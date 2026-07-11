@@ -1,8 +1,12 @@
+    // D-PROCESS1=A: exactly the three ratified stream modes. `Stream` and
+    // `Capture` both pipe the child's stream (`Stdio::piped()`) — they differ
+    // only in which Jet-level API is meant to drain them (`Child.stdout.lines()`
+    // for `Stream`, the collected `ProcessResult.output`/`.errors` for `Capture`).
     #[derive(Clone, Debug, PartialEq)]
     pub enum ProcessStreamMode {
-        Capture,
+        Stream,
         Inherit,
-        Discard,
+        Capture,
     }
 
     #[derive(Clone, Debug, PartialEq)]
@@ -12,7 +16,9 @@
         pub env_clear: bool,
         pub env_set: Vec<(String, String)>,
         pub env_remove: Vec<String>,
-        pub stdin_text: Option<String>,
+        // `None` (default) closes the child's stdin (`Stdio::null()`) — matches
+        // the pre-D-PROCESS1 default of no accidental stdin inheritance.
+        pub stdin: Option<ProcessStreamMode>,
         pub stdout: ProcessStreamMode,
         pub stderr: ProcessStreamMode,
         pub timeout_ms: Option<i64>,

@@ -69,6 +69,12 @@ pub(crate) fn core_type_known(name: &str) -> bool {
     matches!(
         name,
         "Unit" | "Void" | "U8" | "Error" | "ProcessResult" | "ProcessSpec" | "ProcessChild" | "Stopwatch" | "Closed"
+        // D-PROCESS1=A: `ProcessStreamMode` is a core dot-literal enum
+        // (`.Stream`/`.Inherit`/`.Capture`, D-ENUMDOT2). `ProcessStdin`/
+        // `ProcessStdoutStream`/`ProcessStderrStream` are field-access-only
+        // handles off a `ProcessChild`; `ProcessLines` is the loop-source-only
+        // result of `.lines()` on the latter two (mirrors `FileLines`/`StdinLines`).
+        | "ProcessStreamMode" | "ProcessStdin" | "ProcessStdoutStream" | "ProcessStderrStream" | "ProcessLines"
         // D-DET1: deterministic injected capability handles.
         // D-DET-CAPAPI: `Duration` value type for the widened clock surface.
         | "Clock" | "Rng" | "Duration"
@@ -298,6 +304,12 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         ("ProcessResult", "success" | "timed_out") => Some(Type::Bool),
         ("ProcessResult", "signal") => Some(Type::Option(Box::new(Type::Int))),
         ("ProcessResult", "output" | "errors") => Some(Type::String),
+        // D-PROCESS1=A: `child.stdin`/`.stdout`/`.stderr` are handle fields, not
+        // plain values — a writer and two streaming readers (E2502-restricted,
+        // see `core_type_known`).
+        ("ProcessChild", "stdin") => Some(Type::Named("ProcessStdin".to_string())),
+        ("ProcessChild", "stdout") => Some(Type::Named("ProcessStdoutStream".to_string())),
+        ("ProcessChild", "stderr") => Some(Type::Named("ProcessStderrStream".to_string())),
         // E2-M10: HTTP request fields exposed to handlers.
         ("HttpRequest", "method" | "path" | "body") => Some(Type::String),
         ("HttpRequest", "headers") => Some(Type::Map {
@@ -423,6 +435,21 @@ pub(crate) fn core_key_pattern_types(variant: &str) -> Option<Vec<Type>> {
         "F" => Some(vec![Type::Int]),
         _ => None,
     }
+}
+
+/// D-PROCESS1=A: `ProcessStreamMode` is a core dot-literal enum (`.Stream`,
+/// `.Inherit`, `.Capture` — exactly the three ratified stream modes), not in
+/// the user registry. Mirrors `core_key_variants`.
+pub(crate) fn core_process_stream_mode_variants(
+) -> std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)> {
+    use crate::AST::VariantPayload;
+    use crate::Diagnostics::Span;
+    let zero = Span::new(0, 0);
+    let mut m = std::collections::HashMap::new();
+    for name in &["Stream", "Inherit", "Capture"] {
+        m.insert((*name).to_string(), (zero, VariantPayload::Unit));
+    }
+    m
 }
 
 /// D-TERM1 (ratified 2026-06-22): synthesised variant table for the `Key` enum.

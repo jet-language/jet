@@ -16,11 +16,11 @@ fn jet_process_spec_stderr_inherit(spec: jet_std::ProcessSpec) -> jet_std::Proce
 fn jet_process_spec_stderr_discard(spec: jet_std::ProcessSpec) -> jet_std::ProcessSpec {
     jet_process_spec_with_mode(spec, false, jet_std::ProcessStreamMode::Discard)
 }
-fn jet_process_spec_timeout_ms(
+fn jet_process_spec_timeout(
     mut spec: jet_std::ProcessSpec,
-    timeout_ms: i64,
+    timeout: &jet_std::Duration,
 ) -> jet_std::ProcessSpec {
-    spec.timeout_ms = Some(timeout_ms.max(0));
+    spec.timeout_ms = Some(timeout.ms.max(0));
     spec
 }
 fn jet_process_spec_output_limit(
@@ -36,9 +36,12 @@ fn jet_process_spec_detached(mut spec: jet_std::ProcessSpec) -> jet_std::Process
 }
 fn jet_process_stdio(mode: &jet_std::ProcessStreamMode) -> std::process::Stdio {
     match mode {
-        jet_std::ProcessStreamMode::Capture => std::process::Stdio::piped(),
+        // `Stream` and `Capture` both pipe — they differ only in which Jet API
+        // is meant to drain the pipe (see `ProcessStreamMode` in CommonTypes.rs).
+        jet_std::ProcessStreamMode::Stream | jet_std::ProcessStreamMode::Capture => {
+            std::process::Stdio::piped()
+        }
         jet_std::ProcessStreamMode::Inherit => std::process::Stdio::inherit(),
-        jet_std::ProcessStreamMode::Discard => std::process::Stdio::null(),
     }
 }
 fn jet_process_command(
@@ -63,10 +66,11 @@ fn jet_process_command(
     for (name, value) in &spec.env_set {
         command.env(name, value);
     }
-    command.stdin(if spec.stdin_text.is_some() {
-        std::process::Stdio::piped()
-    } else {
-        std::process::Stdio::null()
+    // D-PROCESS1=A: no `.stdin(...)` call (default) closes the child's stdin —
+    // no accidental terminal/parent-stdin inheritance.
+    command.stdin(match &spec.stdin {
+        Some(mode) => jet_process_stdio(mode),
+        None => std::process::Stdio::null(),
     });
     command.stdout(jet_process_stdio(&spec.stdout));
     command.stderr(jet_process_stdio(&spec.stderr));
@@ -82,12 +86,6 @@ fn jet_process_spec_spawn(
         command.stderr(std::process::Stdio::null());
     }
     let mut child = command.spawn().map_err(io_other)?;
-    if let Some(text) = &spec.stdin_text {
-        if let Some(stdin) = child.stdin.as_mut() {
-            std::io::Write::write_all(stdin, text.as_bytes()).map_err(io_other)?;
-        }
-        child.stdin.take();
-    }
     Ok(jet_std::ProcessChild {
         stdin: std::rc::Rc::new(std::cell::RefCell::new(child.stdin.take())),
         stdout: std::rc::Rc::new(std::cell::RefCell::new(
@@ -195,11 +193,15 @@ fn jet_process_child_terminate(child: &jet_std::ProcessChild) -> Result<(), jet_
 fn jet_process_child_interrupt(child: &jet_std::ProcessChild) -> Result<(), jet_std::IoError> {
     jet_process_child_kill(child)
 }
-fn jet_process_child_write_stdin(
-    child: &jet_std::ProcessChild,
+// D-PROCESS1=A: `child.stdin` is a writer handle (`.write(text)`); `child.stdout`/
+// `child.stderr` are streaming reader handles consumed only via
+// `loop line in child.stdout.lines() { ... }` (mirrors `FileReader`/`StdinHandle`
+// — sema restricts the field access + `.lines()` result to that position, E2502).
+fn jet_process_stdin_write(
+    handle: &std::rc::Rc<std::cell::RefCell<Option<std::process::ChildStdin>>>,
     text: &String,
 ) -> Result<(), jet_std::IoError> {
-    if let Some(stdin) = child.stdin.borrow_mut().as_mut() {
+    if let Some(stdin) = handle.borrow_mut().as_mut() {
         std::io::Write::write_all(stdin, text.as_bytes()).map_err(io_other)?;
     }
     Ok(())
@@ -224,15 +226,10 @@ fn jet_process_child_read_line<R: std::io::Read>(
         Ok(Some(line))
     }
 }
-fn jet_process_child_read_stdout_line(
-    child: &jet_std::ProcessChild,
+fn jet_process_stream_next_line<R: std::io::Read>(
+    handle: &std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<R>>>>,
 ) -> Result<Option<String>, jet_std::IoError> {
-    jet_process_child_read_line(&mut child.stdout.borrow_mut())
-}
-fn jet_process_child_read_stderr_line(
-    child: &jet_std::ProcessChild,
-) -> Result<Option<String>, jet_std::IoError> {
-    jet_process_child_read_line(&mut child.stderr.borrow_mut())
+    jet_process_child_read_line(&mut handle.borrow_mut())
 }
 
 fn jet_std_math_sqrt(x: f64) -> f64 {

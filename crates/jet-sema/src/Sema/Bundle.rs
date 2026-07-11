@@ -773,6 +773,34 @@ pub(crate) fn check_bundle_opts(
         process_computed_fields(&mut module.items, &mut diags);
         // D-PATCH1: synthetic `T.Patch` before struct registration.
         inject_patchable_types(&mut module.items, &mut diags);
+        // Card #436: `CFFI::assemble` (jetpack crate) drains every
+        // `#Extern`/`#Bindgen module` out of its declaring file and re-homes
+        // it in a synthetic per-lib module (`<c.lib>`) with an empty
+        // registry of its own — so a struct/enum/distinct declared in an
+        // ordinary file was NEVER visible to `is_c_abi_type`'s `Type::Named`
+        // lookup (`c_named_type_ok`, Sema/FFI.rs), and every named type was
+        // silently rejected at the C boundary regardless of its shape. Real
+        // modules are always processed before any synthetic one (assemble
+        // only appends), so by this iteration every preceding module's
+        // registry is already fully populated; merge them once here so a
+        // same-project named type resolves. Type names are unique
+        // program-wide (a duplicate definition is its own error elsewhere),
+        // so this union is sound.
+        let ffi_named_types: Option<HashMap<String, TypeDef>> = if module
+            .items
+            .iter()
+            .any(|i| matches!(i, Item::CModule(_)))
+        {
+            Some(
+                states[..idx]
+                    .iter()
+                    .flat_map(|s| s.registry.types.iter())
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect(),
+            )
+        } else {
+            None
+        };
         let st = &mut states[idx];
         for item in &module.items {
             match item {
@@ -902,12 +930,27 @@ pub(crate) fn check_bundle_opts(
                     }
                 }
                 Item::CModule(cm) => {
-                    if check_c_module(cm, &st.registry, &mut diags) {
+                    // Card #436: check named C-ABI types (struct/enum/distinct)
+                    // against the merged cross-file view built above, not the
+                    // synthetic module's own (empty) registry. See the comment
+                    // at `ffi_named_types`'s construction.
+                    let merged_registry = ffi_named_types.as_ref().map(|extra| {
+                        let mut types = st.registry.types.clone();
+                        for (k, v) in extra {
+                            types.entry(k.clone()).or_insert_with(|| v.clone());
+                        }
+                        TypeRegistry {
+                            types,
+                            computed_fields: st.registry.computed_fields.clone(),
+                        }
+                    });
+                    let check_registry = merged_registry.as_ref().unwrap_or(&st.registry);
+                    if check_c_module(cm, check_registry, &mut diags) {
                         for ef in &cm.functions {
                             register_extern_fn(
                                 ef,
                                 &mut st.funcs,
-                                &st.registry,
+                                check_registry,
                                 &st.consts,
                                 &mut diags,
                                 true,

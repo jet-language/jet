@@ -512,8 +512,13 @@ fn cffi_card436_c_abi_shapes_round_trip() {
     let main = root.join("main.jet");
     fs::write(
         &main,
-        r#"#Layout(c)
-struct Point {
+        r#"use c.jetc436 as c436
+
+// Deliberately NOT named `Point` — that's a reserved builtin UI-geometry
+// type name (D-RENDERTGT2, `Codegen/Context.rs`); this exercises the
+// ordinary user-struct fallback, not that special case.
+#Layout(c)
+struct Coord {
     x: Int
     y: Int
 }
@@ -524,18 +529,18 @@ Meters :: distinct Int;
     fn add_u8(a: U8, b: U8) -> U8 = "jetc436_add_u8";
     fn add_i32(a: I32, b: I32) -> I32 = "jetc436_add_i32";
     fn add_f32(a: F32, b: F32) -> F32 = "jetc436_add_f32";
-    fn make_point(x: Int, y: Int) -> Point = "jetc436_make_point";
-    fn point_sum(p: Point) -> Int = "jetc436_point_sum";
+    fn make_point(x: Int, y: Int) -> Coord = "jetc436_make_point";
+    fn point_sum(p: Coord) -> Int = "jetc436_point_sum";
     fn scale_meters(m: Meters) -> Meters = "jetc436_scale_meters";
 }
 
 fn run() {
-    print(add_u8(200, 55))
-    print(add_i32(1000000, 234567))
-    print(add_f32(1.5, 2.25))
-    p :: make_point(3, 4)
-    print(point_sum(p))
-    print(scale_meters(21))
+    print(c436.add_u8(200, 55))
+    print(c436.add_i32(1000000, 234567))
+    print(c436.add_f32(1.5, 2.25))
+    p :: c436.make_point(3, 4)
+    print(c436.point_sum(p))
+    print(c436.scale_meters(Meters(21)).raw())
 }
 "#,
     )
@@ -609,13 +614,15 @@ fn cffi_runtime_interior_nul_panics_instead_of_silently_truncating() {
     let main = root.join("main.jet");
     fs::write(
         &main,
-        r#"#Extern module c.jetc436 {
+        r#"use c.jetc436 as c436
+
+#Extern module c.jetc436 {
     fn takes_str(s: String) -> Int = "strlen";
 }
 
 fn run() {
-    line :: input()
-    print(takes_str(line))
+    line :: input() ?? ""
+    print(c436.takes_str(line))
 }
 "#,
     )

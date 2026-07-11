@@ -749,7 +749,7 @@ fn jet_std_process_cmd(cmd: &Vec<String>) -> jet_std::ProcessSpec {
         env_clear: false,
         env_set: Vec::new(),
         env_remove: Vec::new(),
-        stdin_text: None,
+        stdin: None,
         stdout: jet_std::ProcessStreamMode::Capture,
         stderr: jet_std::ProcessStreamMode::Capture,
         timeout_ms: None,
@@ -760,24 +760,22 @@ fn jet_std_process_cmd(cmd: &Vec<String>) -> jet_std::ProcessSpec {
 fn jet_std_process_run(cmd: &Vec<String>) -> Result<jet_std::ProcessResult, jet_std::IoError> {
     jet_process_spec_run_inner(&jet_std_process_cmd(cmd))
 }
+// D-PROCESS1=A: `process.pipeline([ProcessSpec, ...])` — argv-only pipelines,
+// no shell. Each stage keeps its own cwd/env/etc (via `jet_process_command`);
+// only stdin (chained from the previous stage) and stdout/stderr (always
+// piped internally, to chain / collect) are overridden.
 fn jet_std_process_pipeline(
-    commands: &Vec<Vec<String>>,
+    specs: &Vec<jet_std::ProcessSpec>,
 ) -> Result<jet_std::ProcessResult, jet_std::IoError> {
-    if commands.is_empty() {
+    if specs.is_empty() {
         return Err(jet_std::IoError::Other {
             message: "process.pipeline needs at least one command".to_string(),
         });
     }
     let mut children: Vec<std::process::Child> = Vec::new();
     let mut prev_stdout: Option<std::process::ChildStdout> = None;
-    for cmd in commands {
-        if cmd.is_empty() {
-            return Err(jet_std::IoError::Other {
-                message: "process.pipeline command is empty".to_string(),
-            });
-        }
-        let mut command = std::process::Command::new(&cmd[0]);
-        command.args(&cmd[1..]);
+    for spec in specs {
+        let mut command = jet_process_command(spec)?;
         if let Some(stdout) = prev_stdout.take() {
             command.stdin(std::process::Stdio::from(stdout));
         }
@@ -814,26 +812,6 @@ fn jet_std_process_pipeline(
         errors,
     })
 }
-fn jet_process_stream_mode(mode: &String) -> jet_std::ProcessStreamMode {
-    match mode.as_str() {
-        "inherit" => jet_std::ProcessStreamMode::Inherit,
-        "discard" => jet_std::ProcessStreamMode::Discard,
-        "capture" | "stream" => jet_std::ProcessStreamMode::Capture,
-        _ => jet_std::ProcessStreamMode::Capture,
-    }
-}
-fn jet_process_spec_with_mode(
-    mut spec: jet_std::ProcessSpec,
-    stdout: bool,
-    mode: jet_std::ProcessStreamMode,
-) -> jet_std::ProcessSpec {
-    if stdout {
-        spec.stdout = mode;
-    } else {
-        spec.stderr = mode;
-    }
-    spec
-}
 fn jet_process_spec_cwd(mut spec: jet_std::ProcessSpec, cwd: &String) -> jet_std::ProcessSpec {
     spec.cwd = Some(cwd.clone());
     spec
@@ -857,16 +835,24 @@ fn jet_process_spec_env_clear(mut spec: jet_std::ProcessSpec) -> jet_std::Proces
     spec.env_clear = true;
     spec
 }
-fn jet_process_spec_stdin_text(
+fn jet_process_spec_stdin(
     mut spec: jet_std::ProcessSpec,
-    text: &String,
+    mode: &jet_std::ProcessStreamMode,
 ) -> jet_std::ProcessSpec {
-    spec.stdin_text = Some(text.clone());
+    spec.stdin = Some(mode.clone());
     spec
 }
-fn jet_process_spec_stdout(spec: jet_std::ProcessSpec, mode: &String) -> jet_std::ProcessSpec {
-    jet_process_spec_with_mode(spec, true, jet_process_stream_mode(mode))
+fn jet_process_spec_stdout(
+    mut spec: jet_std::ProcessSpec,
+    mode: &jet_std::ProcessStreamMode,
+) -> jet_std::ProcessSpec {
+    spec.stdout = mode.clone();
+    spec
 }
-fn jet_process_spec_stderr(spec: jet_std::ProcessSpec, mode: &String) -> jet_std::ProcessSpec {
-    jet_process_spec_with_mode(spec, false, jet_process_stream_mode(mode))
+fn jet_process_spec_stderr(
+    mut spec: jet_std::ProcessSpec,
+    mode: &jet_std::ProcessStreamMode,
+) -> jet_std::ProcessSpec {
+    spec.stderr = mode.clone();
+    spec
 }

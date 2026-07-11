@@ -5,6 +5,18 @@ struct LoopTargets {
     break_block: Block,
 }
 
+/// One JIT-lowering pass over a single function's `TStmt`/`TExpr` tree into
+/// Cranelift IR, via `FunctionBuilder`. This is the "JIT lower" consumer of
+/// R12 (`docs/spec/architecture.md`): the Rust AOT emitter
+/// (`jet-codegen/src/Codegen/TIR/emit/*.rs`) is the other. Both must handle
+/// every executable TIR variant, either with a real lowering or a named
+/// internal "unsupported" arm that falls through transparently — this file
+/// never uses a bare `_ =>` over a TIR enum (`TStmt`/`TExprKind`/`TBuiltinOp`/
+/// `THandleOp`/`TIfCond`) so a new variant fails this match at compile time in
+/// every JIT site, not silently at run time. "Unsupported here" is not a bug:
+/// `AotFallbackBackend`/`InterpreterBackend` (`Source/JitBackend.rs`) retry the
+/// same program through the AOT path and then the tier-0 interpreter, so an
+/// `Err` from this file only costs JIT speed, never correctness (D-JIT1).
 struct LowerCtx<'a, 'b> {
     b: &'a mut FunctionBuilder<'b>,
     module: &'a mut JITModule,
@@ -52,6 +64,11 @@ impl LowerCtx<'_, '_> {
         var
     }
 
+    /// Lower a `TStmt` sequence in the current block. `self.dead` (set by
+    /// `Return`/`Break`/`Continue`) short-circuits `lower_stmt` so statements
+    /// after an unconditional jump are skipped rather than emitted into an
+    /// already-terminated Cranelift block (Cranelift rejects instructions
+    /// after a block terminator).
     fn lower_stmts(&mut self, stmts: &[TStmt]) -> Result<(), String> {
         for stmt in stmts {
             self.lower_stmt(stmt)?;
@@ -100,11 +117,24 @@ impl LowerCtx<'_, '_> {
         Ok(())
     }
 
+    /// `lower_stmts` for a fresh block scope (loop body, if-branch): resets
+    /// `dead` because a `break`/`return` in a PRIOR sibling branch must not
+    /// suppress this branch's own statements.
     fn lower_stmts_scoped(&mut self, stmts: &[TStmt]) -> Result<(), String> {
         self.dead = false;
         self.lower_stmts(stmts)
     }
 
+    /// Exhaustive match on every `TStmt` variant (`TIR/mod.rs`) — the JIT half
+    /// of the R12 two-consumer contract; `TIR/emit/statements.rs::emit_tir_stmt`
+    /// is the AOT half. Control-flow variants (`If`/`Loop`/`While`/`CountedLoop`/
+    /// `Range`/`EnumMatch`/`MixedSwitch`) build real Cranelift blocks with
+    /// explicit `seal_block` calls — sealing before all predecessors are wired
+    /// is a real bug class here (Cranelift block-param SSA), so each loop shape
+    /// seals header/body/exit in a fixed order matched to its jump topology.
+    /// Named-unsupported variants (destructures other than tuple, `Unsafe`,
+    /// `Reactive`, `Layout`, …) return `Err` rather than a wildcard so a new
+    /// `TStmt` variant fails to compile here, not silently drops at runtime.
     fn lower_stmt(&mut self, stmt: &TStmt) -> Result<(), String> {
         if self.dead {
             return Ok(());
@@ -193,7 +223,19 @@ impl LowerCtx<'_, '_> {
             } => {
                 let cond_val = match cond {
                     TIfCond::Plain(e) => self.lower_expr(e)?,
-                    _ => return Err("jit if condition unsupported".to_string()),
+                    // IfLet/IsNone/Matches lower to a pre-computed `matches!`/`is_none`
+                    // string in the AOT emitter (TIR/emit/statements.rs); the JIT has no
+                    // pattern-test lowering, so each is named (not `_`) to keep this match
+                    // exhaustive over `TIfCond`.
+                    TIfCond::IfLet { .. } => {
+                        return Err("jit if-let condition unsupported".to_string());
+                    }
+                    TIfCond::IsNone { .. } => {
+                        return Err("jit is-none condition unsupported".to_string());
+                    }
+                    TIfCond::Matches { .. } => {
+                        return Err("jit pattern-match condition unsupported".to_string());
+                    }
                 };
                 let then_block = self.b.create_block();
                 let else_block = self.b.create_block();
@@ -604,6 +646,12 @@ impl LowerCtx<'_, '_> {
         Ok(())
     }
 
+    /// Compound-assign lowering for `TStmt::Assign { op: Some(op), .. }`. Keyed
+    /// on `(BinOp, Type)` rather than a `TIR` enum, so the wildcard fallback
+    /// here is a genuine combinatorial gap (unsupported operator/type pairs,
+    /// e.g. no compound bitwise-on-float), not a hidden `TIR` variant — it is
+    /// intentionally out of the exhaustive-TIR-match contract this file holds
+    /// elsewhere.
     fn apply_binop_to_var(
         &mut self,
         current: Value,
@@ -630,6 +678,10 @@ impl LowerCtx<'_, '_> {
         })
     }
 
+    /// `TCallArg` wrapper flags (`mut_borrow`/`clone`/`arc_clone`/`fn_coerce`/
+    /// `widen_to_vec`) are all AOT-only borrow/coercion machinery the JIT's
+    /// value model (bare Cranelift `Value`, no borrow tracking) cannot express;
+    /// bail rather than silently drop the wrapper's semantics.
     fn lower_call_arg(&mut self, arg: &TCallArg) -> Result<Value, String> {
         if arg.mut_borrow
             || arg.clone
@@ -645,6 +697,12 @@ impl LowerCtx<'_, '_> {
         self.lower_expr(&arg.value)
     }
 
+    /// `TStrPart` (`TIR/mod.rs`) is exhaustive here inline (`Lit`/`Interp`), not
+    /// factored into its own top-level fn: an all-literal string is folded to
+    /// one heap allocation (`flatten_string`); an interpolated one streams each
+    /// part through a `str_push_*` host call keyed on the interpolated expr's
+    /// `Type`, matching the AOT emitter's `format!`-based concatenation
+    /// byte-for-byte (R12 parity — same runtime string, not just same shape).
     fn lower_string_lit(&mut self, parts: &[TStrPart]) -> Result<Value, String> {
         if let Some(text) = flatten_string(parts) {
             let id = self.runtime.heap.alloc_string(text);
@@ -688,6 +746,12 @@ impl LowerCtx<'_, '_> {
         Ok(buf_id)
     }
 
+    /// Place strings arrive from two lowering paths that disagree on prefix
+    /// convention: a plain `Let`/`Assign` name (raw Jet name, `local_place`
+    /// mangles it here) vs. a `TIR`-lowering-time name already carrying the
+    /// `user_` Rust-mangle prefix (destructure binds — see the
+    /// `TStmt::TupleDestructure` comment in `lower_stmt`). Both must resolve
+    /// to the same `self.vars` key or a valid local silently misses its slot.
     fn normalize_place(&self, place: &str) -> Result<String, String> {
         let place = place.trim();
         if let Some(inner) = place.strip_prefix("(*").and_then(|s| s.strip_suffix(')')) {
@@ -724,6 +788,11 @@ impl LowerCtx<'_, '_> {
         self.load_place(trimmed)
     }
 
+    /// `TExprKind::MethodCall`'s `func_ids` lookup key: JIT compiles user
+    /// methods into plain functions named `Type::method`, so both this and
+    /// `static_method_key` must reproduce the AOT emitter's exact naming
+    /// convention or `func_ids.get(&key)` misses (an internal lookup failure,
+    /// not a user-facing error — surfaces here as "missing method").
     fn method_key(recv_ty: &Type, method_rust: &str) -> Option<String> {
         let type_name = user_type_name(recv_ty)?;
         let method = method_rust.strip_prefix("user_").unwrap_or(method_rust);
@@ -736,6 +805,13 @@ impl LowerCtx<'_, '_> {
         Some(format!("{type_name}::{method}"))
     }
 
+    /// Shared backing for `TExprKind::StructLit`/`TupleLit`: both lower to the
+    /// same boxed-handle host-struct representation (`struct_new`/
+    /// `struct_set_*`), keyed by positional index — a struct's declared field
+    /// order for `StructLit`, tuple position for `TupleLit`. Field values are
+    /// lowered in source order, not name order, so evaluation order matches
+    /// the AOT emitter (side effects in field-init exprs must run in the same
+    /// sequence under both tiers, R12).
     fn lower_record_fields<'f>(
         &mut self,
         fields: impl Iterator<Item = &'f TExpr>,
@@ -864,6 +940,15 @@ impl LowerCtx<'_, '_> {
         Ok(handle)
     }
 
+    /// Exhaustive match on every `TExprKind` variant (`TIR/mod.rs`) — the JIT
+    /// half of the R12 two-consumer contract; `TIR/emit/expressions.rs::
+    /// emit_tir_expr` is the AOT half. Each variant here is either lowered for
+    /// real or returns a named `Err("jit … unsupported")` (never a bare `_`),
+    /// so adding a `TExprKind` variant without updating this match is a
+    /// compile error in this crate, not a silent runtime gap. An `Err` is not
+    /// a user-facing failure: `AotFallbackBackend`/`InterpreterBackend`
+    /// (`Source/JitBackend.rs`) retry through AOT compilation and then the
+    /// tier-0 interpreter, so unsupported-here only costs `jet dev` JIT speed.
     fn lower_expr(&mut self, expr: &TExpr) -> Result<Value, String> {
         match &expr.kind {
             TExprKind::IntLit(v, _) => Ok(self.b.ins().iconst(types::I64, *v)),
@@ -1339,6 +1424,13 @@ impl LowerCtx<'_, '_> {
         Err("jit list get_opt status unsupported".to_string())
     }
 
+    /// Exhaustive match on `TBuiltinOp` (`TIR/mod.rs`) for `TExprKind::
+    /// BuiltinMethod`. The JIT only covers the small hot-path subset (string
+    /// len/trim/case, list push/sort/len/get/join) worth a native host-call
+    /// fast path; every other `TBuiltinOp` variant is named individually (not
+    /// `_`) below so a new one added to `TIR/mod.rs` fails to compile here —
+    /// the AOT emitter (`TIR/emit/expressions.rs`) already handles the full
+    /// set, and JIT-unsupported falls through to it per R12.
     fn lower_builtin_method(
         &mut self,
         recv: &TExpr,
@@ -1425,7 +1517,99 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host_ref, &[recv_val, sep]);
                 Ok(self.b.inst_results(call)[0])
             }
-            _ => Err("jit builtin method unsupported".to_string()),
+            // Remaining TBuiltinOp variants have no JIT lowering: each is named
+            // explicitly (no catch-all) so a future TIR/mod.rs variant fails this
+            // match at compile time in every JIT-lowering site (R12 exhaustive-or-
+            // named-unsupported). The AOT emitter (TIR/emit/expressions.rs) covers
+            // the full set; the tier-0 interpreter covers it too since it re-runs the
+            // AST directly. JIT falls through to that fallback ladder for all of these.
+            TBuiltinOp::IsEmpty => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Pop => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::InsertMap => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::InsertList => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::RemoveMap => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::RemoveList { .. } => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::GetMap => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::First => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Last => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Contains => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::IndexOf => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Reverse => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Sum => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Product => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Min => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Max => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Flatten => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Intersperse => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Unzip { .. } => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Clear => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Chars => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Bytes => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Split => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Lines => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::ToIntString => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::StartsWith => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::EndsWith => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Repeat => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Slice { .. } => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::After => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Before => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::TrimView => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::AfterView => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::BeforeView => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Keys => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Values => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::ContainsKey => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::ToString => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::MatchGroup => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Take => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Skip => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::StepBy => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Dedup => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Chunks => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Windows => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Enumerate { .. } => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Zip { .. } => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::OptionZip { .. } => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::SetFrom => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::SetInsert => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::SetRemove => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::SetToList => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::SetUnion => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::SortedSetFrom => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::SortedSetInsert => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::SortedSetRemove => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::SortedSetToList => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::SortedSetUnion => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::PriorityQueueFrom => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::PriorityQueuePeek => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::PriorityQueueToSortedList => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::LruPut => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::LruGet => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::LruCapacity => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::LruKeys => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::BitSetAdd => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::BitSetRemove => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::BitSetCount => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::BitSetToList => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::BitSetNew => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::ByteBufferNew => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::ByteBufferFrom => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::ByteBufferWrite { .. } => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::ByteBufferToBytes => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::BagAdd => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::BagRemove => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::BagHas => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::BagCount => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::BagLen => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::DequePushFront => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::DequePushBack => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::DequePopFront => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::DequePopBack => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::DequePeekFront => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::DequePeekBack => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::TryCollect => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::ViewNew { .. } => Err("jit builtin method unsupported".to_string()),
         }
     }
 
@@ -1498,6 +1682,14 @@ impl LowerCtx<'_, '_> {
         Ok(self.b.inst_results(call)[0])
     }
 
+    /// Exhaustive match on `THandleOp` (`TIR/mod.rs`) for `TExprKind::
+    /// HandleMethod`. `THandleOp` covers every runtime-handle method in the
+    /// stdlib (I/O, RNG, DB, HTTP, math types, …); the JIT lowers only the
+    /// concurrency primitives worth a native fast path (task join/cancel,
+    /// channel receive/send). Every other variant is named individually below
+    /// (not `_`) so a new stdlib handle method fails to compile here instead
+    /// of silently JIT-succeeding with the wrong behavior; AOT emit + the
+    /// tier-0 interpreter fallback ladder cover the rest (R12).
     fn lower_handle_method(
         &mut self,
         recv: &TExpr,
@@ -1544,7 +1736,178 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().call(host_ref, &[recv_val, val]);
                 Ok(self.b.ins().iconst(types::I8, 0))
             }
-            _ => Err("jit handle method unsupported".to_string()),
+            // Remaining THandleOp variants have no JIT lowering: named explicitly
+            // (no catch-all) so a future TIR/mod.rs variant fails this match at
+            // compile time (R12). AOT emit + tier-0 interpreter fallback cover these.
+            THandleOp::FileReaderReadLine => Err("jit handle method unsupported".to_string()),
+            THandleOp::FileWriterWriteLine => Err("jit handle method unsupported".to_string()),
+            THandleOp::FileWriterFlush => Err("jit handle method unsupported".to_string()),
+            THandleOp::StdinReadLine => Err("jit handle method unsupported".to_string()),
+            THandleOp::StdoutWrite => Err("jit handle method unsupported".to_string()),
+            THandleOp::StdoutWriteLine => Err("jit handle method unsupported".to_string()),
+            THandleOp::StdoutWriteBytes => Err("jit handle method unsupported".to_string()),
+            THandleOp::StdoutFlush => Err("jit handle method unsupported".to_string()),
+            THandleOp::StdoutIsTty => Err("jit handle method unsupported".to_string()),
+            THandleOp::StderrWrite => Err("jit handle method unsupported".to_string()),
+            THandleOp::StderrWriteLine => Err("jit handle method unsupported".to_string()),
+            THandleOp::StderrWriteBytes => Err("jit handle method unsupported".to_string()),
+            THandleOp::StderrFlush => Err("jit handle method unsupported".to_string()),
+            THandleOp::StderrIsTty => Err("jit handle method unsupported".to_string()),
+            THandleOp::StopwatchElapsedMillis => Err("jit handle method unsupported".to_string()),
+            THandleOp::ClockNow => Err("jit handle method unsupported".to_string()),
+            THandleOp::ClockTick => Err("jit handle method unsupported".to_string()),
+            THandleOp::ClockAdvance => Err("jit handle method unsupported".to_string()),
+            THandleOp::ClockWait => Err("jit handle method unsupported".to_string()),
+            THandleOp::RngInt => Err("jit handle method unsupported".to_string()),
+            THandleOp::RngFloat => Err("jit handle method unsupported".to_string()),
+            THandleOp::RngFloatRange => Err("jit handle method unsupported".to_string()),
+            THandleOp::RngBool => Err("jit handle method unsupported".to_string()),
+            THandleOp::RngBoolP => Err("jit handle method unsupported".to_string()),
+            THandleOp::RngNormal => Err("jit handle method unsupported".to_string()),
+            THandleOp::RngExponential => Err("jit handle method unsupported".to_string()),
+            THandleOp::RngBytes => Err("jit handle method unsupported".to_string()),
+            THandleOp::RngSplit => Err("jit handle method unsupported".to_string()),
+            THandleOp::RngPick => Err("jit handle method unsupported".to_string()),
+            THandleOp::RngWeightedPick => Err("jit handle method unsupported".to_string()),
+            THandleOp::RngSample => Err("jit handle method unsupported".to_string()),
+            THandleOp::RngShuffle => Err("jit handle method unsupported".to_string()),
+            THandleOp::SolverNew => Err("jit handle method unsupported".to_string()),
+            THandleOp::SolverRequire => Err("jit handle method unsupported".to_string()),
+            THandleOp::SolverFailureCount => Err("jit handle method unsupported".to_string()),
+            THandleOp::SolverStatus => Err("jit handle method unsupported".to_string()),
+            THandleOp::GameSceneNew => Err("jit handle method unsupported".to_string()),
+            THandleOp::GameReplayRecord => Err("jit handle method unsupported".to_string()),
+            THandleOp::GameBackendHeadless => Err("jit handle method unsupported".to_string()),
+            THandleOp::GameBudgetsNew => Err("jit handle method unsupported".to_string()),
+            THandleOp::GameSceneOnFrame => Err("jit handle method unsupported".to_string()),
+            THandleOp::GameSceneComponent => Err("jit handle method unsupported".to_string()),
+            THandleOp::GameSceneQuery => Err("jit handle method unsupported".to_string()),
+            THandleOp::GameAssetsImage => Err("jit handle method unsupported".to_string()),
+            THandleOp::GameAssetsSound => Err("jit handle method unsupported".to_string()),
+            THandleOp::GameInputBind => Err("jit handle method unsupported".to_string()),
+            THandleOp::GameBudgetsSet => Err("jit handle method unsupported".to_string()),
+            THandleOp::GameInputPressed => Err("jit handle method unsupported".to_string()),
+            THandleOp::DurationMillis => Err("jit handle method unsupported".to_string()),
+            THandleOp::DurationSeconds => Err("jit handle method unsupported".to_string()),
+            THandleOp::PreciseMethod { .. } => Err("jit handle method unsupported".to_string()),
+            THandleOp::TcpListenerAccept => Err("jit handle method unsupported".to_string()),
+            THandleOp::TcpListenerLocalAddr => Err("jit handle method unsupported".to_string()),
+            THandleOp::TcpStreamRead => Err("jit handle method unsupported".to_string()),
+            THandleOp::TcpStreamWrite => Err("jit handle method unsupported".to_string()),
+            THandleOp::TcpStreamPeerAddr => Err("jit handle method unsupported".to_string()),
+            THandleOp::TcpStreamLocalAddr => Err("jit handle method unsupported".to_string()),
+            THandleOp::TcpStreamClose => Err("jit handle method unsupported".to_string()),
+            THandleOp::AllocAlloc => Err("jit handle method unsupported".to_string()),
+            THandleOp::AllocReset => Err("jit handle method unsupported".to_string()),
+            THandleOp::AllocFree => Err("jit handle method unsupported".to_string()),
+            THandleOp::HttpReqField(..) => Err("jit handle method unsupported".to_string()),
+            THandleOp::HttpReqHeader => Err("jit handle method unsupported".to_string()),
+            THandleOp::HttpReqParam => Err("jit handle method unsupported".to_string()),
+            THandleOp::HttpRespField(..) => Err("jit handle method unsupported".to_string()),
+            THandleOp::HttpRespHeader => Err("jit handle method unsupported".to_string()),
+            THandleOp::ArgsSpecFlag => Err("jit handle method unsupported".to_string()),
+            THandleOp::ArgsSpecFlagShort => Err("jit handle method unsupported".to_string()),
+            THandleOp::ArgsSpecOption => Err("jit handle method unsupported".to_string()),
+            THandleOp::ArgsSpecOptionShort => Err("jit handle method unsupported".to_string()),
+            THandleOp::ArgsSpecOptionDefault => Err("jit handle method unsupported".to_string()),
+            THandleOp::ArgsSpecOptionEnv => Err("jit handle method unsupported".to_string()),
+            THandleOp::ArgsSpecOptionInt => Err("jit handle method unsupported".to_string()),
+            THandleOp::ArgsSpecOptionFloat => Err("jit handle method unsupported".to_string()),
+            THandleOp::ArgsSpecOptionChoice => Err("jit handle method unsupported".to_string()),
+            THandleOp::ArgsSpecRepeat => Err("jit handle method unsupported".to_string()),
+            THandleOp::ArgsSpecRequiredOption => Err("jit handle method unsupported".to_string()),
+            THandleOp::ArgsSpecPositional => Err("jit handle method unsupported".to_string()),
+            THandleOp::ArgsSpecSubcommand => Err("jit handle method unsupported".to_string()),
+            THandleOp::ArgsSpecVersion => Err("jit handle method unsupported".to_string()),
+            THandleOp::ArgsSpecCompletion => Err("jit handle method unsupported".to_string()),
+            THandleOp::ArgsSpecHelp => Err("jit handle method unsupported".to_string()),
+            THandleOp::ArgsSpecParse => Err("jit handle method unsupported".to_string()),
+            THandleOp::ParsedArgsFlag => Err("jit handle method unsupported".to_string()),
+            THandleOp::ParsedArgsOption => Err("jit handle method unsupported".to_string()),
+            THandleOp::ParsedArgsOptionInt => Err("jit handle method unsupported".to_string()),
+            THandleOp::ParsedArgsOptionFloat => Err("jit handle method unsupported".to_string()),
+            THandleOp::ParsedArgsOptions => Err("jit handle method unsupported".to_string()),
+            THandleOp::ParsedArgsSubcommand => Err("jit handle method unsupported".to_string()),
+            THandleOp::ParsedArgsPositional => Err("jit handle method unsupported".to_string()),
+            THandleOp::ProcessSpecMethod { .. } => Err("jit handle method unsupported".to_string()),
+            THandleOp::ProcessChildMethod { .. } => Err("jit handle method unsupported".to_string()),
+            THandleOp::ReflectValueTypeName => Err("jit handle method unsupported".to_string()),
+            THandleOp::ReflectValueDisplay => Err("jit handle method unsupported".to_string()),
+            THandleOp::ReflectValueFields => Err("jit handle method unsupported".to_string()),
+            THandleOp::ReflectFieldName => Err("jit handle method unsupported".to_string()),
+            THandleOp::ReflectFieldValue => Err("jit handle method unsupported".to_string()),
+            THandleOp::TaskDetach => Err("jit handle method unsupported".to_string()),
+            THandleOp::TaskPause => Err("jit handle method unsupported".to_string()),
+            THandleOp::TaskResume => Err("jit handle method unsupported".to_string()),
+            THandleOp::TaskTrace => Err("jit handle method unsupported".to_string()),
+            THandleOp::HttpRouterRegister { .. } => Err("jit handle method unsupported".to_string()),
+            THandleOp::MathMethod { .. } => Err("jit handle method unsupported".to_string()),
+            THandleOp::ReactiveGet => Err("jit handle method unsupported".to_string()),
+            THandleOp::ReactiveSet => Err("jit handle method unsupported".to_string()),
+            THandleOp::EventMethod { .. } => Err("jit handle method unsupported".to_string()),
+            THandleOp::WatchMethod { .. } => Err("jit handle method unsupported".to_string()),
+            THandleOp::MeasurementMethod { .. } => Err("jit handle method unsupported".to_string()),
+            THandleOp::LayoutMethod { .. } => Err("jit handle method unsupported".to_string()),
+            THandleOp::LoadableMethod { .. } => Err("jit handle method unsupported".to_string()),
+            THandleOp::ExpiringMethod { .. } => Err("jit handle method unsupported".to_string()),
+            THandleOp::RottingMethod { .. } => Err("jit handle method unsupported".to_string()),
+            THandleOp::SketchMethod { .. } => Err("jit handle method unsupported".to_string()),
+            THandleOp::CivilTimeMethod { .. } => Err("jit handle method unsupported".to_string()),
+            THandleOp::UrlMimeMethod { .. } => Err("jit handle method unsupported".to_string()),
+            THandleOp::RegexMethod { .. } => Err("jit handle method unsupported".to_string()),
+            THandleOp::HttpClientMethod { .. } => Err("jit handle method unsupported".to_string()),
+            THandleOp::HttpServerMethod { .. } => Err("jit handle method unsupported".to_string()),
+            THandleOp::DataTreeField => Err("jit handle method unsupported".to_string()),
+            THandleOp::DataTreeAt => Err("jit handle method unsupported".to_string()),
+            THandleOp::DataTreeInt => Err("jit handle method unsupported".to_string()),
+            THandleOp::DataTreeText => Err("jit handle method unsupported".to_string()),
+            THandleOp::DataTreeBool => Err("jit handle method unsupported".to_string()),
+            THandleOp::DataTreeFloat => Err("jit handle method unsupported".to_string()),
+            THandleOp::JsonField => Err("jit handle method unsupported".to_string()),
+            THandleOp::JsonAt => Err("jit handle method unsupported".to_string()),
+            THandleOp::JsonInt => Err("jit handle method unsupported".to_string()),
+            THandleOp::JsonText => Err("jit handle method unsupported".to_string()),
+            THandleOp::JsonBool => Err("jit handle method unsupported".to_string()),
+            THandleOp::JsonFloat => Err("jit handle method unsupported".to_string()),
+            THandleOp::PathFrom => Err("jit handle method unsupported".to_string()),
+            THandleOp::PathJoin => Err("jit handle method unsupported".to_string()),
+            THandleOp::PathParent => Err("jit handle method unsupported".to_string()),
+            THandleOp::PathExtension => Err("jit handle method unsupported".to_string()),
+            THandleOp::PathStem => Err("jit handle method unsupported".to_string()),
+            THandleOp::PathToString => Err("jit handle method unsupported".to_string()),
+            THandleOp::PathWriteAtomic => Err("jit handle method unsupported".to_string()),
+            THandleOp::PathWalk => Err("jit handle method unsupported".to_string()),
+            THandleOp::UiBackendMethod { .. } => Err("jit handle method unsupported".to_string()),
+            THandleOp::DevServerMethod { .. } => Err("jit handle method unsupported".to_string()),
+            THandleOp::DbQuery => Err("jit handle method unsupported".to_string()),
+            THandleOp::DbQueryOne => Err("jit handle method unsupported".to_string()),
+            THandleOp::DbExecute => Err("jit handle method unsupported".to_string()),
+            THandleOp::DbBegin => Err("jit handle method unsupported".to_string()),
+            THandleOp::DbCommit => Err("jit handle method unsupported".to_string()),
+            THandleOp::DbRollback => Err("jit handle method unsupported".to_string()),
+            THandleOp::DbClose => Err("jit handle method unsupported".to_string()),
+            THandleOp::DbValueInt => Err("jit handle method unsupported".to_string()),
+            THandleOp::DbValueFloat => Err("jit handle method unsupported".to_string()),
+            THandleOp::DbValueText => Err("jit handle method unsupported".to_string()),
+            THandleOp::DbValueBool => Err("jit handle method unsupported".to_string()),
+            THandleOp::DbValueIsNull => Err("jit handle method unsupported".to_string()),
+            THandleOp::PluginCall => Err("jit handle method unsupported".to_string()),
+            THandleOp::PluginCallInt => Err("jit handle method unsupported".to_string()),
+            THandleOp::ReaderOver => Err("jit handle method unsupported".to_string()),
+            THandleOp::ReaderReadU8 => Err("jit handle method unsupported".to_string()),
+            THandleOp::ReaderReadU16Le => Err("jit handle method unsupported".to_string()),
+            THandleOp::ReaderReadU16Be => Err("jit handle method unsupported".to_string()),
+            THandleOp::ReaderReadU32Le => Err("jit handle method unsupported".to_string()),
+            THandleOp::ReaderReadU32Be => Err("jit handle method unsupported".to_string()),
+            THandleOp::ReaderReadU64Le => Err("jit handle method unsupported".to_string()),
+            THandleOp::ReaderReadU64Be => Err("jit handle method unsupported".to_string()),
+            THandleOp::ReaderTake => Err("jit handle method unsupported".to_string()),
+            THandleOp::ReaderRemaining => Err("jit handle method unsupported".to_string()),
+            THandleOp::ReaderAtEnd => Err("jit handle method unsupported".to_string()),
+            THandleOp::CursorOver => Err("jit handle method unsupported".to_string()),
+            THandleOp::CursorTakeUntil => Err("jit handle method unsupported".to_string()),
+            THandleOp::CursorSkipWs => Err("jit handle method unsupported".to_string()),
+            THandleOp::CursorTakePattern { .. } => Err("jit handle method unsupported".to_string()),
         }
     }
 
@@ -1605,6 +1968,10 @@ impl LowerCtx<'_, '_> {
         Ok(self.b.block_params(merge_block)[0])
     }
 
+    /// `TExprKind::CompareChain` (`a < b <= c`, …): ops/types are ancillary
+    /// `BinOp`/`Type` combinations, not a `TIR` enum, so the `_` fallback here
+    /// is a genuine unsupported-combination gap (e.g. no chained String
+    /// comparison), not a hidden `TIR` variant.
     fn lower_compare_chain(&mut self, operands: &[TExpr], ops: &[BinOp]) -> Result<Value, String> {
         if operands.len() != ops.len() + 1 {
             return Err("jit compare chain arity mismatch".to_string());
@@ -1704,6 +2071,10 @@ impl LowerCtx<'_, '_> {
         expr.ty.clone()
     }
 
+    /// `TExprKind::Binary` (`op != And/Or`, those short-circuit separately in
+    /// `lower_short_circuit`). Keyed on `(Type, BinOp)` — ancillary types, not
+    /// a `TIR` enum — so the trailing `_` is a real unsupported-combination
+    /// gap (e.g. no bitwise-on-float), not a hidden `TIR` variant.
     fn lower_binary(
         &mut self,
         op: BinOp,
@@ -1828,6 +2199,11 @@ impl LowerCtx<'_, '_> {
         self.b.ins().select(cmp, one, zero)
     }
 
+    /// `TExprKind::Print` payload lowering: literal-kind exprs (`IntLit`/
+    /// `FloatLit`/…) print without a materialized `Value` round-trip; the
+    /// fallback arm lowers the expr once and dispatches on its result `Type`
+    /// — a `Type`, not a `TIR` variant, so its own `_ => Err(..)` is a real
+    /// unsupported-print-type gap, not a hidden `TExprKind` case.
     fn emit_print(&mut self, inner: &TExpr) -> Result<(), String> {
         let (host_id, arg) = match &inner.kind {
             TExprKind::IntLit(v, _) => (self.host.print_i64, self.b.ins().iconst(types::I64, *v)),
