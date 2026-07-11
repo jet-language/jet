@@ -625,8 +625,8 @@ impl Parser {
             return Ok(Value::Float(f64::NAN));
         }
         let mut tok = String::new();
-        if matches!(self.peek(), Some('+') | Some('-')) {
-            let sign = self.bump().unwrap();
+        if let Some(sign @ ('+' | '-')) = self.peek() {
+            self.pos += 1;
             tok.push(sign);
             if self.try_keyword("inf") {
                 return Ok(Value::Float(if sign == '-' {
@@ -641,10 +641,14 @@ impl Parser {
         }
         // Radix prefixes (hex/oct/bin) — only valid unsigned.
         if self.peek() == Some('0') {
-            if let Some(r) = self.peek_at(1) {
-                if matches!(r, 'x' | 'o' | 'b') && tok.is_empty() {
-                    return self.radix_integer();
-                }
+            let radix = match self.peek_at(1) {
+                Some('x') if tok.is_empty() => Some(16),
+                Some('o') if tok.is_empty() => Some(8),
+                Some('b') if tok.is_empty() => Some(2),
+                _ => None,
+            };
+            if let Some(radix) = radix {
+                return self.radix_integer(radix);
             }
         }
         let mut is_float = false;
@@ -676,15 +680,8 @@ impl Parser {
         }
     }
 
-    fn radix_integer(&mut self) -> Result<Value, ParseError> {
-        self.bump(); // 0
-        let prefix = self.bump().unwrap(); // x | o | b
-        let radix = match prefix {
-            'x' => 16,
-            'o' => 8,
-            'b' => 2,
-            _ => unreachable!(),
-        };
+    fn radix_integer(&mut self, radix: u32) -> Result<Value, ParseError> {
+        self.pos += 2; // caller proved a complete 0x / 0o / 0b prefix
         let mut tok = String::new();
         while let Some(c) = self.peek() {
             if c == '_' {
@@ -744,6 +741,27 @@ mod tests {
         assert_eq!(kv(&items, "e"), Value::Float(1500.0));
         assert_eq!(kv(&items, "b"), Value::Boolean(true));
         assert_eq!(kv(&items, "und"), Value::Integer(1000));
+    }
+
+    #[test]
+    fn malformed_signed_and_radix_numbers_recover_without_panic() {
+        let (items, errors) = parse("signed = +\nradix = 0x\nvalid = -7\nhex = 0xFF\n");
+
+        assert_eq!(
+            errors,
+            vec![
+                ParseError {
+                    line: 1,
+                    message: "invalid number `+`".into(),
+                },
+                ParseError {
+                    line: 2,
+                    message: "expected digits after numeric base prefix".into(),
+                },
+            ]
+        );
+        assert_eq!(kv(&items, "valid"), Value::Integer(-7));
+        assert_eq!(kv(&items, "hex"), Value::Integer(255));
     }
 
     #[test]
