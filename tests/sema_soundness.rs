@@ -34,11 +34,17 @@ fn relative(path: &Path) -> String {
         .replace('\\', "/")
 }
 
-fn selected(path: &Path) -> bool {
-    let filter = std::env::var("SEMA_SOUNDNESS_CASE")
+fn case_filter() -> Option<String> {
+    std::env::var("SEMA_SOUNDNESS_CASE")
         .ok()
-        .map(|s| normalize_fixture_selector("SEMA_SOUNDNESS_CASE", &s));
-    fixture_matches(filter.as_deref(), &relative(path))
+        .map(|s| normalize_fixture_selector("SEMA_SOUNDNESS_CASE", &s))
+}
+
+fn selected_cases(kind: &str, filter: Option<&str>) -> Vec<PathBuf> {
+    cases(kind)
+        .into_iter()
+        .filter(|path| fixture_matches(filter, &relative(path)))
+        .collect()
 }
 
 fn replay(path: &Path) {
@@ -65,11 +71,38 @@ fn expected_code(path: &Path) -> &str {
 }
 
 #[test]
+fn selector_routes_exactly_one_fixture_category() {
+    let filter = case_filter();
+    let counts: Vec<_> = ["valid", "invalid", "differential"]
+        .into_iter()
+        .map(|kind| (kind, selected_cases(kind, filter.as_deref()).len()))
+        .collect();
+    if let Some(filter) = filter {
+        assert_eq!(
+            counts.iter().map(|(_, count)| count).sum::<usize>(),
+            1,
+            "SEMA_SOUNDNESS_CASE must select exactly one fixture: {filter}; routes: {counts:?}"
+        );
+        assert_eq!(
+            counts.iter().filter(|(_, count)| *count == 1).count(),
+            1,
+            "selector must route to exactly one category: {counts:?}"
+        );
+    } else {
+        assert!(
+            counts.iter().all(|(_, count)| *count > 0),
+            "full corpus must keep every category non-vacuous: {counts:?}"
+        );
+    }
+}
+
+#[test]
 fn exact_invalid_corpus_rejects_in_jet() {
-    let mut ran = 0;
-    for path in cases("invalid") {
-        if !selected(&path) { continue; }
-        ran += 1;
+    let filter = case_filter();
+    let selected = selected_cases("invalid", filter.as_deref());
+    if filter.is_some() && selected.is_empty() { return; }
+    assert!(!selected.is_empty(), "full invalid corpus must not be empty");
+    for path in selected {
         replay(&path);
         let expected = expected_code(&path);
         let fixture = fs::read_to_string(&path).unwrap();
@@ -87,32 +120,32 @@ fn exact_invalid_corpus_rejects_in_jet() {
             diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
         );
     }
-    assert!(ran > 0, "SEMA_SOUNDNESS_CASE selected no invalid fixture");
 }
 
 #[test]
 fn valid_corpus_reaches_rustc() {
+    let filter = case_filter();
+    let selected = selected_cases("valid", filter.as_deref());
+    if filter.is_some() && selected.is_empty() { return; }
+    assert!(!selected.is_empty(), "full valid corpus must not be empty");
     require_rustc();
-    let mut ran = 0;
-    for path in cases("valid") {
-        if !selected(&path) { continue; }
-        ran += 1;
+    for path in selected {
         replay(&path);
         let src = fs::read_to_string(&path).unwrap();
         let name = path.file_stem().unwrap().to_string_lossy();
         let (code, _, stderr) = build_and_run("jet_sema_sound_valid", &name, &src);
         assert_eq!(code, 0, "{} failed:\n{stderr}", relative(&path));
     }
-    assert!(ran > 0, "SEMA_SOUNDNESS_CASE selected no valid fixture");
 }
 
 #[test]
 fn executable_corpus_matches_aot_and_default_dev() {
+    let filter = case_filter();
+    let selected = selected_cases("differential", filter.as_deref());
+    if filter.is_some() && selected.is_empty() { return; }
+    assert!(!selected.is_empty(), "full differential corpus must not be empty");
     require_rustc();
-    let mut ran = 0;
-    for path in cases("differential") {
-        if !selected(&path) { continue; }
-        ran += 1;
+    for path in selected {
         replay(&path);
         let src = fs::read_to_string(&path).unwrap();
         let name = path.file_stem().unwrap().to_string_lossy();
@@ -126,5 +159,4 @@ fn executable_corpus_matches_aot_and_default_dev() {
         assert_eq!(aot, dev, "{} AOT/default-dev divergence", relative(&path));
         assert_eq!(aot, (0, expected, String::new()), "{} output drift", relative(&path));
     }
-    assert!(ran > 0, "SEMA_SOUNDNESS_CASE selected no differential fixture");
 }
