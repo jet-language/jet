@@ -2363,15 +2363,15 @@ use core.encoding.json as json
 struct Email { addr: String }
 
 impl Email.Encode {
-    fn encode(self) -> Data {
-        m: [String: Data] :: ["email": Data.Text(copy self.addr)]
-        return Data.Object(m)
+    fn encode(self) -> DataTree {
+        m: [String: DataTree] :: ["email": DataTree.Text(copy self.addr)]
+        return DataTree.Object(m)
     }
 }
 
 impl Email.Decode {
-    fn decode(tree: Data) -> Email ? DecodeError {
-        f := tree.field("email") ?? Data.Text("")
+    fn decode(tree: DataTree) -> Email ? DecodeError {
+        f := tree.field("email") ?? DataTree.Text("")
         s := f.text() ?? ""
         return ok(Email.{addr: s})
     }
