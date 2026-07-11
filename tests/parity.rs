@@ -139,36 +139,33 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     ("core.crypto.expert", "chacha20_open"),
     ("core.crypto.expert", "chacha20_seal"),
     ("core.crypto.random", "bytes"),
-    // core.encoding.*: structured-format codecs (JSON has its own comptime
-    // path via `JsonInterp.rs` for the basics; these are the remaining
-    // formats/edge methods — csv/toml/yaml/xml/jsonl/cbor/canonical JSON/JSON
-    // event-stream/traced-decode). base32 and base64's URL-safe variant are
-    // done (byte-for-byte ports — `base32_encode`/`base32_decode` and the
-    // `encode_url`/`decode_url` arms in Methods.rs).
-    ("core.encoding.cbor", "decode"),
-    ("core.encoding.cbor", "encode"),
-    ("core.encoding.csv", "parse"),
-    ("core.encoding.csv", "to_string"),
-    ("core.encoding.json", "canonical"),
-    // paren-balance-parser artifact: `("core.encoding.json" | "core.encoding.csv"
-    // | ..., "method")`-style module-alternation source lines get read as
-    // (first-module, second-module) by this test's extractor, alongside the
-    // real pairs — see `extract_pairs`'s doc comment. Harmless (both sides
-    // of the diff are equally blind to it), kept explicit rather than
-    // silently swallowed.
+    // core.encoding.*: card #392 pass 4 ported csv/toml/yaml/xml/cbor/jsonl
+    // parse+to_string (or encode/decode) plus json.canonical/events verbatim
+    // into comptime (`EncodingLite.rs`, dispatched from `Methods.rs`,
+    // rustc-verified in `tests/comptime_diff.rs`). base32 and base64's
+    // URL-safe variant were already done (byte-for-byte ports —
+    // `base32_encode`/`base32_decode` and the `encode_url`/`decode_url` arms
+    // in Methods.rs).
+    //
+    // `decode_traced<T>` is the one method left open: it needs a *typed*
+    // Decode dispatch at comptime (call a user type's generated
+    // `jet_decode`/`jet_decode_traced`, walk its `@PublishedSchema` migration
+    // chain) — comptime currently has no typed-decode machinery at all (the
+    // existing `core.encoding.json.decode` arm is the untyped/lenient D-JSON3
+    // form only). That's new interpreter machinery, not a verbatim port of
+    // pure logic — same class of gap as `core.data`'s typed table pipeline
+    // below, and needs its own design pass.
+    ("core.encoding.json", "decode_traced"),
+    // paren-balance-parser artifact (see `extract_pairs`'s doc comment):
+    // `fixed_sigs.rs`'s `("core.encoding.json" | "core.encoding.csv" |
+    // "core.encoding.toml" | "core.encoding.yaml", "to_string" | ... |
+    // "decode_traced")` alternation line reads as (first-module,
+    // second-module) pairs to this test's extractor, alongside the real
+    // ones. Harmless (both sides of the diff are equally blind to it), kept
+    // explicit rather than silently swallowed.
     ("core.encoding.json", "core.encoding.csv"),
     ("core.encoding.json", "core.encoding.toml"),
     ("core.encoding.json", "core.encoding.yaml"),
-    ("core.encoding.json", "decode_traced"),
-    ("core.encoding.json", "events"),
-    ("core.encoding.jsonl", "parse"),
-    ("core.encoding.jsonl", "to_string"),
-    ("core.encoding.toml", "parse"),
-    ("core.encoding.toml", "to_string"),
-    ("core.encoding.xml", "parse"),
-    ("core.encoding.xml", "to_string"),
-    ("core.encoding.yaml", "parse"),
-    ("core.encoding.yaml", "to_string"),
     // core.os: host/process facts (hostname, arch, pid, cpu_count, …) — real
     // ambient reads of the host, arguably belongs behind the same `#Impure`
     // gate as `core.env`/`core.process` rather than E0956; needs the same

@@ -338,6 +338,17 @@ pub(super) fn json_error_value(e: JsonError) -> CtValue {
     }
 }
 
+/// `core.encoding.jsonl.parse` (`EncodingLite.rs`) reports a JSON parse error
+/// on line `idx` of the JSONL document at `idx + e.line` — mirrors AOT's
+/// `jet_std_jsonl_parse` (`MathRandomTime.rs`), which adds the 0-based JSONL
+/// line index to the per-line JSON parser's own line number.
+pub(super) fn json_error_value_at_line(e: JsonError, line_offset: i64) -> CtValue {
+    json_error_value(JsonError {
+        line: line_offset + e.line,
+        message: e.message,
+    })
+}
+
 pub(super) fn render_json_pretty(v: &CtValue, pretty: bool, depth: usize) -> String {
     match v {
         // D-SERDE-ACCESS=B: a `Json`-tagged dynamic value (from `.parse()`, or

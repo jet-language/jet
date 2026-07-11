@@ -2427,6 +2427,90 @@ fn apply_core_call(
                 v, true, 0,
             )))
         }
+        // --- card #392 pass 4: core.encoding.json.canonical/events (ported
+        // verbatim from AOT's `jet_std_json_render_canonical`/
+        // `jet_std_json_events`, `EncodingLite.rs`) ---
+        ("core.encoding.json", "canonical") => {
+            Ok(CtValue::Str(super::EncodingLite::json_canonical(one(0)?)))
+        }
+        ("core.encoding.json", "events") => {
+            Ok(CtValue::Str(super::EncodingLite::json_events(one(0)?)))
+        }
+        // --- core.encoding.jsonl (ported verbatim, `EncodingLite.rs`) ---
+        ("core.encoding.jsonl", "parse") => {
+            let text = as_string(one(0)?, span)?;
+            match super::EncodingLite::jsonl_parse(text) {
+                Ok(rows) => Ok(CtValue::ResOk(Box::new(CtValue::List(rows)))),
+                Err(e) => Ok(CtValue::ResErr(Box::new(e))),
+            }
+        }
+        ("core.encoding.jsonl", "to_string") => {
+            let rows = match one(0)? {
+                CtValue::List(xs) => xs.clone(),
+                _ => return Err(unsupported("core.encoding.jsonl.to_string: expected a list", span)),
+            };
+            Ok(CtValue::Str(super::EncodingLite::jsonl_render(&rows)))
+        }
+        // --- core.encoding.csv (ported verbatim, `EncodingLite.rs`) ---
+        ("core.encoding.csv", "parse") => {
+            let text = as_string(one(0)?, span)?;
+            match super::EncodingLite::csv_parse(text) {
+                Ok(rows) => Ok(CtValue::ResOk(Box::new(CtValue::List(
+                    rows.into_iter()
+                        .map(|row| CtValue::List(row.into_iter().map(CtValue::Str).collect()))
+                        .collect(),
+                )))),
+                Err(e) => Ok(CtValue::ResErr(Box::new(CtValue::Str(e)))),
+            }
+        }
+        ("core.encoding.csv", "to_string") => {
+            let rows = as_string_rows(one(0)?, span)?;
+            Ok(CtValue::Str(super::EncodingLite::csv_render(&rows)))
+        }
+        // --- core.encoding.toml (ported verbatim, `EncodingLite.rs`) ---
+        ("core.encoding.toml", "parse") => {
+            let text = as_string(one(0)?, span)?;
+            match super::EncodingLite::toml_parse(text) {
+                Ok(v) => Ok(CtValue::ResOk(Box::new(v))),
+                Err(e) => Ok(CtValue::ResErr(Box::new(e))),
+            }
+        }
+        ("core.encoding.toml", "to_string") => {
+            Ok(CtValue::Str(super::EncodingLite::toml_render(one(0)?)))
+        }
+        // --- core.encoding.yaml (ported verbatim, `EncodingLite.rs`) ---
+        ("core.encoding.yaml", "parse") => {
+            let text = as_string(one(0)?, span)?;
+            match super::EncodingLite::yaml_parse(text) {
+                Ok(v) => Ok(CtValue::ResOk(Box::new(v))),
+                Err(e) => Ok(CtValue::ResErr(Box::new(e))),
+            }
+        }
+        ("core.encoding.yaml", "to_string") => {
+            Ok(CtValue::Str(super::EncodingLite::yaml_render(one(0)?)))
+        }
+        // --- core.encoding.xml (ported verbatim, `EncodingLite.rs`) ---
+        ("core.encoding.xml", "parse") => {
+            let text = as_string(one(0)?, span)?;
+            match super::EncodingLite::xml_parse(text) {
+                Ok(v) => Ok(CtValue::ResOk(Box::new(v))),
+                Err(e) => Ok(CtValue::ResErr(Box::new(CtValue::Str(e)))),
+            }
+        }
+        ("core.encoding.xml", "to_string") => {
+            Ok(CtValue::Str(super::EncodingLite::xml_render(one(0)?)))
+        }
+        // --- core.encoding.cbor (ported verbatim, `EncodingLite.rs`) ---
+        ("core.encoding.cbor", "encode") => {
+            Ok(CtValue::Bytes(super::EncodingLite::cbor_encode(one(0)?)))
+        }
+        ("core.encoding.cbor", "decode") => {
+            let bytes = as_bytes(one(0)?, span)?;
+            match super::EncodingLite::cbor_decode(&bytes) {
+                Ok(v) => Ok(CtValue::ResOk(Box::new(v))),
+                Err(e) => Ok(CtValue::ResErr(Box::new(CtValue::Str(e)))),
+            }
+        }
         // --- core.time pure constructors ---
         ("core.time", "ms") => {
             let n = match one(0)? {

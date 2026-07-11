@@ -18,6 +18,7 @@ pub mod Build;
 mod Builtins;
 mod DataLite;
 mod Diagnostics;
+mod EncodingLite;
 mod Interpreter;
 mod JsonInterp;
 mod Methods;

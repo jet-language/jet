@@ -293,6 +293,7 @@ const CORELIB_PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/CoreLib/Top/HandlesRaylib.rs"),
     include_str!("../Prelude/CoreLib/Top/Game.rs"),
     include_str!("../Prelude/CoreLib/Top/PathFiles.rs"),
+    include_str!("../Prelude/CoreLib/Top/UnicodeTables.rs"),
     include_str!("../Prelude/CoreLib/Top/Text.rs"),
     include_str!("../Prelude/CoreLib/Top/FsIoEnvOsTesting.rs"),
     include_str!("../Prelude/CoreLib/Top/Process.rs"),

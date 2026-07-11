@@ -6,6 +6,7 @@ pub mod CanonicalAST;
 pub mod Collections;
 pub mod Diagnostics;
 pub mod Generics;
+pub mod generated;
 pub mod JitBackend;
 pub mod Numeric;
 pub mod OsTarget;

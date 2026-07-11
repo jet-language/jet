@@ -60,73 +60,199 @@ fn jet_text_unicode_upper(s: &String) -> String {
 fn jet_text_unicode_scalars(s: &String) -> Vec<String> {
     s.chars().map(|c| c.to_string()).collect()
 }
-fn jet_text_decompose_char(c: char, compat: bool, out: &mut String) {
-    match c {
-        'é' => out.push_str("e\u{0301}"), 'É' => out.push_str("E\u{0301}"),
-        'è' => out.push_str("e\u{0300}"), 'á' => out.push_str("a\u{0301}"),
-        'ó' => out.push_str("o\u{0301}"), 'í' => out.push_str("i\u{0301}"),
-        'ú' => out.push_str("u\u{0301}"), 'ñ' => out.push_str("n\u{0303}"),
-        'ö' => out.push_str("o\u{0308}"), 'Ö' => out.push_str("O\u{0308}"),
-        'ü' => out.push_str("u\u{0308}"), 'Ü' => out.push_str("U\u{0308}"),
-        'ä' => out.push_str("a\u{0308}"), 'Ä' => out.push_str("A\u{0308}"),
-        'ç' => out.push_str("c\u{0327}"), 'Ç' => out.push_str("C\u{0327}"),
-        'Å' => out.push_str("A\u{030A}"), 'å' => out.push_str("a\u{030A}"),
-        'ﬃ' if compat => out.push_str("ffi"), 'ﬁ' if compat => out.push_str("fi"),
-        '①' if compat => out.push('1'), '②' if compat => out.push('2'),
-        _ => out.push(c),
+
+// ── card #298: table-driven NFC/NFD/NFKC/NFKD + full case folding ──────────
+// Real Unicode 16.0.0 algorithms over the generated tables in
+// `UnicodeTables.rs` (pinned UCD, see scripts/agent/gen-unicode-tables.mjs):
+// canonical/compatibility decomposition, canonical-combining-class ordering,
+// Hangul algorithmic (de)composition, composition exclusions, and full
+// (C+F) case folding. Replaces the old ~18-entry hand-written match table.
+const HANGUL_SBASE: u32 = 0xAC00;
+const HANGUL_LBASE: u32 = 0x1100;
+const HANGUL_VBASE: u32 = 0x1161;
+const HANGUL_TBASE: u32 = 0x11A7;
+const HANGUL_LCOUNT: u32 = 19;
+const HANGUL_VCOUNT: u32 = 21;
+const HANGUL_TCOUNT: u32 = 28;
+const HANGUL_NCOUNT: u32 = HANGUL_VCOUNT * HANGUL_TCOUNT; // 588
+const HANGUL_SCOUNT: u32 = HANGUL_LCOUNT * HANGUL_NCOUNT; // 11172
+
+fn jet_text_ccc(cp: u32) -> u8 {
+    UNICODE_CCC
+        .binary_search_by(|&(a, b, _)| {
+            if cp < a { std::cmp::Ordering::Greater }
+            else if cp > b { std::cmp::Ordering::Less }
+            else { std::cmp::Ordering::Equal }
+        })
+        .map(|i| UNICODE_CCC[i].2)
+        .unwrap_or(0)
+}
+
+fn jet_text_hangul_decompose(cp: u32) -> Option<[u32; 3]> {
+    if cp < HANGUL_SBASE || cp >= HANGUL_SBASE + HANGUL_SCOUNT {
+        return None;
+    }
+    let s_index = cp - HANGUL_SBASE;
+    let l = HANGUL_LBASE + s_index / HANGUL_NCOUNT;
+    let v = HANGUL_VBASE + (s_index % HANGUL_NCOUNT) / HANGUL_TCOUNT;
+    let t_index = s_index % HANGUL_TCOUNT;
+    if t_index == 0 {
+        Some([l, v, 0])
+    } else {
+        Some([l, v, HANGUL_TBASE + t_index])
     }
 }
-fn jet_text_compose_pair(a: char, b: char) -> Option<char> {
-    match (a, b) {
-        ('e', '\u{0301}') => Some('é'), ('E', '\u{0301}') => Some('É'),
-        ('e', '\u{0300}') => Some('è'), ('a', '\u{0301}') => Some('á'),
-        ('o', '\u{0301}') => Some('ó'), ('i', '\u{0301}') => Some('í'),
-        ('u', '\u{0301}') => Some('ú'), ('n', '\u{0303}') => Some('ñ'),
-        ('o', '\u{0308}') => Some('ö'), ('O', '\u{0308}') => Some('Ö'),
-        ('u', '\u{0308}') => Some('ü'), ('U', '\u{0308}') => Some('Ü'),
-        ('a', '\u{0308}') => Some('ä'), ('A', '\u{0308}') => Some('Ä'),
-        ('c', '\u{0327}') => Some('ç'), ('C', '\u{0327}') => Some('Ç'),
-        ('A', '\u{030A}') => Some('Å'), ('a', '\u{030A}') => Some('å'),
-        _ => None,
+
+fn jet_text_decomp_lookup(cp: u32, compat: bool) -> Option<&'static [u32]> {
+    let idx = UNICODE_DECOMP_INDEX
+        .binary_search_by_key(&cp, |&(c, _, _, _)| c)
+        .ok()?;
+    let (_, start, len, is_canon) = UNICODE_DECOMP_INDEX[idx];
+    if !compat && is_canon == 0 {
+        return None;
+    }
+    Some(&UNICODE_DECOMP_POOL[start as usize..(start + len) as usize])
+}
+
+// Recursive: UnicodeData.txt decomposition mappings are only one step, not
+// maximal (e.g. U+1E14 -> U+0112 U+0300, and U+0112 itself further
+// decomposes to U+0045 U+0304) — each produced codepoint must be expanded
+// again until stable (conformance-verified against NormalizationTest.txt).
+fn jet_text_expand_char(cp: u32, compat: bool, seq: &mut Vec<u32>) {
+    if let Some([l, v, t]) = jet_text_hangul_decompose(cp) {
+        seq.push(l);
+        seq.push(v);
+        if t != 0 {
+            seq.push(t);
+        }
+        return;
+    }
+    if let Some(expansion) = jet_text_decomp_lookup(cp, compat) {
+        for &sub in expansion {
+            jet_text_expand_char(sub, compat, seq);
+        }
+        return;
+    }
+    seq.push(cp);
+}
+
+fn jet_text_canonical_order(seq: &mut [u32]) {
+    // Stable insertion-sort of adjacent nonzero-ccc runs (UAX#15 canonical ordering).
+    for i in 1..seq.len() {
+        let cls = jet_text_ccc(seq[i]);
+        if cls == 0 {
+            continue;
+        }
+        let mut j = i;
+        while j > 0 && jet_text_ccc(seq[j - 1]) > cls {
+            seq.swap(j - 1, j);
+            j -= 1;
+        }
     }
 }
+
 fn jet_text_nfd_inner(s: &String, compat: bool) -> String {
-    let mut out = String::new();
-    for c in s.chars() { jet_text_decompose_char(c, compat, &mut out); }
-    out
+    let mut seq: Vec<u32> = Vec::with_capacity(s.len());
+    for c in s.chars() {
+        jet_text_expand_char(c as u32, compat, &mut seq);
+    }
+    jet_text_canonical_order(&mut seq);
+    seq.into_iter()
+        .filter_map(char::from_u32)
+        .collect()
 }
 fn jet_text_nfd(s: &String) -> String { jet_text_nfd_inner(s, false) }
 fn jet_text_nfkd(s: &String) -> String { jet_text_nfd_inner(s, true) }
+
+fn jet_text_compose_pair_cp(a: u32, b: u32) -> Option<u32> {
+    UNICODE_COMPOSE_PAIRS
+        .binary_search_by(|&(x, y, _)| (x, y).cmp(&(a, b)))
+        .ok()
+        .map(|i| UNICODE_COMPOSE_PAIRS[i].2)
+}
+
+fn jet_text_hangul_compose_pair(a: u32, b: u32) -> Option<u32> {
+    // L + V -> LV
+    if a >= HANGUL_LBASE && a < HANGUL_LBASE + HANGUL_LCOUNT
+        && b >= HANGUL_VBASE && b < HANGUL_VBASE + HANGUL_VCOUNT
+    {
+        let l_index = a - HANGUL_LBASE;
+        let v_index = b - HANGUL_VBASE;
+        return Some(HANGUL_SBASE + (l_index * HANGUL_VCOUNT + v_index) * HANGUL_TCOUNT);
+    }
+    // LV + T -> LVT
+    if a >= HANGUL_SBASE && a < HANGUL_SBASE + HANGUL_SCOUNT
+        && (a - HANGUL_SBASE) % HANGUL_TCOUNT == 0
+        && b > HANGUL_TBASE && b < HANGUL_TBASE + HANGUL_TCOUNT
+    {
+        return Some(a + (b - HANGUL_TBASE));
+    }
+    None
+}
+
 fn jet_text_compose(s: String) -> String {
-    let mut out = String::new();
-    let mut it = s.chars().peekable();
-    while let Some(c) = it.next() {
-        if let Some(&next) = it.peek() {
-            if let Some(composed) = jet_text_compose_pair(c, next) {
-                out.push(composed);
-                it.next();
+    // UAX#15 canonical composition ("blocked" rule): a character C composes
+    // with the tracked starter only if no character since that starter has
+    // combining class >= ccc(C). `last_class` uses -1 (not 0) as the
+    // "nothing has intervened yet" sentinel — a ccc=0 character (many Indic
+    // vowel signs compose with ccc=0) is only unblocked immediately after
+    // the starter itself, not after any intervening combining mark.
+    let seq: Vec<u32> = s.chars().map(|c| c as u32).collect();
+    let mut out: Vec<u32> = Vec::with_capacity(seq.len());
+    let mut starter_idx: Option<usize> = None;
+    let mut last_class: i32 = -1;
+    for cp in seq {
+        let cls = jet_text_ccc(cp) as i32;
+        if let Some(si) = starter_idx {
+            let starter = out[si];
+            let composed = jet_text_hangul_compose_pair(starter, cp)
+                .or_else(|| jet_text_compose_pair_cp(starter, cp));
+            if let (Some(composed_cp), true) = (composed, last_class < cls) {
+                out[si] = composed_cp;
                 continue;
             }
         }
-        out.push(c);
+        if cls == 0 {
+            out.push(cp);
+            starter_idx = Some(out.len() - 1);
+            last_class = -1;
+        } else {
+            out.push(cp);
+            last_class = cls;
+        }
     }
-    out
+    out.into_iter().filter_map(char::from_u32).collect()
 }
 fn jet_text_nfc(s: &String) -> String { jet_text_compose(jet_text_nfd(s)) }
 fn jet_text_nfkc(s: &String) -> String { jet_text_compose(jet_text_nfkd(s)) }
+
+fn jet_text_fold_lookup(cp: u32) -> Option<&'static [u32]> {
+    let idx = UNICODE_FOLD_INDEX
+        .binary_search_by_key(&cp, |&(c, _, _)| c)
+        .ok()?;
+    let (_, start, len) = UNICODE_FOLD_INDEX[idx];
+    Some(&UNICODE_FOLD_POOL[start as usize..(start + len) as usize])
+}
 fn jet_text_casefold(s: &String) -> String {
     let mut out = String::new();
     for c in s.chars() {
-        match c {
-            'ß' | 'ẞ' => out.push_str("ss"),
-            'ς' => out.push('σ'),
-            _ => out.push_str(&c.to_lowercase().to_string()),
+        match jet_text_fold_lookup(c as u32) {
+            Some(seq) => {
+                for &cp in seq {
+                    if let Some(fc) = char::from_u32(cp) {
+                        out.push(fc);
+                    }
+                }
+            }
+            None => out.push(c),
         }
     }
     out
 }
+// caseless_eq = full case fold + NFD compare (AOT doc contract): normalize
+// each side to NFD, then apply full case folding, then compare byte-for-byte.
 fn jet_text_caseless_eq(a: &String, b: &String) -> bool {
-    jet_text_casefold(&jet_text_nfkc(a)) == jet_text_casefold(&jet_text_nfkc(b))
+    jet_text_casefold(&jet_text_nfd(a)) == jet_text_casefold(&jet_text_nfd(b))
 }
 fn jet_text_is_mark(c: char) -> bool {
     matches!(c as u32, 0x0300..=0x036F | 0x1AB0..=0x1AFF | 0x1DC0..=0x1DFF | 0x20D0..=0x20FF | 0xFE20..=0xFE2F)

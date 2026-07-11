@@ -117,6 +117,24 @@ const MODULE_CASES: &[&str] = &[
     "use core.data as data\ncomptime C = data.rolling_mean([1.0, 2.0, 3.0, 4.0], 2)\n\nfn run() {\n    r :: data.rolling_mean([1.0, 2.0, 3.0, 4.0], 2)\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
     "use core.data as data\ncomptime C = data.min([3.0, -1.0, 5.0])\n\nfn run() {\n    r :: data.min([3.0, -1.0, 5.0])\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
     "use core.data as data\ncomptime C = data.max([3.0, -1.0, 5.0])\n\nfn run() {\n    r :: data.max([3.0, -1.0, 5.0])\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
+    // card #392 pass 4: `core.encoding.{csv,toml,yaml,xml,cbor,jsonl}` +
+    // `core.encoding.json.{canonical,events}`, ported verbatim from AOT's
+    // `jet_ring_csv_*`/`toml`/`yaml` mods/`jet_std_xml_*`/`jet_cbor_*`/
+    // `jet_std_jsonl_*`/`jet_std_json_render_canonical`/`jet_std_json_events`
+    // (see `EncodingLite.rs`). Every case round-trips `parse`+`to_string` (or
+    // `encode`+`decode`) so both the parser and the renderer sides differ
+    // against real generated Rust, not just one direction.
+    "use core.encoding.csv as csv\ncomptime C = csv.to_string(csv.parse(\"a,\\\"b,c\\\",\\\"e\\\"\\\"f\\\"\\n\") ?? panic(\"bad\"))\n\nfn run() {\n    r :: csv.to_string(csv.parse(\"a,\\\"b,c\\\",\\\"e\\\"\\\"f\\\"\\n\") ?? panic(\"bad\"))\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.csv as csv\ncomptime C = csv.parse(\"a,b,c\\n1,2\\n\") ?? panic(\"bad\")\n\nfn run() {\n    r :: csv.parse(\"a,b,c\\n1,2\\n\") ?? panic(\"bad\")\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.toml as toml\ncomptime C = toml.to_string(toml.parse(\"[a]\\nx = 1\\n\\n[[a.b]]\\ny = 2\\n\\n[[a.b]]\\ny = 3\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n\nfn run() {\n    r :: toml.to_string(toml.parse(\"[a]\\nx = 1\\n\\n[[a.b]]\\ny = 2\\n\\n[[a.b]]\\ny = 3\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.toml as toml\ncomptime C = toml.to_string(toml.parse(\"x = 1.5\\ny = [1, 2, 3]\\nz = {{ a = 1, b = 2 }}\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n\nfn run() {\n    r :: toml.to_string(toml.parse(\"x = 1.5\\ny = [1, 2, 3]\\nz = {{ a = 1, b = 2 }}\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.yaml as yaml\ncomptime C = yaml.to_string(yaml.parse(\"a: &x 1\\nb: *x\\nc:\\n  - 1\\n  - 2\\nd: |\\n  hello\\n  world\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n\nfn run() {\n    r :: yaml.to_string(yaml.parse(\"a: &x 1\\nb: *x\\nc:\\n  - 1\\n  - 2\\nd: |\\n  hello\\n  world\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.xml as xml\ncomptime C = xml.to_string(xml.parse(\"<root xmlns:ns=\\\"http://example\\\"><ns:child id=\\\"1\\\">text</ns:child></root>\") ?? panic(\"bad\"))\n\nfn run() {\n    r :: xml.to_string(xml.parse(\"<root xmlns:ns=\\\"http://example\\\"><ns:child id=\\\"1\\\">text</ns:child></root>\") ?? panic(\"bad\"))\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.json as json\nuse core.encoding.cbor as cbor\nuse core.encoding.hex as hex\ncomptime C = hex.encode(cbor.encode(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3],\\\"c\\\":-7}}\") ?? panic(\"bad\")))\n\nfn run() {\n    r :: hex.encode(cbor.encode(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3],\\\"c\\\":-7}}\") ?? panic(\"bad\")))\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.json as json\nuse core.encoding.cbor as cbor\ncomptime C = json.to_string(cbor.decode(cbor.encode(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3]}}\") ?? panic(\"bad\"))) ?? panic(\"bad\"))\n\nfn run() {\n    r :: json.to_string(cbor.decode(cbor.encode(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3]}}\") ?? panic(\"bad\"))) ?? panic(\"bad\"))\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.jsonl as jsonl\ncomptime C = jsonl.to_string(jsonl.parse(\"{{\\\"a\\\":1}}\\n{{\\\"b\\\":2}}\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n\nfn run() {\n    r :: jsonl.to_string(jsonl.parse(\"{{\\\"a\\\":1}}\\n{{\\\"b\\\":2}}\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.json as json\ncomptime C = json.canonical(json.parse(\"{{\\\"b\\\":1,\\\"a\\\":2}}\") ?? panic(\"bad\"))\n\nfn run() {\n    r :: json.canonical(json.parse(\"{{\\\"b\\\":1,\\\"a\\\":2}}\") ?? panic(\"bad\"))\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.json as json\ncomptime C = json.events(json.parse(\"{{\\\"a\\\":[1,2]}}\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n\nfn run() {\n    r :: json.events(json.parse(\"{{\\\"a\\\":[1,2]}}\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
 ];
 
 #[test]

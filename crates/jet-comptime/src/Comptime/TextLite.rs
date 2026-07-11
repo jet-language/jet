@@ -7,64 +7,105 @@
 //! (no external crate, I6), not full Unicode Standard algorithms; both tiers
 //! share the same approximation, so they still agree with each other.
 
-pub(super) fn decompose_char(c: char, compat: bool, out: &mut String) {
-    match c {
-        'é' => out.push_str("e\u{0301}"),
-        'É' => out.push_str("E\u{0301}"),
-        'è' => out.push_str("e\u{0300}"),
-        'á' => out.push_str("a\u{0301}"),
-        'ó' => out.push_str("o\u{0301}"),
-        'í' => out.push_str("i\u{0301}"),
-        'ú' => out.push_str("u\u{0301}"),
-        'ñ' => out.push_str("n\u{0303}"),
-        'ö' => out.push_str("o\u{0308}"),
-        'Ö' => out.push_str("O\u{0308}"),
-        'ü' => out.push_str("u\u{0308}"),
-        'Ü' => out.push_str("U\u{0308}"),
-        'ä' => out.push_str("a\u{0308}"),
-        'Ä' => out.push_str("A\u{0308}"),
-        'ç' => out.push_str("c\u{0327}"),
-        'Ç' => out.push_str("C\u{0327}"),
-        'Å' => out.push_str("A\u{030A}"),
-        'å' => out.push_str("a\u{030A}"),
-        'ﬃ' if compat => out.push_str("ffi"),
-        'ﬁ' if compat => out.push_str("fi"),
-        '①' if compat => out.push('1'),
-        '②' if compat => out.push('2'),
-        _ => out.push(c),
+// Card #298: table-driven NFC/NFD/NFKC/NFKD + full case folding, mirroring
+// the AOT twin byte-for-byte (R12 parity) — see
+// crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs for the identical
+// algorithm. Both consume the same generated tables directly from
+// jet-foundation (this crate already depends on it; no duplicate table
+// copy needed here — only the AOT prelude, which cannot depend on the
+// compiler's own crates, carries a textual duplicate).
+use jet_foundation::generated::UnicodeTables::*;
+
+const HANGUL_SBASE: u32 = 0xAC00;
+const HANGUL_LBASE: u32 = 0x1100;
+const HANGUL_VBASE: u32 = 0x1161;
+const HANGUL_TBASE: u32 = 0x11A7;
+const HANGUL_LCOUNT: u32 = 19;
+const HANGUL_VCOUNT: u32 = 21;
+const HANGUL_TCOUNT: u32 = 28;
+const HANGUL_NCOUNT: u32 = HANGUL_VCOUNT * HANGUL_TCOUNT;
+const HANGUL_SCOUNT: u32 = HANGUL_LCOUNT * HANGUL_NCOUNT;
+
+fn ccc(cp: u32) -> u8 {
+    UNICODE_CCC
+        .binary_search_by(|&(a, b, _)| {
+            if cp < a { std::cmp::Ordering::Greater }
+            else if cp > b { std::cmp::Ordering::Less }
+            else { std::cmp::Ordering::Equal }
+        })
+        .map(|i| UNICODE_CCC[i].2)
+        .unwrap_or(0)
+}
+
+fn hangul_decompose(cp: u32) -> Option<[u32; 3]> {
+    if cp < HANGUL_SBASE || cp >= HANGUL_SBASE + HANGUL_SCOUNT {
+        return None;
+    }
+    let s_index = cp - HANGUL_SBASE;
+    let l = HANGUL_LBASE + s_index / HANGUL_NCOUNT;
+    let v = HANGUL_VBASE + (s_index % HANGUL_NCOUNT) / HANGUL_TCOUNT;
+    let t_index = s_index % HANGUL_TCOUNT;
+    if t_index == 0 {
+        Some([l, v, 0])
+    } else {
+        Some([l, v, HANGUL_TBASE + t_index])
     }
 }
 
-pub(super) fn compose_pair(a: char, b: char) -> Option<char> {
-    match (a, b) {
-        ('e', '\u{0301}') => Some('é'),
-        ('E', '\u{0301}') => Some('É'),
-        ('e', '\u{0300}') => Some('è'),
-        ('a', '\u{0301}') => Some('á'),
-        ('o', '\u{0301}') => Some('ó'),
-        ('i', '\u{0301}') => Some('í'),
-        ('u', '\u{0301}') => Some('ú'),
-        ('n', '\u{0303}') => Some('ñ'),
-        ('o', '\u{0308}') => Some('ö'),
-        ('O', '\u{0308}') => Some('Ö'),
-        ('u', '\u{0308}') => Some('ü'),
-        ('U', '\u{0308}') => Some('Ü'),
-        ('a', '\u{0308}') => Some('ä'),
-        ('A', '\u{0308}') => Some('Ä'),
-        ('c', '\u{0327}') => Some('ç'),
-        ('C', '\u{0327}') => Some('Ç'),
-        ('A', '\u{030A}') => Some('Å'),
-        ('a', '\u{030A}') => Some('å'),
-        _ => None,
+fn decomp_lookup(cp: u32, compat: bool) -> Option<&'static [u32]> {
+    let idx = UNICODE_DECOMP_INDEX
+        .binary_search_by_key(&cp, |&(c, _, _, _)| c)
+        .ok()?;
+    let (_, start, len, is_canon) = UNICODE_DECOMP_INDEX[idx];
+    if !compat && is_canon == 0 {
+        return None;
+    }
+    Some(&UNICODE_DECOMP_POOL[start as usize..(start + len) as usize])
+}
+
+// Recursive: UnicodeData.txt decomposition mappings are only one step, not
+// maximal (e.g. U+1E14 -> U+0112 U+0300, and U+0112 itself further
+// decomposes to U+0045 U+0304) — each produced codepoint must be expanded
+// again until stable (conformance-verified against NormalizationTest.txt).
+fn expand_char(cp: u32, compat: bool, seq: &mut Vec<u32>) {
+    if let Some([l, v, t]) = hangul_decompose(cp) {
+        seq.push(l);
+        seq.push(v);
+        if t != 0 {
+            seq.push(t);
+        }
+        return;
+    }
+    if let Some(expansion) = decomp_lookup(cp, compat) {
+        for &sub in expansion {
+            expand_char(sub, compat, seq);
+        }
+        return;
+    }
+    seq.push(cp);
+}
+
+fn canonical_order(seq: &mut [u32]) {
+    for i in 1..seq.len() {
+        let cls = ccc(seq[i]);
+        if cls == 0 {
+            continue;
+        }
+        let mut j = i;
+        while j > 0 && ccc(seq[j - 1]) > cls {
+            seq.swap(j - 1, j);
+            j -= 1;
+        }
     }
 }
 
 fn nfd_inner(s: &str, compat: bool) -> String {
-    let mut out = String::new();
+    let mut seq: Vec<u32> = Vec::with_capacity(s.len());
     for c in s.chars() {
-        decompose_char(c, compat, &mut out);
+        expand_char(c as u32, compat, &mut seq);
     }
-    out
+    canonical_order(&mut seq);
+    seq.into_iter().filter_map(char::from_u32).collect()
 }
 
 pub(super) fn nfd(s: &str) -> String {
@@ -74,20 +115,62 @@ pub(super) fn nfkd(s: &str) -> String {
     nfd_inner(s, true)
 }
 
+fn compose_pair_cp(a: u32, b: u32) -> Option<u32> {
+    UNICODE_COMPOSE_PAIRS
+        .binary_search_by(|&(x, y, _)| (x, y).cmp(&(a, b)))
+        .ok()
+        .map(|i| UNICODE_COMPOSE_PAIRS[i].2)
+}
+
+fn hangul_compose_pair(a: u32, b: u32) -> Option<u32> {
+    if a >= HANGUL_LBASE && a < HANGUL_LBASE + HANGUL_LCOUNT
+        && b >= HANGUL_VBASE && b < HANGUL_VBASE + HANGUL_VCOUNT
+    {
+        let l_index = a - HANGUL_LBASE;
+        let v_index = b - HANGUL_VBASE;
+        return Some(HANGUL_SBASE + (l_index * HANGUL_VCOUNT + v_index) * HANGUL_TCOUNT);
+    }
+    if a >= HANGUL_SBASE && a < HANGUL_SBASE + HANGUL_SCOUNT
+        && (a - HANGUL_SBASE) % HANGUL_TCOUNT == 0
+        && b > HANGUL_TBASE && b < HANGUL_TBASE + HANGUL_TCOUNT
+    {
+        return Some(a + (b - HANGUL_TBASE));
+    }
+    None
+}
+
 fn compose(s: String) -> String {
-    let mut out = String::new();
-    let mut it = s.chars().peekable();
-    while let Some(c) = it.next() {
-        if let Some(&next) = it.peek() {
-            if let Some(composed) = compose_pair(c, next) {
-                out.push(composed);
-                it.next();
+    // UAX#15 canonical composition ("blocked" rule): a character C composes
+    // with the tracked starter only if no character since that starter has
+    // combining class >= ccc(C). `last_class` uses -1 (not 0) as the
+    // "nothing has intervened yet" sentinel — a ccc=0 character (many Indic
+    // vowel signs compose with ccc=0) is only unblocked immediately after
+    // the starter itself, not after any intervening combining mark.
+    let seq: Vec<u32> = s.chars().map(|c| c as u32).collect();
+    let mut out: Vec<u32> = Vec::with_capacity(seq.len());
+    let mut starter_idx: Option<usize> = None;
+    let mut last_class: i32 = -1;
+    for cp in seq {
+        let cls = ccc(cp) as i32;
+        if let Some(si) = starter_idx {
+            let starter = out[si];
+            let composed =
+                hangul_compose_pair(starter, cp).or_else(|| compose_pair_cp(starter, cp));
+            if let (Some(composed_cp), true) = (composed, last_class < cls) {
+                out[si] = composed_cp;
                 continue;
             }
         }
-        out.push(c);
+        if cls == 0 {
+            out.push(cp);
+            starter_idx = Some(out.len() - 1);
+            last_class = -1;
+        } else {
+            out.push(cp);
+            last_class = cls;
+        }
     }
-    out
+    out.into_iter().filter_map(char::from_u32).collect()
 }
 
 pub(super) fn nfc(s: &str) -> String {
@@ -97,20 +180,33 @@ pub(super) fn nfkc(s: &str) -> String {
     compose(nfkd(s))
 }
 
+fn fold_lookup(cp: u32) -> Option<&'static [u32]> {
+    let idx = UNICODE_FOLD_INDEX.binary_search_by_key(&cp, |&(c, _, _)| c).ok()?;
+    let (_, start, len) = UNICODE_FOLD_INDEX[idx];
+    Some(&UNICODE_FOLD_POOL[start as usize..(start + len) as usize])
+}
+
 pub(super) fn casefold(s: &str) -> String {
     let mut out = String::new();
     for c in s.chars() {
-        match c {
-            'ß' | 'ẞ' => out.push_str("ss"),
-            'ς' => out.push('σ'),
-            _ => out.push_str(&c.to_lowercase().to_string()),
+        match fold_lookup(c as u32) {
+            Some(seq) => {
+                for &cp in seq {
+                    if let Some(fc) = char::from_u32(cp) {
+                        out.push(fc);
+                    }
+                }
+            }
+            None => out.push(c),
         }
     }
     out
 }
 
+// caseless_eq = full case fold + NFD compare (AOT doc contract): normalize
+// each side to NFD, then apply full case folding, then compare.
 pub(super) fn caseless_eq(a: &str, b: &str) -> bool {
-    casefold(&nfkc(a)) == casefold(&nfkc(b))
+    casefold(&nfd(a)) == casefold(&nfd(b))
 }
 
 fn is_mark(c: char) -> bool {
@@ -247,4 +343,82 @@ pub(super) fn char_indices(s: &str) -> Vec<String> {
     s.char_indices()
         .map(|(i, c)| format!("{}:{}", i, c))
         .collect()
+}
+
+// Card #298: conformance against the pinned Unicode 16.0.0 official
+// NormalizationTest.txt corpus (committed at tests/data/unicode/, no
+// network/runtime file dependency — embedded at compile time). Tests the
+// exact algorithm shared (hand-mirrored) with the AOT twin in
+// crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs.
+#[cfg(test)]
+mod normalization_conformance {
+    use super::{nfc, nfd, nfkc, nfkd};
+
+    fn cps_to_string(field: &str) -> String {
+        field
+            .split_whitespace()
+            .filter_map(|tok| u32::from_str_radix(tok, 16).ok())
+            .filter_map(char::from_u32)
+            .collect()
+    }
+
+    #[test]
+    fn normalization_test_txt_16_0_0() {
+        let corpus = include_str!("../../../../tests/data/unicode/NormalizationTest.txt");
+        let mut lines_checked = 0usize;
+        let mut assertions = 0usize;
+        for raw in corpus.lines() {
+            let line = match raw.find('#') {
+                Some(i) => &raw[..i],
+                None => raw,
+            };
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('@') {
+                continue;
+            }
+            let fields: Vec<&str> = line.split(';').collect();
+            if fields.len() < 5 {
+                continue;
+            }
+            let c1 = cps_to_string(fields[0]);
+            let c2 = cps_to_string(fields[1]);
+            let c3 = cps_to_string(fields[2]);
+            let c4 = cps_to_string(fields[3]);
+            let c5 = cps_to_string(fields[4]);
+            lines_checked += 1;
+
+            // NFC: c2 == nfc(c1) == nfc(c2) == nfc(c3); c4 == nfc(c4) == nfc(c5)
+            for (label, input) in [("c1", &c1), ("c2", &c2), ("c3", &c3)] {
+                assert_eq!(nfc(input), c2, "NFC({label}) mismatch on line: {raw}");
+                assertions += 1;
+            }
+            for (label, input) in [("c4", &c4), ("c5", &c5)] {
+                assert_eq!(nfc(input), c4, "NFC({label}) mismatch on line: {raw}");
+                assertions += 1;
+            }
+            // NFD: c3 == nfd(c1) == nfd(c2) == nfd(c3); c5 == nfd(c4) == nfd(c5)
+            for (label, input) in [("c1", &c1), ("c2", &c2), ("c3", &c3)] {
+                assert_eq!(nfd(input), c3, "NFD({label}) mismatch on line: {raw}");
+                assertions += 1;
+            }
+            for (label, input) in [("c4", &c4), ("c5", &c5)] {
+                assert_eq!(nfd(input), c5, "NFD({label}) mismatch on line: {raw}");
+                assertions += 1;
+            }
+            // NFKC: c4 == nfkc(c1..=c5)
+            for (label, input) in [("c1", &c1), ("c2", &c2), ("c3", &c3), ("c4", &c4), ("c5", &c5)] {
+                assert_eq!(nfkc(input), c4, "NFKC({label}) mismatch on line: {raw}");
+                assertions += 1;
+            }
+            // NFKD: c5 == nfkd(c1..=c5)
+            for (label, input) in [("c1", &c1), ("c2", &c2), ("c3", &c3), ("c4", &c4), ("c5", &c5)] {
+                assert_eq!(nfkd(input), c5, "NFKD({label}) mismatch on line: {raw}");
+                assertions += 1;
+            }
+        }
+        assert!(lines_checked > 15000, "expected the full corpus, only saw {lines_checked} lines");
+        println!(
+            "NormalizationTest.txt 16.0.0: {lines_checked} lines, {assertions} conformance assertions, all passed"
+        );
+    }
 }
