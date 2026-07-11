@@ -985,14 +985,12 @@ fn validate_pattern_bindings(id: &str, m: &Template, r: &Template, idx: &SemInde
     for (template, replacement) in [(m, false), (r, true)] {
         for (i, atom) in template.atoms.iter().enumerate() {
             let Atom::Literal(name) = atom else { continue };
-            if !is_ident(name)
-                || is_keyword(name)
+            if !is_identifier_literal(name)
                 || captures.contains(name.as_str())
-                || (replacement
-                    && template
-                        .atoms
-                        .get(i + 1)
-                        .is_some_and(|n| matches!(n,Atom::Literal(x)if x==":")))
+                || template
+                    .atoms
+                    .get(i + 1)
+                    .is_some_and(|n| matches!(n,Atom::Literal(x)if x==":"))
             {
                 continue;
             }
@@ -1048,7 +1046,9 @@ fn print_batch(batch: &Batch, plan: &BatchPlan) {
 fn print_simple_diff(before: &[u8], after: &[u8]) {
     let a = String::from_utf8_lossy(before);
     let b = String::from_utf8_lossy(after);
-    println!("@@");
+    let a_lines = a.lines().count();
+    let b_lines = b.lines().count();
+    println!("@@ -1,{a_lines} +1,{b_lines} @@");
     for line in a.lines() {
         println!("-{line}")
     }
@@ -1458,26 +1458,16 @@ fn is_ident(n: &str) -> bool {
     c.next().is_some_and(|x| x == '_' || x.is_alphabetic())
         && c.all(|x| x == '_' || x.is_alphanumeric())
 }
-fn is_keyword(n: &str) -> bool {
-    matches!(
-        n,
-        "fn" | "return"
-            | "if"
-            | "else"
-            | "for"
-            | "while"
-            | "true"
-            | "false"
-            | "use"
-            | "struct"
-            | "enum"
-            | "trait"
-            | "impl"
-            | "pub"
-            | "module"
-            | "self"
-            | "base"
-    )
+fn is_identifier_literal(text: &str) -> bool {
+    let (tokens, diagnostics) = jet::Lexer::lex(text);
+    let mut meaningful = tokens
+        .iter()
+        .filter(|token| token.span.start != token.span.end);
+    diagnostics.is_empty()
+        && meaningful
+            .next()
+            .is_some_and(|token| matches!(token.kind, jet::Lexer::TokKind::Ident(_)))
+        && meaningful.next().is_none()
 }
 fn is_builtin(n: &str) -> bool {
     matches!(
