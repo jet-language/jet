@@ -229,6 +229,15 @@ pub const TYPE_STREAM: &str = "Stream";
 /// teaching error.
 pub const KW_UNSAFE: &str = "Unsafe";
 
+/// D-SHIELDNAME1=A (ratified 2026-07-11): `#Shield { … }` — the cancellation-shield
+/// block marker, joining the `#Unsafe`/`#Context` sigil family. Any cancellation
+/// (or blown deadline) pending against a task running inside the block is deferred
+/// until the block exits; at exit the deadline lands first, then the cancel. Bare
+/// `#Shield {` only — no argument list (`#Shield(...)` is a parse error). Lowers to
+/// the `jet_scheduler_shield_enter`/`_leave` runtime (SHIELD_DEPTH thread-local);
+/// a no-op outside a task. Expert-tier concurrency marker.
+pub const KW_SHIELD: &str = "Shield";
+
 /// D-CTEFFECT1 (ratified 2026-06-25): `#Impure("reason") { … }` — the audited
 /// Tier-2 comptime effect gate. Both this block AND `--allow-impure` at build
 /// are required to execute ambient comptime I/O (Fs/Env/Exec/Io). PascalCase

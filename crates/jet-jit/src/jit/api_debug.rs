@@ -152,6 +152,7 @@ fn collect_stmt_ops(stmts: &[TStmt], out: &mut Vec<String>) {
             | TStmt::Inline(body)
             | TStmt::DebugOnly(body)
             | TStmt::Live { body }
+            | TStmt::Shield { body }
             | TStmt::ScopeMember { body, .. } => collect_stmt_ops(body, out),
             TStmt::While { cond, body, .. } => {
                 collect_expr_ops(cond, out);

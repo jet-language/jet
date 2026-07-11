@@ -208,6 +208,13 @@ impl<'a> Fmt<'a> {
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
+            // D-SHIELDNAME1=A: `#Shield { … }` round-trips verbatim.
+            Stmt::Shield { body, .. } => {
+                self.write(&format!("#{} {{", Syntax::KW_SHIELD));
+                self.newline();
+                self.with_indent(|f| f.fmt_block_stmts(body));
+                self.end_block();
+            }
             // D-REGION1 (opt B): `region r { … }`.
             Stmt::Region { name, body, .. } => {
                 self.write(&format!("{} {} {{", Syntax::KW_REGION, name));

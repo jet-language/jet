@@ -534,6 +534,12 @@ fn assert_fmt_stable(src: &str, label: &str) {
 }
 
 #[test]
+fn fmt_shield_block_stability() {
+    let src = "fn run() {\n    #Shield {\n        print(\"committed\")\n    }\n}\n";
+    assert_fmt_stable(src, "#Shield block");
+}
+
+#[test]
 fn fmt_preserves_single_line_if() {
     // A one-line `if` body the author placed inline survives unchanged.
     let src = "fn run() {\n    ready :: true\n    if ready { launch() }\n}\n";

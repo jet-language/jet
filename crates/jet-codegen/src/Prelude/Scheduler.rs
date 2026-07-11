@@ -26,9 +26,9 @@ fn jet_scheduler_fatal(msg: &str) -> ! {
 // Drop-backed cleanup runs on the way out — the same shape a blown deadline
 // already produces. A shielded region (SHIELD_DEPTH > 0) DEFERS the unwind: wait
 // points inside it complete normally and the deferred cancel/deadline lands when
-// the outermost region exits. Shield has no user spelling yet (gated on
-// D-SHIELDNAME1); `jet_scheduler_shield_enter`/`_leave` are internal-only until
-// the parent wires the ratified sigil.
+// the outermost region exits. D-SHIELDNAME1=A (ratified 2026-07-11) spells this
+// region `#Shield { … }`; codegen lowers the block to
+// `jet_scheduler_shield_enter`/`_leave` around the body (Codegen/TIR emit).
 struct JetCancelUnwind;
 
 thread_local! {
@@ -41,17 +41,28 @@ fn jet_scheduler_shielded() -> bool {
 
 #[allow(dead_code)] // wired to a user sigil once D-SHIELDNAME1 ratifies
 pub fn jet_scheduler_shield_enter() {
-    SHIELD_DEPTH.with(|d| d.set(d.get().saturating_add(1)));
+    // Outside a scheduler task/catch frame, `#Shield` is a transparent block.
+    if current_task_control().is_some() && jet_scheduler_panic_should_unwind() {
+        SHIELD_DEPTH.with(|d| d.set(d.get().saturating_add(1)));
+    }
 }
 
 #[allow(dead_code)] // wired to a user sigil once D-SHIELDNAME1 ratifies
 pub fn jet_scheduler_shield_leave() {
+    // Match `enter`: ambient deadlines must never begin unwinding merely because
+    // ordinary non-task code crossed a lexical shield boundary.
+    if current_task_control().is_none() || !jet_scheduler_panic_should_unwind() {
+        return;
+    }
     let landed = SHIELD_DEPTH.with(|d| {
         let n = d.get().saturating_sub(1);
         d.set(n);
         n == 0
     });
-    if landed {
+    // If the body is already unwinding, decrement the depth but do not start a
+    // second cancellation/deadline unwind from this Drop guard. The original
+    // unwind already exits the task and runs every remaining cleanup.
+    if landed && !std::thread::panicking() {
         // A deadline that closed while shielded is program-level; raise it first.
         if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) {
             jet_deadline_exceeded("shield exit");

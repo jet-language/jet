@@ -279,6 +279,7 @@ fn collect_tuple_shapes_from_stmt(stmt: &Stmt, out: &mut BTreeMap<String, Vec<(S
         // D-REGION1: a region body is real code — collect tuple shapes from it.
         // D-EFF1: a `#Caps` region body is likewise real code.
         Stmt::Region { body, .. }
+        | Stmt::Shield { body, .. }
         | Stmt::Off { body, .. }
         | Stmt::DebugOnly { body, .. }
         | Stmt::TaskGroup { body, .. }

@@ -487,6 +487,7 @@ pub(crate) fn rewrite_inline_calls_stmts(
             | Stmt::Unsafe { body: inner, .. }
             | Stmt::Impure { body: inner, .. }
             | Stmt::Reactive { body: inner, .. }
+            | Stmt::Shield { body: inner, .. }
             | Stmt::SuppressMustUse { body: inner, .. }
             | Stmt::Off { body: inner, .. }
             | Stmt::DebugOnly { body: inner, .. }
@@ -2154,6 +2155,13 @@ pub(crate) fn collect_core_stmts(
             | Stmt::Grant { body, .. }
             | Stmt::Transact { body, .. }
             | Stmt::AssumeDet { body, .. } => collect_core_stmts(body, imports, used, spans),
+            // D-SHIELDNAME1=A: parsed syntax, not raw source text, owns the
+            // scheduler-prelude capability. This recognizes legal whitespace
+            // such as `# Shield` and cannot be fooled by comments or strings.
+            Stmt::Shield { body, span } => {
+                note_core_usage(used, spans, "core.concurrency::shield", Some(*span));
+                collect_core_stmts(body, imports, used, spans);
+            }
             // D-REACTCORE1: reactive blocks implicitly use `core.reactive`.
             Stmt::Reactive { body, span, .. } => {
                 note_core_usage(used, spans, "core.reactive", Some(*span));

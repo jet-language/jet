@@ -109,6 +109,16 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
+    /// D-SHIELDNAME1=A (ratified 2026-07-11): `#Shield { … }` — a cancellation
+    /// shield region. A cancellation or blown deadline pending against the running
+    /// task is deferred until the block exits (deadline first, then cancel).
+    /// Lowers to `jet_scheduler_shield_enter()` / `_leave()` around `body` with a
+    /// RAII guard so `_leave` runs on every exit path including unwind. A no-op
+    /// outside a task (SHIELD_DEPTH is thread-local). No arguments.
+    Shield {
+        body: Vec<Stmt>,
+        span: Span,
+    },
     /// D-IGNORERET2=A (ratified 2026-06-28): `#Suppress(MustUse) { … }` — a
     /// lexical scope in which all fallible / `@MustUse` statement results are
     /// allowed to be silently dropped without `.drop("reason")`.  Erases to a
@@ -339,6 +349,7 @@ impl Stmt {
             | Stmt::Unsafe { span, .. }
             | Stmt::Impure { span, .. }
             | Stmt::Reactive { span, .. }
+            | Stmt::Shield { span, .. }
             | Stmt::SuppressMustUse { span, .. }
             | Stmt::Off { span, .. }
             | Stmt::DebugOnly { span, .. }

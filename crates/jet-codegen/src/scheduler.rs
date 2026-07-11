@@ -68,9 +68,9 @@ fn jet_scheduler_fatal(msg: &str) -> ! {
 // Drop-backed cleanup runs on the way out — the same shape a blown deadline
 // already produces. A shielded region (SHIELD_DEPTH > 0) DEFERS the unwind: wait
 // points inside it complete normally and the deferred cancel/deadline lands when
-// the outermost region exits. Shield has no user spelling yet (gated on
-// D-SHIELDNAME1); `jet_scheduler_shield_enter`/`_leave` are internal-only until
-// the parent wires the ratified sigil.
+// the outermost region exits. D-SHIELDNAME1=A (ratified 2026-07-11) spells this
+// region `#Shield { … }`; codegen lowers the block to
+// `jet_scheduler_shield_enter`/`_leave` around the body (Codegen/TIR emit).
 struct JetCancelUnwind;
 
 thread_local! {
@@ -83,17 +83,28 @@ fn jet_scheduler_shielded() -> bool {
 
 #[allow(dead_code)] // wired to a user sigil once D-SHIELDNAME1 ratifies
 pub fn jet_scheduler_shield_enter() {
-    SHIELD_DEPTH.with(|d| d.set(d.get().saturating_add(1)));
+    // Outside a scheduler task/catch frame, `#Shield` is a transparent block.
+    if current_task_control().is_some() && jet_scheduler_panic_should_unwind() {
+        SHIELD_DEPTH.with(|d| d.set(d.get().saturating_add(1)));
+    }
 }
 
 #[allow(dead_code)] // wired to a user sigil once D-SHIELDNAME1 ratifies
 pub fn jet_scheduler_shield_leave() {
+    // Match `enter`: ambient deadlines must never begin unwinding merely because
+    // ordinary non-task code crossed a lexical shield boundary.
+    if current_task_control().is_none() || !jet_scheduler_panic_should_unwind() {
+        return;
+    }
     let landed = SHIELD_DEPTH.with(|d| {
         let n = d.get().saturating_sub(1);
         d.set(n);
         n == 0
     });
-    if landed {
+    // If the body is already unwinding, decrement the depth but do not start a
+    // second cancellation/deadline unwind from this Drop guard. The original
+    // unwind already exits the task and runs every remaining cleanup.
+    if landed && !std::thread::panicking() {
         // A deadline that closed while shielded is program-level; raise it first.
         if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) {
             jet_deadline_exceeded("shield exit");
@@ -2024,6 +2035,7 @@ mod interrupt_boundary_tests {
     // consistent with the cancel case.
     #[test]
     fn shield_defers_deadline_until_it_exits() {
+        jet_scheduler_set_task_control(Some(JetTaskControl::new()));
         jet_scheduler_task_panic_enter();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             jet_scheduler_shield_enter();
@@ -2037,10 +2049,106 @@ mod interrupt_boundary_tests {
             "no-unwind"
         }));
         TEST_DEADLINE_EXCEEDED.with(|d| d.set(false));
+        jet_scheduler_set_task_control(None);
         jet_scheduler_task_panic_leave();
         assert!(
             result.is_err(),
             "deadline deferred by the shield must unwind when the region exits"
         );
+    }
+
+    // Exercise the exact RAII shape emitted by Codegen/TIR/emit/statements.rs.
+    // These helpers deliberately do not call `_leave` from test bodies: Drop is
+    // what must cover every control-flow and unwind edge.
+    struct EmittedShieldGuard<F: FnOnce()>(Option<F>);
+    impl<F: FnOnce()> Drop for EmittedShieldGuard<F> {
+        fn drop(&mut self) {
+            if let Some(f) = self.0.take() {
+                f();
+            }
+        }
+    }
+
+    macro_rules! emitted_shield {
+        ($body:block) => {{
+            jet_scheduler_shield_enter();
+            let _shield_guard = EmittedShieldGuard(Some(|| jet_scheduler_shield_leave()));
+            $body
+        }};
+    }
+
+    fn emitted_early_return() -> i64 {
+        emitted_shield!({ return 17 });
+    }
+
+    fn emitted_try_exit() -> Result<i64, &'static str> {
+        emitted_shield!({ Err("stop")? });
+        Ok(1)
+    }
+
+    #[test]
+    fn emitted_shield_guard_covers_control_flow_unwind_and_reset_matrix() {
+        // Outside a task/catch frame, even an expired ambient deadline is inert.
+        TEST_DEADLINE_EXCEEDED.with(|d| d.set(true));
+        emitted_shield!({ assert!(!jet_scheduler_shielded()) });
+        TEST_DEADLINE_EXCEEDED.with(|d| d.set(false));
+
+        jet_scheduler_task_panic_enter();
+        jet_scheduler_set_task_control(Some(JetTaskControl::new()));
+
+        emitted_shield!({
+            assert!(jet_scheduler_shielded());
+            emitted_shield!({ assert!(jet_scheduler_shielded()) });
+            assert!(jet_scheduler_shielded());
+        });
+        assert!(!jet_scheduler_shielded(), "nested guards must balance depth");
+        assert_eq!(emitted_early_return(), 17);
+        assert!(!jet_scheduler_shielded(), "return must drop the guard");
+        assert_eq!(emitted_try_exit(), Err("stop"));
+        assert!(!jet_scheduler_shielded(), "? must drop the guard");
+
+        // A body panic wins over pending cancel/deadline: guard decrements depth
+        // but must not begin a second panic while unwinding.
+        for pending_deadline in [false, true] {
+            let control = JetTaskControl::new();
+            control.cancel();
+            jet_scheduler_set_task_control(Some(control));
+            TEST_DEADLINE_EXCEEDED.with(|d| d.set(pending_deadline));
+            let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                emitted_shield!({ panic!("body panic") });
+            }));
+            let text = panic
+                .expect_err("body must panic")
+                .downcast::<&'static str>()
+                .map(|s| *s)
+                .unwrap_or("");
+            assert_eq!(text, "body panic");
+            assert!(!jet_scheduler_shielded(), "panic must reset shield depth");
+            TEST_DEADLINE_EXCEEDED.with(|d| d.set(false));
+        }
+
+        // When both become pending during a normal body, deadline has priority.
+        let control = JetTaskControl::new();
+        control.cancel();
+        jet_scheduler_set_task_control(Some(control));
+        let both = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            emitted_shield!({ TEST_DEADLINE_EXCEEDED.with(|d| d.set(true)) });
+        }));
+        let payload = both.expect_err("pending deadline must land at guard drop");
+        let text = if let Some(s) = payload.downcast_ref::<String>() {
+            s.as_str()
+        } else {
+            payload.downcast_ref::<&'static str>().copied().unwrap_or("")
+        };
+        assert_eq!(text, "deadline exceeded");
+        assert!(!jet_scheduler_shielded());
+        TEST_DEADLINE_EXCEEDED.with(|d| d.set(false));
+
+        // Same worker/thread can run a later task with clean depth and control.
+        jet_scheduler_set_task_control(Some(JetTaskControl::new()));
+        emitted_shield!({ assert!(jet_scheduler_shielded()) });
+        assert!(!jet_scheduler_shielded(), "subsequent task must start clean");
+        jet_scheduler_set_task_control(None);
+        jet_scheduler_task_panic_leave();
     }
 }

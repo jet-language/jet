@@ -746,6 +746,17 @@ pub enum TStmt {
     Live {
         body: Vec<TStmt>,
     },
+    /// D-SHIELDNAME1=A (ratified 2026-07-11): `#Shield { … }` — a cancellation-shield
+    /// region. Lowers to:
+    ///   `{ jet_scheduler_shield_enter(); let _shield_guard = jet_scope_guard(|| jet_scheduler_shield_leave()); <body> }`
+    /// The scope guard guarantees `jet_scheduler_shield_leave()` runs on every exit
+    /// path (normal, `return`, `?`, panic unwind) so a deferred cancel/deadline lands
+    /// at region exit — deadline first, then cancel (the runtime `_leave` decides the
+    /// order). A no-op outside a task (SHIELD_DEPTH is thread-local). Codegen is dumb
+    /// (I3): only emits the already-checked RAII form.
+    Shield {
+        body: Vec<TStmt>,
+    },
     /// D-DOTSCOPE1: a `#Test` scope-member region — `.setup` / `.expect_fail` /
     /// `.timeout(dur)` / `.skip`. Emitted only inside a `jet test` harness fn
     /// (`fn jet_test_N() -> Result<(), String>`); see `emit_tir_stmt` for the

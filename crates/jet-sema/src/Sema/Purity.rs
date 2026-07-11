@@ -245,6 +245,7 @@ pub(crate) fn check_pure_stmt(
         Stmt::Unsafe { body, .. }
         | Stmt::Impure { body, .. }
         | Stmt::Reactive { body, .. }
+        | Stmt::Shield { body, .. }
         | Stmt::SuppressMustUse { body, .. }
         | Stmt::Off { body, .. }
         | Stmt::DebugOnly { body, .. }
@@ -672,6 +673,7 @@ fn check_pure_stmt_with_path(
         Stmt::Unsafe { body, .. }
         | Stmt::Impure { body, .. }
         | Stmt::Reactive { body, .. }
+        | Stmt::Shield { body, .. }
         | Stmt::SuppressMustUse { body, .. }
         | Stmt::Off { body, .. }
         | Stmt::DebugOnly { body, .. }
@@ -1175,6 +1177,7 @@ fn walk_stmt_for_calls(
         | Stmt::Unsafe { body, .. }
         | Stmt::Impure { body, .. }
         | Stmt::Reactive { body, .. }
+        | Stmt::Shield { body, .. }
         | Stmt::SuppressMustUse { body, .. }
         | Stmt::Off { body, .. }
         | Stmt::DebugOnly { body, .. }

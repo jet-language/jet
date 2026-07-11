@@ -325,6 +325,33 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// D-SHIELDNAME1=A (ratified 2026-07-11): parse `#Shield { … }` in statement
+    /// position. Bare block only — no argument list. `#Shield(...)` is E0430.
+    /// Lowers to `jet_scheduler_shield_enter`/`_leave` around the body at codegen.
+    fn at_shield_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+        let start = self.peek().span;
+        self.expect(TokKind::Hash, "expected `#`")?;
+        let name_tok = self.bump(); // `Shield`
+        if matches!(self.peek().kind, TokKind::LParen) {
+            let lparen = self.peek().span;
+            return Err(Diagnostic::error(
+                "E0430",
+                "`#Shield` takes no arguments".to_string(),
+                "a shield region protects whatever runs inside it; there is nothing to configure"
+                    .to_string(),
+                "write `#Shield { … }`".to_string(),
+                Some(Span::new(name_tok.span.start, lparen.end)),
+            ));
+        }
+        self.expect(TokKind::LBrace, "after `#Shield`")?;
+        let body = self.block_stmts();
+        let end = self.toks[self.pos - 1].span.end;
+        Ok(Stmt::Shield {
+            body,
+            span: Span::new(start.start, end),
+        })
+    }
+
     /// D-CTX1 (ratified 2026-06-22, G2): parse `#Context(field: value, …) { … }`.
     /// Cursor is on the `#` token. Emits E0760 for `=` spelling, E0761 for
     /// unknown fields.
@@ -1101,6 +1128,12 @@ impl<'a> Parser<'a> {
                 // D-CTEFFECT1: `#Impure("reason") { … }` comptime effect gate.
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_IMPURE) {
                     return self.at_impure_stmt();
+                }
+                // D-SHIELDNAME1=A: `#Shield { … }` cancellation-shield region.
+                // Dispatch on the name alone so `#Shield(...)` still routes here
+                // to emit the E0430 teaching error.
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_SHIELD) {
+                    return self.at_shield_stmt();
                 }
                 // D-REACTCORE1: `#Reactive { … }` reactive effect scope.
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_REACTIVE)

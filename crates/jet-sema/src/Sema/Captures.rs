@@ -75,6 +75,7 @@ pub(crate) fn walk_stmts_for_const_refs(
             | Stmt::Unsafe { body: inner, .. }
             | Stmt::Impure { body: inner, .. }
             | Stmt::Reactive { body: inner, .. }
+            | Stmt::Shield { body: inner, .. }
             | Stmt::SuppressMustUse { body: inner, .. }
             | Stmt::Off { body: inner, .. }
             | Stmt::DebugOnly { body: inner, .. }
@@ -472,6 +473,7 @@ pub(crate) fn stmt_refs_name(stmt: &Stmt, name: &str) -> bool {
         | Stmt::Unsafe { body, .. }
         | Stmt::Impure { body, .. }
         | Stmt::Reactive { body, .. }
+        | Stmt::Shield { body, .. }
         | Stmt::SuppressMustUse { body, .. }
         | Stmt::DebugOnly { body, .. }
         | Stmt::Region { body, .. }
@@ -856,6 +858,7 @@ pub(crate) fn stmt_collect_captures(
         | Stmt::Unsafe { body, .. }
         | Stmt::Impure { body, .. }
         | Stmt::Reactive { body, .. }
+        | Stmt::Shield { body, .. }
         | Stmt::SuppressMustUse { body, .. }
         | Stmt::DebugOnly { body, .. }
         | Stmt::Region { body, .. }

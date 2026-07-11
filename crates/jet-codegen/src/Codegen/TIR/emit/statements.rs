@@ -602,6 +602,25 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
             emit_tir_stmts(body, cx, out, inner);
             out.push_str(&format!("{}}}\n", pad));
         }
+        // D-SHIELDNAME1=A: `#Shield { … }` — enter a cancellation-shield region, install
+        // a scope guard that leaves it, then emit the body. The guard fires on every
+        // exit path (normal, return, ?, panic unwind) via Rust's Drop ordering, so a
+        // cancel/deadline deferred while shielded lands when the region exits.
+        TStmt::Shield { body } => {
+            let inner = indent + 1;
+            let inner_pad = "    ".repeat(inner);
+            out.push_str(&format!("{}{{\n", pad));
+            out.push_str(&format!(
+                "{}{}jet_scheduler_shield_enter();\n",
+                inner_pad, cx.root_prefix
+            ));
+            out.push_str(&format!(
+                "{}let _shield_guard = {}jet_scope_guard(|| {{ {}jet_scheduler_shield_leave(); }});\n",
+                inner_pad, cx.root_prefix, cx.root_prefix
+            ));
+            emit_tir_stmts(body, cx, out, inner);
+            out.push_str(&format!("{}}}\n", pad));
+        }
         // D-DOTSCOPE1: a `#Test` scope member, emitted inside `fn jet_test_N() ->
         // Result<(), String>`. Kind decides the framing; a `require` failure or
         // panic inside a region returns `Err`/unwinds, which each kind handles.
