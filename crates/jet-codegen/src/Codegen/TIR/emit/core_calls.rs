@@ -1450,22 +1450,24 @@ pub(crate) fn emit_tir_core_call(
             format!("{}(&({}))", helper("jet_net_dns_srv_weight"), arg(0))
         }
         ("core.net", "tls_connect") => format!(
-            "{{ let _s = {}; {}(_s.inner, &({})).map(|id| JetTlsStream{{id}}) }}",
+            "{{ let _s = {}; {}({}(_s.inner, &({})), \"tls handshake\").map(|id| JetTlsStream{{id}}) }}",
             arg(0),
+            helper("jet_net_tls_result"),
             regex_fn("jet_net_tls_connect_impl"),
             arg(1)
         ),
         ("core.net", "tls_read") => {
-            format!("{}(({}).id)", regex_fn("jet_net_tls_read_impl"), arg(0))
+            format!("{}({}(({}).id), \"tls read text\")", helper("jet_net_tls_result"), regex_fn("jet_net_tls_read_impl"), arg(0))
         }
         ("core.net", "tls_write") => format!(
-            "{}(({}).id, &({}))",
+            "{}({}(({}).id, &({})), \"tls write text\")",
+            helper("jet_net_tls_result"),
             regex_fn("jet_net_tls_write_impl"),
             arg(0),
             arg(1)
         ),
         ("core.net", "tls_close") => {
-            format!("{}(({}).id)", regex_fn("jet_net_tls_close_impl"), arg(0))
+            format!("{}({}(({}).id), \"tls close\")", helper("jet_net_tls_result"), regex_fn("jet_net_tls_close_impl"), arg(0))
         }
         ("core.tls", "client") => format!(
             "{{ let _s = {}; {}({}(_s.inner, &({})), \"tls handshake\").map(|id| JetTlsStream{{id}}) }}",

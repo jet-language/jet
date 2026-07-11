@@ -114,9 +114,13 @@ pub fn jet_net_tls_write_all_bytes_impl(id: i64, data: &Vec<u8>) -> Result<(), S
 
 pub fn jet_net_tls_close_impl(id: i64) -> Result<(), String> {
     JET_NET_TLS_STREAMS.with(|cell| {
-        if let Some(mut stream) = cell.borrow_mut().remove(&id) {
+        let mut streams = cell.borrow_mut();
+        if let Some(stream) = streams.get_mut(&id) {
             stream.conn.send_close_notify();
-            let _ = stream.flush();
+            stream
+                .flush()
+                .map_err(|e| format!("TLS close-notify flush failed: {}", e))?;
+            streams.remove(&id);
             JET_NET_TLS_CLOSED.with(|closed| { closed.borrow_mut().insert(id); });
             return Ok(());
         }

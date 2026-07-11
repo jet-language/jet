@@ -2177,21 +2177,22 @@ shift count past the type's width traps (no leaked Rust panic).
 ## `core.net` — sockets and DNS
 
 `core.net` is the low-level socket layer. Calls look blocking at the Jet
-surface, but shared runtime handles observe `#Context` deadlines where the
-runtime provides one. Beginner calls accept strings; expert calls accept typed
+surface. AOT socket operations bound blocking I/O by available `#Context`
+deadlines; prompt cancellation and JIT scheduler integration remain #306 work.
+Beginner calls accept strings; expert calls accept typed
 `IpAddr` / `SocketAddr` values.
 
 | Function | Returns | Notes |
 |----------|---------|-------|
-| `ip_addr(text)` | `IpAddr ? String` | Parse IPv4/IPv6 |
+| `ip_addr(text)` | `IpAddr ? NetError` | Parse IPv4/IPv6 |
 | `ip_to_string(ip)` / `ip_is_ipv4(ip)` | `String` / `Bool` | Inspect typed IP values |
-| `socket_addr(host, port)` | `SocketAddr ? String` | Resolve/parse host and port |
-| `socket_addr_parse(text)` | `SocketAddr ? String` | Parse `host:port` |
+| `socket_addr(host, port)` | `SocketAddr ? NetError` | Resolve/parse host and port |
+| `socket_addr_parse(text)` | `SocketAddr ? NetError` | Parse `host:port` |
 | `socket_host(addr)` / `socket_port(addr)` / `socket_to_string(addr)` | `String` / `Int` / `String` | Inspect typed socket addresses |
-| `tcp_listen(addr)` / `tcp_connect(addr)` | `TcpListener ? String` / `TcpStream ? String` | String entrypoints |
-| `tcp_listen_addr(addr)` / `tcp_connect_addr(addr)` | `TcpListener ? String` / `TcpStream ? String` | Typed entrypoints |
-| `tcp_connect_timeout(addr, ms)` | `TcpStream ? String` | Typed dial with timeout |
-| `tcp_connect_happy(host, port, ms)` | `TcpStream ? String` | Dual-stack dial, IPv6 tried before IPv4 |
+| `tcp_listen(addr)` / `tcp_connect(addr)` | `TcpListener ? NetError` / `TcpStream ? NetError` | String entrypoints |
+| `tcp_listen_addr(addr)` / `tcp_connect_addr(addr)` | `TcpListener ? NetError` / `TcpStream ? NetError` | Typed entrypoints |
+| `tcp_connect_timeout(addr, ms)` | `TcpStream ? NetError` | Typed dial with timeout |
+| `tcp_connect_happy(host, port, ms)` | `TcpStream ? NetError` | Dual-stack dial, IPv6 tried before IPv4 |
 | `stream.read(limit)` / `stream.write(bytes)` / `stream.write_all(bytes)` | `[U8] ? NetError` / `Int ? NetError` / `() ? NetError` | Canonical byte stream operations |
 | `stream.read_text(limit)` / `stream.write_text(text)` | `String ? NetError` / `() ? NetError` | Checked UTF-8 projections over the same byte stream |
 | `stream.shutdown(.Read/.Write/.Both)` / `stream.close()` | `() ? NetError` | Explicit half-close; close is idempotent and later I/O is `.Closed` |
@@ -2199,20 +2200,20 @@ runtime provides one. Beginner calls accept strings; expert calls accept typed
 | `tcp_local_socket_addr(stream)` / `tcp_peer_socket_addr(stream)` | `SocketAddr` | Typed stream addresses |
 | `listener_local_socket_addr(listener)` | `SocketAddr` | Typed listener address |
 | `set_timeout(stream, ms)` | `()` | Set read/write timeouts |
-| `set_read_timeout(stream, ms)` / `set_write_timeout(stream, ms)` | `() ? String` | Directional timeouts |
-| `udp_bind(addr)` / `udp_bind_addr(addr)` | `UdpSocket ? String` | Datagram sockets |
+| `set_read_timeout(stream, ms)` / `set_write_timeout(stream, ms)` | `() ? NetError` | Directional timeouts |
+| `udp_bind(addr)` / `udp_bind_addr(addr)` | `UdpSocket ? NetError` | Datagram sockets |
 | `udp_local_addr(socket)` | `SocketAddr` | Typed local address |
-| `udp_set_timeout(socket, ms)` | `() ? String` | Read/write datagram timeouts |
+| `udp_set_timeout(socket, ms)` | `() ? NetError` | Read/write datagram timeouts |
 | `udp_send_bytes_to(socket, bytes, addr)` | `Int ? NetError` | Send one arbitrary-byte datagram |
 | `udp_receive(socket, limit)` | `UdpPacket ? NetError` | Full datagram receive with bounded returned payload |
 | `udp_packet_bytes/address/original_len/truncated(packet)` | `[U8]` / `SocketAddr` / `Int` / `Bool` | Packet data, source, wire length, and truncation fact |
-| `unix_listen(path)` / `unix_connect(path)` | `UnixListener ? String` / `UnixStream ? String` | Unix-domain sockets where supported |
-| `unix_accept(listener)` | `UnixStream ? String` | Accept one Unix stream |
+| `unix_listen(path)` / `unix_connect(path)` | `UnixListener ? NetError` / `UnixStream ? NetError` | Unix-domain sockets where supported |
+| `unix_accept(listener)` | `UnixStream ? NetError` | Accept one Unix stream |
 | `unix_read_bytes(stream, limit)` / `unix_write_all_bytes(stream, bytes)` | `[U8] ? NetError` / `() ? NetError` | Unix byte stream operations; same deadline/close law as TCP |
 | `unix_shutdown(stream, how)` / `unix_close(stream)` | `() ? NetError` | Explicit shutdown and idempotent close |
-| `dns_a(name, ms)` / `dns_aaaa(name, ms)` | `[IpAddr] ? String` | System resolver config, timeout in ms |
-| `dns_txt(name, ms)` | `[String] ? String` | TXT records |
-| `dns_srv(name, ms)` | `[DnsSrv] ? String` | SRV records |
+| `dns_a(name, ms)` / `dns_aaaa(name, ms)` | `[IpAddr] ? NetError` | System resolver config, timeout in ms |
+| `dns_txt(name, ms)` | `[String] ? NetError` | TXT records |
+| `dns_srv(name, ms)` | `[DnsSrv] ? NetError` | SRV records |
 | `dns_*_at(server, name, ms)` | same as matching lookup | Expert override for a specific DNS server |
 | `dns_srv_target(srv)` / `dns_srv_port(srv)` | `String` / `Int` | Inspect SRV records |
 | `core.tls.client(stream, server_name)` | `TlsStream ? NetError` | Consume a connected `TcpStream`; verify name with system roots |

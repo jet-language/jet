@@ -1641,12 +1641,14 @@ index, not a substitute for that law.
   observe the current `#Context`, yield through the shared runtime where
   available, and obey the earliest context, persistent socket, or explicit
   per-call deadline. The same handles expose readiness; cancellation and
-  expiry are distinct `.Cancelled` and `.Timeout` values.
+  expiry are distinct `.Cancelled` and `.Timeout` values. **Implementation
+  status:** deadline bounding and same-handle readiness exist in AOT; prompt
+  task cancellation and scheduler/JIT integration remain tracked by #306.
 - **D-NETTLSSTREAM1=A**: `core.tls.client` consumes a connected `TcpStream` and
-  returns a `TlsStream` with the same byte, reader/writer, readiness, deadline,
-  cancellation, shutdown, and close law. Safe defaults verify the server name
+  returns a `TlsStream` with the same byte and close law. Safe defaults verify the server name
   with system roots; advanced roots, ALPN, identity, protocol bounds, peer
-  identity, and close-notify remain explicit `core.tls` controls.
+  identity, readiness/deadline/cancellation/shutdown integration, and advanced
+  close-notify controls remain implementation work under #306/#300.
 - **D-HTTPDEPTH1=A**: `core.http` owns Client, Server, Router, middleware,
   streaming bodies, forms/multipart, cookies, redirects, timeouts, TLS policy,
   and SSE, built on `core.url`, `core.mime`, and `core.net`. WebSocket support

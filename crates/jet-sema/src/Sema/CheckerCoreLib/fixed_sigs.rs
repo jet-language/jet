@@ -843,12 +843,12 @@ pub fn core_fixed_sig(
             vec![(read, Type::String)],
             Some(result_ty(
                 Type::Named("TcpListener".to_string()),
-                Type::String,
+                Type::Named("NetError".to_string()),
             )),
         )),
         ("core.net", "ip_addr") => Some((
             vec![(read, Type::String)],
-            Some(result_ty(Type::Named("IpAddr".to_string()), Type::String)),
+            Some(result_ty(Type::Named("IpAddr".to_string()), Type::Named("NetError".to_string()))),
         )),
         ("core.net", "ip_to_string") => Some((
             vec![(read, Type::Named("IpAddr".to_string()))],
@@ -862,14 +862,14 @@ pub fn core_fixed_sig(
             vec![(read, Type::String), (read, Type::Int)],
             Some(result_ty(
                 Type::Named("SocketAddr".to_string()),
-                Type::String,
+                Type::Named("NetError".to_string()),
             )),
         )),
         ("core.net", "socket_addr_parse") => Some((
             vec![(read, Type::String)],
             Some(result_ty(
                 Type::Named("SocketAddr".to_string()),
-                Type::String,
+                Type::Named("NetError".to_string()),
             )),
         )),
         ("core.net", "socket_host" | "socket_to_string") => Some((
@@ -884,7 +884,7 @@ pub fn core_fixed_sig(
             vec![(read, Type::Named("SocketAddr".to_string()))],
             Some(result_ty(
                 Type::Named("TcpListener".to_string()),
-                Type::String,
+                Type::Named("NetError".to_string()),
             )),
         )),
         ("core.net", "tcp_accept") => Some((
@@ -894,21 +894,21 @@ pub fn core_fixed_sig(
             )],
             Some(result_ty(
                 Type::Named("TcpStream".to_string()),
-                Type::String,
+                Type::Named("NetError".to_string()),
             )),
         )),
         ("core.net", "tcp_connect") => Some((
             vec![(read, Type::String)],
             Some(result_ty(
                 Type::Named("TcpStream".to_string()),
-                Type::String,
+                Type::Named("NetError".to_string()),
             )),
         )),
         ("core.net", "tcp_connect_addr") => Some((
             vec![(read, Type::Named("SocketAddr".to_string()))],
             Some(result_ty(
                 Type::Named("TcpStream".to_string()),
-                Type::String,
+                Type::Named("NetError".to_string()),
             )),
         )),
         ("core.net", "tcp_connect_timeout") => Some((
@@ -918,14 +918,14 @@ pub fn core_fixed_sig(
             ],
             Some(result_ty(
                 Type::Named("TcpStream".to_string()),
-                Type::String,
+                Type::Named("NetError".to_string()),
             )),
         )),
         ("core.net", "tcp_connect_happy") => Some((
             vec![(read, Type::String), (read, Type::Int), (read, Type::Int)],
             Some(result_ty(
                 Type::Named("TcpStream".to_string()),
-                Type::String,
+                Type::Named("NetError".to_string()),
             )),
         )),
         ("core.net", "tcp_read") => Some((
@@ -933,7 +933,7 @@ pub fn core_fixed_sig(
                 AccessConvention::Write,
                 Type::Named("TcpStream".to_string()),
             )],
-            Some(result_ty(Type::String, Type::String)),
+            Some(result_ty(Type::String, Type::Named("NetError".to_string()))),
         )),
         ("core.net", "tcp_write") => Some((
             vec![
@@ -943,7 +943,7 @@ pub fn core_fixed_sig(
                 ),
                 (read, Type::String),
             ],
-            Some(result_ty(unit_ty(), Type::String)),
+            Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
         )),
         ("core.net", "tcp_read_bytes") => Some((
             vec![
@@ -1051,7 +1051,7 @@ pub fn core_fixed_sig(
                 ),
                 (read, Type::Int),
             ],
-            Some(result_ty(unit_ty(), Type::String)),
+            Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
         )),
         // Convenience: send a complete HTTP/1.1 response and close the stream.
         ("core.net", "tcp_reply") => Some((
@@ -1066,14 +1066,14 @@ pub fn core_fixed_sig(
             vec![(read, Type::String)],
             Some(result_ty(
                 Type::Named("UdpSocket".to_string()),
-                Type::String,
+                Type::Named("NetError".to_string()),
             )),
         )),
         ("core.net", "udp_bind_addr") => Some((
             vec![(read, Type::Named("SocketAddr".to_string()))],
             Some(result_ty(
                 Type::Named("UdpSocket".to_string()),
-                Type::String,
+                Type::Named("NetError".to_string()),
             )),
         )),
         ("core.net", "udp_local_addr") => Some((
@@ -1085,7 +1085,7 @@ pub fn core_fixed_sig(
                 (read, Type::Named("UdpSocket".to_string())),
                 (read, Type::Int),
             ],
-            Some(result_ty(unit_ty(), Type::String)),
+            Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
         )),
         ("core.net", "udp_send_to") => Some((
             vec![
@@ -1093,7 +1093,7 @@ pub fn core_fixed_sig(
                 (read, Type::String),
                 (read, Type::Named("SocketAddr".to_string())),
             ],
-            Some(result_ty(Type::Int, Type::String)),
+            Some(result_ty(Type::Int, Type::Named("NetError".to_string()))),
         )),
         ("core.net", "udp_recv_from") => Some((
             vec![
@@ -1102,7 +1102,7 @@ pub fn core_fixed_sig(
             ],
             Some(result_ty(
                 Type::Named("UdpPacket".to_string()),
-                Type::String,
+                Type::Named("NetError".to_string()),
             )),
         )),
         ("core.net", "udp_send_bytes_to") => Some((
@@ -1147,21 +1147,21 @@ pub fn core_fixed_sig(
             vec![(read, Type::String)],
             Some(result_ty(
                 Type::Named("UnixListener".to_string()),
-                Type::String,
+                Type::Named("NetError".to_string()),
             )),
         )),
         ("core.net", "unix_accept") => Some((
             vec![(read, Type::Named("UnixListener".to_string()))],
             Some(result_ty(
                 Type::Named("UnixStream".to_string()),
-                Type::String,
+                Type::Named("NetError".to_string()),
             )),
         )),
         ("core.net", "unix_connect") => Some((
             vec![(read, Type::String)],
             Some(result_ty(
                 Type::Named("UnixStream".to_string()),
-                Type::String,
+                Type::Named("NetError".to_string()),
             )),
         )),
         ("core.net", "unix_read") => Some((
@@ -1169,7 +1169,7 @@ pub fn core_fixed_sig(
                 AccessConvention::Write,
                 Type::Named("UnixStream".to_string()),
             )],
-            Some(result_ty(Type::String, Type::String)),
+            Some(result_ty(Type::String, Type::Named("NetError".to_string()))),
         )),
         ("core.net", "unix_write") => Some((
             vec![
@@ -1179,7 +1179,7 @@ pub fn core_fixed_sig(
                 ),
                 (read, Type::String),
             ],
-            Some(result_ty(unit_ty(), Type::String)),
+            Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
         )),
         ("core.net", "unix_read_bytes") => Some((
             vec![
@@ -1272,7 +1272,7 @@ pub fn core_fixed_sig(
             ],
             Some(result_ty(
                 Type::Named("TlsStream".to_string()),
-                Type::String,
+                Type::Named("NetError".to_string()),
             )),
         )),
         ("core.net", "tls_read") => Some((
@@ -1280,7 +1280,7 @@ pub fn core_fixed_sig(
                 AccessConvention::Write,
                 Type::Named("TlsStream".to_string()),
             )],
-            Some(result_ty(Type::String, Type::String)),
+            Some(result_ty(Type::String, Type::Named("NetError".to_string()))),
         )),
         ("core.net", "tls_write") => Some((
             vec![
@@ -1290,11 +1290,11 @@ pub fn core_fixed_sig(
                 ),
                 (read, Type::String),
             ],
-            Some(result_ty(unit_ty(), Type::String)),
+            Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
         )),
         ("core.net", "tls_close") => Some((
             vec![(AccessConvention::Move, Type::Named("TlsStream".to_string()))],
-            Some(result_ty(unit_ty(), Type::String)),
+            Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
         )),
         ("core.tls", "client") => Some((
             vec![

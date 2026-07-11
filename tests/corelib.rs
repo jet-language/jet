@@ -775,30 +775,62 @@ fn core_net_dns_nxdomain_is_an_error() {
 }
 
 #[test]
-fn core_tls_byte_stream_surface_links_through_the_real_bridge() {
+fn core_tls_byte_stream_runs_real_local_handshake_and_close_notify() {
     let dir = std::env::temp_dir().join(format!("jet_core_tls_surface_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
+    let probe = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = probe.local_addr().unwrap().port();
+    drop(probe);
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let ca_cert = root.join("tests/fixtures/tls/localhost.cert.pem");
+    let ca_key = root.join("tests/fixtures/tls/localhost.key.pem");
+    let cert = dir.join("leaf.cert.pem");
+    let key = dir.join("leaf.key.pem");
+    let csr = dir.join("leaf.csr.pem");
+    let extensions = dir.join("leaf.ext");
+    fs::write(&extensions, "basicConstraints=critical,CA:FALSE\nsubjectAltName=DNS:localhost,IP:127.0.0.1\nextendedKeyUsage=serverAuth\n").unwrap();
+    let req = Command::new("openssl").args(["req", "-new", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=localhost", "-keyout"])
+        .arg(&key).arg("-out").arg(&csr).output().unwrap();
+    assert!(req.status.success(), "{}", String::from_utf8_lossy(&req.stderr));
+    let sign = Command::new("openssl").args(["x509", "-req", "-days", "1", "-set_serial", "2", "-CA"])
+        .arg(&ca_cert).arg("-CAkey").arg(&ca_key).arg("-extfile").arg(&extensions)
+        .arg("-in").arg(&csr).arg("-out").arg(&cert).output().unwrap();
+    assert!(sign.status.success(), "{}", String::from_utf8_lossy(&sign.stderr));
+    let mut server = Command::new("openssl")
+        .args(["s_server", "-quiet", "-www", "-accept", &port.to_string(), "-cert"])
+        .arg(&cert)
+        .arg("-key")
+        .arg(&key)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(100));
     let src = r#"
 use core.net as net
 use core.tls as tls
 
 fn run() {
-    if false {
-        tcp :: net.tcp_connect("127.0.0.1:443") ?? panic("tcp")
-        secure :: tls.client(tcp, "localhost") ?? panic("tls")
-        _all :: tls.write_all(&secure, "ping".bytes()) ?? panic("write")
-        _count :: tls.write(&secure, "x".bytes()) ?? panic("write")
-        _bytes :: tls.read(&secure, 1024) ?? panic("read")
-        _text :: tls.read_text(&secure, 1024) ?? panic("text")
-        tls.close(&secure) ?? panic("close")
-        tls.close(&secure) ?? panic("close twice")
+    tcp :: net.tcp_connect("127.0.0.1:$PORT") ?? panic("tcp")
+    if tls.client(tcp, "localhost") == {
+        ok(secure) -> {
+            request: [U8] :: [71, 69, 84, 32, 47, 32, 72, 84, 84, 80, 47, 49, 46, 48, 13, 10, 13, 10]
+            tls.write_all(&secure, request) ?? panic("write bytes")
+            response :: tls.read(&secure, 4096) ?? panic("read bytes")
+            print(response.len() > 0)
+            tls.close(&secure) ?? panic("close notify")
+            tls.close(&secure) ?? panic("idempotent close")
+        }
+        err(error) -> panic(net.error_message(error))
     }
-    print("tls-byte-surface")
 }
-"#;
-    let (code, stdout, stderr) = build_and_run(&dir, "tls_byte_surface", src, &[], None);
+"#.replace("$PORT", &port.to_string());
+    let cert_text = ca_cert.to_string_lossy().into_owned();
+    let (code, stdout, stderr) = build_and_run(&dir, "tls_byte_surface", &src, &[("SSL_CERT_FILE", &cert_text)], None);
+    let _ = server.kill();
+    let _ = server.wait();
     assert_eq!(code, 0, "{stderr}");
-    assert_eq!(stdout, "tls-byte-surface\n");
+    assert_eq!(stdout, "true\n");
 }
 
 #[test]
