@@ -282,9 +282,8 @@ fn read_last_rebuild_record(
     project_root: &Path,
     action: ActionId,
 ) -> io::Result<Option<LastRebuildRecord>> {
-    let root = project_root.join(".jet/build-cache/explanations");
     let path = rebuild_record_path(project_root, action);
-    let bytes = match secure_read_file(&root, &path) {
+    let bytes = match secure_read_file(project_root, &path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error),
@@ -313,10 +312,9 @@ fn write_last_rebuild_record(
     key: &ActionKey,
     status: ActionCacheStatus,
 ) -> Result<(), BuildExecutionError> {
-    let root = project_root.join(".jet/build-cache/explanations");
     let path = rebuild_record_path(project_root, action);
     let text = format!("{}\n{}\n", key.as_str(), rebuild_status_code(status));
-    atomic_restore_file(&root, &path, text.as_bytes()).map_err(|error| BuildExecutionError::Io {
+    atomic_restore_file(project_root, &path, text.as_bytes()).map_err(|error| BuildExecutionError::Io {
         action: format!("rebuild explanation {}", action.0),
         detail: error.to_string(),
     })
