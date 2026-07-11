@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 496,
-    "rev": 3693,
+    "rev": 3715,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -20,14 +20,14 @@
         "radar:e9",
         "radar:e8",
         "radar-sq",
-        "radar:e4",
-        "radar:e5",
         "radar:e6",
         "radar:e7",
-        "radar-cards"
+        "radar-cards",
+        "radar:e5",
+        "radar:e4"
       ]
     },
-    "digestCursor": "2026-07-11T12:48:15.444Z"
+    "digestCursor": "2026-07-11T16:52:30.071Z"
   },
   "epochs": [
     {
@@ -14493,12 +14493,47 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": null,
       "blockedBy": [],
       "assignee": "terra-495-builder",
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "codex-orchestrator",
+          "text": "Parent integrated verification: hostile UI 1/1, explicit-copy and owned-slice real compile/run 1/1, ICE/rustc agreement 8/8 green. Independent Sol accepted f25f0a4b; criteria 1-4 verified. Closed P0 I2 field/index ownership gap."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "sol-495-reviewer",
+          "text": "[review] ACCEPT through f25f0a4b. Borrowed root rejection total and renderer-independent; exact/generic diagnostics truthful; Slice excluded; explicit-copy and I2 proofs green (UI 1, corelib 1, bare UI 1, ICE 8)."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "terra-495-builder",
+          "text": "P0 architecture fix f25f0a4b makes rejection total after borrowed ownership-root classification. Renderer success keeps exact path; renderer failure now emits truthful generic E0209 over full consumed-expression span with non-lying copy-prefix guidance. Hostile if-valued index snapshot and explicit-copy real compile/run green."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "terra-495-builder",
+          "text": "Diagnostic-truth fix b6e3f556 removes root-name fallback and renders valid computed Int index forms including calls, methods, unary, parentheses, binary, fields, and nested indexes. Hostile pick() and -(-i) snapshots pin exact full paths/copy fixes; explicit-copy real compile/run green."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "terra-495-builder",
+          "text": "Final semantic review fix at 6861c386: Index ownership root detection is independent of computed-index rendering; i + 1 path gets exact E0209/full span/copy fix. Slice excluded because TIR creates an owned inclusive-copy value. UI and real compile/run prove computed explicit copy plus consuming owned List<Data> slice without false E0209."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "terra-495-builder",
+          "text": "P1 review fix landed at 5223b2eb: ownership-place walker now traverses Index and Slice bases while rejecting call/method temporaries; indexed hostile UI pins exact e.items[0].text span and copy fix; explicit indexed copy real compile/run green. Re-review required."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "terra-495-builder",
+          "text": "Builder complete at 1dbb9448. Failing-first repro was no errors; sema-only root-aware field-place E0209 fix landed. Targeted UI, bare-ident regression, explicit-copy real compile/run, and rustc agreement green. Independent review required; no full suite run."
+        },
         {
           "at": "2026-07-11",
           "by": "codex-orchestrator",
@@ -14514,38 +14549,38 @@
         {
           "n": 1,
           "text": "A borrowed bare/read binding field passed to a consuming Core constructor is rejected by sema with existing E0209 before codegen/rustc.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-11T16:39:18.109Z"
+          "status": "verified",
+          "metBy": "terra-495-builder",
+          "verifiedBy": "sol-495-reviewer",
+          "evidence": "Independent source review + focused UI: borrowed shallow/nested/indexed Core constructor fields reject with E0209 before codegen; no renderer-dependent escape after ownership root.",
+          "at": "2026-07-11T17:10:34.501Z"
         },
         {
           "n": 2,
           "text": "Nested field-path ownership detection uses the real root binding and reports an actionable span/fix naming user-written copy of the field; no silent clone or codegen workaround.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-11T16:39:18.201Z"
+          "status": "verified",
+          "metBy": "terra-495-builder",
+          "verifiedBy": "sol-495-reviewer",
+          "evidence": "f25f0a4b makes root classification total: exact renderings retain exact copy fixes; unsupported valid index expressions get truthful generic copy-before-highlight guidance over full span; Slice excluded as owned copy.",
+          "at": "2026-07-11T17:10:34.585Z"
         },
         {
           "n": 3,
           "text": "An explicit copy of the field compiles and runs, while existing bare-identifier E0209 behavior remains unchanged.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-11T16:39:18.288Z"
+          "status": "verified",
+          "metBy": "terra-495-builder",
+          "verifiedBy": "sol-495-reviewer",
+          "evidence": "Independent real compile/run 1/1 PASS covers explicit shallow, nested, literal/computed/call/unary/if index copies plus owned slice; existing bare-identifier E0209 snapshot 1/1 PASS.",
+          "at": "2026-07-11T17:10:34.667Z"
         },
         {
           "n": 4,
           "text": "Focused UI snapshot, sema/corelib, and rustc-agreement or real compile proof pass with no exit-101 ICE path.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-11T16:39:18.381Z"
+          "status": "verified",
+          "metBy": "terra-495-builder",
+          "verifiedBy": "sol-495-reviewer",
+          "evidence": "Focused independent proof: new UI 1/1, corelib real rustc/run 1/1, bare-ident UI 1/1, ice_regressions 8/8; no exit-101 path.",
+          "at": "2026-07-11T17:10:34.751Z"
         }
       ],
       "refs": [],
@@ -27281,6 +27316,111 @@
   ],
   "events": [
     {
+      "at": "2026-07-11T17:11:44.634Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0hwv6b6",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T17:10:34.836Z",
+      "by": "sol-495-reviewer",
+      "action": "card.update",
+      "ref": "c0hwv6b6",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T17:10:34.751Z",
+      "by": "sol-495-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0hwv6b6",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-11T17:10:34.667Z",
+      "by": "sol-495-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0hwv6b6",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-11T17:10:34.585Z",
+      "by": "sol-495-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0hwv6b6",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-11T17:10:34.501Z",
+      "by": "sol-495-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0hwv6b6",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-11T17:08:52.176Z",
+      "by": "terra-495-builder",
+      "action": "card.update",
+      "ref": "c0hwv6b6",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T17:04:36.045Z",
+      "by": "terra-495-builder",
+      "action": "card.update",
+      "ref": "c0hwv6b6",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T17:00:29.361Z",
+      "by": "terra-495-builder",
+      "action": "card.update",
+      "ref": "c0hwv6b6",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T16:52:39.502Z",
+      "by": "terra-495-builder",
+      "action": "card.update",
+      "ref": "c0hwv6b6",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T16:46:49.482Z",
+      "by": "terra-495-builder",
+      "action": "card.update",
+      "ref": "c0hwv6b6",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T16:46:49.312Z",
+      "by": "terra-495-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0hwv6b6",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-11T16:46:49.145Z",
+      "by": "terra-495-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0hwv6b6",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-11T16:46:48.977Z",
+      "by": "terra-495-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0hwv6b6",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-11T16:46:48.801Z",
+      "by": "terra-495-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0hwv6b6",
+      "note": "#1"
+    },
+    {
       "at": "2026-07-11T16:39:18.473Z",
       "by": "codex-orchestrator",
       "action": "card.update",
@@ -30674,111 +30814,6 @@
       "action": "card.add",
       "ref": "c0tfsrts",
       "note": "Canvas M1: data-pin drag-to-wire gesture + client-side type gate"
-    },
-    {
-      "at": "2026-07-11T01:42:37.035Z",
-      "by": "codex-main",
-      "action": "card.criteria-add",
-      "ref": "c0wx96s2",
-      "note": "#6 Examples/docs name byte, scalar, grapheme, and display-colum"
-    },
-    {
-      "at": "2026-07-11T01:42:36.878Z",
-      "by": "codex-main",
-      "action": "card.criteria-add",
-      "ref": "c0wx96s2",
-      "note": "#5 Public classification, padding, centering, diagnostics, rege"
-    },
-    {
-      "at": "2026-07-11T01:42:36.717Z",
-      "by": "codex-main",
-      "action": "card.criteria-add",
-      "ref": "c0wx96s2",
-      "note": "#4 Canonical text.display_width implements D-TEXTWIDTH1=B over "
-    },
-    {
-      "at": "2026-07-11T01:42:36.560Z",
-      "by": "codex-main",
-      "action": "card.criteria-add",
-      "ref": "c0wx96s2",
-      "note": "#3 Grapheme, word, and sentence segmentation pass 100% of the p"
-    },
-    {
-      "at": "2026-07-11T01:42:36.411Z",
-      "by": "codex-main",
-      "action": "card.criteria-add",
-      "ref": "c0wx96s2",
-      "note": "#2 Normalization and locale-free case folding pass 100% of the "
-    },
-    {
-      "at": "2026-07-11T01:42:36.254Z",
-      "by": "codex-main",
-      "action": "card.criteria-add",
-      "ref": "c0wx96s2",
-      "note": "#1 Pinned Unicode release, checksummed official inputs, and std"
-    },
-    {
-      "at": "2026-07-11T01:39:47.207Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c008rjua",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-11T01:39:24.358Z",
-      "by": "sol-244-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c008rjua",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-11T01:39:24.204Z",
-      "by": "sol-244-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c008rjua",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-11T01:39:24.050Z",
-      "by": "sol-244-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c008rjua",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-11T01:39:23.892Z",
-      "by": "sol-244-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c008rjua",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-11T01:38:34.084Z",
-      "by": "codex-main",
-      "action": "card.criteria-meet",
-      "ref": "c008rjua",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-11T01:38:33.928Z",
-      "by": "codex-main",
-      "action": "card.criteria-meet",
-      "ref": "c008rjua",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-11T01:38:33.768Z",
-      "by": "codex-main",
-      "action": "card.criteria-meet",
-      "ref": "c008rjua",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-11T01:38:33.607Z",
-      "by": "codex-main",
-      "action": "card.criteria-meet",
-      "ref": "c008rjua",
-      "note": "#1"
     }
   ],
   "nextNum": 368,
