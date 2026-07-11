@@ -22,6 +22,7 @@ impl<'a> Parser<'a> {
                 name_span,
                 args,
                 span: Span::new(name_span.start, end),
+                ct: None,
             })
         }
     

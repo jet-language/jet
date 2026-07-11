@@ -1,4 +1,6 @@
-use super::{AccessConvention, ConstDef, ErrorConvDef, Expr, MetaAttr, MigrationDecl, Stmt, Type};
+use super::{
+    AccessConvention, ConstDef, CtValue, ErrorConvDef, Expr, MetaAttr, MigrationDecl, Stmt, Type,
+};
 use crate::Diagnostics::Span;
 
 #[derive(Debug)]
@@ -880,6 +882,13 @@ pub struct Marker {
     pub name_span: Span,
     pub args: Vec<Expr>,
     pub span: Span,
+    /// Card #131 / D-SERDE5: for a `#[Default(expr)]` field marker, the
+    /// compile-time value its argument evaluates to. Sema fills this once
+    /// (`eval_default_markers`) so both the AOT codegen tier and the comptime
+    /// decode tier bake the *exact same* value (R12 parity) — a non-primitive
+    /// default never silently degrades to `Default::default()`. `None` for
+    /// every non-`Default` marker and for a bare `#[Default]` (zero value).
+    pub ct: Option<CtValue>,
 }
 
 #[derive(Debug)]
