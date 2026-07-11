@@ -77,6 +77,22 @@ pub fn open_with_overlays(
     Err(SemIndexError::Load(diags))
 }
 
+/// Index a staged fixture even when its deliberately expected diagnostics are
+/// present. The returned facts still come from the real loader/sema pass; this
+/// is not a syntax-only fallback.
+pub fn open_with_overlays_and_diagnostics(
+    entry: &Path,
+    overlays: &[(&Path, &str)],
+) -> Result<(SemIndex, Vec<Diagnostic>), SemIndexError> {
+    let entry_str = entry.to_string_lossy();
+    let (diags, bundle, facts) =
+        jet_driver::Driver::check_file_with_overlays(&entry_str, overlays, false);
+    match bundle {
+        Some(bundle) => Ok((build_index(&bundle, &facts), diags)),
+        None => Err(SemIndexError::Load(diags)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
