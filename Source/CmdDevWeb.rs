@@ -69,10 +69,13 @@ struct DevStatus {
     /// (dashboard's depth, D-FE-DEVSRV1=D "on-demand depth").
     verbose: AtomicBool,
     active: AtomicBool,
+    /// Color and cursor control are separate capabilities. `NO_COLOR`
+    /// changes the dot into a bracketed state word, but a real TTY still
+    /// gets the pinned dashboard and live `v` control.
+    color: bool,
     /// Redraw the parity line in place instead of appending a new one each
-    /// time. Only when stderr is a real TTY *and* color is on — `NO_COLOR`
-    /// degrades straight to the CI floor (plain, append-only, unpinned), same
-    /// as a non-TTY pipe.
+    /// time. This depends only on stderr being a real TTY; color is cosmetic.
+    /// Non-TTY pipes use the plain append-only CI floor.
     pin: bool,
     /// Serializes every write to stderr from the status/log renderer so
     /// concurrent request threads and the rebuild-watch thread never
@@ -109,7 +112,8 @@ impl DevStatus {
             port: AtomicU64::new(0),
             verbose: AtomicBool::new(verbose),
             active: AtomicBool::new(false),
-            pin: is_tty && color,
+            color,
+            pin: is_tty,
             term_lock: Mutex::new(()),
             last_block_lines: Mutex::new(0),
             header_started: Mutex::new(false),
@@ -136,7 +140,7 @@ impl DevStatus {
     }
 
     fn format_line(&self, word: &str, rest: &str) -> String {
-        if self.pin {
+        if self.color {
             format_line_colored(word, rest)
         } else {
             format_line_plain(word, rest)
@@ -1425,14 +1429,21 @@ fn live_reload_script() -> String {
     fetch("/__jet_dev_status?client=" + encodeURIComponent(jetDevClient), {{ cache: "no-store" }})
       .then(function (r) {{ return r.json(); }})
       .then(function (s) {{
+        var recoveredConnection = reconnectAttempt > 0;
         reconnectAttempt = 0;
         renderStatus(s);
         var v = String(s.version || "");
-        if (jetDevVersion === null) {{ jetDevVersion = v; return; }}
+        if (jetDevVersion === null) {{
+          jetDevVersion = v;
+          if (recoveredConnection) location.reload();
+          return;
+        }}
         // Never bumps on an error build (`DevStatus::mark_error` doesn't
         // touch `version`) — a reload only ever follows the next clean build,
         // which is also what auto-collapses the overlay above.
-        if (v !== jetDevVersion) {{ jetDevVersion = v; location.reload(); }}
+        // A recovered connection also reloads even when a restarted server's
+        // version counter happens to equal the previous process's counter.
+        if (recoveredConnection || v !== jetDevVersion) {{ jetDevVersion = v; location.reload(); }}
       }})
       .catch(function () {{
         reconnectAttempt += 1;
@@ -1519,6 +1530,7 @@ mod tests {
         assert!(out.contains("event.key === \"Escape\""));
         assert!(out.contains("dismissedDiagnostic === (s.diagnostic || \"\")"));
         assert!(out.contains("location.reload()"));
+        assert!(out.contains("recoveredConnection || v !== jetDevVersion"));
         assert!(out.contains("reconnecting · retry "));
         assert!(out.contains("position:fixed;left:12px;bottom:12px"));
         assert!(out.contains("display:none;align-items:flex-start"));

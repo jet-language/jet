@@ -136,6 +136,22 @@ fn wait_for_status(port: u16, client: &str, state: &str, timeout: Duration) -> S
     }
 }
 
+fn wait_for_file_text(path: &std::path::Path, needle: &str, timeout: Duration) -> String {
+    let start = Instant::now();
+    loop {
+        let text = fs::read_to_string(path).unwrap_or_default();
+        if text.contains(needle) {
+            return text;
+        }
+        if start.elapsed() > timeout {
+            panic!(
+                "PTY transcript never contained {needle:?} within {timeout:?}:\n{text}"
+            );
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
 // ============================================================================
 // Section: `--target=web` entry mode (was tests/web_dev.rs)
 // ============================================================================
@@ -420,6 +436,128 @@ fn jet_dev_web_error_overlay_status_last_good_and_recovery_stay_in_lockstep() {
             "terminal hybrid transcript missing {marker}:\n{terminal}"
         );
     }
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn jet_dev_web_real_pty_pins_header_toggles_verbose_and_restores_scroll_region() {
+    if !have_tool("rustc") || !have_tool("script") {
+        eprintln!(
+            "note: skipping jet_dev_web_real_pty_pins_header_toggles_verbose_and_restores_scroll_region (need rustc + script)"
+        );
+        return;
+    }
+
+    let dir = std::env::temp_dir().join(format!("jet_dev_hybrid_pty_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let src_path = dir.join("app.jet");
+    let transcript_path = dir.join("terminal.typescript");
+    fs::write(&src_path, FIXTURE_SRC).unwrap();
+    let port = unused_local_port();
+
+    // util-linux `script` allocates a real pseudoterminal. `-f` flushes each
+    // redraw into the transcript so this test can drive the live process,
+    // not inspect a post-exit string facade. NO_COLOR matches the owner's
+    // host environment and proves color is not required for pinning/input.
+    let command = format!(
+        "env NO_COLOR=1 {} dev app.jet --target=web --port={port}",
+        jet_bin().display()
+    );
+    let mut pty = Command::new("script")
+        .args(["-qfec", &command])
+        .arg(&transcript_path)
+        .current_dir(&dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("start real PTY wrapper");
+    let mut input = pty.stdin.take().expect("PTY stdin");
+
+    struct KillOnDrop(std::process::Child);
+    impl Drop for KillOnDrop {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let mut guard = KillOnDrop(pty);
+    wait_for_server_up(port, Duration::from_secs(20));
+
+    let ready = wait_for_status(port, "pty-tab", "ready", Duration::from_secs(5));
+    assert!(ready.contains("\"clients\":1"), "{ready}");
+    let pinned = wait_for_file_text(
+        &transcript_path,
+        &format!("jet dev  [ready] localhost:{port} · 1 client"),
+        Duration::from_secs(5),
+    );
+    assert!(
+        pinned.contains("watching app.jet · Canvas"),
+        "pinned detail row missing:\n{pinned}"
+    );
+    assert!(
+        !pinned.contains("\x1b[32m"),
+        "NO_COLOR PTY emitted colored status: {pinned:?}"
+    );
+
+    input.write_all(b"v").unwrap();
+    input.flush().unwrap();
+    let verbose = wait_for_file_text(
+        &transcript_path,
+        "verbose request/rebuild log enabled · press v to collapse",
+        Duration::from_secs(5),
+    );
+    assert!(
+        verbose.contains("\x1b[3r") && verbose.contains("\x1b[3;1H"),
+        "verbose mode never pinned rows 1-2 with a row-3 scroll region: {verbose:?}"
+    );
+
+    http_get(port, "/app.js").expect("request while verbose");
+    wait_for_file_text(&transcript_path, "GET  /app.js", Duration::from_secs(5));
+
+    let broken = FIXTURE_SRC.replace("print(size.height)", "missing_hybrid_symbol()");
+    fs::write(&src_path, broken).unwrap();
+    wait_for_status(port, "pty-tab", "error", Duration::from_secs(10));
+    let error = wait_for_file_text(
+        &transcript_path,
+        "missing_hybrid_symbol",
+        Duration::from_secs(5),
+    );
+    for marker in ["jet dev  [error] E0102", "Error [E0102]", "Why:", "Fix:"] {
+        assert!(
+            error.contains(marker),
+            "verbose PTY diagnostic missing {marker}:\n{error}"
+        );
+    }
+
+    input.write_all(b"v").unwrap();
+    input.flush().unwrap();
+    wait_for_file_text(
+        &transcript_path,
+        "\x1b[r\x1b[2J\x1b[H",
+        Duration::from_secs(5),
+    );
+    input.write_all(&[3]).unwrap();
+    input.flush().unwrap();
+
+    let start = Instant::now();
+    loop {
+        if let Some(status) = guard.0.try_wait().unwrap() {
+            assert_eq!(status.code(), Some(130), "PTY wrapper exit: {status}");
+            break;
+        }
+        if start.elapsed() > Duration::from_secs(5) {
+            panic!("PTY wrapper did not exit after Ctrl-C");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let final_transcript = fs::read_to_string(&transcript_path).unwrap();
+    assert!(
+        final_transcript.contains("\x1b[r"),
+        "scroll region was not restored before exit: {final_transcript:?}"
+    );
 
     let _ = fs::remove_dir_all(&dir);
 }

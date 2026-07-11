@@ -46,6 +46,7 @@ try {
   );
   assert(ready.includes(`localhost:${port}`), `ready pill missing port: ${ready}`);
   const initialJs = await driver.evaluate('fetch("/app.js", {cache:"no-store"}).then((r) => r.text())');
+  await driver.evaluate('window.__jetReconnectProbe = "must disappear on recovery"');
 
   await driver.send("Network.emulateNetworkConditions", {
     offline: true,
@@ -70,6 +71,10 @@ try {
   await waitFor(
     () => driver.evaluate('document.querySelector("#jet-dev-pill .label")?.textContent.startsWith("ready")'),
     "ready after reconnect",
+  );
+  assert(
+    await driver.evaluate('typeof window.__jetReconnectProbe === "undefined"'),
+    "recovered connection did not reload last-good page",
   );
 
   await writeFile(sourcePath, broken);
