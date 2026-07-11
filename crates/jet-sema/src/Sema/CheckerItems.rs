@@ -411,6 +411,10 @@ impl<'a> Checker<'a> {
         if enum_name == crate::Syntax::TYPE_KEY {
             return true;
         }
+        // D-PROCESS1=A: `ProcessStreamMode` is a core dot-literal enum.
+        if enum_name == "ProcessStreamMode" {
+            return true;
+        }
         false
     }
 
@@ -436,6 +440,11 @@ impl<'a> Checker<'a> {
         // Synthesise its variant table here so `Key.Char(c)` / `Key.Enter` literals work.
         if enum_name == crate::Syntax::TYPE_KEY {
             return Some(core_key_variants());
+        }
+        // D-PROCESS1=A: `ProcessStreamMode` is a core enum — synthesise its variant
+        // table so `.Stream`/`.Inherit`/`.Capture` dot-literals resolve (D-ENUMDOT2).
+        if enum_name == "ProcessStreamMode" {
+            return Some(core_process_stream_mode_variants());
         }
         None
     }

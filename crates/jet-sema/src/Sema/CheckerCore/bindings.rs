@@ -257,7 +257,7 @@ impl<'a> Checker<'a> {
             // previously emitted a placeholder that rustc rejected — an I2 hole. This
             // moves the guarantee into sema, c109/I3.)
             if let Some(Type::Named(n)) = &it {
-                if n == "FileLines" || n == "StdinLines" {
+                if n == "FileLines" || n == "StdinLines" || n == "ProcessLines" {
                     self.diags.push(Diagnostic::error(
                         "E2502",
                         "a line stream can only be used directly in a loop".to_string(),

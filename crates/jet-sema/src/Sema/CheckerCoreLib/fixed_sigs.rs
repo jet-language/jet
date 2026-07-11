@@ -286,10 +286,12 @@ pub fn core_fixed_sig(
             vec![(read, Type::List(Box::new(Type::String)))],
             Some(Type::Named("ProcessSpec".to_string())),
         )),
+        // D-PROCESS1=A: pipeline takes a list of `ProcessSpec` (built via
+        // `process.cmd(argv)...`), not raw argv lists — one canonical builder (I8).
         ("core.process", "pipeline") => Some((
             vec![(
                 read,
-                Type::List(Box::new(Type::List(Box::new(Type::String)))),
+                Type::List(Box::new(Type::Named("ProcessSpec".to_string()))),
             )],
             Some(result_ty(
                 Type::Named("ProcessResult".to_string()),
