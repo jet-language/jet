@@ -575,10 +575,19 @@ fn secure_replace(project: &Path, temp: &Path, path: &Path, expected: &[u8]) -> 
             return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "codemod parent is not a real directory"));
         }
     }
+    let project_handle = open_handle(project, GENERIC_READ, true)?;
     let parent = open_handle(path.parent().unwrap_or(project), GENERIC_READ, true)?;
     let destination = open_handle(path, GENERIC_READ, false)?;
+    let project_final = final_path(project_handle.as_raw_handle())?;
     let parent_final = final_path(parent.as_raw_handle())?;
     let destination_final = final_path(destination.as_raw_handle())?;
+    let project_prefix = format!("{}\\", project_final.trim_end_matches(['\\', '/']));
+    if parent_final != project_final && !parent_final.starts_with(&project_prefix) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "opened destination parent escapes project handle",
+        ));
+    }
     let destination_parent = destination_final
         .rsplit_once(['\\', '/'])
         .map(|(parent, _)| parent)
