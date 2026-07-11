@@ -211,6 +211,9 @@ fn parse_package_ref_names(value: &str) -> Vec<String> {
         .collect()
 }
 
+const MISSING_NIXPKGS_PIN: &str =
+    "no declared source resolves to `github@NixOS/nixpkgs/<rev-or-ref>` (the real tier needs exactly one nixpkgs pin)";
+
 /// Map a `SystemPlan` to a NixOS `configuration.nix` body + package list, or
 /// collect every declaration this backend cannot map (D-JOS-NIXBACKEND1=C —
 /// NO SILENT OMISSIONS, checked in full before returning so one diagnostic
@@ -229,10 +232,7 @@ fn map_system_to_nixos(
 
     let pin = nixpkgs_pin(table);
     if pin.is_none() {
-        unmapped.push(
-            "no declared source resolves to `github@NixOS/nixpkgs/<rev-or-ref>` (the real tier needs exactly one nixpkgs pin)"
-                .to_string(),
-        );
+        unmapped.push(MISSING_NIXPKGS_PIN.to_string());
     }
 
     let mut system_packages = Vec::new();
@@ -597,7 +597,11 @@ fn map_system_to_nixos(
         unmapped.dedup();
         return Err(unmapped);
     }
-    let (nixpkgs_owner, nixpkgs_repo, nixpkgs_rev) = pin.expect("checked above");
+    // A missing pin entered `unmapped` above, so a successful aggregate check
+    // proves `Some`; keep the exact existing error if that ordering ever changes.
+    let Some((nixpkgs_owner, nixpkgs_repo, nixpkgs_rev)) = pin else {
+        return Err(vec![MISSING_NIXPKGS_PIN.to_string()]);
+    };
     Ok(NixosMapping {
         nixpkgs_owner,
         nixpkgs_repo,
