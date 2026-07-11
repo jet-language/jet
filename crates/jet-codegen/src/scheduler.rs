@@ -2056,4 +2056,99 @@ mod interrupt_boundary_tests {
             "deadline deferred by the shield must unwind when the region exits"
         );
     }
+
+    // Exercise the exact RAII shape emitted by Codegen/TIR/emit/statements.rs.
+    // These helpers deliberately do not call `_leave` from test bodies: Drop is
+    // what must cover every control-flow and unwind edge.
+    struct EmittedShieldGuard<F: FnOnce()>(Option<F>);
+    impl<F: FnOnce()> Drop for EmittedShieldGuard<F> {
+        fn drop(&mut self) {
+            if let Some(f) = self.0.take() {
+                f();
+            }
+        }
+    }
+
+    macro_rules! emitted_shield {
+        ($body:block) => {{
+            jet_scheduler_shield_enter();
+            let _shield_guard = EmittedShieldGuard(Some(|| jet_scheduler_shield_leave()));
+            $body
+        }};
+    }
+
+    fn emitted_early_return() -> i64 {
+        emitted_shield!({ return 17 });
+    }
+
+    fn emitted_try_exit() -> Result<i64, &'static str> {
+        emitted_shield!({ Err("stop")? });
+        Ok(1)
+    }
+
+    #[test]
+    fn emitted_shield_guard_covers_control_flow_unwind_and_reset_matrix() {
+        // Outside a task/catch frame, even an expired ambient deadline is inert.
+        TEST_DEADLINE_EXCEEDED.with(|d| d.set(true));
+        emitted_shield!({ assert!(!jet_scheduler_shielded()) });
+        TEST_DEADLINE_EXCEEDED.with(|d| d.set(false));
+
+        jet_scheduler_task_panic_enter();
+        jet_scheduler_set_task_control(Some(JetTaskControl::new()));
+
+        emitted_shield!({
+            assert!(jet_scheduler_shielded());
+            emitted_shield!({ assert!(jet_scheduler_shielded()) });
+            assert!(jet_scheduler_shielded());
+        });
+        assert!(!jet_scheduler_shielded(), "nested guards must balance depth");
+        assert_eq!(emitted_early_return(), 17);
+        assert!(!jet_scheduler_shielded(), "return must drop the guard");
+        assert_eq!(emitted_try_exit(), Err("stop"));
+        assert!(!jet_scheduler_shielded(), "? must drop the guard");
+
+        // A body panic wins over pending cancel/deadline: guard decrements depth
+        // but must not begin a second panic while unwinding.
+        for pending_deadline in [false, true] {
+            let control = JetTaskControl::new();
+            control.cancel();
+            jet_scheduler_set_task_control(Some(control));
+            TEST_DEADLINE_EXCEEDED.with(|d| d.set(pending_deadline));
+            let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                emitted_shield!({ panic!("body panic") });
+            }));
+            let text = panic
+                .expect_err("body must panic")
+                .downcast::<&'static str>()
+                .map(|s| *s)
+                .unwrap_or("");
+            assert_eq!(text, "body panic");
+            assert!(!jet_scheduler_shielded(), "panic must reset shield depth");
+            TEST_DEADLINE_EXCEEDED.with(|d| d.set(false));
+        }
+
+        // When both become pending during a normal body, deadline has priority.
+        let control = JetTaskControl::new();
+        control.cancel();
+        jet_scheduler_set_task_control(Some(control));
+        let both = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            emitted_shield!({ TEST_DEADLINE_EXCEEDED.with(|d| d.set(true)) });
+        }));
+        let payload = both.expect_err("pending deadline must land at guard drop");
+        let text = if let Some(s) = payload.downcast_ref::<String>() {
+            s.as_str()
+        } else {
+            payload.downcast_ref::<&'static str>().copied().unwrap_or("")
+        };
+        assert_eq!(text, "deadline exceeded");
+        assert!(!jet_scheduler_shielded());
+        TEST_DEADLINE_EXCEEDED.with(|d| d.set(false));
+
+        // Same worker/thread can run a later task with clean depth and control.
+        jet_scheduler_set_task_control(Some(JetTaskControl::new()));
+        emitted_shield!({ assert!(jet_scheduler_shielded()) });
+        assert!(!jet_scheduler_shielded(), "subsequent task must start clean");
+        jet_scheduler_set_task_control(None);
+        jet_scheduler_task_panic_leave();
+    }
 }
