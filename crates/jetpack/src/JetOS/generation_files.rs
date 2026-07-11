@@ -541,7 +541,16 @@ fn rewrite_store_symlinks(root: &Path, path: &Path, store: &Path) -> std::io::Re
     if meta.file_type().is_symlink() {
         let target = fs::read_link(path)?;
         if target.starts_with(store) {
-            let owned = root.join(target.strip_prefix("/").expect("absolute store target"));
+            let relative_target = target.strip_prefix("/").map_err(|_| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "store symlink target must be absolute: `{}`",
+                        target.display()
+                    ),
+                )
+            })?;
+            let owned = root.join(relative_target);
             let parent = path
                 .parent()
                 .ok_or_else(|| std::io::Error::other("generation symlink has no parent"))?;
@@ -796,6 +805,30 @@ mod generation_closure_tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn relative_store_symlink_target_returns_invalid_data() {
+        let guard = Scratch::new();
+        let generation = guard.0.join("generation");
+        fs::create_dir_all(&generation).unwrap();
+        let link = generation.join("tool");
+        let target = Path::new("fake-nix/store/aaaa-package/bin/tool");
+        symlink(target, &link).unwrap();
+
+        let error = rewrite_store_symlinks(
+            &generation,
+            &link,
+            Path::new("fake-nix/store"),
+        )
+        .unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert_eq!(
+            error.to_string(),
+            "store symlink target must be absolute: `fake-nix/store/aaaa-package/bin/tool`"
+        );
+        assert_eq!(fs::read_link(&link).unwrap(), target);
     }
 
     #[test]
