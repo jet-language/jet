@@ -792,6 +792,49 @@ fn repl_core_process_run_is_authorized_and_captured() {
     );
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn repl_tty_ctrl_c_reaches_child_group_and_restores_input() {
+    use std::process::Command;
+
+    let root = std::env::temp_dir().join(format!("jet_repl_interrupt_{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    let shell = r#"
+{
+  sleep 0.2
+  printf 'use core.process as process\r'
+  sleep 0.2
+  printf '#Grant(Exec) { caps -> process.run(["sh", "-c", "trap '\''printf done > child-exited.txt; exit 130'\'' INT; printf $$ > child.pid; while :; do :; done"]) ?? panic("run failed") }\r'
+  sleep 0.8
+  printf '\003'
+  sleep 0.5
+  printf '40 + 2\r'
+  sleep 0.3
+  printf ':quit\r'
+} | timeout 8s script -qec '"$JET_REPL_BIN" repl --project "$JET_REPL_ROOT" --allow-exec' /dev/null
+"#;
+    let output = Command::new("sh")
+        .args(["-c", shell])
+        .env("JET_REPL_BIN", env!("CARGO_BIN_EXE_jet"))
+        .env("JET_REPL_ROOT", &root)
+        .output()
+        .unwrap();
+    let transcript = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "PTY interrupt session failed: {transcript}");
+    assert!(transcript.contains("42 : Int"), "REPL did not resume after Ctrl-C: {transcript}");
+    assert_eq!(std::fs::read_to_string(root.join("child-exited.txt")).unwrap(), "done");
+    let pid = std::fs::read_to_string(root.join("child.pid")).unwrap();
+    let alive = Command::new("kill")
+        .args(["-0", pid.trim()])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .unwrap()
+        .success();
+    assert!(!alive, "interrupted REPL child {pid} leaked");
+    std::fs::remove_dir_all(root).ok();
+}
+
 #[test]
 fn repl_non_tty_denies_ungranted_files_before_execution() {
     let root = std::env::temp_dir().join(format!("jet_repl_deny_{}", std::process::id()));

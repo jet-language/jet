@@ -1173,6 +1173,16 @@ impl<'a> Interp<'a> {
                             repl_executable = Some(pin_repl_command(&mut argv, self.base_dir, span)?);
                         }
                         let request = repl_effect_request(&module, method, &argv);
+                        let Some(authorizer) = self.repl_authorizer.as_deref_mut() else {
+                            return Err(Diagnostic::error(
+                                "E1803",
+                                format!("{}.{} for `{}` was denied", request.root, request.operation, request.resource),
+                                "this REPL mode has no runtime authority provider, so the host operation did not run".to_string(),
+                                format!("restart with `jet repl --allow-{}` or use an interactive session and approve the exact operation", request.root.to_ascii_lowercase()),
+                                Some(span),
+                            ));
+                        };
+                        authorizer.preflight(&request, span)?;
                         let granted = self.repl_grants.iter().any(|cap| {
                             cap == &request.root || cap.starts_with(&format!("{}.", request.root))
                         });
@@ -1185,15 +1195,6 @@ impl<'a> Interp<'a> {
                                 Some(span),
                             ));
                         }
-                        let Some(authorizer) = self.repl_authorizer.as_deref_mut() else {
-                            return Err(Diagnostic::error(
-                                "E1803",
-                                format!("{}.{} for `{}` was denied", request.root, request.operation, request.resource),
-                                "this REPL mode has no runtime authority provider, so the host operation did not run".to_string(),
-                                format!("restart with `jet repl --allow-{}` or use an interactive session and approve the exact operation", request.root.to_ascii_lowercase()),
-                                Some(span),
-                            ));
-                        };
                         authorizer.authorize(&request, span)?;
                         if module == "core.files" {
                             return apply_repl_fs_call(method, &argv, span, authorizer);
@@ -1782,6 +1783,8 @@ fn run_repl_process(
     };
     #[cfg(target_os = "linux")]
     let _signal_forward = pinned_executable.map(|_| ReplSignalForward::install(child.id() as i32));
+    #[cfg(target_os = "linux")]
+    let _terminal_signals = pinned_executable.and_then(|_| ReplTerminalSignals::enable());
 
     let deadline = Instant::now() + timeout;
     let status = loop {
@@ -1881,6 +1884,58 @@ impl Drop for ReplSignalForward {
 #[cfg(target_os = "linux")]
 fn kill_repl_process_group(group: i32) {
     unsafe { kill(-group, 9) };
+}
+
+#[cfg(target_os = "linux")]
+struct ReplTerminalSignals {
+    saved: String,
+}
+
+#[cfg(target_os = "linux")]
+impl ReplTerminalSignals {
+    fn enable() -> Option<Self> {
+        use std::io::IsTerminal;
+        use std::process::Stdio;
+
+        if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+            return None;
+        }
+        let saved = std::process::Command::new("stty")
+            .arg("-g")
+            .stdin(Stdio::inherit())
+            .stderr(Stdio::null())
+            .output()
+            .ok()?;
+        if !saved.status.success() {
+            return None;
+        }
+        let saved = String::from_utf8_lossy(&saved.stdout).trim().to_string();
+        if saved.is_empty() {
+            return None;
+        }
+        let enabled = std::process::Command::new("stty")
+            .arg("isig")
+            .stdin(Stdio::inherit())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .ok()?
+            .success();
+        enabled.then_some(Self { saved })
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for ReplTerminalSignals {
+    fn drop(&mut self) {
+        use std::process::Stdio;
+        let _ = std::process::Command::new("stty")
+            .arg(&self.saved)
+            .stdin(Stdio::inherit())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
 }
 
 // ---------------------------------------------------------------------------

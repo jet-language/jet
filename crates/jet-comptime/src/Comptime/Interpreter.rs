@@ -143,6 +143,7 @@ pub struct ReplEffectRequest {
 /// Invocation policy seam owned by the REPL frontend. Returning an error
 /// aborts before the Core operation executes.
 pub trait ReplAuthorizer {
+    fn preflight(&mut self, request: &ReplEffectRequest, span: Span) -> Result<(), Diagnostic>;
     fn authorize(&mut self, request: &ReplEffectRequest, span: Span) -> Result<(), Diagnostic>;
     fn fs_read(&mut self, path: &str) -> std::io::Result<Vec<u8>>;
     fn fs_write(&mut self, path: &str, bytes: &[u8], append: bool) -> std::io::Result<()>;

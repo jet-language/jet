@@ -15,8 +15,9 @@
 //! These files are the product: the error messages ARE the language's UX.
 
 use std::fs;
+use std::io::Write;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 mod common;
 use common::{fixture_filter, fixture_matches, normalize_fixture_selector, unified_diff};
@@ -159,12 +160,30 @@ fn ui_snapshots() {
                 Ok(_) => "(no errors)\n".to_string(),
             }
         } else if repl_deny {
-            let inputs = src
+            let input = src
                 .lines()
                 .filter(|line| !line.trim_start().starts_with("//"))
                 .filter(|line| !line.trim().is_empty())
-                .collect::<Vec<_>>();
-            jet::REPL::run_transcript_with_flags(&inputs, None, &[], &["fs"])
+                .chain(std::iter::once(":quit"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            let mut child = Command::new(env!("CARGO_BIN_EXE_jet"))
+                .args(["repl", "--deny-fs"])
+                .env("NO_COLOR", "1")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("start real REPL diagnostic fixture");
+            child
+                .stdin
+                .as_mut()
+                .expect("REPL stdin")
+                .write_all(input.as_bytes())
+                .expect("write REPL diagnostic fixture");
+            let output = child.wait_with_output().expect("finish REPL diagnostic fixture");
+            assert!(output.status.success(), "REPL diagnostic fixture failed to exit");
+            String::from_utf8(output.stderr).expect("REPL diagnostic stderr is UTF-8")
         } else if all_diags {
             let diags = jet::check_with_path(&file_arg);
             if diags.is_empty() {

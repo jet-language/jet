@@ -74,6 +74,7 @@ struct ReplPolicy {
     flags: ReplFlags,
     root: std::path::PathBuf,
     root_dir: std::io::Result<std::fs::File>,
+    handles_available: bool,
     session: HashSet<crate::Comptime::ReplEffectRequest>,
 }
 
@@ -83,6 +84,7 @@ impl ReplPolicy {
             flags,
             root: root.to_path_buf(),
             root_dir: std::fs::File::open(root),
+            handles_available: cfg!(target_os = "linux"),
             session: HashSet::new(),
         }
     }
@@ -128,6 +130,19 @@ impl ReplAuthorization<'_> {
 }
 
 impl crate::Comptime::ReplAuthorizer for ReplAuthorization<'_> {
+    fn preflight(&mut self, request: &crate::Comptime::ReplEffectRequest, span: crate::Diagnostics::Span) -> Result<(), Diagnostic> {
+        let needs_handles = request.root == "Fs"
+            || (request.root == "Exec" && request.operation == "Run");
+        if needs_handles && !self.policy.handles_available {
+            return Err(self.e1803(
+                request,
+                "this platform cannot enforce descriptor-pinned, no-follow REPL confinement, so no runtime authority was offered",
+                span,
+            ));
+        }
+        Ok(())
+    }
+
     fn authorize(&mut self, request: &crate::Comptime::ReplEffectRequest, span: crate::Diagnostics::Span) -> Result<(), Diagnostic> {
         self.validate_file_target(request, span)?;
         let root = request.root.to_ascii_lowercase();
@@ -2646,6 +2661,51 @@ pub fn run_transcript_with_flags(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct CountingPrompt(usize);
+
+    impl EffectPrompt for CountingPrompt {
+        fn choose(
+            &mut self,
+            _: &crate::Comptime::ReplEffectRequest,
+            _: bool,
+        ) -> PromptChoice {
+            self.0 += 1;
+            PromptChoice::Once
+        }
+    }
+
+    #[test]
+    fn unavailable_handle_backend_denies_before_prompt_or_operation() {
+        let root = std::env::temp_dir().join(format!(
+            "jet_repl_unavailable_backend_{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let target = root.join("must-not-exist.txt");
+        let mut policy = ReplPolicy::new(ReplFlags::default(), &root);
+        policy.handles_available = false;
+        let mut prompt = CountingPrompt(0);
+        let request = crate::Comptime::ReplEffectRequest {
+            root: "Fs".to_string(),
+            operation: "Write".to_string(),
+            resource: "must-not-exist.txt".to_string(),
+        };
+        {
+            let mut authorization = policy.authorizer(Some(&mut prompt));
+            let error = crate::Comptime::ReplAuthorizer::preflight(
+                &mut authorization,
+                &request,
+                crate::Diagnostics::Span::new(0, 1),
+            )
+            .expect_err("unavailable confinement backend must fail closed");
+            assert_eq!(error.code, "E1803");
+            assert!(error.why.contains("no runtime authority was offered"));
+        }
+        assert_eq!(prompt.0, 0, "platform denial must not ask for authority");
+        assert!(!target.exists(), "platform denial executed filesystem operation");
+        std::fs::remove_dir_all(root).ok();
+    }
 
     #[test]
     fn sigil_binding_is_classified_as_statement() {
