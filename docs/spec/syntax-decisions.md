@@ -2372,11 +2372,15 @@ artifact lifecycle, migration/version law, fixtures, and failure precedence are
 normative in [`proof-replay-decisions.md`](proof-replay-decisions.md); later
 specialized decisions there override umbrella examples.
 
-**D-PERFBUDGET-SURFACE1=A / D-PERFBUDGET-BASELINE1=A**: performance budgets
-are declared in role modules such as `module perf.server { budgets: ... }`.
-Statistical budgets use pinned baseline artifacts with hardware/toolchain
-identity, trend window, confidence policy, and explicit `jet budget update
---baseline <name>` / `jet bench --budget <name>` commands.
+**D-PERFBUDGET-SURFACE1=A / D-PERFBUDGET-BASELINE1=A /
+D-PERFBUDGET-GRAMMAR1=A / D-PERFBUDGET-REPORT1=A /
+D-PERFBUDGET-OUTPUT1=A**: performance budgets use typed
+`module perf.<role> { budgets: [Budget.{ ... }] }` declarations, pinned
+statistical baselines, one canonical `BudgetReport`, and exact `jet budget
+check` / plan-first `jet budget update` projections. Full closed grammar,
+inference, arithmetic, collision, report, baseline, storage, output,
+diagnostic, fixture, migration, and prototype-retirement law is normative in
+[`performance-budget-decisions.md`](performance-budget-decisions.md).
 
 **D-BPE-NAME1=A / D-BPE-HOST1=B / D-BPE-LAYOUT1=A / D-BPE-ALTITUDE1=A /
 D-BPE-TAXONOMY1=A / D-BPE-EDITSCOPE1=A / D-BPE-PROTOCOL1=C**: Jet's visual

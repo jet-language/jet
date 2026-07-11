@@ -378,6 +378,14 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
         class: HighlightClass::TypeBuiltin,
     },
     HighlightToken {
+        text: TYPE_BUDGET,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_BUDGET_APPLIES,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
         text: TYPE_HASH_MAP,
         class: HighlightClass::TypeBuiltin,
     },
@@ -1076,6 +1084,7 @@ use super::{
     OP_RANGE, OP_SHL, OP_SHL_EQ, OP_SHR, OP_SHR_EQ, OP_SLASH, OP_SLASH_EQ, OP_STAR,
     OP_STAR_EQ, OP_TRY_SUFFIX, PROTO_CLIENT, PROTO_SERVER, SIGIL_BIND_IMMUT, SIGIL_BIND_MUT,
     SIGIL_MOVE, SIGIL_SPREAD, SIGIL_WRITE, TYPE_BIGINT, TYPE_BIT_SET, TYPE_BOOL, TYPE_BTREE_MAP,
+    TYPE_BUDGET, TYPE_BUDGET_APPLIES,
     TYPE_BYTE_BUFFER, TYPE_CHAR, TYPE_COMPUTED, TYPE_DATA, TYPE_DATA_CSV, TYPE_DATA_JSON,
     TYPE_DATA_TOML, TYPE_DATA_YAML, TYPE_DB_VALUE, TYPE_DECIMAL, TYPE_DEQUE, TYPE_DERIVED,
     TYPE_EFFECT, TYPE_ERROR, TYPE_EVENT, TYPE_EVENT_POLICY, TYPE_EVENT_SCOPE, TYPE_EVENT_TRACE,

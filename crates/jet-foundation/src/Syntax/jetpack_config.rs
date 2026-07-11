@@ -114,6 +114,43 @@ pub const NS_IMAGE: &str = "image";
 /// (resolver rides board card c156).
 pub const NS_WORKSPACE: &str = "workspace";
 
+/// D-PERFBUDGET-GRAMMAR1=A: reserved performance-policy role namespace.
+/// `module perf.<role> { budgets: [Budget.{ ... }] }` is sole declaration
+/// surface. Names are reserved before parser/runtime implementation. Full law:
+/// docs/spec/performance-budget-decisions.md.
+pub const NS_PERF: &str = "perf";
+pub const PERF_FIELD_BUDGETS: &str = "budgets";
+pub const TYPE_BUDGET: &str = "Budget";
+pub const TYPE_BUDGET_APPLIES: &str = "BudgetApplies";
+
+/// D-PERFBUDGET-GRAMMAR1=A: closed typed Budget vocabulary. Leading-dot enum
+/// cases use these exact spellings; no metric-key shorthand or aliases exist.
+pub const PERF_BUDGET_SCOPES: &[&str] =
+    &["Package", "Env", "Service", "Scene", "Bench", "Target"];
+pub const PERF_BUDGET_PROVIDERS: &[&str] = &[
+    "BuildArtifact", "CompilerFacts", "AllocationProbe", "BenchMeasurement",
+    "ServiceProbe", "SceneProbe",
+];
+pub const PERF_BUDGET_METRICS: &[&str] = &[
+    "BinarySize", "ArtifactSize", "GeneratedUnsafe", "PublicApiItems",
+    "DependencyCount", "EffectCount", "AllocationCount", "AllocationBytes",
+    "StartupTime", "FrameTime", "Latency", "Throughput", "MemoryHighWater",
+    "BenchTime", "ServiceReadiness",
+];
+pub const PERF_BUDGET_PERCENTILES: &[&str] = &["P50", "P90", "P95", "P99", "P999"];
+pub const PERF_BUDGET_COMPARISONS: &[&str] = &["Absolute", "AbsoluteFrom", "RelativeTo"];
+pub const PERF_BUDGET_LIMITS: &[&str] =
+    &["AtMost", "AtLeast", "RegressionAtMost", "ImprovementAtLeast"];
+pub const PERF_BUDGET_ENFORCEMENT: &[&str] = &["Fail", "Warn"];
+pub const PERF_BUDGET_SELECTIONS: &[&str] = &["Current", "All", "Only"];
+pub const PERF_BUDGET_TARGET_SELECTORS: &[&str] = &["Class", "Triple"];
+pub const PERF_BUDGET_TARGET_CLASSES: &[&str] =
+    &["Native", "Web", "Freestanding", "Plugin", "OsImage"];
+pub const PERF_BUDGET_PROFILES: &[&str] =
+    &["Dev", "Release", "Small", "Test", "Bench", "Named"];
+pub const PERF_BUDGET_UNIT_SUFFIXES: &[&str] =
+    &["ns", "us", "ms", "s", "B", "KiB", "MiB", "GiB", "pct"];
+
 /// D-JPK-FLEET1=A (ratified 2026-07-02): a fleet is a map of named hosts to
 /// `System` refs — `module fleet.<name> { hosts: { web1: system.<sys>.{ … } } }`.
 /// Distinct from `workspace` (the monorepo index): a fleet is a deployment target.
