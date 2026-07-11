@@ -21,6 +21,11 @@
         tir_covers(f, &cx)
     }
 
+    #[test]
+    fn shield_block_is_covered_by_tir() {
+        assert!(covers("fn guarded() { #Shield { value :: 1 } }", "guarded"));
+    }
+
     /// Like `covers`, but runs the FULL front end (sema) on `src` first, so
     /// sema-filled facts — notably a comptime LOCAL's evaluated `b.ct` value
     /// (S57/M9.5) — are present before gating. Builds a single-module bundle the

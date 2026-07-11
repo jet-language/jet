@@ -305,6 +305,7 @@ before continuing.
 | E0427 | parse | *retired by D-MEM1/S3* (was: teaching retired `#Ref(owner) name: T` field form → `name: &T`, D-REF-SHORTHAND1; stored-ref fields no longer exist) |
 | E0428 | parse | duplicate `#NoPrelude` marker in one file (D-PRELUDEX1) |
 | E0429 | sema  | ambient `print`/`input` used under `#NoPrelude` (D-PRELUDEX1) |
+| E0430 | parse | `#Shield` was given arguments; the cancellation shield is a bare block (D-SHIELDNAME1) |
 | E0501 | sema  | empty `[]` needs a context type           |
 | E0502 | sema  | type can't be a map key                   |
 | E0503 | sema  | strings aren't indexable with `[ ]`       |
@@ -1007,6 +1008,7 @@ error (E0426) pointing at the new spelling — see D-UNINIT-SENTINEL1's fixture,
 | E0426 | `` `#Uninit` is retired ``. | Uninitialized storage is a fact about the initializer, not the declaration — it now reads `` `name: Type := uninit` ``. | Write `` `{name}: <Type> := uninit` ``. |
 | E0428 | only one `#NoPrelude` marker is allowed per file. | A file may opt out of the ambient prelude at most once. | Remove the duplicate `#NoPrelude` marker. |
 | E0429 | `` `{name}` is not ambient here — this file opted out with `#NoPrelude` ``. | `` `#NoPrelude` disables the curated prelude auto-imports (`print` / `input`) ``. | Write `use core.io as io` and call `io.{name}(…)`, or remove `#NoPrelude`. |
+| E0430 | `` `#Shield` takes no arguments ``. | A shield region protects whatever runs inside it; there is nothing to configure (D-SHIELDNAME1). | Write `#Shield { … }`. |
 
 ## Low-level tier diagnostics (E2-M13, S58)
 

@@ -1232,8 +1232,12 @@ releases resources via Drop rather than running to completion. A cancelled
 `g.all` member reports `Cancelled` rather than a completed value. A scoped
 shielded region defers (never discards) the unwind until a critical section
 finishes — its wait points complete normally and the deferred cancel/deadline
-lands when the region exits. The shield's user spelling is pending ballot
-**D-SHIELDNAME1**; the runtime machinery ships syntax-free until it ratifies.
+lands when the region exits. D-SHIELDNAME1=A spells that lexical region
+`#Shield { … }`. It takes no arguments, nests by depth, and always leaves through
+an RAII guard, so return, error propagation, and unwinding cannot strand a task
+in the shielded state. At the outermost normal exit, an expired deadline lands
+before a pending cancellation. Outside a task, the region is a transparent
+block; at comptime it has no scheduler effect.
 
 `tasks.channel<T>() -> (Sender<T>, Receiver<T>)` (D-TUPLE-DESTRUCT1) creates a
 linked send/receive pair, destructured at the call site: `(tx, rx) :=

@@ -51,7 +51,10 @@ pub fn jet_scheduler_shield_leave() {
         d.set(n);
         n == 0
     });
-    if landed {
+    // If the body is already unwinding, decrement the depth but do not start a
+    // second cancellation/deadline unwind from this Drop guard. The original
+    // unwind already exits the task and runs every remaining cleanup.
+    if landed && !std::thread::panicking() {
         // A deadline that closed while shielded is program-level; raise it first.
         if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) {
             jet_deadline_exceeded("shield exit");

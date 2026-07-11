@@ -264,6 +264,9 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
         // D-CTEFFECT1: `#Impure` erases to a plain block at codegen (I3).
         Stmt::Impure { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
         Stmt::Reactive { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
+        // D-SHIELDNAME1=A: the body lowers to `TStmt::Shield` on the same
+        // lexical environment; the runtime enter/RAII-leave guard wraps it.
+        Stmt::Shield { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
         // D-IGNORERET2=A: `#Suppress(MustUse)` erases to a plain block at codegen (I3).
         Stmt::SuppressMustUse { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
         // D-CANVASSTATE1=D: `#Off` erases; `#DebugOnly` lowers in a lexical
