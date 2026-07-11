@@ -1293,8 +1293,6 @@ test vectors, and edition migrations are normative in
 | `core.encoding.jsonl` | `parse(text)`, `to_string(rows)` | JSON Lines over `[Data]` |
 | `core.encoding.xml` | `parse`, `parse_bytes`, `to_string`, `to_bytes`, `canonical`, `reader`, `writer` | Exact tagged ordinary-`Data` tree/events with namespaces, token-local lexical evidence, safe entities/limits, and W3C C14N |
 | `core.encoding.cbor` | `parse`, `decode<T>`, `to_bytes`, `to_bytes_canonical`, `reader`, `writer` | RFC 8949 typed/native bytes and Core deterministic profile |
-| `core.encoding.base64` | `encode`, `decode`, `encode_url`, `decode_url` | Edition-2027 strict RFC 4648 defaults with named narrow allowances |
-| `core.encoding.base32` | `encode`, `decode` | Edition-2027 strict uppercase/padded RFC 4648 with named narrow allowances |
 
 Each adapter is a full serde equivalent, not a lossy subset:
 
@@ -1308,6 +1306,10 @@ Each adapter is a full serde equivalent, not a lossy subset:
 - **CBOR** — typed `[U8]` maps to native byte strings. Untyped `Data` rejects
   byte strings and every value outside its closed algebra. Canonical maps use
   RFC 8949 section 4.2.1 complete encoded-key byte ordering.
+- **Base encodings are not Data/stream codecs.** `core.encoding.base64` exposes
+  `encode`/`decode` and `encode_url`/`decode_url`; `core.encoding.base32`
+  exposes `encode`/`decode`. They are scalar `[U8]`/`String` RFC 4648 helpers
+  with edition-2027 strict defaults and named narrow allowances.
 - **CSV** — header-mapped typed rows (`decode<T>` maps columns to fields by name).
 - **TOML** — full TOML 1.0: `[table]` headers, `[[array-of-tables]]`, dotted keys,
   inline tables, strings (every escape + multi-line), integers in every base,
