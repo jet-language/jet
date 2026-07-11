@@ -540,16 +540,16 @@ fn rewrite_store_symlinks(root: &Path, path: &Path, store: &Path) -> std::io::Re
     let meta = fs::symlink_metadata(path)?;
     if meta.file_type().is_symlink() {
         let target = fs::read_link(path)?;
+        let relative_target = target.strip_prefix("/").map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "store symlink target must be absolute: `{}`",
+                    target.display()
+                ),
+            )
+        })?;
         if target.starts_with(store) {
-            let relative_target = target.strip_prefix("/").map_err(|_| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!(
-                        "store symlink target must be absolute: `{}`",
-                        target.display()
-                    ),
-                )
-            })?;
             let owned = root.join(relative_target);
             let parent = path
                 .parent()
@@ -813,21 +813,31 @@ mod generation_closure_tests {
         let generation = guard.0.join("generation");
         fs::create_dir_all(&generation).unwrap();
         let link = generation.join("tool");
-        let target = Path::new("fake-nix/store/aaaa-package/bin/tool");
+        let target = Path::new("nix/store/aaaa-package/bin/tool");
         symlink(target, &link).unwrap();
 
-        let error = rewrite_store_symlinks(
-            &generation,
-            &link,
-            Path::new("fake-nix/store"),
-        )
-        .unwrap_err();
+        let error = rewrite_store_symlinks(&generation, &link, Path::new("/nix/store"))
+            .unwrap_err();
 
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
         assert_eq!(
             error.to_string(),
-            "store symlink target must be absolute: `fake-nix/store/aaaa-package/bin/tool`"
+            "store symlink target must be absolute: `nix/store/aaaa-package/bin/tool`"
         );
+        assert_eq!(fs::read_link(&link).unwrap(), target);
+    }
+
+    #[test]
+    fn absolute_non_store_symlink_target_is_unchanged() {
+        let guard = Scratch::new();
+        let generation = guard.0.join("generation");
+        fs::create_dir_all(&generation).unwrap();
+        let link = generation.join("tool");
+        let target = Path::new("/opt/jet/bin/tool");
+        symlink(target, &link).unwrap();
+
+        rewrite_store_symlinks(&generation, &link, Path::new("/nix/store")).unwrap();
+
         assert_eq!(fs::read_link(&link).unwrap(), target);
     }
 
