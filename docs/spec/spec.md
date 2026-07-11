@@ -1053,11 +1053,11 @@ Examples: `examples/features/modules/inline_module`, `43_module_file`,
 fixtures: `tests/ui/module_{missing,private,unknown_namespace,wildcard,
 inline_private,inline_type_error}`, `genmod_{unknown_target,wrong_arg_count,non_fn_item}`.
 
-### Generic modules (D-GENMOD1, D-GENMOD2; done 2026-06-30)
+### Generic modules (D-GENMOD1, D-GENMOD2, D-GENMOD-VALUE1,
+D-GENMOD-BODY1, D-GENMOD-IDENTITY1)
 
-A **generic module** is a module template parameterized by types and/or compile-time
-values. Instantiating it produces a normal inline `CodeModule` with specialized
-exported functions.
+A **generic module** is a module template parameterized by types and compile-time
+values. Instantiating it produces a specialized ordinary module.
 
 **Template form (D-GENMOD2=A):**
 
@@ -1077,16 +1077,35 @@ Both live in one `<…>` list.
 module IntCache = Cache<Int>
 ```
 
-The alias expands before sema registration into a concrete module; calls use the
-usual mangled name (`IntCache__key_of(…)`). Templates and aliases are erased
-before codegen.
+Value parameters are immutable Tier-0 comptime `Bool`, `Int`, `Char`, `String`,
+or fieldless-enum values (D-GENMOD-VALUE1=A). The compiler evaluates and
+normalizes each value before specialization. `Int` parameters may appear in the
+generic-module-only fixed-list layout form `[T#capacity]`. Value argument types
+must match exactly; E0853 reports a mismatch.
 
-**MVP restrictions:** generic module bodies may contain only `fn` items today.
-Structs, enums, or constants inside a template are **E0854** at instantiation
-time. Type arguments substitute into function signatures only (not bodies).
-Unknown template **E0850**; wrong argument count **E0851**. Value-param bound
-checking, cycle detection, and cross-file templates are follow-ups (E0852–E0855
-staged).
+The template body has ordinary-module parity and definition-site lexical scope
+(D-GENMOD-BODY1=A). It may contain functions, structs, enums, tags, constants,
+traits and impls, tests and benches, nested modules and generic modules,
+aliases, and existing legal markers. Applying a template does not change what
+its body can see or authorize.
+
+Instantiation is applicative (D-GENMOD-IDENTITY1=A). The resolved template
+DefinitionId and normalized arguments form the instance identity. Repeating
+the same application shares nominal member types and one checked/code-generated
+specialization; different arguments or a different template definition produce
+a different instance.
+
+**Implementation status:** the parser and AST represent templates and aliases,
+and sema currently expands same-file aliases containing `fn` items. It
+substitutes type parameters in function signatures. Value evaluation and body
+substitution, bounds, cycles, full ordinary-module bodies, applicative identity,
+cross-file templates, and the corresponding complete acceptance proof remain
+open. E0854 is the current implementation boundary for non-`fn` items, not the
+ratified language law. E0850 and E0851 are implemented. E0852 (unsatisfied
+bound), E0853 (value type mismatch), E0855 (instantiation cycle), E0856
+(disallowed value-parameter type), E0857 (argument is not a compile-time
+value), and E0859 (identity fingerprint collision, ICE 101) remain staged until
+their semantics, What/Why/Fix copy, and UI snapshots ship.
 
 ## M6 phase 4 — `--small` + LSP v0 (done)
 

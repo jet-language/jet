@@ -590,8 +590,105 @@ inside `module name { … }`, never file top-level.
 **U4 — Import-tree discovery**: `imports: find("./modules")` auto-discovers
 `.jet` files and merges typed contributions; no manual lists.
 
-**D-GENMOD1 — Generic modules**: ML-functor style — a module parameterized by
-type/value; instantiation yields a specialized normal module (E0850–E0854).
+**D-GENMOD1 / D-GENMOD2 — Generic modules**: ML-functor style — a module
+parameterized by types and values; instantiation yields a specialized normal
+module. Type parameters (`K: Hash`) and value parameters (`capacity: Int`) share
+one `<…>` list, and application mirrors it: `module Cache64 = Cache<String,
+64>`.
+
+**D-GENMOD-VALUE1=A — Closed value specialization**: value parameters are
+immutable Tier-0 comptime values of type `Bool`, `Int`, `Char`, `String`, or a
+fieldless enum. Arguments are evaluated and normalized before specialization;
+they do not convert between value types. An `Int` value parameter may also fill
+the narrowly approved generic-module layout slot `[T#capacity]` under S26,
+S76, and D-FIXARR1.
+
+Parameter kind comes from sema resolution of its declaration annotation in the
+definition scope, never casing. A bare parameter is a type parameter; an
+annotated parameter is a type parameter when its annotation resolves to a
+trait/bound and a value parameter when it resolves to an allowed concrete value
+type. Alias arguments remain unresolved syntax until the target resolves, then
+each slot contextualizes one ordinary type or expression. There are no defaults,
+named arguments, inference, packs, implicit conversions, or module-valued
+parameters.
+
+A value expression must type-check exactly and finish in the fuel-limited
+Tier-0 pure comptime interpreter before expansion. Literals, fieldless enum
+cases, pure arithmetic/comparison/Boolean/string/`if` expressions, earlier
+immutable `const`/`comptime` bindings, and wholly Tier-0 pure call graphs are
+admitted. Runtime or sibling/template references, ambient state, mutation,
+effects, `find`/`fetch`/embedding/reflection, panic, exhaustion, overflow,
+division by zero, and non-values reject. After validation, results bind as
+immutable comptime constants in ordinary value positions, marker values, and
+`[T#capacity]`; they cannot manufacture names, paths, fields, markers, traits,
+types, overloads, dispatch targets, or enum discriminants. No other type
+position and no general const-generic/type-computation surface is opened.
+
+Canonical value bytes are: Bool `0x01 || 0x00/0x01`; Int `0x02 ||` signed i64
+two's-complement BE; Char `0x03 ||` Unicode scalar as u32-BE; String `0x04 ||`
+u64-BE UTF-8 length `||` exact UTF-8; enum `0x05 ||` u64-length-framed resolved
+package/module/type identity `||` u64-length-framed variant. Strings receive no
+Unicode/case/path normalization. Arguments concatenate in declared parameter
+order. Type plus Jet value defines equality; spelling, span, binding name,
+expression tree, and evaluation route never contribute.
+
+**D-GENMOD-BODY1=A — Full module bodies, definition-site scope**: a generic
+module admits every declaration and legal marker admitted by an ordinary
+module: functions, structs, enums, tags, runtime and comptime constants,
+traits, trait/error-conversion/OS-gated impls, tests, benches, ordinary and
+generic nested modules, and aliases. Names outside the template resolve in the
+template's definition-site lexical scope. A specialization gains no additional
+authority from its application site.
+
+Inline `use`/`pub use` remains excluded until ordinary modules admit it.
+File/package/build/FFI/C-module/generated-binding/role-module/policy/protocol/
+state/migration/user-derive/generic-package declarations remain in their
+existing homes. Existing markers apply only to their already-legal declaration
+kinds; tests and benches instantiate only in their existing modes. Expanded
+impls obey ordinary orphan/coherence law, so supplied or captured external
+types/traits do not become local. Public specialized APIs cannot expose private
+captures. Template/alias lookup is order-independent: sema builds one dependency
+graph, expands in deterministic topological order, and reports direct or
+indirect cycles as E0855 with the complete chain; it never expands until stable.
+
+**D-GENMOD-IDENTITY1=A — Applicative instance identity**: one resolved template
+DefinitionId plus one normalized argument tuple identifies one module instance.
+Repeated applications of that pair project the same nominal member types,
+InstanceFingerprint, sema result, TIR/codegen specialization, cache entry, and
+LSP references. A different normalized argument tuple or resolved template
+definition is a different instance.
+
+`frame(B)` is u64-BE byte length plus `B`; `text(S)` frames exact UTF-8.
+Resolved package identity frames `jet.package.v1`, canonical package name and
+SemVer, plus locked workspace/registry/git/path source identity. Credentials,
+absolute host paths, spans, aliases, display/Rust names, content/body/interface
+hashes, map order, and compile order never enter identity. DefinitionFullKey
+frames `jet.genmod.definition.v1`, package identity, defining workspace path,
+lexical module path, kind `generic-module`, and template name; DefinitionId is
+the 64-lowercase-hex SHA-256. Stores retain schema, id, and full key and treat an
+id/full-key collision as ICE 101.
+
+ParameterBytes records count, kind, name, resolved bound identity, and value
+annotation TypeFullKey. ArgumentBytes records count and either the resolved
+canonical sema TypeFullKey or the complete D-GENMOD-VALUE1 bytes.
+ApplicationFullKey frames `jet.genmod.application.v1`, DefinitionFullKey,
+ParameterBytes, and ArgumentBytes. Under applicative option A,
+InstanceFullKey equals ApplicationFullKey and InstanceFingerprint is its
+64-lowercase-hex SHA-256. Specialized nominal struct/enum/tag/trait keys frame
+that identity basis, member kind/path/name, and member generic arguments; shape
+never replaces nominal identity, and impls mint no type identity.
+
+Resolution occurs before instantiation, so imports/re-exports do not mint
+identity; locked package version/source differences do. Public TypeFingerprints
+persist in semantic-index, interface, and cache artifacts with schema/full-key
+verification. Sema checks each reachable instance once; TIR/codegen emit one
+specialization and aliases are source-name projections. Cache keys additionally
+include compiler ABI/schema, checked body semantic hash, target/profile/effects/
+layout, and dependency interfaces. The semantic index records definitions,
+applications, aliases, arguments, exported members, and their shared identity;
+go-to-definition reaches alias and template application, and references join
+all applicative aliases. AOT, JIT, dev, and comptime consume the same checked
+instance law.
 
 **U17 — Library packages**: consumed with ordinary `use <pkg>`; executables
 go on PATH, never `use`. **D-PRELUDEX1**: `#NoPrelude` opts a file out of
