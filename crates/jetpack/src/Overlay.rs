@@ -526,14 +526,22 @@ fn apply_unified_patch(
         let mut added = 0usize;
         let mut removed = 0usize;
         while matches!(lines.peek(), Some(l) if l.starts_with("@@ ")) {
-            let header = lines.next().unwrap();
+            let Some(header) = lines.next() else {
+                return Err(OverlayError::Patch(
+                    "patch hunk header ended unexpectedly".to_string(),
+                ));
+            };
             let old_start = parse_hunk_start(header)?;
             let mut idx = old_start.saturating_sub(1);
             while let Some(hline) = lines.peek().copied() {
                 if hline.starts_with("--- ") || hline.starts_with("@@ ") {
                     break;
                 }
-                let hline = lines.next().unwrap();
+                let Some(hline) = lines.next() else {
+                    return Err(OverlayError::Patch(
+                        "patch hunk body ended unexpectedly".to_string(),
+                    ));
+                };
                 if hline == r"\ No newline at end of file" {
                     continue;
                 }
@@ -928,6 +936,47 @@ module workspace {
         assert_eq!(
             std::fs::read_to_string(root.join("src/file.txt")).unwrap(),
             "one\nTWO\nthree\n"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn malformed_hunk_header_returns_patch_error() {
+        let root =
+            std::env::temp_dir().join(format!("jet-overlay-bad-hunk-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/file.txt"), "one\n").unwrap();
+        let patch = "--- a/src/file.txt\n+++ b/src/file.txt\n@@ malformed\n";
+
+        let err = apply_unified_patch(&root, patch).unwrap_err();
+        assert_eq!(err.message(), "patch hunk missing old range");
+        assert_eq!(
+            std::fs::read_to_string(root.join("src/file.txt")).unwrap(),
+            "one\n"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn adjacent_file_boundary_preserves_both_valid_patches() {
+        let root =
+            std::env::temp_dir().join(format!("jet-overlay-boundary-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/one.txt"), "one\n").unwrap();
+        std::fs::write(root.join("src/two.txt"), "two\n").unwrap();
+        let patch = "--- a/src/one.txt\n+++ b/src/one.txt\n@@ -1 +1 @@\n-one\n+ONE\n--- a/src/two.txt\n+++ b/src/two.txt\n@@ -1 +1 @@\n-two\n+TWO\n";
+
+        let applied = apply_unified_patch(&root, patch).unwrap();
+        assert_eq!(applied.len(), 2);
+        assert_eq!(
+            std::fs::read_to_string(root.join("src/one.txt")).unwrap(),
+            "ONE\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("src/two.txt")).unwrap(),
+            "TWO\n"
         );
         let _ = std::fs::remove_dir_all(&root);
     }

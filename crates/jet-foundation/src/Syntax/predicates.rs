@@ -1,3 +1,5 @@
+use super::*;
+
 /// D-MARKER-FAMILY1: is `name` a contract-plane (`@`) marker? The I7/R3
 /// dispatch chokepoint — parser/formatter/sema/LSP ask here, never hand-roll
 /// the move list.

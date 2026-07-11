@@ -1,3 +1,5 @@
+use super::*;
+
 /// D-TOOL2 (ratified 2026-06-17, E2-M11; PascalCase marker D-CASING1 follow-on
 /// 2026-06-21): typed hole `#Todo` — compiles everywhere, panics at runtime with
 /// file, line, and expected type. Bare lowercase `todo` (FOREIGN_TODO) is the
@@ -482,4 +484,3 @@ pub const SECRETS_RECIPIENTS_VERBS: &[&str] =
 /// constant family — mirrors `jet keygen --force`'s own flag spelling
 /// (`Source/CLI.rs`), kept a plain literal there too.
 pub const SECRETS_FLAG_FORCE: &str = "--force";
-

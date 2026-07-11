@@ -1,3 +1,5 @@
+use super::*;
+
 pub use crate::OsTarget::{
     os_target_build_context, os_target_dispatch_arm, os_target_dispatch_exhaustive,
     os_target_mixed_axis, os_target_unmatched_call, OsTarget,

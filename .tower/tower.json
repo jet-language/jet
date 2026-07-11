@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 495,
-    "rev": 3354,
+    "rev": 3365,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -7227,7 +7227,7 @@
       "priority": "P0",
       "plan": "Order: (1) read docs/spec/architecture.md R1–R12 + spec.md sections per area; (2) per audit area, spawn adversarial review (opus-tier reasoning) over the relevant sema modules — CheckerCore.rs, CheckerInfer/, CheckerCoreLib.rs, Bundle.rs; (3) write attack programs as tests/ui fixtures — expect reject; write miscompile candidates as differential fixtures — expect byte-identical interpreter/compiled output; (4) extend tests/fuzz_sema.rs: grammar-directed generation from crates/jet-foundation/src/Syntax.rs so the fuzzer only speaks ratified syntax; (5) fix confirmed holes smallest-first, full suite between fixes; (6) audit notes + corpus docs; full nix develop -c cargo test green at close.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "terra-353-corpus",
       "log": [
         {
           "at": "2026-07-11",
@@ -7301,7 +7301,8 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-11T10:13:54.178Z"
     },
     {
       "id": "c0e7rot4",
@@ -9328,6 +9329,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "fable-main",
+          "text": "Ballot hardened per beginner/expert/hybrid pass: option E added (convergence preview — extract default on Enter, reuse-existing-fn offer via formatted span match, explicit inline-duplicate escape hatch w/ divergence warning, B's teaching line as preview header), rec A->E. Build scope if E ratifies additionally includes: span-match query against existing helper bodies + the three-diff preview surface."
+        },
         {
           "at": "2026-07-11",
           "by": "fable-main",
@@ -11661,7 +11667,7 @@
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "terra-452-syntax",
       "log": [
         {
           "at": "2026-07-11",
@@ -11693,7 +11699,8 @@
       ],
       "needsAcceptance": false,
       "refs": [],
-      "workOrder": 33
+      "workOrder": 33,
+      "claimedAt": "2026-07-11T10:13:54.004Z"
     },
     {
       "id": "c047jzdr",
@@ -11866,14 +11873,15 @@
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "terra-456-overlay",
       "log": [],
       "created": "2026-07-10T10:49:07.533Z",
-      "updated": "2026-07-10",
+      "updated": "2026-07-11",
       "criteria": [],
       "needsAcceptance": false,
       "refs": [],
-      "workOrder": 93
+      "workOrder": 93,
+      "claimedAt": "2026-07-11T10:15:55.708Z"
     },
     {
       "id": "c09ffy3w",
@@ -13561,6 +13569,11 @@
         {
           "at": "2026-07-11",
           "by": "fable-main",
+          "text": "Ballot hardened: option E added (D + non-blocking post-paste rename chips using the shipped rename transaction, >3 renames coalesce to one expandable pill, Ctrl+Shift+V / context-menu paste-as-staged modifier), rec D->E. Build scope if E ratifies additionally includes: chip/pill UI + staged-paste modifier wiring."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "fable-main",
           "text": "D-CANVAS-COPYPASTE1 queued (rec D: source-text clipboard + suffix rename + stage-when-unresolved)."
         }
       ],
@@ -13606,6 +13619,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "fable-main",
+          "text": "Ballot hardened: option D added (debug the running tier — native lldb/DAP for compiled runs verbatim per option A; under jet dev the executing tier-0/1 engine reports its own stops/values/path, honest because it IS the runtime, R12/D-DEVMODE1-pinned), rec A->D. Build scope if D ratifies additionally includes: in-tier debug session backend behind one seam (JitBackend precedent), engine-name status chip, and debug facts (stop span/value render/path) joining the existing R12 parity batteries so backend drift fails tests."
+        },
         {
           "at": "2026-07-11",
           "by": "fable-main",
@@ -22746,7 +22764,7 @@
       "explainer": "Glossary. Exec pin: the control-flow arrow socket on a node (\"do this, then that\"), separate from data pins (values). Statement span: the exact slice of `.jet` source a node projects from — every node is a projection of real source, never a standalone graph object. Convergence: two or more exec arrows pointing at one node, so several places in the program run that same node. Extract-to-function: turning a selected span into a named helper `fn` and replacing it with calls — already shipped in Canvas (matrix row \"Extract selection to function\", #280). Structured control flow: `if`/`else`, dispatch arms, `loop` — Jet's only control forms; there is no `goto` and no jump-to-label in the language.\n\nThe wall. Blueprint lets N exec wires converge on one node; its runtime is a VM that just re-enters that node on each incoming pulse. Jet has no VM and no goto: a node is a statement span, and \"run this same span from three places\" has exactly one honest spelling in source — a named function called three times. This ballot decides what happens the instant a user tries the Blueprint habit of dropping a second exec wire onto a node that already has one. The matrix row \"Multiple exec IN (convergence)\" is held at blocked-by-ballot on this decision.",
       "story": "Priya is porting a small chat handler she prototyped in Unreal Blueprint. Her graph has two branches — a Ping arm and a Data arm — and in Blueprint both arms' exec wires ran into a single \"Notify + bump metric\" node before continuing. In Canvas she rebuilds the two arms, then drags the exec output of the Data arm onto the same Notify node the Ping arm already points at. In Blueprint that just worked. She needs to know what Canvas does with that gesture, and what shows up in her `.jet` file afterward — because in Jet the file is the program.",
       "inWild": "Her function today, after building both arms (the shared work is duplicated by hand in each arm — the pain she is trying to remove):\n\n  fn handle(msg: Message) {\n      if msg == Ping(id) {\n          notify(id)\n          bump_metric()\n          reply(id)\n      } else if msg == Data(id, body) {\n          notify(id)\n          bump_metric()\n          store(body)\n      }\n  }\n\nShe selects the `notify(id)` / `bump_metric()` node pair in the Ping arm, and drags the Data arm's exec wire onto it — asking Canvas to make one shared block both arms run. Today that drop lands on the matrix's blocked-by-ballot row: the gesture has no defined result.",
-      "detail": "Recommend A. Devil pass across all four: (C) labeled tunnels introduce goto into a language that has none — it breaks structured control flow, defeats the front end's reachability reasoning, and is the exact spaghetti pattern Godot deleted VisualScript over; reject outright, it is not on the table, listed only so the owner sees it was weighed. (D) inline duplication is honest source but re-introduces the copy-paste divergence bug Priya is trying to escape (fix `notify` in one arm, forget the other) — it is the anti-pattern, not a feature. (B) refuse-and-teach is safe and explicit but stalls the beginner mid-gesture and makes them run a second, separate command; the Blueprint habit hits a wall even though the honest source (extract) is a known, shipped transaction. (A) auto-extract makes the habit work AND writes honest DRY source: the second exec drop runs the existing extract-to-function transaction, previewed and undoable like every Canvas edit. Devil pass on A: silently minting a function could surprise. Patch: the drop opens the same extract preview already shipped — proposed name (`on_event`, editable), the exact `.jet` diff, and the two call sites highlighted — and writes nothing until confirmed; one Escape or Undo reverts it fully. A also stays correct at scale: a genuinely structured join (work that runs after an `if`/`else`, not mid-arm) already projects as a single downstream node reached from both arms with no extraction needed, so auto-extract fires only for true non-tail convergence. One canonical mechanism (I8): convergence == a real named function, the same one the Extract button already produces.",
+      "detail": "Recommend E (hybrid of A+B+D). Devil pass across all five: (C) labeled tunnels introduce goto into a language that has none — it breaks structured control flow, defeats the front end's reachability reasoning, and is the exact spaghetti pattern Godot deleted VisualScript over; reject outright, listed only so the owner sees it was weighed. (D) as a default re-introduces the copy-paste divergence bug Priya is trying to escape — but as an explicit, clearly-labeled expert choice inside a preview it is legitimate (sometimes two arms genuinely should diverge next week). (B) refuse-and-teach stalls the beginner mid-gesture — but its teaching line is exactly what the preview header should say. (A) auto-extract makes the habit work and writes honest DRY source, but fixes every knob: the name is editable, yet the user cannot reuse an existing matching helper or deliberately choose duplication without cancelling and doing something else. (E) keeps A's single mechanism and beginner path — Enter accepts the proposed extract — and puts the expert controls in the same preview: rename, \"call existing fn\" when the converged span already matches a helper's body (span-equality after formatting), or \"duplicate inline instead\" as the explicit divergence escape hatch. One canonical write path (the previewed source transaction), three outcomes the user can see as concrete diffs before anything is written. Devil pass on E: three choices could overwhelm a beginner. Patch: the extract diff is the pre-selected default with the name field focused — a beginner who just types Enter gets exactly option A; the alternatives are a small secondary row, not a fork dialog. A genuinely structured join (work after an if/else, not mid-arm) still projects as a single downstream node with no extraction — E, like A, fires only for true non-tail convergence.",
       "options": [
         {
           "key": "A",
@@ -22771,6 +22789,12 @@
           "name": "Duplicate the span inline",
           "detail": "Converging N exec wires copies the converged statement span into each site inline — no shared function. Source stays structured and honest, but the shared work is physically duplicated in every arm.",
           "code": "Gesture: drag Data arm's exec wire onto the Ping arm's `notify` node.\nCanvas writes the span into both arms verbatim:\n\n  fn handle(msg: Message) {\n      if msg == Ping(id) {\n          notify(id)      // copy\n          bump_metric()   // copy\n          reply(id)\n      } else if msg == Data(id, body) {\n          notify(id)      // copy\n          bump_metric()   // copy\n          store(body)\n      }\n  }\n\nThe two copies drift independently on later edits — the divergence bug this gesture was meant to remove."
+        },
+        {
+          "key": "E",
+          "name": "Convergence preview: extract by default, reuse or duplicate on request (hybrid, recommended)",
+          "detail": "The second exec drop opens ONE preview (the shipped extract-to-function transaction). Default, pre-selected: extract to a named helper — Enter accepts, identical to option A. Same preview offers two expert alternatives, each shown as its concrete source diff: call an existing function (offered only when the converged span textually matches an existing helper body after formatting, e.g. a notify_and_count helper written earlier), or duplicate inline (option D's source, explicitly chosen, labeled with the divergence warning). The preview header carries option B's teaching line, so the beginner learns why convergence means a function. Nothing writes until confirmed; Undo restores exactly.",
+          "code": "Gesture: drag Data arm's exec wire onto the Ping arm's `notify`/`bump_metric` node.\n\n  Two paths will run these steps. In Jet, shared steps are a function.\n\n  (o) Extract to function   name: [ on_event ]      <- default, Enter accepts\n      + fn on_event(id: Id) { notify(id); bump_metric() }\n      both arms:  on_event(id)\n\n  ( ) Call existing `notify_and_count(id)`   (its body matches these steps)\n      both arms:  notify_and_count(id)\n\n  ( ) Duplicate steps into this arm instead   (copies can drift apart)\n      Data arm gains its own notify(id); bump_metric()\n\nEnter -> option A's exact result. Escape -> nothing written."
         }
       ],
       "comparisons": [
@@ -22790,7 +22814,7 @@
           "code": "(removed from Godot 4 — cited graph maintainability and control-flow spaghetti)"
         }
       ],
-      "rec": "A",
+      "rec": "E",
       "draft": false,
       "status": "open",
       "created": "2026-07-11T01:56:08.602Z"
@@ -22804,7 +22828,7 @@
       "explainer": "Glossary. Binding: a named value in Jet, e.g. the `total` in `total = a + b`. Binding collision: pasting a clone whose binding name already exists in the destination scope. Materialize: actually write the clone into `.jet` source (vs. holding it only in the editor). Staged node (#388): a node placed in the editor but NOT yet in source — dashed \"unsaved\" ring, view-state only, never dead code; it materializes into source the moment its first wire connects it to the graph spine, and deleting it touches no source. Source transaction: every Canvas edit is a previewed, formatted, sema-checked write — Canvas never writes source that fails the front end.\n\nThe wall. Copy/paste/duplicate is the most-used editor gesture and the matrix row (\"Cut/copy/paste/duplicate\") is planned/#272. Blueprint clones nodes freely because its clones are graph objects with no naming rules and no source. Jet clones must become real source with real, unique binding names in a real place in the file. Three coupled questions have to be answered together for the gesture to be defined: the rename rule, the placement rule, and whether an incomplete paste writes now or stages.",
       "story": "Marco built a small pricing block in Canvas: a couple of local bindings and a call that uses them. He wants the same block a second time, tweaked. He selects the three nodes and hits Ctrl+D to duplicate. In a text editor he would copy the lines and rename `subtotal` by hand; in Blueprint the duplicate just appears floating. He needs to know what Canvas puts in his `.jet` file: what the second `subtotal` is called, where the new lines go, and whether the duplicate that still has an unwired input is already in his source or waiting to be wired.",
       "inWild": "Selection Marco duplicates (three nodes: two bindings + one call):\n\n  fn quote(base: Money) -> Money {\n      subtotal = base * qty            // <- selected\n      tax = subtotal * rate            // <- selected\n      log_line(subtotal)               // <- selected\n      return subtotal + tax\n  }\n\nOn Ctrl+D, `subtotal` and `tax` already exist in this scope — the clone cannot reuse those names. And the clone's `qty` / `rate` inputs point at bindings that were NOT in the selection, so the copy has two inputs with nothing wired to them yet. What Canvas writes for those two facts is undefined today.",
-      "detail": "Recommend D. Devil pass across all four: (C) prompt-on-collision is the safest read but it interrupts the single most frequent gesture with a modal per name — death by dialog; a beginner duplicating a five-binding block answers five prompts. (A) eager-complete never stalls but fills unresolved inputs with typed defaults, which means Canvas writes source the user did not mean (`qty` silently becomes `0`), violating the spirit of \"never write source that surprises\" even though it type-checks. (B) always-stage is clean for incomplete pastes but wrong for a self-contained selection: duplicating a complete block should just appear in source, not sit dashed waiting for a wire that is not needed. (D) unifies them by principle: the clipboard is real Jet source text (copy serializes the selection to `.jet`, so the same paste works into another file, another Canvas graph, or a plain text editor — one path, I8); a self-contained selection materializes immediately with deterministic suffix rename; a selection with unresolved inputs falls back to the staged mechanism (#388) rather than writing default-filled or dangling source. Devil pass on D: suffix rename must be atomic and scope-correct — renaming `subtotal`->`subtotal2` has to rewrite every in-selection reference to it in the same transaction, pick the first free suffix (skip an existing `subtotal2`), and still choose a fresh name if the clone would shadow an outer binding. Patch: rename resolves against the destination block's visible scope; references inside the pasted selection are remapped as a set; placement is immediately after the selection's source span (graph offset +24px is view-state only, per the design spec). Cross-file paste reuses the existing import-synthesis path. Result: Ctrl+D on a complete block just works and reads cleanly; Ctrl+V of a block with a loose input gives a staged node the user wires, and only then is source written — always valid, never surprising.",
+      "detail": "Recommend E (hybrid: D's split + C's naming intent without modals + B's control as an explicit modifier). Devil pass across all five: (C) prompt-on-collision interrupts the most frequent gesture with a modal per name — death by dialog; but the intent behind it (the user often wants a meaningful name, not `subtotal2`) is real. (A) eager-complete writes values the user never chose (`qty` silently 0) — rejected as a default; nothing in E writes a default-filled input. (B) always-stage is wrong as a default for self-contained clones but right as an on-demand mode: an expert arranging a large paste wants placement and wiring before any write. (D) is the correct core: source-text clipboard (one path — graph, cross-file, plain text editor), atomic first-free-suffix rename against the destination scope, immediate materialization when self-contained, staged fallback when inputs are unresolved. (E) = D plus two additions that supply the missing control without new ceremony: after a materializing paste, the renamed bindings appear as non-blocking rename chips — the suffixed name is highlighted in the graph and one click/F2 runs the ordinary rename-binding transaction (no modal, ignorable, disappears on next edit); and paste-as-staged is available as an explicit modifier (Ctrl+Shift+V and a context-menu entry) for deliberate stage-first workflows even when the selection is self-contained. Devil pass on E: chips could be visual noise on a 10-binding paste. Patch: chips coalesce into one \"3 bindings renamed — review\" pill above the pasted cluster when more than 3 renames happen; the pill expands to the list. Rename-chip renames are the shipped rename transaction, so scope-correctness and undo come for free (I8 — no second rename path).",
       "options": [
         {
           "key": "A",
@@ -22829,6 +22853,12 @@
           "name": "Source-text clipboard (one path), suffix rename, stage only when unresolved",
           "detail": "Copy serializes the selection to real Jet source text on the clipboard, so paste is one mechanism across graph, other files, and a plain text editor. A self-contained selection materializes immediately: first-free suffix rename applied atomically to defs and in-selection uses, inserted right after the selection's span. A selection whose inputs are unresolved falls back to a staged node (#388) instead of writing default-filled or dangling source — Canvas never writes source the user did not complete.",
           "code": "Case 1 — self-contained duplicate (all inputs internal): materializes now.\n\n  subtotal = base * qty\n  tax = subtotal * rate\n  log_line(subtotal)\n  subtotal2 = base * qty         // qty resolves to the same in-scope binding\n  tax2 = subtotal2 * rate        // renamed def + use, atomic\n  log_line(subtotal2)\n\nClipboard also holds the same text — paste into main.jet or a text editor works.\n\nCase 2 — a copied node's input was NOT in the selection: that clone stages\n(dashed ring), writes nothing, and materializes with the rename resolved the\nmoment Marco wires its input. Always-valid source, no surprise defaults."
+        },
+        {
+          "key": "E",
+          "name": "D plus rename chips and an explicit stage modifier (hybrid, recommended)",
+          "detail": "Everything in option D unchanged: source-text clipboard as the one paste mechanism, atomic first-free-suffix rename, insertion after the selection's span, staged fallback for unresolved inputs. Added: (1) after a materializing paste, auto-renamed bindings show non-blocking rename chips — click or F2 runs the ordinary rename transaction, ignoring them costs nothing, >3 renames coalesce into one expandable pill; (2) Ctrl+Shift+V (and context menu \"Paste as staged\") stages any paste deliberately, even self-contained ones, for place-and-wire-first workflows. Beginner path is untouched: Ctrl+D just works and reads cleanly. Expert path gains naming intent and write timing without a single modal.",
+          "code": "Ctrl+D (self-contained) — writes immediately, like D:\n\n  subtotal2 = base * qty     [subtotal2 ✎]   <- chip, click to rename\n  tax2 = subtotal2 * rate    [tax2 ✎]\n  log_line(subtotal2)\n\nClick chip -> inline name edit -> ordinary rename transaction rewrites\ndef + uses; ignore the chips and they vanish on the next edit.\n\nCtrl+Shift+V — same clipboard, but lands as staged (dashed) nodes:\nnothing written; position and wire first; first spine wire materializes\nwith the same suffix-rename rules.\n\nUnresolved-input paste: staged automatically, exactly as in D."
         }
       ],
       "comparisons": [
@@ -22848,7 +22878,7 @@
           "code": "Paste of `subtotal = base * qty` next to an existing `subtotal` ->\ntwo bindings named `subtotal`; the text editor does not rename either."
         }
       ],
-      "rec": "D",
+      "rec": "E",
       "draft": false,
       "status": "open",
       "created": "2026-07-11T01:56:10.498Z"
@@ -22862,7 +22892,7 @@
       "explainer": "Glossary. Native debug session: `jet debug` driving the real compiled process through an lldb/DAP backend (tests/debug.rs) — real breakpoints, real variable reads, real stepping, mapped from generated Rust frames back to Jet source spans. DAP: Debug Adapter Protocol, the same wire format VS Code's debugger uses. Tier-0 interpreter: Jet's comptime interpreter that evaluates a program without producing a native binary (the JIT is a separate tier-1 dev accelerator). Exec pulse: the animated highlight flowing along exec wires showing which path is executing. Watch: a pinned expression whose value the debugger shows as you step. Per the ratified D-CANVAS-DEBUGSTATE1, breakpoints and watches are LOCAL editor state anchored to source spans and the source hash — Canvas never writes them into `.jet`.\n\nThe wall. Every debugger row in the matrix (session selector, step/next/continue/stop, breakpoints/watches, active-node/wire pulse, call stack) is projection-only or a UI shell with zero behavior tests — the debug rail buttons in html.rs do nothing yet. This is the single largest unbuilt surface and it is the one most able to lie: an animation can imply the program is running when it is not. The owner's hard rule for the whole epoch is that the UI must never fake liveness. This ballot picks the engine, and the engine determines what is real.",
       "story": "Dana sets a breakpoint on the `charge(card)` node in her payment function and clicks Run in Canvas. She expects the graph to stop there, show her the real `card` value the program actually has, let her step to the next node, and pulse the exec wire along the path that actually ran. She needs to trust that what glows is what happened — if the debugger showed her a plausible-but-simulated value or pulsed a path the real program did not take, she would ship a bug believing she had watched it not happen.",
       "inWild": "Function Dana is debugging:\n\n  fn checkout(card: Card, cart: Cart) -> Result[Receipt] {\n      total = price(cart)\n      if total > card.limit {\n          return Err(OverLimit)\n      }\n      receipt = charge(card, total)     // <- breakpoint here\n      return Ok(receipt)\n  }\n\nToday: the breakpoint dot renders, the Debug rail buttons render, and clicking Run does nothing testable — no stop, no real `card`/`total` values, no exec pulse. There is no session behind the buttons.",
-      "detail": "Recommend A. This is a truth decision, not a polish decision, and D-CANVAS-DEBUGSTATE1 already fixes breakpoints/watches as local, span-anchored state — option A drives exactly that state against the real process, contradicting nothing. Devil pass across all three: (B) interpreter-overlay gives the prettiest, smoothest, deterministic pulse — and it is a simulation. It is a second execution engine (I8 risk: two ways to run a program), and its values can diverge from the AOT build's real behavior around effects, I/O, ordering, and optimization. Presenting interpreter values as the program's live state is exactly the faked liveness the owner forbids; acceptable only if loudly labeled \"simulated,\" at which point it is a preview, not a debugger. (C) hybrid is the subtle trap: real state for variables/stack, but the wire pulse animated by the interpreter. The pulse is the most liveness-implying element on screen — animating it from a simulation while the numbers are real is the worst of both, a truthful-looking UI whose motion is a guess; reject on \"never fake liveness.\" (A) native session is the honest analog of Blueprint's own debugger: Blueprint's pulse is real because the Blueprint VM is the actual runtime; Jet's actual runtime is the compiled process, so the real debugger is the native session. Devil pass on A: a native debugger's pulse is discrete (it advances at breakpoints and steps), not the continuous flow Blueprint shows by single-stepping its VM; and generated-Rust frames must map back to Jet spans. Patch: accept the truthful discrete pulse — the wire highlights the path proven to have executed at each real stop, and when no session is live the wires do not pulse and the UI says \"not running\" rather than animating anything. Frame mapping reuses the existing source-map already built for `jet perf`/`jet debug`. When no native target is available (pure comptime evaluation), the debugger says so plainly instead of quietly substituting the interpreter. One runtime, one truth: what glows is what ran.",
+      "detail": "Recommend D (debug the tier that is actually running; hybrid of A's truth and B's reach, with none of B's simulation). The gap options A-C share: they assume the program under debug is a compiled binary. Canvas's beginner loop runs under `jet dev` — tier-0 interpreter or tier-1 JIT — where there is no native process for lldb to attach to; under option A alone, the beginner's most common session shows \"not running,\" and the debugger is an expert-only feature. But R12 and the ratified D-DEVMODE1 make the dev tier's behavior byte-identical to the compiled program, and when a program runs under jet dev, that tier IS the runtime — instrumenting the engine that is actually executing is real liveness, not simulation (the same reason Scratch's glow is honest: its interpreter is its runtime, and the same reason Blueprint's pulse is honest: its VM is its runtime). Devil pass across all four: (B) as a stand-alone overlay re-RUNS the program beside the real one — that remains simulation and stays rejected; the difference in D is attachment to the session the user's Run actually started, never a second execution. (C) mixes a real session with interpreter-animated motion — still the worst of both, rejected. (A) is correct for compiled runs and remains exactly D's native backend; it just leaves the dev loop dark. (D) one debugger UX, one seam, two honest backends: run was `jet run`/compiled target -> native lldb/DAP session (option A verbatim); run was `jet dev` -> the executing tier reports breakpoints/steps/values/path from inside itself (the JitBackend seam precedent — same protocol facts, different engine). The status chip always names the engine (\"debugging: compiled process\" / \"debugging: dev tier\"), values shown are always read from the engine executing them, and wires never pulse without a live session. Devil pass on D: two backends could drift (a breakpoint behaves differently across tiers). Patch: R12 parity already pins tier behavior with the differential batteries; the debug facts (stop span, value render, path taken) join those existing parity tests, so a drift is a test failure, not a UX surprise. Beginners get a debugger that works the first time they click Run in dev mode; experts get the same real lldb/DAP session option A promised — nothing on screen is ever simulated.",
       "options": [
         {
           "key": "A",
@@ -22881,6 +22911,12 @@
           "name": "Hybrid (native state + interpreter pulse)",
           "detail": "A native session provides real variable/stack/step state; the exec-wire pulse animation is driven by the interpreter overlay for smoothness. State is real, motion is simulated.",
           "code": "Dana clicks Run:\n\n  Watches:   total = 4299            (real, from native session)\n  Call stack: checkout <- main       (real)\n  Exec pulse: smooth flow price->if->charge   (interpreter-animated)\n\nThe numbers are true but the flowing highlight is the interpreter's guess;\nif the two disagree on the taken branch, the UI shows real values under a\npulse tracing a different path — a truthful-looking screen that lies in motion."
+        },
+        {
+          "key": "D",
+          "name": "Debug the running tier: native session for compiled runs, in-tier session under jet dev (hybrid, recommended)",
+          "detail": "One debugger UX behind one seam, backend chosen by what is actually executing. Compiled target: the existing jet debug lldb/DAP backend — option A verbatim, real process, real frames mapped by the existing source map. Under jet dev: the tier-0/tier-1 engine that IS running the program reports its own stops, values, and taken path — real liveness because it is the runtime, guaranteed behavior-identical by R12/D-DEVMODE1 and pinned by the existing parity batteries, which the debug facts join. The engine is always named on screen; no session, no pulse, ever. Breakpoints/watches stay local span-anchored state (D-CANVAS-DEBUGSTATE1) and drive both backends identically.",
+          "code": "Dana under `jet dev` (the beginner default), breakpoint on `charge`:\n\n  [ debugging: dev tier — paused at charge ]\n  Watches:    total = 4299        (read from the executing tier)\n  Call stack: checkout <- main\n  Exec pulse: price -> if(false) -> [charge]   (path the tier actually took)\n\nSame function, compiled run (`jet run` / release binary):\n\n  [ debugging: compiled process — paused at charge ]\n  Watches:    total = 4299        (real process memory via lldb/DAP)\n\nSame breakpoints, same UI, same protocol facts; the chip names the engine.\nNo live session -> wires dark, header \"not running\". Nothing simulated:\nwhat glows is what the running engine did."
         }
       ],
       "comparisons": [
@@ -22900,7 +22936,7 @@
           "code": "Scratch: the running block glows yellow because the interpreter is on it;\ntrue there because the interpreter is the runtime."
         }
       ],
-      "rec": "A",
+      "rec": "D",
       "draft": false,
       "status": "open",
       "created": "2026-07-11T01:56:12.405Z"
@@ -25050,6 +25086,53 @@
       "draft": false,
       "status": "open",
       "created": "2026-07-11T10:11:08.894Z"
+    },
+    {
+      "id": "D-CLI-SURFACE2",
+      "cardId": "c0vntq8c",
+      "group": "tooling",
+      "title": "Place fuzz and LSP in the frequency-ringed CLI",
+      "gist": "Choose the canonical homes for the two native commands omitted from D-CLI-SURFACE1's exhaustive rings.",
+      "explainer": "Recommend A: fuzzing is part of the test/dev loop and stays flat; LSP is self/tooling infrastructure and moves under `jet self`. The editor integrations change atomically, and bare `jet lsp` becomes the same immediate teaching error required for every moved verb.",
+      "story": "Maya fuzzes a parser before release and her editor launches Jet's language server automatically. D-CLI-SURFACE1 precisely names every flat daily verb and every grouped long-tail verb, but today's registry also contains `fuzz` and `lsp`. An implementer cannot remove, group, or retain either spelling without inventing user-facing command law.",
+      "inWild": "$ jet fuzz parser.jet --property round_trip\n$ jet lsp                 # launched by VS Code/Zed, normally not typed\n\n# D-CLI-SURFACE1 currently assigns neither command a destination.",
+      "detail": "This ballot only closes D-CLI-SURFACE1=B's two-command omission. It does not reopen its four groups, daily list, or no-alias rule. EngineDispatch front doors (`env`, `push`, `trust`, `bridge`, `services`, `image`, `os`, `config`, `outdated`, `search`, `info`, `logs`, `clean`) remain outside #468's native-verb shrink exactly as the card scoped them; existing product decisions own them. `jet ?`, help, man, completions, shell completion, editor installers, docs, tests and external-command collision checks must all read the same nested registry. A moved spelling is intercepted before external `jet-<name>` discovery, emits E2101 with What/Why/Fix, preserves all following argv verbatim in the printed replacement, exits 2, performs no action, and is never an alias. `--json` emits the existing diagnostic schema with replacement argv. No L2001 deprecation window applies: D-CLI-SURFACE1 explicitly chose teaching errors rather than compatibility aliases. Beginner pass: fuzz remains discoverable beside test; editor setup hides LSP plumbing. Expert pass: `jet self lsp --bench/doctor` retains exact flags and stdio behavior. Hybrid pass: one registry entry owns canonical argv plus migration metadata; generators cannot drift.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Flat fuzz; self lsp",
+          "detail": "Keep `jet fuzz` in the daily developer ring. Move the machine-facing server to `jet self lsp`; update every first-party editor/installer atomically and teach the old spelling without executing it.",
+          "code": "$ jet fuzz parser.jet --property round_trip\n   PASS  100000 cases\n$ jet self lsp             # editor argv\n\n$ jet lsp\nError [E2101]: `lsp` moved under `jet self`\n Why: language-server plumbing belongs with Jet's own tooling\n Fix: run `jet self lsp`"
+        },
+        {
+          "key": "B",
+          "name": "Self group for both",
+          "detail": "Treat fuzzing and LSP as specialist tooling under `jet self`. This makes the flat ring smaller, but separates fuzz from `test` even though both execute test properties and share fixtures.",
+          "code": "$ jet self fuzz parser.jet --property round_trip\n$ jet self lsp\n\n$ jet fuzz parser.jet\nError [E2101]: `fuzz` moved under `jet self`\n Fix: run `jet self fuzz parser.jet`"
+        },
+        {
+          "key": "C",
+          "name": "Keep both flat but hide LSP from human help",
+          "detail": "Preserve current argv for integrations and fuzz users. `lsp` is marked machine-facing and omitted from ordinary help/palette unless searched exactly. This avoids a migration but leaves an undocumented top-level exception to the frequency-ring inventory.",
+          "code": "$ jet fuzz parser.jet --property round_trip\n$ jet lsp\n# `jet help` omits lsp; `jet ? lsp` still finds it"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "rustup/rust-analyzer",
+          "note": "Compiler-adjacent protocol servers are commonly launched by editor configuration rather than taught as daily compiler verbs.",
+          "code": "rust-analyzer"
+        },
+        {
+          "lang": "cargo fuzz",
+          "note": "Fuzzing stays adjacent to the test/build developer loop even when implemented by specialist machinery.",
+          "code": "cargo fuzz run round_trip"
+        }
+      ],
+      "rec": "A",
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-11T10:14:21.334Z"
     }
   ],
   "questions": [
@@ -25861,6 +25944,83 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-11T10:16:56.367Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0ewd6kd",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T10:16:54.452Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0ocarv7",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T10:16:52.531Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0zpnwk9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T10:16:08.432Z",
+      "by": "fable-main",
+      "action": "decision.update",
+      "ref": "D-CANVAS-MULTIEXEC1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T10:15:55.709Z",
+      "by": "terra-456-overlay",
+      "action": "card.claim",
+      "ref": "c083j754",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T10:15:42.189Z",
+      "by": "fable-main",
+      "action": "decision.update",
+      "ref": "D-CANVAS-DEBUG-UX1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T10:15:38.936Z",
+      "by": "fable-main",
+      "action": "decision.update",
+      "ref": "D-CANVAS-COPYPASTE1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T10:14:29.543Z",
+      "by": "fable-main",
+      "action": "decision.update",
+      "ref": "D-CANVAS-MULTIEXEC1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T10:14:21.334Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-CLI-SURFACE2",
+      "note": "Place fuzz and LSP in the frequency-ringed CLI"
+    },
+    {
+      "at": "2026-07-11T10:13:54.178Z",
+      "by": "terra-353-corpus",
+      "action": "card.claim",
+      "ref": "c0ewbiud",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T10:13:54.005Z",
+      "by": "terra-452-syntax",
+      "action": "card.claim",
+      "ref": "c02wa1dn",
+      "note": ""
+    },
     {
       "at": "2026-07-11T10:13:20.814Z",
       "by": "codex-main",
@@ -29283,83 +29443,6 @@
       "action": "card.criteria-add",
       "ref": "c0prf2ws",
       "note": "#4 Verbose request/rebuild logs remain below the header; non-TT"
-    },
-    {
-      "at": "2026-07-10T17:49:33.242Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0prf2ws",
-      "note": "#3 Browser smoke proves collapsed strip parity, full verbatim e"
-    },
-    {
-      "at": "2026-07-10T17:49:33.097Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0prf2ws",
-      "note": "#2 Real TTY host-wrapper smoke proves the pinned dashboard show"
-    },
-    {
-      "at": "2026-07-10T17:49:32.948Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0prf2ws",
-      "note": "#1 A feature matrix covers every row in the hybrid devserver mo"
-    },
-    {
-      "at": "2026-07-10T17:45:48.912Z",
-      "by": "terra-460-builder",
-      "action": "card.claim",
-      "ref": "c0df169q",
-      "note": ""
-    },
-    {
-      "at": "2026-07-10T17:45:48.764Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0df169q",
-      "note": "#8 Owner records whether exposed Git history will be scrubbed a"
-    },
-    {
-      "at": "2026-07-10T17:45:48.615Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0df169q",
-      "note": "#7 Owner rotates VAPID credentials, resubscribes devices, and p"
-    },
-    {
-      "at": "2026-07-10T17:45:48.469Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0df169q",
-      "note": "#6 Fresh temporary Tower generates untracked VAPID secrets whil"
-    },
-    {
-      "at": "2026-07-10T17:45:48.327Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0df169q",
-      "note": "#5 Legacy tracked auth/push secrets fail with actionable migrat"
-    },
-    {
-      "at": "2026-07-10T17:45:48.179Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0df169q",
-      "note": "#4 store.project, API state, SSE, and mutation responses never "
-    },
-    {
-      "at": "2026-07-10T17:45:48.031Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0df169q",
-      "note": "#3 Server provisioning, subscription updates, and dead-endpoint"
-    },
-    {
-      "at": "2026-07-10T17:45:47.879Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0df169q",
-      "note": "#2 .tower/secrets.json is ignored and tower init creates the ig"
     }
   ],
   "nextNum": 368,

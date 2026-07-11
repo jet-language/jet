@@ -9,15 +9,23 @@
 //! owner in docs/spec/syntax-decisions.md.
 // Marker-plane reconciliation anchors: MARKER_PUB_FILE, MARKER_NO_PRELUDE, ATTR_TARGET,
 // ATTR_LAYOUT, ATTR_CODABLE, CONTRACT_MARKERS, KW_CAPS, KW_GRANT,
-// KW_COMPTIME, KW_DERIVE, ATTR_TRACK. Constants live in the split include
-// files below; keep this root file mentioning them so I7 audits can check one
+// KW_COMPTIME, KW_DERIVE, ATTR_TRACK. Constants live in the private modules
+// below; keep this root file mentioning them so I7 audits can check one
 // canonical surface entrypoint.
 
-include!("Syntax/core_surface.rs");
-include!("Syntax/math_layout.rs");
-include!("Syntax/effects_tests.rs");
-include!("Syntax/jetpack_config.rs");
-include!("Syntax/package_files.rs");
-include!("Syntax/markers.rs");
-include!("Syntax/highlights.rs");
-include!("Syntax/predicates.rs");
+mod core_surface;
+pub use core_surface::*;
+mod math_layout;
+pub use math_layout::*;
+mod effects_tests;
+pub use effects_tests::*;
+mod jetpack_config;
+pub use jetpack_config::*;
+mod package_files;
+pub use package_files::*;
+mod markers;
+pub use markers::*;
+mod highlights;
+pub use highlights::*;
+mod predicates;
+pub use predicates::*;
