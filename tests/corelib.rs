@@ -622,6 +622,74 @@ fn run() {{
 }
 
 #[test]
+fn core_net_dns_rejects_wrong_transaction_id() {
+    let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    let addr = socket.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        let mut query = [0u8; 512];
+        let (n, peer) = socket.recv_from(&mut query).unwrap();
+        let mut response = dns_fixture_response(&query[..n]);
+        let wrong = u16::from_be_bytes([response[0], response[1]]).wrapping_add(1);
+        response[0..2].copy_from_slice(&wrong.to_be_bytes());
+        socket.send_to(&response, peer).unwrap();
+    });
+
+    let dir = std::env::temp_dir().join(format!("jet_core_net_dns_bad_id_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let src = format!(
+        r#"
+use core.net as net
+
+fn run() {{
+    _ :: net.dns_txt_at("{}", "service.example.test", 1000) ?? panic("forged DNS accepted")
+}}
+"#,
+        addr
+    );
+    let (code, _stdout, stderr) = build_and_run(&dir, "dns_bad_id", &src, &[], None);
+    server.join().unwrap();
+    assert_ne!(code, 0, "forged transaction ID was accepted");
+    assert!(stderr.contains("forged DNS accepted"), "{stderr}");
+}
+
+#[test]
+fn core_net_dns_transaction_ids_are_not_a_fixed_sequence() {
+    let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    let addr = socket.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        let mut ids = std::collections::BTreeSet::new();
+        for _ in 0..9 {
+            let mut query = [0u8; 512];
+            let (n, peer) = socket.recv_from(&mut query).unwrap();
+            ids.insert(u16::from_be_bytes([query[0], query[1]]));
+            socket
+                .send_to(&dns_fixture_response(&query[..n]), peer)
+                .unwrap();
+        }
+        ids
+    });
+
+    let dir = std::env::temp_dir().join(format!("jet_core_net_dns_ids_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let src = format!(
+        r#"
+use core.net as net
+
+fn run() {{
+    loop _i in 0..8 {{
+        _ :: net.dns_txt_at("{}", "service.example.test", 1000) ?? panic("dns")
+    }}
+}}
+"#,
+        addr
+    );
+    let (code, _stdout, stderr) = build_and_run(&dir, "dns_ids", &src, &[], None);
+    let ids = server.join().unwrap();
+    assert_eq!(code, 0, "{stderr}");
+    assert!(ids.len() > 1, "all nine DNS queries reused one transaction ID");
+}
+
+#[test]
 fn canonical_core_import_resolves() {
     let out = compile_temp(
         "core_imports.jet",
