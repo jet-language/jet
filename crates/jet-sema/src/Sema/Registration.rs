@@ -816,6 +816,19 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
 
     register_type_methods(&prog.items, &mut registry, &mut diags);
     register_patchable_methods(&prog.items, &mut registry);
+    // Defaults must be evaluated before serde source expansion so generated
+    // Decode bodies can embed the exact compile-time value as Jet source.
+    let serde_core_imports: HashMap<String, String> = prog
+        .imports
+        .iter()
+        .filter_map(|imp| Some((imp.alias.clone(), imp.core_module_path()?)))
+        .collect();
+    eval_default_markers(
+        &mut prog.items,
+        std::path::Path::new("."),
+        &mut diags,
+        &serde_core_imports,
+    );
     // D-SERDE2=A/R11: built-in serde derives become ordinary Jet impl source,
     // then re-enter lexer/parser before any impl registration or checking.
     expand_builtin_serde_source(prog, &mut diags);
@@ -956,14 +969,6 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
         &single_core_imports,
         None,
     );
-    // Card #131: bake each `#[Default(expr)]` value now that comptime consts exist.
-    eval_default_markers(
-        &mut prog.items,
-        std::path::Path::new("."),
-        &mut diags,
-        &single_core_imports,
-    );
-
     let const_names: Vec<String> = consts.keys().cloned().collect();
     let mut address_taken: HashSet<String> = HashSet::new();
     for item in &prog.items {
@@ -1609,7 +1614,70 @@ fn serde_source_field_key(container: &[crate::AST::Marker], f: &crate::AST::Fiel
 
 fn serde_source_default(f: &crate::AST::Field) -> Option<String> {
     let marker = f.serde_markers.iter().find(|m| m.name == crate::Syntax::ATTR_DEFAULT)?;
-    marker.args.first().and_then(serde_source_literal)
+    match (marker.args.first(), marker.ct.as_ref()) {
+        (Some(_), Some(value)) => serde_ct_source(value),
+        (Some(expr), None) => serde_source_literal(expr),
+        (None, _) => None,
+    }
+}
+
+fn serde_ct_source(value: &crate::AST::CtValue) -> Option<String> {
+    use crate::AST::CtValue;
+    Some(match value {
+        CtValue::Int(v) => v.to_string(),
+        CtValue::Float(v) => format!("{v:?}"),
+        CtValue::Bool(v) => v.to_string(),
+        CtValue::Char(v) => format!("{v:?}"),
+        CtValue::Str(v) => format!("{v:?}"),
+        CtValue::BigInt(v) => format!("BigInt({:?})", v.to_string_rep()),
+        CtValue::Bytes(values) => format!(
+            "[{}]",
+            values.iter().map(u8::to_string).collect::<Vec<_>>().join(", ")
+        ),
+        CtValue::List(values) => format!(
+            "[{}]",
+            values.iter().map(serde_ct_source).collect::<Option<Vec<_>>>()?.join(", ")
+        ),
+        CtValue::Map(values) => format!(
+            "[{}]",
+            values.iter().map(|(key, value)| Some(format!(
+                "{}: {}",
+                serde_ct_source(&key.to_value())?,
+                serde_ct_source(value)?
+            ))).collect::<Option<Vec<_>>>()?.join(", ")
+        ),
+        CtValue::Struct { type_name, fields } => format!(
+            "{type_name}.{{ {} }}",
+            fields.iter().map(|(name, value)| Some(format!(
+                "{name}: {}",
+                serde_ct_source(value)?
+            ))).collect::<Option<Vec<_>>>()?.join(", ")
+        ),
+        CtValue::Enum { type_name, variant, args } => {
+            if args.is_empty() {
+                format!("{type_name}.{variant}")
+            } else if args.iter().all(|(label, _)| label.is_none()) {
+                format!(
+                    "{type_name}.{variant}({})",
+                    args.iter().map(|(_, value)| serde_ct_source(value)).collect::<Option<Vec<_>>>()?.join(", ")
+                )
+            } else {
+                format!(
+                    "{type_name}.{variant}.{{ {} }}",
+                    args.iter().map(|(label, value)| Some(format!(
+                        "{}: {}",
+                        label.as_ref()?,
+                        serde_ct_source(value)?
+                    ))).collect::<Option<Vec<_>>>()?.join(", ")
+                )
+            }
+        }
+        CtValue::Some(value) => format!("Val({})", serde_ct_source(value)?),
+        CtValue::None(_) => "None".to_string(),
+        CtValue::ResOk(value) => format!("ok({})", serde_ct_source(value)?),
+        CtValue::ResErr(value) => format!("err({})", serde_ct_source(value)?),
+        CtValue::Unit | CtValue::Closure(_) => return None,
+    })
 }
 
 fn serde_source_literal(e: &crate::AST::Expr) -> Option<String> {

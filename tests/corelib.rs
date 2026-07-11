@@ -2519,7 +2519,7 @@ struct Inner { x: Int  y: Bool }
 struct Outer {
     display_name: String
     #[Flatten] inner: Inner
-    #[Default(9)] count: Int
+    #[Default(4 + 5)] count: Int
 }
 
 fn run() {
@@ -2533,7 +2533,7 @@ fn run() {
 "#;
     let (code, stdout, stderr) = build_and_run(&dir, "struct_markers", src, &[], None);
     assert_eq!(code, 0, "generated marker codec failed: {stderr}");
-    assert_eq!(stdout, "{\"displayName\":\"n\",\"x\":1,\"y\":true,\"count\":2}\nm\n3\n9\n");
+    assert_eq!(stdout, "{\"count\":2,\"displayName\":\"n\",\"x\":1,\"y\":true}\nm\n3\n9\n");
     let _ = fs::remove_dir_all(&dir);
 }
 

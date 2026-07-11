@@ -1151,6 +1151,24 @@ pub(crate) fn check_bundle_opts(
             }
         }
 
+        // Defaults must exist before serde source expansion so Decode bodies
+        // embed the evaluated value rather than re-evaluating at runtime.
+        let serde_core_imports: HashMap<String, String> = module
+            .imports
+            .iter()
+            .filter_map(|imp| Some((imp.import_alias(), imp.core_module_path()?)))
+            .collect();
+        let serde_base = module
+            .path
+            .parent()
+            .map(|path| path.to_path_buf())
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        eval_default_markers(
+            &mut module.items,
+            &serde_base,
+            &mut diags,
+            &serde_core_imports,
+        );
         // D-SERDE2=A/R11: built-in codecs re-enter as ordinary Jet source in
         // bundle builds too; this is the production multi-file path.
         super::Registration::expand_builtin_serde_items(&mut module.items, &mut diags);
@@ -1268,10 +1286,6 @@ pub(crate) fn check_bundle_opts(
             &ct_core_imports[idx],
             Some(&mut top_level_embed_inputs),
         );
-        // Card #131: bake each `#[Default(expr)]` value per module (the derive
-        // in an imported module gets the same exact-value treatment as the
-        // entry file).
-        eval_default_markers(&mut module.items, &base, &mut diags, &ct_core_imports[idx]);
     }
     bundle.comptime_inputs.extend(top_level_embed_inputs);
 
