@@ -116,7 +116,8 @@ pub const NS_WORKSPACE: &str = "workspace";
 
 /// D-PERFBUDGET-GRAMMAR1=A: reserved performance-policy role namespace.
 /// `module perf.<role> { budgets: [Budget.{ ... }] }` is sole declaration
-/// surface. Names are reserved before parser/runtime implementation.
+/// surface. Names are reserved before parser/runtime implementation. Full law:
+/// docs/spec/performance-budget-decisions.md.
 pub const NS_PERF: &str = "perf";
 pub const PERF_FIELD_BUDGETS: &str = "budgets";
 pub const TYPE_BUDGET: &str = "Budget";

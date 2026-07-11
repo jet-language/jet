@@ -2361,52 +2361,14 @@ normative in [`proof-replay-decisions.md`](proof-replay-decisions.md); later
 specialized decisions there override umbrella examples.
 
 **D-PERFBUDGET-SURFACE1=A / D-PERFBUDGET-BASELINE1=A /
-D-PERFBUDGET-GRAMMAR1=A**: performance budgets use one typed declaration
-surface: `module perf.<role> { budgets: [Budget.{ ... }] }`. `perf` is a
-reserved role namespace with one lowercase snake_case role segment. Budget
-identity is containing package + role + name; `scope` attaches each fact to a
-package, env, service, scene, bench, or target. `Budget` and `BudgetApplies`
-fields cover metric, provider, comparison, typed limit, enforcement, and
-target/profile applicability. Omitted fields elaborate into the same
-`BudgetSpec`; there is no shorthand policy language.
-
-The closed quantity suffixes are `ns`, `us`, `ms`, `s`, `B`, `KiB`, `MiB`,
-`GiB`, and `pct`. Deterministic facts use `.Absolute`; statistical facts use
-`.AbsoluteFrom(baseline)` or `.RelativeTo(baseline)` with pinned evidence.
-Values normalize exactly with no rounding; relative percentages use integer
-basis points. Invalid scope/provider/metric, unit, direction, comparison,
-applicability, collision, nonconstant value, overflow, deterministic warning,
-or malformed lowercase kebab-path baseline is a compile-time error. A valid
-baseline name with no pinned generation is runtime-unavailable, never a
-compile error or silent pass. Existing bench/game budget prototypes must be
-removed through their separately ratified migrations before this surface
-ships; no alias, adapter, dormant parser, or second evaluator may remain.
-
-**D-PERFBUDGET-REPORT1=A / D-PERFBUDGET-OUTPUT1=A**: every check/update writes
-one canonical `BudgetReport` JSON artifact at
-`.jet/perf/reports/<report_id>.json`; its lowercase SHA-256 id hashes canonical
-bytes with `report_id` omitted. Reports contain canonical specs, source spans,
-exact normalized measurements/samples/context/provider/toolchain facts,
-baseline history, confidence/trend decisions, and results. Named baseline
-heads use immutable content-addressed report objects plus race-safe
-compare-and-swap manifests; missing, mismatched, stale, zero, or unavailable
-evidence never silently passes. Report and baseline storage obey the ratified
-no-follow, no-replace, durability, canonicalization, privacy, retention, and
-history laws.
-
-Commands are exactly `jet budget check [--json] [--verbose] [--annotations
-auto|none|github]` and `jet budget update --baseline <name>
-[--bootstrap|--accept-regression] [--reason <text>] [-y|--yes]` with the same
-projection flags. Check never mutates baseline state. Update always plans
-first and follows the shared confirmation/non-TTY plan-only law. Default human
-output hides passing rows, emits source-native What/Why/Fix diagnostics for
-warnings/failures, and ends with the canonical summary; JSON and CI annotations
-project the same ordered results. Exit codes are 0 for pass/warn/cancelled or
-plan-only/successful update, 1 for budget/evidence/compiler/tool failure, 2 for
-usage, and 101 only for an ICE. E2903-E2905 are compiler-front-end budget
-diagnostics; E2906-E2908 are tool/result diagnostics. Their exact copy,
-portable schemas, ordering, artifact bytes, baseline update law, output copy,
-and fixtures are normative in the full ratified Tower decisions.
+D-PERFBUDGET-GRAMMAR1=A / D-PERFBUDGET-REPORT1=A /
+D-PERFBUDGET-OUTPUT1=A**: performance budgets use typed
+`module perf.<role> { budgets: [Budget.{ ... }] }` declarations, pinned
+statistical baselines, one canonical `BudgetReport`, and exact `jet budget
+check` / plan-first `jet budget update` projections. Full closed grammar,
+inference, arithmetic, collision, report, baseline, storage, output,
+diagnostic, fixture, migration, and prototype-retirement law is normative in
+[`performance-budget-decisions.md`](performance-budget-decisions.md).
 
 **D-BPE-NAME1=A / D-BPE-HOST1=B / D-BPE-LAYOUT1=A / D-BPE-ALTITUDE1=A /
 D-BPE-TAXONOMY1=A / D-BPE-EDITSCOPE1=A / D-BPE-PROTOCOL1=C**: Jet's visual
