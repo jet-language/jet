@@ -497,6 +497,53 @@ fn dns_fixture_response(query: &[u8]) -> Vec<u8> {
     resp
 }
 
+fn dns_question_end(query: &[u8]) -> usize {
+    let mut pos = 12usize;
+    while pos < query.len() && query[pos] != 0 {
+        pos += query[pos] as usize + 1;
+    }
+    pos + 5
+}
+
+fn dns_truncated_response(query: &[u8]) -> Vec<u8> {
+    let end = dns_question_end(query);
+    let mut response = Vec::new();
+    response.extend_from_slice(&query[0..2]);
+    response.extend_from_slice(&0x8380u16.to_be_bytes());
+    response.extend_from_slice(&1u16.to_be_bytes());
+    response.extend_from_slice(&0u16.to_be_bytes());
+    response.extend_from_slice(&0u16.to_be_bytes());
+    response.extend_from_slice(&0u16.to_be_bytes());
+    response.extend_from_slice(&query[12..end]);
+    response
+}
+
+fn dns_cname_additional_response(query: &[u8]) -> Vec<u8> {
+    let end = dns_question_end(query);
+    let alias = dns_name_wire("alias.example.test");
+    let mut response = Vec::new();
+    response.extend_from_slice(&query[0..2]);
+    response.extend_from_slice(&0x8180u16.to_be_bytes());
+    response.extend_from_slice(&1u16.to_be_bytes());
+    response.extend_from_slice(&1u16.to_be_bytes());
+    response.extend_from_slice(&0u16.to_be_bytes());
+    response.extend_from_slice(&1u16.to_be_bytes());
+    response.extend_from_slice(&query[12..end]);
+    response.extend_from_slice(&[0xc0, 0x0c]);
+    response.extend_from_slice(&5u16.to_be_bytes());
+    response.extend_from_slice(&1u16.to_be_bytes());
+    response.extend_from_slice(&0u32.to_be_bytes());
+    response.extend_from_slice(&(alias.len() as u16).to_be_bytes());
+    response.extend_from_slice(&alias);
+    response.extend_from_slice(&alias);
+    response.extend_from_slice(&1u16.to_be_bytes());
+    response.extend_from_slice(&1u16.to_be_bytes());
+    response.extend_from_slice(&0u32.to_be_bytes());
+    response.extend_from_slice(&4u16.to_be_bytes());
+    response.extend_from_slice(&[192, 0, 2, 42]);
+    response
+}
+
 #[test]
 fn core_net_dns_txt_and_srv_are_real_udp_queries() {
     let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
@@ -528,6 +575,50 @@ fn run() {{
     server.join().unwrap();
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(stdout, "jet\nsrv.example.test:443\n");
+}
+
+#[test]
+fn core_net_dns_udp_truncation_retries_tcp_and_reads_cname_additional() {
+    use std::io::{Read, Write};
+
+    let tcp = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = tcp.local_addr().unwrap();
+    let udp = std::net::UdpSocket::bind(addr).unwrap();
+    let server = std::thread::spawn(move || {
+        let mut udp_query = [0u8; 512];
+        let (n, peer) = udp.recv_from(&mut udp_query).unwrap();
+        udp.send_to(&dns_truncated_response(&udp_query[..n]), peer)
+            .unwrap();
+
+        let (mut stream, _) = tcp.accept().unwrap();
+        let mut prefix = [0u8; 2];
+        stream.read_exact(&mut prefix).unwrap();
+        let mut tcp_query = vec![0u8; u16::from_be_bytes(prefix) as usize];
+        stream.read_exact(&mut tcp_query).unwrap();
+        let response = dns_cname_additional_response(&tcp_query);
+        stream
+            .write_all(&(response.len() as u16).to_be_bytes())
+            .unwrap();
+        stream.write_all(&response).unwrap();
+    });
+
+    let dir = std::env::temp_dir().join(format!("jet_core_net_dns_tcp_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let src = format!(
+        r#"
+use core.net as net
+
+fn run() {{
+    ips :: net.dns_a_at("{}", "service.example.test", 1000) ?? panic("dns")
+    print(net.ip_to_string(ips[0]))
+}}
+"#,
+        addr
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "dns_tcp_cname", &src, &[], None);
+    server.join().unwrap();
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, "192.0.2.42\n");
 }
 
 #[test]

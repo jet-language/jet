@@ -618,19 +618,49 @@ fn jet_net_unix_write(_stream: &mut JetUnixStream, _data: &String) -> Result<(),
 
 fn jet_net_dns_system_servers() -> Vec<String> {
     let mut out = Vec::new();
+    #[cfg(not(windows))]
     if let Ok(text) = std::fs::read_to_string("/etc/resolv.conf") {
         for line in text.lines() {
             let mut parts = line.split_whitespace();
             if parts.next() == Some("nameserver") {
                 if let Some(host) = parts.next() {
-                    out.push(format!("{}:53", host));
+                    let host = host.trim_matches(|c| c == '[' || c == ']');
+                    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+                        out.push(std::net::SocketAddr::new(ip, 53).to_string());
+                    }
                 }
             }
         }
     }
-    if out.is_empty() {
-        out.push("1.1.1.1:53".to_string());
+
+    // Windows has no resolv.conf.  `ipconfig /all` is a platform-owned view of
+    // the active adapter resolver configuration and, unlike an invented public
+    // fallback, preserves VPN and enterprise DNS policy.  Continuation lines
+    // following "DNS Servers" contain additional configured servers.
+    #[cfg(windows)]
+    if let Ok(output) = std::process::Command::new("ipconfig").arg("/all").output() {
+        let text = String::from_utf8_lossy(&output.stdout);
+        let mut reading_dns = false;
+        for line in text.lines() {
+            let trimmed = line.trim();
+            if let Some((label, value)) = trimmed.split_once(':') {
+                reading_dns = label.trim().eq_ignore_ascii_case("DNS Servers");
+                if reading_dns {
+                    if let Ok(ip) = value.trim().parse::<std::net::IpAddr>() {
+                        out.push(std::net::SocketAddr::new(ip, 53).to_string());
+                    }
+                }
+            } else if reading_dns {
+                if let Ok(ip) = trimmed.parse::<std::net::IpAddr>() {
+                    out.push(std::net::SocketAddr::new(ip, 53).to_string());
+                } else if !trimmed.is_empty() {
+                    reading_dns = false;
+                }
+            }
+        }
     }
+    out.sort();
+    out.dedup();
     out
 }
 
@@ -655,27 +685,34 @@ fn jet_net_dns_read_name(packet: &[u8], pos: &mut usize) -> Result<String, Strin
     let mut labels = Vec::new();
     let mut p = *pos;
     let mut jumped = false;
-    let mut seen = 0usize;
+    let mut seen = vec![false; packet.len()];
+    let mut wire_len = 1usize;
     loop {
         if p >= packet.len() {
-            return Err("truncated DNS name".to_string());
+            return Err("network protocol error: truncated DNS name".to_string());
         }
+        if seen[p] {
+            return Err("network protocol error: cyclic DNS compression pointer".to_string());
+        }
+        seen[p] = true;
         let len = packet[p];
         if len & 0xc0 == 0xc0 {
             if p + 1 >= packet.len() {
-                return Err("truncated DNS compression pointer".to_string());
+                return Err("network protocol error: truncated DNS compression pointer".to_string());
             }
             let ptr = (((len & 0x3f) as usize) << 8) | packet[p + 1] as usize;
+            if ptr >= packet.len() {
+                return Err("network protocol error: DNS compression pointer is out of bounds".to_string());
+            }
             if !jumped {
                 *pos = p + 2;
             }
             p = ptr;
             jumped = true;
-            seen += 1;
-            if seen > packet.len() {
-                return Err("cyclic DNS compression pointer".to_string());
-            }
             continue;
+        }
+        if len & 0xc0 != 0 {
+            return Err("network protocol error: reserved DNS label encoding".to_string());
         }
         p += 1;
         if len == 0 {
@@ -684,11 +721,20 @@ fn jet_net_dns_read_name(packet: &[u8], pos: &mut usize) -> Result<String, Strin
             }
             break;
         }
+        if len > 63 {
+            return Err("network protocol error: DNS label exceeds 63 bytes".to_string());
+        }
         let end = p + len as usize;
         if end > packet.len() {
-            return Err("truncated DNS label".to_string());
+            return Err("network protocol error: truncated DNS label".to_string());
         }
-        labels.push(String::from_utf8_lossy(&packet[p..end]).to_string());
+        wire_len += len as usize + 1;
+        if wire_len > 255 {
+            return Err("network protocol error: DNS name exceeds 255 bytes".to_string());
+        }
+        let label = std::str::from_utf8(&packet[p..end])
+            .map_err(|_| "network protocol error: DNS label is not valid UTF-8".to_string())?;
+        labels.push(label.to_string());
         p = end;
         if !jumped {
             *pos = p;
@@ -701,18 +747,149 @@ fn jet_net_dns_read_name(packet: &[u8], pos: &mut usize) -> Result<String, Strin
     })
 }
 
-fn jet_net_dns_query(server: &String, name: &String, qtype: u16, ms: i64) -> Result<Vec<Vec<u8>>, String> {
+#[derive(Clone)]
+struct JetDnsWireRecord {
+    owner: String,
+    ty: u16,
+    class: u16,
+    packet: std::sync::Arc<Vec<u8>>,
+    rdata_start: usize,
+    rdata_len: usize,
+}
+
+fn jet_net_dns_txid() -> u16 {
+    use std::hash::{BuildHasher, Hasher};
+    // RandomState is seeded from the platform's process entropy by std.  Mix a
+    // fresh state with monotonic/process facts so concurrent queries cannot
+    // repeat a predictable counter or a source-code constant.
+    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+    h.write_u32(std::process::id());
+    h.write_u128(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos(),
+    );
+    h.finish() as u16
+}
+
+fn jet_net_dns_read_u16(packet: &[u8], at: usize, what: &str) -> Result<u16, String> {
+    let bytes = packet
+        .get(at..at + 2)
+        .ok_or_else(|| format!("network protocol error: truncated DNS {}", what))?;
+    Ok(u16::from_be_bytes([bytes[0], bytes[1]]))
+}
+
+fn jet_net_dns_parse_response(
+    packet: Vec<u8>,
+    txid: u16,
+    name: &str,
+    qtype: u16,
+) -> Result<(bool, Vec<JetDnsWireRecord>), String> {
+    if packet.len() < 12 {
+        return Err("network protocol error: truncated DNS header".to_string());
+    }
+    if jet_net_dns_read_u16(&packet, 0, "transaction ID")? != txid {
+        return Err("network protocol error: DNS transaction ID mismatch".to_string());
+    }
+    let flags = jet_net_dns_read_u16(&packet, 2, "flags")?;
+    if flags & 0x8000 == 0 {
+        return Err("network protocol error: DNS packet is not a response".to_string());
+    }
+    if flags & 0x7800 != 0 {
+        return Err("network protocol error: unsupported DNS opcode".to_string());
+    }
+    let rcode = flags & 0x000f;
+    if rcode == 3 {
+        return Err(format!("DNS name not found: `{}`", name));
+    }
+    if rcode != 0 {
+        return Err(format!("DNS server failure for `{}`: RCODE {}", name, rcode));
+    }
+    let qd = jet_net_dns_read_u16(&packet, 4, "question count")? as usize;
+    if qd != 1 {
+        return Err("network protocol error: DNS response must echo one question".to_string());
+    }
+    let total_records = jet_net_dns_read_u16(&packet, 6, "answer count")? as usize
+        + jet_net_dns_read_u16(&packet, 8, "authority count")? as usize
+        + jet_net_dns_read_u16(&packet, 10, "additional count")? as usize;
+    let mut pos = 12usize;
+    let echoed_name = jet_net_dns_read_name(&packet, &mut pos)?;
+    let echoed_type = jet_net_dns_read_u16(&packet, pos, "question type")?;
+    let echoed_class = jet_net_dns_read_u16(&packet, pos + 2, "question class")?;
+    pos += 4;
+    if !echoed_name.trim_end_matches('.').eq_ignore_ascii_case(name.trim_end_matches('.'))
+        || echoed_type != qtype
+        || echoed_class != 1
+    {
+        return Err("network protocol error: DNS question echo mismatch".to_string());
+    }
+    let packet = std::sync::Arc::new(packet);
+    let mut records = Vec::with_capacity(total_records);
+    for _ in 0..total_records {
+        let owner = jet_net_dns_read_name(packet.as_slice(), &mut pos)?;
+        let ty = jet_net_dns_read_u16(packet.as_slice(), pos, "record type")?;
+        let class = jet_net_dns_read_u16(packet.as_slice(), pos + 2, "record class")?;
+        let rdata_len = jet_net_dns_read_u16(packet.as_slice(), pos + 8, "record length")? as usize;
+        pos += 10;
+        let end = pos.checked_add(rdata_len)
+            .filter(|end| *end <= packet.len())
+            .ok_or_else(|| "network protocol error: truncated DNS record data".to_string())?;
+        records.push(JetDnsWireRecord {
+            owner,
+            ty,
+            class,
+            packet: packet.clone(),
+            rdata_start: pos,
+            rdata_len,
+        });
+        pos = end;
+    }
+    if pos != packet.len() {
+        return Err("network protocol error: trailing bytes after DNS records".to_string());
+    }
+    Ok((flags & 0x0200 != 0, records))
+}
+
+fn jet_net_dns_tcp_exchange(
+    server_addr: std::net::SocketAddr,
+    request: &[u8],
+    timeout: std::time::Duration,
+) -> Result<Vec<u8>, String> {
+    use std::io::{Read, Write};
+    let mut stream = std::net::TcpStream::connect_timeout(&server_addr, timeout)
+        .map_err(|e| format!("DNS TCP connect to `{}` failed: {}", server_addr, e))?;
+    stream.set_read_timeout(Some(timeout)).map_err(|e| format!("DNS TCP timeout setup failed: {}", e))?;
+    stream.set_write_timeout(Some(timeout)).map_err(|e| format!("DNS TCP timeout setup failed: {}", e))?;
+    let len = u16::try_from(request.len()).map_err(|_| "network protocol error: DNS request exceeds TCP frame".to_string())?;
+    stream.write_all(&len.to_be_bytes()).and_then(|_| stream.write_all(request))
+        .map_err(|e| format!("DNS TCP query send failed: {}", e))?;
+    let mut prefix = [0u8; 2];
+    stream.read_exact(&mut prefix).map_err(|e| format!("DNS TCP response length failed: {}", e))?;
+    let response_len = u16::from_be_bytes(prefix) as usize;
+    if response_len < 12 || response_len > 65535 {
+        return Err("network protocol error: invalid DNS TCP response length".to_string());
+    }
+    let mut packet = vec![0u8; response_len];
+    stream.read_exact(&mut packet).map_err(|e| format!("DNS TCP response truncated: {}", e))?;
+    Ok(packet)
+}
+
+fn jet_net_dns_query(server: &String, name: &String, qtype: u16, ms: i64) -> Result<Vec<JetDnsWireRecord>, String> {
     let timeout = jet_net_timeout(ms)?;
     let server_addr = server
         .parse::<std::net::SocketAddr>()
         .map_err(|e| format!("invalid DNS server `{}`: {}", server, e))?;
-    let socket = std::net::UdpSocket::bind("0.0.0.0:0")
+    let bind_addr = if server_addr.is_ipv6() { "[::]:0" } else { "0.0.0.0:0" };
+    let socket = std::net::UdpSocket::bind(bind_addr)
         .map_err(|e| format!("dns socket bind failed: {}", e))?;
+    socket.connect(server_addr).map_err(|e| format!("DNS server `{}` is unreachable: {}", server, e))?;
     socket
         .set_read_timeout(Some(timeout))
         .map_err(|e| format!("dns timeout setup failed: {}", e))?;
     let mut req = Vec::new();
-    req.extend_from_slice(&0x4a57u16.to_be_bytes());
+    let txid = jet_net_dns_txid();
+    req.extend_from_slice(&txid.to_be_bytes());
     req.extend_from_slice(&0x0100u16.to_be_bytes());
     req.extend_from_slice(&1u16.to_be_bytes());
     req.extend_from_slice(&0u16.to_be_bytes());
@@ -722,104 +899,159 @@ fn jet_net_dns_query(server: &String, name: &String, qtype: u16, ms: i64) -> Res
     req.extend_from_slice(&qtype.to_be_bytes());
     req.extend_from_slice(&1u16.to_be_bytes());
     socket
-        .send_to(&req, server_addr)
+        .send(&req)
         .map_err(|e| format!("dns query send failed: {}", e))?;
-    let mut packet = vec![0u8; 4096];
-    let (n, _) = socket
-        .recv_from(&mut packet)
+    let mut packet = vec![0u8; 65535];
+    let n = socket
+        .recv(&mut packet)
         .map_err(|e| format!("dns query for `{}` failed: {}", name, e))?;
     packet.truncate(n);
-    if packet.len() < 12 {
-        return Err("truncated DNS response".to_string());
+    let (truncated, records) = jet_net_dns_parse_response(packet, txid, name, qtype)?;
+    if truncated {
+        let packet = jet_net_dns_tcp_exchange(server_addr, &req, timeout)?;
+        let (still_truncated, records) = jet_net_dns_parse_response(packet, txid, name, qtype)?;
+        if still_truncated {
+            return Err("network protocol error: DNS TCP response is truncated".to_string());
+        }
+        return Ok(records);
     }
-    let an = u16::from_be_bytes([packet[6], packet[7]]) as usize;
-    let mut pos = 12usize;
-    let _ = jet_net_dns_read_name(&packet, &mut pos)?;
-    pos += 4;
-    let mut out = Vec::new();
-    for _ in 0..an {
-        let _ = jet_net_dns_read_name(&packet, &mut pos)?;
-        if pos + 10 > packet.len() {
-            return Err("truncated DNS answer".to_string());
-        }
-        let ty = u16::from_be_bytes([packet[pos], packet[pos + 1]]);
-        let class = u16::from_be_bytes([packet[pos + 2], packet[pos + 3]]);
-        let rdlen = u16::from_be_bytes([packet[pos + 8], packet[pos + 9]]) as usize;
-        pos += 10;
-        if pos + rdlen > packet.len() {
-            return Err("truncated DNS rdata".to_string());
-        }
-        if ty == qtype && class == 1 {
-            out.push(packet[pos..pos + rdlen].to_vec());
-        }
-        pos += rdlen;
+    Ok(records)
+}
+
+fn jet_net_dns_record_name(record: &JetDnsWireRecord) -> Result<String, String> {
+    let mut pos = record.rdata_start;
+    let name = jet_net_dns_read_name(record.packet.as_slice(), &mut pos)?;
+    if pos != record.rdata_start + record.rdata_len {
+        return Err("network protocol error: DNS name record length mismatch".to_string());
     }
-    Ok(out)
+    Ok(name)
+}
+
+fn jet_net_dns_matching_records(records: &[JetDnsWireRecord], name: &str, qtype: u16) -> Result<Vec<JetDnsWireRecord>, String> {
+    let mut current = name.trim_end_matches('.').to_string();
+    let mut visited = std::collections::BTreeSet::new();
+    for _ in 0..16 {
+        if !visited.insert(current.to_ascii_lowercase()) {
+            return Err("network protocol error: cyclic DNS CNAME chain".to_string());
+        }
+        let found: Vec<_> = records.iter().filter(|r| r.class == 1 && r.ty == qtype && r.owner.eq_ignore_ascii_case(&current)).cloned().collect();
+        if !found.is_empty() {
+            return Ok(found);
+        }
+        let alias = records.iter().find(|r| r.class == 1 && r.ty == 5 && r.owner.eq_ignore_ascii_case(&current));
+        match alias {
+            Some(record) => current = jet_net_dns_record_name(record)?.trim_end_matches('.').to_string(),
+            None => return Ok(Vec::new()),
+        }
+    }
+    Err("network protocol error: DNS CNAME chain exceeds 16 records".to_string())
+}
+
+fn jet_net_dns_system_lookup(name: &String, ms: i64) -> Result<Vec<std::net::SocketAddr>, String> {
+    let configured = jet_net_timeout(ms)?;
+    let timeout = match jet_deadline_remaining_ms() {
+        Some(remaining) if remaining <= 0 => {
+            return Err(format!("network timeout during DNS lookup for `{}`", name));
+        }
+        Some(remaining) => configured.min(std::time::Duration::from_millis(remaining as u64)),
+        None => configured,
+    };
+    let owned_name = name.clone();
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        use std::net::ToSocketAddrs;
+        let result = (owned_name.as_str(), 0)
+            .to_socket_addrs()
+            .map(|iter| iter.collect::<Vec<_>>())
+            .map_err(|e| e.to_string());
+        let _ = tx.send(result);
+    });
+    match rx.recv_timeout(timeout) {
+        Ok(result) => result.map_err(|e| format!("DNS lookup for `{}` failed: {}", name, e)),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            Err(format!("network timeout during DNS lookup for `{}`", name))
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            Err(format!("DNS lookup worker for `{}` failed", name))
+        }
+    }
 }
 
 fn jet_net_dns_a(name: &String, ms: i64) -> Result<Vec<JetIpAddr>, String> {
-    for server in jet_net_dns_system_servers() {
-        if let Ok(v) = jet_net_dns_a_at(&server, name, ms) {
-            return Ok(v);
-        }
-    }
-    Err(format!("DNS A lookup for `{}` failed", name))
+    let mut out: Vec<_> = jet_net_dns_system_lookup(name, ms)?
+        .into_iter().filter(|a| a.is_ipv4()).map(|a| JetIpAddr { inner: a.ip() }).collect();
+    out.sort_by_key(|a| a.inner);
+    out.dedup_by_key(|a| a.inner);
+    Ok(out)
 }
 
 fn jet_net_dns_aaaa(name: &String, ms: i64) -> Result<Vec<JetIpAddr>, String> {
-    for server in jet_net_dns_system_servers() {
-        if let Ok(v) = jet_net_dns_aaaa_at(&server, name, ms) {
-            return Ok(v);
-        }
-    }
-    Err(format!("DNS AAAA lookup for `{}` failed", name))
+    let mut out: Vec<_> = jet_net_dns_system_lookup(name, ms)?
+        .into_iter().filter(|a| a.is_ipv6()).map(|a| JetIpAddr { inner: a.ip() }).collect();
+    out.sort_by_key(|a| a.inner);
+    out.dedup_by_key(|a| a.inner);
+    Ok(out)
 }
 
 fn jet_net_dns_a_at(server: &String, name: &String, ms: i64) -> Result<Vec<JetIpAddr>, String> {
-    Ok(jet_net_dns_query(server, name, 1, ms)?
+    Ok(jet_net_dns_matching_records(&jet_net_dns_query(server, name, 1, ms)?, name, 1)?
         .into_iter()
-        .filter(|r| r.len() == 4)
-        .map(|r| JetIpAddr {
-            inner: std::net::IpAddr::V4(std::net::Ipv4Addr::new(r[0], r[1], r[2], r[3])),
+        .map(|r| {
+            let data = &r.packet[r.rdata_start..r.rdata_start + r.rdata_len];
+            if data.len() != 4 { return Err("network protocol error: DNS A record is not 4 bytes".to_string()); }
+            Ok(JetIpAddr {
+            inner: std::net::IpAddr::V4(std::net::Ipv4Addr::new(data[0], data[1], data[2], data[3])),
         })
-        .collect())
+        })
+        .collect::<Result<Vec<_>, _>>()?)
 }
 
 fn jet_net_dns_aaaa_at(server: &String, name: &String, ms: i64) -> Result<Vec<JetIpAddr>, String> {
-    Ok(jet_net_dns_query(server, name, 28, ms)?
+    Ok(jet_net_dns_matching_records(&jet_net_dns_query(server, name, 28, ms)?, name, 28)?
         .into_iter()
-        .filter(|r| r.len() == 16)
         .map(|r| {
+            let data = &r.packet[r.rdata_start..r.rdata_start + r.rdata_len];
+            if data.len() != 16 { return Err("network protocol error: DNS AAAA record is not 16 bytes".to_string()); }
             let mut b = [0u8; 16];
-            b.copy_from_slice(&r);
-            JetIpAddr {
+            b.copy_from_slice(data);
+            Ok(JetIpAddr {
                 inner: std::net::IpAddr::V6(std::net::Ipv6Addr::from(b)),
-            }
+            })
         })
-        .collect())
+        .collect::<Result<Vec<_>, _>>()?)
 }
 
 fn jet_net_dns_txt(name: &String, ms: i64) -> Result<Vec<String>, String> {
-    for server in jet_net_dns_system_servers() {
-        if let Ok(v) = jet_net_dns_txt_at(&server, name, ms) {
-            return Ok(v);
+    let servers = jet_net_dns_system_servers();
+    if servers.is_empty() {
+        return Err("host DNS configuration has no resolver for TXT lookup".to_string());
+    }
+    let mut last = String::new();
+    for server in servers {
+        match jet_net_dns_txt_at(&server, name, ms) {
+            Ok(v) => return Ok(v),
+            Err(e) => last = e,
         }
     }
-    Err(format!("DNS TXT lookup for `{}` failed", name))
+    Err(last)
 }
 
 fn jet_net_dns_txt_at(server: &String, name: &String, ms: i64) -> Result<Vec<String>, String> {
     let mut out = Vec::new();
-    for r in jet_net_dns_query(server, name, 16, ms)? {
+    let records = jet_net_dns_query(server, name, 16, ms)?;
+    for r in jet_net_dns_matching_records(&records, name, 16)? {
+        let data = &r.packet[r.rdata_start..r.rdata_start + r.rdata_len];
         let mut p = 0usize;
         let mut s = String::new();
-        while p < r.len() {
-            let len = r[p] as usize;
+        while p < data.len() {
+            let len = data[p] as usize;
             p += 1;
-            if p + len > r.len() {
-                return Err("truncated DNS TXT record".to_string());
+            if p + len > data.len() {
+                return Err("network protocol error: truncated DNS TXT record".to_string());
             }
-            s.push_str(&String::from_utf8_lossy(&r[p..p + len]));
+            let part = std::str::from_utf8(&data[p..p + len])
+                .map_err(|_| "network protocol error: DNS TXT record is not valid UTF-8".to_string())?;
+            s.push_str(part);
             p += len;
         }
         out.push(s);
@@ -828,26 +1060,36 @@ fn jet_net_dns_txt_at(server: &String, name: &String, ms: i64) -> Result<Vec<Str
 }
 
 fn jet_net_dns_srv(name: &String, ms: i64) -> Result<Vec<JetDnsSrv>, String> {
-    for server in jet_net_dns_system_servers() {
-        if let Ok(v) = jet_net_dns_srv_at(&server, name, ms) {
-            return Ok(v);
+    let servers = jet_net_dns_system_servers();
+    if servers.is_empty() {
+        return Err("host DNS configuration has no resolver for SRV lookup".to_string());
+    }
+    let mut last = String::new();
+    for server in servers {
+        match jet_net_dns_srv_at(&server, name, ms) {
+            Ok(v) => return Ok(v),
+            Err(e) => last = e,
         }
     }
-    Err(format!("DNS SRV lookup for `{}` failed", name))
+    Err(last)
 }
 
 fn jet_net_dns_srv_at(server: &String, name: &String, ms: i64) -> Result<Vec<JetDnsSrv>, String> {
-    let packets = jet_net_dns_query(server, name, 33, ms)?;
+    let records = jet_net_dns_query(server, name, 33, ms)?;
     let mut out = Vec::new();
-    for r in packets {
-        if r.len() < 7 {
-            return Err("truncated DNS SRV record".to_string());
+    for r in jet_net_dns_matching_records(&records, name, 33)? {
+        if r.rdata_len < 7 {
+            return Err("network protocol error: truncated DNS SRV record".to_string());
         }
-        let priority = u16::from_be_bytes([r[0], r[1]]) as i64;
-        let weight = u16::from_be_bytes([r[2], r[3]]) as i64;
-        let port = u16::from_be_bytes([r[4], r[5]]) as i64;
-        let mut pos = 6usize;
-        let target = jet_net_dns_read_name(&r, &mut pos)?;
+        let data = &r.packet[r.rdata_start..r.rdata_start + r.rdata_len];
+        let priority = u16::from_be_bytes([data[0], data[1]]) as i64;
+        let weight = u16::from_be_bytes([data[2], data[3]]) as i64;
+        let port = u16::from_be_bytes([data[4], data[5]]) as i64;
+        let mut pos = r.rdata_start + 6;
+        let target = jet_net_dns_read_name(r.packet.as_slice(), &mut pos)?;
+        if pos != r.rdata_start + r.rdata_len {
+            return Err("network protocol error: DNS SRV record length mismatch".to_string());
+        }
         out.push(JetDnsSrv {
             priority,
             weight,
@@ -1212,4 +1454,3 @@ fn jet_http_serve_router(addr: &String, router: JetHttpRouter) {
 fn jet_http_request_param(req: &JetHttpRequest, name: &String) -> Option<String> {
     req.params.get(name.as_str()).cloned()
 }
-
