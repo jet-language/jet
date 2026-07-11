@@ -18024,6 +18024,67 @@
       "ratifiedAt": "2026-07-07",
       "draft": false,
       "retiredAt": "2026-07-11T03:11:08.961Z"
+    },
+    {
+      "id": "D-BUILDQUERY1",
+      "cardId": "c0u55hlv",
+      "group": "tooling",
+      "title": "Build graph UX: what commands explain targets, generated files, and rebuild causes?",
+      "gist": "Choose the inspection surface for graph, provenance, and why-rebuilt answers.",
+      "explainer": "",
+      "story": "Grace changes an OpenAPI file and twenty generated modules rebuild. She needs to ask Jet what depended on that file, what generated a changed module, and why a cache miss happened, without reading lock internals.",
+      "inWild": "$ jet graph --target service\n$ jet explain-build build/api_client.jet\n$ jet explain-build openapi-client --why-rebuilt\n$ jet query build \"targets depending_on api/openapi.json\" --json",
+      "detail": "2026-07-06 two-facet pass: command-line explainability and editor UX should share the same model. Recommendation is CLI-first commands plus LSP/editor surfaces over the same graph/provenance API.",
+      "options": [
+        {
+          "key": "A",
+          "name": "CLI commands plus shared editor/query API (recommended)",
+          "detail": "`jet graph` visualizes, `jet explain-build <target/file/action>` explains provenance/rebuilds, `jet query build` gives CI-friendly structured queries, and the LSP uses the same data for hover/go-to-def/generated-file provenance.",
+          "code": "$ jet graph --target service\n$ jet explain-build build/api_client.jet\n$ jet query build \"generated_by openapi-client\" --json\n// editor hover: produced by openapi-client, cache miss reason shown"
+        },
+        {
+          "key": "B",
+          "name": "One explain command only",
+          "detail": "A single `jet explain-build` handles everything. Simpler vocabulary, but graph exploration and CI queries become cramped.",
+          "code": "$ jet explain-build --graph service\n$ jet explain-build --query \"generated_by openapi-client\""
+        },
+        {
+          "key": "C",
+          "name": "JSON lock only",
+          "detail": "Expose `.jet/lock` and let tools inspect it. Machine-readable, but bad human UX and easy to break when lock internals evolve.",
+          "code": "$ cat .jet/lock | jq ..."
+        },
+        {
+          "key": "D",
+          "name": "LSP/editor only",
+          "detail": "Show provenance in editor UI but keep CLI minimal. Good interactive UX, weak CI/script story.",
+          "code": "// hover generated file -> produced by openapi-client"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Bazel",
+          "note": "Bazel query/aquery explain graph shape and actions.",
+          "code": "bazel query \"deps(//app:server)\"\nbazel aquery //app:server"
+        },
+        {
+          "lang": "Ninja",
+          "note": "Ninja can explain why outputs are dirty.",
+          "code": "ninja -d explain"
+        },
+        {
+          "lang": "Cargo",
+          "note": "Cargo metadata is useful for tools but not a complete build-action graph.",
+          "code": "cargo metadata --format-version 1"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "created": "2026-07-06T17:16:20.443Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-06",
+      "draft": false,
+      "retiredAt": "2026-07-11T19:41:16.121Z"
     }
   ],
   "cards": [
@@ -51285,6 +51346,517 @@
       "action": "card.criteria-meet",
       "ref": "c0l5fmyy",
       "note": "#1"
+    },
+    {
+      "at": "2026-07-11T02:10:18.020Z",
+      "by": "terra-360-help",
+      "action": "card.criteria-meet",
+      "ref": "c0l5fmyy",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-11T02:10:45.810Z",
+      "by": "sol-360-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0l5fmyy",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-11T02:10:55.370Z",
+      "by": "sol-360-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0l5fmyy",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-11T02:12:33.507Z",
+      "by": "terra-360-help",
+      "action": "card.release",
+      "ref": "c0l5fmyy",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-11T02:20:58.236Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c02kdm7a",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T02:21:15.355Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0rb4k1d",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T02:21:17.228Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0w6wa07",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T02:21:19.112Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c047jzdr",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T02:21:20.985Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c06tccyz",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T02:21:22.885Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0pef855",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T02:21:24.816Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0ai04g0",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T02:21:45.232Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0w6wa07",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T02:21:47.120Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c047jzdr",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T02:21:49.042Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c06tccyz",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T02:21:50.902Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0pef855",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T02:22:42.729Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0rb4k1d",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T02:22:44.615Z",
+      "by": "fable-main",
+      "action": "card.claim",
+      "ref": "c0m9tjqj",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T02:22:46.512Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0m9tjqj",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T02:25:13.462Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0m9tjqj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T02:25:24.627Z",
+      "by": "fable-main",
+      "action": "card.release",
+      "ref": "c0m9tjqj",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-11T02:25:44.107Z",
+      "by": "fable-main",
+      "action": "card.claim",
+      "ref": "c07vdfen",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T02:25:45.964Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c07vdfen",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T02:28:21.506Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c06tccyz",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T02:29:22.513Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-CODEMOD-BATCH1",
+      "note": "Batch semantic codemod object law"
+    },
+    {
+      "at": "2026-07-11T02:32:04.049Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c07vdfen",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T02:55:44.301Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0rb4k1d",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T03:06:11.253Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-PROVE-SEM1",
+      "note": "Default jet prove execution semantics"
+    },
+    {
+      "at": "2026-07-11T03:06:11.413Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-JPROOF1",
+      "note": ".jproof evidence artifact contract"
+    },
+    {
+      "at": "2026-07-11T03:09:06.054Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c07vdfen",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T03:11:07.032Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c07vdfen",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T03:11:08.947Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c07vdfen",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T03:11:23.385Z",
+      "by": "fable-main",
+      "action": "card.claim",
+      "ref": "c0wx96s2",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T03:11:25.292Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0wx96s2",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T03:14:38.749Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0wx96s2",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T03:14:59.844Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0rb4k1d",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T03:15:39.948Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-JREPLAY1",
+      "note": "General replay capture invocation and .jreplay law"
+    },
+    {
+      "at": "2026-07-11T03:17:17.601Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0wx96s2",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T03:33:06.136Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-PROVE-SOLVER1",
+      "note": "Opt-in solver backend and proof boundary"
+    },
+    {
+      "at": "2026-07-11T03:34:37.695Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-PROVE-LENS1",
+      "note": "Proof lens vocabulary and semantics"
+    },
+    {
+      "at": "2026-07-11T03:36:38.471Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0rb4k1d",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T03:36:48.758Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0wx96s2",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T03:39:30.161Z",
+      "by": "codex-main",
+      "action": "card.claim",
+      "ref": "c02wa1dn",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T03:39:30.243Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c02wa1dn",
+      "note": "#1 Scheduler include-splice is replaced by a real Rust module w"
+    },
+    {
+      "at": "2026-07-11T03:39:30.322Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c02wa1dn",
+      "note": "#2 Focused jet-codegen, jet-jit, scheduler, and concurrency che"
+    },
+    {
+      "at": "2026-07-11T03:43:53.799Z",
+      "by": "codex-main",
+      "action": "card.criteria-meet",
+      "ref": "c02wa1dn",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-11T03:43:53.876Z",
+      "by": "codex-main",
+      "action": "card.criteria-meet",
+      "ref": "c02wa1dn",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-11T03:44:56.790Z",
+      "by": "sol-452-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c02wa1dn",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-11T03:44:56.873Z",
+      "by": "sol-452-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c02wa1dn",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-11T03:44:56.954Z",
+      "by": "codex-main",
+      "action": "card.release",
+      "ref": "c02wa1dn",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-11T04:04:37.517Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-PERFBUDGET-GRAMMAR1",
+      "note": "Typed performance budget grammar and semantics"
+    },
+    {
+      "at": "2026-07-11T04:07:55.212Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-ENCSTREAM-SURFACE1",
+      "note": "Public streaming encoding surface"
+    },
+    {
+      "at": "2026-07-11T04:14:54.969Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-PERFBUDGET-REPORT1",
+      "note": "Canonical performance reports and baseline updates"
+    },
+    {
+      "at": "2026-07-11T04:23:49.653Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-ENCXML1",
+      "note": "Lossless XML representation over DataTree"
+    },
+    {
+      "at": "2026-07-11T04:31:59.878Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-JSONCANON1",
+      "note": "Canonical JSON semantics"
+    },
+    {
+      "at": "2026-07-11T04:39:21.141Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-ENC-CBOR-SURFACE1",
+      "note": "Exact public CBOR verbs and deterministic encoding"
+    },
+    {
+      "at": "2026-07-11T04:40:20.329Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-ENCBASE-STRICT1",
+      "note": "Canonical RFC 4648 decoder policy"
+    },
+    {
+      "at": "2026-07-11T04:40:37.884Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-PERFBUDGET-OUTPUT1",
+      "note": "Performance budget commands, output, diagnostics, and exits"
+    },
+    {
+      "at": "2026-07-11T04:52:45.557Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-GENMOD-VALUE1",
+      "note": "Generic-module value parameter domain and evaluation"
+    },
+    {
+      "at": "2026-07-11T05:01:55.005Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-DBG-DAP1",
+      "note": "DAP transport, lifecycle, and capability profile"
+    },
+    {
+      "at": "2026-07-11T05:05:30.961Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-GENMOD-BODY1",
+      "note": "What declarations and captures belong inside a generic module?"
+    },
+    {
+      "at": "2026-07-11T05:19:55.819Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-DBG-NATIVE1",
+      "note": "Native debugger backends, provisioning, and supported hosts"
+    },
+    {
+      "at": "2026-07-11T05:22:09.274Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-GENMOD-IDENTITY1",
+      "note": "Generic-module instantiation and nominal type identity"
+    },
+    {
+      "at": "2026-07-11T05:36:37.860Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-DBG-AUTH1",
+      "note": "Debugger execution, attach, and workspace authority"
+    },
+    {
+      "at": "2026-07-11T05:47:48.242Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-DBG-EDITOR1",
+      "note": "VS Code and Zed debugger discovery and launch experience"
+    },
+    {
+      "at": "2026-07-11T05:49:03.972Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-ENV-MUTATE1",
+      "note": "Environment removal and enumeration surface"
+    },
+    {
+      "at": "2026-07-11T06:05:15.296Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-DBG-DIAG1",
+      "note": "Debugger diagnostics, exits, and recovery"
+    },
+    {
+      "at": "2026-07-11T07:10:54.718Z",
+      "by": "card298-audit",
+      "action": "decision.add",
+      "ref": "D-DEP-CRYPTO-SUITE2",
+      "note": "Approve the full core.crypto bridge dependency set (I6)"
+    },
+    {
+      "at": "2026-07-11T07:10:54.802Z",
+      "by": "card298-audit",
+      "action": "decision.add",
+      "ref": "D-CRYPTO-RNG1",
+      "note": "Cryptographic entropy providers and failure contract"
+    },
+    {
+      "at": "2026-07-11T07:10:54.890Z",
+      "by": "card298-audit",
+      "action": "decision.add",
+      "ref": "D-PWHASH-POLICY1",
+      "note": "Argon2id password policy and rehash law"
+    },
+    {
+      "at": "2026-07-11T07:10:54.972Z",
+      "by": "card298-audit",
+      "action": "decision.add",
+      "ref": "D-CRYPTO-API1",
+      "note": "Exact safe and expert core.crypto API"
+    },
+    {
+      "at": "2026-07-11T07:10:55.062Z",
+      "by": "card298-audit",
+      "action": "decision.add",
+      "ref": "D-CRYPTO-ENVELOPE2",
+      "note": "Recipient and streaming file envelope"
+    },
+    {
+      "at": "2026-07-11T07:10:55.146Z",
+      "by": "card298-audit",
+      "action": "decision.add",
+      "ref": "D-CRYPTO-VAULT1",
+      "note": "Persistent cryptographic key lifecycle in core.vault"
+    },
+    {
+      "at": "2026-07-11T07:10:55.231Z",
+      "by": "card298-audit",
+      "action": "decision.add",
+      "ref": "D-CRYPTO-KEYWRAP1",
+      "note": "Portable wrapped vault-key backup"
     }
   ]
 }

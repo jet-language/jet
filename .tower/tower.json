@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 496,
-    "rev": 3743,
+    "rev": 3817,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -27,7 +27,7 @@
         "radar:e4"
       ]
     },
-    "digestCursor": "2026-07-11T16:52:30.071Z"
+    "digestCursor": "2026-07-11T18:19:02.207Z"
   },
   "epochs": [
     {
@@ -931,7 +931,7 @@
     },
     {
       "milestoneId": "e3-universal-product-parity",
-      "assignee": null,
+      "assignee": "codex-84-builder",
       "id": "c1cix784",
       "num": 84,
       "title": "Full CoreLib execution in the REPL — c133",
@@ -939,11 +939,21 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": "Full CoreLib REPL execution plan: (1) expand interpreter whitelist from pure math/time/random to all side-effect-safe Core modules; (2) route fs/io/env/process calls through REPL capability sandbox prompts/errors; (3) preserve deterministic transcript mode for tests; (4) add REPL fixtures for json/fs/path/regex/http-disabled cases; (5) document unsupported native-only modules with E2203-style message.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "codex-84-builder",
+          "text": "Replaced fake value-to-source binding stubs with persistent exact accepted statement AST history injected directly into sema; covers declarations, assignments, moves, complex values, closures. Added focused struct/closure/string-list cross-turn regression. Targeted test compilation blocked by unrelated shared Source/lib.rs BuildRunOptions.inspect_only mismatch. Commit attempt blocked by harness usage-limit approval failure; changes remain unstaged in Source/REPL/mod.rs and tests/repl.rs. Effect authorization remains unimplemented; card stays building."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "codex-84-builder",
+          "text": "Claimed #84 after live brief/rev 3797. Implementing exact typed cross-turn CtValue state plus D-REPLCOREEFFECT1=A prompt/flag/non-TTY authorization; no source-string reconstruction or permissive sandbox facade."
+        },
         {
           "at": "2026-07-09",
           "by": "codex-main",
@@ -981,9 +991,37 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-07-10",
+      "updated": "2026-07-11",
       "workOrder": 23,
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "REPL cross-turn bindings preserve exact CtValue variants and declared Jet types for lists, maps, Option, Result, structs, enums, and closures; later turns execute them without source-string reconstruction or type-shape collapse.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-11T18:18:58.766Z"
+        },
+        {
+          "n": 2,
+          "text": "D-REPLCOREEFFECT1=A is enforced: inferred Core effects prompt interactively by default, --allow/--deny flags remain available in every mode, transcript/non-TTY runs deny ungranted effects deterministically, and denied effects cannot execute.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-11T18:19:06.263Z"
+        },
+        {
+          "n": 3,
+          "text": "Focused REPL transcripts prove positive Core execution and negative authorization, including JSON/path/regex, filesystem, Option/Result/struct/enum/closure cross-turn reuse; a different agent reviews implementation and evidence.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-11T18:19:06.347Z"
+        }
+      ],
       "needsAcceptance": false,
       "refs": []
     },
@@ -2189,7 +2227,7 @@
     },
     {
       "milestoneId": "e3-universal-product-parity",
-      "assignee": "fable-medium",
+      "assignee": "sol-131-builder",
       "id": "c2nizvzp",
       "num": 131,
       "title": "Derive output mechanism (emit source fragments re-entering lexer/parser/sema) — D-METADERIVE1",
@@ -2197,11 +2235,21 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P0",
       "plan": "D-METADERIVE1=A: implement user derive output as source fragments. Steps: (1) parser for `derive Trait for T { ... }`; (2) sema registers derive providers and enforces local-only orphan rule (trait or type local); (3) derive body runs at comptime with `T.reflect()` and `$name` splices; (4) emitted Jet text re-enters lexer/parser/sema per R11/D-CTCODEGEN1, never injects pre-parsed AST; (5) diagnostics for generated-fragment failure pin at the user `#[Trait]` trigger with optional generated context; (6) examples and goldens for a custom derive; (7) follow-up card for emit-template quoting, not a blocker.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "card131-recovery",
+          "text": "[handoff] Recovery commit dfae6e17 is merged and green: malformed generated source re-entry now reports E2710 at #[Trait] in both single-program and bundle flows; filtered diagnostic snapshot 1/1 and golden 3/3. Continue from master, never merge stale worktree-agent-adecabd395a1e7082 wholesale. Exact remaining: replace Codegen/Items.rs direct Rust serde synthesis (/) with D-SERDE2=A ordinary Jet Encode/Decode fragments that pass lexer→parser→sema; use public DataTree/Decode protocol surface including D-SERDE16 for primitives/user types/List/Option/Map; prove cross-module generated decode names; add adversarial local-orphan tests (trait local OR type local allowed, neither local rejected); complete hand_codec example/docs; verify Syntax.rs decision entry, syntax-decisions log, grammar regeneration, reviewed snapshots. Preserve neighboring #300 network/TLS dirt."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "card131-recovery",
+          "text": "Recovery landed dfae6e17: generated derive fragment lexer/parser failures now become E2710 at the user #[Trait] trigger in both single-program and bundle paths; adversarial malformed-emission snapshot added. Focused filtered UI snapshot green; full golden 3/3 green. Anti-facade audit confirms generic user derives already perform real lexer→parser→sema re-entry. Major remaining ratified D-SERDE2=A gap: built-in @Codable/@Encode/@Decode still directly emit Rust in Codegen/Items.rs rather than ordinary Jet fragments re-entering the front end; cross-module/local-orphan behavior needs adversarial success/rejection coverage. No criteria met yet."
+        },
         {
           "at": "2026-07-11",
           "text": "All decisions ratified; advanced out of deciding."
@@ -2306,7 +2354,7 @@
       ],
       "needsAcceptance": false,
       "refs": [],
-      "claimedAt": "2026-07-11T10:38:20.223Z"
+      "claimedAt": "2026-07-11T18:11:26.896Z"
     },
     {
       "milestoneId": "e3-universal-product-parity",
@@ -3636,13 +3684,33 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "After D-BUILDQUERY1 ratifies: add CLI and JSON APIs for graph display, action/file/target provenance, why-rebuilt explanation, and generated-file ownership. LSP should use the same graph data for go-to-def into generated source.",
       "blockedBy": [],
       "workOrder": 44,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "codex-main",
+          "text": "Independent Sol review ACCEPT through 88be22af. Isolated build_entry 27/27, build_graph 23/23, LSP 40/40. Verified pure inspect denies ambient effects before execution while declared graph capabilities remain inspectable; typed BuildPlan query is non-executing; LSP generated go-to-definition uses canonical BuildPlan; failed/cache provenance is durable and distinct. No stub/facade. CLOSED."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "codex-224-builder",
+          "text": "Repair complete at 88be22af after adversarial rejection. Inspection now has explicit read-only authority: declared effectful graph nodes remain inspectable while hostile filesystem/environment/exec-process/network comptime calls fail E3411 before side effects. LSP go-to-definition resolves generated declarations from canonical BuildPlan source/path. Failed actions persist exit-code provenance; missing blobs, corrupt blobs/records, and other restore failures are distinct. Green isolated gates: build_entry 27/27, build_graph 23/23, LSP 40/40. Awaiting different independent reviewer; builder does not close."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "codex-224-builder",
+          "text": "Builder complete at 9cf7907f (stack 7f4201c9 f3668993 d891a10c 9cf7907f). Isolated proof: build_entry 22/22; final real explain-build cache-cause test green; static effectful query 2/2; focused action/generated-file provenance tests green; jet-comptime check green. Awaiting independent reviewer; no close claimed."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "codex-224-builder",
+          "text": "Implemented typed fixed build query, durable real cache rebuild provenance, canonical inspect explain exposure, and exact CLI/LSP BuildPlan JSON parity. Commits 7f4201c9 f3668993 d891a10c. build_entry 22/22 green before final CLI assertion; current acceptance rerun blocked by unrelated live jetpack trust_env_build.rs compile errors."
+        },
         {
           "at": "2026-07-09",
           "by": "codex-main",
@@ -3663,7 +3731,7 @@
         }
       ],
       "created": "2026-07-06T17:13:05.155Z",
-      "updated": "2026-07-10",
+      "updated": "2026-07-11",
       "criteria": [],
       "needsAcceptance": false,
       "refs": []
@@ -4291,13 +4359,18 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "deciding",
       "priority": "P2",
       "plan": "Plan seed from D-WD14:\n1. Re-read the ratified ballot and current spec/Tower plans for overlap.\n2. Split into vertical slices if the feature spans compiler, Core, Jetpack, GUI, and OS surfaces.\n3. Queue exact-syntax/subsurface ballots before parser, manifest, CLI, or API surface changes.\n4. Implement the first ungated vertical slice end to end with executable examples and diagnostics.\n5. Prove beginner default UX and expert audit/control UX with tests or transcripts.",
       "blockedBy": [],
       "workOrder": 46,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "codex-main",
+          "text": "Queued and independently reviewed D-PERFBUDGET-BENCHMIGRATE1, D-PERFBUDGET-GAMEMIGRATE1, D-PERFBUDGET-PROVIDER1, and D-PERFBUDGET-INTEGRATION1. Existing ratified grammar forbids implementation until prototype retirement, scene metric amendment, provider authority, and cross-product refresh timing are decided."
+        },
         {
           "at": "2026-07-10",
           "by": "codex-orchestrator",
@@ -5144,13 +5217,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P1",
       "plan": "event-system",
       "blockedBy": [],
       "workOrder": 142,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-11",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
         {
           "at": "2026-07-11",
           "by": "codex-orchestrator",
@@ -5783,9 +5860,41 @@
       "phase": "building",
       "priority": "P1",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-NETSOCKET1=A: Hybrid: blocking-looking sockets over shared runtime handles. core.net exposes typed blocking-looking Tcp/Udp/Unix/DNS APIs for beginners. Under the hood the handles are compatible with the task runtime, so experts can opt into readiness, deadlines, cancellation, and high-concurrency serving without a second socket model.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: corelib audit: core.net — socket layer parity with Go net\n\nCurrent law: Existing linked decisions: none yet. D-CORENS1 keeps all first-party modules under core.*; I6 forbids compiler deps; D-STDRUBRIC1 requires mechanical core API laws.\n\nBuild order: Audit current Core/API/prelude/docs/tests first; write failing UI/golden/unit fixtures; implement std-only or approved bridge code; update docs/reference and syntax-decisions when law changes; run targeted tests, then full nix develop -c cargo test before close.\n\nAcceptance: Examples/goldens or UI snapshots prove each shipped behavior; stdlib map records shipped/carded/declined rows; no rustc/user-hostile errors; no compiler external deps.\n\nDependencies/collisions: Respect neighboring core cards: io/args/process separate; text before regex; net/url before http; encoding before data/db; random never owns secrets.",
-      "blockedBy": [],
-      "assignee": "sol-300-builder",
+      "blockedBy": [
+        "c05o0105"
+      ],
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "sol-300-builder",
+          "text": "Rereview fix dcb03e10: ambient TCP/UDP deadline application now returns typed NetError when OS timeout setters fail and every read/write/send/receive caller propagates it; legacy HTTP handler/router connection read/write failures now emit owned E2801 paths instead of converting read failure to EOF or discarding write errors; TcpListener/TcpStream/UdpSocket JetShow renders explicit address/peer-unavailable OS detail instead of empty address fallbacks; scutil resolver labels require numeric closed indexes and hostile Linux/macOS/Windows parser noise fixtures reject malformed entries. Focused: jet-codegen check green; freshly rebuilt corelib resolver list confirmed; direct fresh binary resolver matrix 3/3 green. Cargo wrapper rerun was blocked by unrelated concurrent jet-comptime BuildExecutionError From<io::Error> compile failure. CONTRACT2-gated IO traits untouched. Needs independent rereview; #306 and owner CONTRACT2 remain blockers."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "sol-300-builder",
+          "text": "Rereview fixes checkpoint e32f2f16 and 53ff700e. Every local/peer/listener/UDP address query, set_timeout, and tcp_reply now returns typed NetError instead of fallback/ignored failures; public examples and signatures consume Results. Native resolver parsing is shared runtime code with real Linux resolv.conf, macOS scutil, and Windows PowerShell fixtures. TLS close-notify now has a hostile BrokenPipe transport proof that flush failure is returned; production retains handle because removal follows successful flush. Focused green: jet-codegen+jet-sema check; resolver policy/parser 2/2; hostile TLS close 1/1. D-NETIO-CONTRACT1=A was owner-ratified before requested clarification; follow-on D-NETIO-CONTRACT2 now ballots exact core.io namespace, error law, mutable receivers, EOF/limits, partial write/write_all, inherent close ownership, and codec adapters. Remaining: owner selects CONTRACT2; #306 task cancellation seam; independent rereview/full verify."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "sol-300-builder",
+          "text": "[handoff] Review fixes committed 0ae881ff and e77b5834. Open owner gate D-NETIO-CONTRACT1 resolves the absent generic Reader/Writer contract without a facade; #306 remains the task cancellation/scheduler blocker. R12 permits named transparent AOT fallback, and #125 owns native net/JIT performance lowering. All exact test evidence and resume order are in the latest card log. Do not close until the owner decision is implemented, #306 integration lands, independent rereview passes, and full verification is green."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "sol-300-builder",
+          "text": "Reviewer-fix checkpoints 0ae881ff and e77b5834. Fixed all legacy/public fallible core.net TCP/UDP/Unix/IP/socket/legacy-TLS String errors to NetError; TLS now has a real local CA-signed hostname handshake, byte request/response, close-notify, idempotent-close test and retains its handle on flush failure; TXT/SRV resolver discovery uses Linux resolv.conf, macOS scoped scutil, and nonlocalized Windows PowerShell IPv4/IPv6 policy; DNS timeout is one decreasing budget across UDP/TCP and multi-server attempts, with adversarial proof; docs no longer claim #306 cancellation/JIT work shipped. Focused green: four-crate check, socket golden 1/1, DNS hostile 6/6 plus total-budget 1/1 and resolver-policy 1/1, TLS runtime 1/1, diff-check. D-NETIO1 generic composition cannot be implemented truthfully because no reusable contract exists and ratification forbids inventing one; ballot D-NETIO-CONTRACT1 is open, recommending public nominal core.io Reader/Writer traits. Native JIT lowering is not an owner gate: R12 explicitly permits named transparent next-tier fallback and makes native coverage a performance tier; #125 owns native net/JIT host work. Resume after owner decision plus #306; do not fake structural conformance or cancellation."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "sol-300-builder",
+          "text": "[handoff] Committed checkpoints e6727902, 6f6ea9f6, 270d3cff, and 1148cbab. Non-task network law is implemented and focused green. Card deliberately remains open and blockedBy #306 (c05o0105): finish D-NETTASK1 by integrating prompt cancellation plus scheduler-backed yielding/readiness/deadlines for blocking socket, DNS, and TLS operations; add real task cancellation and JIT/AOT parity tests; then rerun platform resolver CI and full verify before meeting criteria. Do not replace this with a fake token check, Reader facade, separate Async socket type, or dead-branch-only closure."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "sol-300-builder",
+          "text": "Checkpoint 1148cbab ships the complete non-task socket slice: canonical byte read/write/write_all across TCP/UDP/Unix, structured NetError/NetDnsError variants, strict DNS, same-handle readiness and earliest-deadline behavior, idempotent shutdown/close, and core.tls wrapping TcpStream with byte I/O and close-notify. Gates green: cargo check jet-codegen/jet-sema/jet-jit/jetpack; core_net_dns_ 6/6; core_tls_byte_stream_surface_links_through_the_real_bridge 1/1; socket_echo golden 1/1; diff-check. Exact remaining blocker is D-NETTASK1: prompt cancellation of blocking socket/DNS/TLS operations and scheduler-backed yielding/readiness require #306 core.tasks integration. No fake cancellation or separate async facade added. JIT socket handle ops remain honestly unsupported until that runtime seam lands."
+        },
         {
           "at": "2026-07-11",
           "by": "sol-300-builder",
@@ -5897,8 +6006,7 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
-      "claimedAt": "2026-07-11T17:13:59.323Z"
+      "refs": []
     },
     {
       "id": "c0075iyb",
@@ -7912,6 +8020,26 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-07-11",
+          "by": "codex-card300-builder",
+          "text": "[handoff] Implementation and review-gap fix complete through 32cefaf (plus fe985d6c, 56de3925). Focused green: Shell 11/11; env_dev_trust 13/13. Different reviewer must inspect real PTY assertions and decide close; do not rerun implementation. Shared Tower files remain dirty; no worktree."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "codex-card300-builder",
+          "text": "[review handoff] Fix commit 32cefaf closes prior review gaps without facades. Reproducible dev shell now provides bash/zsh/fish/script. Generated bash/zsh/fish NO_COLOR paths emit no ESC bytes after capture marker, including spinner erase; zsh explicitly loads zsh/datetime. Real bounded PTYs exercise host shell hooks, slow-command visible spinner to success/failure receipts, runnable failure action, Ctrl-G glance, live git facts, env/path prompt, and strip-on; generated matrix proves strip-off. Green: jetpack Shell::tests 11/11; env_dev_trust 13/13. Do not close until different reviewer validates."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "terra-359-builder",
+          "text": "[handoff] Commits fe985d6c + 56de3925. Shell feed implemented; focused 10/10 green. Independent reviewer must inspect state/TTY behavior and run native zsh PTY matrix before any close. No worktree; only shared Tower files dirty."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "terra-359-builder",
+          "text": "Builder checkpoints fe985d6c + 56de3925. Replaced literal unknown prompt facade with live state: bash/zsh/fish hooks classify real jet build/test commands, record actual exit + elapsed time, render TTY running spinner, success/failure receipt, runnable next-action line, and one shared status function for Ctrl-G plus opt-in strip. Git segment reads current branch and dirty/clean state live; default env label + compact path and NO_COLOR ASCII remain. Bounded real PTY proof: bash and fish execute success/failure transitions, NO_COLOR receipt/action, live git facts, exit sentinel, zero unknown text. Zsh native preexec/precmd/spinner/action/git/Ctrl-G hook matrix asserted; CI fails if zsh binary missing. Focused Shell tests 10/10 green. Needs independent anti-facade review and native zsh PTY CI before close; parent owns broader tests."
+        },
+        {
           "at": "2026-07-10",
           "by": "claude-main",
           "text": "Board hygiene: audit flagged plan text calling D-FE-PROMPT-STRIP1 a still-open blocking decision — it is ratified (=B, 2026-07-08). Card is not actually gated on it; unblock accordingly, do not wait on a decision that already landed."
@@ -7971,7 +8099,7 @@
         }
       ],
       "created": "2026-07-08T13:10:16.964Z",
-      "updated": "2026-07-10",
+      "updated": "2026-07-11",
       "workOrder": 11,
       "criteria": [],
       "needsAcceptance": false,
@@ -8153,6 +8281,26 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-07-11",
+          "by": "codex-card361-fixer",
+          "text": "[handoff] Review commits 60dfa408, a95ee82c, dee54f45. Final gap pass adds real core pkg.jet version metadata with binary assertion 0.1.0 (not dash), explicit first-dependency failure transcript completed 0/2, optional fixture channel download byte metadata summed into Download 240 MB, and exact remove Download 0 B. Clean isolated target green: add_then_remove 1/1; failed_first_dependency 1/1; channel_update_writes_exact_lock 1/1; remove_without_yes 1/1; committed_example_builds_offline_end_to_end 1/1; Output::tests 14/14. Shared target had stale binary cache; isolated CARGO_TARGET_DIR=/tmp/jet361-target proved source truth. Independent review and truly interactive host terminal matrix remain; no close."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "codex-card300-builder",
+          "text": "[handoff] Fix commit a95ee82c. Progress now explicitly separates completed count from current edge; first failure remains completed 0/N and later counts advance only after successful realization. JetOS uses same completed-before-current convention. Real jetpack add resolve/version row is reachable and proven by compiled binary integration test. Green: jetpack Output dependency_status 2/2; add_then_remove_edits_env_file 1/1; committed_example_builds_offline_end_to_end 1/1. cargo fmt unavailable in dev shell; git diff --check clean. Independent review required. Card remains building: interactive owner matrix and computable download-size rows still open."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "sol-361-builder",
+          "text": "[handoff] Builder commit 60dfa408 ready for independent review. Focused tests green: Output dependency renderer 2/2; committed 3-package non-TTY build; JetOS offline generation build after explicit jetos binary rebuild; add/remove resolution and non-TTY plan. Review exact six-file commit. Card not complete: owner-required real interactive matrix and computable download-size rows remain to audit."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "sol-361-builder",
+          "text": "[builder] 60dfa408 implements real dependency progress projection: correct source->package edges, TTY pinned region, deterministic non-TTY ledger, jetpack multi-package/adapters, all JetOS generation packages including implicit runtime nodes, and verified-version add rows. Focused Output 2/2, committed 3-package build, JetOS offline build, add/remove, and non-TTY plan tests green. Separate review required; full acceptance still needs matrix/reviewer."
+        },
+        {
           "at": "2026-07-09",
           "by": "claude-main",
           "text": "[EXIT CRITERIA — owner directive 2026-07-09] Owner found sibling cards shipped only the first mock item. Before this card leaves building: build a feature-by-feature matrix from docs/design/frontends/cli/hybrid.html + the FULL ratified option-D text + every owner ratification comment; verify each row in a real interactive terminal and in the owner's environment (host wrapper binaries); check off every row on this card with evidence. No done with any row open."
@@ -8203,7 +8351,7 @@
         }
       ],
       "created": "2026-07-08T13:10:17.238Z",
-      "updated": "2026-07-10",
+      "updated": "2026-07-11",
       "workOrder": 13,
       "criteria": [],
       "needsAcceptance": false,
@@ -11373,13 +11521,28 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "verify",
+      "phase": "deciding",
       "priority": "P0",
       "plan": "docs/plans/epoch-3/universal-language-core.md#ul1--p0-semantic-and-security-stop-line",
       "blockedBy": [],
       "workOrder": 30,
-      "assignee": "fable-main",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "codex-main",
+          "text": "Queued and independently reviewed owner gates D-CABI-CALLBACK1, D-CABI-RESULT1, and D-CABI-PLATFORM1. Ratified D-REPRC2 enum work remains specified, but full card acceptance cannot proceed past callback, generic Result, and alternate-ABI scope without these rulings. Exact implementation map preserved."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "card467-builder",
+          "text": "[handoff] Verification gap: implement ratified D-REPRC2=A end to end before re-verification. Replace current blanket enum E3203 with ratified C-compatible enum representation, add matching CModule declaration/wrapper lowering and live C round-trip/layout fixtures; then complete Syntax.rs, syntax-decisions log, grammar regeneration, and reviewed snapshot re-bless. Add the card-required real error/callback/platform-ABI fixtures or reconcile scope via owner decision—none exist today. Existing targeted proof stays green:  => 29 passed, 0 failed. Do not close from that green subset."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "card467-builder",
+          "text": "Independent anti-facade review rejected close. Focused  is green 29/29, and existing scalar/fixed-width/#Layout(c)-struct/distinct/runtime-NUL slice is real. But owner has since ratified D-REPRC2=A; current sema still hard-rejects every enum at the C boundary in Sema/FFI.rs::c_named_type_ok, CModule has no enum ABI lowering, and all four auto-added ratification chores remain open. Card body also requires live coverage for errors, callbacks, and platform ABIs; current focused suite contains none. Unsupported fallback strings remain in all three CModule lowering functions, currently guarded by sema but not eliminated structurally."
+        },
         {
           "at": "2026-07-11",
           "by": "fable-main",
@@ -11437,8 +11600,7 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
-      "claimedAt": "2026-07-11T00:49:30.685Z"
+      "refs": []
     },
     {
       "id": "c0ddul2b",
@@ -12121,8 +12283,13 @@
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
-      "assignee": "sol-451-builder",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "sol-451-builder",
+          "text": "[handoff] Independent review rejected committed v2 as incomplete: symbol rename is spelling-based because semindex lacks resolved target identity per reference; ast_rewrite token-matches because compiler exposes no complete structural expr/stmt/item/type node facts with semantic bindings; replay/journal paths are not fully hostile-input contained; cross-platform lock is /proc-dependent; unified diff loses EOF-newline truth. Exact completion requires compiler/sema index substrate for resolved reference anchors and structural typed AST matching, plus cross-platform handle-relative no-follow atomic file replacement (Unix openat/renameat; Windows handle-based replace) before adversarial tests. Commits bcf9c4aa..1e6d10dc are untrusted inherited work; criterion 2 and 3 remain open. Worktree source clean after discarding only reviewer's four uncommitted exploratory files."
+        },
         {
           "at": "2026-07-11",
           "by": "codex-orchestrator",
@@ -12167,8 +12334,7 @@
       ],
       "needsAcceptance": false,
       "refs": [],
-      "workOrder": 32,
-      "claimedAt": "2026-07-11T17:20:07.990Z"
+      "workOrder": 32
     },
     {
       "id": "c02wa1dn",
@@ -12745,12 +12911,17 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "deciding",
       "priority": "P0",
       "plan": null,
       "blockedBy": [],
-      "assignee": "terra-460-builder",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "codex-main",
+          "text": "Agent work complete and independently verified. Awaiting owner-only VAPID rotation/live delivery proof and Git-history scrub ruling via q0q92or4."
+        },
         {
           "at": "2026-07-10",
           "by": "codex-orchestrator",
@@ -12758,7 +12929,7 @@
         }
       ],
       "created": "2026-07-10T10:49:07.855Z",
-      "updated": "2026-07-10",
+      "updated": "2026-07-11",
       "criteria": [
         {
           "n": 1,
@@ -12835,8 +13006,7 @@
       ],
       "needsAcceptance": false,
       "refs": [],
-      "workOrder": 7,
-      "claimedAt": "2026-07-10T17:45:48.911Z"
+      "workOrder": 7
     },
     {
       "id": "c04mnkv0",
@@ -13330,12 +13500,22 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "building",
       "priority": "P1",
       "plan": "Ungated first: fix non-Linux empty/data-only leases to return no wrappers instead of unconditional error. Executable behavior is gated by D-JPK-EXECLEASE1. After owner outcome, implement the selected cross-platform contract behind one ExecWrapperStrategy: A protected native lease service with caller impersonation and protected PATH; B explicit weaker same-user race guarantee with loud audit warning; or C fail-closed non-Linux executable leases and narrowed tier-1 law. Preserve Linux mount backend. Add direct and nested-PATH hostile swap proofs, platform-specific runtime CI, exact Jet diagnostic/snapshot, and current-law docs. Serialize Store.rs/tests/jetpack.rs against #465.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "card467-builder",
+          "text": "[handoff] Commit 884df04d fixes the real non-Linux empty/data-only failure: create_exec_wrappers returns None only when executable set is empty; Linux lease tests 5/5 green under nix develop (cargo test -p jetpack lease). Do not close or meet criterion #1 until native macOS+Windows runtime lanes prove it. Remaining D-JPK-EXECLEASE1=A is a large new privileged-service slice, not low hanging: implement/install root-owned macOS LaunchDaemon + Windows LocalSystem service; authenticated local IPC; independent locked-digest verification; protected lease tree; caller UID/session/token impersonation; scrubbed handles/env/PATH; process-tree lifetime cleanup; E1292 diagnostic/snapshot/doctor/audit/docs; native hostile rename/symlink/content/directory and nested PATH runtime CI. Repository currently has none of this service/installer substrate. Re-rank after easier E3 cards."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "card467-builder",
+          "text": "Owner gate audit: D-JPK-EXECLEASE1=A is ratified. Began ungated cross-platform data-only repair. Full A scope requires a new privileged macOS LaunchDaemon and Windows LocalSystem service, authenticated IPC, digest re-verification, caller impersonation, process-tree lifetime, installer registration, and native runtime CI; no existing service or installer substrate exists in this repository, so this is not a low-hanging wrapper-only change."
+        },
         {
           "at": "2026-07-10",
           "by": "codex-orchestrator",
@@ -13397,7 +13577,7 @@
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-10T18:57:34.825Z",
-      "updated": "2026-07-10"
+      "updated": "2026-07-11"
     },
     {
       "id": "c0vntq8c",
@@ -13489,6 +13669,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-07-11",
+          "by": "codex-card300-builder",
+          "text": "Safety rollback: rejected experimental commits 1ec5e470 and 3b7ffb2a reverted by 8593a6d3 and 3cce9968. Baseline/swap regression proof green: os_build_realizes_selected_system_offline 1/1 (includes fstab pri=5); ModuleEval worked example 1/1. Implementation remains gated on D-JOS-PRIORITY-SURFACE2; no priority surface active."
+        },
+        {
           "at": "2026-07-10",
           "by": "claude-main",
           "text": "Correction: this is NOT an owner-gate. D-JOS-PRIORITY1=A already ratifies the priority syntax (named tiers + Priority(n)). Card is pure execution, not a ballot candidate. Moved ready."
@@ -13498,7 +13683,7 @@
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-10T21:03:40.282Z",
-      "updated": "2026-07-10"
+      "updated": "2026-07-11"
     },
     {
       "id": "c0yry94n",
@@ -16482,66 +16667,6 @@
       "created": "2026-07-05T11:39:57.407Z",
       "outcome": "A",
       "ratifiedAt": "2026-07-05",
-      "draft": false
-    },
-    {
-      "id": "D-BUILDQUERY1",
-      "cardId": "c0u55hlv",
-      "group": "tooling",
-      "title": "Build graph UX: what commands explain targets, generated files, and rebuild causes?",
-      "gist": "Choose the inspection surface for graph, provenance, and why-rebuilt answers.",
-      "explainer": "",
-      "story": "Grace changes an OpenAPI file and twenty generated modules rebuild. She needs to ask Jet what depended on that file, what generated a changed module, and why a cache miss happened, without reading lock internals.",
-      "inWild": "$ jet graph --target service\n$ jet explain-build build/api_client.jet\n$ jet explain-build openapi-client --why-rebuilt\n$ jet query build \"targets depending_on api/openapi.json\" --json",
-      "detail": "2026-07-06 two-facet pass: command-line explainability and editor UX should share the same model. Recommendation is CLI-first commands plus LSP/editor surfaces over the same graph/provenance API.",
-      "options": [
-        {
-          "key": "A",
-          "name": "CLI commands plus shared editor/query API (recommended)",
-          "detail": "`jet graph` visualizes, `jet explain-build <target/file/action>` explains provenance/rebuilds, `jet query build` gives CI-friendly structured queries, and the LSP uses the same data for hover/go-to-def/generated-file provenance.",
-          "code": "$ jet graph --target service\n$ jet explain-build build/api_client.jet\n$ jet query build \"generated_by openapi-client\" --json\n// editor hover: produced by openapi-client, cache miss reason shown"
-        },
-        {
-          "key": "B",
-          "name": "One explain command only",
-          "detail": "A single `jet explain-build` handles everything. Simpler vocabulary, but graph exploration and CI queries become cramped.",
-          "code": "$ jet explain-build --graph service\n$ jet explain-build --query \"generated_by openapi-client\""
-        },
-        {
-          "key": "C",
-          "name": "JSON lock only",
-          "detail": "Expose `.jet/lock` and let tools inspect it. Machine-readable, but bad human UX and easy to break when lock internals evolve.",
-          "code": "$ cat .jet/lock | jq ..."
-        },
-        {
-          "key": "D",
-          "name": "LSP/editor only",
-          "detail": "Show provenance in editor UI but keep CLI minimal. Good interactive UX, weak CI/script story.",
-          "code": "// hover generated file -> produced by openapi-client"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Bazel",
-          "note": "Bazel query/aquery explain graph shape and actions.",
-          "code": "bazel query \"deps(//app:server)\"\nbazel aquery //app:server"
-        },
-        {
-          "lang": "Ninja",
-          "note": "Ninja can explain why outputs are dirty.",
-          "code": "ninja -d explain"
-        },
-        {
-          "lang": "Cargo",
-          "note": "Cargo metadata is useful for tools but not a complete build-action graph.",
-          "code": "cargo metadata --format-version 1"
-        }
-      ],
-      "rec": "A",
-      "status": "ratified",
-      "created": "2026-07-06T17:16:20.443Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-07-06",
       "draft": false
     },
     {
@@ -26701,8 +26826,499 @@
       ],
       "rec": "A",
       "draft": false,
+      "status": "ratified",
+      "created": "2026-07-11T17:17:53.950Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-11"
+    },
+    {
+      "id": "D-NETIO-CONTRACT1",
+      "cardId": "c0z3l25j",
+      "group": "stdlib",
+      "title": "Represent the shared byte-stream Reader and Writer contract",
+      "gist": "Choose the real generic contract that lets one middleware implementation consume files, TCP, Unix, and TLS streams.",
+      "explainer": "",
+      "story": "Mina writes a length-prefixed protocol reader against a file capture, then points the same code at a TCP connection and a TLS connection in production. D-NETIO1 promises that this is one generic middleware path, but Jet currently has only concrete FileReader/FileWriter methods and an unrelated binary.Reader cursor; there is no contract a generic parameter can name.",
+      "inWild": "fn copy_frames<R: io.Reader, W: io.Writer>(from: &R, to: &W) -> () ? io.IOError {\n    loop frame in io.LengthPrefixed.over(from) {\n        to.write_all(frame)?\n    }\n}\n\ncopy_frames(&capture_file, &tls_connection)?",
+      "detail": "D-NETIO1=D ratified generic composition while also saying to add no new trait and reuse the existing D-IO2 FileReader/FileWriter law. Repository truth has no generic Reader/Writer law to reuse: FileReader/FileWriter are concrete opaque handles, while core.binary.Reader is a consuming in-memory parser. This ballot clarifies representation without changing byte-canonical I/O, checked text projection, UDP exclusion, or socket-only inherent methods.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Public io.Reader and io.Writer traits (recommended)",
+          "detail": "Amend the no-new-trait sentence and define two ordinary nominal core.io traits. FileReader, FileWriter, TcpStream, UnixStream, and TlsStream receive real implementations; codecs can implement or wrap them. Beginners keep calling inherent read/write methods with no ceremony. Experts can name bounds and write normal reusable middleware. The compiler uses the existing trait system, so there is no second structural dispatch mechanism.",
+          "code": "fn relay<R: io.Reader, W: io.Writer>(from: &R, to: &W) -> () ? io.IOError {\n    loop {\n        bytes :: from.read(64.kib)?\n        if bytes.len() == 0 { return () }\n        to.write_all(bytes)?\n    }\n}\n\nrelay(&file, &socket)?\nrelay(&socket, &tls)?"
+        },
+        {
+          "key": "B",
+          "name": "Compiler-known structural stream contracts",
+          "detail": "Keep the no-new-trait wording. The compiler treats any approved core handle with matching read/write signatures as Reader/Writer for generic bounds, without a user-declarable trait implementation. Beginner calls remain unchanged and built-in middleware composes, but experts cannot implement the contract for their own safe stream type; Jet gains a second, privileged conformance system beside nominal traits.",
+          "code": "fn relay<R: Reader, W: Writer>(from: &R, to: &W) -> () ? IOError { ... }\n\nrelay(&file, &socket)?       // accepted by compiler table\nrelay(&my_stream, &socket)?  // E2401: MyStream is not a built-in Reader"
+        },
+        {
+          "key": "C",
+          "name": "Closed core Stream sum type",
+          "detail": "Keep concrete handles and make middleware accept a core-owned Stream value constructed from file, TCP, Unix, or TLS handles. This supplies one implementation for built-in transports but moves/boxes handles into a closed wrapper and prevents third-party stream participation. Socket-only operations require recovering the concrete handle before use.",
+          "code": "source :: io.Stream.from(file)\ntarget :: io.Stream.from(tls)\nio.copy(&source, &target)?\n\n// peer_addr is unavailable until the TCP handle is recovered"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "std::io::Read and Write are nominal traits implemented by files, TCP streams, Unix streams, and TLS wrappers; generic middleware names those bounds directly.",
+          "code": "fn copy<R: Read, W: Write>(r: &mut R, w: &mut W) -> io::Result<u64>"
+        },
+        {
+          "lang": "Go",
+          "note": "io.Reader and io.Writer are structural interfaces; files, network connections, TLS connections, and user types compose through the same tiny contracts.",
+          "code": "func Copy(dst Writer, src Reader) (written int64, err error)"
+        }
+      ],
+      "rec": "A",
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-07-11T18:12:49.904Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-11"
+    },
+    {
+      "id": "D-NETIO-CONTRACT2",
+      "cardId": "c0z3l25j",
+      "group": "stdlib",
+      "title": "Exact Reader and Writer contract law",
+      "gist": "Define the exact error, receiver, EOF, partial-write, close, and codec laws for the ratified core.io Reader and Writer traits.",
+      "explainer": "",
+      "story": "Mina writes one bounded frame relay, tests it against a file capture, then runs it over TCP and TLS. D-NETIO-CONTRACT1=A chose public nominal traits, but did not say whether the relay preserves NetError versus IOError, whether reads and writes borrow mutably, what zero bytes mean, or whether closing belongs to generic middleware. Those details decide whether one safe implementation really works across every stream.",
+      "inWild": "use core.io as io\n\nfn relay<R: io.Reader, W: io.Writer>(from: &R, to: &W) -> () ? io.IOError {\n    loop {\n        chunk :: from.read(64.kib)?\n        if chunk.is_empty() { return () }\n        to.write_all(chunk)?\n    }\n}",
+      "detail": "D-NETIO-CONTRACT1=A remains binding direction: public nominal traits under core.io. Clarification is required because its worked example assumed one IOError even though files, sockets, TLS, and codecs currently expose distinct typed failures. Every option below fixes exact namespace, error law, receivers, EOF/limit behavior, partial writes, write_all, close ownership, and codec conformance. All preserve D-NETIO1=D: bytes canonical, UDP excluded, socket-only facts inherent, checked text layered over bytes.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Associated Error per stream",
+          "detail": "Exact namespace: core.io.Reader and core.io.Writer. Each has associated type Error. read(&self, limit) and write(&self, bytes) use mutable-borrow receivers because cursor/transport state advances without consuming the handle. limit must be positive; read returns at most limit bytes; empty bytes alone means clean EOF; failures retain the concrete FileError/NetError/TLSError/EncodingError. write may return any positive prefix count and zero for nonempty input is an error; write_all is one default trait method that loops until complete or returns Error. close and socket shutdown are not trait members: resource handles own inherent idempotent close, RAII remains fallback, generic middleware never steals ownership. Codecs conform only through explicit Reader/Writer adapter types whose Error is EncodingError and which delegate to one underlying stream; direct encoders/decoders do not claim byte-stream conformance.",
+          "code": "use core.io as io\n\ntrait Reader {\n    type Error\n    fn read(&self, limit: Int) -> [U8] ? Error\n}\ntrait Writer {\n    type Error\n    fn write(&self, bytes: [U8]) -> Int ? Error\n    fn write_all(&self, bytes: [U8]) -> () ? Error { /* loops on write */ }\n}\n\nfn read_frame<R: io.Reader>(from: &R) -> [U8] ? R.Error {\n    return from.read(64.kib)\n}\n// Cross-Reader/Writer relay needs explicit error conversion because Jet has no where-clause equality constraints."
+        },
+        {
+          "key": "B",
+          "name": "One core.io.IOError for every stream (recommended)",
+          "detail": "Exact namespace and receiver/EOF/limit/partial-write/write_all/close/codec laws match A, but both traits return core.io.IOError. File, TCP, Unix, TLS, and codec adapters convert their native failures into one closed IOError tree carrying operation, source category, address/path, OS code, and cause. This makes Reader-to-Writer middleware use one error type, but callers lose direct NetError/TLSError/EncodingError matching at the generic and inherent byte-operation boundary. Close remains inherent and idempotent; codecs conform only through explicit byte-stream adapters.",
+          "code": "trait Reader { fn read(&self, limit: Int) -> [U8] ? io.IOError }\ntrait Writer {\n    fn write(&self, bytes: [U8]) -> Int ? io.IOError\n    fn write_all(&self, bytes: [U8]) -> () ? io.IOError\n}\n\nchunk :: tls.read(64.kib)? // [] = EOF; TLS cause nested in IOError\ntls.close()?               // inherent, never consumed by middleware"
+        },
+        {
+          "key": "C",
+          "name": "Universal Error at contract boundary",
+          "detail": "Exact namespace and receiver/EOF/limit/partial-write/write_all/close/codec laws match A, but trait methods return universal Error through the ratified Fallible conversion path. Concrete inherent methods keep NetError/TLSError/etc.; only calls through a Reader/Writer bound erase to Error. write_all remains the sole default looping implementation. Close remains inherent and idempotent. Explicit codec adapters implement the traits and erase EncodingError only at the generic boundary.",
+          "code": "trait Reader { fn read(&self, limit: Int) -> [U8] ? Error }\ntrait Writer {\n    fn write(&self, bytes: [U8]) -> Int ? Error\n    fn write_all(&self, bytes: [U8]) -> () ? Error\n}\n\nchunk :: reader.read(64.kib)? // [] = EOF; generic path returns Error\n// concrete tcp.read still returns NetError"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Read and Write use mutable receivers, empty successful read means EOF, write may be partial, write_all loops, and Close is outside both traits; Rust unifies failures as io::Error.",
+          "code": "fn read(&mut self, buf: &mut [u8]) -> io::Result<usize>\nfn write(&mut self, buf: &[u8]) -> io::Result<usize>"
+        },
+        {
+          "lang": "Swift",
+          "note": "Protocols can preserve concrete associated types, matching Jet's existing associated-type feature and retaining transport-specific failures.",
+          "code": "associatedtype Failure: Error"
+        }
+      ],
+      "rec": "B",
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-07-11T18:24:24.647Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-07-11"
+    },
+    {
+      "id": "D-JOS-PRIORITY-SURFACE2",
+      "cardId": "c0by6tvm",
+      "group": "syntax",
+      "title": "Attach option priority without colliding with real option keys",
+      "gist": "Choose the typed source form that attaches Default, Force, or Priority(n) to one option contribution without reserving ordinary dotted keys such as filesystem.swap.fast.priority.",
+      "explainer": "",
+      "story": "Two reusable modules choose different display managers. The baseline should be overridable, the site policy should normally win, and an emergency module may force a value. Separately, a swap device legitimately has an option named priority. Jet must distinguish precedence metadata from that real setting, show every contender in explain output, and never silently reinterpret a user's option key.",
+      "inWild": "module baseline {\n  system.host: { target: linux.x64, options: [\n    services.displayManager: /* Default sddm */\n    filesystem.swap.fast.priority: 5\n  ] }\n}\nmodule site {\n  system.host: { target: linux.x64, options: [\n    services.displayManager: /* Priority(2500) gdm */\n  ] }\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Typed contribution record",
+          "detail": "An ordinary value remains the beginner path. An expert wraps only the contribution that needs precedence in OptionValue.{ value, priority }, where priority is .Default, .Force, or .Priority(n). The record is structurally distinct from dotted option keys, so filesystem.swap.fast.priority remains ordinary data. Explain output projects the wrapper fields but the option consumer receives only value.",
+          "code": "options: [\n  services.displayManager: OptionValue.{ value: \"sddm\", priority: .Default },\n  filesystem.swap.fast.priority: 5,\n  services.audio.enable: true,\n]"
+        },
+        {
+          "key": "B",
+          "name": "Priority value wrapper",
+          "detail": "Default(value), Force(value), and Priority(n, value) wrap one contribution directly. This is compact and unambiguous, but the named tiers look like general calls and mix policy with value construction. Every supported value type must pass through the wrapper unchanged.",
+          "code": "options: [\n  services.displayManager: Default(\"sddm\"),\n  filesystem.swap.fast.priority: 5,\n  services.audio.enable: Force(true),\n  kernel.package: Priority(2500, packages.cachyos),\n]"
+        },
+        {
+          "key": "C",
+          "name": "Contribution attributes",
+          "detail": "Attributes attach policy before one option entry. The relationship is visually clear and does not consume dotted keys, but it creates new attribute vocabulary and makes list-entry formatting carry semantic state outside the value expression.",
+          "code": "options: [\n  #[Default] services.displayManager: \"sddm\",\n  filesystem.swap.fast.priority: 5,\n  #[Force] services.audio.enable: true,\n  #[Priority(2500)] kernel.package: packages.cachyos,\n]"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "NixOS",
+          "note": "Nix wraps a value with mkDefault, mkForce, or mkOverride. The wrapper is unambiguous, but Jet can keep its expert form typed instead of relying on dynamically interpreted functions.",
+          "code": "services.xserver.displayManager.gdm.enable = lib.mkForce true;"
+        },
+        {
+          "lang": "CSS",
+          "note": "CSS attaches !important to one declaration, not to a separate property named priority. This preserves unrelated property names but provides only one override tier.",
+          "code": "display: grid !important;"
+        }
+      ],
+      "rec": "A",
+      "draft": false,
       "status": "open",
-      "created": "2026-07-11T17:17:53.950Z"
+      "created": "2026-07-11T19:23:08.897Z"
+    },
+    {
+      "id": "D-CABI-CALLBACK1",
+      "cardId": "c0ai04g0",
+      "group": "syntax",
+      "title": "C callback pointer and lifetime law",
+      "gist": "Choose which Jet functions may become C callback pointers.",
+      "explainer": "",
+      "story": "Mina binds an audio library whose register_processor function stores her callback and invokes it later from a real-time foreign thread, including reentrant calls while Jet is already handling an event. A captured closure could outlive its stack, race captured state, allocate on the audio thread, or unwind through C. She needs a safe callback rule without a hidden trampoline or context allocation.",
+      "inWild": "use c.audio as audio\n#Extern module c.audio {\n    fn register_processor(cb: fn(I32) -> I32) -> I32\n}\n@Pure fn clamp_sample(sample: I32) -> I32 {\n    return sample.clamp(-32768, 32767)\n}\nfn run() { print(audio.register_processor(clamp_sample)) }",
+      "detail": "This ballot authorizes only C-convention callback pointers. Alternate callback conventions remain rejected even if D-CABI-PLATFORM1 permits an alternate convention on the imported function itself; imported-function ABI and callback ABI are independent. Context-pointer callbacks shaped as fn(void *ctx, ...) remain in the existing gated pointer tier plus a user/external shim. Beginner pass: a named capture-free function is enough. Expert pass: nullability, lifetime, effects, threading, reentry, panic, and storage are fixed. Hybrid pass: reuse fn(A)->R with stricter C-boundary admission. Recommendation A.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Required non-null, capture-free pure pointer",
+          "detail": "In a C parameter, fn(A)->R is a required non-null extern-C pointer. Every parameter and return passes the same D-REPRC1/2 C-safe test. Values are monomorphic named @Pure functions or capture-free @Pure lambdas only. Callback admission adds a compiler-checked foreign-thread-safe subset without new syntax: no heap allocation, mutable/static/TLS access, scheduler/runtime handles, panic-capable operations, or calls outside the same admitted subset. Violations, bound methods, async/generators, generics deferred to C, closures, and effects are E3203. C receives one stable pointer identity, storable for the loaded program's lifetime and callable concurrently or recursively from foreign threads; this adds no Jet equality operation. Panic is forbidden statically, with abort as the boundary backstop. Capture-free lambdas receive one program-lifetime emitted symbol. No implicit context pointer, heap allocation, unregister token, null sentinel, or alternate callback ABI.",
+          "code": "use c.audio as audio\n#Extern module c.audio { fn register_processor(cb: fn(I32) -> I32) -> I32 }\n@Pure fn clamp_sample(x: I32) -> I32 { return x.clamp(-32768, 32767) }\nfn run() {\n  audio.register_processor(clamp_sample)\n  gain :: 2\n  audio.register_processor(fn(x) { return x * gain })\n}\n// Error [E3203]: captured callback has no C-compatible representation.\n// Why: C receives only a function pointer and may call it after local `gain` is gone.\n// Fix: pass an admitted capture-free @Pure function, or bind a context-pointer shim."
+        },
+        {
+          "key": "B",
+          "name": "Synchronous borrowed pure callback marker",
+          "detail": "fn(A)->R is accepted only on a parameter marked #[Callback(sync)]. The foreign contract promises same-thread calls only during the containing C call and no retention. Capture-free monomorphic @Pure functions remain required; D-EFF2 checks them normally on the same Jet thread/context. Concurrent, recursive-after-return, stored, nullable, effectful, and alternate-ABI callbacks remain E3203. Panic is forbidden statically with abort as backstop. #[Callback(sync)] is new parameter metadata and must be registered if chosen.",
+          "code": "#Extern module c.visit {\n    fn visit_count(count: U64, #[Callback(sync)] visitor: fn(U64) -> I32) -> I32\n}\n@Pure fn classify(index: U64) -> I32 { return if index == 0 { 1 } else { 0 } }\n// Error [E3203]: callback lifetime is not proven synchronous.\n// Why: Jet cannot assume C drops the pointer before returning.\n// Fix: add #[Callback(sync)] only when the C contract guarantees it."
+        },
+        {
+          "key": "C",
+          "name": "Keep callbacks rejected",
+          "detail": "fn remains E3203 at every C boundary. Users bind a C-ABI shim that owns lifetime/context and exposes scalar or handle operations. This is maximally narrow but leaves direct GUI, event-loop, allocator, and native callback APIs unavailable.",
+          "code": "#Extern module c.audio { fn register_processor(cb: fn(I32) -> I32) -> I32 }\n// Error [E3203]: `fn(I32) -> I32` has no C-compatible representation.\n// Why: callbacks can outlive and reenter Jet, and no callback law is enabled.\n// Fix: expose a C-ABI shim with scalar/handle operations."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "extern-C function pointers are capture-free; captured closures need a separately owned void* context and unsafe trampoline. Panics must not unwind.",
+          "code": "extern \"C\" fn clamp(x: i32) -> i32 { x }\nextern \"C\" { fn register(cb: extern \"C\" fn(i32) -> i32) -> i32; }"
+        },
+        {
+          "lang": "Swift",
+          "note": "@convention(c) closures cannot capture context; retained APIs need explicit unmanaged context ownership.",
+          "code": "let callback: @convention(c) (Int32) -> Int32 = clamp"
+        },
+        {
+          "lang": "Zig",
+          "note": "A C function pointer has no environment; user data is separate.",
+          "code": "const Callback = *const fn(i32) callconv(.c) i32;"
+        }
+      ],
+      "rec": "A",
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-11T20:00:28.612Z"
+    },
+    {
+      "id": "D-CABI-RESULT1",
+      "cardId": "c0ai04g0",
+      "group": "syntax",
+      "title": "Bind C status-plus-out APIs as Jet Result",
+      "gist": "Decide whether Jet automatically adapts a C status return plus out pointer into Result.",
+      "explainer": "",
+      "story": "Omar binds int store_load(uint64_t id, struct Record *out). It initializes out only for STORE_OK; every other status leaves it uninitialized. Record is a plain #Layout(c) value with no destructor. Omar wants Record ? StoreError without lying about the C call or reading uninitialized memory.",
+      "inWild": "// store.h: int store_load(uint64_t id, struct Record *out);\nuse c.store as store\n#Layout(c) struct Record { id: U64, flags: U32 }\nenum StoreError { Missing, Corrupt, Unknown(I32) }\n#Extern module c.store { fn store_load(id: U64, out: *Record) -> I32 }",
+      "detail": "Every option binds that exact header. out is last, non-null, write-only, initialized iff status==Ok; Record is fixed-size Copy/Clone #Layout(c) with no cleanup; Missing/Corrupt map one-to-one and unknown status becomes StoreError.Unknown(raw). Nullable/partial/owned outputs, cleanup functions, errno, and thread-local error text remain raw bindings. Beginner pass favors teachable conversion; expert pass requires exact initialization and ownership. Hybrid pass already exists as a raw binding plus ordinary Jet wrapper. Recommendation C.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Convention-only automatic adapter",
+          "detail": "A C declaration returning T ? E is permitted only for fixed I32 f(args..., T *out): out is last/write-only/non-null, T is fixed-size #Layout(c) with no destructor, one configured raw integer is success and initializes out, every other listed integer maps to E, and all other integers map explicitly. Compiler uses uninitialized storage, reads only on success, never drops uninitialized storage, and emits exact store_load(id,out). Nested/growable/non-C-safe payloads are E3203. This is an adapter convention, not Result's layout.",
+          "code": "enum StoreError { Missing, Corrupt, Unknown(I32) }\n#Extern module c.store {\n    #[CResult(status: I32, ok: 0, errors: [1: StoreError.Missing, 2: StoreError.Corrupt], unknown: StoreError.Unknown)]\n    fn load(id: U64) -> Record ? StoreError = \"store_load\"\n}\n// Error [E3203]: C Result adapter cannot prove initialized output and total mapping.\n// Fix: complete raw-status mapping or bind store_load(id, out) directly."
+        },
+        {
+          "key": "B",
+          "name": "Fully explicit adapter metadata",
+          "detail": "Keep Result but spell exact symbol, I32 foreign return, out index/type/direction/nullability, raw statuses that initialize it, ownership/cleanup, success integers, exhaustive integer mappings, and unknown handling. Multiple outputs each define initialization and cleanup per status. Missing/overlapping facts are E3203. This creates a second FFI mini-language.",
+          "code": "enum StoreError { Missing, Corrupt, Unknown(I32) }\n#Extern module c.store {\n  #[Adapter(symbol: \"store_load\", return: I32,\n    out: .{index: 1, type: Record, direction: .Write, nullable: false, initialized_on: [0], ownership: .Value, cleanup: .None},\n    ok: [0], errors: [1: StoreError.Missing, 2: StoreError.Corrupt], unknown: StoreError.Unknown)]\n  fn load(id: U64) -> Record ? StoreError\n}\n// Error [E3203]: adapter cannot prove output initialization and cleanup.\n// Fix: complete metadata or bind the raw status/out function."
+        },
+        {
+          "key": "C",
+          "name": "Raw header plus ordinary Jet wrapper",
+          "detail": "Generic Result stays E3203 in C declarations. Bind I32 + *Record in the audited pointer tier. For this ballot's plain Record, zero initialization is valid; pass its address, ignore bytes on nonzero status, and return the value only for 0. Other headers needing true uninitialized/owned storage remain raw until their pointer contract is expressible. The wrapper owns conversion; codegen gains no adapter language.",
+          "code": "use core.mem\nuse c.store as store\n#Layout(c) struct Record { id: U64, flags: U32 }\nenum StoreError { Missing, Corrupt, Unknown(I32) }\n#Extern module c.store { fn store_load(id: U64, out: *Record) -> I32 }\nfn load(id: U64) -> Record ? StoreError {\n  slot: Record := Record.{id: 0, flags: 0}\n  #Unsafe(\"store_load writes slot only when status is zero\") {\n    p := mem.Ptr<Record>.from_addr(mem.address_of(slot))\n    status := store.store_load(id, p)\n    if status == {\n      0 -> { return ok(p.*) }\n      1 -> { return err(.Missing) }\n      2 -> { return err(.Corrupt) }\n      other -> { return err(.Unknown(other)) }\n    }\n  }\n}\n// Direct Result in #Extern: Error [E3203]: Result has no universal C ABI.\n// Fix: bind the header-shaped I32/out function and wrap it."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "bindgen exposes status and *mut out; a safe wrapper owns MaybeUninit and assume_init.",
+          "code": "let mut out = MaybeUninit::<Record>::uninit();\nlet s = unsafe { store_load(id, out.as_mut_ptr()) };"
+        },
+        {
+          "lang": "Swift",
+          "note": "Arbitrary status/out APIs remain raw and gain a handwritten throwing wrapper.",
+          "code": "var record = Record(); let status = store_load(id, &record)"
+        },
+        {
+          "lang": "Zig",
+          "note": "C import preserves pointer/status; an error union is built in Zig.",
+          "code": "var out: Record = undefined; const s = store_load(id, &out);"
+        }
+      ],
+      "rec": "C",
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-11T20:00:32.673Z"
+    },
+    {
+      "id": "D-CABI-PLATFORM1",
+      "cardId": "c0ai04g0",
+      "group": "syntax",
+      "title": "Alternate native calling conventions",
+      "gist": "Choose how a foreign function selects a non-default calling convention.",
+      "explainer": "",
+      "story": "Elena binds BOOL WINAPI IsWindow(HWND) and int __stdcall LegacyPing(int). On 32-bit Windows, stdcall changes stack cleanup and symbol decoration; on 64-bit Windows the platform uses Win64. Calling either with the wrong ABI can corrupt the stack before Jet reports an error.",
+      "inWild": "use core.mem\n#Extern module c.user32 {\n    #Abi(system) fn is_window(hwnd: *U8) -> I32 = \"IsWindow\"\n    #Abi(stdcall) fn legacy_ping(value: I32) -> I32 = \"_LegacyPing@4\"\n}\n// HWND is an opaque pointer; Win32 BOOL is I32. Ordinary Jet wraps result != 0.",
+      "detail": "This ballot uses C-safe pointer/scalar declarations and is independent of callback ABI. #Abi changes calling convention only; = \"symbol\" is passed unchanged and Jet never decorates it. Vector/custom/unwind conventions are excluded. Beginner pass keeps C implicit; expert pass gets an exact matrix, inheritance, symbol, compatibility, and variadic law. Hybrid pass uses one local marker. Recommendation A.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Per-function #Abi, no inheritance",
+          "detail": "Each declaration defaults independently to c. Matrix: c every target; system every target (Windows x86=>stdcall, Windows x86_64/aarch64=>native Windows, non-Windows=>c); cdecl/stdcall/fastcall Windows x86 only; win64 Windows x86_64 only; sysv64 non-Windows x86_64 only. ARM/AArch64 accept c/system only. Unknown E3212; target-invalid E3213; invalid variadic ABI E3214. Variadics only c and Windows-x86 cdecl. Symbol is exact; decoration is user/bindgen responsibility. ABI participates in direct-declaration compatibility, overlay merge, cache, and generated wrapper; conflicts E3205. Alternate-ABI functions are direct-call-only and E3203 when taken as values. Bindgen preserves declared #Abi(system) in portable source and stores resolved target ABI separately. Header types remain exact: HWND is *U8 and BOOL is I32, with a Jet wrapper converting nonzero to Bool.",
+          "code": "use core.mem\n#Extern module c.user32 {\n  fn c_helper(v: I32) -> I32\n  #Abi(system) fn is_window(hwnd: *U8) -> I32 = \"IsWindow\"\n  #Abi(stdcall) fn legacy_ping(v: I32) -> I32 = \"_LegacyPing@4\"\n}\n// Error [E3213]: ABI `stdcall` is unavailable for aarch64-unknown-linux-gnu.\n// Why: stdcall lowers only on 32-bit Windows x86.\n// Fix: use #Abi(c), select Windows x86, or bind a C-ABI shim."
+        },
+        {
+          "key": "B",
+          "name": "Module default with local override",
+          "detail": "#Extern(abi:X) module establishes inherited ABI; #Abi(Y) overrides one declaration. Same matrix, exact header-type fidelity, symbol, variadic, E3212-E3214, direct-call-only, E3205 compatibility, cache, and bindgen portability laws as A. Formatter prints module default/overrides; cache stores each resolved ABI. Moving declarations can change ABI.",
+          "code": "use core.mem\n#Extern(abi: system) module c.user32 {\n  fn is_window(hwnd: *U8) -> I32 = \"IsWindow\"\n  #Abi(c) fn portable_helper(v: I32) -> I32\n}"
+        },
+        {
+          "key": "C",
+          "name": "C ABI only",
+          "detail": "Every CModule function stays extern C. Any #Abi is E3215 with C-shim fix. Bindgen refuses non-C declarations. Variadic C remains only where currently supported; compatibility/cache remain C-only.",
+          "code": "use core.mem\n#Extern module c.user32 {\n  #Abi(system) fn is_window(hwnd: *U8) -> I32 = \"IsWindow\"\n}\n// Error [E3215]: alternate native calling conventions are disabled.\n// Why: this foreign boundary supports only C.\n// Fix: compile a C-ABI shim and bind that exact symbol."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "ABI is per declaration; system maps by target, invalid pairs fail, and header types remain pointer plus i32 BOOL.",
+          "code": "extern \"system\" { fn IsWindow(hwnd: *mut core::ffi::c_void) -> i32; }\nextern \"stdcall\" { #[link_name = \"_LegacyPing@4\"] fn ping(v:i32)->i32; }"
+        },
+        {
+          "lang": "Zig",
+          "note": "callconv is target-validated; the Win32 header remains pointer plus 32-bit BOOL integer.",
+          "code": "extern \"user32\" fn IsWindow(hwnd: ?*anyopaque) callconv(.winapi) i32;"
+        },
+        {
+          "lang": "C/C++",
+          "note": "Calling-convention keywords are declaration-local; headers/import libraries mediate decoration.",
+          "code": "BOOL WINAPI IsWindow(HWND hwnd);"
+        }
+      ],
+      "rec": "A",
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-11T20:00:38.530Z"
+    },
+    {
+      "id": "D-PERFBUDGET-BENCHMIGRATE1",
+      "cardId": "ccq07pav",
+      "group": "tooling",
+      "title": "Retire benchmark budget prototypes",
+      "gist": "Choose the exact retirement mapping for core.testing.bench_budget while keeping #Bench as the sole benchmark workload and BudgetSpec as the sole policy.",
+      "explainer": "",
+      "story": "Mina has #Bench(\"parse-large\") and an older ignored-result call to testing.bench_budget. Another caller branches on its Bool. The helper owns a floating mean, fixed warmups/trials, stderr, and a Bool result, while typed budgets require pinned evidence and canonical reports. The implementation must account for every old argument and result without shipping a migration command, alias, teaching parser, or second evaluator.",
+      "inWild": "#Bench(\"parse-large\") { parse(large_fixture) }\nmodule perf.ci {\n  budgets: [Budget.{\n    name: \"parse-large-time\",\n    scope: .Bench(\"parse-large\"),\n    metric: .BenchTime(.P95),\n    provider: .BenchMeasurement(\"parse-large\"),\n    comparison: .AbsoluteFrom(\"ci/linux-x64\"),\n    limit: .AtMost(5ms),\n  }]\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Narrow mechanical source migration",
+          "detail": "Before deleting the prototype, the repository migration pass may transform a call only when all of these AST conditions hold: it is a direct expression statement whose value is discarded; callee resolves exactly to core.testing.bench_budget; arguments are exactly a static string literal name, nonnegative integer literal max_ns, and a zero-parameter lambda; the lambda captures no local binding and references only package-visible functions/constants/imports; exactly one #Bench with the same name is absent; and exactly one existing BudgetSpec in the same package already has scope .Bench(name), metric .BenchTime(percentile), provider .BenchMeasurement(name), comparison .AbsoluteFrom(baseline), and limit .AtMost(max_ns ns). The pass lifts the lambda body byte-semantically into #Bench(name), deletes only the expression statement, and changes no BudgetSpec. It refuses rather than inventing a percentile, baseline, sampling policy, role, or module location. Any call used as an argument, return, condition, binding initializer, interpolation, operator operand, assertion value, or other value-producing expression is not transformed. After the repository migration, delete the Core item, sema signature, TIR/prelude helper, JET_BENCH_VERBOSE behavior, fixed 3/10 sampling, mean/stddev output, Bool result, and enforcement. All remaining calls receive the canonical unresolved Core-member diagnostic already used for absent members; no special old-syntax diagnostic remains. jet bench measures #Bench through the shared engine only.",
+          "code": "// Accepted only because matching typed policy already exists and result is discarded:\ntesting.bench_budget(\"parse-large\", 5000000, () => parse(large_fixture))\n// becomes:\n#Bench(\"parse-large\") { parse(large_fixture) }\n\n// Refused: Bool is consumed.\nok :: testing.bench_budget(\"parse-large\", 5000000, () => parse(large_fixture))\nError [E0102]: `bench_budget` is not defined in `core.testing`\nWhy: `core.testing` has no member named `bench_budget`.\nFix: declare a `#Bench` workload and attach its policy in `module perf.<role>`."
+        },
+        {
+          "key": "B",
+          "name": "Delete without source transformation",
+          "detail": "Keep #Bench and BudgetSpec exactly as ratified and mechanically remove every first-party prototype use during implementation. The retirement ledger maps name to Bench identity, body to #Bench body, and max_ns to the user's typed AtMost Duration intent; it records fixed warmups/trials, floating mean/stddev, stderr, environment-controlled rendering, and Bool as removed semantics with no equivalent. Delete the complete helper path. External remaining calls receive the normal unresolved-member diagnostic and require explicit user-authored percentile, baseline, and policy.",
+          "code": "#Bench(\"parse-large\") { parse(large_fixture) }\nBudget.{ name: \"parse-large-time\", scope: .Bench(\"parse-large\"), metric: .BenchTime(.P95), comparison: .AbsoluteFrom(\"ci/linux-x64\"), limit: .AtMost(5000000ns) }"
+        },
+        {
+          "key": "C",
+          "name": "Transform workloads only, never thresholds",
+          "detail": "Apply A's exact discarded-result, literal, zero-capture, no-existing-#Bench AST conditions but do not require or create a matching BudgetSpec. Lift only the workload to #Bench and explicitly retire max_ns plus all old sampling/output/Bool semantics. This preserves executable benchmark coverage while forcing every performance policy choice to be authored explicitly under GRAMMAR1. Value-consuming calls are refused and later receive the canonical unresolved-member diagnostic.",
+          "code": "// Old max_ns is reported as retired, not silently mapped.\n#Bench(\"parse-large\") { parse(large_fixture) }\n// No BudgetSpec is invented."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust editions",
+          "note": "Mechanical migrations apply only where meaning is fixed and reject context-sensitive rewrites; A uses that same boundary without shipping a user command.",
+          "code": "machine-applicable suggestion"
+        },
+        {
+          "lang": "Go benchmarks",
+          "note": "A named benchmark defines workload while the harness owns measurement; no Bool-returning threshold helper survives.",
+          "code": "func BenchmarkParse(b *testing.B) { ... }"
+        }
+      ],
+      "rec": "A",
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-11T20:32:18.428Z"
+    },
+    {
+      "id": "D-PERFBUDGET-GAMEMIGRATE1",
+      "cardId": "ccq07pav",
+      "group": "runtime",
+      "title": "Retire game budget prototype",
+      "gist": "Choose an exact typed mapping or explicit retirement for every Game.Budgets field and observable result.",
+      "explainer": "",
+      "story": "Jo sets frame_ms 16, memory_mb 128, asset_kb 4096, and draw_calls 500 on a named scene. The current object stores and displays those integers but does not measure or enforce them. Jo needs device-bound scene evidence in CI and Canvas without pretending those stored values were past measurements or retaining GameBudgets as a second policy API.",
+      "inWild": "module perf.gameplay {\n  budgets: [\n    Budget.{ name: \"frame-p99\", scope: .Scene(\"level-one\"), metric: .FrameTime(.P99), provider: .SceneProbe(\"level-one\"), comparison: .AbsoluteFrom(\"game/linux-x64\"), limit: .AtMost(16ms) },\n    Budget.{ name: \"memory\", scope: .Scene(\"level-one\"), metric: .MemoryHighWater, provider: .SceneProbe(\"level-one\"), comparison: .AbsoluteFrom(\"game/linux-x64\"), limit: .AtMost(128MiB) }\n  ]\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Add exact scene asset and draw metrics",
+          "detail": "Atomically amend GRAMMAR1 with SceneAssetBytes (Bytes; Scene + SceneProbe; lower better) and DrawCalls(percentile) (Count; Scene + SceneProbe; lower better). Map frame_ms to FrameTime(.P99) AtMost value*1,000,000ns; memory_mb to MemoryHighWater AtMost value*1,048,576 bytes (MiB, explicitly resolving the old ambiguous label); asset_kb to SceneAssetBytes AtMost value*1,024 bytes (KiB); draw_calls to DrawCalls(.P99) AtMost Count. Every metric uses AbsoluteFrom because backend/device/replay policy supplies statistical evidence. One SceneProbe run pins backend build, target/device, named replay/input bytes, scene-ready event, 120 warmup frames, 600 measured frames, and identical viewport/settings. FrameTime samples one integer nanosecond duration per measured frame; DrawCalls samples renderer submissions per measured frame; SceneAssetBytes samples total decoded resident bytes at the ready boundary and after each measured frame, with the run maximum as its estimator; MemoryHighWater samples process resident bytes after each measured frame, with the run maximum. REPORT1 then applies its statistical/confidence law. Old Game.Budgets construction/set/show only represented desired thresholds, never evidence; migrate the four intents and explicitly retire its stored object and GameBudgets(...) display. Delete all sema/TIR/JIT/prelude slots and paths. Remaining old calls/types receive ordinary unresolved member/type diagnostics, not performance-budget diagnostics.",
+          "code": "Budget.{ name: \"assets\", scope: .Scene(\"level-one\"), metric: .SceneAssetBytes, provider: .SceneProbe(\"level-one\"), comparison: .AbsoluteFrom(\"game/linux-x64\"), limit: .AtMost(4096KiB) }\nBudget.{ name: \"draws-p99\", scope: .Scene(\"level-one\"), metric: .DrawCalls(.P99), provider: .SceneProbe(\"level-one\"), comparison: .AbsoluteFrom(\"game/linux-x64\"), limit: .AtMost(500) }\n\nError [E0102]: `Budgets` is not defined in `core.game`"
+        },
+        {
+          "key": "B",
+          "name": "Map frame and memory; retire asset and draw",
+          "detail": "Use the same pinned SceneProbe, frame samples, memory samples, old ms-to-ns and mb-to-MiB mappings as A. Explicitly retire asset_kb and draw_calls because GRAMMAR1 has no truthful metric for them. Migration refuses to claim those thresholds survived and reports both removed intents. Delete the entire Game.Budgets API and all results; no alias or second enforcement path remains.",
+          "code": "migrated: frame_ms 16 -> FrameTime(.P99) AtMost(16ms)\nmigrated: memory_mb 128 -> MemoryHighWater AtMost(128MiB)\nretired without equivalent: asset_kb, draw_calls"
+        },
+        {
+          "key": "C",
+          "name": "Retire all four decorative limits",
+          "detail": "Record that the old object never measured or enforced any field, delete it completely, and migrate nothing automatically. Users may author any currently ratified FrameTime or MemoryHighWater BudgetSpec explicitly. SceneAssetBytes and DrawCalls remain unavailable until separately ratified. This preserves GRAMMAR1 and removes the facade without asserting false continuity.",
+          "code": "$ jet migrate perf-budgets game.jet --check\nGame.Budgets stored four thresholds but produced no evidence or policy result; all four require explicit typed replacement."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Unity Profiler",
+          "note": "Frame, resident memory, loaded assets, and draw submissions are session/device facts; A pins their measurement boundaries.",
+          "code": "ProfilerRecorder.StartNew(...);"
+        },
+        {
+          "lang": "Unreal automation",
+          "note": "A fixed map, replay, device, warmup, and capture window are required before scene numbers are comparable.",
+          "code": "StartFPSChart();"
+        }
+      ],
+      "rec": "A",
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-11T20:32:23.160Z"
+    },
+    {
+      "id": "D-PERFBUDGET-PROVIDER1",
+      "cardId": "ccq07pav",
+      "group": "runtime",
+      "title": "Measurement provider protocol",
+      "gist": "Choose the exact trusted boundary that converts each ratified provider identity into canonical raw evidence.",
+      "explainer": "",
+      "story": "Priya checks a build artifact, compiler facts, parser benchmark, service readiness, allocation workload, and scene. CI must reject truncated, replayed, oversized, wrong-context, or wrong-unit evidence while treating a healthy provider that cannot measure this host as unavailable rather than corrupt. She also needs provider names to resolve deterministically without a hidden command lookup path.",
+      "inWild": "Budget.{ name: \"ready-p95\", scope: .Service(\"api\"), metric: .ServiceReadiness, provider: .ServiceProbe(\"api-ready\"), comparison: .AbsoluteFrom(\"ci/linux-x64\"), limit: .AtMost(2s) }",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "In-process typed provider registry",
+          "detail": "The driver owns a closed ProviderRequest and ProviderRecord API; there is no user command protocol. ProviderRequest is exactly {schema:\"jet.perf-provider-request\",version:1,request_id:Hex64,provider:{kind,identity},context_key:Hex64,budget_spec_hashes:[Hex64],metrics:[MetricCanonical],workload:{identity,digest},policy:MeasurementPolicy}. Arrays sort by canonical bytes; request_id hashes the remaining canonical object plus LF. Records are exactly Sample{request_id,sequence:Int,metric,budget_spec_hash,unit,value:Quantity,captured_at:RFC3339UTC}, Unavailable{request_id,reason_kind:\"unsupported-host\"|\"missing-runtime\"|\"probe-not-ready\"|\"insufficient-samples\",detail:Text}, and Complete{request_id,sample_count:Int,records_sha256:Hex64}. Sequence starts at 0 and is contiguous; Complete is last. Maximum 1,000,000 samples, 16 MiB canonical record bytes total, 4096 budget specs, and 512 UTF-8 scalars in detail; excess is E2908 before report creation. BuildArtifact resolves the one artifact target identity from the loaded package graph and reads its no-follow published file. CompilerFacts resolves the checked target and reads front-end facts. BenchMeasurement(name) resolves exactly one #Bench of that canonical package-qualified name. ServiceProbe(name) and SceneProbe(name) resolve exactly one existing named service/scene probe registered by their owning runtime subsystem; no PATH/environment command discovery. AllocationProbe(name) resolves exactly one allocation workload registered on the attached Bench/Service/Scene; absent or ambiguous identities are compile-time E2905. Runtime registries carry the pinned workload contract required by GRAMMAR1 and are hashed into workload.digest. Provider adapters may collect samples only; engine owns direction, statistics, policy, report, and baseline. A valid Unavailable or valid Complete with too few samples becomes E2906. Malformed ordering/schema/unit/context/hash, adapter panic, timeout, or registry invariant failure is E2908. Unsupported metric/provider pairs remain E2903; unresolved identity remains E2905.",
+          "code": "Error [E2906]: performance budget api-ready has no usable evidence\nWhy: ServiceProbe api-ready completed with insufficient-samples after 12 of 20 required trials.\nFix: restore the service probe and run `jet budget check` again.\n\nError [E2908]: performance budget operation failed\nWhy: SceneProbe level-one emitted sequence 8 after sequence 10 for request 4a….\nFix: repair the provider; no report was accepted."
+        },
+        {
+          "key": "B",
+          "name": "Versioned subprocess protocol",
+          "detail": "Use the same request, record variants, resolution rules, limits, ordering, hashes, E2906/E2908 boundary, and centralized evaluator as A, but registered runtime probes execute in an isolated child. stdin is one A-canonical ProviderRequest followed by LF. stdout is frames of four-byte unsigned big-endian length followed by exactly that many A-canonical JSON bytes without LF; zero length and frames over 1 MiB reject, aggregate remains 16 MiB. stderr is bounded to 1 MiB diagnostic log and never parsed. EOF before Complete, bytes after Complete, nonzero exit, timeout, or invalid UTF-8/JSON is E2908. BuildArtifact and CompilerFacts remain in-process trusted adapters. Registry entries select a compiled Jet provider target, never arbitrary PATH commands.",
+          "code": "stdin: {canonical ProviderRequest}\nstdout: 00 00 01 2f | {canonical Sample bytes}\n...\nstdout: 00 00 00 d4 | {canonical Complete bytes}"
+        },
+        {
+          "key": "C",
+          "name": "Signed evidence-file handoff",
+          "detail": "Use the same schemas, resolution, limits, ordering, and evaluator as A. A provider writes one no-follow, create-new canonical container {request,records,complete}; the engine verifies request_id, context, record hash, ownership, mode, size, and atomic completion before reading. Missing compatible evidence is E2906; malformed, replaced, oversized, or protocol-invalid evidence is E2908. This supports remote/device capture but requires the separately gated attestation law before evidence can be trusted across machines; without attestation it is local-only.",
+          "code": ".jet/perf/provider-inbox/<request_id>.json\n# Canonical, create-new, local-only until attestation is ratified."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Cargo JSON messages",
+          "note": "Machine records are separated from logs; B additionally binds every framed record to a canonical request and terminal hash.",
+          "code": "{\"reason\":\"compiler-artifact\",...}"
+        },
+        {
+          "lang": "Bazel workers",
+          "note": "Persistent workers use framed request/response protocols with bounded messages; B applies that discipline without delegating policy.",
+          "code": "WorkRequest -> WorkResponse"
+        }
+      ],
+      "rec": "A",
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-11T20:32:27.996Z"
+    },
+    {
+      "id": "D-PERFBUDGET-INTEGRATION1",
+      "cardId": "ccq07pav",
+      "group": "tooling",
+      "title": "Performance budget integration contract",
+      "gist": "Choose when compatible performance evidence refreshes and when command-specific slices may be reused, without changing hard build gates or #240 proof semantics.",
+      "explainer": "",
+      "story": "Alex builds, starts dev services, runs benchmarks, proves a release, and opens dossier or Canvas. Deterministic Fail budgets must always gate the artifact-producing build. Statistical work must not run from read-only editor views. Proof must reuse budget facts through #240's existing Evidence model, remain pass_incomplete when required evidence is absent, and never become another measurement command.",
+      "inWild": "jet build app.jet --release\njet bench app.jet\njet dev app.jet\njet budget check\njet prove app.jet\njet inspect dossier app.jet",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Intent-owned refresh with compatible slice reuse",
+          "detail": "jet budget check measures every applicable BudgetSpec for the current target/profile and writes the whole-policy report; update reuses that run. Every successful artifact-producing build always evaluates applicable deterministic BuildArtifact and CompilerFacts Fail budgets after atomic artifact publication and before success; failure exits 1, preserving the hard gate. jet bench measures all applicable BenchMeasurement specs whose Bench scope exists in the package, through the shared evaluator and report model. jet dev measures StartupTime on the first transition to runnable, ServiceReadiness from named service start to its declared ready event, and Scene metrics only when the existing scene/replay is explicitly started. Dev refreshes once per provider context, then only when source, BudgetSpec, workload, target, or profile digest changes; Warn never blocks, Fail blocks readiness. Dossier, Canvas, and LSP never measure and project freshness/context/report identity only. CI runs jet budget check. Prove never measures and introduces no flag, receipt type, status, field, or output. It translates each latest compatible budget result into #240's existing ProofReport Evidence representation and lets #240's existing aggregation decide pass, fail, or pass_incomplete and its existing exit behavior. A compatible passing deterministic build slice may satisfy the matching Evidence fact; statistical command slices may satisfy only the exact same BudgetSpec/context/workload fact and never imply whole-policy completion. Missing, stale, incompatible, unavailable, or unmeasured applicable evidence becomes incomplete Evidence under #240; a failed Fail budget becomes failed Evidence. Warn remains evidence detail and does not change #240 status.",
+          "code": "$ jet build app.jet --release\nbuild budgets: 2 passed · report 8bdb1120b90a\n$ jet prove app.jet\n# Existing #240 rendering/status law applies. No budget-specific prove flag or receipt surface is added."
+        },
+        {
+          "key": "B",
+          "name": "Intent-owned refresh, whole-report proof reuse",
+          "detail": "Use A's mandatory deterministic build gates, bench/dev timing, read-only projections, and prove-never-measures rule. Command slices are visible in build/dev/bench/dossier/Canvas/LSP but never satisfy ProofReport Evidence. Only a compatible whole-policy report from jet budget check contributes performance Evidence to #240; otherwise existing #240 aggregation yields pass_incomplete. Failed deterministic build budgets still prevent a successful artifact and therefore cannot be bypassed by proof.",
+          "code": "$ jet build app.jet --release\nbuild budgets: 2 passed · slice report 8bdb1120b90a\n$ jet prove app.jet\n# #240 sees performance Evidence incomplete until `jet budget check` writes a compatible whole report."
+        },
+        {
+          "key": "C",
+          "name": "Eager statistical refresh at owning command boundaries",
+          "detail": "Keep A's hard deterministic build gates, one evaluator, read-only dossier/Canvas/LSP, and exact #240 Evidence/pass_incomplete/exit law. In addition, build refreshes applicable statistical Target scopes after deterministic gates, dev refreshes all applicable Service/Scene scopes at the same explicit start/ready boundaries, and bench refreshes all Bench scopes. Compatible slices may satisfy matching #240 Evidence exactly as A. No command runs a provider outside the target/service/scene/bench it already owns, so build does not launch services/scenes and editor views remain side-effect free.",
+          "code": "$ jet build app.jet --release\ndeterministic budgets: 2 passed\ntarget statistical budgets: 1 warning\n# Service, Scene, and Bench providers were not started by build."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "IDE test explorers",
+          "note": "Editors project cached state and explicit run ownership; all options keep LSP and Canvas non-effectful.",
+          "code": "Run Tests"
+        },
+        {
+          "lang": "Bazel aspects",
+          "note": "Command-scoped facts can be reused only when their graph/context identity matches; A applies exact fact-level compatibility.",
+          "code": "bazel build --aspects=..."
+        }
+      ],
+      "rec": "A",
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-11T20:32:35.385Z"
     }
   ],
   "questions": [
@@ -27514,6 +28130,517 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-11T20:32:41.821Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "ccq07pav",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T20:32:35.385Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-PERFBUDGET-INTEGRATION1",
+      "note": "Performance budget integration contract"
+    },
+    {
+      "at": "2026-07-11T20:32:27.997Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-PERFBUDGET-PROVIDER1",
+      "note": "Measurement provider protocol"
+    },
+    {
+      "at": "2026-07-11T20:32:23.160Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-PERFBUDGET-GAMEMIGRATE1",
+      "note": "Retire game budget prototype"
+    },
+    {
+      "at": "2026-07-11T20:32:18.429Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-PERFBUDGET-BENCHMIGRATE1",
+      "note": "Retire benchmark budget prototypes"
+    },
+    {
+      "at": "2026-07-11T20:20:12.258Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-CABI-PLATFORM1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T20:17:52.096Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-CABI-PLATFORM1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T20:16:39.602Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-CABI-RESULT1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T20:16:33.672Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-CABI-CALLBACK1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T20:16:27.900Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-CABI-PLATFORM1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T20:14:13.861Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0ai04g0",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T20:13:59.762Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-CABI-PLATFORM1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T20:13:54.053Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-CABI-RESULT1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T20:13:47.696Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-CABI-CALLBACK1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T20:00:38.531Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-CABI-PLATFORM1",
+      "note": "Alternate native calling conventions"
+    },
+    {
+      "at": "2026-07-11T20:00:32.673Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-CABI-RESULT1",
+      "note": "Generic Result values at the C boundary"
+    },
+    {
+      "at": "2026-07-11T20:00:28.612Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-CABI-CALLBACK1",
+      "note": "C callback ABI and lifetime law"
+    },
+    {
+      "at": "2026-07-11T19:42:08.738Z",
+      "by": "codex-84-builder",
+      "action": "card.update",
+      "ref": "c1cix784",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T19:41:16.106Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0u55hlv",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T19:37:37.225Z",
+      "by": "codex-84-builder",
+      "action": "card.update",
+      "ref": "c1cix784",
+      "note": "phase,assignee,logEntry"
+    },
+    {
+      "at": "2026-07-11T19:35:47.602Z",
+      "by": "codex-card300-builder",
+      "action": "card.release",
+      "ref": "c0iyfhaf",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-11T19:35:40.341Z",
+      "by": "codex-card300-builder",
+      "action": "card.update",
+      "ref": "c0iyfhaf",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T19:34:15.321Z",
+      "by": "codex-224-builder",
+      "action": "card.update",
+      "ref": "c0u55hlv",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T19:27:37.820Z",
+      "by": "codex-card300-builder",
+      "action": "card.update",
+      "ref": "c0by6tvm",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T19:23:08.897Z",
+      "by": "codex-card470-fixer",
+      "action": "decision.add",
+      "ref": "D-JOS-PRIORITY-SURFACE2",
+      "note": "Attach option priority without colliding with real option keys"
+    },
+    {
+      "at": "2026-07-11T19:20:37.477Z",
+      "by": "codex-card361-fixer",
+      "action": "card.release",
+      "ref": "c0nhjxh4",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-11T19:15:16.454Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-NETIO-CONTRACT2",
+      "note": "B"
+    },
+    {
+      "at": "2026-07-11T19:13:39.395Z",
+      "by": "codex-card361-fixer",
+      "action": "card.claim",
+      "ref": "c0nhjxh4",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T19:13:15.519Z",
+      "by": "codex-card470-builder",
+      "action": "card.release",
+      "ref": "c0by6tvm",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-11T19:04:54.897Z",
+      "by": "codex-224-builder",
+      "action": "card.release",
+      "ref": "c0u55hlv",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-11T19:04:24.204Z",
+      "by": "codex-224-builder",
+      "action": "card.claim",
+      "ref": "c0u55hlv",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T19:04:19.410Z",
+      "by": "codex-224-builder",
+      "action": "card.update",
+      "ref": "c0u55hlv",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T19:02:07.607Z",
+      "by": "codex-card470-builder",
+      "action": "card.claim",
+      "ref": "c0by6tvm",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T19:00:18.777Z",
+      "by": "codex-card300-builder",
+      "action": "card.release",
+      "ref": "c0nhjxh4",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-11T18:57:06.084Z",
+      "by": "codex-224-builder",
+      "action": "card.update",
+      "ref": "c0u55hlv",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T18:56:56.797Z",
+      "by": "codex-224-builder",
+      "action": "card.claim",
+      "ref": "c0u55hlv",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T18:50:16.157Z",
+      "by": "sol-300-builder",
+      "action": "card.update",
+      "ref": "c0z3l25j",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T18:45:45.460Z",
+      "by": "codex-224-builder",
+      "action": "card.claim",
+      "ref": "c0u55hlv",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T18:45:06.742Z",
+      "by": "terra-359-builder",
+      "action": "card.release",
+      "ref": "c0iyfhaf",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-11T18:45:02.619Z",
+      "by": "terra-359-builder",
+      "action": "card.update",
+      "ref": "c0iyfhaf",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T18:39:19.524Z",
+      "by": "sol-361-builder",
+      "action": "card.release",
+      "ref": "c0nhjxh4",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-11T18:39:07.284Z",
+      "by": "sol-361-builder",
+      "action": "card.update",
+      "ref": "c0nhjxh4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T18:28:15.054Z",
+      "by": "terra-359-builder",
+      "action": "card.claim",
+      "ref": "c0iyfhaf",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T18:27:40.327Z",
+      "by": "sol-300-builder",
+      "action": "card.update",
+      "ref": "c0z3l25j",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T18:26:20.509Z",
+      "by": "sol-361-builder",
+      "action": "card.claim",
+      "ref": "c0nhjxh4",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T18:24:29.222Z",
+      "by": "sol-84-builder",
+      "action": "card.release",
+      "ref": "c1cix784",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-11T18:24:24.647Z",
+      "by": "sol-300-builder",
+      "action": "decision.add",
+      "ref": "D-NETIO-CONTRACT2",
+      "note": "Exact Reader and Writer contract law"
+    },
+    {
+      "at": "2026-07-11T18:19:06.431Z",
+      "by": "sol-84-builder",
+      "action": "card.claim",
+      "ref": "c1cix784",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T18:19:06.347Z",
+      "by": "sol-84-builder",
+      "action": "card.criteria-add",
+      "ref": "c1cix784",
+      "note": "#3 Focused REPL transcripts prove positive Core execution and n"
+    },
+    {
+      "at": "2026-07-11T18:19:06.263Z",
+      "by": "sol-84-builder",
+      "action": "card.criteria-add",
+      "ref": "c1cix784",
+      "note": "#2 D-REPLCOREEFFECT1=A is enforced: inferred Core effects promp"
+    },
+    {
+      "at": "2026-07-11T18:18:59.629Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-NETIO-CONTRACT1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-11T18:18:58.766Z",
+      "by": "sol-84-builder",
+      "action": "card.criteria-add",
+      "ref": "c1cix784",
+      "note": "#1 REPL cross-turn bindings preserve exact CtValue variants and"
+    },
+    {
+      "at": "2026-07-11T18:16:29.859Z",
+      "by": "sol-84-builder",
+      "action": "card.release",
+      "ref": "c1cix784",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-11T18:14:55.868Z",
+      "by": "sol-84-builder",
+      "action": "card.claim",
+      "ref": "c1cix784",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T18:14:24.195Z",
+      "by": "sol-300-builder",
+      "action": "card.release",
+      "ref": "c0z3l25j",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-11T18:14:18.251Z",
+      "by": "sol-300-builder",
+      "action": "card.update",
+      "ref": "c0z3l25j",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T18:12:49.904Z",
+      "by": "sol-300-builder",
+      "action": "decision.add",
+      "ref": "D-NETIO-CONTRACT1",
+      "note": "Represent the shared byte-stream Reader and Writer contract"
+    },
+    {
+      "at": "2026-07-11T18:11:26.896Z",
+      "by": "sol-131-builder",
+      "action": "card.claim",
+      "ref": "c2nizvzp",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T18:09:35.122Z",
+      "by": "card131-recovery",
+      "action": "card.release",
+      "ref": "c2nizvzp",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-11T18:09:19.692Z",
+      "by": "card131-recovery",
+      "action": "card.update",
+      "ref": "c2nizvzp",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T18:05:45.429Z",
+      "by": "sol-451-builder",
+      "action": "card.release",
+      "ref": "c01lj8gw",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-11T18:03:52.560Z",
+      "by": "card131-recovery",
+      "action": "card.claim",
+      "ref": "c2nizvzp",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T18:03:49.939Z",
+      "by": "card131-recovery",
+      "action": "card.release",
+      "ref": "c2nizvzp",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-11T18:02:44.342Z",
+      "by": "card467-builder",
+      "action": "card.release",
+      "ref": "c0ai04g0",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-11T18:02:32.960Z",
+      "by": "card467-builder",
+      "action": "card.update",
+      "ref": "c0ai04g0",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T18:01:05.105Z",
+      "by": "card467-builder",
+      "action": "card.release",
+      "ref": "c0t4root",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-11T17:59:50.427Z",
+      "by": "card467-builder",
+      "action": "card.update",
+      "ref": "c0t4root",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T17:59:00.899Z",
+      "by": "card467-builder",
+      "action": "card.claim",
+      "ref": "c0t4root",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T17:58:42.473Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-EVENT2",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-11T17:58:31.515Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0df169q",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T17:58:23.676Z",
+      "by": "codex-main",
+      "action": "card.release",
+      "ref": "c0df169q",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-11T17:53:36.661Z",
+      "by": "sol-300-builder",
+      "action": "card.release",
+      "ref": "c0z3l25j",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-11T17:53:30.573Z",
+      "by": "sol-300-builder",
+      "action": "card.update",
+      "ref": "c0z3l25j",
+      "note": "logEntry,blockedBy"
+    },
     {
       "at": "2026-07-11T17:30:37.705Z",
       "by": "codex-orchestrator",
@@ -30502,517 +31629,6 @@
       "action": "decision.add",
       "ref": "D-CRYPTO-DIAG1",
       "note": "Typed crypto errors and misuse diagnostics"
-    },
-    {
-      "at": "2026-07-11T07:10:55.231Z",
-      "by": "card298-audit",
-      "action": "decision.add",
-      "ref": "D-CRYPTO-KEYWRAP1",
-      "note": "Portable wrapped vault-key backup"
-    },
-    {
-      "at": "2026-07-11T07:10:55.146Z",
-      "by": "card298-audit",
-      "action": "decision.add",
-      "ref": "D-CRYPTO-VAULT1",
-      "note": "Persistent cryptographic key lifecycle in core.vault"
-    },
-    {
-      "at": "2026-07-11T07:10:55.062Z",
-      "by": "card298-audit",
-      "action": "decision.add",
-      "ref": "D-CRYPTO-ENVELOPE2",
-      "note": "Recipient and streaming file envelope"
-    },
-    {
-      "at": "2026-07-11T07:10:54.972Z",
-      "by": "card298-audit",
-      "action": "decision.add",
-      "ref": "D-CRYPTO-API1",
-      "note": "Exact safe and expert core.crypto API"
-    },
-    {
-      "at": "2026-07-11T07:10:54.890Z",
-      "by": "card298-audit",
-      "action": "decision.add",
-      "ref": "D-PWHASH-POLICY1",
-      "note": "Argon2id password policy and rehash law"
-    },
-    {
-      "at": "2026-07-11T07:10:54.802Z",
-      "by": "card298-audit",
-      "action": "decision.add",
-      "ref": "D-CRYPTO-RNG1",
-      "note": "Cryptographic entropy providers and failure contract"
-    },
-    {
-      "at": "2026-07-11T07:10:54.718Z",
-      "by": "card298-audit",
-      "action": "decision.add",
-      "ref": "D-DEP-CRYPTO-SUITE2",
-      "note": "Approve the full core.crypto bridge dependency set (I6)"
-    },
-    {
-      "at": "2026-07-11T06:05:15.296Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-DBG-DIAG1",
-      "note": "Debugger diagnostics, exits, and recovery"
-    },
-    {
-      "at": "2026-07-11T05:49:03.972Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-ENV-MUTATE1",
-      "note": "Environment removal and enumeration surface"
-    },
-    {
-      "at": "2026-07-11T05:47:48.242Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-DBG-EDITOR1",
-      "note": "VS Code and Zed debugger discovery and launch experience"
-    },
-    {
-      "at": "2026-07-11T05:36:37.860Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-DBG-AUTH1",
-      "note": "Debugger execution, attach, and workspace authority"
-    },
-    {
-      "at": "2026-07-11T05:22:09.274Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-GENMOD-IDENTITY1",
-      "note": "Generic-module instantiation and nominal type identity"
-    },
-    {
-      "at": "2026-07-11T05:19:55.819Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-DBG-NATIVE1",
-      "note": "Native debugger backends, provisioning, and supported hosts"
-    },
-    {
-      "at": "2026-07-11T05:05:30.961Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-GENMOD-BODY1",
-      "note": "What declarations and captures belong inside a generic module?"
-    },
-    {
-      "at": "2026-07-11T05:01:55.005Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-DBG-DAP1",
-      "note": "DAP transport, lifecycle, and capability profile"
-    },
-    {
-      "at": "2026-07-11T04:52:45.557Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-GENMOD-VALUE1",
-      "note": "Generic-module value parameter domain and evaluation"
-    },
-    {
-      "at": "2026-07-11T04:40:37.884Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-PERFBUDGET-OUTPUT1",
-      "note": "Performance budget commands, output, diagnostics, and exits"
-    },
-    {
-      "at": "2026-07-11T04:40:20.329Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-ENCBASE-STRICT1",
-      "note": "Canonical RFC 4648 decoder policy"
-    },
-    {
-      "at": "2026-07-11T04:39:21.141Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-ENC-CBOR-SURFACE1",
-      "note": "Exact public CBOR verbs and deterministic encoding"
-    },
-    {
-      "at": "2026-07-11T04:31:59.878Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-JSONCANON1",
-      "note": "Canonical JSON semantics"
-    },
-    {
-      "at": "2026-07-11T04:23:49.653Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-ENCXML1",
-      "note": "Lossless XML representation over DataTree"
-    },
-    {
-      "at": "2026-07-11T04:14:54.969Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-PERFBUDGET-REPORT1",
-      "note": "Canonical performance reports and baseline updates"
-    },
-    {
-      "at": "2026-07-11T04:07:55.212Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-ENCSTREAM-SURFACE1",
-      "note": "Public streaming encoding surface"
-    },
-    {
-      "at": "2026-07-11T04:04:37.517Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-PERFBUDGET-GRAMMAR1",
-      "note": "Typed performance budget grammar and semantics"
-    },
-    {
-      "at": "2026-07-11T03:44:56.954Z",
-      "by": "codex-main",
-      "action": "card.release",
-      "ref": "c02wa1dn",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-11T03:44:56.873Z",
-      "by": "sol-452-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c02wa1dn",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-11T03:44:56.790Z",
-      "by": "sol-452-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c02wa1dn",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-11T03:43:53.876Z",
-      "by": "codex-main",
-      "action": "card.criteria-meet",
-      "ref": "c02wa1dn",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-11T03:43:53.799Z",
-      "by": "codex-main",
-      "action": "card.criteria-meet",
-      "ref": "c02wa1dn",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-11T03:39:30.322Z",
-      "by": "codex-main",
-      "action": "card.criteria-add",
-      "ref": "c02wa1dn",
-      "note": "#2 Focused jet-codegen, jet-jit, scheduler, and concurrency che"
-    },
-    {
-      "at": "2026-07-11T03:39:30.243Z",
-      "by": "codex-main",
-      "action": "card.criteria-add",
-      "ref": "c02wa1dn",
-      "note": "#1 Scheduler include-splice is replaced by a real Rust module w"
-    },
-    {
-      "at": "2026-07-11T03:39:30.161Z",
-      "by": "codex-main",
-      "action": "card.claim",
-      "ref": "c02wa1dn",
-      "note": ""
-    },
-    {
-      "at": "2026-07-11T03:36:48.758Z",
-      "by": "fable-main",
-      "action": "card.update",
-      "ref": "c0wx96s2",
-      "note": ""
-    },
-    {
-      "at": "2026-07-11T03:36:38.471Z",
-      "by": "fable-main",
-      "action": "card.update",
-      "ref": "c0rb4k1d",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-11T03:34:37.695Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-PROVE-LENS1",
-      "note": "Proof lens vocabulary and semantics"
-    },
-    {
-      "at": "2026-07-11T03:33:06.136Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-PROVE-SOLVER1",
-      "note": "Opt-in solver backend and proof boundary"
-    },
-    {
-      "at": "2026-07-11T03:17:17.601Z",
-      "by": "fable-main",
-      "action": "card.update",
-      "ref": "c0wx96s2",
-      "note": ""
-    },
-    {
-      "at": "2026-07-11T03:15:39.948Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-JREPLAY1",
-      "note": "General replay capture invocation and .jreplay law"
-    },
-    {
-      "at": "2026-07-11T03:14:59.844Z",
-      "by": "fable-main",
-      "action": "card.update",
-      "ref": "c0rb4k1d",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-11T03:14:38.749Z",
-      "by": "fable-main",
-      "action": "card.update",
-      "ref": "c0wx96s2",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-11T03:11:25.292Z",
-      "by": "fable-main",
-      "action": "card.update",
-      "ref": "c0wx96s2",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-11T03:11:23.385Z",
-      "by": "fable-main",
-      "action": "card.claim",
-      "ref": "c0wx96s2",
-      "note": ""
-    },
-    {
-      "at": "2026-07-11T03:11:08.947Z",
-      "by": "fable-main",
-      "action": "card.update",
-      "ref": "c07vdfen",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-11T03:11:07.032Z",
-      "by": "fable-main",
-      "action": "card.update",
-      "ref": "c07vdfen",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-11T03:09:06.054Z",
-      "by": "fable-main",
-      "action": "card.update",
-      "ref": "c07vdfen",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-11T03:06:11.413Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-JPROOF1",
-      "note": ".jproof evidence artifact contract"
-    },
-    {
-      "at": "2026-07-11T03:06:11.253Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-PROVE-SEM1",
-      "note": "Default jet prove execution semantics"
-    },
-    {
-      "at": "2026-07-11T02:55:44.301Z",
-      "by": "fable-main",
-      "action": "card.update",
-      "ref": "c0rb4k1d",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-11T02:32:04.049Z",
-      "by": "fable-main",
-      "action": "card.update",
-      "ref": "c07vdfen",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-11T02:29:22.513Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-CODEMOD-BATCH1",
-      "note": "Batch semantic codemod object law"
-    },
-    {
-      "at": "2026-07-11T02:28:21.506Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c06tccyz",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-11T02:25:45.964Z",
-      "by": "fable-main",
-      "action": "card.update",
-      "ref": "c07vdfen",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-11T02:25:44.107Z",
-      "by": "fable-main",
-      "action": "card.claim",
-      "ref": "c07vdfen",
-      "note": ""
-    },
-    {
-      "at": "2026-07-11T02:25:24.627Z",
-      "by": "fable-main",
-      "action": "card.release",
-      "ref": "c0m9tjqj",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-11T02:25:13.462Z",
-      "by": "fable-main",
-      "action": "card.update",
-      "ref": "c0m9tjqj",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-11T02:22:46.512Z",
-      "by": "fable-main",
-      "action": "card.update",
-      "ref": "c0m9tjqj",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-11T02:22:44.615Z",
-      "by": "fable-main",
-      "action": "card.claim",
-      "ref": "c0m9tjqj",
-      "note": ""
-    },
-    {
-      "at": "2026-07-11T02:22:42.729Z",
-      "by": "fable-main",
-      "action": "card.update",
-      "ref": "c0rb4k1d",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-11T02:21:50.902Z",
-      "by": "fable-main",
-      "action": "card.update",
-      "ref": "c0pef855",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-11T02:21:49.042Z",
-      "by": "fable-main",
-      "action": "card.update",
-      "ref": "c06tccyz",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-11T02:21:47.120Z",
-      "by": "fable-main",
-      "action": "card.update",
-      "ref": "c047jzdr",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-11T02:21:45.232Z",
-      "by": "fable-main",
-      "action": "card.update",
-      "ref": "c0w6wa07",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-11T02:21:24.816Z",
-      "by": "fable-main",
-      "action": "card.update",
-      "ref": "c0ai04g0",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-11T02:21:22.885Z",
-      "by": "fable-main",
-      "action": "card.update",
-      "ref": "c0pef855",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-11T02:21:20.985Z",
-      "by": "fable-main",
-      "action": "card.update",
-      "ref": "c06tccyz",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-11T02:21:19.112Z",
-      "by": "fable-main",
-      "action": "card.update",
-      "ref": "c047jzdr",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-11T02:21:17.228Z",
-      "by": "fable-main",
-      "action": "card.update",
-      "ref": "c0w6wa07",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-11T02:21:15.355Z",
-      "by": "fable-main",
-      "action": "card.update",
-      "ref": "c0rb4k1d",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-11T02:20:58.236Z",
-      "by": "fable-main",
-      "action": "card.update",
-      "ref": "c02kdm7a",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-11T02:12:33.507Z",
-      "by": "terra-360-help",
-      "action": "card.release",
-      "ref": "c0l5fmyy",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-11T02:10:55.370Z",
-      "by": "sol-360-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c0l5fmyy",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-11T02:10:45.810Z",
-      "by": "sol-360-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c0l5fmyy",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-11T02:10:18.020Z",
-      "by": "terra-360-help",
-      "action": "card.criteria-meet",
-      "ref": "c0l5fmyy",
-      "note": "#2"
     }
   ],
   "nextNum": 368,

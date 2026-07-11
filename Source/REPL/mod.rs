@@ -177,9 +177,9 @@ pub struct Session {
     /// synthetic program so an import typed in one input (e.g.
     /// `use core.math as math`) keeps resolving in later inputs.
     pub import_srcs: Vec<String>,
-    /// Accumulated binding sources: `x: Int :: 0` style lines.
-    /// These are added after each successful binding step so sema sees them.
-    pub binding_srcs: Vec<String>,
+    /// Exact statement ASTs accepted in prior turns. Sema rechecks this typed
+    /// history directly, preserving declarations, assignments, and moves.
+    pub sema_stmts: Vec<Stmt>,
     /// The interpreter's function table: all `fn` items by name.
     /// Rebuilt when a new function is added.
     pub func_defs: HashMap<String, Func>,
@@ -245,7 +245,7 @@ impl Session {
         Session {
             item_srcs: Vec::new(),
             import_srcs: Vec::new(),
-            binding_srcs: Vec::new(),
+            sema_stmts: Vec::new(),
             func_defs: HashMap::new(),
             scope: HashMap::new(),
             mutable_names: HashSet::new(),
@@ -261,7 +261,7 @@ impl Session {
     pub fn reset(&mut self) {
         self.item_srcs.clear();
         self.import_srcs.clear();
-        self.binding_srcs.clear();
+        self.sema_stmts.clear();
         self.func_defs.clear();
         self.scope.clear();
         self.step = 0;
@@ -316,79 +316,19 @@ impl Session {
         }
     }
 
-    /// Build the accumulated binding stubs for insertion INSIDE a function body.
-    /// Bindings moved in prior inputs are re-declared then immediately consumed
-    /// by a synthetic assignment, so sema reports E0121 ("was given away") if the
-    /// current input tries to use them (D-REPL8=A).
-    fn binding_stub_name(stub: &str) -> &str {
-        let before_marker = stub
-            .split_once("::")
-            .map(|(name, _)| name)
-            .or_else(|| stub.split_once(":=").map(|(name, _)| name))
-            .unwrap_or(stub);
-        before_marker
-            .split_once(':')
-            .map(|(name, _)| name)
-            .unwrap_or(before_marker)
-            .trim()
-    }
-
-    fn binding_stubs_src(&self) -> String {
-        let mut lines: Vec<String> = Vec::new();
-        for stub in &self.binding_srcs {
-            let name = Self::binding_stub_name(stub);
-            if self.moved_names.contains(name) {
-                // Re-declare, then synthetically consume so sema sees it moved.
-                lines.push(stub.clone());
-                // `__moved_<name>__ :: name` — a binding whose init is `name`
-                // (a non-scalar Ident). Sema's `note_move_if_direct_ident` marks
-                // `name` as moved immediately after this declaration.
-                lines.push(format!("__moved_{}__ :: {};", name, name));
-            } else {
-                lines.push(stub.clone());
+    /// Register the exact binding declaration for later sema turns.
+    pub fn record_stmts(&mut self, stmts: &[Stmt]) {
+        for stmt in stmts {
+            if let Stmt::Val(binding) = stmt {
+                if binding.name == "__repl_echo__" { continue; }
+                if binding.mutable {
+                    self.mutable_names.insert(binding.name.clone());
+                } else {
+                    self.mutable_names.remove(&binding.name);
+                }
             }
+            self.sema_stmts.push(stmt.clone());
         }
-        lines.join("\n")
-    }
-
-    /// Register a value binding for sema visibility after it was evaluated.
-    /// `mutable` must match the original `::` / `:=` sigil (D-BIND4).
-    pub fn record_binding(&mut self, name: &str, v: &CtValue, mutable: bool) {
-        if mutable {
-            self.mutable_names.insert(name.to_string());
-        } else {
-            self.mutable_names.remove(name);
-        }
-        let sigil = if mutable {
-            crate::Syntax::SIGIL_BIND_MUT
-        } else {
-            crate::Syntax::SIGIL_BIND_IMMUT
-        };
-        // Synthetic `name: Type {sigil} zero_val` so later inputs type-check.
-        let type_and_val = match v {
-            CtValue::Int(_) => format!(": Int {} 0", sigil),
-            CtValue::Float(_) => format!(": Float {} 0.0", sigil),
-            CtValue::Bool(_) => format!(": Bool {} false", sigil),
-            CtValue::Char(_) => format!(": Char {} 'a'", sigil),
-            CtValue::Str(_) => format!(": String {} \"\"", sigil),
-            CtValue::BigInt(_) => format!(": BigInt {} BigInt(0)", sigil),
-            CtValue::Bytes(_) => format!(": [U8] {} []", sigil),
-            CtValue::List(_) => format!(": [Int] {} []", sigil),
-            CtValue::Map(_) => format!(": [String: Int] {} [:]", sigil),
-            CtValue::Some(_) | CtValue::None(_) => return, // skip Option for now
-            CtValue::ResOk(_) | CtValue::ResErr(_) => return, // skip Result for now
-            CtValue::Struct { .. } => {
-                // We can't easily construct a dummy struct; skip sema pre-check
-                // for struct bindings. The interpreter scope still has the value.
-                return;
-            }
-            CtValue::Enum { .. } => return,
-            CtValue::Unit => return,
-            // c139: no sema pre-check stub for a closure value either — same
-            // reasoning as `Struct`/`Enum` above.
-            CtValue::Closure(_) => return,
-        };
-        self.binding_srcs.push(format!("{}{}", name, type_and_val));
     }
 }
 
@@ -497,16 +437,6 @@ fn set_turn_flag(session: &mut Session, id: usize, flag: &str, value: bool) -> R
 }
 
 // ── move detection (D-REPL8=A) ─────────────────────────────────────────────
-
-/// Whether a `Stmt::Val` in this step introduced `name` as mutable (`:=`).
-fn val_binding_mutable(stmts: &[Stmt], name: &str) -> bool {
-    stmts.iter().any(|stmt| {
-        matches!(
-            stmt,
-            Stmt::Val(b) if b.name == name && b.mutable
-        )
-    })
-}
 
 /// Scan the successfully-parsed stmts for names that were moved from the
 /// session's current bindings. A move occurs when:
@@ -1168,23 +1098,50 @@ const PRELOAD_SRC: &str = "";
 /// Build a complete synthetic Jet source from accumulated declarations +
 /// a new check function, then run sema. `check_src` is the statement(s) text
 /// as produced by `classify` — it already ends in `;` (or `}`). Returns errors only.
-fn type_check_stmts(session: &Session, check_src: &str, step: usize) -> Vec<Diagnostic> {
-    // Binding stubs go inside the check function so sema sees prior `val` bindings.
-    let binding_stubs = session.binding_stubs_src();
-    let body = if binding_stubs.is_empty() {
-        check_src.to_string()
-    } else {
-        format!("{}\n{}", binding_stubs, check_src)
-    };
+fn type_check_stmts(session: &Session, stmts: &[Stmt], step: usize) -> Vec<Diagnostic> {
     let prog_src = format!(
-        "{}{}{}\nfn __repl_check_{}__() {{\n{}\n}}\n",
+        "{}{}{}\nfn __repl_check_{}__() {{}}\n",
         PRELOAD_SRC,
         session.import_src(),
         session.accumulated_src(),
         step,
-        body,
     );
-    run_sema(&prog_src)
+    let mut body = session.sema_stmts.clone();
+    body.extend_from_slice(stmts);
+    run_sema_with_body(&prog_src, &format!("__repl_check_{}__", step), body)
+}
+
+fn run_sema_with_body(src: &str, fn_name: &str, body: Vec<Stmt>) -> Vec<Diagnostic> {
+    let (toks, lex_diags) = crate::Lexer::lex(src);
+    if !lex_diags.is_empty() {
+        return lex_diags;
+    }
+    let mut prog = match crate::Parser::parse(&toks) {
+        Ok(p) => p,
+        Err(ds) => return ds,
+    };
+    if prog.imports.is_empty() {
+        if let Some(Item::Func(f)) = prog.items.iter_mut().find(|item| matches!(item, Item::Func(f) if f.name == fn_name)) {
+            f.body = body;
+        }
+        return crate::Sema::check_with_mode(&mut prog, crate::Sema::CompileMode::Check)
+            .into_iter().filter(|d| matches!(d.severity, crate::Diagnostics::Severity::Error)).collect();
+    }
+    let tmp_path = std::env::temp_dir().join(unique_temp_name("check_ast"));
+    if std::fs::write(&tmp_path, src).is_err() { return Vec::new(); }
+    let path_str = tmp_path.to_string_lossy().to_string();
+    let diags = match crate::Loader::load_entry(&path_str) {
+        Ok(mut bundle) => {
+            let entry = bundle.entry;
+            if let Some(Item::Func(f)) = bundle.modules[entry].items.iter_mut().find(|item| matches!(item, Item::Func(f) if f.name == fn_name)) {
+                f.body = body;
+            }
+            crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Check)
+        }
+        Err(ds) => ds,
+    };
+    let _ = std::fs::remove_file(&tmp_path);
+    diags.into_iter().filter(|d| matches!(d.severity, crate::Diagnostics::Severity::Error)).collect()
 }
 
 /// Build a complete synthetic Jet source from accumulated declarations +
@@ -1615,8 +1572,8 @@ pub(crate) fn execute_line(
             session.record_turn(trimmed, ReplTurnStatus::Ok, "ok".to_string());
         }
 
-        InputKind::Stmts(stmts, suppress, check_src) => {
-            let errors = type_check_stmts(session, &check_src, session.step);
+        InputKind::Stmts(stmts, suppress, _check_src) => {
+            let errors = type_check_stmts(session, &stmts, session.step);
             if !errors.is_empty() {
                 if !quiet {
                     render_diags(&step_src, trimmed, &errors, color);
@@ -1672,13 +1629,7 @@ pub(crate) fn execute_line(
                         .filter(|k| !before_keys.contains(*k) && *k != "__repl_echo__")
                         .cloned()
                         .collect();
-                    for name in &new_names {
-                        if let Some(v) = session.scope.get(name) {
-                            let v = v.clone();
-                            let mutable = val_binding_mutable(&stmts, name);
-                            session.record_binding(name, &v, mutable);
-                        }
-                    }
+                    session.record_stmts(&stmts);
                     if !sink.stdout.is_empty() {
                         qprint!("{}", sink.stdout);
                         summary.push_str(&sink.stdout);
@@ -2194,8 +2145,8 @@ pub fn run_transcript(inputs: &[&str], project_dir: Option<&str>) -> String {
                 session.record_turn(trimmed, ReplTurnStatus::Ok, "ok".to_string());
             }
 
-            InputKind::Stmts(stmts, suppress, check_src) => {
-                let errors = type_check_stmts(&session, &check_src, session.step);
+            InputKind::Stmts(stmts, suppress, _check_src) => {
+                let errors = type_check_stmts(&session, &stmts, session.step);
                 if !errors.is_empty() {
                     for d in &errors {
                         out.push_str(&format!("error [{}]: {}\n", d.code, d.what));
@@ -2252,13 +2203,7 @@ pub fn run_transcript(inputs: &[&str], project_dir: Option<&str>) -> String {
                             .filter(|k| !before_keys.contains(*k) && *k != "__repl_echo__")
                             .cloned()
                             .collect();
-                        for name in &new_names {
-                            if let Some(v) = session.scope.get(name) {
-                                let v = v.clone();
-                                let mutable = val_binding_mutable(&stmts, name);
-                                session.record_binding(name, &v, mutable);
-                            }
-                        }
+                        session.record_stmts(&stmts);
                         if !sink.stdout.is_empty() {
                             out.push_str(&sink.stdout);
                             summary.push_str(&sink.stdout);

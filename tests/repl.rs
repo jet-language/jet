@@ -617,6 +617,26 @@ fn repl_core_result_stored_in_binding() {
 }
 
 #[test]
+fn repl_complex_bindings_keep_exact_typed_ast_across_turns() {
+    let out = run_transcript(
+        &[
+            "struct Point { x: Int y: Int }",
+            "p :: Point.{x: 3, y: 4}",
+            "p.x + p.y",
+            "inc :: (x: Int) => x + 1",
+            "inc(4)",
+            "words :: [\"jet\", \"repl\"]",
+            "words[1]",
+        ],
+        None,
+    );
+    assert!(!out.contains("error ["), "complex state regressed: {out}");
+    assert!(out.contains("7 : Int"), "struct value unavailable: {out}");
+    assert!(out.contains("5 : Int"), "closure value unavailable: {out}");
+    assert!(out.contains("\"repl\" : String"), "list element type collapsed: {out}");
+}
+
+#[test]
 fn repl_core_io_eprint_inline() {
     // c133: Tier-2 core.io calls run in the REPL sandbox (no #Impure gate).
     let inputs = &["use core.io as io", "io.eprint(\"repl-err\")"];
