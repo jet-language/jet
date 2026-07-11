@@ -1,5 +1,3 @@
-use super::*;
-
 /// D-MARKER-FAMILY1: the contract-plane prefix — sibling of `ATTR_PREFIX` ("#").
 /// `@` markers attach only to declarations (fn, type, field) plus the
 /// D-MARKERMOVE2 function-type bound carve-out, never to other expressions or

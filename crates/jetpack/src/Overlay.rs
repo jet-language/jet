@@ -526,36 +526,41 @@ fn apply_unified_patch(
         let mut added = 0usize;
         let mut removed = 0usize;
         while matches!(lines.peek(), Some(l) if l.starts_with("@@ ")) {
-            let Some(header) = lines.next() else {
-                return Err(OverlayError::Patch(
-                    "patch hunk header ended unexpectedly".to_string(),
-                ));
-            };
-            let old_start = parse_hunk_start(header)?;
+            let header = lines.next().ok_or_else(|| {
+                OverlayError::Patch("patch hunk header ended unexpectedly".to_string())
+            })?;
+            let (old_start, old_count, new_count) = parse_hunk_range(header)?;
             let mut idx = old_start.saturating_sub(1);
-            while let Some(hline) = lines.peek().copied() {
-                if hline.starts_with("--- ") || hline.starts_with("@@ ") {
+            let mut old_seen = 0usize;
+            let mut new_seen = 0usize;
+            loop {
+                if old_seen == old_count && new_seen == new_count {
                     break;
                 }
-                let Some(hline) = lines.next() else {
-                    return Err(OverlayError::Patch(
-                        "patch hunk body ended unexpectedly".to_string(),
-                    ));
-                };
+                let hline = lines.next().ok_or_else(|| {
+                    OverlayError::Patch("patch hunk body ended unexpectedly".to_string())
+                })?;
                 if hline == r"\ No newline at end of file" {
                     continue;
                 }
-                let (tag, text) = hline.split_at(1);
+                let Some(tag) = hline.chars().next() else {
+                    return Err(OverlayError::Patch(
+                        "unsupported empty patch line".to_string(),
+                    ));
+                };
+                let text = &hline[tag.len_utf8()..];
                 match tag {
-                    " " => {
+                    ' ' => {
                         if file_lines.get(idx).map(String::as_str) != Some(text) {
                             return Err(OverlayError::Patch(format!(
                                 "patch context did not match `{target}`"
                             )));
                         }
                         idx += 1;
+                        old_seen += 1;
+                        new_seen += 1;
                     }
-                    "-" => {
+                    '-' => {
                         if file_lines.get(idx).map(String::as_str) != Some(text) {
                             return Err(OverlayError::Patch(format!(
                                 "patch removal did not match `{target}`"
@@ -563,11 +568,13 @@ fn apply_unified_patch(
                         }
                         file_lines.remove(idx);
                         removed += 1;
+                        old_seen += 1;
                     }
-                    "+" => {
+                    '+' => {
                         file_lines.insert(idx, text.to_string());
                         idx += 1;
                         added += 1;
+                        new_seen += 1;
                     }
                     _ => {
                         return Err(OverlayError::Patch(format!(
@@ -596,17 +603,37 @@ fn apply_unified_patch(
     Ok(applications)
 }
 
-fn parse_hunk_start(header: &str) -> Result<usize, OverlayError> {
+fn parse_hunk_range(header: &str) -> Result<(usize, usize, usize), OverlayError> {
     let old = header
         .split_whitespace()
         .find(|part| part.starts_with('-'))
         .ok_or_else(|| OverlayError::Patch("patch hunk missing old range".to_string()))?;
-    old.trim_start_matches('-')
-        .split(',')
+    let new = header
+        .split_whitespace()
+        .find(|part| part.starts_with('+'))
+        .ok_or_else(|| OverlayError::Patch("patch hunk missing new range".to_string()))?;
+    let (old_start, old_count) = parse_hunk_side(old, '-')?;
+    let (_, new_count) = parse_hunk_side(new, '+')?;
+    Ok((old_start, old_count, new_count))
+}
+
+fn parse_hunk_side(raw: &str, prefix: char) -> Result<(usize, usize), OverlayError> {
+    let mut parts = raw.trim_start_matches(prefix).split(',');
+    let start = parts
         .next()
-        .unwrap_or("1")
+        .unwrap_or_default()
         .parse::<usize>()
-        .map_err(|_| OverlayError::Patch("patch hunk has bad old range".to_string()))
+        .map_err(|_| OverlayError::Patch("patch hunk has bad range".to_string()))?;
+    let count = parts
+        .next()
+        .map(str::parse::<usize>)
+        .transpose()
+        .map_err(|_| OverlayError::Patch("patch hunk has bad range".to_string()))?
+        .unwrap_or(1);
+    if parts.next().is_some() {
+        return Err(OverlayError::Patch("patch hunk has bad range".to_string()));
+    }
+    Ok((start, count))
 }
 
 fn normalize_patch_path(raw: &str) -> String {

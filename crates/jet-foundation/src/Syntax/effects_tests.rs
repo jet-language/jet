@@ -1,5 +1,3 @@
-use super::*;
-
 /// D-TOOL2 (ratified 2026-06-17, E2-M11; PascalCase marker D-CASING1 follow-on
 /// 2026-06-21): typed hole `#Todo` — compiles everywhere, panics at runtime with
 /// file, line, and expected type. Bare lowercase `todo` (FOREIGN_TODO) is the

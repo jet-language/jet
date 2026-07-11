@@ -1,5 +1,3 @@
-use super::*;
-
 /// D-HL1: generated editor grammars mark their owned sections with these
 /// comments. Tests compare the committed section against fresh renderer output.
 pub const HIGHLIGHT_GENERATED_START: &str = "BEGIN GENERATED JET SYNTAX HIGHLIGHTS";
