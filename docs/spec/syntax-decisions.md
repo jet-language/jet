@@ -1451,7 +1451,8 @@ binding type; bare `decode(s)` yields dynamic `DataTree`). Hand-impl surface:
 `#[Rename("x")]`, `#[Skip]`, `#[Default]`/`#[Default(expr)]`, `#[Flatten]`,
 `#[RenameAll(camel|snake|pascal|kebab|screaming)]` (E2409). Enum wire:
 externally tagged default, single-value variants bare; `#[Tag("type")]`
-internal, `#[Untagged]`. Unknown wire keys ignored by default;
+internal (single unnamed payload under `"value"`), `#[Untagged]`. Unknown wire
+keys ignored by default;
 `#[DenyUnknownFields]` errors (E2412). Generic `@Codable` auto-adds
 `Encode`/`Decode` bounds to wire-reaching type params only. Dynamic trees get
 `?`-chaining accessors (`.field(name)`, `.at(i)`, `.int()`, `.text()`, …).

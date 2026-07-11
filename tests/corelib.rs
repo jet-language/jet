@@ -2517,6 +2517,62 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// D-SERDE7: internal tags apply uniformly to unit, single-payload, and
+/// named-payload variants. Exact JSON plus decode proves the AOT contract.
+#[test]
+fn generated_internal_tagged_enum_round_trips_every_variant_shape() {
+    let dir = std::env::temp_dir().join(format!("jet_tagged_enum_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let src = r#"
+use core.encoding.json as json
+
+@[Codable]
+#[Tag("type")]
+enum Event {
+    Idle
+    Count(Int)
+    Named(name: String, enabled: Bool)
+}
+
+fn run() {
+    unit: Event := .Idle
+    tuple: Event := .Count(3)
+    named: Event := .Named.{ name: "x", enabled: true }
+    print(json.to_string(unit))
+    print(json.to_string(tuple))
+    print(json.to_string(named))
+    a := json.decode<Event>("{{\"type\":\"Idle\"}}") ?? panic("unit")
+    b := json.decode<Event>("{{\"type\":\"Count\",\"value\":7}}") ?? panic("tuple")
+    c := json.decode<Event>("{{\"type\":\"Named\",\"name\":\"y\",\"enabled\":false}}") ?? panic("named")
+    print(json.to_string(a))
+    print(json.to_string(b))
+    print(json.to_string(c))
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "tagged_enum", src, &[], None);
+    assert_eq!(code, 0, "generated internally tagged enum failed: {stderr}");
+    assert_eq!(
+        stdout,
+        "{\"type\":\"Idle\"}\n{\"type\":\"Count\",\"value\":3}\n{\"enabled\":true,\"name\":\"x\",\"type\":\"Named\"}\n{\"type\":\"Idle\"}\n{\"type\":\"Count\",\"value\":7}\n{\"enabled\":false,\"name\":\"y\",\"type\":\"Named\"}\n"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn builtin_codec_expansion_has_no_ast_transplant_or_rust_fallback() {
+    let registration = include_str!("../crates/jet-sema/src/Sema/Registration.rs");
+    let items = include_str!("../crates/jet-codegen/src/Codegen/Items.rs");
+    assert!(registration.contains("impl {}.Encode"));
+    assert!(registration.contains("impl {}.Decode"));
+    assert!(registration.contains("Some(trigger_span)"));
+    assert!(!registration.contains("__JetSerdeCarrier"));
+    assert!(!registration.contains("__JetSerdeGenerated"));
+    assert!(!registration.contains("trait_impls.extend"));
+    assert!(!items.contains("emit_struct_serde"));
+    assert!(!items.contains("emit_enum_serde"));
+}
+
 /// Card #131: generated struct codecs preserve field-policy behavior while
 /// running through ordinary Jet bodies: absent options stay off the wire and
 /// computed fields encode through their getter without becoming decode slots.

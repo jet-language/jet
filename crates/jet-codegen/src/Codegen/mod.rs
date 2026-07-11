@@ -827,7 +827,11 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
                     continue;
                 }
                 if i.trait_name.is_some() {
-                    emit_external_trait_impl(&cx, i, &mut out);
+                    let struct_def = prog.items.iter().find_map(|item| match item {
+                        Item::Struct(s) if s.name == i.type_name => Some(s),
+                        _ => None,
+                    });
+                    emit_external_trait_impl(&cx, i, struct_def, &mut out);
                 } else {
                     emit_type_impl(&cx, &i.type_name, &[], &i.methods, &mut out);
                 }
@@ -1019,7 +1023,11 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
                     continue;
                 }
                 if i.trait_name.is_some() {
-                    emit_external_trait_impl(&cx, i, &mut out);
+                    let struct_def = prog.items.iter().find_map(|item| match item {
+                        Item::Struct(s) if s.name == i.type_name => Some(s),
+                        _ => None,
+                    });
+                    emit_external_trait_impl(&cx, i, struct_def, &mut out);
                 } else {
                     emit_type_impl(&cx, &i.type_name, &[], &i.methods, &mut out);
                 }

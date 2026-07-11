@@ -1278,9 +1278,10 @@ pub(super) fn expand_builtin_serde_source(prog: &mut crate::AST::Program, diags:
 }
 
 pub(super) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags: &mut Vec<Diagnostic>) {
-    for item in items {
+    let mut generated_items = Vec::new();
+    for item in items.iter_mut() {
         if let Item::Enum(e) = item {
-            expand_builtin_enum_serde(e, diags);
+            expand_builtin_enum_serde(e, diags, &mut generated_items);
             continue;
         }
         let Item::Struct(s) = item else { continue };
@@ -1310,9 +1311,9 @@ pub(super) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags: &mut Vec<
         }
         let params = crate::Generics::format_type_params(&codec_params);
         let target = format!("{}{}", s.name, serde_type_arg_names(&s.type_params));
-        let mut source = format!("struct __JetSerdeGenerated{params} {{\n");
+        let mut source = String::new();
         if enc {
-            source.push_str("impl Encode {\nfn encode(self) -> DataTree {\n");
+            source.push_str(&format!("impl {}.Encode {{\nfn encode{params}(self) -> DataTree {{\n", s.name));
             let active: Vec<_> = s.fields.iter().filter(|f|
                 !f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_SKIP)
             ).collect();
@@ -1351,8 +1352,8 @@ pub(super) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags: &mut Vec<
             source.push_str("}\n}\n");
         }
         if dec {
-            source.push_str("impl Decode {\n");
-            source.push_str(&format!("fn decode(tree: DataTree) -> {target} ? DecodeError {{\n"));
+            source.push_str(&format!("impl {}.Decode {{\n", s.name));
+            source.push_str(&format!("fn decode{params}(tree: DataTree) -> {target} ? DecodeError {{\n"));
             let deny_unknown = s.serde_markers.iter().any(|m|
                 m.name == crate::Syntax::ATTR_DENY_UNKNOWN_FIELDS
             );
@@ -1390,40 +1391,25 @@ pub(super) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags: &mut Vec<
             }
             source.push_str("})\n}\n}\n");
         }
-        source.push_str("}\n");
-
-        let (tokens, lex_diags) = crate::Lexer::lex(&source);
-        let parsed = if lex_diags.is_empty() { crate::Parser::parse(&tokens) } else { Err(lex_diags) };
-        match parsed {
-            Ok(mut generated) => {
-                let blocks = generated.items.drain(..).find_map(|i| match i {
-                    Item::Struct(g) => Some(g.trait_impls),
-                    _ => None,
-                }).unwrap_or_default();
-                let mut blocks = blocks;
-                for block in &mut blocks {
-                    for method in &mut block.methods {
-                        method.type_params = codec_params.clone();
-                    }
-                }
-                s.trait_impls.extend(blocks);
-                s.derives.retain(|(n, _)| n != crate::Generics::ENCODE && n != crate::Generics::DECODE);
+        let trigger_span = s.derives.iter()
+            .find(|(name, _)| matches!(name.as_str(), crate::Generics::ENCODE | crate::Generics::DECODE))
+            .map(|(_, span)| *span)
+            .unwrap_or(s.name_span);
+        match parse_builtin_serde_fragment(&source, &s.name, trigger_span, diags) {
+            Some(generated) => {
+                generated_items.extend(generated.into_iter().filter(|item| matches!(item, Item::Impl(_))));
             }
-            Err(errors) => {
-                let detail = errors.first().map(|d| format!("{} at {:?}", d.what, d.span)).unwrap_or_else(|| "generated codec source was invalid".to_string());
-                diags.push(Diagnostic::error(
-                    "E2710",
-                    format!("built-in codec derive generated invalid Jet for `{}`", s.name),
-                    format!("generated source did not pass the ordinary lexer and parser: {detail}; generated source:\n{source}"),
-                    "report this compiler bug; built-in derives must emit valid ordinary Jet".to_string(),
-                    s.derives.first().map(|(_, span)| *span),
-                ));
-            }
+            None => {}
         }
     }
+    items.extend(generated_items);
 }
 
-fn expand_builtin_enum_serde(e: &mut crate::AST::EnumDef, diags: &mut Vec<Diagnostic>) {
+fn expand_builtin_enum_serde(
+    e: &mut crate::AST::EnumDef,
+    diags: &mut Vec<Diagnostic>,
+    generated_items: &mut Vec<Item>,
+) {
     let enc = e.derives.iter().any(|(n, _)| n == crate::Generics::ENCODE);
     let dec = e.derives.iter().any(|(n, _)| n == crate::Generics::DECODE);
     if !enc && !dec { return; }
@@ -1448,12 +1434,9 @@ fn expand_builtin_enum_serde(e: &mut crate::AST::EnumDef, diags: &mut Vec<Diagno
             }), _ => None,
         });
     let untagged = e.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_UNTAGGED);
-    let mut source = format!("enum __JetSerdeGenerated{params} {{ __Unused }}\n");
-    // Attach impls to a synthetic struct because nested enum impl parsing and
-    // nested struct impl parsing normalize to the same TraitImplBlock AST.
-    source.push_str(&format!("struct __JetSerdeCarrier{params} {{\n"));
+    let mut source = String::new();
     if enc {
-        source.push_str("impl Encode {\nfn encode(self) -> DataTree {\nif self == {\n");
+        source.push_str(&format!("impl {}.Encode {{\nfn encode{params}(self) -> DataTree {{\nif self == {{\n", e.name));
         for v in &e.variants {
             let wire = serde_enum_variant_key(v);
             let (pattern, payload) = serde_enum_pattern_and_value(v);
@@ -1470,7 +1453,9 @@ fn expand_builtin_enum_serde(e: &mut crate::AST::EnumDef, diags: &mut Vec<Diagno
                         let pairs = serde_enum_named_pairs(fs);
                         format!("DataTree.Object([{tag_key:?}: DataTree.Text({wire:?}){}{}])", if pairs.is_empty(){""}else{" ,"}, pairs)
                     }
-                    crate::AST::VariantPayload::Single(..) => format!("DataTree.Object([{wire:?}: {payload}])"),
+                    crate::AST::VariantPayload::Single(..) => format!(
+                        "DataTree.Object([{tag_key:?}: DataTree.Text({wire:?}), \"value\": {payload}])"
+                    ),
                 }
             } else {
                 match &v.payload {
@@ -1484,7 +1469,7 @@ fn expand_builtin_enum_serde(e: &mut crate::AST::EnumDef, diags: &mut Vec<Diagno
         source.push_str("}\n}\n}\n");
     }
     if dec {
-        source.push_str(&format!("impl Decode {{\nfn decode(tree: DataTree) -> {target} ? DecodeError {{\n"));
+        source.push_str(&format!("impl {}.Decode {{\nfn decode{params}(tree: DataTree) -> {target} ? DecodeError {{\n", e.name));
         if untagged {
             for v in &e.variants {
                 source.push_str(&serde_enum_decode_attempt(&target, v, "tree", true));
@@ -1493,7 +1478,15 @@ fn expand_builtin_enum_serde(e: &mut crate::AST::EnumDef, diags: &mut Vec<Diagno
             source.push_str(&format!("tag_tree := tree.field({tag_key:?})?\ntag_value := tag_tree.text()?\n"));
             for v in &e.variants {
                 let wire = serde_enum_variant_key(v);
-                source.push_str(&format!("if tag_value == {wire:?} {{ {} }}\n", serde_enum_decode_return(&target, v, "tree")));
+                let payload_source = if matches!(v.payload, crate::AST::VariantPayload::Single(..)) {
+                    "(tree.field(\"value\")?)"
+                } else {
+                    "tree"
+                };
+                source.push_str(&format!(
+                    "if tag_value == {wire:?} {{ {} }}\n",
+                    serde_enum_decode_return(&target, v, payload_source)
+                ));
             }
         } else {
             let mut object_arms = String::new();
@@ -1524,22 +1517,95 @@ fn expand_builtin_enum_serde(e: &mut crate::AST::EnumDef, diags: &mut Vec<Diagno
         }
         source.push_str("return err(DecodeError.{ path: \"\", reason: \"no matching enum variant\" })\n}\n}\n");
     }
-    source.push_str("}\n");
-    let (tokens, lex_diags) = crate::Lexer::lex(&source);
-    let parsed = if lex_diags.is_empty() { crate::Parser::parse(&tokens) } else { Err(lex_diags) };
+    let trigger_span = e.derives.iter()
+        .find(|(name, _)| matches!(name.as_str(), crate::Generics::ENCODE | crate::Generics::DECODE))
+        .map(|(_, span)| *span)
+        .unwrap_or(e.name_span);
+    match parse_builtin_serde_fragment(&source, &e.name, trigger_span, diags) {
+        Some(generated) => {
+            generated_items.extend(generated.into_iter().filter(|item| matches!(item, Item::Impl(_))));
+        }
+        None => {}
+    }
+}
+
+fn parse_builtin_serde_fragment(
+    source: &str,
+    type_name: &str,
+    trigger_span: Span,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<Vec<Item>> {
+    let (tokens, lex_diags) = crate::Lexer::lex(source);
+    let parsed = if lex_diags.is_empty() {
+        crate::Parser::parse(&tokens)
+    } else {
+        Err(lex_diags)
+    };
     match parsed {
-        Ok(mut generated) => {
-            let mut blocks = generated.items.drain(..).find_map(|i| match i {
-                Item::Struct(g) if g.name == "__JetSerdeCarrier" => Some(g.trait_impls), _ => None,
-            }).unwrap_or_default();
-            for block in &mut blocks { for method in &mut block.methods { method.type_params = codec_params.clone(); } }
-            e.trait_impls.extend(blocks);
-            e.derives.retain(|(n, _)| n != crate::Generics::ENCODE && n != crate::Generics::DECODE);
-        }
+        Ok(generated) => Some(generated.items),
         Err(errors) => {
-            let detail = errors.first().map(|d| format!("{} at {:?}", d.what, d.span)).unwrap_or_default();
-            diags.push(Diagnostic::error("E2710", format!("built-in codec derive generated invalid Jet for `{}`", e.name), format!("generated source did not pass the ordinary lexer and parser: {detail}; generated source:\n{source}"), "report this compiler bug; built-in derives must emit valid ordinary Jet".to_string(), e.derives.first().map(|(_, s)| *s)));
+            let detail = errors
+                .first()
+                .map(|d| format!("{} at {:?}", d.what, d.span))
+                .unwrap_or_else(|| "generated codec source was invalid".to_string());
+            diags.push(Diagnostic::error(
+                "E2710",
+                format!("built-in codec derive generated invalid Jet for `{type_name}`"),
+                format!(
+                    "generated source did not pass the ordinary lexer and parser: {detail}; generated source:\n{source}"
+                ),
+                "report this compiler bug; built-in derives must emit valid ordinary Jet".to_string(),
+                Some(trigger_span),
+            ));
+            None
         }
+    }
+}
+
+#[cfg(test)]
+mod serde_source_tests {
+    use super::*;
+
+    #[test]
+    fn builtin_codecs_remain_parsed_top_level_impls() {
+        let source = "@[Codable]\nstruct Point { x: Int }\n";
+        let (tokens, lex_diags) = crate::Lexer::lex(source);
+        assert!(lex_diags.is_empty());
+        let mut program = crate::Parser::parse(&tokens).expect("source parses");
+        let mut diags = Vec::new();
+        expand_builtin_serde_items(&mut program.items, &mut diags);
+        assert!(diags.is_empty(), "generated source must parse: {diags:?}");
+
+        let point = program.items.iter().find_map(|item| match item {
+            Item::Struct(s) if s.name == "Point" => Some(s),
+            _ => None,
+        }).expect("real type remains");
+        assert!(point.trait_impls.is_empty(), "no parsed block may be transplanted into the type");
+        assert!(!program.items.iter().any(|item| match item {
+            Item::Struct(s) => s.name.starts_with("__JetSerde"),
+            Item::Enum(e) => e.name.starts_with("__JetSerde"),
+            _ => false,
+        }));
+        let protocols: Vec<_> = program.items.iter().filter_map(|item| match item {
+            Item::Impl(i) if i.type_name == "Point" => i.trait_name.as_deref(),
+            _ => None,
+        }).collect();
+        assert_eq!(protocols, vec!["Encode", "Decode"]);
+    }
+
+    #[test]
+    fn malformed_builtin_codec_points_at_derive_trigger() {
+        let trigger = Span::new(17, 26);
+        let mut diags = Vec::new();
+        assert!(parse_builtin_serde_fragment(
+            "impl Broken.Encode { fn encode(self) -> DataTree {",
+            "Broken",
+            trigger,
+            &mut diags,
+        ).is_none());
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].code, "E2710");
+        assert_eq!(diags[0].span, Some(trigger));
     }
 }
 

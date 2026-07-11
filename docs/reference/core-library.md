@@ -1547,7 +1547,9 @@ migration blocks pay nothing.
 
 **Enums** serialize externally tagged by default: a unit variant is its bare name
 (`"Closed"`), a payload variant is `{"Variant": payload}`. `#[Tag("type")]` switches
-to internal tagging (`{"type":"Click", …}`); `#[Untagged]` emits the payload alone.
+to internal tagging (`{"type":"Click", …}`); a single unnamed payload uses the
+canonical `value` key (`{"type":"Count","value":7}`). `#[Untagged]` emits the
+payload alone.
 
 Unknown wire keys are ignored by default (forward-compatible); opt into strict
 checking with `#[DenyUnknownFields]`. Diagnostics: E2407 (`#[Rename]` non-string),

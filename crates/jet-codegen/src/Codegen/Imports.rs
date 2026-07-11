@@ -477,7 +477,11 @@ pub(crate) fn emit_program_items(cx: &Cx, items: &[Item], out: &mut String, incl
                     continue;
                 }
                 if i.trait_name.is_some() {
-                    emit_external_trait_impl(cx, i, out);
+                    let struct_def = items.iter().find_map(|item| match item {
+                        Item::Struct(s) if s.name == i.type_name => Some(s),
+                        _ => None,
+                    });
+                    emit_external_trait_impl(cx, i, struct_def, out);
                 } else {
                     emit_type_impl(cx, &i.type_name, &[], &i.methods, out);
                 }
