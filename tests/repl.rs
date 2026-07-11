@@ -855,3 +855,76 @@ fn textual_rerun_fallback_still_previews_a_turn() {
     assert!(out.contains("rerun #1: 1 + 2"), "got: {out:?}");
     assert!(out.matches("3 : Int").count() >= 2, "got: {out:?}");
 }
+
+// ── D-BIGINT1: comptime/REPL tier-0 BigInt (card #392) ─────────────────────
+// Same expression shapes and expected decimal strings as the AOT golden
+// example `examples/features/text/bigint.jet` /
+// `examples/features/expected/text/bigint.out` — proves R12 parity, not just
+// "doesn't crash".
+
+#[test]
+fn repl_bigint_construct_and_show() {
+    let out = run_transcript(&["BigInt(100)"], None);
+    assert!(out.trim().ends_with("100 : BigInt"), "got: {out:?}");
+    assert!(!out.contains("E0956"), "got: {out:?}");
+}
+
+#[test]
+fn repl_bigint_add_beyond_i64_max() {
+    // max_i64 + 1 overflows a fixed Int; BigInt must not (that's the whole
+    // point of D-BIGINT1 — no silent promotion, no overflow trap either).
+    let inputs = &[
+        "max_i64 :: BigInt(9223372036854775807)",
+        "one :: BigInt(1)",
+        "sum :: max_i64 + one",
+        "sum.to_string()",
+    ];
+    let out = run_transcript(inputs, None);
+    assert!(
+        out.contains("\"9223372036854775808\" : String"),
+        "got: {out:?}"
+    );
+}
+
+#[test]
+fn repl_bigint_from_string_add() {
+    let inputs = &[
+        "huge :: BigInt(\"999999999999999999999999999999\")",
+        "doubled :: huge + huge",
+        "doubled.to_string()",
+    ];
+    let out = run_transcript(inputs, None);
+    assert!(
+        out.contains("\"1999999999999999999999999999998\" : String"),
+        "got: {out:?}"
+    );
+}
+
+#[test]
+fn repl_bigint_mul_massive() {
+    let inputs = &[
+        "massive :: BigInt(\"239238749287396287369263958629386592683596293856293659263596235962935869236592863592635962395862935629368592635926359623956293659236592635986239562936592635962395629365926359863892659826398568639269856\")",
+        "massdoub :: massive * massive",
+        "massdoub.to_string()",
+    ];
+    let out = run_transcript(inputs, None);
+    assert!(
+        out.contains(
+            "\"57235179160597657597531047020200956544362763118771376009314169310643907927975523987347975666104048258728304782749129351109033383492052353630602575371754435856735360169485983219218233794801194422942999175714144363822988057872537938863053251946320370964445676871073768260912400343608038289822197795736070764739253602318976703277723078277315814109217255310422643607649043148897685808219536598364790260736\" : String"
+        ),
+        "got: {out:?}"
+    );
+}
+
+#[test]
+fn repl_bigint_sub_and_neg() {
+    let inputs = &[
+        "a :: BigInt(5)",
+        "b :: BigInt(3)",
+        "a.sub(b).to_string()",
+        "b.neg().to_string()",
+    ];
+    let out = run_transcript(inputs, None);
+    assert!(out.contains("\"2\" : String"), "got: {out:?}");
+    assert!(out.contains("\"-3\" : String"), "got: {out:?}");
+}
