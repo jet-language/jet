@@ -11,6 +11,8 @@
 //!     `Scheduler.rs`) — these are `include_str!`-embedded text compiled into
 //!     the USER's program, not compiler code; their panics are the `jet_panic`
 //!     runtime-panic path (`RUNTIME_PANIC` = 70), a different contract than I2.
+//!   - the compiled scheduler runtime module: one runtime-boundary panic and
+//!     one `#[cfg(test)]` deadline shim.
 //!
 //! A file not on the allowlist may have zero bare `panic!`s. A file on the
 //! allowlist may have AT MOST its listed count — so both a brand new bare
@@ -49,9 +51,9 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
         "include_str! runtime template — user-program RUNTIME_PANIC path, not compiler code",
     ),
     (
-        "crates/jet-codegen/src/lib.rs",
-        1,
-        "#[cfg(test)]-only scheduler test shim",
+        "crates/jet-codegen/src/scheduler.rs",
+        2,
+        "scheduler runtime-boundary panic plus #[cfg(test)] deadline shim",
     ),
     (
         "crates/jet-codegen/src/Codegen/TIR/tests.rs",
