@@ -11,6 +11,30 @@ mod jet_std {
         pub message: String,
     }
 
+    // D-TEXTWIDTH1=B: `TextWidth.{ ambiguous: .Wide, controls: .Reject }` —
+    // the explicit-policy override for `core.text.display_width`. The
+    // one-arg call uses the portable default (Narrow/Zero) directly and
+    // never constructs this type.
+    #[derive(Clone, Debug, PartialEq)]
+    pub enum TextWidthAmbiguous {
+        Narrow,
+        Wide,
+    }
+    #[derive(Clone, Debug, PartialEq)]
+    pub enum TextWidthControls {
+        Zero,
+        Reject,
+    }
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct TextWidth {
+        pub ambiguous: TextWidthAmbiguous,
+        pub controls: TextWidthControls,
+    }
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct TextError {
+        pub message: String,
+    }
+
     #[derive(Clone, Debug, PartialEq)]
     pub struct ProcessResult {
         pub code: i64,

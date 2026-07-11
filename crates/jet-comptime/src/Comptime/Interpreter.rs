@@ -202,6 +202,13 @@ pub(super) struct Interp<'a> {
     /// for an unranged type, a proven-in-range literal folds to a direct
     /// value, anything else is the fallible `Result`-wrapped form.
     pub(super) distinct_ranges: &'a HashMap<String, Option<(i64, i64)>>,
+    /// Card #392 pass 5: `TypeName -> migration { }` blocks declared for that
+    /// `@PublishedSchema` type, source order (the migration chain, oldest step
+    /// first — mirrors `Codegen/Items.rs::migration_blocks`'s per-type list).
+    /// Empty for a type with no migrations (the common case), which keeps
+    /// `decode_traced<T>`'s fast path — try the current shape, done — the same
+    /// zero-cost identity codegen's trait default gives every other type.
+    pub(super) migrations: &'a HashMap<String, Vec<&'a crate::AST::MigrationDecl>>,
 }
 
 impl<'a> Interp<'a> {
@@ -1082,9 +1089,10 @@ impl<'a> Interp<'a> {
                 receiver,
                 method,
                 method_span,
+                type_args,
                 args,
                 ..
-            } => self.eval_method(receiver, method, *method_span, args, scope),
+            } => self.eval_method(receiver, method, *method_span, type_args, args, scope),
             Expr::If {
                 cond,
                 then_body,

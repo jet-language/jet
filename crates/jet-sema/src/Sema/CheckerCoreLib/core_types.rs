@@ -65,6 +65,13 @@ pub(crate) fn is_utf8_error_type_name(name: &str) -> bool {
     name == Syntax::TYPE_UTF8_ERROR || name == "Utf8Error"
 }
 
+/// D-TEXTWIDTH1=B: `text.display_width(s, policy: cjk)`'s reject-path error
+/// (a `.Reject` control-character policy hit) — mirrors `Utf8Error`'s
+/// minimal `{ message }` shape.
+pub(crate) fn is_text_error_type_name(name: &str) -> bool {
+    name == "TextError"
+}
+
 pub(crate) fn core_type_known(name: &str) -> bool {
     matches!(
         name,
@@ -75,6 +82,9 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // handles off a `ProcessChild`; `ProcessLines` is the loop-source-only
         // result of `.lines()` on the latter two (mirrors `FileLines`/`StdinLines`).
         | "ProcessStreamMode" | "ProcessStdin" | "ProcessStdoutStream" | "ProcessStderrStream" | "ProcessLines"
+        // D-TEXTWIDTH1=B: `TextWidth` (dot-ctor struct, `core_constructable_fields`)
+        // + its two dot-literal enum fields + the `.Reject` policy error.
+        | "TextWidth" | "TextWidthAmbiguous" | "TextWidthControls" | "TextError"
         // D-DET1: deterministic injected capability handles.
         // D-DET-CAPAPI: `Duration` value type for the widened clock surface.
         | "Clock" | "Rng" | "Duration"
@@ -232,6 +242,12 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         };
     }
     if is_utf8_error_type_name(type_name) {
+        return match field {
+            "message" => Some(Type::String),
+            _ => None,
+        };
+    }
+    if is_text_error_type_name(type_name) {
         return match field {
             "message" => Some(Type::String),
             _ => None,
@@ -452,6 +468,26 @@ pub(crate) fn core_process_stream_mode_variants(
     m
 }
 
+/// D-TEXTWIDTH1=B: the two `TextWidth` field enums (`.Narrow`/`.Wide`,
+/// `.Zero`/`.Reject`) — synthesised the same way as `ProcessStreamMode`.
+pub(crate) fn core_text_width_variants(
+    enum_name: &str,
+) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>> {
+    use crate::AST::VariantPayload;
+    use crate::Diagnostics::Span;
+    let zero = Span::new(0, 0);
+    let names: &[&str] = match enum_name {
+        "TextWidthAmbiguous" => &["Narrow", "Wide"],
+        "TextWidthControls" => &["Zero", "Reject"],
+        _ => return None,
+    };
+    let mut m = std::collections::HashMap::new();
+    for name in names {
+        m.insert((*name).to_string(), (zero, VariantPayload::Unit));
+    }
+    Some(m)
+}
+
 /// D-TERM1 (ratified 2026-06-22): synthesised variant table for the `Key` enum.
 /// Used by `resolve_enum_variants_cloned` so `Key.Char(c)` / `Key.Enter` literals
 /// pass type-checking without `Key` being in the user type registry.
@@ -588,6 +624,14 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             ("path".to_string(), str_ty.clone()),
             ("body".to_string(), str_ty),
             ("headers".to_string(), map_ty),
+        ]),
+        // D-TEXTWIDTH1=B: `TextWidth.{ ambiguous: .Wide, controls: .Reject }`
+        // — the two dot-literal enum fields resolve via `resolve_enum_variants_cloned`
+        // (below), the same "core enum, not in the user registry" mechanism as
+        // `ProcessStreamMode`.
+        "TextWidth" => Some(vec![
+            ("ambiguous".to_string(), Type::Named("TextWidthAmbiguous".to_string())),
+            ("controls".to_string(), Type::Named("TextWidthControls".to_string())),
         ]),
         _ => None,
     }

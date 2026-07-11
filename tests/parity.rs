@@ -94,28 +94,18 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     // stddev/quantile/rolling_mean/describe/status) and plot rendering
     // (bar_text/bar_svg) are PORTED (card #392 pass 3, `DataLite.rs`). The
     // generic call-site-typed table/lazy-pipeline half (D-DATA-SURFACE1) —
-    // a typed-decode + closure-driven pipeline over row handles, resolved by
-    // `infer_core_call`/`enc_target_rust`, not a plain fixed signature — is
-    // its own future card: it needs new `CtValue` machinery for a generic
-    // decoded-table handle plus closure application over rows, which is a
-    // distinct design pass from porting a pure math/string function.
-    ("core.data", "collect"),
-    ("core.data", "count"),
-    ("core.data", "csv"),
-    ("core.data", "filter"),
-    ("core.data", "group_count"),
-    ("core.data", "group_mean"),
-    ("core.data", "group_sum"),
-    ("core.data", "lazy"),
-    ("core.data", "lazy_filter"),
-    ("core.data", "lazy_sort_by"),
-    ("core.data", "missing_count"),
-    ("core.data", "plan"),
-    ("core.data", "rows"),
-    ("core.data", "series"),
-    ("core.data", "sort_by"),
-    ("core.data", "table"),
-    ("core.data", "values"),
+    // table/rows/series/values/missing_count/csv/count/lazy/lazy_filter/
+    // lazy_sort_by/collect/plan/filter/sort_by/group_count/group_sum/
+    // group_mean — is PORTED too (card #392 pass 5, `DataPipeline.rs`):
+    // `Table<T>`/`Series<T>`/`LazyFrame<T>` are plain `CtValue::Struct`
+    // wrappers over already-dynamically-typed rows, with closures applied
+    // through the same `call_closure` path `list.map`/`.filter` use.
+    // `inner_join`/`left_join`/`pivot_sum` are a pre-existing, separate blind
+    // spot in this test's own extractor (they live in `core_call.rs`'s
+    // `infer_core_call`, not `fixed_sigs.rs`, so this scan never sees them) —
+    // still an open gap at comptime, but out of this test's coverage either
+    // way; left for a future card rather than folded into this one's scope.
+    //
     // core.archive / core.compress.*: gzip/zip/tar/zstd — needs a hand-rolled
     // (I6) compression implementation ported into the interpreter, not a
     // one-line Rust std call.
@@ -147,25 +137,23 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     // `base32_encode`/`base32_decode` and the `encode_url`/`decode_url` arms
     // in Methods.rs).
     //
-    // `decode_traced<T>` is the one method left open: it needs a *typed*
-    // Decode dispatch at comptime (call a user type's generated
-    // `jet_decode`/`jet_decode_traced`, walk its `@PublishedSchema` migration
-    // chain) — comptime currently has no typed-decode machinery at all (the
-    // existing `core.encoding.json.decode` arm is the untyped/lenient D-JSON3
-    // form only). That's new interpreter machinery, not a verbatim port of
-    // pure logic — same class of gap as `core.data`'s typed table pipeline
-    // below, and needs its own design pass.
-    ("core.encoding.json", "decode_traced"),
-    // paren-balance-parser artifact (see `extract_pairs`'s doc comment):
-    // `fixed_sigs.rs`'s `("core.encoding.json" | "core.encoding.csv" |
-    // "core.encoding.toml" | "core.encoding.yaml", "to_string" | ... |
-    // "decode_traced")` alternation line reads as (first-module,
-    // second-module) pairs to this test's extractor, alongside the real
-    // ones. Harmless (both sides of the diff are equally blind to it), kept
-    // explicit rather than silently swallowed.
-    ("core.encoding.json", "core.encoding.csv"),
-    ("core.encoding.json", "core.encoding.toml"),
-    ("core.encoding.json", "core.encoding.yaml"),
+    // `decode_traced<T>` is PORTED too (card #392 pass 5, `TypedDecode.rs`):
+    // typed `Decode` dispatch at comptime — resolves the target user type via
+    // `self.structs`, walks its fields (honoring `#[Rename]`/`RenameAll`/
+    // `Default`/`Flatten`/`DenyUnknownFields`), and — for a
+    // `@PublishedSchema` type with `migration { }` blocks — walks the runtime
+    // migration chain the same way `Codegen/Items.rs::emit_migration_chain_walker`
+    // does (shape detection by wire-key set, newest match first, calling the
+    // sema-lowered `__migrate_conv_*`/`__migrate_add_*` synthetic functions
+    // through the ordinary `call_func` path). `json`/`csv`/`toml`/`yaml` all
+    // share the one `typed_decode_top` walker. (The `fixed_sigs.rs`
+    // alternation's paren-balance-parser artifact — `("core.encoding.json",
+    // "core.encoding.csv")` and its toml/yaml siblings — used to need an
+    // explicit entry here too, but `Methods.rs`'s new dispatch guard uses the
+    // identical `("core.encoding.json" | … , "decode" | "decode_traced")`
+    // alternation shape, so the same artifact pairs now appear on both sides
+    // of the diff and aren't `newly_missing` — no entry needed.)
+    //
     // core.os: host/process facts (hostname, arch, pid, cpu_count, …) — real
     // ambient reads of the host, arguably belongs behind the same `#Impure`
     // gate as `core.env`/`core.process` rather than E0956; needs the same

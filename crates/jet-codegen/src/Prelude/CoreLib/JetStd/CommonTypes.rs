@@ -622,6 +622,11 @@
             self.message.clone()
         }
     }
+    impl super::JetShow for TextError {
+        fn jet_show(&self) -> String {
+            self.message.clone()
+        }
+    }
     impl super::JetShow for ProcessResult {
         fn jet_show(&self) -> String {
             format!("{:?}", self)

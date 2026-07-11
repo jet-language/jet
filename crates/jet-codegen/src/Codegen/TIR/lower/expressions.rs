@@ -941,6 +941,24 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     },
                 };
             }
+            // D-TEXTWIDTH1=B: `TextWidth.{ ambiguous: .Wide, controls: .Reject }` —
+            // a plain dot-ctor core struct, `jet_std::TextWidth` head, no injected
+            // extra field (unlike HttpRequest's `params`).
+            if type_name == "TextWidth" {
+                let tfields: Vec<(String, TExpr, bool)> = fields
+                    .iter()
+                    .map(|(n, _, fe)| (n.clone(), lower_expr(fe, cx, env), false))
+                    .collect();
+                return TExpr {
+                    ty: Type::Named(type_name.clone()),
+                    kind: TExprKind::StructLit {
+                        rust_type: format!("{}jet_std::TextWidth", cx.root_prefix),
+                        fields: tfields,
+                        extra: None,
+                        as_trait: None,
+                    },
+                };
+            }
             // c109 Phase 19: a GENERIC struct literal carries `type_args` (`Pair<T> {…}`).
             // The Rust head is the turbofish `user_<Name>::<args>` (`user_type_apply_rust`),
             // resolved at lowering; fields mangle. A non-generic literal renders `user_<Name>`.

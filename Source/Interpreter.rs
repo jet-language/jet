@@ -550,6 +550,11 @@ fn walk_items_for_interp<'a>(
                     .entry(d.name.clone())
                     .or_insert(d.range.map(|(lo, hi, _)| (lo, hi)));
             }
+            // Card #392 pass 5: `migration TypeName { … }` blocks, for
+            // `decode_traced<T>`'s runtime chain-walker (`Interp::migrations`).
+            Item::Migration(m) => {
+                info.migrations.entry(m.type_name.clone()).or_default().push(m);
+            }
             Item::UnitFamily(uf) => {
                 for d in uf.distinct_defs() {
                     info.distinct_ranges

@@ -292,7 +292,10 @@ pub(crate) fn is_covered_foreign_value_ty(ty: &Type, cx: &Cx) -> bool {
 /// `emit_struct_lit`). These get a Rust head `<root>Jet…` with PLAIN (unmangled) fields,
 /// and HttpRequest additionally an injected `params: BTreeMap::new()` field.
 pub(crate) fn is_prelude_struct_name(name: &str) -> bool {
-    matches!(name, "HttpRequest" | "HttpResponse")
+    // D-TEXTWIDTH1=B: `TextWidth` is a plain dot-ctor core struct (no auto
+    // fields, unlike HttpRequest's `params`) — see the lowering branch keyed
+    // on `type_name == "TextWidth"` in `lower_expr`'s StructLit arm.
+    matches!(name, "HttpRequest" | "HttpResponse" | "TextWidth")
 }
 
 /// c109 Phase 19: is a FOREIGN (imported user) struct literal `alias.Type { … }` in

@@ -997,6 +997,7 @@ impl<'a> Interp<'a> {
         receiver: &Expr,
         method: &str,
         span: Span,
+        type_args: &[Type],
         args: &[crate::AST::CallArg],
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
@@ -1045,6 +1046,47 @@ impl<'a> Interp<'a> {
                 let mut argv = Vec::with_capacity(args.len());
                 for a in args {
                     argv.push(self.eval(&a.expr, scope)?);
+                }
+                // Card #392 pass 5: `core.data`'s typed table/lazy pipeline — a
+                // generic call-site-typed surface built from ordinary Jet
+                // lambdas over dynamically-typed `CtValue` rows, so (unlike
+                // `decode<T>` below) only `csv<T>` actually reads `type_args`.
+                // The pre-existing fixed-signature stats/plot surface (`sum`/
+                // `mean`/…/`bar_svg`, `DataLite.rs`) stays on the
+                // `apply_core_call` path below — only the table/lazy pipeline
+                // names are new here.
+                if matches!(
+                    (module.as_str(), method),
+                    (
+                        "core.data",
+                        "csv" | "count" | "table" | "rows" | "series" | "values" | "missing_count"
+                            | "lazy" | "lazy_filter" | "lazy_sort_by" | "collect" | "plan" | "filter"
+                            | "sort_by" | "group_count" | "group_sum" | "group_mean",
+                    )
+                ) {
+                    return self.eval_data_call(method, argv, type_args, span);
+                }
+                // D-MIGRATE3=A / D-SERDE6: `decode<T>`/`decode_traced<T>` — typed
+                // Decode dispatch. Untyped `.decode()` (no turbofish, D-JSON3
+                // lenient form) keeps its existing `apply_core_call` arm below.
+                if matches!(
+                    (module.as_str(), method),
+                    (
+                        "core.encoding.json" | "core.encoding.csv" | "core.encoding.toml" | "core.encoding.yaml",
+                        "decode" | "decode_traced",
+                    )
+                ) && !type_args.is_empty()
+                {
+                    let Some(text) = argv.first().and_then(|v| match v {
+                        CtValue::Str(s) => Some(s.clone()),
+                        _ => None,
+                    }) else {
+                        return Err(unsupported(
+                            &format!("`{}.{}()`: expected a string argument", module, method),
+                            span,
+                        ));
+                    };
+                    return self.eval_typed_decode(&module, method, &text, &type_args[0], span);
                 }
                 // D-CTEFFECT1 Tier-1: fetch is hermetic (sha256-pinned); no gate.
                 if module == "core.net" && method == "fetch" {
@@ -1446,7 +1488,7 @@ impl<'a> Interp<'a> {
 // The whitelist grows with tests; start with core.math and core.string.
 // ---------------------------------------------------------------------------
 
-fn as_float(v: &CtValue, span: Span) -> Result<f64, Diagnostic> {
+pub(super) fn as_float(v: &CtValue, span: Span) -> Result<f64, Diagnostic> {
     match v {
         CtValue::Float(f) => Ok(*f),
         CtValue::Int(n) => Ok(*n as f64),
@@ -1457,7 +1499,7 @@ fn as_float(v: &CtValue, span: Span) -> Result<f64, Diagnostic> {
     }
 }
 
-fn as_string(v: &CtValue, span: Span) -> Result<&str, Diagnostic> {
+pub(super) fn as_string(v: &CtValue, span: Span) -> Result<&str, Diagnostic> {
     match v {
         CtValue::Str(s) => Ok(s.as_str()),
         _ => Err(unsupported(
@@ -2022,6 +2064,25 @@ fn with_ambient_rng<R>(f: impl FnOnce(&mut u64) -> R) -> R {
     })
 }
 
+/// D-TEXTWIDTH1=B: pull the two policy flags back out of a `TextWidth`
+/// `CtValue::Struct` (`ambiguous: .Wide|.Narrow`, `controls: .Zero|.Reject`).
+/// Missing/malformed fields fall back to the portable default (`Narrow`,
+/// `Zero`) rather than erroring — sema already guarantees the shape.
+fn text_width_policy_flags(policy: &CtValue) -> (bool, bool) {
+    let CtValue::Struct { fields, .. } = policy else {
+        return (false, false);
+    };
+    let ambiguous_wide = fields
+        .iter()
+        .find(|(n, _)| n == "ambiguous")
+        .is_some_and(|(_, v)| matches!(v, CtValue::Enum { variant, .. } if variant == "Wide"));
+    let controls_reject = fields
+        .iter()
+        .find(|(n, _)| n == "controls")
+        .is_some_and(|(_, v)| matches!(v, CtValue::Enum { variant, .. } if variant == "Reject"));
+    (ambiguous_wide, controls_reject)
+}
+
 /// Evaluate a whitelisted pure Core call at comptime / in the REPL.
 /// `module` is the full path (e.g. `"core.math"`, `"jet.regex"`).
 fn apply_core_call(
@@ -2257,10 +2318,27 @@ fn apply_core_call(
                 .map(|c| CtValue::Str(c.to_string()))
                 .collect(),
         )),
-        ("core.text", "width") => Ok(CtValue::Int(super::TextLite::width(as_string(
-            one(0)?,
-            span,
-        )?))),
+        // D-TEXTWIDTH1=B: 1-arg call uses the portable default policy and
+        // returns a bare `Int`; the 2-arg (`policy:`) call can reject a
+        // control character under `.Reject`, so it returns `Int ? TextError`.
+        // `TextWidth`'s two enum fields evaluate generically (`CtValue::Struct`/
+        // `CtValue::Enum`, no per-type interpreter code needed) — this arm
+        // just reads them back out.
+        ("core.text", "display_width") => {
+            let s = as_string(one(0)?, span)?;
+            if let Some(policy) = args.get(1) {
+                let (ambiguous_wide, controls_reject) = text_width_policy_flags(policy);
+                match super::TextLite::display_width_policy(s, ambiguous_wide, controls_reject) {
+                    Ok(n) => Ok(CtValue::ResOk(Box::new(CtValue::Int(n)))),
+                    Err(message) => Ok(CtValue::ResErr(Box::new(CtValue::Struct {
+                        type_name: "TextError".to_string(),
+                        fields: vec![("message".to_string(), CtValue::Str(message))],
+                    }))),
+                }
+            } else {
+                Ok(CtValue::Int(super::TextLite::display_width_default(s)))
+            }
+        }
         ("core.text", "scalar_count") => {
             Ok(CtValue::Int(as_string(one(0)?, span)?.chars().count() as i64))
         }

@@ -959,7 +959,15 @@ pub(crate) fn emit_tir_core_call(
         ("core.text", "graphemes") => format!("{}(&({}))", helper("jet_text_graphemes"), arg(0)),
         ("core.text", "words") => format!("{}(&({}))", helper("jet_text_words"), arg(0)),
         ("core.text", "sentences") => format!("{}(&({}))", helper("jet_text_sentences"), arg(0)),
-        ("core.text", "width") => format!("{}(&({}))", helper("jet_text_width"), arg(0)),
+        // D-TEXTWIDTH1=B: 1-arg = portable default (`Int`); 2-arg (`policy:`)
+        // routes through the `TextWidth`-taking helper (`Int ? TextError`).
+        ("core.text", "display_width") if args.len() >= 2 => format!(
+            "{}(&({}), &({}))",
+            helper("jet_text_display_width"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.text", "display_width") => format!("{}(&({}))", helper("jet_text_display_width_default"), arg(0)),
         ("core.text", "scalar_count") => format!("{}(&({}))", helper("jet_text_unicode_scalar_count"), arg(0)),
         ("core.text", "byte_count") => format!("{}(&({}))", helper("jet_text_unicode_byte_count"), arg(0)),
         ("core.text", "is_alphabetic") => format!("{}(&({}))", helper("jet_text_is_alphabetic"), arg(0)),

@@ -434,6 +434,14 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             if type_name == "ProcessStreamMode" {
                 return matches!(variant.as_str(), "Stream" | "Inherit" | "Capture");
             }
+            // D-TEXTWIDTH1=B: `TextWidth`'s two field enums, always
+            // covered — every variant is unit (no payload args to check).
+            if type_name == "TextWidthAmbiguous" {
+                return matches!(variant.as_str(), "Narrow" | "Wide");
+            }
+            if type_name == "TextWidthControls" {
+                return matches!(variant.as_str(), "Zero" | "Reject");
+            }
             if !enum_is_covered(type_name, cx) {
                 return false;
             }

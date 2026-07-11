@@ -442,6 +442,10 @@ pub(crate) fn tir_enum_lit_prefix(cx: &Cx, type_name: &str, variant: &str) -> St
     if type_name == "ProcessStreamMode" {
         return format!("{}jet_std::ProcessStreamMode::{}", cx.root_prefix, variant);
     }
+    // D-TEXTWIDTH1=B: `TextWidth`'s two field enums — same shape.
+    if matches!(type_name, "TextWidthAmbiguous" | "TextWidthControls") {
+        return format!("{}jet_std::{}::{}", cx.root_prefix, type_name, variant);
+    }
     let type_prefix = match cx.foreign_types.get(type_name) {
         Some(rust_mod) => format!("{}{}::user_{}", cx.root_prefix, rust_mod, type_name),
         None => format!("user_{}", type_name),

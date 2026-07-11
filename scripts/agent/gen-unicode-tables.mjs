@@ -11,7 +11,8 @@
 //   UnicodeData.txt, CaseFolding.txt, CompositionExclusions.txt,
 //   DerivedNormalizationProps.txt, EastAsianWidth.txt, emoji/emoji-data.txt,
 //   auxiliary/GraphemeBreakProperty.txt, auxiliary/WordBreakProperty.txt,
-//   auxiliary/SentenceBreakProperty.txt
+//   auxiliary/SentenceBreakProperty.txt, DerivedCoreProperties.txt (GB9c's
+//   Indic_Conjunct_Break, added card #298 segmentation slice)
 //
 // Emits byte-identical Rust source to two paths:
 //   crates/jet-foundation/src/generated/UnicodeTables.rs   (source of truth;
@@ -36,6 +37,8 @@ const PINNED_SHA256 = {
   "auxiliary/GraphemeBreakProperty.txt": "c29360bd6f7132811d701d29069541e827eb44bfc4c8fbde8c370d6982689dc1",
   "auxiliary/WordBreakProperty.txt": "476464e71a4b7b779b8ba7c5671f4338fea77da8e6b6b05fb82b3fdd14603779",
   "auxiliary/SentenceBreakProperty.txt": "20aab5eca3842c7a27cc6756d74488a4a5f744c8dca2948ec1128f26a60d1f79",
+  // GB9c (Indic conjunct clusters — Unicode 15+): Indic_Conjunct_Break.
+  "DerivedCoreProperties.txt": "39d35161f2954497f69e08bdb9e701493f476a3d30222de20028feda36c1dabd",
 };
 
 import { readFileSync, writeFileSync } from "node:fs";
@@ -205,6 +208,27 @@ const graphemeProp = parseBreakProperty(readChecked("auxiliary/GraphemeBreakProp
 const wordProp = parseBreakProperty(readChecked("auxiliary/WordBreakProperty.txt"));
 const sentenceProp = parseBreakProperty(readChecked("auxiliary/SentenceBreakProperty.txt"));
 
+// ---- DerivedCoreProperties.txt: Indic_Conjunct_Break (GB9c) -----------------
+// `<range> ; InCB; <Value> # comment` lines only; everything else in the file
+// (Alphabetic, ID_Start, …) is irrelevant here and skipped.
+function parseInCB(text) {
+  const out = []; // [start,end,tagString]
+  for (const raw of text.split("\n")) {
+    const line = stripComment(raw).trim();
+    if (!line) continue;
+    const f = line.split(";").map((x) => x.trim());
+    if (f.length < 3 || f[1] !== "InCB") continue;
+    const range = f[0];
+    const prop = f[2];
+    let a, b;
+    if (range.includes("..")) [a, b] = range.split("..").map((x) => parseInt(x, 16));
+    else a = b = parseInt(range, 16);
+    out.push([a, b, prop]);
+  }
+  return out;
+}
+const incbProp = parseInCB(readChecked("DerivedCoreProperties.txt"));
+
 // ---- derive: canonical composition pairs ------------------------------------
 // pair (c1,c2) -> composed, only from canonical (untagged) 2-codepoint
 // decompositions whose composed cp is not in Full_Composition_Exclusion.
@@ -274,6 +298,9 @@ function encodeBreakRanges(ranges, tags) {
 const graphemeRanges = encodeBreakRanges(graphemeProp, GRAPHEME_TAGS);
 const wordRanges = encodeBreakRanges(wordProp, WORD_TAGS);
 const sentenceRanges = encodeBreakRanges(sentenceProp, SENTENCE_TAGS);
+// GB9c: 0=None(unlisted default) 1=Linker 2=Consonant 3=Extend
+const INCB_TAGS = ["None", "Linker", "Consonant", "Extend"];
+const incbRanges = encodeBreakRanges(incbProp, INCB_TAGS);
 
 // ---- emit Rust ---------------------------------------------------------------
 function fmtU32Triples(rows) {
@@ -360,6 +387,9 @@ pub static UNICODE_GRAPHEME_BREAK: &[(u32,u32,u8)] = &[${fmtU32Triples(graphemeR
 pub static UNICODE_WORD_BREAK: &[(u32,u32,u8)] = &[${fmtU32Triples(wordRanges)}];
 // Sentence_Break tags: ${SENTENCE_TAGS.map((t, i) => `${i}=${t}`).join(" ")}
 pub static UNICODE_SENTENCE_BREAK: &[(u32,u32,u8)] = &[${fmtU32Triples(sentenceRanges)}];
+
+// Indic_Conjunct_Break (GB9c) tags: ${INCB_TAGS.map((t, i) => `${i}=${t}`).join(" ")}
+pub static UNICODE_INCB: &[(u32,u32,u8)] = &[${fmtU32Triples(incbRanges)}];
 `;
 
 const moduleOut = MODULE_HEADER + body;

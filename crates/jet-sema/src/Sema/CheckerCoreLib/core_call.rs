@@ -2351,9 +2351,55 @@ impl<'a> Checker<'a> {
                     self.expect_core_arg("decimal", 0, &Type::String, &mut args[0]);
                     return Some(Type::Named(crate::Syntax::TYPE_DECIMAL.to_string()));
                 }
+                // D-TEXTWIDTH1=B: `text.display_width(s)` (portable default,
+                // returns bare `Int`) vs `text.display_width(s, policy: cjk)`
+                // (the `.Reject` control policy can fail, so it returns
+                // `Int ? TextError`). Named-arg dispatch mirrors `game.run`.
+                ("core.text", "display_width") => {
+                    match args.len() {
+                        1 => {
+                            self.expect_core_arg("display_width", 0, &Type::String, &mut args[0]);
+                            return Some(Type::Int);
+                        }
+                        2 => {
+                            self.expect_core_arg("display_width", 0, &Type::String, &mut args[0]);
+                            let label = args[1].label.as_ref().map(|(l, _)| l.clone());
+                            match label.as_deref() {
+                                Some("policy") | None => self.expect_core_arg(
+                                    "display_width",
+                                    1,
+                                    &Type::Named("TextWidth".to_string()),
+                                    &mut args[1],
+                                ),
+                                Some(label) => {
+                                    let label_span = args[1].label.as_ref().map(|(_, s)| *s).unwrap_or(span);
+                                    self.diags.push(Diagnostic::error(
+                                        "E0125",
+                                        format!("`display_width` has no `{label}:` option at argument 2"),
+                                        "this position accepts a `TextWidth` policy; labels document the positional shape and never reorder arguments".to_string(),
+                                        "write `policy:` here, or drop the label".to_string(),
+                                        Some(label_span),
+                                    ));
+                                    self.infer(&mut args[1].expr);
+                                }
+                            }
+                            return Some(Type::Result {
+                                ok: Box::new(Type::Int),
+                                err: Box::new(Type::Named("TextError".to_string())),
+                            });
+                        }
+                        n => {
+                            self.diags.push(wrong_core_arity("display_width", 1, n, span));
+                            for a in args.iter_mut() {
+                                self.infer(&mut a.expr);
+                            }
+                            return None;
+                        }
+                    }
+                }
                 _ => {}
             }
-    
+
             let Some((params, ret)) = sig else {
                 self.diags.push(unknown_core_item(module, name, span));
                 for a in args.iter_mut() {

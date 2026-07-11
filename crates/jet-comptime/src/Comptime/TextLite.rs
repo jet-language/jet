@@ -209,34 +209,527 @@ pub(super) fn caseless_eq(a: &str, b: &str) -> bool {
     casefold(&nfd(a)) == casefold(&nfd(b))
 }
 
-fn is_mark(c: char) -> bool {
-    matches!(c as u32, 0x0300..=0x036F | 0x1AB0..=0x1AFF | 0x1DC0..=0x1DFF | 0x20D0..=0x20FF | 0xFE20..=0xFE2F)
+// Card #298: real UAX#29 grapheme/word/sentence segmentation over the
+// generated break-property tables (`UNICODE_GRAPHEME_BREAK`/`_WORD_BREAK`/
+// `_SENTENCE_BREAK`/`_EXTENDED_PICTOGRAPHIC`), mirroring the AOT twin
+// byte-for-byte (R12 parity) — see
+// crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs for the identical
+// algorithm. Tag encodings match `scripts/agent/gen-unicode-tables.mjs`'s
+// `GRAPHEME_TAGS`/`WORD_TAGS`/`SENTENCE_TAGS` arrays exactly.
+
+fn bsearch_triple(table: &[(u32, u32, u8)], cp: u32) -> u8 {
+    table
+        .binary_search_by(|&(a, b, _)| {
+            if cp < a {
+                std::cmp::Ordering::Greater
+            } else if cp > b {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        })
+        .map(|i| table[i].2)
+        .unwrap_or(0)
+}
+fn bsearch_pair(table: &[(u32, u32)], cp: u32) -> bool {
+    table
+        .binary_search_by(|&(a, b)| {
+            if cp < a {
+                std::cmp::Ordering::Greater
+            } else if cp > b {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        })
+        .is_ok()
+}
+
+fn grapheme_class(cp: u32) -> u8 {
+    bsearch_triple(UNICODE_GRAPHEME_BREAK, cp)
+}
+fn word_class(cp: u32) -> u8 {
+    bsearch_triple(UNICODE_WORD_BREAK, cp)
+}
+fn sentence_class(cp: u32) -> u8 {
+    bsearch_triple(UNICODE_SENTENCE_BREAK, cp)
+}
+fn is_ext_pictographic(cp: u32) -> bool {
+    bsearch_pair(UNICODE_EXTENDED_PICTOGRAPHIC, cp)
+}
+fn is_emoji_presentation(cp: u32) -> bool {
+    bsearch_pair(UNICODE_EMOJI_PRESENTATION, cp)
+}
+/// East Asian Width: 0=narrow(N/Na/H) 1=Ambiguous 2=wide(W/F).
+fn eaw_class(cp: u32) -> u8 {
+    bsearch_triple(UNICODE_EAST_ASIAN_WIDTH, cp)
+}
+/// Indic_Conjunct_Break (GB9c): 0=None 1=Linker 2=Consonant 3=Extend.
+fn incb_class(cp: u32) -> u8 {
+    bsearch_triple(UNICODE_INCB, cp)
+}
+const INCB_LINKER: u8 = 1;
+const INCB_CONSONANT: u8 = 2;
+const INCB_EXTEND: u8 = 3;
+
+// ---- GB1-GB13 grapheme cluster boundaries -----------------------------------
+const GB_OTHER: u8 = 0;
+const GB_CR: u8 = 1;
+const GB_LF: u8 = 2;
+const GB_CONTROL: u8 = 3;
+const GB_EXTEND: u8 = 4;
+const GB_ZWJ: u8 = 5;
+const GB_RI: u8 = 6;
+const GB_PREPEND: u8 = 7;
+const GB_SPACINGMARK: u8 = 8;
+const GB_L: u8 = 9;
+const GB_V: u8 = 10;
+const GB_T: u8 = 11;
+const GB_LV: u8 = 12;
+const GB_LVT: u8 = 13;
+
+/// GB3-GB9b/GB999 (class-pair rules only — GB11's Extended_Pictographic
+/// lookup and GB12/13's regional-indicator parity are stateful, handled by
+/// the caller).
+fn grapheme_break_classes(pc: u8, cc: u8) -> bool {
+    if pc == GB_CR && cc == GB_LF {
+        return false; // GB3
+    }
+    if matches!(pc, GB_CR | GB_LF | GB_CONTROL) {
+        return true; // GB4
+    }
+    if matches!(cc, GB_CR | GB_LF | GB_CONTROL) {
+        return true; // GB5
+    }
+    if pc == GB_L && matches!(cc, GB_L | GB_V | GB_LV | GB_LVT) {
+        return false; // GB6
+    }
+    if matches!(pc, GB_LV | GB_V) && matches!(cc, GB_V | GB_T) {
+        return false; // GB7
+    }
+    if matches!(pc, GB_LVT | GB_T) && cc == GB_T {
+        return false; // GB8
+    }
+    if matches!(cc, GB_EXTEND | GB_ZWJ) {
+        return false; // GB9
+    }
+    if cc == GB_SPACINGMARK {
+        return false; // GB9a
+    }
+    if pc == GB_PREPEND {
+        return false; // GB9b
+    }
+    let _ = GB_OTHER;
+    true // GB999
 }
 
 pub(super) fn graphemes(s: &str) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    for c in s.chars() {
-        if is_mark(c) || c == '\u{200D}' {
-            if let Some(last) = out.last_mut() {
-                last.push(c);
-            } else {
-                out.push(c.to_string());
-            }
+    let cps: Vec<char> = s.chars().collect();
+    if cps.is_empty() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    cur.push(cps[0]);
+    let mut ri_run: usize = if grapheme_class(cps[0] as u32) == GB_RI { 1 } else { 0 };
+    let mut saw_pic = is_ext_pictographic(cps[0] as u32);
+    let mut incb_pending = incb_class(cps[0] as u32) == INCB_CONSONANT;
+    let mut incb_linker = false;
+    for i in 1..cps.len() {
+        let prev = cps[i - 1];
+        let curc = cps[i];
+        let pc = grapheme_class(prev as u32);
+        let cc = grapheme_class(curc as u32);
+        let brk = if pc == GB_ZWJ && saw_pic && is_ext_pictographic(curc as u32) {
+            false // GB11: \p{Extended_Pictographic} Extend* ZWJ x \p{Extended_Pictographic}
+        } else if pc == GB_RI && cc == GB_RI {
+            ri_run % 2 == 0 // GB12/GB13: pair up regional indicators
+        } else if incb_pending && incb_linker && incb_class(curc as u32) == INCB_CONSONANT {
+            false // GB9c: Indic conjunct (Consonant [Extend|Linker]* Linker [Extend|Linker]* x Consonant)
         } else {
-            out.push(c.to_string());
+            grapheme_break_classes(pc, cc)
+        };
+        if brk {
+            out.push(std::mem::take(&mut cur));
         }
+        cur.push(curc);
+        ri_run = if cc == GB_RI { ri_run + 1 } else { 0 };
+        saw_pic = if matches!(cc, GB_EXTEND | GB_ZWJ) {
+            saw_pic
+        } else {
+            is_ext_pictographic(curc as u32)
+        };
+        match incb_class(curc as u32) {
+            INCB_CONSONANT => {
+                incb_pending = true;
+                incb_linker = false;
+            }
+            INCB_LINKER => {
+                if incb_pending {
+                    incb_linker = true;
+                }
+            }
+            INCB_EXTEND => {}
+            _ => {
+                incb_pending = false;
+                incb_linker = false;
+            }
+        }
+    }
+    out.push(cur);
+    out
+}
+
+// ---- WB1-WB16 word boundaries ------------------------------------------------
+const WB_OTHER: u8 = 0;
+const WB_CR: u8 = 1;
+const WB_LF: u8 = 2;
+const WB_NEWLINE: u8 = 3;
+const WB_EXTEND: u8 = 4;
+const WB_ZWJ: u8 = 5;
+const WB_RI: u8 = 6;
+const WB_FORMAT: u8 = 7;
+const WB_KATAKANA: u8 = 8;
+const WB_HEBREW: u8 = 9;
+const WB_ALETTER: u8 = 10;
+const WB_SINGLEQUOTE: u8 = 11;
+const WB_DOUBLEQUOTE: u8 = 12;
+const WB_MIDNUMLET: u8 = 13;
+const WB_MIDLETTER: u8 = 14;
+const WB_MIDNUM: u8 = 15;
+const WB_NUMERIC: u8 = 16;
+const WB_EXTENDNUMLET: u8 = 17;
+const WB_WSEGSPACE: u8 = 18;
+
+/// WB4: `Extend`/`Format`/`ZWJ` are transparent — they attach to the
+/// preceding "word unit" and never start a new one. Reduces the raw
+/// codepoint sequence to word units, each remembering the ORIGINAL index of
+/// its last raw char (`ends[i]`) so boundary decisions map back onto the
+/// real string.
+fn word_reduce(cps: &[char]) -> (Vec<(u8, char)>, Vec<usize>) {
+    let mut units: Vec<(u8, char)> = Vec::new();
+    let mut ends: Vec<usize> = Vec::new();
+    for (idx, &c) in cps.iter().enumerate() {
+        let cl = word_class(c as u32);
+        if matches!(cl, WB_EXTEND | WB_FORMAT | WB_ZWJ) {
+            if let Some(&(last_cl, _)) = units.last() {
+                // WB4's attach rule has an explicit carve-out: "except after
+                // sot, or after CR, LF, or Newline" — a CR/LF/Newline unit
+                // always starts its own boundary, so a following Extend/
+                // Format/ZWJ must NOT merge into it (conformance-verified:
+                // WordBreakTest.txt has `CR × Extend` cases wanting `÷`).
+                if !matches!(last_cl, WB_CR | WB_LF | WB_NEWLINE) {
+                    *ends.last_mut().unwrap() = idx;
+                    continue;
+                }
+            }
+        }
+        units.push((cl, c));
+        ends.push(idx);
+    }
+    (units, ends)
+}
+
+/// WB3-WB13b (pairwise, with the single lookback/lookahead unit each rule
+/// needs). WB15/16's regional-indicator parity is stateful (running count),
+/// handled by the caller.
+fn word_break_at(units: &[(u8, char)], ends: &[usize], cps: &[char], i: usize) -> bool {
+    let (pc, _) = units[i];
+    let (cc, _) = units[i + 1];
+    if pc == WB_CR && cc == WB_LF {
+        return false; // WB3
+    }
+    if matches!(pc, WB_NEWLINE | WB_CR | WB_LF) {
+        return true; // WB3a
+    }
+    if matches!(cc, WB_NEWLINE | WB_CR | WB_LF) {
+        return true; // WB3b
+    }
+    // WB3c: ZWJ x Extended_Pictographic (the last RAW char merged into unit i
+    // may be the ZWJ itself even though `pc` is the unit's anchor class).
+    if word_class(cps[ends[i]] as u32) == WB_ZWJ && is_ext_pictographic(units[i + 1].1 as u32) {
+        return false;
+    }
+    // WB3d: requires the two WSegSpace runes to be RAW-adjacent — a merged
+    // Extend/Format/ZWJ between them (attached into unit `i` per WB4) means
+    // the immediately preceding raw char is no longer WSegSpace, so this
+    // does NOT fire (conformance-verified: `SPACE Extend SPACE` breaks at
+    // the second boundary, `[999.0]` in WordBreakTest.txt, not WB3d).
+    if pc == WB_WSEGSPACE && cc == WB_WSEGSPACE && word_class(cps[ends[i]] as u32) == WB_WSEGSPACE {
+        return false;
+    }
+    if matches!(pc, WB_ALETTER | WB_HEBREW) && matches!(cc, WB_ALETTER | WB_HEBREW) {
+        return false; // WB5
+    }
+    if matches!(pc, WB_ALETTER | WB_HEBREW) && matches!(cc, WB_MIDLETTER | WB_MIDNUMLET | WB_SINGLEQUOTE) {
+        if let Some(&(nc, _)) = units.get(i + 2) {
+            if matches!(nc, WB_ALETTER | WB_HEBREW) {
+                return false; // WB6
+            }
+        }
+    }
+    if matches!(cc, WB_ALETTER | WB_HEBREW) && matches!(pc, WB_MIDLETTER | WB_MIDNUMLET | WB_SINGLEQUOTE) {
+        if i >= 1 {
+            let (pp, _) = units[i - 1];
+            if matches!(pp, WB_ALETTER | WB_HEBREW) {
+                return false; // WB7
+            }
+        }
+    }
+    if pc == WB_HEBREW && cc == WB_SINGLEQUOTE {
+        return false; // WB7a
+    }
+    if pc == WB_HEBREW && cc == WB_DOUBLEQUOTE {
+        if let Some(&(nc, _)) = units.get(i + 2) {
+            if nc == WB_HEBREW {
+                return false; // WB7b
+            }
+        }
+    }
+    if pc == WB_DOUBLEQUOTE && cc == WB_HEBREW {
+        if i >= 1 {
+            let (pp, _) = units[i - 1];
+            if pp == WB_HEBREW {
+                return false; // WB7c
+            }
+        }
+    }
+    if pc == WB_NUMERIC && cc == WB_NUMERIC {
+        return false; // WB8
+    }
+    if matches!(pc, WB_ALETTER | WB_HEBREW) && cc == WB_NUMERIC {
+        return false; // WB9
+    }
+    if pc == WB_NUMERIC && matches!(cc, WB_ALETTER | WB_HEBREW) {
+        return false; // WB10
+    }
+    if cc == WB_NUMERIC && matches!(pc, WB_MIDNUM | WB_MIDNUMLET | WB_SINGLEQUOTE) {
+        if i >= 1 {
+            let (pp, _) = units[i - 1];
+            if pp == WB_NUMERIC {
+                return false; // WB11
+            }
+        }
+    }
+    if pc == WB_NUMERIC && matches!(cc, WB_MIDNUM | WB_MIDNUMLET | WB_SINGLEQUOTE) {
+        if let Some(&(nc, _)) = units.get(i + 2) {
+            if nc == WB_NUMERIC {
+                return false; // WB12
+            }
+        }
+    }
+    if pc == WB_KATAKANA && cc == WB_KATAKANA {
+        return false; // WB13
+    }
+    if matches!(pc, WB_ALETTER | WB_HEBREW | WB_NUMERIC | WB_KATAKANA | WB_EXTENDNUMLET) && cc == WB_EXTENDNUMLET {
+        return false; // WB13a
+    }
+    if pc == WB_EXTENDNUMLET && matches!(cc, WB_ALETTER | WB_HEBREW | WB_NUMERIC | WB_KATAKANA) {
+        return false; // WB13b
+    }
+    let _ = WB_OTHER;
+    true // WB999
+}
+
+/// The full UAX#29 word segmentation — every boundary, including
+/// whitespace-only and punctuation-only spans (what `WordBreakTest.txt`
+/// checks). `words()` derives its public "give me the tokens" surface from
+/// this by keeping only segments that contain a letter or digit.
+pub(super) fn word_segments(s: &str) -> Vec<String> {
+    let cps: Vec<char> = s.chars().collect();
+    if cps.is_empty() {
+        return Vec::new();
+    }
+    let (units, ends) = word_reduce(&cps);
+    let n = units.len();
+    let mut brk = vec![true; n.saturating_sub(1)];
+    let mut ri_run: usize = 0;
+    for i in 0..n {
+        let (cl, _) = units[i];
+        ri_run = if cl == WB_RI { ri_run + 1 } else { 0 };
+        if i + 1 < n {
+            let (nc, _) = units[i + 1];
+            brk[i] = if cl == WB_RI && nc == WB_RI {
+                ri_run % 2 == 0 // WB15/WB16
+            } else {
+                word_break_at(&units, &ends, &cps, i)
+            };
+        }
+    }
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut ui = 0usize;
+    for (idx, &c) in cps.iter().enumerate() {
+        cur.push(c);
+        if idx == ends[ui] {
+            if ui + 1 < n {
+                if brk[ui] {
+                    out.push(std::mem::take(&mut cur));
+                }
+                ui += 1;
+            }
+        }
+    }
+    if !cur.is_empty() {
+        out.push(cur);
     }
     out
 }
 
 pub(super) fn words(s: &str) -> Vec<String> {
+    word_segments(s)
+        .into_iter()
+        .filter(|w| w.chars().any(|c| c.is_alphanumeric()))
+        .collect()
+}
+
+// ---- SB1-SB11 sentence boundaries -------------------------------------------
+const SB_CR: u8 = 1;
+const SB_LF: u8 = 2;
+const SB_EXTEND: u8 = 3;
+const SB_SEP: u8 = 4;
+const SB_FORMAT: u8 = 5;
+const SB_SP: u8 = 6;
+const SB_LOWER: u8 = 7;
+const SB_UPPER: u8 = 8;
+const SB_OLETTER: u8 = 9;
+const SB_NUMERIC: u8 = 10;
+const SB_ATERM: u8 = 11;
+const SB_SCONTINUE: u8 = 12;
+const SB_STERM: u8 = 13;
+const SB_CLOSE: u8 = 14;
+
+/// The full UAX#29 sentence segmentation (SB1-SB11) over the reduced class
+/// sequence. Returns `true` at position `i` when a break falls after unit
+/// `i` (length `units.len() - 1`).
+///
+/// SB999's default is "do NOT break" (`Any × Any`) — unlike GB999/WB999,
+/// which default to breaking. A sentence keeps accumulating text until an
+/// explicit separator (SB4) or a terminator run (SB11) closes it; that is
+/// why plain adjacent `Other` characters stay joined in the official
+/// SentenceBreakTest.txt corpus.
+fn sentence_breaks(units: &[u8]) -> Vec<bool> {
+    let n = units.len();
+    let mut brk = vec![false; n.saturating_sub(1)];
+    let mut i = 0usize;
+    while i + 1 < n {
+        let cc0 = units[i];
+        if cc0 == SB_CR && units[i + 1] == SB_LF {
+            i += 1; // SB3 (redundant with the default, kept for clarity)
+            continue;
+        }
+        if matches!(cc0, SB_SEP | SB_CR | SB_LF) {
+            brk[i] = true; // SB4
+            i += 1;
+            continue;
+        }
+        if matches!(cc0, SB_ATERM | SB_STERM) {
+            // SB6: ATerm x Numeric (a decimal point like "3.0" never ends a sentence).
+            if cc0 == SB_ATERM && units[i + 1] == SB_NUMERIC {
+                i += 1;
+                continue;
+            }
+            // SB7: (Upper|Lower) ATerm x Upper (abbreviation-style initials).
+            if cc0 == SB_ATERM
+                && i > 0
+                && matches!(units[i - 1], SB_UPPER | SB_LOWER)
+                && i + 1 < n
+                && units[i + 1] == SB_UPPER
+            {
+                i += 1;
+                continue;
+            }
+            // Close* Sp* — interior boundaries stay unbroken by default
+            // (SB9/SB9-interior), so no explicit action is needed for them.
+            let mut j = i + 1;
+            while j < n && units[j] == SB_CLOSE {
+                j += 1;
+            }
+            let close_end = j;
+            while j < n && units[j] == SB_SP {
+                j += 1;
+            }
+            let sp_end = j;
+            // SB9: (STerm|ATerm) Close* x (Close|Sp|Sep|CR|LF) — Close* is
+            // maximal munch above, so only Sep/CR/LF (or a still-pending Sp,
+            // already folded into `sp_end`) can land at `close_end`.
+            let sb9 = close_end < n && matches!(units[close_end], SB_SEP | SB_CR | SB_LF);
+            // SB10: (STerm|ATerm) Close* Sp* x (Sp|Sep|CR|LF).
+            let sb10 = sp_end < n && matches!(units[sp_end], SB_SP | SB_SEP | SB_CR | SB_LF);
+            // SB8a: (STerm|ATerm) Close* Sp* x (SContinue|STerm|ATerm).
+            let sb8a = sp_end < n && matches!(units[sp_end], SB_SCONTINUE | SB_STERM | SB_ATERM);
+            // SB8: ATerm Close* Sp* x (not OLetter/Upper/Lower/Sep/CR/LF/STerm/ATerm)* Lower.
+            let sb8 = cc0 == SB_ATERM && {
+                let mut k = sp_end;
+                let mut found_lower = false;
+                while k < n {
+                    let kc = units[k];
+                    if kc == SB_LOWER {
+                        found_lower = true;
+                        break;
+                    }
+                    if matches!(kc, SB_OLETTER | SB_UPPER | SB_SEP | SB_CR | SB_LF | SB_STERM | SB_ATERM) {
+                        break;
+                    }
+                    k += 1;
+                }
+                found_lower
+            };
+            // SB11: otherwise, break right after Close* Sp*.
+            if !(sb9 || sb10 || sb8a || sb8) && sp_end > 0 && sp_end - 1 < brk.len() {
+                brk[sp_end - 1] = true;
+            }
+            i = if sp_end > i { sp_end } else { i + 1 };
+            continue;
+        }
+        i += 1;
+    }
+    brk
+}
+
+/// The full UAX#29 sentence segmentation, untrimmed (what
+/// `SentenceBreakTest.txt` checks — trailing space/close-punctuation stays
+/// attached to its sentence per SB8a-SB10). `sentences()` derives the public
+/// surface by trimming and dropping empties.
+pub(super) fn sentence_segments(s: &str) -> Vec<String> {
+    let cps: Vec<char> = s.chars().collect();
+    if cps.is_empty() {
+        return Vec::new();
+    }
+    // Reduction drops Extend/Format chars from the CLASS sequence but every
+    // raw char still needs to land in the output text, so track original
+    // indices for reduced units the same way `word_reduce` does.
+    let mut units: Vec<u8> = Vec::new();
+    let mut ends: Vec<usize> = Vec::new();
+    for (idx, &c) in cps.iter().enumerate() {
+        let cl = sentence_class(c as u32);
+        if matches!(cl, SB_EXTEND | SB_FORMAT) {
+            if let Some(&last_cl) = units.last() {
+                // SB5's attach rule has the same "except after sot, CR, LF,
+                // or Sep" carve-out as WB4 — see `word_reduce`.
+                if !matches!(last_cl, SB_CR | SB_LF | SB_SEP) {
+                    *ends.last_mut().unwrap() = idx;
+                    continue;
+                }
+            }
+        }
+        units.push(cl);
+        ends.push(idx);
+    }
+    let brk = sentence_breaks(&units);
+    let n = units.len();
     let mut out = Vec::new();
     let mut cur = String::new();
-    for c in s.chars() {
-        if c.is_alphanumeric() || c == '\'' {
-            cur.push(c);
-        } else if !cur.is_empty() {
-            out.push(std::mem::take(&mut cur));
+    let mut ui = 0usize;
+    for (idx, &c) in cps.iter().enumerate() {
+        cur.push(c);
+        if idx == ends[ui] {
+            if ui + 1 < n {
+                if brk[ui] {
+                    out.push(std::mem::take(&mut cur));
+                }
+                ui += 1;
+            }
         }
     }
     if !cur.is_empty() {
@@ -246,39 +739,80 @@ pub(super) fn words(s: &str) -> Vec<String> {
 }
 
 pub(super) fn sentences(s: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut cur = String::new();
-    for c in s.chars() {
-        cur.push(c);
-        if matches!(c, '.' | '!' | '?') {
-            let t = cur.trim();
-            if !t.is_empty() {
-                out.push(t.to_string());
+    sentence_segments(s)
+        .into_iter()
+        .filter_map(|seg| {
+            let t = seg.trim();
+            if t.is_empty() {
+                None
+            } else {
+                Some(t.to_string())
             }
-            cur.clear();
+        })
+        .collect()
+}
+
+// ---- D-TEXTWIDTH1=B: portable-default + explicit-policy display width ------
+// Extended grapheme clusters via the real `graphemes()` above. East Asian
+// Wide/Fullwidth and Emoji_Presentation clusters cost 2 columns; Ambiguous
+// costs 1 (narrow) unless the policy asks for `.Wide`; combining/ZWJ
+// components inside a cluster cost 0 (only the cluster total is charged);
+// controls cost 0 unless the policy asks to `.Reject` them (a TextError).
+fn cluster_is_wide(cluster: &str) -> bool {
+    let mut chars = cluster.chars();
+    let ri_pair = if let Some(a) = chars.next() {
+        if grapheme_class(a as u32) == GB_RI {
+            matches!(chars.next(), Some(b) if grapheme_class(b as u32) == GB_RI)
+        } else {
+            false
         }
-    }
-    let t = cur.trim();
-    if !t.is_empty() {
-        out.push(t.to_string());
-    }
-    out
-}
-
-fn char_width(c: char) -> i64 {
-    let u = c as u32;
-    if c == '\0' || c.is_control() || is_mark(c) {
-        0
-    } else if matches!(u, 0x1100..=0x115F | 0x2329..=0x232A | 0x2E80..=0xA4CF | 0xAC00..=0xD7A3 | 0xF900..=0xFAFF | 0xFE10..=0xFE19 | 0xFE30..=0xFE6F | 0xFF00..=0xFF60 | 0xFFE0..=0xFFE6 | 0x1F300..=0x1FAFF)
-    {
-        2
     } else {
-        1
-    }
+        false
+    };
+    ri_pair
+        || cluster
+            .chars()
+            .any(|c| eaw_class(c as u32) == 2 || is_emoji_presentation(c as u32))
 }
 
-pub(super) fn width(s: &str) -> i64 {
-    s.chars().map(char_width).sum()
+fn cluster_width(cluster: &str, ambiguous_wide: bool, controls_reject: bool) -> Result<i64, String> {
+    let base = match cluster.chars().next() {
+        Some(c) => c,
+        None => return Ok(0),
+    };
+    if base == '\0' || base.is_control() {
+        return if controls_reject {
+            Err(format!("control character U+{:04X} rejected by TextWidth policy", base as u32))
+        } else {
+            Ok(0)
+        };
+    }
+    if cluster_is_wide(cluster) {
+        return Ok(2);
+    }
+    if eaw_class(base as u32) == 1 {
+        return Ok(if ambiguous_wide { 2 } else { 1 });
+    }
+    Ok(1)
+}
+
+pub(super) fn display_width_default(s: &str) -> i64 {
+    graphemes(s)
+        .iter()
+        .map(|g| cluster_width(g, false, false).unwrap_or(0))
+        .sum()
+}
+
+pub(super) fn display_width_policy(
+    s: &str,
+    ambiguous_wide: bool,
+    controls_reject: bool,
+) -> Result<i64, String> {
+    let mut total = 0i64;
+    for g in graphemes(s) {
+        total += cluster_width(&g, ambiguous_wide, controls_reject)?;
+    }
+    Ok(total)
 }
 
 pub(super) fn is_alphabetic(s: &str) -> bool {
@@ -305,7 +839,7 @@ pub(super) fn rsplitn(s: &str, pat: &str, n: i64) -> Vec<String> {
 pub(super) fn pad_start(s: &str, w: i64, fill: &str) -> String {
     let mut out = String::new();
     let f = fill.chars().next().unwrap_or(' ');
-    for _ in 0..(w - width(s)).max(0) {
+    for _ in 0..(w - display_width_default(s)).max(0) {
         out.push(f);
     }
     out.push_str(s);
@@ -314,13 +848,13 @@ pub(super) fn pad_start(s: &str, w: i64, fill: &str) -> String {
 pub(super) fn pad_end(s: &str, w: i64, fill: &str) -> String {
     let mut out = s.to_string();
     let f = fill.chars().next().unwrap_or(' ');
-    for _ in 0..(w - width(s)).max(0) {
+    for _ in 0..(w - display_width_default(s)).max(0) {
         out.push(f);
     }
     out
 }
 pub(super) fn center(s: &str, w: i64, fill: &str) -> String {
-    let gap = (w - width(s)).max(0);
+    let gap = (w - display_width_default(s)).max(0);
     let left = gap / 2;
     let right = gap - left;
     let f = fill.chars().next().unwrap_or(' ');
@@ -420,5 +954,95 @@ mod normalization_conformance {
         println!(
             "NormalizationTest.txt 16.0.0: {lines_checked} lines, {assertions} conformance assertions, all passed"
         );
+    }
+}
+
+// Card #298: UAX#29 grapheme/word/sentence break conformance against the
+// pinned Unicode 16.0.0 official {Grapheme,Word,Sentence}BreakTest.txt
+// corpora (committed at tests/data/unicode/, no network/runtime file
+// dependency — embedded at compile time). Each `÷`/`×`-annotated line names
+// every legal break; a mismatch means the state machine above disagrees with
+// the official test data.
+#[cfg(test)]
+mod break_conformance {
+    /// Parses one `÷ 0061 × 0308 ÷ 0020 ÷` line (comment already stripped)
+    /// into the full test string plus the expected list of segments (each
+    /// `÷`-delimited run of codepoints).
+    fn parse_break_line(line: &str) -> Option<(String, Vec<String>)> {
+        let mut full = String::new();
+        let mut segments: Vec<String> = Vec::new();
+        let mut cur = String::new();
+        let mut any_cp = false;
+        for tok in line.split_whitespace() {
+            match tok {
+                "\u{00F7}" => {
+                    if !cur.is_empty() {
+                        segments.push(std::mem::take(&mut cur));
+                    }
+                }
+                "\u{00D7}" => {}
+                hex => {
+                    let cp = u32::from_str_radix(hex, 16).ok()?;
+                    let ch = char::from_u32(cp)?;
+                    full.push(ch);
+                    cur.push(ch);
+                    any_cp = true;
+                }
+            }
+        }
+        if !cur.is_empty() {
+            segments.push(cur);
+        }
+        if !any_cp {
+            return None;
+        }
+        Some((full, segments))
+    }
+
+    fn run_corpus(corpus: &str, seg_fn: impl Fn(&str) -> Vec<String>, label: &str) -> (usize, usize) {
+        let mut lines_checked = 0usize;
+        let mut assertions = 0usize;
+        for raw in corpus.lines() {
+            let line = match raw.find('#') {
+                Some(i) => &raw[..i],
+                None => raw,
+            };
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            let Some((full, expected)) = parse_break_line(line) else {
+                continue;
+            };
+            lines_checked += 1;
+            let got = seg_fn(&full);
+            assert_eq!(got, expected, "{label} mismatch on line: {raw}");
+            assertions += 1;
+        }
+        (lines_checked, assertions)
+    }
+
+    #[test]
+    fn grapheme_break_test_txt_16_0_0() {
+        let corpus = include_str!("../../../../tests/data/unicode/GraphemeBreakTest.txt");
+        let (lines_checked, assertions) = run_corpus(corpus, |s| super::graphemes(s), "GraphemeBreakTest");
+        assert!(lines_checked > 500, "expected the full corpus, only saw {lines_checked} lines");
+        println!("GraphemeBreakTest.txt 16.0.0: {lines_checked} lines, {assertions} conformance assertions, all passed");
+    }
+
+    #[test]
+    fn word_break_test_txt_16_0_0() {
+        let corpus = include_str!("../../../../tests/data/unicode/WordBreakTest.txt");
+        let (lines_checked, assertions) = run_corpus(corpus, |s| super::word_segments(s), "WordBreakTest");
+        assert!(lines_checked > 500, "expected the full corpus, only saw {lines_checked} lines");
+        println!("WordBreakTest.txt 16.0.0: {lines_checked} lines, {assertions} conformance assertions, all passed");
+    }
+
+    #[test]
+    fn sentence_break_test_txt_16_0_0() {
+        let corpus = include_str!("../../../../tests/data/unicode/SentenceBreakTest.txt");
+        let (lines_checked, assertions) = run_corpus(corpus, |s| super::sentence_segments(s), "SentenceBreakTest");
+        assert!(lines_checked > 100, "expected the full corpus, only saw {lines_checked} lines");
+        println!("SentenceBreakTest.txt 16.0.0: {lines_checked} lines, {assertions} conformance assertions, all passed");
     }
 }

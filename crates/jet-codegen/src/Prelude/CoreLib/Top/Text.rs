@@ -254,52 +254,382 @@ fn jet_text_casefold(s: &String) -> String {
 fn jet_text_caseless_eq(a: &String, b: &String) -> bool {
     jet_text_casefold(&jet_text_nfd(a)) == jet_text_casefold(&jet_text_nfd(b))
 }
-fn jet_text_is_mark(c: char) -> bool {
-    matches!(c as u32, 0x0300..=0x036F | 0x1AB0..=0x1AFF | 0x1DC0..=0x1DFF | 0x20D0..=0x20FF | 0xFE20..=0xFE2F)
+// Card #298: real UAX#29 grapheme/word/sentence segmentation over the
+// generated break-property tables, mirroring the comptime twin byte-for-byte
+// (R12 parity) — see crates/jet-comptime/src/Comptime/TextLite.rs for the
+// identical algorithm and the conformance tests (this AOT copy is validated
+// by that mirror, not a separate compiled test — it is spliced flat into the
+// user's generated program, not compiled as part of this crate).
+
+fn jet_text_bsearch_triple(table: &[(u32, u32, u8)], cp: u32) -> u8 {
+    table
+        .binary_search_by(|&(a, b, _)| {
+            if cp < a { std::cmp::Ordering::Greater }
+            else if cp > b { std::cmp::Ordering::Less }
+            else { std::cmp::Ordering::Equal }
+        })
+        .map(|i| table[i].2)
+        .unwrap_or(0)
 }
+fn jet_text_bsearch_pair(table: &[(u32, u32)], cp: u32) -> bool {
+    table
+        .binary_search_by(|&(a, b)| {
+            if cp < a { std::cmp::Ordering::Greater }
+            else if cp > b { std::cmp::Ordering::Less }
+            else { std::cmp::Ordering::Equal }
+        })
+        .is_ok()
+}
+fn jet_text_grapheme_class(cp: u32) -> u8 { jet_text_bsearch_triple(UNICODE_GRAPHEME_BREAK, cp) }
+fn jet_text_word_class(cp: u32) -> u8 { jet_text_bsearch_triple(UNICODE_WORD_BREAK, cp) }
+fn jet_text_sentence_class(cp: u32) -> u8 { jet_text_bsearch_triple(UNICODE_SENTENCE_BREAK, cp) }
+fn jet_text_is_ext_pictographic(cp: u32) -> bool { jet_text_bsearch_pair(UNICODE_EXTENDED_PICTOGRAPHIC, cp) }
+fn jet_text_is_emoji_presentation(cp: u32) -> bool { jet_text_bsearch_pair(UNICODE_EMOJI_PRESENTATION, cp) }
+/// East Asian Width: 0=narrow(N/Na/H) 1=Ambiguous 2=wide(W/F).
+fn jet_text_eaw_class(cp: u32) -> u8 { jet_text_bsearch_triple(UNICODE_EAST_ASIAN_WIDTH, cp) }
+/// Indic_Conjunct_Break (GB9c): 0=None 1=Linker 2=Consonant 3=Extend.
+fn jet_text_incb_class(cp: u32) -> u8 { jet_text_bsearch_triple(UNICODE_INCB, cp) }
+const JET_INCB_LINKER: u8 = 1;
+const JET_INCB_CONSONANT: u8 = 2;
+const JET_INCB_EXTEND: u8 = 3;
+
+// ---- GB1-GB13 grapheme cluster boundaries -----------------------------------
+const JET_GB_CR: u8 = 1;
+const JET_GB_LF: u8 = 2;
+const JET_GB_CONTROL: u8 = 3;
+const JET_GB_EXTEND: u8 = 4;
+const JET_GB_ZWJ: u8 = 5;
+const JET_GB_RI: u8 = 6;
+const JET_GB_PREPEND: u8 = 7;
+const JET_GB_SPACINGMARK: u8 = 8;
+const JET_GB_L: u8 = 9;
+const JET_GB_V: u8 = 10;
+const JET_GB_T: u8 = 11;
+const JET_GB_LV: u8 = 12;
+const JET_GB_LVT: u8 = 13;
+
+/// GB3-GB9b/GB999 (class-pair rules only — GB11's Extended_Pictographic
+/// lookup, GB12/13's regional-indicator parity, and GB9c's Indic conjunct
+/// scan are stateful, handled by the caller).
+fn jet_text_grapheme_break_classes(pc: u8, cc: u8) -> bool {
+    if pc == JET_GB_CR && cc == JET_GB_LF { return false; } // GB3
+    if matches!(pc, JET_GB_CR | JET_GB_LF | JET_GB_CONTROL) { return true; } // GB4
+    if matches!(cc, JET_GB_CR | JET_GB_LF | JET_GB_CONTROL) { return true; } // GB5
+    if pc == JET_GB_L && matches!(cc, JET_GB_L | JET_GB_V | JET_GB_LV | JET_GB_LVT) { return false; } // GB6
+    if matches!(pc, JET_GB_LV | JET_GB_V) && matches!(cc, JET_GB_V | JET_GB_T) { return false; } // GB7
+    if matches!(pc, JET_GB_LVT | JET_GB_T) && cc == JET_GB_T { return false; } // GB8
+    if matches!(cc, JET_GB_EXTEND | JET_GB_ZWJ) { return false; } // GB9
+    if cc == JET_GB_SPACINGMARK { return false; } // GB9a
+    if pc == JET_GB_PREPEND { return false; } // GB9b
+    true // GB999
+}
+
 fn jet_text_graphemes(s: &String) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    for c in s.chars() {
-        if jet_text_is_mark(c) || c == '\u{200D}' {
-            if let Some(last) = out.last_mut() { last.push(c); } else { out.push(c.to_string()); }
-        } else {
-            out.push(c.to_string());
-        }
-    }
-    out
-}
-fn jet_text_words(s: &String) -> Vec<String> {
+    let cps: Vec<char> = s.chars().collect();
+    if cps.is_empty() { return Vec::new(); }
     let mut out = Vec::new();
     let mut cur = String::new();
-    for c in s.chars() {
-        if c.is_alphanumeric() || c == '\'' { cur.push(c); }
-        else if !cur.is_empty() { out.push(std::mem::take(&mut cur)); }
+    cur.push(cps[0]);
+    let mut ri_run: usize = if jet_text_grapheme_class(cps[0] as u32) == JET_GB_RI { 1 } else { 0 };
+    let mut saw_pic = jet_text_is_ext_pictographic(cps[0] as u32);
+    let mut incb_pending = jet_text_incb_class(cps[0] as u32) == JET_INCB_CONSONANT;
+    let mut incb_linker = false;
+    for i in 1..cps.len() {
+        let prev = cps[i - 1];
+        let curc = cps[i];
+        let pc = jet_text_grapheme_class(prev as u32);
+        let cc = jet_text_grapheme_class(curc as u32);
+        let brk = if pc == JET_GB_ZWJ && saw_pic && jet_text_is_ext_pictographic(curc as u32) {
+            false // GB11
+        } else if pc == JET_GB_RI && cc == JET_GB_RI {
+            ri_run % 2 == 0 // GB12/GB13
+        } else if incb_pending && incb_linker && jet_text_incb_class(curc as u32) == JET_INCB_CONSONANT {
+            false // GB9c
+        } else {
+            jet_text_grapheme_break_classes(pc, cc)
+        };
+        if brk { out.push(std::mem::take(&mut cur)); }
+        cur.push(curc);
+        ri_run = if cc == JET_GB_RI { ri_run + 1 } else { 0 };
+        saw_pic = if matches!(cc, JET_GB_EXTEND | JET_GB_ZWJ) { saw_pic } else { jet_text_is_ext_pictographic(curc as u32) };
+        match jet_text_incb_class(curc as u32) {
+            JET_INCB_CONSONANT => { incb_pending = true; incb_linker = false; }
+            JET_INCB_LINKER => { if incb_pending { incb_linker = true; } }
+            JET_INCB_EXTEND => {}
+            _ => { incb_pending = false; incb_linker = false; }
+        }
+    }
+    out.push(cur);
+    out
+}
+
+// ---- WB1-WB16 word boundaries ------------------------------------------------
+const JET_WB_CR: u8 = 1;
+const JET_WB_LF: u8 = 2;
+const JET_WB_NEWLINE: u8 = 3;
+const JET_WB_EXTEND: u8 = 4;
+const JET_WB_ZWJ: u8 = 5;
+const JET_WB_RI: u8 = 6;
+const JET_WB_FORMAT: u8 = 7;
+const JET_WB_KATAKANA: u8 = 8;
+const JET_WB_HEBREW: u8 = 9;
+const JET_WB_ALETTER: u8 = 10;
+const JET_WB_SINGLEQUOTE: u8 = 11;
+const JET_WB_DOUBLEQUOTE: u8 = 12;
+const JET_WB_MIDNUMLET: u8 = 13;
+const JET_WB_MIDLETTER: u8 = 14;
+const JET_WB_MIDNUM: u8 = 15;
+const JET_WB_NUMERIC: u8 = 16;
+const JET_WB_EXTENDNUMLET: u8 = 17;
+const JET_WB_WSEGSPACE: u8 = 18;
+
+fn jet_text_word_reduce(cps: &[char]) -> (Vec<(u8, char)>, Vec<usize>) {
+    let mut units: Vec<(u8, char)> = Vec::new();
+    let mut ends: Vec<usize> = Vec::new();
+    for (idx, &c) in cps.iter().enumerate() {
+        let cl = jet_text_word_class(c as u32);
+        if matches!(cl, JET_WB_EXTEND | JET_WB_FORMAT | JET_WB_ZWJ) {
+            if let Some(&(last_cl, _)) = units.last() {
+                if !matches!(last_cl, JET_WB_CR | JET_WB_LF | JET_WB_NEWLINE) {
+                    *ends.last_mut().unwrap() = idx;
+                    continue;
+                }
+            }
+        }
+        units.push((cl, c));
+        ends.push(idx);
+    }
+    (units, ends)
+}
+
+fn jet_text_word_break_at(units: &[(u8, char)], ends: &[usize], cps: &[char], i: usize) -> bool {
+    let (pc, _) = units[i];
+    let (cc, _) = units[i + 1];
+    if pc == JET_WB_CR && cc == JET_WB_LF { return false; } // WB3
+    if matches!(pc, JET_WB_NEWLINE | JET_WB_CR | JET_WB_LF) { return true; } // WB3a
+    if matches!(cc, JET_WB_NEWLINE | JET_WB_CR | JET_WB_LF) { return true; } // WB3b
+    if jet_text_word_class(cps[ends[i]] as u32) == JET_WB_ZWJ && jet_text_is_ext_pictographic(units[i + 1].1 as u32) {
+        return false; // WB3c
+    }
+    if pc == JET_WB_WSEGSPACE && cc == JET_WB_WSEGSPACE && jet_text_word_class(cps[ends[i]] as u32) == JET_WB_WSEGSPACE {
+        return false; // WB3d
+    }
+    if matches!(pc, JET_WB_ALETTER | JET_WB_HEBREW) && matches!(cc, JET_WB_ALETTER | JET_WB_HEBREW) { return false; } // WB5
+    if matches!(pc, JET_WB_ALETTER | JET_WB_HEBREW) && matches!(cc, JET_WB_MIDLETTER | JET_WB_MIDNUMLET | JET_WB_SINGLEQUOTE) {
+        if let Some(&(nc, _)) = units.get(i + 2) { if matches!(nc, JET_WB_ALETTER | JET_WB_HEBREW) { return false; } } // WB6
+    }
+    if matches!(cc, JET_WB_ALETTER | JET_WB_HEBREW) && matches!(pc, JET_WB_MIDLETTER | JET_WB_MIDNUMLET | JET_WB_SINGLEQUOTE) {
+        if i >= 1 { let (pp, _) = units[i - 1]; if matches!(pp, JET_WB_ALETTER | JET_WB_HEBREW) { return false; } } // WB7
+    }
+    if pc == JET_WB_HEBREW && cc == JET_WB_SINGLEQUOTE { return false; } // WB7a
+    if pc == JET_WB_HEBREW && cc == JET_WB_DOUBLEQUOTE {
+        if let Some(&(nc, _)) = units.get(i + 2) { if nc == JET_WB_HEBREW { return false; } } // WB7b
+    }
+    if pc == JET_WB_DOUBLEQUOTE && cc == JET_WB_HEBREW {
+        if i >= 1 { let (pp, _) = units[i - 1]; if pp == JET_WB_HEBREW { return false; } } // WB7c
+    }
+    if pc == JET_WB_NUMERIC && cc == JET_WB_NUMERIC { return false; } // WB8
+    if matches!(pc, JET_WB_ALETTER | JET_WB_HEBREW) && cc == JET_WB_NUMERIC { return false; } // WB9
+    if pc == JET_WB_NUMERIC && matches!(cc, JET_WB_ALETTER | JET_WB_HEBREW) { return false; } // WB10
+    if cc == JET_WB_NUMERIC && matches!(pc, JET_WB_MIDNUM | JET_WB_MIDNUMLET | JET_WB_SINGLEQUOTE) {
+        if i >= 1 { let (pp, _) = units[i - 1]; if pp == JET_WB_NUMERIC { return false; } } // WB11
+    }
+    if pc == JET_WB_NUMERIC && matches!(cc, JET_WB_MIDNUM | JET_WB_MIDNUMLET | JET_WB_SINGLEQUOTE) {
+        if let Some(&(nc, _)) = units.get(i + 2) { if nc == JET_WB_NUMERIC { return false; } } // WB12
+    }
+    if pc == JET_WB_KATAKANA && cc == JET_WB_KATAKANA { return false; } // WB13
+    if matches!(pc, JET_WB_ALETTER | JET_WB_HEBREW | JET_WB_NUMERIC | JET_WB_KATAKANA | JET_WB_EXTENDNUMLET) && cc == JET_WB_EXTENDNUMLET { return false; } // WB13a
+    if pc == JET_WB_EXTENDNUMLET && matches!(cc, JET_WB_ALETTER | JET_WB_HEBREW | JET_WB_NUMERIC | JET_WB_KATAKANA) { return false; } // WB13b
+    true // WB999
+}
+
+fn jet_text_word_segments(s: &String) -> Vec<String> {
+    let cps: Vec<char> = s.chars().collect();
+    if cps.is_empty() { return Vec::new(); }
+    let (units, ends) = jet_text_word_reduce(&cps);
+    let n = units.len();
+    let mut brk = vec![true; n.saturating_sub(1)];
+    let mut ri_run: usize = 0;
+    for i in 0..n {
+        let (cl, _) = units[i];
+        ri_run = if cl == JET_WB_RI { ri_run + 1 } else { 0 };
+        if i + 1 < n {
+            let (nc, _) = units[i + 1];
+            brk[i] = if cl == JET_WB_RI && nc == JET_WB_RI {
+                ri_run % 2 == 0 // WB15/WB16
+            } else {
+                jet_text_word_break_at(&units, &ends, &cps, i)
+            };
+        }
+    }
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut ui = 0usize;
+    for (idx, &c) in cps.iter().enumerate() {
+        cur.push(c);
+        if idx == ends[ui] {
+            if ui + 1 < n {
+                if brk[ui] { out.push(std::mem::take(&mut cur)); }
+                ui += 1;
+            }
+        }
     }
     if !cur.is_empty() { out.push(cur); }
     out
 }
-fn jet_text_sentences(s: &String) -> Vec<String> {
+
+fn jet_text_words(s: &String) -> Vec<String> {
+    jet_text_word_segments(s).into_iter().filter(|w| w.chars().any(|c| c.is_alphanumeric())).collect()
+}
+
+// ---- SB1-SB11 sentence boundaries -------------------------------------------
+const JET_SB_CR: u8 = 1;
+const JET_SB_LF: u8 = 2;
+const JET_SB_EXTEND: u8 = 3;
+const JET_SB_SEP: u8 = 4;
+const JET_SB_FORMAT: u8 = 5;
+const JET_SB_SP: u8 = 6;
+const JET_SB_LOWER: u8 = 7;
+const JET_SB_UPPER: u8 = 8;
+const JET_SB_OLETTER: u8 = 9;
+const JET_SB_NUMERIC: u8 = 10;
+const JET_SB_ATERM: u8 = 11;
+const JET_SB_SCONTINUE: u8 = 12;
+const JET_SB_STERM: u8 = 13;
+const JET_SB_CLOSE: u8 = 14;
+
+/// SB999's default is "do NOT break" (`Any x Any`) — unlike GB999/WB999,
+/// which default to breaking; see the comptime twin for the full rationale.
+fn jet_text_sentence_breaks(units: &[u8]) -> Vec<bool> {
+    let n = units.len();
+    let mut brk = vec![false; n.saturating_sub(1)];
+    let mut i = 0usize;
+    while i + 1 < n {
+        let cc0 = units[i];
+        if cc0 == JET_SB_CR && units[i + 1] == JET_SB_LF { i += 1; continue; } // SB3
+        if matches!(cc0, JET_SB_SEP | JET_SB_CR | JET_SB_LF) { brk[i] = true; i += 1; continue; } // SB4
+        if matches!(cc0, JET_SB_ATERM | JET_SB_STERM) {
+            if cc0 == JET_SB_ATERM && units[i + 1] == JET_SB_NUMERIC { i += 1; continue; } // SB6
+            if cc0 == JET_SB_ATERM
+                && i > 0
+                && matches!(units[i - 1], JET_SB_UPPER | JET_SB_LOWER)
+                && i + 1 < n
+                && units[i + 1] == JET_SB_UPPER
+            {
+                i += 1; continue; // SB7
+            }
+            let mut j = i + 1;
+            while j < n && units[j] == JET_SB_CLOSE { j += 1; }
+            let close_end = j;
+            while j < n && units[j] == JET_SB_SP { j += 1; }
+            let sp_end = j;
+            let sb9 = close_end < n && matches!(units[close_end], JET_SB_SEP | JET_SB_CR | JET_SB_LF);
+            let sb10 = sp_end < n && matches!(units[sp_end], JET_SB_SP | JET_SB_SEP | JET_SB_CR | JET_SB_LF);
+            let sb8a = sp_end < n && matches!(units[sp_end], JET_SB_SCONTINUE | JET_SB_STERM | JET_SB_ATERM);
+            let sb8 = cc0 == JET_SB_ATERM && {
+                let mut k = sp_end;
+                let mut found_lower = false;
+                while k < n {
+                    let kc = units[k];
+                    if kc == JET_SB_LOWER { found_lower = true; break; }
+                    if matches!(kc, JET_SB_OLETTER | JET_SB_UPPER | JET_SB_SEP | JET_SB_CR | JET_SB_LF | JET_SB_STERM | JET_SB_ATERM) { break; }
+                    k += 1;
+                }
+                found_lower
+            };
+            if !(sb9 || sb10 || sb8a || sb8) && sp_end > 0 && sp_end - 1 < brk.len() {
+                brk[sp_end - 1] = true; // SB11
+            }
+            i = if sp_end > i { sp_end } else { i + 1 };
+            continue;
+        }
+        i += 1;
+    }
+    brk
+}
+
+fn jet_text_sentence_segments(s: &String) -> Vec<String> {
+    let cps: Vec<char> = s.chars().collect();
+    if cps.is_empty() { return Vec::new(); }
+    let mut units: Vec<u8> = Vec::new();
+    let mut ends: Vec<usize> = Vec::new();
+    for (idx, &c) in cps.iter().enumerate() {
+        let cl = jet_text_sentence_class(c as u32);
+        if matches!(cl, JET_SB_EXTEND | JET_SB_FORMAT) {
+            if let Some(&last_cl) = units.last() {
+                if !matches!(last_cl, JET_SB_CR | JET_SB_LF | JET_SB_SEP) {
+                    *ends.last_mut().unwrap() = idx;
+                    continue;
+                }
+            }
+        }
+        units.push(cl);
+        ends.push(idx);
+    }
+    let brk = jet_text_sentence_breaks(&units);
+    let n = units.len();
     let mut out = Vec::new();
     let mut cur = String::new();
-    for c in s.chars() {
+    let mut ui = 0usize;
+    for (idx, &c) in cps.iter().enumerate() {
         cur.push(c);
-        if matches!(c, '.' | '!' | '?') {
-            let t = cur.trim();
-            if !t.is_empty() { out.push(t.to_string()); }
-            cur.clear();
+        if idx == ends[ui] {
+            if ui + 1 < n {
+                if brk[ui] { out.push(std::mem::take(&mut cur)); }
+                ui += 1;
+            }
         }
     }
-    let t = cur.trim();
-    if !t.is_empty() { out.push(t.to_string()); }
+    if !cur.is_empty() { out.push(cur); }
     out
 }
-fn jet_text_char_width(c: char) -> i64 {
-    let u = c as u32;
-    if c == '\0' || c.is_control() || jet_text_is_mark(c) { 0 }
-    else if matches!(u, 0x1100..=0x115F | 0x2329..=0x232A | 0x2E80..=0xA4CF | 0xAC00..=0xD7A3 | 0xF900..=0xFAFF | 0xFE10..=0xFE19 | 0xFE30..=0xFE6F | 0xFF00..=0xFF60 | 0xFFE0..=0xFFE6 | 0x1F300..=0x1FAFF) { 2 }
-    else { 1 }
+
+fn jet_text_sentences(s: &String) -> Vec<String> {
+    jet_text_sentence_segments(s)
+        .into_iter()
+        .filter_map(|seg| { let t = seg.trim(); if t.is_empty() { None } else { Some(t.to_string()) } })
+        .collect()
 }
-fn jet_text_width(s: &String) -> i64 { s.chars().map(jet_text_char_width).sum() }
+
+// ---- D-TEXTWIDTH1=B: portable-default + explicit-policy display width ------
+fn jet_text_cluster_is_wide(cluster: &str) -> bool {
+    let mut chars = cluster.chars();
+    let ri_pair = if let Some(a) = chars.next() {
+        if jet_text_grapheme_class(a as u32) == JET_GB_RI {
+            matches!(chars.next(), Some(b) if jet_text_grapheme_class(b as u32) == JET_GB_RI)
+        } else { false }
+    } else { false };
+    ri_pair || cluster.chars().any(|c| jet_text_eaw_class(c as u32) == 2 || jet_text_is_emoji_presentation(c as u32))
+}
+fn jet_text_cluster_width(cluster: &str, ambiguous_wide: bool, controls_reject: bool) -> Result<i64, String> {
+    let base = match cluster.chars().next() { Some(c) => c, None => return Ok(0) };
+    if base == '\0' || base.is_control() {
+        return if controls_reject {
+            Err(format!("control character U+{:04X} rejected by TextWidth policy", base as u32))
+        } else {
+            Ok(0)
+        };
+    }
+    if jet_text_cluster_is_wide(cluster) { return Ok(2); }
+    if jet_text_eaw_class(base as u32) == 1 { return Ok(if ambiguous_wide { 2 } else { 1 }); }
+    Ok(1)
+}
+fn jet_text_display_width_default(s: &String) -> i64 {
+    jet_text_graphemes(s).iter().map(|g| jet_text_cluster_width(g, false, false).unwrap_or(0)).sum()
+}
+fn jet_text_display_width_policy(s: &String, ambiguous_wide: bool, controls_reject: bool) -> Result<i64, String> {
+    let mut total = 0i64;
+    for g in jet_text_graphemes(s) {
+        total += jet_text_cluster_width(&g, ambiguous_wide, controls_reject)?;
+    }
+    Ok(total)
+}
+fn jet_text_display_width(s: &String, policy: &jet_std::TextWidth) -> Result<i64, jet_std::TextError> {
+    let ambiguous_wide = matches!(policy.ambiguous, jet_std::TextWidthAmbiguous::Wide);
+    let controls_reject = matches!(policy.controls, jet_std::TextWidthControls::Reject);
+    jet_text_display_width_policy(s, ambiguous_wide, controls_reject)
+        .map_err(|message| jet_std::TextError { message })
+}
 fn jet_text_is_alphabetic(s: &String) -> bool { !s.is_empty() && s.chars().all(|c| c.is_alphabetic()) }
 fn jet_text_is_numeric(s: &String) -> bool { !s.is_empty() && s.chars().all(|c| c.is_numeric()) }
 fn jet_text_is_whitespace(s: &String) -> bool { !s.is_empty() && s.chars().all(|c| c.is_whitespace()) }
@@ -312,18 +642,18 @@ fn jet_text_rsplitn(s: &String, pat: &String, n: i64) -> Vec<String> {
 fn jet_text_pad_start(s: &String, width: i64, fill: &String) -> String {
     let mut out = String::new();
     let f = fill.chars().next().unwrap_or(' ');
-    for _ in 0..(width - jet_text_width(s)).max(0) { out.push(f); }
+    for _ in 0..(width - jet_text_display_width_default(s)).max(0) { out.push(f); }
     out.push_str(s);
     out
 }
 fn jet_text_pad_end(s: &String, width: i64, fill: &String) -> String {
     let mut out = s.clone();
     let f = fill.chars().next().unwrap_or(' ');
-    for _ in 0..(width - jet_text_width(s)).max(0) { out.push(f); }
+    for _ in 0..(width - jet_text_display_width_default(s)).max(0) { out.push(f); }
     out
 }
 fn jet_text_center(s: &String, width: i64, fill: &String) -> String {
-    let gap = (width - jet_text_width(s)).max(0);
+    let gap = (width - jet_text_display_width_default(s)).max(0);
     let left = gap / 2;
     let right = gap - left;
     let f = fill.chars().next().unwrap_or(' ');

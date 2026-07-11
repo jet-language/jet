@@ -415,6 +415,10 @@ impl<'a> Checker<'a> {
         if enum_name == "ProcessStreamMode" {
             return true;
         }
+        // D-TEXTWIDTH1=B: `TextWidth`'s two field enums.
+        if matches!(enum_name, "TextWidthAmbiguous" | "TextWidthControls") {
+            return true;
+        }
         false
     }
 
@@ -445,6 +449,12 @@ impl<'a> Checker<'a> {
         // table so `.Stream`/`.Inherit`/`.Capture` dot-literals resolve (D-ENUMDOT2).
         if enum_name == "ProcessStreamMode" {
             return Some(core_process_stream_mode_variants());
+        }
+        // D-TEXTWIDTH1=B: `TextWidthAmbiguous`/`TextWidthControls` — synthesise
+        // their variant table so `.Narrow`/`.Wide`/`.Zero`/`.Reject` dot-literals
+        // resolve (D-ENUMDOT2), same mechanism as `ProcessStreamMode`.
+        if let Some(v) = core_text_width_variants(enum_name) {
+            return Some(v);
         }
         None
     }

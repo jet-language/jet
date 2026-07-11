@@ -679,6 +679,8 @@ fn compile_bundle_path_build_inner(
         let mut methods = std::collections::HashMap::new();
         let mut structs = std::collections::HashMap::new();
         let mut enums = std::collections::HashMap::new();
+        let mut migrations: std::collections::HashMap<String, Vec<&crate::AST::MigrationDecl>> =
+            std::collections::HashMap::new();
         let computed_fields = std::collections::HashMap::new();
         let distinct_ranges = std::collections::HashMap::new();
         let mut function_name_counts = std::collections::HashMap::<String, usize>::new();
@@ -727,6 +729,9 @@ fn compile_bundle_path_build_inner(
                             if type_name_counts.get(&imp.type_name) == Some(&1) { methods.insert((imp.type_name.clone(), method.name.clone()), method); }
                         }
                     }
+                    crate::AST::Item::Migration(m) => {
+                        migrations.entry(m.type_name.clone()).or_default().push(m);
+                    }
                     _ => {}
                 }
             }
@@ -741,6 +746,7 @@ fn compile_bundle_path_build_inner(
             computed_fields,
             distinct_ranges,
             core_imports,
+            migrations,
         };
         let semantic_facts = program_semantic_facts(&bundle, &effect_facts);
         let program_value = crate::Comptime::build_program_info(&bundle, &semantic_facts);

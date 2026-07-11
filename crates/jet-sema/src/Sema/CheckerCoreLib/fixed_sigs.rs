@@ -661,7 +661,7 @@ pub fn core_fixed_sig(
             vec![(read, Type::String)],
             Some(Type::List(Box::new(Type::String))),
         )),
-        ("core.text", "width" | "scalar_count" | "byte_count") => {
+        ("core.text", "scalar_count" | "byte_count") => {
             Some((vec![(read, Type::String)], Some(Type::Int)))
         }
         ("core.text", "is_alphabetic" | "is_numeric" | "is_whitespace" | "is_ascii") => {

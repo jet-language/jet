@@ -308,7 +308,7 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "graphemes",
             "words",
             "sentences",
-            "width",
+            "display_width",
             "scalar_count",
             "byte_count",
             "is_alphabetic",
