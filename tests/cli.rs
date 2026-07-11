@@ -643,7 +643,7 @@ fn unknown_cross_target_is_e3302() {
 fn completions_generate_for_every_shell() {
     for shell in ["bash", "zsh", "fish"] {
         let out = Command::new(jet())
-            .arg("completions")
+            .args(["self", "completions"])
             .arg(shell)
             .output()
             .unwrap();
@@ -660,7 +660,7 @@ fn completions_generate_for_every_shell() {
 
 #[test]
 fn man_page_golden() {
-    let out = Command::new(jet()).arg("man").output().unwrap();
+    let out = Command::new(jet()).args(["self", "man"]).output().unwrap();
     let mut s = String::from_utf8_lossy(&out.stdout).into_owned();
     // Scrub the version so the snapshot is stable across releases.
     s = s.replace(env!("CARGO_PKG_VERSION"), "VERSION");

@@ -574,20 +574,9 @@ fn unknown_subcommand(cmd: &str) -> ! {
 /// Normalize only after rejecting retired bare spellings, so grouped commands
 /// reach the existing real handlers without keeping compatibility aliases.
 fn normalize_frequency_ring_argv(raw: &mut Vec<String>) {
-    const MOVED: &[(&str, &str)] = &[
-        ("publish", "registry"), ("yank", "registry"), ("keygen", "registry"),
-        ("key", "registry"), ("vendor", "registry"),
-        ("graph", "inspect"), ("query", "inspect"), ("explain-build", "inspect"),
-        ("impact", "inspect"), ("dossier", "inspect"), ("semindex", "inspect"),
-        ("expand", "inspect"), ("schema", "inspect"), ("codemod", "inspect"),
-        ("audit", "inspect"), ("sbom", "inspect"), ("bind", "inspect"),
-        ("gc", "store"), ("fetch", "store"), ("lock", "store"),
-        ("toolchain", "self"), ("upgrade", "self"), ("doctor", "self"),
-        ("completions", "self"), ("man", "self"), ("devtools", "self"),
-        ("lsp", "self"),
-    ];
     let Some(first) = raw.first().map(String::as_str) else { return };
-    if let Some((verb, group)) = MOVED.iter().find(|(verb, _)| *verb == first) {
+    if let Some(group) = jet::CLI::moved_command_group(first) {
+        let verb = first;
         let replacement = format!("jet {group} {}", raw.join(" "));
         if raw.iter().any(|arg| arg == "--json") {
             fn esc(s: &str) -> String {
@@ -610,27 +599,16 @@ fn normalize_frequency_ring_argv(raw: &mut Vec<String>) {
         exit(ExitCodes::USAGE);
     }
     let Some(group) = raw.first().cloned() else { return };
-    let group_verbs = match group.as_str() {
-        "registry" => Some("publish yank keygen key backup vendor"),
-        "inspect" => Some("graph query explain-build impact dossier semindex expand schema codemod audit sbom bind"),
-        "store" => Some("verify rollback generations gc fetch lock"),
-        "self" => Some("toolchain upgrade doctor completions man devtools lsp"),
-        _ => None,
-    };
-    if let Some(verbs) = group_verbs {
+    if let Some(spec) = jet::CLI::command_group(&group) {
         if raw.len() == 1 || raw.get(1).map(String::as_str) == Some("help") {
-            println!("jet {group}: {verbs}");
+            println!("jet {group}: {}", spec.actions.join(" "));
             exit(ExitCodes::OK);
         }
     }
     let Some(sub) = raw.get(1).cloned() else { return };
-    let valid = match group.as_str() {
-        "registry" => matches!(sub.as_str(), "publish" | "yank" | "keygen" | "key" | "vendor"),
-        "inspect" => matches!(sub.as_str(), "graph" | "query" | "explain-build" | "impact" | "dossier" | "semindex" | "expand" | "schema" | "codemod" | "audit" | "sbom" | "bind"),
-        "store" => matches!(sub.as_str(), "gc" | "fetch" | "lock"),
-        "self" => matches!(sub.as_str(), "toolchain" | "upgrade" | "doctor" | "completions" | "man" | "devtools" | "lsp"),
-        _ => false,
-    };
+    let valid = jet::CLI::command_group(&group)
+        .is_some_and(|spec| spec.actions.contains(&sub.as_str()))
+        && !(group == "store" && matches!(sub.as_str(), "verify" | "rollback" | "generations"));
     if valid {
         raw.remove(0);
     }

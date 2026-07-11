@@ -340,9 +340,10 @@ pub(crate) fn run_completions(shell: Option<&str>) {
         Some("bash") => jet::CLI::completions_bash(),
         Some("zsh") => jet::CLI::completions_zsh(),
         Some("fish") => jet::CLI::completions_fish(),
+        Some("powershell") => jet::CLI::completions_powershell(),
         other => {
             eprintln!(
-                "error: completions need a shell: {} completions <bash|zsh|fish>",
+                "error: completions need a shell: {} self completions <bash|zsh|fish|powershell>",
                 jet::Syntax::BINARY_NAME
             );
             if let Some(s) = other {
