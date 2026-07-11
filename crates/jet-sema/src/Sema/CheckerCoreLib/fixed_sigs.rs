@@ -316,8 +316,22 @@ pub fn core_fixed_sig(
         ("core.testing", "fake_rng") => {
             Some((vec![(read, Type::Int)], Some(Type::Named("Rng".to_string()))))
         }
+        // D-TESTKIT1=A: `bench_budget` actually runs `body` (warmup + timed
+        // trials) and compares the measured mean against `max_ns` — it is not a
+        // no-op assertion. The closure takes no args and returns nothing.
         ("core.testing", "bench_budget") => Some((
-            vec![(read, Type::String), (read, Type::Int)],
+            vec![
+                (read, Type::String),
+                (read, Type::Int),
+                (
+                    read,
+                    Type::Fn {
+                        params: vec![],
+                        ret: None,
+                        effect_bound: None,
+                    },
+                ),
+            ],
             Some(Type::Bool),
         )),
         ("core.math", "sqrt" | "floor" | "ceil") => {

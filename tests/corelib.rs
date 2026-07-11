@@ -1264,7 +1264,7 @@ fn run() {
     rng := testing.fake_rng(5)
     print(clock.now())
     print(rng.int(1, 4) >= 1)
-    print(testing.bench_budget("parse", 10))
+    print(testing.bench_budget("parse", 5000000, () => {}))
 }
 "#,
         &[],

@@ -1629,6 +1629,16 @@ Helpers: `snap`, `golden`, `fixture`, `temp_dir`, `corpus`, `fake_clock`,
 `fake_rng`, and `bench_budget`. Use `expect(value).snapshot()` inside `#Test`
 blocks for assertion snapshots; `testing.snap` is for explicit named files.
 
+`bench_budget(name, max_ns, body)` actually runs `body` (a zero-arg closure):
+a few warmup calls, then timed trials, then compares the measured mean
+wall-clock time to `max_ns` and returns whether it's within budget. The mean,
+stddev, and verdict print to stderr so a failing budget is diagnosable, not
+just a bare `false`.
+
+```jet
+print(testing.bench_budget("parse", 5_000_000, () => { parse(input) }))
+```
+
 ### `core.regex` — linear-time regular expressions
 
 `use core.regex as re`. Matching is **linear-time** — the engine is a

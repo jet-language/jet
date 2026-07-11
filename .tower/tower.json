@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 495,
-    "rev": 3266,
+    "rev": 3269,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -5842,6 +5842,11 @@
         {
           "at": "2026-07-11",
           "by": "fable-main",
+          "text": "Builder pass 1: audit vs M11 done — snapshots/fixtures/fake_clock/fake_rng/#Bench+jet bench all real+verified. Found + fixed dead stub: testing.bench_budget always returned true ignoring timing — now real 3-warmup/10-trial mean-vs-budget with closure param (fixed_sigs 3-arg, TIR emit, prelude impl, example+golden+docs updated). Targeted green: golden, corelib 60, parity. Remaining ungated gaps inside D-TESTKIT1=A: jet fuzz harness (corpus+minimization, std-only PRNG), runner directory recursion, parallel isolation, filters/tags/shuffle. Pass 2 builder launching."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "fable-main",
           "text": "fable-main starting via jet-impl builder (audit-first: reconcile vs M11 before building)."
         },
         {
@@ -11642,12 +11647,17 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "done",
+      "phase": "building",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
       "assignee": "fable-main",
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "codex-main",
+          "text": "REOPENED by independent exact rerun: nix develop -c cargo test --test dev dev_default_matches_compiled_binary -- --exact --nocapture fails current HEAD after 51.48s. Actual boundary set includes io/stdin_filter E3410; expected set omits it. Not cache poisoning. Prior 43/43 close claim is not reproducible. Fix JIT support or restore exact expected boundary, then independent rerun before done."
+        },
         {
           "at": "2026-07-11",
           "by": "fable-main",
@@ -22806,6 +22816,58 @@
       "draft": false,
       "status": "open",
       "created": "2026-07-11T01:56:21.912Z"
+    },
+    {
+      "id": "D-CODEMOD-BATCH1",
+      "cardId": "c01lj8gw",
+      "group": "tooling",
+      "title": "Batch semantic codemod object law",
+      "gist": "Choose how one replayable codemod object expresses ordered semantic rewrites across examples and UI fixtures.",
+      "explainer": "D-CODEMOD1 remains the one engine. `jet codemod dry-run|apply|undo` and existing v1 objects/logs stay valid. A missing `version`, or `version: 1`, with `{entry, operation: \"rename\", from, to}` lowers internally to one `symbol_rename` rule and keeps today's entry-closure scope and output compatibility. Existing v1 logs remain readable; new logs carry `schema: 2` but undo lowers both schemas to the same verified inverse plan. A v2 object lowers to the same TextEdit plan, journal, log, and undo model; no second executor exists. A v2 object requires `project`, resolved relative to the object file, and `roots`. The canonical project path owns `.jet/codemods/<sanitized-name>.log.json`, `.lock`, and any recovery journal. For card #451, each root names either one regular `.jet` file or a directory, and must canonicalize beneath `<project>/examples` or `<project>/tests/ui`; `..`, absolute escape, and symlink escape fail. Directory discovery recursively sorts regular `.jet` files by project-relative byte path; a file root discovers only that file. Each discovered file is an entry compilation unit; its transitive Jet imports join that unit. The same physical file imported by several entries is indexed and edited once. Imports outside editable roots may be read for parsing, name resolution, and semantic identity but never edited; a rule selecting one fails with its path. Non-Jet files are ignored except the exact paired `tests/ui/<name>.stderr` of a touched UI fixture and declared snapshot inputs. Every rule resolves against the currently staged tree after prior rules. Within each compilation unit, every bare identifier in a match template resolves through semindex at the candidate node; that resolved definition anchor, not spelling, controls the match. Every non-capture identifier introduced by a replacement template must resolve uniquely in that same staged compilation unit before an edit is accepted. A rename destination is checked in every affected definition/reference scope and fails on collision or changed binding. A semantic symbol anchor is `(canonical definition module path, symbol kind, current definition span)`; references bind to that anchor through semindex. Independent same-spelled definitions remain independent anchors; selectors either match all and assert the total or narrow with `defined_in`. If a match source or destination resolves to zero or multiple definitions in any unit, the rule fails with unit path and candidates. Rules run in listed order. Within one rule, overlapping/nested edits fail; overlap across rules is intentional sequencing because rule N sees reindexed output from rule N-1. Duplicate ids, unknown fields, ambiguous anchors, unused captures, invalid replacement nodes, and zero matches unless `allow_zero: true` fail. Validation is transactional data, not a code-only check: a `clean` root must finish with zero lexer/parser/sema diagnostics; every touched `fixture` `.jet` must render a complete stderr snapshot. Without `snapshot_after`, generated stderr must equal the existing paired `.stderr` byte-for-byte. With `snapshot_after`, each value is a project-relative path resolved beneath the canonical project; every component must be non-symlink and the final input must be a regular file. Absolute paths, `..`, project escape, symlink, directory, and aliasing the destination `.stderr` fail. That file contains the complete replacement bytes; generated stderr must equal it byte-for-byte, and the paired `.stderr` becomes a planned edit shown in dry-run and committed/undone with source. Dry-run and apply take the exclusive codemod lock before discovery and hold it through discovery, indexing, every staged rule, validation, diagnostic rendering, final hash verification, and output/commit. The lock coordinates codemod processes only; ordinary editors need not honor it. Therefore the engine fingerprints every discovered source, read-only import, existing `.stderr`, and `snapshot_after` input on first read, rehashes all of them after rendering, and refuses with exact drift paths before printing a ready plan or writing anything if any changed. Apply rechecks every destination immediately before its rename and refuses observed drift. This does not close the check-to-rename race with a noncooperating editor: only codemod peers honor the lock, so an editor can still write after the check and be overwritten by the rename. Apply prints that limitation before confirmation; `--yes` accepts it. It writes same-directory temp files, fsyncs file contents, writes+fsyncs a journal containing transaction id, state, every before/after hash, complete before bytes, temp path, and destination, then fsyncs parent directories. Commit uses sequential same-filesystem renames; it is recoverable, not falsely advertised as globally atomic or safe from noncooperating concurrent writers. After each rename it advances and fsyncs journal state. On write/rename/fsync failure, rollback restores a destination only when its current hash equals the transaction's recorded after-hash; any other hash may be an unseen concurrent write, so recovery preserves that destination and the journal, reports the conflict, and refuses further codemod work. A crash leaves the journal. Before any later dry-run/apply/undo, the engine locks and recovers: hashes matching all after states complete the log; mixed/before states attempt the same conditional rollback, restoring only destinations still at recorded transaction hashes. Ambiguous drift or failed recovery preserves the journal, changes nothing further, prints exact paths/hashes, and refuses all codemod work until recovery can succeed. Only successful completion writes+fsyncs the schema-2 replay log and removes+fsyncs the journal. Undo first locks and verifies every current after-hash, then uses the identical temp/journal/fsync/recovery protocol to restore byte-exact before content, including `.stderr`; any mismatch causes zero writes. Dry-run writes no source, snapshot, log, temp, or new journal; after the final stable-snapshot rehash it prints path-ordered rule counts, validation, and unified source+snapshot diffs while still holding the lock.",
+      "story": "Maya must update a helper across runnable examples and diagnostic fixtures. One rule renames a semantic function; another changes a call shape while preserving its argument. She needs one reviewed plan where code and every affected UI snapshot move together. Dev needs deterministic discovery, stable symbol identity, exact match counts, crash recovery, and byte-exact undo before approving the apply.",
+      "inWild": "// examples/features/tooling/report.jet\nfn legacy_parse(text: String) -> Int { return 42 }\nfn parse_int(text: String, base: Int) -> Int { return 42 }\nfn report(value: Int) { print(value) }\nfn run() { report(legacy_parse(\"42\")) }\n\n// tests/ui/report_type.jet\nfn legacy_parse(text: String) -> Int { return 42 }\nfn parse_int(text: String, base: Int) -> Int { return 42 }\nfn report(value: Int) {}\nfn run() { report(legacy_parse(true)) }\n\n// tests/ui/report_type.stderr is the full current E0112 snapshot.\n// The migration must commit both changed .jet and regenerated .stderr bytes.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Typed AST templates",
+          "detail": "Rules are `symbol_rename` or `ast_rewrite`. An AST rule declares `node` as `expr`, `stmt`, `item`, or `type`; `match` and `replace` are current Jet source parsed in that node class. `$name` captures exactly one subtree. `$args...` captures an ordered zero-or-more sequence only where that node grammar has a list. A repeated scalar capture requires structural equality. Bare identifiers, labels, literals, operators, and syntax match exactly after semantic name resolution; comments and layout do not participate. Replacement uses only declared captures, preserves captured bytes when safe, and otherwise formats the replacement node with `jet fmt`; variadic captures splice only into the same list kind. Every root declares `clean` or `fixture`. `clean` requires zero lexer/parser/sema diagnostics after every rule. `fixture` requires the generated final diagnostic output to equal the paired `.stderr` byte-for-byte. If expected output intentionally changes, `snapshot_after` maps the `.jet` path to a repository file containing the complete new `.stderr`; dry-run compares generated bytes to it and shows the paired `.stderr` diff, while apply writes those exact verified bytes in the same transaction. A code-only apply is impossible. Recommended: Jet-shaped patterns are readable to beginners; node classes, semantic anchors, captures, exact counts, and snapshots give experts precise control without regex.",
+          "code": "{\n  \"version\": 2,\n  \"name\": \"ReportV2\",\n  \"project\": \"..\",\n  \"roots\": [\n    {\"path\": \"examples/features/tooling/report.jet\", \"validate\": \"clean\"},\n    {\"path\": \"tests/ui/report_type.jet\", \"validate\": \"fixture\"}\n  ],\n  \"rules\": [\n    {\"id\": \"rename-report\", \"kind\": \"symbol_rename\", \"from\": {\"name\": \"report\", \"symbol_kind\": \"function\"}, \"to\": \"summarize\", \"matches\": 4},\n    {\"id\": \"parse-needs-base\", \"kind\": \"ast_rewrite\", \"node\": \"expr\", \"match\": \"legacy_parse($input)\", \"replace\": \"parse_int($input, base: 10)\", \"matches\": 2}\n  ],\n  \"snapshot_after\": {\"tests/ui/report_type.jet\": \"migrations/report_type.after.stderr\"}\n}\n\n$ jet codemod dry-run migrations/report-v2.codemod.json\ncodemod `ReportV2` dry run\n  units: 2  rules: 2  files: 3  edits: 7\n  rename-report: 4 matches\n  parse-needs-base: 2 matches\n  validation: examples clean; report_type E0112 snapshot exact\n[complete changed hunks; unchanged location/Why/Fix omitted]\n--- examples/features/tooling/report.jet\n+++ examples/features/tooling/report.jet\n@@\n-fn report(value: Int) { print(value) }\n-fn run() { report(legacy_parse(\"42\")) }\n+fn summarize(value: Int) { print(value) }\n+fn run() { summarize(parse_int(\"42\", base: 10)) }\n--- tests/ui/report_type.jet\n+++ tests/ui/report_type.jet\n@@\n-fn report(value: Int) {}\n-fn run() { report(legacy_parse(true)) }\n+fn summarize(value: Int) {}\n+fn run() { summarize(parse_int(true, base: 10)) }\n--- tests/ui/report_type.stderr\n+++ tests/ui/report_type.stderr\n@@\n-Error [E0112]: `legacy_parse` wants String (text) for argument 1, but this is Bool (true or false)\n+Error [E0112]: `parse_int` wants String (text) for argument 1, but this is Bool (true or false)\n-  4 | fn run() { report(legacy_parse(true)) }\n+  4 | fn run() { summarize(parse_int(true, base: 10)) }\n     |                                ^^^^ this is Bool\n\nready: no files written"
+        },
+        {
+          "key": "B",
+          "name": "Finite semantic operations",
+          "detail": "Rules choose a closed registry: `symbol_rename`, `call_rename`, `call_add_named_arg`, `import_move`, or `marker_replace`. `symbol_rename` takes a semantic selector and identifier. `call_rename` changes only calls resolved to the selected function. `call_add_named_arg` parses `value` as one Jet expression, rejects an existing or positionally conflicting label, and inserts through the AST argument list. `import_move` takes exact resolved `from` and `to` module paths and preserves the local alias. `marker_replace` takes exact current PascalCase marker names, changes the marker AST node only, and rejects different argument arity; it does not text-replace comments or strings. No interpolation exists in B. Unknown operations/fields fail. Roots, anchors, ordering, exact `matches`, validation, full snapshot pairing, recoverable transaction, log, and undo are identical to the shared law. This is easiest to discover and audit, but a new migration shape requires a future ratified registry entry.",
+          "code": "{\n  \"version\": 2,\n  \"name\": \"ReportV2\",\n  \"project\": \"..\",\n  \"roots\": [{\"path\": \"examples/features/tooling/report.jet\", \"validate\": \"clean\"}, {\"path\": \"tests/ui/report_type.jet\", \"validate\": \"fixture\"}],\n  \"rules\": [\n    {\"id\": \"rename-report\", \"operation\": \"symbol_rename\", \"select\": {\"name\": \"report\", \"symbol_kind\": \"function\"}, \"to\": \"summarize\", \"matches\": 4},\n    {\"id\": \"rename-parse\", \"operation\": \"call_rename\", \"select\": {\"name\": \"legacy_parse\", \"symbol_kind\": \"function\"}, \"to\": \"parse_int\", \"matches\": 2},\n    {\"id\": \"add-base\", \"operation\": \"call_add_named_arg\", \"select\": {\"name\": \"parse_int\", \"symbol_kind\": \"function\"}, \"label\": \"base\", \"value\": \"10\", \"matches\": 2}\n  ],\n  \"snapshot_after\": {\"tests/ui/report_type.jet\": \"migrations/report_type.after.stderr\"}\n}\n\n$ jet codemod dry-run migrations/report-v2.codemod.json\ncodemod `ReportV2` dry run\n  units: 2  rules: 3  matches: 8  files: 3\n  conflicts: 0\n[complete changed hunks; unchanged location/Why/Fix omitted]\n--- examples/features/tooling/report.jet\n+++ examples/features/tooling/report.jet\n@@\n-fn report(value: Int) { print(value) }\n-fn run() { report(legacy_parse(\"42\")) }\n+fn summarize(value: Int) { print(value) }\n+fn run() { summarize(parse_int(\"42\", base: 10)) }\n--- tests/ui/report_type.jet\n+++ tests/ui/report_type.jet\n@@\n-fn report(value: Int) {}\n-fn run() { report(legacy_parse(true)) }\n+fn summarize(value: Int) {}\n+fn run() { summarize(parse_int(true, base: 10)) }\n--- tests/ui/report_type.stderr\n+++ tests/ui/report_type.stderr\n@@\n-Error [E0112]: `legacy_parse` wants String (text) for argument 1, but this is Bool (true or false)\n+Error [E0112]: `parse_int` wants String (text) for argument 1, but this is Bool (true or false)\n-  4 | fn run() { report(legacy_parse(true)) }\n+  4 | fn run() { summarize(parse_int(true, base: 10)) }\n     |                                ^^^^ this is Bool\n validation: clean=pass fixture=byte-exact E0112\n ready: no files written\n\nerror example:\nrule `add-base` matched 3 calls, expected 2\nno files written"
+        },
+        {
+          "key": "C",
+          "name": "Semantic selectors and typed edits",
+          "detail": "Each rule has `select` plus `edit`. Selectors allow only `node`, `symbol_kind`, `resolved_name`, `defined_in`, `called_from`, and exact `argument_count`; globs are project-relative and may narrow but never widen roots. Edits are `rename_symbol`, `replace_callee`, `insert_named_arg`, or `replace_node`. `replace_node.source` is parsed as the selected node class. It may interpolate `$argument[N]`, `$receiver`, or `$node`; indices are zero-based, each placeholder expands to that captured AST subtree, and no other `$` form exists. A missing/out-of-range placeholder, wrong node class, label collision, or marker/value parse error fails. Marker edits use `node: \"marker\"`, exact PascalCase `resolved_name`, and a complete replacement marker source such as `#New(arg)`; arguments are never implicitly copied. Roots, anchors, ordering, exact counts, validation, full snapshot pairing, journal, log, and undo follow the shared law. This gives experts strongest targeting, but simple work requires learning selector/edit vocabulary.",
+          "code": "{\n  \"version\": 2,\n  \"name\": \"ReportV2\",\n  \"project\": \"..\",\n  \"roots\": [{\"path\": \"examples/features/tooling/report.jet\", \"validate\": \"clean\"}, {\"path\": \"tests/ui/report_type.jet\", \"validate\": \"fixture\"}],\n  \"rules\": [\n    {\"id\": \"rename-report\", \"select\": {\"node\": \"symbol\", \"symbol_kind\": \"function\", \"resolved_name\": \"report\"}, \"edit\": {\"kind\": \"rename_symbol\", \"to\": \"summarize\"}, \"matches\": 4},\n    {\"id\": \"rewrite-parse\", \"select\": {\"node\": \"call\", \"resolved_name\": \"legacy_parse\", \"argument_count\": 1}, \"edit\": {\"kind\": \"replace_node\", \"source\": \"parse_int($argument[0], base: 10)\"}, \"matches\": 2}\n  ],\n  \"snapshot_after\": {\"tests/ui/report_type.jet\": \"migrations/report_type.after.stderr\"}\n}\n\n$ jet codemod dry-run migrations/report-v2.codemod.json\ncodemod `ReportV2` dry run\n  units: 2  selected: 6 nodes  files: 3\n  conflicts: 0\n[complete changed hunks; unchanged location/Why/Fix omitted]\n--- examples/features/tooling/report.jet\n+++ examples/features/tooling/report.jet\n@@\n-fn report(value: Int) { print(value) }\n-fn run() { report(legacy_parse(\"42\")) }\n+fn summarize(value: Int) { print(value) }\n+fn run() { summarize(parse_int(\"42\", base: 10)) }\n--- tests/ui/report_type.jet\n+++ tests/ui/report_type.jet\n@@\n-fn report(value: Int) {}\n-fn run() { report(legacy_parse(true)) }\n+fn summarize(value: Int) {}\n+fn run() { summarize(parse_int(true, base: 10)) }\n--- tests/ui/report_type.stderr\n+++ tests/ui/report_type.stderr\n@@\n-Error [E0112]: `legacy_parse` wants String (text) for argument 1, but this is Bool (true or false)\n+Error [E0112]: `parse_int` wants String (text) for argument 1, but this is Bool (true or false)\n-  4 | fn run() { report(legacy_parse(true)) }\n+  4 | fn run() { summarize(parse_int(true, base: 10)) }\n     |                                ^^^^ this is Bool\n validation: pass; paired snapshot included\n transaction: not started\n\nerror example:\nrule `rewrite-parse`: `$argument[1]` is out of range for a one-argument call\nno files written"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Comby",
+          "note": "Structural templates with holes stay readable across formatting. Option A adds Jet node classes and semantic resolution.",
+          "code": "legacy_parse(:[input]) -> parse_int(:[input], base: 10)"
+        },
+        {
+          "lang": "Clang Transformer",
+          "note": "Semantic matchers separate identity from edits. Option C adopts that precision with a deliberately small selector set.",
+          "code": "callExpr(callee(functionDecl(hasName(\"legacy_parse\"))))"
+        },
+        {
+          "lang": "cargo fix",
+          "note": "Compiler facts produce checked edits and conflicts stop the run. Jet adds ordered multi-rule objects, paired diagnostic snapshots, and recoverable replay logs.",
+          "code": "$ cargo fix --workspace"
+        }
+      ],
+      "rec": "A",
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-11T02:29:22.513Z"
     }
   ],
   "questions": [
@@ -23617,6 +23679,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-11T02:32:04.049Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c07vdfen",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T02:29:22.513Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-CODEMOD-BATCH1",
+      "note": "Batch semantic codemod object law"
+    },
+    {
+      "at": "2026-07-11T02:28:21.506Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c06tccyz",
+      "note": "phase,logEntry"
+    },
     {
       "at": "2026-07-11T02:25:45.964Z",
       "by": "fable-main",
@@ -27094,27 +27177,6 @@
       "by": "codex-orchestrator",
       "action": "card.update",
       "ref": "c0todzv8",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.049Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0frdmrx",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.049Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0ddul2b",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.049Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c00lqj9d",
       "note": "workOrder"
     }
   ],
