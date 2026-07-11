@@ -5,10 +5,43 @@
 /// results are temporaries, not places whose ownership follows one local.
 fn core_consuming_place(expr: &Expr) -> Option<(String, String, Span)> {
     fn subscript(expr: &Expr) -> Option<String> {
+        fn args(args: &[crate::AST::CallArg]) -> Option<String> {
+            args.iter()
+                .map(|arg| {
+                    let value = subscript(&arg.expr)?;
+                    Some(match &arg.label {
+                        Some((label, _)) => format!("{}: {}", label, value),
+                        None => value,
+                    })
+                })
+                .collect::<Option<Vec<_>>>()
+                .map(|parts| parts.join(", "))
+        }
+
         match expr {
             Expr::Ident(name, _) => Some(name.clone()),
             Expr::Int(value, _, _) => Some(value.to_string()),
             Expr::Bool(value, _) => Some(value.to_string()),
+            Expr::Call(call) => Some(format!("{}({})", call.name, args(&call.args)?)),
+            Expr::MethodCall {
+                receiver,
+                method,
+                args: call_args,
+                ..
+            } => Some(format!(
+                "{}.{}({})",
+                subscript(receiver)?,
+                method,
+                args(call_args)?
+            )),
+            Expr::Unary(op, inner, _) => Some(format!(
+                "{}{}",
+                match op {
+                    crate::AST::UnOp::Neg => "-",
+                    crate::AST::UnOp::Not => "!",
+                },
+                subscript(inner)?
+            )),
             Expr::Binary(op, left, right, _) => Some(format!(
                 "{} {} {}",
                 subscript(left)?,
@@ -54,10 +87,9 @@ fn core_consuming_place(expr: &Expr) -> Option<(String, String, Span)> {
 
     let end = expr.span().end;
     let (root, root_span) = ownership_root(expr)?;
-    // The supported place grammar has a product spelling. Keep root detection
-    // independent so adding a new index-expression form cannot reopen I2; the
-    // root fallback still rejects before codegen until its renderer is added.
-    let place = spelling(expr).unwrap_or_else(|| root.clone());
+    // Root discovery and product spelling are separate facts: the index
+    // expression never controls which binding owns the selected place.
+    let place = spelling(expr)?;
     Some((root, place, Span::new(root_span.start, end)))
 }
 

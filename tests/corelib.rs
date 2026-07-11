@@ -2145,12 +2145,18 @@ use core.encoding.json as json
 struct Address { text: String }
 struct Email { addr: String, nested: Address, items: [Address] }
 
+fn pick() -> Int {
+    return 0
+}
+
 fn encoded(e: Email, i: Int) -> String {
     shallow := Data.Text(copy e.addr)
     nested := Data.Text(copy e.nested.text)
     indexed := Data.Text(copy e.items[0].text)
     computed := Data.Text(copy e.items[i + 1].text)
-    return "{json.to_string(shallow)}|{json.to_string(nested)}|{json.to_string(indexed)}|{json.to_string(computed)}"
+    called := Data.Text(copy e.items[pick()].text)
+    parenthesized := Data.Text(copy e.items[-(-i)].text)
+    return "{json.to_string(shallow)}|{json.to_string(nested)}|{json.to_string(indexed)}|{json.to_string(computed)}|{json.to_string(called)}|{json.to_string(parenthesized)}"
 }
 
 fn slice_data(xs: [Data]) -> Data {
@@ -2169,7 +2175,7 @@ fn run() {
     assert_eq!(code, 0, "explicit field copy failed to compile/run: {stderr}");
     assert_eq!(
         stdout,
-        "\"a@b.com\"|\"inside\"|\"zero\"|\"item\"|[\"slice0\",\"slice1\"]\n"
+        "\"a@b.com\"|\"inside\"|\"zero\"|\"item\"|\"zero\"|\"zero\"|[\"slice0\",\"slice1\"]\n"
     );
     let _ = fs::remove_dir_all(&dir);
 }
