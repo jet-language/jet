@@ -5,7 +5,9 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn jet() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_jet"))
+    std::env::var_os("JET_CODEMOD_TEST_BIN")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_jet")))
 }
 
 fn temp_dir(tag: &str) -> PathBuf {
@@ -13,6 +15,25 @@ fn temp_dir(tag: &str) -> PathBuf {
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     dir
+}
+
+fn check_stderr(path: &std::path::Path) -> Vec<u8> {
+    let output = Command::new(jet())
+        .args(["check", path.to_str().unwrap()])
+        .output()
+        .expect("jet check fixture");
+    assert!(!output.status.success(), "fixture must fail");
+    let mut rendered = String::from_utf8(output.stderr).unwrap();
+    if let Some(at) = rendered.find("\n1 problem found\n") {
+        rendered.truncate(at);
+        while rendered.ends_with("\n\n") {
+            rendered.pop();
+        }
+        if !rendered.ends_with('\n') {
+            rendered.push('\n');
+        }
+    }
+    rendered.into_bytes()
 }
 
 #[test]
@@ -128,4 +149,222 @@ fn codemod_undo_refuses_changed_file() {
     let stderr = String::from_utf8_lossy(&undo.stderr);
     assert!(stderr.contains("checkpoint mismatch"), "stderr: {stderr}");
     assert!(fs::read_to_string(&source).unwrap().contains("changed"));
+}
+
+#[test]
+fn batch_rules_reindex_across_clean_and_fixture_roots_then_undo_exactly() {
+    let project = temp_dir("batch_chain");
+    let example = project.join("examples/report.jet");
+    let fixture = project.join("tests/ui/report_type.jet");
+    let fixture_stderr = fixture.with_extension("stderr");
+    let migrations = project.join("migrations");
+    fs::create_dir_all(example.parent().unwrap()).unwrap();
+    fs::create_dir_all(fixture.parent().unwrap()).unwrap();
+    fs::create_dir_all(&migrations).unwrap();
+
+    let clean_before = "fn legacy_parse(text: String) -> Int { return 42 }\nfn parse_int(text: String, base: Int) -> Int { return 42 }\nfn report(value: Int) { print(value) }\nfn run() { report(legacy_parse(\"42\")) }\n";
+    let clean_after = "fn legacy_parse(text: String) -> Int { return 42 }\nfn parse_int(text: String, base: Int) -> Int { return 42 }\nfn summarize(value: Int) { print(value) }\nfn run() { summarize(parse_int(\"42\", base: 10)) }\n";
+    let fixture_before = "fn legacy_parse(text: String) -> Int { return 42 }\nfn parse_int(text: String, base: Int) -> Int { return 42 }\nfn report(value: Int) {}\nfn run() { report(legacy_parse(true)) }\n";
+    let fixture_after = "fn legacy_parse(text: String) -> Int { return 42 }\nfn parse_int(text: String, base: Int) -> Int { return 42 }\nfn summarize(value: Int) {}\nfn run() { summarize(parse_int(true, base: 10)) }\n";
+    fs::write(&example, clean_before).unwrap();
+    fs::write(&fixture, fixture_before).unwrap();
+    let stderr_before = check_stderr(&fixture);
+    fs::write(&fixture_stderr, &stderr_before).unwrap();
+    fs::write(&fixture, fixture_after).unwrap();
+    let stderr_after = check_stderr(&fixture);
+    fs::write(migrations.join("report_type.after.stderr"), &stderr_after).unwrap();
+    fs::write(&fixture, fixture_before).unwrap();
+
+    let object = migrations.join("batch.codemod.json");
+    fs::write(
+        &object,
+        r#"{
+  "version": 2,
+  "name": "ReportV2",
+  "project": "..",
+  "roots": [
+    {"path": "examples/report.jet", "validate": "clean"},
+    {"path": "tests/ui/report_type.jet", "validate": "fixture"}
+  ],
+  "rules": [
+    {"id": "rename-report", "kind": "symbol_rename", "from": {"name": "report", "symbol_kind": "function"}, "to": "summarize", "matches": 4},
+    {"id": "parse-needs-base", "kind": "ast_rewrite", "node": "expr", "match": "legacy_parse($input)", "replace": "parse_int($input, base: 10)", "matches": 2}
+  ],
+  "snapshot_after": {"tests/ui/report_type.jet": "migrations/report_type.after.stderr"}
+}
+"#,
+    )
+    .unwrap();
+
+    let dry = Command::new(jet())
+        .args(["inspect", "codemod", "dry-run", object.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        dry.status.success(),
+        "{}",
+        String::from_utf8_lossy(&dry.stderr)
+    );
+    let dry_out = String::from_utf8_lossy(&dry.stdout);
+    assert!(dry_out.contains("parse-needs-base: 2 matches"), "{dry_out}");
+    assert_eq!(fs::read_to_string(&example).unwrap(), clean_before);
+    assert_eq!(fs::read(&fixture_stderr).unwrap(), stderr_before);
+    assert!(!project.join(".jet/codemods/ReportV2.log.json").exists());
+
+    let apply = Command::new(jet())
+        .args([
+            "inspect",
+            "codemod",
+            "apply",
+            object.to_str().unwrap(),
+            "--yes",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        apply.status.success(),
+        "{}",
+        String::from_utf8_lossy(&apply.stderr)
+    );
+    assert_eq!(fs::read_to_string(&example).unwrap(), clean_after);
+    assert_eq!(fs::read_to_string(&fixture).unwrap(), fixture_after);
+    assert_eq!(fs::read(&fixture_stderr).unwrap(), stderr_after);
+
+    let log = project.join(".jet/codemods/ReportV2.log.json");
+    let undo = Command::new(jet())
+        .args(["inspect", "codemod", "undo", log.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        undo.status.success(),
+        "{}",
+        String::from_utf8_lossy(&undo.stderr)
+    );
+    assert_eq!(fs::read_to_string(&example).unwrap(), clean_before);
+    assert_eq!(fs::read_to_string(&fixture).unwrap(), fixture_before);
+    assert_eq!(fs::read(&fixture_stderr).unwrap(), stderr_before);
+}
+
+fn simple_batch(project: &std::path::Path, matches: usize) -> PathBuf {
+    let example = project.join("examples/a.jet");
+    fs::create_dir_all(example.parent().unwrap()).unwrap();
+    fs::write(
+        &example,
+        "fn report() { print(\"ok\") }\nfn run() { report() }\n",
+    )
+    .unwrap();
+    let object = project.join("rename.codemod.json");
+    fs::write(
+        &object,
+        format!(
+            "{{\"version\":2,\"name\":\"BatchRename\",\"project\":\".\",\"roots\":[{{\"path\":\"examples/a.jet\",\"validate\":\"clean\"}}],\"rules\":[{{\"id\":\"rename\",\"kind\":\"symbol_rename\",\"from\":{{\"name\":\"report\",\"symbol_kind\":\"function\"}},\"to\":\"summarize\",\"matches\":{matches}}}]}}\n"
+        ),
+    )
+    .unwrap();
+    object
+}
+
+#[test]
+fn batch_refuses_declared_count_and_unknown_fields_without_writes() {
+    let project = temp_dir("batch_refuse");
+    let object = simple_batch(&project, 3);
+    let source = project.join("examples/a.jet");
+    let before = fs::read(&source).unwrap();
+    let count = Command::new(jet())
+        .args(["inspect", "codemod", "dry-run", object.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(!count.status.success());
+    assert!(String::from_utf8_lossy(&count.stderr).contains("matched 2, expected 3"));
+    assert_eq!(fs::read(&source).unwrap(), before);
+
+    let raw = fs::read_to_string(&object).unwrap();
+    fs::write(
+        &object,
+        raw.replacen("\"name\":", "\"mystery\":1,\"name\":", 1),
+    )
+    .unwrap();
+    let unknown = Command::new(jet())
+        .args(["inspect", "codemod", "dry-run", object.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(!unknown.status.success());
+    assert!(String::from_utf8_lossy(&unknown.stderr).contains("unknown field"));
+    assert_eq!(fs::read(&source).unwrap(), before);
+}
+
+#[test]
+fn interrupted_batch_recovers_before_the_next_plan() {
+    let project = temp_dir("batch_recovery");
+    let object = simple_batch(&project, 2);
+    let source = project.join("examples/a.jet");
+    let before = fs::read(&source).unwrap();
+    let crashed = Command::new(jet())
+        .env("JET_CODEMOD_CRASH_AFTER_RENAME", "1")
+        .args([
+            "inspect",
+            "codemod",
+            "apply",
+            object.to_str().unwrap(),
+            "--yes",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(crashed.status.code(), Some(86));
+    assert!(project.join(".jet/codemods/transaction.journal").exists());
+    assert_ne!(fs::read(&source).unwrap(), before);
+
+    let recovered = Command::new(jet())
+        .args(["inspect", "codemod", "dry-run", object.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        recovered.status.success(),
+        "{}",
+        String::from_utf8_lossy(&recovered.stderr)
+    );
+    assert_eq!(fs::read(&source).unwrap(), before);
+    assert!(!project.join(".jet/codemods/transaction.journal").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn batch_rejects_symlink_and_parent_escape_roots() {
+    use std::os::unix::fs::symlink;
+    let project = temp_dir("batch_paths");
+    fs::create_dir_all(project.join("examples")).unwrap();
+    let outside = project.parent().unwrap().join("codemod-outside.jet");
+    fs::write(&outside, "fn run() {}\n").unwrap();
+    symlink(&outside, project.join("examples/link.jet")).unwrap();
+    let object = project.join("bad.codemod.json");
+    for root in ["examples/link.jet", "examples/../tests/ui/x.jet"] {
+        fs::write(&object, format!("{{\"version\":2,\"name\":\"Bad\",\"project\":\".\",\"roots\":[{{\"path\":\"{root}\",\"validate\":\"clean\"}}],\"rules\":[{{\"id\":\"x\",\"kind\":\"symbol_rename\",\"from\":{{\"name\":\"run\",\"symbol_kind\":\"function\"}},\"to\":\"start\",\"matches\":1}}]}}\n")).unwrap();
+        let output = Command::new(jet())
+            .args(["inspect", "codemod", "dry-run", object.to_str().unwrap()])
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "root {root} must fail");
+    }
+}
+
+#[test]
+fn schema_one_inverse_edit_log_remains_readable() {
+    let dir = temp_dir("schema_one_log");
+    let source = dir.join("main.jet");
+    let before = "fn report() {}\nfn run() { report() }\n";
+    let after = "fn summarize() {}\nfn run() { summarize() }\n";
+    fs::write(&source, after).unwrap();
+    let hash = |s: &str| format!("sha256-{}", jet::SHA256::sha256_hex(s.as_bytes()));
+    let log = dir.join("old.log.json");
+    fs::write(&log, format!("{{\"name\":\"Old\",\"files\":[{{\"path\":\"{}\",\"before_hash\":\"{}\",\"after_hash\":\"{}\",\"inverse_edits\":[{{\"start\":3,\"end\":12,\"new_text\":\"report\"}},{{\"start\":29,\"end\":38,\"new_text\":\"report\"}}]}}]}}\n", source.display(), hash(before), hash(after))).unwrap();
+    let undo = Command::new(jet())
+        .args(["inspect", "codemod", "undo", log.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        undo.status.success(),
+        "{}",
+        String::from_utf8_lossy(&undo.stderr)
+    );
+    assert_eq!(fs::read_to_string(source).unwrap(), before);
 }

@@ -533,18 +533,32 @@ impl BuildFilesystemTransaction {
             };
             files.push((path, before));
         }
-        Ok(Self { files, committed: false })
+        Ok(Self {
+            files,
+            committed: false,
+        })
     }
-    fn commit(&mut self) { self.committed = true; }
+    fn commit(&mut self) {
+        self.committed = true;
+    }
 }
 
 impl Drop for BuildFilesystemTransaction {
     fn drop(&mut self) {
-        if self.committed { return; }
+        if self.committed {
+            return;
+        }
         for (path, before) in self.files.iter().rev() {
             match before {
-                Some(bytes) => { if let Some(parent) = path.parent() { let _ = std::fs::create_dir_all(parent); } let _ = std::fs::write(path, bytes); }
-                None => { let _ = std::fs::remove_file(path); }
+                Some(bytes) => {
+                    if let Some(parent) = path.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    let _ = std::fs::write(path, bytes);
+                }
+                None => {
+                    let _ = std::fs::remove_file(path);
+                }
             }
         }
     }
@@ -586,10 +600,20 @@ pub fn query_build_plan_with_overlay(
 /// One canonical graph representation shared by CLI and LSP.
 pub fn build_plan_json(plan: &crate::Comptime::Build::BuildPlan) -> String {
     fn escape(value: &str) -> String {
-        value.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
+        value
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('\n', "\\n")
     }
     fn strings(values: &[String]) -> String {
-        format!("[{}]", values.iter().map(|value| format!("\"{}\"", escape(value))).collect::<Vec<_>>().join(","))
+        format!(
+            "[{}]",
+            values
+                .iter()
+                .map(|value| format!("\"{}\"", escape(value)))
+                .collect::<Vec<_>>()
+                .join(",")
+        )
     }
     let graph = plan.graph();
     format!("{{\"schema_version\":1,\"default\":{},\"targets\":[{}],\"actions\":[{}],\"files\":[{}],\"toolchains\":[{}],\"probes\":[{}],\"generated\":[{}]}}",
@@ -627,9 +651,10 @@ fn compile_bundle_path_build_inner(
     };
     bundle.active_os = active_os;
     bundle.web_partition_enforced = options.web_target;
-    let build_index = bundle.modules[bundle.entry].items.iter().position(
-        |item| matches!(item, crate::AST::Item::Func(func) if func.name == "build"),
-    );
+    let build_index = bundle.modules[bundle.entry]
+        .items
+        .iter()
+        .position(|item| matches!(item, crate::AST::Item::Func(func) if func.name == "build"));
     if let Some(index) = build_index {
         let crate::AST::Item::Func(build) = &bundle.modules[bundle.entry].items[index] else {
             unreachable!()
@@ -645,7 +670,10 @@ fn compile_bundle_path_build_inner(
         crate::Sema::check_bundle_with_effect_facts(&mut bundle, compile_mode);
     let mut errors = Vec::new();
     let mut lints = Vec::new();
-    for diag in std::mem::take(&mut bundle.parse_teaching).into_iter().chain(diags) {
+    for diag in std::mem::take(&mut bundle.parse_teaching)
+        .into_iter()
+        .chain(diags)
+    {
         match diag.severity {
             // Generated declarations do not exist during the pre-build
             // reflection pass. Defer only unknown-name errors to the fresh
@@ -674,7 +702,10 @@ fn compile_bundle_path_build_inner(
             .flatten()
             .filter_map(|(name, _)| crate::Comptime::Build::BuildCapability::parse(name))
             .collect::<std::collections::BTreeSet<_>>();
-        let has_impure_gate = build.body.iter().any(|stmt| matches!(stmt, crate::AST::Stmt::Impure { .. }));
+        let has_impure_gate = build
+            .body
+            .iter()
+            .any(|stmt| matches!(stmt, crate::AST::Stmt::Impure { .. }));
         let mut funcs = std::collections::HashMap::new();
         let mut methods = std::collections::HashMap::new();
         let mut structs = std::collections::HashMap::new();
@@ -688,9 +719,15 @@ fn compile_bundle_path_build_inner(
         for module in &bundle.modules {
             for item in &module.items {
                 match item {
-                    crate::AST::Item::Func(func) => *function_name_counts.entry(func.name.clone()).or_default() += 1,
-                    crate::AST::Item::Struct(def) => *type_name_counts.entry(def.name.clone()).or_default() += 1,
-                    crate::AST::Item::Enum(def) => *type_name_counts.entry(def.name.clone()).or_default() += 1,
+                    crate::AST::Item::Func(func) => {
+                        *function_name_counts.entry(func.name.clone()).or_default() += 1
+                    }
+                    crate::AST::Item::Struct(def) => {
+                        *type_name_counts.entry(def.name.clone()).or_default() += 1
+                    }
+                    crate::AST::Item::Enum(def) => {
+                        *type_name_counts.entry(def.name.clone()).or_default() += 1
+                    }
                     _ => {}
                 }
             }
@@ -707,26 +744,37 @@ fn compile_bundle_path_build_inner(
                     crate::AST::Item::Struct(def) => {
                         let owner = format!("{}::{}", module.alias, def.name);
                         structs.insert(owner.clone(), def);
-                        if type_name_counts.get(&def.name) == Some(&1) { structs.insert(def.name.clone(), def); }
+                        if type_name_counts.get(&def.name) == Some(&1) {
+                            structs.insert(def.name.clone(), def);
+                        }
                         for method in &def.methods {
                             methods.insert((owner.clone(), method.name.clone()), method);
-                            if type_name_counts.get(&def.name) == Some(&1) { methods.insert((def.name.clone(), method.name.clone()), method); }
+                            if type_name_counts.get(&def.name) == Some(&1) {
+                                methods.insert((def.name.clone(), method.name.clone()), method);
+                            }
                         }
                     }
                     crate::AST::Item::Enum(def) => {
                         let owner = format!("{}::{}", module.alias, def.name);
                         enums.insert(owner.clone(), def);
-                        if type_name_counts.get(&def.name) == Some(&1) { enums.insert(def.name.clone(), def); }
+                        if type_name_counts.get(&def.name) == Some(&1) {
+                            enums.insert(def.name.clone(), def);
+                        }
                         for method in &def.methods {
                             methods.insert((owner.clone(), method.name.clone()), method);
-                            if type_name_counts.get(&def.name) == Some(&1) { methods.insert((def.name.clone(), method.name.clone()), method); }
+                            if type_name_counts.get(&def.name) == Some(&1) {
+                                methods.insert((def.name.clone(), method.name.clone()), method);
+                            }
                         }
                     }
                     crate::AST::Item::Impl(imp) => {
                         let owner = format!("{}::{}", module.alias, imp.type_name);
                         for method in &imp.methods {
                             methods.insert((owner.clone(), method.name.clone()), method);
-                            if type_name_counts.get(&imp.type_name) == Some(&1) { methods.insert((imp.type_name.clone(), method.name.clone()), method); }
+                            if type_name_counts.get(&imp.type_name) == Some(&1) {
+                                methods
+                                    .insert((imp.type_name.clone(), method.name.clone()), method);
+                            }
                         }
                     }
                     crate::AST::Item::Migration(m) => {
@@ -750,7 +798,9 @@ fn compile_bundle_path_build_inner(
         };
         let semantic_facts = program_semantic_facts(&bundle, &effect_facts);
         let program_value = crate::Comptime::build_program_info(&bundle, &semantic_facts);
-        let base_dir = std::path::Path::new(file).parent().unwrap_or(std::path::Path::new("."));
+        let base_dir = std::path::Path::new(file)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
         let package = std::path::Path::new(file)
             .file_stem()
             .and_then(|name| name.to_str())
@@ -778,31 +828,58 @@ fn compile_bundle_path_build_inner(
             build.name_span,
         )?;
 
-        let selected_actions = evaluated.plan.selected_action_ids().map_err(|error| vec![build_plan_diagnostic(&error)])?;
-        let selected_generated = evaluated.plan.selected_generated_modules().map_err(|error| vec![build_plan_diagnostic(&error)])?;
-        let transaction_paths = selected_generated.iter()
+        let selected_actions = evaluated
+            .plan
+            .selected_action_ids()
+            .map_err(|error| vec![build_plan_diagnostic(&error)])?;
+        let selected_generated = evaluated
+            .plan
+            .selected_generated_modules()
+            .map_err(|error| vec![build_plan_diagnostic(&error)])?;
+        let transaction_paths = selected_generated
+            .iter()
             .map(|module| bundle.project_root.join(module.path.as_str()))
-            .chain(evaluated.plan.actions().iter().filter(|action| selected_actions.contains(&action.id)).flat_map(|action| action.outputs.iter().map(|output| bundle.project_root.join(output.as_str()))))
+            .chain(
+                evaluated
+                    .plan
+                    .actions()
+                    .iter()
+                    .filter(|action| selected_actions.contains(&action.id))
+                    .flat_map(|action| {
+                        action
+                            .outputs
+                            .iter()
+                            .map(|output| bundle.project_root.join(output.as_str()))
+                    }),
+            )
             .chain(std::iter::once(bundle.project_root.join(".jet/lock")))
             .collect::<Vec<_>>();
-        filesystem_transaction = Some(BuildFilesystemTransaction::new(transaction_paths)
-            .map_err(|error| vec![generated_io_diag("build filesystem transaction", &error)])?);
+        filesystem_transaction = Some(
+            BuildFilesystemTransaction::new(transaction_paths)
+                .map_err(|error| vec![generated_io_diag("build filesystem transaction", &error)])?,
+        );
         if options.locked {
-            let planned_generated = selected_generated.iter().map(|module| crate::AST::ComptimeInput {
-                path: module.path.as_str().to_string(),
-                hash: module.source_digest.as_str().to_string(),
-            }).collect::<Vec<_>>();
+            let planned_generated = selected_generated
+                .iter()
+                .map(|module| crate::AST::ComptimeInput {
+                    path: module.path.as_str().to_string(),
+                    hash: module.source_digest.as_str().to_string(),
+                })
+                .collect::<Vec<_>>();
             crate::Lock::record_generated_inputs(&bundle.project_root, &planned_generated, true)
                 .map_err(|diagnostic| vec![diagnostic])?;
         }
         let mut generated = if options.execute {
             materialize_and_check_generated(&selected_generated, &bundle.project_root)?
         } else {
-            selected_generated.iter().map(|module| GeneratedSourceProvenance {
-                name: module.name.clone(),
-                path: bundle.project_root.join(module.path.as_str()),
-                digest: module.source_digest.clone(),
-            }).collect()
+            selected_generated
+                .iter()
+                .map(|module| GeneratedSourceProvenance {
+                    name: module.name.clone(),
+                    path: bundle.project_root.join(module.path.as_str()),
+                    digest: module.source_digest.clone(),
+                })
+                .collect()
         };
         let executed = if options.execute {
             crate::Comptime::Build::execute_build_plan(
@@ -821,32 +898,49 @@ fn compile_bundle_path_build_inner(
             }
         };
         if options.execute {
-            generated.extend(check_action_generated_sources(&evaluated.plan, &bundle.project_root)?);
+            generated.extend(check_action_generated_sources(
+                &evaluated.plan,
+                &bundle.project_root,
+            )?);
             let mut locked_provenance = generated
                 .iter()
                 .map(|item| crate::AST::ComptimeInput {
-                    path: item.path.strip_prefix(&bundle.project_root).unwrap_or(&item.path).display().to_string(),
+                    path: item
+                        .path
+                        .strip_prefix(&bundle.project_root)
+                        .unwrap_or(&item.path)
+                        .display()
+                        .to_string(),
                     hash: item.digest.as_str().to_string(),
                 })
                 .collect::<Vec<_>>();
             locked_provenance.extend(evaluated.comptime_inputs.iter().cloned());
-            for action in evaluated.plan.actions().iter().filter(|action| {
-                selected_actions.contains(&action.id)
-            }) {
+            for action in evaluated
+                .plan
+                .actions()
+                .iter()
+                .filter(|action| selected_actions.contains(&action.id))
+            {
                 for input in &action.inputs {
                     let path = bundle.project_root.join(input.as_str());
-                    let bytes = std::fs::read(&path).map_err(|error| vec![generated_io_diag(&action.name, &error)])?;
+                    let bytes = std::fs::read(&path)
+                        .map_err(|error| vec![generated_io_diag(&action.name, &error)])?;
                     locked_provenance.push(crate::AST::ComptimeInput {
                         path: input.as_str().to_string(),
-                        hash: crate::Comptime::Build::ContentDigest::from_bytes(&bytes).as_str().to_string(),
+                        hash: crate::Comptime::Build::ContentDigest::from_bytes(&bytes)
+                            .as_str()
+                            .to_string(),
                     });
                 }
                 for output in &action.outputs {
                     let path = bundle.project_root.join(output.as_str());
-                    let bytes = std::fs::read(&path).map_err(|error| vec![generated_io_diag(&action.name, &error)])?;
+                    let bytes = std::fs::read(&path)
+                        .map_err(|error| vec![generated_io_diag(&action.name, &error)])?;
                     locked_provenance.push(crate::AST::ComptimeInput {
                         path: output.as_str().to_string(),
-                        hash: crate::Comptime::Build::ContentDigest::from_bytes(&bytes).as_str().to_string(),
+                        hash: crate::Comptime::Build::ContentDigest::from_bytes(&bytes)
+                            .as_str()
+                            .to_string(),
                     });
                 }
             }
@@ -865,7 +959,9 @@ fn compile_bundle_path_build_inner(
         } else {
             bundle
         };
-        planned_bundle.comptime_inputs.extend(evaluated.comptime_inputs);
+        planned_bundle
+            .comptime_inputs
+            .extend(evaluated.comptime_inputs);
         build_run = Some(BuildRun {
             plan: evaluated.plan,
             execution: executed.report,
@@ -880,9 +976,9 @@ fn compile_bundle_path_build_inner(
     // Imported build entries are checked but never run. They are build-only
     // values and must not leak into runtime codegen (root was removed above).
     for module in &mut bundle.modules {
-        module.items.retain(
-            |item| !matches!(item, crate::AST::Item::Func(func) if func.name == "build"),
-        );
+        module
+            .items
+            .retain(|item| !matches!(item, crate::AST::Item::Func(func) if func.name == "build"));
     }
 
     // The selected target source closure and generated modules are a fresh
@@ -897,7 +993,10 @@ fn compile_bundle_path_build_inner(
             crate::Sema::check_bundle(&mut bundle, compile_mode)
         };
         let mut planned_errors = Vec::new();
-        for diag in std::mem::take(&mut bundle.parse_teaching).into_iter().chain(planned_diags) {
+        for diag in std::mem::take(&mut bundle.parse_teaching)
+            .into_iter()
+            .chain(planned_diags)
+        {
             match diag.severity {
                 Severity::Error => planned_errors.push(diag),
                 Severity::Lint => lints.push(diag),
@@ -946,32 +1045,33 @@ fn compile_bundle_path_build_inner(
             )).collect());
         }
     }
-    let rust = crate::Codegen::emit_bundle_dbg(
-        &bundle,
-        ffi.as_ref(),
-        false,
-        active_os,
-    );
+    let rust = crate::Codegen::emit_bundle_dbg(&bundle, ffi.as_ref(), false, active_os);
     let web = if options.web_target {
-        Some(crate::Codegen::emit_web(&bundle, compile_mode, ffi.as_ref()).map_err(|miss| {
-            vec![Diagnostic::error(
-                "E-WEB-TIR-UNSUPPORTED",
-                format!("web output cannot compile `{}` yet", miss.func_name),
-                "web emitter capability facts drifted after validation".to_string(),
-                "report this compiler bug with the named function".to_string(),
-                Some(miss.span),
-            )]
-        })?)
+        Some(
+            crate::Codegen::emit_web(&bundle, compile_mode, ffi.as_ref()).map_err(|miss| {
+                vec![Diagnostic::error(
+                    "E-WEB-TIR-UNSUPPORTED",
+                    format!("web output cannot compile `{}` yet", miss.func_name),
+                    "web emitter capability facts drifted after validation".to_string(),
+                    "report this compiler bug with the named function".to_string(),
+                    Some(miss.span),
+                )]
+            })?,
+        )
     } else {
         None
     };
     let plugin = if options.plugin_target {
         let errors = crate::PluginExport::validate_export_surface(&bundle);
-        if !errors.is_empty() { return Err(errors); }
+        if !errors.is_empty() {
+            return Err(errors);
+        }
         let name = crate::PluginExport::resolve_export_name(&bundle);
         crate::PluginExport::check_and_freeze_version(&bundle, &name)?;
         Some(crate::Codegen::emit_plugin(&bundle, &rust, &name))
-    } else { None };
+    } else {
+        None
+    };
     let capabilities = crate::Capabilities::from_sema(
         &bundle.used_core,
         crate::bundle_uses_unsafe(&bundle),
@@ -990,8 +1090,13 @@ fn compile_bundle_path_build_inner(
         inferred_layer: bundle.inferred_layer,
         layer_ceiling: bundle.layer_ceiling,
     };
-    if let Some(transaction) = filesystem_transaction.as_mut() { transaction.commit(); }
-    Ok(BuildCompileOutput { compile, build: build_run })
+    if let Some(transaction) = filesystem_transaction.as_mut() {
+        transaction.commit();
+    }
+    Ok(BuildCompileOutput {
+        compile,
+        build: build_run,
+    })
 }
 
 fn load_planned_runtime_bundle(
@@ -1000,7 +1105,9 @@ fn load_planned_runtime_bundle(
     generated: &[GeneratedSourceProvenance],
     project_root: &std::path::Path,
 ) -> Result<crate::AST::ProgramBundle, Vec<Diagnostic>> {
-    let sources = plan.selected_sources().map_err(|error| vec![build_plan_diagnostic(&error)])?;
+    let sources = plan
+        .selected_sources()
+        .map_err(|error| vec![build_plan_diagnostic(&error)])?;
     let Some(entry_source) = sources.first() else {
         return Err(vec![Diagnostic::error(
             "E3502",
@@ -1012,7 +1119,11 @@ fn load_planned_runtime_bundle(
     };
     let resolve = |path: &str| {
         let path = std::path::Path::new(path);
-        if path.is_absolute() { path.to_path_buf() } else { project_root.join(path) }
+        if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            project_root.join(path)
+        }
     };
     let entry_path = resolve(entry_source.as_str());
     let mut bundle = crate::Loader::load_entry_with_overlay(
@@ -1023,21 +1134,34 @@ fn load_planned_runtime_bundle(
 
     // Additional selected roots and generated modules merge before the one
     // complete sema pass, so runtime code can call generated declarations.
-    let mut additions = sources.iter().skip(1).map(|path| ("selected source", resolve(path.as_str())))
-        .chain(generated.iter().map(|item| (item.name.as_str(), item.path.clone())))
+    let mut additions = sources
+        .iter()
+        .skip(1)
+        .map(|path| ("selected source", resolve(path.as_str())))
+        .chain(
+            generated
+                .iter()
+                .map(|item| (item.name.as_str(), item.path.clone())),
+        )
         .collect::<Vec<_>>();
     additions.sort_by(|a, b| a.1.cmp(&b.1));
     additions.dedup_by(|a, b| a.1 == b.1);
     for (generator, path) in additions {
-        let loaded = crate::Loader::load_entry_with_overlay(path.to_str().unwrap_or(build_file), None, false)
-            .map_err(|mut diagnostics| {
-                for diagnostic in &mut diagnostics {
-                    diagnostic.what = format!("generated by `{generator}`: {}", diagnostic.what);
-                }
-                diagnostics
-            })?;
+        let loaded = crate::Loader::load_entry_with_overlay(
+            path.to_str().unwrap_or(build_file),
+            None,
+            false,
+        )
+        .map_err(|mut diagnostics| {
+            for diagnostic in &mut diagnostics {
+                diagnostic.what = format!("generated by `{generator}`: {}", diagnostic.what);
+            }
+            diagnostics
+        })?;
         let entry = loaded.entry;
-        bundle.modules[bundle.entry].items.extend(loaded.modules.into_iter().nth(entry).unwrap().items);
+        bundle.modules[bundle.entry]
+            .items
+            .extend(loaded.modules.into_iter().nth(entry).unwrap().items);
     }
     Ok(bundle)
 }
@@ -1052,18 +1176,25 @@ fn check_action_generated_sources(
         .map(|module| module.path.as_str())
         .collect::<std::collections::HashSet<_>>();
     let mut out = Vec::new();
-    let selected = plan.selected_action_ids().map_err(|error| vec![build_plan_diagnostic(&error)])?;
-    for action in plan.actions().iter().filter(|action| selected.contains(&action.id)) {
+    let selected = plan
+        .selected_action_ids()
+        .map_err(|error| vec![build_plan_diagnostic(&error)])?;
+    for action in plan
+        .actions()
+        .iter()
+        .filter(|action| selected.contains(&action.id))
+    {
         for output in &action.outputs {
             if !output.as_str().ends_with(".jet") || registered.contains(output.as_str()) {
                 continue;
             }
             let path = root.join(output.as_str());
-            let source = std::fs::read_to_string(&path).map_err(|error| {
-                vec![generated_io_diag(&action.name, &error)]
-            })?;
+            let source = std::fs::read_to_string(&path)
+                .map_err(|error| vec![generated_io_diag(&action.name, &error)])?;
             let mut generated_bundle = crate::Loader::load_entry_with_overlay(
-                path.to_str().unwrap_or(output.as_str()), None, false,
+                path.to_str().unwrap_or(output.as_str()),
+                None,
+                false,
             )
             .map_err(|mut diags| {
                 for diag in &mut diags {
@@ -1071,10 +1202,8 @@ fn check_action_generated_sources(
                 }
                 diags
             })?;
-            let mut diags = crate::Sema::check_bundle(
-                &mut generated_bundle,
-                crate::Sema::CompileMode::Check,
-            );
+            let mut diags =
+                crate::Sema::check_bundle(&mut generated_bundle, crate::Sema::CompileMode::Check);
             diags.retain(|diag| diag.severity == Severity::Error);
             if !diags.is_empty() {
                 for diag in &mut diags {
@@ -1094,7 +1223,8 @@ fn check_action_generated_sources(
 
 fn valid_build_signature(func: &crate::AST::Func) -> bool {
     if func.params.len() != 1
-        || func.params[0].ty != crate::AST::Type::Named(crate::Syntax::TYPE_BUILD_CONTEXT.to_string())
+        || func.params[0].ty
+            != crate::AST::Type::Named(crate::Syntax::TYPE_BUILD_CONTEXT.to_string())
     {
         return false;
     }
@@ -1112,14 +1242,20 @@ fn validate_build_authority(
     options: &BuildRunOptions,
     span: crate::Diagnostics::Span,
 ) -> Result<(), Vec<Diagnostic>> {
-    let selected = plan.selected_action_ids().map_err(|error| vec![build_plan_diagnostic(&error)])?;
+    let selected = plan
+        .selected_action_ids()
+        .map_err(|error| vec![build_plan_diagnostic(&error)])?;
     let mut required = plan
         .actions()
         .iter()
         .filter(|action| selected.contains(&action.id))
         .flat_map(|action| action.caps.iter().copied())
         .collect::<std::collections::BTreeSet<_>>();
-    if !plan.selected_probe_ids().map_err(|error| vec![build_plan_diagnostic(&error)])?.is_empty() {
+    if !plan
+        .selected_probe_ids()
+        .map_err(|error| vec![build_plan_diagnostic(&error)])?
+        .is_empty()
+    {
         required.insert(crate::Comptime::Build::BuildCapability::Exec);
     }
     for effect in required {
@@ -1168,7 +1304,10 @@ fn program_semantic_facts(
         }
         let reached = summaries.get(name).is_some_and(|summary| {
             summary.edges.contains("__jet_panic__")
-                || summary.edges.iter().any(|callee| reaches_panic(callee, summaries, visiting))
+                || summary
+                    .edges
+                    .iter()
+                    .any(|callee| reaches_panic(callee, summaries, visiting))
         });
         visiting.remove(name);
         reached
@@ -1177,18 +1316,30 @@ fn program_semantic_facts(
     let mut panic_facts = std::collections::BTreeSet::new();
     for module in &bundle.modules {
         for item in &module.items {
-            let crate::AST::Item::Func(func) = item else { continue };
+            let crate::AST::Item::Func(func) = item else {
+                continue;
+            };
             let qualified = format!("{}::{}", module.alias, func.name);
-            let values = checked.solved.get(&qualified)
-                .map(|set| set.iter().cloned().collect()).unwrap_or_default();
+            let values = checked
+                .solved
+                .get(&qualified)
+                .map(|set| set.iter().cloned().collect())
+                .unwrap_or_default();
             effects.insert(qualified.clone(), values);
-            if reaches_panic(&qualified, &checked.summaries, &mut std::collections::BTreeSet::new()) {
+            if reaches_panic(
+                &qualified,
+                &checked.summaries,
+                &mut std::collections::BTreeSet::new(),
+            ) {
                 panic_facts.insert(qualified);
             }
         }
     }
     let reaches_panic = panic_facts;
-    crate::Comptime::ProgramSemanticFacts { effects, reaches_panic }
+    crate::Comptime::ProgramSemanticFacts {
+        effects,
+        reaches_panic,
+    }
 }
 
 fn bad_build_signature(span: crate::Diagnostics::Span) -> Diagnostic {
@@ -1209,9 +1360,11 @@ fn materialize_and_check_generated(
     for module in modules {
         let path = root.join(module.path.as_str());
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| vec![generated_io_diag(&module.name, &error)])?;
+            std::fs::create_dir_all(parent)
+                .map_err(|error| vec![generated_io_diag(&module.name, &error)])?;
         }
-        std::fs::write(&path, &module.source).map_err(|error| vec![generated_io_diag(&module.name, &error)])?;
+        std::fs::write(&path, &module.source)
+            .map_err(|error| vec![generated_io_diag(&module.name, &error)])?;
         let mut generated_bundle = crate::Loader::load_entry_with_overlay(
             path.to_str().unwrap_or(module.path.as_str()),
             None,
@@ -1223,7 +1376,8 @@ fn materialize_and_check_generated(
             }
             diags
         })?;
-        let mut diags = crate::Sema::check_bundle(&mut generated_bundle, crate::Sema::CompileMode::Check);
+        let mut diags =
+            crate::Sema::check_bundle(&mut generated_bundle, crate::Sema::CompileMode::Check);
         diags.retain(|diag| diag.severity == Severity::Error);
         if !diags.is_empty() {
             for diag in &mut diags {
@@ -1245,7 +1399,8 @@ fn generated_io_diag(name: &str, error: &std::io::Error) -> Diagnostic {
         "E3502",
         format!("generated module `{name}` could not be materialized"),
         format!("generated source must be a real file before it re-enters the front end: {error}"),
-        "make sure `.jet/generated` is writable and the generated module name is unique".to_string(),
+        "make sure `.jet/generated` is writable and the generated module name is unique"
+            .to_string(),
         None,
     )
 }
@@ -1393,15 +1548,17 @@ fn compile_bundle_path_opts_full(
     }
     let rust = crate::Codegen::emit_bundle_dbg(&bundle, ffi.as_ref(), debug_linemap, active_os);
     let web = if web_target {
-        Some(crate::Codegen::emit_web(&bundle, mode, ffi.as_ref()).map_err(|miss| {
-            vec![Diagnostic::error(
-                "E-WEB-TIR-UNSUPPORTED",
-                format!("web output cannot compile `{}` yet", miss.func_name),
-                "web emitter capability facts drifted after validation".to_string(),
-                "report this compiler bug with the named function".to_string(),
-                Some(miss.span),
-            )]
-        })?)
+        Some(
+            crate::Codegen::emit_web(&bundle, mode, ffi.as_ref()).map_err(|miss| {
+                vec![Diagnostic::error(
+                    "E-WEB-TIR-UNSUPPORTED",
+                    format!("web output cannot compile `{}` yet", miss.func_name),
+                    "web emitter capability facts drifted after validation".to_string(),
+                    "report this compiler bug with the named function".to_string(),
+                    Some(miss.span),
+                )]
+            })?,
+        )
     } else {
         None
     };
@@ -1730,8 +1887,8 @@ pub fn compile_fuzz(
     file: &str,
     test_name: Option<&str>,
 ) -> Result<(String, Option<crate::FFI::FfiLink>), FuzzCompileError> {
-    let mut bundle =
-        crate::Loader::load_entry_with_overlay(file, None, false).map_err(FuzzCompileError::Diagnostics)?;
+    let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)
+        .map_err(FuzzCompileError::Diagnostics)?;
     let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Test);
     let mut errors = Vec::new();
     for d in diags {

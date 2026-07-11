@@ -2112,7 +2112,58 @@ The LSP exposes scattered-method breadcrumbs as inlay hints at the owning type
 declaration. These are editor-only overlays: they do not edit source and carry
 source links to the real impl method spans.
 
-`jet inspect codemod` supports a first replayable codemod object, encoded as JSON:
+`jet inspect codemod dry-run|apply|undo` uses one replay engine for both schema
+versions. A missing version or `version: 1` is the original semantic rename:
+
+```json
+{"name":"RenameReport","entry":"main.jet","operation":"rename","from":"report","to":"summarize"}
+```
+
+Schema 2 (D-CODEMOD-BATCH1=A) is an ordered batch over typed Jet templates.
+`project` is relative to the object. Each root is one `.jet` file or directory
+beneath `examples/` or `tests/ui/`; absolute, parent, and symlink escapes fail.
+Directory discovery is recursive and byte-path ordered. Rules are either a
+semantic `symbol_rename` or an `ast_rewrite` whose `node` is `expr`, `stmt`,
+`item`, or `type`. `$value` captures one subtree and `$values...` captures a
+list. Every rule declares its exact match count; duplicate ids, unknown fields,
+ambiguous names, unused captures, unresolved replacement names, zero matches,
+and overlapping edits fail before any write. Rule N+1 sees a compiler-reindexed
+overlay containing rule N, so a later semantic rule may target an earlier
+rule's output.
+
+```json
+{
+  "version": 2,
+  "name": "ReportV2",
+  "project": "..",
+  "roots": [
+    {"path":"examples/report.jet","validate":"clean"},
+    {"path":"tests/ui/report_type.jet","validate":"fixture"}
+  ],
+  "rules": [
+    {"id":"rename","kind":"symbol_rename","from":{"name":"report","symbol_kind":"function"},"to":"summarize","matches":4},
+    {"id":"call","kind":"ast_rewrite","node":"expr","match":"legacy_parse($input)","replace":"parse_int($input, base: 10)","matches":2}
+  ],
+  "snapshot_after": {"tests/ui/report_type.jet":"migrations/report_type.after.stderr"}
+}
+```
+
+Clean roots must finish without front-end errors. Fixture roots must reproduce
+their complete paired `.stderr` exactly. An intentional snapshot change names
+a non-symlink project file in `snapshot_after`; the engine first proves those
+bytes equal the compiler-rendered result, then includes the paired `.stderr` in
+the same plan, transaction, and undo log. Code-only fixture changes are refused.
+
+Dry-run holds the codemod lock through discovery, staged compilation,
+validation, input rehash, and diff output but writes no source, snapshot, log,
+temporary file, or journal. Apply requires `--yes` after warning that an editor
+which ignores the codemod lock can still race the final rename. Apply writes
+same-directory temporary files, fsyncs contents and parents, and advances a
+fsynced recovery journal around each rename. A later codemod recovers a crash
+before planning; unexpected concurrent bytes preserve the journal and stop.
+Schema-2 logs contain byte-exact before/after images. Undo verifies every
+after-hash before making any write and uses the same journal protocol to restore
+source and snapshots. Existing schema-1 inverse-edit logs remain readable.
 
 ## Canvas visual editor prototype (D-BPE-*)
 
@@ -2160,16 +2211,6 @@ AST-derived Canvas coverage ratchet is pinned in
 [`docs/reference/canvas-parity.md`](../reference/canvas-parity.md).
 Unknown request fields are ignored by v1; unknown operations fail as Canvas edit
 errors, and unknown future graph fields may never carry hidden semantics.
-
-```json
-{"name":"RenameReport","entry":"main.jet","operation":"rename","from":"report","to":"summarize"}
-```
-
-`jet inspect codemod dry-run <object>` prints affected files plus the inverse object.
-`jet inspect codemod apply <object>` rewrites semantic definition/reference spans using
-the same fix engine as `jet fix` and writes `.jet/codemods/<name>.log.json`
-with inverse rename metadata plus before/after hashes. `jet inspect codemod undo <log>`
-checks the apply hash before replaying the inverse rename.
 
 ## Public front-end toolkit API (D-FRONTENDAPI1=A, card #227)
 
