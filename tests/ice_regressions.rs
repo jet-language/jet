@@ -40,7 +40,8 @@ fn assert_compiles(name: &str, src: &str) {
             jet::render_diagnostics(&shown, src, &diags)
         )
     });
-    assert!(!out.rust.contains("unsafe"), "{name}: invariant I1");
+    let user_rust = common::strip_vetted_module(&out.rust, "jet_atomic_windows");
+    assert!(!user_rust.contains("unsafe"), "{name}: invariant I1");
 
     if !have_rustc() {
         eprintln!("note: rustc not found; skipping build for {name}");
