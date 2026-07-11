@@ -1,5 +1,7 @@
+use super::super::{Call, CallArg, Diagnostic, Parser, Span, TokKind};
+
 impl<'a> Parser<'a> {
-        fn call_after_name(&mut self, name: String, name_span: Span) -> Result<Call, Diagnostic> {
+        pub(super) fn call_after_name(&mut self, name: String, name_span: Span) -> Result<Call, Diagnostic> {
             self.expect(TokKind::LParen, &format!("after `{}` to call it", name))?;
             let mut args = Vec::new();
             if !matches!(self.peek().kind, TokKind::RParen) {
@@ -20,7 +22,7 @@ impl<'a> Parser<'a> {
             })
         }
     
-        fn call_arg(&mut self) -> Result<CallArg, Diagnostic> {
+        pub(super) fn call_arg(&mut self) -> Result<CallArg, Diagnostic> {
             // D-MEM1/S2: an unmarked argument is a plain read at the call site —
             // `parse_access_prefix` already resolves unmarked to `Read` directly.
             let convention = self.parse_access_prefix();

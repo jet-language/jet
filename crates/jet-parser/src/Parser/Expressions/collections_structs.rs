@@ -1,9 +1,11 @@
+use super::super::{Diagnostic, EnumLitArg, Expr, Parser, Pattern, Span, Syntax, TokKind, Type};
+
 impl<'a> Parser<'a> {
         /// S37/S38: `[a, b]` or `["k": v]` or `[]`. D-EMPTYLIT1: `[]` is the one
         /// empty-collection spelling — type-directed, list or map decided by the
         /// expected-type context (sema). `[:]` is gone; `[` immediately followed
         /// by `:` falls through to an ordinary expression-expected parse error.
-        fn list_or_map_lit(&mut self) -> Result<Expr, Diagnostic> {
+        pub(super) fn list_or_map_lit(&mut self) -> Result<Expr, Diagnostic> {
             let open = self.bump().span;
             if matches!(self.peek().kind, TokKind::RBracket) {
                 let close = self.bump().span;
@@ -52,7 +54,7 @@ impl<'a> Parser<'a> {
             self.expr()
         }
     
-        fn struct_lit_after_name(
+        pub(super) fn struct_lit_after_name(
             &mut self,
             type_name: String,
             type_args: Vec<Type>,
@@ -91,7 +93,7 @@ impl<'a> Parser<'a> {
             })
         }
     
-        fn struct_lit_after_import(
+        pub(super) fn struct_lit_after_import(
             &mut self,
             alias: String,
             type_name: String,
@@ -132,7 +134,7 @@ impl<'a> Parser<'a> {
     
         /// D-DOTCTOR1: inferred struct lit `.{ field: val, … }`.
         /// The leading `.` was already consumed. Parses `{ field: val, … }`.
-        fn struct_lit_inferred(&mut self, dot_start: usize) -> Result<Expr, Diagnostic> {
+        pub(super) fn struct_lit_inferred(&mut self, dot_start: usize) -> Result<Expr, Diagnostic> {
             self.expect(TokKind::LBrace, "to open an inferred struct literal")?;
             let mut fields = Vec::new();
             while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
@@ -169,7 +171,7 @@ impl<'a> Parser<'a> {
         /// The leading `.` before `{` was already consumed; parses the brace body and
         /// returns `EnumLitArg::Named` entries (S77 field punning applies, matching
         /// struct dot-construction).
-        fn enum_lit_named_fields(&mut self) -> Result<(Vec<EnumLitArg>, usize), Diagnostic> {
+        pub(super) fn enum_lit_named_fields(&mut self) -> Result<(Vec<EnumLitArg>, usize), Diagnostic> {
             self.expect(TokKind::LBrace, "to open a named enum-variant literal")?;
             let mut args = Vec::new();
             while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
@@ -201,7 +203,7 @@ impl<'a> Parser<'a> {
         /// `Variant(bindings)`. A bare identifier is ordinary value equality
         /// (`a == b`); unit-variant tests like `light == Red` are resolved in
         /// sema when `Red` is not a variable but is a variant on the subject.
-        pub(super) fn try_pattern_rhs(&mut self) -> Result<Option<Pattern>, Diagnostic> {
+        pub(in crate::Parser) fn try_pattern_rhs(&mut self) -> Result<Option<Pattern>, Diagnostic> {
             match &self.peek().kind {
                 // D-PARSESTR1: an interpolation literal in pattern position —
                 // `subject == "prefix-{id:Int}-suffix"`. Each hole must reduce to

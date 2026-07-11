@@ -1,5 +1,10 @@
+use super::super::{
+    AccessConvention, Call, CallArg, Diagnostic, Expr, LValue, Parser, Span, Syntax, TokKind,
+    TryConvert,
+};
+
 impl<'a> Parser<'a> {
-        fn expr_postfix(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
+        pub(super) fn expr_postfix(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
             let mut expr = self.expr_primary(allow_struct_lit)?;
             // D-TRAILBLOCK1: a call takes at most one trailing `{ }` block.
             let mut trailing_block_attached = false;
@@ -425,7 +430,7 @@ impl<'a> Parser<'a> {
         /// S75 (2026-06-16): parse `.[item, …]` after the `.` has already been consumed.
         /// `dot_span` is the span of the consumed `.`. Called from both `expr_primary`
         /// (for `ident.[…]`) and `expr_postfix` (for chained `expr.[…]`).
-        fn parse_fan_out_bracket(
+        pub(super) fn parse_fan_out_bracket(
             &mut self,
             callee: Box<Expr>,
             dot_span: Span,
@@ -454,7 +459,7 @@ impl<'a> Parser<'a> {
             })
         }
     
-        pub(super) fn expr_to_lvalue(&mut self, expr: Expr) -> Result<LValue, Diagnostic> {
+        pub(in crate::Parser) fn expr_to_lvalue(&mut self, expr: Expr) -> Result<LValue, Diagnostic> {
             match expr {
                 Expr::Ident(name, name_span) => Ok(LValue::Local { name, name_span }),
                 Expr::Index {

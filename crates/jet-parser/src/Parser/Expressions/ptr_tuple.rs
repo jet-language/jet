@@ -1,8 +1,10 @@
+use super::super::{Diagnostic, Expr, Parser, Span, Syntax, TokKind};
+
 impl<'a> Parser<'a> {
         /// S58 (E2-M13): parse the tail of `alias.Ptr<T>.from_addr(addr)`, with the
         /// cursor at the `<`. The `alias`/`alias_span` are the already-parsed
         /// module alias and `.Ptr` member.
-        fn ptr_from_addr(&mut self, alias: String, alias_span: Span) -> Result<Expr, Diagnostic> {
+        pub(super) fn ptr_from_addr(&mut self, alias: String, alias_span: Span) -> Result<Expr, Diagnostic> {
             self.expect_type_args_open(Syntax::TYPE_PTR)?;
             let (elem, _) = self.type_()?;
             if matches!(self.peek().kind, TokKind::Comma) {
@@ -58,7 +60,7 @@ impl<'a> Parser<'a> {
     
         /// S73: `( name :: … )` — named tuple literal or type, not grouping.
         /// When `lparen_consumed` is true, `self.pos` is already on the first member name.
-        pub(super) fn looks_like_named_tuple(&self, lparen_consumed: bool) -> bool {
+        pub(in crate::Parser) fn looks_like_named_tuple(&self, lparen_consumed: bool) -> bool {
             let i = if lparen_consumed {
                 self.pos
             } else {
@@ -98,7 +100,7 @@ impl<'a> Parser<'a> {
         }
     
         /// S73: reject `.0` / `.1` field access before `expect_ident`.
-        fn expect_field_name(&mut self) -> Result<(String, Span), Diagnostic> {
+        pub(super) fn expect_field_name(&mut self) -> Result<(String, Span), Diagnostic> {
             if matches!(self.peek().kind, TokKind::Int(_) | TokKind::Float(_)) {
                 let span = self.peek().span;
                 self.bump();
@@ -187,7 +189,7 @@ impl<'a> Parser<'a> {
             ))
         }
     
-        fn parse_paren_primary(&mut self, _allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
+        pub(super) fn parse_paren_primary(&mut self, _allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
             let open = self.bump().span;
             if self.looks_like_named_tuple(true) {
                 return self.parse_tuple_lit(open);
@@ -254,12 +256,12 @@ impl<'a> Parser<'a> {
             }
         }
     
-        pub(super) fn expr(&mut self) -> Result<Expr, Diagnostic> {
+        pub(in crate::Parser) fn expr(&mut self) -> Result<Expr, Diagnostic> {
             let span = self.peek().span;
             self.with_nesting(span, |p| p.expr_or_fallback(true))
         }
     
-        pub(super) fn expr_no_struct_lit(&mut self) -> Result<Expr, Diagnostic> {
+        pub(in crate::Parser) fn expr_no_struct_lit(&mut self) -> Result<Expr, Diagnostic> {
             let span = self.peek().span;
             self.with_nesting(span, |p| p.expr_or_fallback(false))
         }
@@ -270,7 +272,7 @@ impl<'a> Parser<'a> {
         /// consume the `==` (as a comparison or a `PatternTest`) and then choke on
         /// the `{`. Struct literals are disallowed, like `expr_no_struct_lit`, so
         /// `if subject {` never reads `subject { … }` as a struct value.
-        pub(super) fn expr_no_struct_lit_no_cmp(&mut self) -> Result<Expr, Diagnostic> {
+        pub(in crate::Parser) fn expr_no_struct_lit_no_cmp(&mut self) -> Result<Expr, Diagnostic> {
             let span = self.peek().span;
             self.with_nesting(span, |p| p.expr_bitor(false))
         }

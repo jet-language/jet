@@ -1,6 +1,10 @@
+use super::super::{
+    Diagnostic, Lambda, LambdaBody, LambdaMeta, LambdaParam, Parser, Span, Stmt, TokKind,
+};
+
 impl<'a> Parser<'a> {
         /// S46: `(` … `) =>` without scanning nested `(` for the `=>` probe.
-        fn after_lparen_is_lambda(&self) -> bool {
+        pub(super) fn after_lparen_is_lambda(&self) -> bool {
             let mut i = self.pos + 1;
             let mut depth = 1usize;
             while i < self.toks.len() {
@@ -23,7 +27,7 @@ impl<'a> Parser<'a> {
         }
     
         /// S47: `take(a, b)` prefix on a lambda.
-        fn parse_lambda_takes(&mut self) -> Result<Vec<(String, Span)>, Diagnostic> {
+        pub(super) fn parse_lambda_takes(&mut self) -> Result<Vec<(String, Span)>, Diagnostic> {
             self.expect(TokKind::KwMove, "before the capture list")?;
             self.expect(TokKind::LParen, "after `take` in a capture list")?;
             let mut names = Vec::new();
@@ -41,7 +45,7 @@ impl<'a> Parser<'a> {
             Ok(names)
         }
     
-        fn parse_lambda(&mut self, take_names: Vec<(String, Span)>) -> Result<Lambda, Diagnostic> {
+        pub(super) fn parse_lambda(&mut self, take_names: Vec<(String, Span)>) -> Result<Lambda, Diagnostic> {
             let open = self.peek().span;
             self.expect(TokKind::LParen, "before lambda parameters")?;
             let mut params = Vec::new();
@@ -86,7 +90,7 @@ impl<'a> Parser<'a> {
         /// as the existing omitted-type `(m) => …` form under S46/D-LAMBDAINFER1).
         /// No `take` prefix on the bare form — write `(take x) (x) => …` when a
         /// capture list is needed.
-        fn parse_bare_lambda(&mut self) -> Result<Lambda, Diagnostic> {
+        pub(super) fn parse_bare_lambda(&mut self) -> Result<Lambda, Diagnostic> {
             let (name, name_span) = self.expect_ident("as a lambda parameter")?;
             self.expect(TokKind::LambdaArrow, "after a bare lambda parameter")?;
             let (body, end) = self.lambda_arrow_body(name_span.end)?;
@@ -169,7 +173,7 @@ impl<'a> Parser<'a> {
         }
     
         /// D-TASKSCOPE1=A: `{ stmts }` after `.task` → `() => { stmts }`.
-        fn parse_task_body_lambda(&mut self) -> Result<Lambda, Diagnostic> {
+        pub(super) fn parse_task_body_lambda(&mut self) -> Result<Lambda, Diagnostic> {
             let open = self.peek().span;
             self.expect(TokKind::LBrace, "to open the task body")?;
             let stmts = self.block_stmts();
