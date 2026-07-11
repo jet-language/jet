@@ -52,8 +52,8 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
     ),
     (
         "crates/jet-codegen/src/scheduler.rs",
-        2,
-        "scheduler runtime-boundary panic plus #[cfg(test)] deadline shim",
+        4,
+        "scheduler runtime-boundary panic, #[cfg(test)] deadline shim, and two #[cfg(test)] cancel/shield result asserts (D-CANCELMODEL1)",
     ),
     (
         "crates/jet-codegen/src/Codegen/TIR/tests.rs",
