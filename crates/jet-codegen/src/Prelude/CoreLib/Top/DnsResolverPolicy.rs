@@ -21,9 +21,9 @@ fn jet_net_dns_parse_scutil(text: &str) -> Vec<String> {
     text.lines()
         .filter_map(|line| {
             let (label, value) = line.trim().split_once(':')?;
-            label
-                .trim()
-                .starts_with("nameserver[")
+            let label = label.trim();
+            let index = label.strip_prefix("nameserver[")?.strip_suffix(']')?;
+            (!index.is_empty() && index.bytes().all(|byte| byte.is_ascii_digit()))
                 .then(|| jet_net_dns_socket_addr(value))
                 .flatten()
         })

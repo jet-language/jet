@@ -162,7 +162,7 @@ impl JetShow for JetTcpListener {
             self.inner
                 .local_addr()
                 .map(|a| a.to_string())
-                .unwrap_or_default()
+                .unwrap_or_else(|error| format!("address unavailable: {}", error))
         )
     }
 }
@@ -173,7 +173,7 @@ impl JetShow for JetTcpStream {
             self.inner
                 .peer_addr()
                 .map(|a| a.to_string())
-                .unwrap_or_default()
+                .unwrap_or_else(|error| format!("peer unavailable: {}", error))
         )
     }
 }
@@ -218,7 +218,7 @@ impl JetShow for JetUdpSocket {
             self.inner
                 .local_addr()
                 .map(|a| a.to_string())
-                .unwrap_or_default()
+                .unwrap_or_else(|error| format!("address unavailable: {}", error))
         )
     }
 }
@@ -379,26 +379,32 @@ fn jet_net_tcp_stream(inner: std::net::TcpStream) -> JetTcpStream {
     }
 }
 
-fn jet_net_apply_tcp_deadlines(stream: &std::net::TcpStream, op: &str) {
+fn jet_net_apply_tcp_deadlines(stream: &std::net::TcpStream, op: &str) -> Result<(), JetNetError> {
     if let Some(remaining) = jet_deadline_remaining_ms() {
         if remaining <= 0 {
             jet_deadline_exceeded(op);
         }
         let dur = Some(std::time::Duration::from_millis(remaining as u64));
-        let _ = stream.set_read_timeout(dur);
-        let _ = stream.set_write_timeout(dur);
+        stream.set_read_timeout(dur)
+            .map_err(|error| jet_net_io_error(&format!("{} read timeout", op), None, error))?;
+        stream.set_write_timeout(dur)
+            .map_err(|error| jet_net_io_error(&format!("{} write timeout", op), None, error))?;
     }
+    Ok(())
 }
 
-fn jet_net_apply_udp_deadline(socket: &std::net::UdpSocket, op: &str) {
+fn jet_net_apply_udp_deadline(socket: &std::net::UdpSocket, op: &str) -> Result<(), JetNetError> {
     if let Some(remaining) = jet_deadline_remaining_ms() {
         if remaining <= 0 {
             jet_deadline_exceeded(op);
         }
         let dur = Some(std::time::Duration::from_millis(remaining as u64));
-        let _ = socket.set_read_timeout(dur);
-        let _ = socket.set_write_timeout(dur);
+        socket.set_read_timeout(dur)
+            .map_err(|error| jet_net_io_error(&format!("{} read timeout", op), None, error))?;
+        socket.set_write_timeout(dur)
+            .map_err(|error| jet_net_io_error(&format!("{} write timeout", op), None, error))?;
     }
+    Ok(())
 }
 
 fn jet_net_ip_addr(text: &String) -> Result<JetIpAddr, JetNetError> {
@@ -571,7 +577,7 @@ fn jet_net_tcp_read_bytes(stream: &mut JetTcpStream, limit: i64) -> Result<Vec<u
     if cap == 0 {
         return Ok(Vec::new());
     }
-    jet_net_apply_tcp_deadlines(&stream.inner, "tcp read");
+    jet_net_apply_tcp_deadlines(&stream.inner, "tcp read")?;
     let mut bytes = vec![0u8; cap];
     loop {
         match stream.inner.read(&mut bytes) {
@@ -605,7 +611,7 @@ fn jet_net_tcp_write_bytes(stream: &mut JetTcpStream, data: &Vec<u8>) -> Result<
     if stream.closed || stream.write_shutdown {
         return Err(jet_net_closed("tcp write"));
     }
-    jet_net_apply_tcp_deadlines(&stream.inner, "tcp write");
+    jet_net_apply_tcp_deadlines(&stream.inner, "tcp write")?;
     loop {
         match stream.inner.write(data) {
             Ok(n) => return Ok(n as i64),
@@ -813,7 +819,7 @@ fn jet_net_udp_send_to(
     data: &String,
     addr: &JetSocketAddr,
 ) -> Result<i64, JetNetError> {
-    jet_net_apply_udp_deadline(&socket.inner, "udp send");
+    jet_net_apply_udp_deadline(&socket.inner, "udp send")?;
     socket
         .inner
         .send_to(data.as_bytes(), addr.inner)
@@ -825,7 +831,7 @@ fn jet_net_udp_recv_from(socket: &JetUdpSocket, limit: i64) -> Result<JetUdpPack
     if limit <= 0 {
         return Err(JetNetError::InvalidInput(jet_net_detail("udp receive", None, None, "udp receive limit must be positive".to_string(), None)));
     }
-    jet_net_apply_udp_deadline(&socket.inner, "udp receive");
+    jet_net_apply_udp_deadline(&socket.inner, "udp receive")?;
     let cap = std::cmp::min(limit as usize, 1 << 20);
     let mut buf = vec![0u8; 65535];
     socket
@@ -857,7 +863,7 @@ fn jet_net_udp_send_bytes_to(
     data: &Vec<u8>,
     addr: &JetSocketAddr,
 ) -> Result<i64, JetNetError> {
-    jet_net_apply_udp_deadline(&socket.inner, "udp send");
+    jet_net_apply_udp_deadline(&socket.inner, "udp send")?;
     socket
         .inner
         .send_to(data, addr.inner)
@@ -871,7 +877,7 @@ fn jet_net_udp_receive(socket: &JetUdpSocket, limit: i64) -> Result<JetUdpPacket
             "udp receive", None, None, "udp receive limit must be non-negative".to_string(), None,
         )));
     }
-    jet_net_apply_udp_deadline(&socket.inner, "udp receive");
+    jet_net_apply_udp_deadline(&socket.inner, "udp receive")?;
     let cap = std::cmp::min(limit as usize, 65535);
     let mut bytes = vec![0u8; 65535];
     let (original_len, addr) = socket
@@ -1693,12 +1699,20 @@ where
         let h = handler.clone();
         std::thread::spawn(move || {
             let mut buf = [0u8; 16384];
-            let n = stream.read(&mut buf).unwrap_or(0);
+            let n = match stream.read(&mut buf) {
+                Ok(n) => n,
+                Err(error) => {
+                    eprintln!("E2801: HTTP connection read failed: {}", error);
+                    return;
+                }
+            };
             let raw = String::from_utf8_lossy(&buf[..n]).into_owned();
             let req = jet_http_parse_request(&raw);
             let resp = h(req);
             let response_text = jet_http_format_response(&resp);
-            let _ = stream.write_all(response_text.as_bytes());
+            if let Err(error) = stream.write_all(response_text.as_bytes()) {
+                eprintln!("E2801: HTTP connection write failed: {}", error);
+            }
         });
     }
 }
@@ -1881,12 +1895,20 @@ fn jet_http_serve_router(addr: &String, router: JetHttpRouter) {
         let r = router.clone();
         std::thread::spawn(move || {
             let mut buf = [0u8; 16384];
-            let n = stream.read(&mut buf).unwrap_or(0);
+            let n = match stream.read(&mut buf) {
+                Ok(n) => n,
+                Err(error) => {
+                    eprintln!("E2801: HTTP router connection read failed: {}", error);
+                    return;
+                }
+            };
             let raw = String::from_utf8_lossy(&buf[..n]).into_owned();
             let req = jet_http_parse_request(&raw);
             let resp = jet_http_router_dispatch(&r, req);
             let response_text = jet_http_format_response(&resp);
-            let _ = stream.write_all(response_text.as_bytes());
+            if let Err(error) = stream.write_all(response_text.as_bytes()) {
+                eprintln!("E2801: HTTP router connection write failed: {}", error);
+            }
         });
     }
 }

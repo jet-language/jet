@@ -711,6 +711,22 @@ fn core_net_dns_platform_resolver_parsers_accept_native_fixtures() {
 }
 
 #[test]
+fn core_net_dns_platform_resolver_parsers_reject_noise_and_malformed_entries() {
+    assert!(dns_resolver_policy::resolv_conf(
+        "nameserver nope\nnot-nameserver 192.0.2.1\nnameserver [broken\n"
+    )
+    .is_empty());
+    assert!(dns_resolver_policy::scutil(
+        "nameserver[x] : 192.0.2.1\nnameserver[0 : 192.0.2.2\nnameserver[] : 192.0.2.3\n"
+    )
+    .is_empty());
+    assert!(dns_resolver_policy::windows(
+        "InterfaceAlias Ethernet\nServerAddresses nope, 999.1.1.1\n"
+    )
+    .is_empty());
+}
+
+#[test]
 fn core_net_dns_rejects_wrong_transaction_id() {
     let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
     let addr = socket.local_addr().unwrap();
