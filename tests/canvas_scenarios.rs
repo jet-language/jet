@@ -13,6 +13,55 @@ static BUILD_JET: Once = Once::new();
 const MAX_CANVAS_BROWSERS: usize = 4;
 static CANVAS_BROWSER_POOL: OnceLock<(Mutex<usize>, Condvar)> = OnceLock::new();
 
+#[test]
+fn strict_full_verification_rejects_each_missing_canvas_tool_once() {
+    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let original_chromium = std::env::var_os("JET_CANVAS_CHROMIUM");
+    let original_node = std::env::var_os("JET_CANVAS_NODE");
+
+    for (missing, chromium, node) in [
+        ("chromium", "jet-test-missing-chromium", "node"),
+        ("node", "chromium", "jet-test-missing-node"),
+    ] {
+        let output = Command::new("bash")
+            .current_dir(&repo)
+            .arg("scripts/agent/verify-full.sh")
+            .env("JET_VERIFY_CANVAS_PREREQUISITES_ONLY", "1")
+            .env("JET_NIX_TMP_CLEANED", "1")
+            .env("JET_CANVAS_CHROMIUM", chromium)
+            .env("JET_CANVAS_NODE", node)
+            .output()
+            .expect("run strict Canvas prerequisite preflight");
+        assert!(!output.status.success(), "missing {missing} must fail");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let expected = format!(
+            "error: Canvas interaction tests require Chromium and Node; missing: {missing}. Run full verification inside 'nix develop'."
+        );
+        assert_eq!(stderr.matches(&expected).count(), 1, "{stderr}");
+        assert!(!stderr.contains("ignored:"), "{stderr}");
+    }
+
+    assert_eq!(std::env::var_os("JET_CANVAS_CHROMIUM"), original_chromium);
+    assert_eq!(std::env::var_os("JET_CANVAS_NODE"), original_node);
+}
+
+#[test]
+fn strict_full_verification_accepts_canvas_tools_in_dev_shell() {
+    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let output = Command::new("bash")
+        .current_dir(&repo)
+        .arg("scripts/agent/verify-full.sh")
+        .env("JET_VERIFY_CANVAS_PREREQUISITES_ONLY", "1")
+        .env("JET_NIX_TMP_CLEANED", "1")
+        .output()
+        .expect("run strict Canvas prerequisite preflight");
+    assert!(
+        output.status.success(),
+        "dev-shell Canvas prerequisite preflight failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 struct CanvasBrowserPermit;
 
 impl CanvasBrowserPermit {
