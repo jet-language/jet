@@ -2207,6 +2207,8 @@ pub enum THandleOp {
     DataTreeBool,
     /// D-SERDE-ACCESS=B: `DataTree.float()` → `(recv).float()`.
     DataTreeFloat,
+    /// D-SERDE16=A: `tree.decode<T>()` dispatches the public `T.Decode` protocol.
+    DataTreeDecode(Type),
     /// D-SERDE-ACCESS=B: same accessors on `Json`/`Data`.
     JsonField,
     JsonAt,

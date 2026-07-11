@@ -1593,6 +1593,18 @@ pub(crate) fn lower_method_call(
         }
     }
     if let Some(handle) = recv_type {
+        if handle == Syntax::TYPE_DATA && method == "decode" && args.is_empty() {
+            if let Some(Type::Result { ok, .. }) = resolved_ret {
+                return TExpr {
+                    ty: resolved_ret.cloned().unwrap_or_else(unit_type),
+                    kind: TExprKind::HandleMethod {
+                        recv: Box::new(lower_expr(receiver, cx, env)),
+                        op: THandleOp::DataTreeDecode((**ok).clone()),
+                        args: Vec::new(),
+                    },
+                };
+            }
+        }
         if let Some(op) = handle_method_op(handle, method, args.len()) {
             let recv_t = lower_expr(receiver, cx, env);
             let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();

@@ -32,7 +32,7 @@ impl<'a> Checker<'a> {
         /// D-SERDE: a type `decode<T>` can construct. Mirrors [`Self::is_encodable`] but a
         /// user type must derive `Decode` (the dynamic `Json` tree is reached by bare
         /// `decode`, not the typed path).
-        fn is_decodable(&self, t: &Type) -> bool {
+        pub(crate) fn is_decodable(&self, t: &Type) -> bool {
             match t {
                 Type::Int
                 | Type::Float

@@ -686,6 +686,36 @@ impl<'a> Checker<'a> {
                 self.allow_string_view_read = false;
             }
             let recv_ty = recv_ty?;
+            // D-SERDE16=A: public, target-directed Decode dispatch from an ordinary
+            // DataTree subtree. This is the spelling generated derives emit too.
+            if matches!(&recv_ty, Type::Named(n) if n == Syntax::TYPE_DATA)
+                && method == "decode"
+            {
+                *recv_type_out = Some(Syntax::TYPE_DATA.to_string());
+                if !args.is_empty() || type_args.len() != 1 {
+                    self.diags.push(wrong_core_arity("DataTree.decode<T>", 0, args.len(), span));
+                    for arg in args.iter_mut() {
+                        self.infer(&mut arg.expr);
+                    }
+                    return None;
+                }
+                let target = type_args[0].clone();
+                if !self.is_decodable(&target) {
+                    self.diags.push(Diagnostic::error(
+                        "E0905",
+                        format!("`{}` does not implement `Decode`", target.show()),
+                        format!("`DataTree.decode<{}>()` can only call the type's Decode contract", target.show()),
+                        format!("derive `Decode` on `{}`, or write `impl {}.Decode`", target.show(), target.show()),
+                        Some(span),
+                    ));
+                }
+                let ret = Type::Result {
+                    ok: Box::new(target),
+                    err: Box::new(Type::Named("DecodeError".to_string())),
+                };
+                *resolved_ret_out = Some(ret.clone());
+                return Some(ret);
+            }
             if let Type::Named(ref n) | Type::Apply { name: ref n, .. } = &recv_ty {
                 if n == Syntax::TYPE_TASKGROUP {
                     return self.infer_taskgroup_method(receiver, method, span, args, recv_type_out);
