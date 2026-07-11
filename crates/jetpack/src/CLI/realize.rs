@@ -685,6 +685,17 @@ fn resolve_channel_from_fixture(source: &ChannelSource, flags: &Flags) -> Option
     None
 }
 
+fn channel_download_size_from_fixture(source: &ChannelSource, flags: &Flags) -> Option<u64> {
+    let dir = fixtures_for(flags)?;
+    let raw = std::fs::read_to_string(dir.join("channels.txt")).ok()?;
+    raw.lines().find_map(|line| {
+        let cols = line.split_whitespace().collect::<Vec<_>>();
+        (cols.len() >= 4 && cols[0] == source.base && cols[1] == source.channel.as_str())
+            .then(|| cols[3].parse().ok())
+            .flatten()
+    })
+}
+
 fn exact_upstream(base: &str, exact: &str) -> String {
     if exact.contains(Syntax::REF_SEPARATOR) {
         exact.to_string()

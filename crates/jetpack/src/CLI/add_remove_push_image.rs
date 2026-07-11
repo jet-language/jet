@@ -216,6 +216,7 @@ fn cmd_remove(theme: &Theme, parsed: &Parsed) -> i32 {
         raw,
         Syntax::ENV_FILE,
     );
+    theme.download_line(0);
     if !theme.confirm_apply(parsed.flags.assume_yes) {
         return 0;
     }

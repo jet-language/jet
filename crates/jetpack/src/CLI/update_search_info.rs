@@ -57,6 +57,14 @@ fn cmd_update(theme: &Theme, parsed: &Parsed) -> i32 {
             exact,
         );
     }
+    let download_bytes = updates
+        .iter()
+        .map(|(source, _)| channel_download_size_from_fixture(source, &parsed.flags))
+        .collect::<Option<Vec<_>>>()
+        .map(|sizes| sizes.into_iter().sum());
+    if let Some(bytes) = download_bytes {
+        theme.download_line(bytes);
+    }
     if !theme.confirm_apply(parsed.flags.assume_yes) {
         return 0;
     }

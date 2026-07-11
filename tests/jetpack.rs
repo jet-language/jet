@@ -468,7 +468,7 @@ fn write_channel_fixture(fixtures: &Path, base: &str, channel: &str, exact: &str
     fs::create_dir_all(fixtures).unwrap();
     fs::write(
         fixtures.join("channels.txt"),
-        format!("{base} {channel} {exact}\n"),
+        format!("{base} {channel} {exact} 240000000\n"),
     )
     .unwrap();
 }
@@ -1063,7 +1063,7 @@ fn add_then_remove_edits_env_file() {
         String::from_utf8_lossy(&add.stderr)
     );
     assert!(
-        String::from_utf8_lossy(&add.stderr).contains("✓ hello     —"),
+        String::from_utf8_lossy(&add.stderr).contains("✓ hello     0.1.0"),
         "add must print its verified resolved version: {}",
         String::from_utf8_lossy(&add.stderr)
     );
@@ -1114,6 +1114,7 @@ fn remove_without_yes_prints_plan_and_keeps_env_file_in_non_tty() {
     let stderr = String::from_utf8_lossy(&remove.stderr);
     assert!(stderr.contains("Plan env edit"), "stderr: {stderr}");
     assert!(stderr.contains("- hello"), "stderr: {stderr}");
+    assert!(stderr.contains("Download 0 B"), "stderr: {stderr}");
     assert!(stderr.contains("-y or --yes"), "stderr: {stderr}");
 }
 
@@ -1441,6 +1442,11 @@ module dev {
         "stderr: {}",
         String::from_utf8_lossy(&update.stderr)
     );
+    assert!(
+        String::from_utf8_lossy(&update.stderr).contains("Download 240 MB"),
+        "stderr: {}",
+        String::from_utf8_lossy(&update.stderr)
+    );
     let lock = fs::read_to_string(proj.join(".jet/lock")).unwrap();
     assert!(lock.contains("[[source_channel]]"), "lock: {lock}");
     assert!(lock.contains("channel = \"latest\""), "lock: {lock}");
@@ -1725,6 +1731,11 @@ fn core_hello_project(tag: &str) -> (Scratch, PathBuf, PathBuf) {
     fs::create_dir_all(&hello_bin).unwrap();
     fs::create_dir_all(&proj).unwrap();
     fs::write(hello_pkg.join("hello.jet"), "module hello { }\n").unwrap();
+    fs::write(
+        repo.join("pkg.jet"),
+        "payload: { name: \"fixture\", version: \"0.1.0\" }\npackages: { hello: executable }\n",
+    )
+    .unwrap();
     let greet = hello_bin.join("hello");
     fs::write(&greet, "#!/bin/sh\necho hello from jet-pkgs\n").unwrap();
     #[cfg(unix)]
@@ -2274,6 +2285,29 @@ fn committed_example_builds_offline_end_to_end() {
         );
     }
     assert!(stderr.contains("built 3 package(s)"), "stderr: {stderr}");
+}
+
+#[test]
+fn failed_first_dependency_reports_zero_completed_nodes() {
+    let (_base, proj, root) = core_hello_project("progress-first-failure");
+    let env_path = proj.join("env.jet");
+    let env = fs::read_to_string(&env_path)
+        .unwrap()
+        .replace("[\"mine:hello\"]", "[\"mine:missing\", \"mine:hello\"]");
+    fs::write(&env_path, env).unwrap();
+    let out = jetpack()
+        .args(["build", "--no-color"])
+        .current_dir(&proj)
+        .env("JETPACK_ROOT", &root)
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("building completed 0/2 · current: mine -> missing · resolving"),
+        "first failure must not claim completion: {stderr}"
+    );
+    assert!(!stderr.contains("building completed 1/2 · current: mine -> missing"));
 }
 
 #[test]
