@@ -1621,6 +1621,32 @@ index, not a substitute for that law.
   deadlines, cancellation, readiness, and high-concurrency serving stay one
   socket model. String entrypoints remain the beginner path; `IpAddr` and
   `SocketAddr` are the expert/control path over the same semantics.
+- **D-NETDNS2=A**: ordinary IP resolution delegates to the host resolver and
+  therefore preserves hosts files, search domains, VPNs, and enterprise
+  policy. `DnsResolver.at` is the one expert wire-resolver escape hatch. It
+  uses unpredictable transaction IDs, validates sender/header/question and
+  every packet bound, follows bounded compression and CNAME chains, retries a
+  truncated UDP answer over bounded TCP, and never invents a public resolver.
+- **D-NETIO1=D**: TCP, Unix, and TLS streams are byte-canonical and conform to
+  the same reader/writer operation contract as file and codec streams; checked
+  UTF-8 helpers project over those bytes. UDP remains packet-oriented and
+  reports source, original length, and truncation. Half-close is explicit;
+  close is idempotent; later misuse returns `.Closed`.
+- **D-NETERROR1=A**: every fallible network operation returns the structured
+  `NetError` family. Stable variants cover invalid input, permissions,
+  address/connection state, closed handles, timeout, cancellation,
+  unsupported operations, DNS, TLS, protocol errors, and other OS failures.
+  Operation/address/name are stable data; an OS code is optional audit data.
+- **D-NETTASK1=A**: blocking-looking calls on the one socket-handle family
+  observe the current `#Context`, yield through the shared runtime where
+  available, and obey the earliest context, persistent socket, or explicit
+  per-call deadline. The same handles expose readiness; cancellation and
+  expiry are distinct `.Cancelled` and `.Timeout` values.
+- **D-NETTLSSTREAM1=A**: `core.tls.client` consumes a connected `TcpStream` and
+  returns a `TlsStream` with the same byte, reader/writer, readiness, deadline,
+  cancellation, shutdown, and close law. Safe defaults verify the server name
+  with system roots; advanced roots, ALPN, identity, protocol bounds, peer
+  identity, and close-notify remain explicit `core.tls` controls.
 - **D-HTTPDEPTH1=A**: `core.http` owns Client, Server, Router, middleware,
   streaming bodies, forms/multipart, cookies, redirects, timeouts, TLS policy,
   and SSE, built on `core.url`, `core.mime`, and `core.net`. WebSocket support

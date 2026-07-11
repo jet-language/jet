@@ -93,7 +93,7 @@ fn layer_of_normalized(module: &str) -> RuntimeLayer {
 
         // ── hosted: OS I/O, networking, processes ──────────────────────────
         "core.io" | "core.env" | "core.process" | "core.files" | "core.path" | "core.watcher"
-        | "core.net" | "core.term" | "core.time" | "core.time.date" | "core.time.datetime"
+        | "core.net" | "core.tls" | "core.term" | "core.time" | "core.time.date" | "core.time.datetime"
         | "core.tasks" | "jet.http" | "core.http.client" | "core.http.server" | "core.archive"
         | "core.raylib" | "core.compress.gzip" | "core.compress.zstd" | "jet.db"
         // D-DEP-WASM1=A (c81): the plugin loader embeds wasmtime — same OS-facing

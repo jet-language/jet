@@ -419,6 +419,12 @@ impl<'a> Checker<'a> {
         if matches!(enum_name, "TextWidthAmbiguous" | "TextWidthControls") {
             return true;
         }
+        if matches!(enum_name, "NetShutdown" | "NetReadyInterest") {
+            return true;
+        }
+        if matches!(enum_name, "NetError" | "NetDnsError") {
+            return true;
+        }
         false
     }
 
@@ -454,6 +460,12 @@ impl<'a> Checker<'a> {
         // their variant table so `.Narrow`/`.Wide`/`.Zero`/`.Reject` dot-literals
         // resolve (D-ENUMDOT2), same mechanism as `ProcessStreamMode`.
         if let Some(v) = core_text_width_variants(enum_name) {
+            return Some(v);
+        }
+        if let Some(v) = core_net_control_variants(enum_name) {
+            return Some(v);
+        }
+        if let Some(v) = core_net_error_variants(enum_name) {
             return Some(v);
         }
         None

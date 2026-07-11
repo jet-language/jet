@@ -33,7 +33,7 @@ fn run() {
         // Serve exactly 4 connections then let the task exit.
         loop i in [0, 1, 2, 3] {
             stream :: listener.accept() ?? panic("accept failed")
-            raw :: stream.read() ?? panic("read failed")
+            raw :: stream.read_text(8192) ?? panic("read failed")
             req :: http.parse(raw)
             resp :: http.dispatch(router, req)
             net.tcp_reply(stream, resp.status(), resp.body())

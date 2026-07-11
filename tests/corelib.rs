@@ -775,6 +775,33 @@ fn core_net_dns_nxdomain_is_an_error() {
 }
 
 #[test]
+fn core_tls_byte_stream_surface_links_through_the_real_bridge() {
+    let dir = std::env::temp_dir().join(format!("jet_core_tls_surface_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let src = r#"
+use core.net as net
+use core.tls as tls
+
+fn run() {
+    if false {
+        tcp :: net.tcp_connect("127.0.0.1:443") ?? panic("tcp")
+        secure :: tls.client(tcp, "localhost") ?? panic("tls")
+        _all :: tls.write_all(&secure, "ping".bytes()) ?? panic("write")
+        _count :: tls.write(&secure, "x".bytes()) ?? panic("write")
+        _bytes :: tls.read(&secure, 1024) ?? panic("read")
+        _text :: tls.read_text(&secure, 1024) ?? panic("text")
+        tls.close(&secure) ?? panic("close")
+        tls.close(&secure) ?? panic("close twice")
+    }
+    print("tls-byte-surface")
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "tls_byte_surface", src, &[], None);
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, "tls-byte-surface\n");
+}
+
+#[test]
 fn canonical_core_import_resolves() {
     let out = compile_temp(
         "core_imports.jet",

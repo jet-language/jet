@@ -3,7 +3,7 @@
 pub fn net_method_return(
     type_name: &str,
     method: &str,
-    _n_args: usize,
+    n_args: usize,
     _span: Span,
     _diags: &mut Vec<Diagnostic>,
 ) -> Option<Option<Type>> {
@@ -31,11 +31,33 @@ pub fn net_method_return(
         ))),
         ("TcpListener", "local_addr") => Some(Some(str_ty.clone())),
         // TcpStream methods.
-        ("TcpStream", "read") => Some(Some(result_ty(str_ty.clone(), err.clone()))),
-        ("TcpStream", "write") => Some(Some(result_ty(unit.clone(), err.clone()))),
+        ("TcpStream", "read") if n_args == 0 => Some(Some(result_ty(str_ty.clone(), err.clone()))),
+        ("TcpStream", "read") if n_args == 1 => Some(Some(result_ty(
+            Type::List(Box::new(u8_ty())),
+            Type::Named("NetError".to_string()),
+        ))),
+        ("TcpStream", "read_text") if n_args == 1 => Some(Some(result_ty(
+            str_ty.clone(),
+            Type::Named("NetError".to_string()),
+        ))),
+        ("TcpStream", "write") if n_args == 1 => Some(Some(result_ty(
+            Type::Int,
+            Type::Named("NetError".to_string()),
+        ))),
+        ("TcpStream", "write_all" | "write_text" | "shutdown") if n_args == 1 => Some(Some(result_ty(
+            unit.clone(),
+            Type::Named("NetError".to_string()),
+        ))),
+        ("TcpStream", "ready") if n_args == 2 => Some(Some(result_ty(
+            Type::Named("NetReady".to_string()),
+            Type::Named("NetError".to_string()),
+        ))),
         ("TcpStream", "peer_addr") => Some(Some(str_ty.clone())),
         ("TcpStream", "local_addr") => Some(Some(str_ty.clone())),
-        ("TcpStream", "close") => Some(Some(unit)),
+        ("TcpStream", "close") => Some(Some(result_ty(
+            unit,
+            Type::Named("NetError".to_string()),
+        ))),
         _ => None,
     }
 }

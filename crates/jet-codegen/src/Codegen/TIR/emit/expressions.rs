@@ -1313,7 +1313,30 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::TcpStreamLocalAddr => {
                     format!("{}jet_net_tcp_local_addr(&({}))", root, recv)
                 }
-                THandleOp::TcpStreamClose => format!("{{ drop({}); }}", recv),
+                THandleOp::TcpStreamClose => {
+                    format!("{}jet_net_tcp_close(&mut ({}))", root, recv)
+                }
+                THandleOp::TcpStreamReadBytes => {
+                    format!("{}jet_net_tcp_read_bytes(&mut ({}), {})", root, recv, a(0))
+                }
+                THandleOp::TcpStreamReadText => {
+                    format!("{}jet_net_tcp_read_text(&mut ({}), {})", root, recv, a(0))
+                }
+                THandleOp::TcpStreamWriteBytes => {
+                    format!("{}jet_net_tcp_write_bytes(&mut ({}), &({}))", root, recv, a(0))
+                }
+                THandleOp::TcpStreamWriteAllBytes => {
+                    format!("{}jet_net_tcp_write_all_bytes(&mut ({}), &({}))", root, recv, a(0))
+                }
+                THandleOp::TcpStreamWriteText => {
+                    format!("{}jet_net_tcp_write_text(&mut ({}), &({}))", root, recv, a(0))
+                }
+                THandleOp::TcpStreamShutdown => {
+                    format!("{}jet_net_tcp_shutdown(&mut ({}), {})", root, recv, a(0))
+                }
+                THandleOp::TcpStreamReady => format!(
+                    "{}jet_net_tcp_ready(&mut ({}), {}, {})", root, recv, a(0), a(1)
+                ),
                 // c109 Phase 19: arena allocator methods (byte-for-byte the AST arms).
                 THandleOp::AllocAlloc => {
                     let a0 = emit_tir_expr(&args[0], cx);

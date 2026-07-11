@@ -442,6 +442,12 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             if type_name == "TextWidthControls" {
                 return matches!(variant.as_str(), "Zero" | "Reject");
             }
+            if type_name == "NetShutdown" {
+                return matches!(variant.as_str(), "Read" | "Write" | "Both");
+            }
+            if type_name == "NetReadyInterest" {
+                return matches!(variant.as_str(), "Read" | "Write" | "ReadWrite");
+            }
             if !enum_is_covered(type_name, cx) {
                 return false;
             }

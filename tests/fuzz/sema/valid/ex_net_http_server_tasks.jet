@@ -18,7 +18,7 @@ fn run() {
         addr :: listener.local_addr()
         sender.send(copy addr)
         stream :: listener.accept() ?? panic("accept failed")
-        _req_raw :: stream.read() ?? panic("read failed")
+        _req_raw :: stream.read_text(8192) ?? panic("read failed")
         req :: HttpRequest.{method: "GET", path: "/", body: "", headers: []}
         resp :: handle(req)
         net.tcp_reply(stream, resp.status(), resp.body())

@@ -2,7 +2,7 @@
 pub(crate) fn is_freestanding_forbidden(module: &str) -> bool {
     matches!(
         module,
-        "core.files" | "core.watcher" | "core.io" | "core.net" | "core.tasks"
+        "core.files" | "core.watcher" | "core.io" | "core.net" | "core.tls" | "core.tasks"
             | "core.process" | "core.time" | "jet.http" | "jet.log"
             // D-TERM1: terminal I/O requires an OS terminal device.
             | "core.term"
@@ -23,7 +23,7 @@ pub(crate) fn freestanding_hint(module: &str) -> &'static str {
         "core.files" => {
             "Embed the data at compile time with `@embed(\"file\")`, or build without `--freestanding`."
         }
-        "core.net" | "jet.http" => {
+        "core.net" | "core.tls" | "jet.http" => {
             "Freestanding targets have no network stack. Build without `--freestanding`, or use a bare-metal driver."
         }
         "core.tasks" => {

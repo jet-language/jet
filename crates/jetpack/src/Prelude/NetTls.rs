@@ -9,6 +9,7 @@ type TlsStream = rustls::StreamOwned<rustls::ClientConnection, TcpStream>;
 
 thread_local! {
     static JET_NET_TLS_STREAMS: RefCell<BTreeMap<i64, TlsStream>> = RefCell::new(BTreeMap::new());
+    static JET_NET_TLS_CLOSED: RefCell<std::collections::BTreeSet<i64>> = RefCell::new(std::collections::BTreeSet::new());
 }
 
 static JET_NET_TLS_NEXT: AtomicI64 = AtomicI64::new(1);
@@ -68,6 +69,21 @@ pub fn jet_net_tls_read_impl(id: i64) -> Result<String, String> {
     })
 }
 
+pub fn jet_net_tls_read_bytes_impl(id: i64, limit: i64) -> Result<Vec<u8>, String> {
+    if limit < 0 {
+        return Err("TLS read limit must be non-negative".to_string());
+    }
+    JET_NET_TLS_STREAMS.with(|cell| {
+        let mut streams = cell.borrow_mut();
+        let stream = streams.get_mut(&id).ok_or_else(|| "TLS stream is closed".to_string())?;
+        let mut bytes = vec![0u8; std::cmp::min(limit as usize, 16 * 1024 * 1024)];
+        if bytes.is_empty() { return Ok(bytes); }
+        let n = stream.read(&mut bytes).map_err(|e| format!("TLS read failed: {}", e))?;
+        bytes.truncate(n);
+        Ok(bytes)
+    })
+}
+
 pub fn jet_net_tls_write_impl(id: i64, data: &String) -> Result<(), String> {
     JET_NET_TLS_STREAMS.with(|cell| {
         let mut streams = cell.borrow_mut();
@@ -80,12 +96,31 @@ pub fn jet_net_tls_write_impl(id: i64, data: &String) -> Result<(), String> {
     })
 }
 
+pub fn jet_net_tls_write_bytes_impl(id: i64, data: &Vec<u8>) -> Result<i64, String> {
+    JET_NET_TLS_STREAMS.with(|cell| {
+        let mut streams = cell.borrow_mut();
+        let stream = streams.get_mut(&id).ok_or_else(|| "TLS stream is closed".to_string())?;
+        stream.write(data).map(|n| n as i64).map_err(|e| format!("TLS write failed: {}", e))
+    })
+}
+
+pub fn jet_net_tls_write_all_bytes_impl(id: i64, data: &Vec<u8>) -> Result<(), String> {
+    JET_NET_TLS_STREAMS.with(|cell| {
+        let mut streams = cell.borrow_mut();
+        let stream = streams.get_mut(&id).ok_or_else(|| "TLS stream is closed".to_string())?;
+        stream.write_all(data).map_err(|e| format!("TLS write failed: {}", e))
+    })
+}
+
 pub fn jet_net_tls_close_impl(id: i64) -> Result<(), String> {
     JET_NET_TLS_STREAMS.with(|cell| {
-        if cell.borrow_mut().remove(&id).is_some() {
-            Ok(())
-        } else {
-            Err("TLS stream is closed".to_string())
+        if let Some(mut stream) = cell.borrow_mut().remove(&id) {
+            stream.conn.send_close_notify();
+            let _ = stream.flush();
+            JET_NET_TLS_CLOSED.with(|closed| { closed.borrow_mut().insert(id); });
+            return Ok(());
         }
+        if JET_NET_TLS_CLOSED.with(|closed| closed.borrow().contains(&id)) { Ok(()) }
+        else { Err("TLS stream is closed".to_string()) }
     })
 }

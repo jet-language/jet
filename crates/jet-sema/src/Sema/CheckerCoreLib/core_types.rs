@@ -108,6 +108,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // E2-M10: networking opaque types.
         | "TcpListener" | "TcpStream" | "IpAddr" | "SocketAddr" | "UdpSocket" | "UdpPacket"
         | "DnsSrv" | "UnixListener" | "UnixStream" | "TlsStream"
+        | "NetError" | "NetErrorDetail" | "NetDnsError" | "NetShutdown" | "NetReadyInterest" | "NetReady"
         | "HttpRequest" | "HttpResponse" | "HttpRouter"
         // D-ALLOC1/D-ALLOC-C (ratified 2026-06-19): allocator opaque types.
         | "Arena" | "Bump" | "Pool" | "Fixed"
@@ -466,6 +467,55 @@ pub(crate) fn core_process_stream_mode_variants(
         m.insert((*name).to_string(), (zero, VariantPayload::Unit));
     }
     m
+}
+
+pub(crate) fn core_net_control_variants(
+    enum_name: &str,
+) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>> {
+    use crate::AST::VariantPayload;
+    use crate::Diagnostics::Span;
+    let names: &[&str] = match enum_name {
+        "NetShutdown" => &["Read", "Write", "Both"],
+        "NetReadyInterest" => &["Read", "Write", "ReadWrite"],
+        _ => return None,
+    };
+    let zero = Span::new(0, 0);
+    let mut variants = std::collections::HashMap::new();
+    for name in names {
+        variants.insert((*name).to_string(), (zero, VariantPayload::Unit));
+    }
+    Some(variants)
+}
+
+pub(crate) fn core_net_error_variants(
+    enum_name: &str,
+) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>> {
+    use crate::AST::VariantPayload;
+    use crate::Diagnostics::Span;
+    let zero = Span::new(0, 0);
+    let mut variants = std::collections::HashMap::new();
+    if enum_name == "NetDnsError" {
+        for name in ["NotFound", "Failure"] {
+            variants.insert(name.to_string(), (zero, VariantPayload::Single(Type::String, zero)));
+        }
+        return Some(variants);
+    }
+    if enum_name != "NetError" { return None; }
+    for name in [
+        "InvalidInput", "PermissionDenied", "AddressInUse", "AddressUnavailable",
+        "ConnectionRefused", "ConnectionReset", "NotConnected", "Closed", "Timeout",
+        "Cancelled", "Unsupported", "Tls", "Protocol", "Other",
+    ] {
+        variants.insert(name.to_string(), (
+            zero,
+            VariantPayload::Single(Type::Named("NetErrorDetail".to_string()), zero),
+        ));
+    }
+    variants.insert("Dns".to_string(), (
+        zero,
+        VariantPayload::Single(Type::Named("NetDnsError".to_string()), zero),
+    ));
+    Some(variants)
 }
 
 /// D-TEXTWIDTH1=B: the two `TextWidth` field enums (`.Narrow`/`.Wide`,

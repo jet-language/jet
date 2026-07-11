@@ -1852,6 +1852,13 @@ impl LowerCtx<'_, '_> {
             THandleOp::TcpStreamPeerAddr => Err("jit handle method unsupported".to_string()),
             THandleOp::TcpStreamLocalAddr => Err("jit handle method unsupported".to_string()),
             THandleOp::TcpStreamClose => Err("jit handle method unsupported".to_string()),
+            THandleOp::TcpStreamReadBytes
+            | THandleOp::TcpStreamReadText
+            | THandleOp::TcpStreamWriteBytes
+            | THandleOp::TcpStreamWriteAllBytes
+            | THandleOp::TcpStreamWriteText
+            | THandleOp::TcpStreamShutdown
+            | THandleOp::TcpStreamReady => Err("jit handle method unsupported".to_string()),
             THandleOp::AllocAlloc => Err("jit handle method unsupported".to_string()),
             THandleOp::AllocReset => Err("jit handle method unsupported".to_string()),
             THandleOp::AllocFree => Err("jit handle method unsupported".to_string()),

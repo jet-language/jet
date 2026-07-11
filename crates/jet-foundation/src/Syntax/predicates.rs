@@ -185,6 +185,8 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     // D-NETDEP1=A / D-HTTPLIB2=B (ratified 2026-06-26): full HTTP library.
     "core.http.client",
     "core.http.server",
+    // D-NETTLSSTREAM1=A: verified TLS wraps the canonical core.net byte stream.
+    "core.tls",
     // c-devserver (owner-directed 2026-07-01): a `.jet` file's own `jet dev`
     // behavior — a configurable server value (`for_app`/`.html`/`.port`/`.serve`).
     "core.devserver",

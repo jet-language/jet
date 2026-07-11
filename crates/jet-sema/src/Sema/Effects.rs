@@ -342,7 +342,7 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
     }
     Some(match module {
         "core.files" => Effect::Fs,
-        "core.net" | "jet.http" | "core.http.client" | "core.http.server" => Effect::Net,
+        "core.net" | "core.tls" | "jet.http" | "core.http.client" | "core.http.server" => Effect::Net,
         // D-RAYLIB1=A: windowing/drawing/input/audio bridge.
         "core.raylib" => Effect::Gpu,
         "core.time" => Effect::Time,

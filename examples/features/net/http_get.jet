@@ -12,7 +12,7 @@ fn run() {
         listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")
         sender.send(listener.local_addr())
         stream :: listener.accept() ?? panic("accept failed")
-        _req :: stream.read() ?? panic("read failed")
+        _req :: stream.read_text(8192) ?? panic("read failed")
         net.tcp_reply(stream, "200 OK", "hello, world!")
     })
     addr :: ch.receive() ?? panic("no address")

@@ -2192,7 +2192,10 @@ runtime provides one. Beginner calls accept strings; expert calls accept typed
 | `tcp_listen_addr(addr)` / `tcp_connect_addr(addr)` | `TcpListener ? String` / `TcpStream ? String` | Typed entrypoints |
 | `tcp_connect_timeout(addr, ms)` | `TcpStream ? String` | Typed dial with timeout |
 | `tcp_connect_happy(host, port, ms)` | `TcpStream ? String` | Dual-stack dial, IPv6 tried before IPv4 |
-| `tcp_read(stream)` / `tcp_write(stream, text)` | `String ? String` / `() ? String` | UTF-8 text I/O |
+| `stream.read(limit)` / `stream.write(bytes)` / `stream.write_all(bytes)` | `[U8] ? NetError` / `Int ? NetError` / `() ? NetError` | Canonical byte stream operations |
+| `stream.read_text(limit)` / `stream.write_text(text)` | `String ? NetError` / `() ? NetError` | Checked UTF-8 projections over the same byte stream |
+| `stream.shutdown(.Read/.Write/.Both)` / `stream.close()` | `() ? NetError` | Explicit half-close; close is idempotent and later I/O is `.Closed` |
+| `stream.ready(.Read/.Write/.ReadWrite, deadline_ms)` | `NetReady ? NetError` | Same-handle readiness; earliest ambient or explicit deadline wins |
 | `tcp_local_socket_addr(stream)` / `tcp_peer_socket_addr(stream)` | `SocketAddr` | Typed stream addresses |
 | `listener_local_socket_addr(listener)` | `SocketAddr` | Typed listener address |
 | `set_timeout(stream, ms)` | `()` | Set read/write timeouts |
@@ -2200,23 +2203,32 @@ runtime provides one. Beginner calls accept strings; expert calls accept typed
 | `udp_bind(addr)` / `udp_bind_addr(addr)` | `UdpSocket ? String` | Datagram sockets |
 | `udp_local_addr(socket)` | `SocketAddr` | Typed local address |
 | `udp_set_timeout(socket, ms)` | `() ? String` | Read/write datagram timeouts |
-| `udp_send_to(socket, text, addr)` | `Int ? String` | Sent byte count |
-| `udp_recv_from(socket, limit)` | `UdpPacket ? String` | UTF-8 packet data + source address |
-| `udp_packet_data(packet)` / `udp_packet_addr(packet)` | `String` / `SocketAddr` | Inspect packets |
+| `udp_send_bytes_to(socket, bytes, addr)` | `Int ? NetError` | Send one arbitrary-byte datagram |
+| `udp_receive(socket, limit)` | `UdpPacket ? NetError` | Full datagram receive with bounded returned payload |
+| `udp_packet_bytes/address/original_len/truncated(packet)` | `[U8]` / `SocketAddr` / `Int` / `Bool` | Packet data, source, wire length, and truncation fact |
 | `unix_listen(path)` / `unix_connect(path)` | `UnixListener ? String` / `UnixStream ? String` | Unix-domain sockets where supported |
 | `unix_accept(listener)` | `UnixStream ? String` | Accept one Unix stream |
-| `unix_read(stream)` / `unix_write(stream, text)` | `String ? String` / `() ? String` | Unix stream text I/O |
+| `unix_read_bytes(stream, limit)` / `unix_write_all_bytes(stream, bytes)` | `[U8] ? NetError` / `() ? NetError` | Unix byte stream operations; same deadline/close law as TCP |
+| `unix_shutdown(stream, how)` / `unix_close(stream)` | `() ? NetError` | Explicit shutdown and idempotent close |
 | `dns_a(name, ms)` / `dns_aaaa(name, ms)` | `[IpAddr] ? String` | System resolver config, timeout in ms |
 | `dns_txt(name, ms)` | `[String] ? String` | TXT records |
 | `dns_srv(name, ms)` | `[DnsSrv] ? String` | SRV records |
 | `dns_*_at(server, name, ms)` | same as matching lookup | Expert override for a specific DNS server |
 | `dns_srv_target(srv)` / `dns_srv_port(srv)` | `String` / `Int` | Inspect SRV records |
-| `tls_connect(stream, server_name)` | `TlsStream ? String` | Upgrade a `TcpStream` through the D-TLS1 bridge |
-| `tls_read(stream)` / `tls_write(stream, text)` / `tls_close(stream)` | `String ? String` / `() ? String` / `() ? String` | Client TLS stream I/O |
+| `core.tls.client(stream, server_name)` | `TlsStream ? NetError` | Consume a connected `TcpStream`; verify name with system roots |
+| `core.tls.read/write/write_all/read_text/write_text/close` | byte-stream results with `NetError` | Same byte/text and idempotent close law; close sends close-notify |
 
-`TcpListener.accept()`, `TcpStream.read()`, `TcpStream.write(text)`,
-`TcpStream.local_addr()`, `TcpStream.peer_addr()`, and `TcpStream.close()` remain
-method aliases for the common TCP path.
+`NetError` has stable variants for input, permission, address, connection,
+closed, timeout, cancellation, unsupported, DNS, TLS, protocol, and other OS
+failures. `error_operation/address/name/message/os_code` expose portable control
+and audit data. Raw OS text is never control-flow law.
+
+Ordinary A/AAAA lookups use the platform resolver and preserve host files,
+search policy, VPNs, and enterprise DNS. TXT/SRV use configured host name
+servers; explicit `_at` calls query only their named server. The wire resolver
+uses unpredictable IDs, validates sender/header/question/bounds/compression,
+follows bounded CNAME chains across answer/additional records, and retries a
+truncated UDP answer over bounded TCP. It never falls back to a public resolver.
 
 ---
 

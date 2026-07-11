@@ -109,7 +109,7 @@ pub fn prepare(bundle: &ProgramBundle) -> Result<Option<FfiLink>, Vec<Diagnostic
     let needs_net_tls = bundle
         .used_core
         .iter()
-        .any(|u| u == "core.net::tls_connect");
+        .any(|u| u == "core.net::tls_connect" || u == "core.tls" || u.starts_with("core.tls::"));
     // D-DEP-CRYPTO1=A: RustCrypto AEAD + Ed25519 for core.crypto envelope APIs.
     let needs_crypto = bundle.used_core.iter().any(|u| {
         u == "jet.crypto"

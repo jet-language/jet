@@ -1251,6 +1251,41 @@ pub(crate) fn emit_tir_core_call(
             arg(0),
             arg(1)
         ),
+        ("core.net", "tcp_read_bytes") => format!(
+            "{}(&mut ({}), {})", helper("jet_net_tcp_read_bytes"), arg(0), arg(1)
+        ),
+        ("core.net", "tcp_read_text") => format!(
+            "{}(&mut ({}), {})", helper("jet_net_tcp_read_text"), arg(0), arg(1)
+        ),
+        ("core.net", "tcp_write_bytes") => format!(
+            "{}(&mut ({}), &({}))", helper("jet_net_tcp_write_bytes"), arg(0), arg(1)
+        ),
+        ("core.net", "tcp_write_all_bytes") => format!(
+            "{}(&mut ({}), &({}))", helper("jet_net_tcp_write_all_bytes"), arg(0), arg(1)
+        ),
+        ("core.net", "tcp_write_text") => format!(
+            "{}(&mut ({}), &({}))", helper("jet_net_tcp_write_text"), arg(0), arg(1)
+        ),
+        ("core.net", "tcp_shutdown") => format!(
+            "{}(&mut ({}), {})", helper("jet_net_tcp_shutdown"), arg(0), arg(1)
+        ),
+        ("core.net", "tcp_close") => {
+            format!("{}(&mut ({}))", helper("jet_net_tcp_close"), arg(0))
+        }
+        ("core.net", "tcp_ready") => format!(
+            "{}(&mut ({}), {}, {})", helper("jet_net_tcp_ready"), arg(0), arg(1), arg(2)
+        ),
+        ("core.net", "ready_readable") => {
+            format!("{}(&({}))", helper("jet_net_ready_readable"), arg(0))
+        }
+        ("core.net", "ready_writable") => {
+            format!("{}(&({}))", helper("jet_net_ready_writable"), arg(0))
+        }
+        ("core.net", "error_operation") => format!("{}(&({}))", helper("jet_net_error_operation"), arg(0)),
+        ("core.net", "error_address") => format!("{}(&({}))", helper("jet_net_error_address"), arg(0)),
+        ("core.net", "error_name") => format!("{}(&({}))", helper("jet_net_error_name"), arg(0)),
+        ("core.net", "error_message") => format!("{}(&({}))", helper("jet_net_error_message"), arg(0)),
+        ("core.net", "error_os_code") => format!("{}(&({}))", helper("jet_net_error_os_code"), arg(0)),
         ("core.net", "tcp_local_addr") => {
             format!("{}(&({}))", helper("jet_net_tcp_local_addr"), arg(0))
         }
@@ -1319,12 +1354,27 @@ pub(crate) fn emit_tir_core_call(
             arg(0),
             arg(1)
         ),
+        ("core.net", "udp_send_bytes_to") => format!(
+            "{}(&({}), &({}), &({}))", helper("jet_net_udp_send_bytes_to"), arg(0), arg(1), arg(2)
+        ),
+        ("core.net", "udp_receive") => format!(
+            "{}(&({}), {})", helper("jet_net_udp_receive"), arg(0), arg(1)
+        ),
         ("core.net", "udp_packet_data") => {
             format!("{}(&({}))", helper("jet_net_udp_packet_data"), arg(0))
         }
         ("core.net", "udp_packet_addr") => {
             format!("{}(&({}))", helper("jet_net_udp_packet_addr"), arg(0))
         }
+        ("core.net", "udp_packet_bytes") => {
+            format!("{}(&({}))", helper("jet_net_udp_packet_bytes"), arg(0))
+        }
+        ("core.net", "udp_packet_original_len") => format!(
+            "{}(&({}))", helper("jet_net_udp_packet_original_len"), arg(0)
+        ),
+        ("core.net", "udp_packet_truncated") => format!(
+            "{}(&({}))", helper("jet_net_udp_packet_truncated"), arg(0)
+        ),
         ("core.net", "unix_listen") => format!("{}(&({}))", helper("jet_net_unix_listen"), arg(0)),
         ("core.net", "unix_accept") => format!("{}(&({}))", helper("jet_net_unix_accept"), arg(0)),
         ("core.net", "unix_connect") => {
@@ -1337,43 +1387,55 @@ pub(crate) fn emit_tir_core_call(
             arg(0),
             arg(1)
         ),
-        ("core.net", "dns_a") => format!("{}(&({}), {})", helper("jet_net_dns_a"), arg(0), arg(1)),
+        ("core.net", "unix_read_bytes") => format!(
+            "{}(&mut ({}), {})", helper("jet_net_unix_read_bytes"), arg(0), arg(1)
+        ),
+        ("core.net", "unix_write_all_bytes") => format!(
+            "{}(&mut ({}), &({}))", helper("jet_net_unix_write_all_bytes"), arg(0), arg(1)
+        ),
+        ("core.net", "unix_shutdown") => format!(
+            "{}(&mut ({}), {})", helper("jet_net_unix_shutdown"), arg(0), arg(1)
+        ),
+        ("core.net", "unix_close") => {
+            format!("{}(&mut ({}))", helper("jet_net_unix_close"), arg(0))
+        }
+        ("core.net", "dns_a") => format!("{}({}(&({}), {}), &({}))", helper("jet_net_dns_result"), helper("jet_net_dns_a"), arg(0), arg(1), arg(0)),
         ("core.net", "dns_aaaa") => {
-            format!("{}(&({}), {})", helper("jet_net_dns_aaaa"), arg(0), arg(1))
+            format!("{}({}(&({}), {}), &({}))", helper("jet_net_dns_result"), helper("jet_net_dns_aaaa"), arg(0), arg(1), arg(0))
         }
         ("core.net", "dns_a_at") => format!(
-            "{}(&({}), &({}), {})",
-            helper("jet_net_dns_a_at"),
+            "{}({}(&({}), &({}), {}), &({}))",
+            helper("jet_net_dns_result"), helper("jet_net_dns_a_at"),
             arg(0),
             arg(1),
-            arg(2)
+            arg(2), arg(1)
         ),
         ("core.net", "dns_aaaa_at") => format!(
-            "{}(&({}), &({}), {})",
-            helper("jet_net_dns_aaaa_at"),
+            "{}({}(&({}), &({}), {}), &({}))",
+            helper("jet_net_dns_result"), helper("jet_net_dns_aaaa_at"),
             arg(0),
             arg(1),
-            arg(2)
+            arg(2), arg(1)
         ),
         ("core.net", "dns_txt") => {
-            format!("{}(&({}), {})", helper("jet_net_dns_txt"), arg(0), arg(1))
+            format!("{}({}(&({}), {}), &({}))", helper("jet_net_dns_result"), helper("jet_net_dns_txt"), arg(0), arg(1), arg(0))
         }
         ("core.net", "dns_txt_at") => format!(
-            "{}(&({}), &({}), {})",
-            helper("jet_net_dns_txt_at"),
+            "{}({}(&({}), &({}), {}), &({}))",
+            helper("jet_net_dns_result"), helper("jet_net_dns_txt_at"),
             arg(0),
             arg(1),
-            arg(2)
+            arg(2), arg(1)
         ),
         ("core.net", "dns_srv") => {
-            format!("{}(&({}), {})", helper("jet_net_dns_srv"), arg(0), arg(1))
+            format!("{}({}(&({}), {}), &({}))", helper("jet_net_dns_result"), helper("jet_net_dns_srv"), arg(0), arg(1), arg(0))
         }
         ("core.net", "dns_srv_at") => format!(
-            "{}(&({}), &({}), {})",
-            helper("jet_net_dns_srv_at"),
+            "{}({}(&({}), &({}), {}), &({}))",
+            helper("jet_net_dns_result"), helper("jet_net_dns_srv_at"),
             arg(0),
             arg(1),
-            arg(2)
+            arg(2), arg(1)
         ),
         ("core.net", "dns_srv_target") => {
             format!("{}(&({}))", helper("jet_net_dns_srv_target"), arg(0))
@@ -1405,6 +1467,34 @@ pub(crate) fn emit_tir_core_call(
         ("core.net", "tls_close") => {
             format!("{}(({}).id)", regex_fn("jet_net_tls_close_impl"), arg(0))
         }
+        ("core.tls", "client") => format!(
+            "{{ let _s = {}; {}({}(_s.inner, &({})), \"tls handshake\").map(|id| JetTlsStream{{id}}) }}",
+            arg(0), helper("jet_net_tls_result"), regex_fn("jet_net_tls_connect_impl"), arg(1)
+        ),
+        ("core.tls", "read") => format!(
+            "{}({}(({}).id, {}), \"tls read\")",
+            helper("jet_net_tls_result"), regex_fn("jet_net_tls_read_bytes_impl"), arg(0), arg(1)
+        ),
+        ("core.tls", "read_text") => format!(
+            "{}({}(({}).id), \"tls read text\")",
+            helper("jet_net_tls_result"), regex_fn("jet_net_tls_read_impl"), arg(0)
+        ),
+        ("core.tls", "write") => format!(
+            "{}({}(({}).id, &({})), \"tls write\")",
+            helper("jet_net_tls_result"), regex_fn("jet_net_tls_write_bytes_impl"), arg(0), arg(1)
+        ),
+        ("core.tls", "write_all") => format!(
+            "{}({}(({}).id, &({})), \"tls write all\")",
+            helper("jet_net_tls_result"), regex_fn("jet_net_tls_write_all_bytes_impl"), arg(0), arg(1)
+        ),
+        ("core.tls", "write_text") => format!(
+            "{}({}(({}).id, &({})), \"tls write text\")",
+            helper("jet_net_tls_result"), regex_fn("jet_net_tls_write_impl"), arg(0), arg(1)
+        ),
+        ("core.tls", "close") => format!(
+            "{}({}(({}).id), \"tls close\")",
+            helper("jet_net_tls_result"), regex_fn("jet_net_tls_close_impl"), arg(0)
+        ),
         // E2-M10: jet.http — HTTP client.
         ("jet.http", "get") => format!("{}(&({}))", helper("jet_http_get"), arg(0)),
         ("jet.http", "post") => {
