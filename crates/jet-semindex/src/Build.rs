@@ -7,7 +7,7 @@ use jet_foundation::AST::{self, Item, LoadedModule, ProgramBundle};
 use jet_sema::{effect_key, SemIndexEffectFacts};
 
 use crate::Json::{convert_defs, convert_effects, convert_refs};
-use crate::Types::{CallEdge, MemberFact, MemberKind, MemberOrigin, SemIndex};
+use crate::Types::{CallEdge, MemberFact, MemberKind, MemberOrigin, SemIndex, StructuralNode};
 
 /// The semantic kind of a defined symbol (LSP-facing; uses AST types internally).
 #[derive(Debug, Clone)]
@@ -60,6 +60,7 @@ pub struct SymRef {
     pub span: Span,
     pub module_path: String,
     pub scope_identity: Option<String>,
+    pub target_identity: Option<String>,
 }
 
 /// Hover entry: an expression/token span + text to show on hover.
@@ -87,6 +88,7 @@ pub struct SymbolDB {
     pub members: Vec<MemberFact>,
     pub hover: Vec<HoverEntry>,
     pub inlay: Vec<InlayHint>,
+    pub nodes: Vec<StructuralNode>,
 }
 
 struct CallerFrame {
@@ -104,17 +106,21 @@ struct WalkCtx<'a> {
 impl SymbolDB {
     pub fn new() -> Self {
         SymbolDB {
-            index: SemIndex::new(Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new()),
+            index: SemIndex::new(
+                Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(),
+            ),
             defs: Vec::new(),
             refs: Vec::new(),
             calls: Vec::new(),
             members: Vec::new(),
             hover: Vec::new(),
             inlay: Vec::new(),
+            nodes: Vec::new(),
         }
     }
 
     fn finalize_index(&mut self, facts: &SemIndexEffectFacts) {
+        resolve_reference_targets(&self.defs, &mut self.refs);
         let defs = convert_defs(&self.defs);
         let refs = convert_refs(&self.refs);
         let effects = convert_effects(facts);
@@ -124,6 +130,7 @@ impl SymbolDB {
             self.calls.clone(),
             effects,
             self.members.clone(),
+            self.nodes.clone(),
         );
     }
 
@@ -253,6 +260,175 @@ fn scoped_ref(name: String, span: Span, mp: &str, ctx: &WalkCtx<'_>) -> SymRef {
         span,
         module_path: mp.to_string(),
         scope_identity: Some(active_scope(ctx).to_string()),
+        target_identity: None,
+    }
+}
+
+fn resolve_reference_targets(defs: &[SymDef], refs: &mut [SymRef]) {
+    for reference in refs {
+        let mut candidates = defs
+            .iter()
+            .filter(|d| d.name == reference.name)
+            .collect::<Vec<_>>();
+        if let Some(scope) = &reference.scope_identity {
+            let scoped = candidates
+                .iter()
+                .copied()
+                .filter(|d| {
+                    d.module_path == reference.module_path
+                        && d.identity.contains(scope)
+                        && d.def_span.start <= reference.span.start
+                })
+                .collect::<Vec<_>>();
+            if let Some(best) = scoped.into_iter().max_by_key(|d| d.def_span.start) {
+                reference.target_identity = Some(best.identity.clone());
+                continue;
+            }
+        }
+        let same_module = candidates
+            .iter()
+            .copied()
+            .filter(|d| d.module_path == reference.module_path)
+            .collect::<Vec<_>>();
+        candidates = if same_module.is_empty() {
+            candidates
+        } else {
+            same_module
+        };
+        if candidates.len() == 1 {
+            reference.target_identity = Some(candidates[0].identity.clone());
+        }
+    }
+}
+
+fn record_node(ctx: &mut WalkCtx<'_>, class: &str, shape: &str, mp: &str, span: Span) {
+    if span.end >= span.start {
+        ctx.db.nodes.push(StructuralNode {
+            class: class.to_string(),
+            shape: shape.to_string(),
+            module_path: mp.to_string(),
+            span: span.into(),
+        });
+    }
+}
+
+fn expr_shape(expr: &AST::Expr) -> String {
+    format!("{:?}", std::mem::discriminant(expr))
+}
+
+fn structural_expr_span(expr: &AST::Expr) -> Span {
+    match expr {
+        AST::Expr::Call(call) => Span::new(
+            call.name_span.start,
+            call.args
+                .last()
+                .map_or(call.name_span.end.saturating_add(2), |arg| {
+                    structural_expr_span(&arg.expr).end.saturating_add(1)
+                }),
+        ),
+        AST::Expr::MethodCall {
+            receiver,
+            method_span,
+            args,
+            ..
+        } => Span::new(
+            structural_expr_span(receiver).start,
+            args.last()
+                .map_or(method_span.end.saturating_add(2), |arg| {
+                    structural_expr_span(&arg.expr).end.saturating_add(1)
+                }),
+        ),
+        _ => expr.span(),
+    }
+}
+
+fn stmt_shape(stmt: &AST::Stmt) -> String {
+    format!("{:?}", std::mem::discriminant(stmt))
+}
+
+fn item_shape(item: &AST::Item) -> String {
+    format!("{:?}", std::mem::discriminant(item))
+}
+
+fn item_anchor(item: &AST::Item) -> Span {
+    match item {
+        AST::Item::Func(x) => x.name_span,
+        AST::Item::Struct(x) => x.name_span,
+        AST::Item::Enum(x) => x.name_span,
+        AST::Item::Distinct(x) => x.span,
+        AST::Item::TypeAlias(x) => x.span,
+        AST::Item::UnitFamily(x) => x.span,
+        AST::Item::Trait(x) => x.name_span,
+        AST::Item::Tag(x) => x.span,
+        AST::Item::Impl(x) => x.type_span,
+        AST::Item::Const(x) => x.name_span,
+        AST::Item::Test(x) => x.name_span,
+        AST::Item::Bench(x) => x.name_span,
+        AST::Item::ExternRust(x) => x.span,
+        AST::Item::Module(x) => x.span,
+        AST::Item::CModule(x) => x.span,
+        AST::Item::CodeModule(x) => x.span,
+        AST::Item::ErrorConv(x) => x.from_span,
+        AST::Item::Migration(x) => x.span,
+        AST::Item::StateDecl(x) => x.span,
+        AST::Item::ProtocolDecl(x) => x.span,
+        AST::Item::UserDerive(x) => x.span,
+        AST::Item::GenericModule(x) => x.span,
+        AST::Item::ModuleAlias(x) => x.span,
+    }
+}
+
+fn source_item_span(item: &AST::Item, source: &str) -> Span {
+    let anchor = item_anchor(item);
+    let mut start = source[..anchor.start.min(source.len())]
+        .rfind('\n')
+        .map_or(0, |p| p + 1);
+    while start > 0 {
+        let prior_end = start - 1;
+        let prior_start = source[..prior_end].rfind('\n').map_or(0, |p| p + 1);
+        let prior = source[prior_start..prior_end].trim_start();
+        if prior.starts_with('#') || prior.starts_with('@') {
+            start = prior_start;
+        } else {
+            break;
+        }
+    }
+    let (tokens, _) = jet_lexer::Lexer::lex(&source[start..]);
+    let mut round = 0usize;
+    let mut square = 0usize;
+    let mut curly = 0usize;
+    let mut saw_curly = false;
+    for token in tokens {
+        let absolute_start = start + token.span.start;
+        let absolute_end = start + token.span.end;
+        let text = &source[absolute_start..absolute_end];
+        match text {
+            "(" => round += 1,
+            ")" => round = round.saturating_sub(1),
+            "[" => square += 1,
+            "]" => square = square.saturating_sub(1),
+            "{" => {
+                curly += 1;
+                saw_curly = true;
+            }
+            "}" => {
+                curly = curly.saturating_sub(1);
+                if saw_curly && round == 0 && square == 0 && curly == 0 {
+                    return Span::new(start, absolute_end);
+                }
+            }
+            ";" if round == 0 && square == 0 && curly == 0 => {
+                return Span::new(start, absolute_end);
+            }
+            _ => {}
+        }
+    }
+    Span::new(start, item_anchor(item).end)
+}
+
+fn record_func_type_nodes(f: &AST::Func, mp: &str, ctx: &mut WalkCtx<'_>) {
+    for param in &f.params {
+        record_node(ctx, "type", "type", mp, param.ty_span);
     }
 }
 
@@ -350,8 +526,16 @@ pub fn build_index(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> SemIn
 }
 
 fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<'_>) {
+    record_node(
+        ctx,
+        "item",
+        &item_shape(item),
+        mp,
+        source_item_span(item, &module.source),
+    );
     match item {
         Item::Func(f) => {
+            record_func_type_nodes(f, mp, ctx);
             let fn_identity = callable_identity(&ctx.scope_identity, None, &f.name, f);
             let params: Vec<(String, AST::Type)> = method_params(f);
             let sym = SymDef {
@@ -449,6 +633,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 });
             }
             for meth in &s.methods {
+                record_func_type_nodes(meth, mp, ctx);
                 let method_identity =
                     callable_identity(&ctx.scope_identity, Some(&s.name), &meth.name, meth);
                 let hover_text = hover_for_fn(meth);
@@ -505,6 +690,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
             }
             for tb in &s.trait_impls {
                 for meth in &tb.methods {
+                    record_func_type_nodes(meth, mp, ctx);
                     let method_identity =
                         callable_identity(&ctx.scope_identity, Some(&s.name), &meth.name, meth);
                     ctx.db.members.push(method_fact(
@@ -854,6 +1040,7 @@ fn collect_stmts(stmts: &[AST::Stmt], mp: &str, module: &LoadedModule, ctx: &mut
 }
 
 fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<'_>) {
+    record_node(ctx, "stmt", &stmt_shape(stmt), mp, stmt.span());
     match stmt {
         AST::Stmt::Val(b) => {
             collect_binding(b, mp, ctx);
@@ -1042,6 +1229,9 @@ fn collect_lvalue(lv: &AST::LValue, mp: &str, ctx: &mut WalkCtx<'_>) {
 }
 
 fn collect_binding(b: &AST::Binding, mp: &str, ctx: &mut WalkCtx<'_>) {
+    if let Some(span) = b.ty_span {
+        record_node(ctx, "type", "type", mp, span);
+    }
     // S74: a destructuring binding brings each named field/element into scope.
     if let Some(pat) = &b.pattern {
         for n in pat.names() {
@@ -1097,6 +1287,7 @@ fn collect_binding(b: &AST::Binding, mp: &str, ctx: &mut WalkCtx<'_>) {
 }
 
 fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
+    record_node(ctx, "expr", &expr_shape(e), mp, structural_expr_span(e));
     match e {
         AST::Expr::PtrFromAddr { addr, .. } => collect_expr(addr, mp, ctx),
         AST::Expr::Ident(name, span) => {

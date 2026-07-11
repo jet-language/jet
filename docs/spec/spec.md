@@ -2135,7 +2135,11 @@ subcommand or a new flag (I8).
 `jet inspect semindex --json <file.jet>` emits schema v3: definitions, references,
 call edges, effects, and member facts. Member facts stitch fields, variants,
 inline methods, external inherent impl methods, trait impl methods, and trait
-requirements into one stable owner-ordered view.
+requirements into one stable owner-ordered view. Every resolved reference also
+carries its definition identity; unresolved or ambiguous references carry no
+target and semantic edits must not fall back to spelling. Compiler-internal
+structural facts expose checked `expr`, `stmt`, `item`, and written `type` node
+boundaries for refactoring tools.
 
 `jet inspect dossier <file.jet> [Symbol]` renders those facts as a human report;
 `--json` emits the same lens data. The first shipped lens is the type/member
@@ -2159,7 +2163,10 @@ beneath `examples/` or `tests/ui/`; absolute, parent, and symlink escapes fail.
 Directory discovery is recursive and byte-path ordered. Rules are either a
 semantic `symbol_rename` or an `ast_rewrite` whose `node` is `expr`, `stmt`,
 `item`, or `type`. `$value` captures one subtree and `$values...` captures a
-list. Every rule declares its exact match count; duplicate ids, unknown fields,
+list. Matching is confined to the requested compiler-owned AST boundaries;
+same token bytes in another node class are not candidates. Symbol definitions
+and references are selected by their resolved definition anchors, never by
+spelling. Every rule declares its exact match count; duplicate ids, unknown fields,
 ambiguous names, unused captures, unresolved replacement names, zero matches,
 and overlapping edits fail before any write. Rule N+1 sees a compiler-reindexed
 overlay containing rule N, so a later semantic rule may target an earlier
@@ -2193,11 +2200,18 @@ validation, input rehash, and diff output but writes no source, snapshot, log,
 temporary file, or journal. Apply requires `--yes` after warning that an editor
 which ignores the codemod lock can still race the final rename. Apply writes
 same-directory temporary files, fsyncs contents and parents, and advances a
-fsynced recovery journal around each rename. A later codemod recovers a crash
+fsynced recovery journal around each rename. Replacement reopens each parent
+without following links, verifies the destination through that handle, and
+renames relative to the same handle (`openat`/`renameat` on Unix; directory and
+file handles plus `SetFileInformationByHandle` on Windows). The process lock is
+an OS-owned advisory lock on Unix and a delete-on-close exclusive file on
+Windows, so crash recovery does not depend on `/proc`. A later codemod recovers a crash
 before planning; unexpected concurrent bytes preserve the journal and stop.
 Schema-2 logs contain byte-exact before/after images. Undo verifies every
 after-hash before making any write and uses the same journal protocol to restore
 source and snapshots. Existing schema-1 inverse-edit logs remain readable.
+Unified dry-run output emits the standard no-newline marker for each side whose
+last line lacks a terminating newline.
 
 ## Web dev-server dashboard (D-FE-DEVSRV1)
 

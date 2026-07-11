@@ -457,3 +457,101 @@ fn batch_refuses_collision_invalid_binding_and_overlapping_ast_nodes() {
     );
     assert_eq!(fs::read_to_string(source).unwrap(), body);
 }
+
+#[test]
+fn semantic_rename_uses_resolved_reference_identity_not_spelling() {
+    let project = temp_dir("batch_identity");
+    let source = project.join("examples/a.jet");
+    fs::create_dir_all(source.parent().unwrap()).unwrap();
+    let before = "fn report() { print(\"function\") }\nfn run() { report :: 7\nprint(report) }\n";
+    fs::write(&source, before).unwrap();
+    let object = project.join("rename.codemod.json");
+    fs::write(&object, "{\"version\":2,\"name\":\"Identity\",\"project\":\".\",\"roots\":[{\"path\":\"examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"rename\",\"kind\":\"symbol_rename\",\"from\":{\"name\":\"report\",\"symbol_kind\":\"function\"},\"to\":\"summarize\",\"matches\":1}]}\n").unwrap();
+
+    let output = Command::new(jet())
+        .args(["inspect", "codemod", "apply", object.to_str().unwrap(), "--yes"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        fs::read_to_string(source).unwrap(),
+        "fn summarize() { print(\"function\") }\nfn run() { report :: 7\nprint(report) }\n"
+    );
+}
+
+#[test]
+fn typed_ast_rewrite_matches_only_compiler_owned_node_class() {
+    let project = temp_dir("batch_node_class");
+    let source = project.join("examples/a.jet");
+    fs::create_dir_all(source.parent().unwrap()).unwrap();
+    fs::write(
+        &source,
+        "fn helper(value: Int) {}\nfn run() { print(\"Int stays text\") }\n",
+    )
+    .unwrap();
+    let object = project.join("types.codemod.json");
+    fs::write(&object, "{\"version\":2,\"name\":\"Types\",\"project\":\".\",\"roots\":[{\"path\":\"examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"type\",\"kind\":\"ast_rewrite\",\"node\":\"type\",\"match\":\"Int\",\"replace\":\"Float\",\"matches\":1}]}\n").unwrap();
+
+    let output = Command::new(jet())
+        .args(["inspect", "codemod", "apply", object.to_str().unwrap(), "--yes"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        fs::read_to_string(source).unwrap(),
+        "fn helper(value: Float) {}\nfn run() { print(\"Int stays text\") }\n"
+    );
+}
+
+#[test]
+fn recovery_rejects_hostile_journal_paths_without_touching_outside_file() {
+    let project = temp_dir("batch_hostile_journal");
+    let object = simple_batch(&project, 2);
+    let outside = project.parent().unwrap().join(format!(
+        "{}-outside.jet",
+        project.file_name().unwrap().to_string_lossy()
+    ));
+    fs::write(&outside, b"outside bytes\n").unwrap();
+    let dir = project.join(".jet/codemods");
+    fs::create_dir_all(&dir).unwrap();
+    let hex = |bytes: &[u8]| bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
+    let log = dir.join("Hostile.log.json");
+    let journal = format!(
+        "{{\"schema\":2,\"tx\":\"hostile\",\"completed\":0,\"log_path\":\"{}\",\"log\":\"\",\"files\":[{{\"path\":\"{}\",\"temp\":\"{}\",\"before\":\"{}\",\"after\":\"{}\"}}]}}\n",
+        log.display(),
+        outside.display(),
+        outside.with_extension("tmp").display(),
+        hex(b"outside bytes\n"),
+        hex(b"owned\n")
+    );
+    let journal_path = dir.join("transaction.journal");
+    fs::write(&journal_path, journal).unwrap();
+
+    let output = Command::new(jet())
+        .args(["inspect", "codemod", "dry-run", object.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("escapes project"));
+    assert_eq!(fs::read(&outside).unwrap(), b"outside bytes\n");
+    assert!(journal_path.exists(), "hostile journal must remain for inspection");
+}
+
+#[test]
+fn dry_run_diff_preserves_eof_newline_truth() {
+    let project = temp_dir("batch_eof_diff");
+    let source = project.join("examples/a.jet");
+    fs::create_dir_all(source.parent().unwrap()).unwrap();
+    fs::write(&source, b"fn report() {}\nfn run() { report() }").unwrap();
+    let object = project.join("rename.codemod.json");
+    fs::write(&object, "{\"version\":2,\"name\":\"Eof\",\"project\":\".\",\"roots\":[{\"path\":\"examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"rename\",\"kind\":\"symbol_rename\",\"from\":{\"name\":\"report\",\"symbol_kind\":\"function\"},\"to\":\"summarize\",\"matches\":2}]}\n").unwrap();
+
+    let output = Command::new(jet())
+        .args(["inspect", "codemod", "dry-run", object.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.matches("\\ No newline at end of file").count(), 2, "{stdout}");
+    assert_eq!(fs::read(source).unwrap(), b"fn report() {}\nfn run() { report() }");
+}
