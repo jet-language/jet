@@ -1641,6 +1641,70 @@ see the full mean/stddev/budget line for diagnosing a failure.
 print(testing.bench_budget("parse", 5_000_000, () => { parse(input) }))
 ```
 
+#### `jet test` — directory recursion, filters, shuffle, parallel runs
+
+`jet test <dir>` walks every subdirectory (skipping `build/` and dotdirs),
+running every `.jet` file found, in sorted path order. A directory that has a
+`pkg.jet` manifest is still treated as a project root (its single entry file
+runs), same as before.
+
+Tests run in parallel by default — one thread per test, with its own
+`testing.temp_dir` (the thread id is folded into the path) and its own
+captured `print()` output, flushed right above that test's result line so a
+test's own output always reads the same as it did running alone. `--serial`
+opts out and runs one test at a time.
+
+```
+jet test <file|dir>              # parallel by default; walks subdirectories
+jet test <file|dir> --serial     # one test at a time
+jet test <file> --filter=foo     # only run tests whose name contains "foo"
+jet test <file> --shuffle        # random (printed) order — order-dependence check
+jet test <file> --shuffle=42     # reproduce a specific shuffled order
+```
+
+#### `jet fuzz` — fuzz a property test
+
+`jet fuzz <file> [<test-name>]` fuzzes a parameterized `#Test fn` (the same
+property-test form D-TEST1 gives `jet test` — see above) well past the
+200-case property-test budget, with corpus persistence and automatic
+minimization. The test name is optional when the file has exactly one
+property test; with more than one, name which:
+
+```
+jet fuzz examples/features/tooling/fuzz_demo.jet reverse_twice_is_identity
+```
+
+- **Corpus persistence**: every failure's seed is saved under
+  `.jet/fuzz/<file>/<test>/` (override with `--corpus=<dir>`) and replayed
+  first on the next run — a fixed bug stays caught until it's actually fixed.
+- **Minimization**: the first failing case is shrunk with the same greedy
+  algorithm `jet test`'s property-test driver uses, so the report names a
+  minimal counterexample, not the first (possibly huge) random input.
+- **Deterministic seeded PRNG**: the same `JetRng` splitmix64 generator
+  D-TEST1 already ships (std-only, I6). `--seed=<n>` pins the base seed (the
+  default is a fixed constant, so even a bare `jet fuzz` run reproduces); a
+  saved seed alone is a full, exact reproduction of that case.
+- **Budget flags**: `--iterations=<n>` (default 1000) and/or `--time=<n>`
+  (wall-clock seconds).
+
+A clean run:
+
+```
+corpus: 0 case(s) replayed clean
+reverse_twice_is_identity: 500 iteration(s), no failure found
+```
+
+A failure — minimized, saved, and printed as a runnable repro:
+
+```
+always_small: FAIL (after 9 iteration(s))
+  condition failed
+  minimized input: n = 50
+  seed: 2476628477891077985
+  saved: .jet/fuzz/prop_shrink/seed_2476628477891077985.txt
+repro: JET_PROP_SEED=2476628477891077985 jet test tests/fixtures/prop_shrink.jet
+```
+
 ### `core.regex` — linear-time regular expressions
 
 `use core.regex as re`. Matching is **linear-time** — the engine is a

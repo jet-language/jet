@@ -1490,6 +1490,109 @@ fn as_bytes(v: &CtValue, span: Span) -> Result<Vec<u8>, Diagnostic> {
     }
 }
 
+/// D-URL1=A: `Vec<Vec<String>>`-shaped arg (`[[String]]`) — used by
+/// `core.url.from_parts`'s `query` param and `core.url.query`'s pairs param,
+/// mirroring AOT's `&Vec<Vec<String>>` signature.
+fn as_string_rows(v: &CtValue, span: Span) -> Result<Vec<Vec<String>>, Diagnostic> {
+    match v {
+        CtValue::List(rows) => rows
+            .iter()
+            .map(|row| match row {
+                CtValue::List(cols) => cols
+                    .iter()
+                    .map(|c| Ok(as_string(c, span)?.to_string()))
+                    .collect::<Result<Vec<_>, _>>(),
+                _ => Err(unsupported("core.url query rows must be `[[String]]`", span)),
+            })
+            .collect(),
+        _ => Err(unsupported("core.url query rows must be `[[String]]`", span)),
+    }
+}
+
+/// Mirrors AOT's `JetUrl` field shape 1:1 so `.scheme`/`.host`/`.path`/
+/// `.query`/`.fragment` struct-field reads (generic member access,
+/// `Interpreter.rs`) work the same as any other `CtValue::Struct`.
+fn url_parts_to_ct(u: &super::UrlLite::UrlParts) -> CtValue {
+    CtValue::Struct {
+        type_name: "Url".to_string(),
+        fields: vec![
+            ("scheme".to_string(), CtValue::Str(u.scheme.clone())),
+            (
+                "host".to_string(),
+                match &u.host {
+                    Some(h) if !h.is_empty() => CtValue::Some(Box::new(CtValue::Str(h.clone()))),
+                    _ => CtValue::None(Type::String),
+                },
+            ),
+            (
+                "port".to_string(),
+                match u.port {
+                    Some(p) => CtValue::Some(Box::new(CtValue::Int(p))),
+                    None => CtValue::None(Type::Int),
+                },
+            ),
+            ("path".to_string(), CtValue::Str(u.path.clone())),
+            (
+                "query".to_string(),
+                CtValue::List(
+                    u.query
+                        .iter()
+                        .map(|(k, v)| {
+                            CtValue::List(vec![CtValue::Str(k.clone()), CtValue::Str(v.clone())])
+                        })
+                        .collect(),
+                ),
+            ),
+            (
+                "fragment".to_string(),
+                match &u.fragment {
+                    Some(f) => CtValue::Some(Box::new(CtValue::Str(f.clone()))),
+                    None => CtValue::None(Type::String),
+                },
+            ),
+        ],
+    }
+}
+
+/// `[Float]` argument — `core.data`'s stats functions all take `&Vec<f64>`.
+fn as_float_list(v: &CtValue, span: Span) -> Result<Vec<f64>, Diagnostic> {
+    match v {
+        CtValue::List(xs) => xs.iter().map(|x| as_float(x, span)).collect(),
+        _ => Err(unsupported("core.data: argument must be `[Float]`", span)),
+    }
+}
+
+/// `[DataGroup]` argument — `bar_text`/`bar_svg` only read `.key`/`.count`
+/// (never `.sum`/`.mean`), matching AOT's `jet_data_bar_text`/`_svg`.
+fn as_data_groups(v: &CtValue, span: Span) -> Result<Vec<(String, i64)>, Diagnostic> {
+    match v {
+        CtValue::List(xs) => xs
+            .iter()
+            .map(|x| match x {
+                CtValue::Struct { type_name, fields } if type_name == "DataGroup" => {
+                    let key = fields
+                        .iter()
+                        .find(|(n, _)| n == "key")
+                        .map(|(_, v)| v.clone());
+                    let count = fields
+                        .iter()
+                        .find(|(n, _)| n == "count")
+                        .map(|(_, v)| v.clone());
+                    match (key, count) {
+                        (Some(CtValue::Str(k)), Some(CtValue::Int(c))) => Ok((k, c)),
+                        _ => Err(unsupported(
+                            "core.data: a `DataGroup` needs `key: String` and `count: Int`",
+                            span,
+                        )),
+                    }
+                }
+                _ => Err(unsupported("core.data: argument must be `[DataGroup]`", span)),
+            })
+            .collect(),
+        _ => Err(unsupported("core.data: argument must be `[DataGroup]`", span)),
+    }
+}
+
 const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
 
 fn hex_encode(bytes: Vec<u8>) -> String {
@@ -2661,6 +2764,202 @@ fn apply_core_call(
                 Err(e) => CtValue::ResErr(Box::new(CtValue::Str(e))),
             })
         }
+        // --- D-URL1=A: core.url (pure RFC-3986-shaped parser, ported
+        // verbatim from AOT's `JetUrl`/`jet_url_*` in `UrlMime.rs` — see
+        // `UrlLite.rs`) ---
+        ("core.url", "parse") => {
+            let s = as_string(one(0)?, span)?;
+            Ok(match super::UrlLite::UrlParts::parse(s) {
+                Ok(u) => CtValue::ResOk(Box::new(url_parts_to_ct(&u))),
+                Err(e) => CtValue::ResErr(Box::new(CtValue::Str(e))),
+            })
+        }
+        ("core.url", "from_parts") => {
+            let scheme = as_string(one(0)?, span)?.to_string();
+            let host = as_string(one(1)?, span)?.to_string();
+            let path = as_string(one(2)?, span)?.to_string();
+            let query = as_string_rows(one(3)?, span)?;
+            let fragment = as_string(one(4)?, span)?.to_string();
+            Ok(
+                match super::UrlLite::UrlParts::from_parts(&scheme, &host, &path, &query, &fragment)
+                {
+                    Ok(u) => CtValue::ResOk(Box::new(url_parts_to_ct(&u))),
+                    Err(e) => CtValue::ResErr(Box::new(CtValue::Str(e))),
+                },
+            )
+        }
+        ("core.url", "file") => {
+            let path = as_string(one(0)?, span)?;
+            Ok(url_parts_to_ct(&super::UrlLite::UrlParts::file(path)))
+        }
+        ("core.url", "data") => {
+            // `mime` arg is a `CtValue::Struct { type_name: "Mime", .. }`
+            // (D-URL1's `Mime` type) with `top`/`sub`/`params` fields — the
+            // `core.mime` module port isn't in this card's slice, so render
+            // its essence + params here the same way AOT's
+            // `JetMime::to_string_value` does, matching field-for-field.
+            let mime = one(0)?;
+            let text = as_string(one(1)?, span)?;
+            let rendered = match mime {
+                CtValue::Struct { type_name, fields } if type_name == "Mime" => {
+                    let get = |name: &str| {
+                        fields
+                            .iter()
+                            .find(|(n, _)| n == name)
+                            .map(|(_, v)| v.clone())
+                    };
+                    let top = match get("top") {
+                        Some(CtValue::Str(s)) => s,
+                        _ => return Err(unsupported("core.url.data: mime.top must be String", span)),
+                    };
+                    let sub = match get("sub") {
+                        Some(CtValue::Str(s)) => s,
+                        _ => return Err(unsupported("core.url.data: mime.sub must be String", span)),
+                    };
+                    let mut out = format!("{}/{}", top, sub);
+                    if let Some(CtValue::List(params)) = get("params") {
+                        for p in params {
+                            if let CtValue::List(kv) = p {
+                                if let [CtValue::Str(k), CtValue::Str(v)] = &kv[..] {
+                                    out.push_str("; ");
+                                    out.push_str(k);
+                                    out.push('=');
+                                    out.push_str(v);
+                                }
+                            }
+                        }
+                    }
+                    out
+                }
+                _ => return Err(unsupported("core.url.data: first argument must be a Mime", span)),
+            };
+            Ok(url_parts_to_ct(&super::UrlLite::UrlParts::data(
+                &rendered, text,
+            )))
+        }
+        ("core.url", "query") => {
+            let rows = as_string_rows(one(0)?, span)?;
+            let pairs: Vec<(String, String)> = rows
+                .iter()
+                .filter(|r| !r.is_empty())
+                .map(|r| {
+                    (
+                        r.get(0).cloned().unwrap_or_default(),
+                        r.get(1).cloned().unwrap_or_default(),
+                    )
+                })
+                .collect();
+            Ok(CtValue::Str(super::UrlLite::url_render_query(&pairs)))
+        }
+        ("core.url", "percent_encode") => {
+            let s = as_string(one(0)?, span)?;
+            Ok(CtValue::Str(super::UrlLite::url_percent_encode(s, false)))
+        }
+        ("core.url", "percent_decode") => {
+            let s = as_string(one(0)?, span)?;
+            Ok(match super::UrlLite::url_percent_decode_str(s) {
+                Ok(v) => CtValue::ResOk(Box::new(CtValue::Str(v))),
+                Err(e) => CtValue::ResErr(Box::new(CtValue::Str(e))),
+            })
+        }
+        // --- D-DATA-SURFACE1/PLOT1/STATUS1: core.data's fixed-signature
+        // stats + plot surface (pure, ported verbatim from AOT's
+        // `jet_data_*` — see `DataLite.rs`). The generic call-site-typed
+        // table/lazy-pipeline half of `core.data` is a separate, larger
+        // design pass (see `DataLite.rs`'s doc comment) and isn't here.
+        ("core.data", "sum") => Ok(CtValue::Float(super::DataLite::sum(&as_float_list(
+            one(0)?,
+            span,
+        )?))),
+        ("core.data", "mean") => Ok(CtValue::Float(super::DataLite::mean(&as_float_list(
+            one(0)?,
+            span,
+        )?))),
+        ("core.data", "min") => Ok(CtValue::Float(super::DataLite::min(&as_float_list(
+            one(0)?,
+            span,
+        )?))),
+        ("core.data", "max") => Ok(CtValue::Float(super::DataLite::max(&as_float_list(
+            one(0)?,
+            span,
+        )?))),
+        ("core.data", "median") => Ok(CtValue::Float(super::DataLite::median(&as_float_list(
+            one(0)?,
+            span,
+        )?))),
+        ("core.data", "variance") => Ok(CtValue::Float(super::DataLite::variance(
+            &as_float_list(one(0)?, span)?,
+        ))),
+        ("core.data", "stddev") => Ok(CtValue::Float(super::DataLite::stddev(&as_float_list(
+            one(0)?,
+            span,
+        )?))),
+        ("core.data", "quantile") => {
+            let values = as_float_list(one(0)?, span)?;
+            let q = as_float(one(1)?, span)?;
+            Ok(CtValue::Float(super::DataLite::quantile(&values, q)))
+        }
+        ("core.data", "rolling_mean") => {
+            let values = as_float_list(one(0)?, span)?;
+            let width = as_int(one(1)?, span)?;
+            Ok(CtValue::List(
+                super::DataLite::rolling_mean(&values, width)
+                    .into_iter()
+                    .map(CtValue::Float)
+                    .collect(),
+            ))
+        }
+        ("core.data", "describe") => {
+            let values = as_float_list(one(0)?, span)?;
+            Ok(CtValue::Struct {
+                type_name: "DataSummary".to_string(),
+                fields: vec![
+                    (
+                        "count".to_string(),
+                        CtValue::Int(values.len() as i64),
+                    ),
+                    ("sum".to_string(), CtValue::Float(super::DataLite::sum(&values))),
+                    ("mean".to_string(), CtValue::Float(super::DataLite::mean(&values))),
+                    ("min".to_string(), CtValue::Float(super::DataLite::min(&values))),
+                    ("max".to_string(), CtValue::Float(super::DataLite::max(&values))),
+                    (
+                        "median".to_string(),
+                        CtValue::Float(super::DataLite::median(&values)),
+                    ),
+                    (
+                        "variance".to_string(),
+                        CtValue::Float(super::DataLite::variance(&values)),
+                    ),
+                    (
+                        "stddev".to_string(),
+                        CtValue::Float(super::DataLite::stddev(&values)),
+                    ),
+                ],
+            })
+        }
+        ("core.data", "status") => Ok(CtValue::List(
+            super::DataLite::status_rows()
+                .into_iter()
+                .map(|(step, path, replacement)| CtValue::Struct {
+                    type_name: "DataStatus".to_string(),
+                    fields: vec![
+                        ("step".to_string(), CtValue::Str(step.to_string())),
+                        ("path".to_string(), CtValue::Str(path.to_string())),
+                        (
+                            "replacement".to_string(),
+                            CtValue::Str(replacement.to_string()),
+                        ),
+                    ],
+                })
+                .collect(),
+        )),
+        ("core.data", "bar_text") => Ok(CtValue::Str(super::DataLite::bar_text(
+            &as_data_groups(one(0)?, span)?,
+        ))),
+        ("core.data", "bar_svg") => Ok(CtValue::Str(super::DataLite::bar_svg(&as_data_groups(
+            one(0)?,
+            span,
+        )?))),
         // --- core.text.unicode (std-only Unicode scalar helpers, pure) ---
         ("core.text.unicode", "scalar_count") => Ok(CtValue::Int(
             as_string(one(0)?, span)?.chars().count() as i64,

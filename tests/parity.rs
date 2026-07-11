@@ -266,19 +266,9 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     ("core.testing", "golden"),
     ("core.testing", "snap"),
     ("core.testing", "temp_dir"),
-    // core.url: full parse/normalize/percent-encode surface (`JetUrl`,
-    // `UrlMime.rs` + `MathRandomTime.rs`) — a pure text transform, but the AOT
-    // implementation is a real RFC-3986-shaped parser (scheme/authority/host/
-    // port/path/query/fragment, dot-segment normalization) with its own struct
-    // shape; porting it correctly is a distinct pass, not folded into this
-    // card's BigInt-plus-audit slice.
-    ("core.url", "data"),
-    ("core.url", "file"),
-    ("core.url", "from_parts"),
-    ("core.url", "parse"),
-    ("core.url", "percent_decode"),
-    ("core.url", "percent_encode"),
-    ("core.url", "query"),
+    // core.url: PORTED (card #392 pass 3) — see `UrlLite.rs` + `Methods.rs`'s
+    // `("core.url", ...)` arms, ported verbatim from `JetUrl`/`jet_url_*`
+    // (`UrlMime.rs` + `MathRandomTime.rs`).
     // core.uuid: EFFECT BOUNDARY, not a porting gap. `v4`/`v7` need genuine
     // ambient entropy (`jet_uuid_fill_random` reads `/dev/urandom`, POSIX,
     // falling back to a wall-clock-nanosecond seed — `EncodingCodecs.rs`) and

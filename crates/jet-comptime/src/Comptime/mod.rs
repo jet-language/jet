@@ -16,6 +16,7 @@
 
 pub mod Build;
 mod Builtins;
+mod DataLite;
 mod Diagnostics;
 mod Interpreter;
 mod JsonInterp;
@@ -24,6 +25,7 @@ mod Purity;
 mod Reflect;
 mod RegexLite;
 mod TextLite;
+mod UrlLite;
 mod Value;
 
 use std::collections::{HashMap, HashSet};

@@ -626,6 +626,42 @@ fn fuzz_corpus_dir(label: &str) -> PathBuf {
 }
 
 #[test]
+fn jet_fuzz_example_clean_run_output() {
+    // I5: examples/features/tooling/fuzz_demo.jet is the executable spec for
+    // `jet fuzz` — fixed `--seed`/`--iterations` so the clean-run report is
+    // byte-for-byte deterministic (D-TESTKIT1=A gap #1).
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let jet = jet_bin();
+    let have_rustc = have_rustc();
+    if !have_rustc || !jet.exists() {
+        return;
+    }
+    let example = root.join("examples/features/tooling/fuzz_demo.jet");
+    let corpus = fuzz_corpus_dir("example_demo");
+    let out = Command::new(&jet)
+        .arg("fuzz")
+        .arg(&example)
+        .arg("reverse_twice_is_identity")
+        .arg("--iterations=500")
+        .arg("--seed=1")
+        .arg(format!("--corpus={}", corpus.display()))
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "fuzz_demo.jet must fuzz clean:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let expected = fs::read_to_string(
+        root.join("examples/features/expected/tooling/fuzz_demo.fuzz.out"),
+    )
+    .expect("examples/features/expected/tooling/fuzz_demo.fuzz.out");
+    assert_eq!(String::from_utf8_lossy(&out.stdout), expected);
+    let _ = fs::remove_dir_all(&corpus);
+}
+
+#[test]
 fn jet_fuzz_ambiguous_target_names_candidates() {
     // Gap #1, target selection: a file with more than one property test must
     // name one — this is CLI argument validation, not a compiler diagnostic

@@ -87,6 +87,18 @@ const MODULE_CASES: &[&str] = &[
     "use core.math as math\ncomptime C = math.sin(0.0)\n\nfn run() {\n    r :: math.sin(0.0)\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
     "use core.math as math\ncomptime C = math.gcd(12, 18)\n\nfn run() {\n    r :: math.gcd(12, 18)\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
     "use core.math as math\ncomptime C = math.saturating_add(9223372036854775807, 1)\n\nfn run() {\n    r :: math.saturating_add(9223372036854775807, 1)\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
+    // card #392 pass 3: `core.url` (D-URL1=A), ported verbatim from AOT's
+    // `jet_url_*` (`UrlMime.rs` + `MathRandomTime.rs`, see `UrlLite.rs`).
+    // Only the plain-`String`-returning free functions go through this
+    // rustc-verified differential (parse/from_parts/file/data return a `Url`
+    // struct whose instance methods — `.scheme()` etc — are a separate,
+    // out-of-scope gap, so there's no printable way to compare their
+    // contents byte-for-byte here; those are covered by
+    // `tests/repl.rs::repl_core_url_dispatch` instead).
+    "use core.url as url\ncomptime C = url.percent_encode(\"a b/c?d#e\")\n\nfn run() {\n    r :: url.percent_encode(\"a b/c?d#e\")\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
+    "use core.url as url\ncomptime C = url.percent_decode(\"a%20b%2Fc\") ?? panic(\"bad\")\n\nfn run() {\n    r :: url.percent_decode(\"a%20b%2Fc\") ?? panic(\"bad\")\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
+    "use core.url as url\ncomptime C = url.percent_decode(\"bad%\") ?? \"fallback\"\n\nfn run() {\n    r :: url.percent_decode(\"bad%\") ?? \"fallback\"\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
+    "use core.url as url\ncomptime C = url.query([[\"a\", \"1\"], [\"b\", \"2 c\"]])\n\nfn run() {\n    r :: url.query([[\"a\", \"1\"], [\"b\", \"2 c\"]])\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
 ];
 
 #[test]
