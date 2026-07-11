@@ -27,6 +27,7 @@ use crate::AST::{
     CModule, CModuleKind, ExternFn, ForeignLanguage, ImportDecl, ImportKind, Item, LoadedModule,
     ProgramBundle,
 };
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -231,17 +232,16 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
                 diags.push(e3207(&lib, path_span));
                 continue;
             }
-            if !surfaces.contains_key(&lib) {
-                order.push(lib.clone());
-                surfaces.insert(
-                    lib.clone(),
-                    LibSurface {
+            let surf = match surfaces.entry(lib.clone()) {
+                Entry::Occupied(entry) => entry.into_mut(),
+                Entry::Vacant(entry) => {
+                    order.push(lib.clone());
+                    entry.insert(LibSurface {
                         bindgen: Vec::new(),
                         overlay: Vec::new(),
-                    },
-                );
-            }
-            let surf = surfaces.get_mut(&lib).unwrap();
+                    })
+                }
+            };
             match kind {
                 CModuleKind::Bindgen => surf.bindgen.extend(functions),
                 CModuleKind::Extern => surf.overlay.extend(functions),
@@ -260,7 +260,11 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
     let mut lib_to_idx: HashMap<String, usize> = HashMap::new();
 
     for lib in &order {
-        let surf = surfaces.get(lib).unwrap();
+        // Every key enters `order` only beside its vacant `surfaces` insertion
+        // above, and no surface is removed before this ordered merge pass.
+        let Some(surf) = surfaces.get(lib) else {
+            continue;
+        };
         // Start from bindgen, then let overlay add/override.
         let mut merged: Vec<ExternFn> = Vec::new();
         let mut index: HashMap<String, usize> = HashMap::new();
