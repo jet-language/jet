@@ -1,3 +1,31 @@
+/// A plain binding or field chain that a consuming Core constructor would move.
+/// Returns the real root binding, the Jet spelling used in the diagnostic, and
+/// the full place span. Calls/indexing are deliberately excluded: this helper
+/// only describes places whose ownership follows one local binding.
+fn core_consuming_place(expr: &Expr) -> Option<(String, String, Span)> {
+    fn walk(expr: &Expr, fields: &mut Vec<String>) -> Option<(String, Span)> {
+        match expr {
+            Expr::Ident(name, span) => Some((name.clone(), *span)),
+            Expr::Field(base, field, _) => {
+                fields.push(field.clone());
+                walk(base, fields)
+            }
+            _ => None,
+        }
+    }
+
+    let end = expr.span().end;
+    let mut fields = Vec::new();
+    let (root, root_span) = walk(expr, &mut fields)?;
+    fields.reverse();
+    let mut place = root.clone();
+    for field in fields {
+        place.push('.');
+        place.push_str(&field);
+    }
+    Some((root, place, Span::new(root_span.start, end)))
+}
+
 impl<'a> Checker<'a> {
         pub(crate) fn expect_core_arg(
             &mut self,
@@ -109,10 +137,8 @@ impl<'a> Checker<'a> {
                 && matches!(arg.convention, AccessConvention::Read)
                 && matches!(param_ty, Type::String | Type::List(_) | Type::Map { .. })
             {
-                if let Expr::Ident(name, ispan) = &arg.expr {
-                    let name = name.clone();
-                    let ispan = *ispan;
-                    if self.is_borrowed_binding(&name) {
+                if let Some((root, place, place_span)) = core_consuming_place(&arg.expr) {
+                    if self.is_borrowed_binding(&root) {
                         arg.flags.implicit_clone = true;
                         // D-MEM1/S2 (was D-L0201 lint): a hard error now, regardless
                         // of liveness — no clone is ever silent. Unlike a Move-param
@@ -122,10 +148,14 @@ impl<'a> Checker<'a> {
                         // move/reorder menu.
                         self.diags.push(Diagnostic::error(
                             "E0209",
-                            format!("implicit clone of `{}`", name),
+                            format!("implicit clone of `{}`", place),
                             format!("`{}` stores its own copy of this value", call_name),
-                            format!("write `{} {}` to copy explicitly", Syntax::KW_COPY, name),
-                            Some(ispan),
+                            format!(
+                                "write `{} {}` to copy explicitly",
+                                Syntax::KW_COPY,
+                                place
+                            ),
+                            Some(place_span),
                         ));
                     }
                 }

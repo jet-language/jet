@@ -2123,6 +2123,47 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// #495 / I2: a field read from a bare (`Read`) parameter is still rooted in
+/// the borrowed parameter. The explicit `copy` required by E0209 must produce
+/// owned values for both shallow and nested fields, compile through rustc, and
+/// run with the expected data.
+#[test]
+fn consuming_core_constructor_copies_borrowed_field_explicitly() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_core_borrowed_field_copy_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "core_borrowed_field_copy",
+        r#"
+use core.encoding.json as json
+
+struct Address { text: String }
+struct Email { addr: String, nested: Address }
+
+fn encoded(e: Email) -> String {
+    shallow := Data.Text(copy e.addr)
+    nested := Data.Text(copy e.nested.text)
+    return "{json.to_string(shallow)}|{json.to_string(nested)}"
+}
+
+fn run() {
+    e := Email.{addr: "a@b.com", nested: Address.{text: "inside"}}
+    print(encoded(e))
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "explicit field copy failed to compile/run: {stderr}");
+    assert_eq!(stdout, "\"a@b.com\"|\"inside\"\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
 // ── c152: full YAML adapter (D-ENC-YAML1 = A) ────────────────────────────────
 // Block mappings + sequences, flow collections, typed scalars, block scalars,
 // comments, document markers, and anchors/aliases.
