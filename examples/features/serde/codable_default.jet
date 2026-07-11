@@ -1,0 +1,23 @@
+// Card #131 — a non-primitive `#[Default(expr)]` fills a missing field with the
+// EXACT value it names, on both the compiled binary and `jet dev` (R12). The
+// argument is evaluated once at compile time; a list/struct/enum default no
+// longer silently degrades to an empty/zero value.
+use core.encoding.json as json
+
+@Codable
+struct Config {
+    name: String
+    #[Default([80, 443])] ports: [Int]
+    #[Default("prod")] env: String
+}
+
+fn run() {
+    // `ports` and `env` are absent on the wire → both defaults apply.
+    c :: json.decode<Config>("{{\"name\":\"web\"}}") ?? panic("bad config")
+    print(c.name)
+    print(c.ports)
+    print(c.env)
+    // A wire value overrides the default.
+    d :: json.decode<Config>("{{\"name\":\"api\",\"ports\":[8080]}}") ?? panic("bad config")
+    print(d.ports)
+}

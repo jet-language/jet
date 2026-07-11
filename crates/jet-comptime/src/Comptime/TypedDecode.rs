@@ -435,6 +435,12 @@ impl<'a> Interp<'a> {
 
     fn field_default_value(&mut self, f: &Field, _span: Span) -> CtValue {
         if let Some(m) = serde_marker(&f.serde_markers, crate::Syntax::ATTR_DEFAULT) {
+            // Card #131: prefer the value sema already baked onto the marker, so
+            // this decode tier and AOT codegen use the byte-identical default
+            // (R12). Fall back to a live eval only if sema's pass didn't run.
+            if let Some(v) = &m.ct {
+                return v.clone();
+            }
             if let Some(expr) = m.args.first() {
                 let mut empty_scope = std::collections::HashMap::new();
                 if let Ok(v) = self.eval(expr, &mut empty_scope) {

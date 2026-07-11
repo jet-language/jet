@@ -688,18 +688,6 @@ fn marker_str_arg(m: &Marker) -> Option<String> {
         _ => None,
     }
 }
-fn lit_rust(e: &Expr) -> String {
-    match e {
-        Expr::Int(n, _, _) => format!("{}i64", n),
-        Expr::Float(f, _, _) => format!("{:?}f64", f),
-        Expr::Bool(b, _) => b.to_string(),
-        Expr::Str(parts, _) if parts.len() == 1 => match &parts[0] {
-            StrPart::Lit(s) => format!("{:?}.to_string()", s),
-            _ => "Default::default()".to_string(),
-        },
-        _ => "Default::default()".to_string(),
-    }
-}
 fn cap_word(w: &str) -> String {
     let mut c = w.chars();
     match c.next() {
@@ -746,9 +734,17 @@ fn field_wire_key(style: Option<&str>, f: &Field) -> String {
 }
 fn field_default_rust(f: &Field) -> Option<String> {
     let m = serde_marker(&f.serde_markers, crate::Syntax::ATTR_DEFAULT)?;
-    Some(match m.args.first() {
-        Some(arg) => lit_rust(arg),
-        None => "Default::default()".to_string(),
+    Some(match (m.args.first(), &m.ct) {
+        // `#[Default(expr)]`: emit the exact compile-time value sema evaluated
+        // (`eval_default_markers`) — byte-for-byte the same `CtValue` the
+        // comptime decode tier uses, so a non-primitive default round-trips
+        // exactly (R12) instead of silently degrading to `Default::default()`.
+        // A non-const argument is rejected in sema (E2414), so a present arg
+        // always carries a value here.
+        (Some(_), Some(v)) => v.serialize(),
+        (Some(_), None) => "Default::default()".to_string(),
+        // bare `#[Default]`: the field type's zero value.
+        (None, _) => "Default::default()".to_string(),
     })
 }
 

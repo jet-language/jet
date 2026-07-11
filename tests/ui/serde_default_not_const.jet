@@ -1,0 +1,17 @@
+// Card #131 / E2414: a `#[Default(expr)]` argument must be a compile-time
+// constant. `live()` performs I/O, so its value can only be known at runtime —
+// it can't be baked in as a decode default.
+fn live() -> Int {
+    print("side effect")
+    return 1
+}
+
+@Codable
+struct S {
+    #[Default(live())] n: Int
+}
+
+fn run() {
+    s :: S.{n: 5}
+    print(s.n)
+}

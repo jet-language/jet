@@ -920,6 +920,13 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
         &single_core_imports,
         None,
     );
+    // Card #131: bake each `#[Default(expr)]` value now that comptime consts exist.
+    eval_default_markers(
+        &mut prog.items,
+        std::path::Path::new("."),
+        &mut diags,
+        &single_core_imports,
+    );
 
     let const_names: Vec<String> = consts.keys().cloned().collect();
     let mut address_taken: HashSet<String> = HashSet::new();
@@ -1651,6 +1658,62 @@ pub(crate) fn eval_comptime_items(
             if c.is_comptime {
                 if let Some(pos) = results.iter().position(|(n, _)| n == &c.name) {
                     c.ct = Some(results.remove(pos).1);
+                }
+            }
+        }
+    }
+}
+
+/// Card #131 / D-SERDE5: pre-evaluate every `#[Default(expr)]` argument on a
+/// `@[Codable]`/`@[Encode]`/`@[Decode]` struct field to a compile-time value,
+/// stashed on the marker (`Marker::ct`). Runs after `eval_comptime_items`, so a
+/// default may reference a `comptime` const. Codegen serializes this value and
+/// the comptime decode tier reuses it, so the two tiers bake the same default —
+/// a non-primitive `#[Default(expr)]` never silently degrades to
+/// `Default::default()` (R11/R12). A non-const argument is E2414.
+pub(crate) fn eval_default_markers(
+    items: &mut [Item],
+    base_dir: &std::path::Path,
+    diags: &mut Vec<Diagnostic>,
+    core_imports: &HashMap<String, String>,
+) {
+    fn is_codable(s: &crate::AST::StructDef) -> bool {
+        s.derives
+            .iter()
+            .any(|(t, _)| t == crate::Generics::ENCODE || t == crate::Generics::DECODE)
+    }
+    let any = items.iter().any(|i| matches!(i, Item::Struct(s) if is_codable(s)
+        && s.fields.iter().any(|f| f.serde_markers.iter().any(|m|
+            m.name == crate::Syntax::ATTR_DEFAULT && !m.args.is_empty()))));
+    if !any {
+        return;
+    }
+    let (funcs_owned, externs, globals) = comptime_context_from_items(items);
+    let funcs: HashMap<String, &Func> = funcs_owned.iter().map(|(k, v)| (k.clone(), v)).collect();
+    for item in items.iter_mut() {
+        let Item::Struct(s) = item else { continue };
+        if !is_codable(s) {
+            continue;
+        }
+        for f in &mut s.fields {
+            let field_name = f.name.clone();
+            for m in &mut f.serde_markers {
+                if m.name != crate::Syntax::ATTR_DEFAULT {
+                    continue;
+                }
+                let Some(expr) = m.args.first() else { continue };
+                match crate::Comptime::evaluate_with_imports_opts_collecting(
+                    expr,
+                    &funcs,
+                    &externs,
+                    base_dir,
+                    &globals,
+                    core_imports,
+                    false,
+                    0,
+                ) {
+                    Ok((v, _)) => m.ct = Some(v),
+                    Err(_) => diags.push(crate::Sema::e2414(&field_name, m.span)),
                 }
             }
         }
