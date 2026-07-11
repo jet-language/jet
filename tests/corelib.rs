@@ -689,6 +689,91 @@ fn run() {{
     assert!(ids.len() > 1, "all nine DNS queries reused one transaction ID");
 }
 
+fn run_rejected_dns_response(tag: &str, make_response: fn(&[u8]) -> Vec<u8>) -> String {
+    let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    let addr = socket.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        let mut query = [0u8; 512];
+        let (n, peer) = socket.recv_from(&mut query).unwrap();
+        socket
+            .send_to(&make_response(&query[..n]), peer)
+            .unwrap();
+    });
+    let dir = std::env::temp_dir().join(format!(
+        "jet_core_net_dns_reject_{}_{}",
+        tag,
+        std::process::id()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    let src = format!(
+        r#"
+use core.net as net
+
+fn run() {{
+    _ :: net.dns_a_at("{}", "service.example.test", 1000) ?? panic("invalid DNS accepted")
+}}
+"#,
+        addr
+    );
+    let (code, _stdout, stderr) = build_and_run(&dir, tag, &src, &[], None);
+    server.join().unwrap();
+    assert_ne!(code, 0, "invalid DNS response was accepted: {tag}");
+    stderr
+}
+
+#[test]
+fn core_net_dns_rejects_non_response_and_cyclic_compression() {
+    fn non_response(query: &[u8]) -> Vec<u8> {
+        let mut response = dns_fixture_response(query);
+        response[2] &= 0x7f;
+        response
+    }
+    fn cyclic_compression(query: &[u8]) -> Vec<u8> {
+        let end = dns_question_end(query);
+        let record_start = end;
+        let mut response = Vec::new();
+        response.extend_from_slice(&query[0..2]);
+        response.extend_from_slice(&0x8180u16.to_be_bytes());
+        response.extend_from_slice(&1u16.to_be_bytes());
+        response.extend_from_slice(&1u16.to_be_bytes());
+        response.extend_from_slice(&0u16.to_be_bytes());
+        response.extend_from_slice(&0u16.to_be_bytes());
+        response.extend_from_slice(&query[12..end]);
+        response.push(0xc0 | ((record_start >> 8) as u8 & 0x3f));
+        response.push(record_start as u8);
+        response.extend_from_slice(&1u16.to_be_bytes());
+        response.extend_from_slice(&1u16.to_be_bytes());
+        response.extend_from_slice(&0u32.to_be_bytes());
+        response.extend_from_slice(&4u16.to_be_bytes());
+        response.extend_from_slice(&[192, 0, 2, 1]);
+        response
+    }
+
+    let qr = run_rejected_dns_response("dns_not_response", non_response);
+    assert!(qr.contains("invalid DNS accepted"), "{qr}");
+    let cycle = run_rejected_dns_response("dns_pointer_cycle", cyclic_compression);
+    assert!(cycle.contains("invalid DNS accepted"), "{cycle}");
+}
+
+#[test]
+fn core_net_dns_nxdomain_is_an_error() {
+    fn nxdomain(query: &[u8]) -> Vec<u8> {
+        let end = dns_question_end(query);
+        let mut response = Vec::new();
+        response.extend_from_slice(&query[0..2]);
+        response.extend_from_slice(&0x8183u16.to_be_bytes());
+        response.extend_from_slice(&1u16.to_be_bytes());
+        response.extend_from_slice(&0u16.to_be_bytes());
+        response.extend_from_slice(&0u16.to_be_bytes());
+        response.extend_from_slice(&0u16.to_be_bytes());
+        response.extend_from_slice(&query[12..end]);
+        response
+    }
+
+    let stderr = run_rejected_dns_response("dns_nxdomain", nxdomain);
+    assert!(stderr.contains("invalid DNS accepted"), "{stderr}");
+}
+
 #[test]
 fn canonical_core_import_resolves() {
     let out = compile_temp(
