@@ -1290,8 +1290,7 @@ pub(super) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags: &mut Vec<
         // generated Encode body is checked.
         let mut codec_params = s.type_params.clone();
         let wire_types = s.fields.iter()
-            .filter(|f| f.computed.is_none()
-                && !f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_SKIP))
+            .filter(|f| !f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_SKIP))
             .map(|f| &f.ty)
             .collect::<Vec<_>>();
         for param in &mut codec_params {
@@ -1310,7 +1309,7 @@ pub(super) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags: &mut Vec<
         if enc {
             source.push_str("impl Encode {\nfn encode(self) -> DataTree {\n");
             let active: Vec<_> = s.fields.iter().filter(|f|
-                f.computed.is_none() && !f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_SKIP)
+                !f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_SKIP)
             ).collect();
             let needs_mutation = active.iter().any(|f|
                 f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_FLATTEN)
@@ -1325,14 +1324,18 @@ pub(super) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags: &mut Vec<
             } else {
                 source.push_str("out: [String: DataTree] := []\n");
             for f in &s.fields {
-                if f.computed.is_some()
-                    || f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_SKIP)
+                if f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_SKIP)
                 { continue; }
                 let key = serde_source_field_key(&s.serde_markers, f);
                 if f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_FLATTEN) {
                     source.push_str(&format!(
                         "nested :: self.{}.encode()\nif nested == .Object(entries) {{ loop key, value in entries {{ out[key] = value }} }}\n",
                         f.name
+                    ));
+                } else if matches!(f.ty, Type::Option(_)) {
+                    source.push_str(&format!(
+                        "if self.{} == Val(value) {{ out[{:?}] = (copy value).encode() }}\n",
+                        f.name, key
                     ));
                 } else {
                     source.push_str(&format!("out[{:?}] = self.{}.encode()\n", key, f.name));

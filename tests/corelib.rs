@@ -2469,6 +2469,38 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// Card #131: generated struct codecs preserve field-policy behavior while
+/// running through ordinary Jet bodies: absent options stay off the wire and
+/// computed fields encode through their getter without becoming decode slots.
+#[test]
+fn generated_struct_codecs_preserve_option_and_computed_fields() {
+    let dir = std::env::temp_dir().join(format!("jet_struct_serde_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let src = r#"
+use core.encoding.json as json
+
+@[Codable]
+struct Record {
+    base: Int
+    note: String?
+    doubled: Int => base * 2
+}
+
+fn run() {
+    value := Record.{ base: 4, note: None }
+    print(json.to_string(value))
+    back := json.decode<Record>("{{\"base\":5,\"doubled\":999}}") ?? panic("decode")
+    print(back.base)
+    print(back.doubled)
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "struct_serde", src, &[], None);
+    assert_eq!(code, 0, "generated struct codec failed: {stderr}");
+    assert_eq!(stdout, "{\"base\":4,\"doubled\":8}\n5\n10\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
 /// #495 / I2: a field read from a bare (`Read`) parameter is still rooted in
 /// the borrowed parameter. The explicit `copy` required by E0209 must produce
 /// owned values for both shallow and nested fields, compile through rustc, and
