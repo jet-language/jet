@@ -140,8 +140,9 @@ fn current_task_control() -> Option<Arc<JetTaskControl>> {
 }
 
 /// Park at a yield point; honors pause/cancel on the running task.
-pub fn jet_scheduler_yield(wait_kind: &str, slot: &ParkSlot, timeout: Option<Duration>) {
-    if let Some(ctrl) = current_task_control() {
+pub fn jet_scheduler_yield(wait_kind: &str, slot: &Arc<ParkSlot>, timeout: Option<Duration>) {
+    let ctrl = current_task_control();
+    if let Some(ctrl) = &ctrl {
         if ctrl.cancelled.load(Ordering::Relaxed) {
             return;
         }
@@ -149,9 +150,17 @@ pub fn jet_scheduler_yield(wait_kind: &str, slot: &ParkSlot, timeout: Option<Dur
         if ctrl.cancelled.load(Ordering::Relaxed) {
             return;
         }
+        // Make this park reachable by cancel(): a task blocked on a channel, timer,
+        // or IO wait must actually unblock when its handle is cancelled — not only
+        // when the awaited event arrives. If cancel already fired, this wakes the
+        // slot immediately so the park below returns at once.
+        ctrl.register_cancel_waiter(slot);
     }
     if let Some(remaining) = jet_deadline_remaining_ms() {
         if remaining <= 0 {
+            if let Some(ctrl) = &ctrl {
+                ctrl.remove_cancel_waiter(slot);
+            }
             jet_deadline_exceeded(wait_kind);
         }
         let cap = Duration::from_millis(remaining as u64);
@@ -159,13 +168,17 @@ pub fn jet_scheduler_yield(wait_kind: &str, slot: &ParkSlot, timeout: Option<Dur
         slot.park(Some(wait));
         if let Some(left) = jet_deadline_remaining_ms() {
             if left <= 0 {
+                if let Some(ctrl) = &ctrl {
+                    ctrl.remove_cancel_waiter(slot);
+                }
                 jet_deadline_exceeded(wait_kind);
             }
         }
     } else {
         slot.park(timeout);
     }
-    if let Some(ctrl) = current_task_control() {
+    if let Some(ctrl) = &ctrl {
+        ctrl.remove_cancel_waiter(slot);
         ctrl.wait_while_paused();
     }
 }

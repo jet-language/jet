@@ -182,8 +182,9 @@ fn current_task_control() -> Option<Arc<JetTaskControl>> {
 }
 
 /// Park at a yield point; honors pause/cancel on the running task.
-pub fn jet_scheduler_yield(wait_kind: &str, slot: &ParkSlot, timeout: Option<Duration>) {
-    if let Some(ctrl) = current_task_control() {
+pub fn jet_scheduler_yield(wait_kind: &str, slot: &Arc<ParkSlot>, timeout: Option<Duration>) {
+    let ctrl = current_task_control();
+    if let Some(ctrl) = &ctrl {
         if ctrl.cancelled.load(Ordering::Relaxed) {
             return;
         }
@@ -191,9 +192,17 @@ pub fn jet_scheduler_yield(wait_kind: &str, slot: &ParkSlot, timeout: Option<Dur
         if ctrl.cancelled.load(Ordering::Relaxed) {
             return;
         }
+        // Make this park reachable by cancel(): a task blocked on a channel, timer,
+        // or IO wait must actually unblock when its handle is cancelled — not only
+        // when the awaited event arrives. If cancel already fired, this wakes the
+        // slot immediately so the park below returns at once.
+        ctrl.register_cancel_waiter(slot);
     }
     if let Some(remaining) = jet_deadline_remaining_ms() {
         if remaining <= 0 {
+            if let Some(ctrl) = &ctrl {
+                ctrl.remove_cancel_waiter(slot);
+            }
             jet_deadline_exceeded(wait_kind);
         }
         let cap = Duration::from_millis(remaining as u64);
@@ -201,13 +210,17 @@ pub fn jet_scheduler_yield(wait_kind: &str, slot: &ParkSlot, timeout: Option<Dur
         slot.park(Some(wait));
         if let Some(left) = jet_deadline_remaining_ms() {
             if left <= 0 {
+                if let Some(ctrl) = &ctrl {
+                    ctrl.remove_cancel_waiter(slot);
+                }
                 jet_deadline_exceeded(wait_kind);
             }
         }
     } else {
         slot.park(timeout);
     }
-    if let Some(ctrl) = current_task_control() {
+    if let Some(ctrl) = &ctrl {
+        ctrl.remove_cancel_waiter(slot);
         ctrl.wait_while_paused();
     }
 }
@@ -1710,5 +1723,98 @@ mod interrupt_boundary_tests {
     #[ignore = "local 100k parked-task scale proof; run with --ignored"]
     fn scale_100k_tasks_park_under_backpressure() {
         run_backpressure_scale(100_000);
+    }
+
+    // Tower #126: prove pause/cancel are real control over a *running* task —
+    // they actually park/unblock it at its wait point, not merely flip a flag a
+    // `trace()` can read.
+
+    #[test]
+    fn pause_holds_a_running_task_at_its_wait_point_until_resume() {
+        use std::sync::atomic::AtomicUsize;
+        let control = JetTaskControl::new();
+        let ready = JetSchedulerChannel::<i64>::new();
+        let ready_tx = ready.sender();
+        let work = JetSchedulerChannel::<i64>::new();
+        let work_tx = work.sender();
+        let progressed = Arc::new(AtomicUsize::new(0));
+
+        let task_ready = ready_tx;
+        let task_work = work;
+        let task_progressed = progressed.clone();
+        let _join = jet_scheduler_spawn_with_control(
+            move || {
+                task_ready.send(1);
+                // Parks here until a value arrives AND the task is not paused.
+                let _ = task_work.receive();
+                task_progressed.fetch_add(1, Ordering::SeqCst);
+            },
+            control.clone(),
+        );
+
+        // Task has reached the wait point.
+        assert_eq!(ready.receive(), Some(1));
+        control.pause();
+        // Make the value available: a flag-only "pause" would let the task run.
+        work_tx.send(42);
+        std::thread::sleep(Duration::from_millis(60));
+        assert_eq!(
+            progressed.load(Ordering::SeqCst),
+            0,
+            "paused task consumed the value and ran past its wait point — pause is not real"
+        );
+
+        control.resume();
+        let start = Instant::now();
+        while progressed.load(Ordering::SeqCst) == 0 {
+            assert!(
+                start.elapsed() < Duration::from_secs(5),
+                "resumed task never progressed"
+            );
+            std::thread::yield_now();
+        }
+        jet_scheduler_drain();
+    }
+
+    #[test]
+    fn cancel_unblocks_a_parked_task_and_it_observes_cancellation() {
+        use std::sync::atomic::AtomicUsize;
+        let control = JetTaskControl::new();
+        let ready = JetSchedulerChannel::<i64>::new();
+        let ready_tx = ready.sender();
+        // Nothing is ever sent on `work`: only cancellation can free the task.
+        let work = JetSchedulerChannel::<i64>::new();
+        let outcome = Arc::new(AtomicUsize::new(0));
+
+        let task_ready = ready_tx;
+        let task_work = work;
+        let task_outcome = outcome.clone();
+        let _join = jet_scheduler_spawn_with_control(
+            move || {
+                task_ready.send(1);
+                let got = task_work.receive();
+                // `None` == the wait observed cancellation and unblocked.
+                task_outcome.store(if got.is_none() { 2 } else { 1 }, Ordering::SeqCst);
+            },
+            control.clone(),
+        );
+
+        assert_eq!(ready.receive(), Some(1));
+        // Task is now parked forever unless cancel actually unblocks it.
+        control.cancel();
+        let start = Instant::now();
+        while outcome.load(Ordering::SeqCst) == 0 {
+            assert!(
+                start.elapsed() < Duration::from_secs(5),
+                "cancel did not unblock the parked task — cancel is only observational"
+            );
+            std::thread::yield_now();
+        }
+        assert_eq!(
+            outcome.load(Ordering::SeqCst),
+            2,
+            "cancelled wait must report cancellation, not deliver a value"
+        );
+        jet_scheduler_drain();
     }
 }
