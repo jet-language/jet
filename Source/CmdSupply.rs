@@ -37,7 +37,7 @@ fn git_dirty_files(root: &std::path::Path) -> Option<Vec<String>> {
     }
 }
 
-/// `jet publish [--force]` — pre-publish gate + SemVer API diff.
+/// `jet registry publish [--force]` — pre-publish gate + SemVer API diff.
 ///
 /// D-PKGS4 (amended): must run `jet build` + `jet test` locally first.
 /// Submits only when both pass (`--force` overrides with a warning).
@@ -49,7 +49,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = crate::require_manifest_root(
         &cwd,
-        "error: no `pkg.jet` found — run `jet publish` inside a project",
+        "error: no `pkg.jet` found — run `jet registry publish` inside a project",
     );
 
     let pack_path = root.join(jet::Syntax::PAYLOAD_FILE);
@@ -94,9 +94,9 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
                  the published package unreproducible."
             );
             eprintln!(
-                " Fix: commit or stash all uncommitted changes, then run `jet publish` again."
+                " Fix: commit or stash all uncommitted changes, then run `jet registry publish` again."
             );
-            eprintln!("      use `jet publish --force` to bypass with an explicit warning banner.");
+            eprintln!("      use `jet registry publish --force` to bypass with an explicit warning banner.");
             eprintln!();
             eprintln!("  uncommitted changes ({}):", dirty.len());
             for line in dirty.iter().take(10) {
@@ -134,7 +134,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
                     &fs::read_to_string(&entry_path).unwrap_or_default(),
                     &diags,
                 );
-                eprintln!("\n use `jet publish --force` to bypass this gate with a warning banner");
+                eprintln!("\n use `jet registry publish --force` to bypass this gate with a warning banner");
                 exit(ExitCodes::USER_ERROR);
             }
             false
@@ -218,7 +218,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
                     "\nerror: breaking public API change since {} requires a major version bump.",
                     prev.published_version
                 );
-                eprintln!(" use `jet publish --force` to override with a warning banner");
+                eprintln!(" use `jet registry publish --force` to override with a warning banner");
                 exit(ExitCodes::USER_ERROR);
             }
         } else {
@@ -381,8 +381,8 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
 
 /// Source hash + plan fingerprint for the index entry. Reuses the lock's
 /// recorded values (the exact `LockedPackage` fields) when a lock exists; falls
-/// back to hashing the source tree so `jet publish` works before a first
-/// `jet fetch`.
+/// back to hashing the source tree so `jet registry publish` works before a first
+/// `jet store fetch`.
 fn publish_index_hashes(root: &std::path::Path, name: &str) -> (String, String) {
     if let Some(lock) = jet::Lock::load(root) {
         if let Some(pkg) = lock
@@ -403,7 +403,7 @@ fn publish_index_hashes(root: &std::path::Path, name: &str) -> (String, String) 
     (tree_hash, fingerprint)
 }
 
-/// `jet keygen [--registry <name>] [--force]` — create the Ed25519 signing key
+/// `jet registry keygen [--registry <name>] [--force]` — create the Ed25519 signing key
 /// used to sign published packages (c146, D-PKGSIGN1). Refuses to overwrite an
 /// existing key without `--force` (E1248).
 pub(crate) fn run_keygen(registry: Option<&str>, force: bool) {
@@ -438,7 +438,7 @@ pub(crate) fn run_key_backup(dest: Option<&str>, registry: Option<&str>) {
     let (seed_path, _pub_path) = jet::Publish::Sign::key_paths(reg);
     if !seed_path.is_file() {
         eprintln!(
-            "error: no signing key for registry `{}` — run `jet keygen` first.",
+            "error: no signing key for registry `{}` — run `jet registry keygen` first.",
             reg
         );
         exit(ExitCodes::USER_ERROR);
@@ -464,7 +464,7 @@ pub(crate) fn run_key_backup(dest: Option<&str>, registry: Option<&str>) {
     }
 }
 
-/// `jet vendor [--vendor-dir <path>]` — copy all resolved dependencies into a
+/// `jet registry vendor [--vendor-dir <path>]` — copy all resolved dependencies into a
 /// local vendor tree for offline builds (D-SUPPLY1). The default location is
 /// `<project>/vendor`; `--vendor-dir` relocates it (relative paths resolve
 /// against the project root).
@@ -472,7 +472,7 @@ pub(crate) fn run_vendor(vendor_dir: Option<&str>) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = crate::require_manifest_root(
         &cwd,
-        "error: no `pkg.jet` found — run `jet vendor` inside a project",
+        "error: no `pkg.jet` found — run `jet registry vendor` inside a project",
     );
 
     let pack_path = root.join(jet::Syntax::PAYLOAD_FILE);
@@ -533,7 +533,7 @@ pub(crate) fn run_vendor(vendor_dir: Option<&str>) {
                 }
                 println!("ok: {} dependencies copied to {}/", copied.len(), shown);
                 println!(
-                    "tip: commit {}/ and use `jet fetch --locked` for reproducible offline builds.",
+                    "tip: commit {}/ and use `jet store fetch --locked` for reproducible offline builds.",
                     shown
                 );
             }
@@ -548,18 +548,18 @@ pub(crate) fn run_vendor(vendor_dir: Option<&str>) {
     }
 }
 
-/// `jet audit [--advisory-db <path>]` — check the lockfile against an advisory DB.
+/// `jet inspect audit [--advisory-db <path>]` — check the lockfile against an advisory DB.
 pub(crate) fn run_audit(db_path: Option<&str>) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = crate::require_manifest_root(
         &cwd,
-        "error: no `pkg.jet` found — run `jet audit` inside a project",
+        "error: no `pkg.jet` found — run `jet inspect audit` inside a project",
     );
 
     let lock = match jet::Lock::load(&root) {
         Some(l) => l,
         None => {
-            println!("audit: no lockfile found — run `jet fetch` first");
+            println!("audit: no lockfile found — run `jet store fetch` first");
             exit(ExitCodes::OK);
         }
     };
@@ -628,12 +628,12 @@ pub(crate) fn run_audit(db_path: Option<&str>) {
     // Non-critical matches are advisory only: exit 0 so a scan doesn't break CI.
 }
 
-/// `jet sbom [--cyclonedx]` — emit a software bill of materials from the lockfile.
+/// `jet inspect sbom [--cyclonedx]` — emit a software bill of materials from the lockfile.
 pub(crate) fn run_sbom(cyclonedx: bool) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = crate::require_manifest_root(
         &cwd,
-        "error: no `pkg.jet` found — run `jet sbom` inside a project",
+        "error: no `pkg.jet` found — run `jet inspect sbom` inside a project",
     );
 
     let pack_path = root.join(jet::Syntax::PAYLOAD_FILE);
@@ -652,7 +652,7 @@ pub(crate) fn run_sbom(cyclonedx: bool) {
     let lock = match jet::Lock::load(&root) {
         Some(l) => l,
         None => {
-            eprintln!("error: no lockfile found — run `jet fetch` first");
+            eprintln!("error: no lockfile found — run `jet store fetch` first");
             exit(ExitCodes::USER_ERROR);
         }
     };
@@ -665,19 +665,19 @@ pub(crate) fn run_sbom(cyclonedx: bool) {
     print!("{}", out);
 }
 
-/// `jet yank <version> [--message <reason>]` — mark a published version as yanked.
+/// `jet registry yank <version> [--message <reason>]` — mark a published version as yanked.
 ///
 /// D-VERSION1=A (version immutability): a published version can't be re-published;
-/// `jet yank` flips its `yanked` flag in the registry index in place (never
+/// `jet registry yank` flips its `yanked` flag in the registry index in place (never
 /// deletes the line), then commits and pushes (card c56).
 pub(crate) fn run_yank(version: Option<&str>, message: Option<&str>) {
     let version = match version {
         Some(v) if !v.is_empty() => v,
         _ => {
-            eprintln!("Error [E2606]: `jet yank` requires a version argument.");
+            eprintln!("Error [E2606]: `jet registry yank` requires a version argument.");
             eprintln!(" Why: a yank marks one specific published version as deprecated;");
             eprintln!("      without a version the command doesn't know which one to yank.");
-            eprintln!(" Fix: run `jet yank <version>`, e.g. `jet yank 1.2.3`.");
+            eprintln!(" Fix: run `jet registry yank <version>`, e.g. `jet registry yank 1.2.3`.");
             exit(ExitCodes::USER_ERROR);
         }
     };
@@ -695,7 +695,7 @@ pub(crate) fn run_yank(version: Option<&str>, message: Option<&str>) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = crate::require_manifest_root(
         &cwd,
-        "error: no `pkg.jet` found — run `jet yank` inside a project",
+        "error: no `pkg.jet` found — run `jet registry yank` inside a project",
     );
 
     let pack_path = root.join(jet::Syntax::PAYLOAD_FILE);

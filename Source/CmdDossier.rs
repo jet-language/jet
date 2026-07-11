@@ -1,4 +1,4 @@
-//! D-WD2/D-DOSSIER1: `jet dossier` — one explainable view over semantic facts.
+//! D-WD2/D-DOSSIER1: `jet inspect dossier` — one explainable view over semantic facts.
 
 use std::path::{Path, PathBuf};
 use std::process::exit;
@@ -18,8 +18,8 @@ pub(crate) fn run_dossier(args: &[String], json: bool) {
         [path] => (*path, None),
         [path, target] => (*path, Some(*target)),
         _ => {
-            eprintln!("error: `jet dossier` needs an entry file and optional symbol");
-            eprintln!(" Fix: jet dossier examples/features/basics/hello.jet run");
+            eprintln!("error: `jet inspect dossier` needs an entry file and optional symbol");
+            eprintln!(" Fix: jet inspect dossier examples/features/basics/hello.jet run");
             exit(ExitCodes::USER_ERROR);
         }
     };

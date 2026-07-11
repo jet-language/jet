@@ -8,7 +8,7 @@ use super::SemVer::{SemVer, VersionReq};
 // Advisory database
 // ──────────────────────────────────────────────
 
-/// Advisory severity (D-SUPPLY1). `jet audit` exits nonzero only when a
+/// Advisory severity (D-SUPPLY1). `jet inspect audit` exits nonzero only when a
 /// `Critical` advisory matches; lower severities are advisory and exit 0.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Severity {
@@ -52,7 +52,7 @@ pub struct Advisory {
     /// First version where the fix is available, if known.
     pub fixed: Option<SemVer>,
     pub title: String,
-    /// Advisory severity — only `Critical` makes `jet audit` exit nonzero.
+    /// Advisory severity — only `Critical` makes `jet inspect audit` exit nonzero.
     pub severity: Severity,
 }
 
@@ -101,7 +101,7 @@ pub fn parse_advisory_db(text: &str) -> Vec<Advisory> {
 }
 
 /// One advisory that matched a locked package, paired with its severity so the
-/// caller can decide the exit code (`jet audit` exits nonzero on CRITICAL).
+/// caller can decide the exit code (`jet inspect audit` exits nonzero on CRITICAL).
 pub struct AuditMatch {
     pub severity: Severity,
     pub diagnostic: Diagnostic,
@@ -145,8 +145,8 @@ pub fn e2603(
     fixed: Option<&SemVer>,
 ) -> Diagnostic {
     let fix_msg = match fixed {
-        Some(v) => format!("upgrade `{}` to >= {}. Run `jet audit --explain {}` for details.", package, v, id),
-        None => format!("no fixed version is known; monitor `{}` for a patch. Run `jet audit --explain {}` for details.", package, id),
+        Some(v) => format!("upgrade `{}` to >= {}. Run `jet inspect audit --explain {}` for details.", package, v, id),
+        None => format!("no fixed version is known; monitor `{}` for a patch. Run `jet inspect audit --explain {}` for details.", package, id),
     };
     Diagnostic::error(
         "E2603",
@@ -174,7 +174,7 @@ pub fn e2604(package: &str, version: &str, expected: &str, actual: &str) -> Diag
             expected, actual
         ),
         format!(
-            "re-run `jet fetch` after cleaning stale Jetpack hangar entries (`jet clean`). If the problem persists, the upstream source may have been altered; audit the change before proceeding."
+            "re-run `jet store fetch` after cleaning stale Jetpack hangar entries (`jet clean`). If the problem persists, the upstream source may have been altered; audit the change before proceeding."
         ),
         None,
     )

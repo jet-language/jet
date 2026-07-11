@@ -294,7 +294,7 @@ fn jet_semindex_cli_json_smoke() {
     let out = std::process::Command::new(bin)
         .args(["semindex", path.to_str().unwrap(), "--json"])
         .output()
-        .expect("jet semindex");
+        .expect("jet inspect semindex");
     assert!(
         out.status.success(),
         "stderr: {}",
@@ -311,7 +311,7 @@ fn jet_dossier_cli_json_smoke() {
     let out = std::process::Command::new(bin)
         .args(["dossier", path.to_str().unwrap(), "Square", "--json"])
         .output()
-        .expect("jet dossier");
+        .expect("jet inspect dossier");
     assert!(
         out.status.success(),
         "stderr: {}",

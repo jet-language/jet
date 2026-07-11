@@ -97,9 +97,9 @@ the next line starts with `.` or a binary operator. `jet fmt` handles layout.
 **Can I use this in production?**  
 The language, compiler, and core library are post-v1.0. Pin your toolchain with
 `edition:` in `pkg.jet` and read [versioning](docs/reference/versioning.md).
-Not yet ready: registry upload (`jet publish` validates but does not upload —
-use git-based dependencies), `jet gc` (stub until M12.2 registry lands), and
-`jet doctor --online` (registry not wired). TLS requires the separate `jet.tls`
+Not yet ready: registry upload (`jet registry publish` validates but does not upload —
+use git-based dependencies), `jet store gc` (stub until M12.2 registry lands), and
+`jet self doctor --online` (registry not wired). TLS requires the separate `jet.tls`
 package; the built-in HTTP client is plain HTTP only.
 
 ## Repo map

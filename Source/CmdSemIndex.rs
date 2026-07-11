@@ -1,4 +1,4 @@
-//! D-SEMINDEX1: `jet semindex` — smoke CLI for the stable semantic-index JSON API.
+//! D-SEMINDEX1: `jet inspect semindex` — smoke CLI for the stable semantic-index JSON API.
 
 use std::path::{Path, PathBuf};
 use std::process::exit;
@@ -13,8 +13,8 @@ pub(crate) fn run_semindex(args: &[String], json: bool) {
         .map(|s| s.as_str());
 
     let Some(path) = path else {
-        eprintln!("error: `jet semindex` needs an entry file");
-        eprintln!(" Fix: jet semindex examples/features/basics/hello.jet");
+        eprintln!("error: `jet inspect semindex` needs an entry file");
+        eprintln!(" Fix: jet inspect semindex examples/features/basics/hello.jet");
         exit(ExitCodes::USER_ERROR);
     };
 

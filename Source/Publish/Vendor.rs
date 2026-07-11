@@ -3,7 +3,7 @@ use crate::Lock::LockFile;
 use std::path::{Path, PathBuf};
 
 // ──────────────────────────────────────────────
-// `jet vendor` — copy resolved deps into vendor/
+// `jet registry vendor` — copy resolved deps into vendor/
 // ──────────────────────────────────────────────
 
 /// Copy all resolved dependency store entries into `<vendor_dir>/<name>/`.
@@ -29,7 +29,7 @@ pub fn vendor(
                 vendor_dir.display(),
                 e
             ),
-            "the vendor directory is where `jet vendor` writes offline copies of dependencies."
+            "the vendor directory is where `jet registry vendor` writes offline copies of dependencies."
                 .into(),
             "check write permissions, or pass a writable `--vendor-dir <path>`.".into(),
             None,
@@ -47,9 +47,9 @@ pub fn vendor(
             Diagnostic::error(
                 "E2604",
                 format!("failed to vendor `{}`: {}", name, e),
-                "jet vendor copies dependency source into the vendor tree for offline builds."
+                "jet registry vendor copies dependency source into the vendor tree for offline builds."
                     .into(),
-                "check that the dependency is correctly fetched first with `jet fetch`.".into(),
+                "check that the dependency is correctly fetched first with `jet store fetch`.".into(),
                 None,
             )
         })?;

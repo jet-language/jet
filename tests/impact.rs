@@ -10,7 +10,7 @@ fn impact_report_upstream_run() {
     let out = std::process::Command::new(bin)
         .args(["impact", path.to_str().unwrap(), "report", "--depth=3"])
         .output()
-        .expect("jet impact");
+        .expect("jet inspect impact");
     assert!(
         out.status.success(),
         "stderr: {}",
@@ -35,7 +35,7 @@ fn impact_json_output() {
             "--depth=2",
         ])
         .output()
-        .expect("jet impact --json");
+        .expect("jet inspect impact --json");
     assert!(out.status.success());
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("\"symbol\":\"square\""));
@@ -50,6 +50,6 @@ fn impact_unknown_symbol_exits_error() {
     let out = std::process::Command::new(bin)
         .args(["impact", path.to_str().unwrap(), "not_a_real_symbol_xyz"])
         .output()
-        .expect("jet impact missing symbol");
+        .expect("jet inspect impact missing symbol");
     assert!(!out.status.success());
 }

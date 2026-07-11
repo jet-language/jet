@@ -89,7 +89,7 @@ fn sandbox_tool_must_be_a_dep_e1238() {
             args: vec![],
         }],
     };
-    // `validate` (the `jet audit` read path) flags it without executing.
+    // `validate` (the `jet inspect audit` read path) flags it without executing.
     assert_eq!(Recipe::validate(&recipe, &ctx).unwrap_err().code, "E1238");
     std::fs::remove_dir_all(&base).ok();
 }

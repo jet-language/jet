@@ -162,7 +162,7 @@ fn moved_bare_commands_are_teaching_errors_not_aliases() {
 
 #[test]
 fn jet_install_teaches_jet_fetch() {
-    // `jet install` is not a Jet command; the compiler emits E0043 pointing to `jet fetch`.
+    // `jet install` is not a Jet command; the compiler emits E0043 pointing to `jet store fetch`.
     let out = Command::new(jet()).arg("install").output().unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
@@ -170,8 +170,8 @@ fn jet_install_teaches_jet_fetch() {
         "`jet install` should emit E0043 teaching error:\n{stderr}"
     );
     assert!(
-        stderr.contains("jet fetch"),
-        "`jet install` error should mention `jet fetch`:\n{stderr}"
+        stderr.contains("jet store fetch"),
+        "`jet install` error should mention `jet store fetch`:\n{stderr}"
     );
 }
 
@@ -1061,7 +1061,7 @@ build: { staging: Build.{ optimize: basic } }
     );
 }
 
-// ── D-EXPANDCLI1 (card #183): `jet expand` transparency command ────
+// ── D-EXPANDCLI1 (card #183): `jet inspect expand` transparency command ────
 
 /// Fixture exercising the `inline` lens: an `@Inline` fn and an
 /// `@InlineAlways` method.
@@ -1096,7 +1096,7 @@ fn expand_inline_golden() {
 #[test]
 fn expand_all_golden() {
     let p = expand_fixture();
-    // Bare `jet expand <file>`: every lens, grouped, magic default.
+    // Bare `jet inspect expand <file>`: every lens, grouped, magic default.
     let out = Command::new(jet())
         .args(["inspect", "expand"])
         .arg(&p)

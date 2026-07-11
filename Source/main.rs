@@ -369,7 +369,7 @@ usage:
   {bin} fix   <file.{ext}> --dry-run   show the fixes as a diff, write nothing
   {bin} self doctor                 diagnose the toolchain and offer fixes
   {bin} self completions <shell>    print shell completions
-  {bin} self man                    print the jet man page (roff)
+  {bin} self man                    print the jet self man page (roff)
   {bin} self lsp                    language server (stdio JSON-RPC)
   {bin} self devtools <verb>        run checked developer generators
   {bin} inspect bind <header.h> --pkg <lib>   generate a C binding cache (S59)
@@ -832,7 +832,7 @@ fn main() {
                 return;
             }
             (_, true) | (Some("--bench"), _) => {
-                // jet lsp --bench: run latency benchmark on a small program
+                // jet self lsp --bench: run latency benchmark on a small program
                 let src = include_str!("../examples/features/collections/wordcount.jet");
                 jet::LSP::run_bench(src, 10, 200);
                 return;
@@ -1024,7 +1024,7 @@ fn main() {
         // script's inline `use pkg#version;` deps into the freshly written
         // `pkg.jet`; bare `jet init` is unchanged.
         "init" => run_init(args.get(1).map(|s| s.as_str())),
-        // U11: `jet lock <script.jet>` resolves its inline deps and writes
+        // U11: `jet store lock <script.jet>` resolves its inline deps and writes
         // `<script.jet>.lock`.
         "lock" => {
             run_lock(args.get(1).map(|s| s.as_str()), mode);
@@ -1042,7 +1042,7 @@ fn main() {
             return;
         }
         "keygen" => {
-            // c146: `jet keygen [--registry <name>] [--force]`.
+            // c146: `jet registry keygen [--registry <name>] [--force]`.
             let registry = flag_value(&raw, "--registry");
             let force = raw.iter().any(|a| a == "--force");
             run_keygen(registry, force);
@@ -1072,7 +1072,7 @@ fn main() {
         }
         "yank" => {
             // D-VERSION1=A: mark a published version as yanked (no delete).
-            // `jet yank <version> [--message <reason>]`
+            // `jet registry yank <version> [--message <reason>]`
             let version = args.get(1).map(|s| s.as_str());
             let message = flag_value(&raw, "--message");
             run_yank(version, message);
@@ -1084,7 +1084,7 @@ fn main() {
             return;
         }
         "schema" => {
-            // D-MIGRATE2C: `jet schema status` / `jet schema squash --before <ver>`.
+            // D-MIGRATE2C: `jet inspect schema status` / `jet inspect schema squash --before <ver>`.
             // Use the unfiltered argv so `--before` and the verb survive.
             let schema_args: Vec<String> = raw.iter().skip(1).cloned().collect();
             run_schema(&schema_args);
@@ -1120,7 +1120,7 @@ fn main() {
             return;
         }
         "expand" => {
-            // D-EXPANDCLI1=A: `jet expand --facts <lens> <file>` / bare `jet
+            // D-EXPANDCLI1=A: `jet inspect expand --facts <lens> <file>` / bare `jet
             // expand <file>` — the transparency command (card #183).
             let expand_args: Vec<String> = raw.iter().skip(1).cloned().collect();
             run_expand(&expand_args, mode.json);
@@ -1291,11 +1291,11 @@ fn main() {
             run_repl(project.as_deref());
             return;
         }
-        // Teaching error: E0043 `jet install` → `jet fetch`
+        // Teaching error: E0043 `jet install` → `jet store fetch`
         "install" => {
             eprintln!("Error [E0043]: `jet install` isn't a Jet command");
-            eprintln!(" Why: Jet uses `jet fetch` to download and link dependencies");
-            eprintln!(" Fix: run `jet fetch` to install all dependencies listed in pkg.jet");
+            eprintln!(" Why: Jet uses `jet store fetch` to download and link dependencies");
+            eprintln!(" Fix: run `jet store fetch` to install all dependencies listed in pkg.jet");
             exit(ExitCodes::USER_ERROR);
         }
         "dev" => {
@@ -1700,8 +1700,8 @@ fn main() {
         // Teaching error: E0042 foreign manifest filename, E0043 `jet install`
         "install" => {
             eprintln!("Error [E0043]: `jet install` isn't a Jet command");
-            eprintln!(" Why: Jet uses `jet fetch` to download and link dependencies");
-            eprintln!(" Fix: run `jet fetch` to install all dependencies listed in pkg.jet");
+            eprintln!(" Why: Jet uses `jet store fetch` to download and link dependencies");
+            eprintln!(" Fix: run `jet store fetch` to install all dependencies listed in pkg.jet");
             exit(ExitCodes::USER_ERROR);
         }
         _ => {
@@ -1970,13 +1970,13 @@ fn maybe_dispatch_pinned_toolchain(raw: &[String]) {
     }
 }
 
-/// `jet toolchain` — print the project's pin, locked version, object id, and
+/// `jet self toolchain` — print the project's pin, locked version, object id, and
 /// realized state (read-only, D-JPK-TOOLCHAIN1=A #179).
 fn run_toolchain() -> ! {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = require_manifest_root(
         &cwd,
-        "error: `jet toolchain` needs a project — no `pkg.jet` found here or above",
+        "error: `jet self toolchain` needs a project — no `pkg.jet` found here or above",
     );
     print!("{}", jet::Jetpack::JetPin::report_pin(&root));
     exit(ExitCodes::OK);
@@ -2053,13 +2053,13 @@ fn lift_inline_deps_into_manifest(cwd: &Path, script: &str) {
     }
 }
 
-/// `jet lock <script.jet>` — U11: resolve a manifest-less script's inline
+/// `jet store lock <script.jet>` — U11: resolve a manifest-less script's inline
 /// `use pkg#version;` deps and write the `<script.jet>.lock` sidecar,
 /// keyed by the script's own content hash (edit the script, the lock goes
 /// stale — the same "locks by file-content hash" contract `jet run` uses).
 fn run_lock(script: Option<&str>, mode: OutputMode) {
     let Some(raw_arg) = script else {
-        eprintln!("error: `jet lock` needs a script path, e.g. `jet lock stats.jet`");
+        eprintln!("error: `jet store lock` needs a script path, e.g. `jet store lock stats.jet`");
         exit(ExitCodes::USER_ERROR);
     };
     let file = resolve_source_path(raw_arg);
@@ -2068,7 +2068,7 @@ fn run_lock(script: Option<&str>, mode: OutputMode) {
 
     if jet::Loader::find_manifest_root(script_dir).is_some() {
         eprintln!(
-            "error: `{file}` belongs to a project with a `{}` — use `jet fetch` to lock its dependencies",
+            "error: `{file}` belongs to a project with a `{}` — use `jet store fetch` to lock its dependencies",
             jet::Syntax::PAYLOAD_FILE
         );
         exit(ExitCodes::USER_ERROR);

@@ -1,4 +1,4 @@
-//! c450 (D-DEVTOOLS1=A) — the maintainer-facing `jet devtools` subcommands:
+//! c450 (D-DEVTOOLS1=A) — the maintainer-facing `jet self devtools` subcommands:
 //! `reduce`, `ice-report`, `new-example`, `new-ui`, `check-fixture-paths`,
 //! `bless`. All hidden behind the existing `devtools` namespace (never a
 //! top-level command); one test per tool.

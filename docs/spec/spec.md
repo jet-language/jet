@@ -534,7 +534,7 @@ impl Circle {
   *current* struct shape and records `squashed_before = <ver>`, so future builds
   treat the current shape as the authoritative baseline and migration blocks for
   versions before `<ver>` are no longer required (delete the now-stale blocks). It
-  edits only `.jet/cache/schema/`, never user source. There is **no `jet schema
+  edits only `.jet/cache/schema/`, never user source. There is **no `jet inspect schema
   check` verb** — `jet build`'s E0910 is already the CI gate.
 
   **Decode-time migration transparency (D-MIGRATE3=A):** `decode_traced<T>(raw)
@@ -2062,8 +2062,8 @@ is that one command for all of them — never a second, mechanism-specific
 CLI flag per feature.
 
 ```
-jet expand --facts <lens> <file.jet>   # one lens's facts
-jet expand <file.jet>                  # every lens, grouped, empty ones skipped
+jet inspect expand --facts <lens> <file.jet>   # one lens's facts
+jet inspect expand <file.jet>                  # every lens, grouped, empty ones skipped
 ```
 
 Facts are read straight off the ordinary check pass — never a second
@@ -2081,14 +2081,14 @@ time the bundle compiled at all) — the same side-channel `jet inspect semindex
 
 A `refs` lens (D-REF-SHORTHAND1) once reported resolved owners for `&T`
 stored-reference struct fields; D-MEM1/S3 deleted that mechanism outright
-(no stored-borrow fields in v1), and the lens went with it — `jet expand
+(no stored-borrow fields in v1), and the lens went with it — `jet inspect expand
 --facts refs` is an unknown-lens usage error today, like any retired name.
 
 Unknown `--facts <lens>` lists the registered lenses and exits nonzero
 (usage error, not an E-code — it never reaches the diagnostic renderer). A
 file that fails to compile prints the ordinary front-end diagnostics and
-exits nonzero: facts require a clean check, same as `jet semindex`/
-`jet impact`. A clean program with no facts for a lens (or for every lens,
+exits nonzero: facts require a clean check, same as `jet inspect semindex`/
+`jet inspect impact`. A clean program with no facts for a lens (or for every lens,
 bare form) exits 0 — absence of facts is not a failure.
 
 **Extensibility:** lenses live in one static table in `Source/CmdExpand.rs`

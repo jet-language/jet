@@ -1,6 +1,6 @@
-//! D-EXPANDCLI1=A (card #183): `jet expand` — the transparency command.
+//! D-EXPANDCLI1=A (card #183): `jet inspect expand` — the transparency command.
 //! Prints the facts sema already proved for one lens (`--facts <lens>`), or
-//! every lens grouped (bare `jet expand <file>`).
+//! every lens grouped (bare `jet inspect expand <file>`).
 //!
 //! I2/I3: this never runs a second analysis and never asks rustc. Every fact
 //! comes straight off the checked `ProgramBundle` (`Func::is_inline` /
@@ -55,9 +55,9 @@ pub(crate) fn run_expand(args: &[String], _json: bool) {
     }
 
     let Some(path) = positional.first().copied() else {
-        eprintln!("error: `jet expand` needs an entry file");
-        eprintln!(" Fix: jet expand examples/features/basics/hello.jet");
-        eprintln!(" Fix: jet expand --facts inline examples/features/basics/hello.jet");
+        eprintln!("error: `jet inspect expand` needs an entry file");
+        eprintln!(" Fix: jet inspect expand examples/features/basics/hello.jet");
+        eprintln!(" Fix: jet inspect expand --facts inline examples/features/basics/hello.jet");
         exit(ExitCodes::USER_ERROR);
     };
 

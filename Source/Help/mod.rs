@@ -96,11 +96,11 @@ fn usage_for(cmd: &str) -> String {
         "env" => "jet env".to_string(),
         "add" => "jet add <dep>".to_string(),
         "remove" => "jet remove <dep>".to_string(),
-        "fetch" => "jet fetch".to_string(),
+        "fetch" => "jet store fetch".to_string(),
         "update" => "jet update [dep]".to_string(),
         "clean" => "jet clean".to_string(),
         "explain" => "jet explain <CODE>".to_string(),
-        "doctor" => "jet doctor".to_string(),
+        "doctor" => "jet self doctor".to_string(),
         "repl" => "jet repl".to_string(),
         "help" => "jet help".to_string(),
         "os" => "jet os <plan|import|build|vm> <host> …".to_string(),
@@ -388,7 +388,7 @@ mod tests {
     #[test]
     fn fuzzy_ranks_exact_prefix_above_loose_subsequence() {
         let (exact, _) = fuzzy_match("run", "jet run").unwrap();
-        let (loose, _) = fuzzy_match("run", "jet devtools — run checked generators").unwrap();
+        let (loose, _) = fuzzy_match("run", "jet self devtools — run checked generators").unwrap();
         assert!(exact > loose, "exact {} should outrank loose {}", exact, loose);
     }
 

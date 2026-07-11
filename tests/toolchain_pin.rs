@@ -38,7 +38,7 @@ fn write(dir: &Path, name: &str, body: &str) {
     std::fs::write(dir.join(name), body).unwrap();
 }
 
-/// `jet init` writes a `jet:` pin; `jet toolchain` reports it; `jet update jet`
+/// `jet init` writes a `jet:` pin; `jet self toolchain` reports it; `jet update jet`
 /// moves the lock's `[[toolchain]]` record.
 #[test]
 fn init_report_and_update_roundtrip() {
@@ -66,7 +66,7 @@ fn init_report_and_update_roundtrip() {
         "lock version:\n{lock}"
     );
 
-    // `jet toolchain` now reports the locked exact version + object id.
+    // `jet self toolchain` now reports the locked exact version + object id.
     let out = run(&["toolchain"], &dir);
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("locked:   0.4.0"), "locked report:\n{text}");

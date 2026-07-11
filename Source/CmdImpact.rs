@@ -1,4 +1,4 @@
-//! D-IMPACT1: `jet impact` — blast-radius queries over the semantic index.
+//! D-IMPACT1: `jet inspect impact` — blast-radius queries over the semantic index.
 
 use std::path::{Path, PathBuf};
 use std::process::exit;
@@ -24,8 +24,8 @@ pub(crate) fn run_impact(args: &[String], json: bool) {
     let (path, symbol) = match positional.as_slice() {
         [path, symbol] => (*path, *symbol),
         _ => {
-            eprintln!("error: `jet impact` needs an entry file and a symbol name");
-            eprintln!(" Fix: jet impact examples/features/effects/effects.jet report");
+            eprintln!("error: `jet inspect impact` needs an entry file and a symbol name");
+            eprintln!(" Fix: jet inspect impact examples/features/effects/effects.jet report");
             exit(ExitCodes::USER_ERROR);
         }
     };

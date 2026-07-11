@@ -204,7 +204,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "toolchain",
-        summary: "show the project's pinned jet toolchain and its locked version (D-JPK-TOOLCHAIN1)",
+        summary: "show the project's pinned jet self toolchain and its locked version (D-JPK-TOOLCHAIN1)",
         headline: false,
     },
     CommandSpec {
@@ -304,7 +304,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "query",
-        summary: "query typed facts; `jet query build <file>` inspects build graph",
+        summary: "query typed facts; `jet inspect query build <file>` inspects build graph",
         headline: false,
     },
     CommandSpec {
@@ -364,7 +364,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "man",
-        summary: "print the jet man page (roff)",
+        summary: "print the jet self man page (roff)",
         headline: false,
     },
     CommandSpec {

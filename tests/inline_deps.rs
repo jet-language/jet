@@ -2,7 +2,7 @@
 //!
 //! A manifest-less `.jet` script may open with `use pkg#version;` instead of
 //! shipping a `pkg.jet`. These tests drive the real `jet` binary end to end:
-//! `jet run` resolves + locks by file-content hash, `jet lock` writes a
+//! `jet run` resolves + locks by file-content hash, `jet store lock` writes a
 //! `<script>.lock` sidecar, and `jet init <script>` lifts the inline refs into
 //! a generated `pkg.jet`. Resolution is offline-only today (no external
 //! network/registry fetch — see `crates/jet-driver/src/Jetpack/ScriptDeps.rs`):
@@ -60,7 +60,7 @@ fn jet_cmd(args: &[&str], cwd: &Path) -> std::process::Output {
 }
 
 /// Committed offline fixture: a tiny `textkit` "library" at 1.4.2, staged the
-/// same way a `jet lock`-populated local cache would look.
+/// same way a `jet store lock`-populated local cache would look.
 fn write_textkit_fixture(project: &Path) {
     write(
         project,
@@ -168,7 +168,7 @@ fn jet_lock_writes_sidecar() {
     let out = jet_cmd(&["lock", "stats.jet"], &dir);
     assert!(
         out.status.success(),
-        "jet lock should succeed\nstdout: {}\nstderr: {}",
+        "jet store lock should succeed\nstdout: {}\nstderr: {}",
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );

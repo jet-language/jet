@@ -90,7 +90,7 @@ pub fn e2601(
             change.description,
         ),
         format!(
-            "bump to {}.0.0, or restore `{}` (a deprecated shim counts). Use `jet publish --force` to override with a warning banner.",
+            "bump to {}.0.0, or restore `{}` (a deprecated shim counts). Use `jet registry publish --force` to override with a warning banner.",
             next_major,
             change.item_name,
         ),

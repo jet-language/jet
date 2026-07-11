@@ -106,7 +106,7 @@ fn normalize_path(path: &Path) -> PathBuf {
 
 /// Health check: verify that the server can lex/parse/check a trivial program.
 pub fn run_doctor() {
-    println!("jet lsp doctor");
+    println!("jet self lsp doctor");
     println!("--------------");
     let src = "fn run() { print(\"hello\"); }\n";
     let (toks, lex_errs) = crate::Lexer::lex(src);

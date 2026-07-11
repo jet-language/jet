@@ -1,4 +1,4 @@
-//! E2-M3 (D-DX2 + D-BUILD1) — `jet doctor`: environment self-diagnosis.
+//! E2-M3 (D-DX2 + D-BUILD1) — `jet self doctor`: environment self-diagnosis.
 //!
 //! Jet hides a rustc dependency and a build/store cache; when those drift the
 //! errors land far from the cause. `doctor` checks them up front, offline by
