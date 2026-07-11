@@ -1044,51 +1044,76 @@ fn unknown_source_is_friendly() {
 
 #[test]
 fn add_then_remove_edits_env_file() {
-    let proj = Scratch::new("proj");
+    let (_base, proj, root) = core_hello_project("add-remove");
+    let env_path = proj.join("env.jet");
+    fs::write(
+        &env_path,
+        fs::read_to_string(&env_path).unwrap().replace("\"mine:hello\"", ""),
+    )
+    .unwrap();
     let add = jetpack()
-        .args(["add", "nixpkgs:ripgrep", "--no-color"])
-        .current_dir(&proj.path)
+        .args(["add", "mine:hello", "--no-color"])
+        .current_dir(&proj)
+        .env("JETPACK_ROOT", &root)
         .output()
         .unwrap();
-    assert!(add.status.success());
+    assert!(
+        add.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&add.stderr).contains("✓ hello     —"),
+        "add must print its verified resolved version: {}",
+        String::from_utf8_lossy(&add.stderr)
+    );
     let env = fs::read_to_string(proj.join("env.jet")).unwrap();
-    assert!(env.contains("ripgrep"), "env.jet: {env}");
+    assert!(env.contains("hello"), "env.jet: {env}");
     assert!(env.contains("pkg.packages"), "env.jet: {env}");
 
     let remove = jetpack()
-        .args(["remove", "nixpkgs:ripgrep", "--no-color", "--yes"])
-        .current_dir(&proj.path)
+        .args(["remove", "mine:hello", "--no-color", "--yes"])
+        .current_dir(&proj)
+        .env("JETPACK_ROOT", &root)
         .output()
         .unwrap();
     assert!(remove.status.success());
     let env = fs::read_to_string(proj.join("env.jet")).unwrap();
     assert!(
-        !env.contains("\"ripgrep\""),
-        "env.jet still has ripgrep: {env}"
+        !env.contains("\"mine:hello\""),
+        "env.jet still has hello: {env}"
     );
 }
 
 #[test]
 fn remove_without_yes_prints_plan_and_keeps_env_file_in_non_tty() {
-    let proj = Scratch::new("proj");
+    let (_base, proj, root) = core_hello_project("remove-plan");
+    let env_path = proj.join("env.jet");
+    fs::write(
+        &env_path,
+        fs::read_to_string(&env_path).unwrap().replace("\"mine:hello\"", ""),
+    )
+    .unwrap();
     let add = jetpack()
-        .args(["add", "nixpkgs:ripgrep", "--no-color"])
-        .current_dir(&proj.path)
+        .args(["add", "mine:hello", "--no-color"])
+        .current_dir(&proj)
+        .env("JETPACK_ROOT", &root)
         .output()
         .unwrap();
     assert!(add.status.success());
 
     let remove = jetpack()
-        .args(["remove", "nixpkgs:ripgrep", "--no-color"])
-        .current_dir(&proj.path)
+        .args(["remove", "mine:hello", "--no-color"])
+        .current_dir(&proj)
+        .env("JETPACK_ROOT", &root)
         .output()
         .unwrap();
     assert!(remove.status.success());
     let env = fs::read_to_string(proj.join("env.jet")).unwrap();
-    assert!(env.contains("\"ripgrep\""), "env.jet was changed: {env}");
+    assert!(env.contains("\"mine:hello\""), "env.jet was changed: {env}");
     let stderr = String::from_utf8_lossy(&remove.stderr);
     assert!(stderr.contains("Plan env edit"), "stderr: {stderr}");
-    assert!(stderr.contains("- ripgrep"), "stderr: {stderr}");
+    assert!(stderr.contains("- hello"), "stderr: {stderr}");
     assert!(stderr.contains("-y or --yes"), "stderr: {stderr}");
 }
 
@@ -2236,6 +2261,12 @@ fn committed_example_builds_offline_end_to_end() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("building 1/3 · stable -> ripgrep · resolving")
+            && stderr.contains("building 2/3 · unstable -> neovim · resolving")
+            && stderr.contains("building 3/3 · mine -> hello · resolving"),
+        "plain non-TTY output must preserve ordered source-to-package edges: {stderr}"
+    );
     for pkg in ["ripgrep", "neovim", "hello"] {
         assert!(
             stderr.contains(pkg),
@@ -2816,6 +2847,14 @@ fn os_build_realizes_selected_system_offline() {
         String::from_utf8_lossy(&out.stderr)
     );
     let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.lines().any(|line| {
+            line.contains("building system")
+                && line.contains(" -> hello · resolving")
+                && !line.contains('\u{1b}')
+        }),
+        "plain jetos build must project its real package edge without ANSI: {stderr}"
+    );
     for pkg in ["hello", "btop"] {
         assert!(stderr.contains(pkg), "expected `{pkg}` in output: {stderr}");
     }

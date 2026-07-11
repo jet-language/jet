@@ -180,6 +180,33 @@ impl Theme {
         )
     }
 
+    /// One truthful projection of the work graph edge currently being
+    /// realized. `source -> node` is dependency direction (the provider/source
+    /// supplies the package), while `done/total` counts completed nodes.
+    /// State is an actual phase (`resolving`, `building`, `substituting`), not
+    /// an animation label inferred after the fact.
+    pub fn render_dependency_status(
+        &self,
+        phase: &str,
+        done: usize,
+        total: usize,
+        source: &str,
+        node: &str,
+        state: &str,
+    ) -> String {
+        let edge = if source.is_empty() {
+            node.to_string()
+        } else {
+            format!("{} -> {}", self.gray(source), self.bold(node))
+        };
+        format!(
+            "{phase} {done}/{total} {} {edge} {} {}",
+            self.gray("·"),
+            self.gray("·"),
+            self.gray(state),
+        )
+    }
+
     /// Dependency-chain progress for long realization/build phases. TTY output
     /// can later pin/redraw this same line; non-TTY appends it as stable ledger.
     pub fn progress_chain(&self, phase: &str, done: usize, total: usize, node: &str, edge: &str) {
@@ -475,6 +502,35 @@ impl<'a> LiveRegion<'a> {
         self.drawn = lines.len();
     }
 
+    /// Project one dependency edge. TTY redraws a two-line pinned region;
+    /// non-TTY appends exactly one stable chain line per node so CI retains
+    /// progress without cursor control, timing noise, or duplicate bars.
+    pub fn set_dependency_status(
+        &mut self,
+        phase: &str,
+        done: usize,
+        total: usize,
+        source: &str,
+        node: &str,
+        state: &str,
+    ) {
+        let line = self
+            .theme
+            .render_dependency_status(phase, done, total, source, node, state);
+        if !self.tty {
+            eprintln!("{}{}", Self::pad(), line);
+            return;
+        }
+        self.set_status(&[
+            line,
+            format!(
+                "{}  {}",
+                Theme::render_progress_bar(done, total, 14),
+                self.theme.gray(state),
+            ),
+        ]);
+    }
+
     /// Close the live region out, collapsing it to one final summary line
     /// (tier 2's `<tool> build ready ✓`).
     pub fn collapse(&mut self, summary: &str) {
@@ -625,6 +681,31 @@ mod tests {
         assert_eq!(
             theme.render_progress_chain("realize", 2, 5, "ripgrep", "nixpkgs"),
             "▸ realize 2/5 ripgrep -> nixpkgs"
+        );
+    }
+
+    #[test]
+    fn dependency_status_uses_real_edge_direction_and_stable_plain_text() {
+        let theme = Theme { color: false };
+        assert_eq!(
+            theme.render_dependency_status(
+                "building",
+                2,
+                5,
+                "nixpkgs",
+                "ripgrep",
+                "resolving",
+            ),
+            "building 2/5 · nixpkgs -> ripgrep · resolving"
+        );
+    }
+
+    #[test]
+    fn dependency_status_handles_first_party_node_without_invented_parent() {
+        let theme = Theme { color: false };
+        assert_eq!(
+            theme.render_dependency_status("building", 1, 1, "", "local-app", "building"),
+            "building 1/1 · local-app · building"
         );
     }
 

@@ -37,6 +37,27 @@ fn cmd_add(theme: &Theme, parsed: &Parsed) -> i32 {
             return 2;
         }
     };
+    // Tier 1 is still real work: resolve before editing the manifest so the
+    // quiet `✓ package version` row is a verified package fact, not a cosmetic
+    // echo of the requested name. A failed resolution leaves env.jet intact.
+    let roots = Store::resolve();
+    let _lease = match realize_ref_outcome(
+        theme,
+        &roots,
+        &parsed.flags,
+        &table,
+        &spec,
+        spec.package.len().max(8),
+        RowStyle::Ready,
+        None,
+    ) {
+        RefOutcome::Realized(_entry, _state, _line, lease) => lease,
+        RefOutcome::NeedsNix(need) => {
+            report_nix_bridge_required(theme, &parsed.flags, &[need], &[]);
+            return 2;
+        }
+        RefOutcome::Failed => return 1,
+    };
     match EnvFile::add(&dir, &spec) {
         Ok(ef) => {
             theme.ok(&format!(

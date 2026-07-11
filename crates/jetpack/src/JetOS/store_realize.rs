@@ -101,8 +101,20 @@ fn realize_ref(
     table: &RefSpec::SourceTable,
     spec: &RefSpec::RefSpec,
     name_w: usize,
+    mut progress: Option<(&mut super::Output::LiveRegion<'_>, usize, usize)>,
 ) -> Option<RealizedPackage> {
-    theme.status(&format!("resolving {} ...", theme.bold(&spec.raw)));
+    if let Some((live, step, total)) = progress.as_mut() {
+        live.set_dependency_status(
+            "building system",
+            *step,
+            *total,
+            spec.source.label(),
+            &spec.package,
+            "resolving",
+        );
+    } else {
+        theme.status(&format!("resolving {} ...", theme.bold(&spec.raw)));
+    }
     let store_dir = roots.hangar_dir();
     let fixtures =
         if flags.offline && Provider::uses_nix_provider(spec, table, flags.offline, &store_dir) {
@@ -122,6 +134,9 @@ fn realize_ref(
         Store::RealizeRequest::Package { spec, table },
     ) {
         Ok(realized) => {
+            if let Some((live, _, _)) = progress.as_mut() {
+                live.clear();
+            }
             let entry = realized.metadata();
             theme.row(
                 &entry.name,
@@ -133,10 +148,16 @@ fn realize_ref(
             Some(RealizedPackage::from_verified(realized))
         }
         Err(Store::RealizeError::Integrity(failure)) => {
+            if let Some((live, _, _)) = progress.as_mut() {
+                live.clear();
+            }
             Store::report_integrity(theme, &failure);
             None
         }
         Err(e) => {
+            if let Some((live, _, _)) = progress.as_mut() {
+                live.clear();
+            }
             theme.error(
                 "could not realize a jetos package",
                 &format!("provider failed for `{}`: {e:?}", spec.raw),
@@ -154,8 +175,20 @@ fn try_realize_ref(
     table: &RefSpec::SourceTable,
     spec: &RefSpec::RefSpec,
     name_w: usize,
+    mut progress: Option<(&mut super::Output::LiveRegion<'_>, usize, usize)>,
 ) -> Result<RealizedPackage, String> {
-    theme.status(&format!("resolving {} ...", theme.bold(&spec.raw)));
+    if let Some((live, step, total)) = progress.as_mut() {
+        live.set_dependency_status(
+            "building system",
+            *step,
+            *total,
+            spec.source.label(),
+            &spec.package,
+            "resolving",
+        );
+    } else {
+        theme.status(&format!("resolving {} ...", theme.bold(&spec.raw)));
+    }
     let store_dir = roots.hangar_dir();
     let fixtures =
         if flags.offline && Provider::uses_nix_provider(spec, table, flags.offline, &store_dir) {
@@ -174,7 +207,15 @@ fn try_realize_ref(
         &ctx,
         Store::RealizeRequest::Package { spec, table },
     )
-    .map_err(|e| format!("verified realization failed for `{}`: {e:?}", spec.raw))?;
+    .map_err(|e| {
+        if let Some((live, _, _)) = progress.as_mut() {
+            live.clear();
+        }
+        format!("verified realization failed for `{}`: {e:?}", spec.raw)
+    })?;
+    if let Some((live, _, _)) = progress.as_mut() {
+        live.clear();
+    }
     let entry = realized.metadata();
     theme.row(
         &entry.name,

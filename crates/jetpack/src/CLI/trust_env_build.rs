@@ -339,14 +339,14 @@ fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
     let mut live = theme.live_region();
     for (idx, spec) in plan.refs.iter().enumerate() {
         let style = if live_mode {
-            live.set_status(&[
-                theme.render_live_header("building", idx + 1, total_steps, &spec.raw),
-                format!(
-                    "{}  {}",
-                    Theme::render_progress_bar(idx, total_steps, 14),
-                    theme.gray("resolving"),
-                ),
-            ]);
+            live.set_dependency_status(
+                "building",
+                idx + 1,
+                total_steps,
+                spec.source.label(),
+                &spec.package,
+                "resolving",
+            );
             RowStyle::Silent
         } else {
             RowStyle::Ledger
@@ -379,13 +379,17 @@ fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
     }
     for (idx, adapter) in plan.adapters.iter().enumerate() {
         if total_steps > 1 {
-            theme.progress_chain(
-                "adapt",
+            live.set_dependency_status(
+                "building",
                 plan.refs.len() + idx + 1,
                 total_steps,
-                &adapter.name,
                 "adapter",
+                &adapter.name,
+                "adapting",
             );
+            // Adapter realization owns its diagnostic/ledger output today;
+            // erase the pinned projection before handing control to it.
+            live.clear();
         }
         match realize_adapter(theme, &roots, &parsed.flags, adapter, false) {
             Some((entry, state, _lease)) => {

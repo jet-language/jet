@@ -21,6 +21,59 @@ fn build_generation(
         .map(|p| p.name.len())
         .max()
         .unwrap_or(1);
+    // D-FE-CLI1: build the real package-edge count up front so both the TTY
+    // region and plain transcript report an honest denominator. Runtime
+    // packages already named explicitly are not counted twice.
+    let explicit_names: std::collections::BTreeSet<&str> =
+        system.packages.iter().map(|p| p.name.as_str()).collect();
+    let explicit_total = system
+        .packages
+        .iter()
+        .filter(|pkg| {
+            !(flags.real_tier
+                && plan
+                    .table
+                    .declarations()
+                    .into_iter()
+                    .find(|(name, _, _)| name == &pkg.source)
+                    .map(|(_, _, via)| via == RefSpec::ProviderKind::Nix)
+                    .unwrap_or(pkg.source == "nixpkgs"))
+        })
+        .count();
+    let boot_for_progress = boot_profile(system);
+    let implicit_systemd = boot_for_progress.init == "/sbin/init"
+        && !flags.real_tier
+        && !explicit_names.contains(SYSTEMD_INIT_PACKAGE);
+    let implicit_desktop = if flags.real_tier {
+        0
+    } else {
+        desktop_default_required_packages(system)
+            .iter()
+            .filter(|name| !explicit_names.contains(*name))
+            .count()
+    };
+    let progress_kernel_defaulted =
+        option_value(system, &["boot.kernel", "kernel.package"]).is_none();
+    let progress_cachyos_source = plan
+        .table
+        .declarations()
+        .into_iter()
+        .any(|(_, upstream, _)| {
+            upstream
+                .strip_prefix("github:")
+                .and_then(|rest| rest.split('/').nth(1))
+                .map(|repo| repo.eq_ignore_ascii_case("nix-cachyos-kernel"))
+                .unwrap_or(false)
+        });
+    let implicit_cachyos = boot_for_progress.kernel == "CachyOS"
+        && !(flags.real_tier && (progress_kernel_defaulted || progress_cachyos_source))
+        && !explicit_names.contains(CACHYOS_KERNEL_PACKAGE);
+    let progress_total = explicit_total
+        + usize::from(implicit_cachyos)
+        + usize::from(implicit_systemd)
+        + implicit_desktop;
+    let mut progress_step = 0usize;
+    let mut live = theme.live_region();
     let mut realized = Vec::new();
     for pkg in &system.packages {
         let raw = if pkg.source.is_empty() {
@@ -42,7 +95,16 @@ fn build_generation(
         if flags.real_tier && is_nixpkgs_source(&spec.source, &plan.table) {
             continue;
         }
-        let entry = match realize_ref(theme, &roots, flags, &plan.table, &spec, name_w) {
+        progress_step += 1;
+        let entry = match realize_ref(
+            theme,
+            &roots,
+            flags,
+            &plan.table,
+            &spec,
+            name_w,
+            Some((&mut live, progress_step, progress_total)),
+        ) {
             Some(entry) => entry,
             None => return None,
         };
@@ -91,6 +153,7 @@ fn build_generation(
                 return None;
             }
         };
+        progress_step += 1;
         let entry = match try_realize_ref(
             theme,
             &roots,
@@ -98,6 +161,7 @@ fn build_generation(
             &plan.table,
             &spec,
             name_w.max(CACHYOS_KERNEL_PACKAGE.len()),
+            Some((&mut live, progress_step, progress_total)),
         ) {
             Ok(entry) => entry,
             Err(_) => {
@@ -136,6 +200,7 @@ fn build_generation(
                 return None;
             }
         };
+        progress_step += 1;
         let entry = match try_realize_ref(
             theme,
             &roots,
@@ -143,6 +208,7 @@ fn build_generation(
             &plan.table,
             &spec,
             name_w.max(SYSTEMD_INIT_PACKAGE.len()),
+            Some((&mut live, progress_step, progress_total)),
         ) {
             Ok(entry) => entry,
             Err(_) => {
@@ -181,6 +247,7 @@ fn build_generation(
                     return None;
                 }
             };
+            progress_step += 1;
             let entry = match try_realize_ref(
                 theme,
                 &roots,
@@ -188,6 +255,7 @@ fn build_generation(
                 &plan.table,
                 &spec,
                 name_w.max(package.len()),
+                Some((&mut live, progress_step, progress_total)),
             ) {
                 Ok(entry) => entry,
                 Err(_) => {
