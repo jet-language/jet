@@ -83,11 +83,19 @@ fn jet_scheduler_shielded() -> bool {
 
 #[allow(dead_code)] // wired to a user sigil once D-SHIELDNAME1 ratifies
 pub fn jet_scheduler_shield_enter() {
-    SHIELD_DEPTH.with(|d| d.set(d.get().saturating_add(1)));
+    // Outside a scheduler task/catch frame, `#Shield` is a transparent block.
+    if current_task_control().is_some() && jet_scheduler_panic_should_unwind() {
+        SHIELD_DEPTH.with(|d| d.set(d.get().saturating_add(1)));
+    }
 }
 
 #[allow(dead_code)] // wired to a user sigil once D-SHIELDNAME1 ratifies
 pub fn jet_scheduler_shield_leave() {
+    // Match `enter`: ambient deadlines must never begin unwinding merely because
+    // ordinary non-task code crossed a lexical shield boundary.
+    if current_task_control().is_none() || !jet_scheduler_panic_should_unwind() {
+        return;
+    }
     let landed = SHIELD_DEPTH.with(|d| {
         let n = d.get().saturating_sub(1);
         d.set(n);
@@ -2027,6 +2035,7 @@ mod interrupt_boundary_tests {
     // consistent with the cancel case.
     #[test]
     fn shield_defers_deadline_until_it_exits() {
+        jet_scheduler_set_task_control(Some(JetTaskControl::new()));
         jet_scheduler_task_panic_enter();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             jet_scheduler_shield_enter();
@@ -2040,6 +2049,7 @@ mod interrupt_boundary_tests {
             "no-unwind"
         }));
         TEST_DEADLINE_EXCEEDED.with(|d| d.set(false));
+        jet_scheduler_set_task_control(None);
         jet_scheduler_task_panic_leave();
         assert!(
             result.is_err(),
