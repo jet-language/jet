@@ -112,14 +112,20 @@ pub fn jet_net_tls_write_all_bytes_impl(id: i64, data: &Vec<u8>) -> Result<(), S
     })
 }
 
+fn jet_net_tls_flush_close_notify<S: Read + Write>(
+    stream: &mut rustls::StreamOwned<rustls::ClientConnection, S>,
+) -> Result<(), String> {
+    stream.conn.send_close_notify();
+    stream
+        .flush()
+        .map_err(|e| format!("TLS close-notify flush failed: {}", e))
+}
+
 pub fn jet_net_tls_close_impl(id: i64) -> Result<(), String> {
     JET_NET_TLS_STREAMS.with(|cell| {
         let mut streams = cell.borrow_mut();
         if let Some(stream) = streams.get_mut(&id) {
-            stream.conn.send_close_notify();
-            stream
-                .flush()
-                .map_err(|e| format!("TLS close-notify flush failed: {}", e))?;
+            jet_net_tls_flush_close_notify(stream)?;
             streams.remove(&id);
             JET_NET_TLS_CLOSED.with(|closed| { closed.borrow_mut().insert(id); });
             return Ok(());

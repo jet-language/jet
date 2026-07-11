@@ -202,6 +202,55 @@ const HTTP_SERVER_TLS_RUNTIME: &str = include_str!("Prelude/HttpServerTls.rs");
 /// Hand-written client TLS stream runtime emitted when `core.net.tls_connect` is used.
 const NET_TLS_RUNTIME: &str = include_str!("Prelude/NetTls.rs");
 
+#[cfg(test)]
+mod net_tls_close_tests {
+    #![allow(dead_code)]
+
+    include!("Prelude/NetTls.rs");
+
+    struct BrokenTransport;
+
+    impl std::io::Read for BrokenTransport {
+        fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+            Ok(0)
+        }
+    }
+
+    impl std::io::Write for BrokenTransport {
+        fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "hostile peer reset",
+            ))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "hostile peer reset",
+            ))
+        }
+    }
+
+    #[test]
+    fn close_notify_reports_hostile_transport_flush_failure() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let config = std::sync::Arc::new(
+            rustls::ClientConfig::builder()
+                .with_root_certificates(rustls::RootCertStore::empty())
+                .with_no_client_auth(),
+        );
+        let name = rustls::pki_types::ServerName::try_from("localhost".to_string()).unwrap();
+        let conn = rustls::ClientConnection::new(config, name).unwrap();
+        let mut stream = rustls::StreamOwned::new(conn, BrokenTransport);
+
+        let error = jet_net_tls_flush_close_notify(&mut stream).unwrap_err();
+
+        assert!(error.contains("TLS close-notify flush failed"), "{error}");
+        assert!(error.contains("hostile peer reset"), "{error}");
+    }
+}
+
 /// Crate dependency specs that require non-trivial TOML values (e.g. feature flags).
 /// These are emitted verbatim as the right-hand side of the `name = …` line.
 const FEATURED_DEPS: &[(&str, &str)] = &[
