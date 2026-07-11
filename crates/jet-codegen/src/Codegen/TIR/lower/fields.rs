@@ -76,6 +76,10 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
             member,
             "code" | "output" | "errors" | "success" | "signal" | "timed_out"
         ),
+        // D-PROCESS1=A: `child.stdin`/`.stdout`/`.stderr` read the real
+        // `ProcessChild` Rust struct field directly (a writer/reader handle),
+        // not a `user_<field>` name.
+        "ProcessChild" => matches!(member, "stdin" | "stdout" | "stderr"),
         n if n == Syntax::TYPE_JSON_ERROR || n == "JsonError" => {
             matches!(member, "line" | "message")
         }

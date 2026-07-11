@@ -466,6 +466,31 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                         0
                     ));
                 }
+                Some(TForInMethod::LinesProcessStream) => {
+                    // D-PROCESS1=A: poll `jet_process_stream_next_line`, panicking on a
+                    // read error (mirrors the `LinesFile`/`LinesStdin` mid-stream-error
+                    // panic), `break`ing at EOF. One open brace (the `for`-equivalent
+                    // `loop`), closed by the generic tail below — no extra block needed.
+                    out.push_str(&format!("{}{}loop {{\n", pad, lbl));
+                    out.push_str(&format!(
+                        "{}    let _jet_line_opt = {}jet_process_stream_next_line(&({})).unwrap_or_else(|_e| {}jet_panic({:?}, {}, &_e.to_string()));\n",
+                        pad,
+                        cx.root_prefix,
+                        collection_str,
+                        cx.root_prefix,
+                        cx.file,
+                        0
+                    ));
+                    out.push_str(&format!(
+                        "{}    let Some(_jet_raw_line) = _jet_line_opt else {{ break; }};\n",
+                        pad
+                    ));
+                    out.push_str(&format!(
+                        "{}    let {} = _jet_raw_line;\n",
+                        pad,
+                        mangle(var)
+                    ));
+                }
                 Some(TForInMethod::Iterable {
                     coll_type,
                     iter_type,

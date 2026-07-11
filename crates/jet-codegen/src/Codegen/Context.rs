@@ -188,6 +188,8 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "ProcessResult" => Some("ProcessResult"),
         "ProcessSpec" => Some("ProcessSpec"),
         "ProcessChild" => Some("ProcessChild"),
+        // D-PROCESS1=A: the core dot-literal stream-mode enum.
+        "ProcessStreamMode" => Some("ProcessStreamMode"),
         "Stopwatch" => Some("Stopwatch"),
         // D-DET1: deterministic injected capability handles.
         "Clock" => Some("Clock"),
@@ -290,6 +292,14 @@ pub(crate) fn file_handle_rust_type(name: &str) -> Option<&'static str> {
         // D-STDIN1=A: stdin handle types; StdinLines is an internal sema marker.
         "StdinHandle" => Some("JetStdinReader"),
         "StdinLines" => Some("()"),
+        // D-PROCESS1=A: `child.stdin`/`.stdout`/`.stderr` handle markers — the real
+        // Rust value comes straight off the `ProcessChild` struct field (see
+        // `core_struct_field_rust_name`); these Jet-level types never appear as a
+        // standalone Rust type. `ProcessLines` is the `.lines()` loop-only marker.
+        "ProcessStdin" => Some("()"),
+        "ProcessStdoutStream" => Some("()"),
+        "ProcessStderrStream" => Some("()"),
+        "ProcessLines" => Some("()"),
         // D-COREIO1=A: standard stream handles.
         "Stdout" => Some("JetStdout"),
         "Stderr" => Some("JetStderr"),

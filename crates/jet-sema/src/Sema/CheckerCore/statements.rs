@@ -1015,6 +1015,11 @@ impl<'a> Checker<'a> {
                                 Some(Type::Named(n)) if n == "StdinLines" => {
                                     self.declare_loop_var(var.clone(), *var_span, &Type::String);
                                 }
+                                // D-PROCESS1=A: `loop line in child.stdout.lines()` /
+                                // `child.stderr.lines()` — streaming subprocess output.
+                                Some(Type::Named(n)) if n == "ProcessLines" => {
+                                    self.declare_loop_var(var.clone(), *var_span, &Type::String);
+                                }
                                 Some(Type::Named(n))
                                     if self.trait_reg.iterable_items.contains_key(n) =>
                                 {

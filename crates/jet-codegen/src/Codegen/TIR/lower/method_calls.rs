@@ -964,10 +964,6 @@ pub(crate) fn lower_method_call(
                 ok: Box::new(Type::Named("ProcessResult".to_string())),
                 err: Box::new(Type::Named("IOError".to_string())),
             },
-            (Some("ProcessChild"), "read_stdout_line" | "read_stderr_line") => Type::Result {
-                ok: Box::new(Type::Option(Box::new(Type::String))),
-                err: Box::new(Type::Named("IOError".to_string())),
-            },
             (Some("ProcessChild"), _) => Type::Result {
                 ok: Box::new(unit_type()),
                 err: Box::new(Type::Named("IOError".to_string())),
@@ -988,6 +984,24 @@ pub(crate) fn lower_method_call(
             kind: TExprKind::HandleMethod {
                 recv: Box::new(recv_t),
                 op,
+                args: targs,
+            },
+        };
+    }
+    // D-PROCESS1=A: `.write(text)` on `child.stdin` — the receiver LOWERS to the
+    // real `ProcessChild.stdin` Rust field (a writer handle), and the write goes
+    // through the generic `jet_process_stdin_write` prelude helper.
+    if recv_type.as_deref() == Some("ProcessStdin") && method == "write" {
+        let recv_t = lower_expr(receiver, cx, env);
+        let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+        return TExpr {
+            ty: Type::Result {
+                ok: Box::new(unit_type()),
+                err: Box::new(Type::Named("IOError".to_string())),
+            },
+            kind: TExprKind::HandleMethod {
+                recv: Box::new(recv_t),
+                op: THandleOp::ProcessStdinWrite,
                 args: targs,
             },
         };

@@ -437,6 +437,11 @@ pub(crate) fn tir_enum_lit_prefix(cx: &Cx, type_name: &str, variant: &str) -> St
     if type_name == crate::Syntax::TYPE_KEY {
         return format!("{}JetKey::{}", cx.root_prefix, variant);
     }
+    // D-PROCESS1=A: `ProcessStreamMode` is a core dot-literal enum (`.Stream`/
+    // `.Inherit`/`.Capture`) — its Rust type lives in `jet_std`, plain variant names.
+    if type_name == "ProcessStreamMode" {
+        return format!("{}jet_std::ProcessStreamMode::{}", cx.root_prefix, variant);
+    }
     let type_prefix = match cx.foreign_types.get(type_name) {
         Some(rust_mod) => format!("{}{}::user_{}", cx.root_prefix, rust_mod, type_name),
         None => format!("user_{}", type_name),

@@ -1471,8 +1471,8 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         format!("{}jet_process_spec_env_remove({}, &({}))", root, recv, a(0))
                     }
                     "env_clear" => format!("{}jet_process_spec_env_clear({})", root, recv),
-                    "stdin_text" => {
-                        format!("{}jet_process_spec_stdin_text({}, &({}))", root, recv, a(0))
+                    "stdin" => {
+                        format!("{}jet_process_spec_stdin({}, &({}))", root, recv, a(0))
                     }
                     "stdout" => {
                         format!("{}jet_process_spec_stdout({}, &({}))", root, recv, a(0))
@@ -1480,26 +1480,8 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     "stderr" => {
                         format!("{}jet_process_spec_stderr({}, &({}))", root, recv, a(0))
                     }
-                    "stdout_capture" => {
-                        format!("{}jet_process_spec_stdout_capture({})", root, recv)
-                    }
-                    "stdout_inherit" => {
-                        format!("{}jet_process_spec_stdout_inherit({})", root, recv)
-                    }
-                    "stdout_discard" => {
-                        format!("{}jet_process_spec_stdout_discard({})", root, recv)
-                    }
-                    "stderr_capture" => {
-                        format!("{}jet_process_spec_stderr_capture({})", root, recv)
-                    }
-                    "stderr_inherit" => {
-                        format!("{}jet_process_spec_stderr_inherit({})", root, recv)
-                    }
-                    "stderr_discard" => {
-                        format!("{}jet_process_spec_stderr_discard({})", root, recv)
-                    }
-                    "timeout_ms" => {
-                        format!("{}jet_process_spec_timeout_ms({}, {})", root, recv, a(0))
+                    "timeout" => {
+                        format!("{}jet_process_spec_timeout({}, &({}))", root, recv, a(0))
                     }
                     "output_limit" => {
                         format!("{}jet_process_spec_output_limit({}, {})", root, recv, a(0))
@@ -1517,17 +1499,13 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         format!("{}jet_process_child_terminate(&({}))", root, recv)
                     }
                     "interrupt" => format!("{}jet_process_child_interrupt(&({}))", root, recv),
-                    "write_stdin" => {
-                        format!("{}jet_process_child_write_stdin(&({}), &({}))", root, recv, a(0))
-                    }
-                    "read_stdout_line" => {
-                        format!("{}jet_process_child_read_stdout_line(&({}))", root, recv)
-                    }
-                    "read_stderr_line" => {
-                        format!("{}jet_process_child_read_stderr_line(&({}))", root, recv)
-                    }
                     _ => format!("/* unsupported ProcessChild.{method} */ {{ unreachable!() }}"),
                 },
+                // D-PROCESS1=A: `child.stdin.write(text)` — recv is already the
+                // lowered `(child).stdin` field access (a writer handle).
+                THandleOp::ProcessStdinWrite => {
+                    format!("{}jet_process_stdin_write(&({}), &({}))", root, recv, a(0))
+                }
                 // D-ANY-JAI1 (c7jaiany §6): Value/Field are plain inherent-method
                 // passthroughs, same shape as `ArgsSpecHelp`.
                 THandleOp::ReflectValueTypeName => format!("({}).type_name()", recv),

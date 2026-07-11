@@ -371,6 +371,12 @@ pub enum TForInMethod {
     /// block (so the `io.stdin()` temporary outlives the loop body), with a matching
     /// extra closing brace.
     LinesStdin,
+    /// D-PROCESS1=A: `loop line in child.stdout.lines()` / `child.stderr.lines()` —
+    /// a `ProcessChild`'s streaming reader. The receiver string is the plain field
+    /// access (`(child).stdout`); each iteration polls
+    /// `jet_process_stream_next_line(&recv)` via a `let Some(x) = … else { break }`,
+    /// so (unlike `LinesFile`/`LinesStdin`) no extra wrapper block is needed.
+    LinesProcessStream,
     /// D-ITER-HOOK: `loop x in mytype` when `mytype` implements `Iterable`.
     Iterable {
         coll_type: String,
@@ -2032,6 +2038,9 @@ pub enum THandleOp {
     ProcessChildMethod {
         method: String,
     },
+    /// D-PROCESS1=A: `child.stdin.write(text)` →
+    /// `{root}jet_process_stdin_write(&(recv), &(a0))` → `Result<(), IOError>`.
+    ProcessStdinWrite,
     /// D-ANY-JAI1 (c7jaiany §6): `reflect.of(x)`'s `Value` handle — plain
     /// inherent-method passthrough, same shape as `ArgsSpecHelp`.
     ReflectValueTypeName,

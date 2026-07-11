@@ -76,6 +76,16 @@ pub(crate) fn lower_forin_collection(
                 if is_stdin {
                     return (recv, Some(TForInMethod::LinesStdin));
                 }
+                // D-PROCESS1=A: `child.stdout.lines()` / `child.stderr.lines()` — the
+                // receiver's OWN type (the field access itself) is the
+                // `ProcessStdoutStream`/`ProcessStderrStream` marker sema hands back
+                // for `child.stdout`/`child.stderr`.
+                if matches!(
+                    tir_recv_jet_ty(receiver, env),
+                    Some(Type::Named(n)) if n == "ProcessStdoutStream" || n == "ProcessStderrStream"
+                ) {
+                    return (recv, Some(TForInMethod::LinesProcessStream));
+                }
                 // A `.lines()` on neither (unreachable in valid Jet — sema E2502
                 // restricts `.lines()` to a FileReader/StdinHandle loop position) would
                 // fall to the AST `else` default; reproduce that for totality.
