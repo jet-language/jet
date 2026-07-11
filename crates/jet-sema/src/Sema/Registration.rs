@@ -747,12 +747,44 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                                 for fragment in fragments {
                                     let (toks, lex_diags) = crate::Lexer::lex(&fragment);
                                     if !lex_diags.is_empty() {
-                                        diags.extend(lex_diags);
+                                        let detail = lex_diags
+                                            .first()
+                                            .map(|d| d.what.as_str())
+                                            .unwrap_or("the generated text could not be read");
+                                        diags.push(Diagnostic::error(
+                                            "E2710",
+                                            format!(
+                                                "`derive T.{}` generated invalid Jet while expanding `#[{}]` on `{}`",
+                                                derive_name, derive_name, s.name
+                                            ),
+                                            format!(
+                                                "generated source did not pass the ordinary lexer and parser: {detail}"
+                                            ),
+                                            "fix the `derive` body so every emitted fragment is valid Jet source".to_string(),
+                                            Some(*derive_span),
+                                        ));
                                         continue;
                                     }
                                     match crate::Parser::parse(&toks) {
                                         Ok(mut p) => new_items.extend(p.items.drain(..)),
-                                        Err(parse_diags) => diags.extend(parse_diags),
+                                        Err(parse_diags) => {
+                                            let detail = parse_diags
+                                                .first()
+                                                .map(|d| d.what.as_str())
+                                                .unwrap_or("the generated text was not valid Jet");
+                                            diags.push(Diagnostic::error(
+                                                "E2710",
+                                                format!(
+                                                    "`derive T.{}` generated invalid Jet while expanding `#[{}]` on `{}`",
+                                                    derive_name, derive_name, s.name
+                                                ),
+                                                format!(
+                                                    "generated source did not pass the ordinary lexer and parser: {detail}"
+                                                ),
+                                                "fix the `derive` body so every emitted fragment is valid Jet source".to_string(),
+                                                Some(*derive_span),
+                                            ));
+                                        }
                                     }
                                 }
                             }
