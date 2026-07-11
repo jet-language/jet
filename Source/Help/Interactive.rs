@@ -387,7 +387,7 @@ fn selected_category_index(index: &[Entry], category: usize, entry: Option<usize
 }
 
 fn selected_category_cmd(index: &[Entry], category: usize, entry: Option<usize>) -> Option<&str> {
-    selected_category_index(index, category, entry).map(|i| index[i].cmd)
+    selected_category_index(index, category, entry).map(|i| index[i].cmd.as_str())
 }
 
 fn apply_reference_search(index: &[Entry], query: &str, category: &mut usize, entry: &mut Option<usize>) {

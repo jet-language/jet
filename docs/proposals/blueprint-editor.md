@@ -151,7 +151,7 @@ The graph is also the debug surface, reusing shipped/ratified machinery:
 ```
 
 - **Projection service**: new query surface on the existing LSP server
-  (`jet lsp` already hosts features; semindex is ratified as its data
+  (`jet self lsp` already hosts features; semindex is ratified as its data
   layer). Speaks a graph document + edit-op protocol to any client.
 - **Canvas client**: one renderer, embeddable in the places users already
   are (Cursor/VS Code webview, Zed, browser via `jet dev`) — host question

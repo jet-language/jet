@@ -1,17 +1,17 @@
-//! D-MIGRATE2C (ratified 2026-06-22): `jet schema` subcommand handlers.
+//! D-MIGRATE2C (ratified 2026-06-22): `jet inspect schema` subcommand handlers.
 //!
-//! `jet schema status` — report every `@PublishedSchema` type in the project:
+//! `jet inspect schema status` — report every `@PublishedSchema` type in the project:
 //! its pinned published version, field count, and field list. If the working-tree
 //! struct has a pending breaking change vs its snapshot, note it (reuses the
 //! E0910 diff, so the output matches what `jet build` would refuse).
 //!
-//! `jet schema squash --before <ver>` — re-baseline. Rewrites every snapshot to
+//! `jet inspect schema squash --before <ver>` — re-baseline. Rewrites every snapshot to
 //! the CURRENT published struct shape and records `squashed_before = <ver>`, so
 //! future builds treat the current shape as the authoritative baseline and old
 //! `migration` blocks for versions `< <ver>` are no longer required. This NEVER
 //! edits user source — only the committed `.jet/cache/schema/*.snapshot` files.
 //!
-//! There is NO `jet schema check` verb — `jet build`'s E0910 is already the CI gate.
+//! There is NO `jet inspect schema check` verb — `jet build`'s E0910 is already the CI gate.
 
 use std::path::PathBuf;
 use std::process::exit;
@@ -21,7 +21,7 @@ use jet::Syntax;
 
 use crate::find_project_entry;
 
-/// Dispatch `jet schema <verb> …`.
+/// Dispatch `jet inspect schema <verb> …`.
 pub(crate) fn run_schema(args: &[String]) {
     let verb = args.first().map(|s| s.as_str());
     match verb {
@@ -32,13 +32,13 @@ pub(crate) fn run_schema(args: &[String]) {
         }
         other => {
             if let Some(v) = other {
-                eprintln!("error: `jet schema {}` isn't a schema command", v);
+                eprintln!("error: `jet inspect schema {}` isn't a schema command", v);
             } else {
-                eprintln!("error: `jet schema` needs a verb");
+                eprintln!("error: `jet inspect schema` needs a verb");
             }
             eprintln!(
-                " Fix: use `jet schema {}` to inspect published schemas, or \
-                 `jet schema {} --before <version>` to re-baseline them",
+                " Fix: use `jet inspect schema {}` to inspect published schemas, or \
+                 `jet inspect schema {} --before <version>` to re-baseline them",
                 Syntax::SCHEMA_VERB_STATUS,
                 Syntax::SCHEMA_VERB_SQUASH
             );
@@ -52,11 +52,11 @@ fn project_root() -> PathBuf {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     crate::require_manifest_root(
         &cwd,
-        "error: no `pkg.jet` found — run `jet schema` inside a project",
+        "error: no `pkg.jet` found — run `jet inspect schema` inside a project",
     )
 }
 
-/// `jet schema status` — list every snapshotted `@PublishedSchema` type.
+/// `jet inspect schema status` — list every snapshotted `@PublishedSchema` type.
 fn run_status() {
     let root = project_root();
     let snaps = jet::Publish::load_all_snapshots(&root);
@@ -64,7 +64,7 @@ fn run_status() {
     if snaps.is_empty() {
         println!("no published schemas yet.");
         println!(
-            "note: a `@PublishedSchema` struct is snapshotted into .jet/cache/schema/ on `jet publish`."
+            "note: a `@PublishedSchema` struct is snapshotted into .jet/cache/schema/ on `jet registry publish`."
         );
         return;
     }
@@ -141,11 +141,11 @@ fn pending_breaks(root: &std::path::Path) -> Vec<String> {
     out
 }
 
-/// `jet schema squash --before <ver>` — re-baseline snapshots to current shape.
+/// `jet inspect schema squash --before <ver>` — re-baseline snapshots to current shape.
 fn run_squash(before: Option<&str>) {
     let Some(before) = before else {
         eprintln!(
-            "error: `jet schema {}` needs `--before <version>`",
+            "error: `jet inspect schema {}` needs `--before <version>`",
             Syntax::SCHEMA_VERB_SQUASH
         );
         eprintln!(
@@ -153,7 +153,7 @@ fn run_squash(before: Option<&str>) {
              a version as no longer required — so it needs that cutoff version"
         );
         eprintln!(
-            " Fix: run `jet schema {} --before 2.0.0` (the version whose migrations you want to retire)",
+            " Fix: run `jet inspect schema {} --before 2.0.0` (the version whose migrations you want to retire)",
             Syntax::SCHEMA_VERB_SQUASH
         );
         exit(ExitCodes::USER_ERROR);

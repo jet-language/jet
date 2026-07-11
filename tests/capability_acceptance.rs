@@ -259,39 +259,40 @@ fn public_build_product() {
     let _ = fs::remove_file(&bin);
 
     let graph = Command::new(jet_bin())
-        .args(["graph", entry.to_str().unwrap(), "--json"])
+        .args(["inspect", "graph", entry.to_str().unwrap(), "--json"])
         .current_dir(root())
         .output()
-        .expect("jet graph");
+        .expect("jet inspect graph");
     assert!(
         graph.status.success(),
-        "jet graph failed:\n{}",
+        "jet inspect graph failed:\n{}",
         String::from_utf8_lossy(&graph.stderr)
     );
     let graph_json = String::from_utf8_lossy(&graph.stdout);
     assert!(
         graph_json.contains("programmable_build") && graph_json.contains("\"targets\""),
-        "jet graph must expose typed targets: {graph_json}"
+        "jet inspect graph must expose typed targets: {graph_json}"
     );
 
     let query = Command::new(jet_bin())
-        .args(["query", "build", entry.to_str().unwrap(), "--json"])
+        .args(["inspect", "query", "build", entry.to_str().unwrap(), "--json"])
         .current_dir(root())
         .output()
-        .expect("jet query build");
+        .expect("jet inspect query build");
     assert!(
         query.status.success(),
-        "jet query build failed:\n{}",
+        "jet inspect query build failed:\n{}",
         String::from_utf8_lossy(&query.stderr)
     );
     let query_json = String::from_utf8_lossy(&query.stdout);
     assert!(
         query_json.contains("programmable_build"),
-        "jet query build must share graph facts: {query_json}"
+        "jet inspect query build must share graph facts: {query_json}"
     );
 
     let explain = Command::new(jet_bin())
         .args([
+            "inspect",
             "explain-build",
             "programmable_build",
             entry.to_str().unwrap(),
@@ -299,10 +300,10 @@ fn public_build_product() {
         ])
         .current_dir(root())
         .output()
-        .expect("jet explain-build");
+        .expect("jet inspect explain-build");
     assert!(
         explain.status.success(),
-        "jet explain-build failed:\n{}",
+        "jet inspect explain-build failed:\n{}",
         String::from_utf8_lossy(&explain.stderr)
     );
     let explain_json = String::from_utf8_lossy(&explain.stdout);

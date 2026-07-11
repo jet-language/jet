@@ -122,7 +122,7 @@ before continuing.
 | E0039 | sema  | teaching: `os.environ`/`getenv` → `env.get` |
 | E0040 | sema  | teaching: `async`/`await` → blocking tasks/channels |
 | E0041 | sema  | teaching: `Mutex`/`lock` → channels |
-| E0043 | jet   | teaching: `jet install` → `jet fetch` |
+| E0043 | jet   | teaching: `jet install` → `jet store fetch` |
 | E0044 | parse | *retired by D-S14-PAUSE* (was: `switch` teaching) |
 | E0045 | parse | *retired by D-S14-PAUSE* (was: `or` fallback teaching) |
 | E0046 | parse | `?.` optional chaining reaches fields, not methods (S71) |
@@ -392,7 +392,7 @@ before continuing.
 | E3205 | sema  | overlay symbol clashes with bindgen (incompatible signature) |
 | E3206 | parse | user declared reserved `__bindgen__` segment |
 | E3207 | parse | `#Bindgen` outside generated `.jet/bindings/c/` file |
-| E3208 | jet   | `jet bind` / header translation failed |
+| E3208 | jet   | `jet inspect bind` / header translation failed |
 | E3209 | jet   | linker couldn't find a declared C library at link time |
 | E3210 | jet   | C library auto-provision from nixpkgs failed |
 | E3211 | sema  | string literal with a known interior NUL byte passed to a C-boundary function |
@@ -551,8 +551,8 @@ before continuing.
 | E1231 | jet   | a bare/path-form ref matched no workspace member (D-MONOREF1) |
 | E1232 | jet   | a monorepo source could not be fetched — sparse subtree checkout and full-clone fallback both failed (D-MONOREF1) |
 | E1233 | jet   | an in-repo dependency names a package outside the source's workspace index (D-MONOREF1) |
-| E1234 | jet   | `jet publish` refused: the version already exists in the registry index and is not yanked — versions are immutable (D-VERSION1) |
-| E1235 | jet   | `jet publish`/`jet yank` couldn't reach the registry index (git clone/pull/push failed) |
+| E1234 | jet   | `jet registry publish` refused: the version already exists in the registry index and is not yanked — versions are immutable (D-VERSION1) |
+| E1235 | jet   | `jet registry publish`/`jet registry yank` couldn't reach the registry index (git clone/pull/push failed) |
 | E1236 | jet   | a build step reached the network without a locked `fetch(url, sha256:)` (D-JPK-ADAPTER1) |
 | E1237 | jet   | a build step wrote outside the package output root (D-JPK-ADAPTER1) |
 | E1238 | jet   | a build recipe named a tool that is not a realized `Pkg` dependency (D-JPK-ADAPTER1) |
@@ -565,7 +565,7 @@ before continuing.
 | E1245 | jet   | a captured `Fleet` with no `hosts:` map (D-JETOS-FREEZE1) |
 | E1246 | jet   | a package signature doesn't verify against its pinned public key (D-PKGSIGN1) |
 | E1247 | jet   | a registry with `require_signed: true` served an unsigned package (D-PKGSIGN1) |
-| E1248 | jet   | `jet keygen` refused: a signing key already exists (use `--force`) (D-PKGSIGN1) |
+| E1248 | jet   | `jet registry keygen` refused: a signing key already exists (use `--force`) (D-PKGSIGN1) |
 | E1249 | jet   | a `jet:` toolchain pin isn't a valid version/channel ref (D-JPK-TOOLCHAIN1) |
 | E1250 | jet   | a `jet:` channel pin is unlocked under `--offline`/CI — no `[[toolchain]]` lock entry (D-JPK-TOOLCHAIN1) |
 | E1251 | jet   | the pinned Jet toolchain has no prebuilt object for this platform — never source-built (D-JPK-TOOLCHAIN1) |
@@ -611,7 +611,7 @@ before continuing.
 | E1291 | jetpack | a jetos real-tier system option/service/package has no NixOS mapping (D-JOS-NIXBACKEND1) |
 | E2001 | jet   | `pkg.jet` requests an edition this toolchain can't provide (E2-M2, D-REL3) |
 | E2002 | jet   | a deprecated item is used past its migration window (E2-M2, D-REL5) |
-| E2101 | jet   | unknown subcommand on the command line, with a "did you mean" (E2-M3, D-DX) |
+| E2101 | jet   | unknown or moved command spelling, with the canonical grouped spelling (E2-M3, D-DX, D-CLI-SURFACE1, D-CLI-SURFACE2) |
 | E2102 | jet   | unknown or ambiguous flag on the command line, with a suggestion (E2-M3, D-DX) |
 | E2201 | interp | `jet dev` can't interpret a feature (task/FFI/`#Unsafe`/native std); names it and `jet build`/`jet run` (E2-M4, D-DEV1) |
 | E2202 | interp | `jet dev` interpreter step budget exhausted — likely an unbounded loop (E2-M4) |
@@ -619,7 +619,7 @@ before continuing.
 | E2204 | interp | `jet debug` session ended early — the user typed `quit` at the `(jet)` prompt before the program finished (D-DBG3) |
 | E2210 | interp | a `jet dev`/`jet serve` edit changed a type surface, so the dev loop restarts instead of swapping (c77, D-HOTSWAP1) |
 | L2001 | jet   | a deprecated item still compiles but should be migrated; suggests `jet fix` (E2-M2, D-REL5) |
-| L2101 | jet   | `jet doctor` advisory: a rustc / cache / PATH problem with a fix (E2-M3, D-DX2) |
+| L2101 | jet   | `jet self doctor` advisory: a rustc / cache / PATH problem with a fix (E2-M3, D-DX2) |
 | E2701 | runtime | malformed input to a ring library parse function — row/line number and detail (E2-M9) |
 | E2702 | sema  | crypto API misuse at the boundary — reserved for future statically-detectable crypto errors (E2-M9, D-LR3) |
 | L2701 | sema  | advisory: regex pattern may catastrophically backtrack; suggest an anchor (E2-M9) |
@@ -648,7 +648,7 @@ diagnostic plumbing (the C-FFI E3202 precedent: registered + honest about reach)
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E2001 | This package needs a newer Jet. | Editions opt a project into a specific era of Jet syntax. A newer edition can use syntax this compiler does not understand. | Upgrade with `jet upgrade`, or set `edition: "2026"` in `pkg.jet`. |
+| E2001 | This package needs a newer Jet. | Editions opt a project into a specific era of Jet syntax. A newer edition can use syntax this compiler does not understand. | Upgrade with `jet self upgrade`, or set `edition: "2026"` in `pkg.jet`. |
 | E2002 | A deprecated item was used past its migration window. | The item was deprecated in an earlier edition and no longer exists in this one; it has reached the end of its migration window. | Use the named replacement, or run `jet fix` to migrate automatically. |
 | L2001 | An item is deprecated in this edition. | It still works during its migration window but will be removed in a later edition. | Use the named replacement, or run `jet fix` to migrate automatically. |
 
@@ -850,7 +850,7 @@ is fixed).
 
 Enforced SemVer, resolver conflicts, audit advisories, and integrity
 verification live here. E26xx is the block for M8. These fire from the
-`jet publish`, `jet fetch`, and `jet audit` commands, never from compiling
+`jet registry publish`, `jet store fetch`, and `jet inspect audit` commands, never from compiling
 source files. Each diagnostic names the affected package and version so the
 output is machine-parseable with `--json`.
 
@@ -858,11 +858,11 @@ output is machine-parseable with `--json`.
 |------|------|-----|-----|
 | E2601 | This release is tagged `{version}` but removes (or changes incompatibly) the public API item `{item}`. | `{version}` is a {bump_kind} bump, which promises no breaking changes under SemVer. Callers pinned to `^{major}.0` would stop compiling. | Bump to `{next_major}.0.0`, or restore `{item}` (a deprecated forwarding shim counts). Use `--force` to publish anyway with an explicit warning banner. |
 | E2602 | Dependency resolver conflict: `{package}` requires `{req_a}` from `{from_a}` but `{req_b}` from `{from_b}`, and no version satisfies both. | Jet uses a PubGrub-style resolver that requires a single version per package. Two incompatible constraints cannot both be met. | Upgrade or downgrade one of the conflicting dependents so their `{package}` constraints overlap, or ask the authors to release a version that satisfies both. |
-| E2603 | `[{severity}]` advisory `{advisory_id}` matches `{package}` `{version}`: {title}. | The advisory database flags this version as having a known vulnerability, exposed interface, or supply-chain risk. `jet audit` exits nonzero only on a `critical` match; lower severities inform and exit 0. | Upgrade to `>= {fixed_version}` (or the version listed in the advisory). Run `jet audit --explain {advisory_id}` for details. |
-| E2604 | Integrity check failed for `{package}` `{version}` — expected `{expected}`, got `{actual}`. | A fetched artifact's content hash differs from what the lockfile recorded. This means the artifact changed after it was locked — accidental or deliberate tampering. | Re-run `jet fetch` after cleaning stale Jetpack hangar entries (`jet clean`). If the problem persists, the upstream source may have been altered; audit the change before proceeding. |
-| E2605 | `{name}` v{version} cannot be published from a dirty working tree. | The registry records the exact source revision that was published. A dirty tree means uncommitted changes would be silently excluded, making the published package unreproducible. | Commit or stash all uncommitted changes (`git status` to list them), then run `jet publish` again. Use `--force` to bypass with an explicit warning banner. |
-| E2606 | `jet yank` requires a version argument. | A yank marks one specific published version as deprecated; without a version the command doesn't know which one to yank. | Run `jet yank <version>`, e.g. `jet yank 1.2.3`. |
-| E1217 | `{dep}` is in `pkg.jet` but has no locked revision. | A `--locked` build (and `jet publish`) requires every dependency to be pinned in the lockfile to a resolved version, so the build is reproducible. The dep is declared but not pinned. | Run `jet fetch` to resolve and pin `{dep}`, then commit the lockfile. |
+| E2603 | `[{severity}]` advisory `{advisory_id}` matches `{package}` `{version}`: {title}. | The advisory database flags this version as having a known vulnerability, exposed interface, or supply-chain risk. `jet inspect audit` exits nonzero only on a `critical` match; lower severities inform and exit 0. | Upgrade to `>= {fixed_version}` (or the version listed in the advisory). Run `jet inspect audit --explain {advisory_id}` for details. |
+| E2604 | Integrity check failed for `{package}` `{version}` — expected `{expected}`, got `{actual}`. | A fetched artifact's content hash differs from what the lockfile recorded. This means the artifact changed after it was locked — accidental or deliberate tampering. | Re-run `jet store fetch` after cleaning stale Jetpack hangar entries (`jet clean`). If the problem persists, the upstream source may have been altered; audit the change before proceeding. |
+| E2605 | `{name}` v{version} cannot be published from a dirty working tree. | The registry records the exact source revision that was published. A dirty tree means uncommitted changes would be silently excluded, making the published package unreproducible. | Commit or stash all uncommitted changes (`git status` to list them), then run `jet registry publish` again. Use `--force` to bypass with an explicit warning banner. |
+| E2606 | `jet registry yank` requires a version argument. | A yank marks one specific published version as deprecated; without a version the command doesn't know which one to yank. | Run `jet registry yank <version>`, e.g. `jet registry yank 1.2.3`. |
+| E1217 | `{dep}` is in `pkg.jet` but has no locked revision. | A `--locked` build (and `jet registry publish`) requires every dependency to be pinned in the lockfile to a resolved version, so the build is reproducible. The dep is declared but not pinned. | Run `jet store fetch` to resolve and pin `{dep}`, then commit the lockfile. |
 | E1218 | Publishing `{new}` after `{old}` is a {bump} bump but breaks the public API item `{item}`. | A {bump} bump promises callers no breaking changes under SemVer, but the public API changed since `{old}`. This is the local publish-time gate; the registry re-checks live with E2601 on receipt. | Bump to `{next_major}.0.0` (a major release), or restore `{item}` (a deprecated shim counts). Use `--force` to publish anyway with an explicit warning banner. |
 | E1219 | `--profile={name}` is not a defined build profile. | Blessed profiles `release`, `debug`, and `ci` have built-in defaults. Any other name must be declared in your `pkg.jet` `build { }` block as `{name}: Build.{ optimize: … }`. | Use `--release` for the release profile, `--profile=debug` for debug, `--profile=ci` for CI, or add `{name}: Build.{ optimize: full }` (or `none`/`basic`) to the `build { }` block in `pkg.jet`. |
 | E1220 | `{dep}` uses the `{effect}` effect, which this package's budget doesn't allow. | An `effects:` budget fails the build when any dependency reaches an effect you didn't list — supply-chain review as a compile error. | Add `{effect}` to `allow`, or grant it to `{dep}` in `grants:`, or drop the dependency. |
@@ -1207,8 +1207,8 @@ Error [E0150]: `check_in` needs `Reservation` in state `Confirmed`, but `r` is i
 | E3204 | Two different `use` forms refer to the same C library `{lib}`. | S59 allows one bring-in per C lib per file — either `use "{header}" as alias` or `use c.{lib} as alias`, not both. | Remove one line; keep the form that matches your workflow. |
 | E3205 | Overlay `{name}` disagrees with the generated binding. | User `#Extern module c.{lib}` may override bindgen symbols, but the Jet signature must stay compatible when replacing. | Match the generated signature, or rename your overlay function. |
 | E3206 | Module path `{path}` uses the reserved segment `__bindgen__`. | Autogen lives in `c.{lib}.__bindgen__`; users declare overlays as `#Extern module c.{lib}` only. | Drop `__bindgen__` from your module path, or use `#Extern module c.{lib} { … }`. |
-| E3207 | `#Bindgen` is only allowed in generated cache files. | `.jet/bindings/c/{lib}.jet` is written by `jet bind`; hand-written sources use `#Extern module`. | Edit your overlay file with `#Extern module`, or regenerate the cache with `jet bind`. |
-| E3208 | Could not generate bindings from `{header}`. | Header parsing or translation failed in the bind backend. | Fix the header path, install dev headers, run `jet bind` manually for details, or hand-write `#Extern module c.{lib}`. |
+| E3207 | `#Bindgen` is only allowed in generated cache files. | `.jet/bindings/c/{lib}.jet` is written by `jet inspect bind`; hand-written sources use `#Extern module`. | Edit your overlay file with `#Extern module`, or regenerate the cache with `jet inspect bind`. |
+| E3208 | Could not generate bindings from `{header}`. | Header parsing or translation failed in the bind backend. | Fix the header path, install dev headers, run `jet inspect bind` manually for details, or hand-write `#Extern module c.{lib}`. |
 | E3209 | The linker couldn't find C library `{lib}`. | Your program links against `{lib}`, but the linker reported `cannot find -l{lib}` — the library isn't on the link search path. | Declare it in `deps:` so Jet provisions it: `{lib}: c@system` (host pkg-config, else fetched from nixpkgs), or `{lib}: c@nixpkgs:<attr>` to pick the nixpkgs attribute, or install the system package. |
 | E3210 | Couldn't fetch C library `{lib}` from nixpkgs. | `{lib}: c@system` asked Jet to provision `nixpkgs#{attr}`, but `nix build` failed: `{reason}`. | Check the attr exists (`nix build nixpkgs#{attr}`), or point at a local build with `{lib}: c@"<path>"`, or install it and use `system`. |
 | E3211 | This string literal has an embedded NUL byte, so it can't cross into a C function. | C strings are NUL-terminated, not length-prefixed — an embedded `\0` would truncate the string on the C side, silently losing everything after it. | Remove the embedded NUL, or split the call so the C function only sees the part before it. |
@@ -1218,7 +1218,7 @@ Error [E0150]: `check_in` needs `Reservation` in state `Confirmed`, but `r` is i
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E3301 | `{api}` is not available in a freestanding build. | `--freestanding` targets have no OS; only `core`-level APIs are available. | Embed data at compile time with `@embed("file")`, or build without `--freestanding`. |
-| E3302 | Target `{triple}` is not available. | rustc doesn't have the standard library for this target compiled in, or the target triple is not recognised. | Run `jet doctor --target=<triple>` to see what's missing, or `rustup target add <triple>` to install it. |
+| E3302 | Target `{triple}` is not available. | rustc doesn't have the standard library for this target compiled in, or the target triple is not recognised. | Run `jet self doctor --target=<triple>` to see what's missing, or `rustup target add <triple>` to install it. |
 | E3303 | This freestanding program allocates memory but has no global allocator configured. | `--freestanding` builds cannot use the OS heap; a custom allocator is required. | Add `use core.mem;` and configure an arena or fixed allocator with `mem.set_allocator(…)`. |
 
 ## Pure evaluation diagnostics (E2-M16)
@@ -1251,26 +1251,26 @@ command/flag is within edit distance 2. Their golden transcripts live in
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E2101 | `{cmd}` isn't a jet command. | Every jet run starts with a command like `run`, `check`, or `new`. | Did you mean `jet {closest}`? Run `jet help` to see them all. |
+| E2101 | Unknown or retired CLI route. Moved bare form: `` `{cmd}` moved under `jet {group}` ``. Invalid nested form: `` `{action}` isn't a jet {group} command ``. | Moved bare form: `infrequent commands live in a named area so daily Jet commands stay easy to scan`. Invalid nested form: `jet {group} accepts only commands in its named area`. | Moved bare form: ``run `jet {group} {cmd} {args}` ``. Invalid nested form: ``run `jet {group} help` ``. Human output renders these as Error/Why/Fix lines; JSON uses these exact message, why, and fix strings with control characters, quotes, and backslashes escaped. |
 | E2102 | `{flag}` isn't a flag jet understands. | jet ignores no flags silently, so a typo can't quietly change a build. | Did you mean `{closest}`? Run `jet help` to see the flags. |
 
-### `jet doctor` advisories
+### `jet self doctor` advisories
 
-`jet doctor` (decision **D-DX2**, ratified 2026-06-16 — health checks *and*
+`jet self doctor` (decision **D-DX2**, ratified 2026-06-16 — health checks *and*
 auto-fix) self-diagnoses the environment Jet hides: the rustc backend, the
 build cache and package store, PATH, the language server, and the C-FFI/cargo
 bridge (the FFI section is decision **D-BUILD1**). It runs **offline by
 default** — only `--online`/`--network` lets it probe the registry. Each
 problem prints a single advisory line tagged **L2101** with the concrete fix.
 Safely auto-fixable problems (a missing cache or store directory) are applied
-under `jet doctor --fix`; doctor never modifies user source or package
+under `jet self doctor --fix`; doctor never modifies user source or package
 manifests. Exit code is 0 when every check is healthy or only advisories
 remain, and 1 when a hard problem (no rustc, an unwritable store) blocks normal
 use.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| L2101 | `jet doctor` found an environment problem with a known fix. | Jet hides a rustc backend, a build cache/store, and a C-FFI bridge; doctor surfaces a broken one before it derails a build. | Apply the fix printed on the advisory line; for a missing cache or store directory, run `jet doctor --fix`. |
+| L2101 | `jet self doctor` found an environment problem with a known fix. | Jet hides a rustc backend, a build cache/store, and a C-FFI bridge; doctor surfaces a broken one before it derails a build. | Apply the fix printed on the advisory line; for a missing cache or store directory, run `jet self doctor --fix`. |
 
 ## Workspace diagnostics (D-WORKSPACE1=B, D-WORKSPACE2=A)
 
@@ -1345,9 +1345,9 @@ snapshots in `tests/jetpack.rs` (the `tests/ui/` harness only renders front-end
 | E1231 | `{query}` is not a workspace member. | A bare/path-form ref must name a member listed in `workspace.jet` `members:`; nothing in the index matched (D-MONOREF1). | Use one of the listed members (a did-you-mean is offered), fix the name, or add the package to `members:`. |
 | E1232 | A monorepo source could not be fetched. | Resolving a monorepo package fetches the source's workspace index and materializes only the addressed subtree; both the sparse subtree checkout and the full-clone fallback failed (D-MONOREF1). | Check the source URL/rev and network access; if the provider lacks partial-clone support the full clone should still work, so this usually means the rev or repo is unreachable. |
 | E1233 | In-repo dependency `{name}` is outside the workspace. | A member's `pkg.jet` depends on another in-repo package, but that package is not in the source repo's `workspace.jet` member index, so the sparse checkout can't include it (D-MONOREF1). | Add the dependency to the source repo's `workspace.jet` `members:`, or depend on it as an external `source:package` ref. |
-| E1234 | `{name}` {version} already exists in the registry index and is not yanked. | Published versions are immutable (D-VERSION1) — a version can never be overwritten, only yanked, so anyone who already locked it keeps building the exact same bytes. | Bump the version in `pkg.jet` and publish again, or `jet yank {version}` the existing one first if it was a mistake (yanking hides it from new resolution; it does not free the version number for reuse). |
-| E1235 | Couldn't reach the registry index at `{url}`. | The git operation against the registry failed — network, auth, or a stale local clone. The registry is a git repo, so `jet publish`/`jet yank` clone/pull it, write the version line, then commit and push. | Check network access and credentials for `{url}`, or set `JET_REGISTRY_URL` to a reachable mirror. |
-| E1236 | A build step tried to reach the network without a locked fetch. | During a build, network access is denied except a locked `fetch(url, sha256:)`; an unpinned fetch would make the build unreproducible (D-JPK-ADAPTER1). | Add the source hash: `fetch("…", sha256: "…")`, or vendor the source with `jet vendor`. |
+| E1234 | `{name}` {version} already exists in the registry index and is not yanked. | Published versions are immutable (D-VERSION1) — a version can never be overwritten, only yanked, so anyone who already locked it keeps building the exact same bytes. | Bump the version in `pkg.jet` and publish again, or `jet registry yank {version}` the existing one first if it was a mistake (yanking hides it from new resolution; it does not free the version number for reuse). |
+| E1235 | Couldn't reach the registry index at `{url}`. | The git operation against the registry failed — network, auth, or a stale local clone. The registry is a git repo, so `jet registry publish`/`jet registry yank` clone/pull it, write the version line, then commit and push. | Check network access and credentials for `{url}`, or set `JET_REGISTRY_URL` to a reachable mirror. |
+| E1236 | A build step tried to reach the network without a locked fetch. | During a build, network access is denied except a locked `fetch(url, sha256:)`; an unpinned fetch would make the build unreproducible (D-JPK-ADAPTER1). | Add the source hash: `fetch("…", sha256: "…")`, or vendor the source with `jet registry vendor`. |
 | E1237 | A build step tried to write outside the output root. | A build may only install files under its own package output root; writing elsewhere would let a build mutate the machine or other packages (D-JPK-ADAPTER1). | Install into a path under the output root (no `..`, no absolute paths). |
 | E1238 | Build tool `{tool}` is not a realized dependency. | Build tools must be realized `Pkg` dependencies so the build is reproducible; a build never falls through to host `/usr/bin` (D-JPK-ADAPTER1). | Add `{tool}` as a build dependency in `pkg.jet` so it is realized into the hangar. |
 | E1240 | No Rust build toolchain is available to build this package. | Building an `extern rust` bridge dependency needs a pinned Rust toolchain realized into the hangar, or Nix; neither is present (D-JPK-BUILDTOOL1). | Run `jet update jet` to realize the pinned toolchain, or install Nix so the bridge builds through the compatibility provider. |
@@ -1356,9 +1356,9 @@ snapshots in `tests/jetpack.rs` (the `tests/ui/` harness only renders front-end
 | E1243 | Fleet `{fleet}` is validated, but `jet push` is not available yet. | The fleet's hosts parse and cross-check clean, but rolling a fleet out over ssh needs single-host jetos realization, which is gated (U15; Phase D, owner greenlight required). `jet push` never fakes a deploy. | Until the jetos realization tier lands, `jet push` captures and validates fleets without deploying them. |
 | E1244 | `{field}` isn't a captured `Fleet` field. | D-JETOS-FREEZE1: fleet deployment remains frozen jetos research; only `hosts` is captured for planning. | Remove `{field}`; captured fleets use `hosts: { … }`. |
 | E1245 | This captured `Fleet` has no `hosts`. | D-JETOS-FREEZE1: fleet deployment is frozen jetos research, but captured fleets still name hosts for later planning. | Add `hosts: { web1: system.<name> }` if this is research capture. |
-| E1246 | Signature verification failed for `{name}` {version}: the signature doesn't match the recorded public key. | This means the package was tampered with after signing, or the index entry is corrupt — the author's Ed25519 signature over the content hash no longer checks out (D-PKGSIGN1). | Do not use this version. Re-run `jet fetch` after clearing the store entry; if the problem persists, report it — this should never happen for an untampered registry. |
-| E1247 | Registry `{registry}` requires signed packages (`require_signed: true`) but `{name}` {version} has no signature. | The registry is configured to accept only author-signed releases; an unsigned entry can't be trusted under that policy (D-PKGSIGN1). | Use a different registry, or ask the package author to publish a signed release (`jet publish` auto-signs by default — they likely used `--no-sign`). |
-| E1248 | `jet keygen` refused: a signing key already exists at `{path}`. | Overwriting it would orphan every package you've published under the old key — consumers who pinned it (TOFU) would see a key-rotation warning on your next publish (D-PKGSIGN1). | Use `jet keygen --force` if you're sure (e.g. the old key was compromised), or back it up first with `jet key backup`. |
+| E1246 | Signature verification failed for `{name}` {version}: the signature doesn't match the recorded public key. | This means the package was tampered with after signing, or the index entry is corrupt — the author's Ed25519 signature over the content hash no longer checks out (D-PKGSIGN1). | Do not use this version. Re-run `jet store fetch` after clearing the store entry; if the problem persists, report it — this should never happen for an untampered registry. |
+| E1247 | Registry `{registry}` requires signed packages (`require_signed: true`) but `{name}` {version} has no signature. | The registry is configured to accept only author-signed releases; an unsigned entry can't be trusted under that policy (D-PKGSIGN1). | Use a different registry, or ask the package author to publish a signed release (`jet registry publish` auto-signs by default — they likely used `--no-sign`). |
+| E1248 | `jet registry keygen` refused: a signing key already exists at `{path}`. | Overwriting it would orphan every package you've published under the old key — consumers who pinned it (TOFU) would see a key-rotation warning on your next publish (D-PKGSIGN1). | Use `jet registry keygen --force` if you're sure (e.g. the old key was compromised), or back it up first with `jet registry key backup`. |
 | E1249 | `{value}` is not a valid toolchain pin. | The `jet:` field pins which Jet toolchain builds this project (D-JPK-TOOLCHAIN1); its value is a channel ref, not a version range. `>=1.0.0`-style constraints don't name one reproducible toolchain. | Write a channel: `jet: 0.4` (track the 0.4 series), `jet: 0.4.2` (exact), or a named channel like `jet: main`. |
 | E1250 | Toolchain channel `{channel}` is pinned but not locked. | An `--offline`/CI build won't resolve a channel — it needs the exact toolchain version recorded in `.jet/lock`, and none is present (D-JPK-TOOLCHAIN1). Resolving a channel reaches the network, which offline/CI forbids. | Run `jet update jet` to resolve `{channel}` to an exact version, then commit `.jet/lock`. |
 | E1251 | Toolchain {channel} ({version}) isn't available for {platform}. | This project pins a Jet toolchain, but no prebuilt object for it was found for this platform. Jet realizes the pinned compiler as a prebuilt — it never builds the compiler from source and never silently falls back to a different `jet` (D-JPK-TOOLCHAIN1). | Move the pin with `jet update jet <channel>` to a toolchain your platform has, or install the pinned toolchain from the release page. |
@@ -1402,7 +1402,7 @@ snapshots in `tests/jetpack.rs` (the `tests/ui/` harness only renders front-end
 | E1289 | jetos could not import a NixOS configuration. | D-JOS-NIXIMPORT1=C imports semantic NixOS, flake-parts, and Home Manager facts into JetOS source and records unsupported facts in an audit report instead of pretending conversion was complete. | Pass a flake/root with `jetos-import-facts.json`, rerun with `--facts-only` for an audited scan draft, or choose a fresh `--out` path when writing. |
 | E1290 | jetos real VM proof needs real tools. | D-JOS-REALGUEST1=C requires actual installed-guest behavior before JetOS can claim NixOS replacement readiness. Script fixtures and fake QEMU tools may test harness plumbing, but they cannot close replacement acceptance. | Rerun without `--real` for plumbing tests, or put real QEMU/image/media tools on PATH before claiming replacement proof. |
 | E1291 | jetos real tier could not map every system declaration to NixOS. | D-JOS-NIXBACKEND1=C generates a hidden NixOS backend from the checked `SystemPlan` and refuses to silently drop an option, service, or package it cannot translate — every unmapped declaration is listed together, before `nix` ever runs. | Rename or drop the unmapped keys/packages/services, or map them to the nearest supported real-tier option (see the option/service/package mapping table for `--real`). |
-| L0203 | `use {name}#{selector};` isn't pinned to an exact version. | An inline script dependency (U11) has no lockfile until `jet lock` runs; a loose selector (`1.4` rather than `1.4.2`) can resolve to a different version on a fresh clone (D-JPK-SCRIPTDEP1). | Write the exact version Jet resolved (`use {name}#<major.minor.patch>;`), or run `jet lock` to pin it in `<script>.lock`. |
+| L0203 | `use {name}#{selector};` isn't pinned to an exact version. | An inline script dependency (U11) has no lockfile until `jet store lock` runs; a loose selector (`1.4` rather than `1.4.2`) can resolve to a different version on a fresh clone (D-JPK-SCRIPTDEP1). | Write the exact version Jet resolved (`use {name}#<major.minor.patch>;`), or run `jet store lock` to pin it in `<script>.lock`. |
 | L0204 | `{field}` in `{file}` has no `env.*` equivalent yet. | `jet bridge flake` (U16) is a best-effort translator; some `flake.nix`/`devenv.nix` fields (`shellHook`, multiple named devShells, `buildInputs` vs `nativeBuildInputs`) have no ratified `env.*` spelling. | Review the generated shim and add `{field}`'s effect by hand if you need it — the shim is a starting point, not a full translation. |
 | L0205 | Build sandboxing is unavailable; adapter builds will run unsandboxed. | D-JPK-NODAEMON1 forbids privileged helpers and daemons. When the platform cannot offer an unprivileged sandbox, Jetpack must say so instead of silently downgrading. | Run `jetpack config sandbox require` to refuse fallback. |
 
@@ -1411,7 +1411,7 @@ snapshots in `tests/jetpack.rs` (the `tests/ui/` harness only renders front-end
 | Code | What | Why | Fix |
 |---|---|---|---|
 | E3501 | `fn build` must take one `BuildContext` and return `BuildPlan ?`. | Build authority and graph handoff are one typed contract. A different signature cannot be selected by `jet build` or modeled by the LSP. | Write `fn build(b: BuildContext) -> BuildPlan ?`. |
-| E3502 | Build plan is invalid, build evaluation returned an error, or generated source could not materialize. | One selected root entry owns one deterministic graph. Handles cannot cross build sessions, outputs need one owner, and generated Jet must become a real file before checking. | Fix the named graph node or generated module; inspect it with `jet graph` and `jet explain-build`. |
+| E3502 | Build plan is invalid, build evaluation returned an error, or generated source could not materialize. | One selected root entry owns one deterministic graph. Handles cannot cross build sessions, outputs need one owner, and generated Jet must become a real file before checking. | Fix the named graph node or generated module; inspect it with `jet inspect graph` and `jet inspect explain-build`. |
 | E3503 | This root build asks for authority missing from its declaration, `#Impure` gate, or effective policy. | Build authority must pass all three independent checks before any probe or action executes. | Declare the effect, gate the ambient operation with `#Impure("reason")`, and grant the effect through CLI/package/workspace policy. |
 | E3504 | Build action `{action}` asks for ungranted `{capability}` authority. | Source declaration makes authority auditable but does not grant it. Invocation, package, and workspace policy cap ambient effects independently. | Pass the named `--allow-<effect>` flag for a one-file build, or grant the effect in package/workspace policy. |
 | E3505 | Typed build probe or sandboxed action execution failed. | Actions run only after graph validation, in a bubblewrap sandbox with declared inputs, outputs, tools, environment, capabilities, and probes. Jet does not fall back to ambient execution. | Fix the named command, probe, toolchain, input/output declaration, or enable a supported sandbox. |

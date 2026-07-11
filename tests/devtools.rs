@@ -1,4 +1,4 @@
-//! c450 (D-DEVTOOLS1=A) — the maintainer-facing `jet devtools` subcommands:
+//! c450 (D-DEVTOOLS1=A) — the maintainer-facing `jet self devtools` subcommands:
 //! `reduce`, `ice-report`, `new-example`, `new-ui`, `check-fixture-paths`,
 //! `bless`. All hidden behind the existing `devtools` namespace (never a
 //! top-level command); one test per tool.
@@ -42,7 +42,7 @@ fn devtools_reduce_shrinks_to_minimal_e0107_repro() {
     .unwrap();
 
     let out = Command::new(jet())
-        .args(["devtools", "reduce"])
+        .args(["self", "devtools", "reduce"])
         .arg(&src_path)
         .args(["--code", "E0107"])
         .output()
@@ -105,7 +105,7 @@ fn devtools_reduce_rejects_non_reproducing_input() {
     fs::write(&src_path, "fn run() {\n    print(\"hello\")\n}\n").unwrap();
 
     let out = Command::new(jet())
-        .args(["devtools", "reduce"])
+        .args(["self", "devtools", "reduce"])
         .arg(&src_path)
         .args(["--code", "E0107"])
         .output()
@@ -133,7 +133,7 @@ fn devtools_ice_report_bundles_source_rust_and_versions() {
 
     let out = Command::new(jet())
         .current_dir(&dir)
-        .args(["devtools", "ice-report"])
+        .args(["self", "devtools", "ice-report"])
         .arg(&src_path)
         .output()
         .unwrap();
@@ -202,7 +202,7 @@ fn devtools_new_example_scaffolds_a_passing_golden_pair() {
 
     let out = Command::new(jet())
         .current_dir(&root)
-        .args(["devtools", "new-example"])
+        .args(["self", "devtools", "new-example"])
         .arg(format!("{}/{}", topic, name))
         .output()
         .unwrap();
@@ -284,7 +284,7 @@ fn devtools_new_ui_scaffolds_a_self_consistent_snapshot_pair() {
 
     let out = Command::new(jet())
         .current_dir(&root)
-        .args(["devtools", "new-ui"])
+        .args(["self", "devtools", "new-ui"])
         .arg(&name)
         .output()
         .unwrap();
@@ -325,7 +325,7 @@ fn devtools_check_fixture_paths_runs_clean_on_this_repo() {
     let root = repo_root();
     let out = Command::new(jet())
         .current_dir(&root)
-        .args(["devtools", "check-fixture-paths"])
+        .args(["self", "devtools", "check-fixture-paths"])
         .output()
         .unwrap();
     assert!(
@@ -349,7 +349,7 @@ fn devtools_check_fixture_paths_runs_clean_on_this_repo() {
 #[test]
 fn devtools_bless_dry_run_lists_every_known_target() {
     let out = Command::new(jet())
-        .args(["devtools", "bless", "--dry-run"])
+        .args(["self", "devtools", "bless", "--dry-run"])
         .output()
         .unwrap();
     assert!(out.status.success());
@@ -378,7 +378,7 @@ fn devtools_bless_dry_run_lists_every_known_target() {
 #[test]
 fn devtools_bless_rejects_unknown_target() {
     let out = Command::new(jet())
-        .args(["devtools", "bless", "not_a_real_test_target", "--dry-run"])
+        .args(["self", "devtools", "bless", "not_a_real_test_target", "--dry-run"])
         .output()
         .unwrap();
     assert!(

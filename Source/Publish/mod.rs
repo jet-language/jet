@@ -8,7 +8,7 @@
 //!   - Advisory database format + check → E2603.
 //!   - Artifact integrity verification → E2604.
 //!   - SBOM emission (SPDX 2.3 tag-value format from a lockfile).
-//!   - `jet vendor` (copy resolved deps into a `vendor/` tree).
+//!   - `jet registry vendor` (copy resolved deps into a `vendor/` tree).
 //!   - Private / mirror registry configuration.
 
 mod API;

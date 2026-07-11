@@ -52,7 +52,7 @@ impl PkgResolution {
 /// Reading the hangar is a *pure lookup*: the compiler never realizes on demand
 /// (that is `jetpack build`'s job). This keeps `jet build`/`run` offline and
 /// deterministic, exactly like the existing pre-fetched-dependency flow
-/// (`collect_dep_dirs` only links deps already present on disk; `jet fetch` is
+/// (`collect_dep_dirs` only links deps already present on disk; `jet store fetch` is
 /// the separate realize step). So a declared-but-unbuilt library is a friendly
 /// "run `jetpack build`" (E0983), never a silent network fetch.
 fn collect_pkg_resolution(raw: &str) -> PkgResolution {
@@ -477,7 +477,7 @@ fn collect_dep_dirs(mf: &Manifest::Manifest, project_root: &Path) -> HashMap<Str
                 dirs.insert(dep_name.clone(), src_root);
             }
             Manifest::DepSpec::Git { .. } => {
-                // Git deps are in .jet-build/deps/<name>/ after `jet fetch`.
+                // Git deps are in .jet-build/deps/<name>/ after `jet store fetch`.
                 let linked = project_root.join(".jet-build").join("deps").join(dep_name);
                 if linked.is_dir() {
                     let src_root = if linked.join(".jet").is_dir() {

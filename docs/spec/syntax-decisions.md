@@ -1192,7 +1192,7 @@ D-MEM1/S3)**: originally the owner label stayed on the `#` directive plane,
 spelled `#Ref(label)` — *not* `@Ref`, resolving the sigil clash with
 D-MARKERMOVE1. Deleted along with D-REF-SHORTHAND1's `&T` fields; a
 `#Ref(label)` naming no candidate owner used to be **E2306** — also gone
-(retired stub row in docs/spec/diagnostics.md). `jet expand --facts refs`
+(retired stub row in docs/spec/diagnostics.md). `jet inspect expand --facts refs`
 (the lens that reported these owners) is gone with it.
 
 **D-REGION1 / D-ALLOC1 / D-ALLOC2 — Arenas & regions**: regions are implicit
@@ -1303,7 +1303,7 @@ bindings + optional user overlay; by-value first, pointers only inside S58.
 
 Link resolution: declared `<lib>: c@system` / `c@"vendor/path"` in `pkg.jet`
 `deps:` → pkg-config fallback → E3201. C deps are link deps, never packages.
-`jet bind` uses a native std-only C-prototype parser (`Source/CBind.rs`);
+`jet inspect bind` uses a native std-only C-prototype parser (`Source/CBind.rs`);
 binds scalars and `char*`↔String; `#define` constants only. Old
 `@extern`/`#extern` spellings E0060. `#Bindgen`/`#Extern` PascalCase.
 
@@ -1312,7 +1312,7 @@ namespace `<lang>.<lib>` with the same three tiers (S59 generalized): script
 tier (`use "xxhash.h" as xx` — bind on first compile), project tier
 (`use py.h5instrument as h5`, dep pinned in `pkg.jet` as
 `<lib>: <lang>@"ref"`), overlay tier (`#Extern module <lang>.<lib> { … }`,
-overlay wins). `jet bind <lang>` is a per-language binder emitting
+overlay wins). `jet inspect bind <lang>` is a per-language binder emitting
 inspectable bindings in `.jet/bindings/<lang>/<lib>.jet`. Generated bindings
 are safe wrappers by construction (marshaling internals compiler-vetted like
 std internals — I1); calling a foreign symbol outside a binding requires
@@ -1330,12 +1330,12 @@ D-EFF4 set); opt-in `py@embed` switches to in-process libpython for
 zero-copy buffer-protocol arrays. One `use py.X` surface; the tier never
 moves call sites. **D-FFI-JS1 (=A)**: one `use js.X` surface, host chosen by
 compile target — browser JS engine on the web target, QuickJS/componentize-js
-WASM component on wasmtime for native targets. `jet bind js` generates
+WASM component on wasmtime for native targets. `jet inspect bind js` generates
 committable typed stubs from a package's `.d.ts` — this AMENDS D-NPMTYPE1's
 hand-authored-only floor; no-`.d.ts` packages get a `#Unsafe`-gated dynamic
 surface; Node-subprocess broker is an opt-in tier. **D-FFI-SWIFT1 (=A)**:
 swift-bridge-style generated projection over the fixed C-ABI transport
-(D-JSWIFTFFI1) — `jet bind swift` runs swiftc to emit `@_cdecl` shims +
+(D-JSWIFTFFI1) — `jet inspect bind swift` runs swiftc to emit `@_cdecl` shims +
 typed Jet wrappers; classes/actors are opaque ref-counted handles;
 throws→Result, async→Jet async; macOS/iOS + Linux-Swift only, honest gated
 error elsewhere. **D-DEP-PY1 (=A)**: CPython approved as a runtime-side
@@ -1860,7 +1860,7 @@ offline thereafter per D-JPK-OFFLINE1, GC per D-JPK-GC1, no Nix required per
 D-JPK-NONIX1, no daemon/root per D-JPK-NODAEMON1) and execs it
 (D-JPK-DISPATCH1). Frozen-forward identity block: the `payload:` block and
 `jet:` line stay parseable by every future jet, so an old jet can always
-read enough of any manifest to fetch the right toolchain. `jet toolchain`
+read enough of any manifest to fetch the right toolchain. `jet self toolchain`
 shows the pin; `jet update jet` moves it deliberately.
 
 **U9 — Provider inference**: a source is always `name: provider@target`; core
@@ -1876,7 +1876,7 @@ E_DUPMAIN).
 
 **D-CAP4/5/6 + c129 — API freeze (retired 2026-07-04 by D-MEM1/S2)**:
 originally, `library { api: stable | explicit }` froze public capability
-signatures into `.jet/cache/api/<package>.api` at `jet publish`, drift was
+signatures into `.jet/cache/api/<package>.api` at `jet registry publish`, drift was
 E0912, digest folded into the lock fingerprint. D-MEM1/S2 deleted the
 mechanism outright: the `api:` field no longer exists (an ordinary
 unknown-key error, E1216, like any typo'd key); `ApiFreeze`'s snapshot
@@ -1884,13 +1884,13 @@ machinery survives, re-grounded as unconditional pub-fn semver diffing
 (E1218/E2601) — same intent (breaking-change detection at publish), no
 capability-tier freeze.
 
-**Publishing & supply chain**: `jet publish` (version from `pkg.jet`;
+**Publishing & supply chain**: `jet registry publish` (version from `pkg.jet`;
 refuses dirty tree/failing tests, `--allow-dirty`; errors E1219+)
-(D-PUBLISH1A). Published versions permanent; `jet yank --undo` hides from new
+(D-PUBLISH1A). Published versions permanent; `jet registry yank --undo` hides from new
 resolution only (D-VERSION1). Ranges `textkit#^1.2` freeze in `.jet/lock`
 (D-RESOLVE1); `jet new` commits the lock for executables, ignores it for
 libraries (D-LOCK1). SHA-256 verification always-on (E1204); Ed25519 signing
-opt-in (D-PKGSIGN1). `jet vendor`, `jet audit`, `jet build --sbom`
+opt-in (D-PKGSIGN1). `jet registry vendor`, `jet inspect audit`, `jet build --sbom`
 (D-SUPPLY1; E1217/E1218). Store is content-addressed (D-CASTORE1).
 
 **Build system** *(D-BUILDENTRY1, D-BUILDPOLICY1, D-BUILDSCOPE1, D-BUILDGEN1,
@@ -1927,7 +1927,7 @@ remote cache and remote execution are separate policy grants, and remote
 execution waits on sandbox/provenance proof. D-BUILDSCHED1=A: the scheduler is
 deterministic with automatic parallelism and named resource pools (`cpu`,
 `memory`, `linker`, `console`, `gpu`). D-BUILDQUERY1=A: graph inspection is
-`jet graph`, `jet query build`, and `jet explain-build <target/file/action>`,
+`jet inspect graph`, `jet inspect query build`, and `jet inspect explain-build <target/file/action>`,
 with the LSP using the same graph/provenance model.
 
 D-BUILDLEGACY1=A: legacy CMake/Make/Gradle/npm/cargo builds are Tier-2
@@ -1949,7 +1949,7 @@ front-end APIs.
 snapshot field layout; a breaking change without a migration is E0910.
 Verbs: `add f: T = val`; `remove f`; `change f: Old -> New via { (old) =>
 expr }` (converter: inline `via` → `impl Old -> New` in scope → E0910); no
-`reorder`. CLI: `jet schema squash --before <ver>`, `jet schema status`.
+`reorder`. CLI: `jet inspect schema squash --before <ver>`, `jet inspect schema status`.
 
 **Decode-time migration transparency** *(D-MIGRATE3=A)*: `decode_traced<T>(raw)
 -> DecodeResult<T> ?` beside `decode<T>` on every codec sharing the decode
@@ -1969,7 +1969,7 @@ matching shape → the ordinary decode error. Zero cost for types without
 migrations. Runtime semantics: spec.md "Runtime migration chain".
 
 **D-EXPANDCLI1 (=A, ratified 2026-07-03, c183expand)**: the transparency
-command is `jet expand --facts <lens> <file>`; bare `jet expand <file>`
+command is `jet inspect expand --facts <lens> <file>`; bare `jet inspect expand <file>`
 runs every lens, grouped (magic default). Lens floor: `inline`
 (D-METHODMACRO1); other ratified surfaces add lenses under the same flag,
 never new commands (I8). A `refs` lens (D-REF-SHORTHAND1) shipped alongside
@@ -1987,7 +1987,7 @@ adapters are `Pkg.adapt(name:, source:, recipe:)` with curated recipes
 (`prebuilt`, `copy`, `cargo`, `go`, `node`, `cmake`/`make`). Hangar GC by age
 (default 30 days), `jet clean` (one verb: garbage-collect + optimize the
 hangar via hardlink/dedup, `nix store optimise` equivalent; owner amendment
-2026-07-03 — there is no `jet gc`), `jet hangar du`; no daemon, no root
+2026-07-03 — there is no `jet store gc`), `jet hangar du`; no daemon, no root
 (transient sudo only for jetos activation). No-Nix machines degrade gracefully (E12xx
 names fixes). Binary cache = output-hash-addressed HTTP(S) protocol with
 signed objects; miss never errors. Linux+macOS+Windows tier-1 native.
@@ -2081,7 +2081,7 @@ implementation.
 - **D-JPK-REPLACEPROOF1 (=A, ratified 2026-07-06, #234)**: native replacement
   packages publish `replacementProof:` metadata naming the foreign package,
   public surface, effects, errors, examples, and goldens proved.
-- **D-WD2**: `jet dossier` is the umbrella explain view over named existing fact
+- **D-WD2**: `jet inspect dossier` is the umbrella explain view over named existing fact
   lenses. Each section must be owned by a real fact producer; experts get stable
   lenses and JSON schemas.
 - **D-WD3**: Jetpack package visibility is strict by default; workspace catalogs
@@ -2112,7 +2112,7 @@ implementation.
     under `core.data`.
   - **D-DATA-STATUS1 (=A, ratified 2026-07-06, #237)**: data workflows expose
     machine-readable Core status through an API, and the canonical human view
-    is the D-WD dossier lens `jet dossier data`.
+    is the D-WD dossier lens `jet inspect dossier data`.
   - **D-DATA-PLOT1 (=A, ratified 2026-07-06, #237)**: Core plotting starts with
     first-party deterministic SVG plus a text backend; bitmap export may layer
     on the same model later.
@@ -2135,7 +2135,7 @@ implementation.
   - **D-TARGET-ALLOC1 (=A, ratified 2026-07-06)**: freestanding `allocator` and
     `panic` are required typed profile facts; hosted defaults stay hidden, and
     sema reads these facts to reject unavailable Core APIs.
-  - **D-TARGET-AUDIT1 (=A, ratified 2026-07-06)**: `jet dossier target` is the
+  - **D-TARGET-AUDIT1 (=A, ratified 2026-07-06)**: `jet inspect dossier target` is the
     canonical human/machine audit view, and builds also write the same stable
     JSON artifact for CI archives.
 - **D-WD12**: `jet prove` becomes a progressive proof/replay product over
@@ -2346,10 +2346,10 @@ swap in place, layout changes trigger a clean announced restart.
 Jet→Rust line table is a sidecar `<file>.jetmap` JSON (versioned, std-only).
 
 **D-SEMINDEX1**: versioned semantic-index query API (symbols/refs/types/
-call-graph/effects/member facts; `jet semindex --json`, schema v3) —
+call-graph/effects/member facts; `jet inspect semindex --json`, schema v3) —
 foundation for dossier views, breadcrumb hints, impact analysis, and codemods
-(D-DOSSIER1/D-BREADCRUMB1/D-IMPACT1/D-CODEMOD1). `jet dossier <file> [Symbol]`
-is the D-WD2 umbrella over those facts; `jet codemod` starts with named JSON
+(D-DOSSIER1/D-BREADCRUMB1/D-IMPACT1/D-CODEMOD1). `jet inspect dossier <file> [Symbol]`
+is the D-WD2 umbrella over those facts; `jet inspect codemod` starts with named JSON
 rename objects (`dry-run`/`apply`/`undo`) and replay logs. **D-DX5**: PATH `jet-*` plugin
 discovery. **D-REF3**: borrowed-return + cleanup-scope inlay hints on by
 default. **D-JPK-DISCOVER1**: `jet search`/`jet info` + LSP completions from
@@ -2438,7 +2438,7 @@ policy retires them.
 `tests/lsp.rs`.
 
 **D-HL1**: highlighting is generated lexical base plus semantic overlay.
-`Syntax.rs` owns all user-typeable tokens; `jet devtools grammars` regenerates
+`Syntax.rs` owns all user-typeable tokens; `jet self devtools grammars` regenerates
 VS Code/TextMate, tree-sitter, and Zed generated sections, and
 `tests/grammar.rs` fails on drift. LSP semantic tokens refine live editors for
 ownership (`copy`, `^`, `&`) and markers; retired/foreign spellings are not
@@ -2595,7 +2595,7 @@ bound and granted name; absent bindings mean silent local operation.
 
 **D-JPK-STORECLI1=D — physical verbs under Hangar**: `jet hangar` owns verify,
 repair, copy, import, export, dump/restore, and sign. Causal questions stay
-`jet explain`/`jet dossier`; `jet clean` remains the sole GC+optimize intent.
+`jet explain`/`jet inspect dossier`; `jet clean` remains the sole GC+optimize intent.
 Mutations use plan-before-apply and stable JSON. Imports are verified and
 quarantined before registration.
 
@@ -2657,7 +2657,7 @@ statically evaluable `fn app()` builder chain into one typed graph. Runtime
 registration outside a declared typed `.mount` is a compile diagnostic. Mounts
 keep prefix, effects, and security policy static. Browser/server partition,
 hydration mismatch, executable TIR, and generated-source re-entry laws apply;
-`jet expand --facts web` and `jet explain --web-graph` expose stable JSON facts.
+`jet inspect expand --facts web` and `jet explain --web-graph` expose stable JSON facts.
 
 **D-WEBAUTHOR1=D — explicit builder with opt-in conventions**: the builder is
 always canonical and one file remains complete. File routing activates only
@@ -2797,6 +2797,12 @@ sbom, bind), `jet store` (existing verify/rollback/generations, plus gc,
 fetch, lock), `jet self` (toolchain, upgrade, doctor, completions, man,
 devtools). The bare ungrouped spelling of a moved verb is a teaching error
 naming the grouped form, never a silent alias (I8).
+
+**D-CLI-SURFACE2=A**: `jet fuzz` remains flat beside testing. The language
+server is canonically `jet self lsp`; first-party editors launch that argv.
+Bare `jet self lsp` is E2101 before external-command discovery, preserves following
+argv in its replacement, exits 2, and never starts a server. Help, palette,
+man pages, and completions advertise only canonical grouped spellings.
 
 **D-JPK-TASKRUN1=A — tasks are `#Task fn`**: a task is an ordinary Jet
 function marked `#Task`, living beside `fn run()`. Reuses typed-argument CLI

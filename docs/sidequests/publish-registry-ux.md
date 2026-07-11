@@ -1,4 +1,4 @@
-# M12.2 registry + `jet publish` UX (c96)
+# M12.2 registry + `jet registry publish` UX (c96)
 
 **Status: ready — active. All four gating decisions ratified 2026-06-25
 (D-PUBLISH1A, D-VERSION1, D-RESOLVE1, D-LOCK1). No open owner decision. Implement
@@ -11,15 +11,15 @@ signing), which the ratified log explicitly parks on c96.
 ## Goal
 
 Ship the publish + version-resolution workflow end to end: a library author cuts
-an immutable release with `jet publish`, can retract a bad one with `jet yank`,
+an immutable release with `jet registry publish`, can retract a bad one with `jet registry yank`,
 and a consumer's `textkit#^1.2` resolves to the highest compatible published
-version, frozen in `.jet/lock`. Today `jet publish` only validates locally and
+version, frozen in `.jet/lock`. Today `jet registry publish` only validates locally and
 prints "registry upload not yet implemented"; registry dependencies hard-error as
 "planned for M12.2". This card closes that gap.
 
 ## Current state (verified, file:line)
 
-- **`jet publish` command** — `Source/CmdSupply.rs:18` `run_publish(force, mode)`.
+- **`jet registry publish` command** — `Source/CmdSupply.rs:18` `run_publish(force, mode)`.
   Reads the version from `pkg.jet` (`mf.package.version`, line 35 — already the
   single source of truth). Pre-flight runs: build gate via sema (lines 44-66),
   a **tests stub** (`tests_ok = true`, line 72 — does not spawn `jet test`),
@@ -29,7 +29,7 @@ prints "registry upload not yet implemented"; registry dependencies hard-error a
   "registry upload not yet implemented (D-PKGS1 deferred)" note, lines 188-196.
 - **Dispatch / CLI** — `Source/main.rs:443` (`"publish"` → `run_publish`),
   spec at `Source/CLI.rs:57`. No `--allow-dirty` flag registered.
-- **`jet yank`** — does not exist anywhere (no command, no dispatch, no flag).
+- **`jet registry yank`** — does not exist anywhere (no command, no dispatch, no flag).
 - **Resolver** — `Source/Publish/Resolve.rs` has `check_conflicts` → E2602
   (conflict *detection* only). The full SemVer range engine
   (`Source/Publish/SemVer.rs`: `VersionReq` caret/tilde/x/hyphen/OR, prerelease
@@ -55,12 +55,12 @@ prints "registry upload not yet implemented"; registry dependencies hard-error a
 
 ## Decision (ratified 2026-06-25)
 
-- **D-PUBLISH1A (A)** — one verb `jet publish`, sibling of `add/update`. Version
+- **D-PUBLISH1A (A)** — one verb `jet registry publish`, sibling of `add/update`. Version
   read from `pkg.jet` (single source of truth). Pre-flight **refuses** a dirty
   working tree and failing tests; `--allow-dirty` is the escape. CLI-version arg
   (B) and `jet release` (C) rejected. New publish errors take codes from E1219.
 - **D-VERSION1 (A)** — a published version is permanent; re-publish is refused
-  (E1221). `jet yank` (with `--undo`) hides a bad version from new resolution,
+  (E1221). `jet registry yank` (with `--undo`) hides a bad version from new resolution,
   while existing `.jet/lock` pins still install it.
 - **D-RESOLVE1 (A)** — a range (`textkit#^1.2`) resolves to the **highest
   compatible** published version, frozen in `.jet/lock`; repeat builds stay on the
@@ -75,7 +75,7 @@ Each stage: parser/sema/codegen-or-CLI wired → diagnostic in `diagnostics.md` 
 `tests/ui` snapshot → runnable example + golden where user-visible → tests →
 docs. The "verifier" here is the CLI/jetpack path, not the language front end.
 
-### Stage 1 — `jet publish` (D-PUBLISH1A)
+### Stage 1 — `jet registry publish` (D-PUBLISH1A)
 
 1. Register `--allow-dirty` in `Source/CLI.rs` + thread through
    `Source/main.rs:443` → `run_publish`. Keep `--force` as the build/semver
@@ -97,13 +97,13 @@ docs. The "verifier" here is the CLI/jetpack path, not the language front end.
 Diagnostics: **E1219** (dirty working tree), **E1220** (tests failing),
 each with what/why/fix + a `tests/ui` snapshot (I4).
 
-### Stage 2 — version immutability + `jet yank` (D-VERSION1)
+### Stage 2 — version immutability + `jet registry yank` (D-VERSION1)
 
 1. On publish, check the registry index for an existing entry at this
    name+version → **E1221** (re-publish refused; immutable). Only `--force` must
    *not* bypass this — immutability is absolute (it underpins the D-PKGSIGN1
    checksum floor).
-2. New command `jet yank` (+ `jet yank --undo`): mark a published version yanked
+2. New command `jet registry yank` (+ `jet registry yank --undo`): mark a published version yanked
    in the index. Register in `Source/CLI.rs`, dispatch in `Source/main.rs`,
    handler alongside `run_publish` (new `run_yank`). A yank flips an index flag;
    it never deletes content (existing `.jet/lock` pins must still install).
@@ -111,7 +111,7 @@ each with what/why/fix + a `tests/ui` snapshot (I4).
    pin that names a yanked version.
 
 Diagnostics: **E1221** (immutable re-publish). Snapshot + a runnable shell
-example showing the refusal and the `jet yank` flow.
+example showing the refusal and the `jet registry yank` flow.
 
 ### Stage 3 — highest-compatible resolver (D-RESOLVE1)
 
@@ -162,7 +162,7 @@ resolver workflow), `docs/spec/roadmap.md` (M12.2 registry done),
   code (c96 touches `CmdSupply.rs`/`Fetch.rs`/`Lock.rs`; c50 touches
   `Provider.rs`/`FFI.rs`).
 - **Downstream unblock:** completing the registry upload here unblocks D-PKGSIGN1
-  Tier A (Ed25519 signing in `Source/Publish/Sign.rs` + `jet keygen`), which the
+  Tier A (Ed25519 signing in `Source/Publish/Sign.rs` + `jet registry keygen`), which the
   ratified log parks specifically on c96.
 
 ## Files (when this burns down)
@@ -170,7 +170,7 @@ resolver workflow), `docs/spec/roadmap.md` (M12.2 registry done),
 | File | Change |
 |---|---|
 | `Source/CLI.rs` | register `--allow-dirty`; add `yank` command spec |
-| `Source/main.rs` | dispatch `--allow-dirty`, `jet yank` |
+| `Source/main.rs` | dispatch `--allow-dirty`, `jet registry yank` |
 | `Source/CmdSupply.rs` | dirty-tree gate (E1219), real test gate (E1220), reject version arg, registry upload, immutability (E1221), `run_yank` |
 | `Source/Fetch.rs` | replace registry "not supported" (lines 405, 512) with highest-compatible resolution |
 | `Source/Lock.rs` | `LockSource::Registry { version }` + ser/parse; drop the `registry:` Path placeholder |

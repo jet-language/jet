@@ -369,7 +369,7 @@ fn build_diag(detail: &str, span: Span) -> Diagnostic {
         "E3502",
         format!("build plan is invalid: {detail}"),
         "`fn build` must return one deterministic typed graph whose handles all belong to that build".to_string(),
-        "fix the named target/action/toolchain/probe and run `jet explain-build` to inspect the graph".to_string(),
+        "fix the named target/action/toolchain/probe and run `jet inspect explain-build` to inspect the graph".to_string(),
         Some(span),
     )
 }

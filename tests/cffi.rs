@@ -252,7 +252,7 @@ const char *jetc_greeting(void) { return "hi from C"; }
     Some((dir.to_path_buf(), "jetc".to_string()))
 }
 
-/// E2-M14: the native `jet bind` backend turns a real C header into a working
+/// E2-M14: the native `jet inspect bind` backend turns a real C header into a working
 /// `#Bindgen` cache that compiles, links against the C library, and runs.
 #[test]
 fn jet_bind_native_backend_end_to_end() {
@@ -355,7 +355,7 @@ fn cffi_end_to_end_links_and_runs() {
         return;
     };
 
-    // Hand-written bindgen cache fixture (simulates `jet bind` output).
+    // Hand-written bindgen cache fixture (simulates `jet inspect bind` output).
     fs::write(
         cache.join("jetc.jet"),
         r#"#Bindgen module c.jetc.__bindgen__ {
@@ -875,7 +875,7 @@ fn hash_invalidation_on_header_change() {
     let header_v1 = "int mylib2_v1(int x);\n";
     fs::write(&header_path, header_v1).unwrap();
 
-    // Pre-populate the cache and hash sidecar (simulates a prior `jet bind`).
+    // Pre-populate the cache and hash sidecar (simulates a prior `jet inspect bind`).
     let cache_file = cache_dir.join("mylib2.jet");
     let bind_v1 = jet::CBind::generate(header_v1, "mylib2").unwrap();
     fs::write(&cache_file, &bind_v1.source).unwrap();

@@ -57,14 +57,14 @@ merge red work with green CI.
   collect-all-failures, and unified diffs instead of assert blob dumps.
 - **Golden bless path.** `expected/*.out` has no update mechanism at all —
   agents hand-copy from panic text. Add `JET_UPDATE_GOLDEN=1`.
-- **ICE tooling.** `jet devtools reduce <file.jet>` (delta-debug minimizer;
+- **ICE tooling.** `jet self devtools reduce <file.jet>` (delta-debug minimizer;
   oracle = front-end accepts, rustc rejects, or diagnostic-code match) and
-  `jet devtools ice-report` (bundle source + generated Rust + rustc stderr +
+  `jet self devtools ice-report` (bundle source + generated Rust + rustc stderr +
   versions). Turns a P0 ICE from frontier-level hand-reduction into a
   mechanical step. `--emit-rust` already exists as the raw ingredient.
-- **Scaffolders.** `jet devtools new-example <topic>/<name>` and `new-ui
+- **Scaffolders.** `jet self devtools new-example <topic>/<name>` and `new-ui
   <name>` that create fixture + expected output + remind the registry row.
-- **Mass migration.** `jet codemod` rejects everything but single renames
+- **Mass migration.** `jet inspect codemod` rejects everything but single renames
   (Source/CmdCodemod.rs:76-77), yet memory-model v5 S1–S9 migrations are
   ahead. Add batch pattern-rewrite over examples/ + tests/ui/, plus
   `check-fixture-paths` validating path-embedding fixtures (the known
@@ -114,7 +114,7 @@ keep in their heads:
   phase jump is legal today (store.mjs:224-243), triage→done included. Add
   `card.checklist[]`; refuse `done` while items are unchecked. On ratify of
   a syntax decision, auto-append the post-ratification chores (Syntax.rs,
-  syntax-decisions.md log, `jet devtools grammars`, re-bless) to the card's
+  syntax-decisions.md log, `jet self devtools grammars`, re-bless) to the card's
   checklist.
 - **BALLOT FIRST becomes structural.** Add `card.gates` (none | decision
   ids), required before a card may leave planning.
@@ -191,7 +191,7 @@ subscriptions, and decide whether repository-history remediation is required.
 
 ## Owner gates to ballot before building
 
-- New `jet devtools` subcommands (bless, reduce, ice-report, new-example,
+- New `jet self devtools` subcommands (bless, reduce, ice-report, new-example,
   new-ui, check-fixture-paths) — CLI surface additions.
 - Tower state-machine strictness (done-gate, ballot validation, owner-only
   guards) — changes the owner's own workflow; he should pick the strictness.

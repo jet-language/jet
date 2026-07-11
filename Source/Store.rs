@@ -3,7 +3,7 @@
 //! Store layout: `~/.jet/store/<name>-<version>-<fingerprint>/`
 //! Full plan fingerprint is the path suffix. Lookups use the lockfile,
 //! not dirname parsing. Hardlinks into project `.jet-build/deps/` on
-//! same device; falls back to copy cross-device. Append-only; `jet gc`
+//! same device; falls back to copy cross-device. Append-only; `jet store gc`
 //! removes unreferenced entries (stub in M12.1).
 
 use crate::Diagnostics::Diagnostic;
@@ -70,7 +70,7 @@ pub fn verify_content_hash(
             "E1204",
             format!("the store entry for `{}` is missing", pkg_name),
             "a package source tree must be present in the store".to_string(),
-            "run `jet fetch` to re-download the package".to_string(),
+            "run `jet store fetch` to re-download the package".to_string(),
             None,
         ));
     }
@@ -86,7 +86,7 @@ pub fn verify_content_hash(
                 "expected content hash `{}` but got `{}`",
                 expected_content_hash, actual
             ),
-            "delete the store entry and run `jet fetch` to re-install".to_string(),
+            "delete the store entry and run `jet store fetch` to re-install".to_string(),
             None,
         ));
     }
@@ -125,7 +125,7 @@ pub fn verify_entry(
             "E1204",
             format!("the store entry for `{}` is missing", pkg_name),
             "a package source tree must be present in the store before it can be used".to_string(),
-            "run `jet fetch` to re-download the package".to_string(),
+            "run `jet store fetch` to re-download the package".to_string(),
             None,
         ));
     }
@@ -141,7 +141,7 @@ pub fn verify_entry(
                 "the content hash of the stored source tree doesn't match the fingerprint in {}",
                 Syntax::UNIFIED_LOCK_FILE
             ),
-            "run `jet fetch` to re-download the package, or run `jet store verify` to check all entries"
+            "run `jet store fetch` to re-download the package, or run `jet store verify` to check all entries"
                 .to_string(),
             None,
         ));
@@ -166,7 +166,7 @@ pub fn verify_all(entries: &[(&str, &Path, &str)]) -> Vec<Diagnostic> {
 }
 
 // ──────────────────────────────────────────────
-// `jet gc` — remove unreferenced store entries (stub)
+// `jet store gc` — remove unreferenced store entries (stub)
 // ──────────────────────────────────────────────
 
 /// List all store entries.

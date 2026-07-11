@@ -60,8 +60,8 @@ pub(crate) fn run_codemod(args: &[String]) {
             apply_undo(&name, &files, &log_path);
         }
         _ => {
-            eprintln!("error: `jet codemod` needs `dry-run`, `apply`, or `undo`");
-            eprintln!(" Fix: jet codemod dry-run rename.codemod.json");
+            eprintln!("error: `jet inspect codemod` needs `dry-run`, `apply`, or `undo`");
+            eprintln!(" Fix: jet inspect codemod dry-run rename.codemod.json");
             exit(ExitCodes::USER_ERROR);
         }
     }

@@ -1,6 +1,6 @@
 # Jet — Zed
 
-Zed dev extension: generated Tree-sitter lexical highlighting plus `jet lsp`
+Zed dev extension: generated Tree-sitter lexical highlighting plus `jet self lsp`
 for diagnostics, completion, hover, go-to-definition, rename, semantic tokens
 (full/range/delta), inlay hints, quick-fixes, document symbols, document
 links, code lenses, folding, selection ranges, call hierarchy, and type
@@ -52,13 +52,13 @@ In order:
 2. `jet` on `$PATH` (e.g. from `nix develop`, or `nix profile install .#jet`).
 3. Falls back to `<workspace>/target/debug/jet` for other projects.
 
-`jet lsp` only runs the front end (no rustc), so the plain cargo binary works.
+`jet self lsp` only runs the front end (no rustc), so the plain cargo binary works.
 Rebuild with `cargo build` and reload Zed to pick up server changes.
 
 ## Verify
 
 ```bash
-nix develop -c jet lsp doctor
+nix develop -c jet self lsp doctor
 nix develop -c cargo test --test lsp
 ```
 

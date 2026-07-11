@@ -62,7 +62,7 @@ it via `std::process::Command`, exactly like `git_dirty_files` shells out to
 `ed25519-dalek` stays exactly as confined as `D-DEP-CRYPTO1` already
 authorized. This is plumbing, not a new mechanism — no ballot.
 
-## 2. Key storage & `jet keygen`
+## 2. Key storage & `jet registry keygen`
 
 Convention (follows the existing unilateral pattern for tool-owned
 directories — `~/.jet/store`, `~/.cache/jet/build` — not a new decision
@@ -73,25 +73,25 @@ axis, just consistency):
 ~/.jet/keys/<registry-name>.ed25519.pub  # 32-byte public key, hex-encoded, mode 0644
 ```
 
-- `jet keygen [--registry <name>]` (default registry `"jet"`): generates a
+- `jet registry keygen [--registry <name>]` (default registry `"jet"`): generates a
   32-byte seed via the same `/dev/urandom`-then-PRNG-fallback
   (`jet_fill_random`, `Crypto.rs:102`) through the bridge helper's `keygen`
   verb, writes both files, refuses to overwrite an existing key without
   `--force` (E-code below), prints the public key + a one-line nudge:
-  `` `jet key backup` writes this to <path> — losing it means losing your
+  `` `jet registry key backup` writes this to <path> — losing it means losing your
   ability to publish signed updates. `` (matches the owner Q&A wording
   exactly — this line is product copy, don't rephrase it).
-- `jet key backup [<dest>]`: copies the seed file to `<dest>` (default
+- `jet registry key backup [<dest>]`: copies the seed file to `<dest>` (default
   `./jet-signing-key.backup`, printed with a warning to store it somewhere
   safe, e.g. a password manager). No encryption of the backup file itself —
   it's the user's copy to protect; don't invent a passphrase flow, that's
   scope creep beyond what D-PKGSIGN1's Q&A asked for.
-- **`jet publish` auto-keygen (D-PKGSIGN1 Q&A commitment):** if
-  `~/.jet/keys/<registry>.ed25519` doesn't exist when `jet publish` runs and
+- **`jet registry publish` auto-keygen (D-PKGSIGN1 Q&A commitment):** if
+  `~/.jet/keys/<registry>.ed25519` doesn't exist when `jet registry publish` runs and
   the registry doesn't have `require_signed: false` forcing skip... actually
   simpler and matches the Q&A literally: **always** auto-keygen silently on
   first publish (no flag needed) — "the beginner's required action is the
-  command they were already running." Print the same one-line `jet key
+  command they were already running." Print the same one-line `jet registry key
   backup` nudge, once, then proceed with signing.
 
 ## 3. Signing flow — wire into `c56`'s index line
@@ -110,10 +110,10 @@ version. Extend it here with two fields:
   bytes of `content_hash` (the same field `c56` already writes — sign what's
   already the integrity anchor, don't invent a second hash to sign).
 - Signing is opt-in per `D-PKGSIGN1`: if the user has no key
-  (`jet publish --no-sign` explicitly, or a registry that sets
+  (`jet registry publish --no-sign` explicitly, or a registry that sets
   `require_signed: false` and the user passes no sign flag — actually per
   §2 auto-keygen always happens, so in practice every publish IS signed
-  unless `--no-sign` is passed). Add `--no-sign` to `jet publish` for the
+  unless `--no-sign` is passed). Add `--no-sign` to `jet registry publish` for the
   rare case (e.g. CI without secure key custody) — this is the honest
   escape hatch, not a footgun since checksum (tier B) still applies
   unconditionally.
@@ -133,7 +133,7 @@ version. Extend it here with two fields:
    stdin-protocol wrapper around the existing `jet_crypto_*_impl` functions)
    when `needs_crypto`; extend `FfiLink` with `helper_bin_path:
    Option<PathBuf>`.
-3. **`Source/CLI.rs`** — register `jet keygen` and `jet key
+3. **`Source/CLI.rs`** — register `jet registry keygen` and `jet registry key
    backup` verbs (I7: these are new user-typeable subcommands, register in
    `crates/jet-foundation/src/Syntax.rs` alongside existing verb constants).
 4. **`Source/CmdSupply.rs::run_publish`** — after building the index entry
@@ -177,17 +177,17 @@ Next free jet/CLI codes after `signed-package-cache.md`'s E1226/E1227 are
 
 | Code | What/why/fix |
 |---|---|
-| E1228 | `jet keygen` refused: a signing key already exists at `{path}`. Overwriting it would orphan every package you've published under the old key — consumers who pinned it (TOFU) would see a key-rotation warning on your next publish. Fix: use `jet keygen --force` if you're sure (e.g. the old key was compromised), or back it up first with `jet key backup`. |
-| E1229 | Signature verification failed for `{name}` `{version}`: the signature doesn't match the recorded public key. This means the package was tampered with after signing, or the index entry is corrupt. Fix: do not use this version. Re-run `jet fetch` after clearing the store entry; if the problem persists, report it — this should never happen for an untampered registry. |
-| E1230 | Registry `{registry}` requires signed packages (`require_signed: true`) but `{name}` `{version}` has no signature. Fix: use a different registry, or ask the package author to publish a signed release (`jet publish` auto-signs by default — they likely used `--no-sign`). |
+| E1228 | `jet registry keygen` refused: a signing key already exists at `{path}`. Overwriting it would orphan every package you've published under the old key — consumers who pinned it (TOFU) would see a key-rotation warning on your next publish. Fix: use `jet registry keygen --force` if you're sure (e.g. the old key was compromised), or back it up first with `jet registry key backup`. |
+| E1229 | Signature verification failed for `{name}` `{version}`: the signature doesn't match the recorded public key. This means the package was tampered with after signing, or the index entry is corrupt. Fix: do not use this version. Re-run `jet store fetch` after clearing the store entry; if the problem persists, report it — this should never happen for an untampered registry. |
+| E1230 | Registry `{registry}` requires signed packages (`require_signed: true`) but `{name}` `{version}` has no signature. Fix: use a different registry, or ask the package author to publish a signed release (`jet registry publish` auto-signs by default — they likely used `--no-sign`). |
 
 Add all three to both diagnostics.md tables.
 
 ## 6. Examples / golden tests (I5)
 
 - Extend `signed-package-cache.md`'s scratch-registry integration test:
-  after `jet publish` against the scratch git repo, assert the index line
-  carries `public_key` + a valid `signature`, and that a fresh `jet keygen`
+  after `jet registry publish` against the scratch git repo, assert the index line
+  carries `public_key` + a valid `signature`, and that a fresh `jet registry keygen`
   in a clean `$HOME` happened automatically (assert the key files exist).
 - Tamper test: hand-edit the pushed index entry's `content_hash` (simulate
   tampering) and assert the next fetch produces E1229.
@@ -199,9 +199,9 @@ Add all three to both diagnostics.md tables.
 
 ## 7. Exit criteria
 
-- `jet keygen` / `jet key backup` work end-to-end, files at the documented
+- `jet registry keygen` / `jet registry key backup` work end-to-end, files at the documented
   paths, correct permissions.
-- `jet publish` auto-generates a key on first use, signs by default, honors
+- `jet registry publish` auto-generates a key on first use, signs by default, honors
   `--no-sign`.
 - Fetch-time verification runs unconditionally when a signature is present;
   `require_signed` enforced per-registry, off by default.

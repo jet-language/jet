@@ -345,9 +345,9 @@ pub const OS_VERBS: &[&str] = &[
     USER_SUBCOMMAND,
 ];
 
-/// c146 (D-PKGSIGN1, ratified): package-signing CLI verbs (I7). `jet keygen`
-/// creates the Ed25519 author key; `jet key backup` copies the secret key out
-/// for safekeeping. `jet publish` signs by default and takes `--no-sign`.
+/// c146 (D-PKGSIGN1, ratified): package-signing CLI verbs (I7). `jet registry keygen`
+/// creates the Ed25519 author key; `jet registry key backup` copies the secret key out
+/// for safekeeping. `jet registry publish` signs by default and takes `--no-sign`.
 pub const KEYGEN_SUBCOMMAND: &str = "keygen";
 pub const KEY_SUBCOMMAND: &str = "key";
 pub const KEY_VERB_BACKUP: &str = "backup";

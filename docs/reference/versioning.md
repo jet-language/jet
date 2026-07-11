@@ -50,5 +50,5 @@ platforms via GitHub Actions. See `.github/workflows/release.yml`.
 To check for a newer release manually:
 
 ```bash
-jet upgrade   # prints the latest GitHub release URL (no self-install in v1)
+jet self upgrade   # prints the latest GitHub release URL (no self-install in v1)
 ```

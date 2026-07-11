@@ -24,7 +24,7 @@ Initial public facts:
 3. Add stable query structs with spans and file paths expressed through
    `jet-foundation` types, not raw LSP JSON.
 4. Keep LSP as one consumer of the same facts; do not fork two symbol databases.
-5. Add a CLI smoke surface only if needed for tests, e.g. `jet semindex --json`.
+5. Add a CLI smoke surface only if needed for tests, e.g. `jet inspect semindex --json`.
 6. Tests:
    - symbol lookup;
    - references;

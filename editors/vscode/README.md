@@ -28,7 +28,7 @@ In order:
 3. `jet` on PATH — covers an installed jet (`nix profile install .#jet`) or an
    editor launched from the dev shell.
 
-`jet lsp` only runs the front end (no rustc), so the plain cargo binary works.
+`jet self lsp` only runs the front end (no rustc), so the plain cargo binary works.
 After `cargo build` the running server picks up the new binary via
 **Jet: Restart Language Server** (or reload the window).
 

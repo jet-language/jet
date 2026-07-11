@@ -139,7 +139,7 @@ fn jet_data_status() -> Vec<jet_std::DataStatus> {
         jet_std::DataStatus {
             step: "py.* / r.* / gpu.*".to_string(),
             path: "bridge-ready".to_string(),
-            replacement: "report via data.status() and jet dossier data".to_string(),
+            replacement: "report via data.status() and jet inspect dossier data".to_string(),
         },
     ]
 }
@@ -475,4 +475,3 @@ fn jet_enc_toml_to_string<T: user_Encode>(v: &T) -> String {
 fn jet_enc_yaml_to_string<T: user_Encode>(v: &T) -> String {
     jet_std::yaml::render(&v.jet_encode())
 }
-

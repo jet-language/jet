@@ -25,8 +25,8 @@ module system.laptop {
 
 ```
 $ jet switch --name "pre-gpu-driver"
-$ jet generations
-$ jet rollback
+$ jet store generations
+$ jet store rollback
 ```
 
 This is Phase D of the epoch-4 sequencing (`README.md` §Sequencing):
@@ -60,7 +60,7 @@ machinery it would sit on doesn't exist yet.
 
 ## Syntax note (not a new ballot — just drift to fix when Phase D starts)
 
-`vision.md`'s example (`jet switch --name …`, `jet generations`, `jet
+`vision.md`'s example (`jet switch --name …`, `jet store generations`, `jet
 rollback`) predates `D-JPK-DISPATCH1=B` (ratified 2026-07-02): "Jetpack /
 jetos verbs must cross a git-style process boundary (`jetpack`, `jetos`, or
 future engine binary) … Do not pile U11-U19 onto the old in-process

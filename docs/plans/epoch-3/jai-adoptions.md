@@ -61,7 +61,7 @@ to `@` in the marker-family migration pass, one parser-table edit.
   `#[inline]` for `ConstAttr::ForceInline`; add the analogous path for
   `is_inline` → `#[inline]`, `is_inline_always` → `#[inline(always)]`, gated
   on the sema check passing (I3: sema decides, codegen just emits).
-- `jet expand --facts inline` — **shipped** (card #183, D-EXPANDCLI1=A):
+- `jet inspect expand --facts inline` — **shipped** (card #183, D-EXPANDCLI1=A):
   `Source/CmdExpand.rs`'s `inline` lens prints every `@Inline`/
   `@InlineAlways` fn/method, its contract, and the emitted Rust attribute —
   read straight off the checked bundle's `Func::is_inline`/`is_inline_always`
@@ -611,7 +611,7 @@ contradict each other and someone needs to close that gap.
    fields of the same struct literal whose type matches the referent, plus
    parameters in scope at construction — pin the exact rule in
    `docs/spec/spec.md` before coding).
-4. `jet expand --facts refs` (ballot's transparency mechanism, "materializes
+4. `jet inspect expand --facts refs` (ballot's transparency mechanism, "materializes
    the resolved owner") — **shipped** (card #183, D-EXPANDCLI1=A):
    `Source/CmdExpand.rs`'s `refs` lens prints every `&T` stored-ref field's
    resolved owner, sourced from `SemIndexEffectFacts::refs`
@@ -679,10 +679,10 @@ formatter emission + fmt STABILITY test (own-memory rule).
   implements each card should re-grep `docs/spec/diagnostics.md` for the
   actual next-free code immediately before landing, not trust the numbers
   drafted here if another card landed first and shifted the free range.
-- **`jet expand --facts <lens>`** is named as the transparency mechanism in
+- **`jet inspect expand --facts <lens>`** is named as the transparency mechanism in
   three separate ballots (inline §1, refs §8, and implicitly §2's owner
   tracking) and **shipped as card #183** (D-EXPANDCLI1=A): `Source/CmdExpand.rs`,
-  floor lenses `inline`/`refs`. Bare `jet expand <file>` runs every lens
+  floor lenses `inline`/`refs`. Bare `jet inspect expand <file>` runs every lens
   grouped; other ratified surfaces add lenses to the same registry, never a
   new command.
 - Every card that touches parseable syntax needs a formatter emission path

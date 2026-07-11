@@ -1,4 +1,4 @@
-//! Git-registry sparse index — the on-disk shape a `jet publish` writes and a
+//! Git-registry sparse index — the on-disk shape a `jet registry publish` writes and a
 //! resolver reads (card c56, D-JPK-CACHE1=A / D-VERSION1=A).
 //!
 //! The registry is an ordinary git repo. Each package gets one append-only

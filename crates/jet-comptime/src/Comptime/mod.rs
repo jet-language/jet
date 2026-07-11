@@ -102,7 +102,7 @@ pub fn run_build_entry(
             format!("`fn build` returned an error: {}", error.jet_show()),
             "the selected root build entry must finish graph construction before any action runs"
                 .to_string(),
-            "fix the failing build operation; use `jet explain-build` to inspect completed graph nodes"
+            "fix the failing build operation; use `jet inspect explain-build` to inspect completed graph nodes"
                 .to_string(),
             Some(build.name_span),
         ));

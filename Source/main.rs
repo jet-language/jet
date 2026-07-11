@@ -367,33 +367,26 @@ usage:
   {bin} fmt   --changed             format only VCS-changed .jet files (requires git)
   {bin} fix   <file.{ext}>          apply all auto-fixable diagnostics in place
   {bin} fix   <file.{ext}> --dry-run   show the fixes as a diff, write nothing
-  {bin} doctor                      diagnose the toolchain and offer fixes
-  {bin} doctor --fix                apply the auto-fixable problems
-  {bin} completions <bash|zsh|fish> print a shell completion script
-  {bin} man                         print the jet man page (roff)
-  {bin} bind  <header.h> --pkg <lib>   generate a C binding cache (S59)
-  {bin} lsp                         language server (stdio JSON-RPC)
-  {bin} doctor                      diagnose your environment (rustc, cache, PATH, FFI)
-  {bin} doctor --fix                same, applying safe auto-fixes
-  {bin} completions <shell>         print a completion script (bash|zsh|fish)
-  {bin} man [<command>]             print the manual page (roff)
-  {bin} lsp doctor                  health-check the language server
-  {bin} lsp --bench                 latency benchmark (CI: must pass in <200ms/round)
-  {bin} expand <file.{ext}>         print every lens' facts, grouped (D-EXPANDCLI1)
-  {bin} expand --facts <lens> <file.{ext}>   print one lens's facts (inline, refs)
+  {bin} self doctor                 diagnose the toolchain and offer fixes
+  {bin} self completions <shell>    print shell completions
+  {bin} self man                    print the jet self man page (roff)
+  {bin} self lsp                    language server (stdio JSON-RPC)
+  {bin} self devtools <verb>        run checked developer generators
+  {bin} inspect bind <header.h> --pkg <lib>   generate a C binding cache (S59)
+  {bin} inspect expand <file.{ext}> print semantic facts (D-EXPANDCLI1)
   {bin} version                     print compiler version
   {bin} help                        print this help text
   {bin} ?                           same as help
   {bin}                             start the interactive REPL (same as repl)
   {bin} <file.{ext}>                run a file (same as run)
-  {bin} upgrade                     how to download a newer release
+  {bin} self upgrade                how to download a newer release
 
 package management (M12.1):
   {bin} add   <dep> --path <dir>    add a path dependency and fetch
   {bin} add   <dep> --git <url> --tag <tag>   add a git dependency
   {bin} remove <dep>                remove a dependency
-  {bin} fetch                       download and link all dependencies
-  {bin} fetch --locked              verify lock only, no network
+  {bin} store fetch                 download and link all dependencies
+  {bin} store fetch --locked        verify lock only, no network
   {bin} update                      refresh @latest / branch selectors
   {bin} update <dep>                update one moving selector
   {bin} outdated                    report Jetpack channel refs with newer locks available
@@ -403,18 +396,16 @@ package management (M12.1):
   {bin} store verify                re-check all store entry hashes
   {bin} store generations           list recorded store generations (D-PURE3)
   {bin} store rollback <gen>        roll back to a prior generation (D-PURE3)
+  {bin} store gc                    remove unreferenced store entries
+  {bin} store lock <script.jet>     write a script dependency lock
   {bin} clean                       optimize and collect stale Jetpack hangar entries
 
 supply chain (E2-M8):
-  {bin} publish                     publish the current package to the registry
-  {bin} publish --force             publish even if the pre-publish gate warns
-  {bin} vendor                      copy all dependencies into vendor/ (offline builds)
-  {bin} vendor --vendor-dir <path>  copy them into a chosen directory instead
+  {bin} registry publish            publish the current package to the registry
+  {bin} registry vendor             copy all dependencies into vendor/
   {bin} build  --sbom <file>        also write an SPDX SBOM next to the binary
-  {bin} audit                       check dependencies against the advisory database
-  {bin} audit --advisory-db <path>  use a custom advisory database
-  {bin} sbom                        emit an SPDX SBOM from the lockfile
-  {bin} sbom --cyclonedx            emit a CycloneDX JSON SBOM instead
+  {bin} inspect audit               check dependencies against the advisory database
+  {bin} inspect sbom                emit a software bill of materials
 
 flags:
   --emit-rust                  also print the generated Rust code
@@ -579,6 +570,67 @@ fn unknown_subcommand(cmd: &str) -> ! {
     exit(ExitCodes::USAGE);
 }
 
+/// D-CLI-SURFACE1=B / D-CLI-SURFACE2=A: grouped spelling is canonical.
+/// Normalize only after rejecting retired bare spellings, so grouped commands
+/// reach the existing real handlers without keeping compatibility aliases.
+fn normalize_frequency_ring_argv(raw: &mut Vec<String>) {
+    let Some(first) = raw.first().map(String::as_str) else { return };
+    if let Some((group_spec, _)) = jet::CLI::moved_command(first) {
+        let group = group_spec.name;
+        let verb = first;
+        let replacement = format!("jet {group} {}", raw.join(" "));
+        if raw.iter().any(|arg| arg == "--json") {
+            println!("{{\"schema_version\":1,\"diagnostics\":[{{\"schema_version\":1,\"code\":\"E2101\",\"severity\":\"error\",\"message\":\"`{verb}` moved under `jet {group}`\",\"why\":\"infrequent commands live in a named area so daily Jet commands stay easy to scan\",\"fix\":\"run `{}`\",\"detail\":null,\"file\":null,\"line\":null,\"col\":null,\"span\":null,\"edit\":null}}]}}", esc(&replacement));
+            exit(ExitCodes::USAGE);
+        }
+        eprintln!("Error [E2101]: `{verb}` moved under `jet {group}`.");
+        eprintln!(" Why: infrequent commands live in a named area so daily Jet commands stay easy to scan.");
+        eprintln!(" Fix: run `{replacement}`.");
+        exit(ExitCodes::USAGE);
+    }
+    let Some(group) = raw.first().cloned() else { return };
+    if let Some(spec) = jet::CLI::command_group(&group) {
+        if raw.len() == 1 || raw.get(1).map(String::as_str) == Some("help") {
+            println!("jet {group} — {}", spec.summary);
+            for action in spec.actions {
+                println!("  {:<15} {}", action.name, action.summary);
+            }
+            exit(ExitCodes::OK);
+        }
+    }
+    let Some(sub) = raw.get(1).cloned() else { return };
+    if jet::CLI::command_group(&group).is_some() {
+        if jet::CLI::nested_command(&group, &sub).is_none() {
+            if raw.iter().any(|arg| arg == "--json") {
+                println!("{{\"schema_version\":1,\"diagnostics\":[{{\"schema_version\":1,\"code\":\"E2101\",\"severity\":\"error\",\"message\":\"`{}` isn't a jet {} command\",\"why\":\"jet {} accepts only commands in its named area\",\"fix\":\"run `jet {} help`\",\"detail\":null,\"file\":null,\"line\":null,\"col\":null,\"span\":null,\"edit\":null}}]}}", esc(&sub), esc(&group), esc(&group), esc(&group));
+            } else {
+                eprintln!("Error [E2101]: `{sub}` isn't a jet {group} command.");
+                eprintln!(" Why: jet {group} accepts only commands in its named area.");
+                eprintln!(" Fix: run `jet {group} help`.");
+            }
+            exit(ExitCodes::USAGE);
+        }
+    }
+    if let Some((_, action)) = jet::CLI::nested_command(&group, &sub) {
+        if !action.handler.keeps_group() {
+            raw[0] = action.handler.dispatch_word().to_string();
+            raw.remove(1);
+        }
+    }
+}
+
+fn esc(s: &str) -> String {
+    s.chars().flat_map(|c| match c {
+        '"' => "\\\"".chars().collect::<Vec<_>>(),
+        '\\' => "\\\\".chars().collect(),
+        '\n' => "\\n".chars().collect(),
+        '\r' => "\\r".chars().collect(),
+        '\t' => "\\t".chars().collect(),
+        c if c.is_control() => format!("\\u{:04x}", c as u32).chars().collect(),
+        c => vec![c],
+    }).collect()
+}
+
 /// Validate every `--flag` in argv against the registry. The first unknown flag
 /// teaches E2102 (with a suggestion) and exits usage.
 ///
@@ -678,7 +730,7 @@ fn is_executable(p: &Path) -> bool {
 }
 
 fn main() {
-    let raw: Vec<String> = std::env::args().skip(1).collect();
+    let mut raw: Vec<String> = std::env::args().skip(1).collect();
 
     // c6vz465: bare `jet` starts the REPL (D-REPL4); `jet ?` is help sugar.
     if raw.is_empty() {
@@ -688,6 +740,8 @@ fn main() {
     if raw[0] == "?" {
         run_question_mark(&raw[1..]);
     }
+
+    normalize_frequency_ring_argv(&mut raw);
 
     if raw.iter().any(|a| a == "--version") {
         run_version();
@@ -783,7 +837,7 @@ fn main() {
                 return;
             }
             (_, true) | (Some("--bench"), _) => {
-                // jet lsp --bench: run latency benchmark on a small program
+                // jet self lsp --bench: run latency benchmark on a small program
                 let src = include_str!("../examples/features/collections/wordcount.jet");
                 jet::LSP::run_bench(src, 10, 200);
                 return;
@@ -975,7 +1029,7 @@ fn main() {
         // script's inline `use pkg#version;` deps into the freshly written
         // `pkg.jet`; bare `jet init` is unchanged.
         "init" => run_init(args.get(1).map(|s| s.as_str())),
-        // U11: `jet lock <script.jet>` resolves its inline deps and writes
+        // U11: `jet store lock <script.jet>` resolves its inline deps and writes
         // `<script.jet>.lock`.
         "lock" => {
             run_lock(args.get(1).map(|s| s.as_str()), mode);
@@ -993,14 +1047,14 @@ fn main() {
             return;
         }
         "keygen" => {
-            // c146: `jet keygen [--registry <name>] [--force]`.
+            // c146: `jet registry keygen [--registry <name>] [--force]`.
             let registry = flag_value(&raw, "--registry");
             let force = raw.iter().any(|a| a == "--force");
             run_keygen(registry, force);
             return;
         }
         "key" => {
-            // c146: `jet key backup [<dest>] [--registry <name>]`.
+            // c146: `jet registry key backup [<dest>] [--registry <name>]`.
             match args.get(1).map(|s| s.as_str()) {
                 Some("backup") => {
                     let registry = flag_value(&raw, "--registry");
@@ -1009,13 +1063,13 @@ fn main() {
                 }
                 Some(other) => {
                     eprintln!(
-                        "error: unknown `jet key` subcommand `{}` — did you mean `jet key backup`?",
+                        "error: unknown `jet registry key` subcommand `{}` — did you mean `jet registry key backup`?",
                         other
                     );
                     exit(ExitCodes::USER_ERROR);
                 }
                 None => {
-                    eprintln!("error: `jet key` needs a subcommand — try `jet key backup`.");
+                    eprintln!("error: `jet registry key` needs a subcommand — try `jet registry key backup`.");
                     exit(ExitCodes::USER_ERROR);
                 }
             }
@@ -1023,7 +1077,7 @@ fn main() {
         }
         "yank" => {
             // D-VERSION1=A: mark a published version as yanked (no delete).
-            // `jet yank <version> [--message <reason>]`
+            // `jet registry yank <version> [--message <reason>]`
             let version = args.get(1).map(|s| s.as_str());
             let message = flag_value(&raw, "--message");
             run_yank(version, message);
@@ -1035,7 +1089,7 @@ fn main() {
             return;
         }
         "schema" => {
-            // D-MIGRATE2C: `jet schema status` / `jet schema squash --before <ver>`.
+            // D-MIGRATE2C: `jet inspect schema status` / `jet inspect schema squash --before <ver>`.
             // Use the unfiltered argv so `--before` and the verb survive.
             let schema_args: Vec<String> = raw.iter().skip(1).cloned().collect();
             run_schema(&schema_args);
@@ -1071,7 +1125,7 @@ fn main() {
             return;
         }
         "expand" => {
-            // D-EXPANDCLI1=A: `jet expand --facts <lens> <file>` / bare `jet
+            // D-EXPANDCLI1=A: `jet inspect expand --facts <lens> <file>` / bare `jet
             // expand <file>` — the transparency command (card #183).
             let expand_args: Vec<String> = raw.iter().skip(1).cloned().collect();
             run_expand(&expand_args, mode.json);
@@ -1242,11 +1296,11 @@ fn main() {
             run_repl(project.as_deref());
             return;
         }
-        // Teaching error: E0043 `jet install` → `jet fetch`
+        // Teaching error: E0043 `jet install` → `jet store fetch`
         "install" => {
             eprintln!("Error [E0043]: `jet install` isn't a Jet command");
-            eprintln!(" Why: Jet uses `jet fetch` to download and link dependencies");
-            eprintln!(" Fix: run `jet fetch` to install all dependencies listed in pkg.jet");
+            eprintln!(" Why: Jet uses `jet store fetch` to download and link dependencies");
+            eprintln!(" Fix: run `jet store fetch` to install all dependencies listed in pkg.jet");
             exit(ExitCodes::USER_ERROR);
         }
         "dev" => {
@@ -1651,8 +1705,8 @@ fn main() {
         // Teaching error: E0042 foreign manifest filename, E0043 `jet install`
         "install" => {
             eprintln!("Error [E0043]: `jet install` isn't a Jet command");
-            eprintln!(" Why: Jet uses `jet fetch` to download and link dependencies");
-            eprintln!(" Fix: run `jet fetch` to install all dependencies listed in pkg.jet");
+            eprintln!(" Why: Jet uses `jet store fetch` to download and link dependencies");
+            eprintln!(" Fix: run `jet store fetch` to install all dependencies listed in pkg.jet");
             exit(ExitCodes::USER_ERROR);
         }
         _ => {
@@ -1921,13 +1975,13 @@ fn maybe_dispatch_pinned_toolchain(raw: &[String]) {
     }
 }
 
-/// `jet toolchain` — print the project's pin, locked version, object id, and
+/// `jet self toolchain` — print the project's pin, locked version, object id, and
 /// realized state (read-only, D-JPK-TOOLCHAIN1=A #179).
 fn run_toolchain() -> ! {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = require_manifest_root(
         &cwd,
-        "error: `jet toolchain` needs a project — no `pkg.jet` found here or above",
+        "error: `jet self toolchain` needs a project — no `pkg.jet` found here or above",
     );
     print!("{}", jet::Jetpack::JetPin::report_pin(&root));
     exit(ExitCodes::OK);
@@ -2004,13 +2058,13 @@ fn lift_inline_deps_into_manifest(cwd: &Path, script: &str) {
     }
 }
 
-/// `jet lock <script.jet>` — U11: resolve a manifest-less script's inline
+/// `jet store lock <script.jet>` — U11: resolve a manifest-less script's inline
 /// `use pkg#version;` deps and write the `<script.jet>.lock` sidecar,
 /// keyed by the script's own content hash (edit the script, the lock goes
 /// stale — the same "locks by file-content hash" contract `jet run` uses).
 fn run_lock(script: Option<&str>, mode: OutputMode) {
     let Some(raw_arg) = script else {
-        eprintln!("error: `jet lock` needs a script path, e.g. `jet lock stats.jet`");
+        eprintln!("error: `jet store lock` needs a script path, e.g. `jet store lock stats.jet`");
         exit(ExitCodes::USER_ERROR);
     };
     let file = resolve_source_path(raw_arg);
@@ -2019,7 +2073,7 @@ fn run_lock(script: Option<&str>, mode: OutputMode) {
 
     if jet::Loader::find_manifest_root(script_dir).is_some() {
         eprintln!(
-            "error: `{file}` belongs to a project with a `{}` — use `jet fetch` to lock its dependencies",
+            "error: `{file}` belongs to a project with a `{}` — use `jet store fetch` to lock its dependencies",
             jet::Syntax::PAYLOAD_FILE
         );
         exit(ExitCodes::USER_ERROR);

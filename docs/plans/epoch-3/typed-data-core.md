@@ -12,7 +12,7 @@ The first user story is a single-file analysis: read CSV into a typed row, group
 - D-CORENS1 requires first-party libraries under `core.*`.
 - D-DATA-SURFACE1 ratifies the `core.data` facade for tables, series, stats, CSV, and plots.
 - D-DATA-BRIDGE1 ratifies direct bridge roots (`py.*`, `r.*`, `gpu.*`) instead of nesting bridge providers under `core.data`.
-- D-DATA-STATUS1 ratifies machine-readable status through the Core API plus the future `jet dossier data` human lens.
+- D-DATA-STATUS1 ratifies machine-readable status through the Core API plus the future `jet inspect dossier data` human lens.
 - D-DATA-PLOT1 ratifies deterministic SVG plus text plotting output.
 - D-DEP1 allows crate-backed capability only as Jet packages wrapping pinned sources through `extern rust`, with a native-ize obligation.
 - I2 and I3 require Jet front-end diagnostics and sema-owned checking; bridge failures must not leak host-language tracebacks as primary user errors.
@@ -51,7 +51,7 @@ Exact public module names, bridge provider prefixes, accelerator status UI, and 
 
 - D-DATA-SURFACE1=A: one `core.data` facade.
 - D-DATA-BRIDGE1=A: direct provider roots.
-- D-DATA-STATUS1=A: Core status API plus `jet dossier data`.
+- D-DATA-STATUS1=A: Core status API plus `jet inspect dossier data`.
 - D-DATA-PLOT1=A: deterministic SVG plus text fallback.
 
 ## Adversarial tradeoffs

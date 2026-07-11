@@ -81,7 +81,7 @@ Exit: tests cover grant add, list, remove, one-shot bypass, and revoked replay.
 ### T5. Dossier Integration
 
 Feed the grant graph into the existing explain/dossier direction without making
-`jet dossier` a dependency of this card. Each grant fact carries an owner
+`jet inspect dossier` a dependency of this card. Each grant fact carries an owner
 producer so a later dossier section can show stable JSON and human output.
 
 Exit: every grant fact records `producer`, `source_span` where available,

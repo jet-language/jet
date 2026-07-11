@@ -231,10 +231,10 @@ fn readme_subcommands_exist_in_cli() {
         }
     }
 
-    // `jet upgrade` is mentioned in docs/reference/versioning.md
+    // `jet self upgrade` is mentioned in docs/reference/versioning.md
     let versioning =
         fs::read_to_string(root.join("docs/reference/versioning.md")).unwrap_or_default();
-    if versioning.contains("`jet upgrade`") && !known.contains("upgrade") {
+    if versioning.contains("`jet self upgrade`") && !known.contains("upgrade") {
         missing.push("upgrade (referenced in versioning.md)".to_string());
     }
 

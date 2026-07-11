@@ -74,7 +74,7 @@ pub fn parse_registries_from_env(
 // ──────────────────────────────────────────────
 
 /// The registry publish/yank target. Defaults to the public registry; a
-/// `JET_REGISTRY_URL` override points `jet publish`/`jet yank` at another git
+/// `JET_REGISTRY_URL` override points `jet registry publish`/`jet registry yank` at another git
 /// index (a private registry, a CI mirror, or — in tests — a scratch bare repo).
 pub fn resolve_publish_registry() -> RegistryConfig {
     match std::env::var("JET_REGISTRY_URL") {
@@ -137,7 +137,7 @@ pub fn push_index(registry: &RegistryConfig, repo: &Path, message: &str) -> Resu
     let run = |args: &[&str]| Command::new("git").args(args).current_dir(repo).output();
     // A scratch clone may carry no user identity; set one so `commit` works.
     let _ = run(&["config", "user.email", "jet-publish@localhost"]);
-    let _ = run(&["config", "user.name", "jet publish"]);
+    let _ = run(&["config", "user.name", "jet registry publish"]);
 
     let add = run(&["add", "-A"]).map_err(|e| e1235(&registry.url, &e.to_string()))?;
     if !add.status.success() {
@@ -274,7 +274,7 @@ pub fn e1246(name: &str, version: &str) -> Diagnostic {
         "this means the package was tampered with after signing, or the index entry is corrupt — \
          the author's Ed25519 signature over the content hash no longer checks out."
             .to_string(),
-        "do not use this version. Re-run `jet fetch` after clearing the store entry; if the \
+        "do not use this version. Re-run `jet store fetch` after clearing the store entry; if the \
          problem persists, report it — this should never happen for an untampered registry."
             .to_string(),
         None,
@@ -293,7 +293,7 @@ pub fn e1247(registry: &str, name: &str, version: &str) -> Diagnostic {
          can't be trusted under that policy."
             .to_string(),
         "use a different registry, or ask the package author to publish a signed release \
-         (`jet publish` auto-signs by default — they likely used `--no-sign`)."
+         (`jet registry publish` auto-signs by default — they likely used `--no-sign`)."
             .to_string(),
         None,
     )
@@ -309,7 +309,7 @@ pub fn e1234(name: &str, version: &str) -> Diagnostic {
          only yanked, so anyone who already locked it keeps building the exact same bytes."
             .to_string(),
         format!(
-            "bump the version in `{}` and publish again, or `jet yank {version}` the existing \
+            "bump the version in `{}` and publish again, or `jet registry yank {version}` the existing \
              one first if it was a mistake (yanking hides it from new resolution; it does not \
              free the version number for reuse).",
             crate::Syntax::PAYLOAD_FILE

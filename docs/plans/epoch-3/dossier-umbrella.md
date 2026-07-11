@@ -5,7 +5,7 @@ slice; implementation waits on stable semantic-index API.
 
 ## Goal
 
-`jet dossier` is the umbrella explain view over facts Jet already owns. It is
+`jet inspect dossier` is the umbrella explain view over facts Jet already owns. It is
 not a new checker, not a new syntax surface, and not a parallel graph. It reads
 named fact producers and renders one coherent human/JSON report.
 
@@ -19,13 +19,13 @@ generated facts, package provenance, cache keys, trust grants, and impact.
   semantic-index API is stable.
 - **D-SEMINDEX1** owns symbol/reference/type/call/effect facts.
 - **D-IMPACT1** owns blast-radius facts.
-- **D-EXPANDCLI1** owns sema fact rendering for `jet expand --facts`.
+- **D-EXPANDCLI1** owns sema fact rendering for `jet inspect expand --facts`.
 - Epoch 4 slices add package/trust/lock provenance facts that can later appear
   as dossier sections.
 
 ## Canonical Shape
 
-`jet dossier <target>` groups existing facts by lens:
+`jet inspect dossier <target>` groups existing facts by lens:
 
 ```text
 summary
@@ -47,7 +47,7 @@ but it must name the missing producer; it must never synthesize a second truth.
 
 1. Finish stable semantic-index API and schema tests.
 2. Implement D-DOSSIER1 type/member view as first dossier lens.
-3. Add `jet dossier <file-or-symbol>` as a renderer over the same lens data.
+3. Add `jet inspect dossier <file-or-symbol>` as a renderer over the same lens data.
 4. Thread `impact`, `expand`, package provenance, and trust grants as additive
    lenses when their fact producers are stable.
 5. Add JSON snapshot tests for lens identity and schema version.

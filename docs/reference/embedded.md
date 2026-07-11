@@ -19,7 +19,7 @@ library for the target must be installed first:
 rustup target add aarch64-unknown-linux-gnu
 ```
 
-Run `jet doctor --target=aarch64-unknown-linux-gnu` to check whether the
+Run `jet self doctor --target=aarch64-unknown-linux-gnu` to check whether the
 toolchain component is present before building.
 
 ## Freestanding profile
@@ -75,7 +75,7 @@ on exact diagnostic decisions.
 
 The profile audit JSON is stable and contains memory layout, linker source,
 allocator, panic behavior, unavailable Core APIs, and MMIO unsafe reasons. The
-ratified user-facing shape is a `jet dossier target` lens plus a build artifact;
+ratified user-facing shape is a `jet inspect dossier target` lens plus a build artifact;
 CLI/package wiring lands in the later surface slice.
 
 ## Running under QEMU (D-CROSS3 local harness)
@@ -103,7 +103,7 @@ qemu-system-aarch64 \
 ## Checking target availability
 
 ```
-jet doctor --target=aarch64-unknown-linux-gnu
+jet self doctor --target=aarch64-unknown-linux-gnu
 ```
 
 Adds a `cross` section to the doctor report:

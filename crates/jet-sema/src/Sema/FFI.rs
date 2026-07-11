@@ -213,7 +213,7 @@ pub fn e3302(triple: &str) -> Diagnostic {
         "rustc doesn't have the standard library for this target compiled in, \
          or the target triple is not recognised."
             .to_string(),
-        "Run `jet doctor --target <triple>` to see what's missing, \
+        "Run `jet self doctor --target <triple>` to see what's missing, \
          or `rustup target add <triple>` to install it."
             .to_string(),
         None,

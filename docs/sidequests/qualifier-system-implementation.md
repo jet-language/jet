@@ -81,7 +81,7 @@ auto-discovers `.jet` modules (U4; `imports: find(…)`), validated by **E0969**
 (`Source/Loader.rs`, `Source/Jetpack/`). Its discovered-file set is **not** hashed
 into the lock today. (See Open Owner-Q on whether `find` here means this directive.)
 
-**`fetch(url, sha256:)` — does not exist.** Today `jet fetch` is *package* fetch
+**`fetch(url, sha256:)` — does not exist.** Today `jet store fetch` is *package* fetch
 (`Source/Fetch.rs`, git-subprocess only, no compiler HTTP); a comptime
 `fetch(url, sha256:)` Tier-1 builtin is unbuilt.
 

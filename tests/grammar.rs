@@ -66,7 +66,7 @@ fn editor_grammars_match_generated_sections() {
         assert_eq!(
             generated_section(path),
             expected.trim_end(),
-            "{path} generated section drifted; run `jet devtools grammars`"
+            "{path} generated section drifted; run `jet self devtools grammars`"
         );
     }
 }

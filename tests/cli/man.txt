@@ -8,6 +8,87 @@ jet \- the Jet compiler and project tool
 jet builds, checks, runs, and tests Jet programs, and manages Jet projects and their dependencies. Output is plain when piped and colored on a terminal.
 .SH COMMANDS
 .TP
+.B registry
+publishing, signing, yanking, and vendoring
+.TP
+.B registry publish
+publish the current package to the registry
+.TP
+.B registry yank
+mark a published version as yanked
+.TP
+.B registry keygen
+create the key that signs published packages
+.TP
+.B registry key
+manage the package signing key
+.TP
+.B registry vendor
+copy all dependencies into vendor/
+.TP
+.B inspect
+semantic, build, schema, supply, and binding inspection
+.TP
+.B inspect graph
+print the typed programmable-build graph
+.TP
+.B inspect query
+query typed semantic and build facts
+.TP
+.B inspect explain-build
+explain one build target, action, or file
+.TP
+.B inspect impact
+report a symbol's blast radius
+.TP
+.B inspect dossier
+explain a file or symbol through semantic facts
+.TP
+.B inspect semindex
+query the stable semantic index
+.TP
+.B inspect expand
+print sema facts for one or every lens
+.TP
+.B inspect schema
+inspect or re-baseline published schema snapshots
+.TP
+.B inspect codemod
+run replayable semantic codemods
+.TP
+.B inspect audit
+check dependencies against the advisory database
+.TP
+.B inspect sbom
+emit a software bill of materials
+.TP
+.B inspect bind
+generate a C binding cache from a header
+.TP
+.B self
+Jet installation, diagnostics, completions, and machine tooling
+.TP
+.B self toolchain
+show the project's pinned Jet toolchain
+.TP
+.B self upgrade
+show how to download a newer release
+.TP
+.B self doctor
+diagnose the toolchain and offer fixes
+.TP
+.B self completions
+print shell completions
+.TP
+.B self man
+print the Jet manual page
+.TP
+.B self devtools
+run checked developer generators
+.TP
+.B self lsp
+run the language server
+.TP
 .B run
 build, then run a program (or a project)
 .TP
@@ -22,9 +103,6 @@ compile to a native binary in ./build/
 .TP
 .B dev
 watch a file and re-run it on every save
-.TP
-.B devtools
-run checked developer generators (grammars)
 .TP
 .B serve
 watch a resident program and hot-swap type-stable edits
@@ -50,9 +128,6 @@ opt-in lint categories, never blocking (--a11y: D-A11YGATE1)
 .B explain
 print the offline essay for a diagnostic code
 .TP
-.B doctor
-diagnose the toolchain and offer fixes
-.TP
 .B env
 enter the project dev shell
 .TP
@@ -74,38 +149,41 @@ build a declared OCI image
 .B os
 check, build, switch, rollback, list, lift, init, or image a jetos host
 .TP
-.B bind
-generate a C binding cache from a header
-.TP
 .B add
 add a dependency and fetch it
 .TP
 .B remove
 remove a dependency
 .TP
-.B fetch
-download and link all dependencies
-.TP
 .B update
 refresh moving dependency selectors (`update jet` moves the toolchain pin)
-.TP
-.B toolchain
-show the project's pinned jet toolchain and its locked version (D-JPK-TOOLCHAIN1)
 .TP
 .B init
 create a pkg.jet here, pinning the running jet's channel (add <script.jet> to lift its inline deps)
 .TP
-.B lock
-resolve a manifest-less script's inline `use pkg#version;` deps and write its .lock sidecar (D-JPK-SCRIPTDEP1)
-.TP
 .B store
 inspect or verify the package store
 .TP
+.B store verify
+verify store objects and references
+.TP
+.B store rollback
+roll back a store generation
+.TP
+.B store generations
+list store generations
+.TP
+.B store gc
+remove unreferenced store entries
+.TP
+.B store fetch
+download and link all dependencies
+.TP
+.B store lock
+lock a script's inline dependencies
+.TP
 .B config
 manage jet configuration (`config trust add/list/remove`, U19)
-.TP
-.B gc
-remove unreferenced store entries
 .TP
 .B outdated
 report Jetpack channel refs with newer locks available
@@ -122,54 +200,6 @@ show latest Jetpack build logs
 .B clean
 optimize and collect stale Jetpack hangar entries
 .TP
-.B publish
-publish the current package to the registry
-.TP
-.B yank
-mark a published version as yanked (D-VERSION1)
-.TP
-.B keygen
-create the Ed25519 key that signs published packages (D-PKGSIGN1)
-.TP
-.B key
-manage the package signing key (key backup)
-.TP
-.B schema
-inspect or re-baseline @PublishedSchema snapshots (status | squash)
-.TP
-.B semindex
-query the stable semantic index for a project entry file
-.TP
-.B dossier
-explain a file or symbol through stable semantic fact lenses
-.TP
-.B impact
-report blast radius for a symbol (callers, references, callees)
-.TP
-.B graph
-print typed programmable-build graph (D-BUILDQUERY1)
-.TP
-.B query
-query typed facts; `jet query build <file>` inspects build graph
-.TP
-.B explain-build
-explain one build target, action, or file (D-BUILDQUERY1)
-.TP
-.B codemod
-dry-run, apply, or undo replayable semantic codemods
-.TP
-.B expand
-print sema's facts for one lens (--facts <lens>) or every lens (D-EXPANDCLI1)
-.TP
-.B vendor
-copy all dependencies into vendor/
-.TP
-.B audit
-check dependencies against the advisory database
-.TP
-.B sbom
-emit a software bill of materials from the lockfile
-.TP
 .B emit
 emit generated output (--rust: print Rust source)
 .TP
@@ -182,20 +212,8 @@ benchmark a Jet program with honest stats
 .B fuzz
 fuzz a property `#Test fn` — corpus, minimization, seeded PRNG
 .TP
-.B completions
-print shell completions (bash | zsh | fish)
-.TP
-.B man
-print the jet man page (roff)
-.TP
-.B lsp
-language server (stdio JSON-RPC)
-.TP
 .B version
 print compiler version
-.TP
-.B upgrade
-how to download a newer release
 .TP
 .B help
 print the help text

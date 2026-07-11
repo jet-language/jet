@@ -334,15 +334,16 @@ fn render_outcome_timed(
     }
 }
 
-/// `jet completions <shell>` — print a shell completion script (D-DX4).
+/// `jet self completions <shell>` — print a shell completion script (D-DX4).
 pub(crate) fn run_completions(shell: Option<&str>) {
     let out = match shell {
         Some("bash") => jet::CLI::completions_bash(),
         Some("zsh") => jet::CLI::completions_zsh(),
         Some("fish") => jet::CLI::completions_fish(),
+        Some("powershell") => jet::CLI::completions_powershell(),
         other => {
             eprintln!(
-                "error: completions need a shell: {} completions <bash|zsh|fish>",
+                "error: completions need a shell: {} self completions <bash|zsh|fish|powershell>",
                 jet::Syntax::BINARY_NAME
             );
             if let Some(s) = other {
@@ -354,11 +355,11 @@ pub(crate) fn run_completions(shell: Option<&str>) {
     print!("{}", out);
 }
 
-/// Every `jet devtools` subcommand name, for the usage line and typo errors.
+/// Every `jet self devtools` subcommand name, for the usage line and typo errors.
 const DEVTOOLS_SUBCOMMANDS: &str =
     "grammars | reduce | ice-report | new-example | new-ui | check-fixture-paths | bless";
 
-/// `jet devtools grammars` — D-HL1 generated lexical base for editor grammars.
+/// `jet self devtools grammars` — D-HL1 generated lexical base for editor grammars.
 /// c450 (D-DEVTOOLS1=A): extended with maintainer-facing minimizer/scaffolding
 /// tools, all under this same hidden namespace (never top-level commands).
 pub(crate) fn run_devtools(args: &[&String]) {
@@ -397,10 +398,10 @@ pub(crate) fn run_devtools(args: &[&String]) {
 }
 
 // ──────────────────────────────────────────────
-// c450: `jet devtools reduce` — delta-debugging minimizer.
+// c450: `jet self devtools reduce` — delta-debugging minimizer.
 // ──────────────────────────────────────────────
 
-/// `jet devtools reduce <file.jet> [--code EXXXX]`.
+/// `jet self devtools reduce <file.jet> [--code EXXXX]`.
 ///
 /// Oracle (what makes a candidate "still interesting"):
 ///   - default: the front end accepts the file AND rustc rejects the
@@ -612,10 +613,10 @@ fn rustc_rejects(rust_code: &str) -> bool {
 }
 
 // ──────────────────────────────────────────────
-// c450: `jet devtools ice-report` — bundle an I2 repro for a bug report.
+// c450: `jet self devtools ice-report` — bundle an I2 repro for a bug report.
 // ──────────────────────────────────────────────
 
-/// `jet devtools ice-report <file.jet>` — bundles the source, generated Rust,
+/// `jet self devtools ice-report <file.jet>` — bundles the source, generated Rust,
 /// rustc's stderr, and both tool versions into one directory under
 /// `.jet/ice-report/<stem>-<unix-time>/` so a bug report has everything
 /// attached in one place. Prints the bundle path.
@@ -697,10 +698,10 @@ pub(crate) fn run_devtools_ice_report(args: &[&String]) {
 }
 
 // ──────────────────────────────────────────────
-// c450: `jet devtools new-example` / `new-ui` — scaffold I5/I4 fixtures.
+// c450: `jet self devtools new-example` / `new-ui` — scaffold I5/I4 fixtures.
 // ──────────────────────────────────────────────
 
-/// `jet devtools new-example <topic>/<name>` — scaffolds
+/// `jet self devtools new-example <topic>/<name>` — scaffolds
 /// `examples/features/<topic>/<name>.jet` and
 /// `examples/features/expected/<topic>/<name>.out`, matching the layout
 /// `tests/golden.rs` walks exactly. The stub is a real, passing example (I5:
@@ -760,12 +761,12 @@ pub(crate) fn run_devtools_new_example(args: &[&String]) {
     println!("wrote {}", expected_path.display());
 }
 
-/// `jet devtools new-ui <name>` — scaffolds `tests/ui/<name>.jet` and its
+/// `jet self devtools new-ui <name>` — scaffolds `tests/ui/<name>.jet` and its
 /// `<name>.stderr` snapshot, matching the layout `tests/diagnostic_snapshots.rs`
 /// walks exactly. The stub triggers a real (if generic) diagnostic and its
 /// `.stderr` is computed with the SAME calls the harness uses, so the pair is
 /// valid the moment it's written — edit the `.jet` to demonstrate the real
-/// diagnostic, then re-bless with `jet devtools bless diagnostic_snapshots`.
+/// diagnostic, then re-bless with `jet self devtools bless diagnostic_snapshots`.
 pub(crate) fn run_devtools_new_ui(args: &[&String]) {
     if args.is_empty() {
         eprintln!("usage: {} devtools new-ui <name>", jet::Syntax::BINARY_NAME);
@@ -827,10 +828,10 @@ fn run() {\n    print(definitely_undefined_scaffold_symbol)\n}\n"
 }
 
 // ──────────────────────────────────────────────
-// c450: `jet devtools check-fixture-paths` — validate hardcoded path fixtures.
+// c450: `jet self devtools check-fixture-paths` — validate hardcoded path fixtures.
 // ──────────────────────────────────────────────
 
-/// `jet devtools check-fixture-paths` — greps every `tests/**/*.rs` file for
+/// `jet self devtools check-fixture-paths` — greps every `tests/**/*.rs` file for
 /// hardcoded fixture path literals (`examples/features/...`, `docs/spec/...`,
 /// `tests/ui/...`, etc.) and confirms each one exists on disk relative to the
 /// current directory (run from the repo root). Path-embedding fixtures rot
@@ -953,7 +954,7 @@ fn is_hardcoded_fixture_path(lit: &str) -> bool {
 }
 
 // ──────────────────────────────────────────────
-// c450: `jet devtools bless` — wrapper over the UPDATE_EXPECT re-bless convention.
+// c450: `jet self devtools bless` — wrapper over the UPDATE_EXPECT re-bless convention.
 // ──────────────────────────────────────────────
 
 /// Every test binary that owns `UPDATE_EXPECT`-blessable snapshots (I4). Kept
@@ -967,7 +968,7 @@ pub(crate) const BLESS_TARGETS: &[&str] = &[
     "release_gates",
 ];
 
-/// `jet devtools bless [target...] [--dry-run]` — runs
+/// `jet self devtools bless [target...] [--dry-run]` — runs
 /// `UPDATE_EXPECT=1 cargo test --test <target>` for each named target (all of
 /// `BLESS_TARGETS` when none is given). This is the one re-bless mechanism in
 /// the repo (see each test file's own "bless with UPDATE_EXPECT=1" doc
@@ -1103,12 +1104,12 @@ fn write_generated_section(path: &str, fresh: &str) {
     println!("wrote {}", path);
 }
 
-/// `jet doctor` — environment self-diagnosis with actionable fixes (D-DX2,
+/// `jet self doctor` — environment self-diagnosis with actionable fixes (D-DX2,
 /// D-BUILD1). Offline by default; `--online` enables network checks; `--fix`
 /// applies the auto-fixable problems. The advisory code for rustc/cache/PATH
 /// problems is L2101.
 pub(crate) fn run_doctor(online: bool, apply: bool, mode: OutputMode) {
-    // E2-M15: `jet doctor --target=<triple>` checks cross-compilation readiness.
+    // E2-M15: `jet self doctor --target=<triple>` checks cross-compilation readiness.
     let cross_target =
         std::env::args().find_map(|a| a.strip_prefix("--target=").map(str::to_string));
     let checks = jet::Doctor::run(jet::Doctor::Options {
@@ -1181,7 +1182,7 @@ pub(crate) fn run_doctor(online: bool, apply: bool, mode: OutputMode) {
     if jet::Doctor::has_problem(&checks) {
         println!("Warning [L2101]: toolchain checks need attention");
         println!(" Why: one or more required tools or paths are unavailable");
-        println!(" Fix: follow the fixes above, then run `jet doctor` again");
+        println!(" Fix: follow the fixes above, then run `jet self doctor` again");
         println!(" {}", jet::Explain::pointer_line("L2101", color));
         exit(ExitCodes::USER_ERROR);
     } else {
@@ -1219,7 +1220,7 @@ pub(crate) fn run_explain(code: Option<&str>, mode: OutputMode) {
     }
 }
 
-/// `jet bind <header.h> [--pkg <lib>] [-o <out.jet>]` (S59 / E2-M14 Phase 4).
+/// `jet inspect bind <header.h> [--pkg <lib>] [-o <out.jet>]` (S59 / E2-M14 Phase 4).
 ///
 /// Generates a `#Bindgen module c.<lib>.__bindgen__` cache from a C header,
 /// using the same native std-only backend the compiler invokes on a cache miss
@@ -1318,7 +1319,7 @@ pub(crate) fn run_bind(args: &[&String]) {
 
     // Phase 3 (D-CBIND2): write a hash sidecar alongside the cache so the
     // compiler can detect stale caches on the next build (hash invalidation).
-    // cflags are not yet threaded through `jet bind`; pass "" for now.
+    // cflags are not yet threaded through `jet inspect bind`; pass "" for now.
     let _ = jet::CBind::write_bind_hash(std::path::Path::new(&out_path), &header_src, "");
 
     println!(

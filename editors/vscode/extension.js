@@ -4,7 +4,7 @@
 //   1. jet.languageServerPath setting (supports ${workspaceFolder} and ~)
 //   2. <workspaceFolder>/target/debug/jet   (developing the compiler itself)
 //   3. `jet` on PATH                        (installed, or editor launched from dev shell)
-// `jet lsp` does not invoke rustc, so the plain cargo binary is enough.
+// `jet self lsp` does not invoke rustc, so the plain cargo binary is enough.
 
 const fs = require("fs");
 const path = require("path");
@@ -73,7 +73,7 @@ function activate(context) {
     "Jet Language Server",
     {
       command: serverPath,
-      args: ["lsp"],
+      args: ["self", "lsp"],
       options: { cwd: workspaceFolder },
       transport: TransportKind.stdio,
     },

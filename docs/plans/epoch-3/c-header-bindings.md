@@ -1,6 +1,6 @@
-# C header auto-binding (`jet bind`)
+# C header auto-binding (`jet inspect bind`)
 
-**Status:** ✅ shipped in **E2-M14** (S59) — `jet bind` is functional with a
+**Status:** ✅ shipped in **E2-M14** (S59) — `jet inspect bind` is functional with a
 **native std-only backend** (`Source/CBind.rs`). The remaining E3 work here is
 optional: compile-time auto-invoke on cache miss (D-CBIND2's auto half) and
 widening the bound type subset beyond function prototypes + scalars/`char*`.
@@ -12,12 +12,12 @@ widening the bound type subset beyond function prototypes + scalars/`char*`.
 ## Pipeline
 
 ```
-C header  →  jet bind  →  @bindgen module c.<lib>.__bindgen__ { … }
+C header  →  jet inspect bind  →  @bindgen module c.<lib>.__bindgen__ { … }
           →  .jet/bindings/c/<lib>.jet
           →  merge @extern overlay  →  extern "C"  →  link
 ```
 
-**`jet bind`** subcommand generates the cache from a header (**D-CBIND2**);
+**`jet inspect bind`** subcommand generates the cache from a header (**D-CBIND2**);
 compile-time auto-invoke on cache miss is the remaining E3 half. Backend:
 **native std-only C-prototype parser** (`Source/CBind.rs`) — owner 2026-06-18
 superseded the bindgen-crate route (**D-CBIND3**); no external crate, no libclang.
@@ -28,7 +28,7 @@ superseded the bindgen-crate route (**D-CBIND3**); no external crate, no libclan
 
 | ID | Decision |
 |---|---|
-| D-CBIND2 | Auto on compile + **`jet bind`** subcommand (`jet bind` ✅; auto-on-compile = E3) |
+| D-CBIND2 | Auto on compile + **`jet inspect bind`** subcommand (`jet inspect bind` ✅; auto-on-compile = E3) |
 | D-CBIND3 | ~~Bindgen helper (I6)~~ → **native std-only parser** `Source/CBind.rs` (owner 2026-06-18) |
 | D-CBIND5 | **`String`** at C string boundary |
 | D-CBIND6 | **`#define` constants only**; skip function-like macros |
@@ -39,7 +39,7 @@ superseded the bindgen-crate route (**D-CBIND3**); no external crate, no libclan
 ## CLI
 
 ```bash
-jet bind raylib.h --pkg raylib -o .jet/bindings/c/raylib.jet
+jet inspect bind raylib.h --pkg raylib -o .jet/bindings/c/raylib.jet
 ```
 
 ---

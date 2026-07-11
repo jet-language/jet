@@ -527,14 +527,14 @@ impl Circle {
   Single-file runs accept the marker but only enforce the check when a project
   snapshot exists.
 
-  **`jet schema` (D-MIGRATE2C):** `jet schema status` lists every snapshotted
+  **`jet inspect schema` (D-MIGRATE2C):** `jet inspect schema status` lists every snapshotted
   `@PublishedSchema` type with its pinned published version and fields, flagging any
   type that has a pending breaking change vs its snapshot (reusing the E0910 diff).
-  `jet schema squash --before <ver>` re-baselines: it rewrites each snapshot to the
+  `jet inspect schema squash --before <ver>` re-baselines: it rewrites each snapshot to the
   *current* struct shape and records `squashed_before = <ver>`, so future builds
   treat the current shape as the authoritative baseline and migration blocks for
   versions before `<ver>` are no longer required (delete the now-stale blocks). It
-  edits only `.jet/cache/schema/`, never user source. There is **no `jet schema
+  edits only `.jet/cache/schema/`, never user source. There is **no `jet inspect schema
   check` verb** — `jet build`'s E0910 is already the CI gate.
 
   **Decode-time migration transparency (D-MIGRATE3=A):** `decode_traced<T>(raw)
@@ -736,7 +736,7 @@ against the committed **`tools/perf/baseline.json`** (sema time + binary size,
 
 **NixOS / flake:** `nix develop` provides `cargo`, `rustc`, `gcc`, `nodejs`,
 and a **`jet`** wrapper around `target/debug/jet`. **`cargo build`** once, then
-`jet run …` / `jet lsp` / `cargo test --test lsp`. Editor setup:
+`jet run …` / `jet self lsp` / `cargo test --test lsp`. Editor setup:
 `editors/vscode/README.md`. Release binary: `nix build .#jet`.
 
 ## Unified FFI frame (D-FFI-UNIFY1)
@@ -811,7 +811,7 @@ unreachable until the pointer tier lands). `#Bindgen` is legal only inside a
 generated cache file (**E3207**); users may not name the reserved `__bindgen__`
 segment (**E3206**); two `use` forms for one lib in one file → **E3204**.
 
-`jet bind <header.h> --pkg <lib>` is the manual cache-refresh entry point and
+`jet inspect bind <header.h> --pkg <lib>` is the manual cache-refresh entry point and
 shares the compile-time auto-bind backend (owner 2026-06-18: native std-only
 implementation, D-CBIND3 superseded). It parses C function prototypes over the
 bindable type subset (scalars, `char*` strings, `void`) and emits a `#Bindgen`
@@ -1113,7 +1113,7 @@ their semantics, What/Why/Fix copy, and UI snapshots ship.
 Smaller binaries than the default speed-oriented profile (`tests/release_gates.rs` on
 `examples/features/collections/wordcount.jet`).
 
-**`jet lsp`**: stdio JSON-RPC language server (hand-rolled JSON, invariant I6).
+**`jet self lsp`**: stdio JSON-RPC language server (hand-rolled JSON, invariant I6).
 Capabilities: full-document diagnostics on open/change (real front end, including
 import graph from disk with an in-memory overlay for the open buffer), S14
 teaching-error quick-fixes (`Diagnostic.edit`), and formatting via `jet fmt`.
@@ -1122,7 +1122,7 @@ Scripted tests: `tests/lsp.rs`.
 **VS Code / Cursor**: `editors/vscode/` — TextMate grammar + LSP client (plain
 JS, no compile step; `install.sh` packs and installs the vsix). The client
 auto-discovers the server: `jet.languageServerPath` setting, then
-`<workspaceFolder>/target/debug/jet`, then `jet` on PATH. `jet lsp` never
+`<workspaceFolder>/target/debug/jet`, then `jet` on PATH. `jet self lsp` never
 invokes rustc, so the cargo debug binary is sufficient.
 
 ## M8 — Functions as values (closures, done)
@@ -1901,7 +1901,7 @@ a different series **realizes the pinned compiler as a prebuilt hangar object**
 source build of the compiler; a platform cache miss is E1251, never a silent
 wrong `jet`. A `JET_TOOLCHAIN_EXEC=<version>` env marker guards the re-exec so
 the pinned child runs natively without looping. Under `--offline`/CI an unlocked
-channel is E1250 (run `jet update jet`, commit the lock). Verbs: `jet toolchain`
+channel is E1250 (run `jet update jet`, commit the lock). Verbs: `jet self toolchain`
 (read-only pin/version/status), `jet update jet [<channel>]` (the only place the
 pin moves), `jet init` (writes a `jet:` pin for the running channel by default).
 
@@ -2054,23 +2054,23 @@ helper functions use unqualified `jet_std`/`user_*` paths, so — like
 the entry file, not an imported module file (tracked, not fixed here;
 same gap, same fix when it lands).
 
-## `jet expand` — transparency command (D-EXPANDCLI1, card #183)
+## `jet inspect expand` — transparency command (D-EXPANDCLI1, card #183)
 
 Every "the compiler inferred this for you" mechanism (I8: magic default,
-expert opt-in) needs a way to ask the compiler what it decided. `jet expand`
+expert opt-in) needs a way to ask the compiler what it decided. `jet inspect expand`
 is that one command for all of them — never a second, mechanism-specific
 CLI flag per feature.
 
 ```
-jet expand --facts <lens> <file.jet>   # one lens's facts
-jet expand <file.jet>                  # every lens, grouped, empty ones skipped
+jet inspect expand --facts <lens> <file.jet>   # one lens's facts
+jet inspect expand <file.jet>                  # every lens, grouped, empty ones skipped
 ```
 
 Facts are read straight off the ordinary check pass — never a second
 analysis, never rustc (I2/I3). A lens renders fields already sitting on the
 checked AST (e.g. `Func::is_inline`/`is_inline_always`, validated by the
-time the bundle compiled at all) — the same side-channel `jet semindex`/
-`jet impact` already read, not a parallel pipeline.
+time the bundle compiled at all) — the same side-channel `jet inspect semindex`/
+`jet inspect impact` already read, not a parallel pipeline.
 
 **Floor lenses (this card):**
 
@@ -2081,14 +2081,14 @@ time the bundle compiled at all) — the same side-channel `jet semindex`/
 
 A `refs` lens (D-REF-SHORTHAND1) once reported resolved owners for `&T`
 stored-reference struct fields; D-MEM1/S3 deleted that mechanism outright
-(no stored-borrow fields in v1), and the lens went with it — `jet expand
+(no stored-borrow fields in v1), and the lens went with it — `jet inspect expand
 --facts refs` is an unknown-lens usage error today, like any retired name.
 
 Unknown `--facts <lens>` lists the registered lenses and exits nonzero
 (usage error, not an E-code — it never reaches the diagnostic renderer). A
 file that fails to compile prints the ordinary front-end diagnostics and
-exits nonzero: facts require a clean check, same as `jet semindex`/
-`jet impact`. A clean program with no facts for a lens (or for every lens,
+exits nonzero: facts require a clean check, same as `jet inspect semindex`/
+`jet inspect impact`. A clean program with no facts for a lens (or for every lens,
 bare form) exits 0 — absence of facts is not a failure.
 
 **Extensibility:** lenses live in one static table in `Source/CmdExpand.rs`
@@ -2098,12 +2098,12 @@ subcommand or a new flag (I8).
 
 ## Semantic index, dossier, and codemods (D-SEMINDEX1, D-WD2, D-CODEMOD1)
 
-`jet semindex --json <file.jet>` emits schema v3: definitions, references,
+`jet inspect semindex --json <file.jet>` emits schema v3: definitions, references,
 call edges, effects, and member facts. Member facts stitch fields, variants,
 inline methods, external inherent impl methods, trait impl methods, and trait
 requirements into one stable owner-ordered view.
 
-`jet dossier <file.jet> [Symbol]` renders those facts as a human report;
+`jet inspect dossier <file.jet> [Symbol]` renders those facts as a human report;
 `--json` emits the same lens data. The first shipped lens is the type/member
 dossier. It never re-checks by another path and never invents facts missing
 from semindex.
@@ -2112,7 +2112,7 @@ The LSP exposes scattered-method breadcrumbs as inlay hints at the owning type
 declaration. These are editor-only overlays: they do not edit source and carry
 source links to the real impl method spans.
 
-`jet codemod` supports a first replayable codemod object, encoded as JSON:
+`jet inspect codemod` supports a first replayable codemod object, encoded as JSON:
 
 ## Canvas visual editor prototype (D-BPE-*)
 
@@ -2165,10 +2165,10 @@ errors, and unknown future graph fields may never carry hidden semantics.
 {"name":"RenameReport","entry":"main.jet","operation":"rename","from":"report","to":"summarize"}
 ```
 
-`jet codemod dry-run <object>` prints affected files plus the inverse object.
-`jet codemod apply <object>` rewrites semantic definition/reference spans using
+`jet inspect codemod dry-run <object>` prints affected files plus the inverse object.
+`jet inspect codemod apply <object>` rewrites semantic definition/reference spans using
 the same fix engine as `jet fix` and writes `.jet/codemods/<name>.log.json`
-with inverse rename metadata plus before/after hashes. `jet codemod undo <log>`
+with inverse rename metadata plus before/after hashes. `jet inspect codemod undo <log>`
 checks the apply hash before replaying the inverse rename.
 
 ## Public front-end toolkit API (D-FRONTENDAPI1=A, card #227)
@@ -2223,7 +2223,7 @@ the sparse index line, never a fetchable source tree); an inline ref that
 resolves nowhere is E1253.
 
 A loose selector (`1.4` rather than an exact `1.4.2`) is fine to write —
-rung 0 stays magic — but is L0203: nothing pins it until `jet lock stats.jet`
+rung 0 stays magic — but is L0203: nothing pins it until `jet store lock stats.jet`
 writes a `stats.jet.lock` sidecar (`script_hash` + each dep's resolved
 version and content hash, keyed by the script's own file-content hash so an
 edit goes stale). `jet init stats.jet` lifts the inline refs into a freshly
@@ -2370,8 +2370,8 @@ consume that same checked bundle. `--locked` compares generated input/output
 hashes before committing provenance; drift is E3512 and action outputs roll
 back.
 
-`jet graph <file> --json` and `jet query build <file> --json` return the same
-typed graph without executing actions. `jet explain-build <target|action|file>
+`jet inspect graph <file> --json` and `jet inspect query build <file> --json` return the same
+typed graph without executing actions. `jet inspect explain-build <target|action|file>
 <file>` reports graph and cache provenance. LSP checking uses the same selected
 root signature validation and the same static graph facts, including E3501.
 

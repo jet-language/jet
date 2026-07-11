@@ -16,7 +16,7 @@ statistical budgets use pinned baselines and trend policy.
   variance, artifact provenance, and CI trend rules are inspectable and JSON
   exportable.
 - Hybrid: budgets feed `jet build`, `jet bench`, `jet dev`, `jet prove`, and
-  `jet dossier`; there is one budget model, not separate bench/build policies.
+  `jet inspect dossier`; there is one budget model, not separate bench/build policies.
 
 ## Current Anchors
 
@@ -48,7 +48,7 @@ statistical budgets use pinned baselines and trend policy.
 5. Dev integration: `jet dev` reports budget drift without changing semantics.
 6. CI baseline slice: checked-in baseline artifact with update command and
    hardware identity.
-7. Dossier/prove integration: `jet dossier budget` and `jet prove` include
+7. Dossier/prove integration: `jet inspect dossier budget` and `jet prove` include
    budget facts.
 8. Diagnostics: budget failures get registered codes, what/why/fix text, and
    snapshots.

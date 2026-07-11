@@ -128,7 +128,7 @@ Semantics:
 
 - Bare script may use `use pkg#version`.
 - `jet run script.jet` resolves, locks by file-content hash, and runs.
-- `jet lock script.jet` writes `script.jet.lock`.
+- `jet store lock script.jet` writes `script.jet.lock`.
 - `jet init` lifts inline deps into generated `pkg.jet`.
 - No install-time code execution.
 
@@ -393,7 +393,7 @@ Tests: channel resolves only on update; lock stays exact; CI-unlocked errors;
 ### U22. Hangar disk contract (`D-JPK-GC1=B`, owner-amended 2026-07-03)
 
 Auto-GC ages out unreferenced objects (**30d** default, opportunistic, no
-daemon); manual verb is **`jet clean`** (not `jet gc`), which both
+daemon); manual verb is **`jet clean`** (not `jet store gc`), which both
 garbage-collects and optimizes the hangar (hardlink/dedup, `nix store
 optimise` equivalent) in one pass; honest `jet hangar du`.
 Lockfile/generation-reachable objects are never collected. Zero-`/tmp`
@@ -404,9 +404,9 @@ Tests: unreferenced object aged out at 30d; reachable object kept; optimize
 dedups identical objects and reports bytes saved; `/tmp` stays empty across a
 build+crash; `jet hangar du` matches on-disk bytes.
 
-Cleanup: E2604 fix text in docs/spec/diagnostics.md says `jet gc --force` —
+Cleanup: E2604 fix text in docs/spec/diagnostics.md says `jet store gc --force` —
 rewrite to the `jet clean` spelling and re-bless its snapshot as part of this
-item. Also `jet gc` stub mentions in docs/spec/roadmap.md (E2-M8/M12.2).
+item. Also `jet store gc` stub mentions in docs/spec/roadmap.md (E2-M8/M12.2).
 
 ### U23. No-Nix machines (`D-JPK-NONIX1=A`)
 

@@ -1,6 +1,6 @@
 //! M13 LSP integration tests: scripted JSON transcripts + latency bench.
 //!
-//! Each test in tests/lsp/*.json is replayed against a live `jet lsp` process.
+//! Each test in tests/lsp/*.json is replayed against a live `jet self lsp` process.
 //! The transcript runner:
 //!   - Sends each step's `send` message (or opens a document for `open` steps)
 //!   - Reads the next server message
@@ -564,7 +564,7 @@ mod transcript_parser {
     }
 }
 
-/// Execute one JSON transcript file against a live `jet lsp` process.
+/// Execute one JSON transcript file against a live `jet self lsp` process.
 fn run_json_transcript_file(jet: &std::path::Path, path: &std::path::Path) {
     let _guard = lsp_process_lock().lock().unwrap();
     let content =
@@ -572,12 +572,12 @@ fn run_json_transcript_file(jet: &std::path::Path, path: &std::path::Path) {
     let transcript = transcript_parser::parse(&content);
 
     let mut child = Command::new(jet)
-        .arg("lsp")
+        .args(["self", "lsp"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .expect("spawn jet lsp");
+        .expect("spawn jet self lsp");
 
     let mut stdin = child.stdin.take().expect("stdin");
     let mut stdout = child.stdout.take().expect("stdout");
@@ -649,12 +649,12 @@ fn lsp_initialize_capabilities_have_named_test_coverage() {
     let _guard = lsp_process_lock().lock().unwrap();
 
     let mut child = Command::new(&jet)
-        .arg("lsp")
+        .args(["self", "lsp"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .expect("spawn jet lsp");
+        .expect("spawn jet self lsp");
     let mut stdin = child.stdin.take().expect("stdin");
     let mut stdout = child.stdout.take().expect("stdout");
 
@@ -705,12 +705,12 @@ fn lsp_teaching_autocorrect_let_to_val() {
     let _guard = lsp_process_lock().lock().unwrap();
 
     let mut child = Command::new(&jet)
-        .arg("lsp")
+        .args(["self", "lsp"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .expect("spawn jet lsp");
+        .expect("spawn jet self lsp");
 
     let mut stdin = child.stdin.take().expect("stdin");
     let mut stdout = child.stdout.take().expect("stdout");
@@ -787,12 +787,12 @@ fn lsp_incremental_sync_range_edit_updates_document() {
     let _guard = lsp_process_lock().lock().unwrap();
 
     let mut child = Command::new(&jet)
-        .arg("lsp")
+        .args(["self", "lsp"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .expect("spawn jet lsp");
+        .expect("spawn jet self lsp");
 
     let mut stdin = child.stdin.take().expect("stdin");
     let mut stdout = child.stdout.take().expect("stdout");
@@ -1036,12 +1036,12 @@ fn run_transcript(source: &str, steps: &[TranscriptStep]) {
     let _guard = lsp_process_lock().lock().unwrap();
 
     let mut child = Command::new(&jet)
-        .arg("lsp")
+        .args(["self", "lsp"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .expect("spawn jet lsp");
+        .expect("spawn jet self lsp");
 
     let mut stdin = child.stdin.take().expect("stdin");
     let mut stdout = child.stdout.take().expect("stdout");
@@ -1251,12 +1251,12 @@ fn lsp_completion_uses_local_discovery_index_for_packages_and_options() {
     std::fs::write(&path, source).expect("write LSP source");
 
     let mut child = Command::new(&jet)
-        .arg("lsp")
+        .args(["self", "lsp"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .expect("spawn jet lsp");
+        .expect("spawn jet self lsp");
 
     let mut stdin = child.stdin.take().expect("stdin");
     let mut stdout = child.stdout.take().expect("stdout");
@@ -2023,12 +2023,12 @@ fn run() {
     let uri = "file:///tmp/lsp_semantic_highlight_stage4.jet";
 
     let mut child = Command::new(&jet)
-        .arg("lsp")
+        .args(["self", "lsp"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .expect("spawn jet lsp");
+        .expect("spawn jet self lsp");
 
     let mut stdin = child.stdin.take().expect("stdin");
     let mut stdout = child.stdout.take().expect("stdout");
@@ -2684,12 +2684,12 @@ fn c44_prelude_idents_canonical() {
     );
 }
 
-// ── Latency bench (jet lsp --bench gate) ─────────────────────────────────────
+// ── Latency bench (jet self lsp --bench gate) ─────────────────────────────────────
 
 #[test]
 fn lsp_bench_under_budget() {
     // Run the bench in-process: 10 rounds on the wordcount example, budget 200ms/round.
-    // This mirrors what `jet lsp --bench` does in CI.
+    // This mirrors what `jet self lsp --bench` does in CI.
     let src = include_str!("../examples/features/collections/wordcount.jet");
     let budget_ms = 200u128;
     let rounds = 10usize;

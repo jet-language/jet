@@ -110,7 +110,7 @@ fn e3207(lib: &str, span: Span) -> Diagnostic {
             Syntax::ATTR_BINDGEN
         ),
         format!(
-            "`{}/{}/{}.{}` is written by `{} bind`; hand-written sources use `#{} module`",
+            "`{}/{}/{}.{}` is written by `{} inspect bind`; hand-written sources use `#{} module`",
             Syntax::SOURCE_ROOT_DIR,
             ForeignLanguage::C.bindings_subdir(),
             lib,
@@ -119,7 +119,7 @@ fn e3207(lib: &str, span: Span) -> Diagnostic {
             Syntax::ATTR_EXTERN_MODULE,
         ),
         format!(
-            "edit your overlay file with `#{} module`, or regenerate the cache with `{} bind`",
+            "edit your overlay file with `#{} module`, or regenerate the cache with `{} inspect bind`",
             Syntax::ATTR_EXTERN_MODULE,
             Syntax::BINARY_NAME,
         ),

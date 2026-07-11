@@ -38,7 +38,8 @@ pub mod Render;
 /// One command in the help index.
 #[derive(Debug, Clone)]
 pub struct Entry {
-    pub cmd: &'static str,
+    /// Canonical route after `jet`, including the group for nested actions.
+    pub cmd: String,
     pub category: &'static str,
     pub usage: String,
     pub summary: &'static str,
@@ -96,11 +97,11 @@ fn usage_for(cmd: &str) -> String {
         "env" => "jet env".to_string(),
         "add" => "jet add <dep>".to_string(),
         "remove" => "jet remove <dep>".to_string(),
-        "fetch" => "jet fetch".to_string(),
+        "fetch" => "jet store fetch".to_string(),
         "update" => "jet update [dep]".to_string(),
         "clean" => "jet clean".to_string(),
         "explain" => "jet explain <CODE>".to_string(),
-        "doctor" => "jet doctor".to_string(),
+        "doctor" => "jet self doctor".to_string(),
         "repl" => "jet repl".to_string(),
         "help" => "jet help".to_string(),
         "os" => "jet os <plan|import|build|vm> <host> …".to_string(),
@@ -177,10 +178,11 @@ fn flags_for(cmd: &str) -> Vec<(&'static str, &'static str)> {
 /// entry per `crate::CLI::COMMANDS` row, real flags/category/keywords layered
 /// on top.
 pub fn build_index() -> Vec<Entry> {
-    CLI::COMMANDS
+    let mut entries: Vec<Entry> = CLI::COMMANDS
         .iter()
+        .filter(|c| CLI::is_canonical_top_level(c.name))
         .map(|c| Entry {
-            cmd: c.name,
+            cmd: c.name.to_string(),
             category: category_for(c.name),
             usage: usage_for(c.name),
             summary: c.summary,
@@ -189,7 +191,22 @@ pub fn build_index() -> Vec<Entry> {
             see_also: see_also_for(c.name),
             keywords: keywords_for(c.name),
         })
-        .collect()
+        .collect();
+    for group in CLI::COMMAND_GROUPS {
+        for action in group.actions {
+            entries.push(Entry {
+                cmd: format!("{} {}", group.name, action.name),
+                category: category_for(action.handler.dispatch_word()),
+                usage: format!("jet {} {} [args]", group.name, action.name),
+                summary: action.summary,
+                flags: flags_for(action.handler.dispatch_word()),
+                example: None,
+                see_also: Vec::new(),
+                keywords: keywords_for(action.handler.dispatch_word()),
+            });
+        }
+    }
+    entries
 }
 
 /// A search result: either a command entry (with its fuzzy score and the
@@ -301,7 +318,7 @@ pub fn search(index: &[Entry], query: &str) -> Vec<Hit> {
     }
     hits.sort_by(|a, b| match (a, b) {
         (Hit::Command { score: sa, entry: ea, .. }, Hit::Command { score: sb, entry: eb, .. }) => {
-            sb.cmp(sa).then_with(|| ea.cmd.cmp(eb.cmd))
+            sb.cmp(sa).then_with(|| ea.cmd.cmp(&eb.cmd))
         }
         _ => std::cmp::Ordering::Equal,
     });
@@ -333,9 +350,17 @@ mod tests {
     #[test]
     fn index_covers_every_cli_command() {
         let index = build_index();
-        assert_eq!(index.len(), CLI::COMMANDS.len());
-        for c in CLI::COMMANDS {
+        let expected = CLI::COMMANDS.iter().filter(|c| CLI::is_canonical_top_level(c.name)).count()
+            + CLI::COMMAND_GROUPS.iter().map(|g| g.actions.len()).sum::<usize>();
+        assert_eq!(index.len(), expected);
+        for c in CLI::COMMANDS.iter().filter(|c| CLI::is_canonical_top_level(c.name)) {
             assert!(index.iter().any(|e| e.cmd == c.name), "missing {}", c.name);
+        }
+        for group in CLI::COMMAND_GROUPS {
+            for action in group.actions {
+                let route = format!("{} {}", group.name, action.name);
+                assert!(index.iter().any(|e| e.cmd == route), "missing {route}");
+            }
         }
     }
 
@@ -387,7 +412,7 @@ mod tests {
     #[test]
     fn fuzzy_ranks_exact_prefix_above_loose_subsequence() {
         let (exact, _) = fuzzy_match("run", "jet run").unwrap();
-        let (loose, _) = fuzzy_match("run", "jet devtools — run checked generators").unwrap();
+        let (loose, _) = fuzzy_match("run", "jet self devtools — run checked generators").unwrap();
         assert!(exact > loose, "exact {} should outrank loose {}", exact, loose);
     }
 

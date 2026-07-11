@@ -1,7 +1,7 @@
 //! Package signing tier A — Ed25519 author signatures (card c146, D-PKGSIGN1).
 //!
 //! Tier B (SHA-256 content checksum) is the always-on integrity floor (c122).
-//! Tier A adds an *author* signature: `jet publish` signs the package's
+//! Tier A adds an *author* signature: `jet registry publish` signs the package's
 //! `content_hash` with the publisher's Ed25519 key and pins the public key into
 //! the registry index on first publish (TOFU). Fetchers verify the signature
 //! against the pinned key.
@@ -191,19 +191,19 @@ fn spawn_helper(helper: &Path, command: &str) -> Result<std::process::Output, Di
 // Diagnostics
 // ──────────────────────────────────────────────
 
-/// E1248 — `jet keygen` refused because a key already exists.
+/// E1248 — `jet registry keygen` refused because a key already exists.
 pub fn e1248(path: &Path) -> Diagnostic {
     Diagnostic::error(
         "E1248",
         format!(
-            "`jet keygen` refused: a signing key already exists at `{}`",
+            "`jet registry keygen` refused: a signing key already exists at `{}`",
             path.display()
         ),
         "overwriting it would orphan every package you've published under the old key — consumers \
          who pinned it (TOFU) would see a key-rotation warning on your next publish."
             .to_string(),
-        "use `jet keygen --force` if you're sure (e.g. the old key was compromised), or back it \
-         up first with `jet key backup`."
+        "use `jet registry keygen --force` if you're sure (e.g. the old key was compromised), or back it \
+         up first with `jet registry key backup`."
             .to_string(),
         None,
     )

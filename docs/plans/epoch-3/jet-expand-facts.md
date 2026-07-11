@@ -1,20 +1,20 @@
-# jet expand --facts <lens> — implementation plan
+# jet inspect expand --facts <lens> — implementation plan
 
-Card #183. Three ratified decisions name `jet expand --facts` as their
+Card #183. Three ratified decisions name `jet inspect expand --facts` as their
 transparency surface, and it does not exist anywhere in `crates/jet-driver`
 or `Source/`:
 
-- **D-METHODMACRO1(=A)** — "`jet expand --facts inline` shows every decision"
+- **D-METHODMACRO1(=A)** — "`jet inspect expand --facts inline` shows every decision"
   (per call site: inlined or not).
 - **D-REF-SHORTHAND1(=D)** — "exactly one candidate owner … is inferred and
-  `jet expand --facts refs` materializes it"; ratified code comment: "every
+  `jet inspect expand --facts refs` materializes it"; ratified code comment: "every
   field's resolved owner".
 - **D-DYNARRAY1(=A)** — compiler-tracked view owners, implicitly the same
   surface (views ride the stored-ref machinery, so their owner facts are ref
   facts).
 
-Those texts fix the spelling `jet expand --facts <lens>`. What they leave
-open — bare `jet expand` meaning, lens listing, output wording — is
+Those texts fix the spelling `jet inspect expand --facts <lens>`. What they leave
+open — bare `jet inspect expand` meaning, lens listing, output wording — is
 owner-facing product surface: **gated on D-EXPANDCLI1** (queued). CLI
 skeleton work below that doesn't depend on the open sub-questions (fact
 collection, semindex plumbing) can proceed; the printed surface locks only
@@ -78,9 +78,9 @@ refs — resolved owners (2 facts)
   semindex schema carries — no second encoder. Stable, versioned via
   `SCHEMA_VERSION`.
 
-## Bare `jet expand`
+## Bare `jet inspect expand`
 
-Open sub-question in D-EXPANDCLI1. Recommended: bare `jet expand <file>` runs
+Open sub-question in D-EXPANDCLI1. Recommended: bare `jet inspect expand <file>` runs
 every lens (grouped sections) — show-everything magic default, `--facts`
 narrows. Do not implement bare-expand behavior until ratified; until then it
 follows whatever the missing-flag path does naturally.
@@ -89,7 +89,7 @@ follows whatever the missing-flag path does naturally.
 
 - Unknown lens (`--facts spam`): CLI usage error on stderr, exit
   `USER_ERROR`, listing valid lenses with one-line descriptions — same
-  surface as `jet impact`'s arg errors (`Source/CmdImpact.rs` precedent).
+  surface as `jet inspect impact`'s arg errors (`Source/CmdImpact.rs` precedent).
   Not an E-code: it never reaches `render_diagnostics`.
 - File fails to compile: render the ordinary diagnostics via
   `SemIndexError::Load` handling, exactly as `CmdSemIndex.rs` does; exit
@@ -118,7 +118,7 @@ follows whatever the missing-flag path does naturally.
 - `docs/spec/syntax-decisions.md` tooling section: one entry alongside
   D-SEMINDEX1/D-IMPACT1 once D-EXPANDCLI1 ratifies.
 - The three ratified decisions' plan sections
-  (`jai-adoptions.md` §1 step "jet expand --facts inline", §8 step 4): point
+  (`jai-adoptions.md` §1 step "jet inspect expand --facts inline", §8 step 4): point
   them here instead of "does not exist".
 
 ## Exit criteria
@@ -132,12 +132,12 @@ follows whatever the missing-flag path does naturally.
       pass" shape the plan called for, fewer moving parts. `inline` needed no
       side table at all — `Source/CmdExpand.rs` reads `Func::is_inline`/
       `is_inline_always` straight off the already-checked bundle.
-- [ ] semindex schema v2 carries the facts; `jet semindex --json` unchanged
+- [ ] semindex schema v2 carries the facts; `jet inspect semindex --json` unchanged
       except additive fields + version. **Not done this pass** — card #183's
       ratified floor scope was the CLI surface + the two lenses, plain text
       only (no `--json` for `expand` yet); wiring `refs` into the semindex
       JSON document for LSP inlay hints is follow-on work, not blocking.
-- [x] `jet expand --facts refs <file>` prints resolved owners — both
+- [x] `jet inspect expand --facts refs <file>` prints resolved owners — both
       inferred (sole in-scope candidate) and explicitly `#Ref(label)`ed —
       verified against `examples/features/memory/ref_owner.jet` and
       `ref_field.jet`. No `--json` rendering (plain text only, per the

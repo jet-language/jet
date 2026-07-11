@@ -198,7 +198,7 @@ pub fn enforce(entries: &[PackageEffects], manifest: &PackManifest) -> Vec<Diagn
 
 /// D-EFFBUDGET1: write computed per-package effect provenance (and configured
 /// `grants:`) into an existing lockfile's package entries in place. No-op for
-/// a package name the lockfile doesn't (yet) list — `jet fetch` owns adding
+/// a package name the lockfile doesn't (yet) list — `jet store fetch` owns adding
 /// package entries; this only annotates ones already there.
 pub fn update_lock_provenance(
     lock: &mut crate::Lock::LockFile,

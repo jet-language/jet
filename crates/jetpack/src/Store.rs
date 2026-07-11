@@ -705,7 +705,7 @@ impl CacheLease {
             reason: "race-safe pre-consumer revalidation".to_string(),
             disposition: "Jetpack rejected it before handing any path to the consumer."
                 .to_string(),
-            fix: "Re-run `jet fetch` after `jet clean`. If the problem persists, audit the source before rebuilding."
+            fix: "Re-run `jet store fetch` after `jet clean`. If the problem persists, audit the source before rebuilding."
                 .to_string(),
         }
     }
@@ -1200,7 +1200,7 @@ fn integrity_failure(
         reason: reason.to_string(),
         disposition: "Jetpack quarantined it instead of using or silently repairing it."
             .to_string(),
-        fix: "Re-run `jet fetch` after `jet clean`. If the problem persists, audit the source before rebuilding."
+        fix: "Re-run `jet store fetch` after `jet clean`. If the problem persists, audit the source before rebuilding."
             .to_string(),
     }
 }
@@ -2453,7 +2453,7 @@ mod tests {
             reason: "content digest verification".to_string(),
             disposition: "Jetpack quarantined it instead of using or silently repairing it."
                 .to_string(),
-            fix: "Re-run `jet fetch` after `jet clean`. If the problem persists, audit the source before rebuilding."
+            fix: "Re-run `jet store fetch` after `jet clean`. If the problem persists, audit the source before rebuilding."
                 .to_string(),
         };
         assert_eq!(
@@ -2466,7 +2466,7 @@ mod tests {
         );
         assert_eq!(
             failure.fix(),
-            "Re-run `jet fetch` after `jet clean`. If the problem persists, audit the source before rebuilding."
+            "Re-run `jet store fetch` after `jet clean`. If the problem persists, audit the source before rebuilding."
         );
     }
 }

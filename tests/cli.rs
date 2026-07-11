@@ -123,8 +123,139 @@ fn exit_code_unknown_subcommand_is_usage() {
 }
 
 #[test]
+fn frequency_ring_groups_execute_real_handlers() {
+    let out = Command::new(jet()).args(["self", "man"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&out.stdout).contains(".TH JET 1"));
+
+    let out = Command::new(jet()).args(["inspect", "semindex"]).output().unwrap();
+    assert_ne!(out.status.code(), Some(2), "group must reach semindex handler");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("needs an entry file"));
+
+    let out = Command::new(jet()).args(["store", "generations"]).output().unwrap();
+    assert_ne!(out.status.code(), Some(2), "existing grouped handler must remain live");
+}
+
+#[test]
+fn moved_bare_commands_are_teaching_errors_not_aliases() {
+    for (verb, replacement) in [
+        ("publish", "jet registry publish"),
+        ("semindex", "jet inspect semindex"),
+        ("gc", "jet store gc"),
+        ("doctor", "jet self doctor"),
+        ("lsp", "jet self lsp"),
+    ] {
+        let out = Command::new(jet()).arg(verb).arg("sentinel").output().unwrap();
+        assert_eq!(out.status.code(), Some(2), "{verb} must be rejected");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains("E2101"), "{verb}: {stderr}");
+        assert!(stderr.contains(replacement), "{verb}: {stderr}");
+    }
+
+    let out = Command::new(jet()).args(["lsp", "--json"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    assert!(out.stderr.is_empty());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("\"code\":\"E2101\""));
+    assert!(stdout.contains("jet self lsp --json"));
+}
+
+#[test]
+fn every_moved_bare_action_is_e2101_in_human_and_json_modes() {
+    for group in jet::CLI::COMMAND_GROUPS {
+        for action in group.actions {
+            let replacement = format!("jet {} {}", group.name, action.name);
+            let out = Command::new(jet()).arg(action.name).arg("sentinel").output().unwrap();
+            assert_eq!(out.status.code(), Some(2), "bare {}", action.name);
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            assert!(stderr.contains("E2101") && stderr.contains(&replacement), "{}: {stderr}", action.name);
+
+            let out = Command::new(jet()).args([action.name, "sentinel\\\"quoted", "--json"]).output().unwrap();
+            assert_eq!(out.status.code(), Some(2), "bare {} --json", action.name);
+            assert!(out.stderr.is_empty(), "JSON diagnostic leaked stderr for {}", action.name);
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            assert!(stdout.contains("\"code\":\"E2101\"") && stdout.contains(&replacement), "{}: {stdout}", action.name);
+            assert!(stdout.contains("sentinel\\\\\\\"quoted"), "replacement was not JSON escaped: {stdout}");
+        }
+    }
+}
+
+#[test]
+fn invalid_nested_action_is_e2101_and_json_escaped() {
+    let bad = "bad\\\"action";
+    for group in jet::CLI::COMMAND_GROUPS {
+        let out = Command::new(jet()).args([group.name, bad]).output().unwrap();
+        assert_eq!(out.status.code(), Some(2));
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains("E2101") && stderr.contains(bad), "{stderr}");
+
+        let out = Command::new(jet()).args([group.name, bad, "--json"]).output().unwrap();
+        assert_eq!(out.status.code(), Some(2));
+        assert!(out.stderr.is_empty());
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(stdout.contains("bad\\\\\\\"action"), "invalid JSON escaping: {stdout}");
+        assert!(!stdout.contains("`bad\\\"action`"), "raw quote leaked into JSON: {stdout}");
+    }
+}
+
+#[test]
+fn grouped_e2101_human_and_json_goldens() {
+    let moved = Command::new(jet()).args(["publish", "sentinel"]).output().unwrap();
+    assert_eq!(moved.status.code(), Some(2));
+    assert!(moved.stdout.is_empty());
+    check_snapshot("moved_bare_e2101_human.txt", &String::from_utf8_lossy(&moved.stderr));
+
+    let moved_json = Command::new(jet()).args(["publish", "sentinel\\\"quoted", "--json"]).output().unwrap();
+    assert_eq!(moved_json.status.code(), Some(2));
+    assert!(moved_json.stderr.is_empty());
+    check_snapshot("moved_bare_e2101_json.txt", &String::from_utf8_lossy(&moved_json.stdout));
+
+    let invalid = Command::new(jet()).args(["inspect", "bad\\\"action"]).output().unwrap();
+    assert_eq!(invalid.status.code(), Some(2));
+    assert!(invalid.stdout.is_empty());
+    check_snapshot("invalid_nested_e2101_human.txt", &String::from_utf8_lossy(&invalid.stderr));
+
+    let invalid_json = Command::new(jet()).args(["inspect", "bad\\\"action", "--json"]).output().unwrap();
+    assert_eq!(invalid_json.status.code(), Some(2));
+    assert!(invalid_json.stderr.is_empty());
+    check_snapshot("invalid_nested_e2101_json.txt", &String::from_utf8_lossy(&invalid_json.stdout));
+}
+
+#[test]
+fn group_help_and_man_inventory_every_nested_description() {
+    let man = Command::new(jet()).args(["self", "man"]).output().unwrap();
+    assert_eq!(man.status.code(), Some(0));
+    let man = String::from_utf8_lossy(&man.stdout);
+    for group in jet::CLI::COMMAND_GROUPS {
+        let out = Command::new(jet()).args([group.name, "help"]).output().unwrap();
+        assert_eq!(out.status.code(), Some(0));
+        let help = String::from_utf8_lossy(&out.stdout);
+        assert!(help.contains(group.summary), "{} help missing summary", group.name);
+        for action in group.actions {
+            assert!(help.contains(action.name) && help.contains(action.summary), "{} help missing {}", group.name, action.name);
+            assert!(man.contains(&format!(".B {} {}", group.name, action.name)), "man missing {} {}", group.name, action.name);
+            assert!(man.contains(action.summary), "man missing summary for {} {}", group.name, action.name);
+        }
+    }
+}
+
+#[test]
+fn palette_uses_canonical_nested_routes() {
+    for group in jet::CLI::COMMAND_GROUPS {
+        for action in group.actions {
+            let route = format!("{} {}", group.name, action.name);
+            let out = Command::new(jet()).args(["?", &route]).output().unwrap();
+            assert_eq!(out.status.code(), Some(0));
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            assert!(stdout.contains(&route), "palette missing {route}: {stdout}");
+            assert!(!stdout.contains(&format!("jet {}   ", action.name)), "palette advertised bare moved action {}", action.name);
+        }
+    }
+}
+
+#[test]
 fn jet_install_teaches_jet_fetch() {
-    // `jet install` is not a Jet command; the compiler emits E0043 pointing to `jet fetch`.
+    // `jet install` is not a Jet command; the compiler emits E0043 pointing to `jet store fetch`.
     let out = Command::new(jet()).arg("install").output().unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
@@ -132,8 +263,8 @@ fn jet_install_teaches_jet_fetch() {
         "`jet install` should emit E0043 teaching error:\n{stderr}"
     );
     assert!(
-        stderr.contains("jet fetch"),
-        "`jet install` error should mention `jet fetch`:\n{stderr}"
+        stderr.contains("jet store fetch"),
+        "`jet install` error should mention `jet store fetch`:\n{stderr}"
     );
 }
 
@@ -511,7 +642,7 @@ fn doctor_ok_golden() {
     // On a CI/dev box rustc is present; the report is deterministic except for
     // machine-specific paths and the rustc version, which we scrub.
     let out = Command::new(jet())
-        .arg("doctor")
+        .args(["self", "doctor"])
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
@@ -531,7 +662,7 @@ fn doctor_ok_golden() {
 #[test]
 fn doctor_failure_is_l2101_snapshot() {
     let out = Command::new(jet())
-        .arg("doctor")
+        .args(["self", "doctor"])
         .env("PATH", "")
         .env("NO_COLOR", "1")
         .output()
@@ -551,7 +682,7 @@ fn fetch_without_git_is_e1203_snapshot() {
     )
     .unwrap();
     let out = Command::new(jet())
-        .arg("fetch")
+        .args(["store", "fetch"])
         .current_dir(&dir)
         .env("PATH", "")
         .env("HOME", &dir)
@@ -569,7 +700,7 @@ fn bind_missing_header_is_e3208() {
     let missing = std::env::temp_dir().join("jet_missing_bind_header.h");
     let _ = fs::remove_file(&missing);
     let out = Command::new(jet())
-        .arg("bind")
+        .args(["inspect", "bind"])
         .arg(&missing)
         .env("NO_COLOR", "1")
         .output()
@@ -603,9 +734,9 @@ fn unknown_cross_target_is_e3302() {
 
 #[test]
 fn completions_generate_for_every_shell() {
-    for shell in ["bash", "zsh", "fish"] {
+    for shell in ["bash", "zsh", "fish", "powershell"] {
         let out = Command::new(jet())
-            .arg("completions")
+            .args(["self", "completions"])
             .arg(shell)
             .output()
             .unwrap();
@@ -622,7 +753,7 @@ fn completions_generate_for_every_shell() {
 
 #[test]
 fn man_page_golden() {
-    let out = Command::new(jet()).arg("man").output().unwrap();
+    let out = Command::new(jet()).args(["self", "man"]).output().unwrap();
     let mut s = String::from_utf8_lossy(&out.stdout).into_owned();
     // Scrub the version so the snapshot is stable across releases.
     s = s.replace(env!("CARGO_PKG_VERSION"), "VERSION");
@@ -1023,7 +1154,7 @@ build: { staging: Build.{ optimize: basic } }
     );
 }
 
-// ── D-EXPANDCLI1 (card #183): `jet expand` transparency command ────
+// ── D-EXPANDCLI1 (card #183): `jet inspect expand` transparency command ────
 
 /// Fixture exercising the `inline` lens: an `@Inline` fn and an
 /// `@InlineAlways` method.
@@ -1040,7 +1171,7 @@ fn scrub_fixture(s: &str, fixture: &Path) -> String {
 fn expand_inline_golden() {
     let p = expand_fixture();
     let out = Command::new(jet())
-        .args(["expand", "--facts", "inline"])
+        .args(["inspect", "expand", "--facts", "inline"])
         .arg(&p)
         .env("NO_COLOR", "1")
         .output()
@@ -1058,9 +1189,9 @@ fn expand_inline_golden() {
 #[test]
 fn expand_all_golden() {
     let p = expand_fixture();
-    // Bare `jet expand <file>`: every lens, grouped, magic default.
+    // Bare `jet inspect expand <file>`: every lens, grouped, magic default.
     let out = Command::new(jet())
-        .arg("expand")
+        .args(["inspect", "expand"])
         .arg(&p)
         .env("NO_COLOR", "1")
         .output()
@@ -1079,7 +1210,7 @@ fn expand_all_golden() {
 fn expand_unknown_lens_golden() {
     let p = expand_fixture();
     let out = Command::new(jet())
-        .args(["expand", "--facts", "bogus"])
+        .args(["inspect", "expand", "--facts", "bogus"])
         .arg(&p)
         .env("NO_COLOR", "1")
         .output()
@@ -1095,7 +1226,7 @@ fn expand_unknown_lens_golden() {
 
 #[test]
 fn expand_missing_file_is_user_error() {
-    let out = Command::new(jet()).arg("expand").output().unwrap();
+    let out = Command::new(jet()).args(["inspect", "expand"]).output().unwrap();
     assert_eq!(
         out.status.code(),
         Some(1),
@@ -1113,7 +1244,7 @@ fn expand_missing_file_is_user_error() {
 fn expand_compile_error_reports_ordinary_diagnostics() {
     let p = bad_file(&line!().to_string());
     let out = Command::new(jet())
-        .arg("expand")
+        .args(["inspect", "expand"])
         .arg(&p)
         .env("NO_COLOR", "1")
         .output()
@@ -1191,7 +1322,7 @@ fn stale_manifest_name_payload_jet_is_e1226() {
     let dir = isolated_cwd("stale_payload_jet");
     fs::write(dir.join("payload.jet"), "").unwrap();
     let out = Command::new(jet())
-        .arg("schema")
+        .args(["inspect", "schema"])
         .arg("status")
         .current_dir(&dir)
         .env("NO_COLOR", "1")

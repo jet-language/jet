@@ -30,10 +30,10 @@ for this task is plan files only).
 Confirmed shipped, read-only checks against the tree:
 
 - `D-SEMINDEX1` — `crates/jet-semindex/` (symbols/refs/types/call-graph/
-  effects), `jet semindex --json`. Card `c1oixt2m`, phase `done`.
+  effects), `jet inspect semindex --json`. Card `c1oixt2m`, phase `done`.
 - `D-IMPACT1` — `crates/jet-impact/` (`ImpactReport::analyze`: references,
   call sites, transitive upstream callers / downstream callees over
-  `SemIndex`), CLI-wired as `jet impact <symbol> <query> [--depth] [--json]`
+  `SemIndex`), CLI-wired as `jet inspect impact <symbol> <query> [--depth] [--json]`
   via the root `jet` binary (`Cargo.toml` `[[bin]] name = "jet"` depends on
   `jet-impact`), covered by `tests/impact.rs`.
 - `D-CODEMOD1` referenced as a sibling dependency of D-SEMINDEX1 in
@@ -45,7 +45,7 @@ engineering left to wait on — only the surface-syntax decision itself
 (typed Jet closures over `core.index.SemanticIndex` vs. extending `jet
 impact` with a `--where` predicate vs. a string DSL — the three options
 already drafted and adversarially passed in `D-ASKCODE1`'s ballot record,
-recommendation **A**: extend `jet impact --where <jet-expr>`, no new CLI
+recommendation **A**: extend `jet inspect impact --where <jet-expr>`, no new CLI
 command, no DSL, no I8 violation).
 
 ## Ballot check

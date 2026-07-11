@@ -31,7 +31,7 @@ pub struct SchemaSnapshot {
     pub schema_version: u32,
     pub type_name: String,
     pub published_version: String,
-    /// D-MIGRATE2C: set by `jet schema squash --before <ver>` to re-baseline this
+    /// D-MIGRATE2C: set by `jet inspect schema squash --before <ver>` to re-baseline this
     /// record. When present, the snapshot's `fields` are the *current* authoritative
     /// shape and migration ops for any version `< squashed_before` are no longer
     /// required — the diff treats this shape as the new baseline. `None` for an
@@ -161,7 +161,7 @@ pub fn schema_cache_dir(project_root: &std::path::Path) -> std::path::PathBuf {
 }
 
 /// Load every `<Type>.snapshot` in the project's schema cache, sorted by type
-/// name. Returns `(type_name, snapshot)` pairs. Used by `jet schema status`.
+/// name. Returns `(type_name, snapshot)` pairs. Used by `jet inspect schema status`.
 pub fn load_all_snapshots(project_root: &std::path::Path) -> Vec<SchemaSnapshot> {
     let dir = schema_cache_dir(project_root);
     let mut out = Vec::new();

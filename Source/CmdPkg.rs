@@ -105,7 +105,7 @@ pub(crate) fn run_fetch(locked: bool) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = crate::require_manifest_root(
         &cwd,
-        "error: no `pkg.jet` found — run `jet fetch` inside a project",
+        "error: no `pkg.jet` found — run `jet store fetch` inside a project",
     );
     do_fetch(&root, locked);
 }
@@ -223,7 +223,7 @@ pub(crate) fn run_store_rollback(gen_str: &str) {
                 "rolled back to generation {} (entry hash: {})",
                 g.number, g.entry_hash
             );
-            println!("hint: the store is append-only; run `jet fetch` to restore the generation's packages");
+            println!("hint: the store is append-only; run `jet store fetch` to restore the generation's packages");
         }
         Err(e) => {
             eprintln!("error: {}", e);

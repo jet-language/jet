@@ -58,7 +58,7 @@ fn jet_cmd(args: &[&str], cwd: &Path, store_dir: &Path) -> std::process::Output 
 }
 
 /// Run the jet binary with an explicit set of env vars (used to point
-/// `jet publish`/`jet yank` at a scratch registry via `JET_REGISTRY_URL` and
+/// `jet registry publish`/`jet registry yank` at a scratch registry via `JET_REGISTRY_URL` and
 /// `JET_REGISTRY_CACHE_DIR`).
 fn jet_cmd_env(args: &[&str], cwd: &Path, envs: &[(&str, &str)]) -> std::process::Output {
     let mut cmd = Command::new(jet_bin());
@@ -93,7 +93,7 @@ fn read_index_file(bare: &Path, name: &str) -> Option<String> {
     }
 }
 
-/// Write a minimal project and commit it (clean tree) so `jet publish` clears
+/// Write a minimal project and commit it (clean tree) so `jet registry publish` clears
 /// the dirty-tree gate (E2605).
 fn init_clean_project(dir: &Path, name: &str, version: &str) {
     write(dir, "pkg.jet", &min_manifest(name, version));
@@ -2306,10 +2306,10 @@ fn cli_vendor_dir_flag_relocates() {
         &manifest_with_deps("app", "0.1.0", "    greeter: path@greeter,"),
     );
 
-    let out = jet_cmd(&["vendor", "--vendor-dir", "third_party"], &tmp, &store);
+    let out = jet_cmd(&["registry", "vendor", "--vendor-dir", "third_party"], &tmp, &store);
     assert!(
         out.status.success(),
-        "jet vendor --vendor-dir failed:\n{}",
+        "jet registry vendor --vendor-dir failed:\n{}",
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
@@ -2681,7 +2681,7 @@ fn audit_e2603_on_vulnerable_dep() {
 #[test]
 fn audit_non_critical_is_advisory() {
     // D-SUPPLY1: a non-critical advisory still matches but is advisory-only —
-    // the severity carried back is below Critical, so `jet audit` exits 0.
+    // the severity carried back is below Critical, so `jet inspect audit` exits 0.
     use jet::Publish::{audit_lockfile, parse_advisory_db, Severity};
 
     let lock = make_test_lock("util-lib", "1.0.0", "sha256-ccdd");
@@ -2815,9 +2815,9 @@ fn pre_publish_gate_passes_with_no_breaks_and_minor_bump() {
 
 #[test]
 fn cli_publish_refuses_dirty_git_tree() {
-    // D-PUBLISH1A: `jet publish` must refuse (E2605) when the git working tree
+    // D-PUBLISH1A: `jet registry publish` must refuse (E2605) when the git working tree
     // has uncommitted changes. This test initialises a fresh git repo with one
-    // commit, adds an uncommitted file, then runs `jet publish` and asserts it
+    // commit, adds an uncommitted file, then runs `jet registry publish` and asserts it
     // exits nonzero with E2605 in stderr.
     if !jet_bin().is_file() {
         eprintln!("note: skipping cli_publish_refuses_dirty_git_tree (run `cargo build` first)");
@@ -2854,15 +2854,15 @@ fn cli_publish_refuses_dirty_git_tree() {
     // Add a new uncommitted file → dirty tree.
     write(&tmp, "untracked.jet", "// dirty\n");
 
-    let out = jet_cmd(&["publish"], &tmp, &store);
+    let out = jet_cmd(&["registry", "publish"], &tmp, &store);
     assert!(
         !out.status.success(),
-        "jet publish must fail on a dirty tree"
+        "jet registry publish must fail on a dirty tree"
     );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         stderr.contains("E2605"),
-        "jet publish must cite E2605 for a dirty tree:\n{stderr}"
+        "jet registry publish must cite E2605 for a dirty tree:\n{stderr}"
     );
 
     // With --force it must emit a warning and get past the dirty gate. The
@@ -2872,7 +2872,7 @@ fn cli_publish_refuses_dirty_git_tree() {
     let cache = tmp.join("cache");
     let bogus = format!("file://{}", tmp.join("nonexistent.git").to_str().unwrap());
     let out_force = jet_cmd_env(
-        &["publish", "--force"],
+        &["registry", "publish", "--force"],
         &tmp,
         &[
             ("JET_STORE_DIR", store.to_str().unwrap()),
@@ -2883,7 +2883,7 @@ fn cli_publish_refuses_dirty_git_tree() {
     let stderr_force = String::from_utf8_lossy(&out_force.stderr);
     assert!(
         stderr_force.contains("warning") && stderr_force.contains("uncommitted"),
-        "jet publish --force must warn about uncommitted changes:\n{stderr_force}"
+        "jet registry publish --force must warn about uncommitted changes:\n{stderr_force}"
     );
 
     let _ = fs::remove_dir_all(&tmp);
@@ -2895,7 +2895,7 @@ fn cli_publish_refuses_dirty_git_tree() {
 
 #[test]
 fn cli_publish_pushes_index_and_enforces_immutability_e1234() {
-    // c56 (D-JPK-CACHE1=A / D-VERSION1=A): `jet publish` writes a JSONL line to
+    // c56 (D-JPK-CACHE1=A / D-VERSION1=A): `jet registry publish` writes a JSONL line to
     // the git registry index and pushes it; republishing the same version is
     // refused with E1234 (version immutability).
     if !jet_bin().is_file() {
@@ -2925,7 +2925,7 @@ fn cli_publish_pushes_index_and_enforces_immutability_e1234() {
         ("JET_KEYS_DIR", keys.to_str().unwrap()),
     ];
 
-    let out = jet_cmd_env(&["publish"], &proj, envs);
+    let out = jet_cmd_env(&["registry", "publish"], &proj, envs);
     assert!(
         out.status.success(),
         "publish should succeed:\n{}",
@@ -2943,7 +2943,7 @@ fn cli_publish_pushes_index_and_enforces_immutability_e1234() {
     );
     assert!(index.contains("\"yanked\":false"), "index line:\n{index}");
 
-    // S2/D-MEM1: `jet publish` now unconditionally snapshots the public-fn
+    // S2/D-MEM1: `jet registry publish` now unconditionally snapshots the public-fn
     // surface to `.jet/cache/api/<pkg>.api` — a committed, durable interface
     // contract (not a build artifact). Commit it so the tree is clean again
     // before the republish attempt below (matching real usage: generate,
@@ -2957,7 +2957,7 @@ fn cli_publish_pushes_index_and_enforces_immutability_e1234() {
     }
 
     // Republish the same version → E1234 immutability.
-    let out2 = jet_cmd_env(&["publish"], &proj, envs);
+    let out2 = jet_cmd_env(&["registry", "publish"], &proj, envs);
     assert!(
         !out2.status.success(),
         "republishing an existing version must fail"
@@ -2973,7 +2973,7 @@ fn cli_publish_pushes_index_and_enforces_immutability_e1234() {
 
 #[test]
 fn cli_yank_flips_index_entry() {
-    // c56 (D-VERSION1=A): `jet yank <version>` flips the `yanked` flag on the
+    // c56 (D-VERSION1=A): `jet registry yank <version>` flips the `yanked` flag on the
     // version's index line in place — it never deletes the line.
     if !jet_bin().is_file() {
         eprintln!("note: skipping cli_yank_flips_index_entry (run `cargo build` first)");
@@ -3002,14 +3002,14 @@ fn cli_yank_flips_index_entry() {
         ("JET_KEYS_DIR", keys.to_str().unwrap()),
     ];
 
-    let pubd = jet_cmd_env(&["publish"], &proj, envs);
+    let pubd = jet_cmd_env(&["registry", "publish"], &proj, envs);
     assert!(
         pubd.status.success(),
         "publish should succeed:\n{}",
         String::from_utf8_lossy(&pubd.stderr)
     );
 
-    let yanked = jet_cmd_env(&["yank", "2.0.0", "--message", "regression"], &proj, envs);
+    let yanked = jet_cmd_env(&["registry", "yank", "2.0.0", "--message", "regression"], &proj, envs);
     assert!(
         yanked.status.success(),
         "yank should succeed:\n{}",
@@ -3036,7 +3036,7 @@ fn cli_yank_flips_index_entry() {
 
 #[test]
 fn cli_publish_unreachable_registry_e1235() {
-    // c56: an unreachable registry index makes `jet publish` fail with E1235 —
+    // c56: an unreachable registry index makes `jet registry publish` fail with E1235 —
     // a clean diagnostic, never a raw git stack trace.
     if !jet_bin().is_file() {
         eprintln!("note: skipping cli_publish_unreachable_registry (run `cargo build` first)");
@@ -3063,7 +3063,7 @@ fn cli_publish_unreachable_registry_e1235() {
         ("JET_STORE_DIR", store.to_str().unwrap()),
     ];
 
-    let out = jet_cmd_env(&["publish"], &proj, envs);
+    let out = jet_cmd_env(&["registry", "publish"], &proj, envs);
     assert!(
         !out.status.success(),
         "publish to an unreachable registry must fail"
@@ -3076,7 +3076,7 @@ fn cli_publish_unreachable_registry_e1235() {
 
 #[test]
 fn cli_yank_requires_version_arg() {
-    // E2606: `jet yank` with no version must exit nonzero with E2606.
+    // E2606: `jet registry yank` with no version must exit nonzero with E2606.
     if !jet_bin().is_file() {
         eprintln!("note: skipping cli_yank_requires_version_arg (run `cargo build` first)");
         return;
@@ -3087,8 +3087,8 @@ fn cli_yank_requires_version_arg() {
     fs::create_dir_all(&store).unwrap();
     write(&tmp, "pkg.jet", &min_manifest("mypkg", "1.0.0"));
 
-    let out = jet_cmd(&["yank"], &tmp, &store);
-    assert!(!out.status.success(), "jet yank with no version must fail");
+    let out = jet_cmd(&["registry", "yank"], &tmp, &store);
+    assert!(!out.status.success(), "jet registry yank with no version must fail");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("E2606"), "must cite E2606:\n{stderr}");
 
@@ -3318,7 +3318,7 @@ fn signed_entry(
 
 #[test]
 fn cli_publish_signs_index_and_auto_keygens() {
-    // c146: `jet publish` auto-generates a key on first use, signs by default,
+    // c146: `jet registry publish` auto-generates a key on first use, signs by default,
     // and pins the public key + signature into the index line.
     if !jet_bin().is_file() || !have_git() || !have_cargo() {
         eprintln!("note: skipping cli_publish_signs (need built binary, git, cargo)");
@@ -3343,7 +3343,7 @@ fn cli_publish_signs_index_and_auto_keygens() {
         ("JET_KEYS_DIR", keys.to_str().unwrap()),
     ];
 
-    let out = jet_cmd_env(&["publish"], &proj, envs);
+    let out = jet_cmd_env(&["registry", "publish"], &proj, envs);
     assert!(
         out.status.success(),
         "signed publish should succeed:\n{}",
@@ -3398,7 +3398,7 @@ fn cli_publish_no_sign_leaves_signature_empty() {
         ("JET_KEYS_DIR", keys.to_str().unwrap()),
     ];
 
-    let out = jet_cmd_env(&["publish", "--no-sign"], &proj, envs);
+    let out = jet_cmd_env(&["registry", "publish", "--no-sign"], &proj, envs);
     assert!(
         out.status.success(),
         "--no-sign publish should succeed:\n{}",
@@ -3517,7 +3517,7 @@ fn key_rotation_warns_not_errors() {
 
 #[test]
 fn keygen_refuses_existing_key_e1248() {
-    // c146: `jet keygen` refuses to overwrite an existing key without --force.
+    // c146: `jet registry keygen` refuses to overwrite an existing key without --force.
     if !have_cargo() {
         eprintln!("note: skipping keygen_refuses_existing_key (cargo not found)");
         return;
