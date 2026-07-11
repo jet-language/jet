@@ -1,0 +1,71 @@
+// D-MIGRATE3=A / D-MIGRATE4=A — decode-time migration transparency plus the
+// runtime engine. `decode_traced<T>` sits beside `decode<T>` on every codec
+// (json/csv/toml/yaml share this decode machinery, D-ENC1): it returns a
+// `DecodeResult<T>` — `{ value, migration }` — so a caller can ask whether the
+// record it just decoded arrived as an old schema version.
+//
+// Decoding a `@PublishedSchema` type tries the current shape first; on
+// mismatch the runtime chain detects which historical shape the data matches
+// (by field-name set, newest matching version preferred) and walks the
+// `migration { }` steps forward. Plain `decode` applies the same chain
+// silently; `decode_traced` reports `from` (the source shape's version label)
+// and `steps` ("v1->v2" style, one per step applied). Types without
+// migrations pay nothing.
+use core.encoding.json as json
+
+// A plain type — decode_traced still works, `.migration.migrated` is false.
+@Codable
+struct Point {
+    x: Int
+    y: Int
+}
+
+// A published record, currently at its v2 shape. The migration block is the
+// v1 -> v2 step: v1 records were { id, name } — the block renames `name` to
+// `display_name` and fills `verified` with a default.
+@[PublishedSchema, Codable]
+struct UserRecord {
+    id: Int
+    display_name: String
+    verified: Bool
+}
+
+migration UserRecord {
+    rename name -> display_name
+    add verified: Bool = false
+}
+
+fn run() {
+    p_raw :: "{{\"x\": 3, \"y\": 4}}"
+    p :: json.decode_traced<Point>(p_raw) ?? panic("bad point")
+    print("point: ({p.value.x}, {p.value.y})")
+    print("point migrated: {p.migration.migrated}")
+
+    // Fresh data — already the current shape, nothing to migrate.
+    fresh_raw :: "{{\"id\": 7, \"display_name\": \"Betty\", \"verified\": true}}"
+    fresh :: json.decode_traced<UserRecord>(fresh_raw) ?? panic("bad fresh record")
+    if fresh.migration.migrated {
+        print("record {fresh.value.id} arrived as schema {fresh.migration.from}")
+    } else {
+        print("record {fresh.value.id} arrived fresh, no migration applied")
+    }
+
+    // An old v1 record — decoded through the migration chain.
+    old_raw :: "{{\"id\": 3, \"name\": \"Ada\"}}"
+    r :: json.decode_traced<UserRecord>(old_raw) ?? panic("bad old record")
+    user :: r.value
+    if r.migration.migrated {
+        print("record {user.id} arrived as schema {r.migration.from}")
+    } else {
+        print("record {user.id} arrived fresh, no migration applied")
+    }
+    print("name: {user.display_name}, verified: {user.verified}")
+    print("steps applied: {r.migration.steps.len()}")
+    loop step in r.migration.steps {
+        print("  {step}")
+    }
+
+    // Plain decode walks the same chain silently.
+    quiet :: json.decode<UserRecord>(old_raw) ?? panic("bad quiet record")
+    print("plain decode upgraded too: {quiet.display_name}")
+}

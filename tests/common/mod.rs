@@ -385,6 +385,58 @@ pub fn build_and_run(prefix: &str, name: &str, src: &str) -> (i32, String, Strin
     )
 }
 
+/// Remove every audited generated-prelude module (jet_mem, jet_txn, the
+/// per-platform jet_term/jet_os/jet_atomic shims, jet_gtk, and any
+/// user___c_* CFFI overlay module) before checking generated Rust for I1
+/// violations. Mirrors `golden.rs::strip_vetted_prelude_modules` — kept as a
+/// second, independent implementation so a sema-soundness corpus check does
+/// not depend on golden.rs internals.
+pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
+    fn strip_mod(src: &str, name: &str) -> String {
+        let Some(start) = src.find(&format!("mod {name}")) else {
+            return src.to_string();
+        };
+        let bytes = src.as_bytes();
+        let mut depth = 0usize;
+        let mut i = start;
+        let mut end = src.len();
+        let mut seen_brace = false;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'{' => {
+                    depth += 1;
+                    seen_brace = true;
+                }
+                b'}' => {
+                    depth -= 1;
+                    if seen_brace && depth == 0 {
+                        end = i + 1;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+        format!("{}{}", &src[..start], &src[end..])
+    }
+    let s = strip_mod(rust_code, "jet_mem");
+    let s = strip_mod(&s, "jet_txn");
+    let s = strip_mod(&s, "jet_term_unix");
+    let s = strip_mod(&s, "jet_term_windows");
+    let s = strip_mod(&s, "jet_os_unix");
+    let s = strip_mod(&s, "jet_atomic_windows");
+    let mut s = strip_mod(&s, "jet_gtk");
+    while s.contains("mod user___c_") {
+        let before = s.clone();
+        s = strip_mod(&s, "user___c_");
+        if s == before {
+            break;
+        }
+    }
+    s
+}
+
 /// Remove one audited generated-prelude module before checking user code for
 /// I1 violations. Generated runtime internals may contain vetted unsafe FFI;
 /// user-authored lowering may not.

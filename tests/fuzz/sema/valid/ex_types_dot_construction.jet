@@ -1,0 +1,42 @@
+// D-DOTCTOR1+2 (ratified 2026-06-25): named and inferred dot-construction.
+struct Point {
+    x: Float
+    y: Float
+}
+
+struct Color {
+    r: Int
+    g: Int
+    b: Int
+}
+
+struct Rect {
+    origin: Point
+    size: Point
+}
+
+fn mirror(p: Point) -> Point {
+    return .{x: -p.x, y: p.y}
+}
+
+fn make_red() -> Color {
+    return .{r: 255, g: 0, b: 0}
+}
+
+fn run() {
+    // Named dot-construction: T.{ field: val }
+    p :: Point.{x: 3.0, y: 4.0}
+    print("{p.x} {p.y}")
+    // Type-inferred from return type annotation
+    q :: mirror(p)
+    print("{q.x} {q.y}")
+    // Nested dot-construction
+    r :: Rect.{origin: Point.{x: 0.0, y: 0.0}, size: p}
+    print("{r.size.x} {r.size.y}")
+    // Inferred from declared type
+    c: Color :: .{r: 64, g: 128, b: 200}
+    print("{c.r} {c.g} {c.b}")
+    // Inferred from function return type
+    red :: make_red()
+    print("{red.r} {red.g} {red.b}")
+}

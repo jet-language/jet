@@ -1,0 +1,27 @@
+// D-TESTKIT1=A (c308 pass 2) — `jet fuzz <file> [<test-name>]`.
+//
+// `jet fuzz` targets a parameterized `#Test fn` (the same property-test form
+// `jet test` already runs — D-TEST1) and generates many more inputs than the
+// default 200-case property-test budget, with corpus persistence (a failing
+// input's seed is saved and replayed first next run) and automatic
+// minimization (the same greedy shrink `jet test` uses).
+//
+// Try: `jet fuzz examples/features/tooling/fuzz_demo.jet --iterations=2000`
+fn reverse(xs: [Int]) -> [Int] {
+    out: [Int] := []
+    loop x in xs {
+        out.insert(0, x)
+    }
+    return out
+}
+
+fn run() {
+    print("{reverse([1, 2, 3])}")
+}
+
+// A true invariant: reversing twice returns the original list, for every
+// generated list. `jet fuzz` finds no counterexample (there is none) — the
+// demo shows the clean-run report shape, not a failure.
+#Test fn reverse_twice_is_identity(xs: [Int]) {
+    require_eq(reverse(reverse(xs)), xs)
+}

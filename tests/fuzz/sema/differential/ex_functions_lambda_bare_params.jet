@@ -1,0 +1,19 @@
+// D-LAMBDA-INFER1 (ratified 2026-07-04): a lambda's PARENS may be dropped
+// too, not just the param type — `m => m.hp > 0`, no parens, no type.
+// Legal wherever the expected closure/fn type fixes the single param's
+// type (same one-directional inference as the parenthesized omitted-type
+// form, S46/D-LAMBDAINFER1). The typed/parenthesized form stays available
+// for anywhere the type can't be inferred.
+struct Fighter {
+    hp: Int
+}
+
+fn run() {
+    units :: [Fighter.{hp: 12}, Fighter.{hp: 0}, Fighter.{hp: 5}]
+    alive :: units.filter(u => u.hp > 0)
+    print(alive.len())
+
+    nums :: [1, 2, 3, 4, 5]
+    doubled :: nums.map(n => n * 2)
+    print(doubled)
+}

@@ -1,0 +1,10 @@
+// D-CTX1/D-DEADLINE1: only `allocator`, `logger`, and `deadline` are valid context fields.
+// E0761 fires on an unknown field name.
+use core.mem
+
+fn run() {
+    arena :: mem.Arena.new()
+    #Context(scheduler: arena) {
+        print("should not reach")
+    }
+}

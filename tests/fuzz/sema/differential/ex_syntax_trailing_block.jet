@@ -1,0 +1,14 @@
+// D-TRAILBLOCK1: when a call's final parameter is a zero-parameter function,
+// the call may end with a bare `{ }` block instead of `() => { }` inside the
+// parens. `twice { … }` has no explicit `()` at all — the block is the
+// call's only argument.
+fn twice(f: fn()) {
+    f()
+    f()
+}
+
+fn run() {
+    twice {
+        print("hi")
+    }
+}

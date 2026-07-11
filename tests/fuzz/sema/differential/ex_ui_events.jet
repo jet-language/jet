@@ -1,0 +1,29 @@
+// D-EVENT1: first-party typed Event/Hook values.
+use core.event as event
+
+fn run() {
+    scope :: event.scope()
+    clicked :: event.new<Int>()
+
+    sub :: clicked.on(scope, (n) => { print("clicked {n}") })
+    clicked.once(scope, (n) => { print("once {n}") })
+
+    first :: clicked.emit(1)
+    print(first.summary())
+
+    second :: clicked.emit(2)
+    print(second.summary())
+    print("active {scope.active_count()}")
+
+    sub.unsubscribe()
+    third :: clicked.emit(3)
+    print(third.summary())
+    print("active {scope.active_count()}")
+
+    before_save :: event.hook<Int, String>("allow")
+    before_save.on_priority(scope, 10, (n) => "seen {n}")
+    print(before_save.run(5, "fallback"))
+
+    scope.cancel()
+    print("after cancel {scope.active_count()}")
+}

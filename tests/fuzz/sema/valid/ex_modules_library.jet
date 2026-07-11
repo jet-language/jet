@@ -1,0 +1,80 @@
+// E2-M6: library authoring ergonomics
+// Demonstrates S61 (labels/defaults), S62 (delegation), S77 (field punning),
+// D-LIB2 (default method bodies), D-LIB3 (Fallible ? conversion).
+// --- S61: argument labels and trailing defaults ---
+fn greet(name: String, loud: Bool = false) -> String {
+    if loud {
+        return "HELLO {name}!"
+    }
+    return "hello {name}."
+}
+
+// --- D-LIB2: trait with a default method body ---
+trait Greetable {
+    fn greeting(self) -> String
+    fn announce(self) -> String {
+        g :: self.greeting()
+        return "[ {g} ]"
+    }
+}
+
+struct Person {
+    name: String
+}
+
+impl Person.Greetable {
+    fn greeting(self) -> String {
+        n :: self.name
+        return "hi, I'm {n}"
+    }
+}
+
+// `announce` uses the default from the trait
+// --- S77: field punning ---
+struct Point {
+    x: Int
+    y: Int
+}
+
+fn make_point(x: Int, y: Int) -> Point {
+    return Point.{x: x, y: y}  // S77 puns: x:x, y:y
+}
+
+// --- S62: trait delegation ---
+trait Logger {
+    fn log(self, msg: String)
+}
+
+struct ConsoleLogger {
+    prefix: String
+}
+
+impl ConsoleLogger.Logger {
+    fn log(self, msg: String) {
+        p :: self.prefix
+        print("{p}: {msg}")
+    }
+}
+
+struct App {
+    logger: ConsoleLogger
+}
+
+impl App.Logger using logger  // S62: forwards Logger methods to `logger`
+
+fn run() {
+    // S61 labels + defaults
+    print(greet("world"))
+    print(greet("world", true))
+    // D-LIB2 default method body
+    p :: Person.{name: "Ada"}
+    print(p.greeting())
+    print(p.announce())
+    // S77 field punning
+    pt :: make_point(3, 4)
+    print(pt.x)
+    print(pt.y)
+    // S62 delegation
+    app :: App.{logger: ConsoleLogger.{prefix: "INFO"}}
+    app.log("delegation works")
+}

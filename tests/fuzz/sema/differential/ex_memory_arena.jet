@@ -1,0 +1,36 @@
+// D-ALLOC1 (ratified 2026-06-19): explicit arena allocators under `core.mem`.
+// Four allocators: Arena, Bump, Pool, Fixed — all under `core.mem.alloc`.
+// No `#Unsafe` needed; `use core.mem` is the opt-in gate (E3102 if absent).
+use core.mem
+
+fn run() {
+    // Arena: general-purpose grow-only allocator.
+    arena :: mem.Arena.new()
+    x :: arena.alloc(42)
+    print(x)
+    // Arena with capacity hint.
+    sized :: mem.Arena.new(capacity: 4096)
+    s :: sized.alloc("hello")
+    print(s)
+    // reset keeps the backing buffer; the arena is reusable.
+    arena.reset()
+    y :: arena.alloc(99)
+    print(y)
+    // Bump: alias for Arena (append-only, O(1) alloc).
+    bump :: mem.Bump.new()
+    b :: bump.alloc(7)
+    print(b)
+    // Pool: fixed-slot slab allocator.
+    pool :: mem.Pool.new(slots: 8)
+    p :: pool.alloc(3)
+    print(p)
+    // Fixed: static backing buffer (stack-only, no heap).
+    fixed :: mem.Fixed.new(size: 256)
+    f :: fixed.alloc(1)
+    print(f)
+    // free returns the backing memory to the OS / releases the buffer.
+    arena.free()
+    bump.free()
+    pool.free()
+    fixed.free()
+}

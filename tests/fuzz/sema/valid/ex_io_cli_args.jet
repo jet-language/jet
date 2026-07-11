@@ -1,0 +1,19 @@
+// D-CLI1 (S-CLI1): `jet run file.jet -- arg1 arg2` forwards everything after
+// `--` to the program verbatim. The program reads them through `io.args()`.
+// argv[0] is the binary name; forwarded tokens follow in order.
+//
+// Run with:  jet run examples/features/io/cli_args.jet -- hello world
+// Expect:    args.len() = 3   (argv[0] + two forwarded tokens)
+//            args.at(1) = hello
+//            args.at(2) = world
+//
+// The golden test runs this binary directly (no extra args), so the no-args
+// branch exercises the basic io.args() plumbing without requiring special args.
+use core.io as io
+
+fn run() {
+    args :: io.args()
+    // When run with no extra args (as the golden test does), len == 1 (just argv[0]).
+    // When run via `jet run 64_cli_args.jet -- hello world`, len == 3.
+    print(args.len())
+}

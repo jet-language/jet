@@ -1,0 +1,23 @@
+// 56 — typed CSV decode → struct → JSON (D-SERDE; the c89+c90 pipeline).
+// `csv.decode<Sale>` maps columns to fields by header name; one derive then
+// re-emits the same values as JSON.
+use core.encoding.csv as csv
+use core.encoding.json as json
+
+@Codable
+struct Sale {
+    item: String
+    qty: Int
+}
+
+fn run() {
+    raw :: "item,qty\npen,3\nink,5"
+    sales :: csv.decode<Sale>(raw) ?? panic("bad csv")
+    total := 0
+    loop s in sales {
+        total = total + s.qty
+    }
+    print("rows: {sales.len()}")
+    print("total qty: {total}")
+    print(json.to_string(sales))
+}

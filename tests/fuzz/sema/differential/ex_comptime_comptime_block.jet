@@ -1,0 +1,21 @@
+// D-CTMARKER1 (ratified 2026-06-25, piece 2): `comptime { … }` execution block.
+// Runs at build time via the comptime interpreter; erases entirely — no runtime
+// Rust is emitted (I3). A block-local comptime binding can be spliced into
+// runtime code with `$name` after the block.
+comptime LIMIT = 1000
+
+comptime BASE = 10
+
+fn run() {
+    // Build-time assertion: verify constants are valid before compiling.
+    comptime {
+        comptime ratio = LIMIT / BASE
+        if ratio < 1 { panic("LIMIT must be >= BASE") }
+    }
+    // The block ran at build time and produced no runtime code. Its comptime
+    // binding leaks into the surrounding comptime scope, so `$ratio` splices a
+    // runtime literal.
+    print("limit: {LIMIT}")
+    print("base: {BASE}")
+    print("ratio: {$ratio}")
+}

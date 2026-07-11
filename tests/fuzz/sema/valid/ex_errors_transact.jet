@@ -1,0 +1,90 @@
+// 110 — transaction blocks (D-TXN1–D-TXN4 + D-TXN-ROLLBACK).
+// `#Transact(name) { … }` opens a transaction. Three rollback layers (D-TXN-ROLLBACK):
+//   (1) auto-snapshot  — every value the block mutates is snapshotted on entry and
+//       restored on a `?`-failure. Magic out of the box, zero annotation.
+//   (3) `name.on_rollback(() => { … })` — an explicit hand-written undo, the mirror of
+//       `on_commit`: Drop-backed, runs LIFO on a `?`-failure, dropped on a clean commit.
+// `name.on_commit(() => { … })` runs LIFO on a clean commit, dropped on a `?`-failure.
+// An irreversible effect (Net/Fs/Exec) directly in the block is rejected (E0746).
+enum Fail {
+    Empty
+    Insufficient
+}
+
+// A clean transaction: both commit hooks fire LIFO after the block commits.
+fn place_order(items: Int) -> Int ? Fail {
+    #Transact(order) {
+        print("reserving stock")
+        order.on_commit(() => {
+            print("commit hook 1: charge card")
+        })
+        order.on_commit(() => {
+            print("commit hook 2: send receipt")
+        })
+        if items == 0 {
+            // `?`-failure: the block never commits, so the hooks are dropped un-run.
+            return err(Fail.Empty)
+        }
+        print("stock reserved")
+    }
+    return ok(items)
+}
+
+// Layer 1 (auto-snapshot): a money transfer over caller-owned balances. Debit `from`,
+// then a `?`-failure while crediting `to`. The auto-snapshot restores `from` (and `to`)
+// to their pre-block values — so the caller observes the balances unchanged after a
+// failed transfer, with zero rollback annotation.
+fn transfer(from: &Int, to: &Int, amount: Int) -> Int ? Fail {
+    #Transact(tx) {
+        from -= amount  // debit — `from` auto-snapshotted on entry
+        to += amount  // credit — `to` auto-snapshotted on entry
+        if amount > 100 {
+            // `?`-failure mid-transfer: the snapshots of `from`/`to` are restored.
+            return err(Fail.Insufficient)
+        }
+    }
+    return ok(amount)
+}
+
+// Layer 3 (explicit on_rollback): the author writes the undo by hand.
+fn reserve_seat(ok_path: Bool) -> Int ? Fail {
+    #Transact(booking) {
+        print("seat held")
+        booking.on_rollback(() => {
+            print("rollback hook: release seat")
+        })
+        if !ok_path {
+            return err(Fail.Empty)
+        }
+        print("seat confirmed")
+    }
+    return ok(1)
+}
+
+fn run() {
+    print("=== success path ===")
+    n :: place_order(3) ?? (-1)
+    print(n)
+    print("=== failure path (commit hooks dropped) ===")
+    m :: place_order(0) ?? (-1)
+    print(m)
+    print("=== auto-snapshot: clean transfer ===")
+    alice: Int := 100
+    bob: Int := 0
+    a :: transfer(&alice, &bob, 40) ?? (-1)
+    print(alice)  // 60
+    print(bob)  // 40
+    print("=== auto-snapshot: failed transfer restores balances ===")
+    carol: Int := 100
+    dave: Int := 0
+    b :: transfer(&carol, &dave, 150) ?? (-1)
+    print(carol)  // 100 (debit undone)
+    print(dave)  // 0   (credit undone)
+    print(b)  // -1  (the `??` default)
+    print("=== explicit on_rollback: success (hook dropped) ===")
+    c :: reserve_seat(true) ?? (-1)
+    print(c)
+    print("=== explicit on_rollback: failure (hook fires) ===")
+    d :: reserve_seat(false) ?? (-1)
+    print(d)
+}

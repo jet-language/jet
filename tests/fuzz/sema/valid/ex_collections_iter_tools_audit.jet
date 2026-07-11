@@ -1,0 +1,56 @@
+// D-ITERTOOLS1=A: collection breadth and iterator adapter audit.
+fn run() {
+    nums := [1, 2, 3, 4]
+    print(nums.sum())
+    print(nums.product())
+    print(nums.min())
+    print(nums.max())
+    print([[1, 2], [3], [4, 5]].flatten())
+    print([1, 2, 3].intersperse(0))
+
+    pairs := ["a", "bb", "c"].zip([1, 2, 3])
+    split := pairs.unzip()
+    print(split.a)
+    print(split.b)
+
+    counts := ["ant", "bee", "ape", "bat"].count_by((s: String) => s.slice(0, 0))
+    print(counts.keys())
+    print(counts.values())
+
+    ss: SortedSet<Int> := SortedSet.from([3, 1, 2, 3])
+    ss.add(4)
+    ss.remove(2)
+    print(ss.to_list())
+    print(ss.first())
+    print(ss.last())
+
+    pq: PriorityQueue<Int> := PriorityQueue.from([4, 1, 7, 3])
+    pq.push(5)
+    print(pq.peek())
+    print(pq.pop())
+    print(pq.to_sorted_list())
+
+    cache: Lru<String, Int> := Lru.new(2)
+    cache.put("a", 1)
+    cache.put("b", 2)
+    print(cache.get("a"))
+    cache.put("c", 3)
+    print(cache.contains_key("b"))
+    print(cache.keys())
+
+    bits: BitSet := BitSet.new()
+    bits.add(1)
+    bits.add(4)
+    bits.add(1)
+    print(bits.to_list())
+    print(bits.count())
+    print(bits.len())
+
+    b: ByteBuffer := ByteBuffer.new()
+    one: U8 :: 1
+    word: U16 :: 0x0203
+    b.write_u8(one)
+    b.write_u16_be(word)
+    b.write_bytes([4, 5])
+    print(b.to_bytes())
+}

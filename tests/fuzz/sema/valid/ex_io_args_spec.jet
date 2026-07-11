@@ -1,0 +1,25 @@
+// D-ARGS1 (ratified 2026-06-22, option A): declarative CLI arg parsing.
+// Builder spec: args.spec().flag(…).option(…).positional(…)
+// Parsed against io.args() → typed values + auto --help + teaching errors.
+//
+// Run with extra args:  jet run examples/features/io/args_spec.jet -- --verbose hello
+// Golden test (no extra args) uses a spec with no required positionals so parse
+// always succeeds and exercises each query method.
+use core.args as args
+use core.io as io
+
+fn run() {
+    spec :: args.spec()
+        .flag("verbose", "print extra detail")
+        .flag("help", "show this help and exit")
+        .option("output", "write result to FILE", "FILE")
+    parsed :: spec.parse(io.args()) ?? panic("arg parse failed")
+    if parsed.flag("help") {
+        print(spec.help())
+    } else {
+        verbose :: parsed.flag("verbose")
+        out :: parsed.option("output")
+        print(verbose)
+        print(out ?? "none")
+    }
+}

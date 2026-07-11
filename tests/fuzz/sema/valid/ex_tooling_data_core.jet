@@ -1,0 +1,29 @@
+// Typed Core data slice (D-WD9, D-DATA-SURFACE1).
+use core.data as data
+
+@Codable
+struct Ticket {
+    team: String
+    minutes: Float
+}
+
+fn run() {
+    raw :: "team,minutes\nCore,4.0\nTools,5.0\nCore,8.0\nTools,7.0"
+    rows :: data.csv<Ticket>(raw) ?? panic("bad csv")
+
+    print("rows: {data.count(rows)}")
+    groups :: data.group_mean(rows, (t) => t.team, (t) => t.minutes)
+    loop g in groups {
+        print("{g.key}: count={g.count} sum={g.sum} mean={g.mean}")
+    }
+
+    values :: [2.0, 4.0, 6.0]
+    print("series mean: {data.mean(values)}")
+
+    counts :: data.group_count(rows, (t) => t.team)
+    print(data.bar_text(counts))
+    print("svg bytes: {data.bar_svg(counts).len()}")
+
+    status :: data.status()
+    print("status: {status[0].step} {status[0].path}")
+}

@@ -1,0 +1,29 @@
+// D-DBG1 / D-DBG3 — a small program you can step through with `jet debug`.
+//
+// Run it normally:           jet run examples/features/tooling/debug.jet
+// Step through it line by line:  jet debug examples/features/tooling/debug.jet
+//
+// At the `(jet)` prompt the lldb-familiar verbs work:
+//   step / s     run the next line, descending into calls
+//   next / n     run the next line, stepping over calls
+//   finish / f   run to the end of the current function
+//   continue / c run to the next breakpoint (or the end)
+//   break N      stop on line N      print X  show a local
+//   locals       show every local    backtrace  the Jet call stack
+//   help         list the verbs      quit       end the session
+//
+// Each paused line shows a `<- here` caret and a one-line `locals:` dump, all in
+// Jet terms — the debugger never surfaces the generated Rust (I2).
+fn sum_to(n: Int) -> Int {
+    total := 0
+    loop i in 1..n {
+        total += i
+    }
+    return total
+}
+
+fn run() {
+    a := 5
+    s := sum_to(a)
+    print("sum 1..{a} is {s}")
+}
