@@ -6,8 +6,16 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 
 fn run_pty(keys: &[u8], color: &str, no_color: bool) -> String {
+    run_pty_sized(keys, color, no_color, 24, 120)
+}
+
+fn run_pty_sized(keys: &[u8], color: &str, no_color: bool, rows: usize, cols: usize) -> String {
     let jet = env!("CARGO_BIN_EXE_jet");
-    let shell_line = format!("'{}' '?' '--color={}'", jet.replace('\'', "'\\''"), color);
+    let shell_line = format!(
+        "stty rows {rows} cols {cols}; exec '{}' '?' '--color={}'",
+        jet.replace('\'', "'\\''"),
+        color
+    );
     let mut command = Command::new("script");
     command.args(["-qfec", &shell_line, "/dev/null"])
         .env_remove("NO_COLOR").env_remove("FORCE_COLOR")
@@ -50,5 +58,17 @@ fn f1_uses_alt_screen_and_escape_restores_palette() {
 #[test]
 fn f1_search_opens_verbatim_error_code_page() {
     let transcript = run_pty(b"\x1bOPE0102\x1b\x1b", "never", false);
-    assert!(transcript.contains("E0102 · code reference"), "F1 E-code search missed shared index:\n{transcript}");
+    let ex = jet::Explain::lookup("E0102").unwrap();
+    let canonical = jet::Explain::render(&ex, false);
+    let normalized = transcript.replace('\r', "");
+    assert!(normalized.contains(&canonical), "F1 page diverged from canonical Explain bytes:\n{transcript}");
+}
+
+#[test]
+fn short_f1_viewport_keeps_later_selection_visible_without_scrolling_terminal() {
+    let mut keys = b"\x1bOP".to_vec();
+    keys.extend(std::iter::repeat_n(b"\x1b[B".as_slice(), 9).flatten());
+    keys.extend_from_slice(b"\x1b\x1b");
+    let transcript = run_pty_sized(&keys, "never", false, 8, 60);
+    assert!(transcript.contains(">   bench"), "later selected row clipped at 8x60:\n{transcript}");
 }

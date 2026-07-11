@@ -5,8 +5,6 @@
 //! behavior is unit-testable without a real pty (card #360 test plan).
 
 use crate::Explain::Explanation;
-use crate::Syntax::BINARY_NAME;
-
 use super::{Entry, Hit};
 
 const MIN_WIDTH: usize = 24;
@@ -337,35 +335,36 @@ pub fn render_detail(entry: &Entry, width: usize, color: bool) -> String {
     out
 }
 
-/// The verbatim diagnostic code page (I4) — words come straight from
-/// `crate::Explain::Explanation`, never reworded for the box.
-pub fn render_code_page(ex: &Explanation, width: usize, color: bool) -> String {
+/// Canonical diagnostic page. Byte-for-byte the same text as `jet explain`;
+/// terminal viewport layout must never reconstruct or summarize it.
+pub fn render_code_page(ex: &Explanation, color: bool) -> String {
+    crate::Explain::render(ex, color)
+}
+
+/// Fixed-height viewport over canonical text. Long source lines wrap without
+/// dropping bytes; `scroll` exposes every wrapped row without terminal scroll.
+pub fn render_text_viewport(text: &str, width: usize, height: usize, scroll: usize) -> String {
     let width = w(width);
-    let mut out = String::new();
-    out.push_str(&top(width, &format!("{} · code reference", ex.code)));
-    out.push('\n');
-    let err_label = if color { "\x1b[1;31mError\x1b[0m" } else { "Error" };
-    let what = ex.what.as_deref().unwrap_or(&ex.meaning);
-    out.push_str(&row(width, &format!("{} [{}]: {}", err_label, ex.code, what), false));
-    out.push('\n');
-    if let Some(why) = &ex.why {
-        out.push_str(&row(width, &format!(" Why: {}", why), false));
-        out.push('\n');
+    let height = height.max(1);
+    let mut rows = Vec::new();
+    for line in text.lines() {
+        if line.is_empty() {
+            rows.push(String::new());
+            continue;
+        }
+        let mut rest = line;
+        while !rest.is_empty() {
+            let split = rest.char_indices().nth(width).map(|(i, _)| i).unwrap_or(rest.len());
+            rows.push(rest[..split].to_string());
+            rest = &rest[split..];
+        }
     }
-    if let Some(fix) = &ex.fix {
-        out.push_str(&row(width, &format!(" Fix: {}", fix), false));
-        out.push('\n');
-    }
-    out.push_str(&mid(width));
-    out.push('\n');
-    out.push_str(&row(
-        width,
-        &format!("run `{} explain {}` for the full essay · F1 reference · Esc close", BINARY_NAME, ex.code),
-        false,
-    ));
-    out.push('\n');
-    out.push_str(&bottom(width));
-    out
+    let max_start = rows.len().saturating_sub(height);
+    let start = scroll.min(max_start);
+    (0..height)
+        .map(|offset| rows.get(start + offset).cloned().unwrap_or_else(|| " ".to_string()))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// The F1 two-pane reference (alt-screen): a category tree on the left,
@@ -380,20 +379,22 @@ pub fn render_reference(
     width: usize,
     height: usize,
     color: bool,
+    query: &str,
 ) -> String {
     let width = w(width).max(50);
     let height = height.max(6);
     let left_width = (width / 3).max(18);
-    let right_width = width - left_width - 1;
+    let right_width = width - left_width - 2;
 
     let header = if color {
-        "\x1b[36;1mjet ?\x1b[0m reference".to_string()
+        format!("\x1b[36;1mjet ?\x1b[0m reference{}", if query.is_empty() { String::new() } else { format!(" · search: {query}") })
     } else {
-        "jet ? reference".to_string()
+        format!("jet ? reference{}", if query.is_empty() { "".to_string() } else { format!(" · search: {query}") })
     };
-    let mut lines = vec![header];
+    let mut lines = vec![pad(&header, width)];
 
     let mut left_rows: Vec<String> = Vec::new();
+    let mut selected_row = None;
     for (ci, cat) in super::CATEGORIES.iter().enumerate() {
         let marker = if ci == selected_category { "▾" } else { "▸" };
         left_rows.push(format!("{} {}", marker, cat));
@@ -401,6 +402,9 @@ pub fn render_reference(
             for e in index.iter().filter(|e| &e.category == cat) {
                 let sel = selected_entry.map(|s| s.cmd) == Some(e.cmd);
                 let prefix = if sel { "> " } else { "  " };
+                if sel {
+                    selected_row = Some(left_rows.len());
+                }
                 left_rows.push(format!("{}  {}", prefix, e.cmd));
             }
         }
@@ -415,12 +419,16 @@ pub fn render_reference(
     };
 
     let body_rows = height.saturating_sub(2);
+    let left_start = selected_row
+        .map(|row| row.saturating_sub(body_rows.saturating_sub(1)))
+        .unwrap_or(0)
+        .min(left_rows.len().saturating_sub(body_rows));
     for i in 0..body_rows {
-        let l = left_rows.get(i).map(|s| pad(s, left_width)).unwrap_or_else(|| " ".repeat(left_width));
-        let r = right_rows.get(i).cloned().unwrap_or_default();
+        let l = left_rows.get(left_start + i).map(|s| pad(s, left_width)).unwrap_or_else(|| " ".repeat(left_width));
+        let r = pad(right_rows.get(i).map(String::as_str).unwrap_or(""), right_width);
         lines.push(format!("│{}│{}", l, r));
     }
-    lines.push("↑↓ move · → into · ⏎ prefill shell · Esc back to overlay".to_string());
+    lines.push(pad("↑↓ move · → into · ⏎ prefill shell · Esc back to overlay", width));
     lines.join("\n")
 }
 
@@ -490,12 +498,8 @@ mod tests {
     #[test]
     fn code_page_is_verbatim_from_explain() {
         let ex = crate::Explain::lookup("E0102").unwrap();
-        let out = render_code_page(&ex, 70, false);
-        if let Some(what) = &ex.what {
-            for word in what.split_whitespace().take(3) {
-                assert!(out.contains(word), "code page dropped word {:?}", word);
-            }
-        }
+        assert_eq!(render_code_page(&ex, false), crate::Explain::render(&ex, false));
+        assert_eq!(render_code_page(&ex, true), crate::Explain::render(&ex, true));
     }
 
     #[test]
@@ -509,8 +513,31 @@ mod tests {
     #[test]
     fn reference_view_has_header_and_footer() {
         let index = build_index();
-        let out = render_reference(&index, 0, index.first(), 80, 12, false);
+        let out = render_reference(&index, 0, index.first(), 80, 12, false, "run");
         assert!(out.starts_with("jet ? reference"));
+        assert!(out.contains("search: run"));
         assert!(out.contains("Esc back to overlay"));
+        assert_eq!(out.lines().count(), 12);
+        assert!(out.lines().all(|line| cols(line) == 80));
+    }
+
+    #[test]
+    fn short_reference_view_scrolls_selected_left_row_into_view() {
+        let index = build_index();
+        let category = super::super::CATEGORIES.iter().position(|c| *c == "Reference").unwrap();
+        let selected = index.iter().filter(|e| e.category == "Reference").last().unwrap();
+        let out = render_reference(&index, category, Some(selected), 60, 8, false, "");
+        assert_eq!(out.lines().count(), 8);
+        assert!(out.contains(&format!(">   {}", selected.cmd)), "selected row clipped:\n{out}");
+        assert!(out.lines().all(|line| cols(line) == 60));
+    }
+
+    #[test]
+    fn canonical_code_viewport_never_exceeds_requested_rows_or_columns() {
+        let ex = crate::Explain::lookup("E0102").unwrap();
+        let canonical = render_code_page(&ex, false);
+        let out = render_text_viewport(&canonical, 50, 8, 0);
+        assert_eq!(out.lines().count(), 8);
+        assert!(out.lines().all(|line| cols(line) <= 50));
     }
 }

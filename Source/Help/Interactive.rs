@@ -54,10 +54,18 @@ impl Drop for AltScreen {
 /// frame's line count, to feed back in as `prev_lines` next call.
 fn redraw(prev_lines: usize, frame: &str) -> usize {
     if prev_lines > 0 {
-        eprint!("\x1b[{}A\r\x1b[J", prev_lines);
+        eprint!("\r");
+        if prev_lines > 1 {
+            eprint!("\x1b[{}A", prev_lines - 1);
+        }
+        eprint!("\x1b[J");
     }
-    for line in frame.lines() {
-        eprint!("{}\r\n", line);
+    let mut lines = frame.lines().peekable();
+    while let Some(line) = lines.next() {
+        eprint!("{}", line);
+        if lines.peek().is_some() {
+            eprint!("\r\n");
+        }
     }
     io::stderr().flush().ok();
     frame.lines().count()
@@ -93,6 +101,7 @@ pub fn run(color: bool) -> io::Result<()> {
     let mut ref_category: usize = 0;
     let mut ref_entry: Option<usize> = None; // index into `index`, filtered to ref_category
     let mut ref_query = String::new();
+    let mut ref_scroll = 0usize;
     let mut alt: Option<AltScreen> = None;
     let mut prev_lines = 0usize;
 
@@ -128,6 +137,7 @@ pub fn run(color: bool) -> io::Result<()> {
                     ref_entry = selected_category_index(&index, cat_selected, cat_entry)
                         .or_else(|| entries_in_category(&index, cat_selected).first().copied());
                     ref_query.clear();
+                    ref_scroll = 0;
                     prev_lines = 0;
                 }
             }
@@ -139,6 +149,7 @@ pub fn run(color: bool) -> io::Result<()> {
             },
             Key::Backspace if matches!(mode, Mode::Reference) => {
                 ref_query.pop();
+                ref_scroll = 0;
                 apply_reference_search(&index, &ref_query, &mut ref_category, &mut ref_entry);
             }
             Key::Backspace => {
@@ -154,6 +165,7 @@ pub fn run(color: bool) -> io::Result<()> {
             }
             Key::Char(c) if matches!(mode, Mode::Reference) => {
                 ref_query.push(c);
+                ref_scroll = 0;
                 apply_reference_search(&index, &ref_query, &mut ref_category, &mut ref_entry);
             }
             Key::Char('q') if query.is_empty() && matches!(mode, Mode::Categorized) => {
@@ -165,6 +177,12 @@ pub fn run(color: bool) -> io::Result<()> {
                 hits = search(&index, &query);
                 res_selected = 0;
                 mode = Mode::Results;
+            }
+            Key::Up if matches!(mode, Mode::Reference) && reference_code(&index, &ref_query).is_some() => {
+                ref_scroll = ref_scroll.saturating_sub(1);
+            }
+            Key::Down if matches!(mode, Mode::Reference) && reference_code(&index, &ref_query).is_some() => {
+                ref_scroll = ref_scroll.saturating_add(1);
             }
             Key::Up => move_selection(&mut mode, &mut cat_selected, &mut cat_entry, &hits, &mut res_selected, &index, &mut ref_category, &mut ref_entry, -1),
             Key::Down => move_selection(&mut mode, &mut cat_selected, &mut cat_entry, &hits, &mut res_selected, &index, &mut ref_category, &mut ref_entry, 1),
@@ -182,7 +200,7 @@ pub fn run(color: bool) -> io::Result<()> {
             Key::Enter => {
                 if matches!(mode, Mode::Categorized) && cat_entry.is_none() {
                     cat_entry = Some(0);
-                    frame = render_current(&mode, &index, cat_selected, cat_entry, &query, &hits, res_selected, ref_category, ref_entry, &ref_query, width, height, color);
+                    frame = render_current(&mode, &index, cat_selected, cat_entry, &query, &hits, res_selected, ref_category, ref_entry, &ref_query, ref_scroll, width, height, color);
                     prev_lines = redraw(prev_lines, &frame);
                     continue;
                 }
@@ -209,14 +227,18 @@ pub fn run(color: bool) -> io::Result<()> {
             _ => {}
         }
 
-        frame = render_current(&mode, &index, cat_selected, cat_entry, &query, &hits, res_selected, ref_category, ref_entry, &ref_query, width, height, color);
+        frame = render_current(&mode, &index, cat_selected, cat_entry, &query, &hits, res_selected, ref_category, ref_entry, &ref_query, ref_scroll, width, height, color);
         prev_lines = redraw(prev_lines, &frame);
     }
 }
 
 fn quit_without_prefill(prev_lines: usize) {
     if prev_lines > 0 {
-        eprint!("\x1b[{}A\r\x1b[J", prev_lines);
+        eprint!("\r");
+        if prev_lines > 1 {
+            eprint!("\x1b[{}A", prev_lines - 1);
+        }
+        eprint!("\x1b[J");
     }
     io::stderr().flush().ok();
 }
@@ -288,6 +310,7 @@ fn render_current(
     ref_category: usize,
     ref_entry: Option<usize>,
     ref_query: &str,
+    ref_scroll: usize,
     width: usize,
     height: usize,
     color: bool,
@@ -303,16 +326,20 @@ fn render_current(
             }
         }
         Mode::Reference => {
-            if let Some(Hit::Code(ex)) = search(index, ref_query).first() {
-                return format!("search: {}\n{}", ref_query, Render::render_code_page(ex, width, color));
+            if let Some(ex) = reference_code(index, ref_query) {
+                let canonical = Render::render_code_page(&ex, color);
+                return Render::render_text_viewport(&canonical, width, height, ref_scroll);
             }
             let sel = ref_entry.map(|i| &index[i]);
-            let mut rendered = Render::render_reference(index, ref_category, sel, width, height, color);
-            if !ref_query.is_empty() {
-                rendered = format!("search: {}\n{}", ref_query, rendered);
-            }
-            rendered
+            Render::render_reference(index, ref_category, sel, width, height, color, ref_query)
         }
+    }
+}
+
+fn reference_code(index: &[Entry], query: &str) -> Option<crate::Explain::Explanation> {
+    match search(index, query).into_iter().next() {
+        Some(Hit::Code(ex)) => Some(ex),
+        _ => None,
     }
 }
 
