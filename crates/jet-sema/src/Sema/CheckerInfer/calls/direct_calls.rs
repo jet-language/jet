@@ -700,6 +700,40 @@ impl<'a> Checker<'a> {
                 self.record_edge(call.name.clone());
             }
     
+            // E3211 (card #436): a `String` literal with a known interior NUL
+            // byte can't cross into a C-boundary function — `CString::new`
+            // would fail (C strings are NUL-terminated, not length-prefixed).
+            // Only checked for a literal (fully known at compile time); a
+            // runtime-built String is caught by a codegen panic instead (see
+            // `Codegen/CModule.rs`'s `NUL_PANIC`).
+            // E3211 (card #436): same check for a directly-called (same-file,
+            // no import alias) C-boundary function — see
+            // `CheckerCoreLib/imports.rs::infer_import_call` for the more
+            // common cross-module-alias path (`use c.<lib> as x; x.f(...)`).
+            if sig.is_c_abi {
+                for (i, arg) in call.args.iter().enumerate() {
+                    let is_string_param =
+                        matches!(sig.params.get(i), Some((_, Type::String)));
+                    if !is_string_param {
+                        continue;
+                    }
+                    if let Expr::Str(parts, span) = &arg.expr {
+                        let literal: Option<String> = parts
+                            .iter()
+                            .map(|p| match p {
+                                StrPart::Lit(s) => Some(s.clone()),
+                                StrPart::Interp(..) => None,
+                            })
+                            .collect();
+                        if let Some(text) = literal {
+                            if text.contains('\0') {
+                                self.diags.push(e3211(*span));
+                            }
+                        }
+                    }
+                }
+            }
+
             // E3103 (S58): an `#Unsafe fn` is a whole-function contract; callers
             // must take responsibility inside their own `#Unsafe` block.
             if sig.is_unsafe && !self.in_unsafe {

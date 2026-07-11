@@ -1394,6 +1394,7 @@ pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
                             .collect(),
                         return_type: f.return_type.clone(),
                         is_extern: false,
+                        is_c_abi: false,
                         is_unsafe: f.is_unsafe,
                         is_pure: f.is_pure,
                         is_sanitizer: f.is_sanitizer,

@@ -18,6 +18,12 @@ pub struct FuncSig {
     /// D-MUSTUSE1 (c18iwxqx): `@MustUse fn` / method — return value cannot be
     /// silently ignored as a bare expression statement (E0419).
     pub is_must_use: bool,
+    /// Card #436: true only for a C-boundary extern fn (`#Extern`/`#Bindgen
+    /// module c.<lib>`, `CModule`), false for everything else including
+    /// `extern rust`. A `String` argument to one of these crosses through
+    /// `CString::new` in codegen — which fails on an embedded NUL byte — so
+    /// call-site checking (E3211, `direct_calls.rs`) only applies here.
+    pub is_c_abi: bool,
     /// S61: parameter names and default-value presence, parallel to `params`.
     /// Empty for extern/built-in functions.
     pub param_info: Vec<(String, bool)>,

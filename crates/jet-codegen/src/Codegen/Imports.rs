@@ -420,7 +420,7 @@ pub(crate) fn emit_program_items(cx: &Cx, items: &[Item], out: &mut String, incl
             Item::Struct(s) => emit_struct(cx, s, out),
             Item::Enum(e) => emit_enum(cx, e, out),
             Item::Const(c) => emit_const(c, out),
-            Item::CModule(cm) => emit_c_module(cm, out),
+            Item::CModule(cm) => emit_c_module(cx, cm, out),
             Item::Distinct(d) => emit_distinct(cx, d, out),
             // D-QUAL3: emit one distinct newtype per unit-family member.
             Item::UnitFamily(uf) => {

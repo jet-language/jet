@@ -662,7 +662,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
             Item::ExternRust(block) => {
                 if check_extern_block(block, &registry, &mut diags) {
                     for ef in &block.functions {
-                        register_extern_fn(ef, &mut funcs, &registry, &consts, &mut diags);
+                        register_extern_fn(ef, &mut funcs, &registry, &consts, &mut diags, false);
                     }
                 }
             }
@@ -1840,6 +1840,7 @@ pub(crate) fn register_struct(
             single_use: s.is_single_use,
             must_use: s.is_must_use,
             columnar: s.layout == Some(crate::AST::StructLayout::Columnar),
+            is_c_layout: s.layout == Some(crate::AST::StructLayout::C),
         },
     );
     if !computed_fields.is_empty() {

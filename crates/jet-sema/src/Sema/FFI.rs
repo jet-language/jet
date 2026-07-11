@@ -110,21 +110,54 @@ pub(crate) fn is_c_abi_type(ty: &Type, registry: &TypeRegistry) -> bool {
 
 pub(crate) fn c_named_type_ok(name: &str, registry: &TypeRegistry) -> bool {
     match registry.types.get(name) {
-        Some(TypeDef::Struct { fields, .. }) => fields
-            .iter()
-            .all(|(_, _, ty, _)| is_c_abi_type(ty, registry)),
-        Some(TypeDef::Enum { variants, .. }) => {
-            variants.values().all(|(_, payload)| match payload {
-                VariantPayload::Unit => true,
-                VariantPayload::Single(ty, _) => is_c_abi_type(ty, registry),
-                VariantPayload::Named(fs) => fs.iter().all(|f| is_c_abi_type(&f.ty, registry)),
-            })
+        // Card #436 / D-REPRC1: only a `#Layout(c)` struct has a defined,
+        // C-matching Rust layout (codegen stamps `#[repr(C)]` on it, and
+        // `#Layout(c)` already bans growable fields via E1104). A plain
+        // struct's Rust field order/size/padding is unspecified — accepting
+        // it here would let sema wave through a shape CModule codegen (and
+        // rustc) cannot lower correctly (I2/I3).
+        Some(TypeDef::Struct {
+            fields,
+            is_c_layout,
+            ..
+        }) => {
+            *is_c_layout
+                && fields
+                    .iter()
+                    .all(|(_, _, ty, _)| is_c_abi_type(ty, registry))
         }
-        // D-DIST1: distinct types are repr(transparent) over a scalar; treat as C-compatible.
+        // No ratified C-safe enum representation exists yet (tag placement,
+        // discriminant width, payload union layout are all undecided — see
+        // card #436 report). Reject every enum at the C boundary rather than
+        // let sema accept a shape CModule codegen can't lower (I2/I3); a
+        // future `#Layout(c) enum` design needs an owner ballot first.
+        Some(TypeDef::Enum { .. }) => false,
+        // D-DIST1: distinct types are repr(transparent) over their base, so
+        // they share the base's C ABI exactly — treat as C-compatible iff
+        // the base is.
         Some(TypeDef::Distinct { base, .. }) => is_c_abi_type(base, registry),
         Some(TypeDef::Alias { target, .. }) => is_c_abi_type(target, registry),
         None => false,
     }
+}
+
+/// E3211 (card #436) — a string literal with a known, comptime interior NUL
+/// byte is passed to a C-boundary function's `String` parameter. C strings
+/// are NUL-terminated, not length-prefixed, so the byte can never make the
+/// trip — `CString::new` would fail at runtime. Caught here for any literal
+/// (an all-`Lit` `Expr::Str`, no interpolation) because the value — and the
+/// bug — are already fully known at compile time; a value built at runtime
+/// panics instead (see `Codegen/CModule.rs`'s `NUL_PANIC`, documented in
+/// docs/spec/diagnostics.md).
+pub(crate) fn e3211(span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E3211",
+        "This string literal has an embedded NUL byte, so it can't cross into a C function."
+            .to_string(),
+        "C strings are NUL-terminated, not length-prefixed — an embedded `\\0` would truncate the string on the C side, silently losing everything after it.".to_string(),
+        "Remove the embedded NUL, or split the call so the C function only sees the part before it.".to_string(),
+        Some(span),
+    )
 }
 
 /// E3203 — a non-C-ABI type appears by value in a C FFI signature.
@@ -309,6 +342,7 @@ pub(crate) fn register_extern_fn(
     registry: &TypeRegistry,
     consts: &HashMap<String, Type>,
     diags: &mut Vec<Diagnostic>,
+    is_c_abi: bool,
 ) {
     if ef.name == Syntax::BUILTIN_PRINT
         || ef.name == Syntax::BUILTIN_PANIC
@@ -333,5 +367,5 @@ pub(crate) fn register_extern_fn(
         ));
         return;
     }
-    funcs.insert(ef.name.clone(), extern_to_sig(ef));
+    funcs.insert(ef.name.clone(), extern_to_sig(ef, is_c_abi));
 }

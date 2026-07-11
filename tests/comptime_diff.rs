@@ -69,6 +69,26 @@ const CASES: &[&str] = &[
     "BigInt(3).neg().to_string()",
 ];
 
+/// card #392: the `use core.X as alias; alias.method(...)` module-call form
+/// needs its own program per case (an inline expression alone can't `use`),
+/// so it gets a dedicated differential loop rather than reusing `CASES`.
+const MODULE_CASES: &[&str] = &[
+    // `("core.string", ...)` was a dead dispatch key (no import resolves to
+    // it — `core.text` is the only ratified spelling), so every
+    // `text.<method>(...)` call hit E0956. Fixed via `TextLite` (ported
+    // verbatim from AOT's `jet_text_*` prelude fns).
+    "use core.text as text\ncomptime C = text.trim(\" hi \")\n\nfn run() {\n    r :: text.trim(\" hi \")\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
+    "use core.text as text\ncomptime C = text.upper(\"abc\")\n\nfn run() {\n    r :: text.upper(\"abc\")\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
+    "use core.text as text\ncomptime C = text.words(\"hello world's foo\")[0]\n\nfn run() {\n    r :: text.words(\"hello world's foo\")[0]\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
+    "use core.text as text\ncomptime C = text.pad_start(\"7\", 3, \"0\")\n\nfn run() {\n    r :: text.pad_start(\"7\", 3, \"0\")\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
+    // core.math: previously only sqrt/floor/ceil/round/abs/pow/min/max/clamp/
+    // log2/log10 were dispatched; the rest (trig, checked/saturating/
+    // wrapping, gcd/lcm) fell to E0956.
+    "use core.math as math\ncomptime C = math.sin(0.0)\n\nfn run() {\n    r :: math.sin(0.0)\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
+    "use core.math as math\ncomptime C = math.gcd(12, 18)\n\nfn run() {\n    r :: math.gcd(12, 18)\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
+    "use core.math as math\ncomptime C = math.saturating_add(9223372036854775807, 1)\n\nfn run() {\n    r :: math.saturating_add(9223372036854775807, 1)\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
+];
+
 #[test]
 fn comptime_matches_runtime() {
     let have_rustc = have_rustc();
@@ -110,13 +130,20 @@ fn check_comptime_case(i: usize, expr: &str) {
         "comptime C = {e}\n\nfn run() {{\n    r :: {e}\n    print(\"{{C}}\")\n    print(\"{{r}}\")\n}}\n",
         e = expr
     );
-    let compiled = match jet::compile(&src) {
+    check_comptime_src(i, expr, &src);
+}
+
+/// Shared by `check_comptime_case` (single-expression cases) and
+/// `check_comptime_module_case` (card #392's `use core.X as a; a.f(...)`
+/// cases, which need a full program — a bare `use` isn't an expression).
+fn check_comptime_src(i: usize, label: &str, src: &str) {
+    let compiled = match jet::compile(src) {
         Ok(c) => c,
         Err(diags) => panic!(
             "case {} `{}` failed the front end:\n{}",
             i,
-            expr,
-            jet::render_diagnostics("comptime_diff.jet", &src, &diags)
+            label,
+            jet::render_diagnostics("comptime_diff.jet", src, &diags)
         ),
     };
     // D-BIGINT1 (card #392): a `BigInt` case pulls the Top-tier prelude
@@ -127,7 +154,7 @@ fn check_comptime_case(i: usize, expr: &str) {
     assert!(
         !user_code.contains("unsafe"),
         "case `{}` generated unsafe outside the vetted prelude",
-        expr
+        label
     );
 
     let dir = std::env::temp_dir();
@@ -144,25 +171,36 @@ fn check_comptime_case(i: usize, expr: &str) {
     assert!(
         out.status.success(),
         "I2 violated: rustc rejected generated code for `{}`:\n{}",
-        expr,
+        label,
         String::from_utf8_lossy(&out.stderr)
     );
     let run = Command::new(&bin).output().unwrap();
-    assert!(run.status.success(), "case `{}` panicked at runtime", expr);
+    assert!(run.status.success(), "case `{}` panicked at runtime", label);
     let stdout = String::from_utf8_lossy(&run.stdout);
     let lines: Vec<&str> = stdout.lines().collect();
     assert_eq!(
         lines.len(),
         2,
         "case `{}` printed {} lines, expected 2",
-        expr,
+        label,
         lines.len()
     );
     assert_eq!(
         lines[0], lines[1],
         "DIVERGENCE for `{}`: comptime gave {:?}, runtime gave {:?} — this is a P0 miscompile",
-        expr, lines[0], lines[1]
+        label, lines[0], lines[1]
     );
+}
+
+#[test]
+fn comptime_module_calls_match_runtime() {
+    if !have_rustc() {
+        eprintln!("note: rustc not found; skipping comptime module-call differential battery");
+        return;
+    }
+    for (i, src) in MODULE_CASES.iter().enumerate() {
+        check_comptime_src(1000 + i, src, src);
+    }
 }
 
 #[test]

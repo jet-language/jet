@@ -23,6 +23,7 @@ mod Methods;
 mod Purity;
 mod Reflect;
 mod RegexLite;
+mod TextLite;
 mod Value;
 
 use std::collections::{HashMap, HashSet};

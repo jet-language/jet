@@ -1691,44 +1691,280 @@ fn apply_core_call(
         }
         ("core.math", "log2") => Ok(CtValue::Float(as_float(one(0)?, span)?.log2())),
         ("core.math", "log10") => Ok(CtValue::Float(as_float(one(0)?, span)?.log10())),
-        // --- core.string whitelist ---
-        ("core.string", "len") | ("core.string", "length") => {
-            let s = as_string(one(0)?, span)?;
-            Ok(CtValue::Int(s.chars().count() as i64))
+        // card #392 gap fix: the rest of `core.math` — mechanical ports of
+        // the same one-line Rust std calls AOT's codegen emits
+        // (`Codegen/TIR/emit/core_calls.rs`), so results match exactly.
+        ("core.math", "sin") => Ok(CtValue::Float(as_float(one(0)?, span)?.sin())),
+        ("core.math", "cos") => Ok(CtValue::Float(as_float(one(0)?, span)?.cos())),
+        ("core.math", "tan") => Ok(CtValue::Float(as_float(one(0)?, span)?.tan())),
+        ("core.math", "asin") => Ok(CtValue::Float(as_float(one(0)?, span)?.asin())),
+        ("core.math", "acos") => Ok(CtValue::Float(as_float(one(0)?, span)?.acos())),
+        ("core.math", "atan") => Ok(CtValue::Float(as_float(one(0)?, span)?.atan())),
+        ("core.math", "sinh") => Ok(CtValue::Float(as_float(one(0)?, span)?.sinh())),
+        ("core.math", "cosh") => Ok(CtValue::Float(as_float(one(0)?, span)?.cosh())),
+        ("core.math", "tanh") => Ok(CtValue::Float(as_float(one(0)?, span)?.tanh())),
+        ("core.math", "exp") => Ok(CtValue::Float(as_float(one(0)?, span)?.exp())),
+        ("core.math", "ln") => Ok(CtValue::Float(as_float(one(0)?, span)?.ln())),
+        ("core.math", "trunc") => Ok(CtValue::Float(as_float(one(0)?, span)?.trunc())),
+        ("core.math", "fract") => Ok(CtValue::Float(as_float(one(0)?, span)?.fract())),
+        ("core.math", "degrees") => Ok(CtValue::Float(as_float(one(0)?, span)?.to_degrees())),
+        ("core.math", "radians") => Ok(CtValue::Float(as_float(one(0)?, span)?.to_radians())),
+        ("core.math", "atan2") => Ok(CtValue::Float(
+            as_float(one(0)?, span)?.atan2(as_float(one(1)?, span)?),
+        )),
+        ("core.math", "hypot") => Ok(CtValue::Float(
+            as_float(one(0)?, span)?.hypot(as_float(one(1)?, span)?),
+        )),
+        ("core.math", "lerp") => {
+            let a = as_float(one(0)?, span)?;
+            let b = as_float(one(1)?, span)?;
+            let t = as_float(one(2)?, span)?;
+            Ok(CtValue::Float(a + (b - a) * t))
         }
-        ("core.string", "to_upper") | ("core.string", "upper") => {
-            let s = as_string(one(0)?, span)?.to_uppercase();
-            Ok(CtValue::Str(s))
+        ("core.math", "is_nan") => Ok(CtValue::Bool(as_float(one(0)?, span)?.is_nan())),
+        ("core.math", "is_inf") => Ok(CtValue::Bool(as_float(one(0)?, span)?.is_infinite())),
+        ("core.math", "is_finite") => Ok(CtValue::Bool(as_float(one(0)?, span)?.is_finite())),
+        ("core.math", "sign") => {
+            let x = as_float(one(0)?, span)?;
+            Ok(CtValue::Int(if x > 0.0 {
+                1
+            } else if x < 0.0 {
+                -1
+            } else {
+                0
+            }))
         }
-        ("core.string", "to_lower") | ("core.string", "lower") => {
-            let s = as_string(one(0)?, span)?.to_lowercase();
-            Ok(CtValue::Str(s))
+        ("core.math", "to_bits") => Ok(CtValue::Int(as_float(one(0)?, span)?.to_bits() as i64)),
+        ("core.math", "from_bits") => Ok(CtValue::Float(f64::from_bits(
+            as_int(one(0)?, span)? as u64,
+        ))),
+        ("core.math", "checked_add") => {
+            let a = as_int(one(0)?, span)?;
+            let b = as_int(one(1)?, span)?;
+            Ok(match a.checked_add(b) {
+                Some(n) => CtValue::Some(Box::new(CtValue::Int(n))),
+                None => CtValue::None(Type::Int),
+            })
         }
-        ("core.string", "trim") => {
-            let s = as_string(one(0)?, span)?.trim().to_string();
-            Ok(CtValue::Str(s))
+        ("core.math", "checked_sub") => {
+            let a = as_int(one(0)?, span)?;
+            let b = as_int(one(1)?, span)?;
+            Ok(match a.checked_sub(b) {
+                Some(n) => CtValue::Some(Box::new(CtValue::Int(n))),
+                None => CtValue::None(Type::Int),
+            })
         }
-        ("core.string", "starts_with") => {
-            let s = as_string(one(0)?, span)?;
-            let prefix = as_string(one(1)?, span)?;
-            Ok(CtValue::Bool(s.starts_with(prefix)))
+        ("core.math", "checked_mul") => {
+            let a = as_int(one(0)?, span)?;
+            let b = as_int(one(1)?, span)?;
+            Ok(match a.checked_mul(b) {
+                Some(n) => CtValue::Some(Box::new(CtValue::Int(n))),
+                None => CtValue::None(Type::Int),
+            })
         }
-        ("core.string", "ends_with") => {
-            let s = as_string(one(0)?, span)?;
-            let suffix = as_string(one(1)?, span)?;
-            Ok(CtValue::Bool(s.ends_with(suffix)))
+        ("core.math", "checked_pow") => {
+            let base = as_int(one(0)?, span)?;
+            let exp = as_int(one(1)?, span)?;
+            Ok(if exp < 0 {
+                CtValue::None(Type::Int)
+            } else {
+                match base.checked_pow(exp as u32) {
+                    Some(n) => CtValue::Some(Box::new(CtValue::Int(n))),
+                    None => CtValue::None(Type::Int),
+                }
+            })
         }
-        ("core.string", "contains") => {
-            let s = as_string(one(0)?, span)?;
-            let needle = as_string(one(1)?, span)?;
-            Ok(CtValue::Bool(s.contains(needle)))
+        ("core.math", "saturating_add") => Ok(CtValue::Int(
+            as_int(one(0)?, span)?.saturating_add(as_int(one(1)?, span)?),
+        )),
+        ("core.math", "saturating_sub") => Ok(CtValue::Int(
+            as_int(one(0)?, span)?.saturating_sub(as_int(one(1)?, span)?),
+        )),
+        ("core.math", "saturating_mul") => Ok(CtValue::Int(
+            as_int(one(0)?, span)?.saturating_mul(as_int(one(1)?, span)?),
+        )),
+        ("core.math", "wrapping_add") => Ok(CtValue::Int(
+            as_int(one(0)?, span)?.wrapping_add(as_int(one(1)?, span)?),
+        )),
+        ("core.math", "wrapping_sub") => Ok(CtValue::Int(
+            as_int(one(0)?, span)?.wrapping_sub(as_int(one(1)?, span)?),
+        )),
+        ("core.math", "wrapping_mul") => Ok(CtValue::Int(
+            as_int(one(0)?, span)?.wrapping_mul(as_int(one(1)?, span)?),
+        )),
+        ("core.math", "int_pow") => {
+            let base = as_int(one(0)?, span)?;
+            let exp = as_int(one(1)?, span)?;
+            Ok(CtValue::Int(if exp < 0 {
+                0
+            } else {
+                base.saturating_pow(exp as u32)
+            }))
         }
-        ("core.string", "replace") => {
+        ("core.math", "gcd") => {
+            let mut a = as_int(one(0)?, span)?.abs();
+            let mut b = as_int(one(1)?, span)?.abs();
+            while b != 0 {
+                let r = a % b;
+                a = b;
+                b = r;
+            }
+            Ok(CtValue::Int(a))
+        }
+        ("core.math", "lcm") => {
+            let a = as_int(one(0)?, span)?;
+            let b = as_int(one(1)?, span)?;
+            Ok(CtValue::Int(if a == 0 || b == 0 {
+                0
+            } else {
+                let mut x = a.abs();
+                let mut y = b.abs();
+                while y != 0 {
+                    let r = x % y;
+                    x = y;
+                    y = r;
+                }
+                (a / x).saturating_mul(b).abs()
+            }))
+        }
+        // --- core.text module whitelist (card #392: `"core.string"` was a
+        // dead key here — no import ever resolves to it, `core.text` is the
+        // only ratified spelling (KNOWN_CORE_MODULES), so every arm below was
+        // unreachable and every `use core.text as t; t.trim(s)`-style call
+        // hit the E0956 fallback. Logic ported verbatim from AOT's
+        // `jet_text_*` prelude fns via `TextLite` — R12 parity. ---
+        ("core.text", "nfc") => Ok(CtValue::Str(super::TextLite::nfc(as_string(one(0)?, span)?))),
+        ("core.text", "nfd") => Ok(CtValue::Str(super::TextLite::nfd(as_string(one(0)?, span)?))),
+        ("core.text", "nfkc") => Ok(CtValue::Str(super::TextLite::nfkc(as_string(one(0)?, span)?))),
+        ("core.text", "nfkd") => Ok(CtValue::Str(super::TextLite::nfkd(as_string(one(0)?, span)?))),
+        ("core.text", "casefold") => Ok(CtValue::Str(super::TextLite::casefold(as_string(
+            one(0)?,
+            span,
+        )?))),
+        ("core.text", "lower") => Ok(CtValue::Str(as_string(one(0)?, span)?.to_lowercase())),
+        ("core.text", "upper") => Ok(CtValue::Str(as_string(one(0)?, span)?.to_uppercase())),
+        ("core.text", "caseless_eq") => Ok(CtValue::Bool(super::TextLite::caseless_eq(
+            as_string(one(0)?, span)?,
+            as_string(one(1)?, span)?,
+        ))),
+        ("core.text", "graphemes") => Ok(CtValue::List(
+            super::TextLite::graphemes(as_string(one(0)?, span)?)
+                .into_iter()
+                .map(CtValue::Str)
+                .collect(),
+        )),
+        ("core.text", "words") => Ok(CtValue::List(
+            super::TextLite::words(as_string(one(0)?, span)?)
+                .into_iter()
+                .map(CtValue::Str)
+                .collect(),
+        )),
+        ("core.text", "sentences") => Ok(CtValue::List(
+            super::TextLite::sentences(as_string(one(0)?, span)?)
+                .into_iter()
+                .map(CtValue::Str)
+                .collect(),
+        )),
+        ("core.text", "scalars") => Ok(CtValue::List(
+            as_string(one(0)?, span)?
+                .chars()
+                .map(|c| CtValue::Str(c.to_string()))
+                .collect(),
+        )),
+        ("core.text", "width") => Ok(CtValue::Int(super::TextLite::width(as_string(
+            one(0)?,
+            span,
+        )?))),
+        ("core.text", "scalar_count") => {
+            Ok(CtValue::Int(as_string(one(0)?, span)?.chars().count() as i64))
+        }
+        ("core.text", "byte_count") => Ok(CtValue::Int(as_string(one(0)?, span)?.len() as i64)),
+        ("core.text", "is_alphabetic") => Ok(CtValue::Bool(super::TextLite::is_alphabetic(
+            as_string(one(0)?, span)?,
+        ))),
+        ("core.text", "is_numeric") => Ok(CtValue::Bool(super::TextLite::is_numeric(as_string(
+            one(0)?,
+            span,
+        )?))),
+        ("core.text", "is_whitespace") => Ok(CtValue::Bool(super::TextLite::is_whitespace(
+            as_string(one(0)?, span)?,
+        ))),
+        ("core.text", "is_ascii") => Ok(CtValue::Bool(as_string(one(0)?, span)?.is_ascii())),
+        ("core.text", "splitn") => {
             let s = as_string(one(0)?, span)?.to_string();
-            let from = as_string(one(1)?, span)?.to_string();
-            let to = as_string(one(2)?, span)?.to_string();
-            Ok(CtValue::Str(s.replace(&from, &to)))
+            let pat = as_string(one(1)?, span)?.to_string();
+            let n = as_int(one(2)?, span)?;
+            Ok(CtValue::List(
+                super::TextLite::splitn(&s, &pat, n)
+                    .into_iter()
+                    .map(CtValue::Str)
+                    .collect(),
+            ))
         }
+        ("core.text", "rsplitn") => {
+            let s = as_string(one(0)?, span)?.to_string();
+            let pat = as_string(one(1)?, span)?.to_string();
+            let n = as_int(one(2)?, span)?;
+            Ok(CtValue::List(
+                super::TextLite::rsplitn(&s, &pat, n)
+                    .into_iter()
+                    .map(CtValue::Str)
+                    .collect(),
+            ))
+        }
+        ("core.text", "trim") => Ok(CtValue::Str(as_string(one(0)?, span)?.trim().to_string())),
+        ("core.text", "trim_start") => Ok(CtValue::Str(
+            as_string(one(0)?, span)?.trim_start().to_string(),
+        )),
+        ("core.text", "trim_end") => Ok(CtValue::Str(
+            as_string(one(0)?, span)?.trim_end().to_string(),
+        )),
+        ("core.text", "pad_start") => {
+            let s = as_string(one(0)?, span)?.to_string();
+            let w = as_int(one(1)?, span)?;
+            let fill = as_string(one(2)?, span)?.to_string();
+            Ok(CtValue::Str(super::TextLite::pad_start(&s, w, &fill)))
+        }
+        ("core.text", "pad_end") => {
+            let s = as_string(one(0)?, span)?.to_string();
+            let w = as_int(one(1)?, span)?;
+            let fill = as_string(one(2)?, span)?.to_string();
+            Ok(CtValue::Str(super::TextLite::pad_end(&s, w, &fill)))
+        }
+        ("core.text", "center") => {
+            let s = as_string(one(0)?, span)?.to_string();
+            let w = as_int(one(1)?, span)?;
+            let fill = as_string(one(2)?, span)?.to_string();
+            Ok(CtValue::Str(super::TextLite::center(&s, w, &fill)))
+        }
+        ("core.text", "starts_any") => {
+            let s = as_string(one(0)?, span)?.to_string();
+            let prefixes = match one(1)? {
+                CtValue::List(xs) => xs
+                    .iter()
+                    .map(|v| as_string(v, span).map(|s| s.to_string()))
+                    .collect::<Result<Vec<_>, _>>()?,
+                _ => return Err(unsupported("core.text.starts_any: non-list argument", span)),
+            };
+            Ok(CtValue::Bool(super::TextLite::starts_any(&s, &prefixes)))
+        }
+        ("core.text", "ends_any") => {
+            let s = as_string(one(0)?, span)?.to_string();
+            let suffixes = match one(1)? {
+                CtValue::List(xs) => xs
+                    .iter()
+                    .map(|v| as_string(v, span).map(|s| s.to_string()))
+                    .collect::<Result<Vec<_>, _>>()?,
+                _ => return Err(unsupported("core.text.ends_any: non-list argument", span)),
+            };
+            Ok(CtValue::Bool(super::TextLite::ends_any(&s, &suffixes)))
+        }
+        ("core.text", "char_indices") => Ok(CtValue::List(
+            super::TextLite::char_indices(as_string(one(0)?, span)?)
+                .into_iter()
+                .map(CtValue::Str)
+                .collect(),
+        )),
         // --- core.path (pure) ---
         ("core.path", "join") => {
             let a = as_string(one(0)?, span)?;

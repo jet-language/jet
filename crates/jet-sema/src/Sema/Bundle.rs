@@ -896,6 +896,7 @@ pub(crate) fn check_bundle_opts(
                                 &st.registry,
                                 &st.consts,
                                 &mut diags,
+                                false,
                             );
                         }
                     }
@@ -909,6 +910,7 @@ pub(crate) fn check_bundle_opts(
                                 &st.registry,
                                 &st.consts,
                                 &mut diags,
+                                true,
                             );
                             // C FFI functions are callable across the `use c.<lib>`
                             // alias — expose them like any pub item.

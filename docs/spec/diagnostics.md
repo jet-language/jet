@@ -394,6 +394,7 @@ before continuing.
 | E3208 | jet   | `jet bind` / header translation failed |
 | E3209 | jet   | linker couldn't find a declared C library at link time |
 | E3210 | jet   | C library auto-provision from nixpkgs failed |
+| E3211 | sema  | string literal with a known interior NUL byte passed to a C-boundary function |
 | E3301 | sema  | OS-dependent std API called in a `--freestanding` build |
 | E3302 | jet   | target triple unknown or toolchain component missing |
 | E3303 | sema  | freestanding build allocates memory with no global allocator |
@@ -1207,6 +1208,7 @@ Error [E0150]: `check_in` needs `Reservation` in state `Confirmed`, but `r` is i
 | E3208 | Could not generate bindings from `{header}`. | Header parsing or translation failed in the bind backend. | Fix the header path, install dev headers, run `jet bind` manually for details, or hand-write `#Extern module c.{lib}`. |
 | E3209 | The linker couldn't find C library `{lib}`. | Your program links against `{lib}`, but the linker reported `cannot find -l{lib}` — the library isn't on the link search path. | Declare it in `deps:` so Jet provisions it: `{lib}: c@system` (host pkg-config, else fetched from nixpkgs), or `{lib}: c@nixpkgs:<attr>` to pick the nixpkgs attribute, or install the system package. |
 | E3210 | Couldn't fetch C library `{lib}` from nixpkgs. | `{lib}: c@system` asked Jet to provision `nixpkgs#{attr}`, but `nix build` failed: `{reason}`. | Check the attr exists (`nix build nixpkgs#{attr}`), or point at a local build with `{lib}: c@"<path>"`, or install it and use `system`. |
+| E3211 | This string literal has an embedded NUL byte, so it can't cross into a C function. | C strings are NUL-terminated, not length-prefixed — an embedded `\0` would truncate the string on the C side, silently losing everything after it. | Remove the embedded NUL, or split the call so the C function only sees the part before it. |
 
 ## Cross-compilation and freestanding diagnostics (E2-M15)
 

@@ -1,6 +1,20 @@
 use super::*;
 use crate::AST::Type;
-pub(crate) fn emit_c_module(cm: &crate::AST::CModule, out: &mut String) {
+
+/// Card #436: a `String` argument crossing into a C function goes through
+/// `CString::new`, which fails on an interior NUL byte (C strings have no
+/// length — NUL IS the terminator, so a Jet `String` holding one can never be
+/// represented as a C string). A value with a known-at-comptime NUL is
+/// rejected in sema (E3211, `Sema/FFI.rs`) before it ever reaches codegen; a
+/// value only known at runtime cannot be — so the generated wrapper panics
+/// with a real Jet-style message instead of the old
+/// `.unwrap_or_default()` (silently sending the C function an EMPTY string,
+/// which is a memory-safety-adjacent lie, not an error). Documented in
+/// docs/spec/diagnostics.md (E3211) and docs/spec/spec.md (C FFI section).
+const NUL_PANIC: &str =
+    "a String with an embedded NUL byte can't cross into a C function (C strings are NUL-terminated, not length-prefixed)";
+
+pub(crate) fn emit_c_module(cx: &Cx, cm: &crate::AST::CModule, out: &mut String) {
     if cm.functions.is_empty() {
         return;
     }
@@ -10,12 +24,12 @@ pub(crate) fn emit_c_module(cm: &crate::AST::CModule, out: &mut String) {
             .params
             .iter()
             .enumerate()
-            .map(|(i, p)| format!("a{i}: {}", c_abi_rust_type(&p.ty)))
+            .map(|(i, p)| format!("a{i}: {}", c_abi_rust_type(&p.ty, cx)))
             .collect();
         let ret = ef
             .return_type
             .as_ref()
-            .map(|t| format!(" -> {}", c_abi_rust_type(t)))
+            .map(|t| format!(" -> {}", c_abi_rust_type(t, cx)))
             .unwrap_or_default();
         out.push_str(&format!(
             "    fn {}({}){};\n",
@@ -31,11 +45,11 @@ pub(crate) fn emit_c_module(cm: &crate::AST::CModule, out: &mut String) {
         let mut conv_lines = Vec::new();
         let mut call_args = Vec::new();
         for (i, p) in ef.params.iter().enumerate() {
-            sig_params.push(format!("a{i}: {}", c_wrapper_param_type(&p.ty)));
+            sig_params.push(format!("a{i}: {}", c_wrapper_param_type(&p.ty, cx)));
             match &p.ty {
                 Type::String => {
                     conv_lines.push(format!(
-                        "    let c{i} = std::ffi::CString::new(a{i}.as_str()).unwrap_or_default();"
+                        "    let c{i} = std::ffi::CString::new(a{i}.as_str()).unwrap_or_else(|_| jet_panic(file!(), line!(), \"{NUL_PANIC}\"));"
                     ));
                     call_args.push(format!("c{i}.as_ptr()"));
                 }
@@ -46,7 +60,7 @@ pub(crate) fn emit_c_module(cm: &crate::AST::CModule, out: &mut String) {
         let ret = ef
             .return_type
             .as_ref()
-            .map(|t| format!(" -> {}", c_wrapper_ret_type(t)))
+            .map(|t| format!(" -> {}", c_wrapper_ret_type(t, cx)))
             .unwrap_or_default();
         let call = format!("{}({})", ef.rust_path, call_args.join(", "));
         let call_body = match &ef.return_type {
@@ -80,13 +94,24 @@ pub(crate) fn emit_c_module(cm: &crate::AST::CModule, out: &mut String) {
 }
 
 /// The C-ABI Rust type used in the `extern "C"` declaration.
-fn c_abi_rust_type(ty: &Type) -> String {
+///
+/// Card #436: `Sema::FFI::is_c_abi_type` is the source of truth for what may
+/// reach here — every arm it accepts MUST have a matching arm below, or an
+/// accepted-but-unlowered shape becomes an I2/I3 bug (rustc ICE or silent
+/// `()`  placeholder). `IntN`/`Float32` (D-SG9, fixed-width) and a `Named`
+/// struct/distinct (D-REPRC1/D-DIST1 — sema already required `#Layout(c)` /
+/// a C-abi base) all get their ordinary generated Rust type via `cx.rust_type`,
+/// which is ABI-identical to the C shape sema verified.
+fn c_abi_rust_type(ty: &Type, cx: &Cx) -> String {
     match ty {
         Type::Int => "std::os::raw::c_longlong".to_string(),
         Type::Float => "f64".to_string(),
         Type::Bool => "bool".to_string(),
         Type::Char => "u32".to_string(),
         Type::String => "*const std::os::raw::c_char".to_string(),
+        Type::IntN { .. } | Type::Float32 => cx.rust_type(ty),
+        Type::Named(_) => cx.rust_type(ty),
+        Type::Tagged { inner, .. } => c_abi_rust_type(inner, cx),
         // Sema (E3203) rejects anything else at the C boundary.
         other => format!("/* unsupported: {} */ ()", other.name()),
     }
@@ -94,24 +119,31 @@ fn c_abi_rust_type(ty: &Type) -> String {
 
 /// The Rust type the safe wrapper accepts, matching cross-module call sites
 /// (Read convention: scalars by value, `String`/`Char` by shared reference).
-fn c_wrapper_param_type(ty: &Type) -> String {
+/// See `c_abi_rust_type` — same acceptance contract with `is_c_abi_type`.
+fn c_wrapper_param_type(ty: &Type, cx: &Cx) -> String {
     match ty {
         Type::Int => "i64".to_string(),
         Type::Float => "f64".to_string(),
         Type::Bool => "bool".to_string(),
         Type::Char => "&char".to_string(),
         Type::String => "&String".to_string(),
+        Type::IntN { .. } | Type::Float32 => cx.rust_type(ty),
+        Type::Named(_) => cx.rust_type(ty),
+        Type::Tagged { inner, .. } => c_wrapper_param_type(inner, cx),
         other => format!("/* unsupported: {} */ ()", other.name()),
     }
 }
 
-fn c_wrapper_ret_type(ty: &Type) -> String {
+fn c_wrapper_ret_type(ty: &Type, cx: &Cx) -> String {
     match ty {
         Type::Int => "i64".to_string(),
         Type::Float => "f64".to_string(),
         Type::Bool => "bool".to_string(),
         Type::Char => "char".to_string(),
         Type::String => "String".to_string(),
+        Type::IntN { .. } | Type::Float32 => cx.rust_type(ty),
+        Type::Named(_) => cx.rust_type(ty),
+        Type::Tagged { inner, .. } => c_wrapper_ret_type(inner, cx),
         other => format!("/* unsupported: {} */ ()", other.name()),
     }
 }

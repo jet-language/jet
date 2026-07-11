@@ -50,6 +50,12 @@ pub(crate) enum TypeDef {
         /// struct is stored struct-of-arrays; sema gates the list-op surface to
         /// the v1-supported subset (E1108) and codegen lowers it columnar.
         columnar: bool,
+        /// D-REPRC1: `#Layout(c)` was present — codegen stamps `#[repr(C)]`
+        /// on the generated Rust struct, so field order/size/padding match C.
+        /// A plain struct (no `#Layout(c)`) has an UNSPECIFIED Rust layout and
+        /// must never be accepted at the C FFI boundary (card #436 / E3203) —
+        /// only this flag makes `c_named_type_ok` (Sema/FFI.rs) say yes.
+        is_c_layout: bool,
     },
     Enum {
         #[allow(dead_code)] // stored for future duplicate-name diagnostics
@@ -354,6 +360,7 @@ fn func_to_sig(f: &Func) -> FuncSig {
         variadic_bounds: f.params.last().and_then(|p| p.variadic_bound_list.clone()),
         return_type: f.return_type.clone(),
         is_extern: false,
+        is_c_abi: false,
         is_unsafe: f.is_unsafe,
         is_pure: f.is_pure,
         is_sanitizer: f.is_sanitizer,
@@ -361,7 +368,7 @@ fn func_to_sig(f: &Func) -> FuncSig {
     }
 }
 
-fn extern_to_sig(ef: &ExternFn) -> FuncSig {
+fn extern_to_sig(ef: &ExternFn, is_c_abi: bool) -> FuncSig {
     FuncSig {
         params: ef
             .params
@@ -381,6 +388,7 @@ fn extern_to_sig(ef: &ExternFn) -> FuncSig {
         variadic_bounds: ef.params.last().and_then(|p| p.variadic_bound_list.clone()),
         return_type: ef.return_type.clone(),
         is_extern: true,
+        is_c_abi,
         is_unsafe: false,
         is_pure: false,      // extern functions are always considered impure
         is_sanitizer: false, // extern functions can't be sanitizers

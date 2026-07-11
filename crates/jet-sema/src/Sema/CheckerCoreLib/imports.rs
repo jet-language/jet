@@ -129,6 +129,27 @@ impl<'a> Checker<'a> {
                     if matches!(pconv, AccessConvention::Read) && !pty.is_scalar() {
                         self.borrow_ctx = true;
                     }
+                    // E3211 (card #436): a `String` literal with a known
+                    // interior NUL byte can't cross into a C-boundary
+                    // function (`CString::new` would fail — C strings are
+                    // NUL-terminated, not length-prefixed). Only literals
+                    // (no interpolation) are checked here — a runtime-built
+                    // String is caught by a codegen panic instead (see
+                    // `Codegen/CModule.rs`'s `NUL_PANIC`).
+                    if sig.is_c_abi && matches!(pty, Type::String) {
+                        if let Expr::Str(parts, str_span) = &arg.expr {
+                            let literal: Option<String> = parts
+                                .iter()
+                                .map(|p| match p {
+                                    crate::AST::StrPart::Lit(s) => Some(s.clone()),
+                                    crate::AST::StrPart::Interp(..) => None,
+                                })
+                                .collect();
+                            if literal.is_some_and(|text| text.contains('\0')) {
+                                self.diags.push(e3211(*str_span));
+                            }
+                        }
+                    }
                     // D-SG9: a fixed-width literal argument adopts the parameter's width.
                     let saved = self.expected_type.clone();
                     self.expected_type = Some(pty.clone());
