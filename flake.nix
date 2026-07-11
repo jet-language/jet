@@ -139,11 +139,18 @@
           ];
 
           shellHook = ''
-            export JET_ROOT="$PWD"
+            if repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+              export JET_ROOT="$repo_root"
+            else
+              export JET_ROOT="$PWD"
+            fi
             export TZDIR="${jetTzdb}"
             export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath [ pkgs.raylib ]}:''${LD_LIBRARY_PATH:-}"
 
-            "$JET_ROOT/scripts/agent/clean-nix-tmp.sh"
+            if [ "''${JET_NIX_TMP_CLEANED:-}" != "1" ]; then
+              "${self}/scripts/agent/clean-nix-tmp.sh"
+            fi
+            export JET_NIX_TMP_CLEANED=1
 
             # D-CI3: wire the fast pre-push doc-sync hook, idempotent, only
             # when inside a git repo (worktrees/CI checkouts included).
