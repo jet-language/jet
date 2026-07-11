@@ -41,24 +41,83 @@ pub struct CommandSpec {
 /// D-CLI-SURFACE1=B / D-CLI-SURFACE2=A: authoritative nested command registry.
 pub struct CommandGroup {
     pub name: &'static str,
-    pub actions: &'static [&'static str],
+    pub summary: &'static str,
+    pub actions: &'static [NestedCommandSpec],
 }
 
+/// One canonical nested spelling and the real legacy dispatcher seam it reaches.
+/// `keep_group` is true only when the existing handler consumes the group word
+/// itself (`store verify`, `store rollback`, and `store generations`).
+pub struct NestedCommandSpec {
+    pub name: &'static str,
+    pub summary: &'static str,
+    pub handler: &'static str,
+    pub keep_group: bool,
+}
+
+const REGISTRY_ACTIONS: &[NestedCommandSpec] = &[
+    NestedCommandSpec { name: "publish", summary: "publish the current package to the registry", handler: "publish", keep_group: false },
+    NestedCommandSpec { name: "yank", summary: "mark a published version as yanked", handler: "yank", keep_group: false },
+    NestedCommandSpec { name: "keygen", summary: "create the key that signs published packages", handler: "keygen", keep_group: false },
+    NestedCommandSpec { name: "key", summary: "manage the package signing key", handler: "key", keep_group: false },
+    NestedCommandSpec { name: "vendor", summary: "copy all dependencies into vendor/", handler: "vendor", keep_group: false },
+];
+const INSPECT_ACTIONS: &[NestedCommandSpec] = &[
+    NestedCommandSpec { name: "graph", summary: "print the typed programmable-build graph", handler: "graph", keep_group: false },
+    NestedCommandSpec { name: "query", summary: "query typed semantic and build facts", handler: "query", keep_group: false },
+    NestedCommandSpec { name: "explain-build", summary: "explain one build target, action, or file", handler: "explain-build", keep_group: false },
+    NestedCommandSpec { name: "impact", summary: "report a symbol's blast radius", handler: "impact", keep_group: false },
+    NestedCommandSpec { name: "dossier", summary: "explain a file or symbol through semantic facts", handler: "dossier", keep_group: false },
+    NestedCommandSpec { name: "semindex", summary: "query the stable semantic index", handler: "semindex", keep_group: false },
+    NestedCommandSpec { name: "expand", summary: "print sema facts for one or every lens", handler: "expand", keep_group: false },
+    NestedCommandSpec { name: "schema", summary: "inspect or re-baseline published schema snapshots", handler: "schema", keep_group: false },
+    NestedCommandSpec { name: "codemod", summary: "run replayable semantic codemods", handler: "codemod", keep_group: false },
+    NestedCommandSpec { name: "audit", summary: "check dependencies against the advisory database", handler: "audit", keep_group: false },
+    NestedCommandSpec { name: "sbom", summary: "emit a software bill of materials", handler: "sbom", keep_group: false },
+    NestedCommandSpec { name: "bind", summary: "generate a C binding cache from a header", handler: "bind", keep_group: false },
+];
+const STORE_ACTIONS: &[NestedCommandSpec] = &[
+    NestedCommandSpec { name: "verify", summary: "verify store objects and references", handler: "store", keep_group: true },
+    NestedCommandSpec { name: "rollback", summary: "roll back a store generation", handler: "store", keep_group: true },
+    NestedCommandSpec { name: "generations", summary: "list store generations", handler: "store", keep_group: true },
+    NestedCommandSpec { name: "gc", summary: "remove unreferenced store entries", handler: "gc", keep_group: false },
+    NestedCommandSpec { name: "fetch", summary: "download and link all dependencies", handler: "fetch", keep_group: false },
+    NestedCommandSpec { name: "lock", summary: "lock a script's inline dependencies", handler: "lock", keep_group: false },
+];
+const SELF_ACTIONS: &[NestedCommandSpec] = &[
+    NestedCommandSpec { name: "toolchain", summary: "show the project's pinned Jet toolchain", handler: "toolchain", keep_group: false },
+    NestedCommandSpec { name: "upgrade", summary: "show how to download a newer release", handler: "upgrade", keep_group: false },
+    NestedCommandSpec { name: "doctor", summary: "diagnose the toolchain and offer fixes", handler: "doctor", keep_group: false },
+    NestedCommandSpec { name: "completions", summary: "print shell completions", handler: "completions", keep_group: false },
+    NestedCommandSpec { name: "man", summary: "print the Jet manual page", handler: "man", keep_group: false },
+    NestedCommandSpec { name: "devtools", summary: "run checked developer generators", handler: "devtools", keep_group: false },
+    NestedCommandSpec { name: "lsp", summary: "run the language server", handler: "lsp", keep_group: false },
+];
+
 pub const COMMAND_GROUPS: &[CommandGroup] = &[
-    CommandGroup { name: "registry", actions: &["publish", "yank", "keygen", "key", "vendor"] },
-    CommandGroup { name: "inspect", actions: &["graph", "query", "explain-build", "impact", "dossier", "semindex", "expand", "schema", "codemod", "audit", "sbom", "bind"] },
-    CommandGroup { name: "store", actions: &["verify", "rollback", "generations", "gc", "fetch", "lock"] },
-    CommandGroup { name: "self", actions: &["toolchain", "upgrade", "doctor", "completions", "man", "devtools", "lsp"] },
+    CommandGroup { name: "registry", summary: "publishing, signing, yanking, and vendoring", actions: REGISTRY_ACTIONS },
+    CommandGroup { name: "inspect", summary: "semantic, build, schema, supply, and binding inspection", actions: INSPECT_ACTIONS },
+    CommandGroup { name: "store", summary: "package-store integrity and lifecycle", actions: STORE_ACTIONS },
+    CommandGroup { name: "self", summary: "Jet installation, diagnostics, completions, and machine tooling", actions: SELF_ACTIONS },
 ];
 
 pub fn command_group(name: &str) -> Option<&'static CommandGroup> {
     COMMAND_GROUPS.iter().find(|group| group.name == name)
 }
 
+pub fn nested_command(group: &str, action: &str) -> Option<(&'static CommandGroup, &'static NestedCommandSpec)> {
+    let group = command_group(group)?;
+    group.actions.iter().find(|spec| spec.name == action).map(|action| (group, action))
+}
+
+pub fn moved_command(name: &str) -> Option<(&'static CommandGroup, &'static NestedCommandSpec)> {
+    COMMAND_GROUPS.iter().find_map(|group| {
+        group.actions.iter().find(|action| action.name == name).map(|action| (group, action))
+    })
+}
+
 pub fn moved_command_group(name: &str) -> Option<&'static str> {
-    COMMAND_GROUPS.iter().find(|group| {
-        group.actions.contains(&name) && !matches!(name, "verify" | "rollback" | "generations")
-    }).map(|group| group.name)
+    moved_command(name).map(|(group, _)| group.name)
 }
 
 /// Every built-in subcommand. Order here is the order shown in the man page and
@@ -589,7 +648,7 @@ pub fn completions_bash() -> String {
         .collect::<Vec<_>>()
         .join(" ");
     let flags = FLAGS.iter().map(|f| f.long).collect::<Vec<_>>().join(" ");
-    let nested = COMMAND_GROUPS.iter().map(|g| format!("        {}) COMPREPLY=( $(compgen -W \"{}\" -- \"$cur\") ); return 0 ;;", g.name, g.actions.join(" "))).collect::<Vec<_>>().join("\n");
+    let nested = COMMAND_GROUPS.iter().map(|g| format!("        {}) COMPREPLY=( $(compgen -W \"{}\" -- \"$cur\") ); return 0 ;;", g.name, g.actions.iter().map(|a| a.name).collect::<Vec<_>>().join(" "))).collect::<Vec<_>>().join("\n");
     format!(
         "# bash completion for {bin} (generated by `{bin} self completions bash`)\n\
 _{bin}() {{\n\
@@ -626,7 +685,7 @@ pub fn completions_zsh() -> String {
         if !is_canonical_top_level(c.name) { continue; }
         cmd_lines.push_str(&format!("        '{}:{}'\n", c.name, escape_zsh(c.summary)));
     }
-    let nested = COMMAND_GROUPS.iter().map(|g| format!("            {}) _values 'action' {} ;;", g.name, g.actions.join(" "))).collect::<Vec<_>>().join("\n");
+    let nested = COMMAND_GROUPS.iter().map(|g| format!("            {}) _values 'action' {} ;;", g.name, g.actions.iter().map(|a| format!("'{}:{}'", a.name, escape_zsh(a.summary))).collect::<Vec<_>>().join(" "))).collect::<Vec<_>>().join("\n");
     let mut flag_lines = String::new();
     for f in FLAGS {
         flag_lines.push_str(&format!("        '{}[{}]'\n", f.long, escape_zsh(f.help)));
@@ -675,7 +734,7 @@ pub fn completions_fish() -> String {
     }
     for group in COMMAND_GROUPS {
         for action in group.actions {
-            out.push_str(&format!("complete -c {bin} -n '__fish_seen_subcommand_from {group}' -a {action}\n", bin=BINARY_NAME, group=group.name, action=action));
+            out.push_str(&format!("complete -c {bin} -n '__fish_seen_subcommand_from {group}' -a {action} -d '{desc}'\n", bin=BINARY_NAME, group=group.name, action=action.name, desc=escape_fish(action.summary)));
         }
     }
     for f in FLAGS {
@@ -692,7 +751,7 @@ pub fn completions_fish() -> String {
 /// PowerShell completion script, derived from the same nested registry.
 pub fn completions_powershell() -> String {
     let top = COMMANDS.iter().filter(|c| is_canonical_top_level(c.name)).map(|c| format!("'{}'", c.name)).collect::<Vec<_>>().join(",");
-    let groups = COMMAND_GROUPS.iter().map(|g| format!("'{}' = @({})", g.name, g.actions.iter().map(|a| format!("'{}'", a)).collect::<Vec<_>>().join(","))).collect::<Vec<_>>().join("; ");
+    let groups = COMMAND_GROUPS.iter().map(|g| format!("'{}' = @({})", g.name, g.actions.iter().map(|a| format!("'{}'", a.name)).collect::<Vec<_>>().join(","))).collect::<Vec<_>>().join("; ");
     format!("# PowerShell completion for {bin} (generated by `{bin} self completions powershell`)\n$JetCommands = @({top})\n$JetGroups = @{{ {groups} }}\nRegister-ArgumentCompleter -Native -CommandName {bin} -ScriptBlock {{ param($wordToComplete,$commandAst,$cursorPosition) $words = @($commandAst.CommandElements | ForEach-Object {{ $_.Extent.Text }}); $choices = if ($words.Count -ge 2 -and $JetGroups.ContainsKey($words[1])) {{ $JetGroups[$words[1]] }} else {{ $JetCommands }}; $choices | Where-Object {{ $_ -like \"$wordToComplete*\" }} | ForEach-Object {{ [System.Management.Automation.CompletionResult]::new($_,$_,\"ParameterValue\",$_) }} }}\n", bin=BINARY_NAME, top=top, groups=groups)
 }
 
@@ -725,6 +784,11 @@ and their dependencies. Output is plain when piped and colored on a terminal.\n"
     for c in COMMANDS {
         if !is_canonical_top_level(c.name) { continue; }
         out.push_str(&format!(".TP\n.B {}\n{}\n", c.name, roff_escape(c.summary)));
+        if let Some(group) = command_group(c.name) {
+            for action in group.actions {
+                out.push_str(&format!(".TP\n.B {} {}\n{}\n", group.name, action.name, roff_escape(action.summary)));
+            }
+        }
     }
     out.push_str(".SH FLAGS\n");
     for f in FLAGS {
@@ -794,7 +858,7 @@ mod tests {
             for group in COMMAND_GROUPS {
                 assert!(shell_out.contains(group.name), "completion missing group {}", group.name);
                 for action in group.actions {
-                    assert!(shell_out.contains(action), "completion missing {} {}", group.name, action);
+                    assert!(shell_out.contains(action.name), "completion missing {} {}", group.name, action.name);
                 }
             }
         }
@@ -804,9 +868,21 @@ mod tests {
     fn moved_commands_are_not_canonical_top_level() {
         for group in COMMAND_GROUPS {
             for action in group.actions {
-                if !matches!(*action, "verify" | "rollback" | "generations") {
-                    assert!(!is_canonical_top_level(action), "moved bare command leaked: {action}");
-                    assert_eq!(moved_command_group(action), Some(group.name));
+                assert!(!is_canonical_top_level(action.name), "moved bare command leaked: {}", action.name);
+                assert_eq!(moved_command_group(action.name), Some(group.name));
+            }
+        }
+    }
+
+    #[test]
+    fn every_nested_action_routes_to_a_real_dispatch_seam() {
+        for group in COMMAND_GROUPS {
+            for action in group.actions {
+                assert!(!action.summary.trim().is_empty(), "missing summary for {} {}", group.name, action.name);
+                assert!(is_builtin(action.handler), "{} {} routes to missing handler {}", group.name, action.name, action.handler);
+                assert_eq!(nested_command(group.name, action.name).map(|(_, a)| a.handler), Some(action.handler));
+                if action.keep_group {
+                    assert_eq!(action.handler, group.name, "kept group must own its dispatcher");
                 }
             }
         }

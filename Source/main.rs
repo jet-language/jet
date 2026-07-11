@@ -575,21 +575,11 @@ fn unknown_subcommand(cmd: &str) -> ! {
 /// reach the existing real handlers without keeping compatibility aliases.
 fn normalize_frequency_ring_argv(raw: &mut Vec<String>) {
     let Some(first) = raw.first().map(String::as_str) else { return };
-    if let Some(group) = jet::CLI::moved_command_group(first) {
+    if let Some((group_spec, _)) = jet::CLI::moved_command(first) {
+        let group = group_spec.name;
         let verb = first;
         let replacement = format!("jet {group} {}", raw.join(" "));
         if raw.iter().any(|arg| arg == "--json") {
-            fn esc(s: &str) -> String {
-                s.chars().flat_map(|c| match c {
-                    '"' => "\\\"".chars().collect::<Vec<_>>(),
-                    '\\' => "\\\\".chars().collect(),
-                    '\n' => "\\n".chars().collect(),
-                    '\r' => "\\r".chars().collect(),
-                    '\t' => "\\t".chars().collect(),
-                    c if c.is_control() => format!("\\u{:04x}", c as u32).chars().collect(),
-                    c => vec![c],
-                }).collect()
-            }
             println!("{{\"schema_version\":1,\"diagnostics\":[{{\"schema_version\":1,\"code\":\"E2101\",\"severity\":\"error\",\"message\":\"`{verb}` moved under `jet {group}`\",\"why\":\"infrequent commands live in a named area so daily Jet commands stay easy to scan\",\"fix\":\"run `{}`\",\"detail\":null,\"file\":null,\"line\":null,\"col\":null,\"span\":null,\"edit\":null}}]}}", esc(&replacement));
             exit(ExitCodes::USAGE);
         }
@@ -599,17 +589,20 @@ fn normalize_frequency_ring_argv(raw: &mut Vec<String>) {
         exit(ExitCodes::USAGE);
     }
     let Some(group) = raw.first().cloned() else { return };
-    if let Some(spec) = jet::CLI::command_group(&group) {
+    if jet::CLI::command_group(&group).is_some() {
         if raw.len() == 1 || raw.get(1).map(String::as_str) == Some("help") {
-            println!("jet {group}: {}", spec.actions.join(" "));
+            println!("jet {group} — {}", spec.summary);
+            for action in spec.actions {
+                println!("  {:<15} {}", action.name, action.summary);
+            }
             exit(ExitCodes::OK);
         }
     }
     let Some(sub) = raw.get(1).cloned() else { return };
     if let Some(spec) = jet::CLI::command_group(&group) {
-        if !spec.actions.contains(&sub.as_str()) {
+        if jet::CLI::nested_command(&group, &sub).is_none() {
             if raw.iter().any(|arg| arg == "--json") {
-                println!("{{\"schema_version\":1,\"diagnostics\":[{{\"schema_version\":1,\"code\":\"E2101\",\"severity\":\"error\",\"message\":\"`{sub}` isn't a jet {group} command\",\"why\":\"jet {group} accepts only commands in its named area\",\"fix\":\"run `jet {group} help`\",\"detail\":null,\"file\":null,\"line\":null,\"col\":null,\"span\":null,\"edit\":null}}]}}");
+                println!("{{\"schema_version\":1,\"diagnostics\":[{{\"schema_version\":1,\"code\":\"E2101\",\"severity\":\"error\",\"message\":\"`{}` isn't a jet {} command\",\"why\":\"jet {} accepts only commands in its named area\",\"fix\":\"run `jet {} help`\",\"detail\":null,\"file\":null,\"line\":null,\"col\":null,\"span\":null,\"edit\":null}}]}}", esc(&sub), esc(&group), esc(&group), esc(&group));
             } else {
                 eprintln!("Error [E2101]: `{sub}` isn't a jet {group} command.");
                 eprintln!(" Why: jet {group} accepts only commands in its named area.");
@@ -618,12 +611,24 @@ fn normalize_frequency_ring_argv(raw: &mut Vec<String>) {
             exit(ExitCodes::USAGE);
         }
     }
-    let valid = jet::CLI::command_group(&group)
-        .is_some_and(|spec| spec.actions.contains(&sub.as_str()))
-        && !(group == "store" && matches!(sub.as_str(), "verify" | "rollback" | "generations"));
-    if valid {
-        raw.remove(0);
+    if let Some((_, action)) = jet::CLI::nested_command(&group, &sub) {
+        if !action.keep_group {
+            raw[0] = action.handler.to_string();
+            raw.remove(1);
+        }
     }
+}
+
+fn esc(s: &str) -> String {
+    s.chars().flat_map(|c| match c {
+        '"' => "\\\"".chars().collect::<Vec<_>>(),
+        '\\' => "\\\\".chars().collect(),
+        '\n' => "\\n".chars().collect(),
+        '\r' => "\\r".chars().collect(),
+        '\t' => "\\t".chars().collect(),
+        c if c.is_control() => format!("\\u{:04x}", c as u32).chars().collect(),
+        c => vec![c],
+    }).collect()
 }
 
 /// Validate every `--flag` in argv against the registry. The first unknown flag

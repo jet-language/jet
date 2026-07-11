@@ -224,7 +224,7 @@ pub fn render_categorized(
             }
             for e in entries {
                 let line = format!("jet {:<20} {}", e.cmd, e.summary);
-                out.push_str(&selected_row(width, &line, selected_cmd == Some(e.cmd), color));
+                out.push_str(&selected_row(width, &line, selected_cmd == Some(e.cmd.as_str()), color));
                 out.push('\n');
             }
         }
@@ -235,10 +235,10 @@ pub fn render_categorized(
 
 /// Command names in categorized display order (headers excluded) — the
 /// selection sequence `Interactive`'s ↑/↓ walks over.
-pub fn categorized_order(index: &[Entry]) -> Vec<&'static str> {
+pub fn categorized_order(index: &[Entry]) -> Vec<&str> {
     super::CATEGORIES
         .iter()
-        .flat_map(|cat| index.iter().filter(move |e| &e.category == cat).map(|e| e.cmd))
+        .flat_map(|cat| index.iter().filter(move |e| &e.category == cat).map(|e| e.cmd.as_str()))
         .collect()
 }
 
@@ -435,7 +435,7 @@ pub fn render_reference(
         left_rows.push(format!("{} {}", marker, cat));
         if ci == selected_category {
             for e in index.iter().filter(|e| &e.category == cat) {
-                let sel = selected_entry.map(|s| s.cmd) == Some(e.cmd);
+                let sel = selected_entry.map(|s| s.cmd.as_str()) == Some(e.cmd.as_str());
                 let prefix = if sel { "> " } else { "  " };
                 if sel {
                     selected_row = Some(left_rows.len());

@@ -161,6 +161,76 @@ fn moved_bare_commands_are_teaching_errors_not_aliases() {
 }
 
 #[test]
+fn every_moved_bare_action_is_e2101_in_human_and_json_modes() {
+    for group in jet::CLI::COMMAND_GROUPS {
+        for action in group.actions {
+            let replacement = format!("jet {} {}", group.name, action.name);
+            let out = Command::new(jet()).arg(action.name).arg("sentinel").output().unwrap();
+            assert_eq!(out.status.code(), Some(2), "bare {}", action.name);
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            assert!(stderr.contains("E2101") && stderr.contains(&replacement), "{}: {stderr}", action.name);
+
+            let out = Command::new(jet()).args([action.name, "sentinel\\\"quoted", "--json"]).output().unwrap();
+            assert_eq!(out.status.code(), Some(2), "bare {} --json", action.name);
+            assert!(out.stderr.is_empty(), "JSON diagnostic leaked stderr for {}", action.name);
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            assert!(stdout.contains("\"code\":\"E2101\"") && stdout.contains(&replacement), "{}: {stdout}", action.name);
+            assert!(stdout.contains("sentinel\\\\\\\"quoted"), "replacement was not JSON escaped: {stdout}");
+        }
+    }
+}
+
+#[test]
+fn invalid_nested_action_is_e2101_and_json_escaped() {
+    let bad = "bad\\\"action";
+    for group in jet::CLI::COMMAND_GROUPS {
+        let out = Command::new(jet()).args([group.name, bad]).output().unwrap();
+        assert_eq!(out.status.code(), Some(2));
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains("E2101") && stderr.contains(bad), "{stderr}");
+
+        let out = Command::new(jet()).args([group.name, bad, "--json"]).output().unwrap();
+        assert_eq!(out.status.code(), Some(2));
+        assert!(out.stderr.is_empty());
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(stdout.contains("bad\\\\\\\"action"), "invalid JSON escaping: {stdout}");
+        assert!(!stdout.contains("`bad\\\"action`"), "raw quote leaked into JSON: {stdout}");
+    }
+}
+
+#[test]
+fn group_help_and_man_inventory_every_nested_description() {
+    let man = Command::new(jet()).args(["self", "man"]).output().unwrap();
+    assert_eq!(man.status.code(), Some(0));
+    let man = String::from_utf8_lossy(&man.stdout);
+    for group in jet::CLI::COMMAND_GROUPS {
+        let out = Command::new(jet()).args([group.name, "help"]).output().unwrap();
+        assert_eq!(out.status.code(), Some(0));
+        let help = String::from_utf8_lossy(&out.stdout);
+        assert!(help.contains(group.summary), "{} help missing summary", group.name);
+        for action in group.actions {
+            assert!(help.contains(action.name) && help.contains(action.summary), "{} help missing {}", group.name, action.name);
+            assert!(man.contains(&format!(".B {} {}", group.name, action.name)), "man missing {} {}", group.name, action.name);
+            assert!(man.contains(action.summary), "man missing summary for {} {}", group.name, action.name);
+        }
+    }
+}
+
+#[test]
+fn palette_uses_canonical_nested_routes() {
+    for group in jet::CLI::COMMAND_GROUPS {
+        for action in group.actions {
+            let route = format!("{} {}", group.name, action.name);
+            let out = Command::new(jet()).args(["?", &route]).output().unwrap();
+            assert_eq!(out.status.code(), Some(0));
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            assert!(stdout.contains(&format!("jet {route}")), "palette missing {route}: {stdout}");
+            assert!(!stdout.contains(&format!("jet {}   ", action.name)), "palette advertised bare moved action {}", action.name);
+        }
+    }
+}
+
+#[test]
 fn jet_install_teaches_jet_fetch() {
     // `jet install` is not a Jet command; the compiler emits E0043 pointing to `jet store fetch`.
     let out = Command::new(jet()).arg("install").output().unwrap();
