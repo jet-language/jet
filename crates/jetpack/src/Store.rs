@@ -814,6 +814,10 @@ struct ExecWrappers {
     directory: fs::File,
 }
 
+fn required_child_pipe<T>(pipe: Option<T>, message: &'static str) -> std::io::Result<T> {
+    pipe.ok_or_else(|| std::io::Error::other(message))
+}
+
 fn open_snapshot_executables(
     snapshot_root: &Path,
     bin: Option<&Path>,
@@ -873,8 +877,8 @@ IFS= read -r _ || true
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
-    let mut input = child.stdin.take().expect("piped lease keeper stdin");
-    let output = child.stdout.take().expect("piped lease keeper stdout");
+    let mut input = required_child_pipe(child.stdin.take(), "piped lease keeper stdin")?;
+    let output = required_child_pipe(child.stdout.take(), "piped lease keeper stdout")?;
     let mut output = std::io::BufReader::new(output);
     let mut line = String::new();
     output.read_line(&mut line)?;
@@ -1005,9 +1009,19 @@ fn open_snapshot_files(
         }
         return Ok(());
     }
+    let relative = path.strip_prefix(root).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!(
+                "snapshot path `{}` is outside snapshot root `{}`",
+                path.display(),
+                root.display()
+            ),
+        )
+    })?;
     let file = fs::File::open(path)?;
     clear_close_on_exec(&file)?;
-    files.push((path.strip_prefix(root).unwrap().to_path_buf(), file));
+    files.push((relative.to_path_buf(), file));
     Ok(())
 }
 
@@ -1765,6 +1779,43 @@ mod tests {
         find_verified_by_reference(roots, reference, expectation)
             .unwrap()
             .is_some()
+    }
+
+    #[test]
+    fn required_child_pipe_preserves_value_and_reports_missing_pipe() {
+        assert_eq!(required_child_pipe(Some(41), "unused").unwrap(), 41);
+
+        let stdin = required_child_pipe(None::<()>, "piped lease keeper stdin").unwrap_err();
+        assert_eq!(stdin.kind(), std::io::ErrorKind::Other);
+        assert_eq!(stdin.to_string(), "piped lease keeper stdin");
+
+        let stdout = required_child_pipe(None::<()>, "piped lease keeper stdout").unwrap_err();
+        assert_eq!(stdout.kind(), std::io::ErrorKind::Other);
+        assert_eq!(stdout.to_string(), "piped lease keeper stdout");
+    }
+
+    #[test]
+    fn open_snapshot_files_rejects_path_outside_root_without_collecting_file() {
+        let (roots, _g) = temp_roots();
+        let snapshot_root = roots.root.join("snapshot");
+        let outside = roots.root.join("outside/payload");
+        fs::create_dir_all(&snapshot_root).unwrap();
+        fs::create_dir_all(outside.parent().unwrap()).unwrap();
+        fs::write(&outside, "outside").unwrap();
+        let mut files = Vec::new();
+
+        let error = open_snapshot_files(&snapshot_root, &outside, &mut files).unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "snapshot path `{}` is outside snapshot root `{}`",
+                outside.display(),
+                snapshot_root.display()
+            )
+        );
+        assert!(files.is_empty());
     }
 
     #[test]
