@@ -682,6 +682,39 @@ fn run() { print("hello, web") }
 }
 
 #[test]
+fn default_wasm_top_level_dev_is_not_web_runtime() {
+    let src = r#"#Target(Web)
+use core.devserver as devserver
+fn dev() {
+    server :: devserver.app()
+    server.port(8080)
+    server.serve()
+}
+fn run() { print("hello") }
+"#;
+    let out = jet::compile_web_with_path(src, "tests/fixtures/web_host_dev_wasm.jet")
+        .expect("default-Wasm host dev entry must stay outside web runtime");
+    let wasm = &out.web.expect("web artifacts").wasm_rust;
+    assert!(!wasm.contains("jet_wasm_dev"), "top-level host dev leaked into Wasm runtime:\n{wasm}");
+}
+
+#[test]
+fn module_local_dev_is_validated_as_web_runtime() {
+    let src = r#"#Target(Web)
+module Tools {
+    fn dev(name: String) { print("hello {name}") }
+}
+fn run() { print("hello") }
+"#;
+    let diags = jet::compile_web_with_path(src, "tests/fixtures/web_module_dev_unsupported.jet")
+        .expect_err("unsupported module-local dev body must not receive host-entry exemption");
+    assert!(
+        diags.iter().any(|d| d.code == "E-WEB-TIR-UNSUPPORTED" && d.what.contains("`dev`")),
+        "{diags:?}"
+    );
+}
+
+#[test]
 fn web_hello_dom_shim_roundtrip() {
     if !have_tool("rustc") || !have_tool("node") {
         eprintln!("note: skipping web_build hello (need rustc + node)");
