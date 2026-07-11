@@ -165,8 +165,38 @@ fn repl_quit_exits() {
 
 #[test]
 fn repl_help_shows_commands() {
-    let out = run_transcript(&[":help"], None);
+    use std::io::Write as _;
+    use std::process::{Command, Stdio};
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .arg("repl")
+        .env("NO_COLOR", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("start jet repl");
+    child
+        .stdin
+        .as_mut()
+        .expect("piped stdin")
+        .write_all(b":help\n:quit\n")
+        .expect("write transcript");
+    let output = child.wait_with_output().expect("finish jet repl");
+    assert!(output.status.success(), "status: {:?}", output.status);
+    let out = String::from_utf8(output.stdout).expect("utf-8 help");
     assert!(out.contains("REPL meta-commands"), "got: {:?}", out);
+    for hint in [
+        "?name",
+        ":? <name>",
+        "Interactive terminal only",
+        "Tab",
+        "^P",
+        "^F",
+        "^R",
+        "^B",
+    ] {
+        assert!(out.contains(hint), "help missing {hint:?}: {out:?}");
+    }
 }
 
 #[test]
