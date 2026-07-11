@@ -1,6 +1,12 @@
 # Epoch 3 pillar — async networking & Go-scale concurrency
 
 **Status:** canonical implementation push is Tower #126 (updated 2026-06-30).
+
+Windows uses IOCP directly: sockets are associated with one completion port,
+zero-byte overlapped `WSARecv`/`WSASend` operations park without consuming data,
+and registration/cancellation control packets wake the port. Monotonic completion
+keys reject stale packets; `CancelIoEx` retires pending operations on task cancel,
+deadline, or scope exit. No portable polling runs on the Windows native path.
 It now owns the Go-scale M:N runtime, native parkers, scoped combinators, select,
 deadlines/cancellation integration, observability, and scale proof. Former
 standalone cards #36 and #103 are merged into #126.

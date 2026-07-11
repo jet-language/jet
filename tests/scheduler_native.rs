@@ -1,5 +1,5 @@
 //! Tower #126: emitted AOT programs must SHIP and SELECT the native readiness
-//! backend (epoll on Linux / kqueue on the BSD-Apple family), not the portable
+//! backend (epoll on Linux / kqueue on BSD-Apple / IOCP on Windows), not the portable
 //! poll fallback — while staying I1-clean once the vetted native region is
 //! excluded from the `unsafe` scan (the same contract `tests/golden.rs` enforces).
 
@@ -70,6 +70,18 @@ fn emitted_scheduler_ships_native_readiness_backend() {
         rust.contains("fn kqueue()"),
         "emitted program must ship the kqueue backend behind cfg"
     );
+    assert!(
+        rust.contains("CreateIoCompletionPort")
+            && rust.contains("GetQueuedCompletionStatus")
+            && rust.contains("WSARecv")
+            && rust.contains("CancelIoEx")
+            && rust.contains("PostQueuedCompletionStatus"),
+        "emitted program must ship real IOCP registration, completion, wake, and cancellation"
+    );
+    assert!(
+        !rust.contains("IOCP path: fall back to portable poll"),
+        "Windows native path must never route through portable readiness polling"
+    );
 
     // The JIT-only Cargo feature gate must be rewritten at emit time so a bare
     // `rustc` build (no Cargo features) still selects native purely on target_os.
@@ -81,7 +93,9 @@ fn emitted_scheduler_ships_native_readiness_backend() {
     // Backend is actually SELECTED, not merely present: the io_backend reporter
     // returns the native name on the native targets.
     assert!(
-        rust.contains("return \"epoll\";") && rust.contains("return \"kqueue\";"),
+        rust.contains("return \"epoll\";")
+            && rust.contains("return \"kqueue\";")
+            && rust.contains("return \"iocp\";"),
         "emitted io_backend must select native backends per target_os"
     );
 }

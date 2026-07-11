@@ -381,10 +381,14 @@ struct IoInterest {
 
 struct IoPoller {
     interests: Mutex<Vec<IoInterest>>,
-    streams: Mutex<Vec<Arc<Mutex<TcpStream>>>>,
+    streams: Mutex<Vec<Option<Arc<Mutex<TcpStream>>>>>,
     notify: Condvar,
+    next_key: AtomicUsize,
+    #[cfg(target_os = "windows")]
+    iocp_port: AtomicUsize,
 }
 
+// jet:scheduler-native-begin — vetted std-only OS FFI and poller dispatch.
 #[allow(dead_code)]
 impl IoPoller {
     fn register(
@@ -394,9 +398,9 @@ impl IoPoller {
         writable: bool,
     ) -> (usize, Arc<ParkSlot>) {
         let slot = ParkSlot::new();
+        let id = self.next_key.fetch_add(1, Ordering::Relaxed);
         let mut streams = self.streams.lock().unwrap();
-        let id = streams.len();
-        streams.push(stream);
+        streams.push(Some(stream));
         drop(streams);
         self.interests.lock().unwrap().push(IoInterest {
             stream_id: id,
@@ -405,7 +409,30 @@ impl IoPoller {
             writable,
         });
         self.notify.notify_one();
+        #[cfg(target_os = "windows")]
+        self.iocp_notify();
         (id, slot)
+    }
+
+    fn unregister(&self, id: usize) {
+        self.interests.lock().unwrap().retain(|i| i.stream_id != id);
+        if let Some(stream) = self.streams.lock().unwrap().get_mut(id) {
+            *stream = None;
+        }
+        #[cfg(target_os = "windows")]
+        self.iocp_notify();
+    }
+
+    #[cfg(target_os = "windows")]
+    fn iocp_notify(&self) {
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn PostQueuedCompletionStatus(port: usize, bytes: u32, key: usize, ov: *mut std::ffi::c_void) -> i32;
+        }
+        let port = self.iocp_port.load(Ordering::Acquire);
+        if port != 0 {
+            unsafe { PostQueuedCompletionStatus(port, 0, 0, std::ptr::null_mut()); }
+        }
     }
 
     fn run(self: Arc<Self>) {
@@ -453,7 +480,6 @@ impl IoPoller {
         }
     }
 
-    // jet:scheduler-native-begin — stripped from user-visible prelude (I1); native IO lives in jet_codegen::scheduler only.
     #[cfg(all(target_os = "linux", feature = "jet_native_io"))]
     fn run_linux_epoll(self: Arc<Self>) {
         use std::collections::HashMap;
@@ -494,7 +520,7 @@ impl IoPoller {
                 let streams = self.streams.lock().unwrap();
                 let mut out = Vec::new();
                 for interest in interests.iter() {
-                    let Some(stream) = streams.get(interest.stream_id) else {
+                    let Some(stream) = streams.get(interest.stream_id).and_then(Option::as_ref) else {
                         continue;
                     };
                     let fd = stream.lock().unwrap().as_raw_fd();
@@ -610,7 +636,7 @@ impl IoPoller {
                 let streams = self.streams.lock().unwrap();
                 let mut out = Vec::new();
                 for interest in interests.iter() {
-                    let Some(stream) = streams.get(interest.stream_id) else {
+                    let Some(stream) = streams.get(interest.stream_id).and_then(Option::as_ref) else {
                         continue;
                     };
                     let fd = stream.lock().unwrap().as_raw_fd();
@@ -704,9 +730,107 @@ impl IoPoller {
 
     #[cfg(all(target_os = "windows", feature = "jet_native_io"))]
     fn run_iocp(self: Arc<Self>) {
-        // IOCP path: fall back to portable poll until full AcceptEx/WSA integration lands.
-        // Backend name is honest (`iocp`) for metrics; readiness uses non-blocking probe.
-        self.run_portable_poll();
+        use std::collections::HashMap;
+        use std::os::windows::io::AsRawSocket;
+        #[repr(C)]
+        struct Overlapped { internal: usize, internal_high: usize, offset: u32, offset_high: u32, event: usize }
+        #[repr(C)]
+        struct WsaBuf { len: u32, buf: *mut u8 }
+        struct Active { socket: usize, operations: Vec<*mut Overlapped> }
+        const INVALID_HANDLE_VALUE: usize = usize::MAX;
+        const WSA_IO_PENDING: i32 = 997;
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn CreateIoCompletionPort(file: usize, existing: usize, key: usize, threads: u32) -> usize;
+            fn GetQueuedCompletionStatus(port: usize, bytes: *mut u32, key: *mut usize, ov: *mut *mut Overlapped, timeout_ms: u32) -> i32;
+            fn CancelIoEx(file: usize, ov: *mut Overlapped) -> i32;
+        }
+        #[link(name = "ws2_32")]
+        extern "system" {
+            fn WSARecv(socket: usize, buffers: *mut WsaBuf, count: u32, bytes: *mut u32, flags: *mut u32, ov: *mut Overlapped, completion: *mut std::ffi::c_void) -> i32;
+            fn WSASend(socket: usize, buffers: *mut WsaBuf, count: u32, bytes: *mut u32, flags: u32, ov: *mut Overlapped, completion: *mut std::ffi::c_void) -> i32;
+            fn WSAGetLastError() -> i32;
+        }
+
+        let port = unsafe { CreateIoCompletionPort(INVALID_HANDLE_VALUE, 0, 0, 1) };
+        assert!(port != 0, "CreateIoCompletionPort failed");
+        self.iocp_port.store(port, Ordering::Release);
+        let mut active: HashMap<usize, Active> = HashMap::new();
+        loop {
+            let pending: Vec<(usize, usize, bool, bool)> = {
+                let interests = self.interests.lock().unwrap();
+                let streams = self.streams.lock().unwrap();
+                interests.iter()
+                    .filter(|interest| !active.contains_key(&interest.stream_id))
+                    .filter_map(|interest| streams.get(interest.stream_id).and_then(Option::as_ref).map(|stream| (
+                        interest.stream_id,
+                        stream.lock().unwrap().as_raw_socket() as usize,
+                        interest.readable,
+                        interest.writable,
+                    )))
+                    .collect()
+            };
+            for (id, socket, readable, writable) in pending {
+                let associated = unsafe { CreateIoCompletionPort(socket, port, id + 1, 0) };
+                if associated == 0 { continue; }
+                let mut operations = Vec::new();
+                for read in [true, false] {
+                    if (read && !readable) || (!read && !writable) { continue; }
+                    let raw = Box::into_raw(Box::new(Overlapped {
+                        internal: 0, internal_high: 0, offset: 0, offset_high: 0, event: 0,
+                    }));
+                    let mut buffer = WsaBuf { len: 0, buf: std::ptr::null_mut() };
+                    let mut bytes = 0;
+                    let rc = if read {
+                        let mut flags = 0;
+                        unsafe { WSARecv(socket, &mut buffer, 1, &mut bytes, &mut flags, raw, std::ptr::null_mut()) }
+                    } else {
+                        unsafe { WSASend(socket, &mut buffer, 1, &mut bytes, 0, raw, std::ptr::null_mut()) }
+                    };
+                    if rc == 0 || unsafe { WSAGetLastError() } == WSA_IO_PENDING {
+                        operations.push(raw);
+                    } else {
+                        unsafe { drop(Box::from_raw(raw)); }
+                    }
+                }
+                if operations.is_empty() {
+                    if let Some(slot) = self.interests.lock().unwrap().iter()
+                        .find(|interest| interest.stream_id == id).map(|interest| interest.slot.clone())
+                    { slot.wake(); }
+                } else {
+                    active.insert(id, Active { socket, operations });
+                }
+            }
+
+            let live: Vec<usize> = self.interests.lock().unwrap().iter()
+                .map(|interest| interest.stream_id).collect();
+            for (id, entry) in active.iter() {
+                if !live.contains(id) {
+                    for operation in &entry.operations { unsafe { CancelIoEx(entry.socket, *operation); } }
+                }
+            }
+
+            let (mut bytes, mut key, mut operation) = (0, 0usize, std::ptr::null_mut());
+            unsafe { GetQueuedCompletionStatus(port, &mut bytes, &mut key, &mut operation, u32::MAX); }
+            if operation.is_null() { continue; }
+            unsafe { drop(Box::from_raw(operation)); }
+            let id = key.saturating_sub(1);
+            let Some(entry) = active.get_mut(&id) else { continue; };
+            entry.operations.retain(|candidate| *candidate != operation);
+            let slot = {
+                let mut interests = self.interests.lock().unwrap();
+                let slot = interests.iter().find(|interest| interest.stream_id == id)
+                    .map(|interest| interest.slot.clone());
+                interests.retain(|interest| interest.stream_id != id);
+                slot
+            };
+            if let Some(slot) = slot {
+                METRIC_POLLER_WAKE.fetch_add(1, Ordering::Relaxed);
+                for pending in &entry.operations { unsafe { CancelIoEx(entry.socket, *pending); } }
+                slot.wake();
+            }
+            if entry.operations.is_empty() { active.remove(&id); }
+        }
     }
     // jet:scheduler-native-end
 
@@ -724,7 +848,7 @@ impl IoPoller {
                 let streams = self.streams.lock().unwrap();
                 let mut slots = Vec::new();
                 for interest in interests.iter() {
-                    let Some(stream) = streams.get(interest.stream_id) else {
+                    let Some(stream) = streams.get(interest.stream_id).and_then(Option::as_ref) else {
                         continue;
                     };
                     let mut s = stream.lock().unwrap();
@@ -771,6 +895,9 @@ fn io_poller() -> Arc<IoPoller> {
                 interests: Mutex::new(Vec::new()),
                 streams: Mutex::new(Vec::new()),
                 notify: Condvar::new(),
+                next_key: AtomicUsize::new(0),
+                #[cfg(target_os = "windows")]
+                iocp_port: AtomicUsize::new(0),
             });
             let p = poller.clone();
             thread::spawn(move || p.run());
@@ -782,7 +909,13 @@ fn io_poller() -> Arc<IoPoller> {
 /// Park until `stream` looks readable or writable (non-blocking probe via poller).
 pub fn jet_scheduler_io_wait(stream: &TcpStream, read: bool, write: bool, wait_kind: &str) {
     let shared = Arc::new(Mutex::new(stream.try_clone().expect("tcp clone")));
-    let (_id, slot) = io_poller().register(shared, read, write);
+    let poller = io_poller();
+    let (id, slot) = poller.register(shared, read, write);
+    struct Registration(Arc<IoPoller>, usize);
+    impl Drop for Registration {
+        fn drop(&mut self) { self.0.unregister(self.1); }
+    }
+    let _registration = Registration(poller, id);
     jet_scheduler_yield(wait_kind, &slot, None);
 }
 

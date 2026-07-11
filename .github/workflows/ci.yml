@@ -38,6 +38,12 @@ jobs:
         if: matrix.os == 'windows-latest'
         run: cargo test --test path_durability -- --nocapture
 
+      - name: Windows native IOCP scheduler proof
+        if: matrix.os == 'windows-latest'
+        run: |
+          cargo test -p jet-codegen iocp_wake_cancel_deadline_stale_scale_and_cleanup -- --nocapture
+          cargo test --test scheduler_native -- --nocapture
+
   verify:
     name: Full verify suite
     if: github.event_name != 'schedule'
