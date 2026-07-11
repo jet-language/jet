@@ -118,9 +118,10 @@ fn validate_web_items_tir(
                 let key = module_prefix.map(|m| format!("{m}__{}", f.name)).unwrap_or_else(|| f.name.clone());
                 let bucket = bundle.web_partitions.get(&key).copied().unwrap_or(WebBucket::Wasm);
                 let has_wasm_export = bundle.modules.iter().any(|m| items_have_wasm_export(&m.items));
-                let emitted = bucket == WebBucket::Js
-                    || !explicit_html
-                    || has_wasm_export;
+                // `dev()` is the host-side programmable dev-server entry. It
+                // executes before the web build and is never web-runtime code.
+                let emitted = f.name != "dev"
+                    && (bucket == WebBucket::Js || !explicit_html || has_wasm_export);
                 validate_web_func_tir(f, cx, bundle, bucket, emitted, diags);
             }
             Item::CodeModule(cm) => {
@@ -218,6 +219,7 @@ fn web_wasm_stmts_supported(stmts: &[TIR::TStmt], bundle: &ProgramBundle) -> boo
 fn web_wasm_expr_supported(expr: &TIR::TExpr, bundle: &ProgramBundle) -> bool {
     match &expr.kind {
         TIR::TExprKind::IntLit(..) | TIR::TExprKind::FloatLit(_) | TIR::TExprKind::BoolLit(_) | TIR::TExprKind::Local(_) => true,
+        TIR::TExprKind::StrLit(parts) => parts.iter().all(|part| matches!(part, TIR::TStrPart::Lit(_))),
         TIR::TExprKind::Binary { lhs, rhs, .. } => web_wasm_expr_supported(lhs, bundle) && web_wasm_expr_supported(rhs, bundle),
         TIR::TExprKind::Unary { operand, .. } | TIR::TExprKind::Clone(operand) | TIR::TExprKind::Print(operand) => {
             web_wasm_expr_supported(operand, bundle)
@@ -585,6 +587,7 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
         .iter()
         .filter(|f| {
             f.bucket == WebBucket::Wasm
+                && f.name != "dev"
                 && (bundle.modules[bundle.entry].html_path.is_none()
                     || funcs.iter().any(|x| x.marker == Some(WebPartitionMarker::WasmExport)))
         })
@@ -677,6 +680,14 @@ fn wasm_emit_expr(expr: &TIR::TExpr, funcs: &[FuncWeb]) -> Result<String, ()> {
         TIR::TExprKind::IntLit(n, _) => n.to_string(),
         TIR::TExprKind::FloatLit(n) => n.to_string(),
         TIR::TExprKind::BoolLit(b) => b.to_string(),
+        TIR::TExprKind::StrLit(parts) => {
+            let mut value = String::new();
+            for part in parts {
+                let TIR::TStrPart::Lit(text) = part else { return Err(()) };
+                value.push_str(text);
+            }
+            json_quote(&value)
+        }
         TIR::TExprKind::Local(name) => name.clone(),
         TIR::TExprKind::Binary { op, lhs, rhs, .. } => format!(
             "({} {} {})",

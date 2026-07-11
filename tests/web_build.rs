@@ -657,6 +657,24 @@ fn run() { print(summarize(4)) }
 }
 
 #[test]
+fn host_dev_entry_is_not_web_runtime_and_run_prints_literal_from_tir() {
+    let src = r#"#Target(Web)
+use core.devserver as devserver
+fn dev() {
+    server :: devserver.app()
+    server.port(8080)
+    server.serve()
+}
+fn run() { print("hello, web") }
+"#;
+    let out = jet::compile_web_with_path(src, "tests/fixtures/web_host_dev.jet")
+        .expect("host dev entry and web run body must compile through their own execution paths");
+    let wasm = &out.web.expect("web artifacts").wasm_rust;
+    assert!(!wasm.contains("jet_wasm_dev"), "host dev entry leaked into web runtime:\n{wasm}");
+    assert!(wasm.contains("println!(\"{}\", \"hello, web\")"), "literal TIR print was not emitted:\n{wasm}");
+}
+
+#[test]
 fn web_hello_dom_shim_roundtrip() {
     if !have_tool("rustc") || !have_tool("node") {
         eprintln!("note: skipping web_build hello (need rustc + node)");

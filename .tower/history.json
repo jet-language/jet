@@ -16858,6 +16858,1061 @@
       "ratifiedAt": "2026-06-28",
       "draft": false,
       "retiredAt": "2026-07-10T15:43:02.253Z"
+    },
+    {
+      "id": "D-CANVAS-WORKSPACE1",
+      "cardId": "c0khyif2",
+      "group": "tooling",
+      "title": "Canvas workspace scope",
+      "gist": "Choose what Canvas opens and edits as one workspace.",
+      "explainer": "",
+      "story": "Maya opens a game project with an app package, a shared math package, a web target, tests, and a dev service. She wants Canvas to show the whole workspace, not make her open each file and guess how the package fits together.",
+      "inWild": "workspace.jet\nmodule workspace {\n    members: find(\"./packages\")\n}\n\npackages/game/pkg.jet\npayload: { name: \"game\", version: \"0.1.0\" }\ndeps: [\"mathkit\"]\n\n$ jet dev packages/game/src/main.jet --target=web\n# Canvas opens project graph: workspace -> packages -> files -> targets -> function graphs",
+      "detail": "Two-facet pass: beginners get one project map after opening any entry file; experts get exact package/member/lock facts without a Canvas asset store.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Current file graph only",
+          "detail": "Canvas stays scoped to the entry file. Imported files and packages may appear as read-only references. This preserves today's model but cannot manage a full package/workspace.",
+          "code": "GET /canvas/graph\n{ \"source_id\": \"packages/game/src/main.jet\", \"graphs\": [...] }\n\n# Deps, targets, workspace members, envs, and lock state are outside Canvas."
+        },
+        {
+          "key": "B",
+          "name": "Package/workspace graph over source truth (recommended)",
+          "detail": "Canvas opens a project graph built from `workspace.jet`, `pkg.jet`, source files, env source, and `.jet/lock`. File graphs remain child views. No hidden Canvas project asset. Single-file mode remains the fallback when no package exists.",
+          "code": "GET /canvas/project\n{\n  \"protocol\": \"jet.canvas.project\",\n  \"workspace\": { \"path\": \"workspace.jet\", \"members\": [...] },\n  \"packages\": [...],\n  \"files\": [...],\n  \"targets\": [...],\n  \"locks\": [...]\n}\n\nGET /canvas/graph?source_id=packages/game/src/main.jet"
+        },
+        {
+          "key": "C",
+          "name": "Separate Canvas project asset",
+          "detail": "Canvas owns a `.canvas` project graph and syncs to Jet source. Reject: the graph can drift from source and violates the source-backed Canvas law.",
+          "code": ".canvas/project.json\n{ \"nodes\": [...], \"packages\": [...] }\n\n# Jet source becomes a projection target instead of truth. Reject."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Unreal Blueprint",
+          "note": "Blueprint assets are the source of truth for graph behavior. Jet should not copy that part; Canvas remains a projection over text.",
+          "code": "Content/Blueprints/BP_Player.uasset"
+        },
+        {
+          "lang": "VS Code",
+          "note": "Workspace view is a projection over files, manifests, tasks, and source control; it does not own a separate semantic graph.",
+          "code": ".vscode/settings.json  # editor state only, not program truth"
+        },
+        {
+          "lang": "Nix flakes",
+          "note": "Project graph comes from source (`flake.nix`), lock state from `flake.lock`; tools project it rather than owning a GUI graph.",
+          "code": "nix flake show"
+        }
+      ],
+      "rec": "B",
+      "status": "ratified",
+      "created": "2026-07-08T10:25:03.219Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-07-08",
+      "draft": false,
+      "retiredAt": "2026-07-11T00:24:37.570Z"
+    },
+    {
+      "id": "D-CANVAS-WORKSPACE-STATE1",
+      "cardId": "c0khyif2",
+      "group": "tooling",
+      "title": "Canvas workspace state boundary",
+      "gist": "Choose which Canvas workspace facts persist in source.",
+      "explainer": "",
+      "story": "Doris reviews a teammate's branch. She wants shared comments and collapsed regions to travel with source when intentional, but she does not want her private tabs, zoom, selection, and scratch breakpoints committed into the repo.",
+      "inWild": "// Shared only when intentional:\n// canvas:comment span=120..260 title=\"combat flow\" color=\"#2f80ed\" alpha=0.25 bounds=(10,20,320,140)\n\n// Local only:\n// open tabs, zoom, selected package, debug watches, last command",
+      "detail": "Two-facet pass: beginners get clean source and sane local persistence; experts can deliberately share source-anchored visual intent for review and teaching.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Source semantics, local viewport state (recommended)",
+          "detail": "Semantic facts come from Jet source, manifests, workspace files, env source, and locks. Viewport/tabs/selection/recent commands/debug watches stay local. Shared Canvas comments/bookmarks/collapse hints use explicit source-anchored comments.",
+          "code": "source: pkg.jet, workspace.jet, src/*.jet, env.jet, .jet/lock\nlocal: tabs, zoom, selected graph, watches\nshared visual intent: // canvas:comment ..."
+        },
+        {
+          "key": "B",
+          "name": "All workspace UI state in source comments",
+          "detail": "Every tab, zoom, selection, bookmark, breakpoint, and layout choice persists into source comments. This is transparent but pollutes source with private editor state.",
+          "code": "// canvas:tab file=\"src/main.jet\" active=true\n// canvas:zoom graph=\"run\" value=0.72\n// canvas:selected node=\"...\"\n\n# Private UI churn enters code review."
+        },
+        {
+          "key": "C",
+          "name": "Hidden per-project Canvas state DB",
+          "detail": "Canvas stores project state in a side database. Reject for semantic or shared facts because it can drift from source; acceptable only for private local cache.",
+          "code": ".jet/canvas-state.db\n# semantic package graph lives here -> reject\n# viewport cache only -> allowed under A"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "VS Code",
+          "note": "Private workspace UI state is local; shared configuration is explicit files. Jet should keep the same boundary, but source facts remain Jet-owned.",
+          "code": ".vscode/settings.json\n.vscode/launch.json"
+        },
+        {
+          "lang": "Unreal Blueprint",
+          "note": "Graph layout lives inside Blueprint assets. That fits an asset editor but conflicts with Canvas source truth.",
+          "code": "Blueprint asset stores graph layout and behavior together."
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "created": "2026-07-08T10:25:06.581Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-08",
+      "draft": false,
+      "retiredAt": "2026-07-11T00:24:37.570Z"
+    },
+    {
+      "id": "D-CANVAS-WORKSPACE-AUTH1",
+      "cardId": "c0khyif2",
+      "group": "tooling",
+      "title": "Canvas multi-file edit authority",
+      "gist": "Choose how Canvas applies cross-file edits and refactors.",
+      "explainer": "",
+      "story": "Hank extracts a shared logging helper from an app package into `packages/logging`, updates `workspace.jet`, edits two `pkg.jet` files, and rewrites imports. He needs Canvas to show the exact touched files and prove the workspace still checks before anything lands.",
+      "inWild": "POST /canvas/project/transaction\n{\n  \"op\": \"extract_package\",\n  \"files\": [\n    {\"path\":\"workspace.jet\",\"revision\":\"sha256-...\"},\n    {\"path\":\"packages/app/pkg.jet\",\"revision\":\"sha256-...\"},\n    {\"path\":\"packages/app/src/log.jet\",\"revision\":\"sha256-...\"}\n  ],\n  \"new_package\": \"packages/logging\"\n}",
+      "detail": "Two-facet pass: beginners get preview/proof before broad edits; experts get exact touched files, revisions, authority, and audit payload.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Previewed source transaction with proof (recommended)",
+          "detail": "Canvas builds an explicit multi-file source transaction, previews the diff, checks touched revisions, formats overlays, runs front-end and package/workspace validation, then writes and reprojects. Authority and touched files are audited.",
+          "code": "preview -> diff + touched files + diagnostics\napply -> fmt overlays -> sema/package check -> write all -> reproject\nconflict -> no write"
+        },
+        {
+          "key": "B",
+          "name": "Direct gesture writes",
+          "detail": "Canvas writes all affected files immediately after a drag/drop/refactor gesture. This feels fast but hides authority and makes broad edits too easy to miss.",
+          "code": "drag package edge -> writes workspace.jet + pkg.jet immediately\n# no required preview, weak audit"
+        },
+        {
+          "key": "C",
+          "name": "Patch export only",
+          "detail": "Canvas never writes multi-file edits; it emits a patch for the user to apply manually. This is safe but breaks the promise that Canvas can manage the workspace.",
+          "code": "POST /canvas/project/transaction -> returns diff only\n$ git apply canvas.patch"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Jet fmt/check",
+          "note": "Existing Canvas edits already format, check, and reproject one file. Multi-file edits should extend that same rule.",
+          "code": "edit -> jet fmt -> front-end check -> write source"
+        },
+        {
+          "lang": "IDE refactors",
+          "note": "Good IDEs preview rename/move refactors with exact file lists before applying.",
+          "code": "Preview: 14 changes in 5 files"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "created": "2026-07-08T10:25:10.027Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-08",
+      "draft": false,
+      "retiredAt": "2026-07-11T00:24:37.570Z"
+    },
+    {
+      "id": "D-CANVAS-WORKSPACE-NAV1",
+      "cardId": "c0khyif2",
+      "group": "web-ui",
+      "title": "Canvas workspace navigation model",
+      "gist": "Choose how packages, files, modules, symbols, and graphs appear in Canvas.",
+      "explainer": "",
+      "story": "Betty joins a monorepo and does not know whether to start from files, packages, targets, or symbols. Canvas should give one navigation model that can be filtered by task instead of forcing her to reconcile separate trees.",
+      "inWild": "Workspace\n  package game\n    target web-app\n    file src/main.jet\n      fn run -> graph\n      fn draw -> graph\n    deps: mathkit\n  package mathkit\n    file src/vector.jet\n      struct Vec2\n      fn Vec2.length -> graph",
+      "detail": "Two-facet pass: beginners get one project map; experts can filter by package/file/symbol/target without creating duplicate semantics.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Unified semantic project tree (recommended)",
+          "detail": "One navigation graph contains packages, targets, modules/files, symbols, and function graphs. UI facets filter the same semantic index by task: files, packages, targets, dependencies, diagnostics, or source control.",
+          "code": "Project tree\n  package -> target -> file/module -> symbol -> graph\nFilters: Files | Packages | Targets | Deps | Diagnostics | Git"
+        },
+        {
+          "key": "B",
+          "name": "File tree plus separate graph list",
+          "detail": "Keep a normal file explorer and a separate list of function graphs. Familiar, but users must mentally connect package structure, targets, and symbols.",
+          "code": "Files: src/main.jet, src/lib.jet\nGraphs: run, update, render\nPackages: separate panel"
+        },
+        {
+          "key": "C",
+          "name": "Freeform visual map as primary navigation",
+          "detail": "A spatial map of packages and graphs is the main nav. Useful as an overview, but weak for large repos, keyboard use, source control, and precise package work.",
+          "code": "[package bubbles] -> [graph bubbles]\n# pretty overview, not enough as primary editor nav"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Jet semindex/LSP",
+          "note": "Definitions, references, packages, and diagnostics already want one semantic index. Canvas should facet that index, not duplicate it.",
+          "code": "definition -> references -> source_to_graph"
+        },
+        {
+          "lang": "Xcode",
+          "note": "Project navigator combines files, targets, symbols, issues, tests, and source control as facets over one project.",
+          "code": "Navigator: Project | Symbols | Issues | Tests | Source Control"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "created": "2026-07-08T10:25:13.811Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-08",
+      "draft": false,
+      "retiredAt": "2026-07-11T00:24:37.570Z"
+    },
+    {
+      "id": "D-FE-CANVAS1",
+      "cardId": "c0bsg5zl",
+      "group": "web-ui",
+      "title": "Canvas visual editor — pick the UX archetype",
+      "gist": "Which editing experience Canvas is built around — four genuinely different editors, one shared look.",
+      "explainer": "Hybrid — the dual-lens truth you liked, with flow's summoner as the everyday verb, guided's safety exactly where mistakes happen, and workbench's depth one toggle away. One mechanism per job (I8).",
+      "story": "Maya opens Canvas to build her first Jet program; Dev, an Unreal veteran, opens it to rewire a 200-node graph. The question is not what Canvas looks like (one visual system, fixed) but what USING it is: does she browse a catalog, summon nodes by typing, edit code and graph as synced twins, or grow a program from type-checked offers? All four options render the full real feature set (typed pins, rails, node search, graph⇄source, inspector, debugger, replay, verbatim E0204). Browse all four side by side: file:///home/nate/Projects/Github/jet/docs/design/frontends/index.html#canvas (←/→ switches, c compares).",
+      "inWild": "// examples/features/basics/fizzbuzz.jet — shown as graph content in the mockups\nfn label(n: Int) -> String {\n    if n % 15 == 0 { \"FizzBuzz\" }\n    else if n % 3 == 0 { \"Fizz\" }\n    else if n % 5 == 0 { \"Buzz\" }\n    else { n.to_string() }\n}",
+      "detail": "Owner modification (2026-07-08): ratify hybrid Canvas, modified as follows. Use a Workbench-style persistent project/file viewer for Canvas; the hybrid palette panel becomes the project and file viewer, not a command palette. Keep the rest of the UI hybrid: Code/Split/Graph views, source-backed graph truth, synced replay, and popup panes for palette/project, inspector, and debugger. Commands live in right-click, Ctrl+K, and drag-from-pin release context menus; drag-release menus show only compatible pins/nodes. Nodes need UE5-Blueprint-style polish: consistent shapes and colors communicate semantic role, pin labels are just variable/field names, and types appear on hover only. Variable/const getters render as compact pure capsule/bubble nodes, not full nodes. Simple variables can embed in fields like Scratch nested blocks for graph cleanliness. Visual tone should be streamlined graphite/gray with optional detail toggles.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Workbench — docked IDE",
+          "detail": "Core loop: browse the palette catalog, drag a node onto the graph, wire its pins, tune it in the docked inspector. Fixed resizable docks (menubar, palette+project+debugger left, graph center with rail gutter, inspector right) — nothing hides. The Unreal/Blender/VS Code model for people in the editor eight hours a day. Beginner: drag a labelled node from the palette. Expert: Ctrl+K search, tabs, docked debugger. Risk: densest option; most familiar, least novel.\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/canvas/workbench.html",
+          "code": "┌ menubar ────────────────────────────────────────────────┐\n│ palette      │  graph (rail gutter on left edge) │ inspector │\n│  search      │   [entry]→[call]→[branch]         │  node     │\n│  categories  │      │pins: ▲exec ●data ◆fallible │  pins     │\n│ project tree │   amber pulse on paused wire      │  actions  │\n│ debugger     │                                   │           │\n│  stack/locals│                                   │           │\n└──────────────┴───────────────────────────────────┴───────────┘\nLoop: browse catalog → drag → wire → inspect"
+        },
+        {
+          "key": "B",
+          "name": "Flow — summon at the cursor",
+          "detail": "Core loop: type at the cursor to summon the node you're thinking of and keep flowing — never leave the canvas for a panel. Infinite canvas, zero fixed panels; ⌘K or double-click opens a type-filtered summoner AT the cursor; releasing a wire on empty space searches only compatible nodes; inspector pops beside the selection. tldraw/Figma chrome with Unreal's drag-from-pin search promoted to the primary verb. Beginner: double-click → type \"print\" → Enter (hint bar teaches it). Expert: the whole loop is keyboard, at the cursor. Risk: power hides behind keys/right-click — discoverability rests on the hint bar.\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/canvas/flow.html",
+          "code": "        (infinite dotted canvas, no panels)\n\n   [grant Fs,Io]──▶[caps.write]        ⌘K anywhere\n         │                              ↓ at cursor\n         ●───────╮        ┌ summon ────────────┐\n                 ▼        │ > pri               │\n            [print]       │ print (msg: String) │  only type-\n                          │ print_line          │  compatible\n                          └─────────────────────┘\nLoop: think → summon by typing → keep flowing"
+        },
+        {
+          "key": "C",
+          "name": "Dual lens — code ⇄ graph, synced",
+          "detail": "Core loop: read or write in whichever lens fits the thought — code editor or graph — and the other follows your cursor live. Two equal panes over the same source: click a line, its node lights; click a node, its line scrolls and highlights; a gutter breakpoint mirrors a red halo on the node; replay scrubs both at once. E0204 appears as one truth in both lenses (squiggle in code, red node in graph, verbatim card below). The Enso/Observable model. Beginner: type ordinary Jet, the graph draws itself — no new gesture. Expert: full-speed text editing with a free live map. Risk: sync must be instant — any lag breaks the promise; two panes cost width.\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/canvas/duallens.html",
+          "code": "┌ code lens ──────────────┬ graph lens ─────────────┐\n│ 3  fn label(n: Int)     │   [entry label]         │\n│ 4    if n % 15 == 0 ◀───┼──▶[branch n%15]  ◀ same │\n│ ●5     \"FizzBuzz\"       │      ├─[\"FizzBuzz\"]     │\n│ 6    else if n % 3 == 0 │      ▼                  │\n│      ~~~~~~ E0204 ~~~~~ │   [branch n%3] (red)    │\n├─────────────────────────┴─────────────────────────┤\n│ replay ├────────●────────┤ step highlights BOTH   │\nLoop: edit either lens; the other follows"
+        },
+        {
+          "key": "D",
+          "name": "Guided — grow from typed offers",
+          "detail": "Core loop: pick a seed, then choose from only the type-compatible offers; the program grows correct-by-construction, one step at a time. A vertical spine of built steps; the value's type rides the connector; the offer tray lists only next steps whose input matches — you never drag a wire, and an invalid wire is unreachable. Diagnostics become refused offers: E0204 shows as a disabled offer with the verbatim why/fix at the exact moment the move would break. The Hazel/Scratch idea with the type system as the snap constraint. Beginner: the strongest story — the first node can't be wrong. Expert: type-to-filter, ↑↓+↵. Risk: linear spine suits growing a function, not reshaping a big graph — needs a hand-off to A/B/C.\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/canvas/guided.html",
+          "code": "  spine                        offer tray (type-filtered)\n  [load_port() -> Int ?]      ┌ next for Int ? ─────────┐\n        │ Int ?               │ > handle with ? (pass)   │\n        ▼                     │   ?? fallback value      │\n  [? propagate]               │   match on error         │\n        │ Int                 └──────────────────────────┘\n        ▼                     refused offer (disabled):\n  [print(port)]                ✕ use x again — E0204 why/fix\nLoop: pick seed → choose typed offer → grows correct"
+        },
+        {
+          "key": "E",
+          "name": "Hybrid — dual-lens core, everything layered",
+          "detail": "Core loop: read or write in whichever lens fits, summon nodes at the cursor, and the other lens plus any docks you opt into follow — one program, one truth. Takes: dual-lens foundation (synced code⇄graph, one-truth E0204, shared replay) + flow's ⌘K/double-click summoner at the cursor as the primary authoring verb + guided's typed offers where they matter (dragged-pin summon pre-filtered and Hazel-ordered; refused offers teach E0204 at the moment of the mistake; a beginner empty-state seed spine that IS the real graph and graduates seamlessly) + workbench's docks as collapsible, off-by-default panels (palette, inspector, debugger), with a Code–Split–Graph control that collapses to pure editor or pure canvas. Left out: guided's spine as a permanent mode, flow's everything-floats, workbench's minimap/menubar — folded, not stapled (I8).\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/canvas/hybrid.html",
+          "code": "┌ tabs: run() · label() · borrow ──── Code | Split | Graph ┐\n│ code lens          │ graph lens          [⌘K summon]     │\n│ 3 #Grant(Fs, Io) ◀─┼─▶ [grant region]                    │\n│ ●4  fs.read(…)     │    [fs.read] ◀ paused, amber        │\n│ 5  caps.write ◀────┼─▶ [caps.write]                      │\n│                    │  drag pin → offers (type-filtered): │\n│                    │  ┌ next for String ───────────────┐ │\n│                    │  │ > print(msg)   · to_upper()    │ │\n│                    │  │ ✕ both(&x, x) — E0204 why/fix  │ │\n│                    │  └────────────────────────────────┘ │\n├ docks (closed by default): palette · inspector · debugger┤\n│ replay ├──────●──────┤ steps BOTH lenses                 │\n└──────────────────────────────────────────────────────────┘\n＋ new → beginner seed spine (typed offers) → graduates to Split"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Unreal Blueprint",
+          "note": "A is its docked-editor model refined; B promotes its drag-from-pin context search to the primary authoring verb.",
+          "code": "release wire on empty canvas → search filtered to compatible nodes"
+        },
+        {
+          "lang": "Enso / Observable",
+          "note": "C's model: code and visual as two faithful, editable views of one program.",
+          "code": "edit code → graph redraws · move node → source updates"
+        },
+        {
+          "lang": "Hazel / Scratch",
+          "note": "D's model: type-directed next-step offers; incomplete-but-valid program at every step; blocks only snap where they fit.",
+          "code": "offer list = every expression the current type can flow into"
+        }
+      ],
+      "rec": "E",
+      "status": "ratified",
+      "created": "2026-07-08T13:10:16.606Z",
+      "comment": "Hybrid Canvas with Workbench project/file viewer; commands in context menus/Ctrl+K/drag-pin; UE5-style pin shape/color semantics; types hover-only; compact getter capsules; embeddable variables; graphite streamlined UI.",
+      "outcome": "E",
+      "ratifiedAt": "2026-07-08",
+      "draft": false,
+      "retiredAt": "2026-07-11T00:24:37.570Z"
+    },
+    {
+      "id": "D-FE-STUDIO1",
+      "cardId": "c0e7rot4",
+      "group": "web-ui",
+      "title": "jetos Studio — pick the UX archetype",
+      "gist": "Which experience Studio is built around — settings app, review-first changesets, ops board, or an editable source document.",
+      "explainer": "Hybrid — the document is the app, the rail finds things, the health strip watches the fleet, and nothing lands without the changeset review. Every edit path — widget, alert fix, rollback — funnels through one gate.",
+      "story": "Nate wants to bump halcyon's kernel and flip a theme option; later that week a bad generation fails to boot and he needs rollback fast. Four genuinely different apps answer those moments: find-and-flip settings, stage-review-apply changesets, a fleet health board, or config.jet itself rendered as a live document. All four share one visual system and the same truth — every GUI edit rewrites exactly one system.jet line and shows the diff (the real set-option transaction). Browse side by side: file:///home/nate/Projects/Github/jet/docs/design/frontends/index.html#studio (←/→ switches, c compares).",
+      "inWild": "// config.jet (halcyon fixture) — the source every archetype edits\nboot.kernel: .CachyOS\nboot.loader: .Limine\nperf.scheduler: .ScxLavd\ndesktop.plasma.enable: true\ntheme.flavor: \"catppuccin-mocha\"\nsecrets.wifi: age(\"wifi.age\")",
+      "detail": "Owner modification (2026-07-08): ratify hybrid Studio, but replace the projectional-document foundation with a normal clean dashboard + sidebar app. Landing page is a simple opsboard-style dashboard: hosts, health, services, generations, alerts, and monitoring status are easy to understand at a glance. Settings live in sidebar categories, with an extensible category/page registry so future Studio modules can add sections without redesign. Changeset is a first-class sidebar page/category for comparing diffs, impact, and generation changes. Settings and monitoring belong in appropriate sidebar categories. Keep the hybrid one-apply-path rule: edits from settings, alerts, rollback, or changeset review stage into the same changeset/apply gate. Visual style follows the cleaner Settings option; information structure follows Ops board where useful. Do not build the projectional config document as the primary UI right now.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Settings — find it, flip it, apply",
+          "detail": "Core loop: pick a category, flip one option's control, confirm the single source line it writes, apply. Apple-System-Settings navigator whose sidebar groups map 1:1 to config.jet namespaces; the signature is the pending source tray — a docked bar accumulating the exact +/- lines and impact chips as you toggle, so nothing touches the machine unseen. Kernel change: Boot & kernel → dropdown (tagged rebuild+reboot). Rollback: Generations category → \"Roll back to N\". The beginner tier: lowest ceremony for changing one thing. Risk: deep tree — search carries it; grouping is editorial, a setting can be \"somewhere unexpected.\"\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/studio/settings.html",
+          "code": "┌ sidebar ─────┬ Boot & kernel ──────────────────────┐\n│ > Boot       │ Kernel        [.CachyOS ▾] rebuild+reboot │\n│   Performance│ Boot loader   [.Limine  ▾]           │\n│   Network    │ Scheduler     [.ScxLavd ▾]           │\n│   Desktop    │                                      │\n│   Generations├──────────────────────────────────────┤\n│   Secrets    │ pending (2): - boot.kernel: .CachyOS │\n│              │              + boot.kernel: .Zen     │\n└──────────────┴──── [Discard] [Apply — builds gen 48] ┘\nLoop: find → flip → confirm the line → apply"
+        },
+        {
+          "key": "B",
+          "name": "Changeset — review before anything lands",
+          "detail": "Core loop: stage edits from anywhere into one changeset whose primary screen is the diff review plus impact, then apply the whole reviewed set as one build. The GitHub-PR/terraform-plan model: unified source diff with per-hunk include/exclude, beside a plain-language \"What this changes\" summary and an impact ledger (services restarted, packages rebuilt, reboot needed, generation N+1). Build & switch = merge. Rollback stages the inverse as a reviewable changeset. The safety tier: never surprised by an apply. Risk: heavier for a one-toggle change; authoring via option-key form assumes some fluency (autocomplete helps).\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/studio/changeset.html",
+          "code": "┌ Changeset: kernel bump + theme ── 2 files · +3 −2 ┐\n│ @@ boot @@                    ☑ include            │\n│ - boot.kernel: .CachyOS                            │\n│ + boot.kernel: .Zen                                │\n│ @@ theme @@                   ☑ include            │\n│ - theme.flavor: \"catppuccin-mocha\"                │\n│ + theme.flavor: \"catppuccin-latte\"                │\n├ What this changes ────────────────────────────────┤\n│ • kernel rebuilt — reboot required                 │\n│ • plasma restarts · generation 47 → 48             │\n└──────── [Build only] [Build & switch] ────────────┘\nLoop: stage → read diff + impact → apply as one"
+        },
+        {
+          "key": "C",
+          "name": "Ops board — health first, edit on drill-in",
+          "detail": "Core loop: watch the fleet health board; when a tile goes red, drill into it, fix or roll back from the drawer, watch it go green. Landing screen is KPIs, alerts, per-host generation ribbons (colored run history), and a service grid — the Proxmox/Tailscale/PagerDuty model. Config editing is a drawer opened FROM a red thing; the mock's centerpiece is a kernel panic on gen 42 with auto-fallback to 41 and one-click clean rollback, the diagnosis in what/why/fix voice. Hosts come from workspace.jet. The fleet tier: operate constantly, edit rarely. Risk: drawer editing is intentionally shallow — deep edits should deep-link into A or D.\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/studio/opsboard.html",
+          "code": "┌ 3 hosts · 1 alert ── services 11/12 ── gen ok 2/3 ┐\n│ ⚠ halcyon: gen 42 failed boot — fell back to 41   │\n│   [Roll back to 41 & reboot]  [Diagnose]          │\n├ hosts ────────────────────────────────────────────┤\n│ ● halcyon   gen ▣▣▣▣▨ 42✕  kernel cachyos  2m ago │\n│ ● skylark   gen ▣▣▣▣▣ 39   kernel zen      1m ago │\n│ ● relay-1   gen ▣▣▣▣▣ 12   headless        4m ago │\n├ services ─────────────────────────────────────────┤\n│ plasma ●  postgres ●  caddy ●  backup ⚠ restart   │\nLoop: watch board → red tile → drill in → heal"
+        },
+        {
+          "key": "D",
+          "name": "Projectional — the file is the app",
+          "detail": "Core loop: read the config AS the document; edit each value through an inline control so you change system.jet without typing syntax. config.jet rendered line-numbered and syntax-highlighted, but every option value is a live widget in place — toggle, dropdown, stepper, chip list, sealed secret. A Text toggle reveals the exact source the projection produces (one artifact, two surfaces); a git-style gutter marks changed lines; the generation picker turns the document into a time machine (\"Restore these values\" stages a rollback). The JetBrains-MPS/Dark model — the expert tier, I8-clean (same set-option mechanism, different entrypoint). Risk: real implementation must round-trip through the formatter; densest for beginners.\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/studio/projectional.html",
+          "code": "  config.jet · halcyon · gen [47 ▾]        [Projection|Text]\n  12  boot.kernel:      [.CachyOS ▾]   ← rebuild + reboot\n▌ 13  boot.loader:      [.Limine  ▾]      (changed)\n  14  perf.scheduler:   [.ScxLavd ▾]\n  18  desktop.plasma:   [on ⏻]\n  19  theme.flavor:     [catppuccin-mocha ▾]\n  24  secrets.wifi:     [sealed · age · 41d] [rekey]\n  ────────────────────────────────────────────────\n  2 lines changed → [Review & apply — gen 48]\nLoop: read the doc → edit values in place → apply"
+        },
+        {
+          "key": "E",
+          "name": "Hybrid — projectional doc, health strip, one apply path",
+          "detail": "Core loop: land on the fleet health strip; read config.jet as a live document the category rail navigates; every widget edit stages into one changeset; open the tray to review the diff + impact, then build — a red alert and a past generation both funnel back through that same changeset. Takes: projectional foundation (inline widgets, git-gutter, Text mirror, generation time-machine) + settings' rail as navigation INTO the document (no separate detail pane — the doc is the detail) + changeset as the only apply path (persistent tray → review sheet: plain summary, impact ledger, per-hunk diff, Build only / Build & switch; rollback stages the inverse) + opsboard's landing strip (hosts, generation ribbons, alerts; a red alert deep-links to the offending option with what/why/fix). Left out: settings' per-change apply, changeset's key/value form, opsboard's shadow drawer editor — one artifact, one gate (I8).\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/studio/hybrid.html",
+          "code": "┌ health: ● halcyon gen▣▣▣▨42✕ · ● skylark · ⚠ 1 alert ────┐\n│ ⚠ gen 42 failed boot → fell back to 41  [Diagnose ↓]     │\n├ rail ────────┬ config.jet · gen [47 ▾] · [Projection|Text]┤\n│ > Boot (1)   │ 12 boot.kernel:    [.CachyOS ▾]  ← reboot │\n│   Perf       │▌13 boot.loader:    [.Limine ▾]   (edited) │\n│   Desktop    │ 18 desktop.plasma: [on ⏻]                 │\n│   Secrets    │ 24 secrets.wifi:   [sealed · age · 41d]   │\n│   Packages   │                                           │\n├──────────────┴───────────────────────────────────────────┤\n│ 2 staged changes  →  [Review & build]                    │\n│   review sheet: summary · impact (reboot, plasma restart)│\n│   · unified diff · per-hunk ☑ · Build only / Build&switch│\n└──────────────────────────────────────────────────────────┘\nalert Diagnose → doc scrolls to the option + what/why/fix\nRestore gen 40 values → stages an inverse changeset"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Apple System Settings",
+          "note": "A's navigation model — category rail, control-on-the-row — extended with the pending source tray so every flip shows its source line.",
+          "code": "toggle → tray: - desktop.plasma.enable: false / + true"
+        },
+        {
+          "lang": "GitHub PR / Terraform plan",
+          "note": "B's primary screen: unified diff + human summary + impact before anything applies; per-hunk include is PR review's viewed-checkbox turned into control.",
+          "code": "Plan: 2 to change · reboot required · gen 47 → 48  [y/N]"
+        },
+        {
+          "lang": "JetBrains MPS / Dark",
+          "note": "D's model: projectional editing — structured values manipulated through typed widgets while the document stays the single artifact.",
+          "code": "boot.kernel: [.CachyOS ▾] — the dropdown IS line 12"
+        }
+      ],
+      "rec": "E",
+      "status": "ratified",
+      "created": "2026-07-08T13:10:16.749Z",
+      "comment": "Hybrid Studio modified: normal clean opsboard-style dashboard landing, settings sidebar categories, extensible pages, changeset as sidebar page for diffs, one apply gate, no projectional primary UI.",
+      "outcome": "E",
+      "ratifiedAt": "2026-07-08",
+      "draft": false,
+      "retiredAt": "2026-07-11T00:24:37.570Z"
+    },
+    {
+      "id": "D-JOS-NIXIMPORT1",
+      "cardId": "c_audit_363_9n2bl3",
+      "group": "tooling",
+      "title": "JetOS NixOS/Home Manager importer scope",
+      "gist": "How JetOS imports an existing NixOS flake, flake-parts, and Home Manager system.",
+      "explainer": "Recommend C: beginner gets one command; expert gets exact provenance, omissions, and source ownership.",
+      "story": "Hank has a real NixOS repo with flake-parts inputs, overlays, host modules, and Home Manager users. He runs one command and expects editable JetOS source, not a tiny sketch.",
+      "inWild": "$ jet os import ~/nixos --host halcyon --user nate\n# expected: writes systems/halcyon.jet, users/nate.jet, lock/provenance, and an omissions report",
+      "detail": "Recommend C: beginner gets one command; expert gets exact provenance, omissions, and source ownership.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Facts-only draft",
+          "detail": "Import package names and host metadata, then list unsupported Nix constructs.",
+          "code": "jet os import ~/nixos --facts-only\n# writes a draft plus omissions: home-manager, overlays, flake-parts"
+        },
+        {
+          "key": "B",
+          "name": "Semantic module importer",
+          "detail": "Evaluate the NixOS/Home Manager module graph into typed JetOS source with exact omissions.",
+          "code": "jet os import ~/nixos --host halcyon\n# writes JetOS source for modules, users, services, packages, files, secrets, overlays"
+        },
+        {
+          "key": "C",
+          "name": "Hybrid importer (recommended)",
+          "detail": "Default semantic import, with facts-only fallback only when exact semantics cannot be represented; every fallback is audited.",
+          "code": "jet os import ~/nixos --host halcyon --write\njet os import report\n# 0 silent omissions; unsupported constructs become named TODO facts"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "NixOS",
+          "note": "nixos-rebuild consumes the module graph directly; JetOS must import that graph before claiming replacement.",
+          "code": "nixos-rebuild switch --flake ~/nixos#halcyon"
+        }
+      ],
+      "rec": "C",
+      "status": "ratified",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-08",
+      "draft": false,
+      "retiredAt": "2026-07-11T00:24:37.570Z"
+    },
+    {
+      "id": "D-JOS-REALGUEST1",
+      "cardId": "c_audit_363_9n2bl3",
+      "group": "safety",
+      "title": "JetOS real installed-guest acceptance gate",
+      "gist": "What proof is required before JetOS can be called installed and usable.",
+      "explainer": "Recommend C: replacement claim needs actual installed-guest behavior, not host proof text.",
+      "story": "Doris boots the installer in QEMU, installs to disk, reboots from that disk, logs in, opens Studio, checks services, and rolls back. Host-side proof files alone are not enough.",
+      "inWild": "jet os vm prove halcyon --disk /tmp/halcyon.qcow2 --real\njet os vm run halcyon --disk /tmp/halcyon.qcow2",
+      "detail": "Recommend C: replacement claim needs actual installed-guest behavior, not host proof text.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Harness proof allowed",
+          "detail": "Host-side harness artifacts may close acceptance if they contain planned QEMU commands.",
+          "code": "state: harness-ready\nsteps: [boot-installer-qemu, reboot-installed-disk]"
+        },
+        {
+          "key": "B",
+          "name": "Guest marker required",
+          "detail": "Only guest serial proof from the installed disk can close acceptance.",
+          "code": "JETOS_GUEST_PROOF: {\"state\":\"guest-passed\",\"host\":\"halcyon\"}"
+        },
+        {
+          "key": "C",
+          "name": "Real guest plus interaction (recommended)",
+          "detail": "Guest marker, serial login, desktop/app launch, service checks, rollback, and captured artifacts from real QEMU tools.",
+          "code": "jet os vm prove halcyon --real --assert login,desktop,studio,network,rollback\n# fake qemu tools rejected for closure"
+        }
+      ],
+      "comparisons": [],
+      "rec": "C",
+      "status": "ratified",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-08",
+      "draft": false,
+      "retiredAt": "2026-07-11T00:24:37.570Z"
+    },
+    {
+      "id": "D-JOS-DESKTOPPROOF1",
+      "cardId": "c_audit_363_9n2bl3",
+      "group": "runtime",
+      "title": "JetOS desktop proof boundary",
+      "gist": "What counts as proving the graphical desktop works.",
+      "explainer": "Recommend C: file/script proof is a useful preflight, not desktop usability.",
+      "story": "Walter switches from NixOS to JetOS and expects GNOME/Plasma login, terminal fallback, Studio, browser, and home configuration to work, not only files to exist.",
+      "inWild": "jet os vm prove halcyon --assert desktop-session-ready,studio-opens,user-home-ready",
+      "detail": "Recommend C: file/script proof is a useful preflight, not desktop usability.",
+      "options": [
+        {
+          "key": "A",
+          "name": "File presence",
+          "detail": "Check display-manager units and launcher scripts exist.",
+          "code": "need /etc/systemd/system/display-manager.service"
+        },
+        {
+          "key": "B",
+          "name": "Proof-mode scripts",
+          "detail": "Run generated launchers with --jetos-proof inside the mounted system.",
+          "code": "jetos-display-manager --jetos-proof\njetos-desktop-session --jetos-proof"
+        },
+        {
+          "key": "C",
+          "name": "Interactive guest desktop (recommended)",
+          "detail": "Boot installed disk, start real display manager/session, verify app/window/process/user-home facts.",
+          "code": "guest assert: display-manager-active, desktop-session-live, studio-window-ready, terminal-opens"
+        }
+      ],
+      "comparisons": [],
+      "rec": "C",
+      "status": "ratified",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-08",
+      "draft": false,
+      "retiredAt": "2026-07-11T00:24:37.570Z"
+    },
+    {
+      "id": "D-JOS-IMAGEPROOF1",
+      "cardId": "c_audit_363_9n2bl3",
+      "group": "safety",
+      "title": "JetOS image artifact proof policy",
+      "gist": "When raw/sd/qcow/image variants may be marked built.",
+      "explainer": "Recommend C: artifact words must reflect real bootability.",
+      "story": "Betty downloads a JetOS qcow image for a laptop test. If an image is only a marker file, she needs the tool to say staged, not built.",
+      "inWild": "jet os image halcyon --format qcow2\n# output must distinguish bootable artifact vs staged proof",
+      "detail": "Recommend C: artifact words must reflect real bootability.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Marker artifacts allowed",
+          "detail": "Sparse placeholder files may stand in for future variants if proof names them.",
+          "code": "halcyon.qcow2\nstate: sparse-marker"
+        },
+        {
+          "key": "B",
+          "name": "Bootable or staged",
+          "detail": "Only bootable image files say built; placeholders are explicit staged artifacts.",
+          "code": "state: staged\nfix: install qemu-img to build qcow2"
+        },
+        {
+          "key": "C",
+          "name": "Bootable plus smoke (recommended)",
+          "detail": "Every built image variant gets a format-specific boot/probe smoke; otherwise it is staged.",
+          "code": "jet os image halcyon --format qcow2\njet os image prove halcyon.qcow2"
+        }
+      ],
+      "comparisons": [],
+      "rec": "C",
+      "status": "ratified",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-08",
+      "draft": false,
+      "retiredAt": "2026-07-11T00:24:37.570Z"
+    },
+    {
+      "id": "D-JOS-FIRSTBOOT1",
+      "cardId": "c_audit_363_9n2bl3",
+      "group": "web-ui",
+      "title": "JetOS first-boot onramp",
+      "gist": "What users see immediately after a successful JetOS install.",
+      "explainer": "Recommend D: beginner gets OS control first; expert can jump to source graph without split state.",
+      "story": "Earl reboots into JetOS for the first time. He should land somewhere useful: source, proof, updates, rollback, and Studio without needing to know system paths.",
+      "inWild": "first boot -> login -> Studio shows current host, generation, source, proof, rollback, update status",
+      "detail": "Recommend D: beginner gets OS control first; expert can jump to source graph without split state.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Terminal only",
+          "detail": "Boot to login shell; user runs commands manually.",
+          "code": "login: nate\n$ jetos studio"
+        },
+        {
+          "key": "B",
+          "name": "Studio first",
+          "detail": "Desktop/session opens Studio as control center on first login.",
+          "code": "jetos Studio: host halcyon, generation current, source ready"
+        },
+        {
+          "key": "C",
+          "name": "Canvas first",
+          "detail": "Open Canvas directly on system source.",
+          "code": "Canvas opens systems/halcyon.jet"
+        },
+        {
+          "key": "D",
+          "name": "Studio with Canvas deep-link (recommended)",
+          "detail": "Open Studio control center; Canvas is available for source graph editing from source spans.",
+          "code": "Studio Dashboard -> Edit source in Canvas -> exact same Jet file"
+        }
+      ],
+      "comparisons": [],
+      "rec": "D",
+      "status": "ratified",
+      "outcome": "D",
+      "ratifiedAt": "2026-07-08",
+      "draft": false,
+      "retiredAt": "2026-07-11T00:24:37.570Z"
+    },
+    {
+      "id": "D-CANVAS-PARITY1",
+      "cardId": "c_audit_364_jkk162",
+      "group": "tooling",
+      "title": "Canvas full-language parity ratchet",
+      "gist": "How Canvas proves coverage for every shipped language form.",
+      "explainer": "Recommend C: source truth covers language semantics; UX affordances stay reviewable.",
+      "story": "Maya opens a real Jet project using protocols, effects, tasks, traits, unsafe gates, targets, and modules. Canvas must either edit each form truthfully or say exactly why not.",
+      "inWild": "cargo test --test canvas canvas_parity_matrix_matches_ast\n# every AST item/expr/stmt/form has node/edit/support status",
+      "detail": "Recommend C: source truth covers language semantics; UX affordances stay reviewable.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Manual matrix",
+          "detail": "Maintain a markdown parity table by hand.",
+          "code": "canvas-blueprint-parity-matrix.md"
+        },
+        {
+          "key": "B",
+          "name": "AST-derived ratchet",
+          "detail": "Generate parity rows from AST enums and require test coverage or explicit unsupported diagnostic.",
+          "code": "CanvasParity::from_ast() -> missing rows fail tests"
+        },
+        {
+          "key": "C",
+          "name": "Hybrid ratchet (recommended)",
+          "detail": "AST-derived coverage for semantic forms plus manual UX rows for gestures/layout.",
+          "code": "cargo test --test canvas parity_ast_and_ux_matrix"
+        }
+      ],
+      "comparisons": [],
+      "rec": "C",
+      "status": "ratified",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-08",
+      "draft": false,
+      "retiredAt": "2026-07-11T00:24:37.570Z"
+    },
+    {
+      "id": "D-CANVAS-CORECATALOG1",
+      "cardId": "c_audit_364_jkk162",
+      "group": "stdlib",
+      "title": "Canvas Core method browser",
+      "gist": "How Canvas exposes Core library methods, docs, and compatible calls.",
+      "explainer": "Recommend C: beginners discover batteries; experts see exact effects/imports/provenance.",
+      "story": "Nina drags from a String output pin and expects only compatible Core methods, docs, effects, fallibility, examples, and imports to appear.",
+      "inWild": "drag String pin -> menu: trim, split, parse_int?; shows docs/effects/imports",
+      "detail": "Recommend C: beginners discover batteries; experts see exact effects/imports/provenance.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Current-file only",
+          "detail": "Only functions defined in the project appear as actions.",
+          "code": "actions: [my_helper, print]"
+        },
+        {
+          "key": "B",
+          "name": "Docs catalog",
+          "detail": "Browse Core docs/search, but insertion remains manual.",
+          "code": "Core Browser: core.files.read_text(path) -> copy snippet"
+        },
+        {
+          "key": "C",
+          "name": "Typed Core action catalog (recommended)",
+          "detail": "Sema-known Core methods/functions appear as compatible source-backed actions with docs and authority.",
+          "code": "pin:String -> core.text.trim(self)\ninsert: name :: value.trim()"
+        }
+      ],
+      "comparisons": [],
+      "rec": "C",
+      "status": "ratified",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-08",
+      "draft": false,
+      "retiredAt": "2026-07-11T00:24:37.570Z"
+    },
+    {
+      "id": "D-CANVAS-ACTIONAUTH1",
+      "cardId": "c_audit_364_jkk162",
+      "group": "safety",
+      "title": "Canvas action execution authority",
+      "gist": "How Canvas runs commands or inserts behavior-producing actions.",
+      "explainer": "Recommend C: one semantic command authority with beginner labels and expert audit.",
+      "story": "Sam clicks Run, Build, Install package, or Add HTTP server from Canvas. The UI must be one-click for safe reads and auditable for mutations.",
+      "inWild": "Canvas Run -> real jet dev/run output\nCanvas Build -> shows command, touched files, grants, diff, diagnostics",
+      "detail": "Recommend C: one semantic command authority with beginner labels and expert audit.",
+      "options": [
+        {
+          "key": "A",
+          "name": "No execution",
+          "detail": "Canvas only edits source; terminal runs everything.",
+          "code": "toast: run this in terminal: jet run main.jet"
+        },
+        {
+          "key": "B",
+          "name": "Command palette authority",
+          "detail": "Every command opens a raw command approval sheet.",
+          "code": "approve: jet build main.jet --target web"
+        },
+        {
+          "key": "C",
+          "name": "Intent cards with expert drawer (recommended)",
+          "detail": "Beginner sees Run/Check/Build cards; expert expands exact command, grants, touched files, outputs.",
+          "code": "Run card: safe read\nBuild card: requires confirmation; audit JSON attached"
+        }
+      ],
+      "comparisons": [],
+      "rec": "C",
+      "status": "ratified",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-08",
+      "draft": false,
+      "retiredAt": "2026-07-11T00:24:37.570Z"
+    },
+    {
+      "id": "D-CANVAS-CODELENS1",
+      "cardId": "c_audit_364_jkk162",
+      "group": "web-ui",
+      "title": "Canvas code lens editing contract",
+      "gist": "Whether the Canvas code lens is read-only or a full source editor.",
+      "explainer": "Recommend C: no accidental edits, no false full-edit claim.",
+      "story": "Grace switches to Split view to fix a line fast. If the code pane is only a preview, Canvas must not advertise full edit parity.",
+      "inWild": "Split view: edit source text -> format/check -> graph updates or diagnostic appears",
+      "detail": "Recommend C: no accidental edits, no false full-edit claim.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Read-only lens",
+          "detail": "Code pane remains preview; all edits use graph transactions.",
+          "code": "<pre id=\"source-view\">source only</pre>"
+        },
+        {
+          "key": "B",
+          "name": "Full editor lens",
+          "detail": "Code pane is editable with format/check/reproject on save.",
+          "code": "edit line 4 -> Ctrl+S -> graph reprojects"
+        },
+        {
+          "key": "C",
+          "name": "Hybrid editor lens (recommended)",
+          "detail": "Read-only by default for beginners; explicit Edit Source mode gives full editor with same transaction pipeline.",
+          "code": "Code lens [Edit] -> source transaction -> diff/check/reproject"
+        }
+      ],
+      "comparisons": [],
+      "rec": "C",
+      "status": "ratified",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-08",
+      "draft": false,
+      "retiredAt": "2026-07-11T00:24:37.570Z"
+    },
+    {
+      "id": "D-CANVAS-PROOFLENS1",
+      "cardId": "c_audit_364_jkk162",
+      "group": "web-ui",
+      "title": "Canvas proof and debug lens",
+      "gist": "How proof, debug, and audit facts appear in Canvas.",
+      "explainer": "Recommend C: beginner sees state; expert gets auditable chain.",
+      "story": "Olivia debugs a failing build from Canvas. She needs to know whether the graph, source, binary, proof, and last run are in sync.",
+      "inWild": "Canvas proof rail: source sha, check status, build status, run output, stale proof warning",
+      "detail": "Recommend C: beginner sees state; expert gets auditable chain.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Badges only",
+          "detail": "Small status badges show pass/fail.",
+          "code": "✓ checked  ⚠ proof stale"
+        },
+        {
+          "key": "B",
+          "name": "Separate audit pane",
+          "detail": "Dedicated pane contains proof/debug logs.",
+          "code": "Audit tab: check/build/run/proof"
+        },
+        {
+          "key": "C",
+          "name": "Rail plus drilldown (recommended)",
+          "detail": "Always-visible proof rail with drilldown to exact diagnostics, command, provenance, and stale reasons.",
+          "code": "source changed -> proof rail red -> open: diff since proof"
+        }
+      ],
+      "comparisons": [],
+      "rec": "C",
+      "status": "ratified",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-08",
+      "draft": false,
+      "retiredAt": "2026-07-11T00:24:37.570Z"
+    },
+    {
+      "id": "D-STUDIO-CHANGESET1",
+      "cardId": "c_audit_365_11opfz",
+      "group": "safety",
+      "title": "Studio one apply path",
+      "gist": "Whether every Studio edit must stage through one changeset gate.",
+      "explainer": "Recommend D: one path, low ceremony, no hidden mutations.",
+      "story": "Iris changes a kernel, edits a service, clicks an alert fix, and starts rollback. Every path should land in one reviewable changeset before touching the machine.",
+      "inWild": "Studio Settings -> stage\nAlerts -> stage fix\nRollback -> stage inverse\nChangeset -> Build/Switch",
+      "detail": "Recommend D: one path, low ceremony, no hidden mutations.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Per-control apply",
+          "detail": "Each widget may apply directly.",
+          "code": "Kernel dropdown -> Apply now"
+        },
+        {
+          "key": "B",
+          "name": "Changeset only",
+          "detail": "Every mutation stages; apply only from Changeset.",
+          "code": "all edits -> changeset -> build/switch"
+        },
+        {
+          "key": "C",
+          "name": "Risk-based fast path",
+          "detail": "Low-risk edits can apply directly; risky edits stage.",
+          "code": "theme -> apply; kernel -> changeset"
+        },
+        {
+          "key": "D",
+          "name": "Hybrid changeset-only (recommended)",
+          "detail": "All edits stage, but low-risk edits get a compact one-click review sheet.",
+          "code": "theme -> compact changeset; kernel -> full impact ledger"
+        }
+      ],
+      "comparisons": [],
+      "rec": "D",
+      "status": "ratified",
+      "outcome": "D",
+      "ratifiedAt": "2026-07-08",
+      "draft": false,
+      "retiredAt": "2026-07-11T00:24:37.570Z"
+    },
+    {
+      "id": "D-STUDIO-WIDGETS1",
+      "cardId": "c_audit_365_11opfz",
+      "group": "web-ui",
+      "title": "Studio type-derived option widgets",
+      "gist": "How much JetOS source becomes GUI controls.",
+      "explainer": "Recommend D: beginner controls without hiding expert source.",
+      "story": "Frank does not know option syntax yet. He should get controls for typed values, while expert-only constructs stay visible as source.",
+      "inWild": "network.hostName: Text -> text input\nboot.kernel: enum -> select\nsecrets.wifi: SecretRef -> secret control",
+      "detail": "Recommend D: beginner controls without hiding expert source.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Common widgets only",
+          "detail": "Hand-build controls for popular options.",
+          "code": "Boot kernel, hostname, packages only"
+        },
+        {
+          "key": "B",
+          "name": "Schema widgets for all typed values",
+          "detail": "Generate controls for every typed option shape.",
+          "code": "Bool toggle, Enum select, List editor, SecretRef picker"
+        },
+        {
+          "key": "C",
+          "name": "Source-first",
+          "detail": "Most values remain source text with search/help.",
+          "code": "open systems/halcyon.jet"
+        },
+        {
+          "key": "D",
+          "name": "Typed widgets with source fallback (recommended)",
+          "detail": "Generate widgets for known safe typed values; unsupported forms remain source-visible with exact reason.",
+          "code": "unsupported computed expression -> source chip, not hidden"
+        }
+      ],
+      "comparisons": [],
+      "rec": "D",
+      "status": "ratified",
+      "outcome": "D",
+      "ratifiedAt": "2026-07-08",
+      "draft": false,
+      "retiredAt": "2026-07-11T00:24:37.570Z"
+    },
+    {
+      "id": "D-STUDIO-SECRETS1",
+      "cardId": "c_audit_365_11opfz",
+      "group": "safety",
+      "title": "Studio secrets boundary",
+      "gist": "What Studio may show and edit for secrets.",
+      "explainer": "Recommend D: no plaintext leak, full expert audit.",
+      "story": "Clara rotates Wi-Fi and deploy keys from Studio. The screen must never leak plaintext but must still make rekey/audit flows usable.",
+      "inWild": "Secrets page: wifi.age recipient set, last rekey, consumers; no secret value in DOM/JSON",
+      "detail": "Recommend D: no plaintext leak, full expert audit.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Names only",
+          "detail": "Show secret names and paths; edits happen outside Studio.",
+          "code": "wifi -> /secrets/wifi.age"
+        },
+        {
+          "key": "B",
+          "name": "Inline secret editor",
+          "detail": "Studio accepts and stores plaintext during edit.",
+          "code": "text area: password"
+        },
+        {
+          "key": "C",
+          "name": "External tool launch",
+          "detail": "Studio shells out to age/sops and only refreshes status.",
+          "code": "Open external editor"
+        },
+        {
+          "key": "D",
+          "name": "Audited secret transactions (recommended)",
+          "detail": "Studio never renders plaintext; add/rekey/rotate use audited secret transaction APIs and proof.",
+          "code": "rekey wifi -> recipients diff -> proof -> source update"
+        }
+      ],
+      "comparisons": [],
+      "rec": "D",
+      "status": "ratified",
+      "outcome": "D",
+      "ratifiedAt": "2026-07-08",
+      "draft": false,
+      "retiredAt": "2026-07-11T00:24:37.570Z"
+    },
+    {
+      "id": "D-STUDIO-FLEET1",
+      "cardId": "c_audit_365_11opfz",
+      "group": "web-ui",
+      "title": "Studio single-host versus fleet surface",
+      "gist": "When Studio shows fleet controls.",
+      "explainer": "Recommend C: beginner avoids empty complexity; expert gets operations scale.",
+      "story": "Paul has one laptop today and ten machines later. Single-host Studio should be quiet; fleet controls should appear naturally when the workspace has multiple systems.",
+      "inWild": "workspace: one system -> no fleet chrome\nworkspace: many systems -> host strip, staged rollout, fleet proof",
+      "detail": "Recommend C: beginner avoids empty complexity; expert gets operations scale.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Single-host first only",
+          "detail": "Studio never shows fleet UI in this phase.",
+          "code": "Dashboard: halcyon only"
+        },
+        {
+          "key": "B",
+          "name": "Fleet first",
+          "detail": "Dashboard always has host grid and rollout controls.",
+          "code": "Hosts: halcyon, nas, work"
+        },
+        {
+          "key": "C",
+          "name": "Adaptive hybrid (recommended)",
+          "detail": "One-host UI is clean; multi-host workspace unlocks fleet strip and rollout/proof pages.",
+          "code": "if systems.len > 1 -> fleet strip appears"
+        }
+      ],
+      "comparisons": [],
+      "rec": "C",
+      "status": "ratified",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-08",
+      "draft": false,
+      "retiredAt": "2026-07-11T00:24:37.570Z"
+    },
+    {
+      "id": "D-STUDIO-CANVASBRIDGE1",
+      "cardId": "c_audit_365_11opfz",
+      "group": "web-ui",
+      "title": "Studio and Canvas integration boundary",
+      "gist": "How Studio and Canvas share source editing without becoming one product.",
+      "explainer": "Recommend C: one source truth, no product confusion.",
+      "story": "Kelly edits JetOS settings in Studio, then opens Canvas to inspect a module graph. The two views must share source truth but not create split semantic state.",
+      "inWild": "Studio option -> exact source span -> Open in Canvas -> same file/revision",
+      "detail": "Recommend C: one source truth, no product confusion.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Separate apps",
+          "detail": "Studio and Canvas share no UI, only files.",
+          "code": "Open external Canvas"
+        },
+        {
+          "key": "B",
+          "name": "Studio as Canvas skin",
+          "detail": "Studio is implemented entirely as Canvas graph/pages.",
+          "code": "Canvas mode=studio"
+        },
+        {
+          "key": "C",
+          "name": "Shared components, strict boundary (recommended)",
+          "detail": "Studio owns OS workflows; Canvas owns general source graph. They share protocol widgets, source spans, proof components, no semantic state.",
+          "code": "Studio source span -> Canvas deep link; Canvas edit -> Studio reprojects"
+        }
+      ],
+      "comparisons": [],
+      "rec": "C",
+      "status": "ratified",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-08",
+      "draft": false,
+      "retiredAt": "2026-07-11T00:24:37.570Z"
+    },
+    {
+      "id": "D-VERIFY-SCHED1",
+      "cardId": "c_audit_366_z7u1x7",
+      "group": "tooling",
+      "title": "Full-suite scheduler contract",
+      "gist": "How the full verification command reaches the 1-3 minute budget.",
+      "explainer": "Recommend C: faster by default without making the harness depend on one tool path.",
+      "story": "Lena runs the full suite before closing a card. She needs the command to use all cores safely and show slow tests without hiding failures.",
+      "inWild": "nix develop -c scripts/agent/verify-full.sh\n# target: 1-3 minutes on dev machine, timing report emitted",
+      "detail": "Recommend C: faster by default without making the harness depend on one tool path.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Plain cargo test",
+          "detail": "Keep current harness and optimize tests individually.",
+          "code": "exec cargo test \"$@\""
+        },
+        {
+          "key": "B",
+          "name": "Nextest default",
+          "detail": "Use cargo-nextest as the default scheduler.",
+          "code": "cargo nextest run --workspace"
+        },
+        {
+          "key": "C",
+          "name": "Repo scheduler wrapper (recommended)",
+          "detail": "Wrapper selects nextest when available, falls back to cargo, applies job caps, isolation, timing report, and known serial groups.",
+          "code": "verify-full.sh -> timed scheduler; serial groups explicit"
+        }
+      ],
+      "comparisons": [],
+      "rec": "C",
+      "status": "ratified",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-08",
+      "draft": false,
+      "retiredAt": "2026-07-11T00:24:37.570Z"
+    },
+    {
+      "id": "D-VERIFY-CACHE1",
+      "cardId": "c_audit_366_z7u1x7",
+      "group": "tooling",
+      "title": "Generated Rust test artifact cache",
+      "gist": "Whether tests may share cached compiled artifacts for generated Jet programs.",
+      "explainer": "Recommend C: same behavior checked, fewer duplicate rustc invocations.",
+      "story": "Quinn runs golden, dev parity, corelib, and web tests. The same generated Rust gets rebuilt many times; caching should cut time without reducing coverage.",
+      "inWild": "cache key = rustc version + generated Rust hash + flags + linked artifacts",
+      "detail": "Recommend C: same behavior checked, fewer duplicate rustc invocations.",
+      "options": [
+        {
+          "key": "A",
+          "name": "No cache",
+          "detail": "Every test recompiles generated Rust independently.",
+          "code": "rustc generated.rs -o tmp/bin each time"
+        },
+        {
+          "key": "B",
+          "name": "Per-test cache",
+          "detail": "Each integration test caches only inside its own binary.",
+          "code": "tests/golden cache only"
+        },
+        {
+          "key": "C",
+          "name": "Shared verified cache (recommended)",
+          "detail": "Repo-local target/test-cache shared across test binaries, keyed by all semantic inputs, with opt-out.",
+          "code": "JET_TEST_BUILD_CACHE=target/test-cache"
+        }
+      ],
+      "comparisons": [],
+      "rec": "C",
+      "status": "ratified",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-08",
+      "draft": false,
+      "retiredAt": "2026-07-11T00:24:37.571Z"
+    },
+    {
+      "id": "D-VERIFY-TIER1",
+      "cardId": "c_audit_366_z7u1x7",
+      "group": "tooling",
+      "title": "Verification tier semantics",
+      "gist": "How fast, full, slow, and real-hardware tests are separated without weakening done.",
+      "explainer": "Recommend C: speed without proof laundering.",
+      "story": "Nate wants ordinary full verification in minutes, but real QEMU/desktop/import replacement proof still has to exist and be runnable before claims close.",
+      "inWild": "verify-full -> default full\nverify-real -> real QEMU/import/Desktop gates\nno card can claim replacement without real tier",
+      "detail": "Recommend C: speed without proof laundering.",
+      "options": [
+        {
+          "key": "A",
+          "name": "One suite only",
+          "detail": "Everything, including real QEMU/browser/hardware, always runs in verify-full.",
+          "code": "scripts/agent/verify-full.sh"
+        },
+        {
+          "key": "B",
+          "name": "Fast default plus optional slow",
+          "detail": "Default suite is fast; slow tests are optional and may be skipped for closure.",
+          "code": "verify-full; verify-slow optional"
+        },
+        {
+          "key": "C",
+          "name": "Tiered but binding (recommended)",
+          "detail": "Default full is 1-3 min; real/slow suites are separate but mandatory for claims/cards that require them.",
+          "code": "card acceptance: requires verify-real-jetos, not just verify-full"
+        }
+      ],
+      "comparisons": [],
+      "rec": "C",
+      "status": "ratified",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-08",
+      "draft": false,
+      "retiredAt": "2026-07-11T00:24:37.571Z"
     }
   ],
   "cards": [
@@ -29981,6 +31036,955 @@
       "needsAcceptance": false,
       "questions": [],
       "retiredAt": "2026-07-10T13:27:58.527Z"
+    },
+    {
+      "id": "c0n8old0",
+      "num": 289,
+      "title": "corelib audit: core.io — terminal surface parity",
+      "body": "Best-in-class bar: Go term + Rust crossterm capabilities with Python rich ergonomics. Current surface is args/input/read_all_input/eprint only.\n\nGaps: print without trailing newline + explicit flush; write raw bytes to stdout; isatty detection for stdout/stderr; terminal width/height; ANSI color/style helpers that honor NO_COLOR and non-tty (safe by default — no garbage codes in pipes); carriage-return progress idiom or a small progress helper; raw mode + key events (may be a separate opt-in module — ballot if so).\n\nDone means: gaps shipped with examples + golden tests or recorded as declined non-goals. Ballot gates: any new user-facing module name, function surface, or syntax is an owner decision (queue ballots before code); any external dep stays behind the FFI bridge pattern (I6).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-COREIO1=A: Hybrid: stream backbone plus terminal capability namespace. core.io owns stdout/stderr/stdin streams, flush, raw bytes, and TTY facts. Terminal capabilities live under `io.terminal`/stream methods, not a separate module: style/progress/raw mode/key events all honor TTY/NO_COLOR by default, with explicit expert overrides for forced color/raw behavior.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: corelib audit: core.io — terminal surface parity\n\nCurrent law: Existing linked decisions: none yet. D-CORENS1 keeps all first-party modules under core.*; I6 forbids compiler deps; D-STDRUBRIC1 requires mechanical core API laws.\n\nBuild order: Audit current Core/API/prelude/docs/tests first; write failing UI/golden/unit fixtures; implement std-only or approved bridge code; update docs/reference and syntax-decisions when law changes; run targeted tests, then full nix develop -c cargo test before close.\n\nAcceptance: Examples/goldens or UI snapshots prove each shipped behavior; stdlib map records shipped/carded/declined rows; no rustc/user-hostile errors; no compiler external deps.\n\nDependencies/collisions: Respect neighboring core cards: io/args/process separate; text before regex; net/url before http; encoding before data/db; random never owns secrets.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Closed #289 after full verification. Final proof: nix develop -c cargo test passed. Focused proof also passed: cargo build; jet run examples/features/io/terminal_parity.jet; cargo fmt --all; cargo test --test golden examples_compile_and_run -- --exact; cargo test --test corelib; cargo test --test tir; cargo test --test dev jit_try_compile_manifest_matches -- --exact --nocapture. Shipped real D-COREIO1=A core.io terminal parity: stdout/stderr handles with write/write_line/write_bytes/flush/is_tty, terminal_width/height, NO_COLOR-aware style, explicit style_force, progress helper, docs/spec updates, golden stdout+stderr coverage."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Focused #289 proof green. Implemented D-COREIO1=A stream handles and terminal helpers: io.stdout/io.stderr write/write_line/write_bytes/flush/is_tty, terminal_width/height, style/style_force, progress. Added terminal_parity golden with stdout+stderr verification and success-stderr harness support. Verified: cargo build; jet run examples/features/io/terminal_parity.jet; cargo fmt --all; cargo test --test golden examples_compile_and_run -- --exact; cargo test --test corelib; cargo test --test tir; cargo test --test dev jit_try_compile_manifest_matches -- --exact --nocapture. Full suite next before done."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "agent",
+          "text": "Started #289 after #306 full-suite done proof. Owner gate clear: D-COREIO1=A ratified. Will audit current core.io/io.terminal/stream surface, implement real terminal parity gaps with std-only code or approved bridge pattern, add deterministic examples/goldens/docs, then focused gates plus full nix develop -c cargo test before any next card."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "2026-07-07 codex-main: Ratified decisions propagated into plan. Owner gates clear; card is ready for implementation."
+        },
+        {
+          "at": "2026-07-07",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "2026-07-07 codex-main: Plan built for fresh corelib card. Existing decisions reconciled; owner surface ballot queued, phase deciding."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e3 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:32.496Z",
+      "updated": "2026-07-08",
+      "criteria": [],
+      "needsAcceptance": false,
+      "refs": [],
+      "questions": [],
+      "retiredAt": "2026-07-11T00:24:37.570Z"
+    },
+    {
+      "id": "c0oa2sfp",
+      "num": 290,
+      "title": "corelib audit: core.args — CLI parsing parity with clap",
+      "body": "Best-in-class bar: clap (Rust), with argparse/Go flag as floors. Current: flag/option/positional + help text, string-only values, no auto help.\n\nGaps: subcommands with per-subcommand specs; short flags (-v) and combined short flags; typed option values (Int, Float, enum choices, path) validated at parse; default values declared in the spec; repeated options (multi values); required vs optional options; automatic --help and --version wiring; environment-variable fallbacks; \"did you mean\" suggestions on unknown flags (Jet diagnostic voice); shell completion generation (bash/zsh/fish) via jet devtools; value hints for completions.\n\nDone means: a nontrivial real CLI (e.g. a jet example tool) is expressible without hand-walking [String], with golden help output. Ballot gates: any new user-facing module name, function surface, or syntax is an owner decision (queue ballots before code); any external dep stays behind the FFI bridge pattern (I6).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-COREARGS1=A: Hybrid: one ArgsSpec from structs or builders. ArgsSpec is the single semantic model. Typed `fn run(args: T)` derives an ArgsSpec for beginners; library/tooling code can build the same ArgsSpec dynamically for subcommands, env fallbacks, completions, and tests. No string mini-language.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: corelib audit: core.args — CLI parsing parity with clap\n\nCurrent law: Existing linked decisions: none yet. D-CORENS1 keeps all first-party modules under core.*; I6 forbids compiler deps; D-STDRUBRIC1 requires mechanical core API laws.\n\nBuild order: Audit current Core/API/prelude/docs/tests first; write failing UI/golden/unit fixtures; implement std-only or approved bridge code; update docs/reference and syntax-decisions when law changes; run targeted tests, then full nix develop -c cargo test before close.\n\nAcceptance: Examples/goldens or UI snapshots prove each shipped behavior; stdlib map records shipped/carded/declined rows; no rustc/user-hostile errors; no compiler external deps.\n\nDependencies/collisions: Respect neighboring core cards: io/args/process separate; text before regex; net/url before http; encoding before data/db; random never owns secrets.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Verified and closed with full proof: nix develop -c scripts/agent/verify-full.sh passed with exit code 0 after targeted jetpack/dev/golden/decisions/diagnostics_coverage/repl/web_dev/cli/syntax_reconciliation proofs. Epoch 3 closeout complete for this card."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "2026-07-08 codex: Implemented D-COREARGS1 expanded core.args surface: short/combined flags, short options, typed Int/Float/choice validation, defaults, env fallbacks, required/repeated options, subcommands with nested ArgsSpec, auto --help/--version flags, did-you-mean suggestions, and completion text. Updated docs/reference/core-library.md, added args_audit example/golden, and added corelib env/suggestion regression. Verified: nix develop -c cargo check -p jet-codegen; nix develop -c cargo test --test corelib core_args_audit_surface_runs_and_reports_suggestions -- --nocapture; nix develop -c cargo test --test golden examples_compile_and_run -- --nocapture."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "2026-07-07 codex-main: Ratified decisions propagated into plan. Owner gates clear; card is ready for implementation."
+        },
+        {
+          "at": "2026-07-07",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "2026-07-07 codex-main: Plan built for fresh corelib card. Existing decisions reconciled; owner surface ballot queued, phase deciding."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e3 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:32.559Z",
+      "updated": "2026-07-08",
+      "criteria": [],
+      "needsAcceptance": false,
+      "refs": [],
+      "questions": [],
+      "retiredAt": "2026-07-11T00:24:37.570Z"
+    },
+    {
+      "id": "c0rmuc30",
+      "num": 293,
+      "title": "corelib audit: core.math — full libm + integer-safety surface",
+      "body": "Best-in-class bar: C99 libm coverage with Rust f64/i64 method safety. Current: sqrt/pow/abs/min/max/floor/ceil/round/clamp/pi/e.\n\nGaps: trig family (sin, cos, tan, asin, acos, atan, atan2) and hyperbolics; exp, ln, log2, log10, hypot; trunc, fract, sign; isnan/isinf/isfinite; float to_bits/from_bits; NaN-explicit min/max policy; integer checked_/saturating_/wrapping_ add/sub/mul (pairs with overflow diagnostics); integer pow; gcd/lcm; degrees/radians; lerp; tau/infinity/nan constants. Verify shipped BigInt/Decimal (#65) integrate with this surface (abs/min/max/comparisons work uniformly).\n\nDone means: gaps shipped with examples + golden tests or recorded as declined non-goals; one canonical spelling per operation (I8). Ballot gates: any new user-facing module name, function surface, or syntax is an owner decision (queue ballots before code); any external dep stays behind the FFI bridge pattern (I6).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-MATHLIB2=A: Hybrid: core.math canonical registry plus discoverability. core.math functions are the canonical callable surface for libm and explicit checked/saturating/wrapping integer families. Numeric documentation, LSP completion, and optional snippets may surface helpers from values, but emitted code uses the same core.math names so Jet does not grow duplicate spellings.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: corelib audit: core.math — full libm + integer-safety surface\n\nCurrent law: Existing linked decisions: none yet. D-CORENS1 keeps all first-party modules under core.*; I6 forbids compiler deps; D-STDRUBRIC1 requires mechanical core API laws.\n\nBuild order: Audit current Core/API/prelude/docs/tests first; write failing UI/golden/unit fixtures; implement std-only or approved bridge code; update docs/reference and syntax-decisions when law changes; run targeted tests, then full nix develop -c cargo test before close.\n\nAcceptance: Examples/goldens or UI snapshots prove each shipped behavior; stdlib map records shipped/carded/declined rows; no rustc/user-hostile errors; no compiler external deps.\n\nDependencies/collisions: Respect neighboring core cards: io/args/process separate; text before regex; net/url before http; encoding before data/db; random never owns secrets.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Verified and closed with full proof: nix develop -c scripts/agent/verify-full.sh passed with exit code 0 after targeted jetpack/dev/golden/decisions/diagnostics_coverage/repl/web_dev/cli/syntax_reconciliation proofs. Epoch 3 closeout complete for this card."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Implemented core.math D-MATHLIB2: libm breadth (trig/hyperbolic/log/pow helpers), float classification/conversion helpers, and explicit checked/saturating/wrapping/gcd/lcm/int_pow integer families. Added docs plus math_audit golden example. Verified: nix develop -c cargo check -p jet-codegen; nix develop -c jet run examples/features/math/math_audit.jet; nix develop -c cargo test --test corelib core_module_items_covers_known_core_modules -- --nocapture; nix develop -c cargo test --test golden examples_compile_and_run -- --nocapture."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "2026-07-07 codex-main: Ratified decisions propagated into plan. Owner gates clear; card is ready for implementation."
+        },
+        {
+          "at": "2026-07-07",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "2026-07-07 codex-main: Plan built for fresh corelib card. Existing decisions reconciled; owner surface ballot queued, phase deciding."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e3 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:32.762Z",
+      "updated": "2026-07-08",
+      "criteria": [],
+      "needsAcceptance": false,
+      "refs": [],
+      "questions": [],
+      "retiredAt": "2026-07-11T00:24:37.570Z"
+    },
+    {
+      "id": "c0sr7exp",
+      "num": 294,
+      "title": "corelib audit: core.random — distributions, bytes, sampling",
+      "body": "Best-in-class bar: Go math/rand/v2 + Python random, with the D-DET1 capability story kept intact. Current: seed/int/float/pick/shuffle + injectable Rng.\n\nGaps: bytes(n); bool with probability p; normal/gaussian and exponential draws; weighted pick; sample(k) without replacement; range convenience over Float; mirror every new draw on the injected Rng capability (D-DET-CAPAPI). Keep the crypto/PRNG split explicit (#52): crypto randomness stays in core.crypto, documented cross-reference both ways.\n\nDone means: gaps shipped with deterministic seeded golden tests or recorded as declined non-goals. Ballot gates: any new user-facing module name, function surface, or syntax is an owner decision (queue ballots before code); any external dep stays behind the FFI bridge pattern (I6).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-RANDOMDIST1=A: Hybrid: reproducible PRNG in core.random, secrets in core.crypto. core.random owns deterministic PRNGs, distributions, shuffling, sampling, seed splitting, and test fixtures. Secret randomness stays in core.crypto. Shared entropy plumbing may exist internally, but names keep simulation/test randomness and security randomness impossible to confuse.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: corelib audit: core.random — distributions, bytes, sampling\n\nCurrent law: Existing linked decisions: none yet. D-CORENS1 keeps all first-party modules under core.*; I6 forbids compiler deps; D-STDRUBRIC1 requires mechanical core API laws.\n\nBuild order: Audit current Core/API/prelude/docs/tests first; write failing UI/golden/unit fixtures; implement std-only or approved bridge code; update docs/reference and syntax-decisions when law changes; run targeted tests, then full nix develop -c cargo test before close.\n\nAcceptance: Examples/goldens or UI snapshots prove each shipped behavior; stdlib map records shipped/carded/declined rows; no rustc/user-hostile errors; no compiler external deps.\n\nDependencies/collisions: Respect neighboring core cards: io/args/process separate; text before regex; net/url before http; encoding before data/db; random never owns secrets.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Verified and closed with full proof: nix develop -c scripts/agent/verify-full.sh passed with exit code 0 after targeted jetpack/dev/golden/decisions/diagnostics_coverage/repl/web_dev/cli/syntax_reconciliation proofs. Epoch 3 closeout complete for this card."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Focused runtime proof now green after Canvas lane cleared: nix develop -c cargo test --test corelib random_distribution_surface_is_deterministic -- --nocapture. #294 waits only final full-suite gate before done."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Implemented core.random D-RANDOMDIST1 surface in sema/TIR/prelude/docs/examples/tests: float_range, bool(p), normal, exponential, weighted_pick, sample, split, bytes, and matching Rng methods. Crate-level verification green: nix develop -c cargo check -p jet-sema -p jet-codegen. Integration/golden proof currently blocked by concurrent non-E3 Source/Canvas.rs compile errors (missing required_project_string/json_array_body/json_object_bodies/etc.); not touching Canvas lane."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "2026-07-07 codex-main: Ratified decisions propagated into plan. Owner gates clear; card is ready for implementation."
+        },
+        {
+          "at": "2026-07-07",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "2026-07-07 codex-main: Plan built for fresh corelib card. Existing decisions reconciled; owner surface ballot queued, phase deciding."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e3 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:32.829Z",
+      "updated": "2026-07-08",
+      "criteria": [],
+      "needsAcceptance": false,
+      "refs": [],
+      "questions": [],
+      "retiredAt": "2026-07-11T00:24:37.570Z"
+    },
+    {
+      "id": "c0vwu9my",
+      "num": 297,
+      "title": "corelib gap: core.url + core.mime — new modules (WHATWG URL, query strings, mime tables)",
+      "body": "Missing entirely today; every serious stdlib has this and core.http/core.web need it underneath. Best-in-class bar: WHATWG URL spec (what browsers and JS ship), Go net/url reliability.\n\nScope: URL parse/build/normalize/join with typed components (scheme, host, port, path segments, query, fragment); query-string encode/decode to typed pairs incl. repeated keys; percent-encoding done right (per-component rules); IDNA/punycode host handling; file:// and data: URL support; relative resolution; a mime module: extension↔type mapping, parse of type/subtype+params, sniffing declined or explicit. core.http and core.web then consume these types instead of raw strings (typed values over strings — owner preference).\n\nNew module names + surfaces are owner ballots before any code. Done means: WHATWG URL test-suite-derived fixtures pass; examples + golden tests. Ballot gates: any new user-facing module name, function surface, or syntax is an owner decision (queue ballots before code); any external dep stays behind the FFI bridge pattern (I6).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": "Plan built 2026-07-07 by codex-main.\n\nFocus: corelib gap: core.url + core.mime — new modules (WHATWG URL, query strings, mime tables)\n\nCurrent law: Existing linked decisions: D-URL1=ratified/A. D-CORENS1 keeps all first-party modules under core.*; I6 forbids compiler deps; D-STDRUBRIC1 requires mechanical core API laws.\n\nBuild order: Audit current Core/API/prelude/docs/tests first; write failing UI/golden/unit fixtures; implement std-only or approved bridge code; update docs/reference and syntax-decisions when law changes; run targeted tests, then full nix develop -c cargo test before close.\n\nAcceptance: Examples/goldens or UI snapshots prove each shipped behavior; stdlib map records shipped/carded/declined rows; no rustc/user-hostile errors; no compiler external deps.\n\nDependencies/collisions: Respect neighboring core cards: io/args/process separate; text before regex; net/url before http; encoding before data/db; random never owns secrets.\n\nOwner gates: No open owner gate after existing ratification; raise a follow-up only if implementation needs new syntax/deps.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Implemented core.url/core.mime per D-URL1: typed Url/Mime runtime, parser/build/join/query/percent/IDNA/file/data APIs, MIME parse/extension mapping, sema types/signatures/methods, TIR/codegen lowering, typed Url accepted at core.http.client boundary, docs/spec/example/golden/UI snapshot/JIT manifest updated. 100% verification before moving on: nix develop -c cargo fmt --all; cargo check -p jet-sema; cargo check -p jet-codegen; cargo build; jet run examples/features/net/url_mime.jet; cargo test --test corelib core_url_mime_parse_join_query_and_http_url_run; cargo test --test corelib core_http_client_accepts_typed_url_in_codegen; cargo test --test golden examples_compile_and_run; cargo test --test corelib core_module_items_covers_known_core_modules; cargo test --test syntax_reconciliation; cargo test --test truthfulness; cargo test --test dev; cargo test --test diagnostic_snapshots; final nix develop -c cargo test PASS."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "#297 focused verification green. Additional proof: golden examples_compile_and_run; core_module_items_covers_known_core_modules; syntax_reconciliation; truthfulness. Remaining before done: full nix develop -c cargo test from current tree."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "#297 implementation in focused verify. Landed std-only core.url/core.mime typed values: Url parse/from_parts/file/data/query/percent encode/decode; Url methods scheme/host/port/path/path_segments/query/query_pairs/fragment/normalize/join/set_query/add_query/to_string; Mime parse/from_extension/extension and media_type/subtype/essence/param/params/to_string; IDNA punycode host handling; repeated query pairs; data/file URL rendering; core.http.client Url boundary codegen. Fresh checks green: cargo check -p jet-sema; cargo check -p jet-codegen; core_url_mime_parse_join_query_and_http_url_run; core_http_client_accepts_typed_url_in_codegen; cargo build; jet run examples/features/net/url_mime.jet. Next: golden, syntax/truthfulness, full cargo test before done."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "Started #297 implementation. Owner gate D-URL1=A already ratified: ship core.url + core.mime typed modules, std-only/no compiler deps. Working one card at a time; #295 is done with full-suite proof before this card began. Next: audit current core module wiring, add fixtures, implement, then focused + full verification before moving."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "2026-07-07 codex-main: Plan built for fresh corelib card. Existing decisions reconciled; no open owner gate remains, advanced to ready."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "owner",
+          "text": "Activated into epoch e3 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:33.020Z",
+      "updated": "2026-07-08",
+      "criteria": [],
+      "needsAcceptance": false,
+      "refs": [],
+      "questions": [],
+      "retiredAt": "2026-07-11T00:24:37.570Z"
+    },
+    {
+      "id": "c0xyrsis",
+      "num": 299,
+      "title": "corelib: core.regex — in-house RE2-class engine + API depth",
+      "body": "D-REGEX1 already slates replacing the bootstrap regex crate with an in-house RE2-style engine before end of Epoch 3 — this card makes that trackable and adds the API gaps so the surface lands once, right.\n\nEngine: linear-time DFA/NFA hybrid in pure Rust (later Jet), no backtracking, keeps the ReDoS-safety guarantee; comptime pattern syntax checking with Jet diagnostics (a bad pattern literal should fail at compile time, not runtime — beats every mainstream language).\n\nAPI gaps: precompiled Regex value (compile once, reuse — current API re-parses the pattern string per call); named group access by name; match spans (start/end offsets), not just text; iterator over all matches with captures; replace with a callback lambda; split with limit; flags surface (case-insensitive, multiline, dotall) as typed options.\n\nDone means: engine swap invisible behind the same surface, bootstrap dep deleted, API gaps shipped with examples + snapshot-tested diagnostics. Ballot gates: any new user-facing module name, function surface, or syntax is an owner decision (queue ballots before code); any external dep stays behind the FFI bridge pattern (I6).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-REGEXENGINE1=A: Hybrid: linear default with explicit compatibility mode. core.regex is RE2-class and linear by default: captures, named groups, replace, split, flags, Unicode classes. A future compatibility parser may diagnose unsupported PCRE features and suggest safe rewrites; any backtracking/PCRE engine would be explicit, audited, and never the default.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: corelib: core.regex — in-house RE2-class engine + API depth\n\nCurrent law: Existing linked decisions: none yet. D-CORENS1 keeps all first-party modules under core.*; I6 forbids compiler deps; D-STDRUBRIC1 requires mechanical core API laws.\n\nBuild order: Audit current Core/API/prelude/docs/tests first; write failing UI/golden/unit fixtures; implement std-only or approved bridge code; update docs/reference and syntax-decisions when law changes; run targeted tests, then full nix develop -c cargo test before close.\n\nAcceptance: Examples/goldens or UI snapshots prove each shipped behavior; stdlib map records shipped/carded/declined rows; no rustc/user-hostile errors; no compiler external deps.\n\nDependencies/collisions: Respect neighboring core cards: io/args/process separate; text before regex; net/url before http; encoding before data/db; random never owns secrets.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "#299 done. Full verification complete: final nix develop -c cargo test PASS after focused gates. Shipped std-only linear core.regex engine in generated prelude; removed old hidden regex crate bridge/runtime; added compiled Regex/RegexFlags, named groups, Match spans/name/group APIs, matches, split_limit, callback replace_all_with, replacement expansion, Unicode classes/flags; docs/spec/example/golden/tests updated. Focused proof also green: cargo fmt --all; cargo check -p jet-driver; cargo test --test regex -- --nocapture; cargo test --test tir regex_match_group; cargo test --test golden examples_compile_and_run; cargo test --test corelib core_module_items_covers_known_core_modules; cargo test --test syntax_reconciliation; cargo test --test truthfulness; cargo test --test dev jit_try_compile_manifest_matches; cargo test --test dev jit_coverage_audit; cargo build; jet run examples/features/text/regex.jet."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "#299 implementation complete, focused verification green. Implemented std-only core.regex engine in generated prelude: no hidden FFI bridge/no regex crate, compiled Regex + RegexFlags, named captures, Match spans/name/group APIs, all matches, split_limit, callback replace_all_with, replacement /, Unicode classes, flags, docs/example/golden/tests. Removed old bridge runtime. Focused proof: cargo fmt --all; cargo check -p jet-driver; cargo test --test regex -- --nocapture; cargo test --test tir regex_match_group; cargo test --test golden examples_compile_and_run; cargo test --test corelib core_module_items_covers_known_core_modules; cargo test --test syntax_reconciliation; cargo test --test truthfulness; cargo test --test dev jit_try_compile_manifest_matches; cargo test --test dev jit_coverage_audit; cargo build; jet run examples/features/text/regex.jet. Remaining before done: full nix develop -c cargo test from current tree."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Started #299. Owner gate D-REGEXENGINE1=A ratified; no open questions. Scope: remove regex crate bridge dependency, ship std-only linear core.regex engine plus compile/reuse Regex value, named groups, spans, all-match captures, callback replace, split limit, flags, diagnostics/docs/examples/tests. Will not move card until focused + full verification green."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "2026-07-07 codex-main: Ratified decisions propagated into plan. Owner gates clear; card is ready for implementation."
+        },
+        {
+          "at": "2026-07-07",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "2026-07-07 codex-main: Plan built for fresh corelib card. Existing decisions reconciled; owner surface ballot queued, phase deciding."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e3 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:33.144Z",
+      "updated": "2026-07-08",
+      "criteria": [],
+      "needsAcceptance": false,
+      "refs": [],
+      "questions": [],
+      "retiredAt": "2026-07-11T00:24:37.570Z"
+    },
+    {
+      "id": "c02ch1op",
+      "num": 303,
+      "title": "corelib audit: core.db — driver breadth, typed rows, migrations",
+      "body": "Best-in-class bar: Go database/sql universality with Rust sqlx's compile-checked queries as the north star — Jet can sema-check SQL at comptime, which no mainstream stdlib does. SQLite shipped (D-DBDRIVER1).\n\nGaps: typed row decode — query<T> returning [T] via @[Codable] instead of hand-indexing rows; named parameters; transaction closure helper (auto commit/rollback on scope exit); prepared-statement caching; connection pool; Postgres wire-protocol driver (native implementation — the protocol is documented and stable; I6-clean, no C lib); MySQL driver decision (ship or record as non-goal); schema migrations runner integrated with @PublishedSchema/migration blocks so data and DB schema share one migration story; comptime SQL syntax/column checking against a declared schema (flagship differentiator — ballot the surface).\n\nDone means: audit table plus shipped gaps with a realistic CRUD example under golden tests. Ballot gates: any new user-facing module name, function surface, or syntax is an owner decision (queue ballots before code); any external dep stays behind the FFI bridge pattern (I6).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-DBMIGRATE1=A: Hybrid: typed SQL rows plus optional query builder. The canonical database path is parameterized SQL with typed row decoding, transactions, prepared statements, migrations, and checksums. A query builder can generate that same SQL/parameter plan for Studio/LSP workflows, but SQL remains inspectable and parameter-only safety remains enforced.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: corelib audit: core.db — driver breadth, typed rows, migrations\n\nCurrent law: Existing linked decisions: none yet. D-CORENS1 keeps all first-party modules under core.*; I6 forbids compiler deps; D-STDRUBRIC1 requires mechanical core API laws.\n\nBuild order: Audit current Core/API/prelude/docs/tests first; write failing UI/golden/unit fixtures; implement std-only or approved bridge code; update docs/reference and syntax-decisions when law changes; run targeted tests, then full nix develop -c cargo test before close.\n\nAcceptance: Examples/goldens or UI snapshots prove each shipped behavior; stdlib map records shipped/carded/declined rows; no rustc/user-hostile errors; no compiler external deps.\n\nDependencies/collisions: Respect neighboring core cards: io/args/process separate; text before regex; net/url before http; encoding before data/db; random never owns secrets.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Verified and closed with full proof: nix develop -c scripts/agent/verify-full.sh passed with exit code 0 after targeted jetpack/dev/golden/decisions/diagnostics_coverage/repl/web_dev/cli/syntax_reconciliation proofs. Epoch 3 closeout complete for this card."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "2026-07-08 codex: Completed #303 vertical slice: typed db.row_* accessors, db.transaction rollback helper, db.migrate checksum table/idempotence, and transparent SQLite prepare_cached path. Updated db_checked_sql example/golden, corelib harness, docs/reference, syntax decision note, and core-db audit artifact. Proof green: nix develop -c cargo check -p jet-codegen -p jet-sema; nix develop -c cargo test --test corelib db_checked_sql_params_feed_parameterized_execute -- --nocapture; nix develop -c jet run examples/features/io/db_checked_sql.jet. Golden full example suite hit shared /tmp nix-shell deletion on unrelated modules/publishable_pkg, so card moves to verify not done until repo-wide proof is stable."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "2026-07-08 codex: Resuming #303 core.db to finish real CRUD/typed rows/transactions/migrations proof. Will inspect current db prelude surface and tests, avoid Canvas/JetOS/other-epoch files, run targeted corelib/golden checks before phase move."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Partial implementation landed: db.params(Sql) converts checked sql\"...{param}...\" templates to [DbValue.Text] so typed SQL feeds parameterized execute; added db_checked_sql example/test. Proof: nix develop -c cargo test --test corelib db_checked_sql_params_feed_parameterized_execute -- --nocapture. Not complete: typed row decode, transaction closure helper, prepared cache, pool, migrations, Postgres/MySQL/comptime schema checks remain open."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "2026-07-07 codex-main: Ratified decisions propagated into plan. Owner gates clear; card is ready for implementation."
+        },
+        {
+          "at": "2026-07-07",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "2026-07-07 codex-main: Plan built for fresh corelib card. Existing decisions reconciled; owner surface ballot queued, phase deciding."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e3 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:33.409Z",
+      "updated": "2026-07-08",
+      "criteria": [],
+      "needsAcceptance": false,
+      "refs": [],
+      "questions": [],
+      "retiredAt": "2026-07-11T00:24:37.570Z"
+    },
+    {
+      "id": "c03gcv39",
+      "num": 304,
+      "title": "corelib audit: core.log — structured logging, spans, sinks, OTel export",
+      "body": "Best-in-class bar: Rust tracing (spans) + Go slog (simplicity) + OpenTelemetry (export). core.log shipped in Epoch 2 — audit the real surface first.\n\nAudit list: leveled structured fields with typed values (not string-formatted); runtime level filtering per module; span/scope context that propagates across core.tasks spawns; sinks — stderr human format, file, JSON lines; rotation policy; sampling for high-volume paths; OTLP/OpenTelemetry export (bridge gate if any dep); metrics floor (counter/gauge/histogram) or an explicit decision that metrics is its own module (ballot); print vs log guidance in docs.\n\nDone means: audit table plus shipped gaps with examples + golden tests; a service example emits parseable JSON logs with spans across tasks. Ballot gates: any new user-facing module name, function surface, or syntax is an owner decision (queue ballots before code); any external dep stays behind the FFI bridge pattern (I6).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-LOGTRACE1=A: Hybrid: structured events, spans, and friendly text sinks. core.log records typed events/spans/fields as the source truth. Text, JSON, and OTel sinks are output formats over those events. Beginners call log.info with plain fields; experts control propagation, sampling, redaction, sinks, trace IDs, and export policy.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: corelib audit: core.log — structured logging, spans, sinks, OTel export\n\nCurrent law: Existing linked decisions: none yet. D-CORENS1 keeps all first-party modules under core.*; I6 forbids compiler deps; D-STDRUBRIC1 requires mechanical core API laws.\n\nBuild order: Audit current Core/API/prelude/docs/tests first; write failing UI/golden/unit fixtures; implement std-only or approved bridge code; update docs/reference and syntax-decisions when law changes; run targeted tests, then full nix develop -c cargo test before close.\n\nAcceptance: Examples/goldens or UI snapshots prove each shipped behavior; stdlib map records shipped/carded/declined rows; no rustc/user-hostile errors; no compiler external deps.\n\nDependencies/collisions: Respect neighboring core cards: io/args/process separate; text before regex; net/url before http; encoding before data/db; random never owns secrets.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Verified and closed with full proof: nix develop -c scripts/agent/verify-full.sh passed with exit code 0 after targeted jetpack/dev/golden/decisions/diagnostics_coverage/repl/web_dev/cli/syntax_reconciliation proofs. Epoch 3 closeout complete for this card."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Implemented core.log structured logging depth: typed LogField/LogSpan, field builders, span enter/close, JSON/text/file sinks, sampling, redaction, counter fields, OTLP-file sink, docs/example. Proof: cargo check -p jet-sema -p jet-codegen; cargo test --test observe structured_log_fields_and_span_context; cargo test --test corelib core_log_structured_file_sink_runs."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "2026-07-07 codex-main: Ratified decisions propagated into plan. Owner gates clear; card is ready for implementation."
+        },
+        {
+          "at": "2026-07-07",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "2026-07-07 codex-main: Plan built for fresh corelib card. Existing decisions reconciled; owner surface ballot queued, phase deciding."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e3 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:33.476Z",
+      "updated": "2026-07-08",
+      "criteria": [],
+      "needsAcceptance": false,
+      "refs": [],
+      "questions": [],
+      "retiredAt": "2026-07-11T00:24:37.570Z"
+    },
+    {
+      "id": "c04ljr3f",
+      "num": 305,
+      "title": "corelib audit: collections + iterator adapters — parity with Rust Iterator/itertools",
+      "body": "Best-in-class bar: Rust's Iterator trait — the most-lauded iterator design anywhere — plus Python itertools breadth. Set/Deque shipped (#55).\n\nContainer gaps: sorted map/sorted set (BTree-class, ordered iteration); binary heap / priority queue; LRU cache; bitset; growable byte buffer with endian-aware read/write (Reader exists for consuming — the building half is missing).\n\nIterator/sequence adapter audit — one canonical spelling each (I8): enumerate, zip/unzip, windows, chunks, flat_map, filter_map, take_while/skip_while, fold/reduce/scan, dedup, partition, group-by/chunk-by, min_by/max_by/min_by_key, sort_by_key, counts/frequency map, sum/product over selectors, first/last/nth, any/all (verify), flatten, intersperse/join beyond strings. Whatever list-comprehension/pipeline surface exists must reach the same operations without a second mechanism.\n\nDone means: audit table in docs; gaps shipped with examples + golden tests; the doc shows the canonical Jet spelling next to the Rust/Python name so migrants find it instantly. Ballot gates: any new user-facing module name, function surface, or syntax is an owner decision (queue ballots before code); any external dep stays behind the FFI bridge pattern (I6).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-ITERTOOLS1=A: Hybrid: lazy iterator protocol with eager collection conveniences. One Iterable/Iterator model powers lazy adapters. Collections expose beginner-friendly adapter methods that return lazy views; `collect`, `to_list`, or terminal reducers make materialization explicit. No comprehension syntax needed now.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: corelib audit: collections + iterator adapters — parity with Rust Iterator/itertools\n\nCurrent law: Existing linked decisions: none yet. D-CORENS1 keeps all first-party modules under core.*; I6 forbids compiler deps; D-STDRUBRIC1 requires mechanical core API laws.\n\nBuild order: Audit current Core/API/prelude/docs/tests first; write failing UI/golden/unit fixtures; implement std-only or approved bridge code; update docs/reference and syntax-decisions when law changes; run targeted tests, then full nix develop -c cargo test before close.\n\nAcceptance: Examples/goldens or UI snapshots prove each shipped behavior; stdlib map records shipped/carded/declined rows; no rustc/user-hostile errors; no compiler external deps.\n\nDependencies/collisions: Respect neighboring core cards: io/args/process separate; text before regex; net/url before http; encoding before data/db; random never owns secrets.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Done #305. Full implementation: iterator audit example/golden; list adapters sum/product/min/max/flatten/intersperse/unzip/count_by; SortedSet, PriorityQueue, Lru, BitSet, ByteBuffer runtime+sema+TIR+docs+syntax/editor grammar; JIT gap manifest updated for Cranelift unsupported collection builtins. 100% proof: nix develop -c cargo test => PASS after focused gates."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Focused verification passed for #305: cargo fmt --all; jet devtools grammars; cargo check -p jet-driver; cargo build; jet run examples/features/collections/iter_tools_audit.jet; cargo test --test golden examples_compile_and_run -- --exact; cargo test --test dev jit_try_compile_manifest_matches -- --exact --nocapture; cargo test --test syntax_reconciliation; cargo test --test corelib; cargo test --test tir. Running final nix develop -c cargo test before done/no next card."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Started #305 after #302 100% close proof. Owner gate clear: D-ITERTOOLS1=A ratified. Will audit current collections/iterator surface, implement real gaps with examples/goldens/docs, then run focused gates and final nix develop -c cargo test before moving to any other card."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "2026-07-07 codex-main: Ratified decisions propagated into plan. Owner gates clear; card is ready for implementation."
+        },
+        {
+          "at": "2026-07-07",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "2026-07-07 codex-main: Plan built for fresh corelib card. Existing decisions reconciled; owner surface ballot queued, phase deciding."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e3 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:33.545Z",
+      "updated": "2026-07-08",
+      "criteria": [],
+      "needsAcceptance": false,
+      "refs": [],
+      "questions": [],
+      "retiredAt": "2026-07-11T00:24:37.570Z"
+    },
+    {
+      "id": "c08z55oy",
+      "num": 309,
+      "title": "corelib gap: core.fmt — human formatting + locale floor (new module decision)",
+      "body": "Missing today: number formatting beyond bare interpolation. Best-in-class bar: JS Intl for capability, Go humanize for ergonomics.\n\nScope to ballot: thousands separators, precision/width/alignment controls (decide: format-spec mini-language in interpolation vs functions — I8 says one way); human bytes (\"1.5 GB\"), human durations (\"3m 42s\"), ordinals; pluralization floor; locale-aware number/date rendering policy — full ICU is likely a non-goal for now, but the decision must be recorded, not implicit.\n\nNew module name + any interpolation syntax are owner ballots first. Done means: ratified surface shipped with golden tests, or the whole area recorded as a scoped non-goal in the stdlib map. Ballot gates: any new user-facing module name, function surface, or syntax is an owner decision (queue ballots before code); any external dep stays behind the FFI bridge pattern (I6).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P3",
+      "plan": "Plan built 2026-07-07 by codex-main.\n\nFocus: corelib gap: core.fmt — human formatting + locale floor (new module decision)\n\nCurrent law: Existing linked decisions: D-HUMANFMT1=ratified/A. D-CORENS1 keeps all first-party modules under core.*; I6 forbids compiler deps; D-STDRUBRIC1 requires mechanical core API laws.\n\nBuild order: Audit current Core/API/prelude/docs/tests first; write failing UI/golden/unit fixtures; implement std-only or approved bridge code; update docs/reference and syntax-decisions when law changes; run targeted tests, then full nix develop -c cargo test before close.\n\nAcceptance: Examples/goldens or UI snapshots prove each shipped behavior; stdlib map records shipped/carded/declined rows; no rustc/user-hostile errors; no compiler external deps.\n\nDependencies/collisions: Respect neighboring core cards: io/args/process separate; text before regex; net/url before http; encoding before data/db; random never owns secrets.\n\nOwner gates: No open owner gate after existing ratification; raise a follow-up only if implementation needs new syntax/deps.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Verified and closed with full proof: nix develop -c scripts/agent/verify-full.sh passed with exit code 0 after targeted jetpack/dev/golden/decisions/diagnostics_coverage/repl/web_dev/cli/syntax_reconciliation proofs. Epoch 3 closeout complete for this card."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Implemented core.fmt: registered module, sema signatures/items, TIR emit, std-only prelude helpers, example/golden, docs. Targeted proof: nix develop -c cargo test --test corelib core_ -- --nocapture (passes core_fmt_human_formatting_surface_runs)."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "2026-07-07 codex-main: Plan built for fresh corelib card. Existing decisions reconciled; no open owner gate remains, advanced to ready."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "owner",
+          "text": "Activated into epoch e3 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:33.810Z",
+      "updated": "2026-07-08",
+      "criteria": [],
+      "needsAcceptance": false,
+      "refs": [],
+      "questions": [],
+      "retiredAt": "2026-07-11T00:24:37.570Z"
+    },
+    {
+      "id": "c0a6z6cg",
+      "num": 310,
+      "title": "corelib: built stdlib module map vs Python/Go/Rust",
+      "body": "Owner chose D-STDLIBLEDGER1=C: Core docs track built modules only. Scope is to keep docs/reference honest about shipped Core modules and avoid a have/have-not ledger of missing or declined domains. Missing domains remain implicit unless a separate implementation card or decision exists. Done means the built-module docs are current, links resolve, and no machine ledger/declined-domain registry is introduced.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P3",
+      "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-STDLIBLEDGER1=C: Track only built modules. Docs list what exists; missing domains are implicit. That hides deliberate no-go decisions and weakens audits.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nImplementation plan:\n1. Honor D-STDLIBLEDGER1=C: do not build a have/have-not ledger, machine ledger, or declined-domain registry.\n2. Keep Core docs focused on built modules only; update docs/reference to list current shipped Core modules and point implementation cards at their own plans.\n3. Remove or avoid any CI/test expectation that missing stdlib domains need rows.\n4. Verify docs links and Tower status; no compiler behavior changes unless touched by docs tooling.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Verified and closed with full proof: nix develop -c scripts/agent/verify-full.sh passed with exit code 0 after targeted jetpack/dev/golden/decisions/diagnostics_coverage/repl/web_dev/cli/syntax_reconciliation proofs. Epoch 3 closeout complete for this card."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Updated built Core module map per D-STDLIBLEDGER1=C: docs list built modules only, no missing/declined ledger. Added core_reference_lists_every_built_core_module guard. Targeted proof: nix develop -c cargo test --test corelib core_ -- --nocapture."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "2026-07-07 codex-main: Ratified decisions propagated into plan. Owner gates clear; card is ready for implementation."
+        },
+        {
+          "at": "2026-07-07",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "2026-07-07 codex-main: Plan built for fresh corelib card. Existing decisions reconciled; owner surface ballot queued, phase deciding."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e3 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:33.884Z",
+      "updated": "2026-07-08",
+      "criteria": [],
+      "needsAcceptance": false,
+      "refs": [],
+      "questions": [],
+      "retiredAt": "2026-07-11T00:24:37.570Z"
+    },
+    {
+      "id": "c0mrjc6k",
+      "num": 347,
+      "title": "Syntax gap: implement D-REFINE1 refinements + proof-carrying bounds",
+      "body": "#339/#340 matrix finding: D-REFINE1 remains ratified but not source-shipped. Implement distinct refinements with #Invariant, pure verifier/prover path for the ratified linear-integer bounds subset, diagnostics/tests/docs, and D-OOBPROOF1 integration. No new syntax; use existing ratified law.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Verified and closed with full proof: nix develop -c scripts/agent/verify-full.sh passed with exit code 0 after targeted jetpack/dev/golden/decisions/diagnostics_coverage/repl/web_dev/cli/syntax_reconciliation proofs. Epoch 3 closeout complete for this card."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Implemented D-REFINE1. Parser accepts #Invariant(\"value >= lo && value < hi\") on distinct Int, including marker lines separated by auto semicolons. Sema proves refined distinct Int indexes fit fixed-list bounds; TIR lowers proven fixed-list indexes without jet_index_vec. Added examples/features/types/refinements.jet + golden output, corelib proof that runtime bounds helper is omitted, Syntax.rs marker law, diagnostics/spec/source-status updates, editor grammar regen. Targeted proof green: cargo test --test corelib invariant_refinement_proves_fixed_array_index -- --nocapture; cargo build; jet run examples/features/types/refinements.jet; cargo test --test syntax_reconciliation -- --nocapture; TMPDIR=target/codex-tmp cargo test --test golden examples_compile_and_run -- --nocapture. Full repo-wide cargo test still pending final Epoch 3 closeout."
+        }
+      ],
+      "created": "2026-07-07T20:44:29.664Z",
+      "updated": "2026-07-08",
+      "criteria": [],
+      "needsAcceptance": false,
+      "refs": [],
+      "questions": [],
+      "retiredAt": "2026-07-11T00:24:37.570Z"
+    },
+    {
+      "id": "c0pf3ppl",
+      "num": 351,
+      "title": "Syntax gap: audit/complete D-PLUGIN1 + D-DEP-WASM1 plugin target",
+      "body": "#339/#340 matrix finding: card #5 and plugin export/version decisions shipped some plugin-target support, but syntax-decisions still called plugin/dependency WASM reserved/unbuilt. Audit implementation against D-PLUGIN1 and D-DEP-WASM1, finish missing WASM component/dependency proof, or narrow docs with tests.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Verified and closed with full proof: nix develop -c scripts/agent/verify-full.sh passed with exit code 0 after targeted jetpack/dev/golden/decisions/diagnostics_coverage/repl/web_dev/cli/syntax_reconciliation proofs. Epoch 3 closeout complete for this card."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "2026-07-08 codex: Audited D-PLUGIN1/D-DEP-WASM1. Code path already ships target: plugin, component WIT/wasm-tools build, zero-import wasmtime host, core.plugin loading, E1257-E1260 diagnostics, and plugin examples. Fixed stale docs/matrix and removed D-PLUGIN1/D-DEP-WASM1 from syntax reconciliation unbuilt list. Verified: nix develop -c cargo test --test syntax_reconciliation -- --nocapture passed 4/4; nix develop -c cargo test --test cli plugin_ -- --nocapture passed 2/2."
+        }
+      ],
+      "created": "2026-07-07T20:44:49.416Z",
+      "updated": "2026-07-08",
+      "criteria": [],
+      "needsAcceptance": false,
+      "refs": [],
+      "questions": [],
+      "retiredAt": "2026-07-11T00:24:37.570Z"
+    },
+    {
+      "id": "c0khyif2",
+      "num": 352,
+      "title": "Canvas workspace architecture: package/project editing surface",
+      "body": "Plan Canvas beyond the single-file prototype: package/workspace graph opening, multi-file source-backed edits, local-vs-source workspace state, semantic navigation, and command/action authority. Keep ordinary Jet source as the only semantic truth. Raise owner ballots before implementation changes product semantics.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e6",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": "docs/plans/epoch-6/canvas-workspace-architecture.md",
+      "blockedBy": [],
+      "workOrder": 20,
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-08",
+          "by": "codex-main",
+          "text": "Completed #352 Canvas workspace architecture closeout. Implemented real workspace management panels in Canvas Project rail (Packages, Dependencies, Dev, Diagnostics, Trust) fed by jet.canvas.project, with browser-visible proof and UI contract pins. Fixed closeout blockers: JetOS runtime package refs prefer first-party source before adapter fallback; installer/netboot copies sanitize runtime branding without mutating symlink targets; CachyOS bootstrap PATH prevents fake VM tools shadowing host coreutils; os_image test uses tiny pinned boot payloads; dev default boundary allowlist explicitly includes io/path native Path.walk boundary. Proof: cargo test --test canvas 42/42; cargo test --test web_dev 4/4; browser /canvas screenshot verified panels, graph, project rail, no app console errors except Electron CSP warning; cargo test --test jetpack 93/93; cargo test --test golden 349.80s green; cargo test --test dev 42/42 after boundary fix; rest-suite rerun with parity skips passed through diagnostics/effects/env/fmt/fuzz/generics and was stopped only at duplicate golden (already green). /tmp ENOSPC was cleared (stale JetOS artifacts) before final Jetpack proof."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex-main",
+          "text": "Cleared JetOS blocker that was preventing #352 closeout. Fixes: jetos runtime packages now prefer first-party source refs before any adapter fallback; generation boot sanitization no longer mutates symlink targets; CachyOS bootstrap uses host coreutils before caller PATH so fake VM tools cannot shadow cp; os_image test pins tiny boot payloads to avoid host-kernel/module pressure. Proof green: cargo test --test jetpack (93/93), cargo test --test canvas (42/42 observed inside broad run), diagnostic_snapshots and diagnostics_coverage observed green inside broad run, git diff --check green. Broad command cargo test -- --skip dev_default_matches_compiled_binary --skip interpreter_matches_compiled_binary progressed through Canvas/dev/diagnostics/Jetpack and later hung at tests/golden.rs examples_compile_and_run with no output for several minutes; interrupted, then direct cargo test --test golden reproduced the hang. #352 remains building: Canvas scoped proof green, repo-wide closeout still blocked by golden hang and product/UI gaps noted by review (real package/deps/dev/diagnostics/trust panes, lock/provenance depth, project_revision protocol mismatch)."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex-main",
+          "text": "Browser/UI proof added for #352. Ran jet dev examples/features/tooling/canvas_blueprint_demo.jet --target=web and loaded http://localhost:8080/canvas in the in-app browser. Verified visible source-backed Project rail, rendered graph canvas, minimap, inspector/action surfaces, and no app console errors beyond Electron CSP warning. HTTP proof: /canvas/project -> jet.canvas.project single_file with 1 source-truth file and git-text truth; /canvas/graph -> jet.canvas.graph with 4 graphs; /canvas/source-control -> jet.canvas.source_control dirty=false; /canvas/query actions -> 9 actions including command cards for build/check/dev/test plus denied service.start. Dev server stopped cleanly after proof."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex-main",
+          "text": "Closeout proof refreshed after ballots. Canvas scope remains green: cargo test --test canvas (42/42), cargo test --test web_dev (4/4), cargo test --test dev dev_default_matches_compiled_binary -- --exact (631s), cargo test --test dev interpreter_matches_compiled_binary -- --exact (96s). Full cargo test progressed through both parity batteries; stale core diagnostics snapshots/coverage path drift were fixed/verified by cargo test --test diagnostic_snapshots ui_snapshots -- --exact and cargo test --test diagnostics_coverage. Current full-suite blocker is unrelated dirty JetOS work in tests/jetpack.rs: missing jetos studio/user verbs plus changed E1281/E1288/E1279 snapshots, with working tree dirty at crates/jetpack/src/JetOS/root_projection.rs. #352 remains building until JetOS lane stabilizes or owner accepts scoped closeout."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex-main",
+          "text": "Extended #352 project navigation surface. Project JSON now emits top-level package/build targets from pkg.jet instead of placeholder targets:[], with package name, package path, manifest path, and target kind; protocol example and tests updated. Proof green: cargo test --test canvas (42/42), cargo test --test web_dev (4/4), cargo test --test dev jit_coverage_audit -- --exact."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex-main",
+          "text": "Extended #352 command/action bridge. Canvas actions now include existing Jet/Jetpack command authority cards for check/test/build/dev plus service-start availability/denial, with exact argv, write class, confirmation flag, package/version, touched files, and authority grants. UI shows command authority cards instead of trying to run them through source-preview transactions. Protocol docs updated. Proof green: cargo test --test canvas (42/42), cargo test --test web_dev (4/4), cargo test --test dev jit_coverage_audit -- --exact."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex-main",
+          "text": "Hardened #352 project transaction authority/proof slice. Project writes now validate changed .jet overlays through the front end after formatting, not formatter-only, and apply writes through rollback-on-failure transaction helper. Added regression canvas_project_transactions_roll_back_when_later_write_fails. Proof green: cargo test --test canvas (42/42), cargo test --test web_dev (4/4), cargo test --test dev jit_coverage_audit -- --exact. Next gaps: command/action bridge metadata and richer project nav/UI proof."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex-main",
+          "text": "Canvas workspace architecture implementation remains built, but final repo-wide closeout is blocked by unrelated active repartition edits in this worktree. Green evidence before collision: cargo test --test canvas (41/41), cargo test --test web_dev (4/4), cargo test --test corelib core_os_interrupt_prelude_is_emitted_only_when_used -- --exact, cargo test --test dev jit_coverage_audit -- --exact, cargo test --test dev jit_try_compile_manifest_matches -- --exact, cargo test --test dev dev_default_matches_compiled_binary -- --exact, cargo test --test dev interpreter_matches_compiled_binary -- --exact, git diff --check on touched Canvas/dev/JIT/doc files. Current blocker: cargo test --test dev jit_coverage_audit -- --exact now fails before tests in jet-foundation after concurrent AST split (E0753 inner docs in AST/types.rs plus truncated split modules missing derives/items). Not closing #352 until full nix develop -c cargo test can run green on a stable tree."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex-main",
+          "text": "Implemented remaining planned Canvas workspace surface: remove_dependency, edit_pkg_field, add_target, add_env_service; env.jet/service projection via ModuleEval with diagnostics; package-backed Canvas action authority metadata; docs/plan/tests updated. Proof green: cargo test --test canvas (39/39), cargo test --test web_dev (4/4), git diff --check. Full cargo test blocked outside Canvas in tests/archive.rs: gzip_compress_decompress_round_trip and gzip_compress_reduces_repetitive_data fail I1 archive output must not contain unsafe. Card remains building until that repo-wide gate is resolved or owner accepts scoped closeout."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex-main",
+          "text": "Extended project transactions with add_workspace_member. Canvas now edits or creates workspace.jet through touched-file revisions, validates Jetpack WorkspaceFile evaluator before write, no-ops when find() already covers a member, and reprojects from source. Plan/protocol/tests updated. Proof green: cargo test --test canvas (35/35), cargo test --test web_dev (4/4), git diff --check. Remaining: edit_pkg_field/remove_dependency/add_target/add_env_service, richer env/service/lock diagnostics, package/dev action authority metadata, full-suite closeout."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex-main",
+          "text": "Extended Canvas workspace implementation after ballot ratification: project source-id graph/query route, workspace/package source-control payload, create_package project transaction, clickable Project rail file navigation, protocol docs, and plan artifact updated. Proof green: cargo test --test canvas, cargo test --test web_dev, git diff --check. cargo fmt --check unavailable because dev-shell cargo has no fmt subcommand. Remaining: add_workspace_member/edit_pkg_field/remove_dependency/add_target/add_env_service, env/service/lock diagnostics, richer package/dev authority metadata, full-suite closeout."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex-main",
+          "text": "Shipped next Canvas workspace slice: project transaction protocol/route plus first real op add_dependency. Endpoint /canvas/project/transaction validates schema, project_revision, touched file revisions, edits pkg.jet via existing manifest helper, validates Jetpack manifest parser, returns preview/apply audit/diff/authority payloads, and leaves preview/conflicts unwritten. UI now fetches /canvas/project and renders a source-backed Project rail with entry/packages/deps/targets/files/state policy. Tests green: nix develop -c cargo test --test canvas; nix develop -c cargo test --test web_dev. Card remains building: file-qualified graph/query, workspace SCM, broader action authority, and more project ops still open."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex-main",
+          "text": "Continuing implementation. Next slice: project transaction endpoint for previewed source transactions, touched-file revision checks, workspace/package validation, plus tests/docs. UI polish scouts running; no write-capable delegation because worktree has broad unrelated dirty state."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex-main",
+          "text": "Implemented first ratified Canvas workspace slice: read-only jet.canvas.project projection and /canvas/project route. Source truth stays pkg.jet/workspace.jet/source/.jet/lock; project document reports mode, project_revision, files, package deps/targets, workspace members, locks, and state_policy. Updated protocol doc and plan doc. Verification green: nix develop -c cargo test --test canvas; nix develop -c cargo test --test web_dev jet_dev_web_exposes_canvas_panel_and_graph -- --exact. Formatter note: rustfmt/cargo fmt unavailable in dev shell, compile/tests are warning-clean."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex-main",
+          "text": "Started implementation after ratification. Outcomes: workspace scope=B package/workspace graph over source truth; state=A source semantics/local viewport; authority=A previewed source transactions with proof; nav=A unified semantic project tree. First slice: read-only Canvas project graph endpoint plus protocol/tests; no source-write semantics yet."
+        },
+        {
+          "at": "2026-07-08",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex-main",
+          "text": "Plan doc written and four Canvas workspace ballots queued: D-CANVAS-WORKSPACE1, D-CANVAS-WORKSPACE-STATE1, D-CANVAS-WORKSPACE-AUTH1, D-CANVAS-WORKSPACE-NAV1. Implementation waits on owner decisions; ungated prep is read-only project graph helper work only."
+        }
+      ],
+      "created": "2026-07-08T10:23:54.333Z",
+      "updated": "2026-07-08",
+      "criteria": [],
+      "needsAcceptance": false,
+      "refs": [],
+      "questions": [],
+      "retiredAt": "2026-07-11T00:24:37.570Z"
+    },
+    {
+      "id": "c077qyuw",
+      "num": 354,
+      "title": "Workspace re-partition: shrink jet-driver, make placeholder crates real or fold them",
+      "body": "jet-driver is ~44k lines and has absorbed three products: the compiler driver, Jetpack (Jetpack/CLI.rs ~4.5k, package engine), and JetOS (Jetpack/JetOS.rs ~7.2k). Meanwhile four workspace crates are shells: jet-queries (375 lines), jet-rt (401), jet-net (295), jet-impact (314). Epoch 4 (jetpack) and Epoch 7 (jetos) will grow these surfaces substantially — re-partition before they grow, not after.\n\nScope:\n1. Extract Jetpack and JetOS out of jet-driver into their own crates (jet-pack / jet-os or per ratified naming canon: jetpack engine, jetos). jet-driver keeps only compile-pipeline orchestration + CLI dispatch.\n2. For each shell crate decide: become real now, or fold into its owner until needed. jet-queries is the big one — it is the incremental-compilation seam; decide whether the query architecture becomes load-bearing now (retrofitting incrementality into a 268k-line compiler later is strictly worse). Produce a recommendation with the decision reasoning recorded in architecture.md.\n3. Update docs/spec/architecture.md: crate map, dependency direction rules, which crate owns which pipeline stage (R1–R12 mapping).\n4. Enforce direction: no back-edges (e.g. codegen must not depend on driver). Add a workspace-level check if cheap (cargo tree assertions in a test).\n\nStrictly behavior-preserving: zero user-visible change, golden/snapshot suites byte-identical, full suite green. No owner gates expected (no user-facing syntax); if extraction forces a user-visible rename anywhere, ballot first. Sequencing note: do this card before the monster-file decomposition card touches Jetpack/JetOS/CLI files, so those files move once, not twice.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": "Order: (1) map current jet-driver module graph + who imports what (rg + cargo tree); (2) write the target crate map as a short architecture.md draft section — get it reviewed in-repo before moving code; (3) extract JetOS first (most self-contained), then Jetpack engine, then CLI dispatch cleanup — one extraction per commit, full suite green between each; (4) shell-crate verdicts: implement or fold, one commit each; (5) jet-queries decision writeup (incrementality now vs later) — this is a design recommendation, not a gate: record in architecture.md; (6) final pass: dependency-direction test, docs updated, full nix develop -c cargo test green.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Verified and closed with full proof: nix develop -c scripts/agent/verify-full.sh passed with exit code 0 after targeted jetpack/dev/golden/decisions/diagnostics_coverage/repl/web_dev/cli/syntax_reconciliation proofs. Epoch 3 closeout complete for this card."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Final verify/closeout by codex. Repartition acceptance rechecked: workspace dependency-direction guard is green (nix develop -c cargo test --test workspace_crates -- --nocapture, 1 passed); package/driver compile is green (nix develop -c cargo check -p jetpack -p jet-driver); full repo verification is green (nix develop -c scripts/agent/verify-full.sh, exit 0). No back-edge regression found; jetpack/jetos extraction remains load-bearing. Closing #354."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Implemented #354 repartition slice. Jetpack/JetOS engine lives in crates/jetpack; root Cargo now has jetpack + jetos bins, jet-driver depends one-way on jetpack and re-exports legacy Manifest/Lock/FFI/CBind/CFFI/PluginExport/Jetpack names for existing callers. Remaining driver-owned package seams moved into jetpack: Manifest.rs, Lock.rs, FFI.rs, CFFI.rs, CBind.rs, Prelude runtime assets; driver PluginExport/bin jetos removed. Architecture crate map updated. Added tests/workspace_crates.rs to pin workspace path-dependency direction including jetpack. Targeted proof green: cargo check -p jetpack -p jet-driver; cargo test --test workspace_crates -- --nocapture; cargo check; cargo test --test jetpack_no_daemon -- --nocapture; cargo build --bin jetos. Full repo-wide cargo test still pending final Epoch 3 closeout. Unrelated dirty jetfighter files belong to other agents and were not touched."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Started #354. Current evidence: Jetpack modules are isolated under crates/jet-driver/src/Jetpack but still call driver seams: Manifest, Lock, FFI, CFFI/CBind, Compile/Driver, SHA256, Syntax/AST/Parser/Sema/Comptime. Shell crates are no longer empty in current tree: jet-queries has a real query cache; jet-rt owns runtime arena/string/list helpers; jet-net owns fetch/TLS diagnostics; jet-impact owns semindex blast-radius reports. Safe path is to codify dependency direction first, update architecture crate map, and avoid a blind Jetpack mv until shared seams are split/re-exported without cycles. No user-facing gate found."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "claude-main",
+          "text": "Do before #355 touches Jetpack/JetOS/CLI/Canvas files — move once, not twice. #353 independent."
+        }
+      ],
+      "created": "2026-07-08T11:24:43.994Z",
+      "updated": "2026-07-08",
+      "criteria": [],
+      "needsAcceptance": false,
+      "refs": [],
+      "questions": [],
+      "retiredAt": "2026-07-11T00:24:37.570Z"
+    },
+    {
+      "id": "c0y0vvf0",
+      "num": 355,
+      "title": "Decompose monster files: CoreLib.rs, Canvas.rs, TIR lower/emit, CheckerCoreLib.rs, JetOS.rs",
+      "body": "Largest files today: crates/jet-codegen/src/Prelude/CoreLib.rs (13.5k lines), Source/Canvas.rs (8.4k), crates/jet-codegen/src/Codegen/TIR/lower.rs (8.3k), crates/jet-sema/src/Sema/CheckerCoreLib.rs (7.5k), crates/jet-driver/src/Jetpack/JetOS.rs (7.2k), Parser/Items.rs (5.7k), TIR/emit.rs (5.3k), TIR/subset.rs (5.1k), CheckerInfer/calls.rs (4.8k), Jetpack/CLI.rs (4.5k), jet-jit/src/lib.rs (4.5k). These files burn agent context every session and are where merge mistakes concentrate. Style rule already says small modules — enforce it.\n\nScope: semantics-preserving decomposition of every file above ~3k lines into responsibility-named submodules. Seams follow responsibility, not line count — e.g. CoreLib.rs splits by core module family (files/io/net/…), lower.rs by TIR construct family, CheckerCoreLib.rs mirroring the CoreLib split so sema and codegen stay navigable in parallel. Target ≤ ~1,500 lines per file; judgment allowed where a real unit resists splitting — record why in the commit message.\n\nRules: pure code motion — no renames of public items, no behavior change, no drive-by refactors. Safety net is the existing suite: golden outputs and UI snapshots must be byte-identical; full suite green after every file's decomposition (one file per commit). Sequencing: JetOS.rs, CLI.rs, and Canvas.rs only AFTER the workspace re-partition card lands, so they move across crates once, not twice; start with CoreLib.rs / lower.rs / CheckerCoreLib.rs / Items.rs, which the re-partition does not touch.\n\nDone means: no source file above the target without a recorded justification; module maps make sense from names alone; zero snapshot diffs; full nix develop -c cargo test green. No owner gates.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": "Order: (1) CoreLib.rs — split by core.* family, mod.rs keeps the registration table; (2) CheckerCoreLib.rs — mirror the same family split; (3) TIR lower.rs then emit.rs then subset.rs — split by construct family (items, exprs, patterns, control flow, closures, tasks); (4) Parser/Items.rs + CheckerInfer/calls.rs; (5) jet-jit/src/lib.rs; (6) wait for re-partition card, then JetOS.rs, Jetpack/CLI.rs, Canvas.rs inside their new homes. Per file: read wholly first, write the module map, mechanical motion, cargo test --test golden + targeted suites, one commit; full suite at card close.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Verified and closed with full proof: nix develop -c scripts/agent/verify-full.sh passed with exit code 0 after targeted jetpack/dev/golden/decisions/diagnostics_coverage/repl/web_dev/cli/syntax_reconciliation proofs. Epoch 3 closeout complete for this card."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Final verify/closeout by codex. Decomposition acceptance rechecked: current line-count proof over Source/ and crates/ shows largest Rust source file is 2920 lines (crates/jet-parser/src/Parser/Statements.rs), so no .rs source remains above 3k. Full repo verification is green (nix develop -c scripts/agent/verify-full.sh, exit 0). Closing #355."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Implementation complete for #355. Decomposed all previously listed monster files and additional >3k holdouts: CoreLib, AST, Syntax, TIR lower/emit/subset/tests, CheckerCoreLib, Parser Items/Expressions, CheckerInfer/calls, CheckerCore, Comptime/Build, jet-jit lib, jetpack JetOS/CLI, Source/Canvas. Current line-count proof: find Source crates -type f -name *.rs ... shows largest file 2920 lines (Parser/Statements.rs), so no .rs source remains above 3k. Targeted verification green: cargo check; cargo check -p jetpack -p jet-driver; cargo test -p jet-codegen --lib; cargo test -p jet-sema --lib; cargo test -p jet-parser --lib; cargo test -p jet-comptime --lib; cargo test -p jet-jit --lib; cargo test -p jetpack --lib; cargo test --lib. Also fixed stale comptime test Func fixture by adding default replay fields. Ready for full-suite verify."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "More #355 progress: decomposed TIR lower.rs, emit.rs, subset.rs into responsibility fragments under Codegen/TIR/{lower,emit,subset}; cargo check -p jet-codegen green. Decomposed CheckerCoreLib.rs into CheckerCoreLib fragments; cargo check -p jet-sema green. Decomposed Parser/Items.rs and Parser/Expressions.rs into Parser/{Items,Expressions} fragments; cargo check -p jet-parser green. Remaining files >3k by wc: Source/Canvas.rs, jetpack/src/JetOS.rs, Sema/CheckerInfer/calls.rs, jetpack/src/CLI.rs, jet-jit/src/lib.rs, Sema/CheckerCore.rs, Comptime/Build.rs."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "More #355 progress: split crates/jet-foundation/src/Syntax.rs into responsibility fragments under crates/jet-foundation/src/Syntax/{core_surface,math_layout,effects_tests,jetpack_config,package_files,markers,highlights,predicates}. Syntax.rs now keeps docs/imports and ordered includes. Targeted proof green: nix develop -c cargo check -p jet-foundation. Current count still shows remaining >3k files: Source/Canvas.rs, TIR lower/emit/subset, CheckerCoreLib, jetpack JetOS/CLI, Parser Items/Expressions, CheckerInfer/calls, jet-jit lib, CheckerCore, Comptime Build."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "More #355 progress. Split crates/jet-foundation/src/AST.rs into responsibility fragments under crates/jet-foundation/src/AST/{types,program_imports,items,patterns,statements,lvalues,expressions,comptime,ffi}. AST.rs now only holds module docs/import and ordered includes. Targeted proof green: cargo check -p jet-foundation. Also moved TIR/mod.rs tests to crates/jet-codegen/src/Codegen/TIR/tests.rs; codegen lib tests green: cargo test -p jet-codegen --lib. Attempted lower.rs include split, rejected because safe top-level boundaries still left huge private functions and one naive boundary failed check; reverted before continuing. Card remains building; remaining monster files still above target."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Progress on #355: decomposed CoreLib.rs by responsibility into include_str fragments under crates/jet-codegen/src/Prelude/CoreLib/{JetStd,Top}/. Codegen/mod.rs now pushes ordered fragments; emitted prelude text was byte-for-byte validated before removing the monolithic CoreLib.rs. Targeted proof green: cargo check -p jet-codegen; cargo test --test corelib -- --nocapture. Remaining >3k files still require decomposition before #355 can move to verify: Canvas.rs, TIR lower/emit/subset/mod, CheckerCoreLib, jetpack JetOS/CLI, Parser/Items, CheckerInfer/calls, jet-jit lib, Syntax, CheckerCore, AST, Comptime Build, Parser Expressions. Read-only TIR split plan is available in thread; not applied yet."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Started #355 after #354 repartition. Current >3k files after extraction: CoreLib.rs 14.4k, Source/Canvas.rs 9.1k, TIR lower 8.4k, CheckerCoreLib 8.0k, jetpack JetOS 7.3k, Parser/Items 5.9k, TIR emit 5.6k, TIR subset 5.2k, CheckerInfer/calls 4.8k, jetpack CLI 4.5k, jet-jit lib 4.5k, TIR mod 4.2k, Syntax 4.1k, CheckerCore 3.8k, AST 3.8k, Comptime Build 3.2k, Parser Expressions 3.1k. Read-only explorers launched for CoreLib and TIR split plans. No code-motion edits for #355 yet."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "claude-main",
+          "text": "Sequencing: JetOS.rs/CLI.rs/Canvas.rs wait for #354 re-partition; CoreLib/lower/CheckerCoreLib/Items start anytime."
+        }
+      ],
+      "created": "2026-07-08T11:24:45.615Z",
+      "updated": "2026-07-08",
+      "criteria": [],
+      "needsAcceptance": false,
+      "refs": [],
+      "questions": [],
+      "retiredAt": "2026-07-11T00:24:37.570Z"
+    },
+    {
+      "id": "c0bsg5zl",
+      "num": 356,
+      "title": "Canvas frontend redesign — implement ratified family",
+      "body": "Implement the ratified Canvas frontend redesign as the next E6 Canvas slice. Build the modified hybrid surface: Workbench-style project/file viewer, hybrid code/split/graph editor, context-command model, UE5-style node/pin visual language, hover-only types, compact getter capsules, embedded simple variables, graphite styling, and detail toggles. Source remains the only semantic truth.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e6",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": "# Plan: Canvas modified hybrid UI\n\nRatified inputs:\n- D-FE-CANVAS1 outcome E with owner modifications.\n- Existing E6 Canvas architecture and protocol from #352; do not introduce a graph asset or GUI-owned semantics.\n\nScope:\n- Source/Canvas/html.rs, Source/Canvas/js.rs, Source/Canvas/*.rs protocol helpers, tests/canvas.rs, tests/web_dev.rs, docs/design/frontends/canvas/NOTES.md if behavior notes drift.\n- Keep /canvas and /__jet_canvas routes source-backed.\n\nImplementation steps:\n1. Replace the old palette-first left surface with a persistent Workbench-style project/file viewer backed by /canvas/project and source ids. It must show workspace/package/file/function graph navigation and source-control/provenance facts where available.\n2. Keep hybrid editor modes: Code, Split, Graph. Ensure selection, source-span jump, graph picker, replay/debug overlay, inspector, and project viewer all point at the same source-backed graph state.\n3. Move commands out of the palette. Add command entrypoints through right-click, Ctrl+K, and drag-from-pin release menus. Drag-release menus must filter to compatible pin/node actions and show denied actions with exact why/fix where an existing diagnostic applies.\n4. Polish node language: consistent shape/color families for exec/control/data/effect/fallible/reference pins; pin label is only the variable/field name; type appears in hover/inspector detail, not default label text.\n5. Render variable/const getters as compact pure capsule/bubble nodes. Allow simple variables to embed inside field/value sockets for clean graphs, with an expand action back to a normal node.\n6. Add detail toggles for types, diagnostics, effects, debug values, and package metadata so the default graph is streamlined graphite/gray rather than crowded.\n7. Preserve keyboard focus, reduced-motion behavior, NO_COLOR/non-visual fallbacks where terminal output is involved, and existing source transaction audit payloads.\n\nAcceptance:\n- A real Jet program opened through jet dev --target=web shows the modified hybrid Canvas UI at /canvas.\n- Project/file viewer is not a command palette; commands are available through context surfaces and Ctrl+K.\n- Getter capsules, embeddable variables, hover-only types, and compatible drag-from-pin menus are visible in browser proof.\n- Existing graph/edit/source-control/debug features still work; no stub controls.\n\nVerification:\n- nix develop -c cargo test --test canvas\n- nix develop -c cargo test --test web_dev\n- Browser proof against /canvas with console clean except known host warnings.\n- Full nix develop -c cargo test before closing the card, unless the owner explicitly accepts scoped proof with unrelated blockers logged.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Completed #356 Canvas frontend redesign modified hybrid slice. Implemented Workbench project/file viewer, Code/Split/Graph lens switch, context-command/Ctrl+K path, drag-pin refused E0204 teaching action, graphite detail toggles, hover-only type labels, semantic pin shapes, getter capsules, embedded simple variables, and workspace panels preserved from #352. Fixed closeout blockers: JetOS runtime package refs prefer first-party source before nix fallback; REPL notebook turn controls compile under deny(warnings); retired C marker diagnostics avoid live retired spellings. Proof: cargo test --test web_dev 4/4; cargo test --test canvas 42/42; cargo test --test jetpack 93/93 and full verify later 95/95; Playwright browser proof at http://localhost:8081/canvas had modified_hybrid contract, Split lens, detail toggles, getter capsules, embedded variables, nonblank canvas pixels, and zero console/page errors; nix develop -c scripts/agent/verify-full.sh completed green."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Planning update: moved to E6 epoch workOrder 21; plan written; phase set to ready."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Owner ratified D-FE-CANVAS1 as modified hybrid: Workbench-like project/file viewer replaces command palette; commands move to right-click, Ctrl+K, and drag-from-pin compatible menus; nodes get UE5-style semantic pin colors/shapes, hover-only types, compact getter capsules, embeddable variables, and graphite streamlined styling."
+        },
+        {
+          "at": "2026-07-08",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Blocked before implementation: D-FE-CANVAS1 is still open, so no ratified design family exists yet. Repo has docs/design/frontends/DESIGN-BRIEF.md only; card mockup/review paths are absent. Per syntax/product decision protocol, leave feature in deciding until owner ratifies D-FE-CANVAS1; no UI code should be guessed."
+        }
+      ],
+      "created": "2026-07-08T13:10:16.530Z",
+      "updated": "2026-07-08",
+      "workOrder": 21,
+      "criteria": [],
+      "needsAcceptance": false,
+      "refs": [],
+      "questions": [],
+      "retiredAt": "2026-07-11T00:24:37.570Z"
     }
   ],
   "events": [
@@ -45137,6 +47141,62 @@
       "by": "codex-orchestrator",
       "action": "card.update",
       "ref": "c01lj8gw",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-10T16:27:04.048Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c02wa1dn",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-10T16:27:04.048Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c047jzdr",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-10T16:27:04.048Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c06tccyz",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-10T16:27:04.048Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0233d1b",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-10T16:27:04.048Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c039kz2t",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-10T16:27:04.048Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c05iu605",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-10T16:27:04.048Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c07p2e72",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-10T16:27:04.048Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c08vpj75",
       "note": "workOrder"
     }
   ]
