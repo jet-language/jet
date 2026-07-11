@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 mod common;
-use common::{have_rustc, panic_message, test_worker_count};
+use common::{have_rustc, panic_message, strip_vetted_module, test_worker_count};
 
 /// Expressions whose comptime and runtime evaluation must agree. Each is
 /// inlined verbatim on both sides, so it must be a self-contained
@@ -119,9 +119,14 @@ fn check_comptime_case(i: usize, expr: &str) {
             jet::render_diagnostics("comptime_diff.jet", &src, &diags)
         ),
     };
+    // D-BIGINT1 (card #392): a `BigInt` case pulls the Top-tier prelude
+    // module, which shares a file with `jet_atomic_windows`'s vetted FFI
+    // internals (I1 gate, `JET_VETTED_UNSAFE_BEGIN/END` markers) — strip it
+    // before the I1 check, same as `golden.rs::strip_vetted_prelude_modules`.
+    let user_code = strip_vetted_module(&compiled.rust, "jet_atomic_windows");
     assert!(
-        !compiled.rust.contains("unsafe"),
-        "case `{}` generated unsafe",
+        !user_code.contains("unsafe"),
+        "case `{}` generated unsafe outside the vetted prelude",
         expr
     );
 
