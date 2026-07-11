@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 488,
-    "rev": 3181,
+    "rev": 3183,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -5041,12 +5041,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P0",
       "plan": "Acceptance: core.process must cover real build-tool and agent-operation workflows without shell strings: safe argv-only execution by default, streaming logs, exact exit status, env/cwd control, timeouts, signals, detached children, output limits, and shell-free pipelines.\n\nCurrent facts found during plan pass:\n- docs/reference/core-library.md documents only process.exit(code) and process.run([String]) -> ProcessResult ? IOError.\n- ProcessResult currently has code/output/errors only.\n- Sema/codegen know core.process exit/run only; effects classify core.process as Exec.\n- Existing taint tests treat process.run as an Exec sink; any expanded surface must keep that policy coverage.\n\nGate queued:\n- D-PROCESS1: exact process spawning/pipeline surface.\n\nImplementation plan after gate clears:\n1. Baseline tests: pin current process.run/exit behavior and taint Exec-sink coverage before expanding.\n2. Data model: add ProcessSpec, Child, ExitStatus, StreamMode, ProcessPipe/Pipeline types per ratified surface. Keep argv lists canonical; no shell-string helper unless separately ratified.\n3. Sema/effects: register all new calls in CheckerCoreLib known-items, mark Exec effects, preserve taint sink checks on every execution path, and type-check stream/stdin/stdout modes.\n4. Runtime/codegen: implement through TIR/prelude only; no codegen checks. Use std::process Command internally; map OS errors into IOError and child outcomes into ExitStatus without exposing Rust/stdout internals.\n5. Safety defaults: bounded capture default or explicit output_limit, no inherited env mutation, timeout kill semantics documented, process handles RAII-clean where possible, and interrupt/terminate/kill behavior platform-pinned.\n6. Examples/goldens: build_runner.jet streams stdout, sets cwd/env, times out a child, pipelines two argv commands, propagates exit. Keep fixture commands cross-platform or test-gated.\n7. Docs: update docs/reference/core-library.md, docs/spec/spec.md effects table, syntax-decisions D-PROCESS1 entry, and stdlib ledger (#310 if present).\n8. Verification: targeted process/taint/golden tests, cargo build, hello smoke, process example smoke, final nix develop -c cargo test before close.\n\nDevil-pass hardening:\n- No shell string default; argv-only is the safe path.\n- No silent output buffering footgun; streaming and capture limits are explicit.\n- No second process model; process.run lowers to ProcessSpec.run.\n- No raw OS status leaks; ExitStatus is typed and portable.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "fable-main",
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "fable-main",
+          "text": "fable-main starting via jet-impl builder."
+        },
         {
           "at": "2026-07-09",
           "by": "codex-main",
@@ -5083,11 +5088,12 @@
         }
       ],
       "created": "2026-07-07T17:23:32.626Z",
-      "updated": "2026-07-10",
+      "updated": "2026-07-11",
       "workOrder": 27,
       "criteria": [],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-11T01:09:49.974Z"
     },
     {
       "id": "c0qi7dc2",
@@ -22769,6 +22775,20 @@
   ],
   "events": [
     {
+      "at": "2026-07-11T01:09:51.854Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0pef855",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T01:09:49.974Z",
+      "by": "fable-main",
+      "action": "card.claim",
+      "ref": "c0pef855",
+      "note": ""
+    },
+    {
       "at": "2026-07-11T01:09:48.010Z",
       "by": "fable-main",
       "action": "card.update",
@@ -26252,20 +26272,6 @@
       "by": "codex-orchestrator",
       "action": "card.update",
       "ref": "c0h41rrl",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c1jixkit",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "ccq07pav",
       "note": "workOrder"
     }
   ],
