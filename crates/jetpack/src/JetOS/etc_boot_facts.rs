@@ -23,7 +23,8 @@ fn write_etc_tree(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
         fstab.push_str(&format!("{device}\tnone\tswap\t{priority}\t0\t0\n"));
     }
     fs::write(etc.join("fstab"), fstab)?;
-    write_identity_files(dir, &etc, system)
+    write_identity_files(dir, &etc, system)?;
+    write_jetos_identity_assets(dir)
 }
 
 fn write_identity_files(dir: &Path, etc: &Path, system: &SystemPlan) -> std::io::Result<()> {
@@ -61,11 +62,11 @@ fn write_identity_files(dir: &Path, etc: &Path, system: &SystemPlan) -> std::io:
     fs::write(etc.join("passwd"), passwd)?;
     fs::write(etc.join("group"), group)?;
     fs::write(etc.join("shadow"), shadow)?;
-    let os_release = "NAME=JetOS\nID=jetos\nPRETTY_NAME=\"JetOS\"\nHOME_URL=\"https://jet.dev/jetos\"\n";
-    fs::write(etc.join("os-release"), os_release)?;
+    let os_release = render_jetos_os_release(false);
+    fs::write(etc.join("os-release"), &os_release)?;
     let usr_lib = dir.join("usr/lib");
     fs::create_dir_all(&usr_lib)?;
-    fs::write(usr_lib.join("os-release"), os_release)?;
+    fs::write(usr_lib.join("os-release"), &os_release)?;
     fs::write(
         etc.join("machine-id"),
         format!("{}\n", &crate::SHA256::sha256_hex(system.name.as_bytes())[..32]),
@@ -114,8 +115,8 @@ fn write_boot_facts(
     fs::write(
         boot_dir.join("limine.conf"),
         format!(
-        "timeout: 5\nserial: yes\ngraphics: no\nverbose: yes\n/jetos {}\n    protocol: linux\n    kernel_path: boot():/boot/kernel\n    module_path: boot():/boot/initrd\n    textmode: yes\n    cmdline: console=ttyS0 root=LABEL=jetos-root rw init={}\n",
-            system.name, boot.init
+            "timeout: 5\nserial: yes\ngraphics: no\nverbose: yes\n/{} — {}\n    protocol: linux\n    kernel_path: boot():/boot/kernel\n    module_path: boot():/boot/initrd\n    textmode: yes\n    cmdline: console=ttyS0 root=LABEL=jetos-root rw init={}\n",
+            jetos_release_label(false), system.name, boot.init
         ),
     )?;
     if kernel_path.is_file() {

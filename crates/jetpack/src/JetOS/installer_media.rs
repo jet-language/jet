@@ -470,7 +470,8 @@ poweroff -f 2>/dev/null || halt -f 2>/dev/null || exit 0
 
 fn render_installed_limine_conf(system: &SystemPlan, gen: &Generation) -> String {
     format!(
-        "timeout: 1\nserial: yes\ngraphics: no\nverbose: yes\n/jetos {host} verify\n    protocol: linux\n    kernel_path: boot():/boot/kernel\n    module_path: boot():/boot/initrd\n    textmode: yes\n    cmdline: console=ttyS0 rdinit=/jetos/init init=/jetos/init jetos.mode=verify jetos.host={host} jetos.generation={generation} root=LABEL=jetos-root rw\n",
+        "timeout: 1\nserial: yes\ngraphics: no\nverbose: yes\n/{release} — {host} verify\n    protocol: linux\n    kernel_path: boot():/boot/kernel\n    module_path: boot():/boot/initrd\n    textmode: yes\n    cmdline: console=ttyS0 rdinit=/jetos/init init=/jetos/init jetos.mode=verify jetos.host={host} jetos.generation={generation} root=LABEL=jetos-root rw\n",
+        release = jetos_release_label(false),
         host = system.name,
         generation = gen.name
     )
@@ -483,7 +484,8 @@ fn render_installer_limine_conf(system: &SystemPlan, gen: &Generation, disk: &st
         "/dev/sda".to_string()
     };
     format!(
-        "timeout: 5\nserial: yes\ngraphics: no\nverbose: yes\n/Install jetos {host}\n    protocol: linux\n    kernel_path: boot():/boot/kernel\n    module_path: boot():/boot/initrd\n    textmode: yes\n    cmdline: console=ttyS0 rdinit=/jetos/init init=/jetos/init jetos.mode=install jetos.host={host} jetos.generation={generation} jetos.disk={disk}\n",
+        "timeout: 5\nserial: yes\ngraphics: no\nverbose: yes\n/Install {release} — {host}\n    protocol: linux\n    kernel_path: boot():/boot/kernel\n    module_path: boot():/boot/initrd\n    textmode: yes\n    cmdline: console=ttyS0 rdinit=/jetos/init init=/jetos/init jetos.mode=install jetos.host={host} jetos.generation={generation} jetos.disk={disk}\n",
+        release = jetos_release_label(false),
         host = system.name,
         generation = gen.name
     )

@@ -15,6 +15,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 include!("JetOS/types.rs");
+include!("JetOS/identity.rs");
 include!("JetOS/entry.rs");
 include!("JetOS/nixos_import.rs");
 include!("JetOS/nixos_import_live.rs");

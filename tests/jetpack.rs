@@ -3927,10 +3927,39 @@ fn os_switch_activates_and_sets_current() {
         "vm_gates: {vm_gates}"
     );
     let os_release = fs::read_to_string(generation.join("etc/os-release")).unwrap();
-    assert!(
-        os_release.contains("ID=jetos") && os_release.contains("PRETTY_NAME=\"JetOS\""),
-        "os_release: {os_release}"
+    let expected_os_release = "NAME=jetos\nID=jetos\nVERSION=\"26.10 (Apex)\"\nVERSION_ID=26.10\nVERSION_CODENAME=apex\nPRETTY_NAME=\"jetos 26.10 (Apex)\"\nHOME_URL=\"https://jet.dev/jetos\"\n";
+    assert_eq!(os_release, expected_os_release);
+    assert_eq!(
+        fs::read_to_string(generation.join("usr/lib/os-release")).unwrap(),
+        expected_os_release
     );
+    let installed_limine = fs::read_to_string(generation.join("boot/limine.conf")).unwrap();
+    assert!(
+        installed_limine.contains("/jetos 26.10 (Apex) — halcyon"),
+        "installed Limine title: {installed_limine}"
+    );
+    let wallpaper = fs::read_to_string(
+        generation.join("share/backgrounds/jetos/apex.svg"),
+    )
+    .unwrap();
+    assert!(
+        wallpaper.starts_with("<svg ")
+            && wallpaper.contains("jetos 26.10 Apex")
+            && wallpaper.contains("linearGradient")
+            && wallpaper.len() > 1_000,
+        "baseline wallpaper must contain the real committed SVG bytes"
+    );
+    for (surface, text) in [
+        ("etc/os-release", os_release.as_str()),
+        ("usr/lib/os-release", expected_os_release),
+        ("boot/limine.conf", installed_limine.as_str()),
+        ("wallpaper", wallpaper.as_str()),
+    ] {
+        assert!(
+            !text.contains("NixOS") && !text.contains("Yarara"),
+            "upstream identity leaked through {surface}: {text}"
+        );
+    }
     assert!(
         generation.join("acceptance/owner-jetos-coverage.md").is_file()
             && generation.join("sw/bin/jetos-acceptance-prove").is_file(),
@@ -6272,11 +6301,48 @@ fn os_image_writes_jetos_installer_media_proof() {
     );
     let limine = fs::read_to_string(staging.join("boot/limine.conf")).unwrap();
     assert!(
-        limine.contains("/Install jetos halcyon")
+        limine.contains("/Install jetos 26.10 (Apex) — halcyon")
             && limine.contains("cmdline: console=ttyS0 rdinit=/jetos/init")
             && limine.contains("jetos.disk=/dev/sda"),
         "limine: {limine}"
     );
+    let installed_limine =
+        fs::read_to_string(staging.join("boot/installed-limine.conf")).unwrap();
+    assert!(
+        installed_limine.contains("/jetos 26.10 (Apex) — halcyon verify"),
+        "installed limine: {installed_limine}"
+    );
+    let installer_os_release = fs::read_to_string(
+        staging.join("jetos/current-system/etc/os-release"),
+    )
+    .unwrap();
+    let installer_usr_os_release = fs::read_to_string(
+        staging.join("jetos/current-system/usr/lib/os-release"),
+    )
+    .unwrap();
+    assert_eq!(installer_os_release, installer_usr_os_release);
+    assert!(
+        installer_os_release.contains("PRETTY_NAME=\"jetos 26.10 (Apex)\"")
+            && installer_os_release.contains("VERSION_CODENAME=apex")
+    );
+    let installer_wallpaper = fs::read_to_string(
+        staging.join("jetos/current-system/share/backgrounds/jetos/apex.svg"),
+    )
+    .unwrap();
+    assert!(
+        installer_wallpaper.contains("jetos 26.10 Apex")
+            && installer_wallpaper.contains("linearGradient")
+            && installer_wallpaper.len() > 1_000,
+        "installer must contain projected wallpaper bytes"
+    );
+    for text in [
+        limine.as_str(),
+        installed_limine.as_str(),
+        installer_os_release.as_str(),
+        installer_wallpaper.as_str(),
+    ] {
+        assert!(!text.contains("NixOS") && !text.contains("Yarara"));
+    }
     assert!(
         staging.join("boot/efiboot.img").is_file(),
         "installer media should carry a UEFI FAT ESP boot image"
