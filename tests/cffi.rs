@@ -533,7 +533,7 @@ fn run() {
     print(add_u8(200, 55))
     print(add_i32(1000000, 234567))
     print(add_f32(1.5, 2.25))
-    let p = make_point(3, 4)
+    p :: make_point(3, 4)
     print(point_sum(p))
     print(scale_meters(21))
 }
@@ -603,6 +603,9 @@ fn cffi_runtime_interior_nul_panics_instead_of_silently_truncating() {
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).unwrap();
 
+    // The NUL-bearing value comes in over stdin at runtime (`input()`), so
+    // it is never a compile-time literal — sema's E3211 (comptime-literal
+    // check) can't see it, only codegen's runtime guard can.
     let main = root.join("main.jet");
     fs::write(
         &main,
@@ -611,23 +614,20 @@ fn cffi_runtime_interior_nul_panics_instead_of_silently_truncating() {
 }
 
 fn run() {
-    let parts = ["ab", "\u{0}", "cd"]
-    let joined = parts.join("")
-    print(takes_str(joined))
+    line :: input()
+    print(takes_str(line))
 }
 "#,
     )
     .unwrap();
 
     let src = fs::read_to_string(&main).unwrap();
-    let Ok(out) = jet::compile_with_path(&src, main.to_str().unwrap()) else {
-        eprintln!(
-            "note: skipping cffi_runtime_interior_nul_panics (front end rejected the \
-             runtime-NUL fixture — Unicode escape syntax may not be ratified; not this \
-             card's gate to guess at)"
-        );
-        return;
-    };
+    let out = jet::compile_with_path(&src, main.to_str().unwrap()).unwrap_or_else(|d| {
+        panic!(
+            "front end rejected the runtime-NUL fixture:\n{}",
+            jet::render_diagnostics(main.to_str().unwrap(), &src, &d)
+        )
+    });
 
     let rs = root.join("main.rs");
     fs::write(&rs, &out.rust).unwrap();
@@ -644,11 +644,26 @@ fn run() {
         "I2: rustc rejected the runtime-NUL wrapper (jet bug):\n{}",
         String::from_utf8_lossy(&status.stderr)
     );
-    let run = Command::new(&bin).output().unwrap();
+
+    use std::io::Write as _;
+    let mut child = Command::new(&bin)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"ab\0cd\n")
+        .unwrap();
+    let run = child.wait_with_output().unwrap();
     assert!(
         !run.status.success(),
         "a runtime String with an embedded NUL must panic at the C boundary, not \
-         silently succeed with a truncated/empty string"
+         silently succeed with a truncated/empty string; stdout was: {:?}",
+        String::from_utf8_lossy(&run.stdout)
     );
 
     let _ = fs::remove_dir_all(&root);
