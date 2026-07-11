@@ -53,7 +53,7 @@ fn block_line_range(lines: &[String], key: &str) -> Option<(usize, usize)> {
         }
         depth += brace_delta(line);
         if depth <= 0 {
-            return Some((start.unwrap(), i));
+            return Some((start?, i));
         }
     }
     None
@@ -126,4 +126,34 @@ fn remove_from_block(raw: &str, key: &str, name: &str) -> String {
         result.push('\n');
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::block_line_range;
+
+    #[test]
+    fn block_line_range_checks_started_state_for_hostile_nesting() {
+        let nested = [
+            "payload: { name: \"x\", version: \"1\" }",
+            "deps: {",
+            "    git_dep: { git: \"https://example.test/repo\", tag: \"v1\" },",
+            "    nested: {",
+            "        inner: { value: \"kept\" },",
+            "    },",
+            "}",
+            "packages: { x: library }",
+        ]
+        .map(str::to_string);
+        assert_eq!(block_line_range(&nested, "deps"), Some((2, 6)));
+
+        let truncated = [
+            "deps: {",
+            "    git_dep: { git: \"https://example.test/repo\", tag: \"v1\" },",
+            "    nested: {",
+            "        inner: { value: \"unterminated\" },",
+        ]
+        .map(str::to_string);
+        assert_eq!(block_line_range(&truncated, "deps"), None);
+    }
 }
