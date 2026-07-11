@@ -836,8 +836,9 @@ fn fmt_char(c: char) -> String {
         '\n' => "'\\n'".to_string(),
         '\t' => "'\\t'".to_string(),
         '\r' => "'\\r'".to_string(),
-        c if c.is_ascii() && !c.is_control() => format!("'{}'", c),
-        c => format!("'\\u{{{:x}}}'", c as u32),
+        // The lexer has no `\u{...}` escape (that spelling would be new
+        // user-typeable syntax), so every other char must round-trip raw.
+        c => format!("'{}'", c),
     }
 }
 
@@ -854,7 +855,8 @@ fn escape_str_multiline(s: &str) -> String {
                 out.push(c);
                 out.push(c);
             }
-            c if c.is_control() => out.push_str(&format!("\\u{{{}}}", c as u32)),
+            // No `\u{...}` escape exists in the lexer; raw round-trip keeps
+            // the formatter lossless on control characters.
             c => out.push(c),
         }
     }
@@ -874,7 +876,8 @@ pub(super) fn escape_str_lit(s: &str) -> String {
                 out.push(c);
                 out.push(c);
             }
-            c if c.is_control() => out.push_str(&format!("\\u{{{}}}", c as u32)),
+            // No `\u{...}` escape exists in the lexer; raw round-trip keeps
+            // the formatter lossless on control characters.
             c => out.push(c),
         }
     }
