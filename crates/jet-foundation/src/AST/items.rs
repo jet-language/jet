@@ -1,3 +1,6 @@
+use super::{AccessConvention, ConstDef, ErrorConvDef, Expr, MetaAttr, MigrationDecl, Stmt, Type};
+use crate::Diagnostics::Span;
+
 #[derive(Debug)]
 pub enum Item {
     Func(Func),

@@ -1,5 +1,7 @@
 // ── C-FFI data types ──────────────────────────────────────────────────────────
 
+use std::path::PathBuf;
+
 /// The result of resolving one C `use` in one file.
 #[derive(Debug, Clone)]
 pub struct CImportLink {

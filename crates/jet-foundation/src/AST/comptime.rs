@@ -1,3 +1,6 @@
+use super::{AccessConvention, Expr, Lambda, Type};
+use std::collections::BTreeMap;
+
 /// Semantic signature of a function — the compiler's internal view after
 /// registration. Lives in `AST` so that `Traits`, `Codegen`, and `Sema` can
 /// all depend on it without creating cycles.
@@ -626,4 +629,3 @@ impl CtValue {
 fn ct_mangle(name: &str) -> String {
     format!("user_{}", name)
 }
-
