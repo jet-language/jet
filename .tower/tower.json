@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 488,
-    "rev": 3187,
+    "rev": 3190,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -5052,6 +5052,11 @@
       "blockedBy": [],
       "assignee": "fable-main",
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "codex-main",
+          "text": "integration probe 2026-07-11: cargo test --test archive currently cannot compile jet-jit: THandleOp::ProcessStdinWrite added without exhaustive lower_ctx.rs arm (E0004 at crates/jet-jit/src/jit/lower_ctx.rs:1701). Earlier generated Rust also lacked jet_process_spec_with_mode and ProcessStreamMode::Discard. Builder owns fixes; parent will rerun gate after checkpoint."
+        },
         {
           "at": "2026-07-11",
           "by": "fable-main",
@@ -11370,6 +11375,11 @@
       "blockedBy": [],
       "assignee": "fable-main",
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "fable-main",
+          "text": "Builder done: scope finding — only 2 real TIR-enum consumers exist (AOT emit, JIT lower_ctx); subset gate matches pre-TIR AST, tier-0 interpreter re-runs AST (matches R12 literal text; recorded in pin test comment). lower_ctx.rs doc pass (region -> TIR variant + R12 contract); wildcards removed: TIfCond 1->3 named, TBuiltinOp 1->87 named-unsupported, THandleOp 1->169 named-unsupported (identical error strings, behavior-neutral). New tests/tir_exhaustive_match.rs 7/7. Dummy-variant proof: E0004 in both consumers independently, reverted clean. Smoke: hello + fizzbuzz identical tier-0 vs JIT. tir 29 fails + ice_regressions 3 fails observed = pre-existing / concurrent #291 prelude churn, not this slice. Parent verify pending full suite."
+        },
         {
           "at": "2026-07-11",
           "by": "fable-main",
@@ -21980,6 +21990,64 @@
       "created": "2026-07-10T23:35:05.629Z",
       "outcome": "B",
       "ratifiedAt": "2026-07-11"
+    },
+    {
+      "id": "D-REPRC2",
+      "cardId": "c0ai04g0",
+      "group": "syntax",
+      "title": "C-compatible enum layout at the FFI boundary",
+      "gist": "Decide whether and how a Jet enum can cross the C boundary. Today every enum at a C signature is rejected (E3203) because no C-safe layout is defined.",
+      "explainer": "D-REPRC1 gave structs `#Layout(c)`. Enums have no C layout, so the C ABI stop-line (#436) hard-rejects them. C libraries use enums constantly (status codes, option flags, tagged unions), so the rejection is a real wall. Recommendation A extends the existing `#Layout(c)` mechanism — one layout family, no new sigil — with a beginner-safe default and an expert tag-width override.",
+      "story": "Priya binds a C audio library. Its API returns `typedef enum { OK, UNDERRUN, DEVICE_LOST } aud_status;` and takes a configuration union tagged by another enum. In Jet she models both as ordinary enums. The compiler rejects her `#Extern module` signatures with E3203 and offers no path forward — she has to degrade both to raw Int32 constants and lose exhaustiveness checking.",
+      "inWild": "use c.audio as aud\n\n#Layout(c)\nenum AudStatus { Ok, Underrun, DeviceLost }\n\n#Extern module audio {\n    fn aud_poll(dev: Int32) -> AudStatus\n}\n\n// today: error E3203 — enums can't cross the C boundary",
+      "detail": "Devil pass: C enum size is formally implementation-defined; payload enums need a tag+union lowering that C callers can actually declare. Patch: fieldless defaults to C `int` width with explicit discriminants required to match the C header's values when nonzero-based; payload enums lower to the well-defined `repr(C)` tag-plus-union form (the layout Rust standardized in RFC 2195); a growable field under `#Layout(c)` stays a compile error exactly like structs (D-REPRC1 family rule).",
+      "options": [
+        {
+          "key": "A",
+          "name": "#Layout(c) on enums, full — fieldless and payload, expert tag override (recommended)",
+          "detail": "Fieldless enum: C int discriminant, explicit values allowed (`Ok = 0`). Payload enum: repr(C) tag + union lowering, documented byte layout, generated C-side header comment shows the exact struct/union a C caller declares. Expert override `#Layout(c, tag: UInt8)` pins tag width. One mechanism, same attribute family as structs.",
+          "code": "#Layout(c)\nenum AudStatus { Ok = 0, Underrun = 1, DeviceLost = 2 }\n\n#Layout(c, tag: UInt8)\nenum Packet {\n    Ping(Int32),\n    Data(DataFrame),   // DataFrame must itself be #Layout(c)\n}\n\n#Extern module audio {\n    fn aud_poll(dev: Int32) -> AudStatus\n    fn aud_send(p: Packet) -> AudStatus\n}"
+        },
+        {
+          "key": "B",
+          "name": "Fieldless only",
+          "detail": "Fieldless enums get the C int lowering; payload enums stay rejected (E3203) with a fix-it pointing at a hand-written #Layout(c) struct + tag pattern. Covers status codes and flags; tagged unions remain manual.",
+          "code": "#Layout(c)\nenum AudStatus { Ok = 0, Underrun = 1, DeviceLost = 2 }\n// Packet with payloads: still E3203, write the tag+union struct by hand"
+        },
+        {
+          "key": "C",
+          "name": "Explicit tag always",
+          "detail": "No defaults: every C-boundary enum must state its tag width (`#Layout(c, tag: Int32)`). Removes the implementation-defined-int ambiguity entirely, but adds ceremony to the 95% case where C `int` is right.",
+          "code": "#Layout(c, tag: Int32)\nenum AudStatus { Ok = 0, Underrun = 1, DeviceLost = 2 }"
+        },
+        {
+          "key": "D",
+          "name": "Keep rejection",
+          "detail": "Enums never cross the C boundary; users model C enums as Int constants or distinct Int32 wrappers. No layout commitment, but every C binding loses exhaustiveness and pattern matching at the seam.",
+          "code": "// status quo: E3203, bind as\nInt32 :: aud_poll(dev)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "repr(C) on fieldless enums = C int; repr(C) payload enums have the RFC 2195 defined tag+union layout; repr(u8) etc. pins tag width. Option A mirrors this proven shape.",
+          "code": "#[repr(C)] enum Status { Ok = 0, Underrun = 1 }\n#[repr(C, u8)] enum Packet { Ping(i32), Data(Frame) }"
+        },
+        {
+          "lang": "Swift",
+          "note": "@objc / C-imported enums carry a fixed raw type; Swift-native enums cannot cross C without one. Same explicit-representation principle.",
+          "code": "enum Status: Int32 { case ok = 0, underrun = 1 }"
+        },
+        {
+          "lang": "Zig",
+          "note": "enum(u8) pins the tag; extern union + enum tag is the manual tagged-union form. Option C is Zig's always-explicit stance.",
+          "code": "const Status = enum(c_int) { ok = 0, underrun = 1 };"
+        }
+      ],
+      "rec": "A",
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-11T01:30:01.593Z"
     }
   ],
   "questions": [
@@ -22791,6 +22859,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-11T01:30:31.482Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c06tccyz",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T01:30:01.593Z",
+      "by": "fable-main",
+      "action": "decision.add",
+      "ref": "D-REPRC2",
+      "note": "C-compatible enum layout at the FFI boundary"
+    },
+    {
+      "at": "2026-07-11T01:28:54.019Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0pef855",
+      "note": "logEntry"
+    },
     {
       "at": "2026-07-11T01:28:45.851Z",
       "by": "fable-main",
@@ -26268,27 +26357,6 @@
       "by": "codex-orchestrator",
       "action": "card.update",
       "ref": "c0zti5r8",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0yl88cz",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0xhxzyu",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0wbf3js",
       "note": "workOrder"
     }
   ],

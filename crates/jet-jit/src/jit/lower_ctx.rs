@@ -1831,6 +1831,7 @@ impl LowerCtx<'_, '_> {
             THandleOp::ParsedArgsPositional => Err("jit handle method unsupported".to_string()),
             THandleOp::ProcessSpecMethod { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::ProcessChildMethod { .. } => Err("jit handle method unsupported".to_string()),
+            THandleOp::ProcessStdinWrite => Err("jit handle method unsupported".to_string()),
             THandleOp::ReflectValueTypeName => Err("jit handle method unsupported".to_string()),
             THandleOp::ReflectValueDisplay => Err("jit handle method unsupported".to_string()),
             THandleOp::ReflectValueFields => Err("jit handle method unsupported".to_string()),
