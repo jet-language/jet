@@ -182,13 +182,15 @@ impl Theme {
 
     /// One truthful projection of the work graph edge currently being
     /// realized. `source -> node` is dependency direction (the provider/source
-    /// supplies the package), while `done/total` counts completed nodes.
+    /// supplies the package), while `completed/total` counts only nodes that
+    /// finished before this current edge. A failing first node therefore stays
+    /// at `completed 0/N` rather than claiming work that never completed.
     /// State is an actual phase (`resolving`, `building`, `substituting`), not
     /// an animation label inferred after the fact.
     pub fn render_dependency_status(
         &self,
         phase: &str,
-        done: usize,
+        completed: usize,
         total: usize,
         source: &str,
         node: &str,
@@ -200,7 +202,7 @@ impl Theme {
             format!("{} -> {}", self.gray(source), self.bold(node))
         };
         format!(
-            "{phase} {done}/{total} {} {edge} {} {}",
+            "{phase} completed {completed}/{total} {} current: {edge} {} {}",
             self.gray("·"),
             self.gray("·"),
             self.gray(state),
@@ -508,7 +510,7 @@ impl<'a> LiveRegion<'a> {
     pub fn set_dependency_status(
         &mut self,
         phase: &str,
-        done: usize,
+        completed: usize,
         total: usize,
         source: &str,
         node: &str,
@@ -516,7 +518,7 @@ impl<'a> LiveRegion<'a> {
     ) {
         let line = self
             .theme
-            .render_dependency_status(phase, done, total, source, node, state);
+            .render_dependency_status(phase, completed, total, source, node, state);
         if !self.tty {
             eprintln!("{}{}", Self::pad(), line);
             return;
@@ -525,7 +527,7 @@ impl<'a> LiveRegion<'a> {
             line,
             format!(
                 "{}  {}",
-                Theme::render_progress_bar(done, total, 14),
+                Theme::render_progress_bar(completed, total, 14),
                 self.theme.gray(state),
             ),
         ]);
@@ -696,7 +698,7 @@ mod tests {
                 "ripgrep",
                 "resolving",
             ),
-            "building 2/5 · nixpkgs -> ripgrep · resolving"
+            "building completed 2/5 · current: nixpkgs -> ripgrep · resolving"
         );
     }
 
@@ -704,8 +706,8 @@ mod tests {
     fn dependency_status_handles_first_party_node_without_invented_parent() {
         let theme = Theme { color: false };
         assert_eq!(
-            theme.render_dependency_status("building", 1, 1, "", "local-app", "building"),
-            "building 1/1 · local-app · building"
+            theme.render_dependency_status("building", 0, 1, "", "local-app", "building"),
+            "building completed 0/1 · current: local-app · building"
         );
     }
 

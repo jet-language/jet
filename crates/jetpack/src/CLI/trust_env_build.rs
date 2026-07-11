@@ -331,17 +331,18 @@ fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
     let mut holes = Vec::new();
     let name_w = name_column_width(&plan.refs);
     let total_steps = plan.refs.len() + plan.adapters.len();
+    let mut completed_steps = 0usize;
     // Tier 2 (D-FE-CLI1): a multi-package build gets the live region —
     // finished rows promote up out of a pinned `building K/N` + progress bar
     // status, which collapses to `build ready ✓` on success. A single
     // package stays the plain quiet ledger row (nothing to promote out of).
     let live_mode = total_steps > 1;
     let mut live = theme.live_region();
-    for (idx, spec) in plan.refs.iter().enumerate() {
+    for spec in &plan.refs {
         let style = if live_mode {
             live.set_dependency_status(
                 "building",
-                idx + 1,
+                completed_steps,
                 total_steps,
                 spec.source.label(),
                 &spec.package,
@@ -367,6 +368,7 @@ fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
                     live.finish(&line);
                 }
                 realized_refs.push(entry.reference);
+                completed_steps += 1;
                 match state {
                     Provider::SourceState::Built => built += 1,
                     Provider::SourceState::Cached => cached += 1,
@@ -377,11 +379,11 @@ fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
             RefOutcome::Failed => ok = false,
         }
     }
-    for (idx, adapter) in plan.adapters.iter().enumerate() {
+    for adapter in &plan.adapters {
         if total_steps > 1 {
             live.set_dependency_status(
                 "building",
-                plan.refs.len() + idx + 1,
+                completed_steps,
                 total_steps,
                 "adapter",
                 &adapter.name,
@@ -394,6 +396,7 @@ fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
         match realize_adapter(theme, &roots, &parsed.flags, adapter, false) {
             Some((entry, state, _lease)) => {
                 realized_refs.push(entry.reference);
+                completed_steps += 1;
                 match state {
                     Provider::SourceState::Built => built += 1,
                     Provider::SourceState::Cached => cached += 1,

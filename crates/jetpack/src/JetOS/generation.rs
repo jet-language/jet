@@ -103,7 +103,7 @@ fn build_generation(
             &plan.table,
             &spec,
             name_w,
-            Some((&mut live, progress_step, progress_total)),
+            Some((&mut live, progress_step - 1, progress_total)),
         ) {
             Some(entry) => entry,
             None => return None,
@@ -161,7 +161,7 @@ fn build_generation(
             &plan.table,
             &spec,
             name_w.max(CACHYOS_KERNEL_PACKAGE.len()),
-            Some((&mut live, progress_step, progress_total)),
+            Some((&mut live, progress_step - 1, progress_total)),
         ) {
             Ok(entry) => entry,
             Err(_) => {
@@ -208,7 +208,7 @@ fn build_generation(
             &plan.table,
             &spec,
             name_w.max(SYSTEMD_INIT_PACKAGE.len()),
-            Some((&mut live, progress_step, progress_total)),
+            Some((&mut live, progress_step - 1, progress_total)),
         ) {
             Ok(entry) => entry,
             Err(_) => {
@@ -255,7 +255,7 @@ fn build_generation(
                 &plan.table,
                 &spec,
                 name_w.max(package.len()),
-                Some((&mut live, progress_step, progress_total)),
+                Some((&mut live, progress_step - 1, progress_total)),
             ) {
                 Ok(entry) => entry,
                 Err(_) => {

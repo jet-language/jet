@@ -2262,9 +2262,9 @@ fn committed_example_builds_offline_end_to_end() {
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("building 1/3 · stable -> ripgrep · resolving")
-            && stderr.contains("building 2/3 · unstable -> neovim · resolving")
-            && stderr.contains("building 3/3 · mine -> hello · resolving"),
+        stderr.contains("building completed 0/3 · current: stable -> ripgrep · resolving")
+            && stderr.contains("building completed 1/3 · current: unstable -> neovim · resolving")
+            && stderr.contains("building completed 2/3 · current: mine -> hello · resolving"),
         "plain non-TTY output must preserve ordered source-to-package edges: {stderr}"
     );
     for pkg in ["ripgrep", "neovim", "hello"] {
