@@ -2163,8 +2163,11 @@ keeps serving the last good artifacts. `Esc` collapses that diagnostic without
 hiding the error status. The next clean build clears it and reloads. A failed
 status poll shows reconnecting in the browser; expiry of its server lease puts
 the terminal on the same reconnecting state. The renewed lease returns both to
-ready. Recovery reloads even when a restarted server reuses the previous
-process's numeric version.
+the underlying build state. Reconnecting overrides ready, building, and error
+on both surfaces while retaining the last build time and any diagnostic in the
+shared snapshot. The renewed lease reveals that retained state again. Recovery
+reloads even when a restarted server reuses the previous process's numeric
+version.
 
 ## Canvas visual editor prototype (D-BPE-*)
 

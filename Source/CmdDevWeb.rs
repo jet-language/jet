@@ -104,6 +104,10 @@ impl DevStatus {
         // command uses. Pinning (cursor redraw) additionally requires a real
         // TTY: `FORCE_COLOR` off-TTY still can't redraw in place.
         let color = ColorChoice::Auto.resolve(is_tty);
+        DevStatus::new_with_terminal(file, verbose, is_tty, color)
+    }
+
+    fn new_with_terminal(file: &str, verbose: bool, is_tty: bool, color: bool) -> DevStatus {
         DevStatus {
             version: AtomicU64::new(1),
             clients: Mutex::new(HashMap::new()),
@@ -137,7 +141,7 @@ impl DevStatus {
     }
 
     fn header_text_for(&self, snap: &DevStatusSnapshot) -> (String, String) {
-        if snap.state == "ready" && self.reconnecting.load(Ordering::SeqCst) {
+        if self.reconnecting.load(Ordering::SeqCst) {
             return (
                 "reconnecting".to_string(),
                 "waiting for connection".to_string(),
@@ -181,7 +185,7 @@ impl DevStatus {
         let line = self.format_line(&word, &rest);
 
         if self.verbose() {
-            if self.pin && self.controls_ready.load(Ordering::SeqCst) {
+            if self.pin {
                 self.write_header_verbose(&line);
             } else {
                 let _g = self.term_lock.lock().unwrap();
@@ -240,6 +244,13 @@ impl DevStatus {
     fn write_header_verbose(&self, line: &str) {
         let _g = self.term_lock.lock().unwrap();
         let mut out = std::io::stderr();
+        // Capability check belongs inside the terminal lock. A refresh that
+        // waited behind EOF/Ctrl-C must not reinstall DECSTBM after cleanup.
+        if !self.controls_ready.load(Ordering::SeqCst) {
+            let _ = writeln!(out, "{}", line);
+            let _ = out.flush();
+            return;
+        }
         let mut started = self.header_started.lock().unwrap();
         let detail = self.dashboard_detail_line();
         if !*started {
@@ -343,27 +354,36 @@ impl DevStatus {
         });
     }
 
-    fn restore_terminal(&self) {
+    fn disable_terminal_controls(&self) {
         if !self.pin {
+            self.controls_ready.store(false, Ordering::SeqCst);
             return;
         }
         let _g = self.term_lock.lock().unwrap();
+        // Disable and restore in one critical section. Any renderer already
+        // waiting for this lock observes false before it can write.
+        self.controls_ready.store(false, Ordering::SeqCst);
         let mut out = std::io::stderr();
-        if *self.header_started.lock().unwrap() {
+        let mut started = self.header_started.lock().unwrap();
+        if *started {
             let _ = write!(out, "\x1b[r\x1b[999;1H\r\n");
         } else {
             let _ = writeln!(out);
         }
+        *started = false;
         let _ = out.flush();
     }
 
     fn mark_building(&self) {
-        *self.state.lock().unwrap() = DevStatusSnapshot {
+        let mut state = self.state.lock().unwrap();
+        let last_build_ms = state.last_build_ms;
+        *state = DevStatusSnapshot {
             state: "building".to_string(),
             code: String::new(),
             diagnostic: String::new(),
-            last_build_ms: 0,
+            last_build_ms,
         };
+        drop(state);
         self.refresh();
     }
 
@@ -385,12 +405,15 @@ impl DevStatus {
 
     fn mark_error(&self, code: String, diagnostic: String, is_rebuild: bool) {
         let diagnostic_for_log = diagnostic.clone();
-        *self.state.lock().unwrap() = DevStatusSnapshot {
+        let mut state = self.state.lock().unwrap();
+        let last_build_ms = state.last_build_ms;
+        *state = DevStatusSnapshot {
             state: "error".to_string(),
             code: code.clone(),
             diagnostic,
-            last_build_ms: 0,
+            last_build_ms,
         };
+        drop(state);
         self.refresh();
         if is_rebuild {
             self.log_rebuild(false, &code);
@@ -488,13 +511,12 @@ fn start_terminal_controls(status: Arc<DevStatus>) {
             match keys.read_key() {
                 jet::Term::Key::Char('v' | 'V') => status.toggle_verbose(),
                 jet::Term::Key::CtrlC => {
-                    status.restore_terminal();
+                    status.disable_terminal_controls();
                     drop(raw);
                     exit(130);
                 }
                 jet::Term::Key::Eof => {
-                    status.restore_terminal();
-                    status.controls_ready.store(false, Ordering::SeqCst);
+                    status.disable_terminal_controls();
                     drop(raw);
                     return;
                 }
@@ -1547,7 +1569,7 @@ fn write_response(
 mod tests {
     use super::{
         format_build_time, format_line_colored, format_line_plain, frame_lines, header_words,
-        inject_live_reload, DevStatus,
+        inject_live_reload, DevStatus, Ordering,
     };
 
     #[test]
@@ -1642,6 +1664,65 @@ mod tests {
         let ready = status.json();
         assert!(ready.contains("\"state\":\"ready\""));
         assert!(ready.contains("ready · localhost:8123 · 1 client"));
+    }
+
+    #[test]
+    fn reconnect_overrides_ready_building_and_error_without_losing_snapshot() {
+        let status = DevStatus::new("app.jet", false);
+        status.set_port(8123);
+        status.mark_ready(425, false);
+        status.reconnecting.store(true, Ordering::SeqCst);
+
+        let ready = status.json();
+        assert!(ready.contains("\"state\":\"reconnecting\""));
+        assert!(ready.contains("\"last_build_ms\":425"));
+
+        status.mark_building();
+        let building = status.json();
+        assert!(building.contains("\"state\":\"reconnecting\""));
+        assert!(building.contains("\"last_build_ms\":425"));
+
+        status.mark_error(
+            "E0102".to_string(),
+            "Error [E0102]: missing".to_string(),
+            true,
+        );
+        let error = status.json();
+        assert!(error.contains("\"state\":\"reconnecting\""));
+        assert!(error.contains("\"code\":\"E0102\""));
+        assert!(error.contains("Error [E0102]: missing"));
+        assert!(error.contains("\"last_build_ms\":425"));
+
+        status.reconnecting.store(false, Ordering::SeqCst);
+        let recovered = status.json();
+        assert!(recovered.contains("\"state\":\"error\""));
+        assert!(recovered.contains("\"code\":\"E0102\""));
+    }
+
+    #[test]
+    fn blocked_verbose_refresh_cannot_reinstall_region_after_disable() {
+        let status = std::sync::Arc::new(DevStatus::new_with_terminal(
+            "app.jet", true, true, false,
+        ));
+        status.controls_ready.store(true, Ordering::SeqCst);
+        let terminal_guard = status.term_lock.lock().unwrap();
+        let waiter = std::sync::Arc::clone(&status);
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            waiter.write_header_verbose("jet dev  [ready] localhost:8123 · 1 client");
+        });
+        started_rx.recv().unwrap();
+
+        // This is the disable+restore critical section: capability flips
+        // while the stale renderer is blocked on the same terminal lock.
+        status.controls_ready.store(false, Ordering::SeqCst);
+        *status.header_started.lock().unwrap() = false;
+        drop(terminal_guard);
+        handle.join().unwrap();
+
+        assert!(!status.controls_ready.load(Ordering::SeqCst));
+        assert!(!*status.header_started.lock().unwrap());
     }
 
     // --- D-FE-DEVSRV1=D: parity words shared verbatim by terminal + browser ---
