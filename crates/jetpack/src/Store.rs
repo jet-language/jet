@@ -999,16 +999,6 @@ fn open_snapshot_files(
     path: &Path,
     files: &mut Vec<(PathBuf, fs::File)>,
 ) -> std::io::Result<()> {
-    let meta = fs::symlink_metadata(path)?;
-    if meta.file_type().is_symlink() {
-        return Ok(());
-    }
-    if meta.is_dir() {
-        for entry in fs::read_dir(path)? {
-            open_snapshot_files(root, &entry?.path(), files)?;
-        }
-        return Ok(());
-    }
     let relative = path.strip_prefix(root).map_err(|_| {
         std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -1019,6 +1009,16 @@ fn open_snapshot_files(
             ),
         )
     })?;
+    let meta = fs::symlink_metadata(path)?;
+    if meta.file_type().is_symlink() {
+        return Ok(());
+    }
+    if meta.is_dir() {
+        for entry in fs::read_dir(path)? {
+            open_snapshot_files(root, &entry?.path(), files)?;
+        }
+        return Ok(());
+    }
     let file = fs::File::open(path)?;
     clear_close_on_exec(&file)?;
     files.push((relative.to_path_buf(), file));
@@ -1795,27 +1795,44 @@ mod tests {
     }
 
     #[test]
-    fn open_snapshot_files_rejects_path_outside_root_without_collecting_file() {
+    fn open_snapshot_files_rejects_paths_outside_root_before_inspection() {
         let (roots, _g) = temp_roots();
         let snapshot_root = roots.root.join("snapshot");
         let outside = roots.root.join("outside/payload");
+        let outside_dir = roots.root.join("outside-empty-dir");
         fs::create_dir_all(&snapshot_root).unwrap();
         fs::create_dir_all(outside.parent().unwrap()).unwrap();
+        fs::create_dir_all(&outside_dir).unwrap();
         fs::write(&outside, "outside").unwrap();
         let mut files = Vec::new();
 
-        let error = open_snapshot_files(&snapshot_root, &outside, &mut files).unwrap_err();
+        let mut assert_rejected = |path: &Path| {
+            let error = open_snapshot_files(&snapshot_root, path, &mut files).unwrap_err();
+            assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+            assert_eq!(
+                error.to_string(),
+                format!(
+                    "snapshot path `{}` is outside snapshot root `{}`",
+                    path.display(),
+                    snapshot_root.display()
+                )
+            );
+            assert!(files.is_empty());
+        };
 
-        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
-        assert_eq!(
-            error.to_string(),
-            format!(
-                "snapshot path `{}` is outside snapshot root `{}`",
-                outside.display(),
-                snapshot_root.display()
-            )
-        );
-        assert!(files.is_empty());
+        assert_rejected(&outside);
+        assert_rejected(&outside_dir);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+
+            let outside_link = roots.root.join("outside-link");
+            symlink(&outside, &outside_link).unwrap();
+            assert_rejected(&outside_link);
+            assert_eq!(fs::read_link(&outside_link).unwrap(), outside);
+            assert_eq!(fs::read_to_string(&outside).unwrap(), "outside");
+        }
     }
 
     #[test]
