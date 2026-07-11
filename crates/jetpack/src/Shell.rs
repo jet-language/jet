@@ -377,8 +377,8 @@ fn fish_init(label: &str, path: PromptPathMode, strip: PromptStripMode) -> Strin
          function __jetpack_status_glance; echo; __jetpack_status_words; echo; commandline -f repaint; end; \
          bind \\cg __jetpack_status_glance; \
          function __jetpack_spinner; set -l frames ⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏; set -l i 1; while true; printf '\\r%s running %s · %ss' $frames[$i] $argv[1] (math (date +%s) - $argv[2]) >&2; set i (math $i % 10 + 1); sleep .1; end; end; \
-         function __jetpack_preexec --on-event fish_preexec; switch $argv[1]; case 'jet build*'; set -g __jetpack_kind build; case 'jet test*'; set -g __jetpack_kind test; case '*'; set -g __jetpack_kind ''; return; end; set -g __jetpack_command $argv[1]; set -g __jetpack_started (date +%s); if isatty stderr; __jetpack_spinner $__jetpack_kind $__jetpack_started &\nset -g __jetpack_spinner_pid $last_pid; disown $__jetpack_spinner_pid; end; end; \
-         function __jetpack_postexec --on-event fish_postexec; set -l code $status; test -n \"$__jetpack_kind\"; or return; if test -n \"$__jetpack_spinner_pid\"; kill $__jetpack_spinner_pid 2>/dev/null; printf '\\r\\033[2K' >&2; end; set -l elapsed (math (date +%s) - $__jetpack_started); set -l result ok; test $code -eq 0; or set result \"failed ($code)\"; if test $__jetpack_kind = build; set -g __jetpack_build_status \"$result · \"$elapsed\"s\"; else; set -g __jetpack_test_status \"$result · \"$elapsed\"s\"; end; if set -q NO_COLOR; printf '%s %s · %ss\\n' $__jetpack_kind \"$result\" $elapsed; else if test $code -eq 0; printf '✓ %s ok · %ss\\n' $__jetpack_kind $elapsed; else; printf '✗ %s failed (%s) · %ss\\n' $__jetpack_kind $code $elapsed; end; if test $code -ne 0; if set -q NO_COLOR; echo \"-> $__jetpack_kind failed. Rerun: $__jetpack_command\"; else; echo \"→ $__jetpack_kind failed. Rerun: $__jetpack_command\"; end; end; set -g __jetpack_kind ''; set -g __jetpack_spinner_pid ''; end; \
+         function __jetpack_preexec --on-event fish_preexec; switch $argv[1]; case \"jet build*\"; set -g __jetpack_kind build; case \"jet test*\"; set -g __jetpack_kind test; case '*'; set -g __jetpack_kind ''; return; end; set -g __jetpack_command $argv[1]; set -g __jetpack_started (date +%s); if isatty stderr; command sh -c 'while :; do printf \"\\r⠹ running %s · %ss\" \"$0\" \"$(( $(date +%s) - $1 ))\" >&2; sleep .1; done' $__jetpack_kind $__jetpack_started &\nset -g __jetpack_spinner_pid $last_pid; end; end; \
+         function __jetpack_postexec --on-event fish_postexec; set -l code $status; test -n \"$__jetpack_kind\"; or return; if test -n \"$__jetpack_spinner_pid\"; kill $__jetpack_spinner_pid 2>/dev/null; wait $__jetpack_spinner_pid 2>/dev/null; printf '\\r\\033[2K' >&2; end; set -l elapsed (math (date +%s) - $__jetpack_started); set -l result ok; test $code -eq 0; or set result \"failed ($code)\"; if test $__jetpack_kind = build; set -g __jetpack_build_status \"$result · \"$elapsed\"s\"; else; set -g __jetpack_test_status \"$result · \"$elapsed\"s\"; end; if set -q NO_COLOR; printf '%s %s · %ss\\n' $__jetpack_kind \"$result\" $elapsed; else if test $code -eq 0; printf '✓ %s ok · %ss\\n' $__jetpack_kind $elapsed; else; printf '✗ %s failed (%s) · %ss\\n' $__jetpack_kind $code $elapsed; end; if test $code -ne 0; if set -q NO_COLOR; echo \"-> $__jetpack_kind failed. Rerun: $__jetpack_command\"; else; echo \"→ $__jetpack_kind failed. Rerun: $__jetpack_command\"; end; end; set -g __jetpack_kind ''; set -g __jetpack_spinner_pid ''; end; \
          function fish_prompt; {strip_line}\
          if set -q NO_COLOR; echo -n '{label} '; echo -n ({path_expr}); echo -n ' > '; \
          else; set_color -o cyan; echo -n '{label} '; \
@@ -430,7 +430,7 @@ fn write_temp_dir(tag: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
+    use std::io::{Read, Write};
     use std::process::Stdio;
 
     fn env_with(dirs: &[&str]) -> Env {
@@ -508,14 +508,29 @@ mod tests {
             .unwrap()
             .write_all(input.as_bytes())
             .unwrap();
-        let output = child.wait_with_output().unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if std::time::Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("PTY shell did not reach exit sentinel within 10s");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        };
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        child.stdout.take().unwrap().read_to_end(&mut stdout).unwrap();
+        child.stderr.take().unwrap().read_to_end(&mut stderr).unwrap();
         assert!(
-            output.status.success(),
+            status.success(),
             "stdout:\n{}\nstderr:\n{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
+            String::from_utf8_lossy(&stdout),
+            String::from_utf8_lossy(&stderr)
         );
-        String::from_utf8_lossy(&output.stdout).replace('\r', "")
+        String::from_utf8_lossy(&stdout).replace('\r', "")
     }
 
     fn shell_single_quote(text: &str) -> String {
@@ -545,20 +560,43 @@ mod tests {
 
     #[test]
     fn fish_prompt_pty_reports_real_command_receipts_when_available() {
-        if Command::new("fish").arg("--version").output().is_err() {
-            return;
-        }
+        Command::new("fish")
+            .arg("--version")
+            .output()
+            .expect("fish must be present for prompt PTY coverage");
         let init = fish_init("web-api", PromptPathMode::Short, PromptStripMode::On);
         let shell = format!("fish -C {} -i", shell_single_quote(&init));
         let output = pty(
             &shell,
-            "function jet; test $argv[1] = build; end\njet build\njet test\n__jetpack_status_words\nexit\n",
+            "function jet; test $argv[1] = build; end\njet build\njet test\n__jetpack_status_words\necho JETPACK_FISH_PTY_DONE\nexit 0\n",
             true,
         );
         assert!(output.contains("build ok"), "{output}");
         assert!(output.contains("test failed (1)"), "{output}");
         assert!(output.contains("-> test failed. Rerun: jet test"), "{output}");
+        assert!(output.contains("JETPACK_FISH_PTY_DONE"), "{output}");
         assert!(!output.contains("unknown"), "{output}");
+    }
+
+    #[test]
+    fn zsh_prompt_has_native_hook_matrix_and_ci_requires_zsh() {
+        let rc = zsh_rc("web-api", PromptPathMode::Short, PromptStripMode::On);
+        for required in [
+            "add-zsh-hook preexec __jetpack_preexec",
+            "add-zsh-hook precmd __jetpack_precmd",
+            "__jetpack_spinner",
+            "failed. Rerun:",
+            "git branch --show-current",
+            "bindkey '^G'",
+        ] {
+            assert!(rc.contains(required), "missing zsh prompt hook: {required}");
+        }
+        if std::env::var_os("CI").is_some() {
+            assert!(
+                Command::new("zsh").arg("--version").output().is_ok(),
+                "CI prompt matrix requires zsh"
+            );
+        }
     }
 
     #[test]
