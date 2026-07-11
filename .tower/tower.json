@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 488,
-    "rev": 3194,
+    "rev": 3210,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -4264,13 +4264,23 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P0",
       "plan": "cleanup-ballot-web-tir",
       "blockedBy": [],
       "workOrder": 2,
       "assignee": "codex-main",
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "codex-main",
+          "text": "implementation and independent criteria 1-4 verification complete; criterion 5 waits only integrated full-suite green. Current unrelated active Canvas matrix rewrite fails its classification test until paired test checkpoint lands."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "codex-main",
+          "text": "broader verification rerun: progressed through canvas; 54/55 green, sole failure canvas_blueprint_parity_matrix_is_classified (missing area Workbench) while docs/plans/epoch-6/canvas-blueprint-parity-matrix.md is actively dirty under another card. #244 web tests remain independently green; rerun after matrix checkpoint."
+        },
         {
           "at": "2026-07-11",
           "by": "codex-main",
@@ -4301,7 +4311,53 @@
       ],
       "created": "2026-07-06T19:40:23.261Z",
       "updated": "2026-07-11",
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "JavaScript web output executes supported retained TIR bodies and returns a Jet-owned data diagnostic for unsupported TIR; no AST-body execution fallback.",
+          "status": "verified",
+          "metBy": "codex-main",
+          "verifiedBy": "sol-244-reviewer",
+          "evidence": "Independent source/diff review: JS FuncWeb retains TIR::TFunc; emit_js_fn/run call emit_tir_js_body only; unsupported stmt/expr arms return WebTirUnsupported -> E-WEB-TIR-UNSUPPORTED. Structural and unsupported-body regressions passed in recorded web_build 25/25.",
+          "at": "2026-07-11T01:39:23.892Z"
+        },
+        {
+          "n": 2,
+          "text": "Wasm lowering covers supported functions/helpers with validated callees and ABI, and rejects unsupported forms without panic, undefined output, or default-value fallback.",
+          "status": "verified",
+          "metBy": "codex-main",
+          "verifiedBy": "sol-244-reviewer",
+          "evidence": "Independent source/diff review: Wasm preflight recursively validates statements, expressions, unique Wasm callee bucket, and internal/export ABI; emitter returns Err/WebTirUnsupported on every unsupported form. Helper, void body, ABI, and cross-partition regressions passed in recorded web_build 25/25.",
+          "at": "2026-07-11T01:39:24.050Z"
+        },
+        {
+          "n": 3,
+          "text": "Canvas web lowering preserves supported control flow, string printing, scoped bindings, and exact top-level host dev exclusion while validating nested dev normally.",
+          "status": "verified",
+          "metBy": "codex-main",
+          "verifiedBy": "sol-244-reviewer",
+          "evidence": "Independent source/diff review: Canvas-supported TIR covers if/else, scoped lets/assignments, calls, and literal Print; exact key identity excludes only top-level dev in JS/Wasm while Tools__dev remains emitted and unsupported nested dev is validated. Recorded canvas 28/28 and web_dev 4/4; web_build 25/25.",
+          "at": "2026-07-11T01:39:24.203Z"
+        },
+        {
+          "n": 4,
+          "text": "Removing or changing retained AST body data cannot alter web emission; regression proof demonstrates TIR is the sole executable source.",
+          "status": "verified",
+          "metBy": "codex-main",
+          "verifiedBy": "sol-244-reviewer",
+          "evidence": "Independent source/diff review: executable FuncWeb stores TIR::TFunc and both JS/Wasm emitters consume only f.tir.body; no retained AST body field/expression emitter, undefined/default, panic, or unreachable fallback remains. Structural TIR-only regression plus emitted-body tests passed in recorded web_build 25/25.",
+          "at": "2026-07-11T01:39:24.358Z"
+        },
+        {
+          "n": 5,
+          "text": "Focused web_build, web_dev, and canvas tests pass; repository full verification passes on the integrated tree.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-11T01:38:25.769Z"
+        }
+      ],
       "needsAcceptance": false,
       "refs": []
     },
@@ -5052,6 +5108,11 @@
       "blockedBy": [],
       "assignee": "fable-main",
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "codex-main",
+          "text": "integration recheck: nix develop -c cargo test --test archive now green 4/4 on live tree; prior ProcessStdinWrite exhaustiveness and generated helper failures resolved."
+        },
         {
           "at": "2026-07-11",
           "by": "fable-main",
@@ -23006,6 +23067,118 @@
   ],
   "events": [
     {
+      "at": "2026-07-11T01:39:47.207Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c008rjua",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T01:39:24.358Z",
+      "by": "sol-244-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c008rjua",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-11T01:39:24.204Z",
+      "by": "sol-244-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c008rjua",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-11T01:39:24.050Z",
+      "by": "sol-244-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c008rjua",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-11T01:39:23.892Z",
+      "by": "sol-244-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c008rjua",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-11T01:38:34.084Z",
+      "by": "codex-main",
+      "action": "card.criteria-meet",
+      "ref": "c008rjua",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-11T01:38:33.928Z",
+      "by": "codex-main",
+      "action": "card.criteria-meet",
+      "ref": "c008rjua",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-11T01:38:33.768Z",
+      "by": "codex-main",
+      "action": "card.criteria-meet",
+      "ref": "c008rjua",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-11T01:38:33.607Z",
+      "by": "codex-main",
+      "action": "card.criteria-meet",
+      "ref": "c008rjua",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-11T01:38:25.770Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c008rjua",
+      "note": "#5 Focused web_build, web_dev, and canvas tests pass; repositor"
+    },
+    {
+      "at": "2026-07-11T01:38:25.617Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c008rjua",
+      "note": "#4 Removing or changing retained AST body data cannot alter web"
+    },
+    {
+      "at": "2026-07-11T01:38:25.462Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c008rjua",
+      "note": "#3 Canvas web lowering preserves supported control flow, string"
+    },
+    {
+      "at": "2026-07-11T01:38:25.305Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c008rjua",
+      "note": "#2 Wasm lowering covers supported functions/helpers with valida"
+    },
+    {
+      "at": "2026-07-11T01:38:25.132Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c008rjua",
+      "note": "#1 JavaScript web output executes supported retained TIR bodies"
+    },
+    {
+      "at": "2026-07-11T01:37:40.479Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c008rjua",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T01:36:58.061Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0pef855",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-07-11T01:36:50.608Z",
       "by": "fable-main",
       "action": "card.update",
@@ -26391,118 +26564,6 @@
       "by": "codex-orchestrator",
       "action": "card.update",
       "ref": "c041flkr",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0zqnb18",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0xe5g33",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0uxofls",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0yxdqju",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0fp9sb3",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0eli2fh",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0a11ldt",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c06lehoq",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c04de5hj",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0to4gms",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0zpnwk9",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0ewbiud",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0184j6s",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0075iyb",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0z3l25j",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0wa2hf8",
       "note": "workOrder"
     }
   ],
