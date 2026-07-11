@@ -2668,6 +2668,18 @@ pub(crate) fn check_module_bodies(
                     no_prelude,
                     ));
                 }
+                for block in &mut e.trait_impls {
+                    for m in &mut block.methods {
+                        let own_params = std::mem::take(&mut m.type_params);
+                        m.type_params = if own_params.is_empty() { e.type_params.clone() } else { own_params.clone() };
+                        diags.extend(check_func_body_bundle(
+                            m, module_idx, states, Some(&e.name), &ct_funcs, &ct_externs,
+                            &ct_base_dir, &ct_globals, freestanding, allow_impure, summaries,
+                            embed_inputs_out, global_addr_taken, no_alloc, no_prelude,
+                        ));
+                        m.type_params = if matches!(block.trait_name.as_str(), crate::Generics::ENCODE | crate::Generics::DECODE) { Vec::new() } else { own_params };
+                    }
+                }
             }
             Item::Impl(i) => {
                 for m in &mut i.methods {

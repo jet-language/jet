@@ -2413,6 +2413,7 @@ impl Email.Decode {
         return ok(Email.{ addr: value.text() ?? "" })
     }
 }
+
 fn run() {
     i_tree: DataTree := DataTree.Int(41)
     xs_tree: DataTree := DataTree.Array([DataTree.Int(1), DataTree.Int(2)])
@@ -2433,6 +2434,38 @@ fn run() {
     let (code, stdout, stderr) = build_and_run(&dir, "datatree_decode", src, &[], None);
     assert_eq!(code, 0, "DataTree.decode dispatch failed: {stderr}");
     assert_eq!(stdout, "50\na@b\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn generated_enum_codecs_reenter_jet_pipeline() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc { return; }
+    let dir = std::env::temp_dir().join(format!("jet_enum_serde_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let src = r#"
+use core.encoding.json as json
+@[Codable]
+enum Event {
+    Idle
+    Count(Int)
+    Named(name: String, enabled: Bool)
+}
+fn run() {
+    a: Event := .Idle
+    b: Event := .Count(3)
+    c: Event := .Named.{ name: "x", enabled: true }
+    print(json.to_string(a))
+    print(json.to_string(b))
+    print(json.to_string(c))
+    back := json.decode<Event>("{{\"Count\":7}}") ?? panic("decode")
+    if back == .Count(n) { print(n) }
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "enum_serde", src, &[], None);
+    assert_eq!(code, 0, "generated enum codec failed: {stderr}");
+    assert_eq!(stdout, "\"Idle\"\n{\"Count\":3}\n{\"Named\":{\"enabled\":true,\"name\":\"x\"}}\n7\n");
     let _ = fs::remove_dir_all(&dir);
 }
 

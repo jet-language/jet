@@ -1274,6 +1274,10 @@ pub(super) fn expand_builtin_serde_source(prog: &mut crate::AST::Program, diags:
 
 pub(super) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags: &mut Vec<Diagnostic>) {
     for item in items {
+        if let Item::Enum(e) = item {
+            expand_builtin_enum_serde(e, diags);
+            continue;
+        }
         let Item::Struct(s) = item else { continue };
         let enc = s.derives.iter().any(|(n, _)| n == crate::Generics::ENCODE);
         let dec = s.derives.iter().any(|(n, _)| n == crate::Generics::DECODE);
@@ -1392,6 +1396,178 @@ pub(super) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags: &mut Vec<
                 ));
             }
         }
+    }
+}
+
+fn expand_builtin_enum_serde(e: &mut crate::AST::EnumDef, diags: &mut Vec<Diagnostic>) {
+    let enc = e.derives.iter().any(|(n, _)| n == crate::Generics::ENCODE);
+    let dec = e.derives.iter().any(|(n, _)| n == crate::Generics::DECODE);
+    if !enc && !dec { return; }
+    let mut codec_params = e.type_params.clone();
+    let wire_types = e.variants.iter().flat_map(|v| match &v.payload {
+        crate::AST::VariantPayload::Unit => Vec::new(),
+        crate::AST::VariantPayload::Single(t, _) => vec![t],
+        crate::AST::VariantPayload::Named(fs) => fs.iter().map(|f| &f.ty).collect(),
+    }).collect::<Vec<_>>();
+    for param in &mut codec_params {
+        let reaches_wire = wire_types.iter().any(|ty|
+            crate::Generics::free_type_params(ty).contains(&param.name));
+        if reaches_wire && enc { param.bounds.push(crate::Generics::ENCODE.to_string()); }
+        if reaches_wire && dec { param.bounds.push(crate::Generics::DECODE.to_string()); }
+    }
+    let params = crate::Generics::format_type_params(&codec_params);
+    let target = format!("{}{}", e.name, serde_type_arg_names(&e.type_params));
+    let tag = e.serde_markers.iter().find(|m| m.name == crate::Syntax::ATTR_TAG)
+        .and_then(|m| m.args.first()).and_then(|x| match x {
+            crate::AST::Expr::Str(parts, _) => parts.first().and_then(|p| match p {
+                crate::AST::StrPart::Lit(s) => Some(s.clone()), _ => None,
+            }), _ => None,
+        });
+    let untagged = e.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_UNTAGGED);
+    let mut source = format!("enum __JetSerdeGenerated{params} {{ __Unused }}\n");
+    // Attach impls to a synthetic struct because nested enum impl parsing and
+    // nested struct impl parsing normalize to the same TraitImplBlock AST.
+    source.push_str(&format!("struct __JetSerdeCarrier{params} {{\n"));
+    if enc {
+        source.push_str("impl Encode {\nfn encode(self) -> DataTree {\nif self == {\n");
+        for v in &e.variants {
+            let wire = serde_enum_variant_key(v);
+            let (pattern, payload) = serde_enum_pattern_and_value(v);
+            let value = if untagged {
+                match &v.payload {
+                    crate::AST::VariantPayload::Unit => "DataTree.Null".to_string(),
+                    crate::AST::VariantPayload::Single(..) => "(copy v0).encode()".to_string(),
+                    crate::AST::VariantPayload::Named(fs) => format!("DataTree.Object([{}])", serde_enum_named_pairs(fs)),
+                }
+            } else if let Some(tag_key) = &tag {
+                match &v.payload {
+                    crate::AST::VariantPayload::Unit => format!("DataTree.Object([{tag_key:?}: DataTree.Text({wire:?})])"),
+                    crate::AST::VariantPayload::Named(fs) => {
+                        let pairs = serde_enum_named_pairs(fs);
+                        format!("DataTree.Object([{tag_key:?}: DataTree.Text({wire:?}){}{}])", if pairs.is_empty(){""}else{" ,"}, pairs)
+                    }
+                    crate::AST::VariantPayload::Single(..) => format!("DataTree.Object([{wire:?}: {payload}])"),
+                }
+            } else {
+                match &v.payload {
+                    crate::AST::VariantPayload::Unit => format!("DataTree.Text({wire:?})"),
+                    crate::AST::VariantPayload::Single(..) => format!("DataTree.Object([{wire:?}: {payload}])"),
+                    crate::AST::VariantPayload::Named(fs) => format!("DataTree.Object([{wire:?}: DataTree.Object([{}])])", serde_enum_named_pairs(fs)),
+                }
+            };
+            source.push_str(&format!("{pattern} -> {{ return {value} }}\n"));
+        }
+        source.push_str("}\n}\n}\n");
+    }
+    if dec {
+        source.push_str(&format!("impl Decode {{\nfn decode(tree: DataTree) -> {target} ? DecodeError {{\n"));
+        if untagged {
+            for v in &e.variants {
+                source.push_str(&serde_enum_decode_attempt(&target, v, "tree", true));
+            }
+        } else if let Some(tag_key) = &tag {
+            source.push_str(&format!("tag_tree := tree.field({tag_key:?})?\ntag_value := tag_tree.text()?\n"));
+            for v in &e.variants {
+                let wire = serde_enum_variant_key(v);
+                source.push_str(&format!("if tag_value == {wire:?} {{ {} }}\n", serde_enum_decode_return(&target, v, "tree")));
+            }
+        } else {
+            let mut object_arms = String::new();
+            for (variant_index, v) in e.variants.iter().enumerate() {
+                match &v.payload {
+                    crate::AST::VariantPayload::Unit => {
+                        let wire = serde_enum_variant_key(v);
+                        source.push_str(&format!("if (copy tree) == .Text(variant_name) {{ if variant_name == {wire:?} {{ return ok({target}.{}) }} }}\n", v.name));
+                    }
+                    _ => {
+                        let wire = serde_enum_variant_key(v);
+                        let candidate = format!("candidate_{variant_index}");
+                        object_arms.push_str(&format!("{candidate}: DataTree := (copy tree).field({wire:?}) ?? DataTree.Null\n"));
+                        match &v.payload {
+                            crate::AST::VariantPayload::Single(t, _) => {
+                                let decoded = format!("decoded_{variant_index}");
+                                object_arms.push_str(&format!("{decoded} := {candidate}.decode<{}>()\nif {decoded} == ok(decoded_value) {{ return ok({target}.{}(decoded_value)) }}\n", serde_type_source(t), v.name));
+                            }
+                            crate::AST::VariantPayload::Named(_) => {
+                                object_arms.push_str(&format!("{}\n", serde_enum_decode_return(&target, v, &candidate)));
+                            }
+                            crate::AST::VariantPayload::Unit => {}
+                        }
+                    }
+                }
+            }
+            source.push_str(&object_arms);
+        }
+        source.push_str("return err(DecodeError.{ path: \"\", reason: \"no matching enum variant\" })\n}\n}\n");
+    }
+    source.push_str("}\n");
+    let (tokens, lex_diags) = crate::Lexer::lex(&source);
+    let parsed = if lex_diags.is_empty() { crate::Parser::parse(&tokens) } else { Err(lex_diags) };
+    match parsed {
+        Ok(mut generated) => {
+            let mut blocks = generated.items.drain(..).find_map(|i| match i {
+                Item::Struct(g) if g.name == "__JetSerdeCarrier" => Some(g.trait_impls), _ => None,
+            }).unwrap_or_default();
+            for block in &mut blocks { for method in &mut block.methods { method.type_params = codec_params.clone(); } }
+            e.trait_impls.extend(blocks);
+            e.derives.retain(|(n, _)| n != crate::Generics::ENCODE && n != crate::Generics::DECODE);
+        }
+        Err(errors) => {
+            let detail = errors.first().map(|d| format!("{} at {:?}", d.what, d.span)).unwrap_or_default();
+            diags.push(Diagnostic::error("E2710", format!("built-in codec derive generated invalid Jet for `{}`", e.name), format!("generated source did not pass the ordinary lexer and parser: {detail}; generated source:\n{source}"), "report this compiler bug; built-in derives must emit valid ordinary Jet".to_string(), e.derives.first().map(|(_, s)| *s)));
+        }
+    }
+}
+
+fn serde_enum_variant_key(v: &crate::AST::Variant) -> String {
+    v.serde_markers.iter().find(|m| m.name == crate::Syntax::ATTR_RENAME)
+        .and_then(|m| m.args.first()).and_then(|e| match e {
+            crate::AST::Expr::Str(parts, _) => parts.first().and_then(|p| match p { crate::AST::StrPart::Lit(s) => Some(s.clone()), _ => None }), _ => None,
+        }).unwrap_or_else(|| v.name.clone())
+}
+
+fn serde_enum_pattern_and_value(v: &crate::AST::Variant) -> (String, String) {
+    match &v.payload {
+        crate::AST::VariantPayload::Unit => (format!(".{}", v.name), String::new()),
+        crate::AST::VariantPayload::Single(..) => (format!(".{}(v0)", v.name), "(copy v0).encode()".to_string()),
+        crate::AST::VariantPayload::Named(fs) => {
+            let names = (0..fs.len()).map(|i| format!("v{i}")).collect::<Vec<_>>();
+            (format!(".{}({})", v.name, names.join(", ")), String::new())
+        }
+    }
+}
+
+fn serde_enum_named_pairs(fs: &[crate::AST::VariantField]) -> String {
+    fs.iter().enumerate().map(|(i, f)| format!("{:?}: (copy v{i}).encode()", f.name)).collect::<Vec<_>>().join(", ")
+}
+
+fn serde_enum_decode_attempt(target: &str, v: &crate::AST::Variant, src: &str, guarded: bool) -> String {
+    if guarded { format!("if {src}.decode<{}>() == ok(v0) {{ {} }}\n", serde_enum_payload_type(v), serde_enum_decode_return(target, v, src)) }
+    else { serde_enum_decode_return(target, v, src) }
+}
+
+fn serde_enum_decode_return(target: &str, v: &crate::AST::Variant, src: &str) -> String {
+    let cons = serde_enum_decode_constructor(target, v, src);
+    if matches!(v.payload, crate::AST::VariantPayload::Named(_)) {
+        format!("decoded_variant: {target} := {cons}\nreturn ok(decoded_variant)")
+    } else {
+        format!("return ok({cons})")
+    }
+}
+
+fn serde_enum_payload_type(v: &crate::AST::Variant) -> String {
+    match &v.payload {
+        crate::AST::VariantPayload::Unit => "DataTree".to_string(),
+        crate::AST::VariantPayload::Single(t, _) => serde_type_source(t),
+        crate::AST::VariantPayload::Named(_) => "DataTree".to_string(),
+    }
+}
+
+fn serde_enum_decode_constructor(target: &str, v: &crate::AST::Variant, src: &str) -> String {
+    match &v.payload {
+        crate::AST::VariantPayload::Unit => format!("{target}.{}", v.name),
+        crate::AST::VariantPayload::Single(t, _) => format!("{target}.{}({src}.decode<{}>()?)", v.name, serde_type_source(t)),
+        crate::AST::VariantPayload::Named(fs) => format!(".{}.{{ {} }}", v.name, fs.iter().map(|f| format!("{}: ((copy {src}).field({:?})?).decode<{}>()?", f.name, f.name, serde_type_source(&f.ty))).collect::<Vec<_>>().join(", ")),
     }
 }
 
