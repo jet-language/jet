@@ -1265,9 +1265,21 @@ fn stable_cargo_detail(stderr: &str) -> String {
                 && !t.contains("waiting for other jobs")
                 && !(t.starts_with("Compiling ") && !t.contains("jet_ffi_"))
         })
-        .map(|line| normalize_ffi_crate_name(&normalize_ffi_cache_path(line)))
+        .map(|line| {
+            normalize_ffi_generated_source_line(&normalize_ffi_crate_name(
+                &normalize_ffi_cache_path(line),
+            ))
+        })
         .collect();
     indent_block(&kept.join("\n"))
+}
+
+fn normalize_ffi_generated_source_line(line: &str) -> String {
+    let marker = "match std::panic::catch_unwind(";
+    let Some(start) = line.find(marker) else {
+        return line.to_string();
+    };
+    format!("{}{}<generated wrapper>)", &line[..start], marker)
 }
 
 fn normalize_ffi_crate_name(line: &str) -> String {
@@ -1330,6 +1342,15 @@ mod tests {
     use super::*;
     use crate::AST::Type;
     use std::collections::HashSet;
+
+    #[test]
+    fn generated_wrapper_excerpt_is_width_independent() {
+        let full = "    10 |     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| call())) {";
+        let short = "    10 |     match std::panic::catch_unwind(s...";
+        let expected = "    10 |     match std::panic::catch_unwind(<generated wrapper>)";
+        assert_eq!(normalize_ffi_generated_source_line(full), expected);
+        assert_eq!(normalize_ffi_generated_source_line(short), expected);
+    }
 
     #[test]
     fn intn_u32_maps_to_rust_u32() {
