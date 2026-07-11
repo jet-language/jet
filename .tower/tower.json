@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 495,
-    "rev": 3247,
+    "rev": 3248,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -7501,8 +7501,13 @@
       "priority": "P1",
       "plan": "# Plan: categorized jet ? help palette\n\nRatified inputs:\n- D-FE-HELP1 outcome D with owner modification: categorized command palette by default; no separate task-based search/home.\n\nScope:\n- Source/main.rs, Source/CLI.rs, command registry/help generation, tests/cli/question_mark_help.txt, any CLI transcript tests.\n- Reuse existing help/usage registry where possible; do not fork command metadata.\n\nImplementation steps:\n1. Make jet ? open a categorized command palette over the shell in TTY mode. Non-TTY and plain jet help keep deterministic text output.\n2. Build one command index from the existing command registry: command name, flags, examples, aliases, fuzzy keywords, error-code references, category, and see-also links.\n3. Remove task-home as a separate managed surface. Encode task/outcome phrases as fuzzy keywords on concrete command entries.\n4. Add browser-style grouping: Build and run, Project/env, Packages, jetos, Dev server, Reference, Error codes.\n5. Tab expands selected result inline to command detail; F1 opens the same index in full two-pane reference; Enter pre-fills shell line and never executes.\n6. Search must cover commands, flags, examples, aliases, task keywords, and E-codes. E-code pages render existing diagnostic/explain text verbatim.\n7. Respect NO_COLOR and restore shell cleanly on Esc/q/Enter.\n\nAcceptance:\n- jet ? starts in categorized command palette.\n- Typing task phrases like \"run on save\" finds explicit commands rather than separate recipes.\n- Enter prefills and does not run.\n- F1 and Tab expose full reference depth from the same index.\n\nVerification:\n- nix develop -c cargo test --test cli question_mark_help -- --exact\n- Add/update focused CLI transcript tests for palette search, F1/Tab fallback, E-code lookup, and non-TTY help.\n- nix develop -c cargo test --test diagnostics_coverage if explain/error index is touched.\n- Full nix develop -c cargo test before done.",
       "blockedBy": [],
-      "assignee": "terra-360-help",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "terra-360-help",
+          "text": "[handoff] Tranche A complete commits 9702ac84, 18a2ec7b, fb2b412c; independent review clean; criteria 1-2 met+verified. Remaining criterion 3 must serialize after #359 shared Shell.rs RC: bash/zsh/fish parent-line insertion, no execution. Criterion 4 needs full owner Ghostty/fish matrix. Criterion 5 full suite currently blocked by #455 stdin_filter boundary expectation regression logged on #455. Focused Help 23/23, help_pty 5/5, CLI question_mark 4/4."
+        },
         {
           "at": "2026-07-11",
           "by": "terra-360-help",
@@ -7629,8 +7634,7 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
-      "claimedAt": "2026-07-11T01:45:43.916Z"
+      "refs": []
     },
     {
       "id": "c0nhjxh4",
@@ -23593,6 +23597,13 @@
   ],
   "events": [
     {
+      "at": "2026-07-11T02:12:33.507Z",
+      "by": "terra-360-help",
+      "action": "card.release",
+      "ref": "c0l5fmyy",
+      "note": "[handoff] logged"
+    },
+    {
       "at": "2026-07-11T02:10:55.370Z",
       "by": "sol-360-reviewer",
       "action": "card.criteria-verify",
@@ -27083,13 +27094,6 @@
       "by": "codex-orchestrator",
       "action": "card.update",
       "ref": "c0qs8j6u",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.049Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0ppv63p",
       "note": "workOrder"
     }
   ],
