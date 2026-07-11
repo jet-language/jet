@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+"$repo/scripts/agent/clean-nix-tmp.sh"
 tmp="${JET_VERIFY_TMPDIR:-$repo/target/test-tmp}"
 mkdir -p "$tmp"
 

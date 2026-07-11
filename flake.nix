@@ -108,6 +108,9 @@
             pkgs.nodejs_22
             pkgs.nixfmt
             pkgs.ripgrep
+            pkgs.jq
+            pkgs.gh
+            pkgs.fd
             # D-DEP-WASM1=A (c81): `jet build --target=plugin` lifts the
             # rustc-built wasm32-unknown-unknown core module into a WASM
             # Component using `wasm-tools component embed`/`new` — an external
@@ -139,6 +142,8 @@
             export JET_ROOT="$PWD"
             export TZDIR="${jetTzdb}"
             export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath [ pkgs.raylib ]}:''${LD_LIBRARY_PATH:-}"
+
+            "$JET_ROOT/scripts/agent/clean-nix-tmp.sh"
 
             # D-CI3: wire the fast pre-push doc-sync hook, idempotent, only
             # when inside a git repo (worktrees/CI checkouts included).
