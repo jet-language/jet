@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 496,
-    "rev": 3737,
+    "rev": 3743,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -5153,6 +5153,11 @@
       "log": [
         {
           "at": "2026-07-11",
+          "by": "codex-orchestrator",
+          "text": "Independent root re-review accepted D-EVENT2 after rev3741 corrections: capacity/count law exact; deterministic pressure handshake; fresh close/cancel/deadline/failure handles in A/B/C; no lifecycle reuse; prior type/failure/Hook findings resolved. Card remains deciding with resumable handoff."
+        },
+        {
+          "at": "2026-07-11",
           "by": "sol-286-builder",
           "text": "Owner gate D-EVENT2 ready. No implementation may guess async overflow/block/drop, typed failure-report, or Hook outcome APIs; resume immediately after ratification."
         },
@@ -5781,6 +5786,21 @@
       "blockedBy": [],
       "assignee": "sol-300-builder",
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "sol-300-builder",
+          "text": "Hostile matrix checkpoint 270d3cff: non-response QR clear, self-referential compression pointer, and NXDOMAIN all rejected by live generated Jet programs. Full focused core_net_dns_ matrix 6/6 green. DNS runtime now has positive A/TXT/SRV+CNAME/additional/TCP-fallback and negative ID/QR/compression/NXDOMAIN proof; still needs remaining header/question/bounds cases plus typed NetError and platform runtime CI before criteria 1-3 can be marked."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "sol-300-builder",
+          "text": "Hostile DNS proof checkpoint 6f6ea9f6: forged transaction ID rejected end to end; nine live queries prove transaction IDs are not a fixed/reused constant. Focused core_net_dns matrix now 4/4 green. Criteria remain open until malformed header/question/compression/NXDOMAIN cases and cross-platform host resolver proof join the byte/error/task/TLS work."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "sol-300-builder",
+          "text": "Checkpoint e6727902: strict DNS seam replaces public fallback/fixed ID. Ordinary A/AAAA now use bounded host resolver; TXT/SRV use Linux/macOS resolv.conf or Windows ipconfig host configuration with no invented resolver. Connected UDP validates source plus ID/QR/opcode/rcode/question/class/bounds/labels/compression/trailing bytes; parses answer/authority/additional, follows bounded CNAME, returns NXDOMAIN failure, retries TC over length-framed bounded TCP. Focused core_net_dns tests 2/2 green including real UDP TXT/SRV and UDP-TC to TCP CNAME/additional A. Remaining: hostile malformed matrix/random-ID proof, typed NetError, byte/close/Reader-Writer law, shared readiness/deadline/cancel handles, core.tls stream API."
+        },
         {
           "at": "2026-07-11",
           "by": "codex-orchestrator",
@@ -26638,44 +26658,44 @@
       "group": "runtime",
       "title": "Complete event dispatch, failure, and hook policy surface",
       "gist": "Choose how Event and Hook expose real queued dispatch, cancellation, typed failures, and intervention outcomes.",
-      "explainer": "",
+      "explainer": "D-EVENT1=D already fixes one compiler-known family of ordinary source-visible Event and Hook values; this ballot chooses its exact expert API, not a second event model. Every option obeys the same runtime law. An async emission moves atomically Pending -> Queued -> Running -> one terminal state. Pending means a Block producer has not been accepted. Queued means accepted and waiting for a worker. Running means one worker won ownership. Capacity counts Queued only: Running and Pending do not consume a queue slot. queued_count is exactly the number in Queued, running_count is exactly Running, and blocked_count is exactly Pending Block producers; each transition updates these facts atomically before waking observers. Terminal DispatchState is Delivered, HandlerFailed, DroppedNewest, DroppedOldest, Closed, Cancelled, or DeadlineExceeded. DispatchReport<E> contains state, accepted, delivered_handlers, failures, and trace. DropNewest completes the new attempt immediately as DroppedNewest with accepted=false. DropOldest atomically completes the oldest Queued payload's existing task as DroppedOldest with accepted=true, then accepts the new payload; it never evicts Running work. Block returns a task immediately but does not accept its payload until capacity exists; close, cancellation, or deadline wakes that producer exactly once with accepted=false. Capacity must be greater than zero or construction fails with typed EventConfigError.InvalidCapacity. AsyncEvent.close is graceful and idempotent: it rejects new and blocked producers as Closed, lets Running and Queued payloads finish, then closes workers. EventScope.cancel and owner teardown are hard, idempotent cancellation: Queued payloads become Cancelled, blocked producers become Cancelled, and Running handlers receive the same structured task cancellation at their next wait point. An inherited deadline uses DeadlineExceeded instead. The worker-versus-control race is one compare-and-set: Queued -> Running means the worker owns delivery; Queued -> Cancelled/DeadlineExceeded means no handler may observe it. A Running handler that returns before observing cancellation is Delivered or HandlerFailed; if cancellation wins at a wait point it is Cancelled/DeadlineExceeded. Thus every accepted payload reaches exactly one terminal report and is never double-delivered or double-dropped. FailurePolicy.StopFirst stops remaining handlers for that payload after the first E; the queue continues. Collect runs every handler and stores failures in stable priority/subscription order. Log runs every handler, stores no E values in the report, and emits each failure into the event trace. Ignore runs every handler and discards E values and failure trace entries. StopFirst and Collect use HandlerFailed when any E occurs; Log and Ignore use Delivered after all handlers return. A handler panic is never coerced to E: it becomes HandlerFailed with a typed DispatchFailure.Panic task-panic record and stops that payload; the queue continues. Decision hooks use DecisionHook<T,E>; each handler receives the current T and returns HookOutcome<T,E>: Continue keeps it, Transform(value) replaces it for later handlers, Cancel stops with Cancel, and Fail(error) stops with Fail(error). FirstCancelElseTransform processes stable priority/subscription order; zero handlers returns Continue(original). Worked pressure examples never depend on timing: a first handler sends on a started channel and waits on a release channel, the test receives started before enqueueing a payload that must remain Queued, then checks queued_count before the overflow or Block attempt. These laws, queue counts, reports, failures, and lifecycle transitions are debugger and Canvas facts, never reconstructed labels.",
       "story": "Maya builds a multiplayer damage pipeline. Ordinary UI clicks should stay one-line and synchronous. Network damage bursts must use a bounded queue, producers must either wait or drop by an explicit policy, cancellation and deadlines must wake blocked work, and every accepted payload must be delivered or dropped exactly once. A validation plugin must be able to transform or cancel a save, while typed handler failures remain inspectable instead of becoming background errors.",
-      "inWild": "use core.event as event\n\nfn run() {\n    owner :: event.scope()\n    clicks :: event.new<Click>()\n    clicks.on(owner, (click) => { ui.highlight(click.target) })\n    clicks.emit(Click.{ target: \"save\" })\n\n    damage :: event.async_result<Damage, DamageError>(\n        event.AsyncPolicy.{ capacity: 256, overflow: event.Overflow.Block },\n        event.FailurePolicy.Collect,\n    )\n    damage.on(owner, (hit) => apply_damage(hit))\n    task :: damage.emit_async(Damage.{ amount: 12 })\n    report :: task.join()\n    print(report.trace().summary())\n    print(report.failures())\n\n    before_save :: event.decision_hook<SaveRequest, SaveRequest, SaveError>(\n        event.HookPolicy.FirstCancelElseTransform,\n    )\n    before_save.on(owner, (request) => event.HookOutcome.Transform(normalize(request)))\n    before_save.on(owner, (request) => validate(request))\n    print(before_save.run(SaveRequest.{ path: \"notes.txt\" }))\n}",
-      "detail": "",
+      "inWild": "use core.event as event\n\nfn run() {\n    owner :: event.scope()\n    clicks :: event.new<Click>()\n    clicks.on(owner, (click) => { ui.highlight(click.target) })\n    clicks.emit(Click.{ target: \"save\" })\n\n    damage :: event.async_result<Damage, DamageError>(\n        event.AsyncPolicy.{ capacity: 2, overflow: event.Overflow.Block },\n        event.FailurePolicy.Collect,\n    )\n    damage.on(owner, (hit) => apply_damage(hit))\n    report :: damage.emit_async(Damage.{ amount: 12 }).join()\n    print(report.state())\n    print(report.failures())\n\n    before_save :: event.decision_hook<SaveRequest, SaveError>(event.HookPolicy.FirstCancelElseTransform)\n    before_save.on(owner, (request) => event.HookOutcome.Transform(normalize(request)))\n    before_save.on(owner, (request) => validate(request))\n    outcome :: before_save.run(SaveRequest.{ path: \" notes.txt \" })\n    print(outcome)\n}",
+      "detail": "Recommendation: A. It preserves D-EVENT1's ceremony-free synchronous Event<T>/Hook<T,R> while one compiler-known companion family gives experts statically fixed return types, one queue policy per handle, and one inspectable control plane. The recommendation does not depend on implementation effort.",
       "options": [
         {
           "key": "A",
           "name": "Typed companion handles",
-          "detail": "Keep the beginner Event<T> and Hook<T,R> calls unchanged and synchronous. Add one companion family for expert policies: AsyncEvent<T,E> owns a bounded scheduler queue and returns Task<DispatchReport<E>> from emit_async; DecisionHook<T,R,E> returns a typed HookOutcome<R,E>. AsyncPolicy requires capacity plus Block, DropNewest, or DropOldest. FailurePolicy is StopFirst, Collect, Log, or Ignore. EventScope owns subscriptions and in-flight dispatch: cancel/drop closes the queue, wakes blocked producers, cancels queued work, and records every accepted payload exactly once. An inherited structured deadline cancels a blocked enqueue or worker through the same task control. This preserves the tiny default while making expert outcomes fully typed and awaitable.",
-          "code": "clicks :: event.new<Click>()\nclicks.on(owner, handle_click)\nclicks.emit(click)\n\ndamage :: event.async_result<Damage, DamageError>(\n    event.AsyncPolicy.{ capacity: 256, overflow: event.Overflow.Block },\n    event.FailurePolicy.Collect,\n)\nreport :: damage.emit_async(hit).join()\nfor failure in report.failures() { print(failure) }\n\nbefore_save :: event.decision_hook<SaveRequest, SaveRequest, SaveError>(\n    event.HookPolicy.FirstCancelElseTransform,\n)\nbefore_save.on(owner, validate_or_transform)\nmatch before_save.run(request) {\n    event.HookOutcome.Continue(value) -> save(value)\n    event.HookOutcome.Cancel(reason) -> print(reason)\n    event.HookOutcome.Fail(error) -> print(error)\n}"
+          "detail": "Keep beginner Event<T> and Hook<T,R> unchanged and synchronous. Add AsyncEvent<T,E>, constructed by async_result, with one immutable AsyncPolicy and FailurePolicy per handle; emit_async always returns Task<DispatchReport<E>>. Add DecisionHook<T,E>, constructed by decision_hook, whose run always returns HookOutcome<T,E>. One handle therefore has one queue, one ordering domain, one lifecycle, and one statically fixed result type. This is the recommended hybrid: defaults remain tiny, while expert pressure, failure, trace, cancellation, and intervention facts are explicit without changing behavior call by call.",
+          "code": "drop_new_scope :: event.scope()\n(start_new, started_new) :: tasks.channel<Int>(1)\n(release_new, released_new) :: tasks.channel<Int>(1)\ndrop_new :: event.async_result<Job, JobError>(event.AsyncPolicy.{ capacity: 1, overflow: event.Overflow.DropNewest }, event.FailurePolicy.Collect)\ndrop_new.on(drop_new_scope, (job) => { start_new.send(job.id); released_new.receive(); handle_job(job) })\ndrop_new.emit_async(Job.{ id: 0 })\nstarted_new.receive()\ndrop_new.emit_async(Job.{ id: 1 })\nprint(drop_new.queued_count())\n// 1\nprint(drop_new.emit_async(Job.{ id: 2 }).join())\n// DispatchReport(state: DroppedNewest, accepted: false, delivered_handlers: 0, failures: [])\nrelease_new.send(0)\n\ndrop_old_scope :: event.scope()\n(start_old, started_old) :: tasks.channel<Int>(1)\n(release_old, released_old) :: tasks.channel<Int>(1)\ndrop_old :: event.async_result<Job, JobError>(event.AsyncPolicy.{ capacity: 1, overflow: event.Overflow.DropOldest }, event.FailurePolicy.Collect)\ndrop_old.on(drop_old_scope, (job) => { start_old.send(job.id); released_old.receive(); handle_job(job) })\ndrop_old.emit_async(Job.{ id: 0 })\nstarted_old.receive()\nevicted :: drop_old.emit_async(Job.{ id: 1 })\nprint(drop_old.queued_count())\n// 1\ndrop_old.emit_async(Job.{ id: 2 })\nprint(evicted.join())\n// DispatchReport(state: DroppedOldest, accepted: true, delivered_handlers: 0, failures: [])\nrelease_old.send(0)\n\nclose_scope :: event.scope()\n(start_close, started_close) :: tasks.channel<Int>(1)\n(release_close, released_close) :: tasks.channel<Int>(1)\nclose_q :: event.async_result<Job, JobError>(event.AsyncPolicy.{ capacity: 1, overflow: event.Overflow.Block }, event.FailurePolicy.StopFirst)\nclose_q.on(close_scope, (job) => { start_close.send(job.id); released_close.receive(); handle_job(job) })\nclose_q.emit_async(Job.{ id: 0 })\nstarted_close.receive()\nclose_q.emit_async(Job.{ id: 1 })\nwaiting_close :: close_q.emit_async(Job.{ id: 2 })\nprint(close_q.blocked_count())\n// 1\nclose_q.close()\nprint(waiting_close.join())\n// DispatchReport(state: Closed, accepted: false, delivered_handlers: 0, failures: [])\nrelease_close.send(0)\n\ncancel_scope :: event.scope()\n(start_cancel, started_cancel) :: tasks.channel<Int>(1)\n(release_cancel, released_cancel) :: tasks.channel<Int>(1)\ncancel_q :: event.async_result<Job, JobError>(event.AsyncPolicy.{ capacity: 1, overflow: event.Overflow.Block }, event.FailurePolicy.Collect)\ncancel_q.on(cancel_scope, (job) => { start_cancel.send(job.id); released_cancel.receive(); handle_job(job) })\ncancel_q.emit_async(Job.{ id: 0 })\nstarted_cancel.receive()\ncancel_q.emit_async(Job.{ id: 1 })\nwaiting_cancel :: cancel_q.emit_async(Job.{ id: 2 })\ncancel_scope.cancel()\nprint(waiting_cancel.join())\n// DispatchReport(state: Cancelled, accepted: false, delivered_handlers: 0, failures: [])\n\ndeadline_scope :: event.scope()\n(start_deadline, started_deadline) :: tasks.channel<Int>(1)\n(release_deadline, released_deadline) :: tasks.channel<Int>(1)\ndeadline_q :: event.async_result<Job, JobError>(event.AsyncPolicy.{ capacity: 1, overflow: event.Overflow.Block }, event.FailurePolicy.Collect)\ndeadline_q.on(deadline_scope, (job) => { start_deadline.send(job.id); released_deadline.receive(); handle_job(job) })\ndeadline_q.emit_async(Job.{ id: 0 })\nstarted_deadline.receive()\ndeadline_q.emit_async(Job.{ id: 1 })\n#Context(deadline: time.now() + 5) {\n    waiting_deadline :: deadline_q.emit_async(Job.{ id: 2 })\n    print(waiting_deadline.join())\n    // DispatchReport(state: DeadlineExceeded, accepted: false, delivered_handlers: 0, failures: [])\n}\ndeadline_scope.cancel()\n\nfailure_scope :: event.scope()\nfailing :: event.async_result<Job, JobError>(event.AsyncPolicy.{ capacity: 2, overflow: event.Overflow.Block }, event.FailurePolicy.Collect)\nfailing.on(failure_scope, (job) => event.fail(JobError.Invalid(job.id)))\nfailing.on(failure_scope, handle_job)\nprint(failing.emit_async(Job.{ id: 6 }).join())\n// DispatchReport(state: HandlerFailed, accepted: true, delivered_handlers: 2, failures: [Invalid(6)])\n\nhook_scope :: event.scope()\nhook :: event.decision_hook<SaveRequest, SaveError>(event.HookPolicy.FirstCancelElseTransform)\nhook.on(hook_scope, (request) => event.HookOutcome.Transform(normalize(request)))\nhook.on(hook_scope, (request) => event.HookOutcome.Cancel)\nhook.on(hook_scope, (request) => event.HookOutcome.Fail(SaveError.Denied))\nprint(hook.run(SaveRequest.{ path: \" notes.txt \" }))\n// Cancel; third handler did not run"
         },
         {
           "key": "B",
           "name": "One configurable Event type",
-          "detail": "Expand Event to Event<T,E> and Hook to Hook<T,R,E>, with Never as the implicit error type for beginner constructors. Every event stores dispatch, overflow, failure, ordering, duplicate, reentrancy, and trace policies. emit always returns DispatchReport<E>; asynchronous configuration makes emit return Task<DispatchReport<E>> instead. This is one nominal family, but the return type of emit depends on stored runtime policy and therefore requires either a sum return value or separate sync/async methods. Scope close/cancel/deadline laws are identical to A.",
-          "code": "clicks :: event.new<Click>()\nclicks.on(owner, handle_click)\nprint(clicks.emit(click).trace())\n\ndamage :: event.new<Damage, DamageError>(event.Policy.{\n    dispatch: event.Dispatch.Async,\n    capacity: 256,\n    overflow: event.Overflow.Block,\n    failures: event.FailurePolicy.Collect,\n})\nreport :: damage.emit_async(hit).join()\n\nhook :: event.hook<SaveRequest, SaveRequest, SaveError>(event.HookPolicy.FirstCancelElseTransform)\nprint(hook.run(request))"
+          "detail": "Use Event<T,E> and Hook<T,E> as the only nominal families; Never is implicit for beginner construction. Sync emit always returns DispatchReport<E>. AsyncPolicy is optional construction state, and emit_async always returns Task<DispatchReport<E>>; calling emit_async on a sync-only Event returns a completed Closed report with EventConfigError.AsyncDisabled in failures. Hook<T,E> uses the exact DecisionHook fold only when constructed with HookPolicy; ordinary last-result Hook<T,R> becomes the Never specialization. This resolves the return type statically with separate emit and emit_async methods, but every beginner value visibly carries the expert error parameter and reports.",
+          "code": "click_scope :: event.scope()\nclicks :: event.new<Click>()\nclicks.on(click_scope, handle_click)\nprint(clicks.emit(click))\n// DispatchReport(state: Delivered, accepted: true, delivered_handlers: 1, failures: [])\n\n// Each pressure fixture below installs a handler that sends started, then waits on release.\nnew_scope :: event.scope()\nnew_q :: event.new_async<Job, JobError>(event.AsyncPolicy.{ capacity: 1, overflow: event.Overflow.DropNewest }, event.FailurePolicy.Collect)\ninstall_started_release_handler(new_q, new_scope, started_new, release_new)\nnew_q.emit_async(Job.{ id: 0 }); started_new.receive(); new_q.emit_async(Job.{ id: 1 })\nprint(new_q.queued_count())\n// 1\nprint(new_q.emit_async(Job.{ id: 2 }).join())\n// DispatchReport(state: DroppedNewest, accepted: false, delivered_handlers: 0, failures: [])\nrelease_new.send(0)\n\nold_scope :: event.scope()\nold_q :: event.new_async<Job, JobError>(event.AsyncPolicy.{ capacity: 1, overflow: event.Overflow.DropOldest }, event.FailurePolicy.Collect)\ninstall_started_release_handler(old_q, old_scope, started_old, release_old)\nold_q.emit_async(Job.{ id: 0 }); started_old.receive(); evicted :: old_q.emit_async(Job.{ id: 1 })\nprint(old_q.queued_count())\n// 1\nold_q.emit_async(Job.{ id: 2 })\nprint(evicted.join())\n// DispatchReport(state: DroppedOldest, accepted: true, delivered_handlers: 0, failures: [])\nrelease_old.send(0)\n\nclose_scope :: event.scope()\nclose_q :: event.new_async<Job, JobError>(event.AsyncPolicy.{ capacity: 1, overflow: event.Overflow.Block }, event.FailurePolicy.StopFirst)\ninstall_started_release_handler(close_q, close_scope, started_close, release_close)\nclose_q.emit_async(Job.{ id: 0 }); started_close.receive(); close_q.emit_async(Job.{ id: 1 }); waiting_close :: close_q.emit_async(Job.{ id: 2 })\nclose_q.close()\nprint(waiting_close.join())\n// DispatchReport(state: Closed, accepted: false, delivered_handlers: 0, failures: [])\nrelease_close.send(0)\n\ncancel_scope :: event.scope()\ncancel_q :: event.new_async<Job, JobError>(event.AsyncPolicy.{ capacity: 1, overflow: event.Overflow.Block }, event.FailurePolicy.Collect)\ninstall_started_release_handler(cancel_q, cancel_scope, started_cancel, release_cancel)\ncancel_q.emit_async(Job.{ id: 0 }); started_cancel.receive(); cancel_q.emit_async(Job.{ id: 1 }); waiting_cancel :: cancel_q.emit_async(Job.{ id: 2 })\ncancel_scope.cancel()\nprint(waiting_cancel.join())\n// DispatchReport(state: Cancelled, accepted: false, delivered_handlers: 0, failures: [])\n\ndeadline_scope :: event.scope()\ndeadline_q :: event.new_async<Job, JobError>(event.AsyncPolicy.{ capacity: 1, overflow: event.Overflow.Block }, event.FailurePolicy.Collect)\ninstall_started_release_handler(deadline_q, deadline_scope, started_deadline, release_deadline)\ndeadline_q.emit_async(Job.{ id: 0 }); started_deadline.receive(); deadline_q.emit_async(Job.{ id: 1 })\n#Context(deadline: time.now() + 5) { waiting_deadline :: deadline_q.emit_async(Job.{ id: 2 }); print(waiting_deadline.join()) }\n// DispatchReport(state: DeadlineExceeded, accepted: false, delivered_handlers: 0, failures: [])\ndeadline_scope.cancel()\n\nfailure_scope :: event.scope()\nfailure_q :: event.new_async<Job, JobError>(event.AsyncPolicy.{ capacity: 1, overflow: event.Overflow.Block }, event.FailurePolicy.Collect)\nfailure_q.on(failure_scope, (job) => event.fail(JobError.Invalid(job.id)))\nprint(failure_q.emit_async(Job.{ id: 3 }).join())\n// DispatchReport(state: HandlerFailed, accepted: true, delivered_handlers: 1, failures: [Invalid(3)])\n\nhook_scope :: event.scope()\nhook :: event.hook_policy<SaveRequest, SaveError>(event.HookPolicy.FirstCancelElseTransform)\nhook.on(hook_scope, (request) => event.HookOutcome.Transform(normalize(request)))\nhook.on(hook_scope, (request) => event.HookOutcome.Fail(SaveError.Denied))\nprint(hook.run(SaveRequest.{ path: \" notes.txt \" }))\n// Fail(Denied)"
         },
         {
           "key": "C",
           "name": "Policy-specific operations",
-          "detail": "Keep Event<T> as the only event type. Add methods for each expert behavior: emit_async_block, emit_async_drop_newest, emit_async_drop_oldest, on_result, run_transform, and run_cancel. Each operation returns a typed task/report where applicable. This keeps construction simple and makes every call explicit, but spreads one semantic control plane across many verbs and allows the same event value to change queue/failure behavior call by call. Scope close/cancel/deadline laws remain mandatory.",
-          "code": "damage :: event.new<Damage>()\ndamage.on_result<DamageError>(owner, apply_damage)\nreport :: damage.emit_async_block<DamageError>(hit, capacity: 256, failures: event.FailurePolicy.Collect).join()\n\nhook :: event.hook<SaveRequest, SaveRequest>(request)\nhook.on(owner, normalize)\ntransformed :: hook.run_transform(request)\ncancelled :: hook.run_cancel(transformed, validate)"
+          "detail": "Keep Event<T> as the only event value and create three independent scheduler lanes lazily: Block, DropNewest, and DropOldest. emit_async_block<E>, emit_async_drop_newest<E>, and emit_async_drop_oldest<E> each have their own bounded queue, FIFO order, FailurePolicy, and Task<DispatchReport<E>> result. EventScope owns all lanes and applies the shared close/cancel/deadline law to each. Cross-lane delivery order is intentionally unspecified and debugger/Canvas show the lane on every trace. Hook stays one value but run_transform<E> returns HookOutcome<T,E>; run_cancel is removed so cancellation and failure cannot become a second control plane. This makes each call explicit, but one Event can silently split related payloads into three ordering domains.",
+          "code": "// Every fresh Event below uses a started/release channel handler; started is received before the queued payload.\nnew_scope :: event.scope()\nnew_events :: event.new<Job>()\ninstall_started_release_handler(new_events, new_scope, started_new, release_new)\nnew_events.emit_async_drop_newest<JobError>(new_scope, Job.{ id: 0 }, capacity: 1, failures: event.FailurePolicy.Collect); started_new.receive(); new_events.emit_async_drop_newest<JobError>(new_scope, Job.{ id: 1 }, capacity: 1, failures: event.FailurePolicy.Collect)\nprint(new_events.queued_count(event.Overflow.DropNewest))\n// 1\nprint(new_events.emit_async_drop_newest<JobError>(new_scope, Job.{ id: 2 }, capacity: 1, failures: event.FailurePolicy.Collect).join())\n// DispatchReport(state: DroppedNewest, accepted: false, lane: DropNewest, delivered_handlers: 0, failures: [])\nrelease_new.send(0)\n\nold_scope :: event.scope()\nold_events :: event.new<Job>()\ninstall_started_release_handler(old_events, old_scope, started_old, release_old)\nold_events.emit_async_drop_oldest<JobError>(old_scope, Job.{ id: 0 }, capacity: 1, failures: event.FailurePolicy.Collect); started_old.receive(); evicted :: old_events.emit_async_drop_oldest<JobError>(old_scope, Job.{ id: 1 }, capacity: 1, failures: event.FailurePolicy.Collect)\nold_events.emit_async_drop_oldest<JobError>(old_scope, Job.{ id: 2 }, capacity: 1, failures: event.FailurePolicy.Collect)\nprint(evicted.join())\n// DispatchReport(state: DroppedOldest, accepted: true, lane: DropOldest, delivered_handlers: 0, failures: [])\nrelease_old.send(0)\n\nclose_scope :: event.scope()\nclose_events :: event.new<Job>()\ninstall_started_release_handler(close_events, close_scope, started_close, release_close)\nclose_events.emit_async_block<JobError>(close_scope, Job.{ id: 0 }, capacity: 1, failures: event.FailurePolicy.StopFirst); started_close.receive(); close_events.emit_async_block<JobError>(close_scope, Job.{ id: 1 }, capacity: 1, failures: event.FailurePolicy.StopFirst); waiting_close :: close_events.emit_async_block<JobError>(close_scope, Job.{ id: 2 }, capacity: 1, failures: event.FailurePolicy.StopFirst)\nclose_events.close()\nprint(waiting_close.join())\n// DispatchReport(state: Closed, accepted: false, lane: Block, delivered_handlers: 0, failures: [])\nrelease_close.send(0)\n\ncancel_scope :: event.scope()\ncancel_events :: event.new<Job>()\ninstall_started_release_handler(cancel_events, cancel_scope, started_cancel, release_cancel)\ncancel_events.emit_async_block<JobError>(cancel_scope, Job.{ id: 0 }, capacity: 1, failures: event.FailurePolicy.Collect); started_cancel.receive(); cancel_events.emit_async_block<JobError>(cancel_scope, Job.{ id: 1 }, capacity: 1, failures: event.FailurePolicy.Collect); waiting_cancel :: cancel_events.emit_async_block<JobError>(cancel_scope, Job.{ id: 2 }, capacity: 1, failures: event.FailurePolicy.Collect)\ncancel_scope.cancel()\nprint(waiting_cancel.join())\n// DispatchReport(state: Cancelled, accepted: false, lane: Block, delivered_handlers: 0, failures: [])\n\ndeadline_scope :: event.scope()\ndeadline_events :: event.new<Job>()\ninstall_started_release_handler(deadline_events, deadline_scope, started_deadline, release_deadline)\ndeadline_events.emit_async_block<JobError>(deadline_scope, Job.{ id: 0 }, capacity: 1, failures: event.FailurePolicy.Collect); started_deadline.receive(); deadline_events.emit_async_block<JobError>(deadline_scope, Job.{ id: 1 }, capacity: 1, failures: event.FailurePolicy.Collect)\n#Context(deadline: time.now() + 5) { waiting_deadline :: deadline_events.emit_async_block<JobError>(deadline_scope, Job.{ id: 2 }, capacity: 1, failures: event.FailurePolicy.Collect); print(waiting_deadline.join()) }\n// DispatchReport(state: DeadlineExceeded, accepted: false, lane: Block, delivered_handlers: 0, failures: [])\ndeadline_scope.cancel()\n\nfailure_scope :: event.scope()\nfailure_events :: event.new<Job>()\nfailure_events.on_result<JobError>(failure_scope, (job) => event.fail(JobError.Invalid(job.id)))\nprint(failure_events.emit_async_block<JobError>(failure_scope, Job.{ id: 7 }, capacity: 1, failures: event.FailurePolicy.Collect).join())\n// DispatchReport(state: HandlerFailed, accepted: true, lane: Block, delivered_handlers: 1, failures: [Invalid(7)])\n\nhook_scope :: event.scope()\nhook :: event.hook<SaveRequest>()\nhook.on(hook_scope, (request) => event.HookOutcome.Transform(normalize(request)))\nhook.on(hook_scope, (request) => event.HookOutcome.Cancel)\nprint(hook.run_transform<SaveError>(SaveRequest.{ path: \" notes.txt \" }))\n// Cancel"
         }
       ],
       "comparisons": [
         {
           "lang": "Kotlin Flow",
-          "note": "buffer capacity and overflow are explicit, while collection runs in structured coroutine scope; Jet should retain the explicit pressure model without hiding failures in a detached collector.",
+          "note": "Buffer capacity and overflow are explicit, while collection runs in structured coroutine scope; Jet should retain the explicit pressure model without hiding failures in a detached collector.",
           "code": "events.buffer(capacity = 256, onBufferOverflow = BufferOverflow.SUSPEND).collect { handle(it) }"
         },
         {
           "lang": "Tokio",
-          "note": "bounded mpsc send waits for capacity and wakes with an error when the receiver closes; Jet needs the same exact wake/drop law under scope cancellation and deadlines, integrated with its scheduler rather than exposed as a raw channel.",
+          "note": "Bounded mpsc send waits for capacity and wakes with an error when the receiver closes; Jet needs the same exact wake/drop law under scope cancellation and deadlines, integrated with its scheduler rather than exposed as a raw channel.",
           "code": "tx.send(value).await?; drop(rx); // blocked sends wake with closed"
         },
         {
           "lang": "DOM AbortSignal",
-          "note": "one owner cancellation signal removes listeners predictably; Jet's EventScope should additionally own queued payloads and blocked producers so teardown cannot leak background work.",
+          "note": "One owner cancellation signal removes listeners predictably; Jet's EventScope should additionally own queued payloads and blocked producers so teardown cannot leak background work.",
           "code": "target.addEventListener(\"click\", handler, { signal: controller.signal }); controller.abort();"
         }
       ],
@@ -27494,6 +27514,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-11T17:30:37.705Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0fiunwy",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T17:29:29.213Z",
+      "by": "sol-300-builder",
+      "action": "card.update",
+      "ref": "c0z3l25j",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T17:28:59.615Z",
+      "by": "terra-event2-editor",
+      "action": "decision.update",
+      "ref": "D-EVENT2",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-11T17:27:16.533Z",
+      "by": "sol-300-builder",
+      "action": "card.update",
+      "ref": "c0z3l25j",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T17:23:54.898Z",
+      "by": "terra-event2-editor",
+      "action": "decision.update",
+      "ref": "D-EVENT2",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-11T17:21:07.822Z",
+      "by": "sol-300-builder",
+      "action": "card.update",
+      "ref": "c0z3l25j",
+      "note": "phase,logEntry"
+    },
     {
       "at": "2026-07-11T17:20:08.071Z",
       "by": "codex-orchestrator",
@@ -30951,48 +31013,6 @@
       "action": "card.criteria-meet",
       "ref": "c0l5fmyy",
       "note": "#2"
-    },
-    {
-      "at": "2026-07-11T02:10:17.803Z",
-      "by": "terra-360-help",
-      "action": "card.criteria-meet",
-      "ref": "c0l5fmyy",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-11T02:10:09.931Z",
-      "by": "codex-main",
-      "action": "card.criteria-add",
-      "ref": "c0l5fmyy",
-      "note": "#5 Focused Help/CLI/PTy tests and repository full verification "
-    },
-    {
-      "at": "2026-07-11T02:10:09.724Z",
-      "by": "codex-main",
-      "action": "card.criteria-add",
-      "ref": "c0l5fmyy",
-      "note": "#4 Every row from D-FE-HELP1, the hybrid mock, owner ratificati"
-    },
-    {
-      "at": "2026-07-11T02:10:09.511Z",
-      "by": "codex-main",
-      "action": "card.criteria-add",
-      "ref": "c0l5fmyy",
-      "note": "#3 Enter inserts the selected command into the editable parent "
-    },
-    {
-      "at": "2026-07-11T02:10:09.313Z",
-      "by": "codex-main",
-      "action": "card.criteria-add",
-      "ref": "c0l5fmyy",
-      "note": "#2 TTY palette starts with collapsed categories; keyboard expan"
-    },
-    {
-      "at": "2026-07-11T02:10:09.103Z",
-      "by": "codex-main",
-      "action": "card.criteria-add",
-      "ref": "c0l5fmyy",
-      "note": "#1 One CLI-backed registry drives commands, flags, examples, al"
     }
   ],
   "nextNum": 368,
