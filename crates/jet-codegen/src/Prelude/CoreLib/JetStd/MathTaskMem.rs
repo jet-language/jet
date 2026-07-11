@@ -448,9 +448,9 @@
     }
     impl<T: Send> JetReceiver<T> {
         pub fn receive(&self) -> Result<T, Closed> {
-            if super::jet_scheduler_task_cancelled() {
-                return Err(Closed::Closed);
-            }
+            // D-CANCELMODEL1=C: cancellation is handled preemptively inside
+            // `inner.receive()` — a cancelled recv unwinds at the wait point rather
+            // than returning a cooperative `Closed`. No pre-check sentinel here.
             if let Some(remaining) = super::jet_deadline_remaining_ms() {
                 if remaining <= 0 {
                     super::jet_deadline_exceeded("channel receive");

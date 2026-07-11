@@ -1198,8 +1198,23 @@ D-COROUTINE1 keeps coroutine machinery internal and exposes expert control via
 task handles instead of new `coroutine` syntax. `task.wait()` aliases
 `task.join()`. `task.pause()`, `task.resume()`, and `task.cancel()` set
 control-plane state on the handle; `task.trace() -> String` reports
-`paused=...,cancel=...`. In the current thread runtime these are observability
-hooks; scheduler-enforced pause/cancel semantics land with the M:N runtime work.
+`paused=...,cancel=...`. Pause holds a running task at its next wait point until
+`resume()`; these are enforced by the M:N scheduler, not mere flags.
+
+D-CANCELMODEL1=C (ratified 2026-07-11): cancellation is **preemptive at wait
+points**. A cancelled task — a race loser, a fail-fast sibling, or an explicit
+`handle.cancel()` — unwinds at its next wait point (channel receive/send,
+`time.sleep`, task join, a `select` arm, I/O), running Drop-backed (RAII)
+cleanup on the way out, exactly as a blown deadline (E3003) already does. There
+is one unwind mechanism with two triggers (deadline, cancel). A cancelled task
+does not fall through to the code after the wait: a cancelled `receive()` unwinds
+instead of returning `Closed`, and a race loser stops at its next wait point and
+releases resources via Drop rather than running to completion. A cancelled
+`g.all` member reports `Cancelled` rather than a completed value. A scoped
+shielded region defers (never discards) the unwind until a critical section
+finishes — its wait points complete normally and the deferred cancel/deadline
+lands when the region exits. The shield's user spelling is pending ballot
+**D-SHIELDNAME1**; the runtime machinery ships syntax-free until it ratifies.
 
 `tasks.channel<T>() -> (Sender<T>, Receiver<T>)` (D-TUPLE-DESTRUCT1) creates a
 linked send/receive pair, destructured at the call site: `(tx, rx) :=
