@@ -22,6 +22,7 @@ function assert(condition, message) {
 
 const port = Number(arg("--port"));
 const sourcePath = arg("--source");
+const terminalTranscript = arg("--terminal-transcript");
 if (!port || !sourcePath) {
   throw new Error("usage: hybrid.mjs --port <port> --source <app.jet>");
 }
@@ -62,6 +63,17 @@ try {
     await driver.evaluate('document.getElementById("jet-dev-shade")?.style.display === "block"'),
     "reconnecting state did not dim last-good page",
   );
+  if (terminalTranscript) {
+    await waitFor(
+      async () => (await readFile(terminalTranscript, "utf8")).includes(
+        "jet dev  [reconnecting] waiting for connection"
+      ),
+      "matching terminal reconnect state",
+    );
+  }
+  const readyCountBeforeRecovery = terminalTranscript
+    ? (await readFile(terminalTranscript, "utf8")).split("jet dev  [ready]").length - 1
+    : 0;
   await driver.send("Network.emulateNetworkConditions", {
     offline: false,
     latency: 0,
@@ -76,6 +88,15 @@ try {
     await driver.evaluate('typeof window.__jetReconnectProbe === "undefined"'),
     "recovered connection did not reload last-good page",
   );
+  if (terminalTranscript) {
+    await waitFor(
+      async () => {
+        const text = await readFile(terminalTranscript, "utf8");
+        return text.split("jet dev  [ready]").length - 1 > readyCountBeforeRecovery;
+      },
+      "terminal ready after browser recovery",
+    );
+  }
 
   await writeFile(sourcePath, broken);
   await waitFor(

@@ -2152,16 +2152,19 @@ live tabs rather than transient HTTP connections.
 
 In a TTY, the terminal keeps a two-row header pinned above the scrolling log.
 Pressing `v` toggles request and rebuild detail without changing the shared
-status; `--verbose` starts with that detail open. `NO_COLOR` replaces the status
-dot with a bracketed state word while retaining TTY pinning and controls.
+status; `--verbose` starts with that detail open. The scroll region is installed
+only after raw input and its cleanup guard are active. `NO_COLOR` replaces the
+status dot with a bracketed state word while retaining TTY pinning and controls.
 Non-TTY output is plain and append-only.
 
 While rebuilding, the browser dims the last good page. A failed build expands
 the strip into an overlay containing the front end's verbatim diagnostic and
 keeps serving the last good artifacts. `Esc` collapses that diagnostic without
 hiding the error status. The next clean build clears it and reloads. A failed
-status poll shows a reconnecting state; recovery reloads even when a restarted
-server reuses the previous process's numeric version.
+status poll shows reconnecting in the browser; expiry of its server lease puts
+the terminal on the same reconnecting state. The renewed lease returns both to
+ready. Recovery reloads even when a restarted server reuses the previous
+process's numeric version.
 
 ## Canvas visual editor prototype (D-BPE-*)
 

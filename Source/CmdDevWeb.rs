@@ -69,6 +69,12 @@ struct DevStatus {
     /// (dashboard's depth, D-FE-DEVSRV1=D "on-demand depth").
     verbose: AtomicBool,
     active: AtomicBool,
+    /// Set only after raw-mode input succeeds. Verbose DECSTBM pinning must
+    /// not start before its Ctrl-C/EOF cleanup guard exists.
+    controls_ready: AtomicBool,
+    /// Losing every leased browser after at least one was connected is a
+    /// shared reconnect state until the next lease renewal.
+    reconnecting: AtomicBool,
     /// Color and cursor control are separate capabilities. `NO_COLOR`
     /// changes the dot into a bracketed state word, but a real TTY still
     /// gets the pinned dashboard and live `v` control.
@@ -112,6 +118,8 @@ impl DevStatus {
             port: AtomicU64::new(0),
             verbose: AtomicBool::new(verbose),
             active: AtomicBool::new(false),
+            controls_ready: AtomicBool::new(false),
+            reconnecting: AtomicBool::new(false),
             color,
             pin: is_tty,
             term_lock: Mutex::new(()),
@@ -129,6 +137,12 @@ impl DevStatus {
     }
 
     fn header_text_for(&self, snap: &DevStatusSnapshot) -> (String, String) {
+        if snap.state == "ready" && self.reconnecting.load(Ordering::SeqCst) {
+            return (
+                "reconnecting".to_string(),
+                "waiting for connection".to_string(),
+            );
+        }
         header_words(
             &snap.state,
             &self.watched_file,
@@ -167,7 +181,7 @@ impl DevStatus {
         let line = self.format_line(&word, &rest);
 
         if self.verbose() {
-            if self.pin {
+            if self.pin && self.controls_ready.load(Ordering::SeqCst) {
                 self.write_header_verbose(&line);
             } else {
                 let _g = self.term_lock.lock().unwrap();
@@ -250,7 +264,7 @@ impl DevStatus {
         }
         let _g = self.term_lock.lock().unwrap();
         let mut out = std::io::stderr();
-        if self.pin {
+        if self.pin && self.controls_ready.load(Ordering::SeqCst) {
             let _ = write!(out, "{}\r\n", text);
         } else {
             let _ = writeln!(out, "{}", text);
@@ -286,7 +300,7 @@ impl DevStatus {
         }
         let _g = self.term_lock.lock().unwrap();
         let mut out = std::io::stderr();
-        if self.pin {
+        if self.pin && self.controls_ready.load(Ordering::SeqCst) {
             for line in frame_lines(code, diagnostic) {
                 let _ = write!(out, "{}\r\n", line);
             }
@@ -417,7 +431,8 @@ impl DevStatus {
         let mut clients = self.clients.lock().unwrap();
         let changed = clients.insert(id.to_string(), Instant::now()).is_none();
         drop(clients);
-        if changed {
+        let recovered = self.reconnecting.swap(false, Ordering::SeqCst);
+        if changed || recovered {
             self.refresh();
         }
     }
@@ -429,8 +444,23 @@ impl DevStatus {
         let before = clients.len();
         clients.retain(|_, seen| now.saturating_duration_since(*seen) <= cutoff);
         let changed = clients.len() != before;
+        let disconnected = before > 0 && clients.is_empty();
+        drop(clients);
+        if disconnected {
+            self.reconnecting.store(true, Ordering::SeqCst);
+        }
+        if changed {
+            self.refresh();
+        }
+    }
+
+    fn drop_client(&self, id: &str) {
+        let mut clients = self.clients.lock().unwrap();
+        let changed = clients.remove(id).is_some();
         drop(clients);
         if changed {
+            // A pagehide beacon is a clean close/reload, not a broken poll.
+            self.reconnecting.store(false, Ordering::SeqCst);
             self.refresh();
         }
     }
@@ -451,6 +481,7 @@ fn start_terminal_controls(status: Arc<DevStatus>) {
     let Some(raw) = jet::Term::RawGuard::enable() else {
         return;
     };
+    status.controls_ready.store(true, Ordering::SeqCst);
     thread::spawn(move || {
         let mut keys = jet::Term::KeyReader::new(std::io::stdin());
         loop {
@@ -463,6 +494,7 @@ fn start_terminal_controls(status: Arc<DevStatus>) {
                 }
                 jet::Term::Key::Eof => {
                     status.restore_terminal();
+                    status.controls_ready.store(false, Ordering::SeqCst);
                     drop(raw);
                     return;
                 }
@@ -510,7 +542,7 @@ fn format_build_time(ms: u128) -> String {
 fn format_line_colored(word: &str, rest: &str) -> String {
     let sgr = match word {
         "ready" => "32",
-        "building" => "33",
+        "building" | "reconnecting" => "33",
         "error" => "31",
         _ => "37",
     };
@@ -621,8 +653,10 @@ pub(crate) fn run_dev_web(file: &str, mode: OutputMode, verbose: bool, port: Opt
         );
         println!("Canvas: http://localhost:{}/canvas", port);
     }
-    status.activate();
     start_terminal_controls(Arc::clone(&status));
+    // Render only after raw-mode setup. With `--verbose`, this prevents a
+    // DECSTBM scroll region from being installed without its cleanup guard.
+    status.activate();
 
     // Same mtime-poll/debounce shape as `run_dev` (Source/CmdDevTools.rs),
     // reusing `file_mtime` verbatim (I6: no filesystem-notification crate).
@@ -1217,6 +1251,20 @@ fn handle_connection(
             body.as_bytes(),
         );
     }
+    if path == "/__jet_dev_disconnect" {
+        if method != "POST" {
+            return method_not_allowed(&mut stream);
+        }
+        if let Some(client) = query_param(target, "client") {
+            status.drop_client(&client);
+        }
+        return write_response(
+            &mut stream,
+            "200 OK",
+            "text/plain; charset=utf-8",
+            b"ok",
+        );
+    }
     // Only page/asset GETs are worth a request-log line (D-FE-DEVSRV1=D's
     // verbose log shows `GET / 200 2ms`, not the 400ms `/__jet_dev_version`
     // poll noise) — those are handled above and already returned.
@@ -1352,6 +1400,9 @@ fn live_reload_script() -> String {
       String(Date.now()) + "-" + Math.random().toString(16).slice(2);
     try {{ sessionStorage.setItem("jet-dev-client", jetDevClient); }} catch (_) {{}}
   }}
+  addEventListener("pagehide", function () {{
+    try {{ navigator.sendBeacon("/__jet_dev_disconnect?client=" + encodeURIComponent(jetDevClient)); }} catch (_) {{}}
+  }});
   var pill = null, shade = null, overlay = null, overlayTitle = null, overlayBody = null, overlayFooter = null;
   var dismissedDiagnostic = null;
   function ensureUi() {{
@@ -1447,7 +1498,7 @@ fn live_reload_script() -> String {
       }})
       .catch(function () {{
         reconnectAttempt += 1;
-        renderStatus({{ state: "reconnecting", message: "reconnecting · retry " + reconnectAttempt }});
+        renderStatus({{ state: "reconnecting", message: "reconnecting · waiting for connection" }});
       }});
   }}, {poll_ms});
 }})();
@@ -1531,7 +1582,7 @@ mod tests {
         assert!(out.contains("dismissedDiagnostic === (s.diagnostic || \"\")"));
         assert!(out.contains("location.reload()"));
         assert!(out.contains("recoveredConnection || v !== jetDevVersion"));
-        assert!(out.contains("reconnecting · retry "));
+        assert!(out.contains("reconnecting · waiting for connection"));
         assert!(out.contains("position:fixed;left:12px;bottom:12px"));
         assert!(out.contains("display:none;align-items:flex-start"));
     }
@@ -1570,6 +1621,27 @@ mod tests {
         status.note_client("");
         status.note_client(&"x".repeat(129));
         assert_eq!(status.client_count(), 2);
+    }
+
+    #[test]
+    fn expired_browser_lease_drives_shared_reconnect_then_ready() {
+        let status = DevStatus::new("app.jet", false);
+        status.set_port(8123);
+        status.note_client("tab-a");
+        status.clients.lock().unwrap().insert(
+            "tab-a".to_string(),
+            std::time::Instant::now()
+                - std::time::Duration::from_millis(super::CLIENT_TTL_MS + 1),
+        );
+        status.expire_clients();
+        let reconnecting = status.json();
+        assert!(reconnecting.contains("\"state\":\"reconnecting\""));
+        assert!(reconnecting.contains("reconnecting · waiting for connection"));
+
+        status.note_client("tab-a");
+        let ready = status.json();
+        assert!(ready.contains("\"state\":\"ready\""));
+        assert!(ready.contains("ready · localhost:8123 · 1 client"));
     }
 
     // --- D-FE-DEVSRV1=D: parity words shared verbatim by terminal + browser ---

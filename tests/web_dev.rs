@@ -534,11 +534,57 @@ fn jet_dev_web_real_pty_pins_header_toggles_verbose_and_restores_scroll_region()
 
     input.write_all(b"v").unwrap();
     input.flush().unwrap();
-    wait_for_file_text(
+    let collapsed = wait_for_file_text(
         &transcript_path,
         "\x1b[r\x1b[2J\x1b[H",
         Duration::from_secs(5),
     );
+    let scroll_regions_before = collapsed.matches("\x1b[3r").count();
+
+    // Re-enter verbose mode, then send EOF while DECSTBM is still active.
+    // The prior version exited only after collapsing, so its cleanup assertion
+    // could pass without the input guard doing any restoration.
+    input.write_all(b"v").unwrap();
+    input.flush().unwrap();
+    let start = Instant::now();
+    let before_eof = loop {
+        let text = fs::read_to_string(&transcript_path).unwrap_or_default();
+        if text.matches("\x1b[3r").count() > scroll_regions_before {
+            break text.len();
+        }
+        if start.elapsed() > Duration::from_secs(5) {
+            panic!("PTY did not reactivate verbose scroll region: {text:?}");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    input.write_all(&[4]).unwrap();
+    input.flush().unwrap();
+
+    let start = Instant::now();
+    let after_eof = loop {
+        let text = fs::read_to_string(&transcript_path).unwrap_or_default();
+        if text[before_eof..].contains("\x1b[r") {
+            break text;
+        }
+        if start.elapsed() > Duration::from_secs(5) {
+            panic!("EOF did not restore active scroll region: {text:?}");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+
+    // EOF leaves the server running in cooked mode. A later refresh must not
+    // reinstall DECSTBM after its raw-input cleanup guard has gone away.
+    let scroll_regions_after_eof = after_eof.matches("\x1b[3r").count();
+    wait_for_status(port, "post-eof-tab", "error", Duration::from_secs(5));
+    std::thread::sleep(Duration::from_millis(100));
+    let after_refresh = fs::read_to_string(&transcript_path).unwrap();
+    assert_eq!(
+        after_refresh.matches("\x1b[3r").count(),
+        scroll_regions_after_eof,
+        "refresh reinstalled DECSTBM without raw controls: {after_refresh:?}"
+    );
+
+    // Cooked terminal now owns Ctrl-C; use it only to terminate the fixture.
     input.write_all(&[3]).unwrap();
     input.flush().unwrap();
 
@@ -553,20 +599,19 @@ fn jet_dev_web_real_pty_pins_header_toggles_verbose_and_restores_scroll_region()
         }
         std::thread::sleep(Duration::from_millis(50));
     }
-    let final_transcript = fs::read_to_string(&transcript_path).unwrap();
-    assert!(
-        final_transcript.contains("\x1b[r"),
-        "scroll region was not restored before exit: {final_transcript:?}"
-    );
 
     let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn jet_dev_web_browser_runs_hybrid_status_overlay_and_recovery_matrix() {
-    if !have_tool("rustc") || !have_tool("node") || !have_tool("chromium") {
+    if !have_tool("rustc")
+        || !have_tool("node")
+        || !have_tool("chromium")
+        || !have_tool("script")
+    {
         eprintln!(
-            "note: skipping jet_dev_web_browser_runs_hybrid_status_overlay_and_recovery_matrix (need rustc + node + chromium)"
+            "note: skipping jet_dev_web_browser_runs_hybrid_status_overlay_and_recovery_matrix (need rustc + node + chromium + script)"
         );
         return;
     }
@@ -576,21 +621,24 @@ fn jet_dev_web_browser_runs_hybrid_status_overlay_and_recovery_matrix() {
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let src_path = dir.join("app.jet");
+    let transcript_path = dir.join("browser-terminal.typescript");
     fs::write(&src_path, FIXTURE_SRC).unwrap();
     let port = unused_local_port();
 
-    let child = Command::new(jet_bin())
-        .args([
-            "dev",
-            "app.jet",
-            "--target=web",
-            &format!("--port={port}"),
-        ])
+    let command = format!(
+        "env NO_COLOR=1 {} dev app.jet --target=web --verbose --port={port}",
+        jet_bin().display()
+    );
+    let mut child = Command::new("script")
+        .args(["-qfec", &command])
+        .arg(&transcript_path)
         .current_dir(&dir)
+        .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .expect("failed to start browser-matrix dev server");
+        .expect("failed to start browser-matrix dev server in PTY");
+    let mut input = child.stdin.take().expect("browser-matrix PTY stdin");
 
     struct KillOnDrop(std::process::Child);
     impl Drop for KillOnDrop {
@@ -599,7 +647,7 @@ fn jet_dev_web_browser_runs_hybrid_status_overlay_and_recovery_matrix() {
             let _ = self.0.wait();
         }
     }
-    let guard = KillOnDrop(child);
+    let mut guard = KillOnDrop(child);
     wait_for_server_up(port, Duration::from_secs(20));
 
     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -609,6 +657,8 @@ fn jet_dev_web_browser_runs_hybrid_status_overlay_and_recovery_matrix() {
         .arg(port.to_string())
         .arg("--source")
         .arg(&src_path)
+        .arg("--terminal-transcript")
+        .arg(&transcript_path)
         .current_dir(&repo)
         .output()
         .expect("run hybrid browser matrix");
@@ -625,7 +675,25 @@ fn jet_dev_web_browser_runs_hybrid_status_overlay_and_recovery_matrix() {
     );
     assert_eq!(fs::read_to_string(&src_path).unwrap(), FIXTURE_SRC_EDITED);
 
-    drop(guard);
+    let before_ctrl_c = fs::read_to_string(&transcript_path).unwrap().len();
+    input.write_all(&[3]).unwrap();
+    input.flush().unwrap();
+    let start = Instant::now();
+    loop {
+        if let Some(status) = guard.0.try_wait().unwrap() {
+            assert_eq!(status.code(), Some(130), "browser PTY wrapper exit: {status}");
+            break;
+        }
+        if start.elapsed() > Duration::from_secs(5) {
+            panic!("browser PTY wrapper did not exit after Ctrl-C");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let final_transcript = fs::read_to_string(&transcript_path).unwrap();
+    assert!(
+        final_transcript[before_ctrl_c..].contains("\x1b[r"),
+        "Ctrl-C did not restore active browser-matrix scroll region: {final_transcript:?}"
+    );
     let _ = fs::remove_dir_all(&dir);
 }
 
