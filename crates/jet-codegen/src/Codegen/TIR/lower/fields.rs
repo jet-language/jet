@@ -130,6 +130,7 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         "GameFrame" => matches!(member, "index" | "input"),
         // D-MIGRATE3=A: `MigrationStatus` — `.migrated`/`.from`/`.steps`.
         "MigrationStatus" => matches!(member, "migrated" | "from" | "steps"),
+        "DecodeError" => matches!(member, "path" | "reason"),
         _ => false,
     };
     if known {
@@ -188,6 +189,9 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
             "steps" => Some(Type::List(Box::new(Type::String))),
             _ => None,
         };
+    }
+    if name == "DecodeError" && !cx.struct_fields.contains_key(name) {
+        return matches!(field, "path" | "reason").then_some(Type::String);
     }
     if name == "GameScene" {
         return match field {

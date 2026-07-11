@@ -1348,6 +1348,22 @@ pub(super) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags: &mut Vec<
         if dec {
             source.push_str("impl Decode {\n");
             source.push_str(&format!("fn decode(tree: DataTree) -> {target} ? DecodeError {{\n"));
+            let deny_unknown = s.serde_markers.iter().any(|m|
+                m.name == crate::Syntax::ATTR_DENY_UNKNOWN_FIELDS
+            );
+            let has_flatten = s.fields.iter().any(|f|
+                f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_FLATTEN)
+            );
+            if deny_unknown && !has_flatten {
+                let keys = s.fields.iter()
+                    .filter(|f| !f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_SKIP))
+                    .map(|f| format!("{:?}", serde_source_field_key(&s.serde_markers, f)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                source.push_str(&format!(
+                    "if (copy tree) == .Object(entries) {{ loop key, value in entries {{ if ![{keys}].contains(key) {{ return err(DecodeError.{{ path: copy key, reason: \"E2412: unknown field `{{key}}`\" }}) }} }} }}\n"
+                ));
+            }
             source.push_str(&format!("return ok({target}.{{\n"));
             for f in s.fields.iter().filter(|f| f.computed.is_none()) {
                 let value = if f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_SKIP) {

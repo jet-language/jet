@@ -2537,6 +2537,34 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// Card #131 / D-SERDE8: strict unknown-key rejection is emitted as ordinary
+/// Jet control flow and carries the offending wire path plus E2412 reason.
+#[test]
+fn generated_struct_decode_denies_unknown_fields() {
+    let dir = std::env::temp_dir().join(format!("jet_struct_deny_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let src = r#"
+use core.encoding.json as json
+
+@[Codable]
+#[DenyUnknownFields]
+struct Strict { name: String }
+
+fn run() {
+    result := json.decode<Strict>("{{\"name\":\"x\",\"extra\":1}}")
+    if result == err(e) {
+        print(e.path)
+        print(e.reason)
+    }
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "struct_deny", src, &[], None);
+    assert_eq!(code, 0, "generated strict codec failed: {stderr}");
+    assert_eq!(stdout, "extra\nE2412: unknown field `extra`\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
 /// #495 / I2: a field read from a bare (`Read`) parameter is still rooted in
 /// the borrowed parameter. The explicit `copy` required by E0209 must produce
 /// owned values for both shallow and nested fields, compile through rustc, and
