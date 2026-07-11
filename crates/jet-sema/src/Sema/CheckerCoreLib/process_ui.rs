@@ -240,14 +240,10 @@ pub(crate) fn process_spec_method_return(
 ) -> Option<Option<Type>> {
     let spec_ty = Type::Named("ProcessSpec".to_string());
     match (method, n_args) {
-        ("cwd" | "env_remove" | "stdin_text" | "stdout" | "stderr", 1) => Some(Some(spec_ty)),
+        ("cwd" | "env_remove" | "stdin" | "stdout" | "stderr", 1) => Some(Some(spec_ty)),
         ("env", 2) => Some(Some(spec_ty)),
-        (
-            "env_clear" | "stdout_capture" | "stdout_inherit" | "stdout_discard" | "stderr_capture"
-            | "stderr_inherit" | "stderr_discard" | "detached",
-            0,
-        ) => Some(Some(spec_ty)),
-        ("timeout_ms" | "output_limit", 1) => Some(Some(spec_ty)),
+        ("env_clear" | "detached", 0) => Some(Some(spec_ty)),
+        ("timeout" | "output_limit", 1) => Some(Some(spec_ty)),
         ("run", 0) => Some(Some(result_ty(
             Type::Named("ProcessResult".to_string()),
             io_error_ty(),
@@ -256,7 +252,7 @@ pub(crate) fn process_spec_method_return(
             Type::Named("ProcessChild".to_string()),
             io_error_ty(),
         ))),
-        ("cwd" | "env_remove" | "stdin_text" | "stdout" | "stderr", _) => {
+        ("cwd" | "env_remove" | "stdin" | "stdout" | "stderr", _) => {
             diags.push(wrong_core_arity(method, 1, n_args, span));
             Some(None)
         }
@@ -264,15 +260,11 @@ pub(crate) fn process_spec_method_return(
             diags.push(wrong_core_arity(method, 2, n_args, span));
             Some(None)
         }
-        (
-            "env_clear" | "stdout_capture" | "stdout_inherit" | "stdout_discard" | "stderr_capture"
-            | "stderr_inherit" | "stderr_discard" | "detached" | "run" | "spawn",
-            _,
-        ) => {
+        ("env_clear" | "detached" | "run" | "spawn", _) => {
             diags.push(wrong_core_arity(method, 0, n_args, span));
             Some(None)
         }
-        ("timeout_ms" | "output_limit", _) => {
+        ("timeout" | "output_limit", _) => {
             diags.push(wrong_core_arity(method, 1, n_args, span));
             Some(None)
         }
@@ -280,7 +272,9 @@ pub(crate) fn process_spec_method_return(
     }
 }
 
-/// D-PROCESS1: type-check `ProcessChild` streaming/control methods.
+/// D-PROCESS1: type-check `ProcessChild` control methods (`id`/`wait`/`kill`/
+/// `terminate`/`interrupt`). Streaming I/O is a field access, not a method:
+/// see `process_stdin_method_return`/`process_stream_method_return`.
 pub(crate) fn process_child_method_return(
     method: &str,
     n_args: usize,
@@ -294,20 +288,44 @@ pub(crate) fn process_child_method_return(
             Type::Named("ProcessResult".to_string()),
             io.clone(),
         ))),
-        ("kill" | "terminate" | "interrupt", 0) => Some(Some(result_ty(unit_ty(), io.clone()))),
-        ("write_stdin", 1) => Some(Some(result_ty(unit_ty(), io.clone()))),
-        ("read_stdout_line" | "read_stderr_line", 0) => {
-            Some(Some(result_ty(Type::Option(Box::new(Type::String)), io)))
+        ("kill" | "terminate" | "interrupt", 0) => Some(Some(result_ty(unit_ty(), io))),
+        ("id" | "wait" | "kill" | "terminate" | "interrupt", _) => {
+            diags.push(wrong_core_arity(method, 0, n_args, span));
+            Some(None)
         }
-        ("write_stdin", _) => {
+        _ => None,
+    }
+}
+
+/// D-PROCESS1=A: type-check `.write(text)` on the `child.stdin` writer handle.
+pub(crate) fn process_stdin_method_return(
+    method: &str,
+    n_args: usize,
+    span: Span,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<Option<Type>> {
+    match (method, n_args) {
+        ("write", 1) => Some(Some(result_ty(unit_ty(), io_error_ty()))),
+        ("write", _) => {
             diags.push(wrong_core_arity(method, 1, n_args, span));
             Some(None)
         }
-        (
-            "id" | "wait" | "kill" | "terminate" | "interrupt" | "read_stdout_line"
-            | "read_stderr_line",
-            _,
-        ) => {
+        _ => None,
+    }
+}
+
+/// D-PROCESS1=A: type-check `.lines()` on a `child.stdout`/`child.stderr`
+/// streaming reader handle. Mirrors `FileReader`/`StdinHandle` — the result is
+/// a loop-source-only `ProcessLines` (E2502 in `bindings.rs`).
+pub(crate) fn process_stream_method_return(
+    method: &str,
+    n_args: usize,
+    span: Span,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<Option<Type>> {
+    match (method, n_args) {
+        ("lines", 0) => Some(Some(Type::Named("ProcessLines".to_string()))),
+        ("lines", _) => {
             diags.push(wrong_core_arity(method, 0, n_args, span));
             Some(None)
         }

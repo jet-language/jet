@@ -1544,17 +1544,27 @@ impl<'a> Checker<'a> {
                         if matches!(method, "run" | "spawn") {
                             self.record_effect(Effect::Exec.name());
                         }
+                        let stream_mode_ty = Type::Named("ProcessStreamMode".to_string());
                         match method {
-                            "cwd" | "env_remove" | "stdin_text" | "stdout" | "stderr"
-                                if args.len() == 1 =>
-                            {
+                            "cwd" | "env_remove" if args.len() == 1 => {
                                 self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
+                            }
+                            "stdin" | "stdout" | "stderr" if args.len() == 1 => {
+                                self.expect_core_arg(method, 0, &stream_mode_ty, &mut args[0]);
                             }
                             "env" if args.len() == 2 => {
                                 self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
                                 self.expect_core_arg(method, 1, &Type::String, &mut args[1]);
                             }
-                            "timeout_ms" | "output_limit" if args.len() == 1 => {
+                            "timeout" if args.len() == 1 => {
+                                self.expect_core_arg(
+                                    method,
+                                    0,
+                                    &Type::Named("Duration".to_string()),
+                                    &mut args[0],
+                                );
+                            }
+                            "output_limit" if args.len() == 1 => {
                                 self.expect_core_arg(method, 0, &Type::Int, &mut args[0]);
                             }
                             _ => {
@@ -1574,14 +1584,41 @@ impl<'a> Checker<'a> {
                         if method != "id" {
                             self.record_effect(Effect::Exec.name());
                         }
-                        if method == "write_stdin" && args.len() == 1 {
+                        for a in args.iter_mut() {
+                            self.infer(&mut a.expr);
+                        }
+                        *recv_type_out = Some("ProcessChild".to_string());
+                        return ret;
+                    }
+                }
+                // D-PROCESS1=A: `.write(text)` on the `child.stdin` writer handle.
+                if handle_ty == "ProcessStdin" {
+                    if let Some(ret) =
+                        process_stdin_method_return(method, args.len(), span, &mut self.diags)
+                    {
+                        self.record_effect(Effect::Exec.name());
+                        if method == "write" && args.len() == 1 {
                             self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
                         } else {
                             for a in args.iter_mut() {
                                 self.infer(&mut a.expr);
                             }
                         }
-                        *recv_type_out = Some("ProcessChild".to_string());
+                        *recv_type_out = Some("ProcessStdin".to_string());
+                        return ret;
+                    }
+                }
+                // D-PROCESS1=A: `.lines()` on `child.stdout`/`child.stderr` streaming
+                // reader handles (loop-source-only — E2502 in bindings.rs).
+                if handle_ty == "ProcessStdoutStream" || handle_ty == "ProcessStderrStream" {
+                    if let Some(ret) =
+                        process_stream_method_return(method, args.len(), span, &mut self.diags)
+                    {
+                        self.record_effect(Effect::Exec.name());
+                        for a in args.iter_mut() {
+                            self.infer(&mut a.expr);
+                        }
+                        *recv_type_out = Some(handle_ty.clone());
                         return ret;
                     }
                 }
