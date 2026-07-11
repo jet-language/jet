@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 495,
-    "rev": 3433,
+    "rev": 3502,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -27,7 +27,7 @@
         "radar-cards"
       ]
     },
-    "digestCursor": "2026-07-11T10:34:13.905Z"
+    "digestCursor": "2026-07-11T11:00:45.028Z"
   },
   "epochs": [
     {
@@ -11750,10 +11750,44 @@
       "plan": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-11",
+          "by": "codex-main",
+          "text": "codemod live audit: remaining D-CODEMOD-BATCH1=A is not a rename-loop patch. Correct tranche needs strict v2 JSON object parser, ordered typed AST templates with staged multi-file overlay/reindex, constrained examples/tests-ui roots and symlink containment, exact match/overlap/binding checks, clean-vs-fixture validation, lock+journal+fsync+recovery transaction, byte-exact schema-2 undo plus schema-1 compatibility. Files: CmdCodemod modules, driver multi-overlay, semindex overlays, docs, tests/codemod. Minimum acceptance: two-root example+UI migration where rule2 matches only after rule1, dry-run no writes, apply source+stderr, crash recovery, drift/path/overlap failures, exact undo. No owner gate; not low-fruit."
+        }
+      ],
       "created": "2026-07-10T10:49:07.140Z",
-      "updated": "2026-07-10",
-      "criteria": [],
+      "updated": "2026-07-11",
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The Nix dev shell provides jq, gh, and fd; shell entry and verify-full share one cleanup helper that removes only stale same-UID unreferenced nix-shell directories, works from subdirectories/explicit flake paths, and never double-scans one inherited shell.",
+          "status": "verified",
+          "metBy": "terra-451-shell",
+          "verifiedBy": "sol-451-shell-review",
+          "evidence": "Independent re-review confirmed root-independent invocation, fail-closed liveness proof, exact guarded removal, active-session preservation, sentinel/direct-verify behavior, strict-shell safety, and tool availability.",
+          "at": "2026-07-11T11:23:51.547Z"
+        },
+        {
+          "n": 2,
+          "text": "The ratified v2 batch codemod executes ordered semantic symbol/template rules across constrained examples/tests-ui roots with strict schema, staged reindex/validation, transactional apply/recovery, byte-exact undo, and non-vacuous multi-file acceptance proof while v1 logs remain readable.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-11T11:23:50.984Z"
+        },
+        {
+          "n": 3,
+          "text": "Focused codemod/dev-shell proofs and repository full verification pass on the integrated tree, then a different agent verifies every criterion.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-11T11:23:51.160Z"
+        }
+      ],
       "needsAcceptance": false,
       "refs": [],
       "workOrder": 32
@@ -12012,8 +12046,14 @@
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
-      "assignee": "terra-456-toml",
-      "log": [],
+      "assignee": "terra-456-store-final",
+      "log": [
+        {
+          "at": "2026-07-11",
+          "by": "codex-main",
+          "text": "live ratchet correction at d915d641: audited historical production baseline was 14; eleven verified removals landed, so current exact production unwrap/expect count is 3, all in Store.rs (piped stdin/stdout expects and root strip_prefix unwrap). Earlier audit wording current=14 was stale. Do not build ratchet with 14; current ceiling/allowlist is 3, historical start 14. Store sites remain serialized against active #465/#467/cache ownership."
+        }
+      ],
       "created": "2026-07-10T10:49:07.533Z",
       "updated": "2026-07-11",
       "criteria": [
@@ -12070,12 +12110,57 @@
           "verifiedBy": "sol-456-cbind-review",
           "evidence": "Independent review proved UTF-8 boundaries, empty-name propagation, ASCII separator/_ behavior, exact existing error, and direct non-vacuous hostile path; no new production panic.",
           "at": "2026-07-11T10:40:44.573Z"
+        },
+        {
+          "n": 7,
+          "text": "TOML sign and radix parsing contain no production unwrap/unreachable path; malformed signed/base-prefixed numbers retain exact errors and recover to parse subsequent valid integers.",
+          "status": "verified",
+          "metBy": "terra-456-toml",
+          "verifiedBy": "sol-456-toml-review",
+          "evidence": "Independent review proved sign/radix preconditions, exact malformed errors and recovery, decimal/radix/infinity behavior, non-vacuous recovered -7/255 assertions, and no new panic.",
+          "at": "2026-07-11T10:47:43.865Z"
+        },
+        {
+          "n": 8,
+          "text": "Manifest latest-edition lookup is total and panic-free; the private canonical edition, supported-list tail, support check, and version banner remain aligned without public value/API change.",
+          "status": "verified",
+          "metBy": "terra-456-manifest-edition",
+          "verifiedBy": "sol-456-manifest-review",
+          "evidence": "Independent review confirmed unchanged 2026 public value/API/banner, non-vacuous tail/support/banner guard, future reorder drift detection, and zero lookup/index panic.",
+          "at": "2026-07-11T10:51:34.882Z"
+        },
+        {
+          "n": 9,
+          "text": "C FFI surface aggregation has no map unwrap: first-seen library order and bindgen/overlay merge semantics are preserved, and every ordered lookup is checked under a documented local invariant.",
+          "status": "verified",
+          "metBy": "terra-456-cffi",
+          "verifiedBy": "sol-456-cffi-review",
+          "evidence": "Independent review proved Vacant pushes once, Occupied preserves order, map never removes before lookup, overlay/E3205 semantics unchanged, and no API/diagnostic/output drift.",
+          "at": "2026-07-11T10:54:41.265Z"
+        },
+        {
+          "n": 10,
+          "text": "JetOS generation symlink rewriting rejects relative targets with checked InvalidData before mutation/routing, preserves absolute non-store links, and rewrites valid absolute store links without panic.",
+          "status": "verified",
+          "metBy": "terra-456-generation-symlink",
+          "verifiedBy": "sol-456-generation-review",
+          "evidence": "Independent re-review proved production /nix/store relative rejection before mutation, unchanged absolute non-store pass-through, unchanged absolute-store rewrite, and non-vacuous three-path tests.",
+          "at": "2026-07-11T11:02:01.332Z"
+        },
+        {
+          "n": 11,
+          "text": "NixOS mapping extracts the required nixpkgs pin without expect; missing-pin aggregation and defensive fallback preserve one exact canonical error, while successful owner/repo/rev mapping is unchanged.",
+          "status": "verified",
+          "metBy": "terra-456-nixos-pin",
+          "verifiedBy": "sol-456-nixos-review",
+          "evidence": "Independent review confirmed unchanged aggregate sort/dedup/error path, exact fallback vector, unchanged Some mapping fields, accurate invariant, and no API/diagnostic drift.",
+          "at": "2026-07-11T11:06:01.922Z"
         }
       ],
       "needsAcceptance": false,
       "refs": [],
       "workOrder": 93,
-      "claimedAt": "2026-07-11T10:44:36.920Z"
+      "claimedAt": "2026-07-11T11:26:45.488Z"
     },
     {
       "id": "c09ffy3w",
@@ -23656,8 +23741,10 @@
       ],
       "rec": "A",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-11T04:07:55.212Z"
+      "status": "ratified",
+      "created": "2026-07-11T04:07:55.212Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-11"
     },
     {
       "id": "D-PERFBUDGET-REPORT1",
@@ -23708,8 +23795,10 @@
       ],
       "rec": "A",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-11T04:14:54.969Z"
+      "status": "ratified",
+      "created": "2026-07-11T04:14:54.969Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-11"
     },
     {
       "id": "D-ENCXML1",
@@ -23771,8 +23860,10 @@
       ],
       "rec": "A",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-11T04:23:49.652Z"
+      "status": "ratified",
+      "created": "2026-07-11T04:23:49.652Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-11"
     },
     {
       "id": "D-JSONCANON1",
@@ -23834,8 +23925,10 @@
       ],
       "rec": "A",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-11T04:31:59.877Z"
+      "status": "ratified",
+      "created": "2026-07-11T04:31:59.877Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-11"
     },
     {
       "id": "D-ENC-CBOR-SURFACE1",
@@ -23892,8 +23985,10 @@
       ],
       "rec": "A",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-11T04:39:21.140Z"
+      "status": "ratified",
+      "created": "2026-07-11T04:39:21.140Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-11"
     },
     {
       "id": "D-ENCBASE-STRICT1",
@@ -23944,8 +24039,10 @@
       ],
       "rec": "A",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-11T04:40:20.328Z"
+      "status": "ratified",
+      "created": "2026-07-11T04:40:20.328Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-11"
     },
     {
       "id": "D-PERFBUDGET-OUTPUT1",
@@ -23996,8 +24093,10 @@
       ],
       "rec": "A",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-11T04:40:37.884Z"
+      "status": "ratified",
+      "created": "2026-07-11T04:40:37.884Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-11"
     },
     {
       "id": "D-GENMOD-VALUE1",
@@ -24048,8 +24147,10 @@
       ],
       "rec": "A",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-11T04:52:45.557Z"
+      "status": "ratified",
+      "created": "2026-07-11T04:52:45.557Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-11"
     },
     {
       "id": "D-DBG-DAP1",
@@ -24105,8 +24206,10 @@
       ],
       "rec": "A",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-11T05:01:55.004Z"
+      "status": "ratified",
+      "created": "2026-07-11T05:01:55.004Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-11"
     },
     {
       "id": "D-GENMOD-BODY1",
@@ -24162,8 +24265,10 @@
       ],
       "rec": "A",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-11T05:05:30.961Z"
+      "status": "ratified",
+      "created": "2026-07-11T05:05:30.961Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-11"
     },
     {
       "id": "D-DBG-NATIVE1",
@@ -24219,8 +24324,10 @@
       ],
       "rec": "A",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-11T05:19:55.818Z"
+      "status": "ratified",
+      "created": "2026-07-11T05:19:55.818Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-11"
     },
     {
       "id": "D-GENMOD-IDENTITY1",
@@ -24276,8 +24383,10 @@
       ],
       "rec": "A",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-11T05:22:09.274Z"
+      "status": "ratified",
+      "created": "2026-07-11T05:22:09.274Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-11"
     },
     {
       "id": "D-DBG-AUTH1",
@@ -24333,8 +24442,10 @@
       ],
       "rec": "A",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-11T05:36:37.860Z"
+      "status": "ratified",
+      "created": "2026-07-11T05:36:37.860Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-07-11"
     },
     {
       "id": "D-DBG-EDITOR1",
@@ -24385,8 +24496,10 @@
       ],
       "rec": "A",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-11T05:47:48.242Z"
+      "status": "ratified",
+      "created": "2026-07-11T05:47:48.242Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-11"
     },
     {
       "id": "D-ENV-MUTATE1",
@@ -24437,8 +24550,10 @@
       ],
       "rec": "A",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-11T05:49:03.972Z"
+      "status": "ratified",
+      "created": "2026-07-11T05:49:03.972Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-11"
     },
     {
       "id": "D-DBG-DIAG1",
@@ -24489,8 +24604,10 @@
       ],
       "rec": "A",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-11T06:05:15.296Z"
+      "status": "ratified",
+      "created": "2026-07-11T06:05:15.296Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-11"
     },
     {
       "id": "D-DEP-CRYPTO-SUITE2",
@@ -24536,8 +24653,10 @@
       ],
       "rec": "A",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-11T07:10:54.718Z"
+      "status": "ratified",
+      "created": "2026-07-11T07:10:54.718Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-11"
     },
     {
       "id": "D-CRYPTO-RNG1",
@@ -24588,8 +24707,10 @@
       ],
       "rec": "A",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-11T07:10:54.802Z"
+      "status": "ratified",
+      "created": "2026-07-11T07:10:54.802Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-11"
     },
     {
       "id": "D-PWHASH-POLICY1",
@@ -24640,8 +24761,10 @@
       ],
       "rec": "A",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-11T07:10:54.890Z"
+      "status": "ratified",
+      "created": "2026-07-11T07:10:54.890Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-11"
     },
     {
       "id": "D-CRYPTO-API1",
@@ -24692,8 +24815,10 @@
       ],
       "rec": "A",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-11T07:10:54.972Z"
+      "status": "ratified",
+      "created": "2026-07-11T07:10:54.972Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-11"
     },
     {
       "id": "D-CRYPTO-ENVELOPE2",
@@ -24744,8 +24869,10 @@
       ],
       "rec": "A",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-11T07:10:55.062Z"
+      "status": "ratified",
+      "created": "2026-07-11T07:10:55.062Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-11"
     },
     {
       "id": "D-CRYPTO-VAULT1",
@@ -24796,8 +24923,10 @@
       ],
       "rec": "A",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-11T07:10:55.146Z"
+      "status": "ratified",
+      "created": "2026-07-11T07:10:55.146Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-11"
     },
     {
       "id": "D-CRYPTO-KEYWRAP1",
@@ -24848,8 +24977,10 @@
       ],
       "rec": "A",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-11T07:10:55.230Z"
+      "status": "ratified",
+      "created": "2026-07-11T07:10:55.230Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-11"
     },
     {
       "id": "D-CRYPTO-DIAG1",
@@ -24900,8 +25031,10 @@
       ],
       "rec": "A",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-11T07:10:55.308Z"
+      "status": "ratified",
+      "created": "2026-07-11T07:10:55.308Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-11"
     },
     {
       "id": "D-HTTP-CORE2",
@@ -24947,8 +25080,10 @@
       ],
       "rec": "A",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-11T07:24:30.983Z"
+      "status": "ratified",
+      "created": "2026-07-11T07:24:30.983Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-11"
     },
     {
       "id": "D-HTTP-CLIENT2",
@@ -24994,8 +25129,10 @@
       ],
       "rec": "A",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-11T07:24:31.068Z"
+      "status": "ratified",
+      "created": "2026-07-11T07:24:31.068Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-11"
     },
     {
       "id": "D-HTTP-SERVER2",
@@ -25041,8 +25178,10 @@
       ],
       "rec": "A",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-11T07:24:31.156Z"
+      "status": "ratified",
+      "created": "2026-07-11T07:24:31.156Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-11"
     },
     {
       "id": "D-DEP-HTTP2",
@@ -25083,8 +25222,10 @@
       ],
       "rec": "B",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-11T07:24:31.246Z"
+      "status": "ratified",
+      "created": "2026-07-11T07:24:31.246Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-07-11"
     },
     {
       "id": "D-NETDNS2",
@@ -25130,8 +25271,10 @@
       ],
       "rec": "A",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-11T10:11:07.718Z"
+      "status": "ratified",
+      "created": "2026-07-11T10:11:07.718Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-11"
     },
     {
       "id": "D-NETIO1",
@@ -25183,8 +25326,10 @@
       ],
       "rec": "D",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-11T10:11:08.011Z"
+      "status": "ratified",
+      "created": "2026-07-11T10:11:08.011Z",
+      "outcome": "D",
+      "ratifiedAt": "2026-07-11"
     },
     {
       "id": "D-NETERROR1",
@@ -25230,8 +25375,10 @@
       ],
       "rec": "A",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-11T10:11:08.305Z"
+      "status": "ratified",
+      "created": "2026-07-11T10:11:08.305Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-11"
     },
     {
       "id": "D-NETTASK1",
@@ -25277,8 +25424,10 @@
       ],
       "rec": "A",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-11T10:11:08.601Z"
+      "status": "ratified",
+      "created": "2026-07-11T10:11:08.601Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-11"
     },
     {
       "id": "D-NETTLSSTREAM1",
@@ -25324,8 +25473,10 @@
       ],
       "rec": "A",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-11T10:11:08.894Z"
+      "status": "ratified",
+      "created": "2026-07-11T10:11:08.894Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-11"
     },
     {
       "id": "D-CLI-SURFACE2",
@@ -25371,8 +25522,10 @@
       ],
       "rec": "A",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-11T10:14:21.334Z"
+      "status": "ratified",
+      "created": "2026-07-11T10:14:21.334Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-11"
     }
   ],
   "questions": [
@@ -26184,6 +26337,482 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-11T11:26:45.489Z",
+      "by": "terra-456-store-final",
+      "action": "card.claim",
+      "ref": "c083j754",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T11:24:07.749Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c01lj8gw",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T11:23:51.720Z",
+      "by": "terra-451-shell",
+      "action": "card.release",
+      "ref": "c01lj8gw",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-11T11:23:51.547Z",
+      "by": "sol-451-shell-review",
+      "action": "card.criteria-verify",
+      "ref": "c01lj8gw",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-11T11:23:51.380Z",
+      "by": "terra-451-shell",
+      "action": "card.criteria-meet",
+      "ref": "c01lj8gw",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-11T11:23:51.160Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c01lj8gw",
+      "note": "#3 Focused codemod/dev-shell proofs and repository full verific"
+    },
+    {
+      "at": "2026-07-11T11:23:50.984Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c01lj8gw",
+      "note": "#2 The ratified v2 batch codemod executes ordered semantic symb"
+    },
+    {
+      "at": "2026-07-11T11:23:50.810Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c01lj8gw",
+      "note": "#1 The Nix dev shell provides jq, gh, and fd; shell entry and v"
+    },
+    {
+      "at": "2026-07-11T11:10:23.234Z",
+      "by": "terra-451-shell",
+      "action": "card.claim",
+      "ref": "c01lj8gw",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T11:08:00.831Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c083j754",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T11:06:02.092Z",
+      "by": "terra-456-nixos-pin",
+      "action": "card.release",
+      "ref": "c083j754",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-11T11:06:01.922Z",
+      "by": "sol-456-nixos-review",
+      "action": "card.criteria-verify",
+      "ref": "c083j754",
+      "note": "#11"
+    },
+    {
+      "at": "2026-07-11T11:06:01.747Z",
+      "by": "terra-456-nixos-pin",
+      "action": "card.criteria-meet",
+      "ref": "c083j754",
+      "note": "#11"
+    },
+    {
+      "at": "2026-07-11T11:06:01.571Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c083j754",
+      "note": "#11 NixOS mapping extracts the required nixpkgs pin without expe"
+    },
+    {
+      "at": "2026-07-11T11:02:09.496Z",
+      "by": "terra-456-nixos-pin",
+      "action": "card.claim",
+      "ref": "c083j754",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T11:02:01.498Z",
+      "by": "terra-456-generation-symlink",
+      "action": "card.release",
+      "ref": "c083j754",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-11T11:02:01.332Z",
+      "by": "sol-456-generation-review",
+      "action": "card.criteria-verify",
+      "ref": "c083j754",
+      "note": "#10"
+    },
+    {
+      "at": "2026-07-11T11:02:01.167Z",
+      "by": "terra-456-generation-symlink",
+      "action": "card.criteria-meet",
+      "ref": "c083j754",
+      "note": "#10"
+    },
+    {
+      "at": "2026-07-11T11:02:01.001Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c083j754",
+      "note": "#10 JetOS generation symlink rewriting rejects relative targets "
+    },
+    {
+      "at": "2026-07-11T11:00:42.953Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CLI-SURFACE2",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-11T11:00:17.186Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-NETTLSSTREAM1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-11T11:00:01.331Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-NETTASK1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-11T10:59:46.851Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-NETERROR1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-11T10:59:33.669Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-NETIO1",
+      "note": "D"
+    },
+    {
+      "at": "2026-07-11T10:59:24.973Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-NETDNS2",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-11T10:59:12.576Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-DEP-HTTP2",
+      "note": "B"
+    },
+    {
+      "at": "2026-07-11T10:59:01.580Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-HTTP-SERVER2",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-11T10:58:45.389Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-HTTP-CLIENT2",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-11T10:58:33.919Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-HTTP-CORE2",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-11T10:57:48.572Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CRYPTO-DIAG1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-11T10:57:13.953Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CRYPTO-KEYWRAP1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-11T10:57:01.492Z",
+      "by": "terra-456-generation-symlink",
+      "action": "card.claim",
+      "ref": "c083j754",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T10:56:41.922Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CRYPTO-VAULT1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-11T10:56:25.089Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CRYPTO-ENVELOPE2",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-11T10:55:24.014Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CRYPTO-API1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-11T10:55:17.439Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-PWHASH-POLICY1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-11T10:54:52.901Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CRYPTO-RNG1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-11T10:54:41.514Z",
+      "by": "terra-456-cffi",
+      "action": "card.release",
+      "ref": "c083j754",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-11T10:54:41.266Z",
+      "by": "sol-456-cffi-review",
+      "action": "card.criteria-verify",
+      "ref": "c083j754",
+      "note": "#9"
+    },
+    {
+      "at": "2026-07-11T10:54:41.038Z",
+      "by": "terra-456-cffi",
+      "action": "card.criteria-meet",
+      "ref": "c083j754",
+      "note": "#9"
+    },
+    {
+      "at": "2026-07-11T10:54:40.813Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c083j754",
+      "note": "#9 C FFI surface aggregation has no map unwrap: first-seen libr"
+    },
+    {
+      "at": "2026-07-11T10:54:34.258Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-DEP-CRYPTO-SUITE2",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-11T10:54:06.425Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-DBG-DIAG1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-11T10:53:52.876Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-ENV-MUTATE1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-11T10:53:39.453Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-DBG-EDITOR1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-11T10:53:31.662Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-DBG-AUTH1",
+      "note": "B"
+    },
+    {
+      "at": "2026-07-11T10:52:41.292Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-GENMOD-IDENTITY1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-11T10:51:41.840Z",
+      "by": "terra-456-cffi",
+      "action": "card.claim",
+      "ref": "c083j754",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T10:51:35.336Z",
+      "by": "terra-456-manifest-edition",
+      "action": "card.release",
+      "ref": "c083j754",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-11T10:51:34.883Z",
+      "by": "sol-456-manifest-review",
+      "action": "card.criteria-verify",
+      "ref": "c083j754",
+      "note": "#8"
+    },
+    {
+      "at": "2026-07-11T10:51:34.357Z",
+      "by": "terra-456-manifest-edition",
+      "action": "card.criteria-meet",
+      "ref": "c083j754",
+      "note": "#8"
+    },
+    {
+      "at": "2026-07-11T10:51:33.924Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c083j754",
+      "note": "#8 Manifest latest-edition lookup is total and panic-free; the "
+    },
+    {
+      "at": "2026-07-11T10:51:31.234Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-DBG-NATIVE1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-11T10:51:20.750Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-GENMOD-BODY1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-11T10:51:07.361Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-DBG-DAP1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-11T10:50:54.720Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-GENMOD-VALUE1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-11T10:50:00.275Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-PERFBUDGET-OUTPUT1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-11T10:49:52.999Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-ENCBASE-STRICT1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-11T10:49:20.963Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-ENC-CBOR-SURFACE1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-11T10:48:50.586Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-JSONCANON1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-11T10:48:31.176Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-ENCXML1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-11T10:47:55.929Z",
+      "by": "terra-456-manifest-edition",
+      "action": "card.claim",
+      "ref": "c083j754",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T10:47:51.471Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-PERFBUDGET-REPORT1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-11T10:47:44.036Z",
+      "by": "terra-456-toml",
+      "action": "card.release",
+      "ref": "c083j754",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-11T10:47:43.865Z",
+      "by": "sol-456-toml-review",
+      "action": "card.criteria-verify",
+      "ref": "c083j754",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-11T10:47:43.701Z",
+      "by": "terra-456-toml",
+      "action": "card.criteria-meet",
+      "ref": "c083j754",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-11T10:47:43.519Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c083j754",
+      "note": "#7 TOML sign and radix parsing contain no production unwrap/unr"
+    },
+    {
+      "at": "2026-07-11T10:47:33.976Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-ENCSTREAM-SURFACE1",
+      "note": "A"
+    },
     {
       "at": "2026-07-11T10:46:13.286Z",
       "by": "owner",
@@ -29207,482 +29836,6 @@
       "action": "decision.add",
       "ref": "D-JPK-PKGOVERRIDE1",
       "note": "Per-package override record inside an overlay block"
-    },
-    {
-      "at": "2026-07-10T21:18:02.039Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-JPK-SELECTOR1",
-      "note": "Monorepo package selection flag for jet build / jet test / jet run"
-    },
-    {
-      "at": "2026-07-10T21:18:01.960Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-JOS-BACKUP1",
-      "note": "jetos user-data backup and snapshot declaration"
-    },
-    {
-      "at": "2026-07-10T21:18:01.877Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-JPK-TOOLRUN1",
-      "note": "On-demand tool execution: ephemeral run + persistent global install surface"
-    },
-    {
-      "at": "2026-07-10T21:14:28.965Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-JPK-TASKRUN1",
-      "note": "How a project declares and invokes named tasks"
-    },
-    {
-      "at": "2026-07-10T21:06:32.939Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0by6tvm",
-      "note": "phase,plan,logEntry"
-    },
-    {
-      "at": "2026-07-10T21:05:48.290Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CLI-SURFACE1",
-      "note": "B"
-    },
-    {
-      "at": "2026-07-10T21:05:38.619Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c96",
-      "note": "phase,plan,logEntry"
-    },
-    {
-      "at": "2026-07-10T21:05:38.536Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0iyfhaf",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T21:05:27.378Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c06lb4p5",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T21:05:27.299Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0qs8j6u",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T21:05:27.219Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0om2gxe",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T21:05:27.137Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0svh6c4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T21:05:27.059Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0uzefny",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T21:05:26.977Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c038yftr",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T21:05:26.897Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c013gf7s",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T21:05:26.819Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0hzhedp",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T21:05:26.736Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0dhzann",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T21:05:07.632Z",
-      "by": "terra-292-builder",
-      "action": "card.claim",
-      "ref": "c0qi7dc2",
-      "note": ""
-    },
-    {
-      "at": "2026-07-10T21:04:59.264Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c07ydlbz",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T21:04:59.112Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c02kdm7a",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T21:04:58.955Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c2hizkhl",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T21:04:57.727Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0wqwqaq",
-      "note": "E3-UL9: mobile native UI (iOS/Android) + app-store distribution pipeline"
-    },
-    {
-      "at": "2026-07-10T21:04:43.606Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0f7jily",
-      "note": "jetpack: doctor/health verb — cache, mirror, hangar reachability"
-    },
-    {
-      "at": "2026-07-10T21:04:39.991Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0rfeel3",
-      "note": "jetpack: monorepo package selection (--filter / -p / affected-only)"
-    },
-    {
-      "at": "2026-07-10T21:04:30.554Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0fchu51",
-      "note": "jetpack: on-demand tool execution — ephemeral run + global install"
-    },
-    {
-      "at": "2026-07-10T21:04:24.722Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0qwckht",
-      "note": "jetpack: task runner — user-named project tasks"
-    },
-    {
-      "at": "2026-07-10T21:04:15.477Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0i0ho3h",
-      "note": "jetos: user-data backup and snapshot (Timeshift/borgbackup parity)"
-    },
-    {
-      "at": "2026-07-10T21:04:11.371Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0m3ug2h",
-      "note": "jetos: first-boot welcome flow + proprietary driver/codec offer"
-    },
-    {
-      "at": "2026-07-10T21:03:58.591Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0qqwe62",
-      "note": "jetos: beginner app store — graphical browse and install"
-    },
-    {
-      "at": "2026-07-10T21:03:54.158Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0pfsrnc",
-      "note": "jetos: declarative networking (NetworkManager/firewall/wireguard/printing/bluetooth parity)"
-    },
-    {
-      "at": "2026-07-10T21:03:43.839Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0yry94n",
-      "note": "jetos: shared VM test harness (boot/assert/rollback-proof framework)"
-    },
-    {
-      "at": "2026-07-10T21:03:40.282Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0by6tvm",
-      "note": "jetos: option-priority/override semantics + explain provenance"
-    },
-    {
-      "at": "2026-07-10T21:03:31.052Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c03asgps",
-      "note": "jetos: per-user environment engine — implement ratified user.<name> + jetos user plan/build/switch/rollback/prove"
-    },
-    {
-      "at": "2026-07-10T21:00:57.780Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c07ydlbz",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T21:00:57.643Z",
-      "by": "sol-343-review",
-      "action": "card.criteria-verify",
-      "ref": "c07ydlbz",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-10T21:00:57.489Z",
-      "by": "sol-343-review",
-      "action": "card.criteria-verify",
-      "ref": "c07ydlbz",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-10T21:00:57.344Z",
-      "by": "sol-343-review",
-      "action": "card.criteria-verify",
-      "ref": "c07ydlbz",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-10T21:00:57.201Z",
-      "by": "sol-343-review",
-      "action": "card.criteria-verify",
-      "ref": "c07ydlbz",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-10T21:00:57.046Z",
-      "by": "luna-343-builder",
-      "action": "card.criteria-meet",
-      "ref": "c07ydlbz",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-10T21:00:56.893Z",
-      "by": "luna-343-builder",
-      "action": "card.criteria-meet",
-      "ref": "c07ydlbz",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-10T21:00:56.747Z",
-      "by": "luna-343-builder",
-      "action": "card.criteria-meet",
-      "ref": "c07ydlbz",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-10T21:00:56.580Z",
-      "by": "luna-343-builder",
-      "action": "card.criteria-meet",
-      "ref": "c07ydlbz",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-10T20:54:00.830Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-CLI-SURFACE1",
-      "note": "jet CLI surface: flat, frequency rings, object grammar, or product surfaces"
-    },
-    {
-      "at": "2026-07-10T20:44:47.406Z",
-      "by": "owner",
-      "action": "card.activate",
-      "ref": "c0vntq8c",
-      "note": ""
-    },
-    {
-      "at": "2026-07-10T20:44:43.057Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-JPK-EXECLEASE1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-10T20:44:32.133Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0vntq8c",
-      "note": "jet CLI: shrink top-level verb surface — namespace the long tail"
-    },
-    {
-      "at": "2026-07-10T20:44:21.394Z",
-      "by": "codex-orchestrator",
-      "action": "card.release",
-      "ref": "c0qi7dc2",
-      "note": ""
-    },
-    {
-      "at": "2026-07-10T20:44:21.229Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0qi7dc2",
-      "note": "#6 Focused jet-codegen, corelib lifecycle/stripping, native Win"
-    },
-    {
-      "at": "2026-07-10T20:44:21.073Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0qi7dc2",
-      "note": "#5 Programs not calling on_interrupt contain no interrupt FFI o"
-    },
-    {
-      "at": "2026-07-10T20:44:20.917Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0qi7dc2",
-      "note": "#4 Unsupported targets fail honestly; process-lifetime registra"
-    },
-    {
-      "at": "2026-07-10T20:44:20.761Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0qi7dc2",
-      "note": "#3 OS callbacks perform only async-safe atomic notification; ha"
-    },
-    {
-      "at": "2026-07-10T20:44:20.614Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0qi7dc2",
-      "note": "#2 Two or more registrations run additively in registration ord"
-    },
-    {
-      "at": "2026-07-10T20:44:20.460Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0qi7dc2",
-      "note": "#1 Windows console Ctrl-C invokes every registered core.os.on_i"
-    },
-    {
-      "at": "2026-07-10T20:44:20.295Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0qi7dc2",
-      "note": "phase,plan,logEntry"
-    },
-    {
-      "at": "2026-07-10T20:42:32.757Z",
-      "by": "sol-292-planner",
-      "action": "card.claim",
-      "ref": "c0qi7dc2",
-      "note": ""
-    },
-    {
-      "at": "2026-07-10T20:41:32.348Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c07ydlbz",
-      "note": "#4 Focused diagnostics_coverage, diagnostic_snapshots, relevant"
-    },
-    {
-      "at": "2026-07-10T20:41:32.185Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c07ydlbz",
-      "note": "#3 Duplicate HTTP routes fail through Jet-owned E2804 runtime r"
-    },
-    {
-      "at": "2026-07-10T20:41:32.029Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c07ydlbz",
-      "note": "#2 Every currently reachable emitted diagnostic code has a real"
-    },
-    {
-      "at": "2026-07-10T20:41:31.877Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c07ydlbz",
-      "note": "#1 User-facing diagnostic snapshots and constructors reject ret"
-    },
-    {
-      "at": "2026-07-10T20:41:31.716Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c07ydlbz",
-      "note": "phase,logEntry,blockedBy"
-    },
-    {
-      "at": "2026-07-10T20:41:12.567Z",
-      "by": "luna-343-builder",
-      "action": "card.claim",
-      "ref": "c07ydlbz",
-      "note": ""
-    },
-    {
-      "at": "2026-07-10T20:39:50.389Z",
-      "by": "sol-466-review",
-      "action": "card.criteria-verify",
-      "ref": "c0onpgah",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-10T20:39:50.246Z",
-      "by": "sol-466-review",
-      "action": "card.criteria-verify",
-      "ref": "c0onpgah",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-10T20:39:50.085Z",
-      "by": "sol-466-review",
-      "action": "card.criteria-verify",
-      "ref": "c0onpgah",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-10T20:39:29.050Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0onpgah",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T20:38:19.591Z",
-      "by": "codex-orchestrator",
-      "action": "decision.add",
-      "ref": "D-JPK-EXECLEASE1",
-      "note": "Cross-platform executable lease security"
-    },
-    {
-      "at": "2026-07-10T20:38:19.434Z",
-      "by": "codex-orchestrator",
-      "action": "card.release",
-      "ref": "c0t4root",
-      "note": ""
-    },
-    {
-      "at": "2026-07-10T20:38:19.279Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0t4root",
-      "note": "#5 Syntax decisions, package-manager security contract, install"
     }
   ],
   "nextNum": 368,

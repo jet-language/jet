@@ -1677,13 +1677,11 @@ pub(crate) fn eval_default_markers(
     diags: &mut Vec<Diagnostic>,
     core_imports: &HashMap<String, String>,
 ) {
-    fn is_codable(s: &crate::AST::StructDef) -> bool {
-        s.derives
-            .iter()
-            .any(|(t, _)| t == crate::Generics::ENCODE || t == crate::Generics::DECODE)
-    }
-    let any = items.iter().any(|i| matches!(i, Item::Struct(s) if is_codable(s)
-        && s.fields.iter().any(|f| f.serde_markers.iter().any(|m|
+    // Every struct that carries `#[Default(expr)]` needs the baked value —
+    // Codable decode absents AND `@Cli` entry-arg absents read it (one
+    // mechanism, I8); gating on Codable silently zeroed CLI defaults.
+    let any = items.iter().any(|i| matches!(i, Item::Struct(s)
+        if s.fields.iter().any(|f| f.serde_markers.iter().any(|m|
             m.name == crate::Syntax::ATTR_DEFAULT && !m.args.is_empty()))));
     if !any {
         return;
@@ -1692,9 +1690,6 @@ pub(crate) fn eval_default_markers(
     let funcs: HashMap<String, &Func> = funcs_owned.iter().map(|(k, v)| (k.clone(), v)).collect();
     for item in items.iter_mut() {
         let Item::Struct(s) = item else { continue };
-        if !is_codable(s) {
-            continue;
-        }
         for f in &mut s.fields {
             let field_name = f.name.clone();
             for m in &mut f.serde_markers {
