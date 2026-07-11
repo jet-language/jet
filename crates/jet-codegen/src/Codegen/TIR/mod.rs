@@ -316,6 +316,15 @@ pub struct TFunc {
     pub kind: TFuncKind,
 }
 
+/// D-SERDE2 (card #131 S1-bridge): which built-in codec trait a hand impl method
+/// bridges to. `Encode` → `jet_encode(&self) -> jet_std::DataTree`; `Decode` →
+/// the static `jet_decode(tree: &jet_std::DataTree) -> Result<Self, DecodeError>`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum SerdeCodec {
+    Encode,
+    Decode,
+}
+
 /// c109 Phase 7: the emission shape of a lowered function.
 pub enum TFuncKind {
     /// A module-level free function — `pub fn name(params) { … }`.
@@ -336,6 +345,14 @@ pub enum TFuncKind {
     TraitMethod {
         is_unsafe: bool,
         self_conv: AccessConvention,
+        /// D-SERDE2 (card #131 S1-bridge): a hand-written `impl T.Encode` /
+        /// `impl T.Decode` method. The user writes the verbs `encode`/`decode`
+        /// with Jet-facing signatures, but the Rust `user_Encode`/`user_Decode`
+        /// traits declare `jet_encode(&self) -> DataTree` /
+        /// `jet_decode(tree: &DataTree) -> Result<Self, DecodeError>`. This bridges
+        /// the name + signature internally (I2: a sema-accepted hand impl must
+        /// produce Rust rustc accepts). `None` for every ordinary trait method.
+        serde: Option<SerdeCodec>,
     },
     /// c109 Phase 15: a DELEGATION trait method (`using field`) — `emit_delegation_method`
     /// (Source/Codegen/Items.rs). The whole method is structural: a forwarding call

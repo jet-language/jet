@@ -10,7 +10,8 @@ pub(crate) fn emit_tir_func(tir: &TFunc, cx: &Cx, out: &mut String) {
         TFuncKind::TraitMethod {
             is_unsafe,
             self_conv,
-        } => emit_tir_trait_method(tir, *is_unsafe, *self_conv, cx, out),
+            serde,
+        } => emit_tir_trait_method(tir, *is_unsafe, *self_conv, *serde, cx, out),
         TFuncKind::Delegation {
             sig,
             fwd,
@@ -194,9 +195,19 @@ pub(crate) fn emit_tir_trait_method(
     tir: &TFunc,
     is_unsafe: bool,
     self_conv: AccessConvention,
+    serde: Option<SerdeCodec>,
     cx: &Cx,
     out: &mut String,
 ) {
+    // D-SERDE2 (card #131 S1-bridge): a hand `impl T.Encode`/`impl T.Decode` method is
+    // bridged to the Rust `user_Encode`/`user_Decode` trait's method name + signature.
+    // The user wrote the verbs `encode`/`decode` with Jet-facing signatures; the trait
+    // declares `jet_encode(&self) -> jet_std::DataTree` /
+    // `jet_decode(tree: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError>`.
+    if let Some(codec) = serde {
+        emit_tir_serde_method(tir, codec, cx, out);
+        return;
+    }
     let indent = 1;
     let pad = "    ".repeat(indent);
     let ret_clause = match &tir.ret {
@@ -238,6 +249,60 @@ pub(crate) fn emit_tir_trait_method(
     }
     emit_tir_stmts(&tir.body, cx, out, indent + 1);
     out.push_str(&format!("{pad}}}\n"));
+}
+
+/// D-SERDE2 (card #131 S1-bridge): emit a hand `impl T.Encode`/`impl T.Decode` method,
+/// bridged to the Rust `user_Encode`/`user_Decode` trait signature. Body is lowered
+/// through the same TIR as any trait method; only the header (name + receiver/params +
+/// return) is the trait's, not the user's Jet-facing spelling.
+///
+/// - `Encode`: `fn jet_encode(&self) -> jet_std::DataTree { <body> }`. The user wrote
+///   `fn encode(self) -> Data`; bare `self` already lowers to `&self` and `Data` to
+///   `jet_std::DataTree`, so only the method NAME is bridged.
+/// - `Decode`: `fn jet_decode(<tree>: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError>`.
+///   The user wrote a STATIC `fn decode(tree: Data) -> T ? DecodeError`; the by-value
+///   `Data` param becomes a borrow with an owned clone re-bound at the head (`let <tree> =
+///   <tree>.clone();`), so the body reads an owned `Data` local exactly as written.
+pub(crate) fn emit_tir_serde_method(tir: &TFunc, codec: SerdeCodec, cx: &Cx, out: &mut String) {
+    let indent = 1;
+    let pad = "    ".repeat(indent);
+    // E2-M12 D-OBS1: track the current function name for rich panic reports.
+    *cx.current_fn.borrow_mut() = tir.name.clone();
+    match codec {
+        SerdeCodec::Encode => {
+            out.push_str(&format!(
+                "{pad}fn jet_encode(&self) -> jet_std::DataTree {{\n"
+            ));
+            if cx.coverage {
+                out.push_str(&format!("{pad}    jet_cov({});\n", tir.line));
+            }
+            emit_tir_stmts(&tir.body, cx, out, indent + 1);
+            out.push_str(&format!("{pad}}}\n"));
+        }
+        SerdeCodec::Decode => {
+            // The single non-self param is the `tree: Data` argument. Render it as a
+            // borrow and re-bind an owned clone so the lowered body (which reads the bare
+            // name) sees an owned `Data`.
+            let tree = tir
+                .params
+                .first()
+                .map(|(n, _, _)| n.clone())
+                .unwrap_or_else(|| "tree".to_string());
+            let ret = match &tir.ret {
+                Some(t) => rust_return_type(cx, t),
+                None => "Result<Self, jet_std::DecodeError>".to_string(),
+            };
+            out.push_str(&format!(
+                "{pad}fn jet_decode({tree}: &jet_std::DataTree) -> {ret} {{\n"
+            ));
+            if cx.coverage {
+                out.push_str(&format!("{pad}    jet_cov({});\n", tir.line));
+            }
+            out.push_str(&format!("{pad}    let {tree} = ({tree}).clone();\n"));
+            emit_tir_stmts(&tir.body, cx, out, indent + 1);
+            out.push_str(&format!("{pad}}}\n"));
+        }
+    }
 }
 
 /// c109 Phase 15: a DELEGATION trait method (`using field`), emitted INSIDE the

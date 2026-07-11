@@ -383,6 +383,15 @@ impl TraitRegistry {
             diags.push(e0902(span));
             return;
         }
+        // D-SERDE2 (card #131 S1-bridge): `Encode`/`Decode` are built-in traits with no
+        // entry in `self.traits`, so the generic signature check below never runs for a
+        // hand `impl T.Encode`/`impl T.Decode`. Validate their fixed shapes here — a wrong
+        // shape must be a sema error (E0906/E0907) BEFORE codegen, or the internal codec
+        // bridge would emit Rust rustc rejects (I2/I4).
+        if trait_name == ENCODE || trait_name == DECODE {
+            self.check_serde_impl_methods(type_name, trait_name, methods, span, diags);
+            return;
+        }
         if let Some(trait_info) = self.traits.get(trait_name) {
             let provided: HashSet<String> = methods.iter().map(|m| m.name.clone()).collect();
             // D-LIB2: methods that have a default body in the trait don't need to be
@@ -922,6 +931,61 @@ impl TraitRegistry {
                     span: dummy,
                 },
             );
+        }
+    }
+
+    /// D-SERDE2 (card #131 S1-bridge): validate a hand `impl T.Encode`/`impl T.Decode`
+    /// against the codec's fixed Jet-facing shape, so a wrong shape is a sema error before
+    /// codegen bridges it to `jet_encode`/`jet_decode`.
+    ///
+    ///   `Encode`:  `fn encode(self) -> Data`         (one `self` param, returns `Data`)
+    ///   `Decode`:  `fn decode(tree: Data) -> T ? DecodeError`
+    ///              (static — no `self`; one `Data` param; returns the owning type or
+    ///               `DecodeError`)
+    fn check_serde_impl_methods(
+        &self,
+        type_name: &str,
+        trait_name: &str,
+        methods: &[Func],
+        span: Span,
+        diags: &mut Vec<Diagnostic>,
+    ) {
+        let verb = if trait_name == ENCODE { "encode" } else { "decode" };
+        let is_data = |ty: &Type| matches!(ty, Type::Named(n) if Syntax::is_data_type_name(n));
+        let mut saw_verb = false;
+        for m in methods {
+            if m.name != verb {
+                // Only `encode`/`decode` belong in the codec impl (the trait owns exactly
+                // one method); anything else can't be bridged.
+                diags.push(e0907(trait_name, &m.name, m.name_span));
+                continue;
+            }
+            saw_verb = true;
+            let has_self = m.params.first().is_some_and(|p| p.name == Syntax::KW_SELF);
+            let non_self: Vec<&crate::AST::Param> =
+                m.params.iter().filter(|p| p.name != Syntax::KW_SELF).collect();
+            let ok = if trait_name == ENCODE {
+                // `encode(self) -> Data`: exactly `self`, no other params, returns a Data.
+                has_self
+                    && non_self.is_empty()
+                    && m.return_type.as_ref().is_some_and(is_data)
+            } else {
+                // `decode(tree: Data) -> T ? DecodeError`: static, one `Data` param,
+                // returns the owning type (or `Self`) or `DecodeError`.
+                let ret_ok = matches!(
+                    &m.return_type,
+                    Some(Type::Result { ok, err })
+                        if matches!(ok.as_ref(), Type::Named(n) if n == type_name || n == "Self")
+                            && matches!(err.as_ref(), Type::Named(n) if n == "DecodeError")
+                );
+                !has_self && non_self.len() == 1 && is_data(&non_self[0].ty) && ret_ok
+            };
+            if !ok {
+                diags.push(e0907(trait_name, &m.name, m.name_span));
+            }
+        }
+        if !saw_verb {
+            diags.push(e0906(trait_name, &[verb.to_string()], span));
         }
     }
 

@@ -236,7 +236,20 @@ pub(crate) fn lower_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
 ///    `Read if scalar` short-circuit branch — it computes `deref = !p.ty.is_scalar()`
 ///    for `Read`, which is identical to `param_place` for `Read` (scalar → false).
 /// The `TraitMethod` kind drives a bare name, no `pub`, always-`&self` signature.
-pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
+///
+/// D-SERDE2 (card #131 S1-bridge): `trait_name` selects a codec bridge when it is
+/// `Encode`/`Decode` — a hand `impl T.Encode`/`impl T.Decode` whose user-facing
+/// `encode`/`decode` verbs + Jet signatures must lower to the Rust trait's
+/// `jet_encode`/`jet_decode`. `Encode` is an ordinary instance method (`&self`),
+/// only its NAME is bridged. `Decode` is STATIC: the by-value `tree: Data` param
+/// binds as an owned local (a clone the emit prepends), so its place is the bare
+/// mangled name — no receiver, no `param_place` deref.
+pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx, trait_name: &str) -> TFunc {
+    let serde = match trait_name {
+        crate::Generics::ENCODE => Some(SerdeCodec::Encode),
+        crate::Generics::DECODE => Some(SerdeCodec::Decode),
+        _ => None,
+    };
     let mut env = LowerEnv::new(f.name.clone());
     env.self_owner = Some(type_name.to_string());
     let mut params = Vec::new();
@@ -260,7 +273,14 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
             continue;
         }
         let rust_name = cx.mangle_name(&p.name);
-        let place = param_place(&rust_name, p);
+        // D-SERDE2: a `Decode.decode(tree: Data)` param is emitted as `&jet_std::DataTree`
+        // and re-bound to an owned clone at the function head, so the body sees an owned
+        // `Data` local — its place is the bare name, NOT `param_place`'s non-scalar deref.
+        let place = if serde == Some(SerdeCodec::Decode) {
+            rust_name.clone()
+        } else {
+            param_place(&rust_name, p)
+        };
         let pty = resolve_self_ty(&p.ty, type_name);
         env.bind(&p.name, place, Some(pty.clone()));
         params.push((rust_name, pty, p.convention));
@@ -287,6 +307,7 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
         kind: TFuncKind::TraitMethod {
             is_unsafe: f.is_unsafe,
             self_conv,
+            serde,
         },
     }
 }

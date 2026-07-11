@@ -1939,3 +1939,62 @@ fn persist_marker_is_codegen_inert() {
         "@Persist must not change generated Rust (inert in release)"
     );
 }
+
+// ── card #131 S1-bridge (D-SERDE2): hand codec dev-tier parity (R12) ──────────
+// A hand `impl T.Encode`/`impl T.Decode` round-trips under the native build (see
+// tests/corelib.rs::hand_written_encode_decode_round_trips). The dev interpreter
+// does not cover the json typed-decode path — and it doesn't for a DERIVED
+// `@[Codable]` either — so the honest behavior for BOTH is to stop at the E2201
+// pre-scan boundary and defer to native, never emit a divergent result. This test
+// pins that parity: the dev tier must not silently produce a wrong round trip.
+#[test]
+fn hand_written_codec_dev_tier_stops_at_honest_boundary() {
+    let _guard = dev_diff_lock().lock().unwrap();
+    const SRC: &str = r#"
+use core.encoding.json as json
+
+struct Email { addr: String }
+
+impl Email.Encode {
+    fn encode(self) -> Data {
+        m: [String: Data] :: ["email": Data.Text(copy self.addr)]
+        return Data.Object(m)
+    }
+}
+
+impl Email.Decode {
+    fn decode(tree: Data) -> Email ? DecodeError {
+        f := tree.field("email") ?? Data.Text("")
+        s := f.text() ?? ""
+        return ok(Email.{addr: s})
+    }
+}
+
+fn run() {
+    e := Email.{addr: "a@b.com"}
+    s := json.to_string(e)
+    print(s)
+    back := json.decode<Email>(s) ?? panic("decode failed")
+    print(back.addr)
+}
+"#;
+    let dir = std::env::temp_dir().join(format!("jet_hand_codec_dev_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("hand_codec.jet");
+    fs::write(&file, SRC).unwrap();
+    let outcome = dev_iteration_with_timeout("hand_codec", file.to_str().unwrap(), true);
+    match outcome {
+        RunOutcome::Problems(diags) => {
+            assert!(
+                diags.iter().any(|d| d.code == "E2201"),
+                "hand codec should stop at the E2201 honest boundary; got codes {:?}",
+                diags.iter().map(|d| d.code.clone()).collect::<Vec<_>>()
+            );
+        }
+        RunOutcome::Ran { stdout, .. } => {
+            panic!("dev interpreter unexpectedly ran the hand codec (must defer to native): {stdout}");
+        }
+    }
+    let _ = fs::remove_dir_all(&dir);
+}

@@ -160,7 +160,12 @@ pub(crate) fn tir_covers_method(f: &Func, type_name: &str, cx: &Cx) -> bool {
 ///    subset does not lower, and the `unsafe fn` prefix is a separate emit concern.
 ///  - a trait method ALWAYS has a `self` receiver (a trait method without `self` is a
 ///    static trait method, rare; exclude it — the emit hook always renders a receiver).
-pub(crate) fn tir_covers_trait_method(f: &Func, type_name: &str, cx: &Cx) -> bool {
+pub(crate) fn tir_covers_trait_method(
+    f: &Func,
+    type_name: &str,
+    cx: &Cx,
+    trait_name: &str,
+) -> bool {
     // Signature shape: no generics. c109 Phase 18: an `#Unsafe fn` trait method IS
     // covered (`TFuncKind::TraitMethod.is_unsafe` already drives the `unsafe ` prefix
     // in `emit_tir_trait_method`).
@@ -178,14 +183,21 @@ pub(crate) fn tir_covers_trait_method(f: &Func, type_name: &str, cx: &Cx) -> boo
     if struct_is_generic(type_name, cx) {
         return false;
     }
-    // A trait method must have `self` as its FIRST parameter (the receiver `&self`/
-    // `&mut self`/`self` per convention). A trait method with no `self` (static trait
-    // fn) emits no receiver — exclude it (the emit hook always renders a receiver).
-    let Some(first) = f.params.first() else {
-        return false;
-    };
-    if first.name != Syntax::KW_SELF {
-        return false;
+    // D-SERDE2 (card #131 S1-bridge): a hand `impl T.Decode` `decode` is a STATIC trait
+    // method (no `self`) — the codec bridge in `emit_tir_trait_method` renders it as
+    // `jet_decode(tree: &jet_std::DataTree) -> Result<Self, DecodeError>` with no
+    // receiver. Admit it (the general "static trait fn" exclusion below does not apply).
+    let is_decode = trait_name == crate::Generics::DECODE;
+    if !is_decode {
+        // A trait method must have `self` as its FIRST parameter (the receiver `&self`/
+        // `&mut self`/`self` per convention). A trait method with no `self` (static trait
+        // fn) emits no receiver — exclude it (the emit hook always renders a receiver).
+        let Some(first) = f.params.first() else {
+            return false;
+        };
+        if first.name != Syntax::KW_SELF {
+            return false;
+        }
     }
     // No further `self` parameters (malformed — sema rejects, but be defensive).
     if f.params.iter().skip(1).any(|p| p.name == Syntax::KW_SELF) {

@@ -1423,7 +1423,7 @@ pub(crate) fn emit_trait_impl(
         ));
     }
     for m in &block.methods {
-        emit_trait_method(cx, type_name, m, out, 1);
+        emit_trait_method(cx, &block.trait_name, type_name, m, out, 1);
     }
     out.push_str("}\n\n");
     if block.trait_name == crate::Syntax::TRAIT_DISPLAY {
@@ -1504,7 +1504,7 @@ pub(crate) fn emit_external_trait_impl(cx: &Cx, i: &ImplDef, out: &mut String) {
         }
     } else {
         for m in &i.methods {
-            emit_trait_method(cx, &i.type_name, m, out, 1);
+            emit_trait_method(cx, trait_name, &i.type_name, m, out, 1);
         }
     }
     out.push_str("}\n\n");
@@ -1518,7 +1518,14 @@ pub(crate) fn emit_external_trait_impl(cx: &Cx, i: &ImplDef, out: &mut String) {
     }
 }
 
-fn emit_trait_method(cx: &Cx, type_name: &str, f: &Func, out: &mut String, indent: usize) {
+fn emit_trait_method(
+    cx: &Cx,
+    trait_name: &str,
+    type_name: &str,
+    f: &Func,
+    out: &mut String,
+    indent: usize,
+) {
     // c109 Phase N: the typed IR is the only codegen seam (R7). A trait-impl
     // method always emits at indent 1 inside the `impl Trait for user_<T>` block
     // the caller opened; it lowers + emits through the TIR. A gate-miss is an
@@ -1527,8 +1534,8 @@ fn emit_trait_method(cx: &Cx, type_name: &str, f: &Func, out: &mut String, inden
         indent, 1,
         "trait methods always emit at impl-block indent 1"
     );
-    if TIR::tir_covers_trait_method(f, type_name, cx) {
-        let tir = TIR::lower_trait_method(f, type_name, cx);
+    if TIR::tir_covers_trait_method(f, type_name, cx, trait_name) {
+        let tir = TIR::lower_trait_method(f, type_name, cx, trait_name);
         TIR::emit_tir_func(&tir, cx, out);
         return;
     }
