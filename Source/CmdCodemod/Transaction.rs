@@ -58,7 +58,10 @@ pub fn validate_destinations(project: &Path, paths: &[PathBuf]) {
 pub fn read_destination(project: &Path, path: &Path) -> std::io::Result<Vec<u8>> {
     let project = canonical_project_io(project)?;
     let path = validate_destination(&project, path, true)?;
-    read_nofollow(&path)
+    let relative = path.strip_prefix(&project).map_err(|_| {
+        std::io::Error::new(std::io::ErrorKind::PermissionDenied, "destination escapes project")
+    })?;
+    read_beneath(&project, relative)
 }
 
 pub fn read_replay_log(project: &Path, path: &Path) -> std::io::Result<String> {
@@ -77,7 +80,10 @@ pub fn read_replay_log(project: &Path, path: &Path) -> std::io::Result<String> {
             "replay log is not a regular non-link file",
         ));
     }
-    let bytes = read_nofollow(path)?;
+    let name = path.file_name().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "replay log has no file name")
+    })?;
+    let bytes = read_beneath(&codemods, Path::new(name))?;
     String::from_utf8(bytes)
         .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "replay log is not UTF-8"))
 }
@@ -192,6 +198,113 @@ fn read_nofollow(path: &Path) -> std::io::Result<Vec<u8>> {
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes)?;
     Ok(bytes)
+}
+
+#[cfg(unix)]
+fn read_beneath(root: &Path, relative: &Path) -> std::io::Result<Vec<u8>> {
+    use std::ffi::{CString, OsStr};
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::OpenOptionsExt;
+    const O_RDONLY: i32 = 0;
+    const O_CLOEXEC: i32 = 0o2000000;
+    const O_DIRECTORY: i32 = 0o200000;
+    const O_NOFOLLOW: i32 = 0o400000;
+    extern "C" {
+        fn openat(dirfd: i32, pathname: *const i8, flags: i32, mode: u32) -> i32;
+    }
+    fn c_name(value: &OsStr) -> std::io::Result<CString> {
+        CString::new(value.as_bytes())
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "NUL in codemod path"))
+    }
+    let root = OpenOptions::new()
+        .read(true)
+        .custom_flags(O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        .open(root)?;
+    let components = relative.components().collect::<Vec<_>>();
+    if components.is_empty() {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "empty relative path"));
+    }
+    let mut held = Vec::<OwnedFd>::new();
+    let mut dirfd = root.as_raw_fd();
+    for component in &components[..components.len() - 1] {
+        let std::path::Component::Normal(name) = component else {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "non-normal relative path"));
+        };
+        let name = c_name(name)?;
+        let fd = unsafe { openat(dirfd, name.as_ptr(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC, 0) };
+        if fd < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        held.push(unsafe { OwnedFd::from_raw_fd(fd) });
+        dirfd = held.last().unwrap().as_raw_fd();
+    }
+    let std::path::Component::Normal(file_name) = components.last().unwrap() else {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "non-normal file name"));
+    };
+    let file_name = c_name(file_name)?;
+    let fd = unsafe { openat(dirfd, file_name.as_ptr(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC, 0) };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let mut file = unsafe { File::from_raw_fd(fd) };
+    if !file.metadata()?.is_file() {
+        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "opened object is not a regular file"));
+    }
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+
+#[cfg(windows)]
+fn read_beneath(root: &Path, relative: &Path) -> std::io::Result<Vec<u8>> {
+    use std::ffi::c_void;
+    use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::os::windows::io::AsRawHandle;
+    type Handle = *mut c_void;
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    extern "system" {
+        fn GetFinalPathNameByHandleW(file: Handle, path: *mut u16, path_len: u32, flags: u32) -> u32;
+    }
+    fn final_path(handle: Handle) -> std::io::Result<String> {
+        let needed = unsafe { GetFinalPathNameByHandleW(handle, std::ptr::null_mut(), 0, 0) };
+        if needed == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        let mut buffer = vec![0u16; needed as usize];
+        let written = unsafe { GetFinalPathNameByHandleW(handle, buffer.as_mut_ptr(), buffer.len() as u32, 0) };
+        if written == 0 || written as usize >= buffer.len() {
+            return Err(std::io::Error::last_os_error());
+        }
+        buffer.truncate(written as usize);
+        Ok(String::from_utf16_lossy(&buffer).to_lowercase())
+    }
+    let path = root.join(relative);
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(&path)?;
+    if !file.metadata()?.is_file() {
+        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "opened object is not a regular file"));
+    }
+    let root_final = fs::canonicalize(root)?.to_string_lossy().to_lowercase();
+    let file_final = final_path(file.as_raw_handle())?;
+    let root_tail = root_final.trim_start_matches(r"\\?\").trim_end_matches(['\\', '/']);
+    let file_tail = file_final.trim_start_matches(r"\\?\");
+    let prefix = format!("{root_tail}\\");
+    if !file_tail.starts_with(&prefix) {
+        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "opened file escapes root handle"));
+    }
+    let mut file = file;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+
+#[cfg(all(not(unix), not(windows)))]
+fn read_beneath(root: &Path, relative: &Path) -> std::io::Result<Vec<u8>> {
+    read_nofollow(&root.join(relative))
 }
 
 pub fn lock(project: &Path) -> Lock {
@@ -336,9 +449,24 @@ fn validate_journal_paths(project: &Path, parsed: &Journal, journal: &Path) {
     let project = fs::canonicalize(project)
         .unwrap_or_else(|e| fail(&format!("could not canonicalize codemod project: {e}")));
     let codemods = project.join(".jet/codemods");
-    if !parsed.log_path.starts_with(&codemods) || parsed.log_path.parent() != Some(codemods.as_path()) {
+    if !parsed.log_path.starts_with(&codemods)
+        || parsed.log_path.parent() != Some(codemods.as_path())
+        || !parsed.log_path.file_name().and_then(|name| name.to_str()).is_some_and(|name| name.ends_with(".log.json"))
+    {
         fail("recovery journal log path escapes .jet/codemods; journal preserved");
     }
+    let destinations = parsed.records.iter().map(|record| record.path.clone()).collect::<Vec<_>>();
+    validate_destinations(&project, &destinations);
+    #[cfg(unix)]
+    let mut temp_identities = {
+        use std::os::unix::fs::MetadataExt;
+        parsed.records.iter().map(|record| {
+            let metadata = fs::metadata(&record.path).unwrap_or_else(|e| {
+                fail(&format!("could not inspect recovery destination `{}`: {e}", record.path.display()))
+            });
+            (metadata.dev(), metadata.ino())
+        }).collect::<BTreeSet<_>>()
+    };
     for record in &parsed.records {
         if !record.path.starts_with(&project)
             || record.temp.parent() != record.path.parent()
@@ -355,6 +483,13 @@ fn validate_journal_paths(project: &Path, parsed: &Journal, journal: &Path) {
             });
             if temp_meta.file_type().is_symlink() || !temp_meta.is_file() {
                 fail("recovery temp is not a regular non-link file; journal preserved")
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::MetadataExt;
+                if !temp_identities.insert((temp_meta.dev(), temp_meta.ino())) {
+                    fail("recovery temp aliases a destination or another temp; journal preserved")
+                }
             }
         }
         let relative = record.path.strip_prefix(&project).unwrap();
@@ -391,6 +526,13 @@ pub fn commit(project: &Path, changes: &[Change], log_path: &Path, log: &[u8]) {
         .unwrap_or_else(|e| fail(&format!("could not securely open codemod directory: {e}")));
     if log_path.parent() != Some(dir.as_path()) {
         fail("codemod replay log must be directly beneath .jet/codemods")
+    }
+    if !log_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.ends_with(".log.json"))
+    {
+        fail("codemod replay log name must end in .log.json")
     }
     if log_path.exists() {
         fail(&format!("codemod replay log already exists: `{}`", log_path.display()))
