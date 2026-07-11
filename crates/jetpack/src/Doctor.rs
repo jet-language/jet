@@ -113,7 +113,10 @@ fn endpoint_reachable(url: &str, online: bool) -> Result<bool, &'static str> {
     if !online { return Ok(false); }
     if url.starts_with("https://") { return git_registry_probe(url).map(|_| true); }
     let (default_port, rest) = if let Some(v) = url.strip_prefix("http://") { (80, v) } else { return Err("unsupported URL scheme") };
-    let authority = rest.split('/').next().unwrap_or("").rsplit('@').next().unwrap_or("");
+    let raw_authority = rest.split('/').next().unwrap_or("");
+    let (credentials, authority) = raw_authority.rsplit_once('@')
+        .map(|(credentials, authority)| (Some(credentials), authority))
+        .unwrap_or((None, raw_authority));
     let (host, port) = authority.rsplit_once(':').and_then(|(h,p)| p.parse().ok().map(|p| (h,p))).unwrap_or((authority, default_port));
     if host.is_empty() { return Err("missing host"); }
     let addrs = (host, port).to_socket_addrs().map_err(|_| "name lookup failed")?;
@@ -121,7 +124,8 @@ fn endpoint_reachable(url: &str, online: bool) -> Result<bool, &'static str> {
     for addr in addrs {
         let Ok(mut stream) = TcpStream::connect_timeout(&addr, Duration::from_secs(2)) else { continue };
         let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
-        let request = format!("GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n");
+        let authorization = credentials.map(|value| format!("Authorization: Basic {}\r\n", base64(value.as_bytes()))).unwrap_or_default();
+        let request = format!("GET {path} HTTP/1.1\r\nHost: {host}\r\n{authorization}Connection: close\r\n\r\n");
         if stream.write_all(request.as_bytes()).is_err() { continue; }
         let mut response = [0u8; 256];
         let Ok(n) = stream.read(&mut response) else { continue };
@@ -146,11 +150,31 @@ fn git_registry_probe(url: &str) -> Result<(), &'static str> {
     }
 }
 
+fn base64(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for chunk in bytes.chunks(3) {
+        let n = ((chunk[0] as u32) << 16) | ((chunk.get(1).copied().unwrap_or(0) as u32) << 8) | chunk.get(2).copied().unwrap_or(0) as u32;
+        out.push(TABLE[((n >> 18) & 63) as usize] as char);
+        out.push(TABLE[((n >> 12) & 63) as usize] as char);
+        out.push(if chunk.len() > 1 { TABLE[((n >> 6) & 63) as usize] as char } else { '=' });
+        out.push(if chunk.len() > 2 { TABLE[(n & 63) as usize] as char } else { '=' });
+    }
+    out
+}
+
 fn check_locks(project: &Path, roots: &Store::Roots) -> Check {
     let dirs = [roots.root.join(".locks"), Store::managed_dir(project).join(".locks")];
     let mut stale = BTreeSet::new();
     let mut unknown = BTreeSet::new();
-    for dir in dirs { let Ok(rd) = fs::read_dir(dir) else { continue }; for ent in rd.flatten() {
+    for dir in dirs {
+        let rd = match fs::read_dir(&dir) {
+            Ok(rd) => rd,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(_) => { unknown.insert(format!("{} (directory unreadable)", dir.display())); continue; }
+        };
+        for next in rd {
+        let ent = match next { Ok(ent) => ent, Err(_) => { unknown.insert("directory entry unreadable".to_string()); continue; } };
         let path = ent.path(); if path.extension().and_then(|s| s.to_str()) != Some("lock") { continue; }
         match lock_state(&path) {
             LockState::Stale => { stale.insert(ent.file_name().to_string_lossy().into_owned()); }
@@ -218,8 +242,8 @@ fn check_signing_key() -> Check {
 
 fn key_pair_matches(secret: &Path, public_hex: &str) -> Result<bool, ()> {
     let seed = fs::read(secret).map_err(|_| ())?;
-    let link = FFI::build_bridge(&[], false, false, false, false, true, false, false, false).map_err(|_| ())?;
-    let helper = link.helper_bin_path.ok_or(())?;
+    let helper = FFI::cached_crypto_helper_path();
+    if !helper.is_file() { return Err(()); }
     let challenge = b"jetpack-doctor-keypair-v1";
     let command = format!("sign {} {}", hex(&seed), hex(challenge));
     let signature = run_crypto_helper(&helper, &command)?;
@@ -287,6 +311,18 @@ mod tests {
         }
         fs::write(&malformed, "old but no process identity\n").unwrap();
         assert!(matches!(lock_state(&malformed), LockState::Unknown));
+        let policy_root = scratch("lock-read-errors");
+        fs::write(policy_root.join(".locks"), "not a directory").unwrap();
+        let roots = Store::Roots { root: policy_root.clone(), dev_mode: false };
+        assert!(check_locks(&root, &roots).detail.contains("directory unreadable"));
+        fs::remove_file(policy_root.join(".locks")).unwrap();
+        fs::create_dir_all(policy_root.join(".locks")).unwrap();
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink("loop.lock", policy_root.join(".locks/loop.lock")).unwrap();
+            assert!(check_locks(&root, &roots).detail.contains("unknown liveness"));
+        }
+        fs::remove_dir_all(policy_root).unwrap();
         fs::remove_dir_all(root).unwrap();
     }
 }

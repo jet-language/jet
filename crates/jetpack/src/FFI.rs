@@ -327,6 +327,24 @@ pub fn build_bridge(
     )
 }
 
+/// Path of the already-built Ed25519 helper, without creating cache state.
+/// Health checks use this instead of calling `build_bridge`.
+pub fn cached_crypto_helper_path() -> PathBuf {
+    let mut deps = BTreeMap::new();
+    for (name, version) in [
+        AES_GCM_CRATE_SPEC, CHACHA_POLY_CRATE_SPEC, ED25519_CRATE_SPEC,
+        ARGON2_CRATE_SPEC, SHA2_CRATE_SPEC, BLAKE3_CRATE_SPEC,
+        HKDF_CRATE_SPEC, X25519_CRATE_SPEC, SUBTLE_CRATE_SPEC,
+    ] {
+        deps.insert(name.to_string(), version.to_string());
+    }
+    let key = cache_key_full(
+        &[], &deps, false, false, false, false, false, false, true, false, false, false,
+    );
+    cache_dir().join(format!("{key:016x}"))
+        .join("target/release/jet-crypto-helper")
+}
+
 fn build_bridge_full(
     entries: &[ExternEntry],
     needs_regex: bool,

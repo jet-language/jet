@@ -134,11 +134,18 @@ fn doctor_checks_real_state_and_is_read_only() {
             let mut stream = stream.unwrap();
             use std::io::{Read, Write};
             let mut request = [0u8; 1024];
-            let _ = stream.read(&mut request).unwrap();
+            let n = stream.read(&mut request).unwrap();
+            let request = String::from_utf8_lossy(&request[..n]);
+            assert!(request.contains("Authorization: Basic dXNlcjpzdXBlci1zZWNyZXQ=\r\n"), "{request}");
             stream.write_all(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
         }
     });
     let registry_url = format!("http://user:super-secret@{addr}/index");
+    let helper = jet::Jetpack::FFI::cached_crypto_helper_path();
+    let helper_before = fs::metadata(&helper).unwrap();
+    let mut helper_parent_before = fs::read_dir(helper.parent().unwrap()).unwrap()
+        .map(|e| e.unwrap().file_name()).collect::<Vec<_>>();
+    helper_parent_before.sort();
 
     let healthy = jetpack()
         .args(["doctor", "--json", "--online"])
@@ -150,6 +157,11 @@ fn doctor_checks_real_state_and_is_read_only() {
     assert!(healthy.status.success(), "stderr: {}", String::from_utf8_lossy(&healthy.stderr));
     let healthy_json = jet::Jetpack::JSON::parse(&String::from_utf8_lossy(&healthy.stdout)).unwrap();
     assert_eq!(json_string(&healthy_json, "status"), "healthy");
+    assert_eq!(fs::metadata(&helper).unwrap().len(), helper_before.len(), "doctor changed signing helper");
+    let mut helper_parent_after = fs::read_dir(helper.parent().unwrap()).unwrap()
+        .map(|e| e.unwrap().file_name()).collect::<Vec<_>>();
+    helper_parent_after.sort();
+    assert_eq!(helper_parent_after, helper_parent_before, "doctor changed signing helper cache");
 
     fs::remove_file(keys.join("jet.ed25519")).unwrap();
     let degraded = jetpack()
