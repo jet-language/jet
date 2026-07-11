@@ -255,10 +255,15 @@ Once ratified, build order:
 
 # COMPLETION — full TOML & YAML adapters (the "serde-complete" gap)
 
-**Status (2026-06-25): ✅ DONE (c152).** `core.encoding` is now 100% serde-equivalent.
+**Historical c152 status (2026-06-25):** TOML/YAML adapter parity shipped. This
+did not complete the later #296 encoding breadth decisions; `core.encoding` is
+not broadly complete.
+The exact ratified completion contract is
+[`../spec/encoding-decisions.md`](../spec/encoding-decisions.md); summaries in
+this historical plan never override it.
 Both gating decisions ratified (D-ENC-DYN1=A+, D-ENC-YAML1=A) and implemented end to
 end; impl recorded in `docs/spec/syntax-decisions.md`. Full suite green (1107 passed).
-Shipped:
+That tranche shipped:
 - **`Data` value + aliases** — user-facing `Data` (face of `jet_std::DataTree`, variants
   `.Null/.Bool/.Int/.Float/.Text/.Array/.Object`); `Json`/`Toml`/`Yaml`/`Csv` are
   aliases canonicalized to `Data` in `Sema::resolve_type`; codegen maps all five to

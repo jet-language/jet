@@ -1280,16 +1280,19 @@ fractional to `.Float`; objects keep field order.
 — `parse(text) -> TOML ? JSONError` / `YAML ? JSONError` (full adapters over
 `Data`, not a flat map), `to_string(value)`.
 
-**Epoch 3 breadth (D-ENCSTREAM1).** The same `Data` tree now backs:
+**Ratified Epoch 3 breadth (D-ENCSTREAM1 and follow-ups).** The same `Data`
+tree backs one whole-value and streaming adapter contract per format:
+The exact signatures, defaults/ranges/accounting, tagged XML schemas, error
+paths/projections, canonical byte rules, strict decoder matrices, lifecycle,
+test vectors, and edition migrations are normative in
+[`../spec/encoding-decisions.md`](../spec/encoding-decisions.md).
 
 | Module | Surface | What it does |
 |--------|---------|--------------|
-| `core.encoding.json` | `canonical(data)`, `events(data)` | Stable key-order JSON for hashing/diffs; pull-style path events for bounded-memory consumers |
+| `core.encoding.json` | `canonical(data, limits)`, `reader`, `writer` | Edition-2027 RFC 8785 JCS; pull `DataEvent` streaming; shipped `events(Data)->String` remains separate until migration |
 | `core.encoding.jsonl` | `parse(text)`, `to_string(rows)` | JSON Lines over `[Data]` |
-| `core.encoding.xml` | `parse(text)`, `to_string(data)` | Namespace-preserving element tree: `name`, `attrs`, `children`, `text` |
-| `core.encoding.cbor` | `encode(data)`, `decode(bytes)` | Canonical binary interchange over `Data` |
-| `core.encoding.base64` | `encode_url(bytes)`, `decode_url(text)` | URL-safe base64 without required padding |
-| `core.encoding.base32` | `encode(bytes)`, `decode(text)` | RFC 4648 base32 |
+| `core.encoding.xml` | `parse`, `parse_bytes`, `to_string`, `to_bytes`, `canonical`, `reader`, `writer` | Exact tagged ordinary-`Data` tree/events with namespaces, token-local lexical evidence, safe entities/limits, and W3C C14N |
+| `core.encoding.cbor` | `parse`, `decode<T>`, `to_bytes`, `to_bytes_canonical`, `reader`, `writer` | RFC 8949 typed/native bytes and Core deterministic profile |
 
 Each adapter is a full serde equivalent, not a lossy subset:
 
@@ -1297,10 +1300,16 @@ Each adapter is a full serde equivalent, not a lossy subset:
   escape including `\uXXXX` with surrogate-pair combining; rejects invalid
   escapes, lone surrogates, and raw control characters with a line + message.
 - **JSONL** — one JSON value per non-empty line, returned as `[Data]`.
-- **XML** — element/attribute/text tree with namespace prefixes and `xmlns:*`
-  declarations preserved as names/attributes.
-- **CBOR** — canonical maps with stable key order, text keys, arrays, bytes,
-  ints, floats, bools, and null.
+- **XML** — D-ENCXML1's closed `$xml`/`$xml_event` ordinary-`Data` algebra,
+  expanded names, ordered namespaces/attributes/content, encoding/BOM and
+  token-local lexical evidence; no lossy `{name, attrs, children, text}` alias.
+- **CBOR** — typed `[U8]` maps to native byte strings. Untyped `Data` rejects
+  byte strings and every value outside its closed algebra. Canonical maps use
+  RFC 8949 section 4.2.1 complete encoded-key byte ordering.
+- **Base encodings are not Data/stream codecs.** `core.encoding.base64` exposes
+  `encode`/`decode` and `encode_url`/`decode_url`; `core.encoding.base32`
+  exposes `encode`/`decode`. They are scalar `[U8]`/`String` RFC 4648 helpers
+  with edition-2027 strict defaults and named narrow allowances.
 - **CSV** — header-mapped typed rows (`decode<T>` maps columns to fields by name).
 - **TOML** — full TOML 1.0: `[table]` headers, `[[array-of-tables]]`, dotted keys,
   inline tables, strings (every escape + multi-line), integers in every base,
@@ -1310,7 +1319,15 @@ Each adapter is a full serde equivalent, not a lossy subset:
   (`|`/`>` with chomping), comments, `---`/`...` document markers, and
   anchors/aliases (`&a`/`*a`). Explicit/custom tags (`!!str`, `!T`) are deferred.
 
-All four parsers use only Rust std (I6).
+**Current implementation boundary:** JSONL, the existing lossy XML prototype,
+prototype CBOR `encode`/Data `decode`, base32/base64url, and an infallible
+key-sorting `json.canonical` exist. The ratified pull handles and shared limits/
+errors, exact lossless XML algebra/C14N, RFC 8785 serializer, CBOR typed/error/
+canonical surface, strict edition migration, hostile standards corpora, and
+AOT/JIT/comptime parity remain open. Entries above state ratified API law, not a
+broad-complete implementation claim.
+
+Compiler/runtime codec implementations remain std-only under I6.
 
 Jet has no general `Any` top type (D-DYNAMIC-TYPE1): use the precise shape for
 the job — an enum for a closed set of variants, generics or traits for
