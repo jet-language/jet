@@ -935,8 +935,13 @@ fn wrapper_keeper_error(mut child: Child, action: &str) -> std::io::Error {
 #[cfg(not(target_os = "linux"))]
 fn create_exec_wrappers(
     _snapshot_root: &Path,
-    _executables: &[(std::ffi::OsString, fs::File)],
+    executables: &[(std::ffi::OsString, fs::File)],
 ) -> std::io::Result<Option<ExecWrappers>> {
+    // Data-only outputs need no named executable handoff. Keep them usable on
+    // every tier-1 host while the protected service handles executable leases.
+    if executables.is_empty() {
+        return Ok(None);
+    }
     Err(std::io::Error::other(
         "immutable executable PATH handoff is unavailable on this platform",
     ))
