@@ -482,3 +482,4 @@ pub const SECRETS_RECIPIENTS_VERBS: &[&str] =
 /// constant family — mirrors `jet keygen --force`'s own flag spelling
 /// (`Source/CLI.rs`), kept a plain literal there too.
 pub const SECRETS_FLAG_FORCE: &str = "--force";
+use super::{CONFIG_SUBCOMMAND, OS_SUBCOMMAND, USER_SUBCOMMAND};

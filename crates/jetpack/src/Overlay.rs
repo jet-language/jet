@@ -1009,6 +1009,60 @@ module workspace {
     }
 
     #[test]
+    fn empty_hunk_body_line_returns_patch_error() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-overlay-empty-hunk-line-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/file.txt"), "one\n").unwrap();
+        let patch = "--- a/src/file.txt\n+++ b/src/file.txt\n@@ -1 +1 @@\n\n";
+
+        let err = apply_unified_patch(&root, patch).unwrap_err();
+        assert_eq!(err.message(), "unsupported empty patch line");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn unicode_hunk_body_tag_returns_patch_error() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-overlay-unicode-hunk-tag-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/file.txt"), "one\n").unwrap();
+        let patch = "--- a/src/file.txt\n+++ b/src/file.txt\n@@ -1 +1 @@\néone\n";
+
+        let err = apply_unified_patch(&root, patch).unwrap_err();
+        assert_eq!(err.message(), "unsupported patch line `éone`");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn removal_content_starting_with_file_header_marker_is_not_a_boundary() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-overlay-removal-marker-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/file.txt"), "-- text\n").unwrap();
+        let patch =
+            "--- a/src/file.txt\n+++ b/src/file.txt\n@@ -1 +1 @@\n--- text\n+replacement\n";
+
+        let applied = apply_unified_patch(&root, patch).unwrap();
+        assert_eq!(applied[0].removed, 1);
+        assert_eq!(applied[0].added, 1);
+        assert_eq!(
+            std::fs::read_to_string(root.join("src/file.txt")).unwrap(),
+            "replacement\n"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn draft_writes_workspace_source() {
         let src = draft_overlay_source(
             None,

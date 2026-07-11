@@ -379,3 +379,7 @@ pub fn edit_distance(a: &str, b: &str) -> usize {
     }
     prev[b.len()]
 }
+use super::{
+    CONTRACT_MARKERS, CORE_CANONICAL, CORE_SHORT, DIRECTIVE_MARKERS, STDLIB_DSL_BLOCK_MARKERS,
+    TYPE_BIT_SET, TYPE_BYTE_BUFFER,
+};
