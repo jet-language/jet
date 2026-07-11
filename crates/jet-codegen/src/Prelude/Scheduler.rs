@@ -19,6 +19,73 @@ fn jet_scheduler_fatal(msg: &str) -> ! {
     std::process::exit(70);
 }
 
+// ── D-CANCELMODEL1=C: preemptive cancellation at wait points ─────────────────
+// One unwind mechanism, two triggers (deadline E3003, task cancel). A cancelled
+// task unwinds at its next wait point by panicking with the `JetCancelUnwind`
+// marker; the task runner maps that payload to a `Cancelled` result and every
+// Drop-backed cleanup runs on the way out — the same shape a blown deadline
+// already produces. A shielded region (SHIELD_DEPTH > 0) DEFERS the unwind: wait
+// points inside it complete normally and the deferred cancel/deadline lands when
+// the outermost region exits. Shield has no user spelling yet (gated on
+// D-SHIELDNAME1); `jet_scheduler_shield_enter`/`_leave` are internal-only until
+// the parent wires the ratified sigil.
+struct JetCancelUnwind;
+
+thread_local! {
+    static SHIELD_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+fn jet_scheduler_shielded() -> bool {
+    SHIELD_DEPTH.with(|d| d.get() > 0)
+}
+
+#[allow(dead_code)] // wired to a user sigil once D-SHIELDNAME1 ratifies
+pub fn jet_scheduler_shield_enter() {
+    SHIELD_DEPTH.with(|d| d.set(d.get().saturating_add(1)));
+}
+
+#[allow(dead_code)] // wired to a user sigil once D-SHIELDNAME1 ratifies
+pub fn jet_scheduler_shield_leave() {
+    let landed = SHIELD_DEPTH.with(|d| {
+        let n = d.get().saturating_sub(1);
+        d.set(n);
+        n == 0
+    });
+    if landed {
+        // A deadline that closed while shielded is program-level; raise it first.
+        if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) {
+            jet_deadline_exceeded("shield exit");
+        }
+        // A cancel that arrived while shielded now takes effect at region exit.
+        if jet_scheduler_task_cancelled() {
+            jet_task_unwind_cancel();
+        }
+    }
+}
+
+fn jet_task_unwind_cancel() -> ! {
+    std::panic::panic_any(JetCancelUnwind);
+}
+
+/// A wait point observed cancellation on a non-shielded task: unwind now when we
+/// are inside a scheduler task (a catch frame exists to turn the unwind into a
+/// `Cancelled` result). Outside a task there is no catch frame, so return and let
+/// the caller fall back to its cooperative sentinel (None/false/Closed).
+fn jet_task_deliver_cancel() {
+    if jet_scheduler_panic_should_unwind() {
+        jet_task_unwind_cancel();
+    }
+}
+
+/// Cancel check for wait points with no sentinel to return (task join): a no-op
+/// unless the running task is cancelled and unshielded, in which case it unwinds
+/// (inside a task) exactly like every other wait point.
+fn jet_task_wait_point_cancel_check() {
+    if jet_scheduler_task_cancelled() && !jet_scheduler_shielded() {
+        jet_task_deliver_cancel();
+    }
+}
+
 // ── M2: park/wake handles ─────────────────────────────────────────────────────
 
 pub struct ParkSlot {
@@ -142,21 +209,34 @@ fn current_task_control() -> Option<Arc<JetTaskControl>> {
 /// Park at a yield point; honors pause/cancel on the running task.
 pub fn jet_scheduler_yield(wait_kind: &str, slot: &Arc<ParkSlot>, timeout: Option<Duration>) {
     let ctrl = current_task_control();
+    // D-CANCELMODEL1=C: inside a shielded region, cancel/deadline are deferred to
+    // region exit — this wait point behaves as if the task were not cancelled, so
+    // the critical section can complete. Outside a shield, cancel unwinds here.
+    let shielded = jet_scheduler_shielded();
     if let Some(ctrl) = &ctrl {
-        if ctrl.cancelled.load(Ordering::Relaxed) {
-            return;
+        if !shielded {
+            if ctrl.cancelled.load(Ordering::Relaxed) {
+                jet_task_deliver_cancel();
+                return;
+            }
+            ctrl.wait_while_paused();
+            if ctrl.cancelled.load(Ordering::Relaxed) {
+                jet_task_deliver_cancel();
+                return;
+            }
+            // Make this park reachable by cancel(): a task blocked on a channel,
+            // timer, or IO wait must actually unblock when its handle is cancelled
+            // — not only when the awaited event arrives. If cancel already fired,
+            // this wakes the slot immediately so the park below returns at once.
+            ctrl.register_cancel_waiter(slot);
+        } else {
+            ctrl.wait_while_paused();
         }
-        ctrl.wait_while_paused();
-        if ctrl.cancelled.load(Ordering::Relaxed) {
-            return;
-        }
-        // Make this park reachable by cancel(): a task blocked on a channel, timer,
-        // or IO wait must actually unblock when its handle is cancelled — not only
-        // when the awaited event arrives. If cancel already fired, this wakes the
-        // slot immediately so the park below returns at once.
-        ctrl.register_cancel_waiter(slot);
     }
-    if let Some(remaining) = jet_deadline_remaining_ms() {
+    if shielded {
+        // Shielded: ignore the deadline too; wait on the real event only.
+        slot.park(timeout);
+    } else if let Some(remaining) = jet_deadline_remaining_ms() {
         if remaining <= 0 {
             if let Some(ctrl) = &ctrl {
                 ctrl.remove_cancel_waiter(slot);
@@ -178,7 +258,15 @@ pub fn jet_scheduler_yield(wait_kind: &str, slot: &Arc<ParkSlot>, timeout: Optio
         slot.park(timeout);
     }
     if let Some(ctrl) = &ctrl {
-        ctrl.remove_cancel_waiter(slot);
+        if !shielded {
+            ctrl.remove_cancel_waiter(slot);
+            // Woken by cancel() while parked: unwind at this wait point rather than
+            // returning to the task body (preemptive, D-CANCELMODEL1=C).
+            if ctrl.cancelled.load(Ordering::Relaxed) {
+                jet_task_deliver_cancel();
+                return;
+            }
+        }
         ctrl.wait_while_paused();
     }
 }
@@ -772,14 +860,15 @@ impl<T: Send> JetSchedulerChannel<T> {
 
     pub fn receive(&self) -> Option<T> {
         loop {
-            if jet_scheduler_task_cancelled() {
+            // D-CANCELMODEL1=C: a cancelled recv unwinds at this wait point (inside
+            // a task) instead of returning the cooperative `None` sentinel. Shielded
+            // regions defer the unwind and receive normally.
+            if jet_scheduler_task_cancelled() && !jet_scheduler_shielded() {
+                jet_task_deliver_cancel();
                 return None;
             }
             if let Some(ctrl) = current_task_control() {
                 ctrl.wait_while_paused();
-                if ctrl.cancelled.load(Ordering::Relaxed) {
-                    return None;
-                }
             }
             let slot = ParkSlot::new();
             let parked = {
@@ -865,14 +954,14 @@ impl<T: Send> JetSchedulerSender<T> {
     pub fn send(&self, value: T) -> bool {
         let mut value = Some(value);
         loop {
-            if jet_scheduler_task_cancelled() {
+            // D-CANCELMODEL1=C: a cancelled send unwinds at this wait point instead
+            // of returning the cooperative `false` sentinel. Shield defers.
+            if jet_scheduler_task_cancelled() && !jet_scheduler_shielded() {
+                jet_task_deliver_cancel();
                 return false;
             }
             if let Some(ctrl) = current_task_control() {
                 ctrl.wait_while_paused();
-                if ctrl.cancelled.load(Ordering::Relaxed) {
-                    return false;
-                }
             }
             let slot = ParkSlot::new();
             let wake = {
@@ -1028,7 +1117,10 @@ pub(crate) fn jet_scheduler_select<T: Send>(
     }
 
     loop {
-        if jet_scheduler_task_cancelled() {
+        // D-CANCELMODEL1=C: a cancelled select unwinds at this wait point (inside a
+        // task) instead of returning the cooperative `Closed` sentinel. Shield defers.
+        if jet_scheduler_task_cancelled() && !jet_scheduler_shielded() {
+            jet_task_deliver_cancel();
             return JetSelectOutcome::Closed;
         }
         METRIC_PARKED.fetch_add(1, Ordering::Relaxed);
@@ -1224,12 +1316,18 @@ pub struct JetSchedulerJoin<T> {
 
 impl<T> JetSchedulerJoin<T> {
     pub fn join(self) -> T {
+        // D-CANCELMODEL1=C: join is a wait point. If the joining task is already
+        // cancelled, unwind here before blocking.
+        jet_task_wait_point_cancel_check();
         match self.rx.recv() {
             Ok(JetSchedulerResult::Value(v)) => v,
             Ok(JetSchedulerResult::Panicked) | Err(_) => {
                 jet_scheduler_fatal("a task panicked");
             }
             Ok(JetSchedulerResult::Cancelled) => {
+                // A joined child that was cancelled propagates cancellation up: inside
+                // a task this unwinds as Cancelled, on the host it stops the program.
+                jet_task_deliver_cancel();
                 jet_scheduler_fatal("a task was cancelled");
             }
         }
@@ -1443,6 +1541,9 @@ where
         jet_scheduler_set_task_control(None);
         let _ = tx.send(match out {
             Ok(v) => JetSchedulerResult::Value(v),
+            // D-CANCELMODEL1=C: a `JetCancelUnwind` payload is a task that unwound at
+            // a wait point because it was cancelled — report Cancelled, not Panicked.
+            Err(e) if e.is::<JetCancelUnwind>() => JetSchedulerResult::Cancelled,
             Err(_) => JetSchedulerResult::Panicked,
         });
     }));

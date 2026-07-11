@@ -1,0 +1,29 @@
+// D-CANCELMODEL1=C: preemptive cancellation at wait points, proven identical
+// under AOT and default dev (JIT) — R12 parity. `fast` wins the race, so the
+// losing `slow` task is cancelled and unwinds at `time.sleep`; the commit after
+// the wait never runs, so only the winner "7" is printed on both tiers.
+use core.tasks as tasks
+use core.time as time
+
+fn slow_commit() -> Int {
+    time.sleep(200)
+    print("committed")
+    return 1
+}
+
+fn fast_seven() -> Int {
+    return 7
+}
+
+fn run() {
+    taskgroup g {
+        slow :: g.task(() => {
+            slow_commit()
+        })
+        fast :: g.task(() => {
+            fast_seven()
+        })
+        winner :: g.race([slow, fast])
+        print(winner)
+    }
+}

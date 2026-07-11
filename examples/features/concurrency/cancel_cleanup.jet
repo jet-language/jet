@@ -1,0 +1,31 @@
+// D-CANCELMODEL1=C: cancellation is preemptive at wait points. When `fast` wins
+// the race, the losing `slow` task is cancelled and unwinds at its next wait
+// point (`time.sleep`) — the work after the wait never runs, so "committed" is
+// never printed. Under a cooperative model the sleep would return early and the
+// commit would still execute; the single deterministic "7" is the executable
+// proof that Jet unwinds the loser instead.
+use core.tasks as tasks
+use core.time as time
+
+fn slow_commit() -> Int {
+    time.sleep(200)      // cancelled here -> unwind; the commit below is skipped
+    print("committed")
+    return 1
+}
+
+fn fast_seven() -> Int {
+    return 7
+}
+
+fn run() {
+    taskgroup g {
+        slow :: g.task(() => {
+            slow_commit()
+        })
+        fast :: g.task(() => {
+            fast_seven()
+        })
+        winner :: g.race([slow, fast])
+        print(winner)
+    }
+}
