@@ -58,6 +58,15 @@ const CASES: &[&str] = &[
     "[\"b\": 2, \"a\": 1, \"c\": 3].keys()",
     "[\"b\": 2, \"a\": 1, \"c\": 3].values()",
     "[2: \"two\", 1: \"one\"].keys()",
+    // D-BIGINT1 (card #392): arbitrary-precision arithmetic — no overflow,
+    // no auto-promotion. comptime must match AOT's limb-based `JetBigInt`
+    // byte-for-byte (R12 parity).
+    "BigInt(9223372036854775807) + BigInt(1)",
+    "BigInt(\"999999999999999999999999999999\") + BigInt(\"999999999999999999999999999999\")",
+    "BigInt(100) - BigInt(1)",
+    "BigInt(7) * BigInt(6)",
+    "BigInt(5).sub(BigInt(3))",
+    "BigInt(3).neg()",
 ];
 
 #[test]
