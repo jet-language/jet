@@ -473,6 +473,9 @@ pub struct BuildRunOptions {
     pub grants: std::collections::BTreeSet<crate::Comptime::Build::BuildCapability>,
     pub execute: bool,
     pub allow_impure: bool,
+    /// Validate and expose declared graph authority without granting ambient
+    /// comptime authority. Used only by read-only CLI/LSP inspection.
+    pub inspect_only: bool,
     pub locked: bool,
     pub freestanding: bool,
     pub web_target: bool,
@@ -486,6 +489,7 @@ impl Default for BuildRunOptions {
             grants: std::collections::BTreeSet::new(),
             execute: true,
             allow_impure: false,
+            inspect_only: false,
             locked: false,
             freestanding: false,
             web_target: false,
@@ -565,7 +569,11 @@ fn build_query_options() -> BuildRunOptions {
         // must not require execution grants merely to display the graph.
         grants: crate::Comptime::Build::BuildCapability::ALL.into_iter().collect(),
         execute: false,
-        allow_impure: true,
+        // Graph inspection may describe effectful actions, but it has no
+        // authority to perform ambient comptime I/O. A user-written #Impure
+        // gate therefore still reaches E3411 instead of touching the host.
+        allow_impure: false,
+        inspect_only: true,
         locked: false,
         freestanding: false,
         web_target: false,
@@ -1161,7 +1169,7 @@ fn validate_build_authority(
                 Some(span),
             )]);
         }
-        if !options.allow_impure || !options.grants.contains(&effect) {
+        if !options.inspect_only && (!options.allow_impure || !options.grants.contains(&effect)) {
             return Err(vec![Diagnostic::error(
                 "E3503",
                 format!("this build asks for `{}`, which effective policy has not granted", effect.name()),

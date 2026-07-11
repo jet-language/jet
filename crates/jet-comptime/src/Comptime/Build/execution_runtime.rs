@@ -157,24 +157,33 @@ fn execute_one_action(
     let previous_key = read_last_rebuild_record(project_root, action.id, &action.name)
         .map_err(|error| io_action(action, error))?
         .map(|record| record.key);
+    let mut restore_failure = None;
     if action.cache == ActionCache::Cached {
-        if let Some(record) = read_action_record(records, &record_path, key.clone()) {
-            if cas.restore_action_outputs(project_root, action, &record).is_ok() {
-                write_last_rebuild_record(
-                    project_root,
-                    action,
-                    &key,
-                    ActionCacheStatus::Hit(CacheHitReason::LocalActionRecordMatched),
-                )?;
-                return Ok(ActionOutcome::RestoredFromCache);
-            }
+        match read_action_record(records, &record_path, key.clone()) {
+            Ok(Some(record)) => match cas.restore_action_outputs(project_root, action, &record) {
+                Ok(()) => {
+                    write_last_rebuild_record(
+                        project_root,
+                        action,
+                        &key,
+                        ActionCacheStatus::Hit(CacheHitReason::LocalActionRecordMatched),
+                        None,
+                    )?;
+                    return Ok(ActionOutcome::RestoredFromCache);
+                }
+                Err(error) => {
+                    restore_failure = Some(cache_restore_miss_reason(&error));
+                }
+            },
+            Ok(None) => {}
+            Err(error) => restore_failure = Some(cache_restore_miss_reason(&error)),
         }
     }
 
     let rebuild_status = if action.cache == ActionCache::UncachedPhony {
         ActionCacheStatus::Miss(CacheMissReason::UncachedAction)
-    } else if record_path.exists() {
-        ActionCacheStatus::Miss(CacheMissReason::DeclaredOutputMissing)
+    } else if let Some(reason) = restore_failure {
+        ActionCacheStatus::Miss(reason)
     } else if previous_key.as_ref().is_some_and(|old| old != &key) {
         ActionCacheStatus::Miss(CacheMissReason::ActionKeyChanged)
     } else {
@@ -218,6 +227,7 @@ fn execute_one_action(
     let code = output.status.code().unwrap_or(1);
     if !output.status.success() {
         let _ = fs::remove_dir_all(&sandbox);
+        write_last_rebuild_record(project_root, action, &key, rebuild_status, Some(code))?;
         return Err(BuildExecutionError::ActionFailed {
             action: action.name.clone(), exit_code: code,
             stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
@@ -237,7 +247,7 @@ fn execute_one_action(
         ).map_err(|e| io_action(action, e))?;
         write_action_record(&record_path, &record).map_err(|e| io_action(action, e))?;
     }
-    write_last_rebuild_record(project_root, action, &key, rebuild_status)?;
+    write_last_rebuild_record(project_root, action, &key, rebuild_status, None)?;
     fs::remove_dir_all(&sandbox).map_err(|e| io_action(action, e))?;
     Ok(outcome)
 }
@@ -245,6 +255,7 @@ fn execute_one_action(
 struct LastRebuildRecord {
     key: ActionKey,
     status: ActionCacheStatus,
+    failed_exit_code: Option<i32>,
 }
 
 fn rebuild_record_path(project_root: &Path, action: ActionId) -> PathBuf {
@@ -260,6 +271,8 @@ fn rebuild_status_code(status: ActionCacheStatus) -> &'static str {
         ActionCacheStatus::Miss(CacheMissReason::NoLocalActionRecord) => "miss-new",
         ActionCacheStatus::Miss(CacheMissReason::ActionKeyChanged) => "miss-key",
         ActionCacheStatus::Miss(CacheMissReason::DeclaredOutputMissing) => "miss-output",
+        ActionCacheStatus::Miss(CacheMissReason::CacheRecordInvalid) => "miss-invalid",
+        ActionCacheStatus::Miss(CacheMissReason::CacheRestoreFailed) => "miss-restore",
         ActionCacheStatus::Miss(CacheMissReason::RemoteDenied) => "miss-remote",
         ActionCacheStatus::Miss(CacheMissReason::UncachedAction) => "miss-uncached",
     }
@@ -272,6 +285,8 @@ fn parse_rebuild_status(code: &str) -> Option<ActionCacheStatus> {
         "miss-new" => ActionCacheStatus::Miss(CacheMissReason::NoLocalActionRecord),
         "miss-key" => ActionCacheStatus::Miss(CacheMissReason::ActionKeyChanged),
         "miss-output" => ActionCacheStatus::Miss(CacheMissReason::DeclaredOutputMissing),
+        "miss-invalid" => ActionCacheStatus::Miss(CacheMissReason::CacheRecordInvalid),
+        "miss-restore" => ActionCacheStatus::Miss(CacheMissReason::CacheRestoreFailed),
         "miss-remote" => ActionCacheStatus::Miss(CacheMissReason::RemoteDenied),
         "miss-uncached" => ActionCacheStatus::Miss(CacheMissReason::UncachedAction),
         _ => return None,
@@ -301,15 +316,11 @@ fn read_last_rebuild_record(
     Ok(Some(LastRebuildRecord {
         key: ActionKey(key.to_string()),
         status,
+        failed_exit_code: lines
+            .next()
+            .and_then(|line| line.strip_prefix("failed:"))
+            .and_then(|code| code.parse().ok()),
     }))
-}
-
-fn read_last_rebuild_status(
-    project_root: &Path,
-    action: ActionId,
-    action_name: &str,
-) -> io::Result<Option<ActionCacheStatus>> {
-    Ok(read_last_rebuild_record(project_root, action, action_name)?.map(|record| record.status))
 }
 
 fn write_last_rebuild_record(
@@ -317,13 +328,17 @@ fn write_last_rebuild_record(
     action: &BuildAction,
     key: &ActionKey,
     status: ActionCacheStatus,
+    failed_exit_code: Option<i32>,
 ) -> Result<(), BuildExecutionError> {
     let path = rebuild_record_path(project_root, action.id);
     let text = format!(
-        "{}\n{}\n{}\n",
+        "{}\n{}\n{}\n{}",
         key.as_str(),
         ContentDigest::from_bytes(action.name.as_bytes()).as_str(),
-        rebuild_status_code(status)
+        rebuild_status_code(status),
+        failed_exit_code
+            .map(|code| format!("failed:{code}\n"))
+            .unwrap_or_default()
     );
     atomic_restore_file(project_root, &path, text.as_bytes()).map_err(|error| BuildExecutionError::Io {
         action: format!("rebuild explanation {}", action.name),
@@ -411,22 +426,46 @@ fn write_action_record(path: &Path, record: &ActionResultRecord) -> io::Result<(
     atomic_restore_file(root, path, text.as_bytes())
 }
 
-fn read_action_record(root: &Path, path: &Path, key: ActionKey) -> Option<ActionResultRecord> {
-    let text = String::from_utf8(secure_read_file(root, path).ok()?).ok()?;
+fn cache_restore_miss_reason(error: &io::Error) -> CacheMissReason {
+    match error.kind() {
+        io::ErrorKind::NotFound => CacheMissReason::DeclaredOutputMissing,
+        io::ErrorKind::InvalidData => CacheMissReason::CacheRecordInvalid,
+        _ => CacheMissReason::CacheRestoreFailed,
+    }
+}
+
+fn read_action_record(
+    root: &Path,
+    path: &Path,
+    key: ActionKey,
+) -> io::Result<Option<ActionResultRecord>> {
+    let bytes = match secure_read_file(root, path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let text = String::from_utf8(bytes)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "action record is not UTF-8"))?;
     let mut lines = text.lines();
-    if lines.next()? != key.as_str() { return None; }
+    if lines.next() != Some(key.as_str()) {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "action record key does not match its cache path"));
+    }
     let mut outputs = Vec::new();
     for line in lines {
         let mut parts = line.split('\t');
-        let path = BuildPath::new(parts.next()?).ok()?;
-        let digest = ContentDigest::parse(parts.next()?).ok()?;
-        let byte_len = parts.next()?.parse().ok()?;
+        let invalid = || io::Error::new(io::ErrorKind::InvalidData, "malformed action output record");
+        let path = BuildPath::new(parts.next().ok_or_else(invalid)?).map_err(|_| invalid())?;
+        let digest = ContentDigest::parse(parts.next().ok_or_else(invalid)?)?;
+        let byte_len = parts.next().ok_or_else(invalid)?.parse().map_err(|_| invalid())?;
+        if parts.next().is_some() {
+            return Err(invalid());
+        }
         outputs.push(ActionOutputRecord { path, digest, byte_len });
     }
-    Some(ActionResultRecord {
+    Ok(Some(ActionResultRecord {
         key, outcome: ActionOutcome::RestoredFromCache, outputs,
         provenance: ActionCacheProvenance::hit(CacheHitReason::LocalActionRecordMatched),
-    })
+    }))
 }
 
 fn io_action(action: &BuildAction, error: io::Error) -> BuildExecutionError {

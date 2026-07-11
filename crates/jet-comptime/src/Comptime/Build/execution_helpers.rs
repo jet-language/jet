@@ -29,6 +29,12 @@ fn cache_status_reason(status: ActionCacheStatus) -> &'static str {
         ActionCacheStatus::Miss(CacheMissReason::DeclaredOutputMissing) => {
             "declared output missing"
         }
+        ActionCacheStatus::Miss(CacheMissReason::CacheRecordInvalid) => {
+            "local cache record or blob is invalid"
+        }
+        ActionCacheStatus::Miss(CacheMissReason::CacheRestoreFailed) => {
+            "local cache output could not be restored"
+        }
         ActionCacheStatus::Miss(CacheMissReason::RemoteDenied) => "remote cache denied by policy",
         ActionCacheStatus::Miss(CacheMissReason::UncachedAction) => "action is uncached",
     }

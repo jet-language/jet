@@ -1956,6 +1956,55 @@ fn lsp_definition_returns_location() {
 }
 
 #[test]
+fn lsp_definition_uses_build_graph_generated_source() {
+    let jet = jet_bin();
+    if !jet.exists() {
+        return;
+    }
+    let source = r#"fn build(b: BuildContext) -> BuildPlan ? {
+    b.generate("made", "fn generated_value() -> String {{ return \"hi\" }}")?
+    app :: b.add_executable("app", ["main.jet", ".jet/generated/main/made.jet"], [])?
+    return b.plan(app)
+}
+fn run() { print(generated_value()) }
+"#;
+    let uri = format!("file:///tmp/lsp_generated_def_{}/main.jet", std::process::id());
+
+    run_transcript(
+        source,
+        &[
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
+                    .to_string(),
+                expect_contains: Some(vec!["definitionProvider".to_string()]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#.to_string(),
+                expect_contains: None,
+            },
+            TranscriptStep::Open {
+                uri: uri.clone(),
+                expect_notification: true,
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/definition","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":5,"character":20}}}}}}"#,
+                    uri
+                ),
+                expect_contains: Some(vec![
+                    ".jet/generated/main/made.jet".to_string(),
+                    "range".to_string(),
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),
+                expect_contains: Some(vec!["result".to_string()]),
+            },
+        ],
+    );
+}
+
+#[test]
 fn lsp_semantic_tokens_returns_data() {
     let jet = jet_bin();
     if !jet.exists() {

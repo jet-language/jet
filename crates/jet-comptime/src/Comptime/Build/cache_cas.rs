@@ -48,6 +48,8 @@ pub enum CacheMissReason {
     NoLocalActionRecord,
     ActionKeyChanged,
     DeclaredOutputMissing,
+    CacheRecordInvalid,
+    CacheRestoreFailed,
     RemoteDenied,
     UncachedAction,
 }

@@ -11,8 +11,8 @@ use std::sync::Arc;
 use super::Check::{check_document_with_bundle, collect_fixes, Fix};
 use super::Completion::compute_completions;
 use super::Features::{
-    compute_definition, compute_hover, compute_references, compute_rename, encode_semantic_tokens,
-    encode_semantic_tokens_in_span, format_inlay_hints,
+    compute_definition, compute_generated_definition, compute_hover, compute_references,
+    compute_rename, encode_semantic_tokens, encode_semantic_tokens_in_span, format_inlay_hints,
 };
 use super::Position::{
     apply_lsp_edit, byte_offset_to_lsp, byte_span_to_range, full_document_range, lsp_pos_to_offset,
@@ -1313,7 +1313,25 @@ fn definition_response(
             );
             Some(response(id, &result))
         }
-        None => Some(response(id, "null")),
+        None => {
+            let generated = crate::Driver::query_build_plan_with_overlay(&doc.path, &doc.text)
+                .ok()
+                .flatten()
+                .and_then(|plan| compute_generated_definition(&plan, &tokens, offset));
+            let Some((relative_path, source, span)) = generated else {
+                return Some(response(id, "null"));
+            };
+            let root = std::path::Path::new(&doc.path)
+                .parent()
+                .unwrap_or(std::path::Path::new("."));
+            let def_path = root.join(relative_path).to_string_lossy().into_owned();
+            let result = format!(
+                r#"{{"uri":"{}","range":{}}}"#,
+                json_escape(&path_to_uri(&def_path)),
+                range_json(byte_span_to_range(&source, span))
+            );
+            Some(response(id, &result))
+        }
     }
 }
 

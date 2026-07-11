@@ -26,6 +26,7 @@ fn opts() -> BuildRunOptions {
         grants: BTreeSet::from([BuildCapability::Exec, BuildCapability::Fs]),
         execute: true,
         allow_impure: true,
+        inspect_only: false,
         locked: false,
         freestanding: false,
         web_target: false,
@@ -36,6 +37,17 @@ fn opts() -> BuildRunOptions {
 
 fn write(path: &Path, text: &str) {
     fs::write(path, text).unwrap();
+}
+
+fn first_file_under(path: &Path) -> PathBuf {
+    for entry in fs::read_dir(path).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            return first_file_under(&path);
+        }
+        return path;
+    }
+    panic!("no cache blob under {}", path.display());
 }
 
 #[test]
@@ -133,6 +145,101 @@ fn run() { print("ok") }
         "explain-build must expose real cache provenance: {}",
         String::from_utf8_lossy(&explain.stdout)
     );
+}
+
+#[test]
+fn failed_action_replaces_stale_rebuild_provenance() {
+    let root = project("failed-provenance");
+    let entry = root.join("main.jet");
+    write(
+        &entry,
+        r#"
+fn build(b: BuildContext) #(Exec) -> BuildPlan ? {
+    #Impure("run declared failing action") {
+        fail :: b.action("fail", [], ["never"], ["sh", "-c", "exit 23"], ["Exec"])?
+        app :: b.add_executable("app", ["main.jet"], [fail])?
+        return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}
+"#,
+    );
+    assert!(compile_bundle_path_build(entry.to_str().unwrap(), opts()).is_err());
+    let plan = jet::Driver::query_build_plan(entry.to_str().unwrap())
+        .unwrap()
+        .unwrap();
+    let explanation = plan
+        .last_rebuild_explanation(&root, "fail")
+        .unwrap()
+        .expect("failed execution must persist provenance");
+    assert_eq!(
+        explanation.reason,
+        "action failed with exit code 23 after no local action record"
+    );
+}
+
+#[test]
+fn cache_restore_provenance_distinguishes_missing_and_invalid_blobs() {
+    for (case, damage, expected) in [
+        (
+            "missing",
+            "remove",
+            jet::Comptime::Build::CacheMissReason::DeclaredOutputMissing,
+        ),
+        (
+            "invalid",
+            "corrupt",
+            jet::Comptime::Build::CacheMissReason::CacheRecordInvalid,
+        ),
+        (
+            "invalid-record",
+            "corrupt-record",
+            jet::Comptime::Build::CacheMissReason::CacheRecordInvalid,
+        ),
+    ] {
+        let root = project(&format!("restore-{case}"));
+        let entry = root.join("main.jet");
+        write(
+            &entry,
+            r#"
+fn build(b: BuildContext) #(Exec, Fs) -> BuildPlan ? {
+    #Impure("write declared cached output") {
+        emit :: b.action("emit", [], ["artifact"], ["sh", "-c", "printf fresh > artifact"], ["Exec", "Fs"])?
+        app :: b.add_executable("app", ["main.jet"], [emit])?
+        return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}
+"#,
+        );
+        compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap();
+        if damage == "corrupt-record" {
+            let record = first_file_under(&root.join(".jet/build-cache/actions"));
+            fs::write(record, "not an action record").unwrap();
+        } else {
+            let blob = first_file_under(&root.join(".jet/build-cache/cas/blobs"));
+            if damage == "remove" {
+                fs::remove_file(blob).unwrap();
+            } else {
+                fs::write(blob, "corrupt").unwrap();
+            }
+        }
+        let rebuilt = compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap();
+        let explanation = rebuilt
+            .build
+            .unwrap()
+            .plan
+            .last_rebuild_explanation(&root, "emit")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            explanation.status,
+            jet::Comptime::Build::ActionCacheStatus::Miss(expected),
+            "{case} restore failure was misclassified"
+        );
+    }
 }
 
 #[test]
@@ -340,6 +447,92 @@ fn run() {}
     .expect("declared effects remain inspectable without execution grants");
     assert_eq!(plan.actions()[0].name, "never-run");
     assert!(!root.join("out").exists(), "query must never execute action");
+}
+
+#[test]
+fn graph_query_denies_ambient_impure_effects_before_host_side_effects() {
+    let root = project("query-denies-ambient");
+    let entry = root.join("main.jet");
+    let marker = root.join("must-not-exist");
+    write(
+        &entry,
+        &format!(
+            r#"
+use core.files as files
+use core.env as env
+use core.process as process
+
+fn build(b: BuildContext) -> BuildPlan ? {{
+    #Impure("hostile inspection probe") {{
+        write_result :: files.write("{}", "owned")
+        env.set("JET_QUERY_MUST_NOT_SET", "owned")
+        process_result :: process.run(["sh", "-c", "exit 97"])
+    }}
+    return b.plan()
+}}
+fn run() {{}}
+"#,
+            marker.display()
+        ),
+    );
+
+    std::env::remove_var("JET_QUERY_MUST_NOT_SET");
+    let diagnostics = jet::Driver::evaluate_build_query(
+        entry.to_str().unwrap(),
+        BuildQueryExpression::Build,
+    )
+    .expect_err("inspection must reject ambient comptime authority");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E3411"),
+        "unexpected diagnostics: {diagnostics:?}"
+    );
+    assert!(!marker.exists(), "inspection wrote to the host filesystem");
+    assert_eq!(std::env::var_os("JET_QUERY_MUST_NOT_SET"), None);
+}
+
+#[test]
+fn graph_query_denies_each_ambient_authority_class() {
+    let cases = [
+        (
+            "filesystem",
+            "core.files",
+            "effect :: api.write(\"blocked\", \"owned\")",
+        ),
+        (
+            "environment",
+            "core.env",
+            "api.set(\"JET_QUERY_BLOCKED\", \"owned\")",
+        ),
+        (
+            "exec-process",
+            "core.process",
+            "effect :: api.run([\"sh\", \"-c\", \"exit 97\"])",
+        ),
+        (
+            "network",
+            "core.net",
+            "effect :: api.tcp_listen(\"127.0.0.1:0\")",
+        ),
+    ];
+    for (name, module, call) in cases {
+        let root = project(&format!("query-denies-{name}"));
+        let entry = root.join("main.jet");
+        write(
+            &entry,
+            &format!(
+                "use {module} as api\nfn build(b: BuildContext) -> BuildPlan ? {{\n    #Impure(\"hostile {name} probe\") {{ {call} }}\n    return b.plan()\n}}\nfn run() {{}}\n"
+            ),
+        );
+        let diagnostics = jet::Driver::evaluate_build_query(
+            entry.to_str().unwrap(),
+            BuildQueryExpression::Build,
+        )
+        .expect_err("inspection must reject ambient comptime authority");
+        assert!(
+            diagnostics.iter().any(|diagnostic| diagnostic.code == "E3411"),
+            "{name} escaped inspection authority: {diagnostics:?}"
+        );
+    }
 }
 
 #[test]

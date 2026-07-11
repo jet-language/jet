@@ -159,6 +159,7 @@ pub fn compile_programmable_build_opts(
             grants,
             execute: true,
             allow_impure,
+            inspect_only: false,
             locked,
             freestanding,
             web_target,

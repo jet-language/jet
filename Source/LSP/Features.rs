@@ -131,6 +131,35 @@ fn find_ident_at<'a>(tokens: &'a [Token], offset: usize) -> Option<&'a str> {
     None
 }
 
+/// Resolve a call into source owned by the canonical build graph. Generated
+/// modules are not a second symbol database: their source and path come from
+/// BuildPlan, and the lexer identifies the exact declaration span.
+pub(crate) fn compute_generated_definition(
+    plan: &crate::Comptime::Build::BuildPlan,
+    tokens: &[Token],
+    offset: usize,
+) -> Option<(String, String, Span)> {
+    let name = find_ident_at(tokens, offset)?;
+    for module in plan.generated_modules() {
+        let (generated_tokens, errors) = crate::Lexer::lex(&module.source);
+        if !errors.is_empty() {
+            continue;
+        }
+        for pair in generated_tokens.windows(2) {
+            if matches!(pair[0].kind, TokKind::KwFn)
+                && matches!(&pair[1].kind, TokKind::Ident(candidate) if candidate == name)
+            {
+                return Some((
+                    module.path.as_str().to_string(),
+                    module.source.clone(),
+                    pair[1].span,
+                ));
+            }
+        }
+    }
+    None
+}
+
 // ── Go-to-definition ──────────────────────────────────────────────────────────
 
 pub(crate) fn compute_definition(

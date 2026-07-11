@@ -400,18 +400,22 @@ impl BuildPlan {
         let Some(action) = self.actions.iter().find(|action| action.name == action_name) else {
             return Ok(None);
         };
-        let Some(status) = read_last_rebuild_status(project_root, action.id, action_name)? else {
+        let Some(record) = read_last_rebuild_record(project_root, action.id, action_name)? else {
             return Ok(None);
         };
-        self.why_rebuilt(
+        let mut explanation = self.why_rebuilt(
             ActionHandle {
                 id: action.id,
                 context: self.context,
             },
-            status,
+            record.status,
         )
-        .map(Some)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, format!("{error:?}")))
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, format!("{error:?}")))?;
+        if let Some(code) = record.failed_exit_code {
+            explanation.reason =
+                format!("action failed with exit code {code} after {}", explanation.reason);
+        }
+        Ok(Some(explanation))
     }
 
     pub fn execution_model(&self) -> Result<BuildExecutionModel, BuildError> {
