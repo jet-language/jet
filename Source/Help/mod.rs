@@ -53,26 +53,30 @@ pub struct Entry {
 /// Category display order for the categorized (empty-query) view and the
 /// F1 reference's left-hand tree.
 pub const CATEGORIES: &[&str] = &[
-    "Build & run",
-    "Project",
+    "Build and run",
+    "Project/env",
     "Packages",
     "jetos",
-    "Analysis",
+    "Dev server",
     "Reference",
+    "Error codes",
 ];
 
 fn category_for(cmd: &str) -> &'static str {
     match cmd {
-        "run" | "check" | "test" | "build" | "dev" | "devtools" | "serve" | "debug" | "bench"
-        | "eval" | "emit" => "Build & run",
+        "run" | "check" | "test" | "build" | "debug" | "bench" | "eval" | "emit" => {
+            "Build and run"
+        }
+        "dev" | "serve" => "Dev server",
+        "devtools" => "Reference",
         "new" | "fmt" | "fix" | "lint" | "env" | "init" | "lock" | "config" | "toolchain" => {
-            "Project"
+            "Project/env"
         }
         "add" | "remove" | "fetch" | "update" | "outdated" | "search" | "info" | "logs"
         | "clean" | "publish" | "yank" | "keygen" | "key" | "vendor" | "audit" | "sbom"
         | "store" | "schema" | "gc" => "Packages",
         "os" | "image" | "bind" | "push" | "trust" | "bridge" | "services" => "jetos",
-        "semindex" | "dossier" | "impact" | "codemod" | "expand" => "Analysis",
+        "semindex" | "dossier" | "impact" | "codemod" | "expand" => "Reference",
         // explain, doctor, repl, man, completions, version, upgrade, help, lsp,
         // and any future command land here — a safe default, never a crash.
         _ => "Reference",
@@ -272,6 +276,9 @@ pub fn search(index: &[Entry], query: &str) -> Vec<Hit> {
         let haystacks: Vec<String> = std::iter::once(format!("jet {}", entry.cmd))
             .chain(std::iter::once(entry.usage.clone()))
             .chain(std::iter::once(entry.summary.to_string()))
+            .chain(entry.flags.iter().map(|(flag, help)| format!("{} {}", flag, help)))
+            .chain(entry.example.iter().cloned())
+            .chain(entry.see_also.iter().map(|name| name.to_string()))
             .chain(entry.keywords.iter().map(|k| k.to_string()))
             .collect();
         let mut best: Option<(i64, String, Vec<usize>)> = None;
@@ -283,6 +290,7 @@ pub fn search(index: &[Entry], query: &str) -> Vec<Hit> {
             }
         }
         if let Some((score, haystack, positions)) = best {
+            let score = score + if entry.cmd.eq_ignore_ascii_case(query) { 1000 } else { 0 };
             hits.push(Hit::Command {
                 entry: entry.clone(),
                 score,
@@ -356,6 +364,17 @@ mod tests {
             panic!("expected a command hit");
         };
         assert_eq!(entry.cmd, "dev");
+    }
+
+    #[test]
+    fn search_covers_registry_flags_and_examples() {
+        let index = build_index();
+        assert!(search(&index, "--release").iter().any(|hit| {
+            matches!(hit, Hit::Command { entry, .. } if entry.cmd == "run")
+        }));
+        assert!(search(&index, "hello.jet").iter().any(|hit| {
+            matches!(hit, Hit::Command { entry, .. } if entry.cmd == "run")
+        }));
     }
 
     #[test]

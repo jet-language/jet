@@ -18,20 +18,62 @@ fn w(width: usize) -> usize {
 /// Visible column count of `s` (byte-agnostic; this module's inputs are all
 /// plain ASCII command/flag/summary text, so `chars().count()` is exact).
 fn cols(s: &str) -> usize {
-    s.chars().count()
+    let mut escaped = false;
+    s.chars()
+        .filter(|&ch| {
+            if escaped {
+                if ch == 'm' {
+                    escaped = false;
+                }
+                false
+            } else if ch == '\x1b' {
+                escaped = true;
+                false
+            } else {
+                true
+            }
+        })
+        .count()
 }
 
 fn pad(s: &str, width: usize) -> String {
     let c = cols(s);
     if c >= width {
-        let mut out: String = s.chars().take(width.saturating_sub(1)).collect();
-        if width > 0 {
-            out.push('…');
-        }
-        out
+        truncate_visible(s, width)
     } else {
         format!("{}{}", s, " ".repeat(width - c))
     }
+}
+
+fn truncate_visible(s: &str, width: usize) -> String {
+    if width == 0 {
+        return String::new();
+    }
+    let keep = width.saturating_sub(1);
+    let mut out = String::new();
+    let mut visible = 0usize;
+    let mut escaped = false;
+    for ch in s.chars() {
+        if escaped {
+            out.push(ch);
+            if ch == 'm' {
+                escaped = false;
+            }
+        } else if ch == '\x1b' {
+            escaped = true;
+            out.push(ch);
+        } else if visible < keep {
+            out.push(ch);
+            visible += 1;
+        } else {
+            break;
+        }
+    }
+    out.push('…');
+    if s.contains('\x1b') {
+        out.push_str("\x1b[0m");
+    }
+    out
 }
 
 fn top(width: usize, label: &str) -> String {
@@ -59,6 +101,16 @@ fn row(width: usize, text: &str, selected: bool) -> String {
     let marker = if selected { "> " } else { "  " };
     let inner = width.saturating_sub(4);
     format!("│{}{}│", marker, pad(text, inner))
+}
+
+fn selected_row(width: usize, text: &str, selected: bool, color: bool) -> String {
+    if selected && color {
+        let width = w(width);
+        let inner = width.saturating_sub(2);
+        format!("│\x1b[7m{}\x1b[0m│", pad(text, inner))
+    } else {
+        row(width, text, selected)
+    }
 }
 
 /// Bracket every maximal run of matched char indices in `text` — the
@@ -136,7 +188,14 @@ fn emphasize(text: &str, positions: &[usize], color: bool) -> String {
 /// `selected_cmd` names the highlighted row (by command name, not row index
 /// — category headers aren't selectable, so a plain "nth row" index would
 /// have to know the header layout too).
-pub fn render_categorized(index: &[Entry], selected_cmd: Option<&str>, width: usize, color: bool) -> String {
+pub fn render_categorized(
+    index: &[Entry],
+    selected_category: usize,
+    expanded: bool,
+    selected_cmd: Option<&str>,
+    width: usize,
+    color: bool,
+) -> String {
     let width = w(width);
     let mut out = String::new();
     out.push_str(&top(width, "jet ? — command palette"));
@@ -145,22 +204,32 @@ pub fn render_categorized(index: &[Entry], selected_cmd: Option<&str>, width: us
     out.push('\n');
     out.push_str(&mid(width));
     out.push('\n');
-    for item in flatten_categorized(index) {
-        match item {
-            Row::Header(cat) => {
-                let label = if color {
-                    format!("\x1b[36m{}\x1b[0m", cat)
-                } else {
-                    format!("▾ {}", cat)
-                };
-                out.push_str(&row(width, &label, false));
+    for (ci, cat) in super::CATEGORIES.iter().enumerate() {
+        let entries: Vec<&Entry> = index.iter().filter(|e| &e.category == cat).collect();
+        if entries.is_empty() && *cat != "Error codes" {
+            continue;
+        }
+        let is_expanded = ci == selected_category && expanded;
+        let marker = if is_expanded { "▾" } else { "▸" };
+        let plain = format!("{} {}", marker, cat);
+        let label = if color && ci == selected_category {
+            format!("\x1b[1;36m{}\x1b[0m", plain)
+        } else {
+            plain
+        };
+        out.push_str(&selected_row(width, &label, ci == selected_category && !is_expanded, color));
+        out.push('\n');
+        if is_expanded {
+            if *cat == "Error codes" {
+                out.push_str(&row(width, "type an E-code, such as E0102, for verbatim help", false));
+                out.push('\n');
             }
-            Row::Entry(e) => {
+            for e in entries {
                 let line = format!("jet {:<20} {}", e.cmd, e.summary);
-                out.push_str(&row(width, &line, selected_cmd == Some(e.cmd)));
+                out.push_str(&selected_row(width, &line, selected_cmd == Some(e.cmd), color));
+                out.push('\n');
             }
         }
-        out.push('\n');
     }
     out.push_str(&bottom(width));
     out
@@ -169,33 +238,10 @@ pub fn render_categorized(index: &[Entry], selected_cmd: Option<&str>, width: us
 /// Command names in categorized display order (headers excluded) — the
 /// selection sequence `Interactive`'s ↑/↓ walks over.
 pub fn categorized_order(index: &[Entry]) -> Vec<&'static str> {
-    flatten_categorized(index)
-        .into_iter()
-        .filter_map(|r| match r {
-            Row::Entry(e) => Some(e.cmd),
-            Row::Header(_) => None,
-        })
+    super::CATEGORIES
+        .iter()
+        .flat_map(|cat| index.iter().filter(move |e| &e.category == cat).map(|e| e.cmd))
         .collect()
-}
-
-enum Row<'a> {
-    Header(&'static str),
-    Entry(&'a Entry),
-}
-
-fn flatten_categorized(index: &[Entry]) -> Vec<Row<'_>> {
-    let mut out = Vec::new();
-    for cat in super::CATEGORIES {
-        let entries: Vec<&Entry> = index.iter().filter(|e| &e.category == cat).collect();
-        if entries.is_empty() {
-            continue;
-        }
-        out.push(Row::Header(cat));
-        for e in entries {
-            out.push(Row::Entry(e));
-        }
-    }
-    out
 }
 
 /// The fuzzy-filtered result list (typing) — also the non-interactive
@@ -226,10 +272,10 @@ pub fn render_result_list(hits: &[Hit], query: &str, width: usize, color: bool, 
                 } else {
                     display
                 };
-                out.push_str(&row(width, &line, is_sel));
+                out.push_str(&selected_row(width, &line, is_sel, color));
             }
             Hit::Code(ex) => {
-                out.push_str(&row(width, &format!("{}   {}", ex.code, ex.meaning), is_sel));
+                out.push_str(&selected_row(width, &format!("{}   {}", ex.code, ex.meaning), is_sel, color));
             }
         }
         out.push('\n');
@@ -386,21 +432,40 @@ mod tests {
     #[test]
     fn categorized_view_lists_every_command_once() {
         let index = build_index();
-        let out = render_categorized(&index, None, 72, false);
+        let out = render_categorized(&index, 0, false, None, 72, false);
         for e in &index {
-            assert!(out.contains(e.cmd), "missing {} in categorized view", e.cmd);
+            assert!(!out.contains(&format!("jet {}", e.cmd)), "collapsed view leaked {}", e.cmd);
         }
     }
 
     #[test]
     fn categorized_view_box_is_well_formed_at_fixed_width() {
         let index = build_index();
-        let out = render_categorized(&index, Some("run"), 64, false);
+        let out = render_categorized(&index, 0, true, Some("run"), 64, false);
         let lines: Vec<&str> = out.lines().collect();
         assert!(lines.first().unwrap().starts_with('┌'));
         assert!(lines.last().unwrap().starts_with('└'));
         for l in &lines {
             assert_eq!(cols(l), 64, "line not padded to width: {:?}", l);
+        }
+    }
+
+    #[test]
+    fn categorized_view_expands_only_selected_category() {
+        let index = build_index();
+        let out = render_categorized(&index, 0, true, Some("run"), 72, false);
+        assert!(out.contains("jet run"));
+        assert!(!out.contains("jet add"));
+    }
+
+    #[test]
+    fn color_mode_styles_header_and_selection_without_breaking_width() {
+        let index = build_index();
+        let out = render_categorized(&index, 0, true, Some("run"), 64, true);
+        assert!(out.contains("\x1b[1;36m"));
+        assert!(out.contains("\x1b[7m"));
+        for line in out.lines() {
+            assert_eq!(cols(line), 64, "bad colored width: {line:?}");
         }
     }
 

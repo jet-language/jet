@@ -621,81 +621,36 @@ fn find_external(cmd: &str) -> Option<PathBuf> {
     None
 }
 
-fn question_mark_palette(is_tty: bool) -> String {
-    let controls = if is_tty {
-        "\ncontrols:\n  type to filter · Tab expands · F1 opens reference · Enter prefills · Esc/q closes\n"
-    } else {
-        "\ncontrols:\n  filter text narrows commands; Tab/F1/Enter are interactive-only\n"
-    };
-    format!(
-        "\
-jet ? — command palette
-
-Build and run
-  jet run <file.jet>              run a file
-  jet run --watch <file.jet>      rebuild and rerun on save
-  jet build <file.jet>            compile to ./build/
-  jet test <file|dir>             run #Test blocks
-  jet check <file.jet>            check without building
-
-Project and env
-  jet new <name>                  create a project
-  jet env                         enter project dev shell
-  jet fmt <file.jet>              format source
-  jet fix <file.jet>              apply safe fixes
-
-Packages
-  jet add <dep>                   add dependency
-  jet fetch                       fetch dependencies
-  jet update [dep]                refresh moving selectors
-  jet clean                       clean Jetpack hangar
-
-jetos
-  jet os plan <host>              show checked system plan
-  jet os import <flake-or-dir>    import NixOS/flake-parts/Home Manager facts
-  jet os build <host>             build generation
-  jet os vm test <name>           run VM scenario
-
-Dev server
-  jet dev <file.jet>              native dev loop
-  jet dev <file.jet> --target=web web dev server + Canvas
-  jet serve <file.jet>            resident hot-swap server
-
-Reference
-  jet explain E0102               explain diagnostic
-  jet doctor                      diagnose toolchain
-  jet repl                        notebook REPL
-  jet help                        full command reference
-
-Error codes
-  type E0102 or run `jet explain E0102` for verbatim diagnostic help
-
-Task keywords
-  run on save -> jet run --watch
-  start web app -> jet dev --target=web
-  add dependency -> jet add
-  understand error -> jet explain
-{controls}"
-    )
-}
-
 /// `jet ?` dispatch (D-FE-HELP1=D). Bare `jet ?` on a TTY opens the
 /// interactive hybrid help app; `jet ? <query>` and any non-TTY use are
 /// non-interactive — the static full palette (no args) or the best matches
 /// for `<query>` (args), printed once and exited.
 fn run_question_mark(args: &[String]) -> ! {
     let is_tty = std::io::stdout().is_terminal() && std::io::stdin().is_terminal();
-    if !args.is_empty() {
-        let query = args.join(" ");
-        let color = is_tty && std::env::var("NO_COLOR").is_err();
+    let color = parse_color(args).resolve(is_tty);
+    let mut query_args = Vec::new();
+    let mut skip_value = false;
+    for arg in args {
+        if skip_value {
+            skip_value = false;
+            continue;
+        }
+        if arg == "--color" {
+            skip_value = true;
+        } else if !arg.starts_with("--color=") {
+            query_args.push(arg.as_str());
+        }
+    }
+    if !query_args.is_empty() {
+        let query = query_args.join(" ");
         print!("{}", jet::Help::run_query(&query, color));
         exit(ExitCodes::OK);
     }
     if is_tty {
-        jet::Help::Interactive::run().ok();
+        jet::Help::Interactive::run(color).ok();
         exit(ExitCodes::OK);
     }
-    print!("{}", question_mark_palette(false));
+    print!("{}\n", jet::Help::Render::render_categorized(&jet::Help::build_index(), 0, false, None, 72, color));
     exit(ExitCodes::OK);
 }
 
