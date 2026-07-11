@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 496,
-    "rev": 3715,
+    "rev": 3722,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -5706,12 +5706,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-NETSOCKET1=A: Hybrid: blocking-looking sockets over shared runtime handles. core.net exposes typed blocking-looking Tcp/Udp/Unix/DNS APIs for beginners. Under the hood the handles are compatible with the task runtime, so experts can opt into readiness, deadlines, cancellation, and high-concurrency serving without a second socket model.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: corelib audit: core.net — socket layer parity with Go net\n\nCurrent law: Existing linked decisions: none yet. D-CORENS1 keeps all first-party modules under core.*; I6 forbids compiler deps; D-STDRUBRIC1 requires mechanical core API laws.\n\nBuild order: Audit current Core/API/prelude/docs/tests first; write failing UI/golden/unit fixtures; implement std-only or approved bridge code; update docs/reference and syntax-decisions when law changes; run targeted tests, then full nix develop -c cargo test before close.\n\nAcceptance: Examples/goldens or UI snapshots prove each shipped behavior; stdlib map records shipped/carded/declined rows; no rustc/user-hostile errors; no compiler external deps.\n\nDependencies/collisions: Respect neighboring core cards: io/args/process separate; text before regex; net/url before http; encoding before data/db; random never owns secrets.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "sol-300-builder",
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "codex-orchestrator",
+          "text": "Easy queue exhausted; starting smallest unblocked E3 medium card. Full ratified network/DNS law audit and implementation, not DNS-only patch. Sol builder; independent anti-facade review required."
+        },
         {
           "at": "2026-07-09",
           "by": "codex-main",
@@ -5753,11 +5758,58 @@
         }
       ],
       "created": "2026-07-07T17:23:33.213Z",
-      "updated": "2026-07-10",
+      "updated": "2026-07-11",
       "workOrder": 60,
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Ordinary DNS uses the host/platform resolver configuration on Linux, macOS, and Windows with no invented public resolver fallback; explicit *_at overrides remain exact.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-11T17:13:14.304Z"
+        },
+        {
+          "n": 2,
+          "text": "DNS queries use unpredictable transaction IDs and strictly validate source, ID, QR/opcode/rcode/truncation, question echo, bounds, labels, and compression pointers before accepting records.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-11T17:13:14.398Z"
+        },
+        {
+          "n": 3,
+          "text": "A, AAAA, TXT, and SRV resolution handles CNAME/additional records, malformed/adversarial packets, NXDOMAIN, timeouts, and UDP truncation through bounded TCP fallback with typed network errors.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-11T17:13:14.492Z"
+        },
+        {
+          "n": 4,
+          "text": "Ratified D-NETIO1, D-NETERROR1, D-NETTASK1, and D-NETTLSSTREAM1 laws are implemented end to end across TCP, UDP, Unix, deadlines/cancellation/readiness, graceful close, and TLS-over-stream without a second socket model.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-11T17:13:14.579Z"
+        },
+        {
+          "n": 5,
+          "text": "Typed address/socket APIs, socket echo golden, DNS hostile fixtures, task/deadline behavior, docs, and focused Core/JIT/AOT parity tests pass; no fixture-only or platform-skip closure.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-11T17:13:14.670Z"
+        }
+      ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-11T17:13:14.216Z"
     },
     {
       "id": "c0075iyb",
@@ -27316,6 +27368,55 @@
   ],
   "events": [
     {
+      "at": "2026-07-11T17:13:14.752Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0z3l25j",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T17:13:14.671Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0z3l25j",
+      "note": "#5 Typed address/socket APIs, socket echo golden, DNS hostile f"
+    },
+    {
+      "at": "2026-07-11T17:13:14.579Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0z3l25j",
+      "note": "#4 Ratified D-NETIO1, D-NETERROR1, D-NETTASK1, and D-NETTLSSTRE"
+    },
+    {
+      "at": "2026-07-11T17:13:14.492Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0z3l25j",
+      "note": "#3 A, AAAA, TXT, and SRV resolution handles CNAME/additional re"
+    },
+    {
+      "at": "2026-07-11T17:13:14.399Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0z3l25j",
+      "note": "#2 DNS queries use unpredictable transaction IDs and strictly v"
+    },
+    {
+      "at": "2026-07-11T17:13:14.305Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0z3l25j",
+      "note": "#1 Ordinary DNS uses the host/platform resolver configuration o"
+    },
+    {
+      "at": "2026-07-11T17:13:14.216Z",
+      "by": "sol-300-builder",
+      "action": "card.claim",
+      "ref": "c0z3l25j",
+      "note": ""
+    },
+    {
       "at": "2026-07-11T17:11:44.634Z",
       "by": "codex-orchestrator",
       "action": "card.update",
@@ -30765,55 +30866,6 @@
       "action": "card.update",
       "ref": "c0y9w2ur",
       "note": "logEntry"
-    },
-    {
-      "at": "2026-07-11T01:43:27.028Z",
-      "by": "fable-main",
-      "action": "card.add",
-      "ref": "c021gh90",
-      "note": "Canvas M0: full suite fails (not skips) when Chromium absent"
-    },
-    {
-      "at": "2026-07-11T01:43:25.116Z",
-      "by": "fable-main",
-      "action": "card.add",
-      "ref": "c06eyg3s",
-      "note": "Canvas architecture: Details field-descriptor renderer"
-    },
-    {
-      "at": "2026-07-11T01:43:23.225Z",
-      "by": "fable-main",
-      "action": "card.add",
-      "ref": "c0b4rcuh",
-      "note": "Canvas architecture: node-descriptor registry (node_catalog.rs)"
-    },
-    {
-      "at": "2026-07-11T01:43:06.038Z",
-      "by": "fable-main",
-      "action": "card.add",
-      "ref": "c0ewd6kd",
-      "note": "Canvas M3: full debugger interaction suite"
-    },
-    {
-      "at": "2026-07-11T01:43:04.148Z",
-      "by": "fable-main",
-      "action": "card.add",
-      "ref": "c0jmvv53",
-      "note": "Canvas M2: node-drag reposition gesture verification"
-    },
-    {
-      "at": "2026-07-11T01:43:02.255Z",
-      "by": "fable-main",
-      "action": "card.add",
-      "ref": "c0ocarv7",
-      "note": "Canvas M2: marquee select + copy/paste/duplicate as source transactions"
-    },
-    {
-      "at": "2026-07-11T01:43:00.387Z",
-      "by": "fable-main",
-      "action": "card.add",
-      "ref": "c0tfsrts",
-      "note": "Canvas M1: data-pin drag-to-wire gesture + client-side type gate"
     }
   ],
   "nextNum": 368,
