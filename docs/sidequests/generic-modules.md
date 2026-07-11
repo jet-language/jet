@@ -65,7 +65,10 @@ are not complete.
    - emit only instantiated modules reachable from the entry graph;
    - keep one stable InstanceFingerprint per instance.
 4. Diagnostics and proof:
-   - ship E0852, E0853, and E0855 with what/why/fix UI snapshots;
+   - ship E0852, E0853, E0855, E0856, E0857, and E0859 with What/Why/Fix,
+     `jet explain`, exact UI snapshots, and JSON/LSP parity;
+   - make E0855 print the full application chain and E0859 exit 101 on a
+     fingerprint/full-key collision without fallback;
    - value-parameterized fixed-size ring buffer or retry policy;
    - full-body declarations and definition-site capture;
    - cross-file `use` of an instantiated module;

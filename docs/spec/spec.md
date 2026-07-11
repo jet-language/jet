@@ -1101,8 +1101,11 @@ substitutes type parameters in function signatures. Value evaluation and body
 substitution, bounds, cycles, full ordinary-module bodies, applicative identity,
 cross-file templates, and the corresponding complete acceptance proof remain
 open. E0854 is the current implementation boundary for non-`fn` items, not the
-ratified language law. E0850 and E0851 are implemented; E0852, E0853, and E0855
-remain staged until their semantics and UI snapshots ship.
+ratified language law. E0850 and E0851 are implemented. E0852 (unsatisfied
+bound), E0853 (value type mismatch), E0855 (instantiation cycle), E0856
+(disallowed value-parameter type), E0857 (argument is not a compile-time
+value), and E0859 (identity fingerprint collision, ICE 101) remain staged until
+their semantics, What/Why/Fix copy, and UI snapshots ship.
 
 ## M6 phase 4 — `--small` + LSP v0 (done)
 
