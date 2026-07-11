@@ -109,12 +109,17 @@ fn json_ref(r: &SymbolRef) -> String {
         Some(scope) => json_str(scope),
         None => "null".to_string(),
     };
-    let target_json = match &r.target_identity {
-        Some(target) => json_str(target),
+    let target_json = match &r.target {
+        Some(target) => format!(
+            "{{\"module\":{},\"kind\":{},\"span\":{}}}",
+            json_str(&target.module_path),
+            json_str(&target.kind),
+            json_span(target.def_span)
+        ),
         None => "null".to_string(),
     };
     format!(
-        "{{\"name\":{},\"module\":{},\"scope_identity\":{},\"target_identity\":{},\"span\":{}}}",
+        "{{\"name\":{},\"module\":{},\"scope_identity\":{},\"target\":{},\"span\":{}}}",
         json_str(&r.name),
         json_str(&r.module_path),
         scope_json,
@@ -361,7 +366,7 @@ pub(crate) fn convert_refs(refs: &[SymRef]) -> Vec<SymbolRef> {
             name: r.name.clone(),
             module_path: r.module_path.clone(),
             scope_identity: r.scope_identity.clone(),
-            target_identity: r.target_identity.clone(),
+            target: r.target.clone(),
             span: r.span.into(),
         })
         .collect()

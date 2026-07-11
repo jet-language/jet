@@ -14,7 +14,7 @@ use jet::Diagnostics::{Severity, Span, TextEdit};
 use jet::ExitCodes;
 use jet_semindex::{
     open, open_with_overlays_and_diagnostics, open_with_overlays_diagnostics_and_inputs, SemIndex,
-    SemIndexError, SymbolKind,
+    DefinitionAnchor, SemIndexError, SymbolKind,
 };
 use Json::Value;
 use Transaction::Change;
@@ -455,7 +455,7 @@ fn apply_rule(
                             .as_ref()
                             .is_none_or(|p| same_path(Path::new(&d.module_path), p))
                 }) {
-                    anchors.insert((canonicalish(Path::new(&d.module_path)), d.identity.clone()));
+                    anchors.insert(definition_anchor(d));
                 }
             }
             if anchors.is_empty() {
@@ -466,12 +466,7 @@ fn apply_rule(
                 for d in idx.definitions().iter().filter(|d| {
                     d.name == *name
                         && kind_matches(&d.kind, kind)
-                        && anchors
-                            .iter()
-                            .any(|(p, identity)| {
-                                same_path(Path::new(&d.module_path), p)
-                                    && d.identity == *identity
-                            })
+                        && anchors.contains(&definition_anchor(d))
                 }) {
                     edits
                         .entry(canonicalish(Path::new(&d.module_path)))
@@ -480,9 +475,7 @@ fn apply_rule(
                 }
                 for r in idx.references().iter().filter(|r| {
                     r.name == *name
-                        && r.target_identity.as_ref().is_some_and(|target| {
-                            anchors.iter().any(|(_, identity)| identity == target)
-                        })
+                        && r.target.as_ref().is_some_and(|target| anchors.contains(target))
                 }) {
                     let path = canonicalish(Path::new(&r.module_path));
                     if files.contains_key(&path) {
@@ -655,14 +648,46 @@ fn dedup_apply_edits(
 
 #[derive(Clone)]
 struct LexToken {
-    start: usize,
-    end: usize,
     text: String,
 }
 struct Found {
     start: usize,
     end: usize,
     captures: BTreeMap<String, String>,
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SlotKind {
+    Scalar,
+    List,
+}
+#[derive(Clone)]
+struct TypedTree {
+    class: String,
+    shape: String,
+    span: jet_semindex::SourceSpan,
+    signature: Vec<String>,
+    slot_kind: SlotKind,
+    children: Vec<TypedTree>,
+}
+#[derive(Clone)]
+enum PatternTree {
+    Capture {
+        name: String,
+        variadic: bool,
+        class: String,
+    },
+    Node {
+        class: String,
+        shape: String,
+        signature: Vec<String>,
+        slot_kind: SlotKind,
+        children: Vec<PatternTree>,
+    },
+}
+#[derive(Clone)]
+struct CapturedTree {
+    text: String,
+    key: String,
 }
 fn lex_template_source(src: &str) -> Vec<LexToken> {
     let b = src.as_bytes();
@@ -744,8 +769,6 @@ fn lex_template_source(src: &str) -> Vec<LexToken> {
             }
         }
         out.push(LexToken {
-            start,
-            end: i,
             text: src[start..i].to_string(),
         });
     }
@@ -808,96 +831,294 @@ fn find_template_matches(
     idx: &SemIndex,
     path: &Path,
 ) -> Vec<Found> {
-    let toks = lex_jet_source(src);
-    let boundaries = idx
+    let pattern = parse_pattern_tree(t, node);
+    let nodes = idx
         .structural_nodes()
         .iter()
         .filter(|n| n.class == node && same_path(Path::new(&n.module_path), path))
-        .map(|n| (n.span.start, n.span.end))
-        .collect::<BTreeSet<_>>();
+        .collect::<Vec<_>>();
     let mut out = Vec::new();
-    for start in 0..toks.len() {
+    for boundary in nodes {
+        let candidate = typed_tree(boundary, idx.structural_nodes(), src, path);
         let mut captures = BTreeMap::new();
-        if let Some(end) = match_atoms(&t.atoms, 0, &toks, start, src, &mut captures) {
-            if end > start {
-                let found_start = toks[start].start;
-                let found_end = toks[end - 1].end;
-                if !boundaries.contains(&(found_start, found_end)) {
-                    continue;
-                }
-                let found = Found {
-                    start: found_start,
-                    end: found_end,
-                    captures,
-                };
-                if captures_are_structural(t, &found, src, idx, path) {
-                    out.push(found)
-                }
-            }
+        if match_typed_tree(&pattern, &candidate, src, &mut captures) {
+            out.push(Found {
+                start: boundary.span.start,
+                end: boundary.span.end,
+                captures: captures
+                    .into_iter()
+                    .map(|(name, capture)| (name, capture.text))
+                    .collect(),
+            });
         }
     }
     out
 }
 
-fn captures_are_structural(
-    template: &Template,
-    found: &Found,
-    source: &str,
-    idx: &SemIndex,
-    path: &Path,
-) -> bool {
-    let nodes = idx
-        .structural_nodes()
+fn parse_pattern_tree(template: &Template, class: &str) -> PatternTree {
+    let captures = template
+        .atoms
         .iter()
-        .filter(|node| {
-            matches!(node.class.as_str(), "expr" | "stmt" | "item" | "type")
-                && same_path(Path::new(&node.module_path), path)
-                && node.span.start >= found.start
-                && node.span.end <= found.end
+        .filter_map(|atom| match atom {
+            Atom::Capture(name, variadic) => Some((
+                name.clone(),
+                format!("__jet_codemod_capture_{}", name),
+                *variadic,
+            )),
+            Atom::Literal(_) => None,
         })
         .collect::<Vec<_>>();
-    template.atoms.iter().all(|atom| {
-        let Atom::Capture(name, variadic) = atom else {
-            return true;
-        };
-        let captured = &found.captures[name];
-        if *variadic && captured.is_empty() {
-            return true;
-        }
-        let pieces = if *variadic {
-            split_top_level_capture(captured)
-        } else {
-            vec![captured.as_str()]
-        };
-        pieces.into_iter().all(|piece| {
-            let expected = normalized(piece);
-            nodes.iter().any(|node| {
-                source
-                    .get(node.span.start..node.span.end)
-                    .is_some_and(|candidate| normalized(candidate) == expected)
-            })
+    let replacements = captures
+        .iter()
+        .map(|(name, sentinel, _)| (name.clone(), sentinel.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let fragment = render_replacement(template, &replacements);
+    let (wrapped, start) = match class {
+        "expr" => (format!("fn __codemod() {{ print({fragment}) }}\n"), 26),
+        "stmt" => (format!("fn __codemod() {{ {fragment} }}\n"), 19),
+        "item" => (format!("{fragment}\n"), 0),
+        "type" => (format!("fn __codemod() -> {fragment} {{}}\n"), 19),
+        _ => unreachable!(),
+    };
+    let actual_start = wrapped.find(&fragment).unwrap_or(start);
+    let (tokens, lex_diags) = jet::Lexer::lex(&wrapped);
+    if !lex_diags.is_empty() {
+        fail("AST pattern failed compiler lexing after capture substitution")
+    }
+    let (program, parse_diags) = jet::Parser::parse_for_check(&tokens)
+        .unwrap_or_else(|_| fail("AST pattern failed compiler parsing after capture substitution"));
+    if !parse_diags.is_empty() {
+        fail("AST pattern produced parser teaching diagnostics")
+    }
+    let module = jet::AST::LoadedModule {
+        path: PathBuf::from("<codemod-pattern>"),
+        display: "<codemod-pattern>".to_string(),
+        source: wrapped.clone(),
+        alias: "pattern".to_string(),
+        imports: program.imports,
+        items: program.items,
+        web_target_ceiling: program.web_target_ceiling,
+        pub_file: program.pub_file,
+        no_prelude: program.no_prelude,
+        html_path: program.html_path,
+        no_alloc_policy: program.no_alloc_policy,
+    };
+    let nodes = jet_semindex::structural_nodes_from_parsed(&module);
+    let end = actual_start + fragment.len();
+    let root = nodes
+        .iter()
+        .filter(|node| {
+            node.class == class && node.span.start <= actual_start && node.span.end >= end
         })
-    })
+        .min_by_key(|node| node.span.end.saturating_sub(node.span.start))
+        .unwrap_or_else(|| fail(&format!("compiler did not produce a typed {class} pattern node")));
+    let tree = typed_tree(root, &nodes, &wrapped, Path::new("<codemod-pattern>"));
+    pattern_tree(&tree, &wrapped, &captures)
 }
 
-fn split_top_level_capture(source: &str) -> Vec<&str> {
-    let tokens = lex_jet_source(source);
-    let mut depth = 0isize;
-    let mut start = 0usize;
-    let mut pieces = Vec::new();
-    for token in &tokens {
-        match token.text.as_str() {
-            "(" | "[" | "{" => depth += 1,
-            ")" | "]" | "}" => depth -= 1,
-            "," if depth == 0 => {
-                pieces.push(source[start..token.start].trim());
-                start = token.end;
+fn typed_tree(
+    root: &jet_semindex::StructuralNode,
+    nodes: &[jet_semindex::StructuralNode],
+    source: &str,
+    path: &Path,
+) -> TypedTree {
+    let contained = nodes
+        .iter()
+        .filter(|node| {
+            same_path(Path::new(&node.module_path), path)
+                && structural_child_class(&root.class, &node.class)
+                && node.span.start >= root.span.start
+                && node.span.end <= root.span.end
+                && (node.span.start > root.span.start || node.span.end < root.span.end)
+        })
+        .collect::<Vec<_>>();
+    let mut immediate = contained
+        .iter()
+        .copied()
+        .filter(|candidate| {
+            !contained.iter().any(|middle| {
+                middle.span.start <= candidate.span.start
+                    && middle.span.end >= candidate.span.end
+                    && (middle.span.start < candidate.span.start || middle.span.end > candidate.span.end)
+            })
+        })
+        .collect::<Vec<_>>();
+    immediate.sort_by_key(|node| (node.span.start, node.span.end, node.class.as_str()));
+    immediate.dedup_by_key(|node| (node.span.start, node.span.end, node.class.as_str()));
+    let children = immediate
+        .iter()
+        .map(|node| typed_tree(node, nodes, source, path))
+        .collect::<Vec<_>>();
+    let mut scalar = String::new();
+    let mut cursor = root.span.start;
+    for child in &children {
+        if cursor <= child.span.start {
+            scalar.push_str(&source[cursor..child.span.start]);
+        }
+        cursor = cursor.max(child.span.end);
+    }
+    if cursor <= root.span.end {
+        scalar.push_str(&source[cursor..root.span.end]);
+    }
+    let signature = normalized(&scalar)
+        .into_iter()
+        .filter(|token| token != ",")
+        .collect();
+    TypedTree {
+        class: root.class.clone(),
+        shape: root.shape.clone(),
+        span: root.span,
+        signature,
+        slot_kind: if children.len() > 1 { SlotKind::List } else { SlotKind::Scalar },
+        children,
+    }
+}
+
+fn structural_child_class(parent: &str, child: &str) -> bool {
+    match parent {
+        "expr" => matches!(child, "expr" | "type"),
+        "stmt" => matches!(child, "stmt" | "expr" | "type"),
+        "type" => child == "type",
+        "item" => matches!(child, "item" | "stmt" | "expr" | "type"),
+        _ => false,
+    }
+}
+
+fn pattern_tree(
+    tree: &TypedTree,
+    source: &str,
+    captures: &[(String, String, bool)],
+) -> PatternTree {
+    let text = source[tree.span.start..tree.span.end].trim();
+    if let Some((name, _, variadic)) = captures.iter().find(|(_, sentinel, _)| text == sentinel) {
+        return PatternTree::Capture {
+            name: name.clone(),
+            variadic: *variadic,
+            class: tree.class.clone(),
+        };
+    }
+    let children = tree
+        .children
+        .iter()
+        .map(|child| pattern_tree(child, source, captures))
+        .collect::<Vec<_>>();
+    let slot_kind = if children.iter().any(|child| matches!(child, PatternTree::Capture { variadic: true, .. }))
+        || children.len() > 1
+    {
+        SlotKind::List
+    } else {
+        tree.slot_kind
+    };
+    PatternTree::Node {
+        class: tree.class.clone(),
+        shape: tree.shape.clone(),
+        signature: tree.signature.clone(),
+        slot_kind,
+        children,
+    }
+}
+
+fn match_typed_tree(
+    pattern: &PatternTree,
+    candidate: &TypedTree,
+    source: &str,
+    captures: &mut BTreeMap<String, CapturedTree>,
+) -> bool {
+    match pattern {
+        PatternTree::Capture { name, variadic: false, class } => {
+            if class != &candidate.class {
+                return false;
             }
-            _ => {}
+            bind_capture(name, source[candidate.span.start..candidate.span.end].to_string(), tree_key(candidate), captures)
+        }
+        PatternTree::Capture { variadic: true, .. } => false,
+        PatternTree::Node { class, shape, signature, slot_kind, children } => {
+            if class != &candidate.class || shape != &candidate.shape || signature != &candidate.signature {
+                return false;
+            }
+            match_children(children, &candidate.children, *slot_kind, source, captures)
         }
     }
-    pieces.push(source[start..].trim());
-    pieces
+}
+
+fn match_children(
+    patterns: &[PatternTree],
+    candidates: &[TypedTree],
+    slot_kind: SlotKind,
+    source: &str,
+    captures: &mut BTreeMap<String, CapturedTree>,
+) -> bool {
+    fn walk(
+        patterns: &[PatternTree],
+        pi: usize,
+        candidates: &[TypedTree],
+        ci: usize,
+        slot_kind: SlotKind,
+        source: &str,
+        captures: &mut BTreeMap<String, CapturedTree>,
+    ) -> bool {
+        if pi == patterns.len() {
+            return ci == candidates.len();
+        }
+        if let PatternTree::Capture { name, variadic: true, class } = &patterns[pi] {
+            if slot_kind != SlotKind::List {
+                return false;
+            }
+            for end in (ci..=candidates.len()).rev() {
+                if candidates[ci..end].iter().any(|candidate| &candidate.class != class) {
+                    continue;
+                }
+                let text = if end == ci {
+                    String::new()
+                } else {
+                    source[candidates[ci].span.start..candidates[end - 1].span.end].to_string()
+                };
+                let key = candidates[ci..end].iter().map(tree_key).collect::<Vec<_>>().join("|");
+                let mut branch = captures.clone();
+                if bind_capture(name, text, key, &mut branch)
+                    && walk(patterns, pi + 1, candidates, end, slot_kind, source, &mut branch)
+                {
+                    *captures = branch;
+                    return true;
+                }
+            }
+            return false;
+        }
+        let Some(candidate) = candidates.get(ci) else { return false };
+        let mut branch = captures.clone();
+        if match_typed_tree(&patterns[pi], candidate, source, &mut branch)
+            && walk(patterns, pi + 1, candidates, ci + 1, slot_kind, source, &mut branch)
+        {
+            *captures = branch;
+            true
+        } else {
+            false
+        }
+    }
+    walk(patterns, 0, candidates, 0, slot_kind, source, captures)
+}
+
+fn bind_capture(
+    name: &str,
+    text: String,
+    key: String,
+    captures: &mut BTreeMap<String, CapturedTree>,
+) -> bool {
+    if let Some(existing) = captures.get(name) {
+        return existing.key == key;
+    }
+    captures.insert(name.to_string(), CapturedTree { text, key });
+    true
+}
+
+fn tree_key(tree: &TypedTree) -> String {
+    format!(
+        "{}:{}:{:?}:[{}]",
+        tree.class,
+        tree.shape,
+        tree.signature,
+        tree.children.iter().map(tree_key).collect::<Vec<_>>().join(",")
+    )
 }
 fn semantic_candidate(t: &Template, f: &Found, idx: &SemIndex, path: &Path) -> bool {
     t.atoms.iter().enumerate().all(|(i, atom)| {
@@ -917,7 +1138,7 @@ fn semantic_candidate(t: &Template, f: &Found, idx: &SemIndex, path: &Path) -> b
                 && same_path(Path::new(&reference.module_path), path)
                 && reference.span.start >= f.start
                 && reference.span.end <= f.end
-                && reference.target_identity.is_some()
+                && reference.target.is_some()
         }) || idx.definitions().iter().any(|definition| {
             definition.name == *name
                 && same_path(Path::new(&definition.module_path), path)
@@ -925,79 +1146,6 @@ fn semantic_candidate(t: &Template, f: &Found, idx: &SemIndex, path: &Path) -> b
                 && definition.def_span.end <= f.end
         })
     })
-}
-fn match_atoms(
-    atoms: &[Atom],
-    ai: usize,
-    toks: &[LexToken],
-    ti: usize,
-    src: &str,
-    caps: &mut BTreeMap<String, String>,
-) -> Option<usize> {
-    if ai == atoms.len() {
-        return Some(ti);
-    }
-    match &atoms[ai] {
-        Atom::Literal(l) => {
-            if toks.get(ti)?.text == *l {
-                match_atoms(atoms, ai + 1, toks, ti + 1, src, caps)
-            } else {
-                None
-            }
-        }
-        Atom::Capture(name, variadic) => {
-            let min = if *variadic { 0 } else { 1 };
-            for end in (ti + min..=toks.len()).rev() {
-                if !balanced(&toks[ti..end]) {
-                    continue;
-                }
-                let text = if end == ti {
-                    String::new()
-                } else {
-                    src[toks[ti].start..toks[end - 1].end].to_string()
-                };
-                if let Some(old) = caps.get(name) {
-                    if normalized(old) != normalized(&text) {
-                        continue;
-                    }
-                } else {
-                    caps.insert(name.clone(), text.clone());
-                }
-                if let Some(done) = match_atoms(atoms, ai + 1, toks, end, src, caps) {
-                    return Some(done);
-                }
-                if caps.get(name) == Some(&text) {
-                    caps.remove(name);
-                }
-            }
-            None
-        }
-    }
-}
-fn balanced(t: &[LexToken]) -> bool {
-    let mut stack = Vec::new();
-    for x in t {
-        match x.text.as_str() {
-            "(" | "[" | "{" => stack.push(x.text.as_str()),
-            ")" => {
-                if stack.pop() != Some("(") {
-                    return false;
-                }
-            }
-            "]" => {
-                if stack.pop() != Some("[") {
-                    return false;
-                }
-            }
-            "}" => {
-                if stack.pop() != Some("{") {
-                    return false;
-                }
-            }
-            _ => {}
-        }
-    }
-    stack.is_empty()
 }
 fn normalized(src: &str) -> Vec<String> {
     lex_jet_source(src).into_iter().map(|t| t.text).collect()
@@ -1012,11 +1160,7 @@ fn lex_jet_source(src: &str) -> Vec<LexToken> {
         .into_iter()
         .filter_map(|token| {
             let text = src.get(token.span.start..token.span.end)?.to_string();
-            (!text.is_empty()).then_some(LexToken {
-                start: token.span.start,
-                end: token.span.end,
-                text,
-            })
+            (!text.is_empty()).then_some(LexToken { text })
         })
         .collect()
 }
@@ -1042,7 +1186,7 @@ fn validate_typed_template(id: &str, node: &str, template: &Template, side: &str
         "expr" => format!("fn run() {{ print({source}) }}\n"),
         "stmt" => format!("fn run() {{ {source} }}\n"),
         "item" => format!("{source}\n"),
-        "type" => format!("fn __codemod(value: {source}) {{}}\nfn run() {{}}\n"),
+        "type" => format!("fn __codemod() -> {source} {{}}\nfn run() {{}}\n"),
         _ => unreachable!(),
     };
     if !jet::Compiler::parse_source(&wrapped).diagnostics.is_empty() {
@@ -1171,16 +1315,12 @@ fn render_v2_log(batch: &Batch, changes: &[Change]) -> String {
     format!("{{\n  \"schema\": 2,\n  \"name\": \"{}\",\n  \"project\": \"{}\",\n  \"files\": [\n    {}\n  ]\n}}\n",json_escape(&batch.name),json_escape(&batch.project.display().to_string()),rows)
 }
 fn undo(path: &Path) {
+    let project = replay_log_project(path);
     if !path.exists() {
-        let project = path
-            .parent()
-            .and_then(Path::parent)
-            .and_then(Path::parent)
-            .unwrap_or_else(|| fail("missing replay log is not beneath .jet/codemods"));
-        let _lock = Transaction::lock(project);
-        Transaction::recover(project);
+        let _lock = Transaction::lock(&project);
+        Transaction::recover(&project);
     }
-    let raw = fs::read_to_string(path).unwrap_or_else(|e| {
+    let raw = Transaction::read_replay_log(&project, path).unwrap_or_else(|e| {
         fail(&format!(
             "could not read codemod log `{}`: {e}",
             path.display()
@@ -1192,24 +1332,27 @@ fn undo(path: &Path) {
         _ => fail("codemod log must be an object"),
     };
     if schema == 2 {
-        undo_v2(value, path)
+        undo_v2(value, path, &project)
     } else {
-        undo_v1(value, path)
+        undo_v1(value, path, &project)
     }
 }
-fn undo_v2(value: Value, path: &Path) {
+fn undo_v2(value: Value, path: &Path, project: &Path) {
     let mut o = value.object().unwrap();
     let schema = take_number(&mut o, "schema");
     if schema != 2 {
         fail("unsupported codemod log schema")
     }
     let name = take_string(&mut o, "name");
-    let project = PathBuf::from(take_string(&mut o, "project"));
+    let declared_project = PathBuf::from(take_string(&mut o, "project"));
     let rows = take_array(&mut o, "files");
     reject_unknown(o, "schema 2 replay log");
-    let _lock = Transaction::lock(&project);
-    Transaction::recover(&project);
-    let mut changes = Vec::new();
+    let declared_project = fs::canonicalize(&declared_project)
+        .unwrap_or_else(|e| fail(&format!("could not canonicalize replay project: {e}")));
+    if declared_project != project {
+        fail("replay log project does not match its .jet/codemods location")
+    }
+    let mut decoded = Vec::new();
     for row in rows {
         let mut r = row
             .object()
@@ -1226,7 +1369,15 @@ fn undo_v2(value: Value, path: &Path) {
                 p.display()
             ))
         }
-        let current = fs::read(&p)
+        decoded.push((p, before, after));
+    }
+    let paths = decoded.iter().map(|(path, _, _)| path.clone()).collect::<Vec<_>>();
+    Transaction::validate_destinations(project, &paths);
+    let _lock = Transaction::lock(project);
+    Transaction::recover(project);
+    let mut changes = Vec::new();
+    for (p, before, after) in decoded {
+        let current = Transaction::read_destination(project, &p)
             .unwrap_or_else(|e| fail(&format!("could not read `{}`: {e}", p.display())));
         if current != after {
             fail(&format!(
@@ -1234,18 +1385,14 @@ fn undo_v2(value: Value, path: &Path) {
                 p.display()
             ))
         }
-        changes.push(Change {
-            path: p,
-            before: after,
-            after: before,
-        });
+        changes.push(Change { path: p, before: after, after: before });
     }
     let undo_log = path.with_extension("undo.log.json");
     let marker = format!(
         "{{\"schema\":2,\"name\":\"{}-undo\",\"files\":[]}}\n",
         json_escape(&name)
     );
-    Transaction::commit(&project, &changes, &undo_log, marker.as_bytes());
+    Transaction::commit(project, &changes, &undo_log, marker.as_bytes());
     println!(
         "codemod undo `{name}` applied\n  files: {}\n  source log: {}",
         changes.len(),
@@ -1296,15 +1443,15 @@ fn run_v1(cm: V1, apply: bool) {
         changes.len()
     );
     if apply {
-        for c in &changes {
-            fs::write(&c.path, &c.after)
-                .unwrap_or_else(|e| fail(&format!("could not write `{}`: {e}", c.path.display())))
-        }
+        let project = managed_project_for_entry(&cm.entry);
+        let paths = changes.iter().map(|change| change.path.clone()).collect::<Vec<_>>();
+        Transaction::validate_destinations(&project, &paths);
         let log = render_v1_log(&cm, &changes);
-        let dir = cm.entry.parent().unwrap().join(".jet/codemods");
-        fs::create_dir_all(&dir).unwrap();
+        let dir = project.join(".jet/codemods");
         let p = dir.join(format!("{}.log.json", sanitize_file_name(&cm.name)));
-        fs::write(&p, log).unwrap();
+        let _lock = Transaction::lock(&project);
+        Transaction::recover(&project);
+        Transaction::commit(&project, &changes, &p, log.as_bytes());
         println!("  log: {}", p.display())
     }
 }
@@ -1318,63 +1465,89 @@ fn render_v1_log(cm: &V1, changes: &[Change]) -> String {
         files
     )
 }
-fn undo_v1(value: Value, _path: &Path) {
+fn undo_v1(value: Value, path: &Path, project: &Path) {
     let mut o = value.object().unwrap();
     let name = take_string_default(&mut o, "name", "UndoCodemod");
     let files = take_array(&mut o, "files");
-    let mut writes = Vec::new();
+    let mut decoded = Vec::new();
     for f in files {
         let mut x = f.object().unwrap();
         let path = PathBuf::from(take_string(&mut x, "path"));
         let before_hash = take_string(&mut x, "before_hash");
         let after_hash = take_string(&mut x, "after_hash");
-        let current = fs::read(&path)
-            .unwrap_or_else(|e| fail(&format!("could not read `{}`: {e}", path.display())));
+        let before_bytes = take_string_opt(&mut x, "before_bytes");
+        let inverse_edits = if before_bytes.is_none() {
+            take_array(&mut x, "inverse_edits")
+        } else {
+            let _ = take_array_opt(&mut x, "inverse_edits");
+            Vec::new()
+        };
+        decoded.push((path, before_hash, after_hash, before_bytes, inverse_edits));
+    }
+    let paths = decoded.iter().map(|row| row.0.clone()).collect::<Vec<_>>();
+    Transaction::validate_destinations(project, &paths);
+    let _lock = Transaction::lock(project);
+    Transaction::recover(project);
+    let mut changes = Vec::new();
+    for (file, before_hash, after_hash, before_bytes, inverse_edits) in decoded {
+        let current = Transaction::read_destination(project, &file)
+            .unwrap_or_else(|e| fail(&format!("could not read `{}`: {e}", file.display())));
         if hash_bytes(&current) != after_hash {
-            fail(&format!(
-                "checkpoint mismatch for `{}`; refusing undo",
-                path.display()
-            ))
+            fail(&format!("checkpoint mismatch for `{}`; refusing undo", file.display()))
         }
-        let before = if let Some(s) = take_string_opt(&mut x, "before_bytes") {
+        let before = if let Some(s) = before_bytes {
             unhex(&s)
         } else {
-            let edits = take_array(&mut x, "inverse_edits")
+            let edits = inverse_edits
                 .into_iter()
                 .map(|v| {
-                    let mut e = v
-                        .object()
-                        .unwrap_or_else(|_| fail("legacy inverse edit must be an object"));
+                    let mut e = v.object().unwrap_or_else(|_| fail("legacy inverse edit must be an object"));
                     TextEdit {
-                        span: Span::new(
-                            take_number(&mut e, "start") as usize,
-                            take_number(&mut e, "end") as usize,
-                        ),
+                        span: Span::new(take_number(&mut e, "start") as usize, take_number(&mut e, "end") as usize),
                         new_text: take_string(&mut e, "new_text"),
                     }
                 })
                 .collect::<Vec<_>>();
             jet::FixEngine::apply_edits(
-                std::str::from_utf8(&current)
-                    .unwrap_or_else(|_| fail("legacy codemod file is not UTF-8")),
+                std::str::from_utf8(&current).unwrap_or_else(|_| fail("legacy codemod file is not UTF-8")),
                 &edits,
-            )
-            .unwrap_or_else(|_| fail("legacy codemod inverse edits overlap"))
-            .into_bytes()
+            ).unwrap_or_else(|_| fail("legacy codemod inverse edits overlap")).into_bytes()
         };
         if hash_bytes(&before) != before_hash {
-            fail(&format!(
-                "undo result mismatch for `{}`; refusing undo",
-                path.display()
-            ))
+            fail(&format!("undo result mismatch for `{}`; refusing undo", file.display()))
         }
-        writes.push((path, before));
+        changes.push(Change { path: file, before: current, after: before });
     }
-    for (p, b) in writes {
-        fs::write(p, b)
-            .unwrap_or_else(|e| fail(&format!("could not restore legacy codemod file: {e}")))
-    }
+    let undo_log = path.with_extension("undo.log.json");
+    let marker = format!("{{\"schema\":2,\"name\":\"{}-undo\",\"files\":[]}}\n", json_escape(&name));
+    Transaction::commit(project, &changes, &undo_log, marker.as_bytes());
     println!("codemod undo `{name}` applied")
+}
+
+fn replay_log_project(path: &Path) -> PathBuf {
+    let codemods = path.parent().unwrap_or_else(|| fail("replay log has no parent"));
+    if codemods.file_name().and_then(|name| name.to_str()) != Some("codemods")
+        || codemods.parent().and_then(Path::file_name).and_then(|name| name.to_str()) != Some(".jet")
+    {
+        fail("replay log must be directly beneath <project>/.jet/codemods")
+    }
+    let project = codemods.parent().and_then(Path::parent)
+        .unwrap_or_else(|| fail("replay log has no project parent"));
+    fs::canonicalize(project)
+        .unwrap_or_else(|e| fail(&format!("could not canonicalize replay project: {e}")))
+}
+
+fn managed_project_for_entry(entry: &Path) -> PathBuf {
+    let canonical = fs::canonicalize(entry)
+        .unwrap_or_else(|e| fail(&format!("could not canonicalize codemod entry: {e}")));
+    for ancestor in canonical.ancestors().skip(1) {
+        if canonical.strip_prefix(ancestor).ok().is_some_and(|relative| {
+            relative.starts_with("examples") || relative.starts_with("tests/ui")
+        }) {
+            return ancestor.to_path_buf();
+        }
+    }
+    fail("version 1 codemod entry must be beneath examples/ or tests/ui/")
 }
 
 fn edit(s: jet_semindex::SourceSpan, text: &str) -> TextEdit {
@@ -1396,6 +1569,26 @@ fn kind_matches(k: &SymbolKind, want: &str) -> bool {
             | (SymbolKind::Field { .. }, "field")
             | (SymbolKind::Module, "module")
     )
+}
+fn definition_anchor(definition: &jet_semindex::SymbolDef) -> DefinitionAnchor {
+    let kind = match &definition.kind {
+        SymbolKind::Module => "module",
+        SymbolKind::Function { .. } => "function",
+        SymbolKind::Struct { .. } => "struct",
+        SymbolKind::Enum { .. } => "enum",
+        SymbolKind::Trait => "trait",
+        SymbolKind::Tag => "tag",
+        SymbolKind::Const => "const",
+        SymbolKind::EnumVariant { .. } => "enum_variant",
+        SymbolKind::Field { .. } => "field",
+        SymbolKind::Local { .. } => "local",
+        SymbolKind::Param { .. } => "param",
+    };
+    DefinitionAnchor {
+        module_path: definition.module_path.clone(),
+        kind: kind.to_string(),
+        def_span: definition.def_span,
+    }
 }
 fn read_fingerprint(path: &Path, inputs: &mut BTreeMap<PathBuf, String>) -> Vec<u8> {
     let bytes = fs::read(path)
@@ -1675,6 +1868,13 @@ fn take_array(o: &mut BTreeMap<String, Value>, k: &str) -> Vec<Value> {
         Some(Value::Array(v)) => v,
         Some(_) => fail(&format!("`{k}` must be an array")),
         None => fail(&format!("codemod object missing `{k}`")),
+    }
+}
+fn take_array_opt(o: &mut BTreeMap<String, Value>, k: &str) -> Option<Vec<Value>> {
+    match o.remove(k) {
+        Some(Value::Array(v)) => Some(v),
+        Some(_) => fail(&format!("`{k}` must be an array")),
+        None => None,
     }
 }
 fn take_object(o: &mut BTreeMap<String, Value>, k: &str) -> BTreeMap<String, Value> {

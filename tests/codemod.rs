@@ -39,7 +39,8 @@ fn check_stderr(path: &std::path::Path) -> Vec<u8> {
 #[test]
 fn codemod_rename_dry_run_apply_and_undo() {
     let dir = temp_dir("rename");
-    let source = dir.join("main.jet");
+    let source = dir.join("examples/main.jet");
+    fs::create_dir_all(source.parent().unwrap()).unwrap();
     fs::write(
         &source,
         "fn report() {\n    print(\"ok\")\n}\n\nfn run() {\n    report()\n}\n",
@@ -109,7 +110,8 @@ fn codemod_rename_dry_run_apply_and_undo() {
 #[test]
 fn codemod_undo_refuses_changed_file() {
     let dir = temp_dir("stale");
-    let source = dir.join("main.jet");
+    let source = dir.join("examples/main.jet");
+    fs::create_dir_all(source.parent().unwrap()).unwrap();
     fs::write(
         &source,
         "fn report() {\n    print(\"ok\")\n}\n\nfn run() {\n    report()\n}\n",
@@ -400,12 +402,14 @@ fn batch_rejects_symlink_and_parent_escape_roots() {
 #[test]
 fn schema_one_inverse_edit_log_remains_readable() {
     let dir = temp_dir("schema_one_log");
-    let source = dir.join("main.jet");
+    let source = dir.join("examples/main.jet");
+    fs::create_dir_all(source.parent().unwrap()).unwrap();
     let before = "fn report() {}\nfn run() { report() }\n";
     let after = "fn summarize() {}\nfn run() { summarize() }\n";
     fs::write(&source, after).unwrap();
     let hash = |s: &str| format!("sha256-{}", jet::SHA256::sha256_hex(s.as_bytes()));
-    let log = dir.join("old.log.json");
+    let log = dir.join(".jet/codemods/old.log.json");
+    fs::create_dir_all(log.parent().unwrap()).unwrap();
     fs::write(&log, format!("{{\"name\":\"Old\",\"files\":[{{\"path\":\"{}\",\"before_hash\":\"{}\",\"after_hash\":\"{}\",\"inverse_edits\":[{{\"start\":3,\"end\":12,\"new_text\":\"report\"}},{{\"start\":29,\"end\":38,\"new_text\":\"report\"}}]}}]}}\n", source.display(), hash(before), hash(after))).unwrap();
     let undo = Command::new(jet())
         .args(["inspect", "codemod", "undo", log.to_str().unwrap()])
@@ -501,6 +505,110 @@ fn typed_ast_rewrite_matches_only_compiler_owned_node_class() {
         fs::read_to_string(source).unwrap(),
         "fn helper(value: Float) {}\nfn run() { print(\"Int stays text\") }\n"
     );
+}
+
+#[test]
+fn typed_ast_type_nodes_cover_params_returns_fields_distincts_and_alias_targets() {
+    let project = temp_dir("batch_type_coverage");
+    let source = project.join("examples/a.jet");
+    fs::create_dir_all(source.parent().unwrap()).unwrap();
+    fs::write(
+        &source,
+        "struct Box { value: Int }\nCount :: distinct Int;\nalias ResultOf<T> = Int ? Int\nfn convert(value: Int) -> Int { return value }\nfn run() {}\n",
+    )
+    .unwrap();
+    let object = project.join("types.codemod.json");
+    fs::write(&object, "{\"version\":2,\"name\":\"TypeCoverage\",\"project\":\".\",\"roots\":[{\"path\":\"examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"alias-target\",\"kind\":\"ast_rewrite\",\"node\":\"type\",\"match\":\"Int ? Int\",\"replace\":\"Float ? Float\",\"matches\":1},{\"id\":\"simple-types\",\"kind\":\"ast_rewrite\",\"node\":\"type\",\"match\":\"Int\",\"replace\":\"Float\",\"matches\":4}]}\n").unwrap();
+    let output = Command::new(jet())
+        .args(["inspect", "codemod", "dry-run", object.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("simple-types: 4 matches"), "{stdout}");
+    assert!(stdout.contains("alias-target: 1 matches"), "{stdout}");
+}
+
+#[test]
+fn typed_ast_repeated_capture_backtracking_keeps_original_binding() {
+    let project = temp_dir("batch_repeated_capture");
+    let source = project.join("examples/a.jet");
+    fs::create_dir_all(source.parent().unwrap()).unwrap();
+    fs::write(
+        &source,
+        "fn pair(a: Int, b: Int) -> Int { return a + b }\nfn same(value: Int) -> Int { return value }\nfn run() { print(pair(1, 2))\nprint(pair(3, 3)) }\n",
+    )
+    .unwrap();
+    let object = project.join("repeat.codemod.json");
+    fs::write(&object, "{\"version\":2,\"name\":\"Repeat\",\"project\":\".\",\"roots\":[{\"path\":\"examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"repeat\",\"kind\":\"ast_rewrite\",\"node\":\"expr\",\"match\":\"pair($value, $value)\",\"replace\":\"same($value)\",\"matches\":1}]}\n").unwrap();
+    let output = Command::new(jet())
+        .args(["inspect", "codemod", "apply", object.to_str().unwrap(), "--yes"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let after = fs::read_to_string(source).unwrap();
+    assert!(after.contains("pair(1, 2)"));
+    assert!(after.contains("same(3)"));
+}
+
+#[test]
+fn typed_ast_variadic_capture_consumes_one_compiler_list_slot() {
+    let project = temp_dir("batch_variadic_capture");
+    let source = project.join("examples/a.jet");
+    fs::create_dir_all(source.parent().unwrap()).unwrap();
+    fs::write(&source, "fn run() { values :: [1, 2, 3]\nprint(values) }\n").unwrap();
+    let object = project.join("variadic.codemod.json");
+    fs::write(&object, "{\"version\":2,\"name\":\"Variadic\",\"project\":\".\",\"roots\":[{\"path\":\"examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"append\",\"kind\":\"ast_rewrite\",\"node\":\"expr\",\"match\":\"[$values...]\",\"replace\":\"[$values..., 4]\",\"matches\":1}]}\n").unwrap();
+    let output = Command::new(jet())
+        .args(["inspect", "codemod", "apply", object.to_str().unwrap(), "--yes"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(fs::read_to_string(source).unwrap().contains("[1, 2, 3, 4]"));
+}
+
+#[cfg(unix)]
+#[test]
+fn undo_rejects_log_symlinks_and_destination_hardlink_aliases_before_reading() {
+    use std::fs::hard_link;
+    use std::os::unix::fs::symlink;
+    let project = temp_dir("undo_aliases");
+    let a = project.join("examples/a.jet");
+    let b = project.join("examples/b.jet");
+    let logs = project.join(".jet/codemods");
+    fs::create_dir_all(a.parent().unwrap()).unwrap();
+    fs::create_dir_all(&logs).unwrap();
+    fs::write(&a, "fn run() {}\n").unwrap();
+    hard_link(&a, &b).unwrap();
+    let bytes = fs::read(&a).unwrap();
+    let hex = bytes.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+    let hash = format!("sha256-{}", jet::SHA256::sha256_hex(&bytes));
+    let real = logs.join("Alias.log.json");
+    fs::write(&real, format!("{{\"schema\":2,\"name\":\"Alias\",\"project\":\"{}\",\"files\":[{{\"path\":\"{}\",\"before_hash\":\"{}\",\"after_hash\":\"{}\",\"before_bytes\":\"{}\",\"after_bytes\":\"{}\"}},{{\"path\":\"{}\",\"before_hash\":\"{}\",\"after_hash\":\"{}\",\"before_bytes\":\"{}\",\"after_bytes\":\"{}\"}}]}}\n", project.display(), a.display(), hash, hash, hex, hex, b.display(), hash, hash, hex, hex)).unwrap();
+    let alias = logs.join("AliasLink.log.json");
+    symlink(&real, &alias).unwrap();
+    let linked = Command::new(jet())
+        .args(["inspect", "codemod", "undo", alias.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(!linked.status.success());
+    assert!(String::from_utf8_lossy(&linked.stderr).contains("regular non-link"));
+    let duplicated = Command::new(jet())
+        .args(["inspect", "codemod", "undo", real.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(!duplicated.status.success());
+    assert!(String::from_utf8_lossy(&duplicated.stderr).contains("alias the same file"));
+}
+
+#[test]
+fn windows_transaction_source_binds_temp_and_flushes_opened_directories() {
+    let source = include_str!("../Source/CmdCodemod/Transaction.rs");
+    assert!(source.contains("let temp_final = final_path(temp.as_raw_handle())?"));
+    assert!(source.contains("opened temp does not belong to opened project parent directory"));
+    assert!(source.contains("FlushFileBuffers(parent.as_raw_handle())"));
+    assert!(source.contains("FILE_FLAG_BACKUP_SEMANTICS"));
+    assert!(source.contains("FILE_FLAG_OPEN_REPARSE_POINT"));
 }
 
 #[test]

@@ -1,5 +1,6 @@
 use std::fs::{self, File, OpenOptions};
-use std::io::Write;
+use std::collections::BTreeSet;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use super::{fail, hash_bytes, json_escape};
@@ -31,23 +32,189 @@ pub struct Change {
     pub after: Vec<u8>,
 }
 
+pub fn validate_destinations(project: &Path, paths: &[PathBuf]) {
+    let project = canonical_project(project);
+    let mut names = BTreeSet::new();
+    #[cfg(unix)]
+    let mut identities = BTreeSet::new();
+    for path in paths {
+        let canonical = validate_destination(&project, path, true)
+            .unwrap_or_else(|e| fail(&format!("unsafe codemod destination `{}`: {e}", path.display())));
+        if !names.insert(canonical.clone()) {
+            fail(&format!("duplicate codemod destination `{}`", path.display()))
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let metadata = fs::metadata(&canonical)
+                .unwrap_or_else(|e| fail(&format!("could not inspect `{}`: {e}", canonical.display())));
+            if !identities.insert((metadata.dev(), metadata.ino())) {
+                fail(&format!("codemod destinations alias the same file at `{}`", path.display()))
+            }
+        }
+    }
+}
+
+pub fn read_destination(project: &Path, path: &Path) -> std::io::Result<Vec<u8>> {
+    let project = canonical_project_io(project)?;
+    let path = validate_destination(&project, path, true)?;
+    read_nofollow(&path)
+}
+
+pub fn read_replay_log(project: &Path, path: &Path) -> std::io::Result<String> {
+    let project = canonical_project_io(project)?;
+    let codemods = validate_codemods_dir(&project, false)?;
+    if path.parent() != Some(codemods.as_path()) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "replay log is not directly beneath the opened project codemod directory",
+        ));
+    }
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "replay log is not a regular non-link file",
+        ));
+    }
+    let bytes = read_nofollow(path)?;
+    String::from_utf8(bytes)
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "replay log is not UTF-8"))
+}
+
+fn canonical_project(project: &Path) -> PathBuf {
+    canonical_project_io(project)
+        .unwrap_or_else(|e| fail(&format!("could not open codemod project `{}`: {e}", project.display())))
+}
+
+fn canonical_project_io(project: &Path) -> std::io::Result<PathBuf> {
+    let metadata = fs::symlink_metadata(project)?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "codemod project is not a real directory",
+        ));
+    }
+    fs::canonicalize(project)
+}
+
+fn validate_destination(project: &Path, path: &Path, must_exist: bool) -> std::io::Result<PathBuf> {
+    let relative = path.strip_prefix(project).map_err(|_| {
+        std::io::Error::new(std::io::ErrorKind::PermissionDenied, "destination escapes project")
+    })?;
+    let components = relative.components().collect::<Vec<_>>();
+    if components.iter().any(|component| !matches!(component, std::path::Component::Normal(_))) {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "non-normal destination path"));
+    }
+    let allowed = relative.starts_with("examples")
+        || relative.starts_with(Path::new("tests").join("ui"));
+    if !allowed || components.len() < 2 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "destination must be beneath examples/ or tests/ui/",
+        ));
+    }
+    let extension = path.extension().and_then(|value| value.to_str());
+    if extension != Some("jet") && !(relative.starts_with(Path::new("tests").join("ui")) && extension == Some("stderr")) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "destination must be a .jet source or paired tests/ui .stderr snapshot",
+        ));
+    }
+    let mut current = project.to_path_buf();
+    for component in relative.parent().into_iter().flat_map(Path::components) {
+        let std::path::Component::Normal(name) = component else { unreachable!() };
+        current.push(name);
+        let metadata = fs::symlink_metadata(&current)?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "destination parent contains a link or non-directory",
+            ));
+        }
+    }
+    if must_exist {
+        let metadata = fs::symlink_metadata(path)?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "destination is not a regular non-link file",
+            ));
+        }
+        let canonical = fs::canonicalize(path)?;
+        if canonical != path {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "destination aliases a different canonical path",
+            ));
+        }
+        Ok(canonical)
+    } else {
+        Ok(path.to_path_buf())
+    }
+}
+
+fn validate_codemods_dir(project: &Path, create: bool) -> std::io::Result<PathBuf> {
+    let jet = project.join(".jet");
+    if !jet.exists() && create {
+        fs::create_dir(&jet)?;
+    }
+    let jet_metadata = fs::symlink_metadata(&jet)?;
+    if jet_metadata.file_type().is_symlink() || !jet_metadata.is_dir() {
+        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, ".jet is not a real directory"));
+    }
+    let codemods = jet.join("codemods");
+    if !codemods.exists() && create {
+        fs::create_dir(&codemods)?;
+    }
+    let metadata = fs::symlink_metadata(&codemods)?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "codemods is not a real directory"));
+    }
+    Ok(codemods)
+}
+
+fn read_nofollow(path: &Path) -> std::io::Result<Vec<u8>> {
+    #[cfg(unix)]
+    use std::os::unix::fs::OpenOptionsExt;
+    #[cfg(windows)]
+    use std::os::windows::fs::OpenOptionsExt;
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    options.custom_flags(0o400000);
+    #[cfg(windows)]
+    options.custom_flags(0x0020_0000);
+    let mut file = options.open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "opened object is not a regular file"));
+    }
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+
 pub fn lock(project: &Path) -> Lock {
-    let dir = project.join(".jet/codemods");
-    fs::create_dir_all(&dir)
-        .unwrap_or_else(|e| fail(&format!("could not create `{}`: {e}", dir.display())));
+    let project = canonical_project(project);
+    let dir = validate_codemods_dir(&project, true)
+        .unwrap_or_else(|e| fail(&format!("could not securely open codemod directory: {e}")));
     let path = dir.join("codemod.lock");
     #[cfg(unix)]
     let mut file = {
         use std::os::fd::AsRawFd;
+        use std::os::unix::fs::OpenOptionsExt;
         extern "C" {
             fn flock(fd: i32, operation: i32) -> i32;
         }
         const LOCK_EX: i32 = 2;
         const LOCK_NB: i32 = 4;
+        const O_CLOEXEC: i32 = 0o2000000;
+        const O_NOFOLLOW: i32 = 0o400000;
         let file = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
+            .custom_flags(O_CLOEXEC | O_NOFOLLOW)
             .open(&path)
             .unwrap_or_else(|e| fail(&format!("could not open codemod lock: {e}")));
         if unsafe { flock(file.as_raw_fd(), LOCK_EX | LOCK_NB) } != 0 {
@@ -61,6 +228,7 @@ pub fn lock(project: &Path) -> Lock {
     let mut file = {
         use std::os::windows::fs::OpenOptionsExt;
         const FILE_FLAG_DELETE_ON_CLOSE: u32 = 0x04000000;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x00200000;
         const GENERIC_READ: u32 = 0x8000_0000;
         const GENERIC_WRITE: u32 = 0x4000_0000;
         const DELETE: u32 = 0x0001_0000;
@@ -69,7 +237,7 @@ pub fn lock(project: &Path) -> Lock {
             .write(true)
             .create_new(true)
             .access_mode(GENERIC_READ | GENERIC_WRITE | DELETE)
-            .custom_flags(FILE_FLAG_DELETE_ON_CLOSE)
+            .custom_flags(FILE_FLAG_DELETE_ON_CLOSE | FILE_FLAG_OPEN_REPARSE_POINT)
             .open(&path)
             .unwrap_or_else(|_| fail(&format!("another codemod holds `{}`", path.display())))
     };
@@ -83,26 +251,41 @@ pub fn lock(project: &Path) -> Lock {
         .unwrap_or_else(|e| fail(&format!("could not write codemod lock: {e}")));
     file.sync_all()
         .unwrap_or_else(|e| fail(&format!("could not sync codemod lock: {e}")));
+    if !file.metadata().is_ok_and(|metadata| metadata.is_file()) {
+        fail("codemod lock is not a regular file")
+    }
     Lock { _path: path, _file: file }
 }
 
 pub fn recover(project: &Path) {
-    let journal = project.join(".jet/codemods/transaction.journal");
+    let project = canonical_project(project);
+    let dir = validate_codemods_dir(&project, true)
+        .unwrap_or_else(|e| fail(&format!("could not securely open codemod directory: {e}")));
+    let journal = dir.join("transaction.journal");
     if !journal.exists() {
         return;
     }
-    let raw = fs::read_to_string(&journal)
-        .unwrap_or_else(|e| fail(&format!("could not read recovery journal: {e}")));
+    let raw = String::from_utf8(read_nofollow(&journal)
+        .unwrap_or_else(|e| fail(&format!("could not read recovery journal: {e}"))))
+        .unwrap_or_else(|_| fail("recovery journal is not UTF-8"));
     let parsed = parse_journal(&raw);
-    validate_journal_paths(project, &parsed, &journal);
+    validate_journal_paths(&project, &parsed, &journal);
     let records = &parsed.records;
     let all_after = records.iter().all(|record| {
-        fs::read(&record.path)
+        read_destination(&project, &record.path)
             .map(|current| current == record.after)
             .unwrap_or(false)
     });
     if all_after {
-        write_sync(&parsed.log_path, &parsed.log);
+        if parsed.log_path.exists() {
+            let current = read_nofollow(&parsed.log_path)
+                .unwrap_or_else(|e| fail(&format!("could not inspect recovered replay log: {e}")));
+            if current != parsed.log {
+                fail("recovered replay log conflicts with transaction journal; journal preserved")
+            }
+        } else {
+            write_new_sync(&parsed.log_path, &parsed.log);
+        }
         sync_dir(
             parsed
                 .log_path
@@ -119,12 +302,12 @@ pub fn recover(project: &Path) {
     }
     let mut conflict = Vec::new();
     for record in records {
-        let current = fs::read(&record.path).unwrap_or_default();
+        let current = read_destination(&project, &record.path).unwrap_or_default();
         if current == record.before {
             continue;
         }
         if current == record.after {
-            atomic_restore(project, &record.path, &record.before);
+            atomic_restore(&project, &record.path, &record.before);
         } else {
             conflict.push(format!(
                 "{} (current {}, before {}, after {})",
@@ -163,6 +346,17 @@ fn validate_journal_paths(project: &Path, parsed: &Journal, journal: &Path) {
         {
             fail("recovery journal file path escapes project or temp directory; journal preserved");
         }
+        validate_destination(&project, &record.path, true).unwrap_or_else(|e| {
+            fail(&format!("unsafe recovery destination `{}`: {e}; journal preserved", record.path.display()))
+        });
+        if record.temp.exists() {
+            let temp_meta = fs::symlink_metadata(&record.temp).unwrap_or_else(|e| {
+                fail(&format!("could not inspect recovery temp `{}`: {e}; journal preserved", record.temp.display()))
+            });
+            if temp_meta.file_type().is_symlink() || !temp_meta.is_file() {
+                fail("recovery temp is not a regular non-link file; journal preserved")
+            }
+        }
         let relative = record.path.strip_prefix(&project).unwrap();
         let mut current = project.clone();
         for component in relative.parent().into_iter().flat_map(Path::components) {
@@ -190,8 +384,19 @@ pub fn commit(project: &Path, changes: &[Change], log_path: &Path, log: &[u8]) {
     if changes.is_empty() {
         fail("codemod has no file edits");
     }
+    let project = canonical_project(project);
+    let paths = changes.iter().map(|change| change.path.clone()).collect::<Vec<_>>();
+    validate_destinations(&project, &paths);
+    let dir = validate_codemods_dir(&project, true)
+        .unwrap_or_else(|e| fail(&format!("could not securely open codemod directory: {e}")));
+    if log_path.parent() != Some(dir.as_path()) {
+        fail("codemod replay log must be directly beneath .jet/codemods")
+    }
+    if log_path.exists() {
+        fail(&format!("codemod replay log already exists: `{}`", log_path.display()))
+    }
     for c in changes {
-        let current = fs::read(&c.path)
+        let current = read_destination(&project, &c.path)
             .unwrap_or_else(|e| fail(&format!("could not re-read `{}`: {e}", c.path.display())));
         if current != c.before {
             fail(&format!(
@@ -200,14 +405,13 @@ pub fn commit(project: &Path, changes: &[Change], log_path: &Path, log: &[u8]) {
             ));
         }
     }
-    let dir = project.join(".jet/codemods");
     let journal = dir.join("transaction.journal");
     let tx = format!("{}-{}", std::process::id(), now_nanos());
     let mut records = Vec::new();
     for (i, c) in changes.iter().enumerate() {
-        let parent = c.path.parent().unwrap_or(project);
+        let parent = c.path.parent().unwrap_or(&project);
         let temp = parent.join(format!(".jet-codemod-{tx}-{i}.tmp"));
-        write_sync(&temp, &c.after);
+        write_new_sync(&temp, &c.after);
         records.push(Record {
             path: c.path.clone(),
             temp,
@@ -216,22 +420,24 @@ pub fn commit(project: &Path, changes: &[Change], log_path: &Path, log: &[u8]) {
         });
     }
     let journal_text = render_journal(&tx, 0, &records, log_path, log);
-    write_sync(&journal, journal_text.as_bytes());
-    sync_dir(&dir);
+    replace_journal_generation(&project, &dir, &journal, &tx, 0, journal_text.as_bytes());
     for (i, record) in records.iter().enumerate() {
-        secure_replace(project, &record.temp, &record.path, &record.before).unwrap_or_else(|e| {
-            rollback(project, &records, &journal);
+        secure_replace(&project, &record.temp, &record.path, &record.before).unwrap_or_else(|e| {
+            rollback(&project, &records, &journal);
             fail(&format!(
                 "codemod rename failed for `{}`: {e}",
                 record.path.display()
             ))
         });
-        sync_dir(record.path.parent().unwrap_or(project));
-        write_sync(
+        sync_dir(record.path.parent().unwrap_or(&project));
+        replace_journal_generation(
+            &project,
+            &dir,
             &journal,
+            &tx,
+            i + 1,
             render_journal(&tx, i + 1, &records, log_path, log).as_bytes(),
         );
-        sync_dir(&dir);
         if std::env::var("JET_CODEMOD_CRASH_AFTER_RENAME")
             .ok()
             .as_deref()
@@ -240,7 +446,7 @@ pub fn commit(project: &Path, changes: &[Change], log_path: &Path, log: &[u8]) {
             std::process::exit(86);
         }
     }
-    write_sync(log_path, log);
+    write_new_sync(log_path, log);
     sync_dir(log_path.parent().unwrap_or(&dir));
     fs::remove_file(&journal)
         .unwrap_or_else(|e| fail(&format!("could not remove transaction journal: {e}")));
@@ -341,18 +547,39 @@ fn parse_journal(raw: &str) -> Journal {
         log: unhex(&string("log")),
     }
 }
-fn write_sync(path: &Path, bytes: &[u8]) {
-    let mut f = File::create(path)
+fn write_new_sync(path: &Path, bytes: &[u8]) {
+    let mut f = OpenOptions::new().write(true).create_new(true).open(path)
         .unwrap_or_else(|e| fail(&format!("could not write `{}`: {e}", path.display())));
     f.write_all(bytes)
         .unwrap_or_else(|e| fail(&format!("could not write `{}`: {e}", path.display())));
     f.sync_all()
         .unwrap_or_else(|e| fail(&format!("could not sync `{}`: {e}", path.display())));
 }
+fn replace_journal_generation(
+    project: &Path,
+    dir: &Path,
+    journal: &Path,
+    tx: &str,
+    generation: usize,
+    bytes: &[u8],
+) {
+    let staged = dir.join(format!(".transaction-{tx}-{generation}.journal.tmp"));
+    write_new_sync(&staged, bytes);
+    if journal.exists() {
+        let current = read_nofollow(journal)
+            .unwrap_or_else(|e| fail(&format!("could not inspect current recovery journal: {e}")));
+        secure_replace(project, &staged, journal, &current)
+            .unwrap_or_else(|e| fail(&format!("could not publish recovery journal generation: {e}")));
+    } else {
+        fs::rename(&staged, journal)
+            .unwrap_or_else(|e| fail(&format!("could not publish first recovery journal: {e}")));
+    }
+    sync_dir(dir);
+}
 fn atomic_restore(project: &Path, path: &Path, bytes: &[u8]) {
     let tmp = path.with_extension(format!("recover-{}.tmp", std::process::id()));
-    write_sync(&tmp, bytes);
-    let current = fs::read(path)
+    write_new_sync(&tmp, bytes);
+    let current = read_destination(project, path)
         .unwrap_or_else(|e| fail(&format!("could not inspect recovery target `{}`: {e}", path.display())));
     secure_replace(project, &tmp, path, &current)
         .unwrap_or_else(|e| fail(&format!("could not recover `{}`: {e}", path.display())));
@@ -448,6 +675,7 @@ fn secure_replace(project: &Path, temp: &Path, path: &Path, expected: &[u8]) -> 
 
     type Handle = *mut c_void;
     const GENERIC_READ: u32 = 0x8000_0000;
+    const GENERIC_WRITE: u32 = 0x4000_0000;
     const DELETE: u32 = 0x0001_0000;
     const SHARE_ALL: u32 = 0x0000_0007;
     const OPEN_EXISTING: u32 = 3;
@@ -497,6 +725,7 @@ fn secure_replace(project: &Path, temp: &Path, path: &Path, expected: &[u8]) -> 
             path_len: u32,
             flags: u32,
         ) -> u32;
+        fn FlushFileBuffers(file: Handle) -> i32;
     }
     fn wide(path: &std::ffi::OsStr) -> Vec<u16> {
         path.encode_wide().chain(std::iter::once(0)).collect()
@@ -575,8 +804,8 @@ fn secure_replace(project: &Path, temp: &Path, path: &Path, expected: &[u8]) -> 
             return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "codemod parent is not a real directory"));
         }
     }
-    let project_handle = open_handle(project, GENERIC_READ, true)?;
-    let parent = open_handle(path.parent().unwrap_or(project), GENERIC_READ, true)?;
+    let project_handle = open_handle(project, GENERIC_READ | GENERIC_WRITE, true)?;
+    let parent = open_handle(path.parent().unwrap_or(project), GENERIC_READ | GENERIC_WRITE, true)?;
     let destination = open_handle(path, GENERIC_READ, false)?;
     let project_final = final_path(project_handle.as_raw_handle())?;
     let parent_final = final_path(parent.as_raw_handle())?;
@@ -607,6 +836,20 @@ fn secure_replace(project: &Path, temp: &Path, path: &Path, expected: &[u8]) -> 
         return Err(std::io::Error::new(std::io::ErrorKind::Other, "destination drifted before rename"));
     }
     let temp = open_handle(temp, GENERIC_READ | DELETE, false)?;
+    let temp_final = final_path(temp.as_raw_handle())?;
+    let temp_parent = temp_final
+        .rsplit_once(['\\', '/'])
+        .map(|(parent, _)| parent)
+        .unwrap_or("");
+    if temp_parent.trim_end_matches(['\\', '/'])
+        != parent_final.trim_end_matches(['\\', '/'])
+        || (temp_parent != project_final && !temp_parent.starts_with(&project_prefix))
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "opened temp does not belong to opened project parent directory",
+        ));
+    }
     let file_name = path
         .file_name()
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "destination has no name"))?
@@ -630,6 +873,14 @@ fn secure_replace(project: &Path, temp: &Path, path: &Path, expected: &[u8]) -> 
             size as u32,
         )
     } == 0
+    {
+        return Err(std::io::Error::last_os_error());
+    }
+    if unsafe { FlushFileBuffers(parent.as_raw_handle()) } == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    if parent_final != project_final
+        && unsafe { FlushFileBuffers(project_handle.as_raw_handle()) } == 0
     {
         return Err(std::io::Error::last_os_error());
     }
@@ -657,6 +908,7 @@ fn secure_replace(project: &Path, temp: &Path, path: &Path, expected: &[u8]) -> 
     }
     fs::rename(temp, path)
 }
+#[cfg(not(windows))]
 fn sync_dir(path: &Path) {
     File::open(path)
         .and_then(|f| f.sync_all())
@@ -666,6 +918,56 @@ fn sync_dir(path: &Path) {
                 path.display()
             ))
         });
+}
+
+#[cfg(windows)]
+fn sync_dir(path: &Path) {
+    use std::ffi::c_void;
+    use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::io::{FromRawHandle, OwnedHandle};
+    type Handle = *mut c_void;
+    const GENERIC_WRITE: u32 = 0x4000_0000;
+    const SHARE_ALL: u32 = 0x0000_0007;
+    const OPEN_EXISTING: u32 = 3;
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    const INVALID_HANDLE_VALUE: Handle = -1isize as Handle;
+    extern "system" {
+        fn CreateFileW(
+            name: *const u16,
+            access: u32,
+            share: u32,
+            security: *mut c_void,
+            creation: u32,
+            flags: u32,
+            template: Handle,
+        ) -> Handle;
+        fn FlushFileBuffers(file: Handle) -> i32;
+    }
+    let wide = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let raw = unsafe {
+        CreateFileW(
+            wide.as_ptr(),
+            GENERIC_WRITE,
+            SHARE_ALL,
+            std::ptr::null_mut(),
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+            std::ptr::null_mut(),
+        )
+    };
+    if raw == INVALID_HANDLE_VALUE {
+        fail(&format!("could not open directory `{}` for sync: {}", path.display(), std::io::Error::last_os_error()))
+    }
+    let handle = unsafe { OwnedHandle::from_raw_handle(raw) };
+    use std::os::windows::io::AsRawHandle;
+    if unsafe { FlushFileBuffers(handle.as_raw_handle()) } == 0 {
+        fail(&format!("could not sync directory `{}`: {}", path.display(), std::io::Error::last_os_error()))
+    }
 }
 fn now_nanos() -> u128 {
     std::time::SystemTime::now()
