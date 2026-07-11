@@ -1895,6 +1895,63 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+// ── card #131 S1-bridge: hand-written `impl T.Encode` / `impl T.Decode` (D-SERDE2) ──
+// A hand codec passes sema and MUST produce Rust rustc accepts (I2). The Jet-facing
+// verbs `encode`/`decode` bridge internally to the Rust `user_Encode`/`user_Decode`
+// traits' `jet_encode(&self) -> DataTree` / `jet_decode(&DataTree) -> Result<Self, …>`.
+// The impl uses a custom wire key (`"email"`, not the field name `addr`) so the round
+// trip can only succeed through the HAND methods, never a derive.
+#[test]
+fn hand_written_encode_decode_round_trips() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping hand_written_encode_decode_round_trips (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_hand_codec_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "hand_codec",
+        r#"
+use core.encoding.json as json
+
+struct Email { addr: String }
+
+impl Email.Encode {
+    fn encode(self) -> Data {
+        m: [String: Data] :: ["email": Data.Text(copy self.addr)]
+        return Data.Object(m)
+    }
+}
+
+impl Email.Decode {
+    fn decode(tree: Data) -> Email ? DecodeError {
+        f := tree.field("email") ?? Data.Text("")
+        s := f.text() ?? ""
+        return ok(Email.{addr: s})
+    }
+}
+
+fn run() {
+    e := Email.{addr: "a@b.com"}
+    s := json.to_string(e)
+    print(s)
+    back := json.decode<Email>(s) ?? panic("decode failed")
+    print(back.addr)
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "hand codec round trip failed: {stderr}");
+    // Custom wire key proves the hand `encode` ran; `back.addr` proves hand `decode` ran.
+    assert_eq!(stdout, "{\"email\":\"a@b.com\"}\na@b.com\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
 // ── c152: full YAML adapter (D-ENC-YAML1 = A) ────────────────────────────────
 // Block mappings + sequences, flow collections, typed scalars, block scalars,
 // comments, document markers, and anchors/aliases.
