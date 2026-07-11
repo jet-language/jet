@@ -264,18 +264,19 @@ this historical plan never override it.
 Both gating decisions ratified (D-ENC-DYN1=A+, D-ENC-YAML1=A) and implemented end to
 end; impl recorded in `docs/spec/syntax-decisions.md`. Full suite green (1107 passed).
 That tranche shipped:
-- **`Data` value + aliases** — user-facing `Data` (face of `jet_std::DataTree`, variants
-  `.Null/.Bool/.Int/.Float/.Text/.Array/.Object`); `Json`/`Toml`/`Yaml`/`Csv` are
-  aliases canonicalized to `Data` in `Sema::resolve_type`; codegen maps all five to
-  `jet_std::DataTree`. The shipped `JSON` enum collapsed into `Data` (clean break);
+- **`DataTree` value** — D-SERDE13 later replaced this tranche's `Data` spelling.
+  The sole user-facing name is now `DataTree` (variants
+  `.Null/.Bool/.Int/.Float/.Text/.Array/.Object`); old `Data` is an E0351
+  teaching error, not an alias. Format modules are adapters over that one value.
+  The shipped `JSON` enum collapsed into the shared tree (clean break);
   examples 30/73/54 + jsonfmt + capstone server/config migrated, goldens re-blessed.
   These five are now reserved core type names.
 - **TOML full** — `Source/Jetpack/TOML.rs` ported into the emitted prelude
   (`jet_std::toml`): nested `[table]`s, `[[array-of-tables]]`, dotted keys, inline
-  tables, typed scalars; `toml.parse`→`Data`, `toml.decode<T>` nested, `toml.to_string`.
+  tables, typed scalars; `toml.parse`→`DataTree`, `toml.decode<T>` nested, `toml.to_string`.
 - **YAML full** — new std-only parser+renderer (`jet_std::yaml`): block+flow
   maps/sequences, core-schema typed scalars, `|`/`>` block scalars with chomping,
-  comments, `---`/`...` documents, `&anchor`/`*alias`; `yaml.parse`→`Data`,
+  comments, `---`/`...` documents, `&anchor`/`*alias`; `yaml.parse`→`DataTree`,
   `yaml.decode<T>`, `yaml.to_string`. Explicit/custom tags → frozen **c153**.
 - **Examples + tests** — 52_toml / 53_yaml rewritten to typed nested decode + round-trip;
   `tests/corelib.rs` TOML/YAML round-trip tests; 54_encoding re-blessed.

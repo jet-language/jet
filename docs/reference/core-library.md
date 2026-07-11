@@ -1257,11 +1257,10 @@ fn run() {
 }
 ```
 
-**One dynamic value, four format faces (D-ENC-DYN1).** Every format's untyped
-`parse` returns the same rich dynamic value, internally `DataTree`, user-facing
-as **`Data`** — variants `.Null` / `.Bool` / `.Int` / `.Float` / `.Text` /
-`.Array` / `.Object`. `JSON`, `TOML`, `YAML`, and `CSV` are type aliases over
-`Data` (so `json.parse` reads as `JSON`, `toml.parse` as `TOML`, …), but it's
+**One dynamic value, four format adapters (D-SERDE13).** Every format's untyped
+`parse` returns **`DataTree`** — variants `.Null` / `.Bool` / `.Int` / `.Float` /
+`.Text` / `.Array` / `.Object`. `DataTree` is the only user-facing tree name;
+the old `Data` spelling is a teaching error, not an alias. Every adapter shares
 one structure with one walker and one accessor set (`.field(name)`, `.at(i)`,
 `.int()`, `.float()`, `.text()`, `.bool()`). Integral numbers decode to `.Int`,
 fractional to `.Float`; objects keep field order.
@@ -1542,9 +1541,9 @@ the user never spells them. A phantom or `#[Skip]`-only param carries no serde
 bound (only structural `Clone`), so `Id<Kind>` serializes for any `Kind`. A
 non-codable type argument fails at the use site (E2411), not the definition.
 
-> The expert hand-impl path (`impl T: Encode { fn encode … }` over the `DataTree`
-> tree, D-SERDE2) is a future increment; see
-> `docs/sidequests/serde-model.md`.
+The expert hand-impl path is live: `impl T.Encode { fn encode(self) -> DataTree
+{ … } }` and `impl T.Decode { fn decode(tree: DataTree) -> T ? DecodeError {
+… } }`. Generated and hand-written codecs use the same protocol dispatch.
 
 ---
 

@@ -1444,9 +1444,9 @@ D-ENC-YAML1)*: one format-agnostic data model. `@Codable` (≡
 field-walk, not S56 reflection. Formats are adapters in **`core.encoding`**
 (`core.encoding.{json,csv,toml,yaml}`); encode verbs `to_string` /
 `to_string_pretty`; typed decode `decode<T>` (target inferable from the
-binding type; bare `decode(s)` yields dynamic `Data`). Hand-impl surface:
+binding type; bare `decode(s)` yields dynamic `DataTree`). Hand-impl surface:
 `encode`/`decode` verbs over `DataTree`
-(`.Null/.Bool/.Int/.Float/.Text/.Bytes/.Array/.Object`); `DecodeError
+(`.Null/.Bool/.Int/.Float/.Text/.Array/.Object`); `DecodeError
 { path, reason }`; encode infallible. Field markers (`#` plane):
 `#[Rename("x")]`, `#[Skip]`, `#[Default]`/`#[Default(expr)]`, `#[Flatten]`,
 `#[RenameAll(camel|snake|pascal|kebab|screaming)]` (E2409). Enum wire:
