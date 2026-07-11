@@ -421,6 +421,239 @@ fn run() {
     let _ = fs::remove_dir_all(&root);
 }
 
+/// Card #436: build a second C static library exercising the C-ABI shapes
+/// that sema newly accepts (fixed-width ints, a `#Layout(c)` struct passed
+/// by value, a distinct-over-`Int`) so the round trip is proven against a
+/// REAL C compiler + linker, not just codegen string matching.
+fn build_c_lib_card436(dir: &Path) -> Option<(PathBuf, String)> {
+    let cc = ["cc", "gcc", "clang"]
+        .iter()
+        .find(|c| Command::new(c).arg("--version").output().is_ok())?;
+    let c_src = dir.join("jetc436.c");
+    fs::write(
+        &c_src,
+        r#"
+#include <stdint.h>
+
+/* D-SG9: fixed-width integers cross the C boundary as their exact C type. */
+uint8_t jetc436_add_u8(uint8_t a, uint8_t b) { return (uint8_t)(a + b); }
+int32_t jetc436_add_i32(int32_t a, int32_t b) { return a + b; }
+float jetc436_add_f32(float a, float b) { return a + b; }
+
+/* D-REPRC1: a `#Layout(c)` struct is `#[repr(C)]` — same field order/size as
+ * this C struct, so it crosses by value with no bridging code needed. */
+typedef struct {
+    long long x;
+    long long y;
+} CPoint;
+
+CPoint jetc436_make_point(long long x, long long y) {
+    CPoint p;
+    p.x = x;
+    p.y = y;
+    return p;
+}
+
+long long jetc436_point_sum(CPoint p) { return p.x + p.y; }
+
+/* D-DIST1: a distinct type is `#[repr(transparent)]` over its base — same
+ * ABI as the base scalar, so it crosses the boundary directly. */
+long long jetc436_scale_meters(long long m) { return m * 2; }
+"#,
+    )
+    .unwrap();
+    let obj = dir.join("jetc436.o");
+    let ok = Command::new(cc)
+        .args(["-c"])
+        .arg(&c_src)
+        .arg("-o")
+        .arg(&obj)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !ok {
+        return None;
+    }
+    let lib = dir.join("libjetc436.a");
+    let ok = Command::new("ar")
+        .arg("rcs")
+        .arg(&lib)
+        .arg(&obj)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !ok {
+        return None;
+    }
+    Some((dir.to_path_buf(), "jetc436".to_string()))
+}
+
+/// Card #436: fixed-width ints (`U8`/`I32`), `F32`, a `#Layout(c)` struct
+/// passed/returned by value, and a distinct-over-`Int` all round-trip through
+/// generated wrappers, link against a real C library, and run — the shapes
+/// `Sema::FFI::is_c_abi_type` accepts now all have matching `CModule.rs`
+/// codegen (before this card, these fell into codegen's `/* unsupported */
+/// ()` placeholder — an I2/I3 bug: sema-accepted, codegen-unlowerable).
+#[test]
+fn cffi_card436_c_abi_shapes_round_trip() {
+    if !have_rustc() {
+        eprintln!("note: skipping cffi_card436_c_abi_shapes_round_trip (need rustc)");
+        return;
+    }
+    let root = std::env::temp_dir().join(format!("jet_cffi_c436_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+
+    let Some((lib_dir, lib_name)) = build_c_lib_card436(&root) else {
+        eprintln!("note: skipping cffi_card436_c_abi_shapes_round_trip (no C compiler)");
+        return;
+    };
+
+    let main = root.join("main.jet");
+    fs::write(
+        &main,
+        r#"#Layout(c)
+struct Point {
+    x: Int
+    y: Int
+}
+
+Meters :: distinct Int;
+
+#Extern module c.jetc436 {
+    fn add_u8(a: U8, b: U8) -> U8 = "jetc436_add_u8";
+    fn add_i32(a: I32, b: I32) -> I32 = "jetc436_add_i32";
+    fn add_f32(a: F32, b: F32) -> F32 = "jetc436_add_f32";
+    fn make_point(x: Int, y: Int) -> Point = "jetc436_make_point";
+    fn point_sum(p: Point) -> Int = "jetc436_point_sum";
+    fn scale_meters(m: Meters) -> Meters = "jetc436_scale_meters";
+}
+
+fn run() {
+    print(add_u8(200, 55))
+    print(add_i32(1000000, 234567))
+    print(add_f32(1.5, 2.25))
+    let p = make_point(3, 4)
+    print(point_sum(p))
+    print(scale_meters(21))
+}
+"#,
+    )
+    .unwrap();
+
+    let src = fs::read_to_string(&main).unwrap();
+    let out = jet::compile_with_path(&src, main.to_str().unwrap()).unwrap_or_else(|d| {
+        panic!(
+            "card #436 C-ABI shapes rejected by the front end:\n{}",
+            jet::render_diagnostics(main.to_str().unwrap(), &src, &d)
+        )
+    });
+    assert!(
+        !out.rust.contains("/* unsupported"),
+        "I2/I3: a sema-accepted C-ABI shape fell through to codegen's unsupported \
+         placeholder; got:\n{}",
+        out.rust
+    );
+
+    let rs = root.join("main.rs");
+    fs::write(&rs, &out.rust).unwrap();
+    let bin = root.join("main_bin");
+    let status = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&rs)
+        .arg("-o")
+        .arg(&bin)
+        .arg("-L")
+        .arg(format!("native={}", lib_dir.display()))
+        .arg("-l")
+        .arg(&lib_name)
+        .output()
+        .unwrap();
+    assert!(
+        status.status.success(),
+        "I2: rustc rejected generated C-FFI code for card #436 shapes (jet bug):\n{}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+    let run = Command::new(&bin).output().unwrap();
+    assert!(
+        run.status.success(),
+        "card #436 C-ABI round-trip program failed at runtime:\n{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout),
+        "255\n1234567\n3.75\n7\n42\n"
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+/// Card #436: a runtime-built `String` (not a literal — so sema's E3211
+/// comptime check can't catch it) with an embedded NUL byte, passed to a
+/// C-boundary function, must fail LOUDLY at runtime (a panic), never silently
+/// send the C function an empty string. Exercises the codegen-side
+/// `NUL_PANIC` path in `Codegen/CModule.rs`.
+#[test]
+fn cffi_runtime_interior_nul_panics_instead_of_silently_truncating() {
+    if !have_rustc() {
+        eprintln!("note: skipping cffi_runtime_interior_nul_panics (need rustc)");
+        return;
+    }
+    let root = std::env::temp_dir().join(format!("jet_cffi_nul_panic_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+
+    let main = root.join("main.jet");
+    fs::write(
+        &main,
+        r#"#Extern module c.jetc436 {
+    fn takes_str(s: String) -> Int = "strlen";
+}
+
+fn run() {
+    let parts = ["ab", "\u{0}", "cd"]
+    let joined = parts.join("")
+    print(takes_str(joined))
+}
+"#,
+    )
+    .unwrap();
+
+    let src = fs::read_to_string(&main).unwrap();
+    let Ok(out) = jet::compile_with_path(&src, main.to_str().unwrap()) else {
+        eprintln!(
+            "note: skipping cffi_runtime_interior_nul_panics (front end rejected the \
+             runtime-NUL fixture — Unicode escape syntax may not be ratified; not this \
+             card's gate to guess at)"
+        );
+        return;
+    };
+
+    let rs = root.join("main.rs");
+    fs::write(&rs, &out.rust).unwrap();
+    let bin = root.join("main_bin");
+    let status = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&rs)
+        .arg("-o")
+        .arg(&bin)
+        .output()
+        .unwrap();
+    assert!(
+        status.status.success(),
+        "I2: rustc rejected the runtime-NUL wrapper (jet bug):\n{}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+    let run = Command::new(&bin).output().unwrap();
+    assert!(
+        !run.status.success(),
+        "a runtime String with an embedded NUL must panic at the C boundary, not \
+         silently succeed with a truncated/empty string"
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
 /// Regression (c95): a `String` parameter must emit its `CString` conversion
 /// line in the wrapper body. The codegen built `call_args` referencing `c{i}`
 /// but dropped the `let c{i} = …` conversion, so rustc rejected the wrapper
