@@ -1,3 +1,8 @@
+use super::super::{
+    Diagnostic, Expr, Parser, Pattern, Span, StrMatchPart, StrTokPart, Syntax, TokKind, Token,
+    describe,
+};
+
 impl<'a> Parser<'a> {
         /// D-PARSESTR1: try to read the string-literal token at the cursor as a
         /// str-match pattern — `"prefix-{id:Int}-suffix"`. Each hole must reduce
@@ -6,7 +11,7 @@ impl<'a> Parser<'a> {
         /// the token is left untouched and the caller falls back to ordinary
         /// `Expr::Str` parsing. E0147 (two holes with nothing to split on between
         /// them) is checked here, at parse time, once we've committed.
-        fn try_str_match_pattern(&mut self) -> Result<Option<Pattern>, Diagnostic> {
+        pub(super) fn try_str_match_pattern(&mut self) -> Result<Option<Pattern>, Diagnostic> {
             let TokKind::Str(parts) = &self.peek().kind else {
                 return Ok(None);
             };
@@ -164,7 +169,7 @@ impl<'a> Parser<'a> {
         /// — there's no ordinary-`Expr::Str` fallback for a `take_pattern`
         /// argument, so silently falling back would just move the failure to a
         /// confusing type error later.
-        fn parse_take_pattern_literal(&mut self) -> Result<Expr, Diagnostic> {
+        pub(super) fn parse_take_pattern_literal(&mut self) -> Result<Expr, Diagnostic> {
             let TokKind::Str(parts) = self.peek().kind.clone() else {
                 return Err(Diagnostic::error(
                     "E0003",
@@ -213,7 +218,7 @@ impl<'a> Parser<'a> {
             Ok(Expr::StrMatchLit(match_parts, span))
         }
     
-        fn struct_pattern_rhs(&mut self) -> Result<Pattern, Diagnostic> {
+        pub(super) fn struct_pattern_rhs(&mut self) -> Result<Pattern, Diagnostic> {
             let dot_span = self.bump().span;
             self.expect(TokKind::LBrace, "after `.` in a struct pattern")?;
             let mut fields = Vec::new();

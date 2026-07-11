@@ -1,5 +1,10 @@
+use super::super::{
+    AccessConvention, Call, CallArg, Diagnostic, Expr, Parser, Span, StrPart, StrTokPart, Syntax,
+    TokKind, describe, retired_s14_teaching_enabled,
+};
+
 impl<'a> Parser<'a> {
-        fn expr_primary(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
+        pub(super) fn expr_primary(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
             match self.peek().kind.clone() {
                 TokKind::KwOk => {
                     let span = self.bump().span;

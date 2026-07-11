@@ -1,9 +1,13 @@
+use super::super::{
+    AccessConvention, Diagnostic, Expr, Parser, Span, Syntax, TokKind, retired_s14_teaching_enabled,
+};
+
 impl<'a> Parser<'a> {
-        fn looks_like_provider_ref_value(&self) -> bool {
+        pub(super) fn looks_like_provider_ref_value(&self) -> bool {
             matches!(self.peek().kind, TokKind::Ident(_)) && matches!(self.peek2().kind, TokKind::At)
         }
     
-        fn provider_ref_placeholder(&mut self) -> Expr {
+        pub(super) fn provider_ref_placeholder(&mut self) -> Expr {
             let start = self.peek().span.start;
             let mut end = self.peek().span.end;
             self.bump(); // provider
@@ -36,7 +40,7 @@ impl<'a> Parser<'a> {
         /// Position-disambiguated: infix `^` (xor) and `&` (BitAnd) are parsed
         /// inside expressions and never reach the start of a parameter/argument or
         /// a type. `*` (raw) is D-CAP9, handled apart.
-        pub(super) fn parse_capability_sigil(&mut self) -> Option<AccessConvention> {
+        pub(in crate::Parser) fn parse_capability_sigil(&mut self) -> Option<AccessConvention> {
             let cap = match self.peek().kind {
                 TokKind::Amp => AccessConvention::Write,
                 TokKind::Caret => AccessConvention::Move,
@@ -46,7 +50,7 @@ impl<'a> Parser<'a> {
             Some(cap)
         }
     
-        pub(super) fn parse_access_prefix(&mut self) -> AccessConvention {
+        pub(in crate::Parser) fn parse_access_prefix(&mut self) -> AccessConvention {
             // D-MEM1 sigils take precedence over the retired keyword forms.
             if let Some(cap) = self.parse_capability_sigil() {
                 return cap;
@@ -144,7 +148,7 @@ impl<'a> Parser<'a> {
             ));
         }
     
-        fn starts_expr(&self, kind: &TokKind) -> bool {
+        pub(super) fn starts_expr(&self, kind: &TokKind) -> bool {
             matches!(
                 kind,
                 TokKind::Ident(_)
@@ -164,7 +168,7 @@ impl<'a> Parser<'a> {
             )
         }
     
-        fn foreign_logic_error(&mut self, foreign: &str, canonical: &str) {
+        pub(super) fn foreign_logic_error(&mut self, foreign: &str, canonical: &str) {
             self.diags.push(Diagnostic::error(
                 "E0012",
                 format!(

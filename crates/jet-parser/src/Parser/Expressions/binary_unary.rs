@@ -1,6 +1,11 @@
+use super::super::{
+    BinOp, Diagnostic, EnumLitArg, Expr, OrFallback, Parser, Span, Syntax, TokKind, UnOp,
+    pat_span, retired_s14_teaching_enabled,
+};
+
 impl<'a> Parser<'a> {
         /// S35/S71: the `??` fallback binds looser than `&&` / `||`.
-        fn expr_or_fallback(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
+        pub(super) fn expr_or_fallback(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
             let mut lhs = self.expr_or(allow_struct_lit)?;
             loop {
                 match &self.peek().kind {
@@ -111,7 +116,7 @@ impl<'a> Parser<'a> {
         /// `a < b == c` both stay the pre-existing "comparisons can't be chained"
         /// error (E0003). A mixed-direction relational chain (`a < b > c`) is
         /// E0333, naming the direction break.
-        pub(super) fn expr_cmp(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
+        pub(in crate::Parser) fn expr_cmp(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
             let lhs = self.expr_bitor(allow_struct_lit)?;
             let op = match &self.peek().kind {
                 TokKind::EqEq => Some(BinOp::Eq),
@@ -224,7 +229,7 @@ impl<'a> Parser<'a> {
             )
         }
     
-        fn expr_bitor(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
+        pub(super) fn expr_bitor(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
             let mut lhs = self.expr_bitxor(allow_struct_lit)?;
             // D-MATCHARM1: arm-head term mode — stop before top-level `|` so the
             // arm-head parser can collect `|`-separated value alternates itself.
