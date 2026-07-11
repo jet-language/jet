@@ -233,7 +233,15 @@ fn parse_cfg_expr(tokens: &[Token], cursor: &mut usize) -> Truth {
     let name = name.as_str();
     *cursor += 1;
     if name == "test" {
-        return Truth::No;
+        return if *cursor == tokens.len()
+            || tokens
+                .get(*cursor)
+                .is_some_and(|token| punct(token, ',') || punct(token, ')'))
+        {
+            Truth::No
+        } else {
+            Truth::Maybe
+        };
     }
     if !matches!(name, "all" | "any" | "not")
         || !tokens.get(*cursor).is_some_and(|t| punct(t, '('))
@@ -487,13 +495,20 @@ fn definitely_test() { value.expect("test"); }
 
 #[cfg(test = "custom")]
 fn key_value_is_not_builtin_test_cfg() { value.expect("production"); }
+
+#[cfg(any(test = "custom", test))]
+fn nested_key_value_is_not_builtin_test_cfg() { value.unwrap(); }
 "#;
     let findings = scan_source("fixture.rs", source);
-    assert_eq!(findings.len(), 2);
+    assert_eq!(findings.len(), 3);
     assert_eq!(findings[0].item, "fn maybe_production");
     assert_eq!(
         findings[1].item,
         "fn key_value_is_not_builtin_test_cfg"
+    );
+    assert_eq!(
+        findings[2].item,
+        "fn nested_key_value_is_not_builtin_test_cfg"
     );
 }
 
