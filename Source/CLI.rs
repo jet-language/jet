@@ -46,52 +46,81 @@ pub struct CommandGroup {
 }
 
 /// One canonical nested spelling and the real legacy dispatcher seam it reaches.
-/// `keep_group` is true only when the existing handler consumes the group word
+/// `HandlerKey::Store` keeps the group because that handler consumes the group word
 /// itself (`store verify`, `store rollback`, and `store generations`).
 pub struct NestedCommandSpec {
     pub name: &'static str,
     pub summary: &'static str,
-    pub handler: &'static str,
-    pub keep_group: bool,
+    pub handler: HandlerKey,
+}
+
+/// Closed set of real dispatcher seams reachable from nested commands.
+/// Adding a handler requires updating this exhaustive mapping and its route test.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HandlerKey {
+    Publish, Yank, Keygen, Key, Vendor,
+    Graph, Query, ExplainBuild, Impact, Dossier, Semindex, Expand, Schema, Codemod, Audit, Sbom, Bind,
+    Store, Gc, Fetch, Lock,
+    Toolchain, Upgrade, Doctor, Completions, Man, Devtools, Lsp,
+}
+
+impl HandlerKey {
+    pub const fn dispatch_word(self) -> &'static str {
+        match self {
+            Self::Publish => "publish", Self::Yank => "yank", Self::Keygen => "keygen",
+            Self::Key => "key", Self::Vendor => "vendor", Self::Graph => "graph",
+            Self::Query => "query", Self::ExplainBuild => "explain-build", Self::Impact => "impact",
+            Self::Dossier => "dossier", Self::Semindex => "semindex", Self::Expand => "expand",
+            Self::Schema => "schema", Self::Codemod => "codemod", Self::Audit => "audit",
+            Self::Sbom => "sbom", Self::Bind => "bind", Self::Store => "store", Self::Gc => "gc",
+            Self::Fetch => "fetch", Self::Lock => "lock", Self::Toolchain => "toolchain",
+            Self::Upgrade => "upgrade", Self::Doctor => "doctor", Self::Completions => "completions",
+            Self::Man => "man", Self::Devtools => "devtools", Self::Lsp => "lsp",
+        }
+    }
+
+    pub const fn keeps_group(self) -> bool {
+        matches!(self, Self::Store)
+    }
 }
 
 const REGISTRY_ACTIONS: &[NestedCommandSpec] = &[
-    NestedCommandSpec { name: "publish", summary: "publish the current package to the registry", handler: "publish", keep_group: false },
-    NestedCommandSpec { name: "yank", summary: "mark a published version as yanked", handler: "yank", keep_group: false },
-    NestedCommandSpec { name: "keygen", summary: "create the key that signs published packages", handler: "keygen", keep_group: false },
-    NestedCommandSpec { name: "key", summary: "manage the package signing key", handler: "key", keep_group: false },
-    NestedCommandSpec { name: "vendor", summary: "copy all dependencies into vendor/", handler: "vendor", keep_group: false },
+    NestedCommandSpec { name: "publish", summary: "publish the current package to the registry", handler: HandlerKey::Publish },
+    NestedCommandSpec { name: "yank", summary: "mark a published version as yanked", handler: HandlerKey::Yank },
+    NestedCommandSpec { name: "keygen", summary: "create the key that signs published packages", handler: HandlerKey::Keygen },
+    NestedCommandSpec { name: "key", summary: "manage the package signing key", handler: HandlerKey::Key },
+    NestedCommandSpec { name: "vendor", summary: "copy all dependencies into vendor/", handler: HandlerKey::Vendor },
 ];
 const INSPECT_ACTIONS: &[NestedCommandSpec] = &[
-    NestedCommandSpec { name: "graph", summary: "print the typed programmable-build graph", handler: "graph", keep_group: false },
-    NestedCommandSpec { name: "query", summary: "query typed semantic and build facts", handler: "query", keep_group: false },
-    NestedCommandSpec { name: "explain-build", summary: "explain one build target, action, or file", handler: "explain-build", keep_group: false },
-    NestedCommandSpec { name: "impact", summary: "report a symbol's blast radius", handler: "impact", keep_group: false },
-    NestedCommandSpec { name: "dossier", summary: "explain a file or symbol through semantic facts", handler: "dossier", keep_group: false },
-    NestedCommandSpec { name: "semindex", summary: "query the stable semantic index", handler: "semindex", keep_group: false },
-    NestedCommandSpec { name: "expand", summary: "print sema facts for one or every lens", handler: "expand", keep_group: false },
-    NestedCommandSpec { name: "schema", summary: "inspect or re-baseline published schema snapshots", handler: "schema", keep_group: false },
-    NestedCommandSpec { name: "codemod", summary: "run replayable semantic codemods", handler: "codemod", keep_group: false },
-    NestedCommandSpec { name: "audit", summary: "check dependencies against the advisory database", handler: "audit", keep_group: false },
-    NestedCommandSpec { name: "sbom", summary: "emit a software bill of materials", handler: "sbom", keep_group: false },
-    NestedCommandSpec { name: "bind", summary: "generate a C binding cache from a header", handler: "bind", keep_group: false },
+    NestedCommandSpec { name: "graph", summary: "print the typed programmable-build graph", handler: HandlerKey::Graph },
+    NestedCommandSpec { name: "query", summary: "query typed semantic and build facts", handler: HandlerKey::Query },
+    NestedCommandSpec { name: "explain-build", summary: "explain one build target, action, or file", handler: HandlerKey::ExplainBuild },
+    NestedCommandSpec { name: "impact", summary: "report a symbol's blast radius", handler: HandlerKey::Impact },
+    NestedCommandSpec { name: "dossier", summary: "explain a file or symbol through semantic facts", handler: HandlerKey::Dossier },
+    NestedCommandSpec { name: "semindex", summary: "query the stable semantic index", handler: HandlerKey::Semindex },
+    NestedCommandSpec { name: "expand", summary: "print sema facts for one or every lens", handler: HandlerKey::Expand },
+    NestedCommandSpec { name: "schema", summary: "inspect or re-baseline published schema snapshots", handler: HandlerKey::Schema },
+    NestedCommandSpec { name: "codemod", summary: "run replayable semantic codemods", handler: HandlerKey::Codemod },
+    NestedCommandSpec { name: "audit", summary: "check dependencies against the advisory database", handler: HandlerKey::Audit },
+    NestedCommandSpec { name: "sbom", summary: "emit a software bill of materials", handler: HandlerKey::Sbom },
+    NestedCommandSpec { name: "bind", summary: "generate a C binding cache from a header", handler: HandlerKey::Bind },
 ];
 const STORE_ACTIONS: &[NestedCommandSpec] = &[
-    NestedCommandSpec { name: "verify", summary: "verify store objects and references", handler: "store", keep_group: true },
-    NestedCommandSpec { name: "rollback", summary: "roll back a store generation", handler: "store", keep_group: true },
-    NestedCommandSpec { name: "generations", summary: "list store generations", handler: "store", keep_group: true },
-    NestedCommandSpec { name: "gc", summary: "remove unreferenced store entries", handler: "gc", keep_group: false },
-    NestedCommandSpec { name: "fetch", summary: "download and link all dependencies", handler: "fetch", keep_group: false },
-    NestedCommandSpec { name: "lock", summary: "lock a script's inline dependencies", handler: "lock", keep_group: false },
+    NestedCommandSpec { name: "verify", summary: "verify store objects and references", handler: HandlerKey::Store },
+    NestedCommandSpec { name: "rollback", summary: "roll back a store generation", handler: HandlerKey::Store },
+    NestedCommandSpec { name: "generations", summary: "list store generations", handler: HandlerKey::Store },
+    NestedCommandSpec { name: "gc", summary: "remove unreferenced store entries", handler: HandlerKey::Gc },
+    NestedCommandSpec { name: "fetch", summary: "download and link all dependencies", handler: HandlerKey::Fetch },
+    NestedCommandSpec { name: "lock", summary: "lock a script's inline dependencies", handler: HandlerKey::Lock },
 ];
 const SELF_ACTIONS: &[NestedCommandSpec] = &[
-    NestedCommandSpec { name: "toolchain", summary: "show the project's pinned Jet toolchain", handler: "toolchain", keep_group: false },
-    NestedCommandSpec { name: "upgrade", summary: "show how to download a newer release", handler: "upgrade", keep_group: false },
-    NestedCommandSpec { name: "doctor", summary: "diagnose the toolchain and offer fixes", handler: "doctor", keep_group: false },
-    NestedCommandSpec { name: "completions", summary: "print shell completions", handler: "completions", keep_group: false },
-    NestedCommandSpec { name: "man", summary: "print the Jet manual page", handler: "man", keep_group: false },
-    NestedCommandSpec { name: "devtools", summary: "run checked developer generators", handler: "devtools", keep_group: false },
-    NestedCommandSpec { name: "lsp", summary: "run the language server", handler: "lsp", keep_group: false },
+    NestedCommandSpec { name: "toolchain", summary: "show the project's pinned Jet toolchain", handler: HandlerKey::Toolchain },
+    NestedCommandSpec { name: "upgrade", summary: "show how to download a newer release", handler: HandlerKey::Upgrade },
+    NestedCommandSpec { name: "doctor", summary: "diagnose the toolchain and offer fixes", handler: HandlerKey::Doctor },
+    NestedCommandSpec { name: "completions", summary: "print shell completions", handler: HandlerKey::Completions },
+    NestedCommandSpec { name: "man", summary: "print the Jet manual page", handler: HandlerKey::Man },
+    NestedCommandSpec { name: "devtools", summary: "run checked developer generators", handler: HandlerKey::Devtools },
+    NestedCommandSpec { name: "lsp", summary: "run the language server", handler: HandlerKey::Lsp },
 ];
 
 pub const COMMAND_GROUPS: &[CommandGroup] = &[
@@ -876,13 +905,37 @@ mod tests {
 
     #[test]
     fn every_nested_action_routes_to_a_real_dispatch_seam() {
+        use HandlerKey::*;
+        let expected = [
+            ("registry", "publish", Publish, false), ("registry", "yank", Yank, false),
+            ("registry", "keygen", Keygen, false), ("registry", "key", Key, false),
+            ("registry", "vendor", Vendor, false), ("inspect", "graph", Graph, false),
+            ("inspect", "query", Query, false), ("inspect", "explain-build", ExplainBuild, false),
+            ("inspect", "impact", Impact, false), ("inspect", "dossier", Dossier, false),
+            ("inspect", "semindex", Semindex, false), ("inspect", "expand", Expand, false),
+            ("inspect", "schema", Schema, false), ("inspect", "codemod", Codemod, false),
+            ("inspect", "audit", Audit, false), ("inspect", "sbom", Sbom, false),
+            ("inspect", "bind", Bind, false), ("store", "verify", Store, true),
+            ("store", "rollback", Store, true), ("store", "generations", Store, true),
+            ("store", "gc", Gc, false), ("store", "fetch", Fetch, false),
+            ("store", "lock", Lock, false), ("self", "toolchain", Toolchain, false),
+            ("self", "upgrade", Upgrade, false), ("self", "doctor", Doctor, false),
+            ("self", "completions", Completions, false), ("self", "man", Man, false),
+            ("self", "devtools", Devtools, false), ("self", "lsp", Lsp, false),
+        ];
+        assert_eq!(COMMAND_GROUPS.iter().map(|g| g.actions.len()).sum::<usize>(), expected.len());
+        for (group_name, action_name, handler, keeps_group) in expected {
+            let (_, action) = nested_command(group_name, action_name).unwrap_or_else(|| panic!("missing {group_name} {action_name}"));
+            assert_eq!(action.handler, handler, "wrong handler for {group_name} {action_name}");
+            assert_eq!(action.handler.keeps_group(), keeps_group, "wrong argv policy for {group_name} {action_name}");
+        }
         for group in COMMAND_GROUPS {
             for action in group.actions {
                 assert!(!action.summary.trim().is_empty(), "missing summary for {} {}", group.name, action.name);
-                assert!(is_builtin(action.handler), "{} {} routes to missing handler {}", group.name, action.name, action.handler);
+                assert!(is_builtin(action.handler.dispatch_word()), "{} {} routes to missing handler {}", group.name, action.name, action.handler.dispatch_word());
                 assert_eq!(nested_command(group.name, action.name).map(|(_, a)| a.handler), Some(action.handler));
-                if action.keep_group {
-                    assert_eq!(action.handler, group.name, "kept group must own its dispatcher");
+                if action.handler.keeps_group() {
+                    assert_eq!(action.handler.dispatch_word(), group.name, "kept group must own its dispatcher");
                 }
             }
         }

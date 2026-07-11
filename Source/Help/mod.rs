@@ -196,13 +196,13 @@ pub fn build_index() -> Vec<Entry> {
         for action in group.actions {
             entries.push(Entry {
                 cmd: format!("{} {}", group.name, action.name),
-                category: category_for(action.handler),
+                category: category_for(action.handler.dispatch_word()),
                 usage: format!("jet {} {} [args]", group.name, action.name),
                 summary: action.summary,
-                flags: flags_for(action.handler),
+                flags: flags_for(action.handler.dispatch_word()),
                 example: None,
                 see_also: Vec::new(),
-                keywords: keywords_for(action.handler),
+                keywords: keywords_for(action.handler.dispatch_word()),
             });
         }
     }

@@ -1251,7 +1251,7 @@ command/flag is within edit distance 2. Their golden transcripts live in
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E2101 | `{cmd}` isn't a jet command. | Every jet run starts with a canonical command path. Commands moved by D-CLI-SURFACE1/D-CLI-SURFACE2 reject their old bare spelling; they are never aliases. | For a moved command: `Use jet {group} {cmd}. The old jet {cmd} spelling is no longer accepted.` Otherwise: `Did you mean jet {closest}? Run jet help to see them all.` JSON uses the same `code`, `message`, `why`, and `fix` fields. |
+| E2101 | Unknown or retired CLI route. Moved bare form: `` `{cmd}` moved under `jet {group}` ``. Invalid nested form: `` `{action}` isn't a jet {group} command ``. | Moved bare form: `infrequent commands live in a named area so daily Jet commands stay easy to scan`. Invalid nested form: `jet {group} accepts only commands in its named area`. | Moved bare form: ``run `jet {group} {cmd} {args}` ``. Invalid nested form: ``run `jet {group} help` ``. Human output renders these as Error/Why/Fix lines; JSON uses these exact message, why, and fix strings with control characters, quotes, and backslashes escaped. |
 | E2102 | `{flag}` isn't a flag jet understands. | jet ignores no flags silently, so a typo can't quietly change a build. | Did you mean `{closest}`? Run `jet help` to see the flags. |
 
 ### `jet self doctor` advisories

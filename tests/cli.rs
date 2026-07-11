@@ -199,6 +199,29 @@ fn invalid_nested_action_is_e2101_and_json_escaped() {
 }
 
 #[test]
+fn grouped_e2101_human_and_json_goldens() {
+    let moved = Command::new(jet()).args(["publish", "sentinel"]).output().unwrap();
+    assert_eq!(moved.status.code(), Some(2));
+    assert!(moved.stdout.is_empty());
+    check_snapshot("moved_bare_e2101_human.txt", &String::from_utf8_lossy(&moved.stderr));
+
+    let moved_json = Command::new(jet()).args(["publish", "sentinel\\\"quoted", "--json"]).output().unwrap();
+    assert_eq!(moved_json.status.code(), Some(2));
+    assert!(moved_json.stderr.is_empty());
+    check_snapshot("moved_bare_e2101_json.txt", &String::from_utf8_lossy(&moved_json.stdout));
+
+    let invalid = Command::new(jet()).args(["inspect", "bad\\\"action"]).output().unwrap();
+    assert_eq!(invalid.status.code(), Some(2));
+    assert!(invalid.stdout.is_empty());
+    check_snapshot("invalid_nested_e2101_human.txt", &String::from_utf8_lossy(&invalid.stderr));
+
+    let invalid_json = Command::new(jet()).args(["inspect", "bad\\\"action", "--json"]).output().unwrap();
+    assert_eq!(invalid_json.status.code(), Some(2));
+    assert!(invalid_json.stderr.is_empty());
+    check_snapshot("invalid_nested_e2101_json.txt", &String::from_utf8_lossy(&invalid_json.stdout));
+}
+
+#[test]
 fn group_help_and_man_inventory_every_nested_description() {
     let man = Command::new(jet()).args(["self", "man"]).output().unwrap();
     assert_eq!(man.status.code(), Some(0));

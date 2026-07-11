@@ -4,7 +4,7 @@
  * beyond the `c: c@system` dep in pkg.jet's `deps:` block.
  *
  * Only prototypes inside the bindable subset (scalars, `char*` -> String,
- * `void`) appear here; that is exactly what `jet bind` emits the cache below
+ * `void`) appear here; that is exactly what `jet inspect bind` emits the cache below
  * from. This header is the human-readable source of truth for that cache.
  */
 

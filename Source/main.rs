@@ -612,8 +612,8 @@ fn normalize_frequency_ring_argv(raw: &mut Vec<String>) {
         }
     }
     if let Some((_, action)) = jet::CLI::nested_command(&group, &sub) {
-        if !action.keep_group {
-            raw[0] = action.handler.to_string();
+        if !action.handler.keeps_group() {
+            raw[0] = action.handler.dispatch_word().to_string();
             raw.remove(1);
         }
     }

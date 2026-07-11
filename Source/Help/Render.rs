@@ -518,7 +518,7 @@ mod tests {
         let order = categorized_order(&index);
         assert_eq!(order.len(), index.len());
         for e in &index {
-            assert!(order.contains(&e.cmd));
+            assert!(order.contains(&e.cmd.as_str()));
         }
     }
 
