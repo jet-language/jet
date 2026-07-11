@@ -478,3 +478,326 @@ fn jet_new_creates_project() {
     assert!(dir.join(".gitignore").exists());
     let _ = fs::remove_dir_all(&dir);
 }
+
+// D-TESTKIT1=A (c308 pass 2): directory recursion, filter/shuffle/serial, and
+// `jet fuzz` (corpus persistence, minimization, deterministic seeded PRNG).
+
+#[test]
+fn jet_test_dir_recurses_into_subdirectories() {
+    // Gap #2: `jet test <dir>` used to read only the immediate directory
+    // (Source/CmdCompile.rs:711-721); it must now walk subdirectories too.
+    let jet = jet_bin();
+    let have_rustc = have_rustc();
+    if !have_rustc || !jet.exists() {
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_test_recurse_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(dir.join("nested/deeper")).unwrap();
+    fs::write(
+        dir.join("a.jet"),
+        "#Test(\"top level\") { require(true) }\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("nested/b.jet"),
+        "#Test(\"one level down\") { require(true) }\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("nested/deeper/c.jet"),
+        "#Test(\"two levels down\") { require(true) }\n",
+    )
+    .unwrap();
+    let out = Command::new(&jet).arg("test").arg(&dir).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "recursive test dir run failed:\nstdout: {}\nstderr: {}",
+        stdout,
+        String::from_utf8_lossy(&out.stderr)
+    );
+    for needle in ["top level: pass", "one level down: pass", "two levels down: pass"] {
+        assert!(stdout.contains(needle), "missing `{}`:\n{}", needle, stdout);
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn jet_test_filter_keeps_only_matching_names() {
+    // Gap #4: `--filter=<substr>` keeps only tests whose name contains it.
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let jet = jet_bin();
+    let have_rustc = have_rustc();
+    if !have_rustc || !jet.exists() {
+        return;
+    }
+    let example = root.join("examples/features/tooling/tests.jet");
+    let out = Command::new(&jet)
+        .arg("test")
+        .arg("--filter=consistent")
+        .arg(&example)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "filtered run failed:\n{}", stdout);
+    assert!(
+        stdout.contains("double is consistent: pass"),
+        "missing the matching test:\n{}",
+        stdout
+    );
+    assert!(
+        !stdout.contains("twice the input"),
+        "filter should have excluded the non-matching test:\n{}",
+        stdout
+    );
+    assert!(
+        stdout.contains("1 passed, 0 failed"),
+        "summary should count only the filtered-in test:\n{}",
+        stdout
+    );
+}
+
+#[test]
+fn jet_test_shuffle_prints_the_seed_used() {
+    // Gap #4: `--shuffle=<seed>` reorders deterministically and always prints
+    // the seed, so a shuffle-dependent failure is reproducible.
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let jet = jet_bin();
+    let have_rustc = have_rustc();
+    if !have_rustc || !jet.exists() {
+        return;
+    }
+    let example = root.join("examples/features/tooling/tests.jet");
+    let out = Command::new(&jet)
+        .arg("test")
+        .arg("--shuffle=42")
+        .arg(&example)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "shuffled run failed:\n{}", stdout);
+    assert!(
+        stdout.contains("shuffle: seed=42"),
+        "expected the seed line:\n{}",
+        stdout
+    );
+    assert!(
+        stdout.contains("2 passed, 0 failed"),
+        "shuffling must not change which tests ran:\n{}",
+        stdout
+    );
+}
+
+#[test]
+fn jet_test_serial_flag_still_passes() {
+    // Gap #3: `--serial` opts out of the parallel default; behavior is
+    // otherwise identical for a passing file.
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let jet = jet_bin();
+    let have_rustc = have_rustc();
+    if !have_rustc || !jet.exists() {
+        return;
+    }
+    let example = root.join("examples/features/tooling/property_tests.jet");
+    let out = Command::new(&jet)
+        .arg("test")
+        .arg("--serial")
+        .arg(&example)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "serial run failed:\n{}", stdout);
+    assert!(
+        stdout.contains("3 passed, 0 failed"),
+        "serial run should behave like the parallel default:\n{}",
+        stdout
+    );
+}
+
+fn fuzz_corpus_dir(label: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_fuzz_corpus_{}_{}",
+        label,
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    dir
+}
+
+#[test]
+fn jet_fuzz_ambiguous_target_names_candidates() {
+    // Gap #1, target selection: a file with more than one property test must
+    // name one — this is CLI argument validation, not a compiler diagnostic
+    // (same tier as `jet bench`'s "can't find the file").
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let jet = jet_bin();
+    let have_rustc = have_rustc();
+    if !have_rustc || !jet.exists() {
+        return;
+    }
+    let example = root.join("examples/features/tooling/property_tests.jet");
+    let out = Command::new(&jet)
+        .arg("fuzz")
+        .arg(&example)
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "ambiguous target must fail");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("multiple property tests") && stderr.contains("jet fuzz <file> <name>"),
+        "expected the ambiguous-target message:\n{}",
+        stderr
+    );
+}
+
+#[test]
+fn jet_fuzz_no_property_test_errors() {
+    // Gap #1, target selection: a file with only unit tests has nothing to fuzz.
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let jet = jet_bin();
+    let have_rustc = have_rustc();
+    if !have_rustc || !jet.exists() {
+        return;
+    }
+    let example = root.join("examples/features/tooling/tests.jet");
+    let out = Command::new(&jet)
+        .arg("fuzz")
+        .arg(&example)
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "no property test must fail");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("no property `#Test fn`"),
+        "expected the no-property-test message:\n{}",
+        stderr
+    );
+}
+
+#[test]
+fn jet_fuzz_deterministic_same_seed_same_corpus() {
+    // Gap #1: a fixed `--seed` makes a run fully reproducible — same corpus
+    // saved, same failing iteration, same minimized input.
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let jet = jet_bin();
+    let have_rustc = have_rustc();
+    if !have_rustc || !jet.exists() {
+        return;
+    }
+    let fixture = root.join("tests/fixtures/prop_shrink.jet");
+
+    let corpus_a = fuzz_corpus_dir("det_a");
+    let out_a = Command::new(&jet)
+        .arg("fuzz")
+        .arg(&fixture)
+        .arg("--seed=7")
+        .arg(format!("--corpus={}", corpus_a.display()))
+        .output()
+        .unwrap();
+
+    let corpus_b = fuzz_corpus_dir("det_b");
+    let out_b = Command::new(&jet)
+        .arg("fuzz")
+        .arg(&fixture)
+        .arg("--seed=7")
+        .arg(format!("--corpus={}", corpus_b.display()))
+        .output()
+        .unwrap();
+
+    assert!(!out_a.status.success(), "the fixture's property always fails");
+    assert_eq!(
+        out_a.status.code(),
+        out_b.status.code(),
+        "same seed must reproduce the same exit code"
+    );
+    // Compare everything except the `saved:` line, which legitimately differs
+    // (the two runs use different `--corpus` directories).
+    let strip_saved = |s: &str| -> String {
+        s.lines()
+            .filter(|l| !l.trim_start().starts_with("saved:"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    assert_eq!(
+        strip_saved(&String::from_utf8_lossy(&out_a.stdout)),
+        strip_saved(&String::from_utf8_lossy(&out_b.stdout)),
+        "same seed must reproduce the same stdout (minimized input, iteration count)"
+    );
+    let stdout_a = String::from_utf8_lossy(&out_a.stdout);
+    assert!(
+        stdout_a.contains("minimized input: n = 50"),
+        "expected the shrunk boundary value:\n{}",
+        stdout_a
+    );
+
+    // Corpus entries for the same seed are identical (same failing seed saved).
+    let entries_a: Vec<String> = fs::read_dir(&corpus_a)
+        .map(|rd| {
+            rd.filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
+                .collect()
+        })
+        .unwrap_or_default();
+    let entries_b: Vec<String> = fs::read_dir(&corpus_b)
+        .map(|rd| {
+            rd.filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
+                .collect()
+        })
+        .unwrap_or_default();
+    assert_eq!(entries_a.len(), 1, "expected exactly one saved corpus entry");
+    assert_eq!(
+        entries_a, entries_b,
+        "same seed must save the same corpus file name"
+    );
+
+    let _ = fs::remove_dir_all(&corpus_a);
+    let _ = fs::remove_dir_all(&corpus_b);
+}
+
+#[test]
+fn jet_fuzz_replays_corpus_before_generating_fresh_cases() {
+    // Gap #1: a saved failing seed is replayed first on the next run, and a
+    // still-reproducing corpus entry is reported (and fails the run) before
+    // any fresh case is generated.
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let jet = jet_bin();
+    let have_rustc = have_rustc();
+    if !have_rustc || !jet.exists() {
+        return;
+    }
+    let fixture = root.join("tests/fixtures/prop_shrink.jet");
+    let corpus = fuzz_corpus_dir("replay");
+
+    let first = Command::new(&jet)
+        .arg("fuzz")
+        .arg(&fixture)
+        .arg("--seed=7")
+        .arg(format!("--corpus={}", corpus.display()))
+        .output()
+        .unwrap();
+    assert!(!first.status.success());
+    assert!(
+        fs::read_dir(&corpus)
+            .map(|rd| rd.count() == 1)
+            .unwrap_or(false),
+        "expected one saved corpus entry after the first run"
+    );
+
+    // A second run (different generation seed) must hit the replay path first.
+    let second = Command::new(&jet)
+        .arg("fuzz")
+        .arg(&fixture)
+        .arg("--seed=999")
+        .arg(format!("--corpus={}", corpus.display()))
+        .output()
+        .unwrap();
+    assert!(!second.status.success());
+    let stdout = String::from_utf8_lossy(&second.stdout);
+    assert!(
+        stdout.contains("corpus replay"),
+        "expected the second run to fail on corpus replay, not a fresh case:\n{}",
+        stdout
+    );
+
+    let _ = fs::remove_dir_all(&corpus);
+}

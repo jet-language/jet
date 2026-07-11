@@ -31,8 +31,8 @@ mod EngineDispatch;
 
 use CmdCodemod::run_codemod;
 use CmdCompile::{
-    run_build_query, run_compile_cmd, run_debug_native, run_dev_entry, run_fix, run_fmt, run_new,
-    run_test, run_test_cov,
+    run_build_query, run_compile_cmd, run_debug_native, run_dev_entry, run_fix, run_fmt,
+    run_fuzz, run_new, run_test, run_test_opts, FuzzRunOpts, TestRunOpts,
 };
 use CmdDevTools::{
     run_bench, run_bind, run_completions, run_dev, run_devtools, run_doctor, run_emit_rust,
@@ -339,8 +339,12 @@ usage:
   {bin} run   <file.{ext}>          build, then run (or `jet run` inside a project)
   {bin} run   <file.{ext}> a b      extra words become program arguments
   {bin} run   <file.{ext}> -- ...   everything after `--` is forwarded to the program (D-CLI1)
-  {bin} test  <file|dir>            compile and run top-level test blocks
+  {bin} test  <file|dir>            compile and run top-level test blocks (recurses into subdirs)
   {bin} test  <file|dir>  -- ...    `--` forwards to the test runner
+  {bin} test  <file> --filter=foo   only run tests whose name contains `foo`
+  {bin} test  <file> --shuffle      run tests in a random (printed) order
+  {bin} test  <file> --serial       run one test at a time (default: parallel)
+  {bin} fuzz  <file> [<test-name>]  fuzz a parameterized `#Test fn` (D-TEST1 property test)
   {bin} new   <name>                create a new project folder with pkg.jet
   {bin} new   <name> --annotated    same, with commented example deps
   {bin} env                         enter the project dev shell (delegates to `jetpack enter`)
@@ -425,6 +429,13 @@ flags:
   --verbose, -v                with build: print the bridge steps
   --json                       emit machine-readable diagnostics
   --color=auto|always|never    control color (auto: only on a terminal)
+  --filter=<substr>            with test: only run tests whose name contains it
+  --shuffle, --shuffle=<seed>  with test: run tests in random (or given-seed) order
+  --serial                     with test: one test at a time (default: parallel)
+  --iterations=<n>             with fuzz: case budget (default 1000)
+  --time=<seconds>             with fuzz: wall-clock budget
+  --seed=<n>                   with fuzz: base PRNG seed (default: fixed, reproducible)
+  --corpus=<dir>               with fuzz: corpus directory (default: .jet/fuzz/<file>[/<test>])
 ",
         bin = jet::Syntax::BINARY_NAME,
         lang = jet::Syntax::LANG_NAME,
@@ -1494,9 +1505,69 @@ fn main() {
             // D-COV1: `jet test --coverage` builds an instrumented harness and
             // reports per-function / per-line coverage after the test results.
             let coverage = jet_argv.iter().any(|a| a == "--coverage");
-            // A directory target is a project root: resolve its entry.
-            let resolved = resolve_source_path(target);
-            run_test_cov(&resolved, update_snapshots, coverage, mode);
+            // D-TESTKIT1=A gap #4: `--filter=<substr>` keeps only test names
+            // containing it (harness-side, `JET_TEST_FILTER`).
+            let filter = jet_argv
+                .iter()
+                .find_map(|a| a.strip_prefix("--filter=").map(str::to_string));
+            // `--shuffle` (random seed, printed so the run is reproducible after
+            // the fact) or `--shuffle=<seed>` (reproduce a specific order).
+            let shuffle = jet_argv
+                .iter()
+                .find_map(|a| a.strip_prefix("--shuffle=").map(str::to_string));
+            let shuffle_bare = jet_argv.iter().any(|a| a == "--shuffle");
+            let shuffle_seed: Option<u64> = if let Some(s) = shuffle {
+                match s.parse::<u64>() {
+                    Ok(n) => Some(n),
+                    Err(_) => {
+                        eprintln!("error: `--shuffle={}` isn't a number", s);
+                        eprintln!(" fix: use `--shuffle=<seed>` (e.g. `--shuffle=42`), or bare `--shuffle` for a random seed");
+                        exit(ExitCodes::USAGE);
+                    }
+                }
+            } else if shuffle_bare {
+                // No seed given: derive one from the clock so each run differs,
+                // but the harness always prints the seed it used, so a failure
+                // is reproducible with `--shuffle=<printed seed>`.
+                Some(
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_nanos() as u64)
+                        .unwrap_or(0),
+                )
+            } else {
+                None
+            };
+            // D-TESTKIT1=A gap #3: parallel by default, `--serial` forces one
+            // test at a time (matches `--update-snapshots`/`-u`'s existing style
+            // of a plain boolean flag).
+            let serial = jet_argv.iter().any(|a| a == "--serial");
+            // A directory target is a project root ONLY when it has a
+            // `pkg.jet` manifest — resolve to that project's single entry
+            // file, same as before (D-CLI1's existing project convenience).
+            // A plain directory of loose `.jet` files (no manifest) is a
+            // test folder instead: pass it straight through so
+            // `run_test_opts` walks it — recursively, D-TESTKIT1=A gap #2 —
+            // rather than erroring "no main.jet entry".
+            let target_path = Path::new(target);
+            let is_project_dir =
+                target_path.is_dir() && target_path.join(jet::Syntax::PAYLOAD_FILE).is_file();
+            let resolved = if target_path.is_dir() && !is_project_dir {
+                target.to_string()
+            } else {
+                resolve_source_path(target)
+            };
+            run_test_opts(
+                &resolved,
+                TestRunOpts {
+                    update_snapshots,
+                    coverage,
+                    filter,
+                    shuffle_seed,
+                    serial,
+                },
+                mode,
+            );
         }
         "add" => run_add(&raw),
         "remove" => run_remove(target),
@@ -1522,6 +1593,40 @@ fn main() {
         // D-TOOL5 (E2-M11): `jet bench` — benchmark a Jet program.
         "bench" => {
             run_bench(target, mode);
+        }
+        // D-TESTKIT1=A (c308 pass 2): `jet fuzz <file> [<test-name>]` — fuzz a
+        // parameterized `#Test fn` (D-TEST1's property-test form).
+        "fuzz" => {
+            let test_name = args.get(2).map(|s| s.as_str());
+            let iterations = jet_argv
+                .iter()
+                .find_map(|a| a.strip_prefix("--iterations="))
+                .and_then(|v| v.parse::<u64>().ok());
+            let time_budget_ms = jet_argv
+                .iter()
+                .find_map(|a| a.strip_prefix("--time="))
+                .and_then(|v| v.parse::<f64>().ok())
+                .map(|secs| (secs * 1000.0) as u64);
+            let seed = jet_argv
+                .iter()
+                .find_map(|a| a.strip_prefix("--seed="))
+                .and_then(|v| v.parse::<u64>().ok());
+            let corpus = jet_argv
+                .iter()
+                .find_map(|a| a.strip_prefix("--corpus="))
+                .map(str::to_string);
+            let resolved = resolve_source_path(target);
+            run_fuzz(
+                &resolved,
+                test_name,
+                FuzzRunOpts {
+                    iterations,
+                    time_budget_ms,
+                    seed,
+                    corpus,
+                },
+                mode,
+            );
         }
         // D-A11YGATE1=B (c134 Phase 6): `jet lint --a11y` — opt-in accessibility
         // lints (E2930/E2931), never blocking `jet build`/`jet run`.

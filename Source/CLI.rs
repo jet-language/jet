@@ -327,6 +327,11 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
     },
     CommandSpec {
+        name: "fuzz",
+        summary: "fuzz a property `#Test fn` — corpus, minimization, seeded PRNG",
+        headline: false,
+    },
+    CommandSpec {
         name: "completions",
         summary: "print shell completions (bash | zsh | fish)",
         headline: false,
@@ -423,6 +428,16 @@ pub const FLAGS: &[FlagSpec] = &[
     // D-A11YGATE1=B (c134 Phase 6): accessibility is an opt-in lint category.
     FlagSpec { long: "--a11y", help: "with lint: check accessibility — missing roles, unlabeled controls (D-A11YGATE1)" },
     FlagSpec { long: "--scope", help: "with trust grant: grant scope, user or repo (D-JPK-GRANTCMD1)" },
+    // D-TESTKIT1=A (c308 pass 2): filter/shuffle/serial for `jet test`.
+    FlagSpec { long: "--filter", help: "with test: only run tests whose name contains --filter=<substr>" },
+    FlagSpec { long: "--shuffle", help: "with test: run tests in random (or --shuffle=<seed>) order" },
+    FlagSpec { long: "--serial", help: "with test: run tests one at a time instead of the parallel default" },
+    // D-TESTKIT1=A: `jet fuzz` (its own bespoke flags below are validated by
+    // `owns_flag_vocabulary`; these two are listed for completions/the man page).
+    FlagSpec { long: "--iterations", help: "with fuzz: case budget --iterations=<n> (default 1000)" },
+    FlagSpec { long: "--time", help: "with fuzz: wall-clock budget in seconds --time=<n>" },
+    FlagSpec { long: "--seed", help: "with fuzz: base PRNG seed --seed=<n> (default: fixed, reproducible)" },
+    FlagSpec { long: "--corpus", help: "with fuzz: corpus directory --corpus=<dir> (default: .jet/fuzz/<test>)" },
 ];
 
 /// Is `name` a built-in command?

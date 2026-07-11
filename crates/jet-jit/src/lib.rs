@@ -12,6 +12,7 @@
 
 mod Collections;
 mod Concurrency;
+mod Numeric;
 
 use jet_codegen::scheduler::{
     JetSchedulerChannel, JetSchedulerJoin, JetSchedulerSender, JetTaskControl,

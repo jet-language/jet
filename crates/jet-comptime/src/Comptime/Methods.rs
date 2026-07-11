@@ -1025,6 +1025,23 @@ impl<'a> Interp<'a> {
         // Check *before* evaluating the receiver so unknown aliases don't fail.
         if let Expr::Ident(alias, _) = receiver {
             if let Some(module) = self.core_imports.get(alias.as_str()).cloned() {
+                // D-DET1: `random.shuffle(&xs)` edits its list in place (E0202 requires
+                // write access) — the one `core.random` call that mutates a caller
+                // binding rather than returning a value, so it needs `write_back`
+                // (the same mechanism `.sort`/`.push` use) instead of the generic
+                // by-value `apply_core_call` dispatch below.
+                if matches!((module.as_str(), method), ("core.random", "shuffle")) {
+                    let Some(arg) = args.first() else {
+                        return Err(unsupported("random.shuffle(): missing arg 0", span));
+                    };
+                    let list = self.eval(&arg.expr, scope)?;
+                    let CtValue::List(mut items) = list else {
+                        return Err(unsupported("random.shuffle needs a list", span));
+                    };
+                    with_ambient_rng(|st| shuffle_ct_list(st, &mut items));
+                    self.write_back(&arg.expr, CtValue::List(items), scope)?;
+                    return Ok(CtValue::Unit);
+                }
                 let mut argv = Vec::with_capacity(args.len());
                 for a in args {
                     argv.push(self.eval(&a.expr, scope)?);
@@ -1549,6 +1566,55 @@ fn base64_decode(s: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
+const BASE32_CHARS: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+
+fn base32_encode(bytes: &[u8]) -> String {
+    let mut out = String::new();
+    let mut buffer: u32 = 0;
+    let mut bits = 0u8;
+    for &b in bytes {
+        buffer = (buffer << 8) | b as u32;
+        bits += 8;
+        while bits >= 5 {
+            let idx = ((buffer >> (bits - 5)) & 31) as usize;
+            out.push(BASE32_CHARS[idx] as char);
+            bits -= 5;
+        }
+    }
+    if bits > 0 {
+        let idx = ((buffer << (5 - bits)) & 31) as usize;
+        out.push(BASE32_CHARS[idx] as char);
+    }
+    while out.len() % 8 != 0 {
+        out.push('=');
+    }
+    out
+}
+
+fn base32_val(b: u8) -> Result<u8, String> {
+    match b {
+        b'A'..=b'Z' => Ok(b - b'A'),
+        b'a'..=b'z' => Ok(b - b'a'),
+        b'2'..=b'7' => Ok(b - b'2' + 26),
+        _ => Err(format!("invalid base32 character: {:?}", b as char)),
+    }
+}
+
+fn base32_decode(text: &str) -> Result<Vec<u8>, String> {
+    let mut out = Vec::new();
+    let mut buffer: u32 = 0;
+    let mut bits = 0u8;
+    for b in text.bytes().filter(|b| !b.is_ascii_whitespace() && *b != b'=') {
+        buffer = (buffer << 5) | base32_val(b)? as u32;
+        bits += 5;
+        if bits >= 8 {
+            out.push(((buffer >> (bits - 8)) & 0xff) as u8);
+            bits -= 8;
+        }
+    }
+    Ok(out)
+}
+
 /// Core modules the REPL interpreter cannot run (native FFI / threads / HTTP stack).
 fn repl_native_only_module(module: &str) -> Option<&'static str> {
     match module {
@@ -1621,6 +1687,223 @@ pub(super) fn random_int(state: &mut u64, low: i64, high: i64) -> i64 {
 
 pub(super) fn random_float(state: &mut u64) -> f64 {
     (splitmix64(state) as f64) / (u64::MAX as f64)
+}
+
+/// D-DET1 widened ambient draws. Mirrors AOT's `jet_std_random_*` (Process.rs)
+/// byte-for-byte — same `jet_rng_next`-equivalent `splitmix64` stream, same
+/// formulas — so an ambient `core.random.*` call at comptime and the same
+/// call at AOT runtime draw the identical sequence from the identical seed
+/// (R12 parity).
+fn random_float_open(state: &mut u64) -> f64 {
+    let x = random_float(state);
+    if x <= 0.0 {
+        f64::MIN_POSITIVE
+    } else {
+        x
+    }
+}
+
+fn random_float_range(state: &mut u64, low: f64, high: f64) -> f64 {
+    if !(high > low) {
+        return low;
+    }
+    low + (high - low) * random_float(state)
+}
+
+fn random_bool_p(state: &mut u64, p: f64) -> bool {
+    if p <= 0.0 || p.is_nan() {
+        false
+    } else if p >= 1.0 {
+        true
+    } else {
+        random_float(state) < p
+    }
+}
+
+fn random_normal(state: &mut u64, mean: f64, stddev: f64) -> f64 {
+    let u1 = random_float_open(state);
+    let u2 = random_float(state);
+    let z0 = (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos();
+    mean + z0 * stddev.max(0.0)
+}
+
+fn random_exponential(state: &mut u64, lambda: f64) -> f64 {
+    if lambda <= 0.0 || lambda.is_nan() {
+        return 0.0;
+    }
+    -random_float_open(state).ln() / lambda
+}
+
+fn random_bytes(state: &mut u64, n: i64) -> Vec<u8> {
+    let n = n.max(0) as usize;
+    let mut out = Vec::with_capacity(n);
+    for _ in 0..n {
+        out.push(splitmix64(state) as u8);
+    }
+    out
+}
+
+fn random_pick_ct(state: &mut u64, xs: &[CtValue]) -> Option<CtValue> {
+    if xs.is_empty() {
+        None
+    } else {
+        Some(xs[random_int(state, 0, xs.len() as i64 - 1) as usize].clone())
+    }
+}
+
+fn random_weighted_pick_ct(
+    state: &mut u64,
+    xs: &[CtValue],
+    weights: &[f64],
+) -> Option<CtValue> {
+    if xs.is_empty() || xs.len() != weights.len() {
+        return None;
+    }
+    let mut total = 0.0;
+    for &w in weights {
+        if w.is_finite() && w > 0.0 {
+            total += w;
+        }
+    }
+    if total <= 0.0 {
+        return None;
+    }
+    let mut needle = random_float_range(state, 0.0, total);
+    for (item, &weight) in xs.iter().zip(weights.iter()) {
+        let w = if weight.is_finite() && weight > 0.0 { weight } else { 0.0 };
+        if needle < w {
+            return Some(item.clone());
+        }
+        needle -= w;
+    }
+    xs.last().cloned()
+}
+
+fn random_sample_ct(state: &mut u64, xs: &[CtValue], k: i64) -> Vec<CtValue> {
+    let want = (k.max(0) as usize).min(xs.len());
+    let mut pool = xs.to_vec();
+    for i in 0..want {
+        let j = random_int(state, i as i64, pool.len() as i64 - 1) as usize;
+        pool.swap(i, j);
+    }
+    pool.truncate(want);
+    pool
+}
+
+fn shuffle_ct_list(state: &mut u64, xs: &mut [CtValue]) {
+    let len = xs.len();
+    for i in (1..len).rev() {
+        let j = random_int(state, 0, i as i64) as usize;
+        xs.swap(i, j);
+    }
+}
+
+// ── core.fmt: pure text formatting, mirrors AOT's `jet_fmt_*` (DataFmt.rs)
+// byte-for-byte (comma grouping, byte-size units, duration parts, ordinal
+// suffix, pad fill) so a comptime call prints identically to the same call
+// at AOT runtime (R12 parity). ────────────────────────────────────────────
+
+fn comma_int_ct(value: i64) -> String {
+    let raw = value.unsigned_abs().to_string();
+    let mut out = String::new();
+    for (i, ch) in raw.chars().rev().enumerate() {
+        if i > 0 && i % 3 == 0 {
+            out.push(',');
+        }
+        out.push(ch);
+    }
+    let mut text: String = out.chars().rev().collect();
+    if value < 0 {
+        text.insert(0, '-');
+    }
+    text
+}
+
+fn comma_decimal_ct(raw: String) -> String {
+    let (sign, rest) = raw.strip_prefix('-').map_or(("", raw.as_str()), |s| ("-", s));
+    let mut split = rest.splitn(2, '.');
+    let whole = split.next().unwrap_or("0");
+    let frac = split.next();
+    let whole_value = whole.parse::<i64>().unwrap_or(0);
+    let whole_text = comma_int_ct(whole_value);
+    match frac {
+        Some(frac) => format!("{}{}.{}", sign, whole_text, frac),
+        None => format!("{}{}", sign, whole_text),
+    }
+}
+
+fn fmt_decimal_ct(value: f64, precision: i64) -> String {
+    let precision = precision.clamp(0, 9) as usize;
+    comma_decimal_ct(format!("{:.*}", precision, value))
+}
+
+fn fmt_bytes_ct(value: i64) -> String {
+    let sign = if value < 0 { "-" } else { "" };
+    let mut size = (value as f64).abs();
+    let units = ["B", "KB", "MB", "GB", "TB", "PB", "EB"];
+    let mut unit = 0usize;
+    while size >= 1000.0 && unit + 1 < units.len() {
+        size /= 1000.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{}{} {}", sign, size as i64, units[unit])
+    } else if size >= 10.0 {
+        format!("{}{} {}", sign, size.round() as i64, units[unit])
+    } else {
+        let shown = format!("{:.1}", size);
+        format!("{}{} {}", sign, shown.trim_end_matches(".0"), units[unit])
+    }
+}
+
+fn fmt_duration_ct(ms: i64) -> String {
+    let sign = if ms < 0 { "-" } else { "" };
+    let mut rest = ms.abs();
+    if rest < 1000 {
+        return format!("{}{}ms", sign, rest);
+    }
+    let days = rest / 86_400_000;
+    rest %= 86_400_000;
+    let hours = rest / 3_600_000;
+    rest %= 3_600_000;
+    let minutes = rest / 60_000;
+    rest %= 60_000;
+    let seconds = rest / 1000;
+    let mut parts = Vec::new();
+    if days > 0 {
+        parts.push(format!("{}d", days));
+    }
+    if hours > 0 {
+        parts.push(format!("{}h", hours));
+    }
+    if minutes > 0 {
+        parts.push(format!("{}m", minutes));
+    }
+    if seconds > 0 || parts.is_empty() {
+        parts.push(format!("{}s", seconds));
+    }
+    format!(
+        "{}{}",
+        sign,
+        parts.into_iter().take(3).collect::<Vec<_>>().join(" ")
+    )
+}
+
+fn pad_need_ct(text: &str, width: i64) -> usize {
+    let width = width.max(0) as usize;
+    width.saturating_sub(text.chars().count())
+}
+
+fn pad_fill_ct(fill: &str, len: usize) -> String {
+    if len == 0 {
+        return String::new();
+    }
+    let fill = if fill.is_empty() { " " } else { fill };
+    let mut out = String::new();
+    while out.chars().count() < len {
+        out.push_str(fill);
+    }
+    out.chars().take(len).collect()
 }
 
 thread_local! {
@@ -2112,6 +2395,196 @@ fn apply_core_call(
                 fields: vec![("state".to_string(), CtValue::Int(seed as i64))],
             })
         }
+        ("core.random", "split") => {
+            let seed = match one(0)? {
+                CtValue::Int(n) => *n as u64,
+                _ => return Err(unsupported("random.split expects an Int seed", span)),
+            };
+            let mixed = with_ambient_rng(|st| seed ^ splitmix64(st).rotate_left(17));
+            Ok(CtValue::Struct {
+                type_name: crate::Syntax::RNG_TYPE.to_string(),
+                fields: vec![("state".to_string(), CtValue::Int(mixed as i64))],
+            })
+        }
+        ("core.random", "float_range") => {
+            let low = as_float(one(0)?, span)?;
+            let high = as_float(one(1)?, span)?;
+            Ok(CtValue::Float(with_ambient_rng(|st| {
+                random_float_range(st, low, high)
+            })))
+        }
+        ("core.random", "bool") => {
+            let p = as_float(one(0)?, span)?;
+            Ok(CtValue::Bool(with_ambient_rng(|st| random_bool_p(st, p))))
+        }
+        ("core.random", "normal") => {
+            let mean = as_float(one(0)?, span)?;
+            let stddev = as_float(one(1)?, span)?;
+            Ok(CtValue::Float(with_ambient_rng(|st| {
+                random_normal(st, mean, stddev)
+            })))
+        }
+        ("core.random", "exponential") => {
+            let lambda = as_float(one(0)?, span)?;
+            Ok(CtValue::Float(with_ambient_rng(|st| {
+                random_exponential(st, lambda)
+            })))
+        }
+        ("core.random", "bytes") => {
+            let n = match one(0)? {
+                CtValue::Int(n) => *n,
+                _ => return Err(unsupported("random.bytes expects an Int count", span)),
+            };
+            Ok(CtValue::Bytes(with_ambient_rng(|st| random_bytes(st, n))))
+        }
+        ("core.random", "pick") => {
+            let CtValue::List(xs) = one(0)? else {
+                return Err(unsupported("random.pick needs a list", span));
+            };
+            Ok(match with_ambient_rng(|st| random_pick_ct(st, xs)) {
+                Some(v) => CtValue::Some(Box::new(v)),
+                None => CtValue::None(Type::Int),
+            })
+        }
+        ("core.random", "weighted_pick") => {
+            let CtValue::List(xs) = one(0)? else {
+                return Err(unsupported("random.weighted_pick needs a list", span));
+            };
+            let CtValue::List(ws) = one(1)? else {
+                return Err(unsupported(
+                    "random.weighted_pick needs a [Float] weights list",
+                    span,
+                ));
+            };
+            let weights: Vec<f64> = ws
+                .iter()
+                .map(|w| as_float(w, span))
+                .collect::<Result<_, _>>()?;
+            Ok(
+                match with_ambient_rng(|st| random_weighted_pick_ct(st, xs, &weights)) {
+                    Some(v) => CtValue::Some(Box::new(v)),
+                    None => CtValue::None(Type::Int),
+                },
+            )
+        }
+        ("core.random", "sample") => {
+            let CtValue::List(xs) = one(0)? else {
+                return Err(unsupported("random.sample needs a list", span));
+            };
+            let k = match one(1)? {
+                CtValue::Int(n) => *n,
+                _ => return Err(unsupported("random.sample count must be Int", span)),
+            };
+            Ok(CtValue::List(with_ambient_rng(|st| {
+                random_sample_ct(st, xs, k)
+            })))
+        }
+        // --- core.fmt (pure text formatting; mirrors AOT's `jet_fmt_*`, DataFmt.rs) ---
+        ("core.fmt", "number") => {
+            let n = match one(0)? {
+                CtValue::Int(n) => *n,
+                _ => return Err(unsupported("fmt.number expects an Int", span)),
+            };
+            Ok(CtValue::Str(comma_int_ct(n)))
+        }
+        ("core.fmt", "decimal") => {
+            let value = as_float(one(0)?, span)?;
+            let precision = match one(1)? {
+                CtValue::Int(n) => *n,
+                _ => return Err(unsupported("fmt.decimal precision must be Int", span)),
+            };
+            Ok(CtValue::Str(fmt_decimal_ct(value, precision)))
+        }
+        ("core.fmt", "percent") => {
+            let value = as_float(one(0)?, span)?;
+            let precision = match one(1)? {
+                CtValue::Int(n) => *n,
+                _ => return Err(unsupported("fmt.percent precision must be Int", span)),
+            };
+            Ok(CtValue::Str(format!(
+                "{}%",
+                fmt_decimal_ct(value * 100.0, precision)
+            )))
+        }
+        ("core.fmt", "bytes") => {
+            let n = match one(0)? {
+                CtValue::Int(n) => *n,
+                _ => return Err(unsupported("fmt.bytes expects an Int", span)),
+            };
+            Ok(CtValue::Str(fmt_bytes_ct(n)))
+        }
+        ("core.fmt", "duration") => {
+            let ms = match one(0)? {
+                CtValue::Int(n) => *n,
+                _ => return Err(unsupported("fmt.duration expects an Int (ms)", span)),
+            };
+            Ok(CtValue::Str(fmt_duration_ct(ms)))
+        }
+        ("core.fmt", "ordinal") => {
+            let n = match one(0)? {
+                CtValue::Int(n) => *n,
+                _ => return Err(unsupported("fmt.ordinal expects an Int", span)),
+            };
+            let abs = n.abs();
+            let suffix = if (11..=13).contains(&(abs % 100)) {
+                "th"
+            } else {
+                match abs % 10 {
+                    1 => "st",
+                    2 => "nd",
+                    3 => "rd",
+                    _ => "th",
+                }
+            };
+            Ok(CtValue::Str(format!("{}{}", comma_int_ct(n), suffix)))
+        }
+        ("core.fmt", "plural") => {
+            let count = match one(0)? {
+                CtValue::Int(n) => *n,
+                _ => return Err(unsupported("fmt.plural count must be Int", span)),
+            };
+            let singular = as_string(one(1)?, span)?;
+            let plural = as_string(one(2)?, span)?;
+            let word = if count.abs() == 1 { singular } else { plural };
+            Ok(CtValue::Str(format!("{} {}", comma_int_ct(count), word)))
+        }
+        ("core.fmt", "pad_left") => {
+            let text = as_string(one(0)?, span)?;
+            let width = match one(1)? {
+                CtValue::Int(n) => *n,
+                _ => return Err(unsupported("fmt.pad_left width must be Int", span)),
+            };
+            let fill = as_string(one(2)?, span)?;
+            let need = pad_need_ct(text, width);
+            Ok(CtValue::Str(format!("{}{}", pad_fill_ct(fill, need), text)))
+        }
+        ("core.fmt", "pad_right") => {
+            let text = as_string(one(0)?, span)?;
+            let width = match one(1)? {
+                CtValue::Int(n) => *n,
+                _ => return Err(unsupported("fmt.pad_right width must be Int", span)),
+            };
+            let fill = as_string(one(2)?, span)?;
+            let need = pad_need_ct(text, width);
+            Ok(CtValue::Str(format!("{}{}", text, pad_fill_ct(fill, need))))
+        }
+        ("core.fmt", "pad_center") => {
+            let text = as_string(one(0)?, span)?;
+            let width = match one(1)? {
+                CtValue::Int(n) => *n,
+                _ => return Err(unsupported("fmt.pad_center width must be Int", span)),
+            };
+            let fill = as_string(one(2)?, span)?;
+            let need = pad_need_ct(text, width);
+            let left = need / 2;
+            let right = need - left;
+            Ok(CtValue::Str(format!(
+                "{}{}{}",
+                pad_fill_ct(fill, left),
+                text,
+                pad_fill_ct(fill, right)
+            )))
+        }
         // --- D-ANY-JAI1: core.reflect (the runtime reflection floor, pure).
         // `"__Reflect"`/`"__ReflectField"` are internal-only tags (like
         // `"TypeInfo"`/`"Match"`/`"IoError"` elsewhere in this file) — never a
@@ -2147,6 +2620,45 @@ fn apply_core_call(
                     "`{}` isn't valid base64",
                     s
                 )))),
+            })
+        }
+        // --- core.encoding.base64 URL-safe variant (pure; mirrors AOT's
+        // `jet_std_b64url_*`, EncodingCodecs.rs — the same alphabet with
+        // `+`/`/` swapped for `-`/`_` and no padding) ---
+        ("core.encoding.base64", "encode_url") => {
+            let bytes = as_bytes(one(0)?, span)?;
+            Ok(CtValue::Str(
+                base64_encode(bytes)
+                    .trim_end_matches('=')
+                    .replace('+', "-")
+                    .replace('/', "_"),
+            ))
+        }
+        ("core.encoding.base64", "decode_url") => {
+            let s = as_string(one(0)?, span)?;
+            let mut padded = s.trim().replace('-', "+").replace('_', "/");
+            while padded.len() % 4 != 0 {
+                padded.push('=');
+            }
+            Ok(match base64_decode(&padded) {
+                Some(bytes) => CtValue::ResOk(Box::new(CtValue::Bytes(bytes))),
+                None => CtValue::ResErr(Box::new(CtValue::Str(format!(
+                    "`{}` isn't valid base64url",
+                    s
+                )))),
+            })
+        }
+        // --- core.encoding.base32 (pure; mirrors AOT's `jet_std_base32_*`,
+        // EncodingCodecs.rs, byte-for-byte — same alphabet, same bit-packing) ---
+        ("core.encoding.base32", "encode") => {
+            let bytes = as_bytes(one(0)?, span)?;
+            Ok(CtValue::Str(base32_encode(&bytes)))
+        }
+        ("core.encoding.base32", "decode") => {
+            let s = as_string(one(0)?, span)?;
+            Ok(match base32_decode(s) {
+                Ok(bytes) => CtValue::ResOk(Box::new(CtValue::Bytes(bytes))),
+                Err(e) => CtValue::ResErr(Box::new(CtValue::Str(e))),
             })
         }
         // --- core.text.unicode (std-only Unicode scalar helpers, pure) ---

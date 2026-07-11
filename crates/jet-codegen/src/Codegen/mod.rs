@@ -69,6 +69,47 @@ impl JetExpect {
         }
     }
 }
+// D-TESTKIT1=A (parallel isolation gap): a test body's `print(...)` is routed
+// here instead of straight to `println!` in test-harness builds (see the
+// `TExprKind::Print` emit site). Buffered per-thread so parallel tests never
+// interleave their own output; `jet_test_take_output` drains it right before
+// the harness prints that test's `name: pass/FAIL` line.
+thread_local! {
+    static JET_TEST_OUT: std::cell::RefCell<String> = std::cell::RefCell::new(String::new());
+}
+fn jet_test_print(s: String) {
+    JET_TEST_OUT.with(|buf| {
+        let mut b = buf.borrow_mut();
+        b.push_str(&s);
+        b.push('\n');
+    });
+}
+fn jet_test_take_output() -> String {
+    JET_TEST_OUT.with(|buf| buf.borrow_mut().split_off(0))
+}
+/// Deterministic splitmix64 step, used by `jet test --shuffle` to reorder tests.
+/// Independent of `JetRng`/`PROP_PRELUDE` (that runtime is only emitted when the
+/// file has a property test) so shuffling never depends on the file's contents.
+fn jet_test_shuffle_next(state: &mut u64) -> u64 {
+    *state = state.wrapping_add(0x9E3779B97F4A7C15);
+    let mut z = *state;
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
+    z ^ (z >> 31)
+}
+/// Fisher-Yates shuffle over test indices, seeded so a run is reproducible with
+/// `--shuffle=<seed>` (or the seed jet printed, when no seed was given).
+fn jet_test_shuffle_order(len: usize, seed: u64) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..len).collect();
+    let mut state = seed;
+    let mut i = len;
+    while i > 1 {
+        i -= 1;
+        let j = (jet_test_shuffle_next(&mut state) % (i as u64 + 1)) as usize;
+        order.swap(i, j);
+    }
+    order
+}
 "#;
 /// D-TEST1 (ratified 2026-06-22, option B): property-test runtime. Emitted into
 /// the `jet test` harness only when the file declares a parameterized `#Test fn`.
@@ -1009,38 +1050,84 @@ fn emit_test_main(tests: &[&TestDef], out: &mut String) {
     emit_test_main_cov(tests, out, false)
 }
 
+/// D-TESTKIT1=A (gaps #3/#4): filter, shuffle, and parallel-with-isolation. The
+/// harness builds a `slots` list of `(name, skip, run fn ptr)` in source order,
+/// then:
+///   - `JET_TEST_FILTER=<substr>` (CLI `--filter`) keeps only matching names;
+///   - `JET_TEST_SHUFFLE_SEED=<n>` (CLI `--shuffle[=seed]`) reorders `slots`
+///     with a seeded Fisher-Yates shuffle before running (order-dependence
+///     detection — a real bug still fails the same way, just in a different
+///     sequence);
+///   - runs are parallel by default (one thread per test; `jet_testing_temp_dir`
+///     folds in the thread id for isolation, and test-body `print()` is routed
+///     to a per-thread buffer flushed right before that test's result line —
+///     see `jet_test_print`/`TExprKind::Print`), or serial with `JET_TEST_SERIAL`
+///     set (CLI `--serial`).
+/// Reporting always walks results in (possibly shuffled) `slots` order, so
+/// output is deterministic regardless of which thread finishes first.
 fn emit_test_main_cov(tests: &[&TestDef], out: &mut String, coverage: bool) {
+    out.push_str("#[derive(Clone, Copy)]\n");
+    out.push_str("struct JetTestSlot { name: &'static str, skip: bool, run: fn() -> Result<(), String> }\n");
     out.push_str("fn main() {\n");
+    out.push_str("    let mut slots: Vec<JetTestSlot> = vec![\n");
+    for (i, test) in tests.iter().enumerate() {
+        let name = escape_rust_str(&test.name);
+        let skip = whole_test_skip(test);
+        out.push_str(&format!(
+            "        JetTestSlot {{ name: {}, skip: {}, run: jet_test_{} }},\n",
+            name, skip, i
+        ));
+    }
+    out.push_str("    ];\n");
+    // Filter (D-TESTKIT1 gap #4): `--filter=<substr>` keeps names containing it.
+    out.push_str("    if let Ok(filter) = std::env::var(\"JET_TEST_FILTER\") {\n");
+    out.push_str("        slots.retain(|s| s.name.contains(filter.as_str()));\n");
+    out.push_str("    }\n");
+    // Shuffle (gap #4): `--shuffle[=seed]` reorders before running; the seed is
+    // always printed so a shuffled run's order is reproducible.
+    out.push_str("    if let Ok(seed_str) = std::env::var(\"JET_TEST_SHUFFLE_SEED\") {\n");
+    out.push_str("        if let Ok(seed) = seed_str.parse::<u64>() {\n");
+    out.push_str("            println!(\"shuffle: seed={}\", seed);\n");
+    out.push_str("            let order = jet_test_shuffle_order(slots.len(), seed);\n");
+    out.push_str("            slots = order.into_iter().map(|i| slots[i]).collect();\n");
+    out.push_str("        }\n");
+    out.push_str("    }\n");
+    // Run (gap #3): parallel by default (one thread per test, own temp-dir/output
+    // isolation), serial with `--serial` (`JET_TEST_SERIAL`) or when there is at
+    // most one test (no isolation benefit, and keeps single-test runs allocation-
+    // free of the thread machinery).
+    out.push_str("    let serial = std::env::var(\"JET_TEST_SERIAL\").is_ok();\n");
+    out.push_str("    let results: Vec<(String, bool, Option<Result<(), String>>, String)> = if serial || slots.len() <= 1 {\n");
+    out.push_str("        slots.iter().map(|s| {\n");
+    out.push_str("            let res = if s.skip { None } else { Some((s.run)()) };\n");
+    out.push_str("            let output = jet_test_take_output();\n");
+    out.push_str("            (s.name.to_string(), s.skip, res, output)\n");
+    out.push_str("        }).collect()\n");
+    out.push_str("    } else {\n");
+    out.push_str("        let handles: Vec<_> = slots.iter().map(|s| {\n");
+    out.push_str("            let name = s.name.to_string();\n");
+    out.push_str("            let skip = s.skip;\n");
+    out.push_str("            let run = s.run;\n");
+    out.push_str("            std::thread::spawn(move || {\n");
+    out.push_str("                let res = if skip { None } else { Some(run()) };\n");
+    out.push_str("                let output = jet_test_take_output();\n");
+    out.push_str("                (name, skip, res, output)\n");
+    out.push_str("            })\n");
+    out.push_str("        }).collect();\n");
+    out.push_str("        handles.into_iter().map(|h| h.join().unwrap_or_else(|_| (\"<thread panicked>\".to_string(), false, Some(Err(\"test thread panicked\".to_string())), String::new()))).collect()\n");
+    out.push_str("    };\n");
     out.push_str("    let mut passed = 0usize;\n");
     out.push_str("    let mut failed = 0usize;\n");
     out.push_str("    let mut skipped = 0usize;\n");
-    for (i, test) in tests.iter().enumerate() {
-        let name = escape_rust_str(&test.name);
-        // D-DOTSCOPE1: a `.skip` first statement skips the WHOLE test — it never
-        // runs, reports `name: skip`, and counts as skipped (not passed/failed).
-        if whole_test_skip(test) {
-            out.push_str(&format!("    println!(\"{{}}: skip\", {});\n", name));
-            out.push_str("    skipped += 1;\n");
-            continue;
-        }
-        out.push_str(&format!("    match jet_test_{}() {{\n", i));
-        out.push_str("        Ok(()) => {\n");
-        out.push_str(&format!(
-            "            println!(\"{{}}: pass\", {});\n",
-            name
-        ));
-        out.push_str("            passed += 1;\n");
-        out.push_str("        }\n");
-        out.push_str("        Err(msg) => {\n");
-        out.push_str(&format!(
-            "            println!(\"{{}}: FAIL\", {});\n",
-            name
-        ));
-        out.push_str("            eprintln!(\"  {}\", msg);\n");
-        out.push_str("            failed += 1;\n");
-        out.push_str("        }\n");
-        out.push_str("    }\n");
-    }
+    out.push_str("    for (name, skip, res, output) in results {\n");
+    out.push_str("        if !output.is_empty() { print!(\"{}\", output); }\n");
+    out.push_str("        match (skip, res) {\n");
+    out.push_str("            (true, _) => { println!(\"{}: skip\", name); skipped += 1; }\n");
+    out.push_str("            (false, Some(Ok(()))) => { println!(\"{}: pass\", name); passed += 1; }\n");
+    out.push_str("            (false, Some(Err(msg))) => { println!(\"{}: FAIL\", name); eprintln!(\"  {}\", msg); failed += 1; }\n");
+    out.push_str("            (false, None) => unreachable!(),\n");
+    out.push_str("        }\n");
+    out.push_str("    }\n");
     // D-DOTSCOPE1: keep the classic `N passed, M failed` summary unless a test was
     // skipped, so existing goldens are unchanged when nothing skips.
     out.push_str("    if skipped > 0 {\n");
@@ -1446,6 +1533,304 @@ pub fn emit_bundle_tests_cov(
     strip_unused_os_signal_prelude(strip_unused_raylib_prelude(strip_unused_term_prelude(strip_unused_gc_prelude(
         strip_unused_txn_prelude(strip_unused_mem_prelude(out)),
     ))))
+}
+
+/// D-TESTKIT1=A (c308 pass 2, gap #1): pick which property `#Test fn` a `jet
+/// fuzz` run targets. `test_name` is the CLI's optional second positional
+/// (`jet fuzz <file> [<name>]`).
+///   - named: must exist and must be a property test (have params) — else a
+///     plain-English `Err` naming the problem (CLI-level selection error, not
+///     a compiler diagnostic, same tier as `run_bench`'s missing-file message).
+///   - unnamed: exactly one property test in the file is picked automatically;
+///     zero or more-than-one is an `Err` (the latter lists the candidates).
+fn select_fuzz_target<'a>(
+    tests: &[&'a TestDef],
+    test_name: Option<&str>,
+) -> Result<usize, String> {
+    if let Some(name) = test_name {
+        match tests.iter().position(|t| t.name == name) {
+            Some(i) if !tests[i].params.is_empty() => Ok(i),
+            Some(_) => Err(format!(
+                "`{}` is a unit `#Test`, not a property test — `jet fuzz` needs a parameterized `#Test fn` (D-TEST1)",
+                name
+            )),
+            None => Err(format!("no `#Test` named `{}` in this file", name)),
+        }
+    } else {
+        let candidates: Vec<usize> = tests
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| !t.params.is_empty())
+            .map(|(i, _)| i)
+            .collect();
+        match candidates.len() {
+            0 => Err(
+                "no property `#Test fn` (D-TEST1) found to fuzz — `jet fuzz` needs one \
+                 parameterized `#Test fn(...)`, not a unit `#Test(\"name\") { ... }`"
+                    .to_string(),
+            ),
+            1 => Ok(candidates[0]),
+            _ => {
+                let names: Vec<&str> = candidates.iter().map(|&i| tests[i].name.as_str()).collect();
+                Err(format!(
+                    "multiple property tests in this file — say which one: {}\n  fix: `jet fuzz <file> <name>`, e.g. `jet fuzz <file> \"{}\"`",
+                    names.join(", "),
+                    names[0]
+                ))
+            }
+        }
+    }
+}
+
+/// D-TESTKIT1=A (c308 pass 2, gap #1): `jet fuzz <file> [<name>]` — reuses the
+/// whole `jet test` harness (same prelude, same `jet_test_fns` for every test,
+/// same `JetRng`/`JetGen`/shrink machinery from `PROP_PRELUDE`) but swaps the
+/// reporting `main` for a fuzz driver over exactly one property test:
+///   - replays the on-disk corpus first (each entry is a seed that reproduced
+///     a failure before — deterministic replay, not the raw decoded value, so
+///     no bespoke value serialization is needed, D-TEST1's `JetRng` already
+///     makes a seed a full, exact reproduction);
+///   - then generates fresh cases from a seeded, incrementing PRNG until the
+///     iteration or wall-clock budget runs out;
+///   - on the first failure, shrinks with the identical greedy algorithm the
+///     property-test driver uses, saves the (pre-shrink) seed to the corpus
+///     directory, and prints a `jet test`-shaped repro line.
+/// Returns `Err(message)` for a CLI-level target-selection problem (no/wrong/
+/// ambiguous test) rather than a compiler diagnostic — this is argument
+/// validation, not a semantic error in the user's program.
+pub fn emit_bundle_fuzz(
+    bundle: &ProgramBundle,
+    link: Option<&FfiLink>,
+    file_label: &str,
+    test_name: Option<&str>,
+) -> Result<String, String> {
+    let entry = &bundle.modules[bundle.entry];
+    let tests: Vec<&TestDef> = entry
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            Item::Test(t) => Some(t),
+            _ => None,
+        })
+        .collect();
+    if tests.is_empty() {
+        return Err(
+            "no `#Test` blocks in this file — `jet fuzz` needs a parameterized `#Test fn(...)`"
+                .to_string(),
+        );
+    }
+    let target = select_fuzz_target(&tests, test_name)?;
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        "// Generated by {} fuzz harness — do not edit.\n",
+        Syntax::BINARY_NAME
+    ));
+    out.push_str("#![allow(warnings)]\n\n");
+    if let Some(ffi) = link {
+        out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
+    }
+    out.push_str(PRELUDE);
+    out.push_str(MEM_PRELUDE);
+    out.push_str(GC_PRELUDE);
+    out.push_str(LAYOUT_PRELUDE);
+    out.push_str(TEST_PRELUDE);
+    // Fuzzing always targets a property test, so the JetRng/JetGen/shrink
+    // runtime is always needed (unlike `jet test`, which only emits it when a
+    // property test is present).
+    out.push_str(PROP_PRELUDE);
+    if !bundle.used_core.is_empty() {
+        push_corelib_prelude(&mut out);
+        out.push_str(scheduler_prelude_for_emit());
+        out.push_str(UI_PRELUDE);
+        if uses_gtk_backend(bundle) {
+            out.push_str(UI_GTK_PRELUDE);
+        }
+        out.push_str(DEVSERVER_PRELUDE);
+    }
+    out.push('\n');
+
+    let import_mods = import_mod_map(bundle, bundle.entry);
+    let extern_funcs = bundle_extern_funcs(bundle);
+
+    for (i, module) in bundle.modules.iter().enumerate() {
+        if i == bundle.entry {
+            continue;
+        }
+        let ns = module.alias.clone();
+        out.push_str(&format!("mod user_{ns} {{\n"));
+        out.push_str(MOD_USE);
+        let mut cx = build_cx_items(
+            &module.items,
+            &module.source,
+            &module.display,
+            link,
+            &extern_funcs,
+        );
+        cx.test_mode = true;
+        cx.import_mods = import_mod_map(bundle, i);
+        cx.foreign_types = foreign_type_map(bundle, i);
+        register_foreign_enum_variants(&mut cx, bundle, i);
+        update_cloneability_with_foreign_types(&mut cx, &module.items);
+        cx.reexport_calls = reexport_call_map(bundle, i);
+        cx.import_sigs = import_sig_map(bundle, i);
+        cx.import_rets = import_ret_map(bundle, i);
+        cx.core_imports = core_import_map(bundle, i);
+        cx.used_core = bundle.used_core.clone();
+        cx.root_prefix = "super::".to_string();
+        let (uinline, ufile) = unqualified_import_maps(bundle, i);
+        cx.unqualified_inline = uinline;
+        cx.unqualified_file = ufile;
+        emit_program_items(&cx, &module.items, &mut out, false);
+        out.push_str("}\n\n");
+    }
+
+    let mut cx = build_cx_items(
+        &entry.items,
+        &entry.source,
+        &entry.display,
+        link,
+        &extern_funcs,
+    );
+    cx.test_mode = true;
+    cx.import_mods = import_mods;
+    cx.foreign_types = foreign_type_map(bundle, bundle.entry);
+    register_foreign_enum_variants(&mut cx, bundle, bundle.entry);
+    update_cloneability_with_foreign_types(&mut cx, &entry.items);
+    cx.reexport_calls = reexport_call_map(bundle, bundle.entry);
+    cx.import_sigs = import_sig_map(bundle, bundle.entry);
+    cx.import_rets = import_ret_map(bundle, bundle.entry);
+    cx.core_imports = core_import_map(bundle, bundle.entry);
+    cx.used_core = bundle.used_core.clone();
+    let (uinline, ufile) = unqualified_import_maps(bundle, bundle.entry);
+    cx.unqualified_inline = uinline;
+    cx.unqualified_file = ufile;
+    emit_program_items(&cx, &entry.items, &mut out, false);
+
+    emit_test_fns(&cx, &tests, &mut out);
+    emit_fuzz_main(&cx, tests[target], target, file_label, &mut out);
+    Ok(strip_unused_os_signal_prelude(strip_unused_raylib_prelude(strip_unused_term_prelude(strip_unused_gc_prelude(
+        strip_unused_txn_prelude(strip_unused_mem_prelude(out)),
+    )))))
+}
+
+/// See `emit_bundle_fuzz`'s doc comment for the overall shape. `test` is the
+/// chosen property test, `idx` its position (`jet_prop_{idx}` is its body fn,
+/// already emitted by `emit_test_fns`).
+fn emit_fuzz_main(cx: &Cx, test: &TestDef, idx: usize, file_label: &str, out: &mut String) {
+    const SHRINK_STEPS: usize = 2000;
+    let n = test.params.len();
+    let types: Vec<String> = test.params.iter().map(|p| cx.rust_type(&p.ty)).collect();
+    let tuple_ty = format!("({},)", types.join(", "));
+    let call_args: Vec<String> = (0..n).map(|k| format!("input.{}.clone()", k)).collect();
+    let gen_components: Vec<String> = types
+        .iter()
+        .map(|t| format!("<{} as JetGen>::generate(rng)", t))
+        .collect();
+    let renders: Vec<String> = test
+        .params
+        .iter()
+        .enumerate()
+        .map(|(k, p)| format!("format!(\"{} = {{}}\", input.{}.render())", p.name, k))
+        .collect();
+    let name_lit = escape_rust_str(&test.name);
+    let file_lit = escape_rust_str(file_label);
+
+    out.push_str("fn main() {\n");
+    out.push_str("    let corpus_dir = std::env::var(\"JET_FUZZ_CORPUS\").unwrap_or_else(|_| \".jet-fuzz-corpus\".to_string());\n");
+    out.push_str("    let _ = std::fs::create_dir_all(&corpus_dir);\n");
+    out.push_str("    let iterations: u64 = std::env::var(\"JET_FUZZ_ITERATIONS\").ok().and_then(|s| s.parse().ok()).unwrap_or(1000);\n");
+    out.push_str("    let time_budget_ms: Option<u64> = std::env::var(\"JET_FUZZ_TIME_MS\").ok().and_then(|s| s.parse().ok());\n");
+    out.push_str("    let base_seed: u64 = std::env::var(\"JET_FUZZ_SEED\").ok().and_then(|s| s.parse().ok()).unwrap_or(0x5EED_1234_ABCD_0001u64);\n");
+    out.push_str(&format!("    let name = {};\n", name_lit));
+    out.push_str(&format!("    let file_label = {};\n", file_lit));
+    out.push_str(&format!(
+        "    let run = |input: &{}| -> Result<(), String> {{ jet_prop_{}({}) }};\n",
+        tuple_ty,
+        idx,
+        call_args.join(", ")
+    ));
+    out.push_str(&format!(
+        "    let gen_input = |rng: &mut JetRng| -> {} {{ ({},) }};\n",
+        tuple_ty,
+        gen_components.join(", ")
+    ));
+
+    // Corpus replay: each entry is the seed of a past failure. A seed alone is
+    // a full, exact reproduction (same PRNG, same first draw), so the corpus
+    // never needs to serialize the generated value itself.
+    out.push_str("    let mut corpus_seeds: Vec<u64> = Vec::new();\n");
+    out.push_str("    if let Ok(entries) = std::fs::read_dir(&corpus_dir) {\n");
+    out.push_str("        for e in entries.flatten() {\n");
+    out.push_str("            if let Ok(s) = std::fs::read_to_string(e.path()) {\n");
+    out.push_str("                if let Ok(seed) = s.trim().parse::<u64>() { corpus_seeds.push(seed); }\n");
+    out.push_str("            }\n");
+    out.push_str("        }\n");
+    out.push_str("    }\n");
+    out.push_str("    corpus_seeds.sort();\n");
+    out.push_str("    for seed in &corpus_seeds {\n");
+    out.push_str("        let mut rng = JetRng::new(*seed);\n");
+    out.push_str("        let input = gen_input(&mut rng);\n");
+    out.push_str("        if let Err(msg) = run(&input) {\n");
+    out.push_str("            println!(\"{}: FAIL (corpus replay, seed={})\", name, seed);\n");
+    out.push_str("            eprintln!(\"  {}\", msg);\n");
+    out.push_str(&format!("            let args = vec![{}];\n", renders.join(", ")));
+    out.push_str("            println!(\"  input: {}\", args.join(\", \"));\n");
+    out.push_str("            println!(\"repro: JET_PROP_SEED={} jet test {}\", seed, file_label);\n");
+    out.push_str("            std::process::exit(1);\n");
+    out.push_str("        }\n");
+    out.push_str("    }\n");
+    out.push_str("    println!(\"corpus: {} case(s) replayed clean\", corpus_seeds.len());\n");
+
+    out.push_str("    let start = std::time::Instant::now();\n");
+    out.push_str("    let mut driver_rng = JetRng::new(base_seed);\n");
+    out.push_str("    let mut n: u64 = 0;\n");
+    out.push_str("    loop {\n");
+    out.push_str("        if n >= iterations { break; }\n");
+    out.push_str("        if let Some(ms) = time_budget_ms { if start.elapsed().as_millis() as u64 >= ms { break; } }\n");
+    out.push_str("        let seed = driver_rng.next_u64();\n");
+    out.push_str("        let mut rng = JetRng::new(seed);\n");
+    out.push_str("        let mut input = gen_input(&mut rng);\n");
+    out.push_str("        n += 1;\n");
+    out.push_str("        if let Err(first_msg) = run(&input) {\n");
+    out.push_str("            let mut msg = first_msg;\n");
+    out.push_str("            let mut improved = true;\n");
+    out.push_str("            let mut steps = 0usize;\n");
+    out.push_str(&format!(
+        "            while improved && steps < {} {{\n",
+        SHRINK_STEPS
+    ));
+    out.push_str("                improved = false;\n");
+    for k in 0..n {
+        out.push_str(&format!(
+            "                for cand in input.{}.shrink() {{\n",
+            k
+        ));
+        out.push_str("                    steps += 1;\n");
+        out.push_str("                    let mut trial = input.clone();\n");
+        out.push_str(&format!("                    trial.{} = cand;\n", k));
+        out.push_str("                    if let Err(m) = run(&trial) {\n");
+        out.push_str(
+            "                        input = trial; msg = m; improved = true; break;\n",
+        );
+        out.push_str("                    }\n");
+        out.push_str("                }\n");
+    }
+    out.push_str("            }\n");
+    out.push_str(&format!("            let args = vec![{}];\n", renders.join(", ")));
+    out.push_str("            let file_name = format!(\"{}/seed_{}.txt\", corpus_dir, seed);\n");
+    out.push_str("            let _ = std::fs::write(&file_name, format!(\"{}\", seed));\n");
+    out.push_str("            println!(\"{}: FAIL (after {} iteration(s))\", name, n);\n");
+    out.push_str("            eprintln!(\"  {}\", msg);\n");
+    out.push_str("            println!(\"  minimized input: {}\", args.join(\", \"));\n");
+    out.push_str("            println!(\"  seed: {}\", seed);\n");
+    out.push_str("            println!(\"  saved: {}\", file_name);\n");
+    out.push_str("            println!(\"repro: JET_PROP_SEED={} jet test {}\", seed, file_label);\n");
+    out.push_str("            std::process::exit(1);\n");
+    out.push_str("        }\n");
+    out.push_str("    }\n");
+    out.push_str("    println!(\"{}: {} iteration(s), no failure found\", name, n);\n");
+    out.push_str("}\n");
 }
 
 /// D-BENCH1: emit a benchmark harness binary — every definition plus a `main`

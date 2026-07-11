@@ -38,10 +38,25 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // c109 Phase 24: a comptime const inlined verbatim (the pre-rendered value).
         TExprKind::ConstInline(val) => val.clone(),
         TExprKind::Print(arg) => {
-            format!(
-                "println!(\"{{}}\", ({}).jet_show())",
-                emit_tir_expr(arg, cx)
-            )
+            // Parallel `jet test` runs each test on its own thread (per-test
+            // isolation, D-TESTKIT1 gap #3); a bare `println!` from inside a test
+            // body would interleave with other threads' output and with the
+            // harness's own `name: pass/FAIL` lines. In test-harness builds route
+            // through the per-thread capture buffer (`jet_test_print`, TEST_PRELUDE)
+            // instead; the harness flushes it right before reporting the result, so
+            // a test's own output always lands directly above its status line, in
+            // slot order, exactly as it did when tests ran one at a time.
+            if cx.test_mode {
+                format!(
+                    "jet_test_print(({}).jet_show())",
+                    emit_tir_expr(arg, cx)
+                )
+            } else {
+                format!(
+                    "println!(\"{{}}\", ({}).jet_show())",
+                    emit_tir_expr(arg, cx)
+                )
+            }
         }
         // D-LIN1-DROP: `drop(x)` → Rust's safe `drop(x)`; the value moves in and
         // its `Drop` runs. No `unsafe` — the audit is sema-side (the `#Unsafe`

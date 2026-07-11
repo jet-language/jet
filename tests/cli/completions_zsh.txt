@@ -60,6 +60,7 @@ commands=(
         'emit:emit generated output (--rust\: print Rust source)'
         'eval:evaluate a pure Jet program to stable JSON (--pure required)'
         'bench:benchmark a Jet program with honest stats'
+        'fuzz:fuzz a property `#Test fn` — corpus, minimization, seeded PRNG'
         'completions:print shell completions (bash | zsh | fish)'
         'man:print the jet man page (roff)'
         'lsp:language server (stdio JSON-RPC)'
@@ -120,6 +121,13 @@ flags=(
         '--profile[with build/run\: named build profile --profile=<name> (D-BUILDPROFILE1)]'
         '--a11y[with lint\: check accessibility — missing roles, unlabeled controls (D-A11YGATE1)]'
         '--scope[with trust grant\: grant scope, user or repo (D-JPK-GRANTCMD1)]'
+        '--filter[with test\: only run tests whose name contains --filter=<substr>]'
+        '--shuffle[with test\: run tests in random (or --shuffle=<seed>) order]'
+        '--serial[with test\: run tests one at a time instead of the parallel default]'
+        '--iterations[with fuzz\: case budget --iterations=<n> (default 1000)]'
+        '--time[with fuzz\: wall-clock budget in seconds --time=<n>]'
+        '--seed[with fuzz\: base PRNG seed --seed=<n> (default\: fixed, reproducible)]'
+        '--corpus[with fuzz\: corpus directory --corpus=<dir> (default\: .jet/fuzz/<test>)]'
     )
 if (( CURRENT == 2 )); then
 _describe -t commands 'command' commands

@@ -695,14 +695,38 @@ pub(crate) fn run_new(name: &str, annotated: bool) {
     println!("next: cd {} && {} run", name, jet::Syntax::BINARY_NAME);
 }
 
-pub(crate) fn run_test(path: &str, update_snapshots: bool, mode: OutputMode) {
-    run_test_cov(path, update_snapshots, false, mode)
+/// `jet test` flags beyond the file/dir target (D-TESTKIT1=A gaps #2-#4).
+/// Grouped so new flags don't keep growing every `run_test*` signature.
+#[derive(Clone, Default)]
+pub(crate) struct TestRunOpts {
+    pub(crate) update_snapshots: bool,
+    pub(crate) coverage: bool,
+    /// `--filter=<substr>`: only run tests whose name contains it.
+    pub(crate) filter: Option<String>,
+    /// `--shuffle` / `--shuffle=<seed>`: reorder tests before running (order-
+    /// dependence detection). `None` = source order (the default).
+    pub(crate) shuffle_seed: Option<u64>,
+    /// `--serial`: run one test at a time instead of the parallel default.
+    pub(crate) serial: bool,
 }
 
-/// `jet test [--coverage]`. With `coverage`, the harness is built with line/
-/// function probes (D-COV1) and a per-function coverage report prints after the
-/// test results.
-pub(crate) fn run_test_cov(path: &str, update_snapshots: bool, coverage: bool, mode: OutputMode) {
+pub(crate) fn run_test(path: &str, update_snapshots: bool, mode: OutputMode) {
+    run_test_opts(
+        path,
+        TestRunOpts {
+            update_snapshots,
+            ..Default::default()
+        },
+        mode,
+    )
+}
+
+/// `jet test [--coverage] [--filter=<substr>] [--shuffle[=<seed>]] [--serial]`.
+/// With `coverage`, the harness is built with line/function probes (D-COV1) and
+/// a per-function coverage report prints after the test results. A directory
+/// target recurses into every subdirectory (D-TESTKIT1=A gap #2), running every
+/// `.jet` file found, in sorted path order.
+pub(crate) fn run_test_opts(path: &str, opts: TestRunOpts, mode: OutputMode) {
     let p = Path::new(path);
     if !p.exists() {
         eprintln!("error: can't find `{}`", path);
@@ -710,22 +734,16 @@ pub(crate) fn run_test_cov(path: &str, update_snapshots: bool, coverage: bool, m
     }
     if p.is_dir() {
         let ext = jet::Syntax::FILE_EXT;
-        let mut files: Vec<PathBuf> = fs::read_dir(p)
-            .unwrap_or_else(|e| {
-                eprintln!("error: couldn't read `{}`: {}", path, e);
-                exit(ExitCodes::USER_ERROR);
-            })
-            .filter_map(|e| e.ok().map(|e| e.path()))
-            .filter(|f| f.extension().and_then(|e| e.to_str()) == Some(ext))
-            .collect();
+        let mut files: Vec<PathBuf> = Vec::new();
+        collect_test_files_recursive(p, ext, &mut files);
         files.sort();
         if files.is_empty() {
-            eprintln!("error: no .{} files in `{}`", ext, path);
+            eprintln!("error: no .{} files in `{}` (searched subdirectories too)", ext, path);
             exit(ExitCodes::USER_ERROR);
         }
         let mut any_fail = false;
         for f in files {
-            if !run_test_file(&f, update_snapshots, coverage, mode) {
+            if !run_test_file(&f, &opts, mode) {
                 any_fail = true;
             }
         }
@@ -735,14 +753,37 @@ pub(crate) fn run_test_cov(path: &str, update_snapshots: bool, coverage: bool, m
             ExitCodes::OK
         });
     }
-    exit(if run_test_file(p, update_snapshots, coverage, mode) {
+    exit(if run_test_file(p, &opts, mode) {
         ExitCodes::OK
     } else {
         ExitCodes::USER_ERROR
     });
 }
 
-fn run_test_file(path: &Path, update_snapshots: bool, coverage: bool, mode: OutputMode) -> bool {
+/// D-TESTKIT1=A gap #2: walk every subdirectory under `dir`, collecting `.ext`
+/// files. `build/` and dotdirs (`.git`, `.jet`'s own cache, etc.) are skipped —
+/// a project's build output and VCS metadata are never test sources.
+fn collect_test_files_recursive(dir: &Path, ext: &str, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if name == "build" || name.starts_with('.') {
+                continue;
+            }
+            collect_test_files_recursive(&path, ext, out);
+        } else if path.extension().and_then(|e| e.to_str()) == Some(ext) {
+            out.push(path);
+        }
+    }
+}
+
+fn run_test_file(path: &Path, opts: &TestRunOpts, mode: OutputMode) -> bool {
+    let update_snapshots = opts.update_snapshots;
+    let coverage = opts.coverage;
     let shown = path.to_string_lossy();
     let src = match fs::read_to_string(path) {
         Ok(s) => s,
@@ -808,6 +849,18 @@ fn run_test_file(path: &Path, update_snapshots: bool, coverage: bool, mode: Outp
     if let Some(co) = &cov_out {
         let _ = fs::remove_file(co);
         cmd.env("JET_COV_OUT", co);
+    }
+    // D-TESTKIT1=A gaps #3/#4: filter/shuffle/serial reach the harness the same
+    // way `--coverage`/`-u` do — an env var the generated `main` reads (see
+    // `emit_test_main_cov` in jet-codegen).
+    if let Some(filter) = &opts.filter {
+        cmd.env("JET_TEST_FILTER", filter);
+    }
+    if let Some(seed) = opts.shuffle_seed {
+        cmd.env("JET_TEST_SHUFFLE_SEED", seed.to_string());
+    }
+    if opts.serial {
+        cmd.env("JET_TEST_SERIAL", "1");
     }
     let out = cmd.output().unwrap_or_else(|e| {
         eprintln!("error: couldn't run tests in `{}`: {}", shown, e);
@@ -1424,6 +1477,103 @@ fn bin_path(file: &str) -> PathBuf {
 
 fn test_bin_path(path: &Path) -> PathBuf {
     PathBuf::from("build").join(format!("test_{}", stem(&path.to_string_lossy())))
+}
+
+fn fuzz_bin_path(path: &Path, test_name: Option<&str>) -> PathBuf {
+    let suffix = test_name.map(|n| format!("_{}", stem(n))).unwrap_or_default();
+    PathBuf::from("build").join(format!(
+        "fuzz_{}{}",
+        stem(&path.to_string_lossy()),
+        suffix
+    ))
+}
+
+/// `jet fuzz` flags beyond the file/test-name target (D-TESTKIT1=A gap #1).
+#[derive(Clone, Default)]
+pub(crate) struct FuzzRunOpts {
+    /// Case budget (`--iterations=<n>`); the harness default (1000) applies
+    /// when `None`.
+    pub(crate) iterations: Option<u64>,
+    /// Wall-clock budget in milliseconds (`--time=<n>` seconds, converted).
+    pub(crate) time_budget_ms: Option<u64>,
+    /// Base PRNG seed (`--seed=<n>`); the harness's fixed default applies
+    /// when `None`, so a bare `jet fuzz` run is still reproducible.
+    pub(crate) seed: Option<u64>,
+    /// Corpus directory (`--corpus=<dir>`); defaults to
+    /// `.jet/fuzz/<file-stem>[/<test-name>]`.
+    pub(crate) corpus: Option<String>,
+}
+
+/// D-TESTKIT1=A (c308 pass 2, gap #1): `jet fuzz <file> [<name>]` — fuzz a
+/// parameterized `#Test fn` (D-TEST1's property-test form) with generated
+/// inputs: corpus dir persistence (failing seeds saved, replayed first next
+/// run), minimization (the same greedy shrink `jet test` uses), a deterministic
+/// seeded PRNG (`JetRng`, std-only, I6 — the same splitmix64 generator D-TEST1
+/// already ships), and iteration/time budget flags. Exit 0 = clean, exit 1 =
+/// found a failure (the repro is printed as a `jet test`-shaped invocation).
+pub(crate) fn run_fuzz(file: &str, test_name: Option<&str>, opts: FuzzRunOpts, mode: OutputMode) {
+    let src = match fs::read_to_string(file) {
+        Ok(s) => s,
+        Err(_) => {
+            eprintln!("error: can't find the file `{}`", file);
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let (rust_code, ffi_link) = match jet::compile_fuzz_with_path(file, test_name) {
+        Ok(r) => r,
+        Err(jet::FuzzCompileError::Diagnostics(diags)) => {
+            report_problems(mode, file, &src, &diags);
+            exit(ExitCodes::USER_ERROR);
+        }
+        Err(jet::FuzzCompileError::Target(msg)) => {
+            eprintln!("error: {}", msg);
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let path = Path::new(file);
+    let bin = fuzz_bin_path(path, test_name);
+    build(
+        file,
+        &rust_code,
+        bin.clone(),
+        BuildProfile::Default,
+        ffi_link.as_ref(),
+        &[],
+        false,
+        None,
+        None,
+        None,
+        mode,
+        // Fuzz harness build; not content-cached — target selection (an
+        // implicit "the file's only property test") can change without the
+        // file's bytes changing (e.g. a sibling test gains params), and a
+        // fuzz run's whole point is a fresh, honest compile of this driver.
+        None,
+    );
+    let corpus = opts.corpus.clone().unwrap_or_else(|| {
+        let mut p = format!(".jet/fuzz/{}", stem(file));
+        if let Some(n) = test_name {
+            p.push('/');
+            p.push_str(&stem(n));
+        }
+        p
+    });
+    let mut cmd = Command::new(&bin);
+    if let Some(n) = opts.iterations {
+        cmd.env("JET_FUZZ_ITERATIONS", n.to_string());
+    }
+    if let Some(ms) = opts.time_budget_ms {
+        cmd.env("JET_FUZZ_TIME_MS", ms.to_string());
+    }
+    if let Some(seed) = opts.seed {
+        cmd.env("JET_FUZZ_SEED", seed.to_string());
+    }
+    cmd.env("JET_FUZZ_CORPUS", &corpus);
+    let status = cmd.status().unwrap_or_else(|e| {
+        eprintln!("error: couldn't run the fuzz harness for `{}`: {}", file, e);
+        exit(ExitCodes::USER_ERROR);
+    });
+    exit(status.code().unwrap_or(ExitCodes::USER_ERROR));
 }
 
 /// D-BUILDNORM1=A (Tower #85): SHA-256 of the enclosing `pkg.jet`'s bytes, or

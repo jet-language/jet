@@ -928,3 +928,107 @@ fn repl_bigint_sub_and_neg() {
     assert!(out.contains("\"2\" : String"), "got: {out:?}");
     assert!(out.contains("\"-3\" : String"), "got: {out:?}");
 }
+
+// ── card #392: `core.random` widened ambient draws now dispatch at comptime ──
+// (`bool`/`float_range`/`normal`/`exponential`/`bytes`/`pick`/`weighted_pick`/
+// `sample`/`shuffle`/`split` — same SplitMix64 stream as AOT's `jet_std_random_*`
+// (Process.rs), so a seeded transcript reproduces AOT's numbers exactly, R12).
+
+#[test]
+fn repl_core_random_widened_draws_dispatch() {
+    let inputs = &[
+        "use core.random as random",
+        "random.seed(1)",
+        "random.bool(0.5)",
+        "random.float_range(1.0, 2.0)",
+        "random.normal(0.0, 1.0)",
+        "random.exponential(1.0)",
+        "random.bytes(3)",
+        "xs :: [1, 2, 3, 4, 5]",
+        "random.pick(xs)",
+        "random.sample(xs, 2)",
+        "random.weighted_pick(xs, [1.0, 1.0, 1.0, 1.0, 1.0])",
+        "ys := [1, 2, 3, 4, 5]",
+        "random.shuffle(&ys)",
+        "ys",
+        "random.split(7)",
+    ];
+    let out = run_transcript(inputs, None);
+    assert!(
+        !out.contains("E0956"),
+        "core.random widened draws should dispatch at comptime, got: {out}"
+    );
+    // Deterministic from seed 1 — same SplitMix64 stream as AOT's
+    // `jet_std_random_*` (Process.rs), so these numbers pin both the dispatch
+    // AND the algorithm (a wrong constant would silently diverge from AOT).
+    assert!(out.contains("false : Bool"), "got: {out}");
+    assert!(out.contains("1.5516928307103677 : Float"), "got: {out}");
+    assert!(out.contains("-0.04268100696719249 : Float"), "got: {out}");
+    assert!(out.contains("0.6199045686318072 : Float"), "got: {out}");
+    assert!(out.contains("[116, 44, 76] : [U8]"), "got: {out}");
+    assert!(out.contains("5 : Option"), "got: {out}");
+    assert!(out.contains("[4, 5] : List"), "got: {out}");
+    assert!(out.contains("4 : Option"), "got: {out}");
+    assert!(out.contains("[3, 2, 1, 5, 4] : List"), "got: {out}");
+    assert!(out.contains("Rng(state: -6449093003948547574) : Struct"), "got: {out}");
+}
+
+// ── card #392: `core.fmt` (pure text formatting) now dispatches at comptime,
+// byte-identical to AOT's `jet_fmt_*` (DataFmt.rs).
+
+#[test]
+fn repl_core_fmt_dispatch() {
+    let inputs = &[
+        "use core.fmt as fmt",
+        "fmt.number(1234567)",
+        "fmt.decimal(3.14159, 2)",
+        "fmt.percent(0.4567, 1)",
+        "fmt.bytes(1500000)",
+        "fmt.duration(93784000)",
+        "fmt.ordinal(23)",
+        "fmt.plural(1, \"item\", \"items\")",
+        "fmt.plural(3, \"item\", \"items\")",
+        "fmt.pad_left(\"7\", 3, \"0\")",
+        "fmt.pad_right(\"ab\", 5, \".\")",
+        "fmt.pad_center(\"hi\", 6, \"*\")",
+    ];
+    let out = run_transcript(inputs, None);
+    assert!(!out.contains("E0956"), "core.fmt should dispatch at comptime, got: {out}");
+    assert!(out.contains("\"1,234,567\" : String"), "got: {out}");
+    assert!(out.contains("\"3.14\" : String"), "got: {out}");
+    assert!(out.contains("\"45.7%\" : String"), "got: {out}");
+    assert!(out.contains("\"1.5 MB\" : String"), "got: {out}");
+    assert!(out.contains("\"1d 2h 3m\" : String"), "got: {out}");
+    assert!(out.contains("\"23rd\" : String"), "got: {out}");
+    assert!(out.contains("\"1 item\" : String"), "got: {out}");
+    assert!(out.contains("\"3 items\" : String"), "got: {out}");
+    assert!(out.contains("\"007\" : String"), "got: {out}");
+    assert!(out.contains("\"ab...\" : String"), "got: {out}");
+    assert!(out.contains("\"**hi**\" : String"), "got: {out}");
+}
+
+// ── card #392: `core.encoding.base32` and base64's URL-safe variant now
+// dispatch at comptime, byte-identical to AOT's `jet_std_base32_*` /
+// `jet_std_b64url_*` (EncodingCodecs.rs).
+
+#[test]
+fn repl_core_encoding_base32_and_base64url_dispatch() {
+    let inputs = &[
+        "use core.encoding.base32 as base32",
+        "use core.encoding.base64 as base64",
+        "base32.encode([104, 101, 108, 108, 111])",
+        "base32.decode(\"NBSWY3DP\")",
+        "base64.encode_url([251, 239, 190])",
+    ];
+    let out = run_transcript(inputs, None);
+    assert!(
+        !out.contains("E0956"),
+        "core.encoding.base32/base64 url variant should dispatch at comptime, got: {out}"
+    );
+    assert!(out.contains("\"NBSWY3DP\" : String"), "got: {out}");
+    assert!(
+        out.contains("[104, 101, 108, 108, 111] : Result"),
+        "got: {out}"
+    );
+    assert!(out.contains("\"----\" : String"), "got: {out}");
+}

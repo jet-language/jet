@@ -404,6 +404,7 @@ struct HostFns {
     is_trapped: FuncId,
     coll: Collections::CollectionsHostFns,
     conc: Concurrency::ConcurrencyHostFns,
+    num: Numeric::NumericHostFns,
 }
 
 fn new_jit_module() -> Result<(JITModule, HostFns), String> {
@@ -475,10 +476,12 @@ fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_is_trapped", jet_jit_is_trapped as *const u8);
     Collections::register_collections_symbols(&mut builder);
     Concurrency::register_concurrency_symbols(&mut builder);
+    Numeric::register_numeric_symbols(&mut builder);
     let mut module = JITModule::new(builder);
     let coll = Collections::declare_collections_host_fns(&mut module)?;
     let conc = Concurrency::declare_concurrency_host_fns(&mut module)?;
-    let host = declare_host_fns(&mut module, coll, conc)?;
+    let num = Numeric::declare_numeric_host_fns(&mut module)?;
+    let host = declare_host_fns(&mut module, coll, conc, num)?;
     Ok((module, host))
 }
 
@@ -486,6 +489,7 @@ fn declare_host_fns(
     module: &mut JITModule,
     coll: Collections::CollectionsHostFns,
     conc: Concurrency::ConcurrencyHostFns,
+    num: Numeric::NumericHostFns,
 ) -> Result<HostFns, String> {
     let cc = module.target_config().default_call_conv;
     let mut sig_bin_i64 = Signature::new(cc);
@@ -612,5 +616,6 @@ fn declare_host_fns(
         is_trapped: import("jet_jit_is_trapped", &sig_is_trapped)?,
         coll,
         conc,
+        num,
     })
 }

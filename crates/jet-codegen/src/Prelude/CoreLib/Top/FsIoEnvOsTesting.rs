@@ -692,7 +692,21 @@ fn jet_testing_fixture(path: &String) -> String {
 
 fn jet_testing_temp_dir(prefix: &String) -> String {
     let safe = sanitize_test_name(prefix);
-    let path = std::env::temp_dir().join(format!("jet_test_{}_{}", safe, std::process::id()));
+    // Parallel test isolation: two tests running concurrently (each on its own
+    // thread — see the parallel runner in the generated `main`) can call this
+    // with the same `prefix`. Fold the thread id into the path so each gets its
+    // own directory; serial/single-thread runs are unaffected (still one path
+    // per prefix, as before).
+    let tid: String = format!("{:?}", std::thread::current().id())
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect();
+    let path = std::env::temp_dir().join(format!(
+        "jet_test_{}_{}_{}",
+        safe,
+        std::process::id(),
+        tid
+    ));
     let _ = std::fs::remove_dir_all(&path);
     let _ = std::fs::create_dir_all(&path);
     path.to_string_lossy().into_owned()

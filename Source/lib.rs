@@ -420,6 +420,16 @@ pub fn compile_tests_with_path_cov(
     Driver::compile_tests(file, coverage)
 }
 
+/// D-TESTKIT1=A (gap #1): compile for `jet fuzz <file> [<name>]`.
+pub use Driver::FuzzCompileError;
+
+pub fn compile_fuzz_with_path(
+    file: &str,
+    test_name: Option<&str>,
+) -> Result<(String, Option<FFI::FfiLink>), FuzzCompileError> {
+    Driver::compile_fuzz(file, test_name)
+}
+
 /// D-BENCH1: compile for `jet bench` when the file has `#Bench` blocks —
 /// optional `main`, bodies type-checked in `Bench` mode, then lowered to the
 /// timing harness.

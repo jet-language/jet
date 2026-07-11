@@ -1674,6 +1674,44 @@ pub fn compile_tests(
     ))
 }
 
+/// D-TESTKIT1=A (c308 pass 2, gap #1): a CLI-level error selecting the `jet
+/// fuzz` target — no property test, an ambiguous set, or a named test that
+/// doesn't exist / isn't a property test. Same tier as `run_bench`'s "can't
+/// find the file" message: argument validation, not a compiler diagnostic.
+pub enum FuzzCompileError {
+    Diagnostics(Vec<Diagnostic>),
+    Target(String),
+}
+
+/// `jet fuzz <file> [<name>]` pipeline: same front end as `compile_tests`
+/// (sema runs in `Test` mode — a property test's body is checked exactly as
+/// `jet test` checks it), but codegen emits the fuzz driver harness instead.
+pub fn compile_fuzz(
+    file: &str,
+    test_name: Option<&str>,
+) -> Result<(String, Option<crate::FFI::FfiLink>), FuzzCompileError> {
+    let mut bundle =
+        crate::Loader::load_entry_with_overlay(file, None, false).map_err(FuzzCompileError::Diagnostics)?;
+    let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Test);
+    let mut errors = Vec::new();
+    for d in diags {
+        if d.severity == Severity::Error {
+            errors.push(d);
+        }
+    }
+    if !errors.is_empty() {
+        return Err(FuzzCompileError::Diagnostics(errors));
+    }
+    let ffi = match crate::FFI::prepare(&bundle) {
+        Ok(link) => link,
+        Err(ffi_diags) => return Err(FuzzCompileError::Diagnostics(ffi_diags)),
+    };
+    match crate::Codegen::emit_bundle_fuzz(&bundle, ffi.as_ref(), file, test_name) {
+        Ok(code) => Ok((code, ffi)),
+        Err(msg) => Err(FuzzCompileError::Target(msg)),
+    }
+}
+
 /// c-devserver (owner-directed 2026-07-01): `jet dev <file>` when the file
 /// defines a top-level `fn dev()` — compiles NATIVELY with `dev()` swapped in
 /// as the program's real entry point instead of `run()`. Mechanically: an

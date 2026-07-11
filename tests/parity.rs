@@ -55,21 +55,6 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     // approximation was in scope (done, see `TextLite.rs`) but the
     // underlying algorithm gap versus true Unicode isn't this card's job to
     // fix on either tier. (Card #392 ported everything else in core.text.)
-    //
-    // core.random: `pick`/`sample`/`shuffle`/`weighted_pick` operate on
-    // `[T]` generically and `bool`/`normal`/`exponential`/`bytes`/`split`
-    // need the `Rng`-state-threading design (`core.random.rng`/`.split`,
-    // D-DET1) done carefully, not bolted on — a distinct pass.
-    ("core.random", "pick"),
-    ("core.random", "weighted_pick"),
-    ("core.random", "sample"),
-    ("core.random", "shuffle"),
-    ("core.random", "bool"),
-    ("core.random", "float_range"),
-    ("core.random", "normal"),
-    ("core.random", "exponential"),
-    ("core.random", "bytes"),
-    ("core.random", "split"),
     // core.time: mixes pure value construction (`period`/`hours`/`minutes`/
     // `seconds`, `Duration`-style) with genuine ambient effects (`now`/
     // `today`/`utc`/`local_time`/`sleep`/`instant` — wall-clock/monotonic
@@ -162,12 +147,10 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     ("core.crypto.random", "bytes"),
     // core.encoding.*: structured-format codecs (JSON has its own comptime
     // path via `JsonInterp.rs` for the basics; these are the remaining
-    // formats/edge methods — csv/toml/yaml/xml/jsonl/cbor/base32/canonical
-    // JSON/JSON event-stream/traced-decode).
-    ("core.encoding.base32", "decode"),
-    ("core.encoding.base32", "encode"),
-    ("core.encoding.base64", "decode_url"),
-    ("core.encoding.base64", "encode_url"),
+    // formats/edge methods — csv/toml/yaml/xml/jsonl/cbor/canonical JSON/JSON
+    // event-stream/traced-decode). base32 and base64's URL-safe variant are
+    // done (byte-for-byte ports — `base32_encode`/`base32_decode` and the
+    // `encode_url`/`decode_url` arms in Methods.rs).
     ("core.encoding.cbor", "decode"),
     ("core.encoding.cbor", "encode"),
     ("core.encoding.csv", "parse"),
@@ -192,19 +175,6 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     ("core.encoding.xml", "to_string"),
     ("core.encoding.yaml", "parse"),
     ("core.encoding.yaml", "to_string"),
-    // core.fmt: number/duration/byte-size/percent/ordinal/plural formatting
-    // helpers and padding — straightforward to port (like `core.text`/
-    // `core.math` this card closed) but out of this pass's slice.
-    ("core.fmt", "bytes"),
-    ("core.fmt", "decimal"),
-    ("core.fmt", "duration"),
-    ("core.fmt", "number"),
-    ("core.fmt", "ordinal"),
-    ("core.fmt", "pad_center"),
-    ("core.fmt", "pad_left"),
-    ("core.fmt", "pad_right"),
-    ("core.fmt", "percent"),
-    ("core.fmt", "plural"),
     // core.os: host/process facts (hostname, arch, pid, cpu_count, …) — real
     // ambient reads of the host, arguably belongs behind the same `#Impure`
     // gate as `core.env`/`core.process` rather than E0956; needs the same
@@ -296,6 +266,12 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     ("core.testing", "golden"),
     ("core.testing", "snap"),
     ("core.testing", "temp_dir"),
+    // core.url: full parse/normalize/percent-encode surface (`JetUrl`,
+    // `UrlMime.rs` + `MathRandomTime.rs`) — a pure text transform, but the AOT
+    // implementation is a real RFC-3986-shaped parser (scheme/authority/host/
+    // port/path/query/fragment, dot-segment normalization) with its own struct
+    // shape; porting it correctly is a distinct pass, not folded into this
+    // card's BigInt-plus-audit slice.
     ("core.url", "data"),
     ("core.url", "file"),
     ("core.url", "from_parts"),
@@ -303,6 +279,15 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     ("core.url", "percent_decode"),
     ("core.url", "percent_encode"),
     ("core.url", "query"),
+    // core.uuid: EFFECT BOUNDARY, not a porting gap. `v4`/`v7` need genuine
+    // ambient entropy (`jet_uuid_fill_random` reads `/dev/urandom`, POSIX,
+    // falling back to a wall-clock-nanosecond seed — `EncodingCodecs.rs`) and
+    // `v7` additionally needs the ambient wall clock for its timestamp bits —
+    // both non-deterministic, unlike `core.random`'s explicitly-seeded stream.
+    // A "pure" comptime UUID would either fake randomness (silently diverging
+    // from AOT, R12 risk) or read the real host (a build-time effect with no
+    // `#Impure` gate defined for it yet) — genuinely impossible to do purely,
+    // not merely unported.
     ("core.uuid", "v4"),
     ("core.uuid", "v7"),
 ];

@@ -1351,6 +1351,35 @@ impl LowerCtx<'_, '_> {
                 Err("jit range-checked ctor unsupported".to_string())
             }
             TExprKind::MathBuiltin { .. } => Err("jit math builtin unsupported".to_string()),
+            // D-BIGINT1: `BigInt(...)` ctor + `+`/`-`/`*` binop, lowered from
+            // `TIR/lower/expressions.rs`. `BigInt` values are opaque i64 handles
+            // into `rt.heap` (`Numeric.rs`'s host shims), the same pattern as
+            // `String`/list handles. `Decimal` (`type_name != "BigInt"`) stays
+            // unsupported — out of this card's slice (jit_gaps.txt keeps
+            // `text/decimal`).
+            TExprKind::PreciseBuiltin {
+                type_name,
+                func,
+                args,
+            } if type_name == "BigInt" => {
+                let host_fn = match func.as_str() {
+                    "from_int" => self.host.num.bigint_from_int,
+                    "from_str" => self.host.num.bigint_from_str,
+                    "add" => self.host.num.bigint_add,
+                    "sub" => self.host.num.bigint_sub,
+                    "mul" => self.host.num.bigint_mul,
+                    _ => return Err(format!("jit precise numeric builtin unsupported: {func}")),
+                };
+                let arg_vals: Result<Vec<_>, _> = args.iter().map(|a| self.lower_expr(a)).collect();
+                let arg_vals = arg_vals?;
+                let host_ref = self.module.declare_func_in_func(host_fn, self.b.func);
+                let call = self.b.ins().call(host_ref, &arg_vals);
+                let result = self.b.inst_results(call)[0];
+                if func == "from_str" {
+                    self.emit_trap_check()?;
+                }
+                Ok(result)
+            }
             TExprKind::PreciseBuiltin { .. } => {
                 Err("jit precise numeric builtin unsupported".to_string())
             }
@@ -1789,6 +1818,27 @@ impl LowerCtx<'_, '_> {
             THandleOp::GameInputPressed => Err("jit handle method unsupported".to_string()),
             THandleOp::DurationMillis => Err("jit handle method unsupported".to_string()),
             THandleOp::DurationSeconds => Err("jit handle method unsupported".to_string()),
+            // D-BIGINT1: `BigInt` instance methods (`.add`/`.sub`/`.mul`/`.neg`/
+            // `.to_string`) — reuses the same `rt.heap` handle host shims as the
+            // `PreciseBuiltin` ctor/binop path above. `Decimal` stays unsupported
+            // (out of this card's slice).
+            THandleOp::PreciseMethod { type_name, method } if type_name == "BigInt" => {
+                let (host_fn, extra_args) = match method.as_str() {
+                    "add" => (self.host.num.bigint_add, 1),
+                    "sub" => (self.host.num.bigint_sub, 1),
+                    "mul" => (self.host.num.bigint_mul, 1),
+                    "neg" => (self.host.num.bigint_neg, 0),
+                    "to_string" => (self.host.num.bigint_to_string, 0),
+                    _ => return Err(format!("jit handle method unsupported: BigInt::{method}")),
+                };
+                let mut arg_vals = vec![recv_val];
+                for a in args.iter().take(extra_args) {
+                    arg_vals.push(self.lower_expr(a)?);
+                }
+                let host_ref = self.module.declare_func_in_func(host_fn, self.b.func);
+                let call = self.b.ins().call(host_ref, &arg_vals);
+                Ok(self.b.inst_results(call)[0])
+            }
             THandleOp::PreciseMethod { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::TcpListenerAccept => Err("jit handle method unsupported".to_string()),
             THandleOp::TcpListenerLocalAddr => Err("jit handle method unsupported".to_string()),
