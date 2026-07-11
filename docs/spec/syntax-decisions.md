@@ -975,8 +975,11 @@ explicit `handle.cancel()`) unwinds at its next wait point — channel
 recv/send, sleep, join, select, I/O — running Drop-backed cleanup, exactly as
 a blown deadline (E3003) already does; a cancelled `g.all` member reports
 `Cancelled`, not a completed `Value`. A scoped shielded region defers (never
-discards) the unwind until a critical section finishes; its spelling is
-pending **D-SHIELDNAME1**.
+discards) the unwind until a critical section finishes. **D-SHIELDNAME1 = A**
+*(ratified 2026-07-11)*: the shielded region is spelled `#Shield { … }`,
+joining the `#Unsafe` / `#Context` sigil family. A cancellation (or blown
+deadline) pending against a task inside `#Shield` lands the moment the block
+exits — deadline first, then cancel.
 
 ### Effects & safety
 
@@ -1463,6 +1466,15 @@ ordinary derives that *emit that same Jet source* and re-enter
 lexer/parser/sema (R11, D-CTCODEGEN1) — no compiler-synthesized Rust, no R11
 carve-out. Ratifying this also fixes cross-module `decode<T>` (derive output
 previously referenced entry-file-local paths).
+
+**D-SERDE13 = B / D-SERDE14 = A / D-SERDE15 = A** *(ratified 2026-07-11, card
+#131)*: the value tree's one user-facing name is **`DataTree`** — the old
+`Data` spelling becomes a teaching error pointing at `DataTree` (no alias,
+I8); tree accessors (`.field`/`.at`/`.int`/`.text`/…) return `T ? DecodeError`
+everywhere, with the accessor auto-filling `path` from where it read, so `?`
+chains inside a hand `decode` with no mapping ceremony; hand-built object
+nodes take the map literal — `DataTree.Object({ "name": v, … })` —
+insertion-ordered, and the pair-list form is not accepted.
 
 **CLI & IO**: builder-spec arg parsing `args.spec().flag(…).option(…)
 .positional(…)` with generated `--help` (D-ARGS1). `io.stdin()` handle with
