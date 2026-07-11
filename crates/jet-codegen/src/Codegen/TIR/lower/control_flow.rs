@@ -77,13 +77,14 @@ pub(crate) fn lower_forin_collection(
                     return (recv, Some(TForInMethod::LinesStdin));
                 }
                 // D-PROCESS1=A: `child.stdout.lines()` / `child.stderr.lines()` — the
-                // receiver's OWN type (the field access itself) is the
-                // `ProcessStdoutStream`/`ProcessStderrStream` marker sema hands back
-                // for `child.stdout`/`child.stderr`.
-                if matches!(
-                    tir_recv_jet_ty(receiver, env),
-                    Some(Type::Named(n)) if n == "ProcessStdoutStream" || n == "ProcessStderrStream"
-                ) {
+                // receiver is a `Field` read (`tir_recv_jet_ty` never resolves a
+                // `Field`, by design — mirrors `expr_jet_ty`), so test its BASE's
+                // type instead: `child` (or any `ProcessChild`-typed expr) `.stdout`
+                // / `.stderr`.
+                let is_process_stream = matches!(receiver.as_ref(), Expr::Field(base, member, _)
+                    if (member == "stdout" || member == "stderr")
+                        && matches!(tir_recv_jet_ty(base, env), Some(Type::Named(n)) if n == "ProcessChild"));
+                if is_process_stream {
                     return (recv, Some(TForInMethod::LinesProcessStream));
                 }
                 // A `.lines()` on neither (unreachable in valid Jet — sema E2502

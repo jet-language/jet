@@ -656,22 +656,26 @@ fn core_process_builder_pipeline_and_spawn_run() {
     let src = format!(
         r#"
 use core.process as process
+use core.time as time
 
 fn run() {{
-    spec :: process.cmd(["{probe}"]).cwd("{work}").env_clear().env("JET_PROCESS_TEST", "ok").stdin_text("from-stdin\n").stdout_capture().stderr_capture().timeout_ms(2000).output_limit(10000)
-    result :: spec.run() ?? panic("process run failed")
+    spec :: process.cmd(["{probe}"]).cwd("{work}").env_clear().env("JET_PROCESS_TEST", "ok").stdin(.Capture).stdout(.Capture).stderr(.Capture).timeout(time.seconds(2)).output_limit(10000)
+    probe_child :: spec.spawn() ?? panic("spawn failed")
+    probe_child.stdin.write("from-stdin\n") ?? panic("write failed")
+    result :: probe_child.wait() ?? panic("wait failed")
     print(result.success)
     print(result.code)
     print(result.timed_out)
     print(result.output)
 
-    piped :: process.pipeline([["{emit}"], ["{cat}"]]) ?? panic("pipeline failed")
+    piped :: process.pipeline([process.cmd(["{emit}"]), process.cmd(["{cat}"])]) ?? panic("pipeline failed")
     print(piped.success)
     print(piped.output)
 
-    child :: process.cmd(["{lines}"]).stdout_capture().spawn() ?? panic("spawn failed")
-    line1 :: child.read_stdout_line() ?? panic("read failed")
-    print(line1 ?? "none")
+    child :: process.cmd(["{lines}"]).stdout(.Stream).spawn() ?? panic("spawn failed")
+    loop line in child.stdout.lines() {{
+        print(line)
+    }}
     waited :: child.wait() ?? panic("wait failed")
     print(waited.success)
 }}

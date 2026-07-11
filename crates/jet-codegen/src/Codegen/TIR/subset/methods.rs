@@ -482,8 +482,10 @@ pub(crate) fn method_call_in_subset(
     }
     // D-PROCESS1: ProcessSpec/ProcessChild subprocess handles. The lowerer routes
     // every admitted method through fixed prelude helpers, with sema-proved arity.
-    if matches!(recv_type.as_deref(), Some("ProcessSpec" | "ProcessChild"))
-        && is_process_handle_method_name(recv_type.as_deref(), method, args.len())
+    if matches!(
+        recv_type.as_deref(),
+        Some("ProcessSpec" | "ProcessChild" | "ProcessStdin" | "ProcessStdoutStream" | "ProcessStderrStream")
+    ) && is_process_handle_method_name(recv_type.as_deref(), method, args.len())
     {
         return expr_in_subset(receiver, cx, locals)
             && args

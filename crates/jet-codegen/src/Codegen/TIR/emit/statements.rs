@@ -473,7 +473,7 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                     // `loop`), closed by the generic tail below — no extra block needed.
                     out.push_str(&format!("{}{}loop {{\n", pad, lbl));
                     out.push_str(&format!(
-                        "{}    let _jet_line_opt = {}jet_process_stream_next_line(&({})).unwrap_or_else(|_e| {}jet_panic({:?}, {}, &_e.to_string()));\n",
+                        "{}    let _jet_line_opt = {}jet_process_stream_next_line(&({})).unwrap_or_else(|_e| {}jet_panic({:?}, {}, &format!(\"{{:?}}\", _e)));\n",
                         pad,
                         cx.root_prefix,
                         collection_str,

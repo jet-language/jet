@@ -1,21 +1,3 @@
-fn jet_process_spec_stdout_capture(spec: jet_std::ProcessSpec) -> jet_std::ProcessSpec {
-    jet_process_spec_with_mode(spec, true, jet_std::ProcessStreamMode::Capture)
-}
-fn jet_process_spec_stdout_inherit(spec: jet_std::ProcessSpec) -> jet_std::ProcessSpec {
-    jet_process_spec_with_mode(spec, true, jet_std::ProcessStreamMode::Inherit)
-}
-fn jet_process_spec_stdout_discard(spec: jet_std::ProcessSpec) -> jet_std::ProcessSpec {
-    jet_process_spec_with_mode(spec, true, jet_std::ProcessStreamMode::Discard)
-}
-fn jet_process_spec_stderr_capture(spec: jet_std::ProcessSpec) -> jet_std::ProcessSpec {
-    jet_process_spec_with_mode(spec, false, jet_std::ProcessStreamMode::Capture)
-}
-fn jet_process_spec_stderr_inherit(spec: jet_std::ProcessSpec) -> jet_std::ProcessSpec {
-    jet_process_spec_with_mode(spec, false, jet_std::ProcessStreamMode::Inherit)
-}
-fn jet_process_spec_stderr_discard(spec: jet_std::ProcessSpec) -> jet_std::ProcessSpec {
-    jet_process_spec_with_mode(spec, false, jet_std::ProcessStreamMode::Discard)
-}
 fn jet_process_spec_timeout(
     mut spec: jet_std::ProcessSpec,
     timeout: &jet_std::Duration,

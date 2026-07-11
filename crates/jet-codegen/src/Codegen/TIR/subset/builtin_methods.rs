@@ -145,29 +145,21 @@ pub(crate) fn is_process_handle_method_name(
     match recv_type {
         Some("ProcessSpec") => matches!(
             (method, nargs),
-            ("cwd" | "env_remove" | "stdin_text" | "stdout" | "stderr", 1)
+            ("cwd" | "env_remove" | "stdin" | "stdout" | "stderr", 1)
                 | ("env", 2)
-                | (
-                    "env_clear"
-                        | "stdout_capture"
-                        | "stdout_inherit"
-                        | "stdout_discard"
-                        | "stderr_capture"
-                        | "stderr_inherit"
-                        | "stderr_discard"
-                        | "detached"
-                        | "run"
-                        | "spawn",
-                    0
-                )
-                | ("timeout_ms" | "output_limit", 1)
+                | ("env_clear" | "detached" | "run" | "spawn", 0)
+                | ("timeout" | "output_limit", 1)
         ),
         Some("ProcessChild") => matches!(
             (method, nargs),
             ("id" | "wait" | "kill" | "terminate" | "interrupt", 0)
-                | ("write_stdin", 1)
-                | ("read_stdout_line" | "read_stderr_line", 0)
         ),
+        // D-PROCESS1=A: `.write(text)` on `child.stdin`.
+        Some("ProcessStdin") => matches!((method, nargs), ("write", 1)),
+        // D-PROCESS1=A: `.lines()` on `child.stdout`/`child.stderr`.
+        Some("ProcessStdoutStream") | Some("ProcessStderrStream") => {
+            matches!((method, nargs), ("lines", 0))
+        }
         _ => false,
     }
 }

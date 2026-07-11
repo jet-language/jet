@@ -732,17 +732,39 @@ Example: `examples/features/io/os_facts.jet`.
 
 ---
 
-### `core.process` — exit and subprocesses
+### `core.process` — exit and subprocesses (D-PROCESS1)
+
+`process.run(argv)` is beginner sugar over the same one mechanism as
+everything else here: `process.cmd(argv).run()`. Everything is argv-only —
+there is no shell-string helper, so there is no quoting/injection footgun to
+learn.
 
 ```jet
 use core.process as process
+use core.time as time
 
 fn run() {
-    result :: process.cmd(["echo", "hi"]).timeout_ms(1000).run() ?? return
-    print(result.success)    // true when the command exited 0
-    print(result.code)       // exit code as Int
-    print(result.output)     // stdout as String
-    print(result.errors)     // stderr as String
+    spec :: process.cmd(["cargo", "test"])
+        .cwd("crates/app")
+        .env_clear()
+        .env("RUST_BACKTRACE", "1")
+        .stdout(.Stream)
+        .stderr(.Inherit)
+        .timeout(time.seconds(30))
+
+    child :: spec.spawn() ?? return
+    loop line in child.stdout.lines() {
+        print(line)
+    }
+    status :: child.wait() ?? return
+    if !status.success { process.exit(status.code ?? 1) }
+
+    pipe :: process.pipeline([
+        process.cmd(["cat", "input.txt"]),
+        process.cmd(["grep", "error"]),
+    ]) ?? return
+    print(pipe.output)
+
     process.exit(0)          // end the program with an exit code (never returns)
 }
 ```
@@ -750,19 +772,27 @@ fn run() {
 | Function | Returns | What it does |
 |----------|---------|--------------|
 | `exit(code)` | never | Stop the program with the given exit code |
-| `run(cmd)` | `ProcessResult ? IOError` | Run a command; `cmd` is `[String]` |
+| `run(cmd)` | `ProcessResult ? IOError` | Beginner sugar for `cmd(cmd).run()`; `cmd` is `[String]` |
 | `cmd(argv)` | `ProcessSpec` | Build a subprocess spec from an argv array; no shell string |
-| `pipeline(commands)` | `ProcessResult ? IOError` | Connect stdout to stdin across `[[String]]` commands |
+| `pipeline(specs)` | `ProcessResult ? IOError` | Connect stdout to stdin across `[ProcessSpec]` stages, no shell |
 
 `ProcessSpec` builder methods are value-returning: `cwd(path)`, `env(key,
-value)`, `env_remove(key)`, `env_clear()`, `stdin_text(text)`,
-`stdout_capture()`, `stdout_inherit()`, `stdout_discard()`, `stderr_capture()`,
-`stderr_inherit()`, `stderr_discard()`, `timeout_ms(ms)`, `output_limit(bytes)`,
-and `detached()`. A spec can `run()` to collect a `ProcessResult` or `spawn()`
-to return a `ProcessChild`.
+value)`, `env_remove(key)`, `env_clear()`, `stdin(mode)`, `stdout(mode)`,
+`stderr(mode)`, `timeout(duration)`, `output_limit(bytes)`, and `detached()`.
+`mode` is one of the three stream-mode dot-literals: `.Stream` (pipe it —
+drain live via `child.stdout.lines()`), `.Inherit` (pass through to the
+parent's stream), or `.Capture` (pipe it — collect into `ProcessResult` at
+`run()`/`wait()`). `stdin` defaults to closed (no `.stdin(...)` call — the
+child gets no stdin at all, never the parent's terminal by accident).
+`timeout` takes a `core.time` `Duration` (e.g. `time.seconds(30)`). A spec can
+`run()` to collect a `ProcessResult` or `spawn()` to return a `ProcessChild`.
 
-`ProcessChild` exposes `id()`, `wait()`, `kill()`, `terminate()`, `interrupt()`,
-`write_stdin(text)`, `read_stdout_line()`, and `read_stderr_line()`.
+`ProcessChild` exposes `id()`, `wait()`, `kill()`, `terminate()`,
+`interrupt()`, a `.stdin` writer (`child.stdin.write(text)`), and `.stdout`/
+`.stderr` streaming readers consumed only via
+`loop line in child.stdout.lines() { ... }` (same loop-source-only shape as
+`FileReader.lines()`/`io.stdin().lines()` — storing the reader or the line
+stream in a name is E2502).
 
 **`ProcessResult`** — `code: Int`, `success: Bool`, `timed_out: Bool`,
 `signal: Int?`, `output: String`, `errors: String`.

@@ -429,6 +429,11 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                     EnumLitArg::Named { expr, .. } => expr_in_subset(expr, cx, locals),
                 });
             }
+            // D-PROCESS1=A: `ProcessStreamMode` is a core dot-literal enum, always
+            // covered — all three variants are unit (no payload args to check).
+            if type_name == "ProcessStreamMode" {
+                return matches!(variant.as_str(), "Stream" | "Inherit" | "Capture");
+            }
             if !enum_is_covered(type_name, cx) {
                 return false;
             }

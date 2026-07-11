@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 488,
-    "rev": 3190,
+    "rev": 3194,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -5052,6 +5052,11 @@
       "blockedBy": [],
       "assignee": "fable-main",
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "fable-main",
+          "text": "Builder done: surface realigned to ratified D-PROCESS1=A verbatim — ProcessStreamMode enum-literal (.Stream/.Inherit/.Capture) replacing string modes + sugar dupes (I8), .timeout(Duration), child.stdin writer + stdout/stderr .lines() streams, pipeline([ProcessSpec]); run() stays sugar over cmd().run(). TIR coverage gate extended (new handle types + enum literal); JIT tier keeps named-unsupported (pre-existing, jit_gaps). Example process_builder.jet rewritten to ratified surface, golden green. Targeted green: corelib, golden, taint 12/12, tir 146/146, parity, diagnostic_snapshots, truthfulness 14/14, ice_regressions 8/8. No owner gates hit. Parent verify pending full suite."
+        },
         {
           "at": "2026-07-11",
           "by": "codex-main",
@@ -22048,6 +22053,147 @@
       "draft": false,
       "status": "open",
       "created": "2026-07-11T01:30:01.593Z"
+    },
+    {
+      "id": "D-FE-REPL-HISTORY1",
+      "cardId": "c0gk8k3t",
+      "group": "tooling",
+      "title": "REPL persistent history policy",
+      "gist": "Choose what the REPL remembers between sessions and how users search or erase it.",
+      "explainer": "A gives beginners useful restart continuity while making secret retention explicit and giving experts exact disable, retention, erase, location, permission, and failure controls.",
+      "story": "Maya explores a private production incident in Jet, closes her terminal, then returns tomorrow wanting useful commands back without silently retaining secrets forever.",
+      "inWild": "$ jet repl\n› deploy_preview(region: \"us-east\")\nPreview ready.\n› :history search deploy\ndeploy_preview(region: \"us-east\")",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Private persistent default",
+          "detail": "Persist the latest 2,000 successfully parsed submissions per user by default. F3 opens search; `:history search text` is the textual path. `:history clear` erases the whole file. Store at `$XDG_STATE_HOME/jet/repl-history` or the platform state-directory equivalent, owner-only; a corrupt tail is discarded with a warning. All inputs, including effectful or secret-bearing text, are retained because Jet cannot truthfully identify every secret. `JET_REPL_HISTORY=off` disables writes; `JET_REPL_HISTORY_LIMIT=N` changes retention. If storage is unavailable, continue session-only with a visible warning.",
+          "code": "$ jet repl\n› deploy_preview(region: \"us-east\")\nPreview ready.\n$ jet repl\n› :history search deploy\ndeploy_preview(region: \"us-east\")\n› :history clear\nHistory cleared."
+        },
+        {
+          "key": "B",
+          "name": "Session only",
+          "detail": "Retain submissions only in memory until exit. F3 and `:history search text` search this session; `:history clear` clears it. No file, environment override, or restart recovery exists.",
+          "code": "$ jet repl\n› deploy_preview(region: \"us-east\")\nPreview ready.\n› :history search deploy\ndeploy_preview(region: \"us-east\")\n$ jet repl\n› :history search deploy\nNo history matches."
+        },
+        {
+          "key": "C",
+          "name": "Opt-in persistence",
+          "detail": "Default to session-only history. `JET_REPL_HISTORY=on` stores the latest 2,000 successfully parsed submissions at `$XDG_STATE_HOME/jet/repl-history` or the platform state-directory equivalent, owner-only. F3 and `:history search text` search it; `:history clear` erases the whole file; `JET_REPL_HISTORY_LIMIT=N` changes retention. All inputs, including effectful or secret-bearing text, persist. A corrupt tail is discarded with a warning; unavailable storage falls back visibly to session-only.",
+          "code": "$ JET_REPL_HISTORY=on jet repl\n› deploy_preview(region: \"us-east\")\nPreview ready.\n$ JET_REPL_HISTORY=on jet repl\n› :history search deploy\ndeploy_preview(region: \"us-east\")"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Python",
+          "note": "Interactive history is commonly persisted through readline configuration and searched interactively.",
+          "code": ">>> deploy_preview(region=\"us-east\")"
+        },
+        {
+          "lang": "fish",
+          "note": "History persists automatically and exposes explicit search and deletion controls.",
+          "code": "$ history search deploy\n$ history clear"
+        }
+      ],
+      "rec": "A",
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-11T01:36:15.412Z"
+    },
+    {
+      "id": "D-FE-REPL-MULTILINE1",
+      "cardId": "c0gk8k3t",
+      "group": "tooling",
+      "title": "REPL multiline editing keys",
+      "gist": "Choose how raw-terminal users edit and submit a multiline REPL entry.",
+      "explainer": "A preserves instant one-line use, derives the default from Jet syntax instead of modes, and retains explicit expert controls for forced newline and submission.",
+      "story": "Iris writes a small function directly at the prompt. She needs ordinary Enter behavior for quick expressions and a predictable way to edit and submit several lines without accidental execution.",
+      "inWild": "› fn total(xs: [Int]) -> Int {\n·     return xs.sum()\n· }\n› total([3, 4, 5])\n12 : Int",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Syntax-aware Enter",
+          "detail": "In raw mode, Enter submits complete input and inserts a newline when the parser says input is incomplete. Alt-Enter, encoded portably as Escape then Enter, always inserts a newline. A blank Enter on an empty continuation line force-submits. One-line Enter remains unchanged; cooked/non-TTY mode keeps today's balance-based continuation.",
+          "code": "› fn total(xs: [Int]) -> Int {\n·     return xs.sum()\n· }\n› total([3, 4, 5])\n12 : Int"
+        },
+        {
+          "key": "B",
+          "name": "Blank line submits blocks",
+          "detail": "One-line Enter still submits. Once Enter encounters incomplete syntax, raw mode enters block editing: later Enter inserts lines even after syntax becomes complete, and an empty line submits the block. Escape then Enter inserts a newline without submitting. Cooked/non-TTY mode keeps today's balance-based continuation.",
+          "code": "› fn total(xs: [Int]) -> Int {\n·     return xs.sum()\n· }\n·\n› total([3, 4, 5])\n12 : Int"
+        },
+        {
+          "key": "C",
+          "name": "Explicit edit mode",
+          "detail": "One-line Enter still submits. F4 opens a multiline editor for the current entry; Enter inserts lines and F4 submits. `:edit` opens it and a `:submit` control line submits without becoming Jet source. Cooked/non-TTY mode keeps today's balance-based continuation.",
+          "code": "› :edit\n· fn total(xs: [Int]) -> Int {\n·     return xs.sum()\n· }\n· :submit\n› total([3, 4, 5])\n12 : Int"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "IPython",
+          "note": "Syntax completeness starts continuation and a blank line finishes a block.",
+          "code": "In [1]: def total(xs):\n   ...:     return sum(xs)\n   ...:"
+        },
+        {
+          "lang": "Browser consoles",
+          "note": "Enter submits while an alternate Enter chord inserts another line.",
+          "code": "> const total = (xs) =>\n    xs.reduce((a, b) => a + b, 0)"
+        }
+      ],
+      "rec": "A",
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-11T01:36:15.578Z"
+    },
+    {
+      "id": "D-FE-REPL-INTERRUPT1",
+      "cardId": "c0gk8k3t",
+      "group": "tooling",
+      "title": "REPL Ctrl-C during evaluation",
+      "gist": "Choose what Ctrl-C does while submitted Jet code is still running.",
+      "explainer": "A matches beginner expectations, preserves truthful prior state, and tells experts exactly which external effects cannot be rolled back while keeping interrupted work addressable.",
+      "story": "Noah accidentally starts an endless calculation in the REPL. He presses Ctrl-C expecting immediate recovery without losing useful state created before that turn.",
+      "inWild": "› loop { compute() }\n^C\nInterrupted. External effects already performed were not rolled back.\n› saved_result\n42",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Interrupt turn, keep session",
+          "detail": "Poll cancellation at every interpreter instruction and before and after each runtime call; Jet-controlled execution must restore the terminal and prompt within 100 ms of Ctrl-C. A blocking external call follows that call's cancellation contract and the UI says when it is still stopping. Keep prior session state and commit no bindings from the interrupted turn. External I/O already performed remains and the message says so. Record the turn as interrupted and allow rerun. Outside evaluation, the existing ruling remains: Ctrl-C clears a nonempty line first; Ctrl-C at an empty prompt exits.",
+          "code": "› loop { compute() }\n^C\nInterrupted. External effects already performed were not rolled back.\n› saved_result\n42"
+        },
+        {
+          "key": "B",
+          "name": "Interrupt and restart session",
+          "detail": "Poll cancellation at every interpreter instruction and before and after each runtime call; Jet-controlled execution must restore the terminal within 100 ms of Ctrl-C. A blocking external call follows that call's cancellation contract and the UI says when it is still stopping. Then discard every REPL binding and start a fresh session. External I/O already performed remains and the message says so. Keep the interrupted turn only in history, not as rerunnable live state. Outside evaluation, existing line-clear and empty-prompt exit behavior remains.",
+          "code": "› loop { compute() }\n^C\nInterrupted. External effects already performed were not rolled back. Session restarted with no bindings.\n›"
+        },
+        {
+          "key": "C",
+          "name": "Exit REPL",
+          "detail": "Poll cancellation at every interpreter instruction and before and after each runtime call; Jet-controlled execution must restore terminal state and exit within 100 ms of Ctrl-C. A blocking external call follows that call's cancellation contract and the UI says when it is still stopping. External I/O already performed remains and the message says so. Outside evaluation, existing line-clear and empty-prompt exit behavior remains.",
+          "code": "› loop { compute() }\n^C\nInterrupted. External effects already performed were not rolled back.\n$"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Python",
+          "note": "Ctrl-C raises KeyboardInterrupt and normally returns to the same interactive session.",
+          "code": ">>> while True: pass\n^C KeyboardInterrupt\n>>>"
+        },
+        {
+          "lang": "Node.js",
+          "note": "Ctrl-C interrupts current execution and returns to the prompt; repeated Ctrl-C exits.",
+          "code": "> while (true) {}\n^C\n>"
+        }
+      ],
+      "rec": "A",
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-11T01:36:15.730Z"
     }
   ],
   "questions": [
@@ -22859,6 +23005,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-11T01:36:50.608Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0pef855",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T01:36:15.730Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-FE-REPL-INTERRUPT1",
+      "note": "REPL Ctrl-C during evaluation"
+    },
+    {
+      "at": "2026-07-11T01:36:15.578Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-FE-REPL-MULTILINE1",
+      "note": "REPL multiline editing keys"
+    },
+    {
+      "at": "2026-07-11T01:36:15.412Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-FE-REPL-HISTORY1",
+      "note": "REPL persistent history policy"
+    },
     {
       "at": "2026-07-11T01:30:31.482Z",
       "by": "fable-main",
@@ -26329,34 +26503,6 @@
       "by": "codex-orchestrator",
       "action": "card.update",
       "ref": "c0wa2hf8",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c2nizvzp",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c2fizfx3",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c144",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0zti5r8",
       "note": "workOrder"
     }
   ],
