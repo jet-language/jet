@@ -2,7 +2,7 @@
 // condvar park/wake substrate (M2): channel wake-on-send, timer sleep, IO poll
 // hook, pause/cancel at yield points. std-only (I6).
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
@@ -10,6 +10,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 type Job = Box<dyn FnOnce() + Send>;
+
+#[cfg(all(test, target_os = "windows"))]
+static TEST_IOCP_GQCS_FATAL: AtomicBool = AtomicBool::new(false);
 
 fn jet_scheduler_fatal(msg: &str) -> ! {
     if jet_scheduler_panic_should_unwind() {
@@ -379,12 +382,29 @@ struct IoInterest {
     writable: bool,
 }
 
-struct IoPoller {
-    interests: Mutex<Vec<IoInterest>>,
-    streams: Mutex<Vec<Arc<Mutex<TcpStream>>>>,
-    notify: Condvar,
+#[allow(dead_code)]
+#[derive(Clone)]
+enum IoBackendState {
+    Starting,
+    Running,
+    Failed(&'static str),
+    Closed,
 }
 
+struct IoPoller {
+    interests: Mutex<Vec<IoInterest>>,
+    streams: Mutex<HashMap<usize, Arc<Mutex<TcpStream>>>>,
+    retire_requested: Mutex<HashSet<usize>>,
+    backend_state: Mutex<IoBackendState>,
+    notify: Condvar,
+    next_key: AtomicUsize,
+    #[cfg(target_os = "windows")]
+    iocp_port: AtomicUsize,
+    #[cfg(target_os = "windows")]
+    iocp_shutdown_done: AtomicBool,
+}
+
+// jet:scheduler-native-begin — vetted std-only OS FFI and poller dispatch.
 #[allow(dead_code)]
 impl IoPoller {
     fn register(
@@ -392,11 +412,18 @@ impl IoPoller {
         stream: Arc<Mutex<TcpStream>>,
         readable: bool,
         writable: bool,
-    ) -> (usize, Arc<ParkSlot>) {
+    ) -> Result<(usize, Arc<ParkSlot>), &'static str> {
+        let state = self.backend_state.lock().unwrap();
+        if let IoBackendState::Failed(error) = &*state {
+            return Err(*error);
+        }
+        if matches!(&*state, IoBackendState::Closed) {
+            return Err("scheduler IO backend is closed");
+        }
         let slot = ParkSlot::new();
         let mut streams = self.streams.lock().unwrap();
-        let id = streams.len();
-        streams.push(stream);
+        let id = self.next_key.fetch_add(1, Ordering::Relaxed);
+        streams.insert(id, stream);
         drop(streams);
         self.interests.lock().unwrap().push(IoInterest {
             stream_id: id,
@@ -405,7 +432,34 @@ impl IoPoller {
             writable,
         });
         self.notify.notify_one();
-        (id, slot)
+        #[cfg(target_os = "windows")]
+        self.iocp_notify();
+        drop(state);
+        Ok((id, slot))
+    }
+
+    fn unregister(&self, id: usize) {
+        self.interests.lock().unwrap().retain(|i| i.stream_id != id);
+        self.retire_requested.lock().unwrap().insert(id);
+        #[cfg(not(target_os = "windows"))]
+        {
+            self.streams.lock().unwrap().remove(&id);
+            self.retire_requested.lock().unwrap().remove(&id);
+        }
+        #[cfg(target_os = "windows")]
+        self.iocp_notify();
+    }
+
+    #[cfg(target_os = "windows")]
+    fn iocp_notify(&self) {
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn PostQueuedCompletionStatus(port: usize, bytes: u32, key: usize, ov: *mut std::ffi::c_void) -> i32;
+        }
+        let port = self.iocp_port.load(Ordering::Acquire);
+        if port != 0 {
+            unsafe { PostQueuedCompletionStatus(port, 0, 0, std::ptr::null_mut()); }
+        }
     }
 
     fn run(self: Arc<Self>) {
@@ -453,7 +507,6 @@ impl IoPoller {
         }
     }
 
-    // jet:scheduler-native-begin — stripped from user-visible prelude (I1); native IO lives in jet_codegen::scheduler only.
     #[cfg(all(target_os = "linux", feature = "jet_native_io"))]
     fn run_linux_epoll(self: Arc<Self>) {
         use std::collections::HashMap;
@@ -494,7 +547,7 @@ impl IoPoller {
                 let streams = self.streams.lock().unwrap();
                 let mut out = Vec::new();
                 for interest in interests.iter() {
-                    let Some(stream) = streams.get(interest.stream_id) else {
+                    let Some(stream) = streams.get(&interest.stream_id) else {
                         continue;
                     };
                     let fd = stream.lock().unwrap().as_raw_fd();
@@ -610,7 +663,7 @@ impl IoPoller {
                 let streams = self.streams.lock().unwrap();
                 let mut out = Vec::new();
                 for interest in interests.iter() {
-                    let Some(stream) = streams.get(interest.stream_id) else {
+                    let Some(stream) = streams.get(&interest.stream_id) else {
                         continue;
                     };
                     let fd = stream.lock().unwrap().as_raw_fd();
@@ -704,9 +757,245 @@ impl IoPoller {
 
     #[cfg(all(target_os = "windows", feature = "jet_native_io"))]
     fn run_iocp(self: Arc<Self>) {
-        // IOCP path: fall back to portable poll until full AcceptEx/WSA integration lands.
-        // Backend name is honest (`iocp`) for metrics; readiness uses non-blocking probe.
-        self.run_portable_poll();
+        use std::collections::HashMap;
+        use std::os::windows::io::AsRawSocket;
+        #[repr(C)]
+        struct Overlapped { internal: usize, internal_high: usize, offset: u32, offset_high: u32, event: usize }
+        #[repr(C)]
+        struct WsaBuf { len: u32, buf: *mut u8 }
+        struct Active {
+            _stream: Arc<Mutex<TcpStream>>,
+            socket: usize,
+            operations: Vec<*mut Overlapped>,
+            cancel_requested: bool,
+        }
+        const INVALID_HANDLE_VALUE: usize = usize::MAX;
+        const WSA_IO_PENDING: i32 = 997;
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn CreateIoCompletionPort(file: usize, existing: usize, key: usize, threads: u32) -> usize;
+            fn GetQueuedCompletionStatus(port: usize, bytes: *mut u32, key: *mut usize, ov: *mut *mut Overlapped, timeout_ms: u32) -> i32;
+            fn CancelIoEx(file: usize, ov: *mut Overlapped) -> i32;
+            fn GetLastError() -> u32;
+            fn CloseHandle(handle: usize) -> i32;
+        }
+        #[link(name = "ws2_32")]
+        extern "system" {
+            fn WSARecv(socket: usize, buffers: *mut WsaBuf, count: u32, bytes: *mut u32, flags: *mut u32, ov: *mut Overlapped, completion: *mut std::ffi::c_void) -> i32;
+            fn WSASend(socket: usize, buffers: *mut WsaBuf, count: u32, bytes: *mut u32, flags: u32, ov: *mut Overlapped, completion: *mut std::ffi::c_void) -> i32;
+            fn WSAGetLastError() -> i32;
+        }
+
+        let port = unsafe { CreateIoCompletionPort(INVALID_HANDLE_VALUE, 0, 0, 1) };
+        if port == 0 {
+            METRIC_IO_FAILURES.fetch_add(1, Ordering::Relaxed);
+            *self.backend_state.lock().unwrap() =
+                IoBackendState::Failed("internal scheduler IOCP creation failed");
+            for interest in self.interests.lock().unwrap().drain(..) { interest.slot.wake(); }
+            self.streams.lock().unwrap().clear();
+            self.retire_requested.lock().unwrap().clear();
+            self.iocp_shutdown_done.store(true, Ordering::Release);
+            return;
+        }
+        self.iocp_port.store(port, Ordering::Release);
+        self.iocp_shutdown_done.store(false, Ordering::Release);
+        *self.backend_state.lock().unwrap() = IoBackendState::Running;
+        let mut active: HashMap<usize, Active> = HashMap::new();
+        loop {
+            let pending: Vec<(usize, Arc<Mutex<TcpStream>>, usize, bool, bool)> = {
+                let interests = self.interests.lock().unwrap();
+                let streams = self.streams.lock().unwrap();
+                interests.iter()
+                    .filter(|interest| !active.contains_key(&interest.stream_id))
+                    .filter_map(|interest| streams.get(&interest.stream_id).map(|stream| (
+                        interest.stream_id,
+                        stream.clone(),
+                        stream.lock().unwrap().as_raw_socket() as usize,
+                        interest.readable,
+                        interest.writable,
+                    )))
+                    .collect()
+            };
+            for (id, stream, socket, readable, writable) in pending {
+                let associated = unsafe { CreateIoCompletionPort(socket, port, id + 1, 0) };
+                if associated == 0 {
+                    let _error = unsafe { GetLastError() };
+                    METRIC_IO_FAILURES.fetch_add(1, Ordering::Relaxed);
+                    if let Some(slot) = self.interests.lock().unwrap().iter()
+                        .find(|interest| interest.stream_id == id).map(|interest| interest.slot.clone())
+                    { slot.wake(); }
+                    self.interests.lock().unwrap().retain(|interest| interest.stream_id != id);
+                    self.streams.lock().unwrap().remove(&id);
+                    continue;
+                }
+                let mut operations = Vec::new();
+                for read in [true, false] {
+                    if (read && !readable) || (!read && !writable) { continue; }
+                    let raw = Box::into_raw(Box::new(Overlapped {
+                        internal: 0, internal_high: 0, offset: 0, offset_high: 0, event: 0,
+                    }));
+                    METRIC_IO_ALLOCATED.fetch_add(1, Ordering::Relaxed);
+                    let mut buffer = WsaBuf { len: 0, buf: std::ptr::null_mut() };
+                    let mut bytes = 0;
+                    let rc = if read {
+                        let mut flags = 0;
+                        unsafe { WSARecv(socket, &mut buffer, 1, &mut bytes, &mut flags, raw, std::ptr::null_mut()) }
+                    } else {
+                        unsafe { WSASend(socket, &mut buffer, 1, &mut bytes, 0, raw, std::ptr::null_mut()) }
+                    };
+                    if rc == 0 || unsafe { WSAGetLastError() } == WSA_IO_PENDING {
+                        operations.push(raw);
+                    } else {
+                        unsafe { drop(Box::from_raw(raw)); }
+                        METRIC_IO_RETIRED.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+                if operations.is_empty() {
+                    if let Some(slot) = self.interests.lock().unwrap().iter()
+                        .find(|interest| interest.stream_id == id).map(|interest| interest.slot.clone())
+                    { slot.wake(); }
+                } else {
+                    active.insert(id, Active { _stream: stream, socket, operations, cancel_requested: false });
+                    METRIC_IO_ACTIVE.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+
+            let retiring: Vec<usize> = self.retire_requested.lock().unwrap().iter().copied().collect();
+            for id in retiring {
+                if let Some(entry) = active.get_mut(&id) {
+                    if !entry.cancel_requested {
+                        entry.cancel_requested = true;
+                        for operation in &entry.operations { unsafe { CancelIoEx(entry.socket, *operation); } }
+                    }
+                } else {
+                    self.streams.lock().unwrap().remove(&id);
+                    self.retire_requested.lock().unwrap().remove(&id);
+                }
+            }
+
+            for (id, entry) in active.iter_mut() {
+                if !self.interests.lock().unwrap().iter().any(|interest| interest.stream_id == *id)
+                    && !entry.cancel_requested {
+                    entry.cancel_requested = true;
+                    for operation in &entry.operations { unsafe { CancelIoEx(entry.socket, *operation); } }
+                }
+            }
+
+            let (mut bytes, mut key, mut operation) = (0, 0usize, std::ptr::null_mut());
+            #[cfg(test)]
+            let inject_fatal = TEST_IOCP_GQCS_FATAL.swap(false, Ordering::AcqRel);
+            #[cfg(not(test))]
+            let inject_fatal = false;
+            let ok = if inject_fatal {
+                0
+            } else {
+                unsafe { GetQueuedCompletionStatus(port, &mut bytes, &mut key, &mut operation, u32::MAX) }
+            };
+            if operation.is_null() {
+                if ok == 0 {
+                    METRIC_IO_FAILURES.fetch_add(1, Ordering::Relaxed);
+                    *self.backend_state.lock().unwrap() =
+                        IoBackendState::Failed("internal scheduler IOCP completion port failed");
+                    for interest in self.interests.lock().unwrap().drain(..) { interest.slot.wake(); }
+                    for entry in active.values_mut() {
+                        if !entry.cancel_requested {
+                            entry.cancel_requested = true;
+                            for pending in &entry.operations {
+                                let cancelled = unsafe { CancelIoEx(entry.socket, *pending) };
+                                if cancelled == 0 {
+                                    let error = unsafe { GetLastError() };
+                                    if error != 1168 { // ERROR_NOT_FOUND: completion already queued.
+                                        METRIC_IO_FAILURES.fetch_add(1, Ordering::Relaxed);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // CancelIoEx on an IOCP-associated socket queues one terminal
+                    // completion per outstanding OVERLAPPED. Keep every Active
+                    // socket owner and Box alive until those completions arrive.
+                    let drain_deadline = Instant::now() + Duration::from_secs(5);
+                    while !active.is_empty() && Instant::now() < drain_deadline {
+                        let (mut drain_bytes, mut drain_key, mut drain_operation) =
+                            (0, 0usize, std::ptr::null_mut());
+                        unsafe {
+                            GetQueuedCompletionStatus(
+                                port,
+                                &mut drain_bytes,
+                                &mut drain_key,
+                                &mut drain_operation,
+                                50,
+                            );
+                        }
+                        if drain_operation.is_null() { continue; }
+                        unsafe { drop(Box::from_raw(drain_operation)); }
+                        METRIC_IO_RETIRED.fetch_add(1, Ordering::Relaxed);
+                        let owner = active.iter().find_map(|(id, entry)|
+                            entry.operations.contains(&drain_operation).then_some(*id));
+                        if let Some(id) = owner {
+                            let entry = active.get_mut(&id).unwrap();
+                            entry.operations.retain(|candidate| *candidate != drain_operation);
+                            if entry.operations.is_empty() {
+                                active.remove(&id);
+                                METRIC_IO_ACTIVE.fetch_sub(1, Ordering::Relaxed);
+                                self.streams.lock().unwrap().remove(&id);
+                                self.retire_requested.lock().unwrap().remove(&id);
+                            }
+                        } else {
+                            METRIC_IO_STALE.fetch_add(1, Ordering::Relaxed);
+                        }
+                    }
+                    self.iocp_port.store(0, Ordering::Release);
+                    *self.backend_state.lock().unwrap() = IoBackendState::Closed;
+                    if unsafe { CloseHandle(port) } != 0 {
+                        METRIC_IO_PORT_CLOSED.fetch_add(1, Ordering::Relaxed);
+                    } else {
+                        METRIC_IO_FAILURES.fetch_add(1, Ordering::Relaxed);
+                    }
+                    if active.is_empty() {
+                        self.streams.lock().unwrap().clear();
+                        self.retire_requested.lock().unwrap().clear();
+                    } else {
+                        // Kernel did not return cancellation completions before
+                        // bounded shutdown. Retain sockets and OVERLAPPED boxes
+                        // permanently: truthful nonzero counters beat UAF.
+                        std::mem::forget(active);
+                    }
+                    *self.backend_state.lock().unwrap() =
+                        IoBackendState::Failed("internal scheduler IOCP completion port failed");
+                    self.iocp_shutdown_done.store(true, Ordering::Release);
+                    return;
+                }
+                if key != 0 { METRIC_IO_STALE.fetch_add(1, Ordering::Relaxed); }
+                continue;
+            }
+            if ok == 0 && unsafe { GetLastError() } != 995 {
+                METRIC_IO_FAILURES.fetch_add(1, Ordering::Relaxed);
+            }
+            unsafe { drop(Box::from_raw(operation)); }
+            METRIC_IO_RETIRED.fetch_add(1, Ordering::Relaxed);
+            let id = key.saturating_sub(1);
+            let Some(entry) = active.get_mut(&id) else { continue; };
+            entry.operations.retain(|candidate| *candidate != operation);
+            let slot = {
+                let mut interests = self.interests.lock().unwrap();
+                let slot = interests.iter().find(|interest| interest.stream_id == id)
+                    .map(|interest| interest.slot.clone());
+                interests.retain(|interest| interest.stream_id != id);
+                slot
+            };
+            if let Some(slot) = slot {
+                METRIC_POLLER_WAKE.fetch_add(1, Ordering::Relaxed);
+                for pending in &entry.operations { unsafe { CancelIoEx(entry.socket, *pending); } }
+                slot.wake();
+            }
+            if entry.operations.is_empty() {
+                active.remove(&id);
+                METRIC_IO_ACTIVE.fetch_sub(1, Ordering::Relaxed);
+                self.streams.lock().unwrap().remove(&id);
+                self.retire_requested.lock().unwrap().remove(&id);
+            }
+        }
     }
     // jet:scheduler-native-end
 
@@ -724,7 +1013,7 @@ impl IoPoller {
                 let streams = self.streams.lock().unwrap();
                 let mut slots = Vec::new();
                 for interest in interests.iter() {
-                    let Some(stream) = streams.get(interest.stream_id) else {
+                    let Some(stream) = streams.get(&interest.stream_id) else {
                         continue;
                     };
                     let mut s = stream.lock().unwrap();
@@ -769,8 +1058,19 @@ fn io_poller() -> Arc<IoPoller> {
         .get_or_init(|| {
             let poller = Arc::new(IoPoller {
                 interests: Mutex::new(Vec::new()),
-                streams: Mutex::new(Vec::new()),
+                streams: Mutex::new(HashMap::new()),
+                retire_requested: Mutex::new(HashSet::new()),
+                backend_state: Mutex::new(if cfg!(target_os = "windows") {
+                    IoBackendState::Starting
+                } else {
+                    IoBackendState::Running
+                }),
                 notify: Condvar::new(),
+                next_key: AtomicUsize::new(0),
+                #[cfg(target_os = "windows")]
+                iocp_port: AtomicUsize::new(0),
+                #[cfg(target_os = "windows")]
+                iocp_shutdown_done: AtomicBool::new(false),
             });
             let p = poller.clone();
             thread::spawn(move || p.run());
@@ -782,8 +1082,19 @@ fn io_poller() -> Arc<IoPoller> {
 /// Park until `stream` looks readable or writable (non-blocking probe via poller).
 pub fn jet_scheduler_io_wait(stream: &TcpStream, read: bool, write: bool, wait_kind: &str) {
     let shared = Arc::new(Mutex::new(stream.try_clone().expect("tcp clone")));
-    let (_id, slot) = io_poller().register(shared, read, write);
+    let poller = io_poller();
+    let (id, slot) = poller
+        .register(shared, read, write)
+        .unwrap_or_else(|error| jet_scheduler_fatal(error));
+    struct Registration(Arc<IoPoller>, usize);
+    impl Drop for Registration {
+        fn drop(&mut self) { self.0.unregister(self.1); }
+    }
+    let _registration = Registration(poller, id);
     jet_scheduler_yield(wait_kind, &slot, None);
+    if let IoBackendState::Failed(error) = &*io_poller().backend_state.lock().unwrap() {
+        jet_scheduler_fatal(error);
+    }
 }
 
 // ── M2: scheduler-integrated channel (wake-on-send) ────────────────────────────
@@ -1163,6 +1474,15 @@ pub(crate) fn jet_scheduler_select<T: Send>(
 static METRIC_PARKED: AtomicUsize = AtomicUsize::new(0);
 static METRIC_POLLER_WAKE: AtomicUsize = AtomicUsize::new(0);
 static METRIC_PARK_BLOCKS: AtomicUsize = AtomicUsize::new(0);
+static METRIC_IO_ACTIVE: AtomicUsize = AtomicUsize::new(0);
+static METRIC_IO_ALLOCATED: AtomicUsize = AtomicUsize::new(0);
+static METRIC_IO_RETIRED: AtomicUsize = AtomicUsize::new(0);
+#[cfg(target_os = "windows")]
+static METRIC_IO_STALE: AtomicUsize = AtomicUsize::new(0);
+#[cfg(target_os = "windows")]
+static METRIC_IO_FAILURES: AtomicUsize = AtomicUsize::new(0);
+#[cfg(target_os = "windows")]
+static METRIC_IO_PORT_CLOSED: AtomicUsize = AtomicUsize::new(0);
 static IO_BACKEND: OnceLock<&'static str> = OnceLock::new();
 
 #[allow(unreachable_code)]
@@ -1207,6 +1527,14 @@ pub fn jet_scheduler_metric_poller_wake() -> usize {
 /// fast-path). A busy-wait scheduler would leave this at zero under contention.
 pub fn jet_scheduler_metric_park_blocks() -> usize {
     METRIC_PARK_BLOCKS.load(Ordering::Relaxed)
+}
+
+pub fn jet_scheduler_metric_io_operations() -> (usize, usize, usize) {
+    (
+        METRIC_IO_ACTIVE.load(Ordering::Relaxed),
+        METRIC_IO_ALLOCATED.load(Ordering::Relaxed),
+        METRIC_IO_RETIRED.load(Ordering::Relaxed),
+    )
 }
 
 // ── M1: work-stealing pool ───────────────────────────────────────────────────
@@ -1571,7 +1899,10 @@ pub fn jet_scheduler_drain() {
                 .workers
                 .iter()
                 .any(|w| !w.queue.lock().unwrap().is_empty());
-            if g.is_empty() && !pending_local {
+            let io_drained = METRIC_IO_ACTIVE.load(Ordering::Acquire) == 0
+                && METRIC_IO_ALLOCATED.load(Ordering::Acquire)
+                    == METRIC_IO_RETIRED.load(Ordering::Acquire);
+            if g.is_empty() && !pending_local && io_drained {
                 return;
             }
         }
