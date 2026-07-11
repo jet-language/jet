@@ -1453,7 +1453,20 @@ reference/search artifacts under `options/` including type, default, example,
 doc, tier, priority, and provenance plus exact/explain search modes, and image
 variant artifacts under `systems/images/`: qcow2, raw, SD-card image, and a
 netboot bundle with kernel/initrd/iPXE config plus
-`jetos-image-variants-<host>.proof.json`,
+`jetos-image-variants-<host>.proof.json`.
+
+Option priority is attached to one contribution, never inferred globally from
+an option key. A following `<key>.tier: .Default` or `.Force`, or
+`<key>.priority: n` / `.Priority(n)`, annotates the immediately preceding
+contribution to that key in the same stable module. Higher weight wins. Two
+different values at the highest weight are E0967 regardless of file or source
+order; identical winning values are deterministic and select the lexically
+first stable module ID for provenance. `packages.disabledModules` names those
+stable module IDs and removes their option contributions before resolution.
+Generated explain JSON records every contender's module ID, source order,
+tier, numeric weight, value, and winner state.
+
+The generation also includes
 first-wave `apps.program.*` modules under `apps/programs/` for git, ssh, fish,
 starship, ghostty, helix, yazi, btop, bat, eza, fzf, zoxide, ripgrep, tealdeer,
 fastfetch, VS Code, Cursor, Discord, Spicetify, and browser policy projection,

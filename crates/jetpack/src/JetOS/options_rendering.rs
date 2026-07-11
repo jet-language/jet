@@ -514,3 +514,109 @@ fn risk_classes(system: &SystemPlan) -> Vec<String> {
     }
     risks
 }
+
+#[cfg(test)]
+mod option_priority_tests {
+    use super::*;
+    use crate::ModuleEval::{OptionPlan, OptionPriority};
+
+    fn option(
+        module_id: &str,
+        source_order: usize,
+        value: &str,
+        priority: OptionPriority,
+    ) -> OptionPlan {
+        OptionPlan {
+            key: "services.displayManager".to_string(),
+            value: value.to_string(),
+            module_id: module_id.to_string(),
+            source_order,
+            priority,
+        }
+    }
+
+    fn system(options: Vec<OptionPlan>) -> SystemPlan {
+        SystemPlan {
+            name: "host".to_string(),
+            target: "linux.x64".to_string(),
+            packages: Vec::new(),
+            services: Vec::new(),
+            options,
+        }
+    }
+
+    #[test]
+    fn force_beats_explicit_normal_and_default_with_full_provenance() {
+        let system = system(vec![
+            option("defaults", 0, "sddm", OptionPriority::Default),
+            option("site", 1, "gdm", OptionPriority::Priority(2_500)),
+            option("emergency", 2, "greetd", OptionPriority::Force),
+        ]);
+        let resolved = resolved_option(&system, "services.displayManager").unwrap();
+        assert_eq!(resolved.value, "greetd");
+        assert_eq!(resolved.tier, "Force");
+        let json = resolved.to_json();
+        assert!(json.contains("\"module_id\":\"defaults\""));
+        assert!(json.contains("\"module_id\":\"site\""));
+        assert!(json.contains("\"module_id\":\"emergency\""));
+        assert_eq!(json.matches("\"winner\":true").count(), 1);
+    }
+
+    #[test]
+    fn equal_winning_priority_conflicts_regardless_of_source_order() {
+        let first = system(vec![
+            option("a", 0, "gdm", OptionPriority::Normal),
+            option("b", 1, "sddm", OptionPriority::Normal),
+        ]);
+        let reversed = system(vec![
+            option("b", 0, "sddm", OptionPriority::Normal),
+            option("a", 1, "gdm", OptionPriority::Normal),
+        ]);
+        assert!(resolved_option(&first, "services.displayManager").is_none());
+        assert!(resolved_option(&reversed, "services.displayManager").is_none());
+        assert_eq!(option_conflict(&first), option_conflict(&reversed));
+    }
+
+    #[test]
+    fn equal_same_value_is_not_a_conflict_and_uses_stable_module_identity() {
+        let system = system(vec![
+            option("z-module", 0, "gdm", OptionPriority::Normal),
+            option("a-module", 1, "gdm", OptionPriority::Normal),
+        ]);
+        assert!(option_conflict(&system).is_none());
+        let resolved = resolved_option(&system, "services.displayManager").unwrap();
+        let winner = resolved.contenders.iter().find(|c| c.winner).unwrap();
+        assert_eq!(winner.module_id, "a-module");
+    }
+
+    #[test]
+    fn generated_explain_records_every_contender_and_stable_module_id() {
+        let mut disabled = OptionPlan::ordinary("packages.disabledModules", "[\"legacy\"]");
+        disabled.module_id = "control".to_string();
+        disabled.source_order = 3;
+        let system = system(vec![
+            option("defaults", 0, "sddm", OptionPriority::Default),
+            option("site", 1, "gdm", OptionPriority::Priority(2_500)),
+            option("emergency", 2, "greetd", OptionPriority::Force),
+            disabled,
+        ]);
+        let dir = std::env::temp_dir().join(format!(
+            "jetos-option-explain-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        write_module_priority_facts(&dir, &system).unwrap();
+        let explain = std::fs::read_to_string(dir.join("module-system/explain.json")).unwrap();
+        assert!(explain.contains("\"module_id\":\"defaults\""));
+        assert!(explain.contains("\"module_id\":\"site\""));
+        assert!(explain.contains("\"module_id\":\"emergency\""));
+        assert!(explain.contains("\"tier\":\"Priority(2500)\""));
+        assert!(explain.contains("\"priority\":10000"));
+        assert_eq!(explain.matches("\"winner\":true").count(), 2);
+        let manifest =
+            std::fs::read_to_string(dir.join("module-system/disabled-modules.manifest")).unwrap();
+        assert_eq!(manifest, "legacy\n");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}

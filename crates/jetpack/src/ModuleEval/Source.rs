@@ -214,11 +214,31 @@ fn merge_system_contributions(systems: Vec<SystemPlan>) -> Vec<SystemPlan> {
         }
     }
     for system in &mut merged {
+        let disabled = system
+            .options
+            .iter()
+            .filter(|option| option.key == "packages.disabledModules")
+            .flat_map(|option| option_list_items(&option.value))
+            .collect::<Vec<_>>();
+        system.options.retain(|option| {
+            option.key == "packages.disabledModules"
+                || !disabled.iter().any(|module_id| module_id == &option.module_id)
+        });
         for (source_order, option) in system.options.iter_mut().enumerate() {
             option.source_order = source_order;
         }
     }
     merged
+}
+
+fn option_list_items(raw: &str) -> Vec<String> {
+    raw.trim()
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .split(',')
+        .map(|item| item.trim().trim_matches('"').to_string())
+        .filter(|item| !item.is_empty())
+        .collect()
 }
 
 fn prompt_path_mode(value: &str) -> PromptPathMode {
