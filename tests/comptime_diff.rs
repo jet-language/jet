@@ -61,12 +61,12 @@ const CASES: &[&str] = &[
     // D-BIGINT1 (card #392): arbitrary-precision arithmetic — no overflow,
     // no auto-promotion. comptime must match AOT's limb-based `JetBigInt`
     // byte-for-byte (R12 parity).
-    "BigInt(9223372036854775807) + BigInt(1)",
-    "BigInt(\"999999999999999999999999999999\") + BigInt(\"999999999999999999999999999999\")",
-    "BigInt(100) - BigInt(1)",
-    "BigInt(7) * BigInt(6)",
-    "BigInt(5).sub(BigInt(3))",
-    "BigInt(3).neg()",
+    "(BigInt(9223372036854775807) + BigInt(1)).to_string()",
+    "(BigInt(\"999999999999999999999999999999\") + BigInt(\"999999999999999999999999999999\")).to_string()",
+    "(BigInt(100) - BigInt(1)).to_string()",
+    "(BigInt(7) * BigInt(6)).to_string()",
+    "BigInt(5).sub(BigInt(3)).to_string()",
+    "BigInt(3).neg().to_string()",
 ];
 
 #[test]
