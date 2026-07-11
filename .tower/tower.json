@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 495,
-    "rev": 3262,
+    "rev": 3266,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -5030,8 +5030,18 @@
       "priority": "P1",
       "plan": "Acceptance: core.files/core.path must beat Python pathlib, Go os/filepath, and Rust std::fs for ordinary scripting/build-tool work, while preserving Jet's one-path, safe-default, audit-friendly model.\n\nCurrent facts found during plan pass:\n- docs/reference/core-library.md currently documents core.files as string-path helpers plus open/create/append streaming handles.\n- docs/spec/syntax-decisions.md records D-PATHFS1 typed Path (from/join/parent/extension/stem/write_atomic/walk) but still labels part of it unbuilt; code already contains Path TIR/prelude/sema hooks, so implementation must verify shipped behavior and fix docs drift.\n- D-FSWATCH1 is ratified as files.watch, with owner comment: include processes and ports now, not later. That requires a shared watch/event model, not only a filesystem helper.\n\nGates queued:\n- D-FSOPS1: exact deep filesystem/path operation surface and Path-vs-String model.\n- D-WATCH-SCOPE1: exact watch composition surface for files, process exit, and port readiness.\n\nImplementation plan after gates clear:\n1. Verification baseline: add/confirm focused tests for currently claimed Path API (Path.from, join, parent, extension, stem, write_atomic, walk), existing core.files helpers, and docs/API-freeze snapshots. Fix any docs/code mismatch before adding new surface.\n2. Data model: add typed Stat, FileKind, WalkEntry, TempFile/TempDir RAII handles, FileLock, WatchHandle, WatchEvent, WatchSet. Keep IOError product-copy shape; add diagnostics only for sema-visible misuse.\n3. Sema/API surface: register ratified functions/methods in CheckerCoreLib known-items, effect caps, target-profile availability, comptime impurity policy where relevant, and semantic-index/docs facts.\n4. Runtime/codegen: lower through TIR/prelude only; no codegen checks. Implement std-only filesystem ops first; platform-specific gaps become typed IOError variants or documented unsupported cases, never raw OS errors.\n5. Watch: implement debounced files.watch plus process/port watchers per ratified D-WATCH-SCOPE1. If a native OS watcher cannot be std-only on a platform, use the existing FFI-bridge dependency posture only after owner-approved dependency gate; otherwise ship a polling fallback only if the ballot allows it and report its fidelity in WatchEvent facts.\n6. Examples/goldens: publish_files.jet exercises create_dir_all, walk, stat, copy_dir, write_atomic, temp_dir cleanup; dev_runner_watch.jet exercises files/process/port watch without shell polling. Golden tests pin output; focused Rust tests cover edge cases.\n7. Docs: update docs/reference/core-library.md, docs/spec/spec.md effect table, syntax-decisions D-PATHFS1/D-FSOPS1/D-WATCH-SCOPE1 entries, and stdlib gap ledger (#310 if present).\n8. Verification: targeted tests for corelib/golden/dev/watch paths, then nix develop -c cargo build, hello.jet smoke, relevant examples, and final nix develop -c cargo test before closing.\n\nDevil-pass hardening:\n- Avoid two mechanisms: every string path entrypoint coerces to Path before audit/effects/codegen see it.\n- Avoid shell-shaped footguns: no blessed mkdir/cp/rm subprocess workaround remains in docs.\n- Avoid watch taxonomy sprawl: domain constructors return one shared event/watch abstraction.\n- Avoid silent platform drift: watch/stat/symlink fidelity is test-pinned or exposed as typed capability facts.",
       "blockedBy": [],
-      "assignee": "fable-main",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "fable-main",
+          "text": "[handoff] Ratified surface fully shipped + verified (see 2026-07-10 fable-main log: module_items/prelude/goldens/docs/parity all green). Remaining: criteria #1 verified already; criterion #2 (write_atomic durability) met, awaiting Windows CI verification by sol-288-review. No code work left — just criteria verification then close."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "fable-main",
+          "text": "fable-main audit pass: entire ratified D-FSOPS1/D-FSWATCH1/D-WATCH-SCOPE1 surface verified shipped (module_items.rs:248-276, PathFiles/FsIoEnvOsTesting/ReactiveEventWatch prelude, files_depth+watcher goldens, docs core-library.md synced, parity whole-module Tier-2 exemption correct). Targeted green: corelib core_files/core_watcher, parity, tir. No code changes needed; nothing unratified found. Criteria 1-2 remain with terra-288-builder/sol-288-review lane — releasing claim to avoid double-work."
+        },
         {
           "at": "2026-07-11",
           "by": "fable-main",
@@ -5096,8 +5106,7 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
-      "claimedAt": "2026-07-11T02:22:44.614Z"
+      "refs": []
     },
     {
       "id": "c0pef855",
@@ -5824,12 +5833,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-TESTKIT1=A: Hybrid: core.testing helpers under existing #Test syntax. Keep #Test as the only test syntax. core.testing adds snapshots, fixtures, corpora, temp dirs, fake clocks/random, HTTP servers, golden files, and benchmark budgets. Helpers emit structured test metadata so reports/CI can render categories without new markers for every feature.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: corelib audit: testing toolkit — fuzzing, snapshots, benchmarks beyond M11\n\nCurrent law: Existing linked decisions: none yet. D-CORENS1 keeps all first-party modules under core.*; I6 forbids compiler deps; D-STDRUBRIC1 requires mechanical core API laws.\n\nBuild order: Audit current Core/API/prelude/docs/tests first; write failing UI/golden/unit fixtures; implement std-only or approved bridge code; update docs/reference and syntax-decisions when law changes; run targeted tests, then full nix develop -c cargo test before close.\n\nAcceptance: Examples/goldens or UI snapshots prove each shipped behavior; stdlib map records shipped/carded/declined rows; no rustc/user-hostile errors; no compiler external deps.\n\nDependencies/collisions: Respect neighboring core cards: io/args/process separate; text before regex; net/url before http; encoding before data/db; random never owns secrets.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "fable-main",
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "fable-main",
+          "text": "fable-main starting via jet-impl builder (audit-first: reconcile vs M11 before building)."
+        },
         {
           "at": "2026-07-09",
           "by": "codex-main",
@@ -5866,11 +5880,12 @@
         }
       ],
       "created": "2026-07-07T17:23:33.743Z",
-      "updated": "2026-07-10",
+      "updated": "2026-07-11",
       "workOrder": 29,
       "criteria": [],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-11T02:25:44.106Z"
     },
     {
       "id": "c0nlrm12",
@@ -23603,6 +23618,34 @@
   ],
   "events": [
     {
+      "at": "2026-07-11T02:25:45.964Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c07vdfen",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T02:25:44.107Z",
+      "by": "fable-main",
+      "action": "card.claim",
+      "ref": "c07vdfen",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T02:25:24.627Z",
+      "by": "fable-main",
+      "action": "card.release",
+      "ref": "c0m9tjqj",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-11T02:25:13.462Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0m9tjqj",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-07-11T02:22:46.512Z",
       "by": "fable-main",
       "action": "card.update",
@@ -27072,34 +27115,6 @@
       "by": "codex-orchestrator",
       "action": "card.update",
       "ref": "c00lqj9d",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.049Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0kbaab0",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.049Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0hzhedp",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.049Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0dhzann",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.049Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0b698t4",
       "note": "workOrder"
     }
   ],
