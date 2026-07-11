@@ -622,6 +622,59 @@ fn run() {{
 }
 
 #[test]
+fn core_net_dns_timeout_is_one_budget_across_udp_and_tcp() {
+    use std::io::Read;
+
+    let tcp = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = tcp.local_addr().unwrap();
+    let udp = std::net::UdpSocket::bind(addr).unwrap();
+    let server = std::thread::spawn(move || {
+        let mut query = [0u8; 512];
+        let (n, peer) = udp.recv_from(&mut query).unwrap();
+        let started = std::time::Instant::now();
+        std::thread::sleep(std::time::Duration::from_millis(70));
+        udp.send_to(&dns_truncated_response(&query[..n]), peer).unwrap();
+        let (mut stream, _) = tcp.accept().unwrap();
+        stream.set_read_timeout(Some(std::time::Duration::from_millis(500))).unwrap();
+        let mut prefix = [0u8; 2];
+        stream.read_exact(&mut prefix).unwrap();
+        let mut request = vec![0u8; u16::from_be_bytes(prefix) as usize];
+        stream.read_exact(&mut request).unwrap();
+        let mut closed = [0u8; 1];
+        let _ = stream.read(&mut closed);
+        started.elapsed()
+    });
+    let dir = std::env::temp_dir().join(format!("jet_core_net_dns_budget_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let src = format!(r#"
+use core.net as net
+
+fn run() {{
+    _ :: net.dns_a_at("{}", "service.example.test", 120) ?? panic("dns total timeout")
+}}
+"#, addr);
+    let (code, _stdout, stderr) = build_and_run(&dir, "dns_total_budget", &src, &[], None);
+    let elapsed = server.join().unwrap();
+    assert_ne!(code, 0, "stalled DNS TCP fallback unexpectedly succeeded");
+    assert!(stderr.contains("dns total timeout"), "{stderr}");
+    assert!(elapsed < std::time::Duration::from_millis(190), "UDP and TCP each received a fresh timeout: {elapsed:?}");
+}
+
+#[test]
+fn core_net_dns_platform_resolver_policy_uses_native_sources() {
+    let net = include_str!("../crates/jet-codegen/src/Prelude/CoreLib/Top/NetHttp.rs");
+    assert!(net.contains("#[cfg(target_os = \"linux\")]"));
+    assert!(net.contains("read_to_string(\"/etc/resolv.conf\")"));
+    assert!(net.contains("#[cfg(target_os = \"macos\")]"));
+    assert!(net.contains("Command::new(\"scutil\").arg(\"--dns\")"));
+    assert!(net.contains("#[cfg(windows)]"));
+    assert!(net.contains("Get-DnsClientServerAddress"));
+    assert!(net.contains("$_.ServerAddresses"));
+    assert!(!net.contains("Command::new(\"ipconfig\")"));
+    assert!(!net.contains("1.1.1.1"));
+}
+
+#[test]
 fn core_net_dns_rejects_wrong_transaction_id() {
     let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
     let addr = socket.local_addr().unwrap();
