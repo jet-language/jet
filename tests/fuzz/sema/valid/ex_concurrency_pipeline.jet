@@ -1,0 +1,27 @@
+use core.tasks as tasks
+
+fn run() {
+    (s1, ch) :: tasks.channel<Int>()
+    s2 :: copy s1
+    s3 :: copy s1
+    t1 :: tasks.spawn(take(s1) () => {
+        s1.send(30)
+    })
+    t2 :: tasks.spawn(take(s2) () => {
+        s2.send(10)
+    })
+    t3 :: tasks.spawn(take(s3) () => {
+        s3.send(20)
+    })
+    t1.join()
+    t2.join()
+    t3.join()
+    results: [Int] := []
+    results.push(ch.receive() ?? panic("channel closed"))
+    results.push(ch.receive() ?? panic("channel closed"))
+    results.push(ch.receive() ?? panic("channel closed"))
+    results.sort()
+    loop x in results {
+        print(x)
+    }
+}

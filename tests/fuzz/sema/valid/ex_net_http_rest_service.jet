@@ -1,0 +1,46 @@
+// D-HTTPDEPTH1=A: realistic core.http client + server, no third-party package.
+use core.http.client as Client
+use core.http.server as Server
+use core.files as files
+use core.net as net
+use core.tasks as tasks
+
+fn run() {
+    files.write("/tmp/jet_http_static.txt", "0123456789") ?? panic("static")
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
+    addr :: listener.local_addr()
+
+    mux :: Server.mux()
+    mux.post("/api/:name/*", (req: HttpSrvReq) =>
+        Server.response(200, "{req.param("name") ?? "missing"}|{req.param("wildcard") ?? "missing"}|{req.header("cookie") ?? "missing"}|{req.body_len()}|{req.under_limit(64)}|{req.body()}")
+    )
+    mux.get("/events", (req: HttpSrvReq) => Server.sse("ready"))
+    mux.get("/file", (req: HttpSrvReq) =>
+        Server.static_file_range(req, "/tmp/jet_http_static.txt", "text/plain") ?? Server.response(500, "range")
+    )
+
+    t :: tasks.spawn(take(listener, mux) () => {
+        Server.serve_once_listener(listener, mux) ?? panic("serve1")
+        Server.serve_once_listener(listener, mux) ?? panic("serve2")
+        Server.serve_once_listener(listener, mux) ?? panic("serve3")
+    })
+
+    req0 :: Client.request("POST", "http://{addr}/api/ada/profile")
+    req1 :: req0.form("tool", "jet")
+    req2 :: req1.cookie("session", "abc")
+    req3 :: req2.redirects(0)
+    req4 :: req3.connect_timeout(1000)
+    req :: req4.read_timeout(1000)
+    resp :: req.send() ?? panic("request")
+    print(resp.status())
+    print(resp.body())
+    print(resp.cookies().len())
+    events :: Client.get("http://{addr}/events") ?? panic("events")
+    print(events.header("content-type") ?? "missing")
+    print(events.body())
+    file_req :: Client.request("GET", "http://{addr}/file")
+    file_resp :: file_req.header("range", "bytes=2-5").send() ?? panic("file")
+    print(file_resp.status())
+    print(file_resp.body())
+    t.join()
+}

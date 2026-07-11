@@ -1,0 +1,26 @@
+// 194 — accessibility: ARIA-style roles + keyboard focus routing (Tower
+// c134 Phase 6, D-A11YGATE1=B). `ui.node_role` attaches an accessible role
+// to a `UiNode`; a backend's `set_focus_group`/`focused_label` model Tab-key
+// focus cycling among interactive nodes. This example is a11y-CLEAN — every
+// interactive node has a distinct, non-empty label — so `jet lint --a11y`
+// on this file finds nothing. See tests/ui_lint/a11y_* for what a real
+// violation looks like (E2930 unlabeled control, E2931 duplicate label).
+use core.ui as ui
+
+fn run() {
+    backend :: ui.null_backend()
+    save :: ui.node_role("Save", 40.0, 10.0, ui.aria_role_button())
+    cancel :: ui.node_role("Cancel", 40.0, 10.0, ui.aria_role_button())
+    backend.set_focus_group([save, cancel])
+    print(backend.focused_label())
+    tab :: ui.key_event("Tab")
+    backend.on_event(tab)
+    print(backend.focused_label())
+    backend.on_event(tab)
+    print(backend.focused_label())
+    backend.on_event(tab)
+    print(backend.focused_label())
+    enter :: ui.key_event("enter")
+    result :: backend.on_event(enter)
+    print(result)
+}

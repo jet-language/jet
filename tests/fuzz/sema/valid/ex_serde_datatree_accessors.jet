@@ -1,0 +1,14 @@
+// D-SERDE-ACCESS=B: dynamic Data/Json accessor methods
+use core.encoding.json as json
+
+fn run() {
+    raw := "{{\"user\":{{\"name\":\"Alice\",\"score\":42,\"active\":true}}}}"
+    tree := json.parse(raw) ?? panic("bad json")
+    user := tree.field("user") ?? panic("missing user")
+    name := user.field("name") ?? panic("missing name")
+    score := user.field("score") ?? panic("missing score")
+    active := user.field("active") ?? panic("missing active")
+    print(name.text() ?? panic("name not text"))
+    print(score.int() ?? panic("score not int"))
+    print(active.bool() ?? panic("active not bool"))
+}

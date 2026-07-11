@@ -1,0 +1,24 @@
+// E2-M15: freestanding (no-OS) example.
+// Build with:
+//   jet build --freestanding 61_freestanding.jet
+//
+// Only core-level APIs are used: no file I/O, no network, no threads.
+// The --freestanding flag rejects OS-dependent calls with E3301.
+use core.math as math
+
+fn clamp(x: Int, lo: Int, hi: Int) -> Int {
+    if x < lo {
+        return lo
+    }
+    if x > hi {
+        return hi
+    }
+    return x
+}
+
+fn run() {
+    a :: clamp(15, 0, 10)
+    b :: clamp((-3), 0, 10)
+    root :: math.sqrt(16.0)
+    print("freestanding: clamp(15,0,10)={a}, clamp(-3,0,10)={b}, sqrt(16)={root}")
+}

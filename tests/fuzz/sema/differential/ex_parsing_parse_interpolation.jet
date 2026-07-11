@@ -1,0 +1,21 @@
+// D-PARSESTR1: the same interpolation literal that formats a string can sit
+// in pattern position and match — the fixed text anchors the match, and each
+// `{hole}` binds a name. A typed hole (`{id:Int}`) is a fallible read: it
+// binds only if the matched text parses as that type. Always refutable, so
+// an `if == {}` table needs an `else` arm.
+fn run() {
+    ticket :: "inc-42"
+    if ticket == {
+        "inc-{id:Int}" -> { print("incident #{id}") }
+        else -> {
+            print("not an incident id")
+        }
+    }
+    garbled :: "inc-notanumber"
+    if garbled == {
+        "inc-{id:Int}" -> { print("incident #{id}") }
+        else -> {
+            print("not an incident id")
+        }
+    }
+}

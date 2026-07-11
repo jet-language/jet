@@ -1,0 +1,20 @@
+// D-REPRC1 (ratified; D-REPRC1 = B): `#Layout(c)` — C-compatible struct layout.
+// Stamps `#[repr(C)]` on the generated Rust struct so the Jet struct can be
+// passed directly to C FFI. Field order is preserved as written.
+// Fixed-size arrays `[T#N]` are allowed; growable `[T]` / Map / String are rejected (E1104).
+#Layout(c)
+struct Vec3 {
+    x: Float
+    y: Float
+    z: Float
+}
+
+fn dot(a: Vec3, b: Vec3) -> Float {
+    return (a.x * b.x) + (a.y * b.y) + (a.z * b.z)
+}
+
+fn run() {
+    a := Vec3.{x: 1.0, y: 0.0, z: 0.0}
+    b := Vec3.{x: 0.0, y: 1.0, z: 0.0}
+    print(dot(a, b))
+}

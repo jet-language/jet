@@ -1,0 +1,34 @@
+// D-MEM1 stage S6 (D-POOLID-API1=A): a parent-pointer tree over a `Pool<T>` —
+// the "many owners, one value" shape `ownership.jet`/`ref_field.jet` used to
+// point at as future work (S3). `Id<Node>?` is an ordinary optional field —
+// no new syntax, just the existing `Val`/`None` option type.
+struct Node {
+    name: String
+    parent: Id<Node>?
+    children: [Id<Node>]
+}
+
+fn run() {
+    tree := Pool<Node>.new()
+    root :: tree.add(Node.{ name: "root", parent: None, children: [] })
+    child :: tree.add(Node.{ name: "child", parent: Val(root), children: [] })
+    grandchild :: tree.add(Node.{ name: "grandchild", parent: Val(child), children: [] })
+
+    tree[root].children.push(child)
+    tree[child].children.push(grandchild)
+
+    id := grandchild
+    depth := 0
+    loop {
+        node :: tree[id].parent
+        if node == Val(p) {
+            depth += 1
+            id = p
+        } else {
+            break
+        }
+    }
+    print("grandchild depth={depth}")
+    print("root has {tree[root].children.len()} child")
+    print("child has {tree[child].children.len()} child")
+}

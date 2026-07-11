@@ -1,0 +1,18 @@
+// M9.5: `comptime` runs Jet at compile time and bakes the answer into the
+// binary. This square-table is computed once, while compiling — at runtime
+// it is just constant data.
+fn make_table() -> [Int] {
+    t: [Int] := []
+    loop i in 0..9 {
+        t.push(((i * i) % 7))
+    }
+    return t
+}
+
+comptime TABLE = make_table()
+
+fn run() {
+    print("{TABLE}")
+    print("{TABLE[3]}")
+    print("squares mod 7, baked at compile time")
+}

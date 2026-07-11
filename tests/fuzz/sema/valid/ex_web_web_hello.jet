@@ -1,0 +1,20 @@
+// D-WEBBACKEND1 M2 (c123): DOM/view path compiles to JS + jet_dom_runtime shim.
+use core.ui as ui
+
+fn run() {
+    backend :: ui.null_backend()
+    node :: ui.node("hello", 100.0, 20.0)
+    constraint :: ui.constraint(0.0, 0.0, 200.0, 100.0)
+    size :: backend.measure(node, constraint)
+    print(size.width)
+    print(size.height)
+    frame :: ui.rect(0.0, 0.0, size.width, size.height)
+    backend.layout(node, frame)
+    backend.paint(node)
+    loop cmd in backend.commands() {
+        print(cmd)
+    }
+    key :: ui.key_event("enter")
+    result :: backend.on_event(key)
+    print(result)
+}

@@ -1,0 +1,14 @@
+// D-REACTCORE1 + D-SIGNAL1: `#Reactive { … }` is an explicit reactive effect
+// scope; `reactive.computed` is the canonical name for a derived value.
+use core.reactive as reactive
+
+fn run() {
+    n := reactive.signal(1)
+    doubled := reactive.computed(() => (n.get() * 2))
+    print(doubled.get())
+    #Reactive {
+        print("Reactive Scope: {doubled.get()}")
+    }
+    n.set(5)
+    print(doubled.get())
+}

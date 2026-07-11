@@ -1,0 +1,23 @@
+// D-DESTRUCT1: the dot-construction shape runs backwards to destructure. A
+// pattern that doesn't name every field must end with `..` — the skipped
+// fields are visible at a glance instead of silently dropped. `field: name`
+// renames the local binding.
+struct Incident {
+    id: Int
+    severity: Int
+    title: String
+    kind: String
+}
+
+fn run() {
+    incident :: Incident.{id: 1, severity: 5, title: "database down", kind: "page"}
+    Incident.{id, severity: sev, ..} :: incident
+    print("#{id} sev {sev}")
+    routed :: Incident.{id: 2, severity: 1, title: "database down", kind: "page"}
+    if routed == {
+        .{kind: "page", title, ..} -> { print("page {title}") }
+        else -> {
+            print("other")
+        }
+    }
+}

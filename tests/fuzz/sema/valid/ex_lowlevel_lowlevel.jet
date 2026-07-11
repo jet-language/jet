@@ -1,0 +1,15 @@
+// E2-M13: the expert low-level tier (D-UNSAFE2). Everything here is gated:
+// `use core.mem` unlocks the vocabulary, `#Unsafe("reason") { ... }`
+// opens the audited region where pointer operations are allowed.
+//
+// Ordinary Jet never needs any of this, and never emits `unsafe`.
+use core.mem
+
+fn run() {
+    cell: Int :: 1337
+    #Unsafe("`cell` is live on this stack frame and the pointer never escapes") {
+        p: *Int :: *cell
+        print(p.*)
+        print(p.*)
+    }
+}

@@ -1,0 +1,28 @@
+// D-ENUMDOT1 (ratified 2026-06-26): a leading `.` before a variant name in pattern position.
+// `.Circle(r)` reads as "a member of the inferred enum", resolving S31's bare-name-vs-variable
+// ambiguity without a qualified `Shape.Circle(r)` spelling.
+// Bare form still accepted; dot form is canonical (formatter always emits it).
+enum Shape {
+    Circle(Float)
+    Square(Float)
+    Empty
+}
+
+fn area(s: Shape) -> Float {
+    if s == {
+        .Circle(r) -> { return r * r }
+        .Square(side) -> { return side * side }
+        .Empty -> { return 0.0 }
+
+    }
+}
+
+fn run() {
+    print(area(Shape.Circle(3.0)))
+    print(area(Shape.Square(4.0)))
+    print(area(Shape.Empty))
+}
+// --- expected output --------------------------------------------------
+// 9.0
+// 16.0
+// 0.0

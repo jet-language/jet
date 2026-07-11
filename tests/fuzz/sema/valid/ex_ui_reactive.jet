@@ -1,0 +1,27 @@
+// D-REACT1=B: reactivity is an opt-in LIBRARY, not core semantics. Ordinary
+// bindings stay non-reactive; `jet.reactive` adds explicit reactive values —
+// signals (mutable sources), derived values (recomputed from signals), and
+// effects (side effects that re-run when a signal they read changes).
+//
+// The runtime is pure std (no external crate, no unsafe). Dependency tracking is
+// explicit-by-read: a `.get()` inside a derived/effect body subscribes it.
+use core.reactive as reactive
+
+fn run() {
+    // A signal is a mutable reactive source. `T` is inferred from the initial value.
+    price := reactive.signal(100)
+    qty := reactive.signal(2)
+    // A derived value recomputes from the signals it reads. Reading `price.get()`
+    // and `qty.get()` here subscribes this derived to both.
+    total := reactive.derived(() => (price.get() * qty.get()))
+    print(total.get())
+    // An effect runs now and again whenever a signal it read changes.
+    reactive.effect(() => {
+        print(total.get())
+    })
+    // Change a source: the derived recomputes and the effect re-runs.
+    price.set(150)
+    qty.set(3)
+    // Read the latest derived value directly.
+    print(total.get())
+}

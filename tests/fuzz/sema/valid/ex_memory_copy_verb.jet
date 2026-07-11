@@ -1,0 +1,28 @@
+// D-CAP2 (D-MEM1/S4): `copy x` — the one copy verb. Produces a fresh,
+// independent value from a named binding; a temporary, so it never needs
+// `^` and never trips E0209 (unlike passing `x` itself to a move param).
+// `.clone()` is not user-typable Jet syntax — `copy x` is the only spelling.
+struct Ticket {
+    id: Int
+    label: String
+}
+
+fn archive(t: ^Ticket) -> String {
+    return t.label
+}
+
+fn run() {
+    name: String :: "vault"
+    saved :: copy name
+    print(name)
+    print(saved)
+
+    n: Int := 5
+    m :: copy n
+    print(n)
+    print(m)
+
+    t :: Ticket.{id: 1, label: "root"}
+    print(archive(copy t))
+    print(t.label)
+}

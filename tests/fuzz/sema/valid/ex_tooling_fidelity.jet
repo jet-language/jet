@@ -1,0 +1,18 @@
+// D-FIDELITY-API1=A: Perf fidelity signal — explicit app-read quality/perf knob.
+use core.perf as Perf
+
+fn run() -> Void ? {
+    print(Perf.default_fidelity())
+    print(Perf.fidelity())
+
+    Perf.override_fidelity(0.5)?
+    print(Perf.fidelity())
+
+    Perf.override_fidelity(0.1)?
+    if Perf.fidelity() < 0.5 {
+        print("low quality mode")
+    }
+
+    Perf.reset_fidelity()
+    print(Perf.fidelity())
+}

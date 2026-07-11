@@ -1,0 +1,18 @@
+// D-PERSIST1 — `@Persist` dev-hot-reload state survival.
+// A module-level binding marked `@Persist` is meant to survive a `jet dev`
+// hot reload instead of resetting (identity = module path + binding name).
+// Release semantics are identical with or without the marker — this example
+// documents the surface and its ordinary (non-dev) run: `@Persist` is inert
+// here, so `counter` is simply its initial value.
+//
+// The dev-reload carry-across itself needs a module-plus-name-keyed value
+// store in the JIT resident runtime (`crates/jet-jit`), which doesn't exist
+// yet — see the D-PERSIST1 row in docs/spec/syntax-decisions.md for the
+// named gate. This example is golden-tested for the ordinary run only.
+@Persist const counter = 0
+
+fn run() {
+    print("{counter}")
+}
+// --- expected output --------------------------------------------------
+// 0

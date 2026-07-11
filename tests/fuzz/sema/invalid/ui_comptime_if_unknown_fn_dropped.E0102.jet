@@ -1,0 +1,10 @@
+// D-WHEN2: unknown function in the dropped arm must still be caught (E0102).
+// Previously, E0107 (unknown var) was kept but E0102 (unknown fn) was silently dropped.
+comptime FLAG = true
+fn run() {
+    comptime if FLAG {
+        print("selected")
+    } else {
+        nonexistent_function_xyz()
+    }
+}

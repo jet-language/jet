@@ -1,0 +1,26 @@
+// D-FIXARR1 (ratified 2026-06-22): `[T#N]` lowers to a real Rust stack array.
+// Unlike growable `[T]` (Vec), a `[T#N]` has a compile-time-known length; the
+// codegen type is `[T; N]` — no heap allocation. Widening to `[T]` (copy into
+// a Vec) happens automatically when a fixed-size list is passed to a `[T]` slot.
+fn sum(xs: [Int]) -> Int {
+    total := 0
+    loop x in xs {
+        total += x
+    }
+    return total
+}
+
+fn run() {
+    // A binding with an explicit `[T#N]` type gets a real stack array.
+    rgb: [U8#3] :: [255, 128, 0]
+    print(rgb[0])
+    print(rgb[1])
+    print(rgb[2])
+    // Indexing and length work the same as a growable list.
+    coords: [Int#2] :: [10, 20]
+    print(coords[0])
+    print(coords[1])
+    // A `[T#N]` widens to `[T]` when passed to a growable-list parameter.
+    nums: [Int#3] :: [3, 1, 4]
+    print(sum(nums))
+}
