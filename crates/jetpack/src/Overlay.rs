@@ -571,6 +571,11 @@ fn apply_unified_patch(
                         old_seen += 1;
                     }
                     '+' => {
+                        if idx > file_lines.len() {
+                            return Err(OverlayError::Patch(format!(
+                                "patch insertion is outside `{target}`"
+                            )));
+                        }
                         file_lines.insert(idx, text.to_string());
                         idx += 1;
                         added += 1;
@@ -1058,6 +1063,27 @@ module workspace {
         assert_eq!(
             std::fs::read_to_string(root.join("src/file.txt")).unwrap(),
             "replacement\n"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn out_of_range_insertion_returns_patch_error() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-overlay-insertion-range-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/file.txt"), "one\n").unwrap();
+        let patch =
+            "--- a/src/file.txt\n+++ b/src/file.txt\n@@ -999,0 +999,1 @@\n+replacement\n";
+
+        let err = apply_unified_patch(&root, patch).unwrap_err();
+        assert_eq!(err.message(), "patch insertion is outside `src/file.txt`");
+        assert_eq!(
+            std::fs::read_to_string(root.join("src/file.txt")).unwrap(),
+            "one\n"
         );
         let _ = std::fs::remove_dir_all(&root);
     }
