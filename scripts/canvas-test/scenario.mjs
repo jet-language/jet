@@ -644,6 +644,49 @@ export const scenarios = {
     await ctx.screenshot("selected-square");
   },
 
+  "node-drag-persists-without-source-change": async (ctx) => {
+    await ctx.openCanvas();
+    const sourceBefore = await ctx.source();
+    const before = await ctx.state();
+    const target = Object.values(before.nodeBounds || {}).find((node) => node.title === "square")
+      || Object.values(before.nodeBounds || {})[0];
+    if (!target) throw new Error("no node available for drag");
+
+    // CDP emits the same client-coordinate pointer stream as a user drag.
+    const requested = { x: 37, y: 29 };
+    const rect = await ctx.canvasRect();
+    const from = {
+      x: rect.left + target.x + target.w / 2,
+      y: rect.top + target.y + target.h / 2,
+    };
+    await ctx.driver.drag(from, {
+      x: from.x + requested.x,
+      y: from.y + requested.y,
+    }, 16);
+    await sleep(150);
+
+    const after = await ctx.state();
+    const moved = after.nodeBounds && after.nodeBounds[target.node_id];
+    if (!moved) throw new Error(`dragged node disappeared: ${target.node_id}`);
+    const delta = { x: moved.x - target.x, y: moved.y - target.y };
+    const tolerance = 0.75;
+    if (Math.abs(delta.x - requested.x) > tolerance || Math.abs(delta.y - requested.y) > tolerance) {
+      throw new Error(`node drag delta ${JSON.stringify(delta)} != requested ${JSON.stringify(requested)} within ${tolerance}; before=${JSON.stringify(target)} after=${JSON.stringify(moved)} view=${JSON.stringify(before.view)} -> ${JSON.stringify(after.view)}`);
+    }
+    const sourceAfter = await ctx.source();
+    if (sourceAfter !== sourceBefore) throw new Error("node drag changed Jet source bytes");
+
+    await ctx.openCanvas();
+    const reloaded = await ctx.state();
+    const persisted = reloaded.nodeBounds && reloaded.nodeBounds[target.node_id];
+    if (!persisted) throw new Error(`dragged node missing after reload: ${target.node_id}`);
+    if (Math.abs(persisted.x - moved.x) > tolerance || Math.abs(persisted.y - moved.y) > tolerance) {
+      throw new Error(`node bounds did not persist across reload: moved=${JSON.stringify(moved)} reloaded=${JSON.stringify(persisted)}`);
+    }
+    const sourceReloaded = await ctx.source();
+    if (sourceReloaded !== sourceBefore) throw new Error("reload after node drag changed Jet source bytes");
+  },
+
   "read-graph-overview": async (ctx) => {
     await ctx.openCanvas();
     const overview = await ctx.driver.evaluate("window.__jetCanvasGraphOverview");

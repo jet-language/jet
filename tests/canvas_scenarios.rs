@@ -79,6 +79,11 @@ fn click_select_details() {
 }
 
 #[test]
+fn node_drag_persists_without_source_change() {
+    run_canvas_scenario("node-drag-persists-without-source-change");
+}
+
+#[test]
 fn read_graph_overview() {
     run_canvas_scenario("read-graph-overview");
 }
@@ -242,12 +247,15 @@ fn run_canvas_scenario(name: &str) {
         );
     }
     eprintln!("{}", String::from_utf8_lossy(&output.stdout));
+    if name == "node-drag-persists-without-source-change" {
+        case.cleanup();
+    }
 }
 
 fn ensure_jet_built() {
     BUILD_JET.call_once(|| {
         let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let bin = repo.join("target/debug/jet");
+        let bin = cargo_target_dir(&repo).join("debug/jet");
         if bin.exists() {
             return;
         }
@@ -258,6 +266,14 @@ fn ensure_jet_built() {
             .expect("cargo build for Canvas scenarios");
         assert!(status.success(), "cargo build failed before Canvas scenarios");
     });
+}
+
+fn cargo_target_dir(repo: &Path) -> PathBuf {
+    match std::env::var_os("CARGO_TARGET_DIR") {
+        Some(dir) if Path::new(&dir).is_absolute() => PathBuf::from(dir),
+        Some(dir) => repo.join(dir),
+        None => repo.join("target"),
+    }
 }
 
 fn tool_available(name: &str) -> bool {
@@ -294,6 +310,10 @@ impl CanvasCase {
             screenshots,
         }
     }
+
+    fn cleanup(&self) {
+        fs::remove_dir_all(&self.dir).expect("remove passed Canvas scenario artifacts");
+    }
 }
 
 struct DevServer {
@@ -302,7 +322,7 @@ struct DevServer {
 
 impl DevServer {
     fn start(repo: &Path, cwd: &Path, entry: &Path, port: u16) -> DevServer {
-        let jet = repo.join("target/debug/jet");
+        let jet = cargo_target_dir(repo).join("debug/jet");
         let mut child = Command::new(jet)
             .current_dir(cwd)
             .arg("dev")
