@@ -493,18 +493,28 @@ const DEFAULT_BACKEND_BOUNDARIES: &[&str] = &[
     "ui/ui_native_linux",
 ];
 
-#[derive(Default, Clone, Copy)]
+const DEFAULT_BACKEND_EXPECTED_BOUNDARIES: &[&str] = &[
+    "io/db_checked_sql",
+    "io/path",
+    "io/stdin_filter",
+    "tooling/data_pipeline",
+    "ui/ui_native_linux",
+];
+
+#[derive(Default, Clone)]
 struct DevBatteryStats {
     ran: usize,
     boundary: usize,
     manifested: usize,
+    boundary_stems: Vec<String>,
 }
 
 impl DevBatteryStats {
-    fn add(&mut self, other: DevBatteryStats) {
+    fn add(&mut self, mut other: DevBatteryStats) {
         self.ran += other.ran;
         self.boundary += other.boundary;
         self.manifested += other.manifested;
+        self.boundary_stems.append(&mut other.boundary_stems);
     }
 }
 
@@ -528,6 +538,7 @@ fn check_dev_default_stem(
         eprintln!("manifested default-backend boundary: {stem}");
         return DevBatteryStats {
             boundary: 1,
+            boundary_stems: vec![stem.to_string()],
             ..DevBatteryStats::default()
         };
     }
@@ -539,6 +550,13 @@ fn check_dev_default_stem(
             exit_code,
         } => ProgramOutput::ran(stdout, stderr, exit_code),
         RunOutcome::Problems(diags) => {
+            if stem == "io/stdin_filter" {
+                assert_eq!(
+                    diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
+                    vec!["E3410"],
+                    "stdin_filter must stop at the deterministic ambient-stdin boundary"
+                );
+            }
             eprintln!(
                 "default boundary: {stem}: {}",
                 diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>().join(",")
@@ -553,6 +571,7 @@ fn check_dev_default_stem(
             );
             return DevBatteryStats {
                 boundary: 1,
+                boundary_stems: vec![stem.to_string()],
                 ..DevBatteryStats::default()
             };
         }
@@ -813,10 +832,12 @@ fn dev_default_matches_compiled_binary() {
         stats.ran > 0,
         "expected at least some examples to run via the default jet dev backend"
     );
+    let mut observed_boundaries = stats.boundary_stems;
+    observed_boundaries.sort();
     assert_eq!(
-        stats.boundary,
-        DEFAULT_BACKEND_BOUNDARIES.len(),
-        "default jet dev boundary set must stay explicit and narrow"
+        observed_boundaries,
+        DEFAULT_BACKEND_EXPECTED_BOUNDARIES,
+        "default jet dev boundary set must stay exact and every non-manifested boundary must execute"
     );
     assert_eq!(
         stats.manifested, 0,
