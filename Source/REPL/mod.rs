@@ -1408,10 +1408,15 @@ fn render_diags(file: &str, src: &str, diags: &[Diagnostic], color: bool) {
 /// mirrors — piped/redirected sessions keep the pre-redesign plain output.
 pub fn run(project_dir: Option<&str>) -> i32 {
     let color = color_on();
+    let raw_guard = Terminal::RawGuard::enable();
     println!("{}", Render::render_banner(env!("CARGO_PKG_VERSION"), color));
     println!();
+    eprintln!(
+        "{}",
+        Render::render_discovery_hint(raw_guard.is_some(), color)
+    );
 
-    match Terminal::RawGuard::enable() {
+    match raw_guard {
         Some(guard) => Interactive::run_interactive(project_dir, color, guard),
         None => run_cooked(project_dir, color),
     }
@@ -1889,59 +1894,83 @@ fn apply_replay_plan(session: &mut Session, plan: &RerunPlan::ReplayPlan, base_d
     }
 }
 
-fn print_help(color: bool) {
-    println!("{}", bold("REPL meta-commands", color));
-    println!("  {}          end the session", bold(":quit", color));
-    println!(
+fn help_text(color: bool) -> String {
+    use std::fmt::Write as _;
+
+    let mut out = String::new();
+    writeln!(out, "{}", bold("REPL meta-commands", color)).unwrap();
+    writeln!(out, "  {}          end the session", bold(":quit", color)).unwrap();
+    writeln!(
+        out,
         "  {}         clear all bindings and start fresh",
         bold(":reset", color)
-    );
-    println!(
+    ).unwrap();
+    writeln!(
+        out,
         "  {}  load a Jet file into the session",
         bold(":load <file.jet>", color)
-    );
-    println!(
+    ).unwrap();
+    writeln!(
+        out,
         "  {}      show the type of a binding",
         bold(":type <name>", color)
-    );
-    println!(
+    ).unwrap();
+    writeln!(
+        out,
         "  {}           compile + run the session (bypasses fuel cap)",
         bold(":run", color)
-    );
-    println!(
+    ).unwrap();
+    writeln!(
+        out,
         "  {}         list notebook turns, status, pins, and folds",
         bold(":turns", color)
-    );
-    println!(
+    ).unwrap();
+    writeln!(
+        out,
         "  {}       rerun a prior turn as a preview",
         bold(":rerun <id>", color)
-    );
-    println!(
+    ).unwrap();
+    writeln!(
+        out,
         "  {}        fold or unfold a turn's output summary",
         bold(":fold <id>", color)
-    );
-    println!(
+    ).unwrap();
+    writeln!(
+        out,
         "  {}         pin or unpin a turn in the notebook rail",
         bold(":pin <id>", color)
-    );
-    println!(
-        "  {}         show docs/type info for a name",
-        bold(":? <name>", color)
-    );
-    println!("  {}          show this message", bold(":help", color));
-    println!();
-    println!(
+    ).unwrap();
+    writeln!(out, "  {}           show docs/type info for a name", bold("?name", color)).unwrap();
+    writeln!(out, "  {}         alias for {}", bold(":? <name>", color), bold("?name", color)).unwrap();
+    writeln!(out, "  {}          show this message", bold(":help", color)).unwrap();
+    writeln!(out).unwrap();
+    writeln!(out, "{}", bold("Interactive terminal only", color)).unwrap();
+    writeln!(out, "  {}             complete the current name", bold("Tab", color)).unwrap();
+    writeln!(out, "  {}              pin or unpin the latest turn", bold("^P", color)).unwrap();
+    writeln!(out, "  {}              fold or unfold the latest turn", bold("^F", color)).unwrap();
+    writeln!(out, "  {}              edit and rerun a prior turn", bold("^R", color)).unwrap();
+    writeln!(out, "  {}              open or close live bindings", bold("^B", color)).unwrap();
+    writeln!(out).unwrap();
+    writeln!(
+        out,
         "  Tip: end a line with {} to suppress echo of its value.",
         bold(";", color)
-    );
-    println!(
+    ).unwrap();
+    writeln!(
+        out,
         "  Tip: {} is auto-imported — type `print(\"hello\")` to try it.",
         bold("core.io", color)
-    );
-    println!(
+    ).unwrap();
+    writeln!(
+        out,
         "  Tip: a `{}` line is kept for the whole session — import once, use it on any later line.",
         bold("use core.math as math", color)
-    );
+    ).unwrap();
+    out
+}
+
+fn print_help(color: bool) {
+    print!("{}", help_text(color));
 }
 
 // ── transcript test harness (D-REPL20=A) ──────────────────────────────────

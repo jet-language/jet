@@ -165,8 +165,47 @@ fn repl_quit_exits() {
 
 #[test]
 fn repl_help_shows_commands() {
-    let out = run_transcript(&[":help"], None);
+    use std::io::Write as _;
+    use std::process::{Command, Stdio};
+
+    // Merge the child's stderr into stdout before launch. The discovery hint
+    // intentionally uses stderr so the historical stdout banner stays stable;
+    // one pipe lets this regression verify the order users actually observe.
+    let mut child = Command::new("sh")
+        .args(["-c", "exec \"$JET_REPL_BIN\" repl 2>&1"])
+        .env("JET_REPL_BIN", env!("CARGO_BIN_EXE_jet"))
+        .env("NO_COLOR", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("start jet repl");
+    child
+        .stdin
+        .as_mut()
+        .expect("piped stdin")
+        .write_all(b":help\n:quit\n")
+        .expect("write transcript");
+    let output = child.wait_with_output().expect("finish jet repl");
+    assert!(output.status.success(), "status: {:?}", output.status);
+    let out = String::from_utf8(output.stdout).expect("utf-8 help");
+    let banner = out.find("Jet 1.0.0 — interactive REPL").expect("banner");
+    let cooked_hint = out
+        .find("Try: ?name docs · :pin/:fold/:rerun <id> · interactive keys require a TTY")
+        .expect("cooked discovery hint from stderr");
+    assert!(banner < cooked_hint, "banner must precede hint: {out:?}");
     assert!(out.contains("REPL meta-commands"), "got: {:?}", out);
+    for hint in [
+        "?name",
+        ":? <name>",
+        "Interactive terminal only",
+        "Tab",
+        "^P",
+        "^F",
+        "^R",
+        "^B",
+    ] {
+        assert!(out.contains(hint), "help missing {hint:?}: {out:?}");
+    }
 }
 
 #[test]

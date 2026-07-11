@@ -33,6 +33,28 @@ pub fn render_banner(version: &str, color: bool) -> String {
     )
 }
 
+/// Startup discovery stays mode-accurate: raw-only keys are never offered
+/// when the REPL fell back to its cooked, non-TTY line loop.
+pub fn render_discovery_hint(raw_mode: bool, color: bool) -> String {
+    if raw_mode {
+        format!(
+            "Try: {} complete · {} docs · {} pin · {} fold · {} rerun · {} bindings",
+            bold("Tab", color),
+            bold("?name", color),
+            bold("^P", color),
+            bold("^F", color),
+            bold("^R", color),
+            bold("^B", color),
+        )
+    } else {
+        format!(
+            "Try: {} docs · {} · interactive keys require a TTY",
+            bold("?name", color),
+            bold(":pin/:fold/:rerun <id>", color),
+        )
+    }
+}
+
 /// The interactive-only prompt: a dim one-character-cost turn-number gutter
 /// ahead of `user> ` (`1 user> `). The non-TTY floor keeps the old bare
 /// `user> ` prompt (see `Source/REPL/mod.rs::run_cooked`) — this is never
@@ -164,6 +186,18 @@ mod tests {
         assert_eq!(
             s,
             "Jet 1.0.0 — interactive REPL  (:quit, :help, ^B bindings)"
+        );
+    }
+
+    #[test]
+    fn discovery_hints_match_available_modes() {
+        assert_eq!(
+            render_discovery_hint(true, false),
+            "Try: Tab complete · ?name docs · ^P pin · ^F fold · ^R rerun · ^B bindings"
+        );
+        assert_eq!(
+            render_discovery_hint(false, false),
+            "Try: ?name docs · :pin/:fold/:rerun <id> · interactive keys require a TTY"
         );
     }
 
