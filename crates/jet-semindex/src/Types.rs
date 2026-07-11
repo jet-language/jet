@@ -107,6 +107,20 @@ pub struct SymbolRef {
     pub name: String,
     pub module_path: String,
     pub scope_identity: Option<String>,
+    /// Compiler-resolved definition identity. `None` means unresolved or
+    /// ambiguous; semantic refactors must never fall back to spelling.
+    pub target_identity: Option<String>,
+    pub span: SourceSpan,
+}
+
+/// One compiler-owned structural AST boundary. Spans come from the parsed AST,
+/// not token-window inference, so structural tools cannot reinterpret an expr
+/// as a stmt/item/type merely because its bytes happen to parse there.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructuralNode {
+    pub class: String,
+    pub shape: String,
+    pub module_path: String,
     pub span: SourceSpan,
 }
 
@@ -138,6 +152,7 @@ pub struct SemIndex {
     calls: Vec<CallEdge>,
     effects: Vec<EffectFact>,
     members: Vec<MemberFact>,
+    nodes: Vec<StructuralNode>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -154,6 +169,7 @@ impl SemIndex {
         calls: Vec<CallEdge>,
         effects: Vec<EffectFact>,
         members: Vec<MemberFact>,
+        nodes: Vec<StructuralNode>,
     ) -> Self {
         SemIndex {
             schema_version: SCHEMA_VERSION,
@@ -162,6 +178,7 @@ impl SemIndex {
             calls,
             effects,
             members,
+            nodes,
         }
     }
 
@@ -195,6 +212,10 @@ impl SemIndex {
 
     pub fn members(&self) -> &[MemberFact] {
         &self.members
+    }
+
+    pub fn structural_nodes(&self) -> &[StructuralNode] {
+        &self.nodes
     }
 
     pub fn members_of(&self, owner: &str) -> Vec<&MemberFact> {

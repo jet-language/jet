@@ -468,14 +468,22 @@ fn apply_rule(
                         && kind_matches(&d.kind, kind)
                         && anchors
                             .iter()
-                            .any(|(p, _)| same_path(Path::new(&d.module_path), p))
+                            .any(|(p, identity)| {
+                                same_path(Path::new(&d.module_path), p)
+                                    && d.identity == *identity
+                            })
                 }) {
                     edits
                         .entry(canonicalish(Path::new(&d.module_path)))
                         .or_default()
                         .push(edit(d.def_span, to));
                 }
-                for r in idx.references().iter().filter(|r| r.name == *name) {
+                for r in idx.references().iter().filter(|r| {
+                    r.name == *name
+                        && r.target_identity.as_ref().is_some_and(|target| {
+                            anchors.iter().any(|(_, identity)| identity == target)
+                        })
+                }) {
                     let path = canonicalish(Path::new(&r.module_path));
                     if files.contains_key(&path) {
                         edits.entry(path).or_default().push(edit(r.span, to));
@@ -498,7 +506,7 @@ fn apply_rule(
                 let state = &files[&u.entry];
                 let source = String::from_utf8(state.staged.clone())
                     .unwrap_or_else(|_| fail(&format!("`{}` is not UTF-8", u.entry.display())));
-                for found in find_template_matches(pattern, &source, node) {
+                for found in find_template_matches(pattern, &source, node, &idx, &u.entry) {
                     if !semantic_candidate(pattern, &found, &idx, &u.entry) {
                         continue;
                     }
@@ -793,34 +801,129 @@ fn validate_templates(id: &str, m: &Template, r: &Template) {
         }
     }
 }
-fn find_template_matches(t: &Template, src: &str, _node: &str) -> Vec<Found> {
+fn find_template_matches(
+    t: &Template,
+    src: &str,
+    node: &str,
+    idx: &SemIndex,
+    path: &Path,
+) -> Vec<Found> {
     let toks = lex_jet_source(src);
+    let boundaries = idx
+        .structural_nodes()
+        .iter()
+        .filter(|n| n.class == node && same_path(Path::new(&n.module_path), path))
+        .map(|n| (n.span.start, n.span.end))
+        .collect::<BTreeSet<_>>();
     let mut out = Vec::new();
     for start in 0..toks.len() {
         let mut captures = BTreeMap::new();
         if let Some(end) = match_atoms(&t.atoms, 0, &toks, start, src, &mut captures) {
             if end > start {
-                out.push(Found {
-                    start: toks[start].start,
-                    end: toks[end - 1].end,
+                let found_start = toks[start].start;
+                let found_end = toks[end - 1].end;
+                if !boundaries.contains(&(found_start, found_end)) {
+                    continue;
+                }
+                let found = Found {
+                    start: found_start,
+                    end: found_end,
                     captures,
-                })
+                };
+                if captures_are_structural(t, &found, src, idx, path) {
+                    out.push(found)
+                }
             }
         }
     }
     out
 }
-fn semantic_candidate(t: &Template, f: &Found, idx: &SemIndex, path: &Path) -> bool {
-    let Some(Atom::Literal(callee)) = t.atoms.first() else {
-        return true;
-    };
-    if !is_ident(callee) || !matches!(t.atoms.get(1),Some(Atom::Literal(x))if x=="(") {
-        return true;
+
+fn captures_are_structural(
+    template: &Template,
+    found: &Found,
+    source: &str,
+    idx: &SemIndex,
+    path: &Path,
+) -> bool {
+    let nodes = idx
+        .structural_nodes()
+        .iter()
+        .filter(|node| {
+            matches!(node.class.as_str(), "expr" | "stmt" | "item" | "type")
+                && same_path(Path::new(&node.module_path), path)
+                && node.span.start >= found.start
+                && node.span.end <= found.end
+        })
+        .collect::<Vec<_>>();
+    template.atoms.iter().all(|atom| {
+        let Atom::Capture(name, variadic) = atom else {
+            return true;
+        };
+        let captured = &found.captures[name];
+        if *variadic && captured.is_empty() {
+            return true;
+        }
+        let pieces = if *variadic {
+            split_top_level_capture(captured)
+        } else {
+            vec![captured.as_str()]
+        };
+        pieces.into_iter().all(|piece| {
+            let expected = normalized(piece);
+            nodes.iter().any(|node| {
+                source
+                    .get(node.span.start..node.span.end)
+                    .is_some_and(|candidate| normalized(candidate) == expected)
+            })
+        })
+    })
+}
+
+fn split_top_level_capture(source: &str) -> Vec<&str> {
+    let tokens = lex_jet_source(source);
+    let mut depth = 0isize;
+    let mut start = 0usize;
+    let mut pieces = Vec::new();
+    for token in &tokens {
+        match token.text.as_str() {
+            "(" | "[" | "{" => depth += 1,
+            ")" | "]" | "}" => depth -= 1,
+            "," if depth == 0 => {
+                pieces.push(source[start..token.start].trim());
+                start = token.end;
+            }
+            _ => {}
+        }
     }
-    idx.call_edges().iter().any(|c| {
-        c.callee == *callee
-            && same_path(Path::new(&c.module_path), path)
-            && c.call_span.start == f.start
+    pieces.push(source[start..].trim());
+    pieces
+}
+fn semantic_candidate(t: &Template, f: &Found, idx: &SemIndex, path: &Path) -> bool {
+    t.atoms.iter().enumerate().all(|(i, atom)| {
+        let Atom::Literal(name) = atom else {
+            return true;
+        };
+        if !is_identifier_literal(name)
+            || is_builtin(name)
+            || t.atoms
+                .get(i + 1)
+                .is_some_and(|next| matches!(next, Atom::Literal(x) if x == ":"))
+        {
+            return true;
+        }
+        idx.references().iter().any(|reference| {
+            reference.name == *name
+                && same_path(Path::new(&reference.module_path), path)
+                && reference.span.start >= f.start
+                && reference.span.end <= f.end
+                && reference.target_identity.is_some()
+        }) || idx.definitions().iter().any(|definition| {
+            definition.name == *name
+                && same_path(Path::new(&definition.module_path), path)
+                && definition.def_span.start >= f.start
+                && definition.def_span.end <= f.end
+        })
     })
 }
 fn match_atoms(
@@ -1052,8 +1155,14 @@ fn print_simple_diff(before: &[u8], after: &[u8]) {
     for line in a.lines() {
         println!("-{line}")
     }
+    if !before.is_empty() && !before.ends_with(b"\n") {
+        println!("\\ No newline at end of file")
+    }
     for line in b.lines() {
         println!("+{line}")
+    }
+    if !after.is_empty() && !after.ends_with(b"\n") {
+        println!("\\ No newline at end of file")
     }
 }
 
@@ -1452,11 +1561,6 @@ fn validate_ident(n: &str) {
     {
         fail(&format!("`{n}` is not a Jet identifier"))
     }
-}
-fn is_ident(n: &str) -> bool {
-    let mut c = n.chars();
-    c.next().is_some_and(|x| x == '_' || x.is_alphabetic())
-        && c.all(|x| x == '_' || x.is_alphanumeric())
 }
 fn is_identifier_literal(text: &str) -> bool {
     let (tokens, diagnostics) = jet::Lexer::lex(text);

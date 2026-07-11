@@ -13,7 +13,8 @@ pub use Build::{
 };
 pub use Types::{
     CallEdge, EffectFact, MemberFact, MemberKind, MemberOrigin, SemIndex, SourceSpan,
-    StructuralAudit, SymbolDef, SymbolKind, SymbolRef, TypeDossier, SCHEMA_VERSION,
+    StructuralAudit, StructuralNode, SymbolDef, SymbolKind, SymbolRef, TypeDossier,
+    SCHEMA_VERSION,
 };
 
 use jet_foundation::Diagnostics::Diagnostic;

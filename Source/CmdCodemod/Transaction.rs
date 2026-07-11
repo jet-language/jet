@@ -5,12 +5,22 @@ use std::path::{Path, PathBuf};
 use super::{fail, hash_bytes, json_escape};
 
 pub struct Lock {
-    path: PathBuf,
+    _path: PathBuf,
     _file: File,
 }
 impl Drop for Lock {
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
+        #[cfg(unix)]
+        {
+            use std::os::fd::AsRawFd;
+            extern "C" {
+                fn flock(fd: i32, operation: i32) -> i32;
+            }
+            const LOCK_UN: i32 = 8;
+            let _ = unsafe { flock(self._file.as_raw_fd(), LOCK_UN) };
+        }
+        #[cfg(all(not(unix), not(windows)))]
+        let _ = fs::remove_file(&self._path);
     }
 }
 
@@ -26,22 +36,44 @@ pub fn lock(project: &Path) -> Lock {
     fs::create_dir_all(&dir)
         .unwrap_or_else(|e| fail(&format!("could not create `{}`: {e}", dir.display())));
     let path = dir.join("codemod.lock");
-    if path.exists() {
-        let owner = fs::read_to_string(&path).unwrap_or_default();
-        let live = owner
-            .strip_prefix("pid=")
-            .and_then(|s| s.trim().parse::<u32>().ok())
-            .is_some_and(|pid| Path::new("/proc").join(pid.to_string()).exists());
-        if live {
+    #[cfg(unix)]
+    let mut file = {
+        use std::os::fd::AsRawFd;
+        extern "C" {
+            fn flock(fd: i32, operation: i32) -> i32;
+        }
+        const LOCK_EX: i32 = 2;
+        const LOCK_NB: i32 = 4;
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(&path)
+            .unwrap_or_else(|e| fail(&format!("could not open codemod lock: {e}")));
+        if unsafe { flock(file.as_raw_fd(), LOCK_EX | LOCK_NB) } != 0 {
             fail(&format!("another codemod holds `{}`", path.display()));
         }
-        fs::remove_file(&path).unwrap_or_else(|e| {
-            fail(&format!(
-                "could not clear stale codemod lock `{}`: {e}",
-                path.display()
-            ))
-        });
-    }
+        file.set_len(0)
+            .unwrap_or_else(|e| fail(&format!("could not reset codemod lock: {e}")));
+        file
+    };
+    #[cfg(windows)]
+    let mut file = {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_FLAG_DELETE_ON_CLOSE: u32 = 0x04000000;
+        const GENERIC_READ: u32 = 0x8000_0000;
+        const GENERIC_WRITE: u32 = 0x4000_0000;
+        const DELETE: u32 = 0x0001_0000;
+        OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .access_mode(GENERIC_READ | GENERIC_WRITE | DELETE)
+            .custom_flags(FILE_FLAG_DELETE_ON_CLOSE)
+            .open(&path)
+            .unwrap_or_else(|_| fail(&format!("another codemod holds `{}`", path.display())))
+    };
+    #[cfg(all(not(unix), not(windows)))]
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -51,7 +83,7 @@ pub fn lock(project: &Path) -> Lock {
         .unwrap_or_else(|e| fail(&format!("could not write codemod lock: {e}")));
     file.sync_all()
         .unwrap_or_else(|e| fail(&format!("could not sync codemod lock: {e}")));
-    Lock { path, _file: file }
+    Lock { _path: path, _file: file }
 }
 
 pub fn recover(project: &Path) {
@@ -62,6 +94,7 @@ pub fn recover(project: &Path) {
     let raw = fs::read_to_string(&journal)
         .unwrap_or_else(|e| fail(&format!("could not read recovery journal: {e}")));
     let parsed = parse_journal(&raw);
+    validate_journal_paths(project, &parsed, &journal);
     let records = &parsed.records;
     let all_after = records.iter().all(|record| {
         fs::read(&record.path)
@@ -91,7 +124,7 @@ pub fn recover(project: &Path) {
             continue;
         }
         if current == record.after {
-            atomic_restore(&record.path, &record.before);
+            atomic_restore(project, &record.path, &record.before);
         } else {
             conflict.push(format!(
                 "{} (current {}, before {}, after {})",
@@ -114,6 +147,43 @@ pub fn recover(project: &Path) {
     fs::remove_file(&journal)
         .unwrap_or_else(|e| fail(&format!("could not remove recovered journal: {e}")));
     sync_dir(journal.parent().unwrap());
+}
+
+fn validate_journal_paths(project: &Path, parsed: &Journal, journal: &Path) {
+    let project = fs::canonicalize(project)
+        .unwrap_or_else(|e| fail(&format!("could not canonicalize codemod project: {e}")));
+    let codemods = project.join(".jet/codemods");
+    if !parsed.log_path.starts_with(&codemods) || parsed.log_path.parent() != Some(codemods.as_path()) {
+        fail("recovery journal log path escapes .jet/codemods; journal preserved");
+    }
+    for record in &parsed.records {
+        if !record.path.starts_with(&project)
+            || record.temp.parent() != record.path.parent()
+            || !record.temp.starts_with(&project)
+        {
+            fail("recovery journal file path escapes project or temp directory; journal preserved");
+        }
+        let relative = record.path.strip_prefix(&project).unwrap();
+        let mut current = project.clone();
+        for component in relative.parent().into_iter().flat_map(Path::components) {
+            let std::path::Component::Normal(part) = component else {
+                fail("recovery journal contains a non-normal path; journal preserved")
+            };
+            current.push(part);
+            let meta = fs::symlink_metadata(&current).unwrap_or_else(|e| {
+                fail(&format!("could not inspect recovery path `{}`: {e}", current.display()))
+            });
+            if meta.file_type().is_symlink() || !meta.is_dir() {
+                fail(&format!(
+                    "recovery path contains symlink or non-directory `{}`; journal preserved",
+                    current.display()
+                ));
+            }
+        }
+    }
+    if journal.parent() != Some(codemods.as_path()) {
+        fail("recovery journal itself is outside .jet/codemods")
+    }
 }
 
 pub fn commit(project: &Path, changes: &[Change], log_path: &Path, log: &[u8]) {
@@ -149,8 +219,8 @@ pub fn commit(project: &Path, changes: &[Change], log_path: &Path, log: &[u8]) {
     write_sync(&journal, journal_text.as_bytes());
     sync_dir(&dir);
     for (i, record) in records.iter().enumerate() {
-        fs::rename(&record.temp, &record.path).unwrap_or_else(|e| {
-            rollback(&records, &journal);
+        secure_replace(project, &record.temp, &record.path, &record.before).unwrap_or_else(|e| {
+            rollback(project, &records, &journal);
             fail(&format!(
                 "codemod rename failed for `{}`: {e}",
                 record.path.display()
@@ -177,12 +247,12 @@ pub fn commit(project: &Path, changes: &[Change], log_path: &Path, log: &[u8]) {
     sync_dir(&dir);
 }
 
-fn rollback(records: &[Record], journal: &Path) {
+fn rollback(project: &Path, records: &[Record], journal: &Path) {
     let mut conflict = false;
     for r in records {
         let current = fs::read(&r.path).unwrap_or_default();
         if current == r.after {
-            atomic_restore(&r.path, &r.before);
+            atomic_restore(project, &r.path, &r.before);
         } else if current != r.before {
             conflict = true;
         }
@@ -279,12 +349,304 @@ fn write_sync(path: &Path, bytes: &[u8]) {
     f.sync_all()
         .unwrap_or_else(|e| fail(&format!("could not sync `{}`: {e}", path.display())));
 }
-fn atomic_restore(path: &Path, bytes: &[u8]) {
+fn atomic_restore(project: &Path, path: &Path, bytes: &[u8]) {
     let tmp = path.with_extension(format!("recover-{}.tmp", std::process::id()));
     write_sync(&tmp, bytes);
-    fs::rename(&tmp, path)
+    let current = fs::read(path)
+        .unwrap_or_else(|e| fail(&format!("could not inspect recovery target `{}`: {e}", path.display())));
+    secure_replace(project, &tmp, path, &current)
         .unwrap_or_else(|e| fail(&format!("could not recover `{}`: {e}", path.display())));
     sync_dir(path.parent().unwrap());
+}
+
+#[cfg(unix)]
+fn secure_replace(project: &Path, temp: &Path, path: &Path, expected: &[u8]) -> std::io::Result<()> {
+    use std::ffi::{CString, OsStr};
+    use std::io::Read;
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    const O_RDONLY: i32 = 0;
+    const O_CLOEXEC: i32 = 0o2000000;
+    const O_DIRECTORY: i32 = 0o200000;
+    const O_NOFOLLOW: i32 = 0o400000;
+    extern "C" {
+        fn openat(dirfd: i32, pathname: *const i8, flags: i32, mode: u32) -> i32;
+        fn renameat(olddirfd: i32, oldpath: *const i8, newdirfd: i32, newpath: *const i8) -> i32;
+    }
+    fn name(value: &OsStr) -> std::io::Result<CString> {
+        CString::new(value.as_bytes())
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "NUL in codemod path"))
+    }
+
+    if temp.parent() != path.parent() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "codemod temp is not beside destination",
+        ));
+    }
+    let relative = path.strip_prefix(project).map_err(|_| {
+        std::io::Error::new(std::io::ErrorKind::PermissionDenied, "destination escapes project")
+    })?;
+    let root = OpenOptions::new()
+        .read(true)
+        .custom_flags(O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        .open(project)?;
+    let mut held = Vec::<OwnedFd>::new();
+    let mut dirfd = root.as_raw_fd();
+    for component in relative.parent().into_iter().flat_map(Path::components) {
+        let std::path::Component::Normal(part) = component else {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "non-normal codemod path"));
+        };
+        let part = name(part)?;
+        let fd = unsafe {
+            openat(
+                dirfd,
+                part.as_ptr(),
+                O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC,
+                0,
+            )
+        };
+        if fd < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        held.push(unsafe { OwnedFd::from_raw_fd(fd) });
+        dirfd = held.last().unwrap().as_raw_fd();
+    }
+    let final_name = name(relative.file_name().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "destination has no name")
+    })?)?;
+    let fd = unsafe { openat(dirfd, final_name.as_ptr(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC, 0) };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let mut destination = unsafe { File::from_raw_fd(fd) };
+    if !destination.metadata()?.is_file() {
+        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "destination is not regular file"));
+    }
+    let mut current = Vec::new();
+    destination.read_to_end(&mut current)?;
+    if current != expected {
+        return Err(std::io::Error::new(std::io::ErrorKind::Other, "destination drifted before handle-relative rename"));
+    }
+    let temp_name = name(temp.file_name().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "temp has no name")
+    })?)?;
+    if unsafe { renameat(dirfd, temp_name.as_ptr(), dirfd, final_name.as_ptr()) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn secure_replace(project: &Path, temp: &Path, path: &Path, expected: &[u8]) -> std::io::Result<()> {
+    use std::ffi::c_void;
+    use std::io::Read;
+    use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+
+    type Handle = *mut c_void;
+    const GENERIC_READ: u32 = 0x8000_0000;
+    const DELETE: u32 = 0x0001_0000;
+    const SHARE_ALL: u32 = 0x0000_0007;
+    const OPEN_EXISTING: u32 = 3;
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+    const FILE_ATTRIBUTE_TAG_INFO_CLASS: i32 = 9;
+    const FILE_RENAME_INFO_CLASS: i32 = 3;
+    const INVALID_HANDLE_VALUE: Handle = -1isize as Handle;
+    #[repr(C)]
+    struct FileAttributeTagInfo {
+        attributes: u32,
+        reparse_tag: u32,
+    }
+    #[repr(C)]
+    struct FileRenameInfo {
+        replace_if_exists: i32,
+        root_directory: Handle,
+        file_name_length: u32,
+        file_name: [u16; 1],
+    }
+    extern "system" {
+        fn CreateFileW(
+            name: *const u16,
+            access: u32,
+            share: u32,
+            security: *mut c_void,
+            creation: u32,
+            flags: u32,
+            template: Handle,
+        ) -> Handle;
+        fn GetFileInformationByHandleEx(
+            file: Handle,
+            class: i32,
+            info: *mut c_void,
+            size: u32,
+        ) -> i32;
+        fn SetFileInformationByHandle(
+            file: Handle,
+            class: i32,
+            info: *mut c_void,
+            size: u32,
+        ) -> i32;
+        fn GetFinalPathNameByHandleW(
+            file: Handle,
+            path: *mut u16,
+            path_len: u32,
+            flags: u32,
+        ) -> u32;
+    }
+    fn wide(path: &std::ffi::OsStr) -> Vec<u16> {
+        path.encode_wide().chain(std::iter::once(0)).collect()
+    }
+    fn open_handle(path: &Path, access: u32, directory: bool) -> std::io::Result<OwnedHandle> {
+        let name = wide(path.as_os_str());
+        let mut flags = FILE_FLAG_OPEN_REPARSE_POINT;
+        if directory {
+            flags |= FILE_FLAG_BACKUP_SEMANTICS;
+        }
+        let raw = unsafe {
+            CreateFileW(
+                name.as_ptr(),
+                access,
+                SHARE_ALL,
+                std::ptr::null_mut(),
+                OPEN_EXISTING,
+                flags,
+                std::ptr::null_mut(),
+            )
+        };
+        if raw == INVALID_HANDLE_VALUE {
+            return Err(std::io::Error::last_os_error());
+        }
+        let owned = unsafe { OwnedHandle::from_raw_handle(raw) };
+        let mut tag = FileAttributeTagInfo {
+            attributes: 0,
+            reparse_tag: 0,
+        };
+        if unsafe {
+            GetFileInformationByHandleEx(
+                owned.as_raw_handle(),
+                FILE_ATTRIBUTE_TAG_INFO_CLASS,
+                (&mut tag as *mut FileAttributeTagInfo).cast(),
+                std::mem::size_of::<FileAttributeTagInfo>() as u32,
+            )
+        } == 0
+        {
+            return Err(std::io::Error::last_os_error());
+        }
+        if tag.attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "codemod path contains a Windows reparse point",
+            ));
+        }
+        Ok(owned)
+    }
+    fn final_path(handle: Handle) -> std::io::Result<String> {
+        let needed = unsafe { GetFinalPathNameByHandleW(handle, std::ptr::null_mut(), 0, 0) };
+        if needed == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        let mut buffer = vec![0u16; needed as usize];
+        let written = unsafe {
+            GetFinalPathNameByHandleW(handle, buffer.as_mut_ptr(), buffer.len() as u32, 0)
+        };
+        if written == 0 || written as usize >= buffer.len() {
+            return Err(std::io::Error::last_os_error());
+        }
+        buffer.truncate(written as usize);
+        Ok(String::from_utf16_lossy(&buffer).to_lowercase())
+    }
+
+    let relative = path.strip_prefix(project).map_err(|_| {
+        std::io::Error::new(std::io::ErrorKind::PermissionDenied, "destination escapes project")
+    })?;
+    let mut current_path = project.to_path_buf();
+    for component in relative.parent().into_iter().flat_map(Path::components) {
+        let std::path::Component::Normal(part) = component else {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "non-normal codemod path"));
+        };
+        current_path.push(part);
+        let meta = fs::symlink_metadata(&current_path)?;
+        if meta.file_type().is_symlink() || !meta.is_dir() {
+            return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "codemod parent is not a real directory"));
+        }
+    }
+    let parent = open_handle(path.parent().unwrap_or(project), GENERIC_READ, true)?;
+    let destination = open_handle(path, GENERIC_READ, false)?;
+    let parent_final = final_path(parent.as_raw_handle())?;
+    let destination_final = final_path(destination.as_raw_handle())?;
+    let destination_parent = destination_final
+        .rsplit_once(['\\', '/'])
+        .map(|(parent, _)| parent)
+        .unwrap_or("");
+    if destination_parent.trim_end_matches(['\\', '/'])
+        != parent_final.trim_end_matches(['\\', '/'])
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "destination does not belong to opened parent directory",
+        ));
+    }
+    let mut destination = File::from(destination);
+    let mut current = Vec::new();
+    destination.read_to_end(&mut current)?;
+    if current != expected {
+        return Err(std::io::Error::new(std::io::ErrorKind::Other, "destination drifted before rename"));
+    }
+    let temp = open_handle(temp, GENERIC_READ | DELETE, false)?;
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "destination has no name"))?
+        .encode_wide()
+        .collect::<Vec<_>>();
+    let bytes = file_name.len() * std::mem::size_of::<u16>();
+    let size = std::mem::size_of::<FileRenameInfo>() + bytes.saturating_sub(2);
+    let mut buffer = vec![0u64; size.div_ceil(std::mem::size_of::<u64>())];
+    let info = buffer.as_mut_ptr().cast::<FileRenameInfo>();
+    unsafe {
+        (*info).replace_if_exists = 1;
+        (*info).root_directory = parent.as_raw_handle();
+        (*info).file_name_length = bytes as u32;
+        std::ptr::copy_nonoverlapping(file_name.as_ptr(), (*info).file_name.as_mut_ptr(), file_name.len());
+    }
+    if unsafe {
+        SetFileInformationByHandle(
+            temp.as_raw_handle(),
+            FILE_RENAME_INFO_CLASS,
+            buffer.as_mut_ptr().cast(),
+            size as u32,
+        )
+    } == 0
+    {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(all(not(unix), not(windows)))]
+fn secure_replace(project: &Path, temp: &Path, path: &Path, expected: &[u8]) -> std::io::Result<()> {
+    let relative = path.strip_prefix(project).map_err(|_| {
+        std::io::Error::new(std::io::ErrorKind::PermissionDenied, "destination escapes project")
+    })?;
+    let mut current_path = project.to_path_buf();
+    for component in relative.parent().into_iter().flat_map(Path::components) {
+        let std::path::Component::Normal(part) = component else {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "non-normal codemod path"));
+        };
+        current_path.push(part);
+        let meta = fs::symlink_metadata(&current_path)?;
+        if meta.file_type().is_symlink() || !meta.is_dir() {
+            return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "codemod parent is not a real directory"));
+        }
+    }
+    if fs::read(path)? != expected {
+        return Err(std::io::Error::new(std::io::ErrorKind::Other, "destination drifted before rename"));
+    }
+    fs::rename(temp, path)
 }
 fn sync_dir(path: &Path) {
     File::open(path)
