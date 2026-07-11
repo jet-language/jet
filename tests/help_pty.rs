@@ -29,6 +29,37 @@ fn run_pty_sized(keys: &[u8], color: &str, no_color: bool, rows: usize, cols: us
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
+fn visible_cols(line: &str) -> usize {
+    let mut escaped = false;
+    line.chars()
+        .filter(|&ch| {
+            if escaped {
+                if ch == 'm' { escaped = false; }
+                false
+            } else if ch == '\x1b' {
+                escaped = true;
+                false
+            } else {
+                true
+            }
+        })
+        .count()
+}
+
+fn final_frame_before_cleanup(transcript: &str) -> String {
+    let normalized = transcript.replace('\r', "");
+    let parts: Vec<&str> = normalized.split("\x1b[J").collect();
+    assert!(parts.len() >= 3, "missing redraw/cleanup sentinels:\n{transcript}");
+    let mut frame = parts[parts.len() - 2].to_string();
+    if let Some(alt_leave) = frame.find("\x1b[?1049l") {
+        frame.truncate(alt_leave);
+    }
+    if let Some(cursor) = frame.rfind("\x1b[") {
+        frame.truncate(cursor);
+    }
+    frame
+}
+
 #[test]
 fn enter_expands_then_emits_prefill_without_running_it() {
     let transcript = run_pty(b"\r\r", "never", false);
@@ -67,8 +98,12 @@ fn f1_search_opens_verbatim_error_code_page() {
 #[test]
 fn short_f1_viewport_keeps_later_selection_visible_without_scrolling_terminal() {
     let mut keys = b"\x1bOP".to_vec();
-    keys.extend(std::iter::repeat_n(b"\x1b[B".as_slice(), 9).flatten());
+    keys.extend(std::iter::repeat_n(b"\x1b[B".as_slice(), 7).flatten());
     keys.extend_from_slice(b"\x1b\x1b");
     let transcript = run_pty_sized(&keys, "never", false, 8, 60);
-    assert!(transcript.contains(">   bench"), "later selected row clipped at 8x60:\n{transcript}");
+    let frame = final_frame_before_cleanup(&transcript);
+    let lines: Vec<&str> = frame.lines().collect();
+    assert!(frame.contains(">   bench"), "final selected row wrong/clipped:\n{frame}");
+    assert_eq!(lines.len(), 8, "final frame scrolled or exceeded rows:\n{frame}");
+    assert!(lines.iter().all(|line| visible_cols(line) <= 60), "final frame exceeded 60 cols:\n{frame}");
 }

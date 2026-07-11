@@ -346,25 +346,60 @@ pub fn render_code_page(ex: &Explanation, color: bool) -> String {
 pub fn render_text_viewport(text: &str, width: usize, height: usize, scroll: usize) -> String {
     let width = w(width);
     let height = height.max(1);
-    let mut rows = Vec::new();
-    for line in text.lines() {
-        if line.is_empty() {
-            rows.push(String::new());
-            continue;
-        }
-        let mut rest = line;
-        while !rest.is_empty() {
-            let split = rest.char_indices().nth(width).map(|(i, _)| i).unwrap_or(rest.len());
-            rows.push(rest[..split].to_string());
-            rest = &rest[split..];
-        }
-    }
+    let rows: Vec<String> = wrap_text_rows(text, width)
+        .into_iter()
+        .map(|row| {
+            let _source_break = row.hard_break;
+            row.text
+        })
+        .collect();
     let max_start = rows.len().saturating_sub(height);
     let start = scroll.min(max_start);
     (0..height)
         .map(|offset| rows.get(start + offset).cloned().unwrap_or_else(|| " ".to_string()))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+struct WrappedRow {
+    text: String,
+    /// The source contained a newline after this row. Soft viewport wraps are
+    /// false, letting tests reconstruct and compare the canonical byte stream.
+    hard_break: bool,
+}
+
+fn wrap_text_rows(text: &str, width: usize) -> Vec<WrappedRow> {
+    let width = width.max(1);
+    let mut rows = Vec::new();
+    for source_line in text.split_inclusive('\n') {
+        let hard_break = source_line.ends_with('\n');
+        let line = source_line.strip_suffix('\n').unwrap_or(source_line);
+        let mut row = String::new();
+        let mut visible = 0usize;
+        let mut chars = line.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if ch == '\x1b' {
+                // Explain color currently uses SGR. Copy the complete control
+                // atom without charging terminal columns or splitting bytes.
+                row.push(ch);
+                while let Some(control) = chars.next() {
+                    row.push(control);
+                    if control == 'm' {
+                        break;
+                    }
+                }
+                continue;
+            }
+            if visible == width {
+                rows.push(WrappedRow { text: std::mem::take(&mut row), hard_break: false });
+                visible = 0;
+            }
+            row.push(ch);
+            visible += 1;
+        }
+        rows.push(WrappedRow { text: row, hard_break });
+    }
+    rows
 }
 
 /// The F1 two-pane reference (alt-screen): a category tree on the left,
@@ -539,5 +574,27 @@ mod tests {
         let out = render_text_viewport(&canonical, 50, 8, 0);
         assert_eq!(out.lines().count(), 8);
         assert!(out.lines().all(|line| cols(line) <= 50));
+    }
+
+    #[test]
+    fn colored_canonical_wrap_preserves_sgr_atoms_and_source_bytes() {
+        let ex = crate::Explain::lookup("E0102").unwrap();
+        let canonical = render_code_page(&ex, true);
+        let rows = wrap_text_rows(&canonical, 8);
+        assert!(rows.iter().all(|row| cols(&row.text) <= 8));
+        assert!(rows.iter().all(|row| {
+            row.text
+                .split('\x1b')
+                .skip(1)
+                .all(|suffix| suffix.starts_with("[1m") || suffix.starts_with("[0m"))
+        }));
+        let mut reconstructed = String::new();
+        for row in rows {
+            reconstructed.push_str(&row.text);
+            if row.hard_break {
+                reconstructed.push('\n');
+            }
+        }
+        assert_eq!(reconstructed, canonical);
     }
 }
