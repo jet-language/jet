@@ -94,22 +94,30 @@
         }
     }
 
-    // D-SERDE-ACCESS=B: dynamic accessor methods on DataTree.
+    // D-SERDE-ACCESS=B + D-SERDE14=A: dynamic accessor methods on DataTree. Each
+    // read returns `Result<T, DecodeError>` so a `?` chain composes cleanly inside
+    // a hand `decode`. `.field`/`.at` auto-fill `DecodeError.path` with the segment
+    // they read (the field name, or `[index]`); the scalar readers leave `path`
+    // empty (they read a leaf that has no name of its own — an enclosing `.field`
+    // frames it via `DecodeError::under` when the caller propagates).
     impl DataTree {
-        pub fn field(&self, name: &str) -> Result<DataTree, String> {
+        pub fn field(&self, name: &str) -> Result<DataTree, DecodeError> {
             match self {
                 DataTree::Object(pairs) => pairs
                     .iter()
                     .find(|(k, _)| k == name)
                     .map(|(_, v)| v.clone())
-                    .ok_or_else(|| format!("field `{}` not found", name)),
-                _ => Err(format!(
-                    "expected object, got {}",
-                    render_datatree_json(self, false, 0)
-                )),
+                    .ok_or_else(|| DecodeError {
+                        path: name.to_string(),
+                        reason: format!("field `{}` not found", name),
+                    }),
+                _ => Err(DecodeError {
+                    path: name.to_string(),
+                    reason: format!("expected object, got {}", render_datatree_json(self, false, 0)),
+                }),
             }
         }
-        pub fn at(&self, i: i64) -> Result<DataTree, String> {
+        pub fn at(&self, i: i64) -> Result<DataTree, DecodeError> {
             match self {
                 DataTree::Array(items) => {
                     let idx = if i < 0 {
@@ -117,52 +125,52 @@
                     } else {
                         i as usize
                     };
-                    items
-                        .get(idx)
-                        .cloned()
-                        .ok_or_else(|| format!("index {} out of bounds (len {})", i, items.len()))
+                    items.get(idx).cloned().ok_or_else(|| DecodeError {
+                        path: format!("[{}]", i),
+                        reason: format!("index {} out of bounds (len {})", i, items.len()),
+                    })
                 }
-                _ => Err(format!(
-                    "expected array, got {}",
-                    render_datatree_json(self, false, 0)
-                )),
+                _ => Err(DecodeError {
+                    path: format!("[{}]", i),
+                    reason: format!("expected array, got {}", render_datatree_json(self, false, 0)),
+                }),
             }
         }
-        pub fn int(&self) -> Result<i64, String> {
+        pub fn int(&self) -> Result<i64, DecodeError> {
             match self {
                 DataTree::Int(n) => Ok(*n),
-                _ => Err(format!(
+                _ => Err(DecodeError::new(format!(
                     "expected int, got {}",
                     render_datatree_json(self, false, 0)
-                )),
+                ))),
             }
         }
-        pub fn text(&self) -> Result<String, String> {
+        pub fn text(&self) -> Result<String, DecodeError> {
             match self {
                 DataTree::Text(s) => Ok(s.clone()),
-                _ => Err(format!(
+                _ => Err(DecodeError::new(format!(
                     "expected text, got {}",
                     render_datatree_json(self, false, 0)
-                )),
+                ))),
             }
         }
-        pub fn bool(&self) -> Result<bool, String> {
+        pub fn bool(&self) -> Result<bool, DecodeError> {
             match self {
                 DataTree::Bool(b) => Ok(*b),
-                _ => Err(format!(
+                _ => Err(DecodeError::new(format!(
                     "expected bool, got {}",
                     render_datatree_json(self, false, 0)
-                )),
+                ))),
             }
         }
-        pub fn float(&self) -> Result<f64, String> {
+        pub fn float(&self) -> Result<f64, DecodeError> {
             match self {
                 DataTree::Float(f) => Ok(*f),
                 DataTree::Int(n) => Ok(*n as f64),
-                _ => Err(format!(
+                _ => Err(DecodeError::new(format!(
                     "expected float, got {}",
                     render_datatree_json(self, false, 0)
-                )),
+                ))),
             }
         }
     }

@@ -1,35 +1,40 @@
-/// D-SERDE-ACCESS=B: accessor methods on `DataTree`.
-/// `.field(name)` → `DataTree ? String`
-/// `.at(i)` → `DataTree ? String`
-/// `.int()` → `Int ? String`
-/// `.text()` → `String ? String`
-/// `.bool()` → `Bool ? String`
-/// `.float()` → `Float ? String`
+/// D-SERDE-ACCESS=B + D-SERDE14=A: accessor methods on `DataTree`. Every read
+/// yields `T ? DecodeError` (was `? String`) so a `?` chain composes with no
+/// mapping ceremony inside a hand `decode`; the accessor auto-fills
+/// `DecodeError.path` from where it read (the field name for `.field`, the
+/// bracketed index for `.at`).
+/// `.field(name)` → `DataTree ? DecodeError`
+/// `.at(i)` → `DataTree ? DecodeError`
+/// `.int()` → `Int ? DecodeError`
+/// `.text()` → `String ? DecodeError`
+/// `.bool()` → `Bool ? DecodeError`
+/// `.float()` → `Float ? DecodeError`
 pub fn datatree_method_return(method: &str, n_args: usize) -> Option<Type> {
+    let decode_err = || Box::new(Type::Named("DecodeError".to_string()));
     match (method, n_args) {
         ("field", 1) => Some(Type::Result {
             ok: Box::new(Type::Named("DataTree".to_string())),
-            err: Box::new(Type::String),
+            err: decode_err(),
         }),
         ("at", 1) => Some(Type::Result {
             ok: Box::new(Type::Named("DataTree".to_string())),
-            err: Box::new(Type::String),
+            err: decode_err(),
         }),
         ("int", 0) => Some(Type::Result {
             ok: Box::new(Type::Int),
-            err: Box::new(Type::String),
+            err: decode_err(),
         }),
         ("text", 0) => Some(Type::Result {
             ok: Box::new(Type::String),
-            err: Box::new(Type::String),
+            err: decode_err(),
         }),
         ("bool", 0) => Some(Type::Result {
             ok: Box::new(Type::Bool),
-            err: Box::new(Type::String),
+            err: decode_err(),
         }),
         ("float", 0) => Some(Type::Result {
             ok: Box::new(Type::Float),
-            err: Box::new(Type::String),
+            err: decode_err(),
         }),
         _ => None,
     }
