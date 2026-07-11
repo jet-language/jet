@@ -61,9 +61,31 @@ pub fn recover(project: &Path) {
     }
     let raw = fs::read_to_string(&journal)
         .unwrap_or_else(|e| fail(&format!("could not read recovery journal: {e}")));
-    let records = parse_records(&raw);
+    let parsed = parse_journal(&raw);
+    let records = &parsed.records;
+    let all_after = records.iter().all(|record| {
+        fs::read(&record.path)
+            .map(|current| current == record.after)
+            .unwrap_or(false)
+    });
+    if all_after {
+        write_sync(&parsed.log_path, &parsed.log);
+        sync_dir(
+            parsed
+                .log_path
+                .parent()
+                .unwrap_or(journal.parent().unwrap()),
+        );
+        for record in records {
+            let _ = fs::remove_file(&record.temp);
+        }
+        fs::remove_file(&journal)
+            .unwrap_or_else(|e| fail(&format!("could not remove completed journal: {e}")));
+        sync_dir(journal.parent().unwrap());
+        return;
+    }
     let mut conflict = Vec::new();
-    for record in &records {
+    for record in records {
         let current = fs::read(&record.path).unwrap_or_default();
         if current == record.before {
             continue;
@@ -86,7 +108,7 @@ pub fn recover(project: &Path) {
             conflict.join("\n  ")
         ));
     }
-    for record in &records {
+    for record in records {
         let _ = fs::remove_file(&record.temp);
     }
     fs::remove_file(&journal)
@@ -123,7 +145,7 @@ pub fn commit(project: &Path, changes: &[Change], log_path: &Path, log: &[u8]) {
             after: c.after.clone(),
         });
     }
-    let journal_text = render_journal(&tx, &records);
+    let journal_text = render_journal(&tx, 0, &records, log_path, log);
     write_sync(&journal, journal_text.as_bytes());
     sync_dir(&dir);
     for (i, record) in records.iter().enumerate() {
@@ -135,6 +157,11 @@ pub fn commit(project: &Path, changes: &[Change], log_path: &Path, log: &[u8]) {
             ))
         });
         sync_dir(record.path.parent().unwrap_or(project));
+        write_sync(
+            &journal,
+            render_journal(&tx, i + 1, &records, log_path, log).as_bytes(),
+        );
+        sync_dir(&dir);
         if std::env::var("JET_CODEMOD_CRASH_AFTER_RENAME")
             .ok()
             .as_deref()
@@ -173,7 +200,13 @@ struct Record {
     before: Vec<u8>,
     after: Vec<u8>,
 }
-fn render_journal(tx: &str, records: &[Record]) -> String {
+fn render_journal(
+    tx: &str,
+    completed: usize,
+    records: &[Record],
+    log_path: &Path,
+    log: &[u8],
+) -> String {
     let rows = records
         .iter()
         .map(|r| {
@@ -188,12 +221,20 @@ fn render_journal(tx: &str, records: &[Record]) -> String {
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        "{{\"schema\":1,\"tx\":\"{}\",\"files\":[{}]}}\n",
+        "{{\"schema\":2,\"tx\":\"{}\",\"completed\":{},\"log_path\":\"{}\",\"log\":\"{}\",\"files\":[{}]}}\n",
         json_escape(tx),
+        completed,
+        json_escape(&log_path.display().to_string()),
+        hex(log),
         rows
     )
 }
-fn parse_records(raw: &str) -> Vec<Record> {
+struct Journal {
+    records: Vec<Record>,
+    log_path: PathBuf,
+    log: Vec<u8>,
+}
+fn parse_journal(raw: &str) -> Journal {
     let root = super::Json::parse(raw)
         .and_then(|v| v.object())
         .unwrap_or_else(|e| fail(&format!("invalid recovery journal: {e}")));
@@ -201,7 +242,11 @@ fn parse_records(raw: &str) -> Vec<Record> {
         Some(super::Json::Value::Array(v)) => v,
         _ => fail("invalid recovery journal files"),
     };
-    files
+    let string = |key| match root.get(key) {
+        Some(super::Json::Value::String(value)) => value.clone(),
+        _ => fail(&format!("recovery journal missing `{key}`")),
+    };
+    let records = files
         .iter()
         .map(|v| {
             let o = match v {
@@ -219,7 +264,12 @@ fn parse_records(raw: &str) -> Vec<Record> {
                 after: unhex(&s("after")),
             }
         })
-        .collect()
+        .collect();
+    Journal {
+        records,
+        log_path: PathBuf::from(string("log_path")),
+        log: unhex(&string("log")),
+    }
 }
 fn write_sync(path: &Path, bytes: &[u8]) {
     let mut f = File::create(path)

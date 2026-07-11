@@ -298,7 +298,22 @@ fn interrupted_batch_recovers_before_the_next_plan() {
     let project = temp_dir("batch_recovery");
     let object = simple_batch(&project, 2);
     let source = project.join("examples/a.jet");
+    let source_b = project.join("examples/b.jet");
+    fs::write(
+        &source_b,
+        "fn report() { print(\"b\") }\nfn run() { report() }\n",
+    )
+    .unwrap();
+    let object_text = fs::read_to_string(&object).unwrap();
+    fs::write(
+        &object,
+        object_text
+            .replace("examples/a.jet", "examples")
+            .replace("\"matches\":2", "\"matches\":4"),
+    )
+    .unwrap();
     let before = fs::read(&source).unwrap();
+    let before_b = fs::read(&source_b).unwrap();
     let crashed = Command::new(jet())
         .env("JET_CODEMOD_CRASH_AFTER_RENAME", "1")
         .args([
@@ -313,6 +328,7 @@ fn interrupted_batch_recovers_before_the_next_plan() {
     assert_eq!(crashed.status.code(), Some(86));
     assert!(project.join(".jet/codemods/transaction.journal").exists());
     assert_ne!(fs::read(&source).unwrap(), before);
+    assert_eq!(fs::read(&source_b).unwrap(), before_b);
 
     let recovered = Command::new(jet())
         .args(["inspect", "codemod", "dry-run", object.to_str().unwrap()])
@@ -322,6 +338,40 @@ fn interrupted_batch_recovers_before_the_next_plan() {
         recovered.status.success(),
         "{}",
         String::from_utf8_lossy(&recovered.stderr)
+    );
+    assert_eq!(fs::read(&source).unwrap(), before);
+    assert_eq!(fs::read(&source_b).unwrap(), before_b);
+    assert!(!project.join(".jet/codemods/transaction.journal").exists());
+}
+
+#[test]
+fn all_after_crash_completes_log_then_undo_restores_every_file() {
+    let project = temp_dir("batch_complete_recovery");
+    let object = simple_batch(&project, 2);
+    let source = project.join("examples/a.jet");
+    let before = fs::read(&source).unwrap();
+    let crashed = Command::new(jet())
+        .env("JET_CODEMOD_CRASH_AFTER_RENAME", "1")
+        .args([
+            "inspect",
+            "codemod",
+            "apply",
+            object.to_str().unwrap(),
+            "--yes",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(crashed.status.code(), Some(86));
+    let log = project.join(".jet/codemods/BatchRename.log.json");
+    assert!(!log.exists());
+    let undo = Command::new(jet())
+        .args(["inspect", "codemod", "undo", log.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        undo.status.success(),
+        "{}",
+        String::from_utf8_lossy(&undo.stderr)
     );
     assert_eq!(fs::read(&source).unwrap(), before);
     assert!(!project.join(".jet/codemods/transaction.journal").exists());
@@ -367,4 +417,43 @@ fn schema_one_inverse_edit_log_remains_readable() {
         String::from_utf8_lossy(&undo.stderr)
     );
     assert_eq!(fs::read_to_string(source).unwrap(), before);
+}
+
+#[test]
+fn batch_refuses_collision_invalid_binding_and_overlapping_ast_nodes() {
+    let project = temp_dir("batch_semantic_refusals");
+    let source = project.join("examples/a.jet");
+    fs::create_dir_all(source.parent().unwrap()).unwrap();
+    let body = "fn report(value: Int) { print(value) }\nfn summarize(value: Int) { print(value) }\nfn run() { report(report(1)) }\n";
+    fs::write(&source, body).unwrap();
+    let object = project.join("bad.codemod.json");
+
+    fs::write(&object, "{\"version\":2,\"name\":\"Collision\",\"project\":\".\",\"roots\":[{\"path\":\"examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"rename\",\"kind\":\"symbol_rename\",\"from\":{\"name\":\"report\",\"symbol_kind\":\"function\"},\"to\":\"summarize\",\"matches\":3}]}\n").unwrap();
+    let collision = Command::new(jet())
+        .args(["inspect", "codemod", "dry-run", object.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(!collision.status.success());
+    assert!(String::from_utf8_lossy(&collision.stderr).contains("destination `summarize`"));
+
+    fs::write(&object, "{\"version\":2,\"name\":\"Binding\",\"project\":\".\",\"roots\":[{\"path\":\"examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"binding\",\"kind\":\"ast_rewrite\",\"node\":\"expr\",\"match\":\"report($value)\",\"replace\":\"missing($value)\",\"matches\":2}]}\n").unwrap();
+    let binding = Command::new(jet())
+        .args(["inspect", "codemod", "dry-run", object.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(!binding.status.success());
+    assert!(String::from_utf8_lossy(&binding.stderr).contains("does not resolve"));
+
+    fs::write(&object, "{\"version\":2,\"name\":\"Overlap\",\"project\":\".\",\"roots\":[{\"path\":\"examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"overlap\",\"kind\":\"ast_rewrite\",\"node\":\"expr\",\"match\":\"report($value)\",\"replace\":\"summarize($value)\",\"matches\":2}]}\n").unwrap();
+    let overlap = Command::new(jet())
+        .args(["inspect", "codemod", "dry-run", object.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(!overlap.status.success());
+    assert!(
+        String::from_utf8_lossy(&overlap.stderr).contains("overlapping edits"),
+        "{}",
+        String::from_utf8_lossy(&overlap.stderr)
+    );
+    assert_eq!(fs::read_to_string(source).unwrap(), body);
 }
