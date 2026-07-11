@@ -44,6 +44,9 @@ impl ParkSlot {
         if self.notified.swap(false, Ordering::Acquire) {
             return;
         }
+        // Tower #126: count real condvar blocks so scale tests can prove tasks
+        // park (bounded blocks) rather than busy-wait (zero blocks, hot spin).
+        METRIC_PARK_BLOCKS.fetch_add(1, Ordering::Relaxed);
         if let Some(t) = timeout {
             let _unused = self.cv.wait_timeout(guard, t).unwrap();
         } else {
@@ -53,6 +56,11 @@ impl ParkSlot {
     }
 
     pub fn wake(&self) {
+        // Hold the same mutex the parker checks its predicate under, so a wake
+        // that lands between the parker's `notified` re-check and its `cv.wait`
+        // cannot be lost (otherwise a `park(None)` sleeps forever). Textbook
+        // condvar handoff; without it, capacity-1 channel backpressure deadlocks.
+        let _guard = self.lock.lock().unwrap();
         self.notified.store(true, Ordering::Release);
         self.cv.notify_one();
     }
@@ -132,8 +140,9 @@ fn current_task_control() -> Option<Arc<JetTaskControl>> {
 }
 
 /// Park at a yield point; honors pause/cancel on the running task.
-pub fn jet_scheduler_yield(wait_kind: &str, slot: &ParkSlot, timeout: Option<Duration>) {
-    if let Some(ctrl) = current_task_control() {
+pub fn jet_scheduler_yield(wait_kind: &str, slot: &Arc<ParkSlot>, timeout: Option<Duration>) {
+    let ctrl = current_task_control();
+    if let Some(ctrl) = &ctrl {
         if ctrl.cancelled.load(Ordering::Relaxed) {
             return;
         }
@@ -141,9 +150,17 @@ pub fn jet_scheduler_yield(wait_kind: &str, slot: &ParkSlot, timeout: Option<Dur
         if ctrl.cancelled.load(Ordering::Relaxed) {
             return;
         }
+        // Make this park reachable by cancel(): a task blocked on a channel, timer,
+        // or IO wait must actually unblock when its handle is cancelled — not only
+        // when the awaited event arrives. If cancel already fired, this wakes the
+        // slot immediately so the park below returns at once.
+        ctrl.register_cancel_waiter(slot);
     }
     if let Some(remaining) = jet_deadline_remaining_ms() {
         if remaining <= 0 {
+            if let Some(ctrl) = &ctrl {
+                ctrl.remove_cancel_waiter(slot);
+            }
             jet_deadline_exceeded(wait_kind);
         }
         let cap = Duration::from_millis(remaining as u64);
@@ -151,13 +168,17 @@ pub fn jet_scheduler_yield(wait_kind: &str, slot: &ParkSlot, timeout: Option<Dur
         slot.park(Some(wait));
         if let Some(left) = jet_deadline_remaining_ms() {
             if left <= 0 {
+                if let Some(ctrl) = &ctrl {
+                    ctrl.remove_cancel_waiter(slot);
+                }
                 jet_deadline_exceeded(wait_kind);
             }
         }
     } else {
         slot.park(timeout);
     }
-    if let Some(ctrl) = current_task_control() {
+    if let Some(ctrl) = &ctrl {
+        ctrl.remove_cancel_waiter(slot);
         ctrl.wait_while_paused();
     }
 }
@@ -1038,6 +1059,7 @@ pub(crate) fn jet_scheduler_select<T: Send>(
 
 static METRIC_PARKED: AtomicUsize = AtomicUsize::new(0);
 static METRIC_POLLER_WAKE: AtomicUsize = AtomicUsize::new(0);
+static METRIC_PARK_BLOCKS: AtomicUsize = AtomicUsize::new(0);
 static IO_BACKEND: OnceLock<&'static str> = OnceLock::new();
 
 #[allow(unreachable_code)]
@@ -1076,6 +1098,12 @@ pub fn jet_scheduler_metric_parked() -> usize {
 
 pub fn jet_scheduler_metric_poller_wake() -> usize {
     METRIC_POLLER_WAKE.load(Ordering::Relaxed)
+}
+
+/// Total times a task actually blocked on a park condvar (not the notified
+/// fast-path). A busy-wait scheduler would leave this at zero under contention.
+pub fn jet_scheduler_metric_park_blocks() -> usize {
+    METRIC_PARK_BLOCKS.load(Ordering::Relaxed)
 }
 
 // ── M1: work-stealing pool ───────────────────────────────────────────────────

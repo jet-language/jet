@@ -336,24 +336,24 @@ const GC_PRELUDE: &str = include_str!("../Prelude/Gc.rs");
 /// `layout {}` block isn't limited to UI code.
 const LAYOUT_PRELUDE: &str = include_str!("../Prelude/Layout.rs");
 
-/// I1: native scheduler IO uses `unsafe` syscalls; keep them in `jet_codegen::scheduler`
-/// but strip from emitted user Rust so archive/golden programs stay `unsafe`-free.
+/// Tower #126: emitted AOT programs ship AND select the native readiness backend
+/// (epoll on Linux, kqueue on the BSD/Apple family), not just the portable poll.
+///
+/// The prelude gates its native syscall paths behind `feature = "jet_native_io"`
+/// for the in-crate JIT copy (`jet_codegen::scheduler`, whose Cargo manifest turns
+/// that feature on by default). Emitted user programs are built by a bare `rustc`
+/// with no Cargo features, so that predicate would always be false and the program
+/// would silently fall back to portable poll. Rewrite the predicate to a
+/// vacuously-true `all()` at emit time: native then selects purely on `target_os`,
+/// so a Linux build compiles in and uses epoll.
+///
+/// I1: the raw epoll/kqueue syscalls stay inside the `jet:scheduler-native`
+/// vetted region — the only `unsafe` in the emitted scheduler. `tests/golden.rs`
+/// ignores exactly that region in its I1 unsafe scan, matching the vetted-internal
+/// pattern used by `jet_os_unix`/`jet_term_unix`.
 fn scheduler_prelude_for_emit() -> &'static str {
-    static STRIPPED: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    STRIPPED.get_or_init(|| {
-        const BEGIN: &str = "// jet:scheduler-native-begin";
-        const END: &str = "// jet:scheduler-native-end";
-        let Some(b) = SCHEDULER_PRELUDE_RAW.find(BEGIN) else {
-            return SCHEDULER_PRELUDE_RAW.to_string();
-        };
-        let Some(e) = SCHEDULER_PRELUDE_RAW.find(END) else {
-            return SCHEDULER_PRELUDE_RAW.to_string();
-        };
-        let mut out = String::new();
-        out.push_str(&SCHEDULER_PRELUDE_RAW[..b]);
-        out.push_str(&SCHEDULER_PRELUDE_RAW[e + END.len()..]);
-        out
-    })
+    static EMIT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    EMIT.get_or_init(|| SCHEDULER_PRELUDE_RAW.replace("feature = \"jet_native_io\"", "all()"))
 }
 
 /// D-ALLOC2: the `jet_mem` arena helper carries the one vetted lifetime-extension

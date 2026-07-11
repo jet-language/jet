@@ -86,6 +86,9 @@ impl ParkSlot {
         if self.notified.swap(false, Ordering::Acquire) {
             return;
         }
+        // Tower #126: count real condvar blocks so scale tests can prove tasks
+        // park (bounded blocks) rather than busy-wait (zero blocks, hot spin).
+        METRIC_PARK_BLOCKS.fetch_add(1, Ordering::Relaxed);
         if let Some(t) = timeout {
             let _unused = self.cv.wait_timeout(guard, t).unwrap();
         } else {
@@ -95,6 +98,11 @@ impl ParkSlot {
     }
 
     pub fn wake(&self) {
+        // Hold the same mutex the parker checks its predicate under, so a wake
+        // that lands between the parker's `notified` re-check and its `cv.wait`
+        // cannot be lost (otherwise a `park(None)` sleeps forever). Textbook
+        // condvar handoff; without it, capacity-1 channel backpressure deadlocks.
+        let _guard = self.lock.lock().unwrap();
         self.notified.store(true, Ordering::Release);
         self.cv.notify_one();
     }
@@ -174,8 +182,9 @@ fn current_task_control() -> Option<Arc<JetTaskControl>> {
 }
 
 /// Park at a yield point; honors pause/cancel on the running task.
-pub fn jet_scheduler_yield(wait_kind: &str, slot: &ParkSlot, timeout: Option<Duration>) {
-    if let Some(ctrl) = current_task_control() {
+pub fn jet_scheduler_yield(wait_kind: &str, slot: &Arc<ParkSlot>, timeout: Option<Duration>) {
+    let ctrl = current_task_control();
+    if let Some(ctrl) = &ctrl {
         if ctrl.cancelled.load(Ordering::Relaxed) {
             return;
         }
@@ -183,9 +192,17 @@ pub fn jet_scheduler_yield(wait_kind: &str, slot: &ParkSlot, timeout: Option<Dur
         if ctrl.cancelled.load(Ordering::Relaxed) {
             return;
         }
+        // Make this park reachable by cancel(): a task blocked on a channel, timer,
+        // or IO wait must actually unblock when its handle is cancelled — not only
+        // when the awaited event arrives. If cancel already fired, this wakes the
+        // slot immediately so the park below returns at once.
+        ctrl.register_cancel_waiter(slot);
     }
     if let Some(remaining) = jet_deadline_remaining_ms() {
         if remaining <= 0 {
+            if let Some(ctrl) = &ctrl {
+                ctrl.remove_cancel_waiter(slot);
+            }
             jet_deadline_exceeded(wait_kind);
         }
         let cap = Duration::from_millis(remaining as u64);
@@ -193,13 +210,17 @@ pub fn jet_scheduler_yield(wait_kind: &str, slot: &ParkSlot, timeout: Option<Dur
         slot.park(Some(wait));
         if let Some(left) = jet_deadline_remaining_ms() {
             if left <= 0 {
+                if let Some(ctrl) = &ctrl {
+                    ctrl.remove_cancel_waiter(slot);
+                }
                 jet_deadline_exceeded(wait_kind);
             }
         }
     } else {
         slot.park(timeout);
     }
-    if let Some(ctrl) = current_task_control() {
+    if let Some(ctrl) = &ctrl {
+        ctrl.remove_cancel_waiter(slot);
         ctrl.wait_while_paused();
     }
 }
@@ -1080,6 +1101,7 @@ pub(crate) fn jet_scheduler_select<T: Send>(
 
 static METRIC_PARKED: AtomicUsize = AtomicUsize::new(0);
 static METRIC_POLLER_WAKE: AtomicUsize = AtomicUsize::new(0);
+static METRIC_PARK_BLOCKS: AtomicUsize = AtomicUsize::new(0);
 static IO_BACKEND: OnceLock<&'static str> = OnceLock::new();
 
 #[allow(unreachable_code)]
@@ -1118,6 +1140,12 @@ pub fn jet_scheduler_metric_parked() -> usize {
 
 pub fn jet_scheduler_metric_poller_wake() -> usize {
     METRIC_POLLER_WAKE.load(Ordering::Relaxed)
+}
+
+/// Total times a task actually blocked on a park condvar (not the notified
+/// fast-path). A busy-wait scheduler would leave this at zero under contention.
+pub fn jet_scheduler_metric_park_blocks() -> usize {
+    METRIC_PARK_BLOCKS.load(Ordering::Relaxed)
 }
 
 // ── M1: work-stealing pool ───────────────────────────────────────────────────
@@ -1635,5 +1663,158 @@ mod interrupt_boundary_tests {
         assert!(result.is_err());
         assert!(inner.state.lock().unwrap().recv_waiters.is_empty());
         assert!(control.cancel_waiters.lock().unwrap().is_empty());
+    }
+
+    // Tower #126 scale guard. Drives `n` tasks against a capacity-1 channel so
+    // every send hits backpressure and must PARK until the receiver drains it.
+    // Deterministic (no rustc, no wall-clock thresholds) and it fails on the three
+    // audited failure modes:
+    //   * lost wake / deadlock  → the watchdog trips instead of hanging forever,
+    //   * busy-wait             → zero real condvar blocks recorded,
+    //   * waiter leak           → send/recv waiter vectors are not drained.
+    fn run_backpressure_scale(n: i64) {
+        let handle = std::thread::spawn(move || {
+            let before = jet_scheduler_metric_park_blocks();
+            let channel = JetSchedulerChannel::<i64>::bounded(1);
+            for _ in 0..n {
+                let sender = channel.sender();
+                let _ = jet_scheduler_spawn(move || {
+                    sender.send(1);
+                });
+            }
+            let mut total = 0i64;
+            for _ in 0..n {
+                total += channel.receive().expect("channel closed before all sends drained");
+            }
+            jet_scheduler_drain();
+            let blocks = jet_scheduler_metric_park_blocks().saturating_sub(before);
+            let inner = channel.select_inner();
+            let st = inner.state.lock().unwrap();
+            (total, blocks, st.send_waiters.len(), st.recv_waiters.len())
+        });
+
+        let start = Instant::now();
+        let budget = Duration::from_secs(120);
+        while !handle.is_finished() {
+            assert!(
+                start.elapsed() < budget,
+                "scale workload hung: a park never woke (lost-wake / deadlock)"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let (total, blocks, send_leak, recv_leak) = handle.join().expect("scale worker panicked");
+
+        assert_eq!(total, n, "every task's message must be delivered exactly once");
+        assert!(
+            blocks > 0,
+            "no task ever blocked on a park condvar under capacity-1 backpressure — \
+             the scheduler is busy-waiting, not parking"
+        );
+        assert_eq!(send_leak, 0, "send waiters leaked after drain (unbounded growth)");
+        assert_eq!(recv_leak, 0, "recv waiters leaked after drain (unbounded growth)");
+    }
+
+    #[test]
+    fn scale_10k_tasks_park_under_backpressure() {
+        run_backpressure_scale(10_000);
+    }
+
+    #[test]
+    #[ignore = "local 100k parked-task scale proof; run with --ignored"]
+    fn scale_100k_tasks_park_under_backpressure() {
+        run_backpressure_scale(100_000);
+    }
+
+    // Tower #126: prove pause/cancel are real control over a *running* task —
+    // they actually park/unblock it at its wait point, not merely flip a flag a
+    // `trace()` can read.
+
+    #[test]
+    fn pause_holds_a_running_task_at_its_wait_point_until_resume() {
+        use std::sync::atomic::AtomicUsize;
+        let control = JetTaskControl::new();
+        let ready = JetSchedulerChannel::<i64>::new();
+        let ready_tx = ready.sender();
+        let work = JetSchedulerChannel::<i64>::new();
+        let work_tx = work.sender();
+        let progressed = Arc::new(AtomicUsize::new(0));
+
+        let task_ready = ready_tx;
+        let task_work = work;
+        let task_progressed = progressed.clone();
+        let _join = jet_scheduler_spawn_with_control(
+            move || {
+                task_ready.send(1);
+                // Parks here until a value arrives AND the task is not paused.
+                let _ = task_work.receive();
+                task_progressed.fetch_add(1, Ordering::SeqCst);
+            },
+            control.clone(),
+        );
+
+        // Task has reached the wait point.
+        assert_eq!(ready.receive(), Some(1));
+        control.pause();
+        // Make the value available: a flag-only "pause" would let the task run.
+        work_tx.send(42);
+        std::thread::sleep(Duration::from_millis(60));
+        assert_eq!(
+            progressed.load(Ordering::SeqCst),
+            0,
+            "paused task consumed the value and ran past its wait point — pause is not real"
+        );
+
+        control.resume();
+        let start = Instant::now();
+        while progressed.load(Ordering::SeqCst) == 0 {
+            assert!(
+                start.elapsed() < Duration::from_secs(5),
+                "resumed task never progressed"
+            );
+            std::thread::yield_now();
+        }
+        jet_scheduler_drain();
+    }
+
+    #[test]
+    fn cancel_unblocks_a_parked_task_and_it_observes_cancellation() {
+        use std::sync::atomic::AtomicUsize;
+        let control = JetTaskControl::new();
+        let ready = JetSchedulerChannel::<i64>::new();
+        let ready_tx = ready.sender();
+        // Nothing is ever sent on `work`: only cancellation can free the task.
+        let work = JetSchedulerChannel::<i64>::new();
+        let outcome = Arc::new(AtomicUsize::new(0));
+
+        let task_ready = ready_tx;
+        let task_work = work;
+        let task_outcome = outcome.clone();
+        let _join = jet_scheduler_spawn_with_control(
+            move || {
+                task_ready.send(1);
+                let got = task_work.receive();
+                // `None` == the wait observed cancellation and unblocked.
+                task_outcome.store(if got.is_none() { 2 } else { 1 }, Ordering::SeqCst);
+            },
+            control.clone(),
+        );
+
+        assert_eq!(ready.receive(), Some(1));
+        // Task is now parked forever unless cancel actually unblocks it.
+        control.cancel();
+        let start = Instant::now();
+        while outcome.load(Ordering::SeqCst) == 0 {
+            assert!(
+                start.elapsed() < Duration::from_secs(5),
+                "cancel did not unblock the parked task — cancel is only observational"
+            );
+            std::thread::yield_now();
+        }
+        assert_eq!(
+            outcome.load(Ordering::SeqCst),
+            2,
+            "cancelled wait must report cancellation, not deliver a value"
+        );
+        jet_scheduler_drain();
     }
 }

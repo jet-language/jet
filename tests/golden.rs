@@ -469,7 +469,16 @@ fn strip_vetted_prelude_modules(rust_code: &str) -> String {
     let s = strip_mod(&s, "jet_term_windows");
     let s = strip_mod(&s, "jet_os_unix");
     let s = strip_mod(&s, "jet_atomic_windows");
-    let mut s = strip_mod(&s, "jet_gtk");
+    let s = strip_mod(&s, "jet_gtk");
+    // Tower #126 / I1: the emitted scheduler ships raw epoll/kqueue syscalls, the
+    // only `unsafe` in it. They live in the `jet:scheduler-native` vetted region
+    // (the sole runtime backend that needs `extern "C"`); drop that region before
+    // the unsafe scan, exactly as the codegen delimits it in Prelude/Scheduler.rs.
+    let mut s = strip_region(
+        &s,
+        "// jet:scheduler-native-begin",
+        "// jet:scheduler-native-end",
+    );
     while s.contains("mod user___c_") {
         let before = s.clone();
         s = strip_mod(&s, "user___c_");
@@ -478,4 +487,17 @@ fn strip_vetted_prelude_modules(rust_code: &str) -> String {
         }
     }
     s
+}
+
+/// Remove the inclusive text span between `begin` and `end` markers (used to drop
+/// a vetted `unsafe` region from the I1 scan without touching the built program).
+fn strip_region(src: &str, begin: &str, end: &str) -> String {
+    match (src.find(begin), src.find(end)) {
+        (Some(b), Some(e)) if e >= b => {
+            let mut s = src[..b].to_string();
+            s.push_str(&src[e + end.len()..]);
+            s
+        }
+        _ => src.to_string(),
+    }
 }
