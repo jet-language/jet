@@ -1,3 +1,6 @@
+use super::{BindPattern, CtValue, Expr, StrPart, Type};
+use crate::Diagnostics::Span;
+
 /// Assignment target: local name or indexed collection slot (M5).
 #[derive(Debug, Clone)]
 pub enum LValue {

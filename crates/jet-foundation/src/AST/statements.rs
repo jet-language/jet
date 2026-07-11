@@ -1,3 +1,6 @@
+use super::{BinOp, Binding, Expr, ForKind, LValue};
+use crate::Diagnostics::Span;
+
 /// One `if`/`else if`/`else` chain.
 #[derive(Debug, Clone)]
 pub struct IfStmt {

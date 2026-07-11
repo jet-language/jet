@@ -1,3 +1,6 @@
+use super::{CFfi, ComptimeInput, Expr, Item, Stmt, Type};
+use crate::{Diagnostics::Span, Syntax};
+
 #[derive(Debug)]
 pub struct Program {
     /// S16 (M6): `import` declarations at the top of this file.
@@ -355,4 +358,3 @@ pub enum MigrationOp {
         conv_fn: Option<String>,
     },
 }
-

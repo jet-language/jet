@@ -1,3 +1,6 @@
+use super::{CallArg, CtValue, Expr, MetaAttr, Type};
+use crate::Diagnostics::Span;
+
 /// D-PATW / D-PATR (ratified 2026-06-19): a single payload slot inside a variant pattern.
 /// `Active(_)` — wildcard (D-PATW); `Closing(500..599)` — range (D-PATR).
 #[derive(Debug, Clone)]

@@ -1,6 +1,4 @@
-use crate::Syntax;
-use std::collections::BTreeMap;
-use std::path::PathBuf;
+use crate::Diagnostics::Span;
 
 /// The access capability of a parameter / argument / receiver (D-MEM1, was
 /// D-CAP7/8/9/10).
@@ -412,4 +410,3 @@ impl Type {
         matches!(self, Type::Option(_) | Type::Result { .. })
     }
 }
-
