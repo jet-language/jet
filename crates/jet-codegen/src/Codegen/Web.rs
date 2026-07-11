@@ -2,7 +2,7 @@
 
 use super::{
     build_cx_items, bundle_extern_funcs, populate_cx_from_bundle, register_foreign_enum_variants,
-    update_cloneability_with_foreign_types, Cx, TIR,
+    update_cloneability_with_foreign_types, mangle, Cx, TIR,
 };
 use crate::Diagnostics::Span;
 use crate::Sema::CompileMode;
@@ -653,7 +653,7 @@ fn emit_wasm_body(body: &[TIR::TStmt], out: &mut String, indent: usize, funcs: &
         match stmt {
             TIR::TStmt::Return(Some(expr)) => out.push_str(&format!("{pad}return {};\n", wasm_emit_expr(expr, funcs)?)),
             TIR::TStmt::ExprStmt(expr) => out.push_str(&format!("{pad}{};\n", wasm_emit_expr(expr, funcs)?)),
-            TIR::TStmt::Let { name, init, .. } => out.push_str(&format!("{pad}let mut {name} = {};\n", wasm_emit_expr(init, funcs)?)),
+            TIR::TStmt::Let { name, init, .. } => out.push_str(&format!("{pad}let mut {} = {};\n", mangle(name), wasm_emit_expr(init, funcs)?)),
             TIR::TStmt::Assign { place, op, value, .. } => out.push_str(&format!("{pad}{place} {}= {};\n", op.as_ref().map(binop).unwrap_or(""), wasm_emit_expr(value, funcs)?)),
             TIR::TStmt::If { cond: TIR::TIfCond::Plain(cond), then_body, else_body, .. } => {
                 out.push_str(&format!("{pad}if {} {{\n", wasm_emit_expr(cond, funcs)?));
