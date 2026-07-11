@@ -907,27 +907,39 @@ mod tests {
     fn every_nested_action_routes_to_a_real_dispatch_seam() {
         use HandlerKey::*;
         let expected = [
-            ("registry", "publish", Publish, false), ("registry", "yank", Yank, false),
-            ("registry", "keygen", Keygen, false), ("registry", "key", Key, false),
-            ("registry", "vendor", Vendor, false), ("inspect", "graph", Graph, false),
-            ("inspect", "query", Query, false), ("inspect", "explain-build", ExplainBuild, false),
-            ("inspect", "impact", Impact, false), ("inspect", "dossier", Dossier, false),
-            ("inspect", "semindex", Semindex, false), ("inspect", "expand", Expand, false),
-            ("inspect", "schema", Schema, false), ("inspect", "codemod", Codemod, false),
-            ("inspect", "audit", Audit, false), ("inspect", "sbom", Sbom, false),
-            ("inspect", "bind", Bind, false), ("store", "verify", Store, true),
-            ("store", "rollback", Store, true), ("store", "generations", Store, true),
-            ("store", "gc", Gc, false), ("store", "fetch", Fetch, false),
-            ("store", "lock", Lock, false), ("self", "toolchain", Toolchain, false),
-            ("self", "upgrade", Upgrade, false), ("self", "doctor", Doctor, false),
-            ("self", "completions", Completions, false), ("self", "man", Man, false),
-            ("self", "devtools", Devtools, false), ("self", "lsp", Lsp, false),
+            ("registry", "publish", Publish, "publish", false), ("registry", "yank", Yank, "yank", false),
+            ("registry", "keygen", Keygen, "keygen", false), ("registry", "key", Key, "key", false),
+            ("registry", "vendor", Vendor, "vendor", false), ("inspect", "graph", Graph, "graph", false),
+            ("inspect", "query", Query, "query", false), ("inspect", "explain-build", ExplainBuild, "explain-build", false),
+            ("inspect", "impact", Impact, "impact", false), ("inspect", "dossier", Dossier, "dossier", false),
+            ("inspect", "semindex", Semindex, "semindex", false), ("inspect", "expand", Expand, "expand", false),
+            ("inspect", "schema", Schema, "schema", false), ("inspect", "codemod", Codemod, "codemod", false),
+            ("inspect", "audit", Audit, "audit", false), ("inspect", "sbom", Sbom, "sbom", false),
+            ("inspect", "bind", Bind, "bind", false), ("store", "verify", Store, "store", true),
+            ("store", "rollback", Store, "store", true), ("store", "generations", Store, "store", true),
+            ("store", "gc", Gc, "gc", false), ("store", "fetch", Fetch, "fetch", false),
+            ("store", "lock", Lock, "lock", false), ("self", "toolchain", Toolchain, "toolchain", false),
+            ("self", "upgrade", Upgrade, "upgrade", false), ("self", "doctor", Doctor, "doctor", false),
+            ("self", "completions", Completions, "completions", false), ("self", "man", Man, "man", false),
+            ("self", "devtools", Devtools, "devtools", false), ("self", "lsp", Lsp, "lsp", false),
         ];
         assert_eq!(COMMAND_GROUPS.iter().map(|g| g.actions.len()).sum::<usize>(), expected.len());
-        for (group_name, action_name, handler, keeps_group) in expected {
+        for (group_name, action_name, handler, dispatch_word, keeps_group) in expected {
             let (_, action) = nested_command(group_name, action_name).unwrap_or_else(|| panic!("missing {group_name} {action_name}"));
             assert_eq!(action.handler, handler, "wrong handler for {group_name} {action_name}");
+            assert_eq!(action.handler.dispatch_word(), dispatch_word, "wrong dispatcher for {group_name} {action_name}");
             assert_eq!(action.handler.keeps_group(), keeps_group, "wrong argv policy for {group_name} {action_name}");
+            let mut normalized = vec![group_name, action_name, "tail"];
+            if !action.handler.keeps_group() {
+                normalized[0] = action.handler.dispatch_word();
+                normalized.remove(1);
+            }
+            let expected_argv = if keeps_group {
+                vec![group_name, action_name, "tail"]
+            } else {
+                vec![dispatch_word, "tail"]
+            };
+            assert_eq!(normalized, expected_argv, "wrong normalized argv for {group_name} {action_name}");
         }
         for group in COMMAND_GROUPS {
             for action in group.actions {

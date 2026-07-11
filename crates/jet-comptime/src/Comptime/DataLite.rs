@@ -99,7 +99,7 @@ pub(super) fn status_rows() -> Vec<(&'static str, &'static str, &'static str)> {
         (
             "py.* / r.* / gpu.*",
             "bridge-ready",
-            "report via data.status() and jet dossier data",
+            "report via data.status() and jet inspect dossier data",
         ),
     ]
 }
