@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 495,
-    "rev": 3348,
+    "rev": 3354,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -7230,6 +7230,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-07-11",
+          "by": "codex-main",
+          "text": "Sol audit: existing fuzz_sema is rustc-agreement smoke, not adversarial soundness proof; it appends inert valid declarations, skips FFI and baseline-unsafe cases, and never executes accepted variants across tiers. Builder-ready first tranche is new std-only deterministic corpus/runner under tests/sema_soundness.rs + tests/fuzz/sema/**, with fail-on-skip replayable valid/invalid/differential oracles; no owner gate or current source collision."
+        },
+        {
           "at": "2026-07-09",
           "by": "codex-main",
           "text": "Reopened by 2026-07-09 universal audit: accepts-invalid and silent-corruption paths remain in FFI, defaults, generic modules, and tier lowering. Full adversarial corpus and no-rustc-voice proof remain original exit requirements."
@@ -7246,9 +7251,55 @@
         }
       ],
       "created": "2026-07-08T11:24:42.282Z",
-      "updated": "2026-07-10",
+      "updated": "2026-07-11",
       "workOrder": 63,
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A deterministic adversarial corpus covers ownership, concurrency/sendability, Unsafe/FFI provenance, generic substitution/defaults, comptime/runtime parity, and TIR lowering with valid, exact-invalid, and executable differential seeds; every failure persists a replayable minimized fixture.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-11T10:13:19.985Z"
+        },
+        {
+          "n": 2,
+          "text": "Required CI runs at least 250 fixed cases with zero silent skips; invalid cases reject with pinned Jet diagnostics before rustc, accepted cases pass rustc, and raw rustc output never reaches users.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-11T10:13:20.153Z"
+        },
+        {
+          "n": 3,
+          "text": "Safe generated user bodies contain no unaudited unsafe, classified structurally by provenance; FFI scalar/string/pointer/layout/interior-NUL/unsupported-target rows either execute a real bridge or produce a pinned Jet rejection.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-11T10:13:20.321Z"
+        },
+        {
+          "n": 4,
+          "text": "Deterministic accepted programs produce byte-identical stdout, stderr, exit, panic, and observable effects across AOT and default dev/interpreter; defaults and generic-module explicit-equivalent cases preserve behavior.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-11T10:13:20.485Z"
+        },
+        {
+          "n": 5,
+          "text": "Each confirmed defect lands failing-fixture-first with the smallest owning fix and retained regression; focused soundness tests and repository full verification pass, then a different agent verifies every criterion.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-11T10:13:20.648Z"
+        }
+      ],
       "needsAcceptance": false,
       "refs": []
     },
@@ -25811,6 +25862,48 @@
   ],
   "events": [
     {
+      "at": "2026-07-11T10:13:20.814Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0ewbiud",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T10:13:20.648Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c0ewbiud",
+      "note": "#5 Each confirmed defect lands failing-fixture-first with the s"
+    },
+    {
+      "at": "2026-07-11T10:13:20.486Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c0ewbiud",
+      "note": "#4 Deterministic accepted programs produce byte-identical stdou"
+    },
+    {
+      "at": "2026-07-11T10:13:20.321Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c0ewbiud",
+      "note": "#3 Safe generated user bodies contain no unaudited unsafe, clas"
+    },
+    {
+      "at": "2026-07-11T10:13:20.153Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c0ewbiud",
+      "note": "#2 Required CI runs at least 250 fixed cases with zero silent s"
+    },
+    {
+      "at": "2026-07-11T10:13:19.985Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c0ewbiud",
+      "note": "#1 A deterministic adversarial corpus covers ownership, concurr"
+    },
+    {
       "at": "2026-07-11T10:12:24.484Z",
       "by": "fable-main",
       "action": "card.update",
@@ -29267,48 +29360,6 @@
       "action": "card.criteria-add",
       "ref": "c0df169q",
       "note": "#2 .tower/secrets.json is ignored and tower init creates the ig"
-    },
-    {
-      "at": "2026-07-10T17:45:47.717Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0df169q",
-      "note": "#1 Tracked .tower/config.json contains no auth, private JWK, pu"
-    },
-    {
-      "at": "2026-07-10T17:44:57.124Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c05hfl27",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-10T17:44:56.979Z",
-      "by": "terra-454-review",
-      "action": "card.criteria-verify",
-      "ref": "c05hfl27",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-10T17:44:56.837Z",
-      "by": "terra-454-review",
-      "action": "card.criteria-verify",
-      "ref": "c05hfl27",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-10T17:44:56.695Z",
-      "by": "terra-454-review",
-      "action": "card.criteria-verify",
-      "ref": "c05hfl27",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-10T17:44:56.548Z",
-      "by": "terra-454-review",
-      "action": "card.criteria-verify",
-      "ref": "c05hfl27",
-      "note": "#1"
     }
   ],
   "nextNum": 368,
