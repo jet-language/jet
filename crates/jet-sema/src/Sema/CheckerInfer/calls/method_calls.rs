@@ -686,6 +686,23 @@ impl<'a> Checker<'a> {
                 self.allow_string_view_read = false;
             }
             let recv_ty = recv_ty?;
+            // D-SERDE2=A: Encode is one public protocol for hand and generated impls.
+            if method == "encode" {
+                if args.is_empty() && type_args.is_empty() && self.is_encodable(&recv_ty) {
+                    *recv_type_out = Some("__SerdeEncode__".to_string());
+                    return Some(Type::Named(Syntax::TYPE_DATA.to_string()));
+                }
+                if !self.is_encodable(&recv_ty) {
+                    self.diags.push(Diagnostic::error(
+                        "E0905",
+                        format!("`{}` does not implement `Encode`", recv_ty.show()),
+                        "`.encode()` can only call the value's Encode contract".to_string(),
+                        format!("derive `Encode` on `{}`, or write `impl {}.Encode`", recv_ty.show(), recv_ty.show()),
+                        Some(span),
+                    ));
+                    return None;
+                }
+            }
             // D-SERDE16=A: public, target-directed Decode dispatch from an ordinary
             // DataTree subtree. This is the spelling generated derives emit too.
             if matches!(&recv_ty, Type::Named(n) if n == Syntax::TYPE_DATA)

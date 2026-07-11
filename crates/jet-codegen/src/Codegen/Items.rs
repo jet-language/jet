@@ -1406,13 +1406,28 @@ pub(crate) fn emit_trait_impl(
     block: &TraitImplBlock,
     out: &mut String,
 ) {
-    let tp = Generics::type_param_rust_list(type_params);
+    let tp_use = Generics::type_param_rust_list(type_params);
+    let tp_impl = if matches!(block.trait_name.as_str(), crate::Generics::ENCODE | crate::Generics::DECODE) {
+        let mut extra: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+        if let Some(wire) = cx.serde_wire_params.get(type_name) {
+            for name in wire {
+                extra.entry(name.clone()).or_default().push(block.trait_name.clone());
+            }
+        }
+        for (name, bounds) in Generics::rust_extra_clone_bounds(type_params) {
+            extra.entry(name).or_default().extend(bounds);
+        }
+        Generics::rust_type_param_list(type_params, &extra)
+    } else {
+        Generics::rust_type_param_list(type_params, &std::collections::HashMap::new())
+    };
     out.push_str(&format!(
         "impl{} {} for {}{} {{\n",
-        tp,
+        tp_impl,
         Generics::user_trait_rust(&block.trait_name),
         user_type_rust(type_name),
-        tp
+        tp_use
     ));
     // D-LIB2: bind each associated type the trait declared (`type Item = i64;`).
     for (name, _, ty) in &block.assoc_type_impls {

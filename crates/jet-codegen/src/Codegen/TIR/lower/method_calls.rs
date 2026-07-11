@@ -1593,6 +1593,16 @@ pub(crate) fn lower_method_call(
         }
     }
     if let Some(handle) = recv_type {
+        if handle == "__SerdeEncode__" && method == "encode" && args.is_empty() {
+            return TExpr {
+                ty: Type::Named(Syntax::TYPE_DATA.to_string()),
+                kind: TExprKind::HandleMethod {
+                    recv: Box::new(lower_expr(receiver, cx, env)),
+                    op: THandleOp::SerdeEncode,
+                    args: Vec::new(),
+                },
+            };
+        }
         if handle == Syntax::TYPE_DATA && method == "decode" && args.is_empty() {
             if let Some(Type::Result { ok, .. }) = resolved_ret {
                 return TExpr {

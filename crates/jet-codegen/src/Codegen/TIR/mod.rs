@@ -2209,6 +2209,8 @@ pub enum THandleOp {
     DataTreeFloat,
     /// D-SERDE16=A: `tree.decode<T>()` dispatches the public `T.Decode` protocol.
     DataTreeDecode(Type),
+    /// D-SERDE2=A: `value.encode()` dispatches the public Encode protocol.
+    SerdeEncode,
     /// D-SERDE-ACCESS=B: same accessors on `Json`/`Data`.
     JsonField,
     JsonAt,

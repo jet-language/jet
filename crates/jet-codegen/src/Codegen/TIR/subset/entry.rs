@@ -175,12 +175,20 @@ pub(crate) fn tir_covers_trait_method(
     }
     // The owning type must be a covered struct or enum.
     let owner_ty = Type::Named(type_name.to_string());
-    if !is_covered_struct_ty(&owner_ty, cx) && !is_covered_enum_ty(&owner_ty, cx) {
+    let serde_generic_owner = matches!(trait_name, crate::Generics::ENCODE | crate::Generics::DECODE)
+        && struct_is_generic(type_name, cx);
+    if !serde_generic_owner
+        && !is_covered_struct_ty(&owner_ty, cx)
+        && !is_covered_enum_ty(&owner_ty, cx)
+    {
         return false;
     }
     // c109 Phase 19: a trait method on a GENERIC struct is the deferred generic-type
     // method surface — exclude (conservative, as in `tir_covers_method`).
-    if struct_is_generic(type_name, cx) {
+    if struct_is_generic(type_name, cx)
+        && trait_name != crate::Generics::ENCODE
+        && trait_name != crate::Generics::DECODE
+    {
         return false;
     }
     // D-SERDE2 (card #131 S1-bridge): a hand `impl T.Decode` `decode` is a STATIC trait

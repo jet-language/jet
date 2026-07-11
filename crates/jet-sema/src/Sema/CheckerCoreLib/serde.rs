@@ -2,7 +2,7 @@ impl<'a> Checker<'a> {
         /// D-SERDE: a value type the `@[Codable]`/`@[Encode]` derive (or a blanket impl)
         /// can serialize. Primitives, the dynamic `Json` tree, and lists/options/maps of
         /// encodables qualify; a user type must derive `Encode`.
-        fn is_encodable(&self, t: &Type) -> bool {
+        pub(crate) fn is_encodable(&self, t: &Type) -> bool {
             match t {
                 Type::Int
                 | Type::Float
@@ -15,7 +15,10 @@ impl<'a> Checker<'a> {
                 Type::FixedList { elem, .. } => self.is_encodable(elem),
                 Type::Map { key, value } => matches!(**key, Type::String) && self.is_encodable(value),
                 Type::Named(n) => {
-                    is_json_type_name(n) || self.trait_reg.implements_trait(n, crate::Generics::ENCODE)
+                    is_json_type_name(n)
+                        || self.trait_reg.implements_trait(n, crate::Generics::ENCODE)
+                        || self.type_param_scope.iter().any(|p|
+                            p.name == *n && p.bounds.iter().any(|b| b == crate::Generics::ENCODE))
                 }
                 // D-SERDE9/10: a generic instantiation `Name<args>` is encodable when
                 // `Name` derives Encode and every type arg that reaches the wire is
@@ -44,7 +47,9 @@ impl<'a> Checker<'a> {
                 Type::List(e) | Type::Option(e) | Type::Shared(e) => self.is_decodable(e),
                 Type::FixedList { elem, .. } => self.is_decodable(elem),
                 Type::Map { key, value } => matches!(**key, Type::String) && self.is_decodable(value),
-                Type::Named(n) => self.trait_reg.implements_trait(n, crate::Generics::DECODE),
+                Type::Named(n) => self.trait_reg.implements_trait(n, crate::Generics::DECODE)
+                    || self.type_param_scope.iter().any(|p|
+                        p.name == *n && p.bounds.iter().any(|b| b == crate::Generics::DECODE)),
                 Type::Apply { name, args } => {
                     apply_serde_ok(name, args, self.trait_reg, crate::Generics::DECODE, &|t| {
                         self.is_decodable(t)

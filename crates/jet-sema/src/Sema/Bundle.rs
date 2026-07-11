@@ -1151,6 +1151,10 @@ pub(crate) fn check_bundle_opts(
             }
         }
 
+        // D-SERDE2=A/R11: built-in codecs re-enter as ordinary Jet source in
+        // bundle builds too; this is the production multi-file path.
+        super::Registration::expand_builtin_serde_items(&mut module.items, &mut diags);
+
         // S62 + D-LIB2: synthesis must happen before register_impl_methods
         // so the synthesised Func nodes appear in the type registry.
         synthesize_impls(&mut module.items);
@@ -2602,6 +2606,46 @@ pub(crate) fn check_module_bodies(
                         no_alloc,
                     no_prelude,
                     ));
+                }
+                // Trait impls nested in a struct are real method bodies too.
+                // They inherit the struct's generic parameters, just as the
+                // Rust impl emitted for them does.  Temporarily expose those
+                // parameters to the ordinary body checker while preserving the
+                // parsed method signature for codegen.
+                for block in &mut s.trait_impls {
+                    for m in &mut block.methods {
+                        let own_params = std::mem::take(&mut m.type_params);
+                        m.type_params = if own_params.is_empty() {
+                            s.type_params.clone()
+                        } else {
+                            own_params.clone()
+                        };
+                        diags.extend(check_func_body_bundle(
+                            m,
+                            module_idx,
+                            states,
+                            Some(&s.name),
+                            &ct_funcs,
+                            &ct_externs,
+                            &ct_base_dir,
+                            &ct_globals,
+                            freestanding,
+                            allow_impure,
+                            summaries,
+                            embed_inputs_out,
+                            global_addr_taken,
+                            no_alloc,
+                            no_prelude,
+                        ));
+                        // Generated serde methods temporarily carry inherited,
+                        // inferred bounds solely for sema. Their Rust generics
+                        // belong on the enclosing impl, not on the method.
+                        m.type_params = if matches!(block.trait_name.as_str(), crate::Generics::ENCODE | crate::Generics::DECODE) {
+                            Vec::new()
+                        } else {
+                            own_params
+                        };
+                    }
                 }
             }
             Item::Enum(e) => {

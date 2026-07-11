@@ -423,6 +423,7 @@ pub(crate) fn fallible_payload_covered(ty: &Type, cx: &Cx) -> bool {
         || is_covered_distinct_ty(ty, cx)
         || is_covered_struct_ty(ty, cx)
         || is_covered_enum_ty(ty, cx)
+        || is_covered_generic_struct_ty(ty, cx)
         || is_covered_collection_ty(ty, cx)
         // c109 Phase 24: a FOREIGN value-type payload (`Note?` on a `ParsedResult` field —
         // `Note` is an imported struct). It renders via `cx.rust_type` to its own Rust

@@ -1974,6 +1974,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     cx.rust_type(target),
                     recv
                 ),
+                THandleOp::SerdeEncode => format!("user_Encode::jet_encode(&({}))", recv),
                 // D-SERDE-ACCESS=B: same accessors on Json/Data.
                 THandleOp::JsonField => format!("({}).field(&({}))", recv, a(0)),
                 THandleOp::JsonAt => format!("({}).at({})", recv, a(0)),

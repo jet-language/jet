@@ -816,6 +816,10 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
 
     register_type_methods(&prog.items, &mut registry, &mut diags);
     register_patchable_methods(&prog.items, &mut registry);
+    // D-SERDE2=A/R11: built-in serde derives become ordinary Jet impl source,
+    // then re-enter lexer/parser before any impl registration or checking.
+    expand_builtin_serde_source(prog, &mut diags);
+
     // S62 + D-LIB2: synthesise before register_impl_methods so synthesised
     // Func nodes are visible when method lookup is registered.
     synthesize_impls(&mut prog.items);
@@ -1258,6 +1262,214 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
     }
 
     diags
+}
+
+/// D-SERDE2=A: render the built-in struct field walk as the same hand-writable
+/// `Encode`/`Decode` impl a user writes, parse it, and attach the parsed methods.
+/// No AST or Rust body is synthesized here: malformed output is E2710 and every
+/// generated method proceeds through ordinary registration, sema, TIR, and codegen.
+pub(super) fn expand_builtin_serde_source(prog: &mut crate::AST::Program, diags: &mut Vec<Diagnostic>) {
+    expand_builtin_serde_items(&mut prog.items, diags);
+}
+
+pub(super) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags: &mut Vec<Diagnostic>) {
+    for item in items {
+        let Item::Struct(s) = item else { continue };
+        let enc = s.derives.iter().any(|(n, _)| n == crate::Generics::ENCODE);
+        let dec = s.derives.iter().any(|(n, _)| n == crate::Generics::DECODE);
+        if !enc && !dec { continue; }
+
+        // The synthetic container exists only to make the generated codec pass
+        // through the ordinary parser/checker.  Its inherited parameters need
+        // the same wire bounds that the final Rust impl receives; otherwise a
+        // field of type `T` is (correctly) rejected as not encodable while the
+        // generated Encode body is checked.
+        let mut codec_params = s.type_params.clone();
+        let wire_types = s.fields.iter()
+            .filter(|f| f.computed.is_none()
+                && !f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_SKIP))
+            .map(|f| &f.ty)
+            .collect::<Vec<_>>();
+        for param in &mut codec_params {
+            let reaches_wire = wire_types.iter()
+                .any(|ty| crate::Generics::free_type_params(ty).contains(&param.name));
+            if reaches_wire && enc && !param.bounds.iter().any(|b| b == crate::Generics::ENCODE) {
+                param.bounds.push(crate::Generics::ENCODE.to_string());
+            }
+            if reaches_wire && dec && !param.bounds.iter().any(|b| b == crate::Generics::DECODE) {
+                param.bounds.push(crate::Generics::DECODE.to_string());
+            }
+        }
+        let params = crate::Generics::format_type_params(&codec_params);
+        let target = format!("{}{}", s.name, serde_type_arg_names(&s.type_params));
+        let mut source = format!("struct __JetSerdeGenerated{params} {{\n");
+        if enc {
+            source.push_str("impl Encode {\nfn encode(self) -> DataTree {\n");
+            let active: Vec<_> = s.fields.iter().filter(|f|
+                f.computed.is_none() && !f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_SKIP)
+            ).collect();
+            let needs_mutation = active.iter().any(|f|
+                f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_FLATTEN)
+                || matches!(f.ty, Type::Option(_))
+            );
+            if !needs_mutation {
+                let pairs = active.iter().map(|f| {
+                    let key = serde_source_field_key(&s.serde_markers, f);
+                    format!("{key:?}: self.{}.encode()", f.name)
+                }).collect::<Vec<_>>().join(", ");
+                source.push_str(&format!("return DataTree.Object([{pairs}])\n"));
+            } else {
+                source.push_str("out: [String: DataTree] := []\n");
+            for f in &s.fields {
+                if f.computed.is_some()
+                    || f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_SKIP)
+                { continue; }
+                let key = serde_source_field_key(&s.serde_markers, f);
+                if f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_FLATTEN) {
+                    source.push_str(&format!(
+                        "nested :: self.{}.encode()\nif nested == .Object(entries) {{ loop key, value in entries {{ out[key] = value }} }}\n",
+                        f.name
+                    ));
+                } else {
+                    source.push_str(&format!("out[{:?}] = self.{}.encode()\n", key, f.name));
+                }
+            }
+                source.push_str("return DataTree.Object(out)\n");
+            }
+            source.push_str("}\n}\n");
+        }
+        if dec {
+            source.push_str("impl Decode {\n");
+            source.push_str(&format!("fn decode(tree: DataTree) -> {target} ? DecodeError {{\n"));
+            source.push_str(&format!("return ok({target}.{{\n"));
+            for f in s.fields.iter().filter(|f| f.computed.is_none()) {
+                let value = if f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_SKIP) {
+                    serde_source_default(f).unwrap_or_else(|| serde_source_zero(&f.ty))
+                } else if f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_FLATTEN) {
+                    format!("tree.decode<{}>()?", serde_type_source(&f.ty))
+                } else {
+                    let key = serde_source_field_key(&s.serde_markers, f);
+                    let subtree = if matches!(f.ty, Type::Option(_)) {
+                        format!("(tree.field({key:?}) ?? DataTree.Null)")
+                    } else if let Some(default) = serde_source_default(f) {
+                        format!("(tree.field({key:?}) ?? {default}.encode())")
+                    } else {
+                        format!("(tree.field({key:?})?)")
+                    };
+                    format!("{subtree}.decode<{}>()?", serde_type_source(&f.ty))
+                };
+                source.push_str(&format!("{}: {},\n", f.name, value));
+            }
+            source.push_str("})\n}\n}\n");
+        }
+        source.push_str("}\n");
+
+        let (tokens, lex_diags) = crate::Lexer::lex(&source);
+        let parsed = if lex_diags.is_empty() { crate::Parser::parse(&tokens) } else { Err(lex_diags) };
+        match parsed {
+            Ok(mut generated) => {
+                let blocks = generated.items.drain(..).find_map(|i| match i {
+                    Item::Struct(g) => Some(g.trait_impls),
+                    _ => None,
+                }).unwrap_or_default();
+                let mut blocks = blocks;
+                for block in &mut blocks {
+                    for method in &mut block.methods {
+                        method.type_params = codec_params.clone();
+                    }
+                }
+                s.trait_impls.extend(blocks);
+                s.derives.retain(|(n, _)| n != crate::Generics::ENCODE && n != crate::Generics::DECODE);
+            }
+            Err(errors) => {
+                let detail = errors.first().map(|d| format!("{} at {:?}", d.what, d.span)).unwrap_or_else(|| "generated codec source was invalid".to_string());
+                diags.push(Diagnostic::error(
+                    "E2710",
+                    format!("built-in codec derive generated invalid Jet for `{}`", s.name),
+                    format!("generated source did not pass the ordinary lexer and parser: {detail}; generated source:\n{source}"),
+                    "report this compiler bug; built-in derives must emit valid ordinary Jet".to_string(),
+                    s.derives.first().map(|(_, span)| *span),
+                ));
+            }
+        }
+    }
+}
+
+fn serde_source_field_key(container: &[crate::AST::Marker], f: &crate::AST::Field) -> String {
+    if let Some(marker) = f.serde_markers.iter().find(|m| m.name == crate::Syntax::ATTR_RENAME) {
+        if let Some(crate::AST::Expr::Str(parts, _)) = marker.args.first() {
+            if let Some(crate::AST::StrPart::Lit(value)) = parts.first() { return value.clone(); }
+        }
+    }
+    let style = container.iter().find(|m| m.name == crate::Syntax::ATTR_RENAME_ALL)
+        .and_then(|m| m.args.first()).and_then(|e| match e { crate::AST::Expr::Ident(n, _) => Some(n.as_str()), _ => None });
+    match style {
+        Some("camel") => { let mut parts = f.name.split('_'); let mut out = parts.next().unwrap_or("").to_string(); for p in parts { let mut c=p.chars(); if let Some(x)=c.next(){out.extend(x.to_uppercase());out.push_str(c.as_str());} } out }
+        Some("kebab") => f.name.replace('_', "-"),
+        Some("screaming") => f.name.to_uppercase(),
+        Some("pascal") => f.name.split('_').map(|p| { let mut c=p.chars(); c.next().map(|x| x.to_uppercase().collect::<String>()+c.as_str()).unwrap_or_default() }).collect(),
+        _ => f.name.clone(),
+    }
+}
+
+fn serde_source_default(f: &crate::AST::Field) -> Option<String> {
+    let marker = f.serde_markers.iter().find(|m| m.name == crate::Syntax::ATTR_DEFAULT)?;
+    marker.args.first().and_then(serde_source_literal)
+}
+
+fn serde_source_literal(e: &crate::AST::Expr) -> Option<String> {
+    match e {
+        crate::AST::Expr::Int(v, _, _) => Some(v.to_string()),
+        crate::AST::Expr::Float(v, _, _) => Some(v.to_string()),
+        crate::AST::Expr::Bool(v, _) => Some(v.to_string()),
+        crate::AST::Expr::Char(v, _) => Some(format!("{v:?}")),
+        crate::AST::Expr::Str(parts, _) if parts.len() == 1 => match &parts[0] {
+            crate::AST::StrPart::Lit(v) => Some(format!("{v:?}")),
+            _ => None,
+        },
+        crate::AST::Expr::ListLit(values, _) => Some(format!("[{}]", values.iter().map(serde_source_literal).collect::<Option<Vec<_>>>()?.join(", "))),
+        crate::AST::Expr::MapLit(values, _) => Some(format!("[{}]", values.iter().map(|(k,v)| Some(format!("{}: {}", serde_source_literal(k)?, serde_source_literal(v)?))).collect::<Option<Vec<_>>>()?.join(", "))),
+        _ => None,
+    }
+}
+
+fn serde_source_zero(ty: &Type) -> String {
+    match ty {
+        Type::Int | Type::IntN { .. } => "0".to_string(),
+        Type::Float | Type::Float32 => "0.0".to_string(),
+        Type::Bool => "false".to_string(),
+        Type::String => "\"\"".to_string(),
+        Type::Option(_) => "None".to_string(),
+        Type::List(_) | Type::Map { .. } => "[]".to_string(),
+        _ => format!("{}.{{}}", serde_type_source(ty)),
+    }
+}
+
+fn serde_type_arg_names(params: &[crate::AST::TypeParam]) -> String {
+    if params.is_empty() { String::new() } else {
+        format!("<{}>", params.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", "))
+    }
+}
+
+fn serde_type_source(ty: &Type) -> String {
+    match ty {
+        Type::Int => "Int".to_string(), Type::Float => "Float".to_string(),
+        Type::Bool => "Bool".to_string(), Type::String => "String".to_string(),
+        Type::Char => "Char".to_string(), Type::Named(n) => n.clone(),
+        Type::List(t) => format!("[{}]", serde_type_source(t)),
+        Type::Map { key, value } => format!("[{}: {}]", serde_type_source(key), serde_type_source(value)),
+        Type::Option(t) => format!("{}?", serde_type_source(t)),
+        Type::Result { ok, err } => format!("{} ? {}", serde_type_source(ok), serde_type_source(err)),
+        Type::Apply { name, args } => format!("{}<{}>", name, args.iter().map(serde_type_source).collect::<Vec<_>>().join(", ")),
+        Type::IntN { signed, bits } => format!("{}{}", if *signed { "I" } else { "U" }, bits),
+        Type::Float32 => "F32".to_string(),
+        Type::FixedList { elem, len } => format!("[{}#{}]", serde_type_source(elem), len),
+        Type::Shared(t) => format!("shared {}", serde_type_source(t)),
+        Type::Tagged { marker, inner } => format!("#{} {}", marker, serde_type_source(inner)),
+        Type::Tuple(fields) => format!("({})", fields.iter().map(|(n,t)| format!("{}: {}", n, serde_type_source(t))).collect::<Vec<_>>().join(", ")),
+        Type::TraitObject(names) => format!("dyn {}", names.join(" + ")),
+        Type::Fn { .. } => "fn()".to_string(),
+    }
 }
 
 /// D-TAINT1: run the taint pass over every function/method body in a single
