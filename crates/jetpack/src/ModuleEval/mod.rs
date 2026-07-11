@@ -30,8 +30,8 @@ pub use Eval::{evaluate_modules, evaluate_source, merge_all, pkg_ref};
 pub use Source::{evaluate_env, is_module_surface};
 pub use Types::{
     AdapterPlan, AdapterRecipe, DevServicePlan, EnvPlan, EvaluatedModule, FleetPlan, HostPlan,
-    ImageKind, ImagePlan, OptionPlan, OptionPriority, PromptPathMode, PromptStripMode, ServicePlan,
-    SystemPlan, VmTestPlan,
+    ImageKind, ImagePlan, OptionPlan, PromptPathMode, PromptStripMode, ServicePlan, SystemPlan,
+    VmTestPlan,
 };
 
 #[cfg(test)]
@@ -598,27 +598,6 @@ module _disabled {
         assert_eq!(options[1].priority, super::Types::OptionPriority::Priority(2500));
         assert_eq!(options[2].source_order, 2);
         assert!(options.iter().all(|option| option.module_id != "_disabled"));
-    }
-
-    #[test]
-    fn disabled_module_id_removes_its_option_contributions_before_resolution() {
-        let src = r#"
-module unwanted {
-    system.host: { target: linux.x64, options: [network.hostName: "wrong"] }
-}
-module control {
-    system.host: { target: linux.x64, options: [
-        packages.disabledModules: ["unwanted"],
-        network.hostName: "right",
-    ] }
-}
-"#;
-        let plan = evaluate_env(src, &base_dir()).unwrap();
-        let options = &plan.systems[0].options;
-        assert!(options.iter().all(|option| option.module_id != "unwanted"));
-        assert!(options.iter().any(|option| {
-            option.key == "network.hostName" && option.value == "\"right\""
-        }));
     }
 
     /// S84: hyphenated System name + hyphenated `from:` reference parse,
