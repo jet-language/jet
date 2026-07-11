@@ -8,6 +8,14 @@ fn core_consuming_place(expr: &Expr) -> Option<(String, String, Span)> {
         match expr {
             Expr::Ident(name, _) => Some(name.clone()),
             Expr::Int(value, _, _) => Some(value.to_string()),
+            Expr::Bool(value, _) => Some(value.to_string()),
+            Expr::Binary(op, left, right, _) => Some(format!(
+                "{} {} {}",
+                subscript(left)?,
+                op.spell(),
+                subscript(right)?
+            )),
+            Expr::Paren(inner, _) => Some(format!("({})", subscript(inner)?)),
             Expr::Field(base, field, _) => {
                 Some(format!("{}.{}", subscript(base)?, field))
             }
@@ -18,37 +26,38 @@ fn core_consuming_place(expr: &Expr) -> Option<(String, String, Span)> {
         }
     }
 
-    fn walk(expr: &Expr) -> Option<(String, String, Span)> {
+    // Ownership root discovery never depends on whether the index expression
+    // can be rendered for product copy. A computed index still selects a place
+    // inside the borrowed base.
+    fn ownership_root(expr: &Expr) -> Option<(String, Span)> {
         match expr {
-            Expr::Ident(name, span) => Some((name.clone(), name.clone(), *span)),
+            Expr::Ident(name, span) => Some((name.clone(), *span)),
+            Expr::Field(base, _, _) | Expr::Index { base, .. } => ownership_root(base),
+            // S40 slices are inclusive copies lowered by TIR to owned values.
+            Expr::Slice { .. } => None,
+            _ => None,
+        }
+    }
+
+    fn spelling(expr: &Expr) -> Option<String> {
+        match expr {
+            Expr::Ident(name, _) => Some(name.clone()),
             Expr::Field(base, field, _) => {
-                let (root, place, root_span) = walk(base)?;
-                Some((root, format!("{}.{}", place, field), root_span))
+                Some(format!("{}.{}", spelling(base)?, field))
             }
             Expr::Index { base, index, .. } => {
-                let (root, place, root_span) = walk(base)?;
-                Some((
-                    root,
-                    format!("{}[{}]", place, subscript(index)?),
-                    root_span,
-                ))
-            }
-            Expr::Slice {
-                base, start, end, ..
-            } => {
-                let (root, place, root_span) = walk(base)?;
-                Some((
-                    root,
-                    format!("{}[{}..{}]", place, subscript(start)?, subscript(end)?),
-                    root_span,
-                ))
+                Some(format!("{}[{}]", spelling(base)?, subscript(index)?))
             }
             _ => None,
         }
     }
 
     let end = expr.span().end;
-    let (root, place, root_span) = walk(expr)?;
+    let (root, root_span) = ownership_root(expr)?;
+    // The supported place grammar has a product spelling. Keep root detection
+    // independent so adding a new index-expression form cannot reopen I2; the
+    // root fallback still rejects before codegen until its renderer is added.
+    let place = spelling(expr).unwrap_or_else(|| root.clone());
     Some((root, place, Span::new(root_span.start, end)))
 }
 

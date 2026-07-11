@@ -2145,23 +2145,32 @@ use core.encoding.json as json
 struct Address { text: String }
 struct Email { addr: String, nested: Address, items: [Address] }
 
-fn encoded(e: Email) -> String {
+fn encoded(e: Email, i: Int) -> String {
     shallow := Data.Text(copy e.addr)
     nested := Data.Text(copy e.nested.text)
     indexed := Data.Text(copy e.items[0].text)
-    return "{json.to_string(shallow)}|{json.to_string(nested)}|{json.to_string(indexed)}"
+    computed := Data.Text(copy e.items[i + 1].text)
+    return "{json.to_string(shallow)}|{json.to_string(nested)}|{json.to_string(indexed)}|{json.to_string(computed)}"
+}
+
+fn slice_data(xs: [Data]) -> Data {
+    return Data.Array(xs[0..1])
 }
 
 fn run() {
-    e := Email.{addr: "a@b.com", nested: Address.{text: "inside"}, items: [Address.{text: "item"}]}
-    print(encoded(e))
+    e := Email.{addr: "a@b.com", nested: Address.{text: "inside"}, items: [Address.{text: "zero"}, Address.{text: "item"}]}
+    sliced := slice_data([Data.Text("slice0"), Data.Text("slice1")])
+    print("{encoded(e, 0)}|{json.to_string(sliced)}")
 }
 "#,
         &[],
         None,
     );
     assert_eq!(code, 0, "explicit field copy failed to compile/run: {stderr}");
-    assert_eq!(stdout, "\"a@b.com\"|\"inside\"|\"item\"\n");
+    assert_eq!(
+        stdout,
+        "\"a@b.com\"|\"inside\"|\"zero\"|\"item\"|[\"slice0\",\"slice1\"]\n"
+    );
     let _ = fs::remove_dir_all(&dir);
 }
 
