@@ -72,8 +72,11 @@ fn exact_invalid_corpus_rejects_in_jet() {
         ran += 1;
         replay(&path);
         let expected = expected_code(&path);
-        let src = fs::read_to_string(&path).unwrap();
-        let diags = match jet::compile_with_path(&src, &path.to_string_lossy()) {
+        let fixture = fs::read_to_string(&path).unwrap();
+        let src = fixture.replace("__NUL__", "\0");
+        let materialized = common::unique_tmp("jet_sema_sound_invalid").with_extension("jet");
+        fs::write(&materialized, &src).unwrap();
+        let diags = match jet::compile_with_path(&src, &materialized.to_string_lossy()) {
             Ok(_) => panic!("{}: sema accepted known-invalid fixture", relative(&path)),
             Err(diags) => diags,
         };
