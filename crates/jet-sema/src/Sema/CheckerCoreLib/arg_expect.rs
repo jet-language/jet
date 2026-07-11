@@ -1,28 +1,54 @@
-/// A plain binding or field chain that a consuming Core constructor would move.
+/// A plain binding or ownership-preserving place chain that a consuming Core
+/// constructor would move.
 /// Returns the real root binding, the Jet spelling used in the diagnostic, and
-/// the full place span. Calls/indexing are deliberately excluded: this helper
-/// only describes places whose ownership follows one local binding.
+/// the full place span. Calls and method calls are deliberately excluded: their
+/// results are temporaries, not places whose ownership follows one local.
 fn core_consuming_place(expr: &Expr) -> Option<(String, String, Span)> {
-    fn walk(expr: &Expr, fields: &mut Vec<String>) -> Option<(String, Span)> {
+    fn subscript(expr: &Expr) -> Option<String> {
         match expr {
-            Expr::Ident(name, span) => Some((name.clone(), *span)),
+            Expr::Ident(name, _) => Some(name.clone()),
+            Expr::Int(value, _, _) => Some(value.to_string()),
             Expr::Field(base, field, _) => {
-                fields.push(field.clone());
-                walk(base, fields)
+                Some(format!("{}.{}", subscript(base)?, field))
+            }
+            Expr::Index { base, index, .. } => {
+                Some(format!("{}[{}]", subscript(base)?, subscript(index)?))
+            }
+            _ => None,
+        }
+    }
+
+    fn walk(expr: &Expr) -> Option<(String, String, Span)> {
+        match expr {
+            Expr::Ident(name, span) => Some((name.clone(), name.clone(), *span)),
+            Expr::Field(base, field, _) => {
+                let (root, place, root_span) = walk(base)?;
+                Some((root, format!("{}.{}", place, field), root_span))
+            }
+            Expr::Index { base, index, .. } => {
+                let (root, place, root_span) = walk(base)?;
+                Some((
+                    root,
+                    format!("{}[{}]", place, subscript(index)?),
+                    root_span,
+                ))
+            }
+            Expr::Slice {
+                base, start, end, ..
+            } => {
+                let (root, place, root_span) = walk(base)?;
+                Some((
+                    root,
+                    format!("{}[{}..{}]", place, subscript(start)?, subscript(end)?),
+                    root_span,
+                ))
             }
             _ => None,
         }
     }
 
     let end = expr.span().end;
-    let mut fields = Vec::new();
-    let (root, root_span) = walk(expr, &mut fields)?;
-    fields.reverse();
-    let mut place = root.clone();
-    for field in fields {
-        place.push('.');
-        place.push_str(&field);
-    }
+    let (root, place, root_span) = walk(expr)?;
     Some((root, place, Span::new(root_span.start, end)))
 }
 

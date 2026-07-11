@@ -2143,16 +2143,17 @@ fn consuming_core_constructor_copies_borrowed_field_explicitly() {
 use core.encoding.json as json
 
 struct Address { text: String }
-struct Email { addr: String, nested: Address }
+struct Email { addr: String, nested: Address, items: [Address] }
 
 fn encoded(e: Email) -> String {
     shallow := Data.Text(copy e.addr)
     nested := Data.Text(copy e.nested.text)
-    return "{json.to_string(shallow)}|{json.to_string(nested)}"
+    indexed := Data.Text(copy e.items[0].text)
+    return "{json.to_string(shallow)}|{json.to_string(nested)}|{json.to_string(indexed)}"
 }
 
 fn run() {
-    e := Email.{addr: "a@b.com", nested: Address.{text: "inside"}}
+    e := Email.{addr: "a@b.com", nested: Address.{text: "inside"}, items: [Address.{text: "item"}]}
     print(encoded(e))
 }
 "#,
@@ -2160,7 +2161,7 @@ fn run() {
         None,
     );
     assert_eq!(code, 0, "explicit field copy failed to compile/run: {stderr}");
-    assert_eq!(stdout, "\"a@b.com\"|\"inside\"\n");
+    assert_eq!(stdout, "\"a@b.com\"|\"inside\"|\"item\"\n");
     let _ = fs::remove_dir_all(&dir);
 }
 

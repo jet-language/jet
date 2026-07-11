@@ -1,15 +1,23 @@
 Error [E0209]: implicit clone of `e.addr`
-  --> tests/ui/core_consuming_borrowed_field.jet:11:22
+  --> tests/ui/core_consuming_borrowed_field.jet:12:22
     |
- 11 |     return Data.Text(e.addr)
+ 12 |     return Data.Text(e.addr)
     |                      ^^^^^^
  Why: `Text` stores its own copy of this value
  Fix: write `copy e.addr` to copy explicitly
 
 Error [E0209]: implicit clone of `e.nested.text`
-  --> tests/ui/core_consuming_borrowed_field.jet:15:22
+  --> tests/ui/core_consuming_borrowed_field.jet:16:22
     |
- 15 |     return Data.Text(e.nested.text)
+ 16 |     return Data.Text(e.nested.text)
     |                      ^^^^^^^^^^^^^
  Why: `Text` stores its own copy of this value
  Fix: write `copy e.nested.text` to copy explicitly
+
+Error [E0209]: implicit clone of `e.items[0].text`
+  --> tests/ui/core_consuming_borrowed_field.jet:20:22
+    |
+ 20 |     return Data.Text(e.items[0].text)
+    |                      ^^^^^^^^^^^^^^^
+ Why: `Text` stores its own copy of this value
+ Fix: write `copy e.items[0].text` to copy explicitly
