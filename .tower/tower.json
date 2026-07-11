@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 496,
-    "rev": 3732,
+    "rev": 3735,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -5144,13 +5144,23 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "building",
+      "phase": "deciding",
       "priority": "P1",
       "plan": "event-system",
       "blockedBy": [],
       "workOrder": 142,
-      "assignee": "sol-286-builder",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "sol-286-builder",
+          "text": "Owner gate D-EVENT2 ready. No implementation may guess async overflow/block/drop, typed failure-report, or Hook outcome APIs; resume immediately after ratification."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "sol-286-builder",
+          "text": "[handoff] D-EVENT2 queued ready: D-EVENT1 only ratifies Event<T>, Hook<T,R> last-result, policy_async(n), EventTrace. Reopened criteria additionally require public overflow/block/drop choice, Task/report completion, blocked-producer close/cancel/deadline law, typed handler failure aggregation, and Hook transform/cancel/error outcomes; implementing any exact surface before owner choice would invent API. Current facade: ReactiveEventWatch.rs JetEvent::dispatch calls handlers synchronously, pushes then q.clear(), and reports cumulative dropped; tests/corelib.rs expects immediate handler output and queued=1 despite queued_count returning 0. Canvas graph_projection.rs event_dispatcher_facts uses raw substring matches and static lifetime/debug strings. No source edits; worktree clean. Resume after D-EVENT2 ratification, propagate decision, write failing runtime/codegen/Core/Canvas/UI tests first, then full scheduler-backed implementation."
+        },
         {
           "at": "2026-07-11",
           "by": "codex-orchestrator",
@@ -5255,8 +5265,7 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
-      "claimedAt": "2026-07-11T17:14:12.257Z"
+      "refs": []
     },
     {
       "id": "c0m9tjqj",
@@ -26616,6 +26625,58 @@
       "created": "2026-07-11T13:38:44.937Z",
       "outcome": "A",
       "ratifiedAt": "2026-07-11"
+    },
+    {
+      "id": "D-EVENT2",
+      "cardId": "c0fiunwy",
+      "group": "runtime",
+      "title": "Complete event dispatch, failure, and hook policy surface",
+      "gist": "Choose how Event and Hook expose real queued dispatch, cancellation, typed failures, and intervention outcomes.",
+      "explainer": "",
+      "story": "Maya builds a multiplayer damage pipeline. Ordinary UI clicks should stay one-line and synchronous. Network damage bursts must use a bounded queue, producers must either wait or drop by an explicit policy, cancellation and deadlines must wake blocked work, and every accepted payload must be delivered or dropped exactly once. A validation plugin must be able to transform or cancel a save, while typed handler failures remain inspectable instead of becoming background errors.",
+      "inWild": "use core.event as event\n\nfn run() {\n    owner :: event.scope()\n    clicks :: event.new<Click>()\n    clicks.on(owner, (click) => { ui.highlight(click.target) })\n    clicks.emit(Click.{ target: \"save\" })\n\n    damage :: event.async_result<Damage, DamageError>(\n        event.AsyncPolicy.{ capacity: 256, overflow: event.Overflow.Block },\n        event.FailurePolicy.Collect,\n    )\n    damage.on(owner, (hit) => apply_damage(hit))\n    task :: damage.emit_async(Damage.{ amount: 12 })\n    report :: task.join()\n    print(report.trace().summary())\n    print(report.failures())\n\n    before_save :: event.decision_hook<SaveRequest, SaveRequest, SaveError>(\n        event.HookPolicy.FirstCancelElseTransform,\n    )\n    before_save.on(owner, (request) => event.HookOutcome.Transform(normalize(request)))\n    before_save.on(owner, (request) => validate(request))\n    print(before_save.run(SaveRequest.{ path: \"notes.txt\" }))\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Typed companion handles",
+          "detail": "Keep the beginner Event<T> and Hook<T,R> calls unchanged and synchronous. Add one companion family for expert policies: AsyncEvent<T,E> owns a bounded scheduler queue and returns Task<DispatchReport<E>> from emit_async; DecisionHook<T,R,E> returns a typed HookOutcome<R,E>. AsyncPolicy requires capacity plus Block, DropNewest, or DropOldest. FailurePolicy is StopFirst, Collect, Log, or Ignore. EventScope owns subscriptions and in-flight dispatch: cancel/drop closes the queue, wakes blocked producers, cancels queued work, and records every accepted payload exactly once. An inherited structured deadline cancels a blocked enqueue or worker through the same task control. This preserves the tiny default while making expert outcomes fully typed and awaitable.",
+          "code": "clicks :: event.new<Click>()\nclicks.on(owner, handle_click)\nclicks.emit(click)\n\ndamage :: event.async_result<Damage, DamageError>(\n    event.AsyncPolicy.{ capacity: 256, overflow: event.Overflow.Block },\n    event.FailurePolicy.Collect,\n)\nreport :: damage.emit_async(hit).join()\nfor failure in report.failures() { print(failure) }\n\nbefore_save :: event.decision_hook<SaveRequest, SaveRequest, SaveError>(\n    event.HookPolicy.FirstCancelElseTransform,\n)\nbefore_save.on(owner, validate_or_transform)\nmatch before_save.run(request) {\n    event.HookOutcome.Continue(value) -> save(value)\n    event.HookOutcome.Cancel(reason) -> print(reason)\n    event.HookOutcome.Fail(error) -> print(error)\n}"
+        },
+        {
+          "key": "B",
+          "name": "One configurable Event type",
+          "detail": "Expand Event to Event<T,E> and Hook to Hook<T,R,E>, with Never as the implicit error type for beginner constructors. Every event stores dispatch, overflow, failure, ordering, duplicate, reentrancy, and trace policies. emit always returns DispatchReport<E>; asynchronous configuration makes emit return Task<DispatchReport<E>> instead. This is one nominal family, but the return type of emit depends on stored runtime policy and therefore requires either a sum return value or separate sync/async methods. Scope close/cancel/deadline laws are identical to A.",
+          "code": "clicks :: event.new<Click>()\nclicks.on(owner, handle_click)\nprint(clicks.emit(click).trace())\n\ndamage :: event.new<Damage, DamageError>(event.Policy.{\n    dispatch: event.Dispatch.Async,\n    capacity: 256,\n    overflow: event.Overflow.Block,\n    failures: event.FailurePolicy.Collect,\n})\nreport :: damage.emit_async(hit).join()\n\nhook :: event.hook<SaveRequest, SaveRequest, SaveError>(event.HookPolicy.FirstCancelElseTransform)\nprint(hook.run(request))"
+        },
+        {
+          "key": "C",
+          "name": "Policy-specific operations",
+          "detail": "Keep Event<T> as the only event type. Add methods for each expert behavior: emit_async_block, emit_async_drop_newest, emit_async_drop_oldest, on_result, run_transform, and run_cancel. Each operation returns a typed task/report where applicable. This keeps construction simple and makes every call explicit, but spreads one semantic control plane across many verbs and allows the same event value to change queue/failure behavior call by call. Scope close/cancel/deadline laws remain mandatory.",
+          "code": "damage :: event.new<Damage>()\ndamage.on_result<DamageError>(owner, apply_damage)\nreport :: damage.emit_async_block<DamageError>(hit, capacity: 256, failures: event.FailurePolicy.Collect).join()\n\nhook :: event.hook<SaveRequest, SaveRequest>(request)\nhook.on(owner, normalize)\ntransformed :: hook.run_transform(request)\ncancelled :: hook.run_cancel(transformed, validate)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Kotlin Flow",
+          "note": "buffer capacity and overflow are explicit, while collection runs in structured coroutine scope; Jet should retain the explicit pressure model without hiding failures in a detached collector.",
+          "code": "events.buffer(capacity = 256, onBufferOverflow = BufferOverflow.SUSPEND).collect { handle(it) }"
+        },
+        {
+          "lang": "Tokio",
+          "note": "bounded mpsc send waits for capacity and wakes with an error when the receiver closes; Jet needs the same exact wake/drop law under scope cancellation and deadlines, integrated with its scheduler rather than exposed as a raw channel.",
+          "code": "tx.send(value).await?; drop(rx); // blocked sends wake with closed"
+        },
+        {
+          "lang": "DOM AbortSignal",
+          "note": "one owner cancellation signal removes listeners predictably; Jet's EventScope should additionally own queued payloads and blocked producers so teardown cannot leak background work.",
+          "code": "target.addEventListener(\"click\", handler, { signal: controller.signal }); controller.abort();"
+        }
+      ],
+      "rec": "A",
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-11T17:17:53.950Z"
     }
   ],
   "questions": [
@@ -27427,6 +27488,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-11T17:18:17.195Z",
+      "by": "sol-286-builder",
+      "action": "card.update",
+      "ref": "c0fiunwy",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T17:18:03.613Z",
+      "by": "sol-286-builder",
+      "action": "card.release",
+      "ref": "c0fiunwy",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-11T17:17:53.950Z",
+      "by": "sol-286-builder",
+      "action": "decision.add",
+      "ref": "D-EVENT2",
+      "note": "Complete event dispatch, failure, and hook policy surface"
+    },
     {
       "at": "2026-07-11T17:14:12.848Z",
       "by": "codex-orchestrator",
@@ -30904,27 +30986,6 @@
       "by": "terra-360-help",
       "action": "card.update",
       "ref": "c0l5fmyy",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-11T02:00:51.065Z",
-      "by": "terra-360-help",
-      "action": "card.update",
-      "ref": "c0l5fmyy",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-11T01:56:21.912Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-REPLCOREEFFECT1",
-      "note": "REPL Core effect authorization"
-    },
-    {
-      "at": "2026-07-11T01:56:18.108Z",
-      "by": "fable-main",
-      "action": "card.update",
-      "ref": "c0ewd6kd",
       "note": "phase,logEntry"
     }
   ],
