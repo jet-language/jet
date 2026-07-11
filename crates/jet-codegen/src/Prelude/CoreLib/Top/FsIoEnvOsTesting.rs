@@ -748,14 +748,25 @@ fn jet_testing_bench_budget<F: Fn()>(name: &String, max_ns: i64, body: F) -> boo
     let variance = samples_ns.iter().map(|s| (s - mean).powi(2)).sum::<f64>() / n;
     let stddev = variance.sqrt();
     let ok = mean <= max_ns as f64;
-    eprintln!(
-        "bench_budget {}: {:.0}ns (±{:.0}) budget {}ns — {}",
-        name,
-        mean,
-        stddev,
-        max_ns,
-        if ok { "ok" } else { "over budget" }
-    );
+    // The default line is deterministic (no measured numbers) so a golden/dev-vs-
+    // AOT comparison never flakes on timing noise. `JET_BENCH_VERBOSE=1` opts into
+    // the full mean/stddev/budget line for a human debugging a budget failure.
+    if std::env::var("JET_BENCH_VERBOSE").is_ok() {
+        eprintln!(
+            "bench_budget {}: {:.0}ns (±{:.0}) budget {}ns — {}",
+            name,
+            mean,
+            stddev,
+            max_ns,
+            if ok { "ok" } else { "over budget" }
+        );
+    } else {
+        eprintln!(
+            "bench_budget {}: {}",
+            name,
+            if ok { "within budget — ok" } else { "over budget — FAIL" }
+        );
+    }
     ok
 }
 
