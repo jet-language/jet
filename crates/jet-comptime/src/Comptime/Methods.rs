@@ -1576,6 +1576,90 @@ fn pin_repl_command(
     Ok(())
 }
 
+fn run_repl_process(
+    cmd: &[String],
+    base_dir: &std::path::Path,
+) -> std::io::Result<std::process::Output> {
+    use std::fs::OpenOptions;
+    use std::process::Stdio;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{Duration, Instant};
+
+    static CAPTURE_ID: AtomicU64 = AtomicU64::new(0);
+    let capture_file = |stream: &str| {
+        loop {
+            let id = CAPTURE_ID.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "jet-repl-process-{}-{id}-{stream}",
+                std::process::id()
+            ));
+            match OpenOptions::new().write(true).create_new(true).open(&path) {
+                Ok(file) => break Ok((path, file)),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(e) => break Err(e),
+            }
+        }
+    };
+    let (stdout_path, stdout_file) = capture_file("stdout")?;
+    let (stderr_path, stderr_file) = match capture_file("stderr") {
+        Ok(capture) => capture,
+        Err(e) => {
+            let _ = std::fs::remove_file(&stdout_path);
+            return Err(e);
+        }
+    };
+    let child = std::process::Command::new(&cmd[0])
+        .args(&cmd[1..])
+        .current_dir(base_dir)
+        .env_clear()
+        .stdout(Stdio::from(stdout_file))
+        .stderr(Stdio::from(stderr_file))
+        .spawn();
+    let mut child = match child {
+        Ok(child) => child,
+        Err(e) => {
+            let _ = std::fs::remove_file(&stdout_path);
+            let _ = std::fs::remove_file(&stderr_path);
+            return Err(e);
+        }
+    };
+
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {}
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = std::fs::remove_file(&stdout_path);
+                let _ = std::fs::remove_file(&stderr_path);
+                return Err(e);
+            }
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = std::fs::remove_file(&stdout_path);
+            let _ = std::fs::remove_file(&stderr_path);
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "process.run exceeded the 30 second REPL limit",
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    let stdout = std::fs::read(&stdout_path);
+    let stderr = std::fs::read(&stderr_path);
+    let _ = std::fs::remove_file(&stdout_path);
+    let _ = std::fs::remove_file(&stderr_path);
+    Ok(std::process::Output {
+        status,
+        stdout: stdout?,
+        stderr: stderr?,
+    })
+}
+
 // ---------------------------------------------------------------------------
 // D-CTCORE1 (ratified 2026-06-22): curated pure Core whitelist for comptime.
 //
@@ -3581,12 +3665,7 @@ fn apply_impure_core_call(
                     )],
                 })));
             }
-            match std::process::Command::new(&cmd[0])
-                .args(&cmd[1..])
-                .current_dir(base_dir)
-                .env_clear()
-                .output()
-            {
+            match run_repl_process(&cmd, base_dir) {
                 Ok(out) => Ok(CtValue::ResOk(Box::new(CtValue::Struct {
                     type_name: "ProcessResult".to_string(),
                     fields: vec![

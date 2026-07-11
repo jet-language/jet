@@ -759,6 +759,20 @@ fn repl_core_fs_read_inline() {
 }
 
 #[test]
+fn repl_core_process_run_is_authorized_and_captured() {
+    let inputs = &[
+        "use core.process as process",
+        "use core.io as io",
+        "#Grant(Exec, Io) { caps -> io.eprint((process.run([\"sh\", \"-c\", \"printf repl-process-ok\"]) ?? panic(\"run failed\")).output) }",
+    ];
+    let out = run_transcript_with_flags(inputs, None, &["exec", "io"], &[]);
+    assert!(
+        out.contains("repl-process-ok") && !out.contains("E1803"),
+        "authorized process.run should capture output, got: {out}"
+    );
+}
+
+#[test]
 fn repl_non_tty_denies_ungranted_files_before_execution() {
     let root = std::env::temp_dir().join(format!("jet_repl_deny_{}", std::process::id()));
     std::fs::create_dir_all(&root).expect("create root");
@@ -857,7 +871,10 @@ fn repl_allow_fs_still_rejects_paths_outside_project_root() {
         &["fs"],
         &[],
     );
-    assert!(out.contains("E1803") && out.contains("confined"), "escape was not rejected: {out}");
+    assert!(
+        out.contains("E1803") && out.contains("Fs.Write") && out.contains(&escaped),
+        "absolute escape was not rejected before execution: {out}"
+    );
     assert!(!outside.exists(), "confined REPL wrote outside project root");
     std::fs::remove_dir_all(root).ok();
 }

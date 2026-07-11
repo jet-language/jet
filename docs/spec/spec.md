@@ -1875,6 +1875,9 @@ or revoke on reuse. `--allow-fs`, `--allow-env`, `--allow-exec`,
 matching `--deny-*` flags override them. Piped and transcript sessions never
 prompt and deny unflagged effects with E1803. Filesystem access is confined to
 the project root and rejects absolute paths, parent traversal, and symlinks.
+Process execution resolves the executable to a canonical path before
+authorization, starts with an empty environment in the project root, captures
+stdout and stderr, and kills commands that exceed 30 seconds.
 Native-only modules still report E1802.
 
 ## Editions & release policy (E2-M2)
