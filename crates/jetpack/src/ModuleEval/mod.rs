@@ -545,16 +545,19 @@ module installer {
             sys.options,
             vec![
                 OptionPlan {
-                    key: "network.hostName".into(),
-                    value: "halcyon".into()
+                    module_id: "halcyon".into(),
+                    source_order: 0,
+                    ..OptionPlan::ordinary("network.hostName", "halcyon")
                 },
                 OptionPlan {
-                    key: "filesystem.timeZone".into(),
-                    value: "\"Europe/London\"".into()
+                    module_id: "halcyon".into(),
+                    source_order: 1,
+                    ..OptionPlan::ordinary("filesystem.timeZone", "\"Europe/London\"")
                 },
                 OptionPlan {
-                    key: "packages.shell".into(),
-                    value: "default.fish".into()
+                    module_id: "halcyon".into(),
+                    source_order: 2,
+                    ..OptionPlan::ordinary("packages.shell", "default.fish")
                 },
             ]
         );
@@ -563,6 +566,38 @@ module installer {
         assert_eq!(plan.images[0].from, "halcyon");
         assert_eq!(plan.images[0].format, "iso");
         assert_eq!(plan.images[0].target, None);
+    }
+
+    #[test]
+    fn system_option_priorities_are_per_contribution_with_stable_module_ids() {
+        let src = r#"
+module defaults {
+    system.host: { target: linux.x64, options: [
+        services.displayManager: "sddm",
+        services.displayManager.tier: .Default,
+    ] }
+}
+module local {
+    system.host: { target: linux.x64, options: [
+        services.displayManager: "gdm",
+        services.displayManager.priority: 2500,
+        network.hostName: "host",
+    ] }
+}
+module _disabled {
+    system.host: { target: linux.x64, options: [network.hostName: "wrong"] }
+}
+"#;
+        let plan = evaluate_env(src, &base_dir()).unwrap();
+        assert_eq!(plan.systems.len(), 1);
+        let options = &plan.systems[0].options;
+        assert_eq!(options.len(), 3);
+        assert_eq!(options[0].module_id, "defaults");
+        assert_eq!(options[0].priority, super::Types::OptionPriority::Default);
+        assert_eq!(options[1].module_id, "local");
+        assert_eq!(options[1].priority, super::Types::OptionPriority::Priority(2500));
+        assert_eq!(options[2].source_order, 2);
+        assert!(options.iter().all(|option| option.module_id != "_disabled"));
     }
 
     /// S84: hyphenated System name + hyphenated `from:` reference parse,

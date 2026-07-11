@@ -69,10 +69,10 @@ mod identity_tests {
             target: "linux.x64".to_string(),
             packages: Vec::new(),
             services: Vec::new(),
-            options: vec![ModuleEval::OptionPlan {
-                key: "hardware.halcyon.specialisation.plasmaBeta".to_string(),
-                value: "true".to_string(),
-            }],
+            options: vec![ModuleEval::OptionPlan::ordinary(
+                "hardware.halcyon.specialisation.plasmaBeta",
+                "true",
+            )],
         };
         fs::create_dir_all(&generation).unwrap();
         write_etc_tree(&generation, &system).unwrap();

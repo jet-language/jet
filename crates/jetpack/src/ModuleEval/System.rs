@@ -22,7 +22,8 @@ use super::Diagnostics::{
 };
 use super::Eval::{check_build_io, extract_packages};
 use super::Types::{
-    FleetPlan, HostPlan, ImageKind, ImagePlan, OptionPlan, ServicePlan, SystemPlan, VmTestPlan,
+    FleetPlan, HostPlan, ImageKind, ImagePlan, OptionPlan, OptionPriority, ServicePlan, SystemPlan,
+    VmTestPlan,
 };
 
 /// U11/U12/U13/U18: field-check a `system.<name>: { … }` record and capture it as
@@ -30,6 +31,7 @@ use super::Types::{
 /// fields, that `target` names a known platform, that `services` records carry a
 /// `Bool` `enable`, and that `options` is a list of `key: value` entries.
 pub(super) fn evaluate_system(
+    module_id: &str,
     path: &str,
     lit: &SystemLit,
     src: &str,
@@ -58,13 +60,19 @@ pub(super) fn evaluate_system(
                 // `default.fish`) or free-form quoted strings — not computed
                 // expressions. Capture the written value by slicing its source
                 // span, the same technique `sources:`/`packages:` use.
+                let mut local = Vec::new();
                 for e in entries {
                     let span = e.value_span;
-                    options.push(OptionPlan {
+                    local.push(OptionPlan {
                         key: e.key.clone(),
                         value: src[span.start..span.end].trim().to_string(),
+                        module_id: module_id.to_string(),
+                        source_order: options.len() + local.len(),
+                        priority: OptionPriority::Normal,
                     });
                 }
+                apply_option_priorities(&mut local);
+                options.extend(local.into_iter().filter(|o| !is_priority_metadata(&o.key)));
             }
             SystemFieldValue::Other(_) => {
                 return Err(unknown_record_field(
@@ -84,6 +92,57 @@ pub(super) fn evaluate_system(
         services,
         options,
     })
+}
+
+fn is_priority_metadata(key: &str) -> bool {
+    key.ends_with(".tier") || key.ends_with(".priority")
+}
+
+fn apply_option_priorities(options: &mut [OptionPlan]) {
+    for metadata_idx in 0..options.len() {
+        let metadata = &options[metadata_idx];
+        let (base, kind) = if let Some(base) = metadata.key.strip_suffix(".tier") {
+            (base, "tier")
+        } else if let Some(base) = metadata.key.strip_suffix(".priority") {
+            (base, "priority")
+        } else {
+            continue;
+        };
+        let Some(target_idx) = options[..metadata_idx].iter().rposition(|o| o.key == base) else {
+            continue;
+        };
+        let raw = metadata.value.clone();
+        options[target_idx].priority = if kind == "priority" {
+            clean_priority_number(&raw)
+                .map(OptionPriority::Priority)
+                .unwrap_or(OptionPriority::Normal)
+        } else {
+            let tier = raw.trim().trim_start_matches('.');
+            if tier == "Default" {
+                OptionPriority::Default
+            } else if tier == "Force" {
+                OptionPriority::Force
+            } else if let Some(weight) = tier
+                .strip_prefix("Priority(")
+                .and_then(|s| s.strip_suffix(')'))
+                .and_then(|s| s.parse().ok())
+            {
+                OptionPriority::Priority(weight)
+            } else {
+                OptionPriority::Normal
+            }
+        };
+    }
+}
+
+fn clean_priority_number(raw: &str) -> Option<i64> {
+    raw.trim()
+        .trim_start_matches('.')
+        .strip_prefix("Priority(")
+        .and_then(|s| s.strip_suffix(')'))
+        .unwrap_or_else(|| raw.trim())
+        .parse()
+        .ok()
 }
 
 /// U13: a `target`/cross-compile platform must name a known OS+arch pair.

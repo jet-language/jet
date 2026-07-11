@@ -90,6 +90,7 @@ pub fn evaluate_env(src: &str, base_dir: &Path) -> Result<EnvPlan, Diagnostic> {
         secrets.extend(module.secrets.iter().cloned());
         adapters.extend(module.adapters.iter().cloned());
     }
+    systems = merge_system_contributions(systems);
     let system_names: Vec<String> = systems.iter().map(|s| s.name.clone()).collect();
     // D-JPK-IMAGE1: an `.Oci` image's `from: packages.<name>` cross-checks against
     // this project's own `pkg.jet` `packages:` block (E1267) — a different
@@ -199,6 +200,25 @@ pub fn evaluate_env(src: &str, base_dir: &Path) -> Result<EnvPlan, Diagnostic> {
         dev_services,
         secrets,
     })
+}
+
+fn merge_system_contributions(systems: Vec<SystemPlan>) -> Vec<SystemPlan> {
+    let mut merged: Vec<SystemPlan> = Vec::new();
+    for mut incoming in systems {
+        if let Some(existing) = merged.iter_mut().find(|s| s.name == incoming.name) {
+            existing.packages.append(&mut incoming.packages);
+            existing.services.append(&mut incoming.services);
+            existing.options.append(&mut incoming.options);
+        } else {
+            merged.push(incoming);
+        }
+    }
+    for system in &mut merged {
+        for (source_order, option) in system.options.iter_mut().enumerate() {
+            option.source_order = source_order;
+        }
+    }
+    merged
 }
 
 fn prompt_path_mode(value: &str) -> PromptPathMode {
