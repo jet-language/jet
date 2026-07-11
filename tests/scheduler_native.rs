@@ -83,7 +83,8 @@ fn emitted_scheduler_ships_native_readiness_backend() {
             && rust.contains("IoBackendState::Failed")
             && rust.contains("scheduler IOCP completion port failed")
             && rust.contains("drain_deadline")
-            && rust.contains("METRIC_IO_PORT_CLOSED"),
+            && rust.contains("METRIC_IO_PORT_CLOSED")
+            && rust.contains("iocp_shutdown_done"),
         "emitted IOCP backend must publish terminal failure and reject later waits"
     );
     assert!(

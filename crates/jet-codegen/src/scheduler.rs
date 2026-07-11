@@ -128,6 +128,14 @@ mod iocp_runtime_tests {
         TEST_IOCP_GQCS_FATAL.store(true, Ordering::Release);
         io_poller().iocp_notify();
         assert!(matches!(wait_result(&active_wait), JetSchedulerResult::Panicked));
+        let shutdown_start = Instant::now();
+        while !io_poller().iocp_shutdown_done.load(Ordering::Acquire) {
+            assert!(
+                shutdown_start.elapsed() < Duration::from_secs(10),
+                "IOCP terminal shutdown did not finish"
+            );
+            std::thread::yield_now();
+        }
         jet_scheduler_drain();
         let (active, allocated, retired) = jet_scheduler_metric_io_operations();
         assert_eq!((active, allocated), (0, retired));
@@ -579,6 +587,8 @@ struct IoPoller {
     next_key: AtomicUsize,
     #[cfg(target_os = "windows")]
     iocp_port: AtomicUsize,
+    #[cfg(target_os = "windows")]
+    iocp_shutdown_done: AtomicBool,
 }
 
 // jet:scheduler-native-begin — vetted std-only OS FFI and poller dispatch.
@@ -971,9 +981,11 @@ impl IoPoller {
             for interest in self.interests.lock().unwrap().drain(..) { interest.slot.wake(); }
             self.streams.lock().unwrap().clear();
             self.retire_requested.lock().unwrap().clear();
+            self.iocp_shutdown_done.store(true, Ordering::Release);
             return;
         }
         self.iocp_port.store(port, Ordering::Release);
+        self.iocp_shutdown_done.store(false, Ordering::Release);
         *self.backend_state.lock().unwrap() = IoBackendState::Running;
         let mut active: HashMap<usize, Active> = HashMap::new();
         loop {
@@ -1122,8 +1134,11 @@ impl IoPoller {
                     }
                     self.iocp_port.store(0, Ordering::Release);
                     *self.backend_state.lock().unwrap() = IoBackendState::Closed;
-                    unsafe { CloseHandle(port); }
-                    METRIC_IO_PORT_CLOSED.fetch_add(1, Ordering::Relaxed);
+                    if unsafe { CloseHandle(port) } != 0 {
+                        METRIC_IO_PORT_CLOSED.fetch_add(1, Ordering::Relaxed);
+                    } else {
+                        METRIC_IO_FAILURES.fetch_add(1, Ordering::Relaxed);
+                    }
                     if active.is_empty() {
                         self.streams.lock().unwrap().clear();
                         self.retire_requested.lock().unwrap().clear();
@@ -1135,6 +1150,7 @@ impl IoPoller {
                     }
                     *self.backend_state.lock().unwrap() =
                         IoBackendState::Failed("internal scheduler IOCP completion port failed");
+                    self.iocp_shutdown_done.store(true, Ordering::Release);
                     return;
                 }
                 if key != 0 { METRIC_IO_STALE.fetch_add(1, Ordering::Relaxed); }
@@ -1240,6 +1256,8 @@ fn io_poller() -> Arc<IoPoller> {
                 next_key: AtomicUsize::new(0),
                 #[cfg(target_os = "windows")]
                 iocp_port: AtomicUsize::new(0),
+                #[cfg(target_os = "windows")]
+                iocp_shutdown_done: AtomicBool::new(false),
             });
             let p = poller.clone();
             thread::spawn(move || p.run());
