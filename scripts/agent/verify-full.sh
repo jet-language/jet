@@ -22,8 +22,22 @@ for canvas_tool in chromium node; do
     chromium) canvas_command="${JET_CANVAS_CHROMIUM:-chromium}" ;;
     node) canvas_command="${JET_CANVAS_NODE:-node}" ;;
   esac
-  if ! command -v -- "$canvas_command" >/dev/null 2>&1; then
+  canvas_resolved="$(command -v -- "$canvas_command" 2>/dev/null || true)"
+  canvas_version=""
+  if [ -n "$canvas_resolved" ]; then
+    canvas_version="$("$canvas_resolved" --version 2>&1 || true)"
+  fi
+  case "$canvas_tool:$canvas_version" in
+    chromium:*Chromium*|chromium:*Chrome*) ;;
+    node:v[0-9]*) ;;
+    *) canvas_resolved="" ;;
+  esac
+  if [ -z "$canvas_resolved" ]; then
     canvas_missing+=("$canvas_tool")
+  elif [ "$canvas_tool" = "chromium" ]; then
+    export JET_CANVAS_CHROMIUM_RESOLVED="$canvas_resolved"
+  else
+    export JET_CANVAS_NODE_RESOLVED="$canvas_resolved"
   fi
 done
 

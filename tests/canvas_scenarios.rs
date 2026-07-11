@@ -13,12 +13,16 @@ static BUILD_JET: Once = Once::new();
 const MAX_CANVAS_BROWSERS: usize = 4;
 static CANVAS_BROWSER_POOL: OnceLock<(Mutex<usize>, Condvar)> = OnceLock::new();
 
+struct CanvasTools {
+    chromium: PathBuf,
+    node: PathBuf,
+}
+
+static CANVAS_TOOLS: OnceLock<Option<CanvasTools>> = OnceLock::new();
+
 #[test]
 fn strict_full_verification_rejects_each_missing_canvas_tool_once() {
     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let original_chromium = std::env::var_os("JET_CANVAS_CHROMIUM");
-    let original_node = std::env::var_os("JET_CANVAS_NODE");
-
     for (missing, chromium, node) in [
         ("chromium", "jet-test-missing-chromium", "node"),
         ("node", "chromium", "jet-test-missing-node"),
@@ -41,18 +45,38 @@ fn strict_full_verification_rejects_each_missing_canvas_tool_once() {
         assert!(!stderr.contains("ignored:"), "{stderr}");
     }
 
-    assert_eq!(std::env::var_os("JET_CANVAS_CHROMIUM"), original_chromium);
-    assert_eq!(std::env::var_os("JET_CANVAS_NODE"), original_node);
 }
 
 #[test]
-fn strict_full_verification_accepts_canvas_tools_in_dev_shell() {
+fn strict_full_verification_rejects_executable_impostors() {
     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let output = Command::new("bash")
         .current_dir(&repo)
         .arg("scripts/agent/verify-full.sh")
         .env("JET_VERIFY_CANVAS_PREREQUISITES_ONLY", "1")
         .env("JET_NIX_TMP_CLEANED", "1")
+        .env("JET_CANVAS_CHROMIUM", "true")
+        .env("JET_CANVAS_NODE", "true")
+        .output()
+        .expect("run strict Canvas prerequisite preflight");
+    assert!(!output.status.success(), "arbitrary executables must fail identity checks");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(stderr.matches("Canvas interaction tests require").count(), 1, "{stderr}");
+    assert!(stderr.contains("missing: chromium,node"), "{stderr}");
+}
+
+#[test]
+fn strict_full_verification_accepts_canvas_tools_in_dev_shell() {
+    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let chromium = resolve_executable("chromium").expect("dev-shell chromium path");
+    let node = resolve_executable("node").expect("dev-shell node path");
+    let output = Command::new("bash")
+        .current_dir(&repo)
+        .arg("scripts/agent/verify-full.sh")
+        .env("JET_VERIFY_CANVAS_PREREQUISITES_ONLY", "1")
+        .env("JET_NIX_TMP_CLEANED", "1")
+        .env("JET_CANVAS_CHROMIUM", &chromium)
+        .env("JET_CANVAS_NODE", &node)
         .output()
         .expect("run strict Canvas prerequisite preflight");
     assert!(
@@ -258,14 +282,10 @@ fn harness_click_noop_selftest() {
 }
 
 fn run_canvas_scenario(name: &str) {
-    if !tool_available("chromium") {
-        eprintln!("ignored: Canvas scenario `{name}` needs dev-shell chromium on PATH");
+    let Some(tools) = canvas_tools() else {
+        eprintln!("ignored: Canvas scenario `{name}` needs dev-shell Chromium and Node");
         return;
-    }
-    if !tool_available("node") {
-        eprintln!("ignored: Canvas scenario `{name}` needs dev-shell node on PATH");
-        return;
-    }
+    };
     let _browser_permit = CanvasBrowserPermit::acquire();
     ensure_jet_built();
 
@@ -273,8 +293,9 @@ fn run_canvas_scenario(name: &str) {
     let case = CanvasCase::new(&repo, name);
     let port = free_port();
     let mut server = DevServer::start(&repo, &case.dir, &case.entry, port);
-    let output = Command::new("node")
+    let output = Command::new(&tools.node)
         .current_dir(&repo)
+        .env("CHROMIUM", &tools.chromium)
         .arg("scripts/canvas-test/run.mjs")
         .arg("--scenario")
         .arg(name)
@@ -338,14 +359,50 @@ fn canvas_cargo_target_dir(repo: &Path) -> PathBuf {
     cargo_target_dir(repo).join(format!("canvas-scenarios-{hash:016x}"))
 }
 
-fn tool_available(name: &str) -> bool {
-    Command::new(name)
-        .arg("--version")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+fn canvas_tools() -> Option<&'static CanvasTools> {
+    CANVAS_TOOLS
+        .get_or_init(|| {
+            let strict = std::env::var_os("JET_CANVAS_PREREQUISITES").as_deref()
+                == Some(std::ffi::OsStr::new("strict"));
+            let chromium = resolve_canvas_tool("chromium", strict)?;
+            let node = resolve_canvas_tool("node", strict)?;
+            Some(CanvasTools { chromium, node })
+        })
+        .as_ref()
+}
+
+fn resolve_canvas_tool(name: &str, strict: bool) -> Option<PathBuf> {
+    let resolved_key = format!("JET_CANVAS_{}_RESOLVED", name.to_ascii_uppercase());
+    let override_key = format!("JET_CANVAS_{}", name.to_ascii_uppercase());
+    let candidate = if strict {
+        std::env::var_os(&resolved_key)
+    } else {
+        std::env::var_os(&override_key).or_else(|| Some(name.into()))
+    }?;
+    let path = resolve_executable(Path::new(&candidate))?;
+    let output = Command::new(&path).arg("--version").output().ok()?;
+    let version = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let valid = match name {
+        "chromium" => version.contains("Chromium") || version.contains("Chrome"),
+        "node" => version.starts_with('v')
+            && version.as_bytes().get(1).is_some_and(u8::is_ascii_digit),
+        _ => false,
+    };
+    valid.then_some(path)
+}
+
+fn resolve_executable(candidate: impl AsRef<Path>) -> Option<PathBuf> {
+    let candidate = candidate.as_ref();
+    if candidate.components().count() > 1 {
+        return candidate.is_file().then(|| candidate.to_path_buf());
+    }
+    std::env::split_paths(&std::env::var_os("PATH")?)
+        .map(|dir| dir.join(candidate))
+        .find(|path| path.is_file())
 }
 
 struct CanvasCase {
