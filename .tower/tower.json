@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 495,
-    "rev": 3528,
+    "rev": 3535,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -2044,6 +2044,11 @@
         {
           "at": "2026-07-11",
           "by": "fable-medium",
+          "text": "D-CANCELMODEL1=C ratified by owner 2026-07-11; logged in syntax-decisions.md. Builder started: preemptive cancel unwind at wait points riding the E3003 mechanism, tier parity, honest golden re-bless. Shield-region SPELLING still gated — D-SHIELDNAME1 ballot queued on this card (7 candidates, rec A=#Shield); runtime machinery lands syntax-free until ratified."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "fable-medium",
           "text": "Audit-gap tranche merged (7af02c2e/751d096f/feffdce2 + merge). Gap2 FIXED: emitted programs shipped busy-poll fallback because native epoll/kqueue hid behind cargo feature jet_native_io that bare rustc never sets; emit now rewrites gate to target_os-only selection; golden I1 scan excises vetted jet:scheduler-native region; new tests/scheduler_native.rs (2/2). Gap3 FIXED: CI-safe 10k backpressure scale guard (fails on lost-wake/busy-wait/waiter-leak); exposed+fixed REAL lost-wake race in ParkSlot::wake (notify without mutex → park(None) slept forever); 100k targets: cargo test -p jet-codegen -- --ignored scale_100k_tasks_park_under_backpressure and --test corelib -- --ignored scheduler_spawn_100000_tasks_bench. Gap1: pause was real (test added); cancel now wakes parked waits via cancel-waiter registration in jet_scheduler_yield, both tiers (R12). GATE HIT: cancellation MODEL (cooperative vs preemptive-unwind-with-RAII) is unratified observable semantics — D-CANCELMODEL1 ballot being drafted on this card. Named remaining gap: IOCP still portable-poll fallback (no Windows lane). Parent re-ran scheduler_native 2/2, jet-codegen scheduler:: 11/12 (1 ignored=100k), golden concurrency 3/3, corelib 60/60."
         },
         {
@@ -2177,6 +2182,16 @@
       "plan": "D-METADERIVE1=A: implement user derive output as source fragments. Steps: (1) parser for `derive Trait for T { ... }`; (2) sema registers derive providers and enforces local-only orphan rule (trait or type local); (3) derive body runs at comptime with `T.reflect()` and `$name` splices; (4) emitted Jet text re-enters lexer/parser/sema per R11/D-CTCODEGEN1, never injects pre-parsed AST; (5) diagnostics for generated-fragment failure pin at the user `#[Trait]` trigger with optional generated context; (6) examples and goldens for a custom derive; (7) follow-up card for emit-template quoting, not a blocker.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "fable-medium",
+          "text": "D-SERDE2=A implementation stopped at 3 concrete surface sub-gates the ballot's illustrative code never settled: D-SERDE13 (Data vs DataTree as the typed name in every hand codec, rec B), D-SERDE14 (?-accessor error composition inside decode, rec A), D-SERDE15 (.Object constructor shape, rec A) — all three queued ballot-ready on this card. UNGATED FINDING being fixed now by orchestrator: hand impl T.Encode/T.Decode passes sema but codegen emits fn encode/decode into impl user_Encode/user_Decode whose trait methods are jet_encode/jet_decode → rustc rejects (I2/I3 P0, emit_external_trait_impl/emit_trait_method in crates/jet-codegen/src/Codegen/Items.rs). Derive→R11 re-entry (S2) resumes when SERDE13-15 land."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "fable-medium",
+          "text": "D-SERDE2=A ratified by owner 2026-07-11; logged in docs/spec/syntax-decisions.md. Builder started: hand-writable Encode/Decode protocol + built-in derives → R11 source re-entry + cross-module decode<T> fix + architecture.md R11 correction."
+        },
         {
           "at": "2026-07-11",
           "by": "fable-medium",
@@ -7543,7 +7558,7 @@
       "priority": "P1",
       "plan": "# Plan: hybrid REPL with notebook controls\n\nRatified inputs:\n- D-FE-REPL1 outcome D, with explicit owner request for notebook-style rerun/fold/unfold/pin controls.\n\nBlocking decisions raised by this plan:\n- D-FE-REPL-DOCS1 chooses the ?name docs surface.\n- D-FE-REPL-RERUN1 chooses rerun/downstream semantics.\n\nScope after decisions clear:\n- Source/REPL.rs, tests/repl.rs, tests/repl/*.txt, tests/cli/no_args_repl_banner.txt if banner/prompt output changes.\n- No diagnostic wording changes unless a new diagnostic is separately registered and snapshotted.\n\nImplementation steps:\n1. Preserve current REPL semantics and transcript compatibility as the floor. Non-TTY and NO_COLOR keep plain line transcripts.\n2. Add turn ids to interactive TTY output. Each turn stores input, output summary, status, duration when available, folded state, pin state, and binding changes.\n3. Add controls: rerun, fold, unfold, pin/unpin. Controls must have keyboard commands and textual fallbacks, not icon-only behavior.\n4. Add pinned value/turn area that stays visible without changing evaluation semantics.\n5. Add folded output rendering for long values/errors and unfold in place.\n6. Implement docs and rerun behavior exactly per the ratified follow-up decisions.\n7. Keep diagnostics verbatim; frame/styling may change, words/codes may not.\n\nAcceptance:\n- Interactive REPL shows addressable turns with notebook controls.\n- Pin/fold/unfold/rerun work in TTY mode and degrade cleanly in plain transcripts.\n- Large output folds without losing data.\n- Bindings remain truthful after rerun according to the ratified rerun policy.\n\nVerification:\n- nix develop -c cargo test --test repl\n- nix develop -c cargo test --test diagnostic_snapshots ui_snapshots -- --exact if any diagnostic frame fixture changes\n- nix develop -c cargo test --test cli question_mark_help -- --exact if CLI startup/help paths are touched\n- Full nix develop -c cargo test before done.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "terra-358-discovery",
       "log": [
         {
           "at": "2026-07-09",
@@ -7615,11 +7630,12 @@
         }
       ],
       "created": "2026-07-08T13:10:16.819Z",
-      "updated": "2026-07-10",
+      "updated": "2026-07-11",
       "workOrder": 10,
       "criteria": [],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-11T11:57:56.212Z"
     },
     {
       "id": "c0iyfhaf",
@@ -25745,6 +25761,130 @@
       "draft": false,
       "status": "open",
       "created": "2026-07-11T11:53:23.860Z"
+    },
+    {
+      "id": "D-SERDE13",
+      "cardId": "c2nizvzp",
+      "group": "api",
+      "title": "The value-tree type name a hand codec types: Data or DataTree",
+      "gist": "D-SERDE2 = A gives every type a hand-writable encode(self) and decode(tree). The spec text calls the wire tree DataTree, but the only name the compiler lets a user construct and return today is Data. One of them must become the single name users type in every hand codec.",
+      "explainer": "The value tree is the format-agnostic middle form: JSON/TOML/YAML/CSV all encode from and decode into it. Its variants are .Null/.Bool/.Int/.Float/.Text/.Bytes/.Array/.Object. The generated Rust type is jet_std::DataTree; the Jet-surface dynamic face is currently spelled Data (bare decode(s) yields it, Data.Text(x) constructs it). The ratified spec sentence (syntax-decisions.md, serde law) says hand-impl verbs are 'over DataTree' — code and spec disagree, and a hand codec forces the choice: the name appears in the signature `fn encode(self) -> <NAME>` of every custom codec ever written.",
+      "story": "Ada writes her Email codec. The first line is the signature. Today she must write `fn encode(self) -> Data` even though the docs she read say DataTree; if she writes DataTree the compiler says nothing by that name exists. Whichever word wins is permanent taught surface.",
+      "inWild": "impl Email.Encode {\n    fn encode(self) -> <NAME> {\n        <NAME>.Text(self.value)\n    }\n}",
+      "detail": "Pure naming; semantics identical. One name only either way (I8) — the loser becomes a teaching error pointing at the winner, not an alias.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Data",
+          "detail": "Keep what the compiler already speaks. Short, matches bare decode(s) -> Data reads that already exist in examples. Spec law text is amended to say Data. Cost: 'Data' is a famously overloaded word; reads generic in signatures.",
+          "code": "fn encode(self) -> Data {\n    Data.Text(self.value)\n}"
+        },
+        {
+          "key": "B",
+          "name": "DataTree",
+          "detail": "Rename the surface to match the ratified law text and the generated runtime type. Self-describing: it is a tree of data, distinct from any user type named Data. Cost: existing examples/goldens using Data re-bless; two more characters.",
+          "code": "fn encode(self) -> DataTree {\n    DataTree.Text(self.value)\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust serde",
+          "note": "serde_json::Value — the tree is named for the format; Jet's tree is format-agnostic so a format-neutral name is needed.",
+          "code": "fn to_value(&self) -> serde_json::Value"
+        },
+        {
+          "lang": "Swift",
+          "note": "Codable hides the tree entirely behind Encoder/Decoder visitors; Jet exposes the tree as a value, so it needs one good name.",
+          "code": "func encode(to encoder: Encoder)"
+        }
+      ],
+      "rec": "B",
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-11T12:09:23.843Z"
+    },
+    {
+      "id": "D-SERDE14",
+      "cardId": "c2nizvzp",
+      "group": "api",
+      "title": "How ?-accessors compose inside a hand-written decode",
+      "gist": "decode(tree) returns T ? DecodeError, but the tree accessors (.field/.at/.int/.text/…) return T ? String. Writing `tree.text()?` inside decode is today E2404: `?` cannot turn a String error into a DecodeError. The ratified surface promises ?-chaining in decode; this picks how the two error types meet.",
+      "explainer": "DecodeError is the structured error { path, reason } that typed decode reports. The accessors were built for casual dynamic reads (bare decode(s) -> Data), where a plain String reason suffices. A hand codec sits between the two: it reads the tree with accessors and must return DecodeError. Something has to convert.",
+      "story": "Ada's decode reads a text node and validates it: `s := tree.text()?`. Under today's types that line does not compile. She should not need a manual error-mapping incantation on every field read — the promise of the surface is that ? just works.",
+      "inWild": "impl Email.Decode {\n    fn decode(tree: DataTree) -> Email ? DecodeError {\n        s := tree.text()?          // must compile\n        if !s.contains(\"@\") {\n            return err(DecodeError.{ path: \"\", reason: \"not an email: {s}\" })\n        }\n        ok(Email.{ value: s })\n    }\n}",
+      "detail": "Three distinct shapes. A changes what accessors return everywhere; B adds one blessed coercion edge; C makes the accessor error type depend on context.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Accessors return ? DecodeError everywhere",
+          "detail": "One error type for all tree reads; the accessor fills path automatically from where it read (field name / index), which makes casual dynamic reads BETTER (structured paths for free). Cost: casual users see a struct where they saw a String; existing accessor call sites re-check.",
+          "code": "s := tree.text()?              // ? DecodeError, path auto-filled\nage := tree.field(\"age\")?.int()?"
+        },
+        {
+          "key": "B",
+          "name": "Blessed String -> DecodeError ? coercion",
+          "detail": "Accessors keep ? String; the ? operator inside a fn returning ? DecodeError converts, path empty. Zero churn to existing reads. Cost: a special-case coercion edge in the ? conversion table, and hand codecs get empty paths unless they fill them manually.",
+          "code": "s := tree.text()?              // String auto-wraps into DecodeError { path: \"\", reason: s }"
+        },
+        {
+          "key": "C",
+          "name": "Context-sensitive accessor error type",
+          "detail": "Inside a Decode impl the same accessor returns ? DecodeError; elsewhere ? String. No churn, best of both surfaces. Cost: the same expression types differently by context — hardest to teach and to implement honestly (I8 tension: one spelling, two meanings).",
+          "code": "// inside impl T.Decode:  tree.text() : String ? DecodeError\n// elsewhere:              tree.text() : String ? String"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust serde",
+          "note": "All tree reads speak one error type (D::Error) — option A's shape.",
+          "code": "let s: String = Deserialize::deserialize(d)?;"
+        },
+        {
+          "lang": "Go",
+          "note": "errors are hand-wrapped at every read — the ceremony option A/B avoid.",
+          "code": "if err != nil { return fmt.Errorf(\"email: %w\", err) }"
+        }
+      ],
+      "rec": "A",
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-11T12:09:44.182Z"
+    },
+    {
+      "id": "D-SERDE15",
+      "cardId": "c2nizvzp",
+      "group": "api",
+      "title": "Hand-built object nodes: map literal or pair list",
+      "gist": "A hand codec that encodes a record needs to build an .Object node. The compiler today takes a Map (Data.Object(map)); the D-SERDE2 ballot text showed a list of pairs. Pick the taught spelling.",
+      "explainer": "This is the constructor a custom codec uses for any structured wire form. Whichever shape is taught appears in every non-trivial hand encoder. Key order matters for deterministic output (goldens, diffs, canonical forms).",
+      "story": "Ada's Signup type encodes as an object with two fields. She writes the encode body once; every reader of the docs copies it.",
+      "inWild": "fn encode(self) -> DataTree {\n    <CONSTRUCT name/email object>\n}",
+      "detail": "Semantics identical if the map preserves insertion order (Jet Map does). Purely which literal is taught and accepted.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Map literal",
+          "detail": "DataTree.Object({ \"name\": v, … }) — matches what the compiler accepts today and how the tree prints; map literal syntax already ratified. Insertion-ordered.",
+          "code": "DataTree.Object({\n    \"name\": self.name.encode(),\n    \"email\": self.email.encode(),\n})"
+        },
+        {
+          "key": "B",
+          "name": "Pair list",
+          "detail": "DataTree.Object([(\"name\", v), …]) — the ballot's illustrative shape. List-of-tuples reads slightly more wire-like; needs a new accepted constructor form and teaches a second collection spelling for the same job (I8 cost).",
+          "code": "DataTree.Object([\n    (\"name\", self.name.encode()),\n    (\"email\", self.email.encode()),\n])"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust serde_json",
+          "note": "json! macro takes map-literal shape — option A.",
+          "code": "json!({ \"name\": name, \"email\": email })"
+        }
+      ],
+      "rec": "A",
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-11T12:10:03.854Z"
     }
   ],
   "questions": [
@@ -26556,6 +26696,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-11T12:10:33.662Z",
+      "by": "fable-medium",
+      "action": "card.update",
+      "ref": "c2nizvzp",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T12:10:03.855Z",
+      "by": "fable-medium",
+      "action": "decision.add",
+      "ref": "D-SERDE15",
+      "note": "Hand-built object nodes: map literal or pair list"
+    },
+    {
+      "at": "2026-07-11T12:09:44.182Z",
+      "by": "fable-medium",
+      "action": "decision.add",
+      "ref": "D-SERDE14",
+      "note": "How ?-accessors compose inside a hand-written decode"
+    },
+    {
+      "at": "2026-07-11T12:09:23.843Z",
+      "by": "fable-medium",
+      "action": "decision.add",
+      "ref": "D-SERDE13",
+      "note": "The value-tree type name a hand codec types: Data or DataTree"
+    },
+    {
+      "at": "2026-07-11T11:57:56.213Z",
+      "by": "terra-358-discovery",
+      "action": "card.claim",
+      "ref": "c0gk8k3t",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T11:56:24.576Z",
+      "by": "fable-medium",
+      "action": "card.update",
+      "ref": "c2iizmyx",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T11:56:04.905Z",
+      "by": "fable-medium",
+      "action": "card.update",
+      "ref": "c2nizvzp",
+      "note": "logEntry"
+    },
     {
       "at": "2026-07-11T11:53:23.861Z",
       "by": "fable-medium",
@@ -30006,55 +30195,6 @@
       "action": "card.update",
       "ref": "c0qqwe62",
       "note": "phase"
-    },
-    {
-      "at": "2026-07-10T21:24:14.737Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0pfsrnc",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-10T21:24:12.860Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0vntq8c",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-10T21:24:07.758Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-JOS-NETWORK1",
-      "note": "B"
-    },
-    {
-      "at": "2026-07-10T21:24:07.758Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0pfsrnc",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-07-10T21:24:07.758Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0pfsrnc",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-07-10T21:24:07.758Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0pfsrnc",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-07-10T21:24:07.758Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0pfsrnc",
-      "note": "#1 Syntax.rs entry updated"
     }
   ],
   "nextNum": 368,
