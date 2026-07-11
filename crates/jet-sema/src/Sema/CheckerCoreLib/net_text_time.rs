@@ -29,7 +29,7 @@ pub fn net_method_return(
             Type::Named("TcpStream".to_string()),
             err.clone(),
         ))),
-        ("TcpListener", "local_addr") => Some(Some(str_ty.clone())),
+        ("TcpListener", "local_addr") => Some(Some(result_ty(str_ty.clone(), err.clone()))),
         // TcpStream methods.
         ("TcpStream", "read") if n_args == 0 => Some(Some(result_ty(str_ty.clone(), err.clone()))),
         ("TcpStream", "read") if n_args == 1 => Some(Some(result_ty(
@@ -52,8 +52,8 @@ pub fn net_method_return(
             Type::Named("NetReady".to_string()),
             Type::Named("NetError".to_string()),
         ))),
-        ("TcpStream", "peer_addr") => Some(Some(str_ty.clone())),
-        ("TcpStream", "local_addr") => Some(Some(str_ty.clone())),
+        ("TcpStream", "peer_addr") => Some(Some(result_ty(str_ty.clone(), err.clone()))),
+        ("TcpStream", "local_addr") => Some(Some(result_ty(str_ty.clone(), err.clone()))),
         ("TcpStream", "close") => Some(Some(result_ty(
             unit,
             Type::Named("NetError".to_string()),

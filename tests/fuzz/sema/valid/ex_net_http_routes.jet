@@ -36,7 +36,7 @@ fn run() {
             raw :: stream.read_text(8192) ?? panic("read failed")
             req :: http.parse(raw)
             resp :: http.dispatch(router, req)
-            net.tcp_reply(stream, resp.status(), resp.body())
+            net.tcp_reply(stream, resp.status(), resp.body()) ?? panic("tcp reply")
         }
     })
     addr :: ch.receive() ?? panic("no address")

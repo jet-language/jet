@@ -499,31 +499,19 @@ fn jet_net_tcp_connect_happy(host: &String, port: i64, ms: i64) -> Result<JetTcp
     }
 }
 
-fn jet_net_listener_local_socket_addr(listener: &JetTcpListener) -> JetSocketAddr {
-    JetSocketAddr {
-        inner: listener
-            .inner
-            .local_addr()
-            .unwrap_or_else(|_| "0.0.0.0:0".parse().unwrap()),
-    }
+fn jet_net_listener_local_socket_addr(listener: &JetTcpListener) -> Result<JetSocketAddr, JetNetError> {
+    listener.inner.local_addr().map(|inner| JetSocketAddr { inner })
+        .map_err(|e| jet_net_io_error("tcp listener local address", None, e))
 }
 
-fn jet_net_tcp_local_socket_addr(stream: &JetTcpStream) -> JetSocketAddr {
-    JetSocketAddr {
-        inner: stream
-            .inner
-            .local_addr()
-            .unwrap_or_else(|_| "0.0.0.0:0".parse().unwrap()),
-    }
+fn jet_net_tcp_local_socket_addr(stream: &JetTcpStream) -> Result<JetSocketAddr, JetNetError> {
+    stream.inner.local_addr().map(|inner| JetSocketAddr { inner })
+        .map_err(|e| jet_net_io_error("tcp local address", None, e))
 }
 
-fn jet_net_tcp_peer_socket_addr(stream: &JetTcpStream) -> JetSocketAddr {
-    JetSocketAddr {
-        inner: stream
-            .inner
-            .peer_addr()
-            .unwrap_or_else(|_| "0.0.0.0:0".parse().unwrap()),
-    }
+fn jet_net_tcp_peer_socket_addr(stream: &JetTcpStream) -> Result<JetSocketAddr, JetNetError> {
+    stream.inner.peer_addr().map(|inner| JetSocketAddr { inner })
+        .map_err(|e| jet_net_io_error("tcp peer address", None, e))
 }
 impl JetShow for JetHttpRequest {
     fn jet_show(&self) -> String {
@@ -756,35 +744,25 @@ fn jet_net_tcp_write(stream: &mut JetTcpStream, data: &String) -> Result<(), Jet
     jet_net_tcp_write_text(stream, data)
 }
 
-fn jet_net_tcp_local_addr(stream: &JetTcpStream) -> String {
-    stream
-        .inner
-        .local_addr()
-        .map(|a| a.to_string())
-        .unwrap_or_default()
+fn jet_net_tcp_local_addr(stream: &JetTcpStream) -> Result<String, JetNetError> {
+    stream.inner.local_addr().map(|a| a.to_string())
+        .map_err(|e| jet_net_io_error("tcp local address", None, e))
 }
 
-fn jet_net_tcp_peer_addr(stream: &JetTcpStream) -> String {
-    stream
-        .inner
-        .peer_addr()
-        .map(|a| a.to_string())
-        .unwrap_or_default()
+fn jet_net_tcp_peer_addr(stream: &JetTcpStream) -> Result<String, JetNetError> {
+    stream.inner.peer_addr().map(|a| a.to_string())
+        .map_err(|e| jet_net_io_error("tcp peer address", None, e))
 }
 
-fn jet_net_listener_local_addr(listener: &JetTcpListener) -> String {
-    listener
-        .inner
-        .local_addr()
-        .map(|a| a.to_string())
-        .unwrap_or_default()
+fn jet_net_listener_local_addr(listener: &JetTcpListener) -> Result<String, JetNetError> {
+    listener.inner.local_addr().map(|a| a.to_string())
+        .map_err(|e| jet_net_io_error("tcp listener local address", None, e))
 }
 
-fn jet_net_set_timeout(stream: &mut JetTcpStream, ms: i64) {
-    if let Ok(dur) = jet_net_timeout(ms) {
-        let _ = stream.inner.set_read_timeout(Some(dur));
-        let _ = stream.inner.set_write_timeout(Some(dur));
-    }
+fn jet_net_set_timeout(stream: &mut JetTcpStream, ms: i64) -> Result<(), JetNetError> {
+    let dur = jet_net_timeout(ms).map_err(|m| JetNetError::InvalidInput(jet_net_detail("set tcp timeout", None, None, m, None)))?;
+    stream.inner.set_read_timeout(Some(dur)).map_err(|e| jet_net_io_error("set tcp read timeout", None, e))?;
+    stream.inner.set_write_timeout(Some(dur)).map_err(|e| jet_net_io_error("set tcp write timeout", None, e))
 }
 
 fn jet_net_set_read_timeout(stream: &mut JetTcpStream, ms: i64) -> Result<(), JetNetError> {
@@ -813,13 +791,9 @@ fn jet_net_udp_bind_addr(addr: &JetSocketAddr) -> Result<JetUdpSocket, JetNetErr
         .map_err(|e| jet_net_io_error("udp bind", Some(addr.inner.to_string()), e))
 }
 
-fn jet_net_udp_local_addr(socket: &JetUdpSocket) -> JetSocketAddr {
-    JetSocketAddr {
-        inner: socket
-            .inner
-            .local_addr()
-            .unwrap_or_else(|_| "0.0.0.0:0".parse().unwrap()),
-    }
+fn jet_net_udp_local_addr(socket: &JetUdpSocket) -> Result<JetSocketAddr, JetNetError> {
+    socket.inner.local_addr().map(|inner| JetSocketAddr { inner })
+        .map_err(|e| jet_net_io_error("udp local address", None, e))
 }
 
 fn jet_net_udp_set_timeout(socket: &JetUdpSocket, ms: i64) -> Result<(), JetNetError> {
@@ -1091,17 +1065,7 @@ fn jet_net_dns_system_servers() -> Vec<String> {
     let mut out = Vec::new();
     #[cfg(target_os = "linux")]
     if let Ok(text) = std::fs::read_to_string("/etc/resolv.conf") {
-        for line in text.lines() {
-            let mut parts = line.split_whitespace();
-            if parts.next() == Some("nameserver") {
-                if let Some(host) = parts.next() {
-                    let host = host.trim_matches(|c| c == '[' || c == ']');
-                    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
-                        out.push(std::net::SocketAddr::new(ip, 53).to_string());
-                    }
-                }
-            }
-        }
+        out.extend(jet_net_dns_parse_resolv_conf(&text));
     }
 
     // macOS resolver policy is scoped per interface/VPN. `scutil --dns` is
@@ -1109,16 +1073,7 @@ fn jet_net_dns_system_servers() -> Vec<String> {
     // scoped resolvers.
     #[cfg(target_os = "macos")]
     if let Ok(output) = std::process::Command::new("scutil").arg("--dns").output() {
-        let text = String::from_utf8_lossy(&output.stdout);
-        for line in text.lines() {
-            if let Some((label, value)) = line.trim().split_once(':') {
-                if label.trim().starts_with("nameserver[") {
-                    if let Ok(ip) = value.trim().parse::<std::net::IpAddr>() {
-                        out.push(std::net::SocketAddr::new(ip, 53).to_string());
-                    }
-                }
-            }
-        }
+        out.extend(jet_net_dns_parse_scutil(&String::from_utf8_lossy(&output.stdout)));
     }
 
     // PowerShell returns address values, not localized ipconfig labels, and
@@ -1128,12 +1083,7 @@ fn jet_net_dns_system_servers() -> Vec<String> {
         .args(["-NoProfile", "-NonInteractive", "-Command", "Get-DnsClientServerAddress | ForEach-Object { $_.ServerAddresses }"])
         .output()
     {
-        let text = String::from_utf8_lossy(&output.stdout);
-        for line in text.lines() {
-            if let Ok(ip) = line.trim().parse::<std::net::IpAddr>() {
-                out.push(std::net::SocketAddr::new(ip, 53).to_string());
-            }
-        }
+        out.extend(jet_net_dns_parse_windows_addresses(&String::from_utf8_lossy(&output.stdout)));
     }
     out.sort();
     out.dedup();
@@ -1605,13 +1555,16 @@ fn jet_net_dns_srv_weight(srv: &JetDnsSrv) -> i64 {
 
 /// Send a well-formed HTTP/1.1 response on a TcpStream and close it.
 /// Handles CRLF line endings internally so Jet code doesn't need `\r`.
-fn jet_net_tcp_reply(mut stream: JetTcpStream, status: &String, body: &String) {
+fn jet_net_tcp_reply(mut stream: JetTcpStream, status: &String, body: &String) -> Result<(), JetNetError> {
     use std::io::Write;
     let response = format!(
         "HTTP/1.1 {}\r\nContent-Length: {}\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n{}",
         status, body.len(), body
     );
-    let _ = stream.inner.write_all(response.as_bytes());
+    stream.inner.write_all(response.as_bytes())
+        .map_err(|e| jet_net_io_error("tcp reply", None, e))?;
+    stream.inner.shutdown(std::net::Shutdown::Write)
+        .map_err(|e| jet_net_io_error("tcp reply close", None, e))
 }
 
 // ── HTTP/1.1 client (minimal, over std::net::TcpStream) ──────────────────────

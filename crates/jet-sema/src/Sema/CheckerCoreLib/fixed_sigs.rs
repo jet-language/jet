@@ -1023,15 +1023,21 @@ pub fn core_fixed_sig(
         )),
         ("core.net", "tcp_local_addr" | "tcp_peer_addr") => Some((
             vec![(read, Type::Named("TcpStream".to_string()))],
-            Some(Type::String),
+            Some(result_ty(Type::String, Type::Named("NetError".to_string()))),
         )),
         ("core.net", "tcp_local_socket_addr" | "tcp_peer_socket_addr") => Some((
             vec![(read, Type::Named("TcpStream".to_string()))],
-            Some(Type::Named("SocketAddr".to_string())),
+            Some(result_ty(
+                Type::Named("SocketAddr".to_string()),
+                Type::Named("NetError".to_string()),
+            )),
         )),
         ("core.net", "listener_local_socket_addr") => Some((
             vec![(read, Type::Named("TcpListener".to_string()))],
-            Some(Type::Named("SocketAddr".to_string())),
+            Some(result_ty(
+                Type::Named("SocketAddr".to_string()),
+                Type::Named("NetError".to_string()),
+            )),
         )),
         ("core.net", "set_timeout") => Some((
             vec![
@@ -1041,7 +1047,7 @@ pub fn core_fixed_sig(
                 ),
                 (read, Type::Int),
             ],
-            None,
+            Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
         )),
         ("core.net", "set_read_timeout" | "set_write_timeout") => Some((
             vec![
@@ -1060,7 +1066,7 @@ pub fn core_fixed_sig(
                 (read, Type::String),
                 (read, Type::String),
             ],
-            None,
+            Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
         )),
         ("core.net", "udp_bind") => Some((
             vec![(read, Type::String)],
@@ -1078,7 +1084,10 @@ pub fn core_fixed_sig(
         )),
         ("core.net", "udp_local_addr") => Some((
             vec![(read, Type::Named("UdpSocket".to_string()))],
-            Some(Type::Named("SocketAddr".to_string())),
+            Some(result_ty(
+                Type::Named("SocketAddr".to_string()),
+                Type::Named("NetError".to_string()),
+            )),
         )),
         ("core.net", "udp_set_timeout") => Some((
             vec![

@@ -4,6 +4,22 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::process::Command;
 
+mod dns_resolver_policy {
+    include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/DnsResolverPolicy.rs");
+
+    pub fn resolv_conf(text: &str) -> Vec<String> {
+        jet_net_dns_parse_resolv_conf(text)
+    }
+
+    pub fn scutil(text: &str) -> Vec<String> {
+        jet_net_dns_parse_scutil(text)
+    }
+
+    pub fn windows(text: &str) -> Vec<String> {
+        jet_net_dns_parse_windows_addresses(text)
+    }
+}
+
 fn compile_temp(name: &str, src: &str) -> jet::CompileOutput {
     let dir = std::env::temp_dir().join(format!("jet_corelib_test_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
@@ -672,6 +688,26 @@ fn core_net_dns_platform_resolver_policy_uses_native_sources() {
     assert!(net.contains("$_.ServerAddresses"));
     assert!(!net.contains("Command::new(\"ipconfig\")"));
     assert!(!net.contains("1.1.1.1"));
+}
+
+#[test]
+fn core_net_dns_platform_resolver_parsers_accept_native_fixtures() {
+    assert_eq!(
+        dns_resolver_policy::resolv_conf(
+            "# generated\nnameserver 192.0.2.53 # vpn\nnameserver 2001:db8::53\nsearch example.test\n"
+        ),
+        ["192.0.2.53:53", "[2001:db8::53]:53"]
+    );
+    assert_eq!(
+        dns_resolver_policy::scutil(
+            "resolver #1\n  nameserver[0] : 192.0.2.54\n  nameserver[1] : 2001:db8::54\n  search domain[0] : example.test\n"
+        ),
+        ["192.0.2.54:53", "[2001:db8::54]:53"]
+    );
+    assert_eq!(
+        dns_resolver_policy::windows("{192.0.2.55, 2001:db8::55}\r\n\r\n"),
+        ["192.0.2.55:53", "[2001:db8::55]:53"]
+    );
 }
 
 #[test]

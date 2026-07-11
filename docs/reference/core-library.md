@@ -2197,12 +2197,12 @@ Beginner calls accept strings; expert calls accept typed
 | `stream.read_text(limit)` / `stream.write_text(text)` | `String ? NetError` / `() ? NetError` | Checked UTF-8 projections over the same byte stream |
 | `stream.shutdown(.Read/.Write/.Both)` / `stream.close()` | `() ? NetError` | Explicit half-close; close is idempotent and later I/O is `.Closed` |
 | `stream.ready(.Read/.Write/.ReadWrite, deadline_ms)` | `NetReady ? NetError` | Same-handle readiness; earliest ambient or explicit deadline wins |
-| `tcp_local_socket_addr(stream)` / `tcp_peer_socket_addr(stream)` | `SocketAddr` | Typed stream addresses |
-| `listener_local_socket_addr(listener)` | `SocketAddr` | Typed listener address |
-| `set_timeout(stream, ms)` | `()` | Set read/write timeouts |
+| `tcp_local_socket_addr(stream)` / `tcp_peer_socket_addr(stream)` | `SocketAddr ? NetError` | Typed stream addresses |
+| `listener_local_socket_addr(listener)` | `SocketAddr ? NetError` | Typed listener address |
+| `set_timeout(stream, ms)` | `() ? NetError` | Set read/write timeouts |
 | `set_read_timeout(stream, ms)` / `set_write_timeout(stream, ms)` | `() ? NetError` | Directional timeouts |
 | `udp_bind(addr)` / `udp_bind_addr(addr)` | `UdpSocket ? NetError` | Datagram sockets |
-| `udp_local_addr(socket)` | `SocketAddr` | Typed local address |
+| `udp_local_addr(socket)` | `SocketAddr ? NetError` | Typed local address |
 | `udp_set_timeout(socket, ms)` | `() ? NetError` | Read/write datagram timeouts |
 | `udp_send_bytes_to(socket, bytes, addr)` | `Int ? NetError` | Send one arbitrary-byte datagram |
 | `udp_receive(socket, limit)` | `UdpPacket ? NetError` | Full datagram receive with bounded returned payload |
