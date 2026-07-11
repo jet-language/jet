@@ -16,16 +16,24 @@ means implementation exists but proof is protocol-, projection-, or grep-class.
 Ratchets use class prefixes: `interaction:`, `protocol:`, `projection:`,
 `grep:`.
 
+Re-baselined 2026-07-10 against the live Chromium harness and code read. An
+`interaction:` ratchet counts only when the scenario drives real pointer or
+keyboard gestures; a scenario that posts transactions through
+`window.__jetCanvasTest.postTransaction` or `fetch("/canvas/transaction")`
+proves the protocol path, not the gesture, and holds a row at `claimed`.
+
 | Area | UE 5.8 Blueprint capability | Canvas target | Status | Ratchet |
 |---|---|---|---|---|
 | Workbench | Right-click action menu | Context menu opens source-backed node actions from graph facts. | shipped | interaction:tests/canvas_scenarios.rs::palette_insert_flow_variable_project_core; interaction:tests/canvas_scenarios.rs::no_dead_end_ad_hoc_insert |
 | Workbench | Drag-off-pin action menu | Compatible action menu filtered by sema expected-type facts. | shipped | interaction:tests/canvas_scenarios.rs::palette_insert_core_fn; interaction:tests/canvas_scenarios.rs::fallible_context; interaction:tests/canvas_scenarios.rs::no_dead_end_ad_hoc_insert |
-| Workbench | Built-in method search | Palette/context search includes source-checked built-ins and ordinary Jet functions with pin metadata. | shipped | interaction:tests/canvas_scenarios.rs::palette_insert_catalog_sweep; interaction:tests/canvas_scenarios.rs::excluded_entry_rendering |
-| Workbench | Selection, shift-add, ctrl-toggle, marquee | Stable keyboard and pointer selection over projected nodes. | shipped | interaction:tests/canvas_scenarios.rs::click_select_details |
+| Workbench | Built-in method search | Palette/context search includes source-checked built-ins and ordinary Jet functions with pin metadata. | claimed | interaction:tests/canvas_scenarios.rs::palette_insert_catalog_sweep; downgraded 2026-07-10 — open P0 #389 (wrong-callee inserts, phantom `println` foreign leak, ranking) breaks the menu in real use |
+| Workbench | Click-select node to details | Clicking a node selects it and populates the details panel. | shipped | interaction:tests/canvas_scenarios.rs::click_select_details |
+| Workbench | Shift-add, ctrl-toggle, marquee select | Modifier clicks and marquee drag build multi-selection over projected nodes. | claimed | grep:Source/Canvas/js/input-events.js selection paths; no gesture scenario drives a marquee drag or modifier click |
 | Workbench | Pan, zoom, zoom-to-fit | Browser panel supports pan, zoom, fit, and nonblank graph rendering. | shipped | interaction:tests/canvas_scenarios.rs::pan_zoom_fit |
 | Workbench | Child/parent graph navigation | Breadcrumbs and graph picker navigate function/test/lambda graphs. | claimed | grep:#287, tests/web_dev.rs |
 | Workbench | Drag nodes and groups | Dragging stores local view state unless source-anchored hints apply. | claimed | grep:#271/#287, tests/web_dev.rs |
-| Workbench | Align, distribute, reroute, tidy | Graph organization commands persist only local view/editor state; source stays truth. | claimed | grep:#312, tests/web_dev.rs |
+| Workbench | Align, distribute, tidy | Graph organization commands persist only local view/editor state; source stays truth. | claimed | grep:#312, tests/web_dev.rs; org-align/org-tidy buttons have no behavior test |
+| Workbench | Reroute nodes | Wire reroute pins let users shape long wires without semantic effect. | planned | not built; no reroute concept in graph JSON or JS |
 | Workbench | Bookmarks and favorite actions | Graph bookmarks, palette pins, and recency/frequency ranking are local editor state. | claimed | grep:#313, tests/web_dev.rs |
 | Workbench | Cut/copy/paste/duplicate | Source transactions duplicate or move source-backed selections. | planned | #272 |
 | Workbench | Inspector/details panel | Inspector shows node kind, pins, source span, and edit affordances. | shipped | interaction:tests/canvas_scenarios.rs::click_select_details; interaction:tests/canvas_scenarios.rs::rename_variable_sidebar |
@@ -37,15 +45,19 @@ Ratchets use class prefixes: `interaction:`, `protocol:`, `projection:`,
 | Node model | Variables get/set | Bindings, reads, and reassignments project as source nodes. | claimed | projection:#274, #281, tests/canvas.rs |
 | Node model | Branch, switch, loops | Jet `if`, dispatch, and `loop` forms project and insert from palette without opaque fallbacks; pattern-arm rows are editable source transactions. | shipped | interaction:tests/canvas_scenarios.rs::palette_insert_flow_variable_project_core; interaction:tests/canvas_scenarios.rs::pattern_arm_add_edit_remove; interaction:tests/canvas_scenarios.rs::pattern_arm_invalid_refused; projection:#272/#274, tests/canvas.rs |
 | Node model | Sequence, gate, do-once, do-N | Blueprint scheduler nodes are rejected unless represented by ordinary Jet control/callback code. | rejected-as-Blueprint-semantic-debt | #278 |
-| Node model | Large graph virtualization and LOD | Canvas renders visible graph regions and low-zoom title-bar nodes for large projections. | claimed | grep:#314, tests/web_dev.rs |
+| Node model | Large graph virtualization and LOD | Canvas renders visible graph regions and low-zoom title-bar nodes for large projections. | planned | downgraded 2026-07-10 — no LOD scenario and no measured frame-time evidence; verify under #382's performance ratchet |
 | Node model | Math Expression node | Expression text stays ordinary Jet expression source, not a separate formula language. | planned | #274 |
 | Pins and wires | Exec pins and data pins | Separate control/data rails over Jet semantics. | shipped | interaction:tests/canvas_scenarios.rs::palette_insert_catalog_sweep; interaction:tests/canvas_scenarios.rs::exec_rewire_reorders_statements |
 | Pins and wires | Typed colored wires | Pin type, capability, fallibility, effect facts, and source spans render distinctly. | shipped | interaction:tests/canvas_scenarios.rs::exec_rewire_reorders_statements; projection:#274/#278, tests/canvas.rs |
-| Pins and wires | Incompatible refusal | Wrong wires are impossible or fail with Jet diagnostics. | shipped | interaction:tests/canvas_scenarios.rs::exec_rewire_refuses_cross_block; interaction:tests/canvas_scenarios.rs::exec_rewire_binding_order_diagnostic |
+| Pins and wires | Incompatible refusal (exec) | Wrong exec wires are impossible or fail with Jet diagnostics. | shipped | interaction:tests/canvas_scenarios.rs::exec_rewire_refuses_cross_block; interaction:tests/canvas_scenarios.rs::exec_rewire_binding_order_diagnostic |
+| Pins and wires | Incompatible refusal (data) | An incompatible data-wire drop refuses in-UI before sema, with the reason shown. | planned | projection-only today; open bugs — data rewire to a fn symbol yields fn-value-where-Int (js.rs:3723), inline editors accept wrong-type input then sema rejects (js.rs:3599) |
 | Pins and wires | Auto-cast insertion | Ratified visible conversion node/call writes source. | claimed | projection:#277, tests/canvas.rs, D-CANVAS-CONVERT1 |
 | Pins and wires | Promote pin to variable | Promotion creates an ordinary Jet binding. | claimed | projection:#277, tests/canvas.rs |
 | Pins and wires | Break/move links | Rewire transactions rewrite ordinary Jet call/argument source. | shipped | interaction:tests/canvas_scenarios.rs::exec_rewire_reorders_statements; projection:#277, tests/canvas.rs |
-| Pins and wires | Drag-drop rewiring | Pin drag applies source-backed move/conversion transactions when Canvas can prove the source anchor, otherwise opens compatible action menus. | shipped | interaction:tests/canvas_scenarios.rs::exec_rewire_reorders_statements; interaction:tests/canvas_scenarios.rs::exec_rewire_refuses_cross_block |
+| Pins and wires | Drag-drop rewiring (exec) | Exec endpoint drag applies source-backed statement reorder transactions. | shipped | interaction:tests/canvas_scenarios.rs::exec_rewire_reorders_statements; interaction:tests/canvas_scenarios.rs::exec_rewire_refuses_cross_block |
+| Pins and wires | Data-pin drag-to-wire | Real pointer drag from a data output pin to a compatible input pin writes the wired source transaction. | planned | the Blueprint-signature gesture has no gesture scenario; wire-data-and-exec posts transactions directly |
+| Pins and wires | Multiple exec OUT (generalized) | Switch arms, loop body/done, and early returns project as N labeled exec outs. | planned | #391; branch/pattern arms exist, generalized outs do not |
+| Pins and wires | Multiple exec IN (convergence) | N incoming exec wires converge on one node over source-backed statement spans. | blocked-by-ballot | D-CANVAS-MULTIEXEC1 on #391 — convergence semantics for a source-backed graph need an owner decision |
 | Types | Primitive and user types | Pins display Bool, numeric, String, structs, enums, collections, options/results. | claimed | projection:#274, tests/canvas.rs |
 | Types | Object/reference handles | Handles render as Jet library/type facts, not Blueprint object semantics. | planned | #274 |
 | Types | Effect and unsafe markers | Async/effect/proof/unsafe rails are visual projections only. | claimed | projection:#278, tests/canvas.rs |
@@ -66,6 +78,7 @@ Ratchets use class prefixes: `interaction:`, `protocol:`, `projection:`,
 | Interfaces | Trait/impl authoring | Jet traits project Blueprint-interface parity facts and create ordinary checked impl stubs. | claimed | projection:#316, tests/canvas.rs::canvas_projects_trait_impl_authoring_and_writes_impl_stub |
 | Tasks | Latent action parity | `core.tasks` spawn/join/channel/taskgroup forms project async rails and task-flow facts. | claimed | projection:#319, tests/canvas.rs::canvas_projects_task_flow_authoring_facts |
 | Debugger | Debug session selector | Canvas selects the local source-span debug session. | claimed | projection:#273, tests/canvas.rs |
+| Debugger | Step, next, continue, stop | Debug rail buttons drive a live session end to end under gesture coverage. | planned | debug-break/watch/step/next/continue/stop buttons exist in html.rs with zero behavior tests; largest untested surface |
 | Debugger | Breakpoints/watches | Local source-span debug state drives breakpoints and watches without editing source. | claimed | projection:#273, D-CANVAS-DEBUGSTATE1, tests/canvas.rs |
 | Debugger | Active node/wire pulse | Runtime overlays map active node/wire pulses back to source spans. | claimed | projection:#273/#278, tests/canvas.rs |
 | Debugger | Call stack and trace | Trace anchors map to graph/source spans. | claimed | projection:#273, tests/canvas.rs |

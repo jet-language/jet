@@ -242,3 +242,188 @@ Remaining card work:
 - action authority metadata for dev/service/lock operations beyond package
   source actions;
 - broader full-suite verification before closing the card.
+
+## Editor Architecture — current vs Blueprint-grade target (re-baselined 2026-07-10)
+
+The sections above cover the workspace/project layer. This section covers how
+the editor itself is built, mapped against UE5 Blueprint proven decomposition,
+and the target seams that keep full parity work from becoming shotgun surgery.
+
+### What Canvas is made of today
+
+Rust (source truth + projection + transactions), ~10.2k lines across 12 files:
+
+- `Source/Canvas.rs` (28) — thin module root.
+- `Source/Canvas/graph_projection.rs` (1487) — AST/HIR → graph JSON. Decides node
+  `archetype` (`entry` / `control` / `function_exec` / `function_pure` / value)
+  and `kind`. This is the real "semantic node layer."
+- `Source/Canvas/graph_json.rs` (804), `graph_helpers.rs` (572) — JSON shapes.
+- `Source/Canvas/edit_actions.rs` (2278) — transaction bus. One `match op { ... }`
+  (`insert_call`, `insert_branch`, `edit_inline_expr`, `rename_binding`,
+  `edit_function_signature`, pattern-arm ops, multi-input ops, `replace_source`…).
+- `Source/Canvas/query_actions.rs` (1319) — palette/action database (`actions`
+  op): project functions + core catalog + exclusion reasons.
+- `Source/Canvas/project_transactions.rs` (913), `project_scan.rs` (476) —
+  workspace layer.
+- `Source/Canvas/schema_api.rs` (960), `validation_json.rs` (622),
+  `debug_source_git.rs` (310), `html.rs` (386), `js.rs` (18).
+
+Browser runtime, ~5.3k lines of JS concatenated by `js.rs::canvas_js()` into one
+IIFE (good: independently lintable files; bad: no module boundaries or exports —
+everything shares one closure scope):
+
+- `runtime-state.js` (172) — state + `window.__jetCanvasTest` hooks.
+- `editing-history.js` (666) — undo/redo/transaction posting.
+- `diagnostics-query.js` (470) — problems, check, jump.
+- `drawing-palette.js` (582) — context menu / palette.
+- `project-navigation.js` (650) — tabs, graph switch, project rail.
+- `graph-rendering.js` (1196) — canvas 2D immediate-mode draw + node style +
+  hit map + node-size measurement.
+- `inspector-connections.js` (674) — Details panel (`innerHTML` templates).
+- `input-events.js` (457) — pointer/keyboard.
+- `transactions-catalog.js` (402), `bootstrap.js` (41).
+
+Test harness (the M0 win, real): `scripts/canvas-test/driver.mjs` (CDP pipe),
+`scenario.mjs` (1250, 28 scenarios), `run.mjs`; `tests/canvas_scenarios.rs`
+launches `jet dev --target=web` + Chromium. `tests/canvas.rs` (3049) is the
+in-process projection suite.
+
+### UE5 Blueprint's proven decomposition, and where Canvas sits
+
+Blueprint earned maintainability by separating four layers plus an editor shell.
+
+| UE5 layer | What it does | Canvas equivalent | Verdict |
+|---|---|---|---|
+| `EdGraph` / `EdGraphNode` / `EdGraphPin` | Persistent graph data model (serialized objects; nodes own pins, pins own links) | **Jet source AST/HIR** projected by `graph_projection.rs`. No persistent graph object | Advantage + cost. No drift, no binary asset — but there is nowhere to hang node-local state, so staged/positioned nodes live only in JS view state, off to the side |
+| `K2Node` subclasses (`K2Node_CallFunction`, `K2Node_VariableGet`, `K2Node_IfThenElse`, `K2Node_Switch`…) | Semantic per-node behavior: pins, tooltip, menu category, expansion to lower graph | **Split across two files with no registry**: archetype/kind decided in `graph_projection.rs`; style/glyph/hover/label decided by a parallel `if (node.kind === …)` chain in `graph-rendering.js`; palette metadata in `query_actions.rs` | Weakest layer. No single node descriptor. Adding a kind = editing 4+ if-chains that must agree |
+| `SGraphEditor` / `SGraphNode` / `SGraphPin` (Slate widgets) | Rendering + interaction as per-node widget objects | `graph-rendering.js` immediate-mode 2D + `input-events.js`. No per-node widget; hit-testing rebuilt each frame into a hit map | Works for render; interaction logic is a flat event handler, hard to extend to marquee/drag/rewire uniformly |
+| `FKismetCompilerContext` | Compiles graph → bytecode | **The Jet front end itself** | Clean advantage — no separate compiler, no stale-compile class of bugs |
+| `BlueprintActionDatabase` + `UBlueprintNodeSpawner` | Palette/context-menu action registry with ranking | `query_actions.rs` `actions` op | Present but leaky: #389 shows foreign-symbol phantoms and wrong ranking. No spawner abstraction, ranking is ad hoc |
+| `FBlueprintEditor` shell (tabs: My Blueprint, Details, Palette, Compiler Results, Debug) | Editor window | `html.rs` static shell + the JS panels | Shell exists; panels are `innerHTML` string builders with per-panel logic, no shared component model |
+| Details = property system reflecting `UPROPERTY` | Generic property editor | `inspector-connections.js` hand-written `innerHTML` per selection type | No reflection; every editable field is bespoke. This is why Details has "dead controls" (#377) |
+| `FKismetDebugUtilities` (breakpoints, watches, exec pulse) | Debugger | Projection facts only; UI buttons in html.rs | Largest unbuilt layer |
+
+The two genuine Jet advantages to keep: source-as-model (no EdGraph asset, no
+merge pain, no stale compile) and front-end-as-compiler. The debt is the
+**missing semantic-node registry** and the **hand-rolled Details/shell**.
+
+### Target architecture
+
+Name four seams and give each an owning module. The rule stays: Jet source is
+the only semantic truth; everything below is projection + interaction.
+
+### Seam 1 — Data-graph model (keep)
+
+`graph_projection.rs` + `graph_json.rs`. Source → graph facts. No change in
+principle. One addition: emit a stable `node_descriptor_id` per node so the
+render layer never re-derives style from `kind` string matching.
+
+### Seam 2 — Semantic node layer (build the missing registry)
+
+New: `Source/Canvas/node_catalog.rs` — one descriptor table, the single source
+of truth for every node kind:
+
+```
+NodeDescriptor {
+  id: "branch",
+  archetype: Control,
+  glyph: "◇",
+  header: (…colors…),
+  hover: "Chooses which path runs next.",
+  palette: PaletteMeta { category: Flow, insertable: true, rank_terms: [...] },
+  projection: fn(&Stmt) -> Option<Node>,   // how source becomes this node
+  transaction: "insert_branch",            // which edit op creates it
+  default_editors: [...],                  // per-input default-value widgets
+}
+```
+
+Generate a JSON descriptor table served to the browser (e.g. `/canvas/node-catalog`
+or embedded), so `graph-rendering.js` reads `descriptor.glyph/header/hover`
+instead of its `if (node.kind === "branch")` ladder, and `drawing-palette.js`
+reads `descriptor.palette` instead of ad-hoc ranking. This kills #389's class of
+bug: the catalog is the only place a node can enter a menu, and a
+catalog-vs-real-exports cross-check test (already requested in #389) becomes a
+one-liner.
+
+### Seam 3 — Rendering + interaction
+
+Split `graph-rendering.js` (1196 lines mixes three jobs):
+
+- `render.js` — draw only, driven by descriptor table + graph facts.
+- `hit-test.js` — the hit map + pin/wire endpoint geometry (already partly
+  separate via `__jetCanvasTest` hooks; make it a real module).
+- `interaction.js` — one pointer state machine (idle → node-drag → wire-drag →
+  rewire → marquee → menu). Today marquee, node-drag, and data-wire-drag are
+  half-present and untested; a single FSM makes each a state, not a special
+  case, and each state maps to one gesture scenario.
+
+### Seam 4 — Source-sync (transaction bus)
+
+`edit_actions.rs` `match op` stays, but each arm is registered by the node
+descriptor's `transaction` field, so a new node kind's edit op is declared next
+to its projection rule, not bolted onto a growing match by hand.
+
+### Details panel — make it reflect, not hand-render
+
+Replace the per-selection `innerHTML` in `inspector-connections.js` with a
+field-descriptor list: `{label, value, editable, apply_op}`. Node/variable/
+function detail views each supply a descriptor array; one renderer turns it into
+rows + an Apply button. Every field is either live (`apply_op` set) or absent —
+no dead controls, which is exactly #377's exit criterion.
+
+### Migration steps (no big-bang rewrite — the postmortem warns against a 5th)
+
+1. Introduce `node_catalog.rs` and the descriptor JSON without changing behavior;
+   have `graph_projection.rs` stamp `node_descriptor_id`. Prove via existing
+   `tests/canvas.rs` snapshots (unchanged output).
+2. Point `graph-rendering.js` style/glyph/hover lookups at the descriptor table;
+   delete the parallel if-chains. Existing gesture scenarios must stay green.
+3. Route `drawing-palette.js` ranking through `descriptor.palette`; land the
+   catalog-vs-exports cross-check test; close #389.
+4. Extract `interaction.js` FSM from `input-events.js` + `graph-rendering.js`;
+   add gesture scenarios for node-drag reposition, marquee, and **data-pin
+   drag-to-wire** (the missing Blueprint gesture).
+5. Convert Details to the field-descriptor renderer; close #377's dead-control
+   bar.
+
+Each step is guarded by the M0 harness — the anti-regression proof the last four
+attempts lacked.
+
+### Worked example A — add a new node type ("Switch"/dispatch insert)
+
+Today (shotgun surgery, ~5 files, 4 must agree by hand):
+
+1. `graph_projection.rs` — teach `project_stmt`/`project_expr_node` to emit the
+   node with the right `archetype`/`kind`.
+2. `graph-rendering.js` — add `if (node.kind === "switch") return …glyph ⇉…` in
+   `nodeStyle`, another arm in the hover-text chain, maybe node-size logic.
+3. `edit_actions.rs` — add an `"insert_switch"` arm to `match op`.
+4. `query_actions.rs` — add it to the palette action set with a rank.
+5. `scenario.mjs` — add an insert gesture scenario.
+
+Miss any one and you get a node that projects but has no style, or inserts but
+never appears in the menu (#389 is exactly this class).
+
+After (registry): add one `NodeDescriptor` in `node_catalog.rs` (archetype,
+glyph, hover, palette, projection closure, transaction op, default editors) +
+one gesture scenario. Render, palette, and Details derive automatically. One
+file of intent, one test.
+
+### Worked example B — add a new panel ("Find in project" results)
+
+Today: hand-write markup in `html.rs`, add a `<div id="…">`, write a bespoke
+`innerHTML` builder + event wiring in a JS file, thread state through the shared
+IIFE closure, add DOM ids the string-assertion test greps for.
+
+After: panels declare `{id, title, mount(state) -> rows, on_action}` against the
+same field-descriptor renderer used by Details. A find-results panel is a
+descriptor array (`{label: match, apply_op: "jump_to_span"}`); the shell renders
+it and the gesture test asserts a row click selects the node — the same shape as
+every other panel, so the harness scenario is copy-adjust, not new machinery.
+
+### Critical files
+- `Source/Canvas/graph_projection.rs`
+- `Source/Canvas/edit_actions.rs`
+- `Source/Canvas/query_actions.rs`
+- `Source/Canvas/js/graph-rendering.js`
+- `Source/Canvas/js/inspector-connections.js`

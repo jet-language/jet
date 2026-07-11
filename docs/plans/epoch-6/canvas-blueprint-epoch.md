@@ -168,6 +168,43 @@ text-review-first collaboration flows. Card them, freeze them until M5 exits.
 | D-CANVASSTATE1 (queued, on #368) | disabled / debug-only node source spelling | node-state UI (M2) |
 | D-CANVASTEST1 (new) | interaction-harness browser + driver strategy | M0 |
 | D-CANVASMETA1 (new) | variable/function metadata attribute surface | metadata parts of M3 |
+| D-CANVAS-MULTIEXEC1 (queued, on #391) | multiple-exec-IN convergence semantics over source-backed spans | multi-exec build (M2) |
+| D-CANVAS-COPYPASTE1 (new) | paste/duplicate source spelling (binding-name cloning, offset, staged materialization) | copy/paste card (M2) |
+| D-CANVAS-DEBUG-UX1 (new) | debugger backing: native lldb/DAP session vs interpreter overlay for exec pulse and watches | debugger suite (M3) |
+
+## Re-baseline reconciliation (2026-07-10)
+
+The matrix was re-baselined against the live harness and code read; see the
+matrix preamble for the gesture-vs-protocol rule it added. Consequences:
+
+- **#389 is M1-blocking, not M2.** The palette is broken in real use
+  (wrong-callee inserts, phantom `println` foreign-symbol leak, ranking).
+  M1 is not accepted while it is open. Its catalog-vs-real-exports
+  cross-check test lands with it.
+- **Data-pin drag-to-wire moves into M1.** The Blueprint-signature gesture has
+  no gesture scenario and two open type bugs (js.rs:3723 fn-value-where-Int,
+  js.rs:3599 wrong-type inline editors). New card covers gesture + client-side
+  type gate + refusal scenario.
+- **#375 is real but unclosed** — its scenarios pass live; verify and close,
+  do not re-implement.
+- **M2 gains explicit rows**: marquee select + copy/paste/duplicate (finishes
+  #272 under the interaction bar; paste spelling gated by D-CANVAS-COPYPASTE1),
+  node-drag reposition gesture verification (#368's free-placement claim),
+  switch/loop insert gestures (named in #376's exit criteria).
+- **M3 gains the debugger.** Every debugger row is projection-only or
+  ui-shell-only; the debug rail buttons have zero behavior tests. A dedicated
+  card drives breakpoints, stepping, active-node pulse, watches, and call
+  stack to gesture coverage, gated by D-CANVAS-DEBUG-UX1.
+- **M4 sharpens #382**: LOD/virtualization downgraded to planned; re-verify
+  with measured frame-time on the generated big project, not string checks.
+- **Architecture cards** (from the editor-architecture section of
+  canvas-workspace-architecture.md): node-descriptor registry
+  (`node_catalog.rs` — structural fix for #389's class of bug) and the Details
+  field-descriptor renderer (structural fix for #377's dead controls). Both
+  are migration steps guarded by the M0 harness.
+- **M0 hardening**: the scenario suite silently skips when Chromium/node are
+  missing; the full-suite run must fail, not skip, so the interaction bar
+  cannot become a no-op on a bare box.
 
 Prior ratified decisions stand: D-CANVAS-LAYOUT1 (layout/comment hints),
 D-CANVAS-CONVERT1, D-CANVAS-COLLAPSE1, D-CANVAS-EVENT1, D-CANVAS-DEBUGSTATE1,
