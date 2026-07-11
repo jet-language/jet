@@ -367,33 +367,26 @@ usage:
   {bin} fmt   --changed             format only VCS-changed .jet files (requires git)
   {bin} fix   <file.{ext}>          apply all auto-fixable diagnostics in place
   {bin} fix   <file.{ext}> --dry-run   show the fixes as a diff, write nothing
-  {bin} doctor                      diagnose the toolchain and offer fixes
-  {bin} doctor --fix                apply the auto-fixable problems
-  {bin} completions <bash|zsh|fish> print a shell completion script
-  {bin} man                         print the jet man page (roff)
-  {bin} bind  <header.h> --pkg <lib>   generate a C binding cache (S59)
-  {bin} lsp                         language server (stdio JSON-RPC)
-  {bin} doctor                      diagnose your environment (rustc, cache, PATH, FFI)
-  {bin} doctor --fix                same, applying safe auto-fixes
-  {bin} completions <shell>         print a completion script (bash|zsh|fish)
-  {bin} man [<command>]             print the manual page (roff)
-  {bin} lsp doctor                  health-check the language server
-  {bin} lsp --bench                 latency benchmark (CI: must pass in <200ms/round)
-  {bin} expand <file.{ext}>         print every lens' facts, grouped (D-EXPANDCLI1)
-  {bin} expand --facts <lens> <file.{ext}>   print one lens's facts (inline, refs)
+  {bin} self doctor                 diagnose the toolchain and offer fixes
+  {bin} self completions <shell>    print shell completions
+  {bin} self man                    print the jet man page (roff)
+  {bin} self lsp                    language server (stdio JSON-RPC)
+  {bin} self devtools <verb>        run checked developer generators
+  {bin} inspect bind <header.h> --pkg <lib>   generate a C binding cache (S59)
+  {bin} inspect expand <file.{ext}> print semantic facts (D-EXPANDCLI1)
   {bin} version                     print compiler version
   {bin} help                        print this help text
   {bin} ?                           same as help
   {bin}                             start the interactive REPL (same as repl)
   {bin} <file.{ext}>                run a file (same as run)
-  {bin} upgrade                     how to download a newer release
+  {bin} self upgrade                how to download a newer release
 
 package management (M12.1):
   {bin} add   <dep> --path <dir>    add a path dependency and fetch
   {bin} add   <dep> --git <url> --tag <tag>   add a git dependency
   {bin} remove <dep>                remove a dependency
-  {bin} fetch                       download and link all dependencies
-  {bin} fetch --locked              verify lock only, no network
+  {bin} store fetch                 download and link all dependencies
+  {bin} store fetch --locked        verify lock only, no network
   {bin} update                      refresh @latest / branch selectors
   {bin} update <dep>                update one moving selector
   {bin} outdated                    report Jetpack channel refs with newer locks available
@@ -403,18 +396,16 @@ package management (M12.1):
   {bin} store verify                re-check all store entry hashes
   {bin} store generations           list recorded store generations (D-PURE3)
   {bin} store rollback <gen>        roll back to a prior generation (D-PURE3)
+  {bin} store gc                    remove unreferenced store entries
+  {bin} store lock <script.jet>     write a script dependency lock
   {bin} clean                       optimize and collect stale Jetpack hangar entries
 
 supply chain (E2-M8):
-  {bin} publish                     publish the current package to the registry
-  {bin} publish --force             publish even if the pre-publish gate warns
-  {bin} vendor                      copy all dependencies into vendor/ (offline builds)
-  {bin} vendor --vendor-dir <path>  copy them into a chosen directory instead
+  {bin} registry publish            publish the current package to the registry
+  {bin} registry vendor             copy all dependencies into vendor/
   {bin} build  --sbom <file>        also write an SPDX SBOM next to the binary
-  {bin} audit                       check dependencies against the advisory database
-  {bin} audit --advisory-db <path>  use a custom advisory database
-  {bin} sbom                        emit an SPDX SBOM from the lockfile
-  {bin} sbom --cyclonedx            emit a CycloneDX JSON SBOM instead
+  {bin} inspect audit               check dependencies against the advisory database
+  {bin} inspect sbom                emit a software bill of materials
 
 flags:
   --emit-rust                  also print the generated Rust code
@@ -579,6 +570,72 @@ fn unknown_subcommand(cmd: &str) -> ! {
     exit(ExitCodes::USAGE);
 }
 
+/// D-CLI-SURFACE1=B / D-CLI-SURFACE2=A: grouped spelling is canonical.
+/// Normalize only after rejecting retired bare spellings, so grouped commands
+/// reach the existing real handlers without keeping compatibility aliases.
+fn normalize_frequency_ring_argv(raw: &mut Vec<String>) {
+    const MOVED: &[(&str, &str)] = &[
+        ("publish", "registry"), ("yank", "registry"), ("keygen", "registry"),
+        ("key", "registry"), ("vendor", "registry"),
+        ("graph", "inspect"), ("query", "inspect"), ("explain-build", "inspect"),
+        ("impact", "inspect"), ("dossier", "inspect"), ("semindex", "inspect"),
+        ("expand", "inspect"), ("schema", "inspect"), ("codemod", "inspect"),
+        ("audit", "inspect"), ("sbom", "inspect"), ("bind", "inspect"),
+        ("gc", "store"), ("fetch", "store"), ("lock", "store"),
+        ("toolchain", "self"), ("upgrade", "self"), ("doctor", "self"),
+        ("completions", "self"), ("man", "self"), ("devtools", "self"),
+        ("lsp", "self"),
+    ];
+    let Some(first) = raw.first().map(String::as_str) else { return };
+    if let Some((verb, group)) = MOVED.iter().find(|(verb, _)| *verb == first) {
+        let replacement = format!("jet {group} {}", raw.join(" "));
+        if raw.iter().any(|arg| arg == "--json") {
+            fn esc(s: &str) -> String {
+                s.chars().flat_map(|c| match c {
+                    '"' => "\\\"".chars().collect::<Vec<_>>(),
+                    '\\' => "\\\\".chars().collect(),
+                    '\n' => "\\n".chars().collect(),
+                    '\r' => "\\r".chars().collect(),
+                    '\t' => "\\t".chars().collect(),
+                    c if c.is_control() => format!("\\u{:04x}", c as u32).chars().collect(),
+                    c => vec![c],
+                }).collect()
+            }
+            println!("{{\"schema_version\":1,\"diagnostics\":[{{\"schema_version\":1,\"code\":\"E2101\",\"severity\":\"error\",\"message\":\"`{verb}` moved under `jet {group}`\",\"why\":\"infrequent commands live in a named area so daily Jet commands stay easy to scan\",\"fix\":\"run `{}`\",\"detail\":null,\"file\":null,\"line\":null,\"col\":null,\"span\":null,\"edit\":null}}]}}", esc(&replacement));
+            exit(ExitCodes::USAGE);
+        }
+        eprintln!("Error [E2101]: `{verb}` moved under `jet {group}`.");
+        eprintln!(" Why: infrequent commands live in a named area so daily Jet commands stay easy to scan.");
+        eprintln!(" Fix: run `{replacement}`.");
+        exit(ExitCodes::USAGE);
+    }
+    let Some(group) = raw.first().cloned() else { return };
+    let group_verbs = match group.as_str() {
+        "registry" => Some("publish yank keygen key backup vendor"),
+        "inspect" => Some("graph query explain-build impact dossier semindex expand schema codemod audit sbom bind"),
+        "store" => Some("verify rollback generations gc fetch lock"),
+        "self" => Some("toolchain upgrade doctor completions man devtools lsp"),
+        _ => None,
+    };
+    if let Some(verbs) = group_verbs {
+        if raw.len() == 1 || raw.get(1).map(String::as_str) == Some("help") {
+            println!("jet {group}: {verbs}");
+            exit(ExitCodes::OK);
+        }
+    }
+    let Some(sub) = raw.get(1).cloned() else { return };
+    let valid = match group.as_str() {
+        "registry" => matches!(sub.as_str(), "publish" | "yank" | "keygen" | "key" | "vendor"),
+        "inspect" => matches!(sub.as_str(), "graph" | "query" | "explain-build" | "impact" | "dossier" | "semindex" | "expand" | "schema" | "codemod" | "audit" | "sbom" | "bind"),
+        "store" => matches!(sub.as_str(), "gc" | "fetch" | "lock"),
+        "self" => matches!(sub.as_str(), "toolchain" | "upgrade" | "doctor" | "completions" | "man" | "devtools" | "lsp"),
+        _ => false,
+    };
+    if valid {
+        raw.remove(0);
+    }
+}
+
 /// Validate every `--flag` in argv against the registry. The first unknown flag
 /// teaches E2102 (with a suggestion) and exits usage.
 ///
@@ -678,7 +735,7 @@ fn is_executable(p: &Path) -> bool {
 }
 
 fn main() {
-    let raw: Vec<String> = std::env::args().skip(1).collect();
+    let mut raw: Vec<String> = std::env::args().skip(1).collect();
 
     // c6vz465: bare `jet` starts the REPL (D-REPL4); `jet ?` is help sugar.
     if raw.is_empty() {
@@ -688,6 +745,8 @@ fn main() {
     if raw[0] == "?" {
         run_question_mark(&raw[1..]);
     }
+
+    normalize_frequency_ring_argv(&mut raw);
 
     if raw.iter().any(|a| a == "--version") {
         run_version();

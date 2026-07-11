@@ -179,6 +179,7 @@ fn flags_for(cmd: &str) -> Vec<(&'static str, &'static str)> {
 pub fn build_index() -> Vec<Entry> {
     CLI::COMMANDS
         .iter()
+        .filter(|c| CLI::is_canonical_top_level(c.name))
         .map(|c| Entry {
             cmd: c.name,
             category: category_for(c.name),
@@ -333,8 +334,8 @@ mod tests {
     #[test]
     fn index_covers_every_cli_command() {
         let index = build_index();
-        assert_eq!(index.len(), CLI::COMMANDS.len());
-        for c in CLI::COMMANDS {
+        assert_eq!(index.len(), CLI::COMMANDS.iter().filter(|c| CLI::is_canonical_top_level(c.name)).count());
+        for c in CLI::COMMANDS.iter().filter(|c| CLI::is_canonical_top_level(c.name)) {
             assert!(index.iter().any(|e| e.cmd == c.name), "missing {}", c.name);
         }
     }

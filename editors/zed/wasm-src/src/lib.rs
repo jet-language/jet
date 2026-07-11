@@ -1,4 +1,4 @@
-//! Jet Zed extension — launches `jet lsp` with the same discovery order as the
+//! Jet Zed extension — launches `jet self lsp` with the same discovery order as the
 //! VS Code extension (debug binary in the compiler repo, then `jet` on PATH).
 
 use zed_extension_api::{self as zed, Command, Extension, LanguageServerId, Result, Worktree};
@@ -18,7 +18,7 @@ impl Extension for JetExtension {
         let command = find_jet_binary(worktree)?;
         Ok(Command {
             command,
-            args: vec!["lsp".to_string()],
+            args: vec!["self".to_string(), "lsp".to_string()],
             env: Default::default(),
         })
     }

@@ -41,6 +41,9 @@ pub struct CommandSpec {
 /// Every built-in subcommand. Order here is the order shown in the man page and
 /// completions; the greeting picks the `headline` ones.
 pub const COMMANDS: &[CommandSpec] = &[
+    CommandSpec { name: "registry", summary: "publishing, signing, yanking, and vendoring", headline: false },
+    CommandSpec { name: "inspect", summary: "semantic, build, schema, supply, and binding inspection", headline: false },
+    CommandSpec { name: "self", summary: "Jet installation, diagnostics, completions, and machine tooling", headline: false },
     CommandSpec {
         name: "run",
         summary: "build, then run a program (or a project)",
@@ -363,6 +366,19 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
 ];
 
+/// D-CLI-SURFACE1=B / D-CLI-SURFACE2=A: canonical top-level frequency ring.
+/// Moved handler names remain in the internal registry only so normalized
+/// grouped argv reaches the real dispatcher; generators must never advertise
+/// those retired bare spellings.
+pub fn is_canonical_top_level(name: &str) -> bool {
+    !matches!(name,
+        "publish" | "yank" | "keygen" | "key" | "vendor" |
+        "graph" | "query" | "explain-build" | "impact" | "dossier" |
+        "semindex" | "expand" | "schema" | "codemod" | "audit" | "sbom" | "bind" |
+        "gc" | "fetch" | "lock" | "toolchain" | "upgrade" | "doctor" |
+        "completions" | "man" | "devtools" | "lsp")
+}
+
 /// Every global flag the driver understands. Used to flag-check and to suggest
 /// on a typo (E2102), and to complete after `--`.
 pub const FLAGS: &[FlagSpec] = &[
@@ -550,6 +566,7 @@ fn closest<'a, I: Iterator<Item = &'a str>>(needle: &str, hay: I) -> Option<&'a 
 pub fn completions_bash() -> String {
     let cmds = COMMANDS
         .iter()
+        .filter(|c| is_canonical_top_level(c.name))
         .map(|c| c.name)
         .collect::<Vec<_>>()
         .join(" ");
@@ -583,6 +600,7 @@ complete -F _{bin} {bin}\n",
 pub fn completions_zsh() -> String {
     let mut cmd_lines = String::new();
     for c in COMMANDS {
+        if !is_canonical_top_level(c.name) { continue; }
         cmd_lines.push_str(&format!("        '{}:{}'\n", c.name, escape_zsh(c.summary)));
     }
     let mut flag_lines = String::new();
@@ -619,6 +637,7 @@ pub fn completions_fish() -> String {
     // Only complete subcommands when none has been seen yet.
     let seen = "__fish_use_subcommand";
     for c in COMMANDS {
+        if !is_canonical_top_level(c.name) { continue; }
         out.push_str(&format!(
             "complete -c {bin} -n '{seen}' -a {name} -d '{desc}'\n",
             bin = BINARY_NAME,
@@ -665,6 +684,7 @@ and their dependencies. Output is plain when piped and colored on a terminal.\n"
     ));
     out.push_str(".SH COMMANDS\n");
     for c in COMMANDS {
+        if !is_canonical_top_level(c.name) { continue; }
         out.push_str(&format!(".TP\n.B {}\n{}\n", c.name, roff_escape(c.summary)));
     }
     out.push_str(".SH FLAGS\n");
@@ -725,7 +745,7 @@ mod tests {
     #[test]
     fn completions_mention_every_command() {
         for shell_out in [completions_bash(), completions_zsh(), completions_fish()] {
-            for c in COMMANDS {
+            for c in COMMANDS.iter().filter(|c| is_canonical_top_level(c.name)) {
                 assert!(
                     shell_out.contains(c.name),
                     "completion missing command {}",
@@ -738,7 +758,7 @@ mod tests {
     #[test]
     fn man_mentions_every_command_and_flag() {
         let m = man_page("0.0.0");
-        for c in COMMANDS {
+        for c in COMMANDS.iter().filter(|c| is_canonical_top_level(c.name)) {
             assert!(m.contains(c.name), "man missing command {}", c.name);
         }
         for f in FLAGS {

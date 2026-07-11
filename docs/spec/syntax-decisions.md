@@ -2798,6 +2798,12 @@ fetch, lock), `jet self` (toolchain, upgrade, doctor, completions, man,
 devtools). The bare ungrouped spelling of a moved verb is a teaching error
 naming the grouped form, never a silent alias (I8).
 
+**D-CLI-SURFACE2=A**: `jet fuzz` remains flat beside testing. The language
+server is canonically `jet self lsp`; first-party editors launch that argv.
+Bare `jet lsp` is E2101 before external-command discovery, preserves following
+argv in its replacement, exits 2, and never starts a server. Help, palette,
+man pages, and completions advertise only canonical grouped spellings.
+
 **D-JPK-TASKRUN1=A — tasks are `#Task fn`**: a task is an ordinary Jet
 function marked `#Task`, living beside `fn run()`. Reuses typed-argument CLI
 parsing (D-CLIFLAG1) and `?` fallibility; a cross-task dependency is a plain

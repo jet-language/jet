@@ -123,6 +123,44 @@ fn exit_code_unknown_subcommand_is_usage() {
 }
 
 #[test]
+fn frequency_ring_groups_execute_real_handlers() {
+    let out = Command::new(jet()).args(["self", "man"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&out.stdout).contains(".TH JET 1"));
+
+    let out = Command::new(jet()).args(["inspect", "semindex"]).output().unwrap();
+    assert_ne!(out.status.code(), Some(2), "group must reach semindex handler");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("needs an entry file"));
+
+    let out = Command::new(jet()).args(["store", "generations"]).output().unwrap();
+    assert_ne!(out.status.code(), Some(2), "existing grouped handler must remain live");
+}
+
+#[test]
+fn moved_bare_commands_are_teaching_errors_not_aliases() {
+    for (verb, replacement) in [
+        ("publish", "jet registry publish"),
+        ("semindex", "jet inspect semindex"),
+        ("gc", "jet store gc"),
+        ("doctor", "jet self doctor"),
+        ("lsp", "jet self lsp"),
+    ] {
+        let out = Command::new(jet()).arg(verb).arg("sentinel").output().unwrap();
+        assert_eq!(out.status.code(), Some(2), "{verb} must be rejected");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains("E2101"), "{verb}: {stderr}");
+        assert!(stderr.contains(replacement), "{verb}: {stderr}");
+    }
+
+    let out = Command::new(jet()).args(["lsp", "--json"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    assert!(out.stderr.is_empty());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("\"code\":\"E2101\""));
+    assert!(stdout.contains("jet self lsp --json"));
+}
+
+#[test]
 fn jet_install_teaches_jet_fetch() {
     // `jet install` is not a Jet command; the compiler emits E0043 pointing to `jet fetch`.
     let out = Command::new(jet()).arg("install").output().unwrap();

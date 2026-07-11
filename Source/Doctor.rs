@@ -203,7 +203,7 @@ fn check_path() -> Check {
 }
 
 fn check_lsp() -> Check {
-    // The LSP ships inside this same binary (`jet lsp`); there is no external
+    // The LSP ships inside this same binary (`jet self lsp`); there is no external
     // server to find. Report it as wired.
     Check::ok(
         "lsp",
