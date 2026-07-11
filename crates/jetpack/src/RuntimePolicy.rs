@@ -67,6 +67,10 @@ pub fn acquire_lock(root: &Path, scope: &str) -> io::Result<FileLock> {
         match OpenOptions::new().write(true).create_new(true).open(&path) {
             Ok(mut f) => {
                 let _ = writeln!(f, "pid={}", std::process::id());
+                #[cfg(target_os = "linux")]
+                if let Some(start) = linux_process_start(std::process::id()) {
+                    let _ = writeln!(f, "process_start={start}");
+                }
                 return Ok(FileLock { path });
             }
             Err(e) if e.kind() == ErrorKind::AlreadyExists && Instant::now() < deadline => {
@@ -81,6 +85,12 @@ pub fn acquire_lock(root: &Path, scope: &str) -> io::Result<FileLock> {
             Err(e) => return Err(e),
         }
     }
+}
+
+#[cfg(target_os = "linux")]
+fn linux_process_start(pid: u32) -> Option<String> {
+    let stat = fs::read_to_string(Path::new("/proc").join(pid.to_string()).join("stat")).ok()?;
+    stat.rsplit_once(") ")?.1.split_whitespace().nth(19).map(str::to_string)
 }
 
 pub fn with_lock<T>(root: &Path, scope: &str, f: impl FnOnce() -> io::Result<T>) -> io::Result<T> {

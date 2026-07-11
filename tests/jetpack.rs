@@ -124,17 +124,28 @@ fn doctor_checks_real_state_and_is_read_only() {
     let project = Scratch::new("doctor-project");
     let root = Scratch::new("doctor-root");
     let keys = Scratch::new("doctor-keys");
-    let registry = project.join("registry");
-    fs::create_dir_all(&registry).unwrap();
-    fs::write(keys.join("jet.ed25519"), [7u8; 32]).unwrap();
-    fs::write(keys.join("jet.ed25519.pub"), "11".repeat(32)).unwrap();
+    let keygen = jet().args(["registry", "keygen"])
+        .current_dir(&project.path).env("JET_KEYS_DIR", &keys.path).output().unwrap();
+    assert!(keygen.status.success(), "keygen: {}", String::from_utf8_lossy(&keygen.stderr));
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        for stream in listener.incoming().take(3) {
+            let mut stream = stream.unwrap();
+            use std::io::{Read, Write};
+            let mut request = [0u8; 1024];
+            let _ = stream.read(&mut request).unwrap();
+            stream.write_all(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+        }
+    });
+    let registry_url = format!("http://user:super-secret@{addr}/index");
 
     let healthy = jetpack()
-        .args(["doctor", "--json", "--offline"])
+        .args(["doctor", "--json", "--online"])
         .current_dir(&project.path)
         .env("JETPACK_ROOT", &root.path)
         .env("JET_KEYS_DIR", &keys.path)
-        .env("JET_REGISTRY_URL", format!("file://{}", registry.display()))
+        .env("JET_REGISTRY_URL", &registry_url)
         .output().unwrap();
     assert!(healthy.status.success(), "stderr: {}", String::from_utf8_lossy(&healthy.stderr));
     let healthy_json = jet::Jetpack::JSON::parse(&String::from_utf8_lossy(&healthy.stdout)).unwrap();
@@ -142,17 +153,35 @@ fn doctor_checks_real_state_and_is_read_only() {
 
     fs::remove_file(keys.join("jet.ed25519")).unwrap();
     let degraded = jetpack()
-        .args(["doctor", "--offline"])
+        .args(["doctor", "--online"])
         .current_dir(&project.path)
         .env("JETPACK_ROOT", &root.path)
         .env("JET_KEYS_DIR", &keys.path)
-        .env("JET_REGISTRY_URL", format!("file://{}", registry.display()))
+        .env("JET_REGISTRY_URL", &registry_url)
         .output().unwrap();
     assert_eq!(degraded.status.code(), Some(1));
     let degraded_text = String::from_utf8(degraded.stderr).unwrap();
     assert!(degraded_text.contains("[warn] signing"), "{degraded_text}");
     assert!(degraded_text.ends_with("result: degraded\n"), "{degraded_text}");
-    fs::write(keys.join("jet.ed25519"), [7u8; 32]).unwrap();
+    assert!(!degraded_text.contains("super-secret"), "credential leaked: {degraded_text}");
+    let keygen = jet().args(["registry", "keygen", "--force"])
+        .current_dir(&project.path).env("JET_KEYS_DIR", &keys.path).output().unwrap();
+    assert!(keygen.status.success(), "keygen: {}", String::from_utf8_lossy(&keygen.stderr));
+    let public_path = keys.join("jet.ed25519.pub");
+    let matching_public = fs::read_to_string(&public_path).unwrap();
+    let mut mismatched_public = matching_public.clone().into_bytes();
+    mismatched_public[0] = if mismatched_public[0] == b'0' { b'1' } else { b'0' };
+    fs::write(&public_path, &mismatched_public).unwrap();
+    let mismatch = jetpack().args(["doctor", "--online"])
+        .current_dir(&project.path).env("JETPACK_ROOT", &root.path)
+        .env("JET_KEYS_DIR", &keys.path).env("JET_REGISTRY_URL", &registry_url)
+        .output().unwrap();
+    let mismatch_text = String::from_utf8(mismatch.stderr).unwrap();
+    assert_eq!(mismatch.status.code(), Some(2), "{mismatch_text}");
+    assert!(mismatch_text.contains("does not match its public key"), "{mismatch_text}");
+    assert!(!mismatch_text.contains("super-secret"), "credential leaked: {mismatch_text}");
+    fs::write(&public_path, matching_public).unwrap();
+    server.join().unwrap();
 
     let output = root.join("owned-output");
     fs::create_dir_all(&output).unwrap();
@@ -175,6 +204,9 @@ fn doctor_checks_real_state_and_is_read_only() {
     fs::remove_file(keys.join("jet.ed25519")).unwrap();
     let before_meta = fs::read(&meta).unwrap();
     let before_lock = fs::read(&stale_lock).unwrap();
+    let before_public = fs::read(keys.join("jet.ed25519.pub")).unwrap();
+    let before_public_permissions = fs::metadata(keys.join("jet.ed25519.pub")).unwrap().permissions();
+    let before_output_permissions = fs::metadata(output.join("payload")).unwrap().permissions();
 
     let broken = jetpack()
         .args(["doctor", "--json", "--offline"])
@@ -192,6 +224,9 @@ fn doctor_checks_real_state_and_is_read_only() {
     assert!(text.contains("signing key for `jet` is missing"), "{text}");
     assert_eq!(fs::read(&meta).unwrap(), before_meta, "doctor changed metadata");
     assert_eq!(fs::read(&stale_lock).unwrap(), before_lock, "doctor changed lock state");
+    assert_eq!(fs::read(keys.join("jet.ed25519.pub")).unwrap(), before_public, "doctor changed public key");
+    assert_eq!(fs::metadata(keys.join("jet.ed25519.pub")).unwrap().permissions(), before_public_permissions, "doctor changed key permissions");
+    assert_eq!(fs::metadata(output.join("payload")).unwrap().permissions(), before_output_permissions, "doctor changed output permissions");
 }
 
 #[derive(Clone)]
