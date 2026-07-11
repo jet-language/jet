@@ -247,9 +247,6 @@ fn run_canvas_scenario(name: &str) {
         );
     }
     eprintln!("{}", String::from_utf8_lossy(&output.stdout));
-    if name == "node-drag-persists-without-source-change" {
-        case.cleanup();
-    }
 }
 
 fn ensure_jet_built() {
@@ -326,9 +323,18 @@ impl CanvasCase {
             screenshots,
         }
     }
+}
 
-    fn cleanup(&self) {
-        fs::remove_dir_all(&self.dir).expect("remove passed Canvas scenario artifacts");
+impl Drop for CanvasCase {
+    fn drop(&mut self) {
+        if let Err(err) = fs::remove_dir_all(&self.dir) {
+            if err.kind() != std::io::ErrorKind::NotFound {
+                eprintln!(
+                    "warning: could not remove Canvas scenario artifacts at {}: {err}",
+                    self.dir.display()
+                );
+            }
+        }
     }
 }
 
