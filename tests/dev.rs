@@ -496,7 +496,6 @@ const DEFAULT_BACKEND_BOUNDARIES: &[&str] = &[
 const DEFAULT_BACKEND_EXPECTED_BOUNDARIES: &[&str] = &[
     "io/db_checked_sql",
     "io/path",
-    "io/stdin_filter",
     "tooling/data_pipeline",
     "ui/ui_native_linux",
 ];

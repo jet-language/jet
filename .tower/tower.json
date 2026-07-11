@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 495,
-    "rev": 3226,
+    "rev": 3235,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -7501,8 +7501,13 @@
       "priority": "P1",
       "plan": "# Plan: categorized jet ? help palette\n\nRatified inputs:\n- D-FE-HELP1 outcome D with owner modification: categorized command palette by default; no separate task-based search/home.\n\nScope:\n- Source/main.rs, Source/CLI.rs, command registry/help generation, tests/cli/question_mark_help.txt, any CLI transcript tests.\n- Reuse existing help/usage registry where possible; do not fork command metadata.\n\nImplementation steps:\n1. Make jet ? open a categorized command palette over the shell in TTY mode. Non-TTY and plain jet help keep deterministic text output.\n2. Build one command index from the existing command registry: command name, flags, examples, aliases, fuzzy keywords, error-code references, category, and see-also links.\n3. Remove task-home as a separate managed surface. Encode task/outcome phrases as fuzzy keywords on concrete command entries.\n4. Add browser-style grouping: Build and run, Project/env, Packages, jetos, Dev server, Reference, Error codes.\n5. Tab expands selected result inline to command detail; F1 opens the same index in full two-pane reference; Enter pre-fills shell line and never executes.\n6. Search must cover commands, flags, examples, aliases, task keywords, and E-codes. E-code pages render existing diagnostic/explain text verbatim.\n7. Respect NO_COLOR and restore shell cleanly on Esc/q/Enter.\n\nAcceptance:\n- jet ? starts in categorized command palette.\n- Typing task phrases like \"run on save\" finds explicit commands rather than separate recipes.\n- Enter prefills and does not run.\n- F1 and Tab expose full reference depth from the same index.\n\nVerification:\n- nix develop -c cargo test --test cli question_mark_help -- --exact\n- Add/update focused CLI transcript tests for palette search, F1/Tab fallback, E-code lookup, and non-TTY help.\n- nix develop -c cargo test --test diagnostics_coverage if explain/error index is touched.\n- Full nix develop -c cargo test before done.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "terra-360-help",
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "terra-360-help",
+          "text": "Tranche A implemented: single CLI-backed index now drives seven categorized groups; empty TTY starts collapsed; Enter/right expands, left collapses; real color/NO_COLOR/--color reaches renderer; width+height follow PTY; F1 opens populated same-index detail, searchable commands/E-codes, and restores alt-screen; Enter emits one bare stdout prefill and never executes. Removed duplicate static palette and nonexistent run --watch claim. Focused proof green: cargo test --lib Help (20), cli question_mark (4), real-PTY help_pty (4). Shell-line injection intentionally remains #359-owned; full owner-terminal matrix/full suite remain parent verification."
+        },
         {
           "at": "2026-07-09",
           "by": "codex-main",
@@ -7564,11 +7569,12 @@
         }
       ],
       "created": "2026-07-08T13:10:17.096Z",
-      "updated": "2026-07-10",
+      "updated": "2026-07-11",
       "workOrder": 12,
       "criteria": [],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-11T01:45:43.916Z"
     },
     {
       "id": "c0nhjxh4",
@@ -9104,12 +9110,17 @@
       "track": "epoch",
       "epoch": "e6",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "deciding",
       "priority": "P2",
       "plan": "canvas-blueprint-epoch",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "fable-main",
+          "text": "D-CANVAS-MULTIEXEC1 queued (rec A: auto-extract on converge). Multi-exec-OUT remains buildable independent of the ballot."
+        },
         {
           "at": "2026-07-11",
           "by": "fable-main",
@@ -13191,12 +13202,18 @@
       "track": "epoch",
       "epoch": "e6",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "deciding",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-11",
+          "by": "fable-main",
+          "text": "D-CANVAS-COPYPASTE1 queued (rec D: source-text clipboard + suffix rename + stage-when-unresolved)."
+        }
+      ],
       "criteria": [],
       "refs": [],
       "needsAcceptance": false,
@@ -13233,12 +13250,18 @@
       "track": "epoch",
       "epoch": "e6",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "deciding",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-11",
+          "by": "fable-main",
+          "text": "D-CANVAS-DEBUG-UX1 queued (rec A: native lldb/DAP session — liveness never faked)."
+        }
+      ],
       "criteria": [],
       "refs": [],
       "needsAcceptance": false,
@@ -22472,6 +22495,231 @@
       "draft": false,
       "status": "open",
       "created": "2026-07-11T01:36:15.730Z"
+    },
+    {
+      "id": "D-CANVAS-MULTIEXEC1",
+      "cardId": "c0zpnwk9",
+      "group": "web-ui",
+      "title": "Multiple-exec-IN convergence over source-backed spans",
+      "gist": "When a user wires two or more execution arrows into the same node, what Jet source does Canvas write — since one node is one statement span, and Jet has no goto.",
+      "explainer": "Glossary. Exec pin: the control-flow arrow socket on a node (\"do this, then that\"), separate from data pins (values). Statement span: the exact slice of `.jet` source a node projects from — every node is a projection of real source, never a standalone graph object. Convergence: two or more exec arrows pointing at one node, so several places in the program run that same node. Extract-to-function: turning a selected span into a named helper `fn` and replacing it with calls — already shipped in Canvas (matrix row \"Extract selection to function\", #280). Structured control flow: `if`/`else`, dispatch arms, `loop` — Jet's only control forms; there is no `goto` and no jump-to-label in the language.\n\nThe wall. Blueprint lets N exec wires converge on one node; its runtime is a VM that just re-enters that node on each incoming pulse. Jet has no VM and no goto: a node is a statement span, and \"run this same span from three places\" has exactly one honest spelling in source — a named function called three times. This ballot decides what happens the instant a user tries the Blueprint habit of dropping a second exec wire onto a node that already has one. The matrix row \"Multiple exec IN (convergence)\" is held at blocked-by-ballot on this decision.",
+      "story": "Priya is porting a small chat handler she prototyped in Unreal Blueprint. Her graph has two branches — a Ping arm and a Data arm — and in Blueprint both arms' exec wires ran into a single \"Notify + bump metric\" node before continuing. In Canvas she rebuilds the two arms, then drags the exec output of the Data arm onto the same Notify node the Ping arm already points at. In Blueprint that just worked. She needs to know what Canvas does with that gesture, and what shows up in her `.jet` file afterward — because in Jet the file is the program.",
+      "inWild": "Her function today, after building both arms (the shared work is duplicated by hand in each arm — the pain she is trying to remove):\n\n  fn handle(msg: Message) {\n      if msg == Ping(id) {\n          notify(id)\n          bump_metric()\n          reply(id)\n      } else if msg == Data(id, body) {\n          notify(id)\n          bump_metric()\n          store(body)\n      }\n  }\n\nShe selects the `notify(id)` / `bump_metric()` node pair in the Ping arm, and drags the Data arm's exec wire onto it — asking Canvas to make one shared block both arms run. Today that drop lands on the matrix's blocked-by-ballot row: the gesture has no defined result.",
+      "detail": "Recommend A. Devil pass across all four: (C) labeled tunnels introduce goto into a language that has none — it breaks structured control flow, defeats the front end's reachability reasoning, and is the exact spaghetti pattern Godot deleted VisualScript over; reject outright, it is not on the table, listed only so the owner sees it was weighed. (D) inline duplication is honest source but re-introduces the copy-paste divergence bug Priya is trying to escape (fix `notify` in one arm, forget the other) — it is the anti-pattern, not a feature. (B) refuse-and-teach is safe and explicit but stalls the beginner mid-gesture and makes them run a second, separate command; the Blueprint habit hits a wall even though the honest source (extract) is a known, shipped transaction. (A) auto-extract makes the habit work AND writes honest DRY source: the second exec drop runs the existing extract-to-function transaction, previewed and undoable like every Canvas edit. Devil pass on A: silently minting a function could surprise. Patch: the drop opens the same extract preview already shipped — proposed name (`on_event`, editable), the exact `.jet` diff, and the two call sites highlighted — and writes nothing until confirmed; one Escape or Undo reverts it fully. A also stays correct at scale: a genuinely structured join (work that runs after an `if`/`else`, not mid-arm) already projects as a single downstream node reached from both arms with no extraction needed, so auto-extract fires only for true non-tail convergence. One canonical mechanism (I8): convergence == a real named function, the same one the Extract button already produces.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Auto-extract on convergence",
+          "detail": "Dropping a second exec wire onto a node runs the shipped extract-to-function transaction: the converged span becomes a named helper `fn`, and both sites become call nodes pointing at it. Previewed and undoable like every Canvas edit; nothing is written until the user confirms the proposed name and diff. The graph then shows one shared node (the call) reached from N sites — the Blueprint look — backed by honest, DRY source.",
+          "code": "Gesture: drag Data arm's exec wire onto the Ping arm's `notify`/`bump_metric` node.\nCanvas opens the extract preview:\n\n  New function name:  on_event   [editable]\n  Captures:          id: Id\n  Call sites:        2 (Ping arm, Data arm)\n\n  --- handle.jet (preview) ---------------------------\n  + fn on_event(id: Id) {\n  +     notify(id)\n  +     bump_metric()\n  + }\n  +\n    fn handle(msg: Message) {\n        if msg == Ping(id) {\n  -         notify(id)\n  -         bump_metric()\n  +         on_event(id)\n            reply(id)\n        } else if msg == Data(id, body) {\n  -         notify(id)\n  -         bump_metric()\n  +         on_event(id)\n            store(body)\n        }\n    }\n\nConfirm -> both arms now call one shared node; Undo restores the exact prior source."
+        },
+        {
+          "key": "B",
+          "name": "Refuse and teach",
+          "detail": "Canvas projects only structured control flow. A second exec wire onto a node is refused in-UI with a Jet-voice diagnostic that names extract-to-function as the deliberate next step. The user selects the span and runs Extract themselves — two explicit steps, nothing implicit.",
+          "code": "Gesture: drag Data arm's exec wire onto the Ping arm's `notify` node.\nCanvas refuses the drop (wire snaps back) and shows:\n\n  Cannot converge two execution paths on one node.\n  A node is one place in your source. To run the same steps\n  from two places, make them a function.\n  -> Select these steps and choose \"Extract to function\".\n\nSource is unchanged until the user runs Extract as a separate action."
+        },
+        {
+          "key": "C",
+          "name": "Labeled tunnel / jump sites",
+          "detail": "Introduce a new source construct: a label at the convergence node and a jump from each incoming site (goto-like). Multiple sites jump to one label. This is the literal graph shape but requires adding non-structured control flow to Jet.",
+          "code": "Would require inventing source with no current spelling, e.g.:\n\n  fn handle(msg: Message) {\n      if msg == Ping(id) { reply(id); goto shared }\n      else if msg == Data(id, body) { store(body); goto shared }\n      shared:\n          notify(id)   // id not in scope from both paths — unsound\n          bump_metric()\n  }\n\nJet has no `goto`/label; this breaks reachability and scope analysis. Shown only for completeness."
+        },
+        {
+          "key": "D",
+          "name": "Duplicate the span inline",
+          "detail": "Converging N exec wires copies the converged statement span into each site inline — no shared function. Source stays structured and honest, but the shared work is physically duplicated in every arm.",
+          "code": "Gesture: drag Data arm's exec wire onto the Ping arm's `notify` node.\nCanvas writes the span into both arms verbatim:\n\n  fn handle(msg: Message) {\n      if msg == Ping(id) {\n          notify(id)      // copy\n          bump_metric()   // copy\n          reply(id)\n      } else if msg == Data(id, body) {\n          notify(id)      // copy\n          bump_metric()   // copy\n          store(body)\n      }\n  }\n\nThe two copies drift independently on later edits — the divergence bug this gesture was meant to remove."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "UE5 Blueprint",
+          "note": "N exec wires converge on one node freely; the Blueprint VM re-enters the node per incoming pulse, and there is no source file to keep honest. This is convenient but is the documented root of Blueprint spaghetti — the shared node's upstream context is ambiguous, and refactoring it is manual. Jet has no VM to re-enter; convergence must resolve to real source, which is what option A produces.",
+          "code": "Ping exec --\\\n              >--> [ Notify + Bump ] --> ...\nData exec --/\n(one node, two incoming exec wires, no source artifact)"
+        },
+        {
+          "lang": "Scratch",
+          "note": "Scratch has no exec convergence: blocks stack linearly and the only way to run the same steps from two places is to define a custom block and call it from both. That custom block is exactly Jet's extract-to-function — option A gives the same mental model (\"make it a block, call it twice\") with the call performed for the user on the converging gesture.",
+          "code": "define notify-and-bump (id)\n  ... notify (id) ...\n  ... change metric by 1 ...\n\nwhen Ping:  notify-and-bump (id)\nwhen Data:  notify-and-bump (id)"
+        },
+        {
+          "lang": "Godot VisualScript",
+          "note": "Earlier Godot VisualScript allowed goto-like sequencing and free exec convergence; Godot removed it, citing unmaintainable graphs. This is the case against option C: adding jump/label sites to reach graph-level convergence trades a structured, analyzable language for the exact pattern a shipping engine deleted.",
+          "code": "(removed from Godot 4 — cited graph maintainability and control-flow spaghetti)"
+        }
+      ],
+      "rec": "A",
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-11T01:56:08.602Z"
+    },
+    {
+      "id": "D-CANVAS-COPYPASTE1",
+      "cardId": "c0ocarv7",
+      "group": "web-ui",
+      "title": "Paste/duplicate: how cloned nodes materialize in source",
+      "gist": "When a user copies or duplicates nodes, what exactly gets written to `.jet`: how colliding binding names are renamed, where the cloned statements land, and whether a paste with unresolved inputs is written now or held as staged nodes.",
+      "explainer": "Glossary. Binding: a named value in Jet, e.g. the `total` in `total = a + b`. Binding collision: pasting a clone whose binding name already exists in the destination scope. Materialize: actually write the clone into `.jet` source (vs. holding it only in the editor). Staged node (#388): a node placed in the editor but NOT yet in source — dashed \"unsaved\" ring, view-state only, never dead code; it materializes into source the moment its first wire connects it to the graph spine, and deleting it touches no source. Source transaction: every Canvas edit is a previewed, formatted, sema-checked write — Canvas never writes source that fails the front end.\n\nThe wall. Copy/paste/duplicate is the most-used editor gesture and the matrix row (\"Cut/copy/paste/duplicate\") is planned/#272. Blueprint clones nodes freely because its clones are graph objects with no naming rules and no source. Jet clones must become real source with real, unique binding names in a real place in the file. Three coupled questions have to be answered together for the gesture to be defined: the rename rule, the placement rule, and whether an incomplete paste writes now or stages.",
+      "story": "Marco built a small pricing block in Canvas: a couple of local bindings and a call that uses them. He wants the same block a second time, tweaked. He selects the three nodes and hits Ctrl+D to duplicate. In a text editor he would copy the lines and rename `subtotal` by hand; in Blueprint the duplicate just appears floating. He needs to know what Canvas puts in his `.jet` file: what the second `subtotal` is called, where the new lines go, and whether the duplicate that still has an unwired input is already in his source or waiting to be wired.",
+      "inWild": "Selection Marco duplicates (three nodes: two bindings + one call):\n\n  fn quote(base: Money) -> Money {\n      subtotal = base * qty            // <- selected\n      tax = subtotal * rate            // <- selected\n      log_line(subtotal)               // <- selected\n      return subtotal + tax\n  }\n\nOn Ctrl+D, `subtotal` and `tax` already exist in this scope — the clone cannot reuse those names. And the clone's `qty` / `rate` inputs point at bindings that were NOT in the selection, so the copy has two inputs with nothing wired to them yet. What Canvas writes for those two facts is undefined today.",
+      "detail": "Recommend D. Devil pass across all four: (C) prompt-on-collision is the safest read but it interrupts the single most frequent gesture with a modal per name — death by dialog; a beginner duplicating a five-binding block answers five prompts. (A) eager-complete never stalls but fills unresolved inputs with typed defaults, which means Canvas writes source the user did not mean (`qty` silently becomes `0`), violating the spirit of \"never write source that surprises\" even though it type-checks. (B) always-stage is clean for incomplete pastes but wrong for a self-contained selection: duplicating a complete block should just appear in source, not sit dashed waiting for a wire that is not needed. (D) unifies them by principle: the clipboard is real Jet source text (copy serializes the selection to `.jet`, so the same paste works into another file, another Canvas graph, or a plain text editor — one path, I8); a self-contained selection materializes immediately with deterministic suffix rename; a selection with unresolved inputs falls back to the staged mechanism (#388) rather than writing default-filled or dangling source. Devil pass on D: suffix rename must be atomic and scope-correct — renaming `subtotal`->`subtotal2` has to rewrite every in-selection reference to it in the same transaction, pick the first free suffix (skip an existing `subtotal2`), and still choose a fresh name if the clone would shadow an outer binding. Patch: rename resolves against the destination block's visible scope; references inside the pasted selection are remapped as a set; placement is immediately after the selection's source span (graph offset +24px is view-state only, per the design spec). Cross-file paste reuses the existing import-synthesis path. Result: Ctrl+D on a complete block just works and reads cleanly; Ctrl+V of a block with a loose input gives a staged node the user wires, and only then is source written — always valid, never surprising.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Eager complete (suffix rename, fill defaults)",
+          "detail": "Paste always writes source immediately. Colliding bindings get the first free numeric suffix (`subtotal` -> `subtotal2`). Clones land right after the selection's source span. Any input left unresolved by the copy is filled with a typed default so the source is always complete and type-checks — the user edits the default afterward.",
+          "code": "Ctrl+D result written immediately:\n\n  fn quote(base: Money) -> Money {\n      subtotal = base * qty\n      tax = subtotal * rate\n      log_line(subtotal)\n      subtotal2 = base * 0        // qty unresolved -> default 0\n      tax2 = subtotal2 * 0.0      // rate unresolved -> default 0.0\n      log_line(subtotal2)\n      return subtotal + tax\n  }\n\nType-checks, but `0` / `0.0` are values Marco never chose."
+        },
+        {
+          "key": "B",
+          "name": "Always stage (defer every paste)",
+          "detail": "Every pasted/duplicated node lands as a staged node (#388): dashed unsaved ring, view-state only, nothing in source. The user positions and wires; the first wire connecting a clone to the graph spine materializes it (with rename resolved then). Nothing is written for a clone until it is wired.",
+          "code": "Ctrl+D result: three staged (dashed) nodes appear beside the originals.\n`.jet` is UNCHANGED until the user wires them:\n\n  fn quote(base: Money) -> Money {\n      subtotal = base * qty\n      tax = subtotal * rate\n      log_line(subtotal)\n      return subtotal + tax\n  }\n\nEven a fully self-contained duplicate stays dashed until the user makes a\nconnection it does not actually need."
+        },
+        {
+          "key": "C",
+          "name": "Prompt on collision, append at block end",
+          "detail": "Paste writes source but pauses to prompt for each colliding binding name (suggested `subtotal_copy`, editable). Clones append at the end of the current block. Complete materialization after the prompts are answered.",
+          "code": "Ctrl+D opens, per collision:\n\n  Name for copied binding \"subtotal\":  [ subtotal_copy ]   Rename / Skip\n  Name for copied binding \"tax\":       [ tax_copy ]        Rename / Skip\n\nThen writes at block end:\n\n  fn quote(base: Money) -> Money {\n      subtotal = base * qty\n      tax = subtotal * rate\n      log_line(subtotal)\n      return subtotal + tax\n      subtotal_copy = base * qty\n      tax_copy = subtotal_copy * rate\n      log_line(subtotal_copy)\n  }\n(unreachable-after-return here is illustrative; real placement is end of the live block)"
+        },
+        {
+          "key": "D",
+          "name": "Source-text clipboard (one path), suffix rename, stage only when unresolved",
+          "detail": "Copy serializes the selection to real Jet source text on the clipboard, so paste is one mechanism across graph, other files, and a plain text editor. A self-contained selection materializes immediately: first-free suffix rename applied atomically to defs and in-selection uses, inserted right after the selection's span. A selection whose inputs are unresolved falls back to a staged node (#388) instead of writing default-filled or dangling source — Canvas never writes source the user did not complete.",
+          "code": "Case 1 — self-contained duplicate (all inputs internal): materializes now.\n\n  subtotal = base * qty\n  tax = subtotal * rate\n  log_line(subtotal)\n  subtotal2 = base * qty         // qty resolves to the same in-scope binding\n  tax2 = subtotal2 * rate        // renamed def + use, atomic\n  log_line(subtotal2)\n\nClipboard also holds the same text — paste into main.jet or a text editor works.\n\nCase 2 — a copied node's input was NOT in the selection: that clone stages\n(dashed ring), writes nothing, and materializes with the rename resolved the\nmoment Marco wires its input. Always-valid source, no surprise defaults."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "UE5 Blueprint",
+          "note": "Ctrl+W/Ctrl+V clones nodes as new graph objects with auto-suffixed titles and no naming or placement rules, because clones are asset data, not source. Dangling input pins are simply unconnected — legal in a graph, meaningless in a source file. Jet has to answer the questions Blueprint gets to skip; option D keeps Blueprint's frictionless feel for self-contained clones while staging (not dangling) the incomplete ones.",
+          "code": "Ctrl+W on a node -> \"MyNode\" clones as \"MyNode\" with pins unconnected;\nno rename dialog, no file, no validity requirement."
+        },
+        {
+          "lang": "Scratch",
+          "note": "Right-click Duplicate drops a floating copy that runs nothing until you attach it under a hat block — this is exactly staged materialization (#388): the copy exists in the editor but is inert until connected. Option D uses that model precisely for the incomplete case, matching a mental model non-programmers already have.",
+          "code": "Duplicate -> a detached stack floats; it does nothing until snapped under\na `when green flag clicked` (or other) hat."
+        },
+        {
+          "lang": "VS Code (text editor)",
+          "note": "Copying lines and pasting them is a byte operation — the editor never renames your variables, so you fix collisions by hand. Option D's source-text clipboard is byte-compatible with this (the clipboard IS Jet text), but adds the graph-aware suffix rename the text editor can't do, so a graph paste is safe where a raw text paste would shadow `subtotal`.",
+          "code": "Paste of `subtotal = base * qty` next to an existing `subtotal` ->\ntwo bindings named `subtotal`; the text editor does not rename either."
+        }
+      ],
+      "rec": "D",
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-11T01:56:10.498Z"
+    },
+    {
+      "id": "D-CANVAS-DEBUG-UX1",
+      "cardId": "c0ewd6kd",
+      "group": "web-ui",
+      "title": "Debugger backing: what drives breakpoints, watches, and exec pulse",
+      "gist": "What actually powers the Canvas debugger — a real native debug session against the running program, a re-run of the tier-0 interpreter with instrumentation, or a hybrid — and, above all, whether the on-screen liveness is real or simulated.",
+      "explainer": "Glossary. Native debug session: `jet debug` driving the real compiled process through an lldb/DAP backend (tests/debug.rs) — real breakpoints, real variable reads, real stepping, mapped from generated Rust frames back to Jet source spans. DAP: Debug Adapter Protocol, the same wire format VS Code's debugger uses. Tier-0 interpreter: Jet's comptime interpreter that evaluates a program without producing a native binary (the JIT is a separate tier-1 dev accelerator). Exec pulse: the animated highlight flowing along exec wires showing which path is executing. Watch: a pinned expression whose value the debugger shows as you step. Per the ratified D-CANVAS-DEBUGSTATE1, breakpoints and watches are LOCAL editor state anchored to source spans and the source hash — Canvas never writes them into `.jet`.\n\nThe wall. Every debugger row in the matrix (session selector, step/next/continue/stop, breakpoints/watches, active-node/wire pulse, call stack) is projection-only or a UI shell with zero behavior tests — the debug rail buttons in html.rs do nothing yet. This is the single largest unbuilt surface and it is the one most able to lie: an animation can imply the program is running when it is not. The owner's hard rule for the whole epoch is that the UI must never fake liveness. This ballot picks the engine, and the engine determines what is real.",
+      "story": "Dana sets a breakpoint on the `charge(card)` node in her payment function and clicks Run in Canvas. She expects the graph to stop there, show her the real `card` value the program actually has, let her step to the next node, and pulse the exec wire along the path that actually ran. She needs to trust that what glows is what happened — if the debugger showed her a plausible-but-simulated value or pulsed a path the real program did not take, she would ship a bug believing she had watched it not happen.",
+      "inWild": "Function Dana is debugging:\n\n  fn checkout(card: Card, cart: Cart) -> Result[Receipt] {\n      total = price(cart)\n      if total > card.limit {\n          return Err(OverLimit)\n      }\n      receipt = charge(card, total)     // <- breakpoint here\n      return Ok(receipt)\n  }\n\nToday: the breakpoint dot renders, the Debug rail buttons render, and clicking Run does nothing testable — no stop, no real `card`/`total` values, no exec pulse. There is no session behind the buttons.",
+      "detail": "Recommend A. This is a truth decision, not a polish decision, and D-CANVAS-DEBUGSTATE1 already fixes breakpoints/watches as local, span-anchored state — option A drives exactly that state against the real process, contradicting nothing. Devil pass across all three: (B) interpreter-overlay gives the prettiest, smoothest, deterministic pulse — and it is a simulation. It is a second execution engine (I8 risk: two ways to run a program), and its values can diverge from the AOT build's real behavior around effects, I/O, ordering, and optimization. Presenting interpreter values as the program's live state is exactly the faked liveness the owner forbids; acceptable only if loudly labeled \"simulated,\" at which point it is a preview, not a debugger. (C) hybrid is the subtle trap: real state for variables/stack, but the wire pulse animated by the interpreter. The pulse is the most liveness-implying element on screen — animating it from a simulation while the numbers are real is the worst of both, a truthful-looking UI whose motion is a guess; reject on \"never fake liveness.\" (A) native session is the honest analog of Blueprint's own debugger: Blueprint's pulse is real because the Blueprint VM is the actual runtime; Jet's actual runtime is the compiled process, so the real debugger is the native session. Devil pass on A: a native debugger's pulse is discrete (it advances at breakpoints and steps), not the continuous flow Blueprint shows by single-stepping its VM; and generated-Rust frames must map back to Jet spans. Patch: accept the truthful discrete pulse — the wire highlights the path proven to have executed at each real stop, and when no session is live the wires do not pulse and the UI says \"not running\" rather than animating anything. Frame mapping reuses the existing source-map already built for `jet perf`/`jet debug`. When no native target is available (pure comptime evaluation), the debugger says so plainly instead of quietly substituting the interpreter. One runtime, one truth: what glows is what ran.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Native debug session (real process)",
+          "detail": "Canvas drives the existing `jet debug` lldb/DAP backend against the real compiled program. Breakpoints, watches, variable reads, call stack, and stepping are real; the exec pulse highlights the path the process actually executed, advancing at real stops. Frames map from generated Rust back to Jet source spans via the existing source map. When nothing is running, wires do not pulse and the UI reports \"not running.\"",
+          "code": "Dana clicks Run with a breakpoint on `charge`:\n\n  [ debug session: checkout(card, cart) ]  paused at charge\n  Watches:   total = 4299   (real value from the process)\n             card.limit = 5000\n  Call stack: checkout  <- main\n  Exec pulse: price -> if(false) -> [charge]  (path actually taken, lit)\n\n  Step Over -> advances to `return Ok(receipt)`; receipt = Receipt{...} real.\n  No session running -> wires dark, header reads \"not running\".\nBreakpoints stay local editor state (D-CANVAS-DEBUGSTATE1); `.jet` is untouched."
+        },
+        {
+          "key": "B",
+          "name": "Interpreter overlay (re-run, instrumented)",
+          "detail": "Canvas re-runs the program on the tier-0 interpreter with instrumentation and animates a deterministic, smooth exec pulse plus interpreter-computed watch values. No native process is involved. Visually the richest and most controllable, but the values and path are the interpreter's, which can differ from the compiled program.",
+          "code": "Dana clicks Run:\n\n  [ interpreter overlay ]\n  Watches:   total = 4299   (interpreter's evaluation)\n  Exec pulse: smooth flowing highlight along price -> if -> charge\n\nRisk made concrete: if `price(cart)` reads a clock, hits the network, or\ndepends on evaluation order, the interpreter's `total` and chosen path may\nnot match what the shipped binary does — the glow would show a run that\ndid not happen. Honest only if labeled \"simulated preview,\" not \"debug.\""
+        },
+        {
+          "key": "C",
+          "name": "Hybrid (native state + interpreter pulse)",
+          "detail": "A native session provides real variable/stack/step state; the exec-wire pulse animation is driven by the interpreter overlay for smoothness. State is real, motion is simulated.",
+          "code": "Dana clicks Run:\n\n  Watches:   total = 4299            (real, from native session)\n  Call stack: checkout <- main       (real)\n  Exec pulse: smooth flow price->if->charge   (interpreter-animated)\n\nThe numbers are true but the flowing highlight is the interpreter's guess;\nif the two disagree on the taken branch, the UI shows real values under a\npulse tracing a different path — a truthful-looking screen that lies in motion."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "UE5 Blueprint",
+          "note": "Blueprint's exec pulse and watch values are real because the Blueprint VM IS the runtime — single-stepping the VM is single-stepping the program, so its glow never lies. The lesson is not \"animate a pulse\"; it is \"debug the actual runtime.\" Jet's actual runtime is the compiled process, so the faithful equivalent of Blueprint's debugger is the native session (option A), not a separate interpreter that merely looks like Blueprint.",
+          "code": "BP debugger: breakpoint on a node -> VM halts -> real pin values shown ->\nexec wire glows the path the VM took (real, because VM == runtime)."
+        },
+        {
+          "lang": "VS Code (DAP debugger)",
+          "note": "VS Code debugs the real process over DAP: it stops at real breakpoints, shows real variables, and steps real frames; it never animates a speculative execution path. Option A is the graph rendering of exactly this — the same DAP-class backend `jet debug` already has (tests/debug.rs), with pulse shown only at real stops.",
+          "code": "launch -> hits breakpoint -> Variables pane shows real values ->\nStep Over advances the real process; nothing is animated between stops."
+        },
+        {
+          "lang": "Scratch",
+          "note": "Scratch's block \"glow\" as a script runs is honest liveness precisely because Scratch is an interpreter — the glowing block is the one the interpreter is executing. That is the ONLY setting where option B/C's interpreter pulse is truthful. Jet is compiled and its debug target is the native process, so importing Scratch-style interpreter glow would make the animation a simulation, not liveness.",
+          "code": "Scratch: the running block glows yellow because the interpreter is on it;\ntrue there because the interpreter is the runtime."
+        }
+      ],
+      "rec": "A",
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-11T01:56:12.405Z"
+    },
+    {
+      "id": "D-REPLCOREEFFECT1",
+      "cardId": "c1cix784",
+      "group": "safety",
+      "title": "REPL Core effect authorization",
+      "gist": "Choose how existing Jet effects are authorized inside the REPL.",
+      "explainer": "Jet already has one effect language: D-EFF4's roots, D-EFFTREE1 paths, lexical #Grant regions, and invocation policy through the existing --allow-fs/--allow-env/--allow-exec/--allow-net/--allow-io/--allow-time/--allow-rand flags. This ballot adds no REPL-specific grant names, grant commands, or persistent permission store. All options keep Core's current static bare-root tags; they do not globally retag Core with compiler-minted leaves. Dynamic capability data distinguishes resources and operations beneath a statically proven root. Thus an Env capability may permit reading HOME but not writing HOME; an Exec capability for one pinned Exec.Run target never permits Exec.Exit; an Io capture channel never permits terminal input. The canonical REPL filesystem root is fixed once: `jet repl --project DIR` uses the canonical project root, otherwise the process's starting cwd. The evaluator opens that root as a directory handle before accepting input. A symlink used to reach the starting location is resolved once when opening the root; later path components are descriptor-relative and no-follow. Because `core.os` has no current static effect root and this ballot does not retag Core, every `core.os` operation remains native-only E1802 in the REPL, including host facts and `set_current_dir`; therefore evaluated code cannot mutate cwd, and the fixed root handle never changes. --allow-fs is only the existing Fs invocation ceiling and never broadens reach beyond that fixed root. Every file operation uses verified handles; if the platform cannot enforce race-safe confinement it fails closed. Process execution pins executable identity before authorization, never re-resolves PATH, uses a verified cwd and minimal declared environment, bounds time, forwards interrupt, kills/reaps children, and separately authorizes redirects. Network authority pins scheme, hostname, port, and resolved addresses; redirects or new DNS results require fresh authority. Env.Read and Env.Write are dynamically separate exact-key resources under bare Env; session authorization for one key/direction never covers another. Ambient Time operations (wall clock, local zone, sleep, stopwatch/instant) require Time; a Clock created from an explicit seed/value is injected data and needs no ambient authority. Ambient/OS and secure randomness require Rand; an explicitly seeded Rng is injected data and needs none. `core.crypto.random` remains E1802 while it is native-only; if the interpreter gains it, it follows secure Rand policy. REPL-owned stdout/stderr capture is inherent evaluator plumbing: print/eprint and subprocess Capture write only to the REPL's captured output and require no runtime Io authority. Reading stdin, raw terminal access, inheriting/streaming a subprocess terminal, or redirecting to an external stream requires #Grant(Io) plus Io policy. A subprocess file redirect requires Fs for the verified file handle; Capture alone grants neither Io nor Fs. FFI, tasks, raw memory, display/UI backends, servers, and other native-only facilities remain E1802. Missing lexical authority remains E0712. E1802 remains only for unavailable interpreter features. This decision allocates E1803 to REPL runtime-policy denial, missing invocation policy, or confinement failure after lexical proof. E1803 must be registered in diagnostics with what/why/fix and pinned by a UI snapshot before implementation uses it.",
+      "story": "Maya is learning Jet in a cloned service. She wraps a config read in the same #Grant(Fs) construct used by checked programs, then pastes a formatter command. Static checking proves which effect roots the turn can reach, but the REPL must still decide which real project file or executable that erased capability may touch. Maya needs the safe choice explained at the moment it matters. Dev needs the same effect proof with explicit invocation flags in a scripted session, without learning a REPL-only authorization system.",
+      "inWild": "use core.files as files\nuse core.process as process\n\n#Grant(Fs) { caps ->\n    cfg :: files.read(\"config.toml\")\n}\n\n#Grant(Exec) { caps ->\n    formatted :: process.run([\"jet\", \"fmt\", \"build/preview.jet\"])\n}\n\n// The decision controls runtime resource authority after the existing\n// #Grant proof succeeds. No `?? return` is needed at the REPL prompt.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Prompted invocation policy",
+          "detail": "Require an enclosing #Grant(root) for every effectful turn. In an interactive TTY, when the corresponding existing --allow-root policy was not supplied, pause before each not-yet-authorized external operation and offer once, session, or deny. Once covers exactly the displayed operation/resource tuple and is discarded before execution, so success or failure cannot retain it. Session stores exactly `(root effect, operation kind, resource identity/scope)` in memory: Env.Read HOME does not cover Env.Write HOME, Exec.Run tool A does not cover tool B or Exec.Exit, and a multi-resource turn prompts separately in execution order before performing each newly reached operation. On reuse, the same authorization preflight names the matching session allowance and offers continue or revoke; revoke deletes that tuple before the operation and returns to once/session/deny. This prompt/preflight is the sole inspection and revocation surface, not a second permission mechanism. All session tuples disappear on REPL exit or restart. Existing --allow-root flags skip ordinary root prompts for that invocation but do not relax confinement or lexical #Grant; non-TTY never prompts and requires the corresponding flag. Exec.Exit is never subsumed by Exec.Run, a session tuple, or --allow-exec: every interactive exit gets a separate `[y/N]` consequence prompt, while non-TTY requires #Grant(Exec) plus --allow-exec and exits without prompting. Recommended: beginner authority stays contextual and safe, experts get auditable flags, and both use Jet's one effect model. All shared confinement, pinning, Env, Time, Rand, Io, diagnostic, and native-only invariants above apply. Process Capture is inherent REPL output; Inherit/Stream/file redirects require their separately proven Io/Fs roots and policies.",
+          "code": "$ jet repl --project /work/api\nuser> use core.files as files\nok\nuser> #Grant(Fs) { caps -> files.read(\"config.toml\") }\nCore effect Fs requests runtime authority before this operation.\n  operation: read\n  target:    config.toml\n  confined:  /work/api (descriptor-relative, no symlinks)\n  [o] once  [s] exact tuple for this session  [d] deny\ns\nport = 8080 : Result\n\nuser> #Grant(Fs) { caps -> files.read(\"config.toml\") }\nUsing session Fs.Read authority for `config.toml`. [c] continue  [r] revoke\nc\nport = 8080 : Result\n\nuser> use core.env as env\nok\nuser> #Grant(Env) { caps -> env.get(\"HOME\") }\nCore effect Env requests runtime authority: Read key HOME. [o] once  [s] exact tuple for session  [d] deny\ns\n/work/api : Option\nuser> #Grant(Env) { caps -> env.set(\"HOME\", \"/tmp\") }\nCore effect Env requests runtime authority: Write key HOME. [o] once  [s] exact tuple for session  [d] deny\nd\nError [E1803]: Env.Write for `HOME` was denied\n Why: session authority covers Env.Read for this key, not mutation\n Fix: choose once or session only if this write is intended\n\nuser> use core.process as process\nok\nuser> #Grant(Exec) { caps -> process.run([\"jet\", \"fmt\", \"build/preview.jet\"]) }\nCore effect Exec requests runtime authority before this operation.\n  executable: /work/api/.jet/toolchain/bin/jet (identity pinned)\n  argv:       jet fmt build/preview.jet\n  cwd:        /work/api\n  env:        minimal declared environment\n  timeout:    30s\n  redirects:  Capture (inherent REPL output; no Io grant)\n  [o] once  [s] exact Exec.Run tuple for session  [d] deny\no\nProcessResult(code: 0, output: , errors: ) : Result\n\nuser> #Grant(Exec) { caps -> process.exit(7) }\nCore effect Exec requests orderly REPL exit with status 7. [y/N]\ny\n# terminal restored; children reaped; REPL exits 7\n\n$ printf 'use core.files as files\\n#Grant(Fs) { caps -> files.read(\"config.toml\") }\\n' | jet repl --allow-fs\nport = 8080 : Result"
+        },
+        {
+          "key": "B",
+          "name": "Flags only",
+          "detail": "Require #Grant(root) in the turn and the corresponding existing --allow-root flag at REPL startup. Never prompt and never persist policy. The flag opens only that bare-root invocation ceiling; each lexical capability remains dynamically narrowed to the concrete operation/resource. All shared confinement, root fixation, process/network pinning, Env key/direction, Time/Clock, Rand/Rng, Io/Capture, diagnostic, and native-only invariants above apply independently. Thus --allow-env plus #Grant(Env) may perform the exact Env.Read/Env.Write operation reached, seeded Clock/Rng need no flag, Capture needs no --allow-io, Inherit/Stream need #Grant(Io) plus --allow-io, and a file redirect also needs #Grant(Fs) plus --allow-fs. A missing flag reports E1803 after lexical proof. Exec.Exit is a distinct operation never obtained from an Exec.Run resource capability; under this flags-only option it requires #Grant(Exec) plus --allow-exec, performs orderly cleanup, and never prompts. Without both it cannot terminate anything. This is maximally predictable for automation and experts, but beginners must understand invocation policy before their first ambient operation.",
+          "code": "$ jet repl\nuser> use core.files as files\nok\nuser> #Grant(Fs) { caps -> files.read(\"config.toml\") }\nError [E1803]: this REPL invocation does not allow Fs\n Why: #Grant proves lexical authority, but host policy did not pass --allow-fs\n Fix: restart with `jet repl --allow-fs`; access remains confined to the REPL root\n\n$ jet repl --allow-fs --allow-exec\nuser> use core.files as files\nok\nuser> #Grant(Fs) { caps -> files.read(\"config.toml\") }\nport = 8080 : Result\nuser> use core.process as process\nok\nuser> #Grant(Exec) { caps -> process.exit(0) }\n# orderly exit: terminal restored, children reaped, status 0\n\n$ printf 'use core.files as files\\n#Grant(Fs) { caps -> files.read(\"config.toml\") }\\n' | jet repl --allow-fs\nport = 8080 : Result"
+        },
+        {
+          "key": "C",
+          "name": "Pure REPL only",
+          "detail": "The REPL executes pure Core plus deterministic injected Clock/Rng values only. #Grant remains valid Jet syntax, but external Fs, Env, Exec, Net, Io input, ambient Time, and ambient Rand are intentionally unavailable in this interpreter and therefore report current E1802 with the jet run/build escape. Existing --allow-* flags do not widen the REPL. No dynamic resource capabilities or persistence exist. Exec.Exit is the sole control exception: process.exit(code) does not require host Exec authority and is interpreted as an orderly REPL quit after terminal restoration; process.run/cmd/pipeline remain E1802. This draws the strongest boundary but rejects the accepted goal of exploring side-effect-safe Core in place.",
+          "code": "$ jet repl\nuser> use core.encoding.json as json\nok\nuser> json.parse(\"{\\\"port\\\":8080}\")\nData(fields: [port: 8080]) : Result\n\nuser> use core.files as files\nok\nuser> #Grant(Fs) { caps -> files.read(\"config.toml\") }\nError [E1802]: the REPL interpreter cannot run `core.files.read()`\n Why: this option keeps external Fs unavailable even inside #Grant\n Fix: put the code in a file and use `jet run`; --allow-fs does not widen the REPL\n\nuser> use core.process as process\nok\nuser> #Grant(Exec) { caps -> process.exit(0) }\n# orderly REPL quit; terminal restored\n\n$ jet repl --allow-exec\nerror: --allow-exec does not widen a pure-only REPL"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Deno",
+          "note": "Deno separates filesystem, environment, process, and network policy and supports prompts or flags. Jet differs by requiring its existing lexical #Grant proof as well as invocation policy, and by attaching resource limits to capability handles.",
+          "code": "Deno: --allow-read=./config --allow-net=api.example.com\nJet: #Grant(Fs) { caps -> ... } plus --allow-fs or the option-A prompt"
+        },
+        {
+          "lang": "cap-std / openat2",
+          "note": "Capability-oriented filesystems operate relative to an already-open directory handle. This avoids the check-then-open race and symlink swap that realpath-prefix sandboxes miss.",
+          "code": "root_fd -> open child component with no-follow -> operate on returned handle"
+        },
+        {
+          "lang": "Jupyter and Node",
+          "note": "Common REPLs inherit ambient host authority. Pasted code can mutate files/environment, launch subprocesses, or connect to the network without a lexical capability proof.",
+          "code": "process.env.KEY = value\nchild_process.execFile(tool, args)"
+        },
+        {
+          "lang": "Nix evaluation",
+          "note": "Pure evaluation rejects ambient effects unless impurity is explicitly enabled. This informs option C and the deterministic non-TTY rule in A/B.",
+          "code": "nix eval --impure ..."
+        }
+      ],
+      "rec": "A",
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-11T01:56:21.912Z"
     }
   ],
   "questions": [
@@ -23283,6 +23531,69 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-11T01:56:21.912Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-REPLCOREEFFECT1",
+      "note": "REPL Core effect authorization"
+    },
+    {
+      "at": "2026-07-11T01:56:18.108Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0ewd6kd",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T01:56:16.204Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0ocarv7",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T01:56:14.287Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0zpnwk9",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T01:56:12.405Z",
+      "by": "fable-main",
+      "action": "decision.add",
+      "ref": "D-CANVAS-DEBUG-UX1",
+      "note": "Debugger backing: what drives breakpoints, watches, and exec pulse"
+    },
+    {
+      "at": "2026-07-11T01:56:10.498Z",
+      "by": "fable-main",
+      "action": "decision.add",
+      "ref": "D-CANVAS-COPYPASTE1",
+      "note": "Paste/duplicate: how cloned nodes materialize in source"
+    },
+    {
+      "at": "2026-07-11T01:56:08.602Z",
+      "by": "fable-main",
+      "action": "decision.add",
+      "ref": "D-CANVAS-MULTIEXEC1",
+      "note": "Multiple-exec-IN convergence over source-backed spans"
+    },
+    {
+      "at": "2026-07-11T01:54:33.811Z",
+      "by": "terra-360-help",
+      "action": "card.update",
+      "ref": "c0l5fmyy",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T01:45:43.916Z",
+      "by": "terra-360-help",
+      "action": "card.claim",
+      "ref": "c0l5fmyy",
+      "note": ""
+    },
     {
       "at": "2026-07-11T01:43:52.099Z",
       "by": "fable-main",
@@ -26718,69 +27029,6 @@
       "by": "codex-orchestrator",
       "action": "card.update",
       "ref": "c2iizmyx",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c29iz43a",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "csivxv0",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c164",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0hxraci",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0cevzhr",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c2hizkhl",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c083j754",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0ok76h1",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0sa3d63",
       "note": "workOrder"
     }
   ],
