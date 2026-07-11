@@ -638,6 +638,25 @@ fn wasm_cross_bucket_call_is_a_normal_preflight_diagnostic() {
 }
 
 #[test]
+fn canvas_style_wasm_tir_control_flow_and_print_compile() {
+    let src = r#"#Target(Web)
+fn square(n: Int) -> Int { return n * n }
+fn summarize(limit: Int) -> Int {
+    total := square(limit)
+    if total > 10 { return total } else { return total + 1 }
+}
+fn scratch(limit: Int, text: String, flag: Bool, ratio: Float) { print(limit) }
+fn run() { print(summarize(4)) }
+"#;
+    let out = jet::compile_web_with_path(src, "tests/fixtures/web_canvas_tir.jet")
+        .expect("ordinary Canvas control flow and print must compile through TIR");
+    let wasm = &out.web.expect("web artifacts").wasm_rust;
+    assert!(wasm.contains("if (user_total > 10)"), "TIR if was not emitted:\n{wasm}");
+    assert!(wasm.contains("println!(\"{}\""), "TIR print was not emitted:\n{wasm}");
+    assert!(wasm.contains("user_text: String"), "internal owned String parameter was rejected:\n{wasm}");
+}
+
+#[test]
 fn web_hello_dom_shim_roundtrip() {
     if !have_tool("rustc") || !have_tool("node") {
         eprintln!("note: skipping web_build hello (need rustc + node)");

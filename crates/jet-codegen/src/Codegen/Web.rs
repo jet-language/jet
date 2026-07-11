@@ -157,10 +157,10 @@ fn validate_web_func_tir(
             true
         } else if bucket == WebBucket::Js {
             web_stmts_supported(&tir.body)
-                && (tir.ret.is_none() || tir.body.iter().any(|s| matches!(s, TIR::TStmt::Return(Some(_)))))
+                && (tir.ret.is_none() || web_stmts_guarantee_return(&tir.body))
         } else {
             web_wasm_stmts_supported(&tir.body, bundle)
-                && (tir.ret.is_none() || tir.body.iter().any(|s| matches!(s, TIR::TStmt::Return(Some(_)))))
+                && (tir.ret.is_none() || web_stmts_guarantee_return(&tir.body))
                 && web_wasm_abi_supported(bundle, f)
         };
         if supported {
@@ -177,10 +177,28 @@ fn validate_web_func_tir(
     });
 }
 
+fn web_stmts_guarantee_return(stmts: &[TIR::TStmt]) -> bool {
+    stmts.iter().any(|stmt| match stmt {
+        TIR::TStmt::Return(Some(_)) => true,
+        TIR::TStmt::If { then_body, else_body: Some(else_body), .. } => {
+            web_stmts_guarantee_return(then_body) && web_stmts_guarantee_return(else_body)
+        }
+        TIR::TStmt::Inline(body) | TIR::TStmt::Region(body) => web_stmts_guarantee_return(body),
+        _ => false,
+    })
+}
+
 fn web_wasm_abi_supported(bundle: &ProgramBundle, f: &Func) -> bool {
+    let ty_supported = if f.web_marker == Some(WebPartitionMarker::WasmExport) {
+        wasm_export_ty
+    } else {
+        wasm_ty
+    };
     flatten_abi_params(bundle, &f.params.iter().map(|p| (p.name.clone(), p.ty.clone())).collect::<Vec<_>>())
-        .iter().all(|(_, ty)| wasm_ty(ty).is_some())
-        && f.return_type.as_ref().map(|ty| wasm_ty(ty).is_some()).unwrap_or(true)
+        .iter().all(|(_, ty)| ty_supported(ty).is_some())
+        // Owned strings can stay inside an internal Rust/Wasm parameter list,
+        // but this emitter has no string return representation yet.
+        && f.return_type.as_ref().map(|ty| wasm_export_ty(ty).is_some()).unwrap_or(true)
 }
 
 fn web_wasm_stmts_supported(stmts: &[TIR::TStmt], bundle: &ProgramBundle) -> bool {
@@ -188,6 +206,11 @@ fn web_wasm_stmts_supported(stmts: &[TIR::TStmt], bundle: &ProgramBundle) -> boo
         TIR::TStmt::LineMarker(_) | TIR::TStmt::Return(None) => true,
         TIR::TStmt::Let { init, .. } | TIR::TStmt::ExprStmt(init) | TIR::TStmt::Return(Some(init)) => web_wasm_expr_supported(init, bundle),
         TIR::TStmt::Assign { value, .. } => web_wasm_expr_supported(value, bundle),
+        TIR::TStmt::If { cond: TIR::TIfCond::Plain(cond), then_body, else_body, .. } => {
+            web_wasm_expr_supported(cond, bundle)
+                && web_wasm_stmts_supported(then_body, bundle)
+                && else_body.as_deref().map(|body| web_wasm_stmts_supported(body, bundle)).unwrap_or(true)
+        }
         _ => false,
     })
 }
@@ -196,7 +219,9 @@ fn web_wasm_expr_supported(expr: &TIR::TExpr, bundle: &ProgramBundle) -> bool {
     match &expr.kind {
         TIR::TExprKind::IntLit(..) | TIR::TExprKind::FloatLit(_) | TIR::TExprKind::BoolLit(_) | TIR::TExprKind::Local(_) => true,
         TIR::TExprKind::Binary { lhs, rhs, .. } => web_wasm_expr_supported(lhs, bundle) && web_wasm_expr_supported(rhs, bundle),
-        TIR::TExprKind::Unary { operand, .. } | TIR::TExprKind::Clone(operand) => web_wasm_expr_supported(operand, bundle),
+        TIR::TExprKind::Unary { operand, .. } | TIR::TExprKind::Clone(operand) | TIR::TExprKind::Print(operand) => {
+            web_wasm_expr_supported(operand, bundle)
+        }
         TIR::TExprKind::Call { name, args } => wasm_callee_bucket(bundle, web_name(name)) == Some(WebBucket::Wasm)
             && args.iter().all(|a| web_wasm_expr_supported(&a.value, bundle)),
         _ => false,
@@ -610,7 +635,15 @@ fn wasm_ty(ty: &Type) -> Option<&'static str> {
         Type::IntN { signed: false, .. } => Some("u64"),
         Type::Float | Type::Float32 => Some("f64"),
         Type::Bool => Some("bool"),
+        Type::String => Some("String"),
         _ => None,
+    }
+}
+
+fn wasm_export_ty(ty: &Type) -> Option<&'static str> {
+    match ty {
+        Type::String => None,
+        _ => wasm_ty(ty),
     }
 }
 
@@ -622,6 +655,16 @@ fn emit_wasm_body(body: &[TIR::TStmt], out: &mut String, indent: usize, funcs: &
             TIR::TStmt::ExprStmt(expr) => out.push_str(&format!("{pad}{};\n", wasm_emit_expr(expr, funcs)?)),
             TIR::TStmt::Let { name, init, .. } => out.push_str(&format!("{pad}let mut {name} = {};\n", wasm_emit_expr(init, funcs)?)),
             TIR::TStmt::Assign { place, op, value, .. } => out.push_str(&format!("{pad}{place} {}= {};\n", op.as_ref().map(binop).unwrap_or(""), wasm_emit_expr(value, funcs)?)),
+            TIR::TStmt::If { cond: TIR::TIfCond::Plain(cond), then_body, else_body, .. } => {
+                out.push_str(&format!("{pad}if {} {{\n", wasm_emit_expr(cond, funcs)?));
+                emit_wasm_body(then_body, out, indent + 1, funcs)?;
+                if let Some(else_body) = else_body {
+                    out.push_str(&format!("{pad}}} else {{\n"));
+                    emit_wasm_body(else_body, out, indent + 1, funcs)?;
+                }
+                out.push_str(&format!("{pad}}}\n"));
+            }
+            TIR::TStmt::Return(None) => out.push_str(&format!("{pad}return;\n")),
             TIR::TStmt::LineMarker(_) => {}
             _ => return Err(()),
         }
@@ -643,6 +686,7 @@ fn wasm_emit_expr(expr: &TIR::TExpr, funcs: &[FuncWeb]) -> Result<String, ()> {
         ),
         TIR::TExprKind::Unary { op, operand } => format!("({}{})", unop(op), wasm_emit_expr(operand, funcs)?),
         TIR::TExprKind::Clone(inner) => wasm_emit_expr(inner, funcs)?,
+        TIR::TExprKind::Print(inner) => format!("println!(\"{{}}\", {})", wasm_emit_expr(inner, funcs)?),
         TIR::TExprKind::Call { name, args } => {
             let source = web_name(name);
             let mut callees = funcs.iter().filter(|f| f.name == source && f.bucket == WebBucket::Wasm);
