@@ -86,6 +86,9 @@ impl ParkSlot {
         if self.notified.swap(false, Ordering::Acquire) {
             return;
         }
+        // Tower #126: count real condvar blocks so scale tests can prove tasks
+        // park (bounded blocks) rather than busy-wait (zero blocks, hot spin).
+        METRIC_PARK_BLOCKS.fetch_add(1, Ordering::Relaxed);
         if let Some(t) = timeout {
             let _unused = self.cv.wait_timeout(guard, t).unwrap();
         } else {
@@ -95,6 +98,11 @@ impl ParkSlot {
     }
 
     pub fn wake(&self) {
+        // Hold the same mutex the parker checks its predicate under, so a wake
+        // that lands between the parker's `notified` re-check and its `cv.wait`
+        // cannot be lost (otherwise a `park(None)` sleeps forever). Textbook
+        // condvar handoff; without it, capacity-1 channel backpressure deadlocks.
+        let _guard = self.lock.lock().unwrap();
         self.notified.store(true, Ordering::Release);
         self.cv.notify_one();
     }
@@ -1080,6 +1088,7 @@ pub(crate) fn jet_scheduler_select<T: Send>(
 
 static METRIC_PARKED: AtomicUsize = AtomicUsize::new(0);
 static METRIC_POLLER_WAKE: AtomicUsize = AtomicUsize::new(0);
+static METRIC_PARK_BLOCKS: AtomicUsize = AtomicUsize::new(0);
 static IO_BACKEND: OnceLock<&'static str> = OnceLock::new();
 
 #[allow(unreachable_code)]
@@ -1118,6 +1127,12 @@ pub fn jet_scheduler_metric_parked() -> usize {
 
 pub fn jet_scheduler_metric_poller_wake() -> usize {
     METRIC_POLLER_WAKE.load(Ordering::Relaxed)
+}
+
+/// Total times a task actually blocked on a park condvar (not the notified
+/// fast-path). A busy-wait scheduler would leave this at zero under contention.
+pub fn jet_scheduler_metric_park_blocks() -> usize {
+    METRIC_PARK_BLOCKS.load(Ordering::Relaxed)
 }
 
 // ── M1: work-stealing pool ───────────────────────────────────────────────────
@@ -1635,5 +1650,65 @@ mod interrupt_boundary_tests {
         assert!(result.is_err());
         assert!(inner.state.lock().unwrap().recv_waiters.is_empty());
         assert!(control.cancel_waiters.lock().unwrap().is_empty());
+    }
+
+    // Tower #126 scale guard. Drives `n` tasks against a capacity-1 channel so
+    // every send hits backpressure and must PARK until the receiver drains it.
+    // Deterministic (no rustc, no wall-clock thresholds) and it fails on the three
+    // audited failure modes:
+    //   * lost wake / deadlock  → the watchdog trips instead of hanging forever,
+    //   * busy-wait             → zero real condvar blocks recorded,
+    //   * waiter leak           → send/recv waiter vectors are not drained.
+    fn run_backpressure_scale(n: i64) {
+        let handle = std::thread::spawn(move || {
+            let before = jet_scheduler_metric_park_blocks();
+            let channel = JetSchedulerChannel::<i64>::bounded(1);
+            for _ in 0..n {
+                let sender = channel.sender();
+                let _ = jet_scheduler_spawn(move || {
+                    sender.send(1);
+                });
+            }
+            let mut total = 0i64;
+            for _ in 0..n {
+                total += channel.receive().expect("channel closed before all sends drained");
+            }
+            jet_scheduler_drain();
+            let blocks = jet_scheduler_metric_park_blocks().saturating_sub(before);
+            let inner = channel.select_inner();
+            let st = inner.state.lock().unwrap();
+            (total, blocks, st.send_waiters.len(), st.recv_waiters.len())
+        });
+
+        let start = Instant::now();
+        let budget = Duration::from_secs(120);
+        while !handle.is_finished() {
+            assert!(
+                start.elapsed() < budget,
+                "scale workload hung: a park never woke (lost-wake / deadlock)"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let (total, blocks, send_leak, recv_leak) = handle.join().expect("scale worker panicked");
+
+        assert_eq!(total, n, "every task's message must be delivered exactly once");
+        assert!(
+            blocks > 0,
+            "no task ever blocked on a park condvar under capacity-1 backpressure — \
+             the scheduler is busy-waiting, not parking"
+        );
+        assert_eq!(send_leak, 0, "send waiters leaked after drain (unbounded growth)");
+        assert_eq!(recv_leak, 0, "recv waiters leaked after drain (unbounded growth)");
+    }
+
+    #[test]
+    fn scale_10k_tasks_park_under_backpressure() {
+        run_backpressure_scale(10_000);
+    }
+
+    #[test]
+    #[ignore = "local 100k parked-task scale proof; run with --ignored"]
+    fn scale_100k_tasks_park_under_backpressure() {
+        run_backpressure_scale(100_000);
     }
 }
