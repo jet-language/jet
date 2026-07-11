@@ -3222,6 +3222,14 @@ fn os_switch_activates_and_sets_current() {
             && generation.join("sw/bin/jetos-hardware-doctor").is_file(),
         "expected hardware scan/profile/specialisation artifacts"
     );
+    let specialisation = fs::read_to_string(
+        generation.join("boot/specialisations/plasmaBeta.conf"),
+    )
+    .unwrap();
+    assert!(
+        specialisation.contains("title jetos 26.10 (Apex) — halcyon (plasmaBeta)"),
+        "specialisation title: {specialisation}"
+    );
     let hardware_root = root.path.join("fake-hardware");
     fs::create_dir_all(hardware_root.join("proc")).unwrap();
     fs::create_dir_all(hardware_root.join("sys/class/block/nvme0n1")).unwrap();
@@ -3953,6 +3961,7 @@ fn os_switch_activates_and_sets_current() {
         ("etc/os-release", os_release.as_str()),
         ("usr/lib/os-release", expected_os_release),
         ("boot/limine.conf", installed_limine.as_str()),
+        ("boot specialisation", specialisation.as_str()),
         ("wallpaper", wallpaper.as_str()),
     ] {
         assert!(

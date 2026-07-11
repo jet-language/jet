@@ -371,8 +371,8 @@ fn write_hardware_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> 
         fs::write(
             boot_spec_dir.join(format!("{name}.conf")),
             format!(
-                "title JetOS {} ({name})\nhost {}\nenabled {}\ngeneration /run/current-system\nproof hardware-specialisation\n",
-                system.name, system.name, enabled
+                "title {} — {} ({name})\nhost {}\nenabled {}\ngeneration /run/current-system\nproof hardware-specialisation\n",
+                jetos_release_label(false), system.name, system.name, enabled
             ),
         )?;
     }
