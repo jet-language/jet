@@ -1631,9 +1631,11 @@ blocks for assertion snapshots; `testing.snap` is for explicit named files.
 
 `bench_budget(name, max_ns, body)` actually runs `body` (a zero-arg closure):
 a few warmup calls, then timed trials, then compares the measured mean
-wall-clock time to `max_ns` and returns whether it's within budget. The mean,
-stddev, and verdict print to stderr so a failing budget is diagnosable, not
-just a bare `false`.
+wall-clock time to `max_ns` and returns whether it's within budget. The default
+stderr line is deterministic (`bench_budget <name>: within budget — ok` /
+`over budget — FAIL`) — no measured numbers, so comparing output across runs or
+tiers (dev vs AOT) never flakes on timing noise. Set `JET_BENCH_VERBOSE=1` to
+see the full mean/stddev/budget line for diagnosing a failure.
 
 ```jet
 print(testing.bench_budget("parse", 5_000_000, () => { parse(input) }))
