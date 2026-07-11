@@ -1504,10 +1504,83 @@ piped (JSON); `log.setup(format:)` overrides (D-LOGFMT1).
   `core.web` consume typed values instead of re-solving string escaping.
 - **D-ENCSTREAM1=A**: each `core.encoding` codec has one adapter identity with
   whole-value and reader/writer stream modes over the shared `Data`/`DataTree`
-  and `Codable` machinery. XML, JSONL, canonical JSON, and CBOR follow this
-  model. Epoch 3 ships JSON canonical output/events, JSON Lines, namespace-
-  preserving XML tree parse/render, CBOR, base32, and URL-safe base64 beside
-  existing JSON/CSV/TOML/YAML/hex/base64.
+  and `Codable` machinery. Streaming is a mode of that adapter, never a second
+  codec library.
+
+  **D-ENCSTREAM-SURFACE1=A** fixes codec-native, synchronous pull handles.
+  JSON/JSONL/CSV/CBOR expose opaque non-`Codable`, non-`Copy`, non-`Clone`
+  Reader/Writer types. Constructors consume `^files.FileReader` or
+  `^files.FileWriter`, take shared `EncodingLimits.safe()`, and return
+  `EncodingError`; readers provide `next(&self)`, writers `write(&self)`,
+  `flush(&self)`, and required idempotent `finish(&self)`. Items are `DataEvent`
+  for JSON/CBOR, `Data` for JSONL, `[String]` for CSV, and D-ENCXML1's exact
+  tagged `Data` event algebra for XML. Blocking calls provide backpressure; no
+  hidden task, queue, partial-success state, or `WouldBlock` exists. Clean EOF
+  follows complete structural/trailing-input validation; the first terminal
+  error is cloned forever. `EncodingLimits` owns buffer/depth/item/total/entity
+  expansion bounds and all constructors validate fields before IO. Shared
+  `EncodingError` records format, kind, zero-based byte offset, optional
+  one-based line/column, Data path, reason, and handle-free IO cause. Whole and
+  stream paths share parser, Data tree, errors, limits, canonical bytes, and
+  bounded-memory law. Shipped `json.events(Data) -> String` is unchanged;
+  pull events exist only through `json.reader` until an edition migration.
+
+  **D-ENCXML1=A** selects one lossless namespace-aware ordinary-`Data` XML
+  algebra, not an `XmlDocument` or `XMLEvent` type. XML 1.0 Fifth Edition plus
+  Namespaces 1.0 is the floor. `parse` accepts Unicode/UTF-8 declarations;
+  `parse_bytes` additionally detects UTF-8 BOM and UTF-16 LE/BE BOM. The closed
+  tagged node/event objects preserve document order, expanded `XMLName`, ordered
+  namespace/attribute lists, text, CDATA, comments, processing instructions,
+  declarations, doctypes, entity references, empty-element style, encoding/BOM,
+  and token-local `XMLLexical` evidence. Untouched compatible tokens reuse exact
+  text/bytes; edits invalidate only that token; false lexical snapshots are
+  ignored. Entity default is Preserve; Reject and explicit in-memory Resolve
+  are available. No files, URLs, catalogs, external entities, parameter
+  entities, or replacement markup execute. Exact XML/expansion limits reject,
+  never truncate. Codable uses Clark keys, `@` attributes, `$text` for simple
+  content, and ordered `$content` for mixed content. Canonicalization is whole-
+  document W3C Inclusive 1.1 or Exclusive 1.0, optional comments, UTF-8/LF/no
+  BOM/declaration/doctype, over the semantic infoset. `XMLError` has the closed
+  reason/location/path law and projects field-for-field into stream
+  `EncodingError`. Folding/unfolding the exact tagged stream and tree algebras
+  is lossless. The prior `{name, attrs, children, text}` tree is unratified and
+  receives no compatibility alias.
+
+  **D-JSONCANON1=A** makes `json.canonical(data, limits:) -> String ?
+  EncodingError` strict RFC 8785 JCS in edition 2027. It recursively emits UTF-8
+  without BOM/LF/whitespace, preserves array order and Unicode scalars, sorts
+  keys by unsigned UTF-16 code units, rejects duplicate keys/Bytes/nonfinite
+  numbers, and uses the RFC-frozen ECMAScript binary64 serializer (`-0.0` ->
+  `0`; Int must be exactly representable). Whole and `json.writer(canonical:
+  true)` output/errors/bounds are byte-identical; nested canonical-object
+  workspace is aggregate-bounded. Edition 2026 retains the old infallible
+  prototype bytes; `jet fix` plus explicit edition upgrade inserts fallibility
+  and audits hashing/signing fixtures. No 2027 legacy branch exists.
+
+  **D-ENCBIN1=A / D-ENC-CBOR-SURFACE1=A** select RFC 8949 CBOR. The only whole
+  surface is `parse([U8], options) -> Data`, `decode<T: Codable>`, `to_bytes`,
+  and `to_bytes_canonical`, returning closed `CBORError`. `[U8]` uses native
+  byte strings through typed Codable; untyped `Data` rejects byte strings,
+  tags, bignums, non-text/duplicate map keys, and unsupported values rather than
+  coercing. `CBOROptions` bounds depth/items/input and live allocation and may
+  require canonical input. Canonical output is RFC 8949 section 4.2.1 Core:
+  definite/shortest forms, preferred Float, canonical NaN, preserved signed
+  zero, and pure bytewise lexicographic complete encoded-key order. Canonical
+  validation checks original bytes. Ordinary output is preferred interoperable
+  CBOR, not a cross-version hash promise. Edition 2026 keeps shipped
+  `encode(Data)`/Data-returning `decode`; edition 2027 migrates to the ratified
+  names, edition 2028 removes forwarding entries, and `jet fix` owns rewrites.
+
+  **D-ENCBASE-STRICT1=A** makes edition-2027 base64/base64url/base32 decoding
+  strict RFC 4648 by default: canonical alphabet/case/padding/length, no
+  whitespace, and zero unused bits. Named false-by-default allowances cover
+  ASCII whitespace and missing standard/base32 padding, URL padding, and
+  lowercase base32 only; they never admit wrong alphabets, interior/excess
+  padding, impossible lengths, `0`/`1` aliases, or nonzero unused bits. Errors
+  are `invalid <codec> at byte <N>: <reason>` at original UTF-8 byte offsets
+  under one fixed validation order. Edition 2026 uses one parity parser for the
+  union of historically accepted AOT/comptime inputs; `jet fix --edition 2027`
+  adds allowances and audits irreconcilable legacy data.
 - **D-TEXTUNICODE1=A**: `core.text` owns Unicode algorithms: normalization,
   case folding, segmentation, width, classification, and UTF-8/scalar helpers.
   `String` stays small; tooling may insert `core.text` calls from String
