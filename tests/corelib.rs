@@ -2501,6 +2501,42 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// Card #131: flatten, rename, and decode defaults are behavior of generated
+/// Jet codec bodies, not a hidden Rust-only derive path.
+#[test]
+fn generated_struct_codecs_preserve_flatten_rename_and_default() {
+    let dir = std::env::temp_dir().join(format!("jet_struct_markers_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let src = r#"
+use core.encoding.json as json
+
+@[Codable]
+struct Inner { x: Int  y: Bool }
+
+@[Codable]
+#[RenameAll(camel)]
+struct Outer {
+    display_name: String
+    #[Flatten] inner: Inner
+    #[Default(9)] count: Int
+}
+
+fn run() {
+    value := Outer.{ display_name: "n", inner: Inner.{ x: 1, y: true }, count: 2 }
+    print(json.to_string(value))
+    back := json.decode<Outer>("{{\"displayName\":\"m\",\"x\":3,\"y\":false}}") ?? panic("decode")
+    print(back.display_name)
+    print(back.inner.x)
+    print(back.count)
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "struct_markers", src, &[], None);
+    assert_eq!(code, 0, "generated marker codec failed: {stderr}");
+    assert_eq!(stdout, "{\"displayName\":\"n\",\"x\":1,\"y\":true,\"count\":2}\nm\n3\n9\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
 /// #495 / I2: a field read from a bare (`Read`) parameter is still rooted in
 /// the borrowed parameter. The explicit `copy` required by E0209 must produce
 /// owned values for both shallow and nested fields, compile through rustc, and
