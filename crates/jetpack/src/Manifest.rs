@@ -25,15 +25,13 @@ pub const COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// into a specific era of Jet syntax (docs/spec/release-policy.md). The list is
 /// ordered oldest→newest; the last entry is the newest stable edition, used by
 /// single-file `jet run file.jet` which carries no edition marker (E2-V4).
-pub const SUPPORTED_EDITIONS: &[&str] = &["2026"];
+const LATEST_EDITION: &str = "2026";
+pub const SUPPORTED_EDITIONS: &[&str] = &[LATEST_EDITION];
 
 /// The newest stable edition this toolchain ships. Single-file programs and a
 /// manifest with no `edition:` field use this.
 pub fn latest_edition() -> &'static str {
-    SUPPORTED_EDITIONS
-        .last()
-        .copied()
-        .expect("SUPPORTED_EDITIONS must be non-empty")
+    LATEST_EDITION
 }
 
 /// The registry-protocol version this toolchain speaks (D-REL1: normal SemVer;
@@ -157,6 +155,20 @@ pub fn version_banner() -> String {
         latest = latest_edition(),
         registry = REGISTRY_COMPAT,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        edition_is_supported, latest_edition, version_banner, SUPPORTED_EDITIONS,
+    };
+
+    #[test]
+    fn latest_edition_is_last_supported_and_drives_banner() {
+        assert_eq!(SUPPORTED_EDITIONS.last().copied(), Some(latest_edition()));
+        assert!(edition_is_supported(latest_edition()));
+        assert!(version_banner().contains(&format!("newest: {}", latest_edition())));
+    }
 }
 
 // ──────────────────────────────────────────────
