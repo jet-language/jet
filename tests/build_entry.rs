@@ -112,6 +112,27 @@ fn run() { print("ok") }
         )
     );
     assert_eq!(rebuilt.reason, "local action record matched");
+    let explain = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args([
+            "inspect",
+            "explain-build",
+            "stamp",
+            entry.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .expect("jet inspect explain-build");
+    assert!(
+        explain.status.success(),
+        "explain-build failed: {}",
+        String::from_utf8_lossy(&explain.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&explain.stdout)
+            .contains("rebuild=local action record matched"),
+        "explain-build must expose real cache provenance: {}",
+        String::from_utf8_lossy(&explain.stdout)
+    );
 }
 
 #[test]

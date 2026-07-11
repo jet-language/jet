@@ -48,8 +48,12 @@ pub(crate) fn run_build_query(command: &str, args: &[&String], mode: OutputMode)
             return;
         }
         if let Some(mut explanation) = plan.explain_action_named(subject) {
-            let project_root = std::path::Path::new(file).parent().unwrap_or(std::path::Path::new("."));
-            if let Ok(Some(rebuild)) = plan.last_rebuild_explanation(project_root, subject) {
+            let source_parent = std::path::Path::new(file)
+                .parent()
+                .unwrap_or(std::path::Path::new("."));
+            let project_root = jet::Loader::find_manifest_root(source_parent)
+                .unwrap_or_else(|| source_parent.to_path_buf());
+            if let Ok(Some(rebuild)) = plan.last_rebuild_explanation(&project_root, subject) {
                 explanation.provenance.push(format!("rebuild={}", rebuild.reason));
             }
             print_build_explanation(&explanation, mode.json);
