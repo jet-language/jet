@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 496,
-    "rev": 3622,
+    "rev": 3644,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -13599,12 +13599,42 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
       "assignee": "terra-479-builder",
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "codex-orchestrator",
+          "text": "Parent integrated-tree verification: Doctor unit integrity/lock 2/2, real read-only E2E 1/1, canonical route/help registry 1/1 green. Independent Sol review accepted c1fc863e; criteria 1-5 verified. Closed."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "sol-479-reviewer",
+          "text": "Independent Sol final review accepted c1fc863e. Third-pass fixes resolve all findings: read-only signing verifier lookup, authenticated/redacted HTTP probe, fail-closed lock reads. Focused Doctor 2/2, route/help 1/1, RuntimePolicy lock 1/1, real E2E 1/1 green."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "terra-479-builder",
+          "text": "Third review fixes landed c1fc863e: doctor only uses already-present crypto helper and degrades unknown when absent; E2E snapshots helper binary/cache directory before/after; HTTP probe sends Basic Authorization while reports redact credentials; lock directory and entry read errors fail closed as unknown/degraded. Focused Doctor 2/2, E2E 1/1, RuntimePolicy lock 1/1 green; diff-check clean."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "codex-orchestrator",
+          "text": "Criterion 4 corrected after review: finish gate is read-only proof against real temporary failure states, with before/after bytes and permissions plus scratch cleanup. It does not require restoring intentionally corrupted scratch fixtures before deletion."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "terra-479-builder",
+          "text": "Sol findings fixed in b2941360: Hangar enumeration fails closed on entry/read/meta errors; signing key proves seed/public consistency through real Ed25519 helper challenge; HTTP parses bounded status and HTTPS uses bounded existing git registry client; locks carry Linux process-start identity and non-provable states degrade unknown instead of age guesses; tests snapshot bytes/permissions. Focused Doctor 2/2, E2E 1/1, RuntimePolicy lock 1/1 green. Criterion 1 corrected to actual standalone canonical registry/help coverage."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "codex-orchestrator",
+          "text": "Criterion 1 corrected after independent review: jetpack has no standalone generated-completion surface. Finish gate covers its actual canonical verb registry, generated usage/help, parser dispatch, and runtime policy; no fake completion artifact added."
+        },
         {
           "at": "2026-07-11",
           "by": "terra-479-builder",
@@ -13619,48 +13649,48 @@
       "criteria": [
         {
           "n": 1,
-          "text": "jetpack doctor is a registered CLI route with generated help/completion coverage and does not collide with jet self doctor.",
-          "status": "met",
+          "text": "jetpack doctor is registered in the canonical jetpack verb registry, generated usage/help, parser dispatch, and runtime policy without colliding with jet self doctor.",
+          "status": "verified",
           "metBy": "terra-479-builder",
-          "verifiedBy": null,
-          "evidence": "Commit 00c23001 registers doctor in canonical JETPACK_VERBS, standalone dispatch, generated usage, and runtime policy registry; focused route/help test green 1/1.",
-          "at": "2026-07-11T15:43:36.313Z"
+          "verifiedBy": "sol-479-reviewer",
+          "evidence": "c1fc863e inspected: canonical JETPACK_VERBS, generated usage, parser dispatch, RuntimePolicy route; focused route/help 1/1 green.",
+          "at": "2026-07-11T16:03:53.323Z"
         },
         {
           "n": 2,
           "text": "The command performs real read-only checks for hangar/store integrity and reachability, registry or mirror configuration/reachability, stale lock/cache state, and signing-key presence; no fixture-only or constant status facade.",
-          "status": "met",
+          "status": "verified",
           "metBy": "terra-479-builder",
-          "verifiedBy": null,
-          "evidence": "Doctor.rs performs read-only Store metadata/output digest checks, local or optional TCP registry reachability, dead-PID lock detection, 30-day last_used cache checks, and keypair validation.",
-          "at": "2026-07-11T15:43:45.841Z"
+          "verifiedBy": "sol-479-reviewer",
+          "evidence": "00c23001..c1fc863e inspected: real content hashing, local/HTTP(S) reachability, fail-closed lock/cache/signing probes; Doctor units 2/2 green.",
+          "at": "2026-07-11T16:03:53.490Z"
         },
         {
           "n": 3,
           "text": "Healthy, degraded, and broken states have deterministic human output, machine-readable output where the shared CLI contract requires it, and consequence-correct exit status without leaking secret material.",
-          "status": "met",
+          "status": "verified",
           "metBy": "terra-479-builder",
-          "verifiedBy": null,
-          "evidence": "E2E test proves deterministic human and parsed JSON healthy/degraded/broken states with exit 0/1/2; output names endpoints only and never emits URL credentials or key bytes.",
-          "at": "2026-07-11T15:44:01.216Z"
+          "verifiedBy": "sol-479-reviewer",
+          "evidence": "Real E2E 1/1 green: healthy/degraded/broken output and exits 0/1/2; Basic auth observed by server; credentials and key bytes absent from report.",
+          "at": "2026-07-11T16:03:53.657Z"
         },
         {
           "n": 4,
-          "text": "Focused tests mutate temporary real state for corruption, stale lock/cache, unreachable registry/mirror, and missing signing key, then restore exactly; no network-dependent false green or silent skip.",
-          "status": "met",
+          "text": "Focused tests use temporary real corruption, stale lock/cache, unreachable registry/mirror, and missing signing-key states; snapshot relevant bytes and permissions before and after doctor to prove read-only behavior; no external-network false green or silent skip.",
+          "status": "verified",
           "metBy": "terra-479-builder",
-          "verifiedBy": null,
-          "evidence": "tests/jetpack.rs mutates temp real Store output/meta, dead lock, file registry, and key state; asserts doctor leaves metadata and lock bytes unchanged; no external network or skip.",
-          "at": "2026-07-11T15:44:05.432Z"
+          "verifiedBy": "sol-479-reviewer",
+          "evidence": "Real scratch E2E 1/1 green: corrupt output/meta, stale lock/cache, missing key and unreachable local registry; before/after state assertions pass; helper/cache unchanged and probe never builds it.",
+          "at": "2026-07-11T16:03:53.826Z"
         },
         {
           "n": 5,
           "text": "User documentation names exact command, checks, remediation, and offline behavior; focused jetpack/CLI tests pass.",
-          "status": "met",
+          "status": "verified",
           "metBy": "terra-479-builder",
-          "verifiedBy": null,
-          "evidence": "Epoch-4 README documents exact command, checks, remediation, offline/online behavior, JSON and exit contract. Focused E2E 1/1 and route/help 1/1 green.",
-          "at": "2026-07-11T15:44:14.346Z"
+          "verifiedBy": "sol-479-reviewer",
+          "evidence": "Epoch-4 health docs inspected: exact command, checks, fixes, offline/online/JSON/exit contract; all focused #479 tests green.",
+          "at": "2026-07-11T16:03:53.993Z"
         }
       ],
       "refs": [],
@@ -14128,12 +14158,27 @@
       "track": "epoch",
       "epoch": "e6",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "verify",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
       "assignee": "terra-490-builder",
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "sol-490-reviewer",
+          "text": "Independent Sol final review accepted c2337c37. Fresh current-worktree binary enforced; real CDP 37x29 oracle, reload persistence, source immutability, and RAII cleanup all proven. Exact focused test 1/1 green; zero case/browser/server artifacts."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "terra-490-builder",
+          "text": "Final reviewer fixes: c9e1c611 replaces stale binary existence shortcut with checkout-keyed Cargo target and real fingerprinted cargo build (first build current, unchanged 0.04s no-op); c2337c37 adds CanvasCase Drop cleanup on success/failure/unwind. Deliberate tolerance mutation 0.75→-1 produced expected nonzero with full diagnostics, zero matching temp dirs afterward, restored exactly; final exact Chromium test green 1/1. Parent must remove /home/nate/Projects/Github/jet/target/canvas-scenarios-e070834516e11250 immediately after merge/worktree cleanup."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "terra-490-builder",
+          "text": "Builder complete e19b9908. Real CDP drag proof found and fixed two owning Canvas bugs: active drag cleared auto-layout offsets, and first saved node disabled reflow without preserving untouched rendered positions. Exact browser scenario green 1/1 twice; strict 37x29 ±0.75 rendered delta, persisted reload bounds, byte-identical source at all three points, no direct mutation helper, no remaining scenario artifacts. Ready for independent review."
+        },
         {
           "at": "2026-07-11",
           "by": "codex-orchestrator",
@@ -14144,38 +14189,38 @@
         {
           "n": 1,
           "text": "A real browser gesture dispatches pointer events against a node body and moves its rendered bounds by the requested delta within a tight tolerance; no direct JavaScript state mutation helper.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-11T15:46:31.787Z"
+          "status": "verified",
+          "metBy": "terra-490-builder",
+          "verifiedBy": "sol-490-reviewer",
+          "evidence": "c2337c37 final review: real CDP Input.dispatchMouseEvent path; exact 37x29 rendered delta within 0.75 passes using checkout-keyed current-worktree jet binary; no direct mutation helper.",
+          "at": "2026-07-11T16:09:01.099Z"
         },
         {
           "n": 2,
           "text": "Reloading /canvas restores the moved node bounds from view state, proving persistence through the normal client lifecycle.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-11T15:46:31.876Z"
+          "status": "verified",
+          "metBy": "terra-490-builder",
+          "verifiedBy": "sol-490-reviewer",
+          "evidence": "Exact final scenario passes: second /canvas navigation restores dragged node bounds within 0.75 through persisted editor view state.",
+          "at": "2026-07-11T16:09:01.278Z"
         },
         {
           "n": 3,
           "text": "The Jet source bytes remain exactly unchanged before gesture, after gesture, and after reload.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-11T15:46:31.962Z"
+          "status": "verified",
+          "metBy": "terra-490-builder",
+          "verifiedBy": "sol-490-reviewer",
+          "evidence": "Scenario enforces byte equality for /canvas/source before drag, after mouseup, and after reload; exact final scenario green 1/1.",
+          "at": "2026-07-11T16:09:01.455Z"
         },
         {
           "n": 4,
           "text": "Focused Canvas scenario passes with no missing-browser silent skip and leaves no server/browser/temp artifact.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-11T15:46:32.051Z"
+          "status": "verified",
+          "metBy": "terra-490-builder",
+          "verifiedBy": "sol-490-reviewer",
+          "evidence": "Chromium present and emitted PASS; exact test green 1/1. CanvasCase RAII cleans success/failure/unwind; deliberate failing oracle recorded zero case dirs; reviewer found zero case dirs and no surviving browser/server process.",
+          "at": "2026-07-11T16:09:01.622Z"
         }
       ],
       "refs": [],
@@ -27037,6 +27082,160 @@
   ],
   "events": [
     {
+      "at": "2026-07-11T16:09:01.790Z",
+      "by": "sol-490-reviewer",
+      "action": "card.update",
+      "ref": "c0jmvv53",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T16:09:01.622Z",
+      "by": "sol-490-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0jmvv53",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-11T16:09:01.455Z",
+      "by": "sol-490-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0jmvv53",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-11T16:09:01.278Z",
+      "by": "sol-490-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0jmvv53",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-11T16:09:01.099Z",
+      "by": "sol-490-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0jmvv53",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-11T16:07:55.533Z",
+      "by": "terra-490-builder",
+      "action": "card.update",
+      "ref": "c0jmvv53",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T16:06:02.714Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0f7jily",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T16:03:54.152Z",
+      "by": "sol-479-reviewer",
+      "action": "card.update",
+      "ref": "c0f7jily",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T16:03:53.993Z",
+      "by": "sol-479-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0f7jily",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-11T16:03:53.827Z",
+      "by": "sol-479-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0f7jily",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-11T16:03:53.658Z",
+      "by": "sol-479-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0f7jily",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-11T16:03:53.491Z",
+      "by": "sol-479-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0f7jily",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-11T16:03:53.323Z",
+      "by": "sol-479-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0f7jily",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-11T15:59:18.496Z",
+      "by": "terra-479-builder",
+      "action": "card.update",
+      "ref": "c0f7jily",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T15:57:45.447Z",
+      "by": "terra-490-builder",
+      "action": "card.update",
+      "ref": "c0jmvv53",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T15:57:19.145Z",
+      "by": "terra-490-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0jmvv53",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-11T15:57:09.212Z",
+      "by": "terra-490-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0jmvv53",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-11T15:57:03.276Z",
+      "by": "terra-490-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0jmvv53",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-11T15:56:54.146Z",
+      "by": "terra-490-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0jmvv53",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-11T15:55:54.077Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0f7jily",
+      "note": "criteria,logEntry"
+    },
+    {
+      "at": "2026-07-11T15:54:19.480Z",
+      "by": "terra-479-builder",
+      "action": "card.update",
+      "ref": "c0f7jily",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T15:49:43.650Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0f7jily",
+      "note": "criteria,logEntry"
+    },
+    {
       "at": "2026-07-11T15:46:32.138Z",
       "by": "codex-orchestrator",
       "action": "card.update",
@@ -30381,160 +30580,6 @@
       "action": "card.update",
       "ref": "c0av6fpb",
       "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T23:08:11.071Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c00er6jr",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T23:08:10.925Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c068vbs2",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T23:08:10.776Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0onpgah",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T23:08:10.621Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c07ydlbz",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T23:08:04.198Z",
-      "by": "sol-485-review",
-      "action": "card.criteria-verify",
-      "ref": "c0mg4tf8",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-10T23:08:04.046Z",
-      "by": "terra-485-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0mg4tf8",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-10T23:08:03.895Z",
-      "by": "sol-484-review",
-      "action": "card.criteria-verify",
-      "ref": "c0fprfjw",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-10T23:08:03.741Z",
-      "by": "terra-484-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0fprfjw",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-10T23:08:03.586Z",
-      "by": "sol-483-review",
-      "action": "card.criteria-verify",
-      "ref": "c0av6fpb",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-10T23:08:03.433Z",
-      "by": "terra-483-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0av6fpb",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-10T23:08:03.283Z",
-      "by": "sol-482-review",
-      "action": "card.criteria-verify",
-      "ref": "c00er6jr",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-10T23:08:03.123Z",
-      "by": "terra-482-builder",
-      "action": "card.criteria-meet",
-      "ref": "c00er6jr",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-10T23:02:15.055Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0onpgah",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T23:02:14.977Z",
-      "by": "sol-466-review",
-      "action": "card.criteria-verify",
-      "ref": "c0onpgah",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-10T23:02:14.902Z",
-      "by": "terra-466-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0onpgah",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-10T22:52:07.493Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c06tyd7v",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T22:52:07.335Z",
-      "by": "sol-487-review",
-      "action": "card.criteria-verify",
-      "ref": "c06tyd7v",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-10T22:52:07.186Z",
-      "by": "terra-487-builder",
-      "action": "card.criteria-meet",
-      "ref": "c06tyd7v",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-10T22:52:07.032Z",
-      "by": "sol-487-review",
-      "action": "card.criteria-verify",
-      "ref": "c06tyd7v",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-10T22:52:06.875Z",
-      "by": "terra-487-builder",
-      "action": "card.criteria-meet",
-      "ref": "c06tyd7v",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-10T22:52:06.727Z",
-      "by": "terra-487-builder",
-      "action": "card.claim",
-      "ref": "c06tyd7v",
-      "note": ""
-    },
-    {
-      "at": "2026-07-10T22:52:06.571Z",
-      "by": "codex-main",
-      "action": "card.criteria-add",
-      "ref": "c06tyd7v",
-      "note": "#2 syntax_reconciliation and decisions pass; authoritative docs"
     }
   ],
   "nextNum": 368,
