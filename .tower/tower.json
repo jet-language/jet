@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 495,
-    "rev": 3235,
+    "rev": 3247,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -7506,6 +7506,16 @@
         {
           "at": "2026-07-11",
           "by": "terra-360-help",
+          "text": "Reviewer follow-up fixed: canonical colored Explain wrapping counts visible cells and copies each ANSI SGR atom whole; narrow-width reconstruction removes only soft wrap boundaries and is byte-equal to canonical colored Explain. PTY 8x60 oracle now extracts the final F1 frame between redraw/cleanup sentinels, selects bench on the final navigation step, and asserts exactly 8 rows plus <=60 visible columns, preventing intermediate-frame false greens and unintended scroll. Focused proof: Help 23/23; help_pty 5/5."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "terra-360-help",
+          "text": "Reviewer P1s fixed: F1 E-code source is now byte-identical Explain::render/jet explain (plain+color unit equality and real-PTY E0102 containment after CR transport normalization); no reconstructed box, truncation, or custom footer. F1 frames now exactly terminal height/width, query status lives inside header budget, canonical code pages wrap into a scrollable bounded viewport, redraw avoids last-row newline scroll, and left tree viewport follows later selected commands at 8x60. Focused proof: Help 22/22, help_pty 5/5, cli question_mark 4/4."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "terra-360-help",
           "text": "Tranche A implemented: single CLI-backed index now drives seven categorized groups; empty TTY starts collapsed; Enter/right expands, left collapses; real color/NO_COLOR/--color reaches renderer; width+height follow PTY; F1 opens populated same-index detail, searchable commands/E-codes, and restores alt-screen; Enter emits one bare stdout prefill and never executes. Removed duplicate static palette and nonexistent run --watch claim. Focused proof green: cargo test --lib Help (20), cli question_mark (4), real-PTY help_pty (4). Shell-line injection intentionally remains #359-owned; full owner-terminal matrix/full suite remain parent verification."
         },
         {
@@ -7571,7 +7581,53 @@
       "created": "2026-07-08T13:10:17.096Z",
       "updated": "2026-07-11",
       "workOrder": 12,
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "One CLI-backed registry drives commands, flags, examples, aliases, task phrases, categories, and verbatim E-code pages; stale duplicate palette and nonexistent run --watch are absent.",
+          "status": "verified",
+          "metBy": "terra-360-help",
+          "verifiedBy": "sol-360-reviewer",
+          "evidence": "Independent review of 9702ac84, 18a2ec7b, and fb2b412c confirmed CLI::COMMANDS/FLAGS drive the index, stale palette/run --watch drift is absent, and F1 E-code output uses canonical Explain rendering byte-for-byte.",
+          "at": "2026-07-11T02:10:45.810Z"
+        },
+        {
+          "n": 2,
+          "text": "TTY palette starts with collapsed categories; keyboard expand/collapse, fuzzy search, Tab detail, F1 same-index navigation, color/NO_COLOR, adaptive rows/columns, and terminal restoration pass real PTY proof.",
+          "status": "verified",
+          "metBy": "terra-360-help",
+          "verifiedBy": "sol-360-reviewer",
+          "evidence": "Independent review confirmed collapsed category navigation, fuzzy/Tab/F1 paths, color and NO_COLOR law, ANSI-safe fixed-size viewport, selected-row scrolling, alt-screen restoration, and non-vacuous final 8x60 PTY oracle.",
+          "at": "2026-07-11T02:10:55.369Z"
+        },
+        {
+          "n": 3,
+          "text": "Enter inserts the selected command into the editable parent shell line without executing it in bash, zsh, and fish through the shared #359 RC surface; bare jet ? prints one composable fallback line.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-11T02:10:09.510Z"
+        },
+        {
+          "n": 4,
+          "text": "Every row from D-FE-HELP1, the hybrid mock, owner ratification comments, and both bounce logs is evidenced in a real PTY and the owner's Ghostty/fish host-wrapper environment.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-11T02:10:09.724Z"
+        },
+        {
+          "n": 5,
+          "text": "Focused Help/CLI/PTy tests and repository full verification pass on the integrated tree.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-11T02:10:09.931Z"
+        }
+      ],
       "needsAcceptance": false,
       "refs": [],
       "claimedAt": "2026-07-11T01:45:43.916Z"
@@ -11522,6 +11578,11 @@
       "blockedBy": [],
       "assignee": "fable-main",
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "codex-main",
+          "text": "integration gate 2026-07-11: verify-full fails tests/dev.rs dev_default_matches_compiled_binary after 15ca83b5 removed io/stdin_filter from DEFAULT_BACKEND_EXPECTED_BOUNDARIES, but live default still returns E3410. Actual boundaries include io/stdin_filter; expected omits it. interpreter_matches_compiled_binary is only PoisonError fallout. Restore expectation or complete JIT lowering before parent reruns."
+        },
         {
           "at": "2026-07-11",
           "by": "fable-main",
@@ -23532,6 +23593,90 @@
   ],
   "events": [
     {
+      "at": "2026-07-11T02:10:55.370Z",
+      "by": "sol-360-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0l5fmyy",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-11T02:10:45.810Z",
+      "by": "sol-360-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0l5fmyy",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-11T02:10:18.020Z",
+      "by": "terra-360-help",
+      "action": "card.criteria-meet",
+      "ref": "c0l5fmyy",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-11T02:10:17.803Z",
+      "by": "terra-360-help",
+      "action": "card.criteria-meet",
+      "ref": "c0l5fmyy",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-11T02:10:09.931Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c0l5fmyy",
+      "note": "#5 Focused Help/CLI/PTy tests and repository full verification "
+    },
+    {
+      "at": "2026-07-11T02:10:09.724Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c0l5fmyy",
+      "note": "#4 Every row from D-FE-HELP1, the hybrid mock, owner ratificati"
+    },
+    {
+      "at": "2026-07-11T02:10:09.511Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c0l5fmyy",
+      "note": "#3 Enter inserts the selected command into the editable parent "
+    },
+    {
+      "at": "2026-07-11T02:10:09.313Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c0l5fmyy",
+      "note": "#2 TTY palette starts with collapsed categories; keyboard expan"
+    },
+    {
+      "at": "2026-07-11T02:10:09.103Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c0l5fmyy",
+      "note": "#1 One CLI-backed registry drives commands, flags, examples, al"
+    },
+    {
+      "at": "2026-07-11T02:09:06.125Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c06tccyz",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T02:04:44.909Z",
+      "by": "terra-360-help",
+      "action": "card.update",
+      "ref": "c0l5fmyy",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T02:00:51.065Z",
+      "by": "terra-360-help",
+      "action": "card.update",
+      "ref": "c0l5fmyy",
+      "note": "phase,logEntry"
+    },
+    {
       "at": "2026-07-11T01:56:21.912Z",
       "by": "codex-main",
       "action": "decision.add",
@@ -26945,90 +27090,6 @@
       "by": "codex-orchestrator",
       "action": "card.update",
       "ref": "c0ppv63p",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.049Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0om2gxe",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.049Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0nlrm12",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.049Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c6q02qhw",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.049Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0p12web",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.049Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c2zj0p7p",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.049Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c2yj0nk5",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c2sj0bd9",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c2qj06uq",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c2lizsmx",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0md55xu",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c05o0105",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c2iizmyx",
       "note": "workOrder"
     }
   ],
