@@ -515,6 +515,10 @@ impl<'a> Interp<'a> {
                 self.impure_depth -= 1;
                 result
             }
+            // D-SHIELDNAME1=A: `#Shield { … }` is a runtime scheduler region; at
+            // comptime there are no tasks or deadlines, so it is a transparent no-op
+            // wrapper — execute the body directly.
+            Stmt::Shield { body, .. } => self.exec_block(body, scope),
             // D-IGNORERET2=A: `#Suppress(MustUse)` is a sema-only gate; it erases
             // at codegen and is transparent to the comptime interpreter.
             Stmt::SuppressMustUse { body, .. } => self.exec_block(body, scope),

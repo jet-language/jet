@@ -68,9 +68,9 @@ fn jet_scheduler_fatal(msg: &str) -> ! {
 // Drop-backed cleanup runs on the way out — the same shape a blown deadline
 // already produces. A shielded region (SHIELD_DEPTH > 0) DEFERS the unwind: wait
 // points inside it complete normally and the deferred cancel/deadline lands when
-// the outermost region exits. Shield has no user spelling yet (gated on
-// D-SHIELDNAME1); `jet_scheduler_shield_enter`/`_leave` are internal-only until
-// the parent wires the ratified sigil.
+// the outermost region exits. D-SHIELDNAME1=A (ratified 2026-07-11) spells this
+// region `#Shield { … }`; codegen lowers the block to
+// `jet_scheduler_shield_enter`/`_leave` around the body (Codegen/TIR emit).
 struct JetCancelUnwind;
 
 thread_local! {

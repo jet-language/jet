@@ -736,6 +736,11 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             let closure = render_reactive_block_closure(body, cx, env);
             TStmt::Reactive { closure }
         }
+        // D-SHIELDNAME1=A: `#Shield { … }` lowers to a shield-guarded block. The
+        // body leaks like a region (AST shares `&mut env`), so lower on the SAME env.
+        Stmt::Shield { body, .. } => TStmt::Shield {
+            body: lower_stmts(body, cx, env),
+        },
         // c109 Phase 19: an explicit `region r { … }` (D-REGION1). The AST emits a plain
         // block and lowers the body on the SAME `&mut env` (its `let`s leak into the outer
         // scope). Reproduce: lower the body on the SAME `env`, wrap in `TStmt::Region`.

@@ -487,6 +487,7 @@ pub(crate) fn rewrite_inline_calls_stmts(
             | Stmt::Unsafe { body: inner, .. }
             | Stmt::Impure { body: inner, .. }
             | Stmt::Reactive { body: inner, .. }
+            | Stmt::Shield { body: inner, .. }
             | Stmt::SuppressMustUse { body: inner, .. }
             | Stmt::Off { body: inner, .. }
             | Stmt::DebugOnly { body: inner, .. }
@@ -1821,6 +1822,16 @@ pub(crate) fn check_bundle_opts(
     }) {
         used_core.insert("core.mem::pool_shared".to_string());
     }
+    // D-SHIELDNAME1=A: a `#Shield { … }` block lowers to
+    // `jet_scheduler_shield_enter`/`_leave`, which live in the scheduler prelude
+    // and whose `_leave` calls the corelib deadline/cancel helpers — all gated on a
+    // non-empty `used_core`. A `#Shield` needs no `use core.X` import (it is a no-op
+    // outside a task), so `collect_used_core` never sees it. Force the same runtime
+    // inclusion with the same over-eager source scan as the Pool/Shared block above
+    // (a comment/string false positive just includes the prelude — harmless).
+    if bundle.modules.iter().any(|m| m.source.contains("#Shield")) {
+        used_core.insert("core.concurrency::shield".to_string());
+    }
     bundle.used_core = used_core;
     apply_helper_layer_inference(bundle, &states, &usage_spans, &mut diags);
     let (public_summaries, public_solved) = qualified_effect_facts(&module_effect_summaries);
@@ -2144,6 +2155,7 @@ pub(crate) fn collect_core_stmts(
             Stmt::Loop { body, .. }
             | Stmt::Unsafe { body, .. }
             | Stmt::Impure { body, .. }
+            | Stmt::Shield { body, .. }
             | Stmt::SuppressMustUse { body, .. }
             | Stmt::Off { body, .. }
             | Stmt::DebugOnly { body, .. }

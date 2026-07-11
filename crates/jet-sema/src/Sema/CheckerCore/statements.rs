@@ -1205,6 +1205,12 @@ impl<'a> Checker<'a> {
                     self.check_block(body, true);
                     self.ct_impure_depth -= 1;
                 }
+                // D-SHIELDNAME1=A: `#Shield { … }` — a cancellation-shield region.
+                // Legal anywhere ordinary statements are; a no-op outside a task.
+                // Semantically a plain block: check the body, no effects, no gate.
+                Stmt::Shield { body, .. } => {
+                    self.check_block(body, true);
+                }
                 // D-REACTCORE1: `#Reactive { … }` — a reactive effect scope.
                 Stmt::Reactive { body, span } => {
                     if self.in_comptime {

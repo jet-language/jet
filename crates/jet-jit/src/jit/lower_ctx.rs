@@ -639,6 +639,11 @@ impl LowerCtx<'_, '_> {
                 return Err("jit context block unsupported".to_string());
             }
             TStmt::Live { .. } => return Err("jit live block unsupported".to_string()),
+            // D-SHIELDNAME1=A: a `#Shield` region wraps its body in scheduler
+            // enter/leave RAII — a runtime-scheduler concern the resident JIT tier
+            // doesn't model. Bail so the function routes to the compiled scheduler
+            // (same executable TIR, R12 parity).
+            TStmt::Shield { .. } => return Err("jit shield block unsupported".to_string()),
             TStmt::ScopeMember { .. } => return Err("jit scope member unsupported".to_string()),
             TStmt::Transact { .. } => return Err("jit transact block unsupported".to_string()),
             TStmt::LineMarker(_) => return Err("jit line marker unsupported".to_string()),
