@@ -129,21 +129,27 @@ pub const TYPE_UTF8_ERROR: &str = "UTF8Error";
 pub const TYPE_JSON: &str = "JSON";
 pub const TYPE_JSON_ERROR: &str = "JSONError";
 
-/// D-ENC-DYN1=A+ (ratified 2026-06-25): the one dynamic encoding value every
-/// format's `parse` returns. `Data` is canonical (the user-facing face of the
-/// internal `DataTree`); `Json`/`Toml`/`Yaml`/`Csv` are type aliases over it, so
-/// `json.parse` is typed `Json`, `toml.parse` is typed `Toml`, etc., but they are
-/// the same structure (one walker, one accessor set). Variants: `Null`, `Bool`,
-/// `Int`, `Float`, `Text`, `Array`, `Object`.
-pub const TYPE_DATA: &str = "Data";
+/// D-ENC-DYN1=A+ (ratified 2026-06-25) + D-SERDE13=B (ratified 2026-07-11): the
+/// one dynamic encoding value every format's `parse` returns and every hand codec
+/// constructs and returns. `DataTree` is the single canonical user-facing
+/// spelling — renamed from the old `Data` face by D-SERDE13=B (it is a tree of
+/// data, distinct from any user type named `Data`; the retired `Data` spelling is
+/// a teaching error, E0351, not an alias, per I8). `Json`/`Toml`/`Yaml`/`Csv` are
+/// format-tagged aliases over the same structure, so `json.parse` is typed
+/// `Json`, `toml.parse` is typed `Toml`, etc., but one walker and one accessor
+/// set back them. Variants: `Null`, `Bool`, `Int`, `Float`, `Text`, `Array`,
+/// `Object`.
+pub const TYPE_DATA: &str = "DataTree";
 pub const TYPE_DATA_JSON: &str = "Json";
 pub const TYPE_DATA_TOML: &str = "Toml";
 pub const TYPE_DATA_YAML: &str = "Yaml";
 pub const TYPE_DATA_CSV: &str = "Csv";
 
-/// The five accepted spellings of the dynamic encoding value (D-ENC-DYN1=A+).
+/// The accepted spellings of the dynamic encoding value (D-ENC-DYN1=A+ /
+/// D-SERDE13=B): canonical `DataTree` plus the four format-tagged aliases. The
+/// old bare `Data` spelling is intentionally absent — it is caught as E0351.
 pub fn is_data_type_name(name: &str) -> bool {
-    matches!(name, "Data" | "Json" | "Toml" | "Yaml" | "Csv")
+    matches!(name, "DataTree" | "Json" | "Toml" | "Yaml" | "Csv")
 }
 
 /// The variants of the dynamic `Data` value (D-ENC-DYN1=A+), the user-facing face

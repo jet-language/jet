@@ -9,6 +9,11 @@ impl<'a> Checker<'a> {
                         self.diags.push(no_any_type(span));
                         return;
                     }
+                    // D-SERDE13=B: the retired `Data` spelling points at `DataTree`.
+                    if n == "Data" {
+                        self.diags.push(data_renamed_to_datatree(span));
+                        return;
+                    }
                     if core_type_known(n) {
                         return;
                     }

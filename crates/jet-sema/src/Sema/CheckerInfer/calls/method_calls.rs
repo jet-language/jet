@@ -277,8 +277,17 @@ impl<'a> Checker<'a> {
                 }
             }
             if let Expr::Ident(type_name, _) = &**receiver {
-                // D-ENC-DYN1=A+: `Data`/`Json`/`Toml`/`Yaml`/`Csv` name the one dynamic value;
-                // they are reserved core type names (a user type may not redefine them).
+                // D-SERDE13=B: `Data.Text(x)` etc. — the retired spelling of the value
+                // tree. Point at `DataTree` (no alias, I8) before generic resolution.
+                if type_name == "Data" {
+                    self.diags.push(data_renamed_to_datatree(span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                    return Some(json_ty());
+                }
+                // D-ENC-DYN1=A+: `DataTree`/`Json`/`Toml`/`Yaml`/`Csv` name the one dynamic
+                // value; they are reserved core type names (a user type may not redefine them).
                 if is_json_type_name(type_name) {
                     if let Some(ret) = self.check_core_json_lit(method, args, span) {
                         return Some(ret);

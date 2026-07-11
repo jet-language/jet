@@ -52,7 +52,7 @@ fn no_any_type(span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0350",
         "Jet does not have an `Any` type".to_string(),
-        "a value should keep a precise shape: use an enum for known variants, generics or traits for abstraction, `T?` for absence, and `Data` for parsed dynamic data".to_string(),
+        "a value should keep a precise shape: use an enum for known variants, generics or traits for abstraction, `T?` for absence, and `DataTree` for parsed dynamic data".to_string(),
         "replace `Any` with the specific mechanism for this value".to_string(),
         Some(span),
     )

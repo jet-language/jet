@@ -29,7 +29,7 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0304",
                         format!("`{}` has no variant `{}`", Syntax::TYPE_DATA, variant),
-                        "the dynamic `Data` value exposes Null/Bool/Int/Float/Text/Array/Object"
+                        "the dynamic `DataTree` value exposes Null/Bool/Int/Float/Text/Array/Object"
                             .to_string(),
                         fix,
                         Some(span),
@@ -51,7 +51,7 @@ impl<'a> Checker<'a> {
                         if expected.len() == 1 { "" } else { "s" },
                         args.len()
                     ),
-                    "each `Data` variant has a fixed payload (Bool/Int/Float→scalar, Text→String, Array→[Data], Object→Map)".to_string(),
+                    "each `DataTree` variant has a fixed payload (Bool/Int/Float→scalar, Text→String, Array→[DataTree], Object→Map)".to_string(),
                     "check the variant payload".to_string(),
                     Some(span),
                 ));
