@@ -258,6 +258,9 @@ Once ratified, build order:
 **Historical c152 status (2026-06-25):** TOML/YAML adapter parity shipped. This
 did not complete the later #296 encoding breadth decisions; `core.encoding` is
 not broadly complete.
+The exact ratified completion contract is
+[`../spec/encoding-decisions.md`](../spec/encoding-decisions.md); summaries in
+this historical plan never override it.
 Both gating decisions ratified (D-ENC-DYN1=A+, D-ENC-YAML1=A) and implemented end to
 end; impl recorded in `docs/spec/syntax-decisions.md`. Full suite green (1107 passed).
 That tranche shipped:

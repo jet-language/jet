@@ -1282,6 +1282,10 @@ fractional to `.Float`; objects keep field order.
 
 **Ratified Epoch 3 breadth (D-ENCSTREAM1 and follow-ups).** The same `Data`
 tree backs one whole-value and streaming adapter contract per format:
+The exact signatures, defaults/ranges/accounting, tagged XML schemas, error
+paths/projections, canonical byte rules, strict decoder matrices, lifecycle,
+test vectors, and edition migrations are normative in
+[`../spec/encoding-decisions.md`](../spec/encoding-decisions.md).
 
 | Module | Surface | What it does |
 |--------|---------|--------------|

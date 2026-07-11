@@ -1473,6 +1473,12 @@ piped (JSON); `log.setup(format:)` overrides (D-LOGFMT1).
 **Core library audit ratifications** *(ratified 2026-07-07, cards #289-#308,
 #310)*: the Epoch 3 Core expansion follows these owner picks.
 
+The complete normative encoding contracts, including exact public types,
+limits, counters, event/node keys, error projection, byte laws, conformance
+vectors, lifecycle state, and edition migrations, are preserved in
+[`encoding-decisions.md`](encoding-decisions.md). The entries below are an
+index, not a substitute for that law.
+
 - **D-COREIO1=A**: `core.io` owns stdout/stderr/stdin streams, flush, raw
   bytes, TTY facts, and terminal capabilities. Style/progress/raw mode/key
   events live under `io.terminal` or stream methods, honor TTY/NO_COLOR by
