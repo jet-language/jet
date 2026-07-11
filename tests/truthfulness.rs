@@ -401,38 +401,126 @@ fn cli_has_no_second_command_registry() {
 // ---------------------------------------------------------------------------
 #[test]
 fn compiler_seam_crates_have_only_path_dependencies() {
-    let root = root();
-    let compiler_crates = [
-        "Cargo.toml",
-        "crates/jet-foundation/Cargo.toml",
-        "crates/jet-lexer/Cargo.toml",
-        "crates/jet-parser/Cargo.toml",
-        "crates/jet-comptime/Cargo.toml",
-        "crates/jet-sema/Cargo.toml",
-        "crates/jet-codegen/Cargo.toml",
-        "crates/jet-driver/Cargo.toml",
-        "crates/jet-semindex/Cargo.toml",
-        // `crates/jet-jit` carries owner-approved Cranelift deps (D-JITDEP1 / D-JIT2=A);
-        // I6 applies to compiler `Source/` and seam crates above, not the JIT sibling.
-        // `crates/jet-net` is a bootstrap HTTP helper (D-NETDEP1=A, owner-approved
-        // `ureq`) — not a compiler seam; I6 applies to `Source/` and seam crates only.
+    // I6 pin (card #447 / durability W2): enumerate crates/ instead of a
+    // hardcoded allowlist, so a new crate is never invisible to this check.
+    // Any crate below not named in EXEMPTIONS is a compiler seam and must
+    // stay path-dependency-only. Exemptions require an owner-ratified
+    // decision ID cited in a comment directly above the dependency line;
+    // each cited ID is cross-checked against docs/spec/syntax-decisions.md's
+    // Ratified section so an exemption can never quietly outlive its
+    // ratification (or cite an ID that was never ratified).
+    const EXEMPTIONS: &[(&str, &[&str])] = &[
+        ("jet-jit", &["D-JITDEP1", "D-JIT2"]),
+        ("jet-net", &["D-NETDEP1", "D-TLS1"]),
     ];
 
+    let root = root();
+    let decisions_doc = fs::read_to_string(root.join("docs/spec/syntax-decisions.md"))
+        .expect("docs/spec/syntax-decisions.md missing");
+    let ratified_doc = section_between_pub(&decisions_doc);
+
+    for (crate_name, ids) in EXEMPTIONS {
+        for id in *ids {
+            assert!(
+                ratified_doc.contains(id),
+                "I6 exemption for `{crate_name}` cites {id}, which does not appear in \
+                 docs/spec/syntax-decisions.md's Ratified section — revoke the exemption \
+                 or get {id} ratified"
+            );
+        }
+    }
+
+    let mut crate_manifests: Vec<(String, PathBuf)> =
+        vec![("<root>".to_string(), root.join("Cargo.toml"))];
+    let crates_dir = root.join("crates");
+    let mut dirs: Vec<_> = fs::read_dir(&crates_dir)
+        .expect("crates/ missing")
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_dir())
+        .collect();
+    dirs.sort();
+    for dir in dirs {
+        let manifest = dir.join("Cargo.toml");
+        if manifest.is_file() {
+            let name = dir.file_name().unwrap().to_string_lossy().into_owned();
+            crate_manifests.push((name, manifest));
+        }
+    }
+
     let mut offenders = Vec::new();
-    for rel in compiler_crates {
-        let text = fs::read_to_string(root.join(rel)).unwrap_or_else(|_| panic!("{rel} missing"));
-        for line in dependency_lines(&text) {
-            if !line.contains(" path = ") && !line.contains("{ path =") {
-                offenders.push(format!("{rel}: {line}"));
+    for (name, manifest) in &crate_manifests {
+        let text = fs::read_to_string(manifest).unwrap_or_else(|_| panic!("{} missing", manifest.display()));
+        let exemption = EXEMPTIONS.iter().find(|(n, _)| n == name);
+        for (line, context) in dependency_lines_with_context(&text) {
+            if line.contains(" path = ") || line.contains("{ path =") {
+                continue;
+            }
+            match exemption {
+                Some((_, ids)) if ids.iter().any(|id| context.contains(id)) => continue,
+                Some((_, ids)) => offenders.push(format!(
+                    "{name}: {line} — external dep must cite one of {ids:?} in a comment \
+                     directly above the dependency line"
+                )),
+                None => offenders.push(format!(
+                    "{name}: {line} — not an exempted crate; I6 forbids external \
+                     dependencies in compiler seam crates (add to EXEMPTIONS with a \
+                     ratified decision ID if this is intentional)"
+                )),
             }
         }
     }
 
     assert!(
         offenders.is_empty(),
-        "compiler seam crates must not add external dependencies (I6):\n{}",
+        "compiler seam crates must not add unexempted external dependencies (I6):\n{}",
         offenders.join("\n")
     );
+}
+
+/// Returns the `## Ratified` section of syntax-decisions.md (up to the next `## ` heading).
+fn section_between_pub(docs: &str) -> &str {
+    let from = docs.find("## Ratified").expect("docs/spec/syntax-decisions.md missing ## Ratified");
+    let rest = &docs[from + "## Ratified".len()..];
+    let to = rest[..].find("\n## ").unwrap_or(rest.len());
+    &rest[..to]
+}
+
+/// Like `dependency_lines`, but also returns any `#`-comment lines
+/// immediately preceding each dependency line (joined), so exemption
+/// decision IDs cited above a dep can be matched to it.
+fn dependency_lines_with_context(text: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let mut in_deps = false;
+    // A comment block covers every dependency line until a blank line or a
+    // new comment block resets it — same "no blank line breaks coverage"
+    // convention as the I7 keyword/decision-comment check in tests/decisions.rs.
+    let mut current_context = String::new();
+    for raw in text.lines() {
+        let line = raw.trim();
+        if line.starts_with('[') {
+            in_deps = matches!(
+                line,
+                "[dependencies]" | "[dev-dependencies]" | "[build-dependencies]"
+            );
+            current_context.clear();
+            continue;
+        }
+        if !in_deps {
+            continue;
+        }
+        if line.is_empty() {
+            current_context.clear();
+            continue;
+        }
+        if line.starts_with('#') {
+            current_context.push_str(line);
+            current_context.push('\n');
+            continue;
+        }
+        out.push((line.to_string(), current_context.clone()));
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -475,6 +563,37 @@ fn epoch3_capability_manifest_rejects_hostile_real_card_fixtures() {
 }
 
 // ---------------------------------------------------------------------------
+// Check 11 (I3 pin, card #447 / durability W2): codegen is dumb — zero
+// `Diagnostic::` calls in jet-codegen. All checking lives in sema; codegen
+// must never "try rustc and see" or synthesize its own diagnostics.
+// ---------------------------------------------------------------------------
+#[test]
+fn codegen_never_constructs_diagnostics() {
+    let root = root();
+    let dir = root.join("crates/jet-codegen/src");
+    let mut offenders = Vec::new();
+    for path in rs_files(&dir) {
+        let text = fs::read_to_string(&path).unwrap_or_default();
+        for (i, line) in text.lines().enumerate() {
+            if line.contains("Diagnostic::") {
+                offenders.push(format!(
+                    "{}:{}: {}",
+                    path.strip_prefix(&root).unwrap().display(),
+                    i + 1,
+                    line.trim()
+                ));
+            }
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "jet-codegen must never construct Diagnostic:: (I3 — codegen is dumb, \
+         all checking lives in sema):\n{}",
+        offenders.join("\n")
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Check 10: Core spec files referenced by D-STDRUBRIC1 exist (c44)
 // ---------------------------------------------------------------------------
 #[test]
@@ -485,25 +604,6 @@ fn stdlib_api_laws_doc_exists() {
         path.is_file(),
         "docs/spec/stdlib-api-laws.md is missing — required by D-STDRUBRIC1 (c44)"
     );
-}
-
-fn dependency_lines(text: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut in_deps = false;
-    for raw in text.lines() {
-        let line = raw.trim();
-        if line.starts_with('[') {
-            in_deps = matches!(
-                line,
-                "[dependencies]" | "[dev-dependencies]" | "[build-dependencies]"
-            );
-            continue;
-        }
-        if in_deps && !line.is_empty() && !line.starts_with('#') {
-            out.push(line.to_string());
-        }
-    }
-    out
 }
 
 // ---------------------------------------------------------------------------

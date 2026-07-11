@@ -22,6 +22,38 @@ impl Span {
     }
 }
 
+/// I2: the single macro every compiler-internal panic site goes through.
+/// `Source/CmdCompile.rs` owns the "internal compiler error: the generated
+/// Rust did not compile" banner for a *rustc-rejected build*; this macro owns
+/// the equivalent "internal compiler error: …" prefix for a bug caught
+/// *inside* the front end (sema/codegen reaching a construct it should never
+/// reach) — same voice, different trigger, one source of the prefix text
+/// each side owns. `panic!` already exits the process with Rust's default
+/// unhandled-panic code 101, which is exactly `ExitCodes::ICE`
+/// (`Source/ExitCodes.rs`) — this macro never touches the exit code, only
+/// normalizes the message so every ICE reads the same.
+///
+/// `span` is `Option<Span>`; pass `None` when the call site has no source
+/// span to attach (most codegen-internal sites: the bug is in the compiler's
+/// own construct coverage, not tied to one user source location).
+///
+/// tests/ban_bare_panic.rs enforces that compiler-crate panic sites use this
+/// macro (or are on its explicit vetted-site allowlist) instead of a bare
+/// `panic!`.
+#[macro_export]
+macro_rules! ice {
+    ($span:expr, $($arg:tt)*) => {{
+        let __ice_msg = format!($($arg)*);
+        match ($span as Option<$crate::Diagnostics::Span>) {
+            Some(__ice_span) => panic!(
+                "internal compiler error: {} (source bytes {}..{})",
+                __ice_msg, __ice_span.start, __ice_span.end
+            ),
+            None => panic!("internal compiler error: {}", __ice_msg),
+        }
+    }};
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Severity {
     Error,

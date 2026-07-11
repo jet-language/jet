@@ -349,6 +349,15 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 kind,
                 span,
             } => {
+                // Sema-to-TIR handoff assert (ice_regressions b5 bug class): the
+                // subset gate must have already excluded `IndexKind::Unknown` before
+                // routing here — an `Unknown` default reaching lowering means sema
+                // left an index kind unresolved and the gate missed it.
+                debug_assert!(
+                    !matches!(kind, IndexKind::Unknown),
+                    "TIR lowering reached an index assign with unresolved IndexKind::Unknown \
+                     (sema-to-TIR handoff violated, ice_regressions b5 bug class)"
+                );
                 let base_t = lower_expr(base, cx, env);
                 let index_t = lower_expr(index, cx, env);
                 let value_t = lower_expr(value, cx, env);
@@ -864,5 +873,59 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         // future variant; currently unreachable because every covered variant is matched.
         #[allow(unreachable_patterns)]
         _ => unreachable!("statement not in TIR subset"),
+    }
+}
+
+/// W4 (durability): proves the sema-to-TIR handoff `debug_assert`s in
+/// `lower_expr`'s `Expr::Index` arm and this file's `LValue::Index` arm
+/// actually trip on a leaked `IndexKind::Unknown` — the exact ice_regressions
+/// b5 bug class (sema left the index kind unresolved; the subset gate is
+/// supposed to exclude it, but a gate bug could let one through). These are
+/// `#[should_panic]` because the debug_assert is the thing under test, not a
+/// normal lowering path — the subset gate itself still excludes `Unknown` in
+/// every real compile.
+#[cfg(test)]
+mod handoff_assert_tests {
+    use super::*;
+
+    fn empty_cx() -> Cx {
+        let src = "fn run() {}\n";
+        let (toks, lex_diags) = crate::Lexer::lex(src);
+        assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
+        let prog = crate::Parser::parse(&toks).expect("parse failed");
+        build_cx(&prog, src, "test.jet")
+    }
+
+    #[test]
+    #[should_panic(expected = "sema-to-TIR handoff violated")]
+    fn index_read_unknown_kind_trips_handoff_assert() {
+        let cx = empty_cx();
+        let mut env = LowerEnv::new("run".to_string());
+        let idx_expr = Expr::Index {
+            base: Box::new(Expr::Int(0, Span::new(0, 0), None)),
+            index: Box::new(Expr::Int(0, Span::new(0, 0), None)),
+            span: Span::new(0, 0),
+            kind: IndexKind::Unknown, // seeded leak: sema never resolved this
+        };
+        let _ = lower_expr(&idx_expr, &cx, &mut env);
+    }
+
+    #[test]
+    #[should_panic(expected = "sema-to-TIR handoff violated")]
+    fn index_assign_unknown_kind_trips_handoff_assert() {
+        let cx = empty_cx();
+        let mut env = LowerEnv::new("run".to_string());
+        let stmt = Stmt::Assign {
+            target: LValue::Index {
+                base: Box::new(Expr::Int(0, Span::new(0, 0), None)),
+                index: Box::new(Expr::Int(0, Span::new(0, 0), None)),
+                span: Span::new(0, 0),
+                kind: IndexKind::Unknown, // seeded leak: sema never resolved this
+            },
+            op: None,
+            op_span: Span::new(0, 0),
+            value: Expr::Int(1, Span::new(0, 0), None),
+        };
+        let _ = lower_stmt(&stmt, &cx, &mut env);
     }
 }

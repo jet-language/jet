@@ -152,10 +152,11 @@ fn build_variadic_bound_func(f: &Func, bounds: &[String], arity: usize) -> Func 
     }
     let body = match unroll_variadic_body(&f.body, &last.name, arity) {
         Ok(body) => body,
-        Err(msg) => panic!(
-            "internal compiler error: trait-bounded variadic `{}` — {} — codegen only covers a \
+        Err(msg) => jet_foundation::ice!(
+            None,
+            "trait-bounded variadic `{}` — {} — codegen only covers a \
              single top-level `loop x in {}` loop; sema's E1314 (Sema/Registration.rs::\
-             check_variadic_bound_body_shape) should have rejected this body already (I2/D-ANY-JAI1)",
+             check_variadic_bound_body_shape) should have rejected this body already (D-ANY-JAI1)",
             f.name, msg, last.name
         ),
     };

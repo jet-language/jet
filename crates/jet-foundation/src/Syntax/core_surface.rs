@@ -199,13 +199,16 @@ pub const KW_IMPL: &str = "impl";
 pub const EXTERNAL_METHOD_CONNECTOR: &str = ".";
 pub const EXTERNAL_METHOD_CONNECTOR_RETIRED: &str = "~~";
 
-/// M2: compile-time constant (emits Rust `const` or `static`).
+/// M2: compile-time constant (emits Rust `const` or `static`). Foundational
+/// keyword predating the S-numbered decision log (card #447 KW_DECISION_ID_EXEMPT).
 pub const KW_CONST: &str = "const";
 
-/// M1/M2: return from a function.
+/// M1/M2: return from a function. Foundational keyword predating the
+/// S-numbered decision log (card #447 KW_DECISION_ID_EXEMPT).
 pub const KW_RETURN: &str = "return";
 
-/// M2: loop statement (for SharedHandle lint checks).
+/// S19 (ratified): loop statement (for SharedHandle lint checks) — same
+/// governing decision as the loop-header keywords in Syntax/math_layout.rs.
 pub const KW_LOOP: &str = "loop";
 
 /// D-STREAMYIELD1 (ratified): `yield expr` — hand a value to a `Stream<T>`

@@ -110,6 +110,120 @@ fn ratified_decisions_enforced() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// I7 pin (card #447 / durability W2): every `pub const KW_*` / `SIGIL_*` in
+// crates/jet-foundation/src/Syntax.rs and its Syntax/ fragments must sit
+// directly under (or carry a trailing) comment naming a decision ID (S123 /
+// N12 / U12 / D-XXXX / D-XXXX=A). A blank line between the decision comment
+// and the const closes the old "no adjacent comment" escape (decisions.rs
+// used to `continue` past any const whose comment lacked a status tag) — no
+// more silent unratified keyword/sigil constants. Scope is KW_*/SIGIL_*
+// (the user-typeable keyword/sigil surface I7 governs); other pub consts
+// (types, attrs, aggregated tables) are covered by the broader
+// ratified_decisions_enforced check above.
+// ---------------------------------------------------------------------------
+#[test]
+fn every_syntax_const_has_adjacent_decision_comment() {
+    let root = "crates/jet-foundation/src/Syntax";
+    let mut files: Vec<String> = vec!["crates/jet-foundation/src/Syntax.rs".to_string()];
+    let mut entries: Vec<_> = fs::read_dir(root)
+        .expect(root)
+        .map(|e| e.expect("Syntax fragment entry").path())
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("rs"))
+        .collect();
+    entries.sort();
+    for path in entries {
+        files.push(path.display().to_string());
+    }
+
+    // Ratchet (card #447 / W2): foundational keywords predating the
+    // S-numbered decision log carry a `KW_DECISION_ID_EXEMPT` marker comment
+    // instead of a fabricated decision ID. This count must never grow —
+    // shrinking (by finding/assigning the real ID) is always welcome.
+    const EXEMPT_MARKER: &str = "KW_DECISION_ID_EXEMPT";
+    const EXEMPT_BASELINE: usize = 3; // KW_CONST, KW_RETURN, KW_IT
+
+    let mut violations = Vec::new();
+    let mut exempt_count = 0usize;
+    for file in &files {
+        let source = fs::read_to_string(file).unwrap_or_else(|err| panic!("{file}: {err}"));
+        let mut covered = false;
+        let mut exempt = false;
+        for (i, line) in source.lines().enumerate() {
+            let t = line.trim();
+            if t.is_empty() {
+                covered = false;
+                exempt = false;
+                continue;
+            }
+            if t.starts_with("///") || t.starts_with("//!") {
+                if line_has_decision_id(t) {
+                    covered = true;
+                }
+                if t.contains(EXEMPT_MARKER) {
+                    exempt = true;
+                }
+                continue;
+            }
+            let is_kw_or_sigil = t.starts_with("pub const KW_") || t.starts_with("pub const SIGIL_");
+            if is_kw_or_sigil && !covered && !line_has_decision_id(t) {
+                if exempt {
+                    exempt_count += 1;
+                } else {
+                    violations.push(format!("{file}:{}: {t}", i + 1));
+                }
+            }
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "pub const KW_*/SIGIL_* declarations without an adjacent decision-ID doc \
+         comment (I7 — add `/// S123 (ratified): …` or `/// D-XXXX=A: …` directly \
+         above, no blank line in between; or a `KW_DECISION_ID_EXEMPT` marker \
+         comment if truly foundational and pre-dates the decision log):\n{}",
+        violations.join("\n")
+    );
+    assert!(
+        exempt_count <= EXEMPT_BASELINE,
+        "KW_DECISION_ID_EXEMPT count grew from {EXEMPT_BASELINE} to {exempt_count} — \
+         find/assign a real decision ID instead of exempting a new keyword const"
+    );
+}
+
+fn line_has_decision_id(line: &str) -> bool {
+    // Matches S123 / N12 / U12 tokens, or D-XXXX / D-XXXX=A / D-XXXX1=A decision IDs.
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if (c == b'S' || c == b'N' || c == b'U')
+            && i + 1 < bytes.len()
+            && bytes[i + 1].is_ascii_digit()
+        {
+            let mut j = i + 1;
+            while j < bytes.len() && bytes[j].is_ascii_digit() {
+                j += 1;
+            }
+            let word_start_ok = i == 0 || !bytes[i - 1].is_ascii_alphanumeric();
+            let word_end_ok = j >= bytes.len() || !bytes[j].is_ascii_alphanumeric();
+            if word_start_ok && word_end_ok {
+                return true;
+            }
+            i = j;
+            continue;
+        }
+        if c == b'D' && i + 1 < bytes.len() && bytes[i + 1] == b'-' {
+            let word_start_ok = i == 0 || !bytes[i - 1].is_ascii_alphanumeric();
+            if word_start_ok {
+                return true;
+            }
+        }
+        i += 1;
+    }
+    false
+}
+
 fn read_syntax_surface() -> String {
     let root = "crates/jet-foundation/src/Syntax.rs";
     let mut syntax = fs::read_to_string(root).expect(root);

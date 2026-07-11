@@ -48,6 +48,10 @@ pub enum CtValue {
     Bool(bool),
     Char(char),
     Str(String),
+    /// D-BIGINT1: arbitrary-precision integer, comptime/REPL tier-0 mirror of
+    /// AOT's `JetBigInt` (crate::Numeric::CtBigInt keeps the same limb algorithm
+    /// so results print identically on both tiers — R12 parity).
+    BigInt(crate::Numeric::CtBigInt),
     /// `[U8]` byte buffer (D-CTIO1 `embed_bytes`).
     Bytes(Vec<u8>),
     List(Vec<CtValue>),
@@ -142,6 +146,7 @@ impl CtValue {
             CtValue::Bool(_) => Type::Bool,
             CtValue::Char(_) => Type::Char,
             CtValue::Str(_) => Type::String,
+            CtValue::BigInt(_) => Type::Named(crate::Syntax::TYPE_BIGINT.to_string()),
             CtValue::Bytes(_) => Type::List(Box::new(Type::IntN {
                 signed: false,
                 bits: 8,
@@ -195,6 +200,7 @@ impl CtValue {
             CtValue::Bool(b) => b.to_string(),
             CtValue::Char(c) => c.to_string(),
             CtValue::Str(s) => s.clone(),
+            CtValue::BigInt(b) => b.to_string_rep(),
             CtValue::Bytes(bs) => {
                 let parts: Vec<String> = bs.iter().map(|b| b.to_string()).collect();
                 format!("[{}]", parts.join(", "))
@@ -262,6 +268,7 @@ impl CtValue {
             CtValue::Bool(b) => b.to_string(),
             CtValue::Char(c) => format!("{:?}", c),
             CtValue::Str(s) => format!("{:?}", s),
+            CtValue::BigInt(b) => b.to_string_rep(),
             CtValue::Bytes(bs) => format!("{:?}", bs),
             CtValue::List(xs) => {
                 let parts: Vec<String> = xs.iter().map(|x| x.debug_rust()).collect();
@@ -335,6 +342,7 @@ impl CtValue {
                 out.push_str(s);
                 out.push('"');
             }
+            CtValue::BigInt(b) => out.push_str(&b.to_string_rep()),
             CtValue::Bytes(bs) => {
                 let parts: Vec<String> = bs.iter().map(|b| b.to_string()).collect();
                 out.push('[');
@@ -463,6 +471,10 @@ impl CtValue {
                 out.push('"');
                 out
             }
+            // A `BigInt` doesn't fit in a JSON number without losing
+            // precision in most readers, so it round-trips as a string —
+            // matching how AOT's `#[Codable]` handles arbitrary precision.
+            CtValue::BigInt(b) => format!("\"{}\"", b.to_string_rep()),
             CtValue::Bytes(bs) => {
                 let parts: Vec<String> = bs.iter().map(|b| b.to_string()).collect();
                 format!("[{}]", parts.join(","))
@@ -525,6 +537,15 @@ impl CtValue {
             CtValue::Bool(b) => b.to_string(),
             CtValue::Char(c) => format!("{:?}", c),
             CtValue::Str(s) => format!("{:?}.to_string()", s),
+            // A `comptime`-computed `BigInt` is baked into the generated
+            // program as a call into the same prelude constructor AOT code
+            // uses for `BigInt("…")` (`jet_std::JetBigInt::from_str`), fed
+            // its canonical decimal string — never re-deriving the limbs in
+            // codegen (I3: codegen stays dumb).
+            CtValue::BigInt(b) => format!(
+                "jet_std::JetBigInt::from_str({:?}).unwrap()",
+                b.to_string_rep()
+            ),
             CtValue::Bytes(bs) => {
                 let parts: Vec<String> = bs.iter().map(|b| format!("{}u8", b)).collect();
                 format!("vec![{}]", parts.join(", "))

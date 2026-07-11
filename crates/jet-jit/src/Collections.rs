@@ -40,7 +40,7 @@ extern "C" fn jet_jit_list_get(list: i64, idx: i64, _line: u32) -> i64 {
         Some(value) => value,
         None => {
             if rt.heap.list_len(list).is_none() {
-                panic!("jit list get: bad handle");
+                jet_foundation::ice!(None, "jit list get: bad handle");
             }
             rt.set_trap("index out of bounds: the index is outside the list");
             0
@@ -53,7 +53,7 @@ extern "C" fn jet_jit_list_get_f64(list: i64, idx: i64, _line: u32) -> f64 {
         Some(value) => value,
         None => {
             if rt.heap.list_len(list).is_none() {
-                panic!("jit list get f64: bad handle");
+                jet_foundation::ice!(None, "jit list get f64: bad handle");
             }
             rt.set_trap("index out of bounds: the index is outside the list");
             0.0
@@ -65,7 +65,7 @@ extern "C" fn jet_jit_list_get_f64(list: i64, idx: i64, _line: u32) -> f64 {
 extern "C" fn jet_jit_list_get_opt(list: i64, idx: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         if rt.heap.list_len(list).is_none() {
-            panic!("jit list get_opt: bad handle");
+            jet_foundation::ice!(None, "jit list get_opt: bad handle");
         }
         rt.heap.list_get_int(list, idx).map(|v| v + 1).unwrap_or(0)
     })
@@ -74,7 +74,7 @@ extern "C" fn jet_jit_list_get_opt(list: i64, idx: i64) -> i64 {
 extern "C" fn jet_jit_list_set(list: i64, idx: i64, v: i64, _line: u32) {
     Concurrency::with_runtime_mut(|rt| {
         if rt.heap.list_len(list).is_none() {
-            panic!("jit list set: bad handle");
+            jet_foundation::ice!(None, "jit list set: bad handle");
         }
         if rt.heap.list_set_int(list, idx, v).is_none() {
             trap_index();
@@ -85,7 +85,7 @@ extern "C" fn jet_jit_list_set(list: i64, idx: i64, v: i64, _line: u32) {
 extern "C" fn jet_jit_list_set_f64(list: i64, idx: i64, v: f64, _line: u32) {
     Concurrency::with_runtime_mut(|rt| {
         if rt.heap.list_len(list).is_none() {
-            panic!("jit list set f64: bad handle");
+            jet_foundation::ice!(None, "jit list set f64: bad handle");
         }
         if rt.heap.list_set_float(list, idx, v).is_none() {
             trap_index();
@@ -104,7 +104,7 @@ extern "C" fn jet_jit_list_sort(list: i64) {
 extern "C" fn jet_jit_list_slice(list: i64, start: i64, end: i64, _line: u32) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         if rt.heap.list_len(list).is_none() {
-            panic!("jit list slice: bad handle");
+            jet_foundation::ice!(None, "jit list slice: bad handle");
         }
         match rt.heap.list_slice(list, start, end) {
             Some(id) => id,

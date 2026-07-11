@@ -1187,8 +1187,9 @@ fn emit_test_body(cx: &Cx, body: &[crate::AST::Stmt], out: &mut String) {
         TIR::emit_tir_test_body(body, cx, out);
         return;
     }
-    panic!(
-        "internal compiler error: codegen reached a #Test body construct the typed IR does not cover — compiler bug (I2/R7)"
+    jet_foundation::ice!(
+        None,
+        "codegen reached a #Test body construct the typed IR does not cover — compiler bug (I2/R7)"
     );
 }
 

@@ -232,6 +232,8 @@ pub const BUILTIN_EXPECT: &str = "expect";
 pub const BUILTIN_SNAPSHOT: &str = "snapshot";
 
 /// M4: synthetic name for a `switch` subject that isn't a plain identifier.
+/// Foundational keyword predating the S-numbered decision log (card #447
+/// KW_DECISION_ID_EXEMPT).
 pub const KW_IT: &str = "it";
 
 /// S42 (ratified M5): `as` recognized only for teaching error E0030.

@@ -734,6 +734,38 @@ fn acknowledged_gaps_are_still_unresolved() {
 }
 
 // ---------------------------------------------------------------------------
+// Count-ratchets (card #447 / durability W2): exclusion lists must shrink
+// over time, never grow silently. A PR that adds a new exclusion to route
+// around this file's checks trips the corresponding ceiling below and must
+// bump it explicitly (a visible, reviewable diff) rather than sneaking a
+// larger list past a green run.
+// ---------------------------------------------------------------------------
+#[test]
+fn exclusion_list_counts_do_not_grow() {
+    const CEILINGS: &[(&str, usize, usize)] = &[
+        ("ACKNOWLEDGED_COVERAGE_GAPS", ACKNOWLEDGED_COVERAGE_GAPS.len(), 4),
+        ("STAGED_BEHIND_GATE", STAGED_BEHIND_GATE.len(), 5),
+        ("UNTESTABLE_VIA_SNAPSHOT", UNTESTABLE_VIA_SNAPSHOT.len(), 1),
+        (
+            "RETIRED_WITH_LEGACY_EMISSION",
+            RETIRED_WITH_LEGACY_EMISSION.len(),
+            1,
+        ),
+        ("RUSTC_CODES_IN_SOURCE", RUSTC_CODES_IN_SOURCE.len(), 3),
+    ];
+    let mut violations = Vec::new();
+    for (name, actual, ceiling) in CEILINGS {
+        if actual > ceiling {
+            violations.push(format!(
+                "{name} grew from {ceiling} to {actual} entries — shrinking is welcome, \
+                 growing needs a reviewed bump of the ceiling in this test, not a silent add"
+            ));
+        }
+    }
+    assert!(violations.is_empty(), "{}", violations.join("\n"));
+}
+
+// ---------------------------------------------------------------------------
 // I4(c): jet explain resolves for every live registered code
 // ---------------------------------------------------------------------------
 

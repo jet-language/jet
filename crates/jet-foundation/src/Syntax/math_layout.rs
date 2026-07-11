@@ -175,7 +175,8 @@ pub fn is_db_value_variant(variant: &str) -> bool {
 /// M2: shared handle type (Arc equivalent); auto-cloned across boundaries.
 pub const TYPE_SHARED: &str = "Shared";
 
-/// M1 (docs/spec/roadmap.md, owner-blessed examples 2026-06-11): branching keywords.
+/// S68 (ratified) / M1 (docs/spec/roadmap.md, owner-blessed examples
+/// 2026-06-11): branching keywords — `if` is the one branching keyword.
 pub const KW_IF: &str = "if";
 pub const KW_ELSE: &str = "else";
 

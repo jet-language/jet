@@ -1401,6 +1401,15 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             span,
             kind,
         } => {
+            // Sema-to-TIR handoff assert (ice_regressions b5 bug class): the subset
+            // gate must have already excluded `IndexKind::Unknown` before routing
+            // here — an `Unknown` default reaching lowering means sema left an
+            // index kind unresolved and the gate missed it.
+            debug_assert!(
+                !matches!(kind, IndexKind::Unknown),
+                "TIR lowering reached an index read with unresolved IndexKind::Unknown \
+                 (sema-to-TIR handoff violated, ice_regressions b5 bug class)"
+            );
             let base_t = lower_expr(base, cx, env);
             let index_t = lower_expr(index, cx, env);
             let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;

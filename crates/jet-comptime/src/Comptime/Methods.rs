@@ -421,6 +421,26 @@ impl<'a> Interp<'a> {
             }
             return Err(unsupported("`emit` argument must be a string", span));
         }
+        // D-BIGINT1: `BigInt(100)` / `BigInt("999…")` — explicit construction
+        // only, same arg shape sema already validated (E0103/E0128). Checked
+        // ahead of the user-function/closure lookups, same as the distinct-
+        // type-ctor case below: `BigInt` is never a real `fn` name.
+        if name == crate::Syntax::TYPE_BIGINT
+            && self.funcs.get(name).is_none()
+            && !scope.contains_key(name)
+        {
+            let arg = match args.first() {
+                Some(a) => self.eval(&a.expr, scope)?,
+                None => return Err(unsupported("`BigInt` with no argument", span)),
+            };
+            return match arg {
+                CtValue::Int(n) => Ok(CtValue::BigInt(crate::Numeric::CtBigInt::from_int(n))),
+                CtValue::Str(s) => crate::Numeric::CtBigInt::from_str(&s)
+                    .map(CtValue::BigInt)
+                    .map_err(|_| unsupported(&format!("`BigInt(\"{}\")`", s), span)),
+                _ => Err(unsupported("`BigInt` with a non-Int/String argument", span)),
+            };
+        }
         // c139/HOF: `f(x)` where `f` is a local binding (a lambda param, or a
         // `let f = someLambdaOrFn` variable) rather than a top-level `fn`
         // name — every bare-name call, whatever the callee resolves to,

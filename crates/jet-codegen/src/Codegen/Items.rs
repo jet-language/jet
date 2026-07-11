@@ -1066,8 +1066,9 @@ fn emit_migration_step_fns(cx: &Cx, s: &StructDef, style: Option<&str>, out: &mu
                 } => {
                     let key = migration_wire_key(style, s, field);
                     let df = default_fn.as_deref().unwrap_or_else(|| {
-                        panic!(
-                            "internal compiler error: migration `add {}` on `{}` reached codegen without its sema-lowered default function (I3)",
+                        jet_foundation::ice!(
+                            None,
+                            "migration `add {}` on `{}` reached codegen without its sema-lowered default function (I3)",
                             field, s.name
                         )
                     });
@@ -1499,8 +1500,9 @@ pub(crate) fn emit_external_trait_impl(cx: &Cx, i: &ImplDef, out: &mut String) {
             // c109 Phase N: the TIR is the only codegen seam (R7). A gate-miss here is
             // a construct the typed IR does not cover — an internal compiler error
             // (I2-class, exit 101), never an AST fallback.
-            panic!(
-                "internal compiler error: codegen reached a construct the typed IR does not cover ({}) — compiler bug (I2/R7)",
+            jet_foundation::ice!(
+                None,
+                "codegen reached a construct the typed IR does not cover ({}) — compiler bug (I2/R7)",
                 m.name
             );
         }
@@ -1534,8 +1536,9 @@ fn emit_trait_method(cx: &Cx, type_name: &str, f: &Func, out: &mut String, inden
         TIR::emit_tir_func(&tir, cx, out);
         return;
     }
-    panic!(
-        "internal compiler error: codegen reached a construct the typed IR does not cover ({}) — compiler bug (I2/R7)",
+    jet_foundation::ice!(
+        None,
+        "codegen reached a construct the typed IR does not cover ({}) — compiler bug (I2/R7)",
         f.name
     );
 }
@@ -1554,8 +1557,9 @@ fn emit_method(cx: &Cx, type_name: &str, f: &Func, out: &mut String, indent: usi
         TIR::emit_tir_func(&tir, cx, out);
         return;
     }
-    panic!(
-        "internal compiler error: codegen reached a construct the typed IR does not cover ({}) — compiler bug (I2/R7)",
+    jet_foundation::ice!(
+        None,
+        "codegen reached a construct the typed IR does not cover ({}) — compiler bug (I2/R7)",
         f.name
     );
 }
@@ -1719,8 +1723,9 @@ pub(crate) fn emit_func(cx: &Cx, f: &Func, out: &mut String) {
         return;
     }
     cx.current_type_params.borrow_mut().clear();
-    panic!(
-        "internal compiler error: codegen reached a construct the typed IR does not cover ({}) — compiler bug (I2/R7)",
+    jet_foundation::ice!(
+        None,
+        "codegen reached a construct the typed IR does not cover ({}) — compiler bug (I2/R7)",
         f.name
     );
 }
@@ -1812,8 +1817,9 @@ pub(crate) fn emit_error_conv(cx: &Cx, ec: &crate::AST::ErrorConvDef, out: &mut 
         out.push_str("}\n\n");
         return;
     }
-    panic!(
-        "internal compiler error: codegen reached an error-conversion body construct the typed IR does not cover ({} -> {}) — compiler bug (I2/R7)",
+    jet_foundation::ice!(
+        None,
+        "codegen reached an error-conversion body construct the typed IR does not cover ({} -> {}) — compiler bug (I2/R7)",
         ec.from_ty, ec.to_ty
     );
 }

@@ -889,6 +889,7 @@ impl<'a> Interp<'a> {
                         .map(CtValue::Int)
                         .ok_or_else(|| overflow("negate", *span)),
                     (UnOp::Neg, CtValue::Float(f)) => Ok(CtValue::Float(-f)),
+                    (UnOp::Neg, CtValue::BigInt(b)) => Ok(CtValue::BigInt(b.neg())),
                     (UnOp::Not, CtValue::Bool(b)) => Ok(CtValue::Bool(!b)),
                     _ => Err(unsupported("this operation", *span)),
                 }

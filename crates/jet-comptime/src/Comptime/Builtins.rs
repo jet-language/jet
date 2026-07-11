@@ -67,6 +67,11 @@ pub(super) fn eval_binop(
         (BinOp::Sub, Float(a), Float(b)) => Ok(Float(a - b)),
         (BinOp::Mul, Float(a), Float(b)) => Ok(Float(a * b)),
         (BinOp::Div, Float(a), Float(b)) => Ok(Float(a / b)),
+        // D-BIGINT1: arbitrary-precision arithmetic never overflows (that's
+        // the whole point), so no `checked_*`/`overflow()` path here.
+        (BinOp::Add, BigInt(a), BigInt(b)) => Ok(BigInt(a.add(&b))),
+        (BinOp::Sub, BigInt(a), BigInt(b)) => Ok(BigInt(a.sub(&b))),
+        (BinOp::Mul, BigInt(a), BigInt(b)) => Ok(BigInt(a.mul(&b))),
         (BinOp::Eq, a, b) => Ok(Bool(a == b)),
         (BinOp::Ne, a, b) => Ok(Bool(a != b)),
         (BinOp::Lt, a, b) => cmp(a, b, span).map(|o| Bool(o == std::cmp::Ordering::Less)),
@@ -86,6 +91,7 @@ pub(super) fn cmp(a: CtValue, b: CtValue, span: Span) -> Result<std::cmp::Orderi
             .ok_or_else(|| unsupported("comparing NaN", span)),
         (Char(a), Char(b)) => Ok(a.cmp(&b)),
         (Str(a), Str(b)) => Ok(a.cmp(&b)),
+        (BigInt(a), BigInt(b)) => Ok(a.compare(&b)),
         _ => Err(unsupported("comparing these values", span)),
     }
 }
@@ -202,6 +208,7 @@ fn ctvalue_type_name(v: &CtValue) -> String {
         CtValue::Bool(_) => "Bool".to_string(),
         CtValue::Char(_) => "Char".to_string(),
         CtValue::Str(_) => "String".to_string(),
+        CtValue::BigInt(_) => "BigInt".to_string(),
         CtValue::Bytes(_) => "[U8]".to_string(),
         CtValue::List(_) => "List".to_string(),
         CtValue::Map(_) => "Map".to_string(),
@@ -222,6 +229,22 @@ pub(super) fn apply_method(
     match (recv, method) {
         // Universal
         (v, "to_string") => Ok(CtValue::Str(v.jet_show())),
+        // D-BIGINT1: explicit method-call form of the same arithmetic the
+        // `+`/`-`/`*` operators reach in `eval_binop` (mirrors AOT's
+        // `bigint_method_return` table in `jet-foundation/Numeric.rs`).
+        (CtValue::BigInt(a), "add") => match args.into_iter().next() {
+            Some(CtValue::BigInt(b)) => Ok(CtValue::BigInt(a.add(&b))),
+            _ => Err(unsupported("`BigInt.add` with a non-BigInt argument", span)),
+        },
+        (CtValue::BigInt(a), "sub") => match args.into_iter().next() {
+            Some(CtValue::BigInt(b)) => Ok(CtValue::BigInt(a.sub(&b))),
+            _ => Err(unsupported("`BigInt.sub` with a non-BigInt argument", span)),
+        },
+        (CtValue::BigInt(a), "mul") => match args.into_iter().next() {
+            Some(CtValue::BigInt(b)) => Ok(CtValue::BigInt(a.mul(&b))),
+            _ => Err(unsupported("`BigInt.mul` with a non-BigInt argument", span)),
+        },
+        (CtValue::BigInt(a), "neg") => Ok(CtValue::BigInt(a.neg())),
         // c139: `.raw()` unwraps a distinct/`#UnitFamily` type (D-DIST1/D-QUAL3).
         // Distinct types have zero runtime representation difference from
         // their base — the interpreter never wraps one, so unwrapping is

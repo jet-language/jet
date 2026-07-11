@@ -289,6 +289,50 @@ fn fuzz_sema_rustc_agreement() {
     let _ = fs::remove_dir_all(&fuzz_dir);
 }
 
+// ---------------------------------------------------------------------------
+// I1 pin (card #447 / durability W2): the ungated-unsafe grep must apply to
+// fuzz_sema-generated programs, not just the examples corpus (tests/golden.rs
+// checks examples only). Unlike `fuzz_sema_rustc_agreement` above, this test
+// does NOT gate on `have_rustc()` — the I1 (no ungated `#[Unsafe]`-less
+// `unsafe`) check must run even when rustc is unavailable, since I1 is a sema
+// invariant, not an I2 rustc-agreement check.
+// ---------------------------------------------------------------------------
+#[test]
+fn fuzz_sema_i1_unsafe_gate_is_ungated_on_rustc() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let seeds = load_example_seeds(&root);
+    assert!(
+        seeds.len() >= 2,
+        "expected at least 2 example seeds, found {}",
+        seeds.len()
+    );
+
+    let seed = fuzz_seed();
+    let mut rng = Rng::new(seed);
+    let mut violations = Vec::new();
+    for i in 0..fuzz_variants() {
+        let (shown, src) = rng.pick(&seeds).clone();
+        let mutated = mutate_source(&mut rng, &src, i);
+        if mutated.contains("#Unsafe") {
+            continue;
+        }
+        if let Ok(out) = jet::compile_with_path(&mutated, &format!("fuzz_variant_{i}.jet")) {
+            if out.rust.contains("unsafe") {
+                violations.push(format!(
+                    "variant {i} from {shown}: source has no #Unsafe but generated code contains `unsafe`"
+                ));
+            }
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "I1 violated in fuzz_sema-generated programs (checked independently of \
+         rustc availability):\n{}",
+        violations.join("\n")
+    );
+}
+
 fn check_fuzz_variant(i: usize, shown: &str, mutated: &str, file_str: &str) {
     match jet::compile_with_path(mutated, file_str) {
         Ok(out) => {
