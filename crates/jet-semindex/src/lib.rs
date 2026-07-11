@@ -84,11 +84,29 @@ pub fn open_with_overlays_and_diagnostics(
     entry: &Path,
     overlays: &[(&Path, &str)],
 ) -> Result<(SemIndex, Vec<Diagnostic>), SemIndexError> {
+    open_with_overlays_diagnostics_and_inputs(entry, overlays)
+        .map(|(index, diagnostics, _)| (index, diagnostics))
+}
+
+/// The same staged compiler pass plus every physical module read by the
+/// loader. Transactional tools fingerprint this complete input set, including
+/// read-only imports that happen to define no symbols.
+pub fn open_with_overlays_diagnostics_and_inputs(
+    entry: &Path,
+    overlays: &[(&Path, &str)],
+) -> Result<(SemIndex, Vec<Diagnostic>, Vec<std::path::PathBuf>), SemIndexError> {
     let entry_str = entry.to_string_lossy();
     let (diags, bundle, facts) =
         jet_driver::Driver::check_file_with_overlays(&entry_str, overlays, false);
     match bundle {
-        Some(bundle) => Ok((build_index(&bundle, &facts), diags)),
+        Some(bundle) => {
+            let inputs = bundle
+                .modules
+                .iter()
+                .map(|module| module.path.clone())
+                .collect();
+            Ok((build_index(&bundle, &facts), diags, inputs))
+        }
         None => Err(SemIndexError::Load(diags)),
     }
 }

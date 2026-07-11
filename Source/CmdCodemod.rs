@@ -12,7 +12,10 @@ use std::process::exit;
 
 use jet::Diagnostics::{Severity, Span, TextEdit};
 use jet::ExitCodes;
-use jet_semindex::{open, open_with_overlays_and_diagnostics, SemIndex, SemIndexError, SymbolKind};
+use jet_semindex::{
+    open, open_with_overlays_and_diagnostics, open_with_overlays_diagnostics_and_inputs, SemIndex,
+    SemIndexError, SymbolKind,
+};
 use Json::Value;
 use Transaction::Change;
 
@@ -236,6 +239,8 @@ fn parse_batch(value: Value, object_path: &Path) -> Batch {
                 let pattern = parse_template(&take_string(&mut r, "match"));
                 let replacement = parse_template(&take_string(&mut r, "replace"));
                 validate_templates(&id, &pattern, &replacement);
+                validate_typed_template(&id, &node, &pattern, "match");
+                validate_typed_template(&id, &node, &replacement, "replace");
                 reject_unknown(r, "ast_rewrite rule");
                 rules.push(Rule::Ast {
                     id,
@@ -437,6 +442,12 @@ fn apply_rule(
             let mut anchors = BTreeSet::new();
             for u in units {
                 let idx = index_unit(u, files, inputs);
+                if idx.definitions().iter().any(|d| d.name == *to) {
+                    fail(&format!(
+                        "rule `{id}` rename destination `{to}` already resolves in unit `{}`",
+                        u.entry.display()
+                    ));
+                }
                 for d in idx.definitions().iter().filter(|d| {
                     d.name == *name
                         && kind_matches(&d.kind, kind)
@@ -518,10 +529,11 @@ fn index_unit(
             )
         })
         .collect::<Vec<_>>();
-    let (idx, _diags) = open_with_overlays_and_diagnostics(&unit.entry, &texts)
-        .unwrap_or_else(|e| render_index_error(&unit.entry, e));
-    for d in idx.definitions() {
-        let p = canonicalish(Path::new(&d.module_path));
+    let (idx, _diags, module_inputs) =
+        open_with_overlays_diagnostics_and_inputs(&unit.entry, &texts)
+            .unwrap_or_else(|e| render_index_error(&unit.entry, e));
+    for module in module_inputs {
+        let p = canonicalish(&module);
         if !files.contains_key(&p) && p.exists() {
             read_fingerprint(&p, inputs);
         }
@@ -782,7 +794,7 @@ fn validate_templates(id: &str, m: &Template, r: &Template) {
     }
 }
 fn find_template_matches(t: &Template, src: &str, _node: &str) -> Vec<Found> {
-    let toks = lex_template_source(src);
+    let toks = lex_jet_source(src);
     let mut out = Vec::new();
     for start in 0..toks.len() {
         let mut captures = BTreeMap::new();
@@ -885,10 +897,56 @@ fn balanced(t: &[LexToken]) -> bool {
     stack.is_empty()
 }
 fn normalized(src: &str) -> Vec<String> {
-    lex_template_source(src)
+    lex_jet_source(src).into_iter().map(|t| t.text).collect()
+}
+
+fn lex_jet_source(src: &str) -> Vec<LexToken> {
+    let (tokens, diagnostics) = jet::Lexer::lex(src);
+    if !diagnostics.is_empty() {
+        fail("staged Jet source no longer lexes while matching an AST template");
+    }
+    tokens
         .into_iter()
-        .map(|t| t.text)
+        .filter_map(|token| {
+            let text = src.get(token.span.start..token.span.end)?.to_string();
+            (!text.is_empty()).then_some(LexToken {
+                start: token.span.start,
+                end: token.span.end,
+                text,
+            })
+        })
         .collect()
+}
+
+fn validate_typed_template(id: &str, node: &str, template: &Template, side: &str) {
+    let captures = template
+        .atoms
+        .iter()
+        .filter_map(|atom| match atom {
+            Atom::Capture(name, variadic) => Some((
+                name.clone(),
+                if *variadic {
+                    "__codemod_a, __codemod_b".to_string()
+                } else {
+                    "__codemod_value".to_string()
+                },
+            )),
+            Atom::Literal(_) => None,
+        })
+        .collect();
+    let source = render_replacement(template, &captures);
+    let wrapped = match node {
+        "expr" => format!("fn run() {{ print({source}) }}\n"),
+        "stmt" => format!("fn run() {{ {source} }}\n"),
+        "item" => format!("{source}\n"),
+        "type" => format!("fn __codemod(value: {source}) {{}}\nfn run() {{}}\n"),
+        _ => unreachable!(),
+    };
+    if !jet::Compiler::parse_source(&wrapped).diagnostics.is_empty() {
+        fail(&format!(
+            "rule `{id}` {side} is not a valid Jet {node} template"
+        ));
+    }
 }
 fn render_replacement(t: &Template, c: &BTreeMap<String, String>) -> String {
     let mut out = String::new();
@@ -1004,6 +1062,15 @@ fn render_v2_log(batch: &Batch, changes: &[Change]) -> String {
     format!("{{\n  \"schema\": 2,\n  \"name\": \"{}\",\n  \"project\": \"{}\",\n  \"files\": [\n    {}\n  ]\n}}\n",json_escape(&batch.name),json_escape(&batch.project.display().to_string()),rows)
 }
 fn undo(path: &Path) {
+    if !path.exists() {
+        let project = path
+            .parent()
+            .and_then(Path::parent)
+            .and_then(Path::parent)
+            .unwrap_or_else(|| fail("missing replay log is not beneath .jet/codemods"));
+        let _lock = Transaction::lock(project);
+        Transaction::recover(project);
+    }
     let raw = fs::read_to_string(path).unwrap_or_else(|e| {
         fail(&format!(
             "could not read codemod log `{}`: {e}",
