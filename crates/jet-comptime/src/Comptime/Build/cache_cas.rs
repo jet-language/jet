@@ -387,7 +387,7 @@ mod hostile_tests {
         fs::write(&host_record, format!("{}\n", key.as_str())).unwrap();
         let record = records.join("known");
         symlink(host_record, &record).unwrap();
-        assert!(read_action_record(&records, &record, key).is_none());
+        assert!(read_action_record(&records, &record, key).is_err());
     }
 
     #[test]
