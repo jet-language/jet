@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 495,
-    "rev": 3340,
+    "rev": 3348,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -5413,6 +5413,11 @@
         {
           "at": "2026-07-11",
           "by": "fable-main",
+          "text": "[handoff] Continuation slice interrupted by session limit. Verified landed + green: display_width ratified rename + TextWidth policy impl in BOTH twins (Text.rs jet_text_display_width_policy, TextLite display_width_policy) + sema arity dispatch; callers/fixture/example updated by parent (corelib text_unicode_audit + golden text green). Break-test corpora committed under tests/data/unicode/ but conformance tests NOT wired yet. UAX#29 segmentation machines: partial edits in both twins — next agent must assess Text.rs/TextLite.rs state vs heuristics, finish GB/WB/SB rules, wire the three corpora tests, sync docs/reference core.text section. Normalization+casefold fully done (399300 assertions green)."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "fable-main",
           "text": "Audit pass (read-only): reopen note accurate — NFC/D/KC/KD is an 18-entry match table (no ccc sort, no Hangul, no exclusions); casefold only ß/ς special-cases; grapheme/word/sentence are heuristics not UAX#29; D-TEXTWIDTH1=B TextWidth policy type entirely unimplemented. upper/lower + char classes are real Unicode via Rust std but unpinned (criterion 1 wants Jet-owned generated tables). UCD 16.0.0 file sizes ~200KB text total — no size gate; both decisions ratified — no owner gate. Build slice launching: offline checksummed table generator -> committed static tables -> 4 algorithm rewrites in Text.rs+TextLite.rs twins -> TextWidth policy -> official conformance corpora tests."
         },
         {
@@ -9313,6 +9318,11 @@
         {
           "at": "2026-07-11",
           "by": "fable-main",
+          "text": "[handoff] Pass 5 (typed-decode + data pipeline) interrupted by session limit mid-flight. Partial state committed (compiles clean; parity/repl/corelib green): new crates/jet-comptime/src/Comptime/TypedDecode.rs + DataPipeline.rs exist, Methods/Interpreter/subset edits partial. Next agent: assess those two files, finish json.decode_traced typed dispatch + data table-handle pipeline per pass-5 brief in card history, rustc-verified diff cases each, then KNOWN_OPEN_GAPS residue = effect boundaries only. Criteria 1-3/6 believed met, 4 pending this, 5 met (JIT BigInt)."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "fable-main",
           "text": "Pass 4 done: comptime EncodingLite.rs — csv/toml/yaml/xml/cbor/jsonl parse+render, json canonical+events, all verbatim ports onto the existing Json-tagged CtValue shape; 11 rustc-verified diff cases. Residue in KNOWN_OPEN_GAPS: json.decode_traced + core.data typed pipeline — both pure but need typed-decode/table-handle interpreter machinery (same class). Targeted green: parity, comptime_diff 7, repl 67. Pass 5 (machinery) launching."
         },
         {
@@ -11601,7 +11611,13 @@
       "plan": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-11",
+          "by": "codex-main",
+          "text": "next builder-ready tranche audited: convert crates/jet-foundation/src/Syntax.rs eight include! fragments to private modules + pub use, preserving order/API; only Syntax.rs and Syntax/{core_surface,math_layout,effects_tests,jetpack_config,package_files,markers,highlights,predicates}.rs. Focused checks: jet-foundation check, grammar, syntax_reconciliation, truthfulness. No owner gate. Write delegation paused: shared tree has neighboring dirty Unicode/generated/sema/codegen work and AGENTS requires a checkpoint before write-capable delegation; do not sweep it."
+        }
+      ],
       "created": "2026-07-10T10:49:07.218Z",
       "updated": "2026-07-11",
       "criteria": [
@@ -24748,6 +24764,241 @@
       "draft": false,
       "status": "open",
       "created": "2026-07-11T07:24:31.246Z"
+    },
+    {
+      "id": "D-NETDNS2",
+      "cardId": "c0z3l25j",
+      "group": "stdlib",
+      "title": "DNS resolver trust and platform contract",
+      "gist": "Choose how ordinary DNS lookups use the host, validate replies, and fall back.",
+      "explainer": "",
+      "story": "Mira runs the same service on Linux, macOS, Windows, a VPN, and a corporate split-DNS network. A lookup must honor each host's resolver policy, never silently send private names to a public resolver, reject forged packets, and still allow an expert to query a named DNS server.",
+      "inWild": "use core.net as net\n\naddrs :: net.resolve_ip(\"db.corp.example\")?\nrecords :: net.DnsResolver.at(\"10.20.0.53:53\").txt(\"_policy.corp.example\")?",
+      "detail": "Beginner pass: the host resolver is automatic. Expert pass: one typed resolver handle controls server, deadline, and audit-visible behavior. Hybrid pass: both return the same record types and NetError law. Security law: unpredictable IDs; source, ID, QR, opcode, question, class, RCODE, bounds, compression-loop, and truncation validation; UDP TC retries over TCP; no invented public fallback. Platform law: native resolver configuration on Linux, macOS, Windows, BSD; search domains and hosts-file behavior belong only to the system path. Dependency law: std/OS APIs or an owner-approved runtime bridge outside compiler seam crates; never a compiler dependency; any bootstrap bridge carries native-ize ownership.",
+      "options": [
+        {
+          "key": "A",
+          "name": "System default plus strict first-party wire resolver (recommended)",
+          "detail": "Ordinary calls delegate to the platform resolver and preserve VPN, search-domain, hosts-file, and enterprise policy. `DnsResolver.at` is the single expert escape hatch and uses a strict first-party UDP/TCP DNS client. Missing/invalid host configuration is an error, never a public fallback.",
+          "code": "addrs :: net.resolve_ip(\"db.corp.example\")?\nresolver :: net.DnsResolver.at(\"10.20.0.53:53\")?\ntxt :: resolver.txt(\"_policy.corp.example\", deadline: 2.seconds)?\n\n// forged ID/source/question, malformed compression, or TC-without-TCP completion\n// => .Protocol(NetProtocolError.DnsInvalidResponse(...))\n// NXDOMAIN => .Dns(NetDnsError.NotFound(...))"
+        },
+        {
+          "key": "B",
+          "name": "Strict first-party resolver for every lookup",
+          "detail": "Every call parses platform resolver configuration, then sends validated DNS itself. This gives uniform packet behavior but partially reimplements platform policy and can diverge from VPN, mDNS, hosts files, NSS, and Windows resolver behavior.",
+          "code": "addrs :: net.resolve_ip(\"db.corp.example\")?\n// Core parses host DNS configuration and performs strict UDP/TCP DNS itself.\n// No public fallback; unsupported host policy => .PlatformPolicyUnsupported."
+        },
+        {
+          "key": "C",
+          "name": "Approved resolver bridge for every lookup",
+          "detail": "A vetted runtime resolver bridge owns platform policy and DNS parsing. It may be bootstrapped behind the Core FFI boundary only after separate dependency approval; the compiler remains dependency-free and the bridge must expose Jet's exact errors and deadlines.",
+          "code": "addrs :: net.resolve_ip(\"db.corp.example\")?\n// Same Jet API; runtime bridge is invisible.\n// Build/audit output names bridge version and native-ize obligation."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "`net.Resolver` uses system or Go resolution depending on platform/config and offers an explicit resolver hook; Jet should keep one typed result/error law.",
+          "code": "ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)"
+        },
+        {
+          "lang": "Rust",
+          "note": "`ToSocketAddrs` follows the platform but does not expose TXT/SRV; ecosystem DNS clients add explicit wire resolution.",
+          "code": "(host, port).to_socket_addrs()?"
+        }
+      ],
+      "rec": "A",
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-11T10:11:07.718Z"
+    },
+    {
+      "id": "D-NETIO1",
+      "cardId": "c0z3l25j",
+      "group": "stdlib",
+      "title": "Socket bytes, text helpers, and close law",
+      "gist": "Choose the canonical payload and shutdown model for TCP, UDP, and Unix sockets.",
+      "explainer": "",
+      "story": "Ravi writes a database driver whose frames contain arbitrary bytes and half-closes its request side before reading the reply. He also writes a beginner echo server that should remain pleasant for UTF-8 text.",
+      "inWild": "conn :: net.Tcp.connect(\"127.0.0.1:5432\")?\nconn.write_all(frame)?\nconn.shutdown(.Write)?\nreply :: conn.read(64.kib)?",
+      "detail": "Beginner pass: `read_text` and `write_text` make the echo case obvious. Expert pass: bytes preserve every protocol, partial reads/writes, limits, peer EOF, half-close, local close, and UDP truncation metadata. Hybrid pass: text helpers are checked projections over the same byte operations, not a second transport. Unix sockets are available on Unix; unsupported targets reject at compile time when target is known, otherwise return `.Unsupported(.UnixSocket)`.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Bytes canonical, checked text helpers (recommended)",
+          "detail": "TCP/Unix `read(limit)` returns bytes and empty bytes means EOF; `write` returns count; `write_all` loops. UDP packets contain bytes, source, original length, and `truncated`. `read_text` validates UTF-8. `close` is idempotent; `shutdown(.Read|.Write|.Both)` is explicit and subsequent misuse returns `.Closed`.",
+          "code": "chunk :: conn.read(64.kib)?\nif chunk.is_empty() { print(\"peer closed\") }\nconn.write_all(chunk)?\nline :: conn.read_text(8.kib)? // invalid UTF-8 => .InvalidText\nconn.shutdown(.Write)?\nconn.close()?\n\npacket :: udp.receive(64.kib)?\nif packet.truncated { return .PacketTooLarge(packet.original_len) }"
+        },
+        {
+          "key": "B",
+          "name": "Generic readable/writable stream trait",
+          "detail": "Sockets expose bytes through shared `Reader`/`Writer` traits; text uses Core codecs. This unifies files, TLS, and sockets, but makes socket-only facts such as datagram boundaries, peer address, half-close, and readiness additional capability methods.",
+          "code": "chunk :: io.read(conn, 64.kib)?\nio.write_all(conn, frame)?\nnet.shutdown(conn, .Write)?\npacket :: udp.receive(64.kib)?"
+        },
+        {
+          "key": "C",
+          "name": "Keep String payloads",
+          "detail": "TCP, UDP, and Unix operations remain UTF-8-only. Arbitrary protocols fail with invalid-text errors and UDP cannot safely represent all datagrams, so Core cannot meet the raw-socket mandate.",
+          "code": "text :: conn.read()?\n// binary frame => error: tcp read: invalid UTF-8"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "Connections read/write byte slices and expose half-close on TCP; text is layered above.",
+          "code": "n, err := conn.Read(buf)\nerr = conn.CloseWrite()"
+        },
+        {
+          "lang": "Rust",
+          "note": "`Read`/`Write` are byte-oriented; `shutdown` selects read, write, or both.",
+          "code": "stream.read(&mut buf)?;\nstream.shutdown(Shutdown::Write)?;"
+        }
+      ],
+      "rec": "A",
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-11T10:11:08.011Z"
+    },
+    {
+      "id": "D-NETERROR1",
+      "cardId": "c0z3l25j",
+      "group": "stdlib",
+      "title": "Typed network error law",
+      "gist": "Choose what callers can reliably inspect when networking fails.",
+      "explainer": "",
+      "story": "Asha retries timeouts, reports DNS not-found without retrying, and removes a Unix-socket feature on unsupported targets. String matching would make those decisions depend on OS wording.",
+      "inWild": "if net.Tcp.connect(addr) == {\n    .Ok(conn) -> use(conn)\n    .Err(.Timeout(op)) -> retry(op)\n    .Err(.Dns(.NotFound(name))) -> report_missing(name)\n    .Err(err) -> log(err.message())\n}",
+      "detail": "All fallible core.net operations return `? NetError`; stable cases include InvalidInput, PermissionDenied, AddressInUse, AddressUnavailable, ConnectionRefused, ConnectionReset, NotConnected, Closed, Timeout, Cancelled, Unsupported, Dns, Tls, Protocol, and Other. Each carries operation plus relevant address/name and a display message; raw OS code is optional expert audit data, never control-flow law. Compiler diagnostics cover statically known target/API misuse; runtime failures remain values.",
+      "options": [
+        {
+          "key": "A",
+          "name": "One structured NetError family (recommended)",
+          "detail": "One exhaustive top-level network error with nested DNS/TLS/protocol detail. Stable variants drive logic across platforms; `message`, `operation`, `address`, `os_code` support reporting/audit. Deadline and cancellation are distinct.",
+          "code": "conn :: net.Tcp.connect(addr) ?? |err| if err == {\n    .Timeout(_) -> return retry_later()\n    .Cancelled(_) -> return .Cancelled\n    .ConnectionRefused(_) -> return unhealthy(addr)\n    else -> return err\n}"
+        },
+        {
+          "key": "B",
+          "name": "Per-operation error enums",
+          "detail": "ConnectError, ReadError, DnsError, and TlsError precisely enumerate each call. Callers gain narrow types but generic middleware must repeatedly translate them and the same OS event can acquire divergent names.",
+          "code": "conn: TcpStream ? ConnectError :: net.Tcp.connect(addr)\nchunk: Bytes ? ReadError :: conn.read(64.kib)"
+        },
+        {
+          "key": "C",
+          "name": "Keep String errors",
+          "detail": "Every operation preserves human-readable strings only. This is easy to print but unsafe for retry, fallback, metrics, and cross-platform control flow.",
+          "code": "conn :: net.tcp_connect(addr) ?? |text| {\n    // brittle: OS/localization-dependent\n    if text.contains(\"timed out\") { retry() }\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "`net.Error` exposes timeout/temporary behavior while concrete errors retain operation and address.",
+          "code": "if ne, ok := err.(net.Error); ok && ne.Timeout() { ... }"
+        },
+        {
+          "lang": "Rust",
+          "note": "`io::ErrorKind` gives stable categories plus optional raw OS codes.",
+          "code": "match err.kind() { ErrorKind::TimedOut => ..., _ => ... }"
+        }
+      ],
+      "rec": "A",
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-11T10:11:08.305Z"
+    },
+    {
+      "id": "D-NETTASK1",
+      "cardId": "c0z3l25j",
+      "group": "stdlib",
+      "title": "Socket deadlines, cancellation, and readiness",
+      "gist": "Choose how one socket model serves scripts and high-concurrency tasks.",
+      "explainer": "",
+      "story": "Leo writes a simple health check, then grows it into ten thousand concurrent probes. The same socket calls must honor the surrounding task budget, permit an explicit per-operation deadline, cancel promptly, and expose readiness without creating async-only socket types.",
+      "inWild": "#Context(deadline: 2.seconds) {\n    conn :: net.Tcp.connect(host)?\n    reply :: conn.read(4.kib)?\n}\n\nready :: conn.ready(.Read, deadline: 50.millis)?",
+      "detail": "Beginner pass: blocking-looking calls automatically observe current #Context. Expert pass: named `deadline:` override, cancellation token/context, readiness interest, and scheduler integration use the same handle. Hybrid pass: no AsyncTcpStream type. Precedence: earliest of current context deadline and explicit deadline; cancellation returns `.Cancelled`; expiry returns `.Timeout`; manual socket timeout is persistent configuration and cannot extend a context budget.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Context-aware calls plus readiness on same handles (recommended)",
+          "detail": "Every blocking-looking operation yields through the shared runtime where available, checks cancellation, and obeys the earliest budget. Experts call `ready` or pass named deadlines on the same Tcp/Udp/Unix/DNS handles. Native-thread fallback preserves semantics without claiming multiplexing.",
+          "code": "#Context(deadline: 2.seconds) { conn :: net.Tcp.connect(host)? }\nchunk :: conn.read(64.kib, deadline: 100.millis)?\nevent :: conn.ready(.ReadWrite, deadline: 20.millis)?\n// cancellation => .Cancelled; budget expiry => .Timeout"
+        },
+        {
+          "key": "B",
+          "name": "Context-only blocking calls",
+          "detail": "Operations observe #Context but expose no readiness or per-call override. Simple and coherent, yet expert event loops cannot integrate sockets without a second lower-level API.",
+          "code": "#Context(deadline: 2.seconds) {\n    conn :: net.Tcp.connect(host)?\n    chunk :: conn.read(64.kib)?\n}"
+        },
+        {
+          "key": "C",
+          "name": "Separate async socket types",
+          "detail": "Blocking sockets remain simple while AsyncTcp/AsyncUdp own cancellation and readiness. This splits semantics and violates the ratified one-handle hybrid direction.",
+          "code": "conn :: await net.AsyncTcp.connect(host)\nchunk :: await conn.read(64.kib)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "Blocking-looking operations are runtime-polled; context is commonly passed to dialing and DNS while connection deadlines interrupt I/O.",
+          "code": "d.DialContext(ctx, \"tcp\", addr)\nconn.SetReadDeadline(t)"
+        },
+        {
+          "lang": "Kotlin",
+          "note": "Structured cancellation applies through coroutine context while sockets remain resources.",
+          "code": "withTimeout(2000) { socket.read(...) }"
+        }
+      ],
+      "rec": "A",
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-11T10:11:08.601Z"
+    },
+    {
+      "id": "D-NETTLSSTREAM1",
+      "cardId": "c0z3l25j",
+      "group": "stdlib",
+      "title": "TLS layering over socket streams",
+      "gist": "Choose how TLS wraps sockets without creating a second I/O model.",
+      "explainer": "",
+      "story": "Noor connects through a preconfigured TCP socket, sets SNI and verification policy, reads binary protocol frames, and needs the same deadline, cancellation, close, and audit behavior before and after TLS.",
+      "inWild": "tcp :: net.Tcp.connect(addr)?\ntls :: tls.client(tcp, server_name: \"api.example.com\")?\ntls.write_all(frame)?\nreply :: tls.read(64.kib)?",
+      "detail": "D-TLS1 remains law: safe HTTPS defaults use rustls and system roots; advanced client TLS configuration lives in core.tls. This ballot only fixes stream composition. Default verification cannot be disabled outside the audited expert/unsafe policy already governing TLS. ALPN, roots, client identity, SNI, protocol versions, handshake deadline, peer identity, and close-notify are explicit expert controls. Runtime rustls bridge remains outside compiler seam crates under the existing approved dependency/native-ize law.",
+      "options": [
+        {
+          "key": "A",
+          "name": "core.tls wraps the canonical byte stream (recommended)",
+          "detail": "`tls.client` consumes a connected TcpStream and returns TlsStream implementing the same byte/readiness/deadline/close law. Safe defaults verify hostname with system roots. `TlsClientConfig` adds roots, ALPN, identity, and version bounds; insecure verification is unavailable here.",
+          "code": "cfg :: tls.ClientConfig.default()\n    .with_alpn([\"h2\", \"http/1.1\"])\ntcp :: net.Tcp.connect(addr)?\nsecure :: tls.client(tcp, server_name: host, config: cfg, deadline: 3.seconds)?\nsecure.write_all(frame)?\nsecure.close()? // sends close-notify, then closes transport"
+        },
+        {
+          "key": "B",
+          "name": "TLS methods remain inside core.net",
+          "detail": "`net.tls_connect` consumes TcpStream and returns a separate TlsStream API. This keeps current placement but mixes transport and security policy, duplicates read/write functions, and conflicts with core.tls ownership of advanced configuration.",
+          "code": "secure :: net.tls_connect(tcp, host)?\nnet.tls_write(secure, text)?\nnet.tls_close(secure)?"
+        },
+        {
+          "key": "C",
+          "name": "TLS only through core.http",
+          "detail": "Raw TLS is hidden; HTTPS works but database, mail, messaging, and custom protocols cannot securely compose over sockets.",
+          "code": "response :: http.Client.get(\"https://api.example.com\")?\n// no raw TLS stream for another protocol"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust rustls",
+          "note": "A TLS connection wraps transport I/O while configuration owns roots, SNI, ALPN, and protocol versions.",
+          "code": "let mut tls = StreamOwned::new(conn, tcp);"
+        },
+        {
+          "lang": "Go crypto/tls",
+          "note": "TLS wraps `net.Conn`, preserving deadline and address behavior while adding handshake/peer state.",
+          "code": "secure := tls.Client(conn, config)"
+        }
+      ],
+      "rec": "A",
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-11T10:11:08.894Z"
     }
   ],
   "questions": [
@@ -25559,6 +25810,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-11T10:12:24.484Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0wx96s2",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T10:12:22.626Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0rb4k1d",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T10:11:23.704Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c02wa1dn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T10:11:08.895Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-NETTLSSTREAM1",
+      "note": "TLS layering over socket streams"
+    },
+    {
+      "at": "2026-07-11T10:11:08.602Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-NETTASK1",
+      "note": "Socket deadlines, cancellation, and readiness"
+    },
+    {
+      "at": "2026-07-11T10:11:08.305Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-NETERROR1",
+      "note": "Typed network error law"
+    },
+    {
+      "at": "2026-07-11T10:11:08.012Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-NETIO1",
+      "note": "Socket bytes, text helpers, and close law"
+    },
+    {
+      "at": "2026-07-11T10:11:07.718Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-NETDNS2",
+      "note": "DNS resolver trust and platform contract"
+    },
     {
       "at": "2026-07-11T07:24:31.246Z",
       "by": "card301-audit",
@@ -29002,62 +29309,6 @@
       "action": "card.criteria-verify",
       "ref": "c05hfl27",
       "note": "#1"
-    },
-    {
-      "at": "2026-07-10T17:44:56.405Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c05hfl27",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-10T17:44:56.255Z",
-      "by": "terra-454-builder",
-      "action": "card.criteria-meet",
-      "ref": "c05hfl27",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-10T17:44:56.100Z",
-      "by": "terra-454-builder",
-      "action": "card.criteria-meet",
-      "ref": "c05hfl27",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-10T17:44:55.947Z",
-      "by": "terra-454-builder",
-      "action": "card.criteria-meet",
-      "ref": "c05hfl27",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-10T17:44:55.795Z",
-      "by": "terra-454-builder",
-      "action": "card.criteria-meet",
-      "ref": "c05hfl27",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-10T17:41:28.825Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0xkikie",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-10T17:41:28.677Z",
-      "by": "sol-448-review",
-      "action": "card.criteria-verify",
-      "ref": "c0xkikie",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-10T17:41:28.534Z",
-      "by": "sol-448-review",
-      "action": "card.criteria-verify",
-      "ref": "c0xkikie",
-      "note": "#3"
     }
   ],
   "nextNum": 368,

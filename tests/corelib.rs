@@ -1081,7 +1081,7 @@ fn run() {
     print(text.graphemes("é👍").len())
     print(text.words("Hi, κόσμε 123.").len())
     print(text.sentences("One. Two!").len())
-    print(text.width("表a"))
+    print(text.display_width("表a"))
     print(text.is_alphabetic("Ж"))
     print(text.is_numeric("٣"))
     print(text.pad_start("7", 3, "0"))
