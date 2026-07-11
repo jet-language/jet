@@ -572,7 +572,7 @@ fn run_json_transcript_file(jet: &std::path::Path, path: &std::path::Path) {
     let transcript = transcript_parser::parse(&content);
 
     let mut child = Command::new(jet)
-        .arg("lsp")
+        .args(["self", "lsp"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -649,7 +649,7 @@ fn lsp_initialize_capabilities_have_named_test_coverage() {
     let _guard = lsp_process_lock().lock().unwrap();
 
     let mut child = Command::new(&jet)
-        .arg("lsp")
+        .args(["self", "lsp"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -705,7 +705,7 @@ fn lsp_teaching_autocorrect_let_to_val() {
     let _guard = lsp_process_lock().lock().unwrap();
 
     let mut child = Command::new(&jet)
-        .arg("lsp")
+        .args(["self", "lsp"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -787,7 +787,7 @@ fn lsp_incremental_sync_range_edit_updates_document() {
     let _guard = lsp_process_lock().lock().unwrap();
 
     let mut child = Command::new(&jet)
-        .arg("lsp")
+        .args(["self", "lsp"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -1036,7 +1036,7 @@ fn run_transcript(source: &str, steps: &[TranscriptStep]) {
     let _guard = lsp_process_lock().lock().unwrap();
 
     let mut child = Command::new(&jet)
-        .arg("lsp")
+        .args(["self", "lsp"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -1251,7 +1251,7 @@ fn lsp_completion_uses_local_discovery_index_for_packages_and_options() {
     std::fs::write(&path, source).expect("write LSP source");
 
     let mut child = Command::new(&jet)
-        .arg("lsp")
+        .args(["self", "lsp"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -2023,7 +2023,7 @@ fn run() {
     let uri = "file:///tmp/lsp_semantic_highlight_stage4.jet";
 
     let mut child = Command::new(&jet)
-        .arg("lsp")
+        .args(["self", "lsp"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())

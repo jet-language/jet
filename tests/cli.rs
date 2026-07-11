@@ -549,7 +549,7 @@ fn doctor_ok_golden() {
     // On a CI/dev box rustc is present; the report is deterministic except for
     // machine-specific paths and the rustc version, which we scrub.
     let out = Command::new(jet())
-        .arg("doctor")
+        .args(["self", "doctor"])
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
@@ -569,7 +569,7 @@ fn doctor_ok_golden() {
 #[test]
 fn doctor_failure_is_l2101_snapshot() {
     let out = Command::new(jet())
-        .arg("doctor")
+        .args(["self", "doctor"])
         .env("PATH", "")
         .env("NO_COLOR", "1")
         .output()
@@ -589,7 +589,7 @@ fn fetch_without_git_is_e1203_snapshot() {
     )
     .unwrap();
     let out = Command::new(jet())
-        .arg("fetch")
+        .args(["store", "fetch"])
         .current_dir(&dir)
         .env("PATH", "")
         .env("HOME", &dir)
@@ -607,7 +607,7 @@ fn bind_missing_header_is_e3208() {
     let missing = std::env::temp_dir().join("jet_missing_bind_header.h");
     let _ = fs::remove_file(&missing);
     let out = Command::new(jet())
-        .arg("bind")
+        .args(["inspect", "bind"])
         .arg(&missing)
         .env("NO_COLOR", "1")
         .output()
@@ -641,7 +641,7 @@ fn unknown_cross_target_is_e3302() {
 
 #[test]
 fn completions_generate_for_every_shell() {
-    for shell in ["bash", "zsh", "fish"] {
+    for shell in ["bash", "zsh", "fish", "powershell"] {
         let out = Command::new(jet())
             .args(["self", "completions"])
             .arg(shell)
@@ -1098,7 +1098,7 @@ fn expand_all_golden() {
     let p = expand_fixture();
     // Bare `jet expand <file>`: every lens, grouped, magic default.
     let out = Command::new(jet())
-        .arg("expand")
+        .args(["inspect", "expand"])
         .arg(&p)
         .env("NO_COLOR", "1")
         .output()
@@ -1133,7 +1133,7 @@ fn expand_unknown_lens_golden() {
 
 #[test]
 fn expand_missing_file_is_user_error() {
-    let out = Command::new(jet()).arg("expand").output().unwrap();
+    let out = Command::new(jet()).args(["inspect", "expand"]).output().unwrap();
     assert_eq!(
         out.status.code(),
         Some(1),
@@ -1151,7 +1151,7 @@ fn expand_missing_file_is_user_error() {
 fn expand_compile_error_reports_ordinary_diagnostics() {
     let p = bad_file(&line!().to_string());
     let out = Command::new(jet())
-        .arg("expand")
+        .args(["inspect", "expand"])
         .arg(&p)
         .env("NO_COLOR", "1")
         .output()
@@ -1229,7 +1229,7 @@ fn stale_manifest_name_payload_jet_is_e1226() {
     let dir = isolated_cwd("stale_payload_jet");
     fs::write(dir.join("payload.jet"), "").unwrap();
     let out = Command::new(jet())
-        .arg("schema")
+        .args(["inspect", "schema"])
         .arg("status")
         .current_dir(&dir)
         .env("NO_COLOR", "1")

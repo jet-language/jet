@@ -262,7 +262,7 @@ fn run() {}
 "#,
     );
     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .arg("graph")
+        .args(["inspect", "graph"])
         .arg(&entry)
         .arg("--json")
         .output()

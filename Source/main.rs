@@ -606,6 +606,18 @@ fn normalize_frequency_ring_argv(raw: &mut Vec<String>) {
         }
     }
     let Some(sub) = raw.get(1).cloned() else { return };
+    if let Some(spec) = jet::CLI::command_group(&group) {
+        if !spec.actions.contains(&sub.as_str()) {
+            if raw.iter().any(|arg| arg == "--json") {
+                println!("{{\"schema_version\":1,\"diagnostics\":[{{\"schema_version\":1,\"code\":\"E2101\",\"severity\":\"error\",\"message\":\"`{sub}` isn't a jet {group} command\",\"why\":\"jet {group} accepts only commands in its named area\",\"fix\":\"run `jet {group} help`\",\"detail\":null,\"file\":null,\"line\":null,\"col\":null,\"span\":null,\"edit\":null}}]}}");
+            } else {
+                eprintln!("Error [E2101]: `{sub}` isn't a jet {group} command.");
+                eprintln!(" Why: jet {group} accepts only commands in its named area.");
+                eprintln!(" Fix: run `jet {group} help`.");
+            }
+            exit(ExitCodes::USAGE);
+        }
+    }
     let valid = jet::CLI::command_group(&group)
         .is_some_and(|spec| spec.actions.contains(&sub.as_str()))
         && !(group == "store" && matches!(sub.as_str(), "verify" | "rollback" | "generations"));

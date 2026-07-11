@@ -394,12 +394,7 @@ pub const COMMANDS: &[CommandSpec] = &[
 /// grouped argv reaches the real dispatcher; generators must never advertise
 /// those retired bare spellings.
 pub fn is_canonical_top_level(name: &str) -> bool {
-    !matches!(name,
-        "publish" | "yank" | "keygen" | "key" | "vendor" |
-        "graph" | "query" | "explain-build" | "impact" | "dossier" |
-        "semindex" | "expand" | "schema" | "codemod" | "audit" | "sbom" | "bind" |
-        "gc" | "fetch" | "lock" | "toolchain" | "upgrade" | "doctor" |
-        "completions" | "man" | "devtools" | "lsp")
+    moved_command_group(name).is_none()
 }
 
 /// Every global flag the driver understands. Used to flag-check and to suggest

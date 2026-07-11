@@ -611,7 +611,7 @@ before continuing.
 | E1291 | jetpack | a jetos real-tier system option/service/package has no NixOS mapping (D-JOS-NIXBACKEND1) |
 | E2001 | jet   | `pkg.jet` requests an edition this toolchain can't provide (E2-M2, D-REL3) |
 | E2002 | jet   | a deprecated item is used past its migration window (E2-M2, D-REL5) |
-| E2101 | jet   | unknown subcommand on the command line, with a "did you mean" (E2-M3, D-DX) |
+| E2101 | jet   | unknown or moved command spelling, with the canonical grouped spelling (E2-M3, D-DX, D-CLI-SURFACE1, D-CLI-SURFACE2) |
 | E2102 | jet   | unknown or ambiguous flag on the command line, with a suggestion (E2-M3, D-DX) |
 | E2201 | interp | `jet dev` can't interpret a feature (task/FFI/`#Unsafe`/native std); names it and `jet build`/`jet run` (E2-M4, D-DEV1) |
 | E2202 | interp | `jet dev` interpreter step budget exhausted — likely an unbounded loop (E2-M4) |
@@ -1251,7 +1251,7 @@ command/flag is within edit distance 2. Their golden transcripts live in
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E2101 | `{cmd}` isn't a jet command. | Every jet run starts with a command like `run`, `check`, or `new`. | Did you mean `jet {closest}`? Run `jet help` to see them all. |
+| E2101 | `{cmd}` isn't a jet command. | Every jet run starts with a canonical command path. Commands moved by D-CLI-SURFACE1/D-CLI-SURFACE2 reject their old bare spelling; they are never aliases. | For a moved command: `Use jet {group} {cmd}. The old jet {cmd} spelling is no longer accepted.` Otherwise: `Did you mean jet {closest}? Run jet help to see them all.` JSON uses the same `code`, `message`, `why`, and `fix` fields. |
 | E2102 | `{flag}` isn't a flag jet understands. | jet ignores no flags silently, so a typo can't quietly change a build. | Did you mean `{closest}`? Run `jet help` to see the flags. |
 
 ### `jet doctor` advisories
