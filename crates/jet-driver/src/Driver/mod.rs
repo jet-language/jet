@@ -555,15 +555,23 @@ impl Drop for BuildFilesystemTransaction {
 pub fn query_build_plan(
     file: &str,
 ) -> Result<Option<crate::Comptime::Build::BuildPlan>, Vec<Diagnostic>> {
-    compile_bundle_path_build(
-        file,
-        BuildRunOptions {
-            execute: false,
-            locked: false,
-            ..BuildRunOptions::default()
-        },
-    )
+    compile_bundle_path_build(file, build_query_options())
     .map(|output| output.build.map(|build| build.plan))
+}
+
+fn build_query_options() -> BuildRunOptions {
+    BuildRunOptions {
+        // Inspection verifies source declarations and #Impure gates, but it
+        // must not require execution grants merely to display the graph.
+        grants: crate::Comptime::Build::BuildCapability::ALL.into_iter().collect(),
+        execute: false,
+        allow_impure: true,
+        locked: false,
+        freestanding: false,
+        web_target: false,
+        plugin_target: false,
+        cross_target: None,
+    }
 }
 
 /// Ratified D-BUILDQUERY1 query expressions. `build` is deliberately the only
@@ -589,11 +597,7 @@ pub fn query_build_plan_with_overlay(
 ) -> Result<Option<crate::Comptime::Build::BuildPlan>, Vec<Diagnostic>> {
     compile_bundle_path_build_inner(
         file,
-        BuildRunOptions {
-            execute: false,
-            locked: false,
-            ..BuildRunOptions::default()
-        },
+        build_query_options(),
         Some((std::path::Path::new(file), source)),
     )
     .map(|output| output.build.map(|build| build.plan))

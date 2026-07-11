@@ -154,7 +154,7 @@ fn execute_one_action(
         &effective_probe_facts,
     ).map_err(BuildExecutionError::InvalidGraph)?;
     let record_path = records.join(key.as_str().trim_start_matches("act-sha256:"));
-    let previous_key = read_last_rebuild_record(project_root, action.id)
+    let previous_key = read_last_rebuild_record(project_root, action.id, &action.name)
         .map_err(|error| io_action(action, error))?
         .map(|record| record.key);
     if action.cache == ActionCache::Cached {
@@ -162,7 +162,7 @@ fn execute_one_action(
             if cas.restore_action_outputs(project_root, action, &record).is_ok() {
                 write_last_rebuild_record(
                     project_root,
-                    action.id,
+                    action,
                     &key,
                     ActionCacheStatus::Hit(CacheHitReason::LocalActionRecordMatched),
                 )?;
@@ -237,7 +237,7 @@ fn execute_one_action(
         ).map_err(|e| io_action(action, e))?;
         write_action_record(&record_path, &record).map_err(|e| io_action(action, e))?;
     }
-    write_last_rebuild_record(project_root, action.id, &key, rebuild_status)?;
+    write_last_rebuild_record(project_root, action, &key, rebuild_status)?;
     fs::remove_dir_all(&sandbox).map_err(|e| io_action(action, e))?;
     Ok(outcome)
 }
@@ -281,6 +281,7 @@ fn parse_rebuild_status(code: &str) -> Option<ActionCacheStatus> {
 fn read_last_rebuild_record(
     project_root: &Path,
     action: ActionId,
+    action_name: &str,
 ) -> io::Result<Option<LastRebuildRecord>> {
     let path = rebuild_record_path(project_root, action);
     let bytes = match secure_read_file(project_root, &path) {
@@ -292,6 +293,10 @@ fn read_last_rebuild_record(
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "rebuild explanation is not UTF-8"))?;
     let mut lines = text.lines();
     let Some(key) = lines.next() else { return Ok(None) };
+    let action_digest = ContentDigest::from_bytes(action_name.as_bytes());
+    if lines.next() != Some(action_digest.as_str()) {
+        return Ok(None);
+    }
     let Some(status) = lines.next().and_then(parse_rebuild_status) else { return Ok(None) };
     Ok(Some(LastRebuildRecord {
         key: ActionKey(key.to_string()),
@@ -302,20 +307,26 @@ fn read_last_rebuild_record(
 fn read_last_rebuild_status(
     project_root: &Path,
     action: ActionId,
+    action_name: &str,
 ) -> io::Result<Option<ActionCacheStatus>> {
-    Ok(read_last_rebuild_record(project_root, action)?.map(|record| record.status))
+    Ok(read_last_rebuild_record(project_root, action, action_name)?.map(|record| record.status))
 }
 
 fn write_last_rebuild_record(
     project_root: &Path,
-    action: ActionId,
+    action: &BuildAction,
     key: &ActionKey,
     status: ActionCacheStatus,
 ) -> Result<(), BuildExecutionError> {
-    let path = rebuild_record_path(project_root, action);
-    let text = format!("{}\n{}\n", key.as_str(), rebuild_status_code(status));
+    let path = rebuild_record_path(project_root, action.id);
+    let text = format!(
+        "{}\n{}\n{}\n",
+        key.as_str(),
+        ContentDigest::from_bytes(action.name.as_bytes()).as_str(),
+        rebuild_status_code(status)
+    );
     atomic_restore_file(project_root, &path, text.as_bytes()).map_err(|error| BuildExecutionError::Io {
-        action: format!("rebuild explanation {}", action.0),
+        action: format!("rebuild explanation {}", action.name),
         detail: error.to_string(),
     })
 }

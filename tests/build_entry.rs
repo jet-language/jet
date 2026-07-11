@@ -315,6 +315,34 @@ fn run() {}
 }
 
 #[test]
+fn graph_query_inspects_declared_effects_without_execution_grants() {
+    let root = project("query-effects");
+    let entry = root.join("main.jet");
+    write(
+        &entry,
+        r#"
+fn build(b: BuildContext) #(Exec, Fs) -> BuildPlan ? {
+    #Impure("declare an inspectable action") {
+        action :: b.action("never-run", [], ["out"], ["sh", "-c", "exit 91"], ["Exec", "Fs"])?
+        app :: b.add_executable("app", ["main.jet"], [action])?
+        return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}
+"#,
+    );
+    let plan = jet::Driver::evaluate_build_query(
+        entry.to_str().unwrap(),
+        BuildQueryExpression::Build,
+    )
+    .unwrap()
+    .expect("declared effects remain inspectable without execution grants");
+    assert_eq!(plan.actions()[0].name, "never-run");
+    assert!(!root.join("out").exists(), "query must never execute action");
+}
+
+#[test]
 fn graph_overlay_uses_unsaved_text_and_canonical_cli_facts() {
     let root = project("query-overlay");
     let entry = root.join("main.jet");

@@ -1070,6 +1070,14 @@ fn graph_query_explain_and_rebuild_reasons_share_plan_provenance() {
         .provenance
         .iter()
         .any(|line| line == "inputs=1"));
+    let file_explain = plan.explain_file(".jet/generated/schema.jet");
+    assert!(
+        file_explain
+            .provenance
+            .iter()
+            .any(|line| line == "owner=Some(ActionId(0))"),
+        "generated action ownership must remain visible"
+    );
     let rebuilt = plan
         .why_rebuilt(
             gen,
@@ -1187,6 +1195,9 @@ fn wasm_build_plugins_handshake_grants_policy_and_return_plan_contributions() {
         .source_digest
         .as_str()
         .starts_with("sha256:"));
+    let generated = plan.explain_file(".jet/generated/shaders.jet");
+    assert!(generated.provenance.iter().any(|fact| fact == "generated=shaders"));
+    assert!(generated.provenance.iter().any(|fact| fact.starts_with("digest=sha256:")));
 
     let denied = BuildContext::new()
         .apply_wasm_component_plugin(

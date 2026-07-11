@@ -349,14 +349,23 @@ impl BuildPlan {
 
     pub fn explain_file(&self, path: impl AsRef<str>) -> BuildExplanation {
         let ownership = self.file_ownership(path.as_ref());
+        let mut provenance = vec![
+            format!("owner={:?}", ownership.owner),
+            format!("consumers={:?}", ownership.consumers),
+            format!("targets={:?}", ownership.targets),
+        ];
+        if let Some(module) = self
+            .generated_modules
+            .iter()
+            .find(|module| module.path.as_str() == ownership.path)
+        {
+            provenance.push(format!("generated={}", module.name));
+            provenance.push(format!("digest={}", module.source_digest.as_str()));
+        }
         BuildExplanation {
             subject: BuildGraphSubject::File,
             label: ownership.path,
-            provenance: vec![
-                format!("owner={:?}", ownership.owner),
-                format!("consumers={:?}", ownership.consumers),
-                format!("targets={:?}", ownership.targets),
-            ],
+            provenance,
         }
     }
 
@@ -391,7 +400,7 @@ impl BuildPlan {
         let Some(action) = self.actions.iter().find(|action| action.name == action_name) else {
             return Ok(None);
         };
-        let Some(status) = read_last_rebuild_status(project_root, action.id)? else {
+        let Some(status) = read_last_rebuild_status(project_root, action.id, action_name)? else {
             return Ok(None);
         };
         self.why_rebuilt(
