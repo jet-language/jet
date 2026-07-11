@@ -58,6 +58,25 @@ pub fn open(entry: &Path) -> Result<SemIndex, SemIndexError> {
     Err(SemIndexError::Load(diags))
 }
 
+/// Build the index from the compiler's staged multi-file overlay path.
+pub fn open_with_overlays(
+    entry: &Path,
+    overlays: &[(&Path, &str)],
+) -> Result<SemIndex, SemIndexError> {
+    let entry_str = entry.to_string_lossy();
+    let (diags, bundle, facts) =
+        jet_driver::Driver::check_file_with_overlays(&entry_str, overlays, false);
+    if !diags
+        .iter()
+        .any(|d| d.severity == jet_foundation::Diagnostics::Severity::Error)
+    {
+        if let Some(bundle) = bundle {
+            return Ok(build_index(&bundle, &facts));
+        }
+    }
+    Err(SemIndexError::Load(diags))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
