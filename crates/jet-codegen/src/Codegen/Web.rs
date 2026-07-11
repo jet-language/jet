@@ -44,7 +44,7 @@ pub type WebEmitResult<T> = Result<T, WebTirUnsupported>;
 
 struct FuncWeb {
     name: String,
-    _key: String,
+    key: String,
     bucket: WebBucket,
     marker: Option<WebPartitionMarker>,
     span: Span,
@@ -120,7 +120,7 @@ fn validate_web_items_tir(
                 let has_wasm_export = bundle.modules.iter().any(|m| items_have_wasm_export(&m.items));
                 // `dev()` is the host-side programmable dev-server entry. It
                 // executes before the web build and is never web-runtime code.
-                let emitted = f.name != "dev"
+                let emitted = key != "dev"
                     && (bucket == WebBucket::Js || !explicit_html || has_wasm_export);
                 validate_web_func_tir(f, cx, bundle, bucket, emitted, diags);
             }
@@ -380,7 +380,7 @@ fn collect_module_funcs(
                     .unwrap_or(WebBucket::Wasm);
                 out.push(FuncWeb {
                     name: f.name.clone(),
-                    _key: key,
+                    key,
                     bucket,
                     marker: f.web_marker,
                     span: f.name_span,
@@ -587,7 +587,7 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
         .iter()
         .filter(|f| {
             f.bucket == WebBucket::Wasm
-                && f.name != "dev"
+                && f.key != "dev"
                 && (bundle.modules[bundle.entry].html_path.is_none()
                     || funcs.iter().any(|x| x.marker == Some(WebPartitionMarker::WasmExport)))
         })
@@ -760,7 +760,7 @@ fn emit_js_app(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<Strin
 
     let js_funcs: Vec<&FuncWeb> = funcs
         .iter()
-        .filter(|f| f.bucket == WebBucket::Js && f.name != "run")
+        .filter(|f| f.bucket == WebBucket::Js && f.key != "run" && f.key != "dev")
         .collect();
     for f in &js_funcs {
         emit_js_fn(f, &mut out, funcs)?;

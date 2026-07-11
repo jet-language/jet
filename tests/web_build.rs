@@ -660,18 +660,25 @@ fn run() { print(summarize(4)) }
 fn host_dev_entry_is_not_web_runtime_and_run_prints_literal_from_tir() {
     let src = r#"#Target(Web)
 use core.devserver as devserver
+#Js
 fn dev() {
     server :: devserver.app()
     server.port(8080)
     server.serve()
 }
+module Tools {
+    fn dev() -> Int { return 7 }
+}
 fn run() { print("hello, web") }
 "#;
     let out = jet::compile_web_with_path(src, "tests/fixtures/web_host_dev.jet")
         .expect("host dev entry and web run body must compile through their own execution paths");
-    let wasm = &out.web.expect("web artifacts").wasm_rust;
-    assert!(!wasm.contains("jet_wasm_dev"), "host dev entry leaked into web runtime:\n{wasm}");
+    let web = out.web.expect("web artifacts");
+    let wasm = &web.wasm_rust;
+    assert!(wasm.contains("fn jet_wasm_dev() -> i64"), "module Tools.dev was not emitted:\n{wasm}");
     assert!(wasm.contains("println!(\"{}\", \"hello, web\")"), "literal TIR print was not emitted:\n{wasm}");
+    let js = &web.js_app;
+    assert!(!js.contains("function dev("), "top-level host dev leaked into JS runtime:\n{js}");
 }
 
 #[test]
