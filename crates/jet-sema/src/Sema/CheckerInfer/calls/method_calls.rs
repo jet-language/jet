@@ -705,7 +705,7 @@ impl<'a> Checker<'a> {
             }
             // D-SERDE16=A: public, target-directed Decode dispatch from an ordinary
             // DataTree subtree. This is the spelling generated derives emit too.
-            if matches!(&recv_ty, Type::Named(n) if n == Syntax::TYPE_DATA)
+            if matches!(&recv_ty, Type::Named(n) if Syntax::is_data_type_name(n))
                 && method == "decode"
             {
                 *recv_type_out = Some(Syntax::TYPE_DATA.to_string());

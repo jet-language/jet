@@ -2394,6 +2394,48 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// card #131: `DataTree.decode<T>()` dispatches primitive, container,
+/// generated, and hand-written Decode implementations through one spelling.
+#[test]
+fn datatree_decode_dispatches_all_decode_impl_kinds() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc { return; }
+    let dir = std::env::temp_dir().join(format!("jet_datatree_decode_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let src = r#"
+@[Codable]
+struct Point { x: Int }
+struct Email { addr: String }
+impl Email.Decode {
+    fn decode(tree: DataTree) -> Email ? DecodeError {
+        value := tree.field("address") ?? DataTree.Text("")
+        return ok(Email.{ addr: value.text() ?? "" })
+    }
+}
+fn run() {
+    i_tree: DataTree := DataTree.Int(41)
+    xs_tree: DataTree := DataTree.Array([DataTree.Int(1), DataTree.Int(2)])
+    p_tree: DataTree := DataTree.Object(["x": DataTree.Int(7)])
+    e_tree: DataTree := DataTree.Object(["address": DataTree.Text("a@b")])
+    i := i_tree.decode<Int>() ?? panic("primitive")
+    xs := xs_tree.decode<[Int]>() ?? panic("list")
+    p := p_tree.decode<Point>() ?? panic("derive")
+    e := e_tree.decode<Email>() ?? panic("hand")
+    print(i + xs[1] + p.x)
+    print(e.addr)
+}
+"#;
+    let out = compile_temp("datatree_decode.jet", src);
+    assert!(out.rust.contains("<i64 as user_Decode>::jet_decode"));
+    assert!(out.rust.contains("<user_Point as user_Decode>::jet_decode"));
+    assert!(out.rust.contains("<user_Email as user_Decode>::jet_decode"));
+    let (code, stdout, stderr) = build_and_run(&dir, "datatree_decode", src, &[], None);
+    assert_eq!(code, 0, "DataTree.decode dispatch failed: {stderr}");
+    assert_eq!(stdout, "50\na@b\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
 /// #495 / I2: a field read from a bare (`Read`) parameter is still rooted in
 /// the borrowed parameter. The explicit `copy` required by E0209 must produce
 /// owned values for both shallow and nested fields, compile through rustc, and
