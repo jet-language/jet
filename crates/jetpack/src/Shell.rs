@@ -309,7 +309,7 @@ fn bash_rc(label: &str, path: PromptPathMode, strip: PromptStripMode) -> String 
          __jetpack_precmd() {{\n\
            local code=$?\n\
            if [ \"$__jetpack_active\" = 1 ]; then\n\
-             [ -z \"$__jetpack_spinner_pid\" ] || {{ kill \"$__jetpack_spinner_pid\" 2>/dev/null; wait \"$__jetpack_spinner_pid\" 2>/dev/null; printf '\\r\\033[2K' >&2; }}\n\
+             [ -z \"$__jetpack_spinner_pid\" ] || {{ kill \"$__jetpack_spinner_pid\" 2>/dev/null; wait \"$__jetpack_spinner_pid\" 2>/dev/null; if [ -n \"${{NO_COLOR:-}}\" ]; then printf '\\r                                        \\r' >&2; else printf '\\r\\033[2K' >&2; fi; }}\n\
              local elapsed=$(( $(date +%s) - __jetpack_started )) result\n\
              if [ \"$code\" = 0 ]; then result=ok; else result=\"failed ($code)\"; fi\n\
              if [ \"$__jetpack_kind\" = build ]; then __jetpack_build_status=\"$result · ${{elapsed}}s\"; else __jetpack_test_status=\"$result · ${{elapsed}}s\"; fi\n\
@@ -342,6 +342,7 @@ fn zsh_rc(label: &str, path: PromptPathMode, strip: PromptStripMode) -> String {
     format!(
         "[ -f \"$HOME/.zshrc\" ] && source \"$HOME/.zshrc\"\n\
          setopt prompt_subst\n\
+         zmodload zsh/datetime\n\
          typeset -g __jetpack_build_status='never run' __jetpack_test_status='never run' __jetpack_kind='' __jetpack_command='' __jetpack_started=0 __jetpack_spinner_pid=''\n\
          __jetpack_git_status() {{ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then local branch=$(git branch --show-current 2>/dev/null); [[ -n $branch ]] || branch=detached; if git diff --quiet --ignore-submodules -- 2>/dev/null && git diff --cached --quiet --ignore-submodules -- 2>/dev/null; then print -n -- \"$branch clean\"; else print -n -- \"$branch changed\"; fi; else print -n -- 'not a git worktree'; fi; }}\n\
          __jetpack_status_words() {{ printf 'build %s · test %s · git %s' \"$__jetpack_build_status\" \"$__jetpack_test_status\" \"$(__jetpack_git_status)\"; }}\n\
@@ -350,7 +351,7 @@ fn zsh_rc(label: &str, path: PromptPathMode, strip: PromptStripMode) -> String {
          bindkey '^G' __jetpack_status_glance 2>/dev/null || true\n\
          __jetpack_spinner() {{ local -a frames=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏); local i=1; while true; do printf '\\r%s running %s · %ss' $frames[$i] $1 $(( $EPOCHSECONDS - $2 )) >&2; (( i = i % 10 + 1 )); sleep .1; done; }}\n\
          __jetpack_preexec() {{ case $1 in 'jet build'*) __jetpack_kind=build;; 'jet test'*) __jetpack_kind=test;; *) __jetpack_kind=''; return;; esac; __jetpack_command=$1; __jetpack_started=$EPOCHSECONDS; if [[ -t 2 ]]; then __jetpack_spinner $__jetpack_kind $__jetpack_started &!; __jetpack_spinner_pid=$!; fi; }}\n\
-         __jetpack_precmd() {{ local code=$?; [[ -n $__jetpack_kind ]] || return; if [[ -n $__jetpack_spinner_pid ]]; then kill $__jetpack_spinner_pid 2>/dev/null; wait $__jetpack_spinner_pid 2>/dev/null; printf '\\r\\033[2K' >&2; fi; local elapsed=$(( EPOCHSECONDS - __jetpack_started )) result; [[ $code = 0 ]] && result=ok || result=\"failed ($code)\"; [[ $__jetpack_kind = build ]] && __jetpack_build_status=\"$result · ${{elapsed}}s\" || __jetpack_test_status=\"$result · ${{elapsed}}s\"; if [[ -n $NO_COLOR ]]; then printf '%s %s · %ss\\n' $__jetpack_kind \"$result\" $elapsed; else [[ $code = 0 ]] && printf '✓ %s ok · %ss\\n' $__jetpack_kind $elapsed || printf '✗ %s failed (%s) · %ss\\n' $__jetpack_kind $code $elapsed; fi; if [[ $code != 0 ]]; then [[ -n $NO_COLOR ]] && printf '%s\\n' \"-> $__jetpack_kind failed. Rerun: $__jetpack_command\" || printf '%s\\n' \"→ $__jetpack_kind failed. Rerun: $__jetpack_command\"; fi; __jetpack_kind=''; __jetpack_spinner_pid=''; }}\n\
+         __jetpack_precmd() {{ local code=$?; [[ -n $__jetpack_kind ]] || return; if [[ -n $__jetpack_spinner_pid ]]; then kill $__jetpack_spinner_pid 2>/dev/null; wait $__jetpack_spinner_pid 2>/dev/null; if [[ -n $NO_COLOR ]]; then printf '\\r                                        \\r' >&2; else printf '\\r\\033[2K' >&2; fi; fi; local elapsed=$(( EPOCHSECONDS - __jetpack_started )) result; [[ $code = 0 ]] && result=ok || result=\"failed ($code)\"; [[ $__jetpack_kind = build ]] && __jetpack_build_status=\"$result · ${{elapsed}}s\" || __jetpack_test_status=\"$result · ${{elapsed}}s\"; if [[ -n $NO_COLOR ]]; then printf '%s %s · %ss\\n' $__jetpack_kind \"$result\" $elapsed; else [[ $code = 0 ]] && printf '✓ %s ok · %ss\\n' $__jetpack_kind $elapsed || printf '✗ %s failed (%s) · %ss\\n' $__jetpack_kind $code $elapsed; fi; if [[ $code != 0 ]]; then [[ -n $NO_COLOR ]] && printf '%s\\n' \"-> $__jetpack_kind failed. Rerun: $__jetpack_command\" || printf '%s\\n' \"→ $__jetpack_kind failed. Rerun: $__jetpack_command\"; fi; __jetpack_kind=''; __jetpack_spinner_pid=''; }}\n\
          autoload -Uz add-zsh-hook; add-zsh-hook preexec __jetpack_preexec; add-zsh-hook precmd __jetpack_precmd\n\
          if [ -n \"${{NO_COLOR:-}}\" ]; then\n\
            PROMPT='{status_prefix}{label} {path_escape} > '\n\
@@ -378,7 +379,7 @@ fn fish_init(label: &str, path: PromptPathMode, strip: PromptStripMode) -> Strin
          bind \\cg __jetpack_status_glance; \
          function __jetpack_spinner; set -l frames ⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏; set -l i 1; while true; printf '\\r%s running %s · %ss' $frames[$i] $argv[1] (math (date +%s) - $argv[2]) >&2; set i (math $i % 10 + 1); sleep .1; end; end; \
          function __jetpack_preexec --on-event fish_preexec; switch $argv[1]; case \"jet build*\"; set -g __jetpack_kind build; case \"jet test*\"; set -g __jetpack_kind test; case '*'; set -g __jetpack_kind ''; return; end; set -g __jetpack_command $argv[1]; set -g __jetpack_started (date +%s); if isatty stderr; command sh -c 'while :; do printf \"\\r⠹ running %s · %ss\" \"$0\" \"$(( $(date +%s) - $1 ))\" >&2; sleep .1; done' $__jetpack_kind $__jetpack_started &\nset -g __jetpack_spinner_pid $last_pid; end; end; \
-         function __jetpack_postexec --on-event fish_postexec; set -l code $status; test -n \"$__jetpack_kind\"; or return; if test -n \"$__jetpack_spinner_pid\"; kill $__jetpack_spinner_pid 2>/dev/null; wait $__jetpack_spinner_pid 2>/dev/null; printf '\\r\\033[2K' >&2; end; set -l elapsed (math (date +%s) - $__jetpack_started); set -l result ok; test $code -eq 0; or set result \"failed ($code)\"; if test $__jetpack_kind = build; set -g __jetpack_build_status \"$result · \"$elapsed\"s\"; else; set -g __jetpack_test_status \"$result · \"$elapsed\"s\"; end; if set -q NO_COLOR; printf '%s %s · %ss\\n' $__jetpack_kind \"$result\" $elapsed; else if test $code -eq 0; printf '✓ %s ok · %ss\\n' $__jetpack_kind $elapsed; else; printf '✗ %s failed (%s) · %ss\\n' $__jetpack_kind $code $elapsed; end; if test $code -ne 0; if set -q NO_COLOR; echo \"-> $__jetpack_kind failed. Rerun: $__jetpack_command\"; else; echo \"→ $__jetpack_kind failed. Rerun: $__jetpack_command\"; end; end; set -g __jetpack_kind ''; set -g __jetpack_spinner_pid ''; end; \
+         function __jetpack_postexec --on-event fish_postexec; set -l code $status; test -n \"$__jetpack_kind\"; or return; if test -n \"$__jetpack_spinner_pid\"; kill $__jetpack_spinner_pid 2>/dev/null; wait $__jetpack_spinner_pid 2>/dev/null; if set -q NO_COLOR; printf '\\r                                        \\r' >&2; else; printf '\\r\\033[2K' >&2; end; end; set -l elapsed (math (date +%s) - $__jetpack_started); set -l result ok; test $code -eq 0; or set result \"failed ($code)\"; if test $__jetpack_kind = build; set -g __jetpack_build_status \"$result · \"$elapsed\"s\"; else; set -g __jetpack_test_status \"$result · \"$elapsed\"s\"; end; if set -q NO_COLOR; printf '%s %s · %ss\\n' $__jetpack_kind \"$result\" $elapsed; else if test $code -eq 0; printf '✓ %s ok · %ss\\n' $__jetpack_kind $elapsed; else; printf '✗ %s failed (%s) · %ss\\n' $__jetpack_kind $code $elapsed; end; if test $code -ne 0; if set -q NO_COLOR; echo \"-> $__jetpack_kind failed. Rerun: $__jetpack_command\"; else; echo \"→ $__jetpack_kind failed. Rerun: $__jetpack_command\"; end; end; set -g __jetpack_kind ''; set -g __jetpack_spinner_pid ''; end; \
          function fish_prompt; {strip_line}\
          if set -q NO_COLOR; echo -n '{label} '; echo -n ({path_expr}); echo -n ' > '; \
          else; set_color -o cyan; echo -n '{label} '; \
@@ -494,7 +495,7 @@ mod tests {
         let mut command = Command::new("script");
         command.args(["-qec", shell_command, "/dev/null"]);
         if no_color {
-            command.env("NO_COLOR", "1");
+            command.env("NO_COLOR", "1").env("TERM", "dumb");
         }
         let mut child = command
             .stdin(Stdio::piped())
@@ -537,6 +538,14 @@ mod tests {
         format!("'{}'", text.replace('\'', "'\\''"))
     }
 
+    fn assert_no_esc_after_marker(output: &str) {
+        let captured = output
+            .rsplit_once("JETPACK_CAPTURE_START")
+            .map(|(_, captured)| captured)
+            .expect("PTY reached NO_COLOR capture marker");
+        assert!(!captured.as_bytes().contains(&0x1b), "{captured:?}");
+    }
+
     #[test]
     fn bash_prompt_pty_reports_real_command_and_git_facts_without_color() {
         let rc = write_temp(
@@ -546,7 +555,7 @@ mod tests {
         let shell = format!("bash --noprofile --rcfile {} -i", rc.display());
         let output = pty(
             &shell,
-            "jet() { [ \"$1\" = build ]; }\njet build\njet test\n__jetpack_status_words\nexit\n",
+            "bind 'set enable-bracketed-paste off'\necho JETPACK_CAPTURE_START\njet() { sleep .3; [ \"$1\" = build ]; }\njet build\njet test\n\x07\n__jetpack_status_words\nexit\n",
             true,
         );
         let _ = std::fs::remove_file(rc);
@@ -554,7 +563,8 @@ mod tests {
         assert!(output.contains("test failed (1)"), "{output}");
         assert!(output.contains("-> test failed. Rerun: jet test"), "{output}");
         assert!(output.contains("git master changed") || output.contains("git master clean"), "{output}");
-        assert!(!output.contains("\\033["), "{output}");
+        assert!(output.contains("running build"), "{output}");
+        assert_no_esc_after_marker(&output);
         assert!(!output.contains("unknown"), "{output}");
     }
 
@@ -568,35 +578,54 @@ mod tests {
         let shell = format!("fish -C {} -i", shell_single_quote(&init));
         let output = pty(
             &shell,
-            "function jet; test $argv[1] = build; end\njet build\njet test\n__jetpack_status_words\necho JETPACK_FISH_PTY_DONE\nexit 0\n",
+            "echo JETPACK_CAPTURE_START\nfunction jet; sleep .3; test $argv[1] = build; end\njet build\njet test\n\x07\n__jetpack_status_words\necho JETPACK_FISH_PTY_DONE\nexit 0\n",
             true,
         );
         assert!(output.contains("build ok"), "{output}");
         assert!(output.contains("test failed (1)"), "{output}");
         assert!(output.contains("-> test failed. Rerun: jet test"), "{output}");
         assert!(output.contains("JETPACK_FISH_PTY_DONE"), "{output}");
+        assert!(output.contains("running build"), "{output}");
+        assert_no_esc_after_marker(&output);
         assert!(!output.contains("unknown"), "{output}");
     }
 
     #[test]
-    fn zsh_prompt_has_native_hook_matrix_and_ci_requires_zsh() {
-        let rc = zsh_rc("web-api", PromptPathMode::Short, PromptStripMode::On);
-        for required in [
-            "add-zsh-hook preexec __jetpack_preexec",
-            "add-zsh-hook precmd __jetpack_precmd",
-            "__jetpack_spinner",
-            "failed. Rerun:",
-            "git branch --show-current",
-            "bindkey '^G'",
-        ] {
-            assert!(rc.contains(required), "missing zsh prompt hook: {required}");
-        }
-        if std::env::var_os("CI").is_some() {
-            assert!(
-                Command::new("zsh").arg("--version").output().is_ok(),
-                "CI prompt matrix requires zsh"
-            );
-        }
+    fn zsh_prompt_pty_exercises_native_hooks_glance_strip_and_no_color() {
+        Command::new("zsh")
+            .arg("--version")
+            .output()
+            .expect("zsh must be present for prompt PTY coverage");
+        let dir = write_temp_dir("jetpack-prompt-test-zdotdir");
+        std::fs::write(
+            dir.join(".zshrc"),
+            zsh_rc("web-api", PromptPathMode::Short, PromptStripMode::On),
+        )
+        .unwrap();
+        let shell = format!("ZDOTDIR={} zsh -d -i", dir.display());
+        let output = pty(
+            &shell,
+            "unset zle_bracketed_paste\necho JETPACK_CAPTURE_START\njet() { sleep .3; [[ $1 = build ]] }\njet build\njet test\n\x07\n__jetpack_status_words\necho JETPACK_ZSH_PTY_DONE\nexit 0\n",
+            true,
+        );
+        let _ = std::fs::remove_dir_all(dir);
+        assert!(output.contains("build ok"), "{output}");
+        assert!(output.contains("test failed (1)"), "{output}");
+        assert!(output.contains("-> test failed. Rerun: jet test"), "{output}");
+        assert!(output.contains("running build"), "{output}");
+        assert!(output.contains("JETPACK_ZSH_PTY_DONE"), "{output}");
+        assert_no_esc_after_marker(&output);
+        assert!(!output.contains("unknown"), "{output}");
+    }
+
+    #[test]
+    fn prompt_strip_off_omits_status_line_in_all_shells() {
+        let bash = bash_rc("web-api", PromptPathMode::Short, PromptStripMode::Off);
+        let zsh = zsh_rc("web-api", PromptPathMode::Short, PromptStripMode::Off);
+        let fish = fish_init("web-api", PromptPathMode::Short, PromptStripMode::Off);
+        assert!(!bash.contains("$(__jetpack_status_words)\\nweb-api"));
+        assert!(!zsh.contains("$(__jetpack_status_words)\nweb-api"));
+        assert!(!fish.contains("function fish_prompt; __jetpack_status_words; echo;"));
     }
 
     #[test]
