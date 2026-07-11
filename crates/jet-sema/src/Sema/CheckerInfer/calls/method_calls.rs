@@ -276,11 +276,11 @@ impl<'a> Checker<'a> {
                     return self.infer_code_module_call(alias, &mangled, *alias_span, span, args);
                 }
             }
-            if let Expr::Ident(type_name, _) = &**receiver {
+            if let Expr::Ident(type_name, type_span) = &**receiver {
                 // D-SERDE13=B: `Data.Text(x)` etc. — the retired spelling of the value
                 // tree. Point at `DataTree` (no alias, I8) before generic resolution.
                 if type_name == "Data" {
-                    self.diags.push(data_renamed_to_datatree(span));
+                    self.diags.push(data_renamed_to_datatree(*type_span));
                     for a in args.iter_mut() {
                         self.infer(&mut a.expr);
                     }
@@ -693,11 +693,13 @@ impl<'a> Checker<'a> {
                     return Some(Type::Named(Syntax::TYPE_DATA.to_string()));
                 }
                 if !self.is_encodable(&recv_ty) {
+                    let shown = recv_ty.show();
+                    let shown = shown.trim_matches('`');
                     self.diags.push(Diagnostic::error(
                         "E0905",
-                        format!("`{}` does not implement `Encode`", recv_ty.show()),
+                        format!("`{shown}` does not implement `Encode`"),
                         "`.encode()` can only call the value's Encode contract".to_string(),
-                        format!("derive `Encode` on `{}`, or write `impl {}.Encode`", recv_ty.show(), recv_ty.show()),
+                        format!("derive `Encode` on `{shown}`, or write `impl {shown}.Encode`"),
                         Some(span),
                     ));
                     return None;
@@ -706,7 +708,7 @@ impl<'a> Checker<'a> {
             // D-SERDE16=A: public, target-directed Decode dispatch from an ordinary
             // DataTree subtree. This is the spelling generated derives emit too.
             if matches!(&recv_ty, Type::Named(n) if Syntax::is_data_type_name(n))
-                && method == "decode"
+                && method == Syntax::METHOD_DATATREE_DECODE
             {
                 *recv_type_out = Some(Syntax::TYPE_DATA.to_string());
                 if !args.is_empty() || type_args.len() != 1 {
@@ -718,11 +720,13 @@ impl<'a> Checker<'a> {
                 }
                 let target = type_args[0].clone();
                 if !self.is_decodable(&target) {
+                    let shown = target.show();
+                    let shown = shown.trim_matches('`');
                     self.diags.push(Diagnostic::error(
                         "E0905",
-                        format!("`{}` does not implement `Decode`", target.show()),
-                        format!("`DataTree.decode<{}>()` can only call the type's Decode contract", target.show()),
-                        format!("derive `Decode` on `{}`, or write `impl {}.Decode`", target.show(), target.show()),
+                        format!("`{shown}` does not implement `Decode`"),
+                        format!("`DataTree.decode<{shown}>()` can only call the type's Decode contract"),
+                        format!("derive `Decode` on `{shown}`, or write `impl {shown}.Decode`"),
                         Some(span),
                     ));
                 }

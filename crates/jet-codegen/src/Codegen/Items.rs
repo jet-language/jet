@@ -300,8 +300,18 @@ fn emit_columnar_storage(cx: &Cx, s: &StructDef, out: &mut String) {
     // Serialization transparency (D-SOA2D): encode/decode as the AoS array, so
     // `json.to_string` of a columnar list equals the plain `[S]` output. Only
     // emit the impl for the trait the element struct derives.
-    let enc = s.derives.iter().any(|(t, _)| t == Generics::ENCODE);
-    let dec = s.derives.iter().any(|(t, _)| t == Generics::DECODE);
+    // Built-in derives are expanded into ordinary trait blocks before codegen,
+    // so inspect the checked protocol impls as well as any legacy marker still
+    // present. This adapter belongs to the physical columnar storage type; the
+    // logical struct codec itself remains the generated Jet implementation.
+    let enc = s.derives.iter().any(|(t, _)| t == Generics::ENCODE)
+        || s.trait_impls
+            .iter()
+            .any(|block| block.trait_name == Generics::ENCODE);
+    let dec = s.derives.iter().any(|(t, _)| t == Generics::DECODE)
+        || s.trait_impls
+            .iter()
+            .any(|block| block.trait_name == Generics::DECODE);
     if enc {
         out.push_str(&format!(
             "impl user_Encode for {cn} {{\n    fn jet_encode(&self) -> jet_std::DataTree {{ self.to_aos().jet_encode() }}\n}}\n\n"
@@ -1404,6 +1414,7 @@ pub(crate) fn emit_trait_impl(
     type_name: &str,
     type_params: &[crate::AST::TypeParam],
     block: &TraitImplBlock,
+    struct_def: Option<&StructDef>,
     out: &mut String,
 ) {
     let tp_use = Generics::type_param_rust_list(type_params);
@@ -1440,7 +1451,21 @@ pub(crate) fn emit_trait_impl(
     for m in &block.methods {
         emit_trait_method(cx, &block.trait_name, type_name, m, out, 1);
     }
+    // R11/D-SERDE2: built-in Decode derives are now ordinary Jet trait
+    // impls. Keep the migration override attached to that impl instead of the
+    // retired compiler-owned serde emitter; otherwise published historical
+    // data silently bypasses its migration chain.
+    let migration_struct = struct_def.filter(|s|
+        block.trait_name == crate::Generics::DECODE && migration_blocks(cx, s).is_some()
+    );
+    let migration_style = migration_struct.and_then(|s| container_rename_all(&s.serde_markers));
+    if let Some(s) = migration_struct {
+        emit_migration_chain_walker(cx, s, migration_style.as_deref(), out);
+    }
     out.push_str("}\n\n");
+    if let Some(s) = migration_struct {
+        emit_migration_step_fns(cx, s, migration_style.as_deref(), out);
+    }
     if block.trait_name == crate::Syntax::TRAIT_DISPLAY {
         out.push_str(&format!(
             "impl JetDisplay for {} {{\n    fn jet_display(&self) -> String {{ <{} as {}>::display(self) }}\n}}\n\n",

@@ -1480,6 +1480,27 @@ sales :: csv.decode<Sale>(raw) ?? panic("bad csv")   // [Sale]
 print(json.to_string(sales))   // [{"item":"pen","qty":3},{"item":"ink","qty":5}]
 ```
 
+**Hand codecs and subtree dispatch** (D-SERDE2, D-SERDE13–16) use the same
+protocol as built-in derives. Write `impl T.Encode` with `encode(self) ->
+DataTree` and `impl T.Decode` with `decode(tree: DataTree) -> T ? DecodeError`.
+Tree accessors add their field/index path and return `DecodeError`, so `?`
+chains without manual mapping. `tree.decode<T>()` dispatches any subtree
+through `T`'s ordinary `Decode` implementation, including primitives, user
+types, lists, options, and string-keyed maps. A derived parent therefore
+composes with a hand-written field codec; generated and hand-written paths are
+one mechanism.
+
+```jet
+impl Email.Decode {
+    fn decode(tree: DataTree) -> Email ? DecodeError {
+        address := tree.text()?
+        return ok(Email.{ address })
+    }
+}
+
+items := tree.field("items")?.decode<[LineItem]>()?
+```
+
 **Traced decode — was this migrated?** (D-MIGRATE3=A, D-MIGRATE4=A):
 `decode_traced<T>(text)` sits beside `decode<T>` on every codec
 (json/csv/toml/yaml share the decode machinery) and returns

@@ -431,6 +431,54 @@ fn build_and_run(
     )
 }
 
+fn build_and_run_multi(
+    dir: &PathBuf,
+    name: &str,
+    entry: &str,
+    files: &[(&str, &str)],
+) -> (i32, String, String) {
+    for (rel, src) in files {
+        let path = dir.join(rel);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(path, src).unwrap();
+    }
+    let entry_path = dir.join(entry);
+    let src = fs::read_to_string(&entry_path).unwrap();
+    let shown = entry_path.to_string_lossy();
+    let out = jet::compile_with_path(&src, &shown).unwrap_or_else(|diags| {
+        panic!(
+            "front end rejected multi-file fixture:\n{}",
+            jet::render_diagnostics(&shown, &src, &diags)
+        )
+    });
+    let rs = dir.join(format!("{name}.rs"));
+    let bin = dir.join(name);
+    fs::write(&rs, &out.rust).unwrap();
+    let rustc = Command::new("rustc")
+        .args([
+            "--edition",
+            "2021",
+            rs.to_str().unwrap(),
+            "-o",
+            bin.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        rustc.status.success(),
+        "rustc rejected generated multi-file code:\n{}",
+        String::from_utf8_lossy(&rustc.stderr)
+    );
+    let run = Command::new(&bin).current_dir(dir).output().unwrap();
+    (
+        run.status.code().unwrap_or(0),
+        String::from_utf8_lossy(&run.stdout).into_owned(),
+        String::from_utf8_lossy(&run.stderr).into_owned(),
+    )
+}
+
 #[cfg(unix)]
 fn write_executable(path: &std::path::Path, body: &str) {
     fs::write(path, body).unwrap();
@@ -2562,6 +2610,98 @@ fn run() {
     let (code, stdout, stderr) = build_and_run(&dir, "struct_deny", src, &[], None);
     assert_eq!(code, 0, "generated strict codec failed: {stderr}");
     assert_eq!(stdout, "extra\nE2412: unknown field `extra`\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// Card #131: built-in Decode fragments live beside their source type, so a
+/// consumer can dispatch through an imported type without entry-local aliases.
+/// The nested List/Option/Map fields also prove D-SERDE16's public dispatch.
+#[test]
+fn generated_decode_dispatches_across_module_boundaries() {
+    let dir = std::env::temp_dir().join(format!("jet_serde_module_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let lib = r#"
+@[Codable]
+pub struct Address { pub city: String }
+
+@[Codable]
+pub struct Order {
+    pub shipping: Address
+    pub quantities: [Int]
+    pub coupon: String?
+    pub labels: [String: Int]
+}
+
+"#;
+    let main = r#"
+use core.encoding.json as json
+use orders
+
+fn run() {
+    order := json.decode<orders.Order>("{{\"shipping\":{{\"city\":\"Paris\"}},\"quantities\":[2,3],\"coupon\":null,\"labels\":{{\"fragile\":1}}}}") ?? panic("decode")
+    print(json.to_string(order))
+}
+"#;
+    let (code, stdout, stderr) = build_and_run_multi(
+        &dir,
+        "serde_module",
+        "main.jet",
+        &[("main.jet", main), ("orders.jet", lib)],
+    );
+    assert_eq!(code, 0, "cross-module generated decode failed: {stderr}");
+    assert_eq!(stdout, "{\"labels\":{\"fragile\":1},\"quantities\":[2,3],\"shipping\":{\"city\":\"Paris\"}}\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// D-METADERIVE1 orphan law: expansion is legal when either derive provider
+/// or target type is entry-local. Both directions must generate usable code.
+#[test]
+fn user_derive_orphan_rule_allows_either_local_side() {
+    let dir = std::env::temp_dir().join(format!("jet_derive_orphan_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let lib = r#"
+derive T.RemoteLabel {
+    info :: T.reflect()
+    name :: info.name
+    emit("impl $name {{ fn remote_label(self) -> String {{ return \"remote:$name\" }} }}")
+}
+
+#[LocalLabel]
+pub struct RemoteType { pub value: Int }
+
+pub fn remote_type_label() -> String {
+    value := RemoteType.{ value: 2 }
+    return value.local_label()
+}
+"#;
+    let main = r#"
+use labels
+
+derive T.LocalLabel {
+    info :: T.reflect()
+    name :: info.name
+    emit("impl $name {{ pub fn local_label(self) -> String {{ return \"local:$name\" }} }}")
+}
+
+#[RemoteLabel]
+struct LocalType { value: Int }
+
+fn run() {
+    local := LocalType.{ value: 1 }
+    print(local.remote_label())
+    print(labels.remote_type_label())
+}
+"#;
+    let (code, stdout, stderr) = build_and_run_multi(
+        &dir,
+        "derive_orphan",
+        "main.jet",
+        &[("main.jet", main), ("labels.jet", lib)],
+    );
+    assert_eq!(code, 0, "local-orphan derive dispatch failed: {stderr}");
+    assert_eq!(stdout, "remote:LocalType\nlocal:RemoteType\n");
     let _ = fs::remove_dir_all(&dir);
 }
 

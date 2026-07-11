@@ -743,6 +743,18 @@ impl Cx {
             Type::Named(name) if self.trait_names.contains(name) => {
                 format!("Box<dyn {}>", Generics::user_trait_rust(name))
             }
+            Type::Named(name) if name.contains('.') => {
+                let (alias, leaf) = name.split_once('.').unwrap();
+                match self.import_mods.get(alias) {
+                    Some(rust_mod) => format!(
+                        "{}{}::{}",
+                        self.root_prefix,
+                        rust_mod,
+                        user_type_rust(leaf)
+                    ),
+                    None => user_type_rust(name),
+                }
+            }
             Type::Named(name) if self.foreign_types.contains_key(name.as_str()) => {
                 let rust_mod = &self.foreign_types[name.as_str()];
                 format!("{}{}::user_{name}", self.root_prefix, rust_mod)
@@ -944,12 +956,27 @@ impl Cx {
                 format!("jet_gc::Gc<{}>", self.rust_type(&args[0]))
             }
             Type::Apply { name, args } => {
-                if args.is_empty() {
+                let head = if let Some((alias, leaf)) = name.split_once('.') {
+                    self.import_mods.get(alias).map_or_else(
+                        || user_type_rust(name),
+                        |rust_mod| {
+                            format!(
+                                "{}{}::{}",
+                                self.root_prefix,
+                                rust_mod,
+                                user_type_rust(leaf)
+                            )
+                        },
+                    )
+                } else {
                     user_type_rust(name)
+                };
+                if args.is_empty() {
+                    head
                 } else {
                     format!(
                         "{}<{args}>",
-                        user_type_rust(name),
+                        head,
                         args = args
                             .iter()
                             .map(|a| self.rust_type(a))

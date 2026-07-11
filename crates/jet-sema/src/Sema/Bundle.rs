@@ -764,6 +764,42 @@ pub(crate) fn check_bundle_opts(
         })
         .collect();
 
+    // D-METADERIVE1=A orphan law needs a bundle-wide provider view: a derive
+    // may be supplied by the entry module for an imported type, or imported
+    // for an entry-local type.  Clone provider bodies/helpers before mutating
+    // modules so expansion can attach generated items beside the target type.
+    let derive_providers: Vec<(
+        usize,
+        String,
+        String,
+        Vec<crate::AST::Stmt>,
+        HashMap<String, Func>,
+    )> = bundle
+        .modules
+        .iter()
+        .enumerate()
+        .flat_map(|(origin, module)| {
+            let helpers: HashMap<String, Func> = module
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    Item::Func(f) => Some((f.name.clone(), f.clone())),
+                    _ => None,
+                })
+                .collect();
+            module.items.iter().filter_map(move |item| match item {
+                Item::UserDerive(d) => Some((
+                    origin,
+                    d.trait_name.clone(),
+                    d.type_param.clone(),
+                    d.body.clone(),
+                    helpers.clone(),
+                )),
+                _ => None,
+            })
+        })
+        .collect();
+
     for (idx, module) in bundle.modules.iter_mut().enumerate() {
         super::Protocol::expand_module_protocols(&mut module.items, &mut diags);
         // D-DOTSCOPE1: validate contextual `.member { … }` scope statements
@@ -999,19 +1035,7 @@ pub(crate) fn check_bundle_opts(
         // derive bodies can call helper functions and access TypeInfo. Re-entry (D-CTCODEGEN1=A):
         // emitted fragments go through the full lexer→parser pipeline and are appended as items.
         {
-            let user_derives: Vec<(String, String, Vec<crate::AST::Stmt>)> = module
-                .items
-                .iter()
-                .filter_map(|i| {
-                    if let Item::UserDerive(d) = i {
-                        Some((d.trait_name.clone(), d.type_param.clone(), d.body.clone()))
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-
-            if !user_derives.is_empty() {
+            if !derive_providers.is_empty() {
                 let struct_infos: Vec<&crate::AST::StructDef> = module
                     .items
                     .iter()
@@ -1024,53 +1048,60 @@ pub(crate) fn check_bundle_opts(
                     })
                     .collect();
 
-                let actual_funcs: HashMap<String, &Func> = module
-                    .items
-                    .iter()
-                    .filter_map(|i| {
-                        if let Item::Func(f) = i {
-                            Some((f.name.clone(), f))
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-
                 let mut new_items: Vec<Item> = Vec::new();
 
                 for s in &struct_infos {
                     for (derive_name, derive_span) in &s.derives {
-                        // D-METADERIVE1=A orphan rule: a UserDerive defined and applied
-                        // in the same imported module violates the orphan rule (E2711).
-                        // Expansion is only allowed in the entry module (idx == 0).
-                        if idx > 0 && user_derives.iter().any(|(tn, _, _)| tn == derive_name) {
+                        // Prefer an entry-local provider, then one beside the target.
+                        // Remaining imported/imported pairs violate the orphan law:
+                        // either provider or target must be entry-local.
+                        let provider = derive_providers
+                            .iter()
+                            .filter(|(_, name, _, _, _)| name == derive_name)
+                            .min_by_key(|(origin, _, _, _, _)| {
+                                if *origin == 0 {
+                                    0
+                                } else if *origin == idx {
+                                    1
+                                } else {
+                                    2
+                                }
+                            });
+                        let Some((provider_idx, _, type_param, body, helper_funcs)) = provider else {
+                            continue;
+                        };
+                        if idx > 0 && *provider_idx > 0 {
                             diags.push(Diagnostic::error(
                                 "E2711",
                                 format!(
-                                    "derive orphan rule: `derive T.{}` and `{}` are both in an imported module",
+                                    "derive orphan rule: neither `derive T.{}` nor `{}` is local",
                                     derive_name, s.name
                                 ),
-                                "user-derive expansion can only run in the entry module; both the derive block and the struct are from the same imported file".to_string(),
+                                "a generated implementation is owned locally only when the derive provider or target type lives in the entry module".to_string(),
                                 format!(
-                                    "move both `derive {}` and `struct {}` to your entry module; derive expansion only runs there",
+                                    "define `derive T.{}` or `{}` in the entry module",
                                     derive_name, s.name
                                 ),
+                                // The violating marker belongs to an imported source file;
+                                // the bundled diagnostic currently renders against the entry
+                                // file, so omit a misleading entry-file caret.
                                 None,
                             ));
                             continue;
                         }
-                        if let Some((_, type_param, body)) =
-                            user_derives.iter().find(|(tn, _, _)| tn == derive_name)
-                        {
-                            let type_info = crate::Comptime::build_struct_type_info(s);
+                        let actual_funcs: HashMap<String, &Func> = helper_funcs
+                            .iter()
+                            .map(|(name, func)| (name.clone(), func))
+                            .collect();
+                        let type_info = crate::Comptime::build_struct_type_info(s);
 
-                            match crate::Comptime::evaluate_derive_body(
-                                body,
-                                type_param,
-                                type_info,
-                                &actual_funcs,
-                                &bundle.project_root,
-                            ) {
+                        match crate::Comptime::evaluate_derive_body(
+                            body,
+                            type_param,
+                            type_info,
+                            &actual_funcs,
+                            &bundle.project_root,
+                        ) {
                                 Ok(fragments) => {
                                     for fragment in fragments {
                                         let (toks, lex_diags) = crate::Lexer::lex(&fragment);
@@ -1118,7 +1149,7 @@ pub(crate) fn check_bundle_opts(
                                 }
                                 // E2710: derive body failed at comptime. Wrap with context
                                 // pointing at the #[TraitName] trigger on the struct.
-                                Err(inner) => diags.push(Diagnostic::error(
+                            Err(inner) => diags.push(Diagnostic::error(
                                     "E2710",
                                     format!(
                                         "`derive T.{}` body failed while expanding `#[{}]` on `{}`",
@@ -1127,8 +1158,7 @@ pub(crate) fn check_bundle_opts(
                                     inner.what.clone(),
                                     "fix the `derive` body so it generates valid Jet at compile time".to_string(),
                                     Some(*derive_span),
-                                )),
-                            }
+                            )),
                         }
                     }
                 }

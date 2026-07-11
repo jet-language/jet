@@ -405,6 +405,21 @@ pub(crate) fn import_ret_map(
 }
 
 pub(crate) fn emit_program_items(cx: &Cx, items: &[Item], out: &mut String, include_main: bool) {
+    let has_serde_protocol_impl = items.iter().any(|item| match item {
+        Item::Struct(s) => s.trait_impls.iter().any(|block| {
+            matches!(block.trait_name.as_str(), crate::Generics::ENCODE | crate::Generics::DECODE)
+        }),
+        Item::Enum(e) => e.trait_impls.iter().any(|block| {
+            matches!(block.trait_name.as_str(), crate::Generics::ENCODE | crate::Generics::DECODE)
+        }),
+        Item::Impl(i) => i.trait_name.as_deref().is_some_and(|name| {
+            matches!(name, crate::Generics::ENCODE | crate::Generics::DECODE)
+        }),
+        _ => false,
+    });
+    if !cx.root_prefix.is_empty() && has_serde_protocol_impl {
+        out.push_str("use super::{user_Encode, user_Decode, jet_std};\n\n");
+    }
     let tuple_shapes = collect_tuple_shapes(items);
     emit_tuple_structs(cx, &tuple_shapes, out);
     emit_synthetic_display_trait(out);
@@ -445,13 +460,13 @@ pub(crate) fn emit_program_items(cx: &Cx, items: &[Item], out: &mut String, incl
             Item::Struct(s) => {
                 emit_type_impl(cx, &s.name, &s.type_params, &s.methods, out);
                 for block in &s.trait_impls {
-                    emit_trait_impl(cx, &s.name, &s.type_params, block, out);
+                    emit_trait_impl(cx, &s.name, &s.type_params, block, Some(s), out);
                 }
             }
             Item::Enum(e) => {
                 emit_type_impl(cx, &e.name, &e.type_params, &e.methods, out);
                 for block in &e.trait_impls {
-                    emit_trait_impl(cx, &e.name, &e.type_params, block, out);
+                    emit_trait_impl(cx, &e.name, &e.type_params, block, None, out);
                 }
             }
             Item::Impl(i) => {

@@ -140,6 +140,9 @@ pub const TYPE_JSON_ERROR: &str = "JSONError";
 /// set back them. Variants: `Null`, `Bool`, `Int`, `Float`, `Text`, `Array`,
 /// `Object`.
 pub const TYPE_DATA: &str = "DataTree";
+/// D-SERDE16=A (ratified 2026-07-11): public target-directed subtree dispatch.
+/// `tree.decode<T>()` calls only `T`'s ordinary `Decode` protocol impl.
+pub const METHOD_DATATREE_DECODE: &str = "decode";
 pub const TYPE_DATA_JSON: &str = "Json";
 pub const TYPE_DATA_TOML: &str = "Toml";
 pub const TYPE_DATA_YAML: &str = "Yaml";
@@ -550,4 +553,3 @@ pub fn scope_members(marker: &str) -> Option<&'static [&'static str]> {
         _ => None,
     }
 }
-

@@ -1476,6 +1476,13 @@ chains inside a hand `decode` with no mapping ceremony; hand-built object
 nodes take the map literal — `DataTree.Object({ "name": v, … })` —
 insertion-ordered, and the pair-list form is not accepted.
 
+**D-SERDE16 = A** *(ratified 2026-07-11, card #131)*: decode an arbitrary
+subtree through its target's public protocol with `tree.decode<T>()`. The
+spelling works uniformly for primitives, user types, `List`, `Option`, and
+`Map`; generated derives emit it as ordinary Jet source. A target without a
+`Decode` implementation is E0905 before codegen. No compiler-only helper,
+hidden alias, alternate codec, or fallback exists.
+
 **CLI & IO**: builder-spec arg parsing `args.spec().flag(…).option(…)
 .positional(…)` with generated `--help` (D-ARGS1). `io.stdin()` handle with
 `.lines()`/`.read_line()` (D-STDIN1). Scoped `live { … }` raw-terminal block

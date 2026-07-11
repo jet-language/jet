@@ -1603,7 +1603,10 @@ pub(crate) fn lower_method_call(
                 },
             };
         }
-        if handle == Syntax::TYPE_DATA && method == "decode" && args.is_empty() {
+        if handle == Syntax::TYPE_DATA
+            && method == Syntax::METHOD_DATATREE_DECODE
+            && args.is_empty()
+        {
             if let Some(Type::Result { ok, .. }) = resolved_ret {
                 return TExpr {
                     ty: resolved_ret.cloned().unwrap_or_else(unit_type),
