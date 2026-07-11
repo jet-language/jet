@@ -17974,6 +17974,56 @@
       "ratifiedAt": "2026-07-07",
       "draft": false,
       "retiredAt": "2026-07-11T02:21:50.916Z"
+    },
+    {
+      "id": "D-TESTKIT1",
+      "cardId": "c07vdfen",
+      "group": "tooling",
+      "title": "Testing toolkit breadth",
+      "gist": "Choose the Core/test surface beyond property tests, doctests, coverage, and bench basics.",
+      "explainer": "Best hybrid: rich test ergonomics as library power, preserving one test syntax surface.",
+      "story": "Dana maintains a library. She needs snapshots, fuzzing, fixtures, golden files, temp dirs, HTTP test servers, fake clocks, deterministic random seeds, and benchmark reports with budgets.",
+      "inWild": "#Test fn parses_config() {\n    assert(parse(input).ok)\n}",
+      "detail": "Hybrid review 2026-07-07: recommended option combines the beginner/default path with expert control where that preserves one semantic mechanism. Best hybrid: rich test ergonomics as library power, preserving one test syntax surface.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Hybrid: core.testing helpers under existing #Test syntax (recommended)",
+          "detail": "Keep #Test as the only test syntax. core.testing adds snapshots, fixtures, corpora, temp dirs, fake clocks/random, HTTP servers, golden files, and benchmark budgets. Helpers emit structured test metadata so reports/CI can render categories without new markers for every feature.",
+          "code": "use core.testing as test\n\n#Test fn renders_snapshot() {\n    test.snapshot(\"invoice\", render(invoice))\n}\n#Test fn http_client() {\n    srv :: test.http_server((req) => http.text(\"ok\"))\n}"
+        },
+        {
+          "key": "B",
+          "name": "Attributes for every feature",
+          "detail": "Add markers for snapshot/fuzz/fixture/bench cases. Visible, but grows syntax for jobs library helpers can do.",
+          "code": "#[Snapshot(\"invoice\")] #Test fn renders() { ... }"
+        },
+        {
+          "key": "C",
+          "name": "External test libraries",
+          "detail": "Keep core test minimal. Ecosystem fragments around snapshots/fuzzing.",
+          "code": "use acme.testing"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "insta/proptest/criterion are separate crates; Jet can bless the useful floor.",
+          "code": "insta::assert_snapshot!()"
+        },
+        {
+          "lang": "Go",
+          "note": "testing package plus httptest/fstest/iotest are stdlib strengths.",
+          "code": "httptest.NewServer(handler)"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "created": "2026-07-07T19:15:32.469Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-07",
+      "draft": false,
+      "retiredAt": "2026-07-11T03:11:08.961Z"
     }
   ],
   "cards": [
@@ -47937,6 +47987,34 @@
       "by": "codex-orchestrator",
       "action": "card.update",
       "ref": "c06tng04",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-10T16:27:04.049Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0r5ttg9",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-10T16:27:04.049Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c9q0534j",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-10T16:27:04.049Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "caq065h8",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-10T16:27:04.049Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0w0dyhm",
       "note": "workOrder"
     }
   ]

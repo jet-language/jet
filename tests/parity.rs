@@ -90,14 +90,18 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     // and CI-enforced (this test), not closing a dozen unrelated stdlib
     // surfaces in one pass. Each group below is its own future card.
     //
-    // core.data: the whole typed-table/series/stats/plot facade (D-DATA-
-    // SURFACE1) — collect/filter/group_*/rolling_mean/quantile/plot-as-SVG.
-    ("core.data", "bar_svg"),
-    ("core.data", "bar_text"),
+    // core.data: fixed-signature stats (sum/mean/min/max/median/variance/
+    // stddev/quantile/rolling_mean/describe/status) and plot rendering
+    // (bar_text/bar_svg) are PORTED (card #392 pass 3, `DataLite.rs`). The
+    // generic call-site-typed table/lazy-pipeline half (D-DATA-SURFACE1) —
+    // a typed-decode + closure-driven pipeline over row handles, resolved by
+    // `infer_core_call`/`enc_target_rust`, not a plain fixed signature — is
+    // its own future card: it needs new `CtValue` machinery for a generic
+    // decoded-table handle plus closure application over rows, which is a
+    // distinct design pass from porting a pure math/string function.
     ("core.data", "collect"),
     ("core.data", "count"),
     ("core.data", "csv"),
-    ("core.data", "describe"),
     ("core.data", "filter"),
     ("core.data", "group_count"),
     ("core.data", "group_mean"),
@@ -105,23 +109,13 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     ("core.data", "lazy"),
     ("core.data", "lazy_filter"),
     ("core.data", "lazy_sort_by"),
-    ("core.data", "max"),
-    ("core.data", "mean"),
-    ("core.data", "median"),
-    ("core.data", "min"),
     ("core.data", "missing_count"),
     ("core.data", "plan"),
-    ("core.data", "quantile"),
-    ("core.data", "rolling_mean"),
     ("core.data", "rows"),
     ("core.data", "series"),
     ("core.data", "sort_by"),
-    ("core.data", "status"),
-    ("core.data", "stddev"),
-    ("core.data", "sum"),
     ("core.data", "table"),
     ("core.data", "values"),
-    ("core.data", "variance"),
     // core.archive / core.compress.*: gzip/zip/tar/zstd — needs a hand-rolled
     // (I6) compression implementation ported into the interpreter, not a
     // one-line Rust std call.

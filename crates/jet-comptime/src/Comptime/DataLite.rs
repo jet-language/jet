@@ -160,3 +160,74 @@ fn svg_escape(s: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
 }
+
+// `bar_text`/`bar_svg` take `[DataGroup]`, but `DataGroup` isn't a
+// user-constructible type at comptime/REPL yet (only `group_count`/
+// `group_sum`/`group_mean` — the still-open generic pipeline gap — produce
+// one), so there's no Jet-source transcript to exercise them with; these
+// unit tests check the ported function directly against AOT's exact
+// literal output (`jet_data_bar_text`/`_svg` in `DataFmt.rs`) instead.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bar_text_matches_aot_shape() {
+        let groups = vec![("a".to_string(), 3), ("b".to_string(), 1)];
+        assert_eq!(bar_text(&groups), "a | ### 3\nb | # 1");
+    }
+
+    #[test]
+    fn bar_text_clamps_negative_and_over_40() {
+        let groups = vec![("neg".to_string(), -5), ("big".to_string(), 100)];
+        assert_eq!(
+            bar_text(&groups),
+            format!("neg |  -5\nbig | {} 100", "#".repeat(40))
+        );
+    }
+
+    #[test]
+    fn bar_svg_matches_aot_shape() {
+        let groups = vec![("a".to_string(), 2)];
+        let svg = bar_svg(&groups);
+        assert!(svg.starts_with(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"320\" height=\"48\""
+        ));
+        assert!(svg.ends_with("</svg>"));
+        assert!(svg.contains(">a</text>"));
+        assert!(svg.contains(">2</text>"));
+    }
+
+    #[test]
+    fn svg_escape_matches_aot() {
+        assert_eq!(
+            svg_escape("<a & \"b\">"),
+            "&lt;a &amp; &quot;b&quot;&gt;"
+        );
+    }
+
+    #[test]
+    fn stats_match_aot_formulas() {
+        let xs = [1.0, 2.0, 3.0, 4.0];
+        assert_eq!(sum(&xs), 10.0);
+        assert_eq!(mean(&xs), 2.5);
+        assert_eq!(min(&xs), 1.0);
+        assert_eq!(max(&xs), 4.0);
+        assert_eq!(median(&xs), 2.5);
+        assert_eq!(variance(&xs), 1.25);
+        assert_eq!(stddev(&xs), 1.25f64.sqrt());
+        assert_eq!(quantile(&xs, 0.25), 1.75);
+        assert_eq!(rolling_mean(&xs, 2), vec![1.0, 1.5, 2.5, 3.5]);
+    }
+
+    #[test]
+    fn empty_stats_are_zero_not_panics() {
+        let xs: [f64; 0] = [];
+        assert_eq!(sum(&xs), 0.0);
+        assert_eq!(mean(&xs), 0.0);
+        assert_eq!(min(&xs), 0.0);
+        assert_eq!(max(&xs), 0.0);
+        assert_eq!(median(&xs), 0.0);
+        assert_eq!(variance(&xs), 0.0);
+    }
+}

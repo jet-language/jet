@@ -99,6 +99,24 @@ const MODULE_CASES: &[&str] = &[
     "use core.url as url\ncomptime C = url.percent_decode(\"a%20b%2Fc\") ?? panic(\"bad\")\n\nfn run() {\n    r :: url.percent_decode(\"a%20b%2Fc\") ?? panic(\"bad\")\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
     "use core.url as url\ncomptime C = url.percent_decode(\"bad%\") ?? \"fallback\"\n\nfn run() {\n    r :: url.percent_decode(\"bad%\") ?? \"fallback\"\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
     "use core.url as url\ncomptime C = url.query([[\"a\", \"1\"], [\"b\", \"2 c\"]])\n\nfn run() {\n    r :: url.query([[\"a\", \"1\"], [\"b\", \"2 c\"]])\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
+    // card #392 pass 3: `core.data`'s fixed-signature stats surface, ported
+    // verbatim from AOT's `jet_data_*` (`EncodingTraits.rs`, see
+    // `DataLite.rs`). `describe`/`status`/`bar_text`/`bar_svg` return/take
+    // builtin struct values (`DataSummary`/`DataStatus`/`DataGroup`), which
+    // this crate's generic `CtValue::Struct` display can't print the same
+    // way AOT's derived struct `Display` does (a pre-existing limit shared
+    // by every builtin struct type, not specific to `core.data` — see
+    // `UrlLite.rs`'s note) — covered instead by
+    // `tests/repl.rs::repl_core_data_dispatch`.
+    "use core.data as data\ncomptime C = data.sum([1.0, 2.0, 3.5])\n\nfn run() {\n    r :: data.sum([1.0, 2.0, 3.5])\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\ncomptime C = data.mean([1.0, 2.0, 3.0, 4.0])\n\nfn run() {\n    r :: data.mean([1.0, 2.0, 3.0, 4.0])\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\ncomptime C = data.median([5.0, 1.0, 3.0, 2.0])\n\nfn run() {\n    r :: data.median([5.0, 1.0, 3.0, 2.0])\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\ncomptime C = data.variance([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0])\n\nfn run() {\n    r :: data.variance([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0])\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\ncomptime C = data.stddev([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0])\n\nfn run() {\n    r :: data.stddev([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0])\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\ncomptime C = data.quantile([1.0, 2.0, 3.0, 4.0, 5.0], 0.25)\n\nfn run() {\n    r :: data.quantile([1.0, 2.0, 3.0, 4.0, 5.0], 0.25)\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\ncomptime C = data.rolling_mean([1.0, 2.0, 3.0, 4.0], 2)\n\nfn run() {\n    r :: data.rolling_mean([1.0, 2.0, 3.0, 4.0], 2)\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\ncomptime C = data.min([3.0, -1.0, 5.0])\n\nfn run() {\n    r :: data.min([3.0, -1.0, 5.0])\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\ncomptime C = data.max([3.0, -1.0, 5.0])\n\nfn run() {\n    r :: data.max([3.0, -1.0, 5.0])\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
 ];
 
 #[test]

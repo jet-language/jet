@@ -1073,3 +1073,34 @@ fn repl_core_url_dispatch() {
     assert!(out.contains("err : Result"), "got: {out}");
     assert!(out.contains("Url(scheme: file"), "got: {out}");
 }
+
+// ── card #392 pass 3: `core.data`'s fixed-signature stats/plot surface now
+// dispatches at comptime, ported verbatim from AOT's `jet_data_*`
+// (`EncodingTraits.rs` + `DataFmt.rs`, see `DataLite.rs`). `describe`/
+// `status`/`bar_text`/`bar_svg` touch builtin struct values, so they're
+// covered here (repl transcript) rather than `comptime_diff` — see that
+// file's note on why struct `Display` can't be compared byte-for-byte yet.
+// `bar_text`/`bar_svg` take `[DataGroup]`, but `DataGroup` isn't a
+// user-constructible type name at comptime/REPL (E0119 — it's only ever
+// produced by `group_count`/`group_sum`/`group_mean`, the generic
+// call-site-typed pipeline functions that are still an open gap). So
+// there's no Jet-source way to exercise `bar_text`/`bar_svg` standalone yet
+// — they're verified instead by `DataLite.rs`'s own `#[cfg(test)]` module
+// against AOT's exact expected output, and will get a real transcript once
+// `group_*` closes that gap.
+#[test]
+fn repl_core_data_dispatch() {
+    let inputs = &[
+        "use core.data as data",
+        "data.describe([1.0, 2.0, 3.0, 4.0])",
+        "data.status()",
+    ];
+    let out = run_transcript(inputs, None);
+    assert!(
+        !out.contains("E0956"),
+        "core.data stats surface should dispatch at comptime, got: {out}"
+    );
+    assert!(out.contains("DataSummary(count: 4"), "got: {out}");
+    assert!(out.contains("mean: 2.5"), "got: {out}");
+    assert!(out.contains("DataStatus(step: core.data.csv"), "got: {out}");
+}

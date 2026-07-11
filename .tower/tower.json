@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 495,
-    "rev": 3273,
+    "rev": 3277,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -5387,12 +5387,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-TEXTUNICODE1=A: Hybrid: core.text algorithms with String-aware tooling. core.text owns Unicode algorithms: normalization, case folding, segmentation, width, classification, and UTF-8/scalar helpers. String stays small. LSP/docs expose common text helpers from String contexts but insert core.text calls, preserving one callable surface.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: corelib audit: core.text — Unicode completeness (case folding, segmentation, width)\n\nCurrent law: Existing linked decisions: none yet. D-CORENS1 keeps all first-party modules under core.*; I6 forbids compiler deps; D-STDRUBRIC1 requires mechanical core API laws.\n\nBuild order: Audit current Core/API/prelude/docs/tests first; write failing UI/golden/unit fixtures; implement std-only or approved bridge code; update docs/reference and syntax-decisions when law changes; run targeted tests, then full nix develop -c cargo test before close.\n\nAcceptance: Examples/goldens or UI snapshots prove each shipped behavior; stdlib map records shipped/carded/declined rows; no rustc/user-hostile errors; no compiler external deps.\n\nDependencies/collisions: Respect neighboring core cards: io/args/process separate; text before regex; net/url before http; encoding before data/db; random never owns secrets.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "fable-main",
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "fable-main",
+          "text": "fable-main starting via jet-impl builder (audit-first; ratified D-TEXTUNICODE1=A, D-TEXTWIDTH1=B)."
+        },
         {
           "at": "2026-07-09",
           "by": "codex-main",
@@ -5488,7 +5493,8 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-11T03:11:23.384Z"
     },
     {
       "id": "c0z3l25j",
@@ -5833,12 +5839,22 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-TESTKIT1=A: Hybrid: core.testing helpers under existing #Test syntax. Keep #Test as the only test syntax. core.testing adds snapshots, fixtures, corpora, temp dirs, fake clocks/random, HTTP servers, golden files, and benchmark budgets. Helpers emit structured test metadata so reports/CI can render categories without new markers for every feature.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: corelib audit: testing toolkit — fuzzing, snapshots, benchmarks beyond M11\n\nCurrent law: Existing linked decisions: none yet. D-CORENS1 keeps all first-party modules under core.*; I6 forbids compiler deps; D-STDRUBRIC1 requires mechanical core API laws.\n\nBuild order: Audit current Core/API/prelude/docs/tests first; write failing UI/golden/unit fixtures; implement std-only or approved bridge code; update docs/reference and syntax-decisions when law changes; run targeted tests, then full nix develop -c cargo test before close.\n\nAcceptance: Examples/goldens or UI snapshots prove each shipped behavior; stdlib map records shipped/carded/declined rows; no rustc/user-hostile errors; no compiler external deps.\n\nDependencies/collisions: Respect neighboring core cards: io/args/process separate; text before regex; net/url before http; encoding before data/db; random never owns secrets.",
       "blockedBy": [],
       "assignee": "fable-main",
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "fable-main",
+          "text": "Closed by fable-main: audit + bench_budget real impl + fuzz harness + runner recursion/parallel/filter/shuffle, all inside ratified D-TESTKIT1=A, docs synced, no owner gates."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "fable-main",
+          "text": "fable-main parent verification: jet_test 25/25, cli 58/58, dev_default battery green (bench flake gone), fresh build cache. Full-suite evidence carries from session baseline; final suite pass pending #392 pass 3 landing."
+        },
         {
           "at": "2026-07-11",
           "by": "fable-main",
@@ -17505,55 +17521,6 @@
       "draft": false
     },
     {
-      "id": "D-TESTKIT1",
-      "cardId": "c07vdfen",
-      "group": "tooling",
-      "title": "Testing toolkit breadth",
-      "gist": "Choose the Core/test surface beyond property tests, doctests, coverage, and bench basics.",
-      "explainer": "Best hybrid: rich test ergonomics as library power, preserving one test syntax surface.",
-      "story": "Dana maintains a library. She needs snapshots, fuzzing, fixtures, golden files, temp dirs, HTTP test servers, fake clocks, deterministic random seeds, and benchmark reports with budgets.",
-      "inWild": "#Test fn parses_config() {\n    assert(parse(input).ok)\n}",
-      "detail": "Hybrid review 2026-07-07: recommended option combines the beginner/default path with expert control where that preserves one semantic mechanism. Best hybrid: rich test ergonomics as library power, preserving one test syntax surface.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Hybrid: core.testing helpers under existing #Test syntax (recommended)",
-          "detail": "Keep #Test as the only test syntax. core.testing adds snapshots, fixtures, corpora, temp dirs, fake clocks/random, HTTP servers, golden files, and benchmark budgets. Helpers emit structured test metadata so reports/CI can render categories without new markers for every feature.",
-          "code": "use core.testing as test\n\n#Test fn renders_snapshot() {\n    test.snapshot(\"invoice\", render(invoice))\n}\n#Test fn http_client() {\n    srv :: test.http_server((req) => http.text(\"ok\"))\n}"
-        },
-        {
-          "key": "B",
-          "name": "Attributes for every feature",
-          "detail": "Add markers for snapshot/fuzz/fixture/bench cases. Visible, but grows syntax for jobs library helpers can do.",
-          "code": "#[Snapshot(\"invoice\")] #Test fn renders() { ... }"
-        },
-        {
-          "key": "C",
-          "name": "External test libraries",
-          "detail": "Keep core test minimal. Ecosystem fragments around snapshots/fuzzing.",
-          "code": "use acme.testing"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Rust",
-          "note": "insta/proptest/criterion are separate crates; Jet can bless the useful floor.",
-          "code": "insta::assert_snapshot!()"
-        },
-        {
-          "lang": "Go",
-          "note": "testing package plus httptest/fstest/iotest are stdlib strengths.",
-          "code": "httptest.NewServer(handler)"
-        }
-      ],
-      "rec": "A",
-      "status": "ratified",
-      "created": "2026-07-07T19:15:32.469Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-07-07",
-      "draft": false
-    },
-    {
       "id": "D-JPK-OVERLAY1",
       "cardId": "c0yzg1yu",
       "group": "tooling",
@@ -23794,6 +23761,34 @@
   ],
   "events": [
     {
+      "at": "2026-07-11T03:11:25.292Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0wx96s2",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T03:11:23.385Z",
+      "by": "fable-main",
+      "action": "card.claim",
+      "ref": "c0wx96s2",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T03:11:08.947Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c07vdfen",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T03:11:07.032Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c07vdfen",
+      "note": "phase,logEntry"
+    },
+    {
       "at": "2026-07-11T03:09:06.054Z",
       "by": "fable-main",
       "action": "card.update",
@@ -27263,34 +27258,6 @@
       "by": "codex-orchestrator",
       "action": "card.update",
       "ref": "c0fiunwy",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.049Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0w0dyhm",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.049Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "caq065h8",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.049Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c9q0534j",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.049Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0r5ttg9",
       "note": "workOrder"
     }
   ],
