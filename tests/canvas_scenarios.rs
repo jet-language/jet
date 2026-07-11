@@ -5,11 +5,37 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::Once;
+use std::sync::{Condvar, Mutex, Once, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
 static BUILD_JET: Once = Once::new();
+const MAX_CANVAS_BROWSERS: usize = 4;
+static CANVAS_BROWSER_POOL: OnceLock<(Mutex<usize>, Condvar)> = OnceLock::new();
+
+struct CanvasBrowserPermit;
+
+impl CanvasBrowserPermit {
+    fn acquire() -> Self {
+        let (available, wake) =
+            CANVAS_BROWSER_POOL.get_or_init(|| (Mutex::new(MAX_CANVAS_BROWSERS), Condvar::new()));
+        let mut available = available.lock().expect("Canvas browser permit lock poisoned");
+        while *available == 0 {
+            available = wake.wait(available).expect("Canvas browser permit lock poisoned");
+        }
+        *available -= 1;
+        Self
+    }
+}
+
+impl Drop for CanvasBrowserPermit {
+    fn drop(&mut self) {
+        let (available, wake) =
+            CANVAS_BROWSER_POOL.get_or_init(|| (Mutex::new(MAX_CANVAS_BROWSERS), Condvar::new()));
+        *available.lock().expect("Canvas browser permit lock poisoned") += 1;
+        wake.notify_one();
+    }
+}
 
 const DEMO: &str = r#"fn helper() -> Int {
     return 1
@@ -186,6 +212,7 @@ fn run_canvas_scenario(name: &str) {
         eprintln!("ignored: Canvas scenario `{name}` needs dev-shell node on PATH");
         return;
     }
+    let _browser_permit = CanvasBrowserPermit::acquire();
     ensure_jet_built();
 
     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
