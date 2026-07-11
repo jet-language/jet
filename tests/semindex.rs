@@ -292,7 +292,7 @@ fn jet_semindex_cli_json_smoke() {
     let bin = PathBuf::from(env!("CARGO_BIN_EXE_jet"));
     let path = fixture("basics/hello.jet");
     let out = std::process::Command::new(bin)
-        .args(["semindex", path.to_str().unwrap(), "--json"])
+        .args(["inspect", "semindex", path.to_str().unwrap(), "--json"])
         .output()
         .expect("jet inspect semindex");
     assert!(
@@ -309,7 +309,7 @@ fn jet_dossier_cli_json_smoke() {
     let bin = PathBuf::from(env!("CARGO_BIN_EXE_jet"));
     let path = fixture("types/traits.jet");
     let out = std::process::Command::new(bin)
-        .args(["dossier", path.to_str().unwrap(), "Square", "--json"])
+        .args(["inspect", "dossier", path.to_str().unwrap(), "Square", "--json"])
         .output()
         .expect("jet inspect dossier");
     assert!(

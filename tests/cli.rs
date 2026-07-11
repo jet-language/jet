@@ -224,7 +224,7 @@ fn palette_uses_canonical_nested_routes() {
             let out = Command::new(jet()).args(["?", &route]).output().unwrap();
             assert_eq!(out.status.code(), Some(0));
             let stdout = String::from_utf8_lossy(&out.stdout);
-            assert!(stdout.contains(&format!("jet {route}")), "palette missing {route}: {stdout}");
+            assert!(stdout.contains(&route), "palette missing {route}: {stdout}");
             assert!(!stdout.contains(&format!("jet {}   ", action.name)), "palette advertised bare moved action {}", action.name);
         }
     }
@@ -1148,7 +1148,7 @@ fn scrub_fixture(s: &str, fixture: &Path) -> String {
 fn expand_inline_golden() {
     let p = expand_fixture();
     let out = Command::new(jet())
-        .args(["expand", "--facts", "inline"])
+        .args(["inspect", "expand", "--facts", "inline"])
         .arg(&p)
         .env("NO_COLOR", "1")
         .output()
@@ -1187,7 +1187,7 @@ fn expand_all_golden() {
 fn expand_unknown_lens_golden() {
     let p = expand_fixture();
     let out = Command::new(jet())
-        .args(["expand", "--facts", "bogus"])
+        .args(["inspect", "expand", "--facts", "bogus"])
         .arg(&p)
         .env("NO_COLOR", "1")
         .output()

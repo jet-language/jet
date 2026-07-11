@@ -259,7 +259,7 @@ fn public_build_product() {
     let _ = fs::remove_file(&bin);
 
     let graph = Command::new(jet_bin())
-        .args(["graph", entry.to_str().unwrap(), "--json"])
+        .args(["inspect", "graph", entry.to_str().unwrap(), "--json"])
         .current_dir(root())
         .output()
         .expect("jet inspect graph");
@@ -275,7 +275,7 @@ fn public_build_product() {
     );
 
     let query = Command::new(jet_bin())
-        .args(["query", "build", entry.to_str().unwrap(), "--json"])
+        .args(["inspect", "query", "build", entry.to_str().unwrap(), "--json"])
         .current_dir(root())
         .output()
         .expect("jet inspect query build");
@@ -292,6 +292,7 @@ fn public_build_product() {
 
     let explain = Command::new(jet_bin())
         .args([
+            "inspect",
             "explain-build",
             "programmable_build",
             entry.to_str().unwrap(),

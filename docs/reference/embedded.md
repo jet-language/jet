@@ -19,7 +19,7 @@ library for the target must be installed first:
 rustup target add aarch64-unknown-linux-gnu
 ```
 
-Run `jet doctor --target=aarch64-unknown-linux-gnu` to check whether the
+Run `jet self doctor --target=aarch64-unknown-linux-gnu` to check whether the
 toolchain component is present before building.
 
 ## Freestanding profile
@@ -103,7 +103,7 @@ qemu-system-aarch64 \
 ## Checking target availability
 
 ```
-jet doctor --target=aarch64-unknown-linux-gnu
+jet self doctor --target=aarch64-unknown-linux-gnu
 ```
 
 Adds a `cross` section to the doctor report:

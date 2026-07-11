@@ -589,7 +589,7 @@ fn normalize_frequency_ring_argv(raw: &mut Vec<String>) {
         exit(ExitCodes::USAGE);
     }
     let Some(group) = raw.first().cloned() else { return };
-    if jet::CLI::command_group(&group).is_some() {
+    if let Some(spec) = jet::CLI::command_group(&group) {
         if raw.len() == 1 || raw.get(1).map(String::as_str) == Some("help") {
             println!("jet {group} — {}", spec.summary);
             for action in spec.actions {
@@ -599,7 +599,7 @@ fn normalize_frequency_ring_argv(raw: &mut Vec<String>) {
         }
     }
     let Some(sub) = raw.get(1).cloned() else { return };
-    if let Some(spec) = jet::CLI::command_group(&group) {
+    if jet::CLI::command_group(&group).is_some() {
         if jet::CLI::nested_command(&group, &sub).is_none() {
             if raw.iter().any(|arg| arg == "--json") {
                 println!("{{\"schema_version\":1,\"diagnostics\":[{{\"schema_version\":1,\"code\":\"E2101\",\"severity\":\"error\",\"message\":\"`{}` isn't a jet {} command\",\"why\":\"jet {} accepts only commands in its named area\",\"fix\":\"run `jet {} help`\",\"detail\":null,\"file\":null,\"line\":null,\"col\":null,\"span\":null,\"edit\":null}}]}}", esc(&sub), esc(&group), esc(&group), esc(&group));

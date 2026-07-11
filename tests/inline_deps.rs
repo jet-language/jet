@@ -165,7 +165,7 @@ fn jet_lock_writes_sidecar() {
         "use textkit#1.4;\n\nfn run() {\n    print(textkit.shout(\"hi\"))\n}\n",
     );
 
-    let out = jet_cmd(&["lock", "stats.jet"], &dir);
+    let out = jet_cmd(&["store", "lock", "stats.jet"], &dir);
     assert!(
         out.status.success(),
         "jet store lock should succeed\nstdout: {}\nstderr: {}",
@@ -185,7 +185,7 @@ fn jet_lock_writes_sidecar() {
     assert!(contents.contains("content_hash = \"sha256-"));
 
     // Locking again is stable (same script, same resolved shape).
-    let out2 = jet_cmd(&["lock", "stats.jet"], &dir);
+    let out2 = jet_cmd(&["store", "lock", "stats.jet"], &dir);
     assert!(out2.status.success());
     let contents2 = fs::read_to_string(&sidecar).unwrap();
     assert_eq!(contents, contents2);
@@ -202,7 +202,7 @@ fn jet_lock_unresolved_dep_is_e1253() {
         "stats.jet",
         "use ghostpkg#1.0.0;\n\nfn run() {\n    print(\"never\")\n}\n",
     );
-    let out = jet_cmd(&["lock", "stats.jet"], &dir);
+    let out = jet_cmd(&["store", "lock", "stats.jet"], &dir);
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("E1253"));
     assert!(!dir.join("stats.jet.lock").exists());

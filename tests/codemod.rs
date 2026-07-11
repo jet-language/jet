@@ -35,7 +35,7 @@ fn codemod_rename_dry_run_apply_and_undo() {
     .unwrap();
 
     let dry = Command::new(jet())
-        .args(["codemod", "dry-run", object.to_str().unwrap()])
+        .args(["inspect", "codemod", "dry-run", object.to_str().unwrap()])
         .output()
         .expect("jet inspect codemod dry-run");
     assert!(
@@ -52,7 +52,7 @@ fn codemod_rename_dry_run_apply_and_undo() {
     );
 
     let apply = Command::new(jet())
-        .args(["codemod", "apply", object.to_str().unwrap()])
+        .args(["inspect", "codemod", "apply", object.to_str().unwrap()])
         .output()
         .expect("jet inspect codemod apply");
     assert!(
@@ -72,7 +72,7 @@ fn codemod_rename_dry_run_apply_and_undo() {
     assert!(log_text.contains("inverse_edits"));
 
     let undo = Command::new(jet())
-        .args(["codemod", "undo", log.to_str().unwrap()])
+        .args(["inspect", "codemod", "undo", log.to_str().unwrap()])
         .output()
         .expect("jet inspect codemod undo");
     assert!(
@@ -105,7 +105,7 @@ fn codemod_undo_refuses_changed_file() {
     .unwrap();
 
     let apply = Command::new(jet())
-        .args(["codemod", "apply", object.to_str().unwrap()])
+        .args(["inspect", "codemod", "apply", object.to_str().unwrap()])
         .output()
         .expect("jet inspect codemod apply");
     assert!(
@@ -121,7 +121,7 @@ fn codemod_undo_refuses_changed_file() {
 
     let log = dir.join(".jet/codemods/StaleRename.log.json");
     let undo = Command::new(jet())
-        .args(["codemod", "undo", log.to_str().unwrap()])
+        .args(["inspect", "codemod", "undo", log.to_str().unwrap()])
         .output()
         .expect("jet inspect codemod undo");
     assert!(!undo.status.success());

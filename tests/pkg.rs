@@ -2306,7 +2306,7 @@ fn cli_vendor_dir_flag_relocates() {
         &manifest_with_deps("app", "0.1.0", "    greeter: path@greeter,"),
     );
 
-    let out = jet_cmd(&["vendor", "--vendor-dir", "third_party"], &tmp, &store);
+    let out = jet_cmd(&["registry", "vendor", "--vendor-dir", "third_party"], &tmp, &store);
     assert!(
         out.status.success(),
         "jet registry vendor --vendor-dir failed:\n{}",
@@ -2854,7 +2854,7 @@ fn cli_publish_refuses_dirty_git_tree() {
     // Add a new uncommitted file → dirty tree.
     write(&tmp, "untracked.jet", "// dirty\n");
 
-    let out = jet_cmd(&["publish"], &tmp, &store);
+    let out = jet_cmd(&["registry", "publish"], &tmp, &store);
     assert!(
         !out.status.success(),
         "jet registry publish must fail on a dirty tree"
@@ -2872,7 +2872,7 @@ fn cli_publish_refuses_dirty_git_tree() {
     let cache = tmp.join("cache");
     let bogus = format!("file://{}", tmp.join("nonexistent.git").to_str().unwrap());
     let out_force = jet_cmd_env(
-        &["publish", "--force"],
+        &["registry", "publish", "--force"],
         &tmp,
         &[
             ("JET_STORE_DIR", store.to_str().unwrap()),
@@ -2925,7 +2925,7 @@ fn cli_publish_pushes_index_and_enforces_immutability_e1234() {
         ("JET_KEYS_DIR", keys.to_str().unwrap()),
     ];
 
-    let out = jet_cmd_env(&["publish"], &proj, envs);
+    let out = jet_cmd_env(&["registry", "publish"], &proj, envs);
     assert!(
         out.status.success(),
         "publish should succeed:\n{}",
@@ -2957,7 +2957,7 @@ fn cli_publish_pushes_index_and_enforces_immutability_e1234() {
     }
 
     // Republish the same version → E1234 immutability.
-    let out2 = jet_cmd_env(&["publish"], &proj, envs);
+    let out2 = jet_cmd_env(&["registry", "publish"], &proj, envs);
     assert!(
         !out2.status.success(),
         "republishing an existing version must fail"
@@ -3002,14 +3002,14 @@ fn cli_yank_flips_index_entry() {
         ("JET_KEYS_DIR", keys.to_str().unwrap()),
     ];
 
-    let pubd = jet_cmd_env(&["publish"], &proj, envs);
+    let pubd = jet_cmd_env(&["registry", "publish"], &proj, envs);
     assert!(
         pubd.status.success(),
         "publish should succeed:\n{}",
         String::from_utf8_lossy(&pubd.stderr)
     );
 
-    let yanked = jet_cmd_env(&["yank", "2.0.0", "--message", "regression"], &proj, envs);
+    let yanked = jet_cmd_env(&["registry", "yank", "2.0.0", "--message", "regression"], &proj, envs);
     assert!(
         yanked.status.success(),
         "yank should succeed:\n{}",
@@ -3063,7 +3063,7 @@ fn cli_publish_unreachable_registry_e1235() {
         ("JET_STORE_DIR", store.to_str().unwrap()),
     ];
 
-    let out = jet_cmd_env(&["publish"], &proj, envs);
+    let out = jet_cmd_env(&["registry", "publish"], &proj, envs);
     assert!(
         !out.status.success(),
         "publish to an unreachable registry must fail"
@@ -3087,7 +3087,7 @@ fn cli_yank_requires_version_arg() {
     fs::create_dir_all(&store).unwrap();
     write(&tmp, "pkg.jet", &min_manifest("mypkg", "1.0.0"));
 
-    let out = jet_cmd(&["yank"], &tmp, &store);
+    let out = jet_cmd(&["registry", "yank"], &tmp, &store);
     assert!(!out.status.success(), "jet registry yank with no version must fail");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("E2606"), "must cite E2606:\n{stderr}");
@@ -3343,7 +3343,7 @@ fn cli_publish_signs_index_and_auto_keygens() {
         ("JET_KEYS_DIR", keys.to_str().unwrap()),
     ];
 
-    let out = jet_cmd_env(&["publish"], &proj, envs);
+    let out = jet_cmd_env(&["registry", "publish"], &proj, envs);
     assert!(
         out.status.success(),
         "signed publish should succeed:\n{}",
@@ -3398,7 +3398,7 @@ fn cli_publish_no_sign_leaves_signature_empty() {
         ("JET_KEYS_DIR", keys.to_str().unwrap()),
     ];
 
-    let out = jet_cmd_env(&["publish", "--no-sign"], &proj, envs);
+    let out = jet_cmd_env(&["registry", "publish", "--no-sign"], &proj, envs);
     assert!(
         out.status.success(),
         "--no-sign publish should succeed:\n{}",

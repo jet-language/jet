@@ -49,7 +49,7 @@ fn init_report_and_update_roundtrip() {
     let manifest = std::fs::read_to_string(dir.join("pkg.jet")).unwrap();
     assert!(manifest.contains("jet:"), "init wrote no pin:\n{manifest}");
 
-    let out = run(&["toolchain"], &dir);
+    let out = run(&["self", "toolchain"], &dir);
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("pin:"), "toolchain report:\n{text}");
 
@@ -67,7 +67,7 @@ fn init_report_and_update_roundtrip() {
     );
 
     // `jet self toolchain` now reports the locked exact version + object id.
-    let out = run(&["toolchain"], &dir);
+    let out = run(&["self", "toolchain"], &dir);
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("locked:   0.4.0"), "locked report:\n{text}");
     assert!(text.contains("object:   jet-0.4.0-"), "object id:\n{text}");
