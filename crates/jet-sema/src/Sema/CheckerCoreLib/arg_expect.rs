@@ -3,7 +3,7 @@
 /// Returns the real root binding, the Jet spelling used in the diagnostic, and
 /// the full place span. Calls and method calls are deliberately excluded: their
 /// results are temporaries, not places whose ownership follows one local.
-fn core_consuming_place(expr: &Expr) -> Option<(String, String, Span)> {
+fn core_consuming_place(expr: &Expr) -> Option<(String, Option<String>, Span)> {
     fn subscript(expr: &Expr) -> Option<String> {
         fn args(args: &[crate::AST::CallArg]) -> Option<String> {
             args.iter()
@@ -89,7 +89,7 @@ fn core_consuming_place(expr: &Expr) -> Option<(String, String, Span)> {
     let (root, root_span) = ownership_root(expr)?;
     // Root discovery and product spelling are separate facts: the index
     // expression never controls which binding owns the selected place.
-    let place = spelling(expr)?;
+    let place = spelling(expr);
     Some((root, place, Span::new(root_span.start, end)))
 }
 
@@ -213,15 +213,28 @@ impl<'a> Checker<'a> {
                         // `^` is never accepted here (E0203), so `copy name` (D-CAP2,
                         // D-MEM1/S4) is the only fix, not a liveness-dependent
                         // move/reorder menu.
+                        let (what, fix) = match place {
+                            Some(place) => (
+                                format!("implicit clone of `{}`", place),
+                                format!(
+                                    "write `{} {}` to copy explicitly",
+                                    Syntax::KW_COPY,
+                                    place
+                                ),
+                            ),
+                            None => (
+                                "implicit clone of this consumed expression".to_string(),
+                                format!(
+                                    "write `{}` before the highlighted expression to copy it explicitly",
+                                    Syntax::KW_COPY
+                                ),
+                            ),
+                        };
                         self.diags.push(Diagnostic::error(
                             "E0209",
-                            format!("implicit clone of `{}`", place),
+                            what,
                             format!("`{}` stores its own copy of this value", call_name),
-                            format!(
-                                "write `{} {}` to copy explicitly",
-                                Syntax::KW_COPY,
-                                place
-                            ),
+                            fix,
                             Some(place_span),
                         ));
                     }

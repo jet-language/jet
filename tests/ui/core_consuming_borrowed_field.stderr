@@ -45,3 +45,11 @@ Error [E0209]: implicit clone of `e.items[-(-i)].text`
     |                      ^^^^^^^^^^^^^^^^^^^
  Why: `Text` stores its own copy of this value
  Fix: write `copy e.items[-(-i)].text` to copy explicitly
+
+Error [E0209]: implicit clone of this consumed expression
+  --> tests/ui/core_consuming_borrowed_field.jet:40:22
+    |
+ 40 |     return Data.Text(e.items[if choose_first { 0 } else { 1 }].text)
+    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: `Text` stores its own copy of this value
+ Fix: write `copy` before the highlighted expression to copy it explicitly

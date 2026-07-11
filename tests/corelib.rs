@@ -2156,7 +2156,8 @@ fn encoded(e: Email, i: Int) -> String {
     computed := Data.Text(copy e.items[i + 1].text)
     called := Data.Text(copy e.items[pick()].text)
     parenthesized := Data.Text(copy e.items[-(-i)].text)
-    return "{json.to_string(shallow)}|{json.to_string(nested)}|{json.to_string(indexed)}|{json.to_string(computed)}|{json.to_string(called)}|{json.to_string(parenthesized)}"
+    conditional := Data.Text(copy e.items[if i == 0 { 0 } else { 1 }].text)
+    return "{json.to_string(shallow)}|{json.to_string(nested)}|{json.to_string(indexed)}|{json.to_string(computed)}|{json.to_string(called)}|{json.to_string(parenthesized)}|{json.to_string(conditional)}"
 }
 
 fn slice_data(xs: [Data]) -> Data {
@@ -2175,7 +2176,7 @@ fn run() {
     assert_eq!(code, 0, "explicit field copy failed to compile/run: {stderr}");
     assert_eq!(
         stdout,
-        "\"a@b.com\"|\"inside\"|\"zero\"|\"item\"|\"zero\"|\"zero\"|[\"slice0\",\"slice1\"]\n"
+        "\"a@b.com\"|\"inside\"|\"zero\"|\"item\"|\"zero\"|\"zero\"|\"zero\"|[\"slice0\",\"slice1\"]\n"
     );
     let _ = fs::remove_dir_all(&dir);
 }
