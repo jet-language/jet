@@ -105,6 +105,21 @@ pub fn load_entry_with_overlay(
     overlay: Option<(&Path, &str)>,
     for_check: bool,
 ) -> Result<ProgramBundle, Vec<Diagnostic>> {
+    let overlays: Vec<(&Path, &str)> = overlay.into_iter().collect();
+    load_entry_with_overlays(entry_path, &overlays, for_check)
+}
+
+/// Load a program while substituting an ordered set of in-memory sources.
+///
+/// Codemods use this to re-check a staged multi-file tree without exposing a
+/// partially rewritten tree on disk. Duplicate canonical paths are rejected by
+/// the caller; the loader deliberately uses the last matching overlay so a
+/// staged transaction can replace an earlier snapshot deterministically.
+pub fn load_entry_with_overlays(
+    entry_path: &str,
+    overlays: &[(&Path, &str)],
+    for_check: bool,
+) -> Result<ProgramBundle, Vec<Diagnostic>> {
     let entry = PathBuf::from(entry_path);
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let entry_abs = if entry.is_absolute() {
@@ -262,7 +277,7 @@ pub fn load_entry_with_overlay(
         &mut modules,
         &mut path_to_idx,
         &mut stack,
-        overlay,
+        overlays,
         for_check,
         &mut parse_teaching,
     )?;
@@ -519,7 +534,7 @@ fn load_file(
     modules: &mut Vec<LoadedModule>,
     path_to_idx: &mut HashMap<PathBuf, usize>,
     stack: &mut Vec<PathBuf>,
-    overlay: Option<(&Path, &str)>,
+    overlays: &[(&Path, &str)],
     for_check: bool,
     parse_teaching: &mut Vec<Diagnostic>,
 ) -> Result<(), Vec<Diagnostic>> {
@@ -542,9 +557,12 @@ fn load_file(
         return Ok(());
     }
 
-    let norm_overlay = overlay.map(|(p, _)| normalize_path(p));
-    let source = if norm_overlay.as_ref() == Some(&norm) {
-        overlay.unwrap().1.to_string()
+    let source = if let Some((_, text)) = overlays
+        .iter()
+        .rev()
+        .find(|(candidate, _)| normalize_path(candidate) == norm)
+    {
+        (*text).to_string()
     } else {
         match fs::read_to_string(path) {
             Ok(s) => s,
@@ -638,7 +656,7 @@ fn load_file(
             modules,
             path_to_idx,
             stack,
-            overlay,
+            overlays,
             for_check,
             parse_teaching,
         ) {
@@ -691,7 +709,7 @@ fn load_file(
             modules,
             path_to_idx,
             stack,
-            overlay,
+            overlays,
             for_check,
             parse_teaching,
         ) {
