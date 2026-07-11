@@ -11,6 +11,9 @@ use std::time::{Duration, Instant};
 
 type Job = Box<dyn FnOnce() + Send>;
 
+#[cfg(all(test, target_os = "windows"))]
+static TEST_IOCP_GQCS_FATAL: AtomicBool = AtomicBool::new(false);
+
 fn jet_scheduler_fatal(msg: &str) -> ! {
     if jet_scheduler_panic_should_unwind() {
         panic!("{}", msg);
@@ -875,7 +878,15 @@ impl IoPoller {
             }
 
             let (mut bytes, mut key, mut operation) = (0, 0usize, std::ptr::null_mut());
-            let ok = unsafe { GetQueuedCompletionStatus(port, &mut bytes, &mut key, &mut operation, u32::MAX) };
+            #[cfg(test)]
+            let inject_fatal = TEST_IOCP_GQCS_FATAL.swap(false, Ordering::AcqRel);
+            #[cfg(not(test))]
+            let inject_fatal = false;
+            let ok = if inject_fatal {
+                0
+            } else {
+                unsafe { GetQueuedCompletionStatus(port, &mut bytes, &mut key, &mut operation, u32::MAX) }
+            };
             if operation.is_null() {
                 if ok == 0 {
                     METRIC_IO_FAILURES.fetch_add(1, Ordering::Relaxed);
@@ -886,14 +897,21 @@ impl IoPoller {
                         if !entry.cancel_requested {
                             entry.cancel_requested = true;
                             for pending in &entry.operations {
-                                unsafe { CancelIoEx(entry.socket, *pending); }
+                                let cancelled = unsafe { CancelIoEx(entry.socket, *pending) };
+                                if cancelled == 0 {
+                                    let error = unsafe { GetLastError() };
+                                    if error != 1168 { // ERROR_NOT_FOUND: completion already queued.
+                                        METRIC_IO_FAILURES.fetch_add(1, Ordering::Relaxed);
+                                    }
+                                }
                             }
                         }
                     }
                     // CancelIoEx on an IOCP-associated socket queues one terminal
                     // completion per outstanding OVERLAPPED. Keep every Active
                     // socket owner and Box alive until those completions arrive.
-                    while !active.is_empty() {
+                    let drain_deadline = Instant::now() + Duration::from_secs(5);
+                    while !active.is_empty() && Instant::now() < drain_deadline {
                         let (mut drain_bytes, mut drain_key, mut drain_operation) =
                             (0, 0usize, std::ptr::null_mut());
                         unsafe {
@@ -902,7 +920,7 @@ impl IoPoller {
                                 &mut drain_bytes,
                                 &mut drain_key,
                                 &mut drain_operation,
-                                u32::MAX,
+                                50,
                             );
                         }
                         if drain_operation.is_null() { continue; }
@@ -923,11 +941,19 @@ impl IoPoller {
                             METRIC_IO_STALE.fetch_add(1, Ordering::Relaxed);
                         }
                     }
-                    self.streams.lock().unwrap().clear();
-                    self.retire_requested.lock().unwrap().clear();
                     self.iocp_port.store(0, Ordering::Release);
                     *self.backend_state.lock().unwrap() = IoBackendState::Closed;
                     unsafe { CloseHandle(port); }
+                    METRIC_IO_PORT_CLOSED.fetch_add(1, Ordering::Relaxed);
+                    if active.is_empty() {
+                        self.streams.lock().unwrap().clear();
+                        self.retire_requested.lock().unwrap().clear();
+                    } else {
+                        // Kernel did not return cancellation completions before
+                        // bounded shutdown. Retain sockets and OVERLAPPED boxes
+                        // permanently: truthful nonzero counters beat UAF.
+                        std::mem::forget(active);
+                    }
                     *self.backend_state.lock().unwrap() =
                         IoBackendState::Failed("internal scheduler IOCP completion port failed");
                     return;
@@ -1056,6 +1082,9 @@ pub fn jet_scheduler_io_wait(stream: &TcpStream, read: bool, write: bool, wait_k
     }
     let _registration = Registration(poller, id);
     jet_scheduler_yield(wait_kind, &slot, None);
+    if let IoBackendState::Failed(error) = &*io_poller().backend_state.lock().unwrap() {
+        jet_scheduler_fatal(error);
+    }
 }
 
 // ── M2: scheduler-integrated channel (wake-on-send) ────────────────────────────
@@ -1442,6 +1471,8 @@ static METRIC_IO_RETIRED: AtomicUsize = AtomicUsize::new(0);
 static METRIC_IO_STALE: AtomicUsize = AtomicUsize::new(0);
 #[cfg(target_os = "windows")]
 static METRIC_IO_FAILURES: AtomicUsize = AtomicUsize::new(0);
+#[cfg(target_os = "windows")]
+static METRIC_IO_PORT_CLOSED: AtomicUsize = AtomicUsize::new(0);
 static IO_BACKEND: OnceLock<&'static str> = OnceLock::new();
 
 #[allow(unreachable_code)]
