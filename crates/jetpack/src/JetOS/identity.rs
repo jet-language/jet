@@ -35,6 +35,17 @@ fn write_jetos_identity_assets(dir: &Path) -> std::io::Result<()> {
 mod identity_tests {
     use super::*;
 
+    fn identity_test_dir() -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "jetos-identity-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ))
+    }
+
     #[test]
     fn jetos_release_identity_pins_stable_and_prerelease_forms() {
         assert_eq!(jetos_release_label(false), "jetos 26.10 (Apex)");
@@ -46,5 +57,76 @@ mod identity_tests {
         for surface in [render_jetos_os_release(false), render_jetos_os_release(true)] {
             assert!(!surface.contains("NixOS") && !surface.contains("Yarara"));
         }
+    }
+
+    #[test]
+    fn jetos_release_identity_reaches_generation_and_installer_projection() {
+        let root = identity_test_dir();
+        let generation = root.join("generation");
+        let installer = root.join("installer/current-system");
+        let system = SystemPlan {
+            name: "halcyon".to_string(),
+            target: "linux.x64".to_string(),
+            packages: Vec::new(),
+            services: Vec::new(),
+            options: vec![ModuleEval::OptionPlan {
+                key: "hardware.halcyon.specialisation.plasmaBeta".to_string(),
+                value: "true".to_string(),
+            }],
+        };
+        fs::create_dir_all(&generation).unwrap();
+        write_etc_tree(&generation, &system).unwrap();
+        write_hardware_facts(&generation, &system).unwrap();
+
+        let generation_record = Generation {
+            name: "identity-proof".to_string(),
+            host: system.name.clone(),
+            path: generation.clone(),
+            created_at: 0,
+        };
+        let installed_limine = render_installed_limine_conf(&system, &generation_record);
+        let installer_limine =
+            render_installer_limine_conf(&system, &generation_record, "/dev/sda");
+        copy_generation_payload_deref(&generation, &installer).unwrap();
+
+        let os_release = fs::read_to_string(generation.join("etc/os-release")).unwrap();
+        let usr_os_release =
+            fs::read_to_string(generation.join("usr/lib/os-release")).unwrap();
+        let specialisation = fs::read_to_string(
+            generation.join("boot/specialisations/plasmaBeta.conf"),
+        )
+        .unwrap();
+        let wallpaper =
+            fs::read_to_string(generation.join("share/backgrounds/jetos/apex.svg")).unwrap();
+        assert_eq!(os_release, render_jetos_os_release(false));
+        assert_eq!(usr_os_release, os_release);
+        assert_eq!(wallpaper, JETOS_WALLPAPER_SVG);
+        assert!(specialisation
+            .contains("title jetos 26.10 (Apex) — halcyon (plasmaBeta)"));
+        assert!(installed_limine.contains("/jetos 26.10 (Apex) — halcyon verify"));
+        assert!(installer_limine.contains("/Install jetos 26.10 (Apex) — halcyon"));
+        assert_eq!(
+            fs::read_to_string(installer.join("etc/os-release")).unwrap(),
+            os_release
+        );
+        assert_eq!(
+            fs::read_to_string(installer.join("usr/lib/os-release")).unwrap(),
+            usr_os_release
+        );
+        assert_eq!(
+            fs::read_to_string(installer.join("share/backgrounds/jetos/apex.svg")).unwrap(),
+            wallpaper
+        );
+        for surface in [
+            os_release,
+            usr_os_release,
+            specialisation,
+            wallpaper,
+            installed_limine,
+            installer_limine,
+        ] {
+            assert!(!surface.contains("NixOS") && !surface.contains("Yarara"));
+        }
+        fs::remove_dir_all(root).unwrap();
     }
 }
