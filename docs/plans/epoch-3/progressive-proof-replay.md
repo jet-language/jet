@@ -1,6 +1,7 @@
 # Progressive Proof And Replay
 
-Card: #240 / cbq06v8j. Decision anchor: D-WD12 = B.
+Card: #240 / cbq06v8j. Decision anchor: D-WD12 = B. Status: ratified, not
+implemented end to end.
 
 ## Goal
 
@@ -27,22 +28,31 @@ the beginner face; deeper proof engines stay opt-in and Jet-diagnostic-shaped.
 - D-WD2/D-SEMINDEX1: dossier and semantic index own inspectable facts.
 - D-GAME-REPLAY1: game replay artifacts are typed and deterministic.
 
-## Implementation Slices
+## Normative law
+
+The reconciled current contract is
+[`../../spec/proof-replay-decisions.md`](../../spec/proof-replay-decisions.md).
+It preserves the exact D-PROVE-REPLAY1, D-PROVE-SEM1, D-JPROOF1, D-JREPLAY1,
+D-PROVE-SOLVER1, and D-PROVE-LENS1 law. Later specialized decisions override
+the umbrella's provisional examples.
+
+## Remaining implementation slices
 
 1. Fact inventory: define `ProofFact` schema over tests, contracts, effects,
    refinements, typestate, coverage, replay, and budgets.
-2. CLI surface after ballot: `jet prove <target>` renders human report and
+2. CLI surface: `jet prove <target>` renders the ratified human report and
    `--json` emits stable schema.
 3. Beginner slice: run unit/property/doctests, contract checks, coverage summary,
    and replay determinism checks without solvers.
 4. Replay slice: typed replay artifact reader/writer, deterministic capability
    injection, trace comparison, and panic replay.
 5. Budget slice: consume D-WD14 budget reports as proof facts.
-6. Expert lenses: `--lens effects`, `--lens replay`, `--lens refinements`,
-   `--lens budgets`, `--lens solver` once each producer exists.
+6. Expert lenses: implement D-PROVE-LENS1's presentation-only facets without
+   changing execution, report identity, artifacts, result, or exits.
 7. CI integration: stable exit codes, JSON schema snapshots, and dossier links.
-8. Solver bridge: only after a ballot for solver backend, timeout policy,
-   proof-obligation shape, and diagnostics.
+8. Solver: implement D-PROVE-SOLVER1's std-only deterministic bounded
+   Presburger engine, certificate checker, counterexample validation, and
+   step/resource policy.
 
 ## Test Strategy
 
@@ -62,8 +72,9 @@ the beginner face; deeper proof engines stay opt-in and Jet-diagnostic-shaped.
 - `jet prove <target>` renders the beginner pass/fail report.
 - `jet prove <target> --replay trace.jreplay` replays a typed trace against the
   target.
-- `jet prove <target> --lens effects|replay|refinements|budgets|solver` selects
-  expert proof views as their producers ship.
+- repeated `--lens all|refinements|effects|taint|contracts|tests|budgets|replay|solver`
+  selects presentation-only views; the full producer run and complete machine
+  report remain unchanged.
 - `jet prove <target> --json` emits stable `.jproof`-shaped data for CI.
-- `.jreplay` and `.jproof` are typed artifacts; raw solver/runtime text never
-  reaches users.
+- `.jreplay` and `.jproof` use the exact typed/versioned/security/migration law
+  linked above; raw solver/runtime text never reaches users.

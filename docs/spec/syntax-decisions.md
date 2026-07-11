@@ -2349,9 +2349,16 @@ output is deterministic local HTML; `--json` emits the stable docs schema;
 `--check` runs doc link, doctest, and stale-example checks. Implementation is
 deferred until the owner explicitly reopens documentation build work.
 
-**D-PROVE-REPLAY1=A**: `jet prove` is the umbrella proof/replay command. It
-accepts `--replay`, `--lens`, and `--json`, with typed `.jreplay` and `.jproof`
-artifacts. Raw solver/runtime text must be laundered into Jet diagnostics.
+**D-PROVE-REPLAY1=A / D-PROVE-SEM1=A / D-JPROOF1=A / D-JREPLAY1=A /
+D-PROVE-SOLVER1=A / D-PROVE-LENS1=A**: `jet prove` is the single progressive
+proof/replay command. It owns deterministic target resolution and producer
+order, evidence policy, results/exits, stable complete JSON, typed versioned
+`.jproof`/`.jreplay` artifacts, opt-in deterministic native Presburger proof,
+and presentation-only evidence lenses. Raw solver/runtime text never reaches
+users. Exact resources, canonical hashes/bytes, errors, privacy/security,
+artifact lifecycle, migration/version law, fixtures, and failure precedence are
+normative in [`proof-replay-decisions.md`](proof-replay-decisions.md); later
+specialized decisions there override umbrella examples.
 
 **D-PERFBUDGET-SURFACE1=A / D-PERFBUDGET-BASELINE1=A**: performance budgets
 are declared in role modules such as `module perf.server { budgets: ... }`.
