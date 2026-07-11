@@ -22,19 +22,19 @@ use std::path::Path;
 use super::Terminal::{Key, KeyReader, RawGuard};
 use super::{
     apply_replay_plan, dim, execute_line, set_turn_flag, unfold_turn, Docs, RerunPlan, Render,
-    Session,
+    EffectPrompt, PromptChoice, ReplFlags, ReplPolicy, Session,
 };
 
 /// Run the interactive raw-mode REPL loop. `_guard` is held for its
-/// lifetime (RAII) — dropping it (when this function returns) restores
-/// cooked terminal mode; this function must never call
-/// `std::process::exit`, only return.
-pub(crate) fn run_interactive(project_dir: Option<&str>, color: bool, _guard: RawGuard) -> i32 {
+/// lifetime (RAII). Ordinary exits restore on drop; an authorized
+/// `core.process.exit` restores explicitly before the interpreter terminates.
+pub(crate) fn run_interactive(project_dir: Option<&str>, color: bool, mut guard: RawGuard, flags: ReplFlags) -> i32 {
     let base_dir: std::path::PathBuf = project_dir
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
 
     let mut session = Session::new();
+    let mut policy = ReplPolicy::new(flags, &base_dir);
     if let Some(dir) = project_dir {
         let mut stdout = io::stdout();
         super::load_project_items(Path::new(dir), &mut session, &mut stdout);
@@ -56,7 +56,9 @@ pub(crate) fn run_interactive(project_dir: Option<&str>, color: bool, _guard: Ra
                     continue;
                 }
                 let turns_before = session.turns.len();
-                if execute_line(&trimmed, &mut session, &base_dir, color, true, false) {
+                let mut prompt = InteractiveEffectPrompt { reader: &mut reader, guard: &mut guard };
+                let mut authorizer = policy.authorizer(Some(&mut prompt));
+                if execute_line(&trimmed, &mut session, &base_dir, color, true, false, &mut authorizer) {
                     break;
                 }
                 if bindings_pane_visible && session.turns.len() > turns_before {
@@ -83,11 +85,62 @@ pub(crate) fn run_interactive(project_dir: Option<&str>, color: bool, _guard: Ra
             }
             LineOutcome::CtrlP => cmd_toggle_pin(&mut session, color),
             LineOutcome::CtrlF => cmd_toggle_fold(&mut session, color),
-            LineOutcome::CtrlR => cmd_rerun(&mut reader, &mut session, &base_dir, color),
+            LineOutcome::CtrlR => cmd_rerun(&mut reader, &mut session, &base_dir, color, &mut policy, &mut guard),
         }
     }
 
     0
+}
+
+struct InteractiveEffectPrompt<'a, R: Read> {
+    reader: &'a mut KeyReader<R>,
+    guard: &'a mut RawGuard,
+}
+
+impl<R: Read> EffectPrompt for InteractiveEffectPrompt<'_, R> {
+    fn choose(&mut self, request: &crate::Comptime::ReplEffectRequest, reused: bool) -> PromptChoice {
+        if reused {
+            println!("Using session {}.{} authority for `{}`. [c] continue  [r] revoke", request.root, request.operation, request.resource);
+            io::stdout().flush().ok();
+            loop {
+                match self.reader.read_key() {
+                    Key::Char('c') | Key::Char('C') => { println!(); return PromptChoice::Continue; }
+                    Key::Char('r') | Key::Char('R') => { println!(); return PromptChoice::Revoke; }
+                    Key::Idle => continue,
+                    _ => { println!(); return PromptChoice::Revoke; }
+                }
+            }
+        }
+        if request.operation == "Exit" {
+            println!("Core effect Exec requests orderly REPL exit with status {}. [y/N]", request.resource);
+            io::stdout().flush().ok();
+            loop {
+                match self.reader.read_key() {
+                    Key::Char('y') | Key::Char('Y') => {
+                        println!();
+                        self.guard.restore_now();
+                        return PromptChoice::Once;
+                    }
+                    Key::Idle => continue,
+                    _ => { println!(); return PromptChoice::Deny; }
+                }
+            }
+        }
+        println!("Core effect {} requests runtime authority before this operation.", request.root);
+        println!("  operation: {}", request.operation.to_ascii_lowercase());
+        println!("  target:    {}", request.resource);
+        println!("  [o] once  [s] exact tuple for this session  [d] deny");
+        io::stdout().flush().ok();
+        loop {
+            match self.reader.read_key() {
+                Key::Char('o') | Key::Char('O') => { println!(); return PromptChoice::Once; }
+                Key::Char('s') | Key::Char('S') => { println!(); return PromptChoice::Session; }
+                Key::Char('d') | Key::Char('D') => { println!(); return PromptChoice::Deny; }
+                Key::Idle => continue,
+                _ => { println!(); return PromptChoice::Deny; }
+            }
+        }
+    }
 }
 
 // ── pin rail / bindings pane ────────────────────────────────────────────────
@@ -149,7 +202,7 @@ fn cmd_toggle_fold(session: &mut Session, color: bool) {
 
 // ── rerun (^R, D-FE-REPL-RERUN1=A) ─────────────────────────────────────────
 
-fn cmd_rerun<R: Read>(reader: &mut KeyReader<R>, session: &mut Session, base_dir: &Path, color: bool) {
+fn cmd_rerun<R: Read>(reader: &mut KeyReader<R>, session: &mut Session, base_dir: &Path, color: bool, policy: &mut ReplPolicy, guard: &mut RawGuard) {
     let Some(last) = session.turns.last() else {
         println!("{}", dim("no turns yet to rerun", color));
         return;
@@ -208,7 +261,9 @@ fn cmd_rerun<R: Read>(reader: &mut KeyReader<R>, session: &mut Session, base_dir
             dim(&format!("replaying {} turn(s), all auto", plan.steps.len()), color)
         );
     }
-    apply_replay_plan(session, &plan, base_dir, color);
+    let mut prompt = InteractiveEffectPrompt { reader, guard };
+    let mut authorizer = policy.authorizer(Some(&mut prompt));
+    apply_replay_plan(session, &plan, base_dir, color, &mut authorizer);
 }
 
 // ── line editor ─────────────────────────────────────────────────────────────

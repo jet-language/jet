@@ -37,7 +37,7 @@ use std::path::Path;
 use crate::Diagnostics::Diagnostic;
 use crate::AST::{EnumDef, Expr, Func, StructDef};
 
-pub use Interpreter::{DebugHook, DevSink, REPL_FUEL_BUDGET};
+pub use Interpreter::{DebugHook, DevSink, ReplAuthorizer, ReplEffectRequest, REPL_FUEL_BUDGET};
 pub use Purity::walk_calls;
 pub use Reflect::{build_program_info, build_struct_type_info, ProgramSemanticFacts};
 pub use Value::CtValue;
@@ -77,6 +77,8 @@ pub fn run_build_entry(
         impure_depth: 0,
         allow_impure,
         repl_mode: false,
+        repl_grants: Vec::new(),
+        repl_authorizer: None,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
         globals: &program.globals,
@@ -233,6 +235,8 @@ pub fn evaluate_with_imports_opts(
         impure_depth: initial_impure_depth,
         allow_impure,
         repl_mode: false,
+        repl_grants: Vec::new(),
+        repl_authorizer: None,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
         globals,
@@ -274,6 +278,8 @@ pub fn evaluate_with_imports_opts_collecting(
         impure_depth: initial_impure_depth,
         allow_impure,
         repl_mode: false,
+        repl_grants: Vec::new(),
+        repl_authorizer: None,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
         globals,
@@ -351,6 +357,8 @@ pub fn run_main(
         impure_depth: 0,
         allow_impure: false,
         repl_mode: false,
+        repl_grants: Vec::new(),
+        repl_authorizer: None,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
         globals: &program.globals,
@@ -391,6 +399,8 @@ pub fn run_main_debug(
         impure_depth: 0,
         allow_impure: false,
         repl_mode: false,
+        repl_grants: Vec::new(),
+        repl_authorizer: None,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
         globals: empty_globals(),
@@ -427,6 +437,8 @@ pub fn run_main_value(
         impure_depth: 0,
         allow_impure: false,
         repl_mode: false,
+        repl_grants: Vec::new(),
+        repl_authorizer: None,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
         globals: empty_globals(),
@@ -466,6 +478,8 @@ pub fn run_main_with_fuel(
         impure_depth: 0,
         allow_impure: false,
         repl_mode: false,
+        repl_grants: Vec::new(),
+        repl_authorizer: None,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
         globals: empty_globals(),
@@ -503,6 +517,8 @@ pub fn run_repl_main_with_fuel(
         impure_depth: 1,
         allow_impure: true,
         repl_mode: true,
+        repl_grants: Vec::new(),
+        repl_authorizer: None,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
         globals: empty_globals(),
@@ -543,6 +559,7 @@ pub fn run_repl_step(
     fuel: u64,
     suppress: bool,
     core_imports: &HashMap<String, String>,
+    authorizer: &mut dyn ReplAuthorizer,
 ) -> Result<Option<CtValue>, Diagnostic> {
     let mut interp = Interp {
         funcs,
@@ -553,10 +570,12 @@ pub fn run_repl_step(
         debugger: None,
         depth: 0,
         cur_func: "main".to_string(),
-        // c133: REPL sandbox — Tier-2 I/O without user `#Impure` gates.
-        impure_depth: 1,
+        // D-REPLCOREEFFECT1=A: only a lexical `#Grant` opens this depth.
+        impure_depth: 0,
         allow_impure: true,
         repl_mode: true,
+        repl_grants: Vec::new(),
+        repl_authorizer: Some(authorizer),
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
         globals: empty_globals(),
@@ -632,6 +651,8 @@ pub fn run_block_with_imports(
         allow_impure: false,
         impure_depth: 0,
         repl_mode: false,
+        repl_grants: Vec::new(),
+        repl_authorizer: None,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
         globals,
@@ -761,6 +782,8 @@ pub fn evaluate_derive_body(
         impure_depth: 0,
         allow_impure: false,
         repl_mode: false,
+        repl_grants: Vec::new(),
+        repl_authorizer: None,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
         globals: empty_globals(),

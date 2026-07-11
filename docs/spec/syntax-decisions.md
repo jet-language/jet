@@ -1376,6 +1376,18 @@ scene-first game engine layered above it (D-GAME1=B, D-GAME2=A, D-GAME3=C).
 npm interop = typed first-party stub packages, no `.d.ts` parsing
 (D-NPMTYPE1); Swift interop waits on native-UI/C-ABI work (D-JSWIFTFFI1).
 
+**D-REPLCOREEFFECT1=A (ratified 2026-07-11)**: `jet repl` uses the existing
+effect model for ambient Core calls. An enclosing `#Grant(root)` supplies
+lexical authority. Interactive sessions then authorize the exact
+`(root, operation, resource)` tuple once or for the in-memory session;
+reusing session authority offers continue or revoke before execution.
+`--allow-{root}` skips ordinary prompts, while `--deny-{root}` always wins.
+Non-TTY and transcript sessions never prompt and deny effects without the
+matching allow flag. Filesystem operations stay within the REPL project root
+and reject absolute paths, parent traversal, and symlinks. `Exec.Exit` always
+gets its own consequence prompt interactively and needs both `#Grant(Exec)`
+and `--allow-exec` outside a TTY.
+
 ### Core library
 
 **S9 — Print**: `print` (adds newline).

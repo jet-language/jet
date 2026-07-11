@@ -131,6 +131,22 @@ pub trait DebugHook {
     ) -> Result<(), Diagnostic>;
 }
 
+/// Concrete ambient operation reached by a REPL turn after arguments have
+/// been evaluated but before host state is touched (D-REPLCOREEFFECT1=A).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ReplEffectRequest {
+    pub root: String,
+    pub operation: String,
+    pub resource: String,
+}
+
+/// Invocation policy seam owned by the REPL frontend. Returning an error
+/// aborts before the Core operation executes.
+pub trait ReplAuthorizer {
+    fn authorize(&mut self, request: &ReplEffectRequest, span: Span) -> Result<(), Diagnostic>;
+    fn reset_session(&mut self) {}
+}
+
 pub(super) struct Interp<'a> {
     pub(super) funcs: &'a HashMap<String, &'a Func>,
     pub(super) base_dir: &'a Path,
@@ -165,6 +181,12 @@ pub(super) struct Interp<'a> {
     /// E2-M18 / c133: true only in `run_repl_step` — enables REPL-specific
     /// diagnostics for native-only Core modules (E1802-style wording).
     pub(super) repl_mode: bool,
+    /// Active lexical `#Grant` effect names in REPL mode. Sema proves the
+    /// region statically; this copy gates host authorization dynamically.
+    pub(super) repl_grants: Vec<String>,
+    /// Host invocation policy callback. Called after concrete arguments are
+    /// known and before any ambient operation executes.
+    pub(super) repl_authorizer: Option<&'a mut dyn ReplAuthorizer>,
     /// D-CTEFFECT1 Tier-1: embed_file/embed_bytes inputs accumulated during
     /// this evaluation. Each entry records the relative path and the sha256
     /// of the bytes read, for recording in `.jet/lock`. Drained by the
@@ -536,7 +558,16 @@ impl<'a> Interp<'a> {
             // `taskgroup`.
             Stmt::Layout { span, .. } => Err(unsupported("a `layout` block", *span)),
             Stmt::Caps { span, .. } => Err(unsupported("a `#Caps` block", *span)),
-            Stmt::Grant { span, .. } => Err(unsupported("a `#grant` block", *span)),
+            Stmt::Grant { caps, body, .. } if self.repl_mode => {
+                let old_len = self.repl_grants.len();
+                self.repl_grants.extend(caps.iter().map(|(name, _)| name.clone()));
+                self.impure_depth += 1;
+                let result = self.exec_block(body, scope);
+                self.impure_depth -= 1;
+                self.repl_grants.truncate(old_len);
+                result
+            }
+            Stmt::Grant { span, .. } => Err(unsupported("a `#Grant` block", *span)),
             // D-TXN1–D-TXN4: a transaction block is a runtime/codegen construct; the
             // comptime interpreter has no transactions, so `#Transact` is declined.
             Stmt::Transact { span, .. } => Err(unsupported("a `#Transact` block", *span)),
@@ -1164,16 +1195,15 @@ impl<'a> Interp<'a> {
             Expr::OrFallback {
                 value,
                 fallback,
-                is_option,
+                is_option: _,
                 span: _,
             } => {
                 let v = self.eval(value, scope)?;
-                // Determine if the value is "absent" (needs fallback).
-                let is_absent = if *is_option {
-                    matches!(v, CtValue::None(_))
-                } else {
-                    matches!(v, CtValue::ResErr(_))
-                };
+                // Runtime variant is authoritative here. REPL statements are
+                // interpreted from the accepted AST while sema annotates a
+                // checked clone, so relying on sema's `is_option` bit would
+                // make a cross-turn `None ?? fallback` silently stay `None`.
+                let is_absent = matches!(v, CtValue::None(_) | CtValue::ResErr(_));
                 if is_absent {
                     // Evaluate the fallback.
                     match fallback {

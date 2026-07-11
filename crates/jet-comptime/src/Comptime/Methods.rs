@@ -1120,7 +1120,38 @@ impl<'a> Interp<'a> {
                         | "core.process"
                 );
                 if is_tier2 {
+                    if self.repl_mode {
+                        if matches!((module.as_str(), method), ("core.process", "run")) {
+                            pin_repl_command(&mut argv, self.base_dir, span)?;
+                        }
+                        let request = repl_effect_request(&module, method, &argv);
+                        let granted = self.repl_grants.iter().any(|cap| {
+                            cap == &request.root || cap.starts_with(&format!("{}.", request.root))
+                        });
+                        if !granted {
+                            return Err(Diagnostic::error(
+                                "E1803",
+                                format!("{}.{} for `{}` has no REPL runtime authority", request.root, request.operation, request.resource),
+                                "REPL host effects require both lexical `#Grant` authority and invocation policy; no host operation ran".to_string(),
+                                format!("wrap this operation in `#Grant({}) {{ caps -> ... }}`; interactive sessions then prompt, while non-TTY sessions also need `--allow-{}`", request.root, request.root.to_ascii_lowercase()),
+                                Some(span),
+                            ));
+                        }
+                        let Some(authorizer) = self.repl_authorizer.as_deref_mut() else {
+                            return Err(Diagnostic::error(
+                                "E1803",
+                                format!("{}.{} for `{}` was denied", request.root, request.operation, request.resource),
+                                "this REPL mode has no runtime authority provider, so the host operation did not run".to_string(),
+                                format!("restart with `jet repl --allow-{}` or use an interactive session and approve the exact operation", request.root.to_ascii_lowercase()),
+                                Some(span),
+                            ));
+                        };
+                        authorizer.authorize(&request, span)?;
+                    }
                     if self.impure_depth == 0 {
+                        if self.repl_mode {
+                            unreachable!("REPL lexical grant checked above");
+                        }
                         return Err(Diagnostic::error(
                             "E3410",
                             format!("`{}.{}()` is a Tier-2 comptime effect — it requires a `#Impure` gate", module, method),
@@ -1149,6 +1180,7 @@ impl<'a> Interp<'a> {
                         span,
                         self.base_dir,
                         self.sink.as_deref_mut(),
+                        self.repl_mode,
                     );
                 }
                 return apply_core_call(&module, method, argv, span, self.repl_mode);
@@ -1476,6 +1508,72 @@ impl<'a> Interp<'a> {
         }
         apply_method(&recv, method, argv, span)
     }
+}
+
+fn repl_effect_request(module: &str, method: &str, args: &[CtValue]) -> super::ReplEffectRequest {
+    let shown = |i: usize, fallback: &str| {
+        args.get(i).map(CtValue::jet_show).unwrap_or_else(|| fallback.to_string())
+    };
+    let (root, operation, resource) = match (module, method) {
+        ("core.files", "read" | "read_bytes" | "exists" | "is_dir") =>
+            ("Fs", "Read", shown(0, "<path>")),
+        ("core.files", "write" | "append_all" | "create_dir" | "remove") =>
+            ("Fs", "Write", shown(0, "<path>")),
+        ("core.env", "get") => ("Env", "Read", shown(0, "<key>")),
+        ("core.env", "set") => ("Env", "Write", shown(0, "<key>")),
+        ("core.env", "current_dir") => ("Env", "Read", "PWD".to_string()),
+        ("core.env", "home_dir") => ("Env", "Read", "HOME".to_string()),
+        ("core.io", "eprint") => ("Io", "Write", "stderr".to_string()),
+        ("core.io", "input" | "read_all_input" | "stdin") =>
+            ("Io", "Read", "stdin".to_string()),
+        ("core.io", "args") => ("Io", "Read", "argv".to_string()),
+        ("core.process", "run") => ("Exec", "Run", shown(0, "<command>")),
+        ("core.process", "exit") => ("Exec", "Exit", shown(0, "0")),
+        ("core.net", _) => ("Net", method, shown(0, "<network resource>")),
+        ("core.exec", _) => ("Exec", method, shown(0, "<command>")),
+        _ => ("Io", method, module.to_string()),
+    };
+    super::ReplEffectRequest {
+        root: root.to_string(),
+        operation: operation.to_string(),
+        resource,
+    }
+}
+
+fn pin_repl_command(
+    args: &mut [CtValue],
+    base_dir: &std::path::Path,
+    span: Span,
+) -> Result<(), Diagnostic> {
+    let Some(CtValue::List(words)) = args.first_mut() else {
+        return Err(unsupported("process.run expects a list of command words", span));
+    };
+    let Some(CtValue::Str(program)) = words.first_mut() else {
+        return Err(unsupported("process.run needs an executable name", span));
+    };
+    let candidate = std::path::Path::new(program);
+    let resolved = if candidate.components().count() > 1 || candidate.is_absolute() {
+        let path = if candidate.is_absolute() {
+            candidate.to_path_buf()
+        } else {
+            base_dir.join(candidate)
+        };
+        std::fs::canonicalize(path).ok()
+    } else {
+        std::env::var_os("PATH").and_then(|path| {
+            std::env::split_paths(&path)
+                .map(|dir| dir.join(candidate))
+                .find_map(|path| std::fs::canonicalize(path).ok().filter(|p| p.is_file()))
+        })
+    };
+    let Some(resolved) = resolved else {
+        return Err(unsupported(
+            &format!("process.run could not resolve executable `{program}`"),
+            span,
+        ));
+    };
+    *program = resolved.to_string_lossy().into_owned();
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -3304,6 +3402,7 @@ fn apply_impure_core_call(
     span: Span,
     base_dir: &std::path::Path,
     sink: Option<&mut super::Interpreter::DevSink>,
+    repl_mode: bool,
 ) -> Result<CtValue, Diagnostic> {
     let one = |i: usize| {
         args.get(i).ok_or_else(|| {
@@ -3402,7 +3501,7 @@ fn apply_impure_core_call(
         ("core.env", "get") => {
             let key = as_string(one(0)?, span)?;
             match std::env::var(key) {
-                Ok(v) => Ok(CtValue::Str(v)),
+                Ok(v) => Ok(CtValue::Some(Box::new(CtValue::Str(v)))),
                 Err(_) => Ok(CtValue::None(crate::AST::Type::String)),
             }
         }
@@ -3445,8 +3544,13 @@ fn apply_impure_core_call(
             Ok(CtValue::Unit)
         }
         ("core.io", "input") | ("core.io", "read_all_input") => {
-            Ok(CtValue::ResOk(Box::new(CtValue::Str(String::new()))))
+            if repl_mode {
+                Err(repl_native_module_diag("core.io", method, span))
+            } else {
+                Ok(CtValue::ResOk(Box::new(CtValue::Str(String::new()))))
+            }
         }
+        ("core.io", "stdin") if repl_mode => Err(repl_native_module_diag("core.io", method, span)),
         ("core.io", "stdin") => Ok(CtValue::Struct {
             type_name: "StdinHandle".to_string(),
             fields: vec![],
@@ -3477,7 +3581,12 @@ fn apply_impure_core_call(
                     )],
                 })));
             }
-            match std::process::Command::new(&cmd[0]).args(&cmd[1..]).output() {
+            match std::process::Command::new(&cmd[0])
+                .args(&cmd[1..])
+                .current_dir(base_dir)
+                .env_clear()
+                .output()
+            {
                 Ok(out) => Ok(CtValue::ResOk(Box::new(CtValue::Struct {
                     type_name: "ProcessResult".to_string(),
                     fields: vec![

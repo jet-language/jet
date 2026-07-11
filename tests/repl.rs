@@ -6,7 +6,7 @@
 //!
 //! Test failures show the first diverging expected/actual line.
 
-use jet::REPL::run_transcript;
+use jet::REPL::{run_transcript, run_transcript_with_flags};
 
 /// Parse a transcript file: return `(inputs, expected_outputs)`.
 /// Lines `> input` become inputs; non-comment, non-`>` lines become expected.
@@ -637,10 +637,53 @@ fn repl_complex_bindings_keep_exact_typed_ast_across_turns() {
 }
 
 #[test]
+fn repl_all_complex_binding_shapes_survive_across_turns() {
+    let out = run_transcript(
+        &[
+            "enum State { Ready(Int) }",
+            "fn state_value(s: State) -> Int { if s == { .Ready(value) -> { return value } } return 0 }",
+            "items: [String] :: [\"jet\", \"repl\"]",
+            "items[0]",
+            "counts: [String: Int] :: [\"jet\": 2]",
+            "counts[\"jet\"]",
+            "maybe: Int? :: Val(7)",
+            "maybe ?? 0",
+            "result: Int ? String :: ok(9)",
+            "result ?? 0",
+            "state :: State.Ready(11)",
+            "state_value(state)",
+        ],
+        None,
+    );
+    assert!(!out.contains("error ["), "typed state regressed: {out}");
+    for expected in ["\"jet\" : String", "2 : Int", "7 : Int", "9 : Int", "11 : Int"] {
+        assert!(out.contains(expected), "missing {expected:?}: {out}");
+    }
+}
+
+#[test]
+fn repl_declared_types_survive_empty_and_absent_values() {
+    let out = run_transcript(
+        &[
+            "names: [String] :: []",
+            "missing: String? :: None",
+            ":type names",
+            ":type missing",
+            "names.len()",
+            "missing ?? \"fallback\"",
+        ],
+        None,
+    );
+    assert!(!out.contains("error ["), "declared type state regressed: {out}");
+    assert!(out.contains("names : [String]"), "empty list type collapsed: {out}");
+    assert!(out.contains("missing : String?"), "None type collapsed: {out}");
+    assert!(out.contains("0 : Int") && out.contains("\"fallback\" : String"), "values unusable: {out}");
+}
+
+#[test]
 fn repl_core_io_eprint_inline() {
-    // c133: Tier-2 core.io calls run in the REPL sandbox (no #Impure gate).
-    let inputs = &["use core.io as io", "io.eprint(\"repl-err\")"];
-    let out = run_transcript(inputs, None);
+    let inputs = &["use core.io as io", "#Grant(Io) { caps -> io.eprint(\"repl-err\") }"];
+    let out = run_transcript_with_flags(inputs, None, &["io"], &[]);
     assert!(
         out.contains("ok") && out.contains("repl-err"),
         "io.eprint should run inline, got: {:?}",
@@ -694,7 +737,7 @@ fn repl_core_regex_is_match_inline() {
 
 #[test]
 fn repl_core_fs_read_inline() {
-    let fixture = std::env::temp_dir().join(format!(
+    let root = std::env::temp_dir().join(format!(
         "jet_repl_fs_{}_{}",
         std::process::id(),
         std::time::SystemTime::now()
@@ -702,20 +745,159 @@ fn repl_core_fs_read_inline() {
             .unwrap()
             .as_nanos()
     ));
-    std::fs::write(&fixture, "repl-fs-payload").expect("write fixture");
-    let path = fixture.to_string_lossy().to_string();
-    let read_expr = format!(
-        "fs.read(\"{}\") ?? panic(\"read failed\")",
-        path.replace('\\', "\\\\")
-    );
-    let inputs = &["use core.files as fs", &read_expr];
-    let out = run_transcript(inputs, None);
-    std::fs::remove_file(&fixture).ok();
+    std::fs::create_dir_all(&root).expect("create fixture root");
+    std::fs::write(root.join("payload.txt"), "repl-fs-payload").expect("write fixture");
+    let read_expr = "#Grant(Fs, Io) { caps -> io.eprint(fs.read(\"payload.txt\") ?? panic(\"read failed\")) }";
+    let inputs = &["use core.files as fs", "use core.io as io", read_expr];
+    let out = run_transcript_with_flags(inputs, root.to_str(), &["fs", "io"], &[]);
+    std::fs::remove_dir_all(&root).ok();
     assert!(
         out.contains("repl-fs-payload") && !out.contains("E1802"),
         "fs.read should work in REPL, got: {:?}",
         out
     );
+}
+
+#[test]
+fn repl_non_tty_denies_ungranted_files_before_execution() {
+    let root = std::env::temp_dir().join(format!("jet_repl_deny_{}", std::process::id()));
+    std::fs::create_dir_all(&root).expect("create root");
+    let target = root.join("must-not-exist.txt");
+    let input = "#Grant(Fs) { caps -> fs.write(\"must-not-exist.txt\", \"bad\") ?? panic(\"write failed\") }";
+    let out = run_transcript(&["use core.files as fs", input], root.to_str());
+    assert!(out.contains("E1803") && out.contains("Fs.Write"), "missing deterministic deny: {out}");
+    assert!(!target.exists(), "denied effect executed");
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn repl_allow_and_deny_flags_work_in_transcript_mode() {
+    let root = std::env::temp_dir().join(format!("jet_repl_flags_{}", std::process::id()));
+    std::fs::create_dir_all(&root).expect("create root");
+    let input = "#Grant(Fs) { caps -> fs.write(\"flag.txt\", \"allowed\") ?? panic(\"write failed\") }";
+    let allowed = run_transcript_with_flags(
+        &["use core.files as fs", input],
+        root.to_str(),
+        &["fs"],
+        &[],
+    );
+    assert!(!allowed.contains("E1803"), "--allow-fs rejected: {allowed}");
+    assert_eq!(std::fs::read_to_string(root.join("flag.txt")).unwrap(), "allowed");
+    std::fs::remove_file(root.join("flag.txt")).unwrap();
+
+    let denied = run_transcript_with_flags(
+        &["use core.files as fs", input],
+        root.to_str(),
+        &["fs"],
+        &["fs"],
+    );
+    assert!(denied.contains("E1803"), "--deny-fs must override allow: {denied}");
+    assert!(!root.join("flag.txt").exists(), "explicitly denied effect executed");
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn repl_cli_allow_and_deny_flags_control_non_tty_execution() {
+    use std::io::Write as _;
+    use std::process::{Command, Stdio};
+
+    let root = std::env::temp_dir().join(format!("jet_repl_cli_flags_{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    let input = b"use core.files as fs\n#Grant(Fs) { caps -> fs.write(\"cli.txt\", \"yes\") ?? panic(\"write failed\") }\n:quit\n";
+    let run = |extra: &[&str]| {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_jet"));
+        cmd.arg("repl").arg("--project").arg(&root).args(extra)
+            .env("NO_COLOR", "1")
+            .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        let mut child = cmd.spawn().unwrap();
+        child.stdin.as_mut().unwrap().write_all(input).unwrap();
+        child.wait_with_output().unwrap()
+    };
+
+    let allowed = run(&["--allow-fs"]);
+    assert!(allowed.status.success(), "allow status: {:?}", allowed.status);
+    assert_eq!(std::fs::read_to_string(root.join("cli.txt")).unwrap(), "yes");
+    std::fs::remove_file(root.join("cli.txt")).unwrap();
+
+    let denied = run(&["--allow-fs", "--deny-fs"]);
+    let stderr = String::from_utf8_lossy(&denied.stderr);
+    assert!(stderr.contains("E1803"), "missing deny diagnostic: {stderr}");
+    assert!(!root.join("cli.txt").exists(), "CLI-denied write executed");
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn repl_effect_needs_lexical_grant_even_with_allow_flag() {
+    let root = std::env::temp_dir().join(format!("jet_repl_missing_grant_{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    let out = run_transcript_with_flags(
+        &["use core.files as fs", "fs.write(\"no.txt\", \"bad\") ?? panic(\"write failed\")"],
+        root.to_str(),
+        &["fs"],
+        &[],
+    );
+    assert!(out.contains("E1803") && out.contains("no REPL runtime authority"), "missing lexical denial: {out}");
+    assert!(!root.join("no.txt").exists(), "operation without #Grant executed");
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn repl_allow_fs_still_rejects_paths_outside_project_root() {
+    let root = std::env::temp_dir().join(format!("jet_repl_confined_{}", std::process::id()));
+    let outside = std::env::temp_dir().join(format!("jet_repl_escape_{}.txt", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::remove_file(&outside).ok();
+    let escaped = outside.to_string_lossy().replace('\\', "\\\\");
+    let input = format!(
+        "#Grant(Fs) {{ caps -> fs.write(\"{escaped}\", \"bad\") ?? panic(\"write failed\") }}"
+    );
+    let out = run_transcript_with_flags(
+        &["use core.files as fs", &input],
+        root.to_str(),
+        &["fs"],
+        &[],
+    );
+    assert!(out.contains("E1803") && out.contains("confined"), "escape was not rejected: {out}");
+    assert!(!outside.exists(), "confined REPL wrote outside project root");
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn repl_tty_prompts_and_reuses_exact_session_tuple() {
+    use std::process::Command;
+
+    let root = std::env::temp_dir().join(format!("jet_repl_tty_auth_{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("value.txt"), "ok").unwrap();
+    let shell = r#"
+{
+  sleep 0.2
+  printf 'use core.files as fs\r'
+  sleep 0.2
+  printf '#Grant(Fs) { caps -> fs.read("value.txt") ?? panic("read failed") }\r'
+  sleep 0.2
+  printf 's'
+  sleep 0.2
+  printf '#Grant(Fs) { caps -> fs.read("value.txt") ?? panic("read failed") }\r'
+  sleep 0.2
+  printf 'c'
+  sleep 0.2
+  printf ':quit\r'
+} | script -qec '"$JET_REPL_BIN" repl --project "$JET_REPL_ROOT"' /dev/null
+"#;
+    let output = Command::new("sh")
+        .args(["-c", shell])
+        .env("JET_REPL_BIN", env!("CARGO_BIN_EXE_jet"))
+        .env("JET_REPL_ROOT", &root)
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run REPL under PTY");
+    let out = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "PTY status: {:?}\n{out}", output.status);
+    assert!(out.contains("Core effect Fs requests runtime authority"), "missing prompt: {out}");
+    assert!(out.contains("Using session Fs.Read authority for `value.txt`"), "missing exact tuple reuse: {out}");
+    assert!(!out.contains("E1803"), "approved tuple denied: {out}");
+    std::fs::remove_dir_all(root).ok();
 }
 
 #[test]

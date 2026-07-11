@@ -1860,6 +1860,23 @@ Enum literals use the qualified form: `Key.Char('a')`, `Key.Enter`, etc.
 **Platform FFI:** I6-compliant; uses inline `extern "C"` (POSIX termios) and
 `extern "system"` (Windows console API) — no external crates.
 
+## REPL Core effects
+
+The REPL keeps accepted statement ASTs and live `CtValue`s across turns.
+Lists, maps, options, results, structs, enums, and closures are not rebuilt
+from display text; explicit binding annotations remain available to `:type`.
+
+Pure Core calls run directly. Ambient Core calls use normal Jet authority:
+the call must be inside `#Grant(root)`, and the REPL must authorize the exact
+operation and resource before it touches host state. A TTY prompts for once,
+session, or deny. A session allowance is an exact tuple and offers continue
+or revoke on reuse. `--allow-fs`, `--allow-env`, `--allow-exec`,
+`--allow-net`, and `--allow-io` skip ordinary prompts for their roots;
+matching `--deny-*` flags override them. Piped and transcript sessions never
+prompt and deny unflagged effects with E1803. Filesystem access is confined to
+the project root and rejects absolute paths, parent traversal, and symlinks.
+Native-only modules still report E1802.
+
 ## Editions & release policy (E2-M2)
 
 A project pins an **edition** with `edition: "2026"` in its `pkg.jet`

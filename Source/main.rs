@@ -358,6 +358,8 @@ usage:
   {bin} debug <file.{ext}>          step through a program at the Jet source level (D-DBG3)
   {bin} repl                         start an interactive session (E2-M18)
   {bin} repl  --project <dir>        same, with access to a project's imports
+  {bin} repl  --allow-<root>         pre-authorize one Core effect root (fs/env/exec/net/io)
+  {bin} repl  --deny-<root>          deny one Core effect root; overrides allow and prompts
   {bin} eval  <file.{ext}> --pure   evaluate a pure program to stable JSON (S60)
   {bin} fmt                         rewrite all .jet files in the project to canonical style
   {bin} fmt   <file|dir>...         rewrite specific files or directories (recurse)
@@ -734,7 +736,7 @@ fn main() {
 
     // c6vz465: bare `jet` starts the REPL (D-REPL4); `jet ?` is help sugar.
     if raw.is_empty() {
-        run_repl(None);
+        run_repl(None, &[], &[]);
         return;
     }
     if raw[0] == "?" {
@@ -1293,7 +1295,16 @@ fn main() {
                 .iter()
                 .find_map(|a| a.strip_prefix("--project=").map(str::to_string))
                 .or_else(|| flag_value(&raw, "--project").map(str::to_string));
-            run_repl(project.as_deref());
+            let roots = ["exec", "fs", "net", "env", "io", "db", "time", "rand", "log", "gpu"];
+            let allow: Vec<String> = roots.into_iter()
+                .filter(|root| raw.iter().any(|arg| arg == &format!("--allow-{root}")))
+                .map(str::to_string)
+                .collect();
+            let deny: Vec<String> = roots.into_iter()
+                .filter(|root| raw.iter().any(|arg| arg == &format!("--deny-{root}")))
+                .map(str::to_string)
+                .collect();
+            run_repl(project.as_deref(), &allow, &deny);
             return;
         }
         // Teaching error: E0043 `jet install` → `jet store fetch`

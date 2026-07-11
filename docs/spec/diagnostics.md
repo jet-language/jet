@@ -419,6 +419,7 @@ before continuing.
 | E3403 | sema  | non-deterministic construct in pure evaluation (e.g. time/random) |
 | E1801 | repl  | per-input fuel cap hit — snippet ran more than ~10M interpreter steps |
 | E1802 | repl  | hard-rejected feature in the REPL (FFI, tasks, `#Unsafe`, OS-level APIs) |
+| E1803 | repl  | a REPL Core effect lacks lexical or invocation authority, or its exact operation/resource was denied |
 | E0801 | sema  | lambda parameter type unknown |
 | E0802 | sema  | escaping lambda captures non-clonable value without `take` |
 | E0803 | sema  | calling a value that isn't a function |
@@ -1239,6 +1240,7 @@ REPL step number in place of a file span (`<repl:N>`).
 |------|------|-----|-----|
 | E1801 | This snippet ran more than `{N}` interpreter steps without finishing. | The REPL interpreter caps each input to avoid hanging your session; this almost always means a loop that never ends. | Check any loops for a condition that never becomes false. Use `:run` to allow unbounded execution (compiles and runs instead of interpreting). |
 | E1802 | The REPL interpreter can't run `{feature}`. | The REPL is an interpreter for learning Jet; some features — FFI, tasks/channels, `#Unsafe`, and OS-level APIs — require the real compiler. | Run `jet run <file.jet>` or `jet build <file.jet>` to use the full compiler. |
+| E1803 | `{Root}.{Operation}` for `{resource}` was denied. | REPL host effects require both an enclosing `#Grant` and runtime invocation authority; denied operations stop before touching host state. | Approve the exact operation interactively, or restart with the matching `jet repl --allow-{root}` flag. `--deny-{root}` always wins. |
 
 ## CLI diagnostics (E2-M3 developer command UX)
 

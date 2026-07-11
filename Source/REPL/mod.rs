@@ -48,6 +48,121 @@ pub mod RerunPlan;
 // unchanged.
 use crate::Term as Terminal;
 
+#[derive(Clone, Debug, Default)]
+pub struct ReplFlags {
+    pub allow: HashSet<String>,
+    pub deny: HashSet<String>,
+}
+
+impl ReplFlags {
+    pub fn new(allow: &[String], deny: &[String]) -> Self {
+        Self {
+            allow: allow.iter().map(|s| s.to_ascii_lowercase()).collect(),
+            deny: deny.iter().map(|s| s.to_ascii_lowercase()).collect(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PromptChoice { Once, Session, Deny, Continue, Revoke }
+
+pub(crate) trait EffectPrompt {
+    fn choose(&mut self, request: &crate::Comptime::ReplEffectRequest, reused: bool) -> PromptChoice;
+}
+
+struct ReplPolicy {
+    flags: ReplFlags,
+    root: std::path::PathBuf,
+    session: HashSet<crate::Comptime::ReplEffectRequest>,
+}
+
+impl ReplPolicy {
+    fn new(flags: ReplFlags, root: &Path) -> Self {
+        Self { flags, root: root.to_path_buf(), session: HashSet::new() }
+    }
+
+    fn authorizer<'a>(&'a mut self, prompt: Option<&'a mut dyn EffectPrompt>) -> ReplAuthorization<'a> {
+        ReplAuthorization { policy: self, prompt }
+    }
+}
+
+struct ReplAuthorization<'a> {
+    policy: &'a mut ReplPolicy,
+    prompt: Option<&'a mut dyn EffectPrompt>,
+}
+
+impl ReplAuthorization<'_> {
+    fn e1803(&self, request: &crate::Comptime::ReplEffectRequest, why: &str, span: crate::Diagnostics::Span) -> Diagnostic {
+        Diagnostic::error(
+            "E1803",
+            format!("{}.{} for `{}` was denied", request.root, request.operation, request.resource),
+            format!("{why}; the host operation did not run"),
+            format!("approve this exact operation interactively, or restart with `jet repl --allow-{}`", request.root.to_ascii_lowercase()),
+            Some(span),
+        )
+    }
+
+    fn validate_file_target(&self, request: &crate::Comptime::ReplEffectRequest, span: crate::Diagnostics::Span) -> Result<(), Diagnostic> {
+        if request.root != "Fs" { return Ok(()); }
+        let relative = std::path::Path::new(&request.resource);
+        if relative.is_absolute() || relative.components().any(|c| matches!(c, std::path::Component::ParentDir | std::path::Component::RootDir | std::path::Component::Prefix(_))) {
+            return Err(self.e1803(request, "filesystem authority is confined to the REPL project root and rejects absolute or parent paths", span));
+        }
+        let mut cursor = self.policy.root.clone();
+        for component in relative.components() {
+            if let std::path::Component::Normal(part) = component {
+                cursor.push(part);
+                if std::fs::symlink_metadata(&cursor).is_ok_and(|m| m.file_type().is_symlink()) {
+                    return Err(self.e1803(request, "filesystem authority rejects symlink traversal", span));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl crate::Comptime::ReplAuthorizer for ReplAuthorization<'_> {
+    fn authorize(&mut self, request: &crate::Comptime::ReplEffectRequest, span: crate::Diagnostics::Span) -> Result<(), Diagnostic> {
+        self.validate_file_target(request, span)?;
+        let root = request.root.to_ascii_lowercase();
+        if self.policy.flags.deny.contains(&root) {
+            return Err(self.e1803(request, "an explicit `--deny` policy overrides every prompt and allowance", span));
+        }
+        if self.policy.flags.allow.contains(&root)
+            && (request.operation != "Exit" || self.prompt.is_none())
+        {
+            return Ok(());
+        }
+        let reused = self.policy.session.contains(request);
+        let Some(prompt) = self.prompt.as_deref_mut() else {
+            return Err(self.e1803(request, "non-TTY REPL sessions never prompt and no matching `--allow` flag was supplied", span));
+        };
+        match prompt.choose(request, reused) {
+            PromptChoice::Once | PromptChoice::Continue => Ok(()),
+            PromptChoice::Session => {
+                self.policy.session.insert(request.clone());
+                Ok(())
+            }
+            PromptChoice::Revoke => {
+                self.policy.session.remove(request);
+                match prompt.choose(request, false) {
+                    PromptChoice::Once | PromptChoice::Continue => Ok(()),
+                    PromptChoice::Session => {
+                        self.policy.session.insert(request.clone());
+                        Ok(())
+                    }
+                    _ => Err(self.e1803(request, "session authority was revoked and the replacement request was denied", span)),
+                }
+            }
+            PromptChoice::Deny => Err(self.e1803(request, "interactive authority was denied", span)),
+        }
+    }
+
+    fn reset_session(&mut self) {
+        self.policy.session.clear();
+    }
+}
+
 /// Effect markers used to classify a Stmts turn as "effectful" for
 /// D-FE-REPL-RERUN1=A replay gating (`ReplTurn::had_effect`). Textual, not a
 /// full purity analysis — deliberately conservative (a false positive just
@@ -185,6 +300,9 @@ pub struct Session {
     pub func_defs: HashMap<String, Func>,
     /// Live interpreter scope: accumulated bindings (D-REPL7).
     pub scope: HashMap<String, CtValue>,
+    /// Declared Jet type annotations, retained independently from CtValue so
+    /// empty collections and absent/error variants never collapse in `:type`.
+    pub binding_types: HashMap<String, crate::AST::Type>,
     /// Names bound with `:=` (mutable). Everything else in `scope` was bound
     /// with `::`. Drives the `name: Type := value` / `:: value` line shape.
     pub mutable_names: HashSet<String>,
@@ -248,6 +366,7 @@ impl Session {
             sema_stmts: Vec::new(),
             func_defs: HashMap::new(),
             scope: HashMap::new(),
+            binding_types: HashMap::new(),
             mutable_names: HashSet::new(),
             shown_preload_note: false,
             step: 0,
@@ -264,6 +383,7 @@ impl Session {
         self.sema_stmts.clear();
         self.func_defs.clear();
         self.scope.clear();
+        self.binding_types.clear();
         self.step = 0;
         self.moved_names.clear();
         self.stmt_srcs.clear();
@@ -325,6 +445,9 @@ impl Session {
                     self.mutable_names.insert(binding.name.clone());
                 } else {
                     self.mutable_names.remove(&binding.name);
+                }
+                if let Some(ty) = &binding.ty {
+                    self.binding_types.insert(binding.name.clone(), ty.clone());
                 }
             }
             self.sema_stmts.push(stmt.clone());
@@ -574,6 +697,12 @@ fn cmd_run_native(session: &Session, color: bool, out_sink: &mut impl Write) {
         let _ = writeln!(out_sink, "note: session is empty — nothing to run");
         return;
     }
+    if session.turns.iter().any(|turn| turn.input.contains("#Grant")) {
+        let _ = writeln!(out_sink, "Error [E1803]: `:run` will not replay effectful turns");
+        let _ = writeln!(out_sink, " Why: replay would repeat already-authorized host operations without an operation-by-operation prompt; nothing ran");
+        let _ = writeln!(out_sink, " Fix: run each effectful turn in the REPL, or put the program in a file and use `jet run`");
+        return;
+    }
 
     // Materialize: imports + items + a run() that replays statement inputs.
     let import_src = session.import_src();
@@ -632,6 +761,9 @@ fn cmd_run_native(session: &Session, color: bool, out_sink: &mut impl Write) {
 fn cmd_run_transcript(session: &Session) -> String {
     if session.stmt_srcs.is_empty() && session.item_srcs.is_empty() {
         return "note: session is empty — nothing to run\n".to_string();
+    }
+    if session.turns.iter().any(|turn| turn.input.contains("#Grant")) {
+        return "Error [E1803]: `:run` will not replay effectful turns\n Why: replay would repeat already-authorized host operations without an operation-by-operation prompt; nothing ran\n Fix: run each effectful turn in the REPL, or put the program in a file and use `jet run`\n".to_string();
     }
 
     let import_src = session.import_src();
@@ -1333,7 +1465,8 @@ fn cmd_load(
 
 fn cmd_type(name: &str, session: &Session, color: bool) {
     if let Some(v) = session.scope.get(name) {
-        println!("{} : {}", name, type_name(v));
+        let ty = session.binding_types.get(name).map(|t| t.name()).unwrap_or_else(|| type_name(v).to_string());
+        println!("{} : {}", name, ty);
     } else if session.func_defs.contains_key(name) {
         println!("{} : fn", name);
     } else {
@@ -1363,7 +1496,7 @@ fn render_diags(file: &str, src: &str, diags: &[Diagnostic], color: bool) {
 /// line-buffered loop otherwise (I6: `stty` shell-out, no line-editing
 /// crate). The cooked loop is also the exact non-TTY floor `run_transcript`
 /// mirrors — piped/redirected sessions keep the pre-redesign plain output.
-pub fn run(project_dir: Option<&str>) -> i32 {
+pub fn run(project_dir: Option<&str>, flags: ReplFlags) -> i32 {
     let color = color_on();
     let raw_guard = Terminal::RawGuard::enable();
     println!("{}", Render::render_banner(env!("CARGO_PKG_VERSION"), color));
@@ -1374,8 +1507,8 @@ pub fn run(project_dir: Option<&str>) -> i32 {
     );
 
     match raw_guard {
-        Some(guard) => Interactive::run_interactive(project_dir, color, guard),
-        None => run_cooked(project_dir, color),
+        Some(guard) => Interactive::run_interactive(project_dir, color, guard, flags),
+        None => run_cooked(project_dir, color, flags),
     }
 }
 
@@ -1384,7 +1517,7 @@ pub fn run(project_dir: Option<&str>) -> i32 {
 /// unfolded echoes. This is the non-TTY fallback and stays byte-identical to
 /// the REPL's prior behavior (tests/cli's `no_args_repl_banner_golden` and
 /// every `tests/repl.rs` transcript floor depend on it).
-fn run_cooked(project_dir: Option<&str>, color: bool) -> i32 {
+fn run_cooked(project_dir: Option<&str>, color: bool, flags: ReplFlags) -> i32 {
     let base_dir: std::path::PathBuf =
         project_dir
             .map(std::path::PathBuf::from)
@@ -1393,6 +1526,7 @@ fn run_cooked(project_dir: Option<&str>, color: bool) -> i32 {
             });
 
     let mut session = Session::new();
+    let mut policy = ReplPolicy::new(flags, &base_dir);
 
     // D-REPL10=A: --project loads the project's source items into the session
     // so functions/types are available without `use`.
@@ -1418,7 +1552,8 @@ fn run_cooked(project_dir: Option<&str>, color: bool) -> i32 {
             continue;
         }
 
-        if execute_line(trimmed, &mut session, &base_dir, color, false, false) {
+        let mut authorizer = policy.authorizer(None);
+        if execute_line(trimmed, &mut session, &base_dir, color, false, false, &mut authorizer) {
             break;
         }
     }
@@ -1447,6 +1582,7 @@ pub(crate) fn execute_line(
     color: bool,
     fold_long_output: bool,
     quiet: bool,
+    authorizer: &mut dyn crate::Comptime::ReplAuthorizer,
 ) -> bool {
     session.step += 1;
     let step_src = format!("<repl:{}>", session.step);
@@ -1510,7 +1646,7 @@ pub(crate) fn execute_line(
                 // recorded), but guard defensively rather than print anyway.
                 return false;
             }
-            return handle_meta(&cmd, arg.as_deref(), session, base_dir, color);
+            return handle_meta(&cmd, arg.as_deref(), session, base_dir, color, authorizer);
         }
 
         InputKind::Reject(feature) => {
@@ -1612,6 +1748,7 @@ pub(crate) fn execute_line(
                 REPL_FUEL_BUDGET,
                 suppress,
                 &session.core_imports,
+                authorizer,
             ) {
                 Ok(echo_val) => {
                     let mut summary = String::new();
@@ -1704,6 +1841,7 @@ fn handle_meta(
     session: &mut Session,
     base_dir: &Path,
     color: bool,
+    authorizer: &mut dyn crate::Comptime::ReplAuthorizer,
 ) -> bool {
     match cmd {
         "quit" | "q" | "exit" => {
@@ -1712,6 +1850,7 @@ fn handle_meta(
         }
         "reset" => {
             session.reset();
+            authorizer.reset_session();
             println!("session reset");
         }
         "load" => {
@@ -1786,7 +1925,7 @@ fn handle_meta(
                                 "note: this plan includes effectful turns — use the interactive `^R` to confirm/skip them"
                             );
                         } else {
-                            apply_replay_plan(session, &plan, base_dir, color);
+                            apply_replay_plan(session, &plan, base_dir, color, authorizer);
                         }
                     }
                     Err(msg) => eprintln!("{msg}"),
@@ -1823,7 +1962,7 @@ fn handle_meta(
 /// from turn 1 through the plan's last step in order — turns before
 /// `plan.from_id` are known-good (their input/output already matched once)
 /// so they replay silently; only the plan's own steps print.
-fn apply_replay_plan(session: &mut Session, plan: &RerunPlan::ReplayPlan, base_dir: &Path, color: bool) {
+fn apply_replay_plan(session: &mut Session, plan: &RerunPlan::ReplayPlan, base_dir: &Path, color: bool, authorizer: &mut dyn crate::Comptime::ReplAuthorizer) {
     let prior: Vec<String> = session
         .turns
         .iter()
@@ -1834,14 +1973,14 @@ fn apply_replay_plan(session: &mut Session, plan: &RerunPlan::ReplayPlan, base_d
     // Turns before the edited one already matched once — replay them quietly
     // to rebuild state, so only the plan's own steps print.
     for input in &prior {
-        execute_line(input, session, base_dir, color, false, true);
+        execute_line(input, session, base_dir, color, false, true, authorizer);
     }
     for step in &plan.steps {
         println!(
             "{}",
             dim(&format!("rerun #{}: {}", step.turn_id, step.input), color)
         );
-        execute_line(&step.input, session, base_dir, color, false, false);
+        execute_line(&step.input, session, base_dir, color, false, false, authorizer);
     }
 }
 
@@ -1932,11 +2071,27 @@ fn print_help(color: bool) {
 /// Each input should be a single REPL input (may be multi-line if the caller
 /// joins them). The returned string is the combined stdout of the session.
 pub fn run_transcript(inputs: &[&str], project_dir: Option<&str>) -> String {
+    run_transcript_with_flags(inputs, project_dir, &[], &[])
+}
+
+/// Deterministic non-TTY transcript with explicit invocation policy. Used to
+/// prove CLI flag behavior without inventing a test-only authorization path.
+pub fn run_transcript_with_flags(
+    inputs: &[&str],
+    project_dir: Option<&str>,
+    allow: &[&str],
+    deny: &[&str],
+) -> String {
     let base_dir: std::path::PathBuf = project_dir
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::path::PathBuf::from("."));
 
     let mut session = Session::new();
+    let flags = ReplFlags {
+        allow: allow.iter().map(|s| s.to_ascii_lowercase()).collect(),
+        deny: deny.iter().map(|s| s.to_ascii_lowercase()).collect(),
+    };
+    let mut policy = ReplPolicy::new(flags, &base_dir);
     let mut out = String::new();
 
     // D-REPL10=A: load project items when --project is set.
@@ -1984,6 +2139,7 @@ pub fn run_transcript(inputs: &[&str], project_dir: Option<&str>) -> String {
                     }
                     "reset" => {
                         session.reset();
+                        policy.session.clear();
                         out.push_str("session reset\n");
                     }
                     "load" => {
@@ -2007,7 +2163,8 @@ pub fn run_transcript(inputs: &[&str], project_dir: Option<&str>) -> String {
                             }
                         };
                         if let Some(v) = session.scope.get(name) {
-                            out.push_str(&format!("{} : {}\n", name, type_name(v)));
+                            let ty = session.binding_types.get(name).map(|t| t.name()).unwrap_or_else(|| type_name(v).to_string());
+                            out.push_str(&format!("{} : {}\n", name, ty));
                         } else if session.func_defs.contains_key(name) {
                             out.push_str(&format!("{} : fn\n", name));
                         } else {
@@ -2177,6 +2334,7 @@ pub fn run_transcript(inputs: &[&str], project_dir: Option<&str>) -> String {
                     .map(|(k, v)| (k.clone(), v))
                     .collect();
                 let mut sink = DevSink::new();
+                let mut authorizer = policy.authorizer(None);
                 match crate::Comptime::run_repl_step(
                     &stmts,
                     &funcs,
@@ -2186,6 +2344,7 @@ pub fn run_transcript(inputs: &[&str], project_dir: Option<&str>) -> String {
                     REPL_FUEL_BUDGET,
                     suppress,
                     &session.core_imports,
+                    &mut authorizer,
                 ) {
                     Ok(echo_val) => {
                         let mut summary = String::new();

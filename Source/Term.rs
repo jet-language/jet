@@ -20,6 +20,7 @@ use std::process::{Command, Stdio};
 /// need to exit the process do so only after this guard has already dropped.
 pub struct RawGuard {
     saved: String,
+    restored: bool,
 }
 
 impl RawGuard {
@@ -61,13 +62,23 @@ impl RawGuard {
             let _ = Command::new("stty").arg(&saved).status();
             return None;
         }
-        Some(RawGuard { saved })
+        Some(RawGuard { saved, restored: false })
+    }
+
+    /// Restore saved terminal state before an orderly process exit. `Drop`
+    /// cannot run after `process::exit`, so consequence-gated REPL exit calls
+    /// this explicitly first.
+    pub fn restore_now(&mut self) {
+        if !self.restored {
+            let _ = Command::new("stty").arg(&self.saved).status();
+            self.restored = true;
+        }
     }
 }
 
 impl Drop for RawGuard {
     fn drop(&mut self) {
-        let _ = Command::new("stty").arg(&self.saved).status();
+        self.restore_now();
     }
 }
 
