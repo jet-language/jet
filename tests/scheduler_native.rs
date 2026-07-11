@@ -79,6 +79,12 @@ fn emitted_scheduler_ships_native_readiness_backend() {
         "emitted program must ship real IOCP registration, completion, wake, and cancellation"
     );
     assert!(
+        rust.contains("enum IoBackendState")
+            && rust.contains("IoBackendState::Failed")
+            && rust.contains("scheduler IOCP completion port failed"),
+        "emitted IOCP backend must publish terminal failure and reject later waits"
+    );
+    assert!(
         !rust.contains("IOCP path: fall back to portable poll"),
         "Windows native path must never route through portable readiness polling"
     );

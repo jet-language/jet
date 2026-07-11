@@ -109,6 +109,19 @@ mod iocp_runtime_tests {
         let (active, allocated, retired) = jet_scheduler_metric_io_operations();
         assert_eq!(active, 0, "IOCP active registrations leaked");
         assert_eq!(allocated, retired, "OVERLAPPED allocations leaked");
+
+        // Published terminal failure rejects later waits synchronously. No task
+        // may park behind a dead backend.
+        io_poller().fail_iocp_for_test();
+        let (client, _server) = connected();
+        let failed = jet_scheduler_spawn(move || {
+            jet_scheduler_io_wait(&client, true, false, "failed iocp");
+            9i64
+        });
+        assert!(matches!(wait_result(&failed), JetSchedulerResult::Panicked));
+        jet_scheduler_drain();
+        let (active, allocated, retired) = jet_scheduler_metric_io_operations();
+        assert_eq!((active, allocated), (0, retired));
     }
 }
 
@@ -528,10 +541,20 @@ struct IoInterest {
     writable: bool,
 }
 
+#[allow(dead_code)]
+#[derive(Clone)]
+enum IoBackendState {
+    Starting,
+    Running,
+    Failed(&'static str),
+    Closed,
+}
+
 struct IoPoller {
     interests: Mutex<Vec<IoInterest>>,
     streams: Mutex<HashMap<usize, Arc<Mutex<TcpStream>>>>,
     retire_requested: Mutex<HashSet<usize>>,
+    backend_state: Mutex<IoBackendState>,
     notify: Condvar,
     next_key: AtomicUsize,
     #[cfg(target_os = "windows")]
@@ -546,7 +569,14 @@ impl IoPoller {
         stream: Arc<Mutex<TcpStream>>,
         readable: bool,
         writable: bool,
-    ) -> (usize, Arc<ParkSlot>) {
+    ) -> Result<(usize, Arc<ParkSlot>), &'static str> {
+        let state = self.backend_state.lock().unwrap();
+        if let IoBackendState::Failed(error) = &*state {
+            return Err(*error);
+        }
+        if matches!(&*state, IoBackendState::Closed) {
+            return Err("scheduler IO backend is closed");
+        }
         let slot = ParkSlot::new();
         let mut streams = self.streams.lock().unwrap();
         let id = self.next_key.fetch_add(1, Ordering::Relaxed);
@@ -561,7 +591,8 @@ impl IoPoller {
         self.notify.notify_one();
         #[cfg(target_os = "windows")]
         self.iocp_notify();
-        (id, slot)
+        drop(state);
+        Ok((id, slot))
     }
 
     fn unregister(&self, id: usize) {
@@ -586,6 +617,16 @@ impl IoPoller {
         if port != 0 {
             unsafe { PostQueuedCompletionStatus(port, 0, 0, std::ptr::null_mut()); }
         }
+    }
+
+    #[cfg(all(test, target_os = "windows"))]
+    fn fail_iocp_for_test(&self) {
+        *self.backend_state.lock().unwrap() =
+            IoBackendState::Failed("injected scheduler IOCP failure");
+        for interest in self.interests.lock().unwrap().drain(..) {
+            interest.slot.wake();
+        }
+        self.iocp_notify();
     }
 
     fn run(self: Arc<Self>) {
@@ -903,6 +944,7 @@ impl IoPoller {
             fn GetQueuedCompletionStatus(port: usize, bytes: *mut u32, key: *mut usize, ov: *mut *mut Overlapped, timeout_ms: u32) -> i32;
             fn CancelIoEx(file: usize, ov: *mut Overlapped) -> i32;
             fn GetLastError() -> u32;
+            fn CloseHandle(handle: usize) -> i32;
         }
         #[link(name = "ws2_32")]
         extern "system" {
@@ -914,10 +956,15 @@ impl IoPoller {
         let port = unsafe { CreateIoCompletionPort(INVALID_HANDLE_VALUE, 0, 0, 1) };
         if port == 0 {
             METRIC_IO_FAILURES.fetch_add(1, Ordering::Relaxed);
+            *self.backend_state.lock().unwrap() =
+                IoBackendState::Failed("internal scheduler IOCP creation failed");
             for interest in self.interests.lock().unwrap().drain(..) { interest.slot.wake(); }
+            self.streams.lock().unwrap().clear();
+            self.retire_requested.lock().unwrap().clear();
             return;
         }
         self.iocp_port.store(port, Ordering::Release);
+        *self.backend_state.lock().unwrap() = IoBackendState::Running;
         let mut active: HashMap<usize, Active> = HashMap::new();
         loop {
             let pending: Vec<(usize, Arc<Mutex<TcpStream>>, usize, bool, bool)> = {
@@ -1004,7 +1051,57 @@ impl IoPoller {
             if operation.is_null() {
                 if ok == 0 {
                     METRIC_IO_FAILURES.fetch_add(1, Ordering::Relaxed);
+                    *self.backend_state.lock().unwrap() =
+                        IoBackendState::Failed("internal scheduler IOCP completion port failed");
                     for interest in self.interests.lock().unwrap().drain(..) { interest.slot.wake(); }
+                    for entry in active.values_mut() {
+                        if !entry.cancel_requested {
+                            entry.cancel_requested = true;
+                            for pending in &entry.operations {
+                                unsafe { CancelIoEx(entry.socket, *pending); }
+                            }
+                        }
+                    }
+                    // CancelIoEx on an IOCP-associated socket queues one terminal
+                    // completion per outstanding OVERLAPPED. Keep every Active
+                    // socket owner and Box alive until those completions arrive.
+                    while !active.is_empty() {
+                        let (mut drain_bytes, mut drain_key, mut drain_operation) =
+                            (0, 0usize, std::ptr::null_mut());
+                        unsafe {
+                            GetQueuedCompletionStatus(
+                                port,
+                                &mut drain_bytes,
+                                &mut drain_key,
+                                &mut drain_operation,
+                                u32::MAX,
+                            );
+                        }
+                        if drain_operation.is_null() { continue; }
+                        unsafe { drop(Box::from_raw(drain_operation)); }
+                        METRIC_IO_RETIRED.fetch_add(1, Ordering::Relaxed);
+                        let owner = active.iter().find_map(|(id, entry)|
+                            entry.operations.contains(&drain_operation).then_some(*id));
+                        if let Some(id) = owner {
+                            let entry = active.get_mut(&id).unwrap();
+                            entry.operations.retain(|candidate| *candidate != drain_operation);
+                            if entry.operations.is_empty() {
+                                active.remove(&id);
+                                METRIC_IO_ACTIVE.fetch_sub(1, Ordering::Relaxed);
+                                self.streams.lock().unwrap().remove(&id);
+                                self.retire_requested.lock().unwrap().remove(&id);
+                            }
+                        } else {
+                            METRIC_IO_STALE.fetch_add(1, Ordering::Relaxed);
+                        }
+                    }
+                    self.streams.lock().unwrap().clear();
+                    self.retire_requested.lock().unwrap().clear();
+                    self.iocp_port.store(0, Ordering::Release);
+                    *self.backend_state.lock().unwrap() = IoBackendState::Closed;
+                    unsafe { CloseHandle(port); }
+                    *self.backend_state.lock().unwrap() =
+                        IoBackendState::Failed("internal scheduler IOCP completion port failed");
                     return;
                 }
                 if key != 0 { METRIC_IO_STALE.fetch_add(1, Ordering::Relaxed); }
@@ -1101,6 +1198,11 @@ fn io_poller() -> Arc<IoPoller> {
                 interests: Mutex::new(Vec::new()),
                 streams: Mutex::new(HashMap::new()),
                 retire_requested: Mutex::new(HashSet::new()),
+                backend_state: Mutex::new(if cfg!(target_os = "windows") {
+                    IoBackendState::Starting
+                } else {
+                    IoBackendState::Running
+                }),
                 notify: Condvar::new(),
                 next_key: AtomicUsize::new(0),
                 #[cfg(target_os = "windows")]
@@ -1117,7 +1219,9 @@ fn io_poller() -> Arc<IoPoller> {
 pub fn jet_scheduler_io_wait(stream: &TcpStream, read: bool, write: bool, wait_kind: &str) {
     let shared = Arc::new(Mutex::new(stream.try_clone().expect("tcp clone")));
     let poller = io_poller();
-    let (id, slot) = poller.register(shared, read, write);
+    let (id, slot) = poller
+        .register(shared, read, write)
+        .unwrap_or_else(|error| jet_scheduler_fatal(error));
     struct Registration(Arc<IoPoller>, usize);
     impl Drop for Registration {
         fn drop(&mut self) { self.0.unregister(self.1); }
