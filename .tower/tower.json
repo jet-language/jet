@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 495,
-    "rev": 3375,
+    "rev": 3383,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -7227,7 +7227,7 @@
       "priority": "P0",
       "plan": "Order: (1) read docs/spec/architecture.md R1–R12 + spec.md sections per area; (2) per audit area, spawn adversarial review (opus-tier reasoning) over the relevant sema modules — CheckerCore.rs, CheckerInfer/, CheckerCoreLib.rs, Bundle.rs; (3) write attack programs as tests/ui fixtures — expect reject; write miscompile candidates as differential fixtures — expect byte-identical interpreter/compiled output; (4) extend tests/fuzz_sema.rs: grammar-directed generation from crates/jet-foundation/src/Syntax.rs so the fuzzer only speaks ratified syntax; (5) fix confirmed holes smallest-first, full suite between fixes; (6) audit notes + corpus docs; full nix develop -c cargo test green at close.",
       "blockedBy": [],
-      "assignee": "terra-353-corpus",
+      "assignee": null,
       "log": [
         {
           "at": "2026-07-11",
@@ -7298,11 +7298,19 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-07-11T10:13:20.648Z"
+        },
+        {
+          "n": 6,
+          "text": "The std-only corpus runner executes real Jet front-end→rustc→binary valid cases, exact-code invalid cases, and AOT-versus-default-dev observable parity cases; missing tools and empty/ambiguous selectors fail, and every single-fixture replay is deterministic and non-vacuous.",
+          "status": "verified",
+          "metBy": "terra-353-corpus",
+          "verifiedBy": "sol-353-review",
+          "evidence": "Independent review found selector globally requires exactly one fixture/category, unrelated categories return cleanly, full runs require all categories nonempty, and invalid/valid/differential oracles are real. No claim of forced JIT execution.",
+          "at": "2026-07-11T10:24:21.530Z"
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
-      "claimedAt": "2026-07-11T10:13:54.178Z"
+      "refs": []
     },
     {
       "id": "c0e7rot4",
@@ -11667,7 +11675,7 @@
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
-      "assignee": "terra-452-syntax",
+      "assignee": null,
       "log": [
         {
           "at": "2026-07-11",
@@ -11717,8 +11725,7 @@
       ],
       "needsAcceptance": false,
       "refs": [],
-      "workOrder": 33,
-      "claimedAt": "2026-07-11T10:13:54.004Z"
+      "workOrder": 33
     },
     {
       "id": "c047jzdr",
@@ -11891,7 +11898,7 @@
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
-      "assignee": "terra-456-overlay",
+      "assignee": null,
       "log": [],
       "created": "2026-07-10T10:49:07.533Z",
       "updated": "2026-07-11",
@@ -11908,11 +11915,11 @@
         {
           "n": 2,
           "text": "Overlay patch parsing has no production unwrap/expect, malformed or truncated user patches return OverlayError::Patch without panic, and valid adjacent-file patches remain byte-correct.",
-          "status": "met",
+          "status": "verified",
           "metBy": "terra-456-overlay",
-          "verifiedBy": null,
-          "evidence": "Mixed checkpoint 0aeec319 removes both Overlay production lines.next unwraps (audited total 14→12), adds malformed-header and adjacent-file boundary regressions, and focused Overlay tests pass 8/8.",
-          "at": "2026-07-11T10:18:49.956Z"
+          "verifiedBy": "sol-456-overlay-review",
+          "evidence": "Independent final review of 212e5917 + prior fixes: safe empty/Unicode tag parsing, count-aware `--- text` removal, insertion idx bounds before Vec::insert, exact unchanged-bytes error regression, valid append preserved. Focused Overlay tests 12/12.",
+          "at": "2026-07-11T10:24:38.088Z"
         },
         {
           "n": 3,
@@ -11935,8 +11942,7 @@
       ],
       "needsAcceptance": false,
       "refs": [],
-      "workOrder": 93,
-      "claimedAt": "2026-07-11T10:15:55.708Z"
+      "workOrder": 93
     },
     {
       "id": "c09ffy3w",
@@ -22760,8 +22766,10 @@
       ],
       "rec": "A",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-11T01:36:15.578Z"
+      "status": "ratified",
+      "created": "2026-07-11T01:36:15.578Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-11"
     },
     {
       "id": "D-FE-REPL-INTERRUPT1",
@@ -26002,6 +26010,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-11T10:25:14.329Z",
+      "by": "terra-456-overlay",
+      "action": "card.release",
+      "ref": "c083j754",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-11T10:25:14.170Z",
+      "by": "terra-353-corpus",
+      "action": "card.release",
+      "ref": "c0ewbiud",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-11T10:25:14.003Z",
+      "by": "terra-452-syntax",
+      "action": "card.release",
+      "ref": "c02wa1dn",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-11T10:25:12.704Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-FE-REPL-MULTILINE1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-11T10:24:38.088Z",
+      "by": "sol-456-overlay-review",
+      "action": "card.criteria-verify",
+      "ref": "c083j754",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-11T10:24:21.530Z",
+      "by": "sol-353-review",
+      "action": "card.criteria-verify",
+      "ref": "c0ewbiud",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-11T10:24:21.366Z",
+      "by": "terra-353-corpus",
+      "action": "card.criteria-meet",
+      "ref": "c0ewbiud",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-11T10:24:21.199Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c0ewbiud",
+      "note": "#6 The std-only corpus runner executes real Jet front-end→rustc"
+    },
     {
       "at": "2026-07-11T10:22:28.383Z",
       "by": "sol-452-syntax-review",
@@ -29445,62 +29509,6 @@
       "action": "card.criteria-add",
       "ref": "c0fzoku6",
       "note": "#4 Focused Canvas projection, transaction, and five named brows"
-    },
-    {
-      "at": "2026-07-10T17:56:14.356Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0fzoku6",
-      "note": "#3 List/fan-out multi-input append and remove transactions pres"
-    },
-    {
-      "at": "2026-07-10T17:56:14.211Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0fzoku6",
-      "note": "#2 Pattern-arm add, edit, and remove transactions produce sema-"
-    },
-    {
-      "at": "2026-07-10T17:56:14.059Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0fzoku6",
-      "note": "#1 Canvas projection identifies pattern-test branches with the "
-    },
-    {
-      "at": "2026-07-10T17:51:17.550Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0yw55x3",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-10T17:51:17.402Z",
-      "by": "terra-449-review",
-      "action": "card.criteria-verify",
-      "ref": "c0yw55x3",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-10T17:51:17.257Z",
-      "by": "terra-449-review",
-      "action": "card.criteria-verify",
-      "ref": "c0yw55x3",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-10T17:51:17.109Z",
-      "by": "terra-449-review",
-      "action": "card.criteria-verify",
-      "ref": "c0yw55x3",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-10T17:51:16.958Z",
-      "by": "terra-449-review",
-      "action": "card.criteria-verify",
-      "ref": "c0yw55x3",
-      "note": "#2"
     }
   ],
   "nextNum": 368,
