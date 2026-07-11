@@ -17913,6 +17913,67 @@
       "ratifiedAt": "2026-07-08",
       "draft": false,
       "retiredAt": "2026-07-11T00:24:37.571Z"
+    },
+    {
+      "id": "D-PROCESS1",
+      "cardId": "c0pef855",
+      "group": "stdlib",
+      "title": "Core process spawning and pipeline surface",
+      "gist": "Choose the canonical subprocess API beyond one-shot process.run.",
+      "explainer": "Recommendation A gives beginners the safe argv-only one-shot they already have, and gives experts a typed ProcessSpec/Child handle for streaming, timeouts, env/cwd, signals, pipelines, and output limits. One semantic mechanism: process.run is sugar over ProcessSpec.run.",
+      "story": "Nora writes a Jet build tool. It must run a compiler, stream logs live, kill it after 30 seconds, pass a clean environment, pipe generated code into a formatter, and preserve the child's exact exit status. A capture-everything process.run either hangs, hides progress, or forces her into shell strings.",
+      "inWild": "use core.process as process\n\nfn build() -> Void ? IOError {\n    // today: captures all output after completion, no timeout, no cwd/env, no streaming\n    r :: process.run([\"cargo\", \"test\"])?\n    print(r.output)\n    if r.code != 0 { process.exit(r.code) }\n    return ok(())\n}",
+      "detail": "Devil pass: a fluent builder can become opaque magic; raw spawn knobs can become a shell footgun. Patch: argv lists only by default, no shell interpolation helper in Core, every knob is a typed field on ProcessSpec, and shell execution remains an explicit expert escape if ever approved separately.",
+      "options": [
+        {
+          "key": "A",
+          "name": "ProcessSpec + Child handles (recommended)",
+          "detail": "Keep process.run(argv) as beginner sugar. Add process.cmd(argv) -> ProcessSpec with cwd/env/stdin/stdout/stderr/timeout/output_limit methods, spawn() -> Child, wait()/kill()/terminate()/interrupt(), typed ExitStatus, streaming readers/writers, and process.pipeline([...]) for argv-only pipelines without a shell.",
+          "code": "use core.process as process\nuse core.time as time\n\nspec :: process.cmd([\"cargo\", \"test\"])\n    .cwd(\"crates/app\")\n    .env_clear()\n    .env(\"RUST_BACKTRACE\", \"1\")\n    .stdout(.Stream)\n    .stderr(.Inherit)\n    .timeout(time.seconds(30))\n\nchild :: spec.spawn()?\nloop line in child.stdout.lines() { print(line) }\nstatus :: child.wait()?\nif !status.success { process.exit(status.code ?? 1) }\n\npipe :: process.pipeline([\n    process.cmd([\"cat\", \"input.txt\"]),\n    process.cmd([\"grep\", \"error\"]),\n])?"
+        },
+        {
+          "key": "B",
+          "name": "Many direct module functions",
+          "detail": "Add process.run_stream, run_timeout, run_env, pipeline, kill, etc. Discoverable in autocomplete, but the surface becomes a pile of near-duplicates and option combinations explode.",
+          "code": "process.run_timeout([\"cargo\", \"test\"], time.seconds(30))?\nprocess.run_env([\"env\"], [\"A=1\"])?\nprocess.pipeline([[\"cat\", \"x\"], [\"grep\", \"y\"]])?"
+        },
+        {
+          "key": "C",
+          "name": "Shell string convenience",
+          "detail": "Expose process.shell(\"cargo test 2>&1 | tee log\") as the powerful path. Familiar for experts, but it makes injection and quoting footguns the blessed default unless gated separately.",
+          "code": "process.shell(\"cd crates/app && cargo test 2>&1 | tee log\")?"
+        },
+        {
+          "key": "D",
+          "name": "Keep one-shot run only",
+          "detail": "Document that serious process orchestration should use external tools. This keeps Jet worse than Python subprocess, Go os/exec, and Rust std::process for build tools and agent operations.",
+          "code": "r :: process.run([\"cargo\", \"test\"])?\nprint(r.output)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Python",
+          "note": "subprocess.run/Popen is flexible but easy to misuse with shell=True and text/bytes confusion. Jet can keep argv-only defaults and typed streams.",
+          "code": "p = subprocess.Popen(['cargo','test'], stdout=subprocess.PIPE, text=True)"
+        },
+        {
+          "lang": "Go",
+          "note": "exec.Command gives explicit argv/cwd/env/stdout fields; pipelines require manual pipe wiring. Jet can wrap that pattern in a typed ProcessSpec and pipeline helper.",
+          "code": "cmd := exec.Command(\"cargo\", \"test\"); cmd.StdoutPipe(); cmd.Start(); cmd.Wait()"
+        },
+        {
+          "lang": "Rust",
+          "note": "std::process::Command is the right safety shape, but verbose for common streaming and timeout cases. Jet can keep the shape and improve ergonomics.",
+          "code": "Command::new(\"cargo\").arg(\"test\").stdout(Stdio::piped()).spawn()?"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "created": "2026-07-07T18:40:01.620Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-07",
+      "draft": false,
+      "retiredAt": "2026-07-11T02:21:50.916Z"
     }
   ],
   "cards": [
@@ -47701,6 +47762,104 @@
       "by": "codex-orchestrator",
       "action": "card.update",
       "ref": "c0ppv63p",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-10T16:27:04.049Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0qs8j6u",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-10T16:27:04.049Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0rvu7rz",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-10T16:27:04.049Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0svh6c4",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-10T16:27:04.049Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0txfavt",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-10T16:27:04.049Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0uzefny",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-10T16:27:04.049Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c013gf7s",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-10T16:27:04.049Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0254elb",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-10T16:27:04.049Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c038yftr",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-10T16:27:04.049Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c04du0jb",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-10T16:27:04.049Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c05hqpe6",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-10T16:27:04.049Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c00uhxes",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-10T16:27:04.049Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c_audit_367_q80zrm",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-10T16:27:04.049Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0yl347q",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-10T16:27:04.049Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c00wjjmo",
       "note": "workOrder"
     }
   ]

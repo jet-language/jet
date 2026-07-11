@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 495,
-    "rev": 3248,
+    "rev": 3262,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -5026,12 +5026,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": "Acceptance: core.files/core.path must beat Python pathlib, Go os/filepath, and Rust std::fs for ordinary scripting/build-tool work, while preserving Jet's one-path, safe-default, audit-friendly model.\n\nCurrent facts found during plan pass:\n- docs/reference/core-library.md currently documents core.files as string-path helpers plus open/create/append streaming handles.\n- docs/spec/syntax-decisions.md records D-PATHFS1 typed Path (from/join/parent/extension/stem/write_atomic/walk) but still labels part of it unbuilt; code already contains Path TIR/prelude/sema hooks, so implementation must verify shipped behavior and fix docs drift.\n- D-FSWATCH1 is ratified as files.watch, with owner comment: include processes and ports now, not later. That requires a shared watch/event model, not only a filesystem helper.\n\nGates queued:\n- D-FSOPS1: exact deep filesystem/path operation surface and Path-vs-String model.\n- D-WATCH-SCOPE1: exact watch composition surface for files, process exit, and port readiness.\n\nImplementation plan after gates clear:\n1. Verification baseline: add/confirm focused tests for currently claimed Path API (Path.from, join, parent, extension, stem, write_atomic, walk), existing core.files helpers, and docs/API-freeze snapshots. Fix any docs/code mismatch before adding new surface.\n2. Data model: add typed Stat, FileKind, WalkEntry, TempFile/TempDir RAII handles, FileLock, WatchHandle, WatchEvent, WatchSet. Keep IOError product-copy shape; add diagnostics only for sema-visible misuse.\n3. Sema/API surface: register ratified functions/methods in CheckerCoreLib known-items, effect caps, target-profile availability, comptime impurity policy where relevant, and semantic-index/docs facts.\n4. Runtime/codegen: lower through TIR/prelude only; no codegen checks. Implement std-only filesystem ops first; platform-specific gaps become typed IOError variants or documented unsupported cases, never raw OS errors.\n5. Watch: implement debounced files.watch plus process/port watchers per ratified D-WATCH-SCOPE1. If a native OS watcher cannot be std-only on a platform, use the existing FFI-bridge dependency posture only after owner-approved dependency gate; otherwise ship a polling fallback only if the ballot allows it and report its fidelity in WatchEvent facts.\n6. Examples/goldens: publish_files.jet exercises create_dir_all, walk, stat, copy_dir, write_atomic, temp_dir cleanup; dev_runner_watch.jet exercises files/process/port watch without shell polling. Golden tests pin output; focused Rust tests cover edge cases.\n7. Docs: update docs/reference/core-library.md, docs/spec/spec.md effect table, syntax-decisions D-PATHFS1/D-FSOPS1/D-WATCH-SCOPE1 entries, and stdlib gap ledger (#310 if present).\n8. Verification: targeted tests for corelib/golden/dev/watch paths, then nix develop -c cargo build, hello.jet smoke, relevant examples, and final nix develop -c cargo test before closing.\n\nDevil-pass hardening:\n- Avoid two mechanisms: every string path entrypoint coerces to Path before audit/effects/codegen see it.\n- Avoid shell-shaped footguns: no blessed mkdir/cp/rm subprocess workaround remains in docs.\n- Avoid watch taxonomy sprawl: domain constructors return one shared event/watch abstraction.\n- Avoid silent platform drift: watch/stat/symlink fidelity is test-pinned or exposed as typed capability facts.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "fable-main",
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "fable-main",
+          "text": "fable-main starting via jet-impl builder (ratified D-FSOPS1=A, D-FSWATCH1=A, D-WATCH-SCOPE1=A)."
+        },
         {
           "at": "2026-07-10",
           "by": "codex-main",
@@ -5068,7 +5073,7 @@
         }
       ],
       "created": "2026-07-07T17:23:32.437Z",
-      "updated": "2026-07-10",
+      "updated": "2026-07-11",
       "workOrder": 25,
       "criteria": [
         {
@@ -5091,7 +5096,8 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-11T02:22:44.614Z"
     },
     {
       "id": "c0pef855",
@@ -5102,12 +5108,22 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": "Acceptance: core.process must cover real build-tool and agent-operation workflows without shell strings: safe argv-only execution by default, streaming logs, exact exit status, env/cwd control, timeouts, signals, detached children, output limits, and shell-free pipelines.\n\nCurrent facts found during plan pass:\n- docs/reference/core-library.md documents only process.exit(code) and process.run([String]) -> ProcessResult ? IOError.\n- ProcessResult currently has code/output/errors only.\n- Sema/codegen know core.process exit/run only; effects classify core.process as Exec.\n- Existing taint tests treat process.run as an Exec sink; any expanded surface must keep that policy coverage.\n\nGate queued:\n- D-PROCESS1: exact process spawning/pipeline surface.\n\nImplementation plan after gate clears:\n1. Baseline tests: pin current process.run/exit behavior and taint Exec-sink coverage before expanding.\n2. Data model: add ProcessSpec, Child, ExitStatus, StreamMode, ProcessPipe/Pipeline types per ratified surface. Keep argv lists canonical; no shell-string helper unless separately ratified.\n3. Sema/effects: register all new calls in CheckerCoreLib known-items, mark Exec effects, preserve taint sink checks on every execution path, and type-check stream/stdin/stdout modes.\n4. Runtime/codegen: implement through TIR/prelude only; no codegen checks. Use std::process Command internally; map OS errors into IOError and child outcomes into ExitStatus without exposing Rust/stdout internals.\n5. Safety defaults: bounded capture default or explicit output_limit, no inherited env mutation, timeout kill semantics documented, process handles RAII-clean where possible, and interrupt/terminate/kill behavior platform-pinned.\n6. Examples/goldens: build_runner.jet streams stdout, sets cwd/env, times out a child, pipelines two argv commands, propagates exit. Keep fixture commands cross-platform or test-gated.\n7. Docs: update docs/reference/core-library.md, docs/spec/spec.md effects table, syntax-decisions D-PROCESS1 entry, and stdlib ledger (#310 if present).\n8. Verification: targeted process/taint/golden tests, cargo build, hello smoke, process example smoke, final nix develop -c cargo test before close.\n\nDevil-pass hardening:\n- No shell string default; argv-only is the safe path.\n- No silent output buffering footgun; streaming and capture limits are explicit.\n- No second process model; process.run lowers to ProcessSpec.run.\n- No raw OS status leaks; ExitStatus is typed and portable.",
       "blockedBy": [],
       "assignee": "fable-main",
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "fable-main",
+          "text": "Closed by fable-main after independent parent verification (builders were separate subagent sessions; parent re-ran all decisive suites)."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "fable-main",
+          "text": "fable-main verification: full workspace suite run (no-fail-fast, .jet isolated) — only failures are two pre-existing clusters confirmed at pre-session HEAD (logged on #465). Slice-specific targeted suites re-run green by parent: dev 43/43, fmt 98/98, truthfulness 14/14, canvas_scenarios 28/28, tir/taint/golden/repl/parity per builder logs. Fallout fixed by parent: jit_gaps if-let message (#455), dev boundary list stdin_filter now runs under dev==AOT (#291 parity win), formatter \\u-escape corruption exposed by #436 fixture, capability digest re-pin."
+        },
         {
           "at": "2026-07-11",
           "by": "codex-main",
@@ -9217,6 +9233,16 @@
         {
           "at": "2026-07-11",
           "by": "fable-main",
+          "text": "Done-gate refused close: criteria 4 (effect-free gaps implemented) and 5 (JIT-tier BigInt, out of jit_gaps.txt) unmet — builder slice covered comptime/REPL only. Relaunching builder for the remainder; criteria 1-3/6 to be verified by a non-builder agent after."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "fable-main",
+          "text": "fable-main verification: full workspace suite run (no-fail-fast, .jet isolated) — only failures are two pre-existing clusters confirmed at pre-session HEAD (logged on #465). Slice-specific targeted suites re-run green by parent: dev 43/43, fmt 98/98, truthfulness 14/14, canvas_scenarios 28/28, tir/taint/golden/repl/parity per builder logs. Fallout fixed by parent: jit_gaps if-let message (#455), dev boundary list stdin_filter now runs under dev==AOT (#291 parity win), formatter \\u-escape corruption exposed by #436 fixture, capability digest re-pin."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "fable-main",
           "text": "Builder done: CtValue::BigInt (limb sign-magnitude ported from AOT JetBigInt) + construction/arith/show in comptime tier-0; REPL matches golden bigint.out. Audit found dead core.string dispatch key (module-call form of core.text hit E0956 wholesale) — fixed via TextLite.rs verbatim port; 37 core.math methods closed. tests/parity.rs enforces AOT-vs-comptime builtin matrix (fails on new gaps AND stale allowlist entries); KNOWN_OPEN_GAPS lists reasoned remainder (core.data/archive/crypto.expert/encoding.*/os/ui/tasks etc). Targeted green: repl 62/62, comptime_diff 7/7 (rustc-verified byte-identical), parity 1/1. Parent verify pending full suite."
         },
         {
@@ -10746,13 +10772,18 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "building",
+      "phase": "verify",
       "priority": "P0",
       "plan": "docs/plans/epoch-3/universal-language-core.md#ul1--p0-semantic-and-security-stop-line",
       "blockedBy": [],
       "workOrder": 30,
       "assignee": "fable-main",
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "fable-main",
+          "text": "fable-main verification: same full-suite evidence as sibling cards; cffi 29/29 + 3 new ui snapshots + diagnostics rows verified. Interior-NUL fixture exposed a latent formatter \\u-escape corruption — fixed by parent (commit 3663fffe) with fmt 98/98. Enum-at-C-boundary stays E3203 pending D-REPRC2 (queued on this card)."
+        },
         {
           "at": "2026-07-11",
           "by": "fable-main",
@@ -11230,12 +11261,22 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
       "assignee": "fable-main",
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "fable-main",
+          "text": "Closed by fable-main after independent parent verification (builders were separate subagent sessions; parent re-ran all decisive suites)."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "fable-main",
+          "text": "fable-main verification: full workspace suite run (no-fail-fast, .jet isolated) — only failures are two pre-existing clusters confirmed at pre-session HEAD (logged on #465). Slice-specific targeted suites re-run green by parent: dev 43/43, fmt 98/98, truthfulness 14/14, canvas_scenarios 28/28, tir/taint/golden/repl/parity per builder logs. Fallout fixed by parent: jit_gaps if-let message (#455), dev boundary list stdin_filter now runs under dev==AOT (#291 parity win), formatter \\u-escape corruption exposed by #436 fixture, capability digest re-pin."
+        },
         {
           "at": "2026-07-11",
           "by": "fable-main",
@@ -11482,12 +11523,22 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": null,
       "blockedBy": [],
       "assignee": "fable-main",
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "fable-main",
+          "text": "Closed by fable-main after independent parent verification (builders were separate subagent sessions; parent re-ran all decisive suites)."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "fable-main",
+          "text": "fable-main verification: full workspace suite run (no-fail-fast, .jet isolated) — only failures are two pre-existing clusters confirmed at pre-session HEAD (logged on #465). Slice-specific targeted suites re-run green by parent: dev 43/43, fmt 98/98, truthfulness 14/14, canvas_scenarios 28/28, tir/taint/golden/repl/parity per builder logs. Fallout fixed by parent: jit_gaps if-let message (#455), dev boundary list stdin_filter now runs under dev==AOT (#291 parity win), formatter \\u-escape corruption exposed by #436 fixture, capability digest re-pin."
+        },
         {
           "at": "2026-07-11",
           "by": "fable-main",
@@ -11576,12 +11627,22 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
       "assignee": "fable-main",
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "fable-main",
+          "text": "Closed by fable-main after independent parent verification (builders were separate subagent sessions; parent re-ran all decisive suites)."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "fable-main",
+          "text": "fable-main verification: full workspace suite run (no-fail-fast, .jet isolated) — only failures are two pre-existing clusters confirmed at pre-session HEAD (logged on #465). Slice-specific targeted suites re-run green by parent: dev 43/43, fmt 98/98, truthfulness 14/14, canvas_scenarios 28/28, tir/taint/golden/repl/parity per builder logs. Fallout fixed by parent: jit_gaps if-let message (#455), dev boundary list stdin_filter now runs under dev==AOT (#291 parity win), formatter \\u-escape corruption exposed by #436 fixture, capability digest re-pin."
+        },
         {
           "at": "2026-07-11",
           "by": "codex-main",
@@ -12163,6 +12224,11 @@
       "assignee": "claude-main",
       "log": [
         {
+          "at": "2026-07-11",
+          "by": "fable-main",
+          "text": "fable-main full-suite pass (no-fail-fast, root .jet isolated): two pre-existing failures confirmed at pre-session HEAD 394d4cb2 via bisect worktree — web_partition::codable_struct_wasm_export_is_abi_safe (E-WEB-TIR-UNSUPPORTED on sum_point; web TIR coverage, matches recent fix(web) commit stream) and jetpack::os_vm_test_runs_declared_scenario_and_records_proof + os_vm_prove_rejects_incomplete_guest_proof. Not caused by today's #392/#436/#447/#453/#455/#291 slices. Also note: capability-manifest digest drifts whenever tower card logs / jit_gaps.txt legitimately change — re-pin via scripts/agent/check-capability-ledger.mjs --refresh-digests + --generate-report."
+        },
+        {
           "at": "2026-07-10",
           "by": "codex-main",
           "text": "2026-07-10 final uninterrupted verify-full exit 0 after resolving JIT ratchet, repo-local TMPDIR fixtures, deadline boundary, Studio proof-order flake, Tower truth boundary, syntax law expectation, and capability ledger. Preexisting root .jet/lock isolated/restored; no env.jet artifact. Master is green at HEAD."
@@ -12234,7 +12300,7 @@
         }
       ],
       "created": "2026-07-10T11:08:18.716Z",
-      "updated": "2026-07-10",
+      "updated": "2026-07-11",
       "criteria": [],
       "needsAcceptance": false,
       "refs": [],
@@ -17057,66 +17123,6 @@
       "created": "2026-07-07T18:38:37.748Z",
       "outcome": "A",
       "comment": "a & b - instead of putting file watcher in file module/lib, put all watcher methods in a core.watcher lib. ALSO, support callback/event triggers with our new event system",
-      "ratifiedAt": "2026-07-07",
-      "draft": false
-    },
-    {
-      "id": "D-PROCESS1",
-      "cardId": "c0pef855",
-      "group": "stdlib",
-      "title": "Core process spawning and pipeline surface",
-      "gist": "Choose the canonical subprocess API beyond one-shot process.run.",
-      "explainer": "Recommendation A gives beginners the safe argv-only one-shot they already have, and gives experts a typed ProcessSpec/Child handle for streaming, timeouts, env/cwd, signals, pipelines, and output limits. One semantic mechanism: process.run is sugar over ProcessSpec.run.",
-      "story": "Nora writes a Jet build tool. It must run a compiler, stream logs live, kill it after 30 seconds, pass a clean environment, pipe generated code into a formatter, and preserve the child's exact exit status. A capture-everything process.run either hangs, hides progress, or forces her into shell strings.",
-      "inWild": "use core.process as process\n\nfn build() -> Void ? IOError {\n    // today: captures all output after completion, no timeout, no cwd/env, no streaming\n    r :: process.run([\"cargo\", \"test\"])?\n    print(r.output)\n    if r.code != 0 { process.exit(r.code) }\n    return ok(())\n}",
-      "detail": "Devil pass: a fluent builder can become opaque magic; raw spawn knobs can become a shell footgun. Patch: argv lists only by default, no shell interpolation helper in Core, every knob is a typed field on ProcessSpec, and shell execution remains an explicit expert escape if ever approved separately.",
-      "options": [
-        {
-          "key": "A",
-          "name": "ProcessSpec + Child handles (recommended)",
-          "detail": "Keep process.run(argv) as beginner sugar. Add process.cmd(argv) -> ProcessSpec with cwd/env/stdin/stdout/stderr/timeout/output_limit methods, spawn() -> Child, wait()/kill()/terminate()/interrupt(), typed ExitStatus, streaming readers/writers, and process.pipeline([...]) for argv-only pipelines without a shell.",
-          "code": "use core.process as process\nuse core.time as time\n\nspec :: process.cmd([\"cargo\", \"test\"])\n    .cwd(\"crates/app\")\n    .env_clear()\n    .env(\"RUST_BACKTRACE\", \"1\")\n    .stdout(.Stream)\n    .stderr(.Inherit)\n    .timeout(time.seconds(30))\n\nchild :: spec.spawn()?\nloop line in child.stdout.lines() { print(line) }\nstatus :: child.wait()?\nif !status.success { process.exit(status.code ?? 1) }\n\npipe :: process.pipeline([\n    process.cmd([\"cat\", \"input.txt\"]),\n    process.cmd([\"grep\", \"error\"]),\n])?"
-        },
-        {
-          "key": "B",
-          "name": "Many direct module functions",
-          "detail": "Add process.run_stream, run_timeout, run_env, pipeline, kill, etc. Discoverable in autocomplete, but the surface becomes a pile of near-duplicates and option combinations explode.",
-          "code": "process.run_timeout([\"cargo\", \"test\"], time.seconds(30))?\nprocess.run_env([\"env\"], [\"A=1\"])?\nprocess.pipeline([[\"cat\", \"x\"], [\"grep\", \"y\"]])?"
-        },
-        {
-          "key": "C",
-          "name": "Shell string convenience",
-          "detail": "Expose process.shell(\"cargo test 2>&1 | tee log\") as the powerful path. Familiar for experts, but it makes injection and quoting footguns the blessed default unless gated separately.",
-          "code": "process.shell(\"cd crates/app && cargo test 2>&1 | tee log\")?"
-        },
-        {
-          "key": "D",
-          "name": "Keep one-shot run only",
-          "detail": "Document that serious process orchestration should use external tools. This keeps Jet worse than Python subprocess, Go os/exec, and Rust std::process for build tools and agent operations.",
-          "code": "r :: process.run([\"cargo\", \"test\"])?\nprint(r.output)"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Python",
-          "note": "subprocess.run/Popen is flexible but easy to misuse with shell=True and text/bytes confusion. Jet can keep argv-only defaults and typed streams.",
-          "code": "p = subprocess.Popen(['cargo','test'], stdout=subprocess.PIPE, text=True)"
-        },
-        {
-          "lang": "Go",
-          "note": "exec.Command gives explicit argv/cwd/env/stdout fields; pipelines require manual pipe wiring. Jet can wrap that pattern in a typed ProcessSpec and pipeline helper.",
-          "code": "cmd := exec.Command(\"cargo\", \"test\"); cmd.StdoutPipe(); cmd.Start(); cmd.Wait()"
-        },
-        {
-          "lang": "Rust",
-          "note": "std::process::Command is the right safety shape, but verbose for common streaming and timeout cases. Jet can keep the shape and improve ergonomics.",
-          "code": "Command::new(\"cargo\").arg(\"test\").stdout(Stdio::piped()).spawn()?"
-        }
-      ],
-      "rec": "A",
-      "status": "ratified",
-      "created": "2026-07-07T18:40:01.620Z",
-      "outcome": "A",
       "ratifiedAt": "2026-07-07",
       "draft": false
     },
@@ -23597,6 +23603,104 @@
   ],
   "events": [
     {
+      "at": "2026-07-11T02:22:46.512Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0m9tjqj",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T02:22:44.615Z",
+      "by": "fable-main",
+      "action": "card.claim",
+      "ref": "c0m9tjqj",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T02:22:42.729Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0rb4k1d",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T02:21:50.902Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0pef855",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T02:21:49.042Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c06tccyz",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T02:21:47.120Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c047jzdr",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T02:21:45.232Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0w6wa07",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T02:21:24.816Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0ai04g0",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T02:21:22.885Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0pef855",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T02:21:20.985Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c06tccyz",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T02:21:19.112Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c047jzdr",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T02:21:17.228Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0w6wa07",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T02:21:15.355Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0rb4k1d",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T02:20:58.236Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c02kdm7a",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-07-11T02:12:33.507Z",
       "by": "terra-360-help",
       "action": "card.release",
@@ -26996,104 +27100,6 @@
       "by": "codex-orchestrator",
       "action": "card.update",
       "ref": "c0b698t4",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.049Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c00wjjmo",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.049Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0yl347q",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.049Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c_audit_367_q80zrm",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.049Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c00uhxes",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.049Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c05hqpe6",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.049Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c04du0jb",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.049Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c038yftr",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.049Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0254elb",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.049Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c013gf7s",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.049Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0uzefny",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.049Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0txfavt",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.049Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0svh6c4",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.049Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0rvu7rz",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.049Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0qs8j6u",
       "note": "workOrder"
     }
   ],
