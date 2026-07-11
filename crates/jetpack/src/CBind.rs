@@ -188,12 +188,18 @@ fn parse_prototype(decl: &str) -> Option<Proto> {
 
     // The function name is the last identifier in `before`; everything earlier
     // is the return type. Strip a leading `*` that belongs to the return type.
-    let name_start = before
-        .rfind(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
-        .map(|i| i + 1)
-        .unwrap_or(0);
+    let name_start = match before
+        .char_indices()
+        .rev()
+        .find(|(_, c)| !(c.is_ascii_alphanumeric() || *c == '_'))
+    {
+        Some((i, separator)) if separator.is_ascii() => i + separator.len_utf8(),
+        Some(_) => return None,
+        None => 0,
+    };
     let name = &before[name_start..];
-    if name.is_empty() || !name.chars().next().unwrap().is_ascii_alphabetic() && name != "_" {
+    let first = name.chars().next()?;
+    if !first.is_ascii_alphabetic() && name != "_" {
         return None;
     }
     if !is_ident(name) {
@@ -355,6 +361,29 @@ fn is_ident(s: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn malformed_prototype_names_return_existing_error_without_panic() {
+        let expected = |lib: &str| format!("no bindable C function prototypes found for `{lib}`");
+
+        assert!(parse_prototype("(int)").is_none());
+        assert_eq!(
+            generate("(int);", "empty-name").err(),
+            Some(expected("empty-name"))
+        );
+
+        assert!(parse_prototype("éfoo(int)").is_none());
+        assert_eq!(
+            generate("éfoo(int);", "unicode-name").err(),
+            Some(expected("unicode-name"))
+        );
+
+        let valid = generate("int foo(int value);", "valid").unwrap();
+        assert_eq!(valid.bound, vec!["foo"]);
+        assert!(valid
+            .source
+            .contains("fn foo(value: Int) -> Int = \"foo\";"));
+    }
 
     #[test]
     fn binds_simple_prototypes() {
