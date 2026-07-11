@@ -872,6 +872,15 @@ borrowed view is a compile error; **D-ASYNCRT1** M:N green threads, no
 `(tx, rx) := tasks.channel<T>()`; a second sender is `copy tx`. A
 `Receiver<T>` is what `g.select().recv(rx)` takes.
 
+**D-CANCELMODEL1 = C** *(ratified 2026-07-11, card #126)*: cancellation is
+preemptive at wait points. A cancelled task (race loser, fail-fast sibling,
+explicit `handle.cancel()`) unwinds at its next wait point — channel
+recv/send, sleep, join, select, I/O — running Drop-backed cleanup, exactly as
+a blown deadline (E3003) already does; a cancelled `g.all` member reports
+`Cancelled`, not a completed `Value`. A scoped shielded region defers (never
+discards) the unwind until a critical section finishes; its spelling is
+pending **D-SHIELDNAME1**.
+
 ### Effects & safety
 
 **D-EFF1 — Effect system**: inferred per-fn effect sets (Koka-style rows),
@@ -1347,6 +1356,16 @@ internal, `#[Untagged]`. Unknown wire keys ignored by default;
 `Encode`/`Decode` bounds to wire-reaching type params only. Dynamic trees get
 `?`-chaining accessors (`.field(name)`, `.at(i)`, `.int()`, `.text()`, …).
 YAML parser is std-only, YAML 1.2 core incl. anchors.
+
+**D-SERDE2 = A** *(ratified 2026-07-11, card #131)*: the hand-writable codec
+surface is a first-class `Encode`/`Decode` protocol — a type implements
+`encode(self) -> DataTree` and `decode(tree: DataTree) -> Result<T,
+DecodeError>` to own its wire form (e.g. a validated newtype serializing as a
+bare string). The built-in `@Codable`/`@Encode`/`@Decode` derives become
+ordinary derives that *emit that same Jet source* and re-enter
+lexer/parser/sema (R11, D-CTCODEGEN1) — no compiler-synthesized Rust, no R11
+carve-out. Ratifying this also fixes cross-module `decode<T>` (derive output
+previously referenced entry-file-local paths).
 
 **CLI & IO**: builder-spec arg parsing `args.spec().flag(…).option(…)
 .positional(…)` with generated `--help` (D-ARGS1). `io.stdin()` handle with

@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 495,
-    "rev": 3518,
+    "rev": 3528,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -27,7 +27,7 @@
         "radar-cards"
       ]
     },
-    "digestCursor": "2026-07-11T11:00:45.028Z"
+    "digestCursor": "2026-07-11T11:48:06.759Z"
   },
   "epochs": [
     {
@@ -12060,9 +12060,16 @@
       "phase": "ready",
       "priority": "P2",
       "plan": null,
-      "blockedBy": [],
-      "assignee": "terra-456-ratchet",
+      "blockedBy": [
+        "c02kdm7a"
+      ],
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "codex-main",
+          "text": "integrated focused boundary green after all merges: unwrap ratchet 6/6; Overlay 12/12; PackageManifest 59/59; CBind 6/6; TOML 30/30; Manifest-filter 55/55; Store 18/18; generation closure 3/3; nixos pin exact 1/1 + mapping 1/1. Production exact unwrap/expect count zero. Criterion 4 waits only repository verify-full, serialized behind live #465 master-suite card."
+        },
         {
           "at": "2026-07-11",
           "by": "codex-main",
@@ -12075,11 +12082,11 @@
         {
           "n": 1,
           "text": "Production unwrap/expect ratchet excludes test-only assertions, starts at audited baseline 14, rejects increases, and requires an adjacent invariant comment plus guard test for every retained production site.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-11T10:18:45.364Z"
+          "status": "verified",
+          "metBy": "terra-456-ratchet",
+          "verifiedBy": "sol-456-ratchet-review",
+          "evidence": "Independent three-pass review verified exact unwrap/expect tokenization, nested comment/string/char exclusion, conservative cfg tri-state including key-value combinators, semicolon test-item state, symlink-safe walk, post-test production detection, seeded failure, and zero live baseline.",
+          "at": "2026-07-11T11:48:57.948Z"
         },
         {
           "n": 2,
@@ -12093,11 +12100,11 @@
         {
           "n": 3,
           "text": "Operational Store pipe and root-prefix sites return existing typed errors without Rust panic text; retained parser/map/config sites have proved guards and seeded tests.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-11T10:18:45.697Z"
+          "status": "verified",
+          "metBy": "terra-456-store-final",
+          "verifiedBy": "sol-456-final-review",
+          "evidence": "Independent reviewers verified Store pipe/containment errors and each Overlay, PackageManifest, CBind, TOML, Manifest, CFFI, generation-symlink, nixos-pin tranche; zero-baseline scanner independently verified.",
+          "at": "2026-07-11T11:49:08.886Z"
         },
         {
           "n": 4,
@@ -12183,8 +12190,7 @@
       ],
       "needsAcceptance": false,
       "refs": [],
-      "workOrder": 93,
-      "claimedAt": "2026-07-11T11:36:07.852Z"
+      "workOrder": 93
     },
     {
       "id": "c09ffy3w",
@@ -25600,8 +25606,10 @@
       ],
       "rec": "A",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-11T11:37:43.806Z"
+      "status": "ratified",
+      "created": "2026-07-11T11:37:43.806Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-11"
     },
     {
       "id": "D-CANCELMODEL1",
@@ -25657,8 +25665,86 @@
       ],
       "rec": "C",
       "draft": false,
+      "status": "ratified",
+      "created": "2026-07-11T11:38:48.683Z",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-11"
+    },
+    {
+      "id": "D-SHIELDNAME1",
+      "cardId": "c2iizmyx",
+      "group": "runtime",
+      "title": "Spelling of the shielded (cancellation-deferred) region",
+      "gist": "D-CANCELMODEL1 = C is ratified: cancellation unwinds a task at its next wait point, and a scoped region can defer that unwind until a critical section finishes. This ballot picks the one word a user types to open that region.",
+      "explainer": "Shielded region: a block inside a task. If the task is cancelled while execution is inside the block, the cancellation is not lost — it is held until the block ends, then the task unwinds. Waits inside the block behave normally. It is the same job as Trio's CancelScope(shield=True), Kotlin's NonCancellable, and asyncio.shield. The sigil family is already established: #Unsafe(\"reason\") { }, #Context(deadline:) { }. This name joins that family in Syntax.rs with this decision ID (I7).",
+      "story": "Priya's task has won nothing: it lost the race, and cancellation is on its way. But it has already begun committing a ledger entry. She wraps the commit in the region so the commit either completes or never starts — cancellation lands the instant the block closes. The word she types should say exactly that to a reader who has never seen it: nothing stops this block early.",
+      "inWild": "task {\n    ledger = open_ledger()\n    <WORD> {\n        ledger.commit()   // cancellation waits for this block\n    }\n    // a pending cancel unwinds here; Drop closes the ledger\n}",
+      "detail": "All candidates are semantically identical; this is purely the spelling. Each shows the same commit example. Candidates avoid #Atomic (collides with the atomics/memory-ordering vocabulary) and #Critical (OS critical-section jargon, implies mutual exclusion that this block does not provide).",
+      "options": [
+        {
+          "key": "A",
+          "name": "#Shield",
+          "detail": "The cross-language term of art (Trio shield=True, asyncio.shield). Verb reads as an action on the block: shield it from cancellation. Short, searchable, already used in the D-CANCELMODEL1 ballot text.",
+          "code": "#Shield {\n    ledger.commit()\n}"
+        },
+        {
+          "key": "B",
+          "name": "#Shielded",
+          "detail": "Adjective form: describes the state of the block rather than commanding it. Reads slightly more like prose; one character longer.",
+          "code": "#Shielded {\n    ledger.commit()\n}"
+        },
+        {
+          "key": "C",
+          "name": "#NoCancel",
+          "detail": "Blunt and literal: cancellation does not land here. Zero metaphor — a beginner cannot misread it. Slightly wrong to a careful reader: the cancel still happens, it is deferred, not refused.",
+          "code": "#NoCancel {\n    ledger.commit()\n}"
+        },
+        {
+          "key": "D",
+          "name": "#Uninterrupted",
+          "detail": "Says precisely what the block guarantees: it runs start to finish. Longest candidate; reads beautifully in docs, is a lot to type at every commit site.",
+          "code": "#Uninterrupted {\n    ledger.commit()\n}"
+        },
+        {
+          "key": "E",
+          "name": "#Finish",
+          "detail": "Names the promise instead of the mechanism: this block finishes. Shortest to type; pairs naturally with the sentence \"cancellation lands after it finishes\".",
+          "code": "#Finish {\n    ledger.commit()\n}"
+        },
+        {
+          "key": "F",
+          "name": "#Hold",
+          "detail": "Aviation register: holding pattern — the cancellation circles until the block clears. Two syllables shorter than everything but #Finish; the metaphor may not be obvious without docs.",
+          "code": "#Hold {\n    ledger.commit()\n}"
+        },
+        {
+          "key": "G",
+          "name": "#Landing",
+          "detail": "Aviation register: final approach — once begun, you land it; nothing aborts the sequence. Distinctively Jet; strongest metaphor, least literal.",
+          "code": "#Landing {\n    ledger.commit()\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Python Trio",
+          "note": "CancelScope(shield=True) — the 'shield' term of art.",
+          "code": "with trio.CancelScope(shield=True):\n    await ledger.commit()"
+        },
+        {
+          "lang": "Kotlin",
+          "note": "withContext(NonCancellable) — the 'no cancel' phrasing.",
+          "code": "withContext(NonCancellable) { ledger.commit() }"
+        },
+        {
+          "lang": "Python asyncio",
+          "note": "asyncio.shield(coro) — shield again, as a function.",
+          "code": "await asyncio.shield(ledger.commit())"
+        }
+      ],
+      "rec": "A",
+      "draft": false,
       "status": "open",
-      "created": "2026-07-11T11:38:48.683Z"
+      "created": "2026-07-11T11:53:23.860Z"
     }
   ],
   "questions": [
@@ -26470,6 +26556,69 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-11T11:53:23.861Z",
+      "by": "fable-medium",
+      "action": "decision.add",
+      "ref": "D-SHIELDNAME1",
+      "note": "Spelling of the shielded (cancellation-deferred) region"
+    },
+    {
+      "at": "2026-07-11T11:51:02.047Z",
+      "by": "terra-456-ratchet",
+      "action": "card.release",
+      "ref": "c083j754",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-11T11:51:01.873Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c083j754",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-11T11:49:08.886Z",
+      "by": "sol-456-final-review",
+      "action": "card.criteria-verify",
+      "ref": "c083j754",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-11T11:49:08.720Z",
+      "by": "terra-456-store-final",
+      "action": "card.criteria-meet",
+      "ref": "c083j754",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-11T11:48:57.949Z",
+      "by": "sol-456-ratchet-review",
+      "action": "card.criteria-verify",
+      "ref": "c083j754",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-11T11:48:57.766Z",
+      "by": "terra-456-ratchet",
+      "action": "card.criteria-meet",
+      "ref": "c083j754",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-11T11:48:04.198Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CANCELMODEL1",
+      "note": "C"
+    },
+    {
+      "at": "2026-07-11T11:45:21.265Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-SERDE2",
+      "note": "A"
+    },
     {
       "at": "2026-07-11T11:43:13.351Z",
       "by": "fable-medium",
@@ -29906,69 +30055,6 @@
       "action": "card.criteria-add",
       "ref": "c0pfsrnc",
       "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-07-10T21:23:53.752Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-JOS-OPTIONSVERB1",
-      "note": "B"
-    },
-    {
-      "at": "2026-07-10T21:23:39.409Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-JPK-PKGOVERRIDE1",
-      "note": "B"
-    },
-    {
-      "at": "2026-07-10T21:23:39.409Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0yzg1yu",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-07-10T21:23:39.409Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0yzg1yu",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-07-10T21:23:39.409Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0yzg1yu",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-07-10T21:23:39.409Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0yzg1yu",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-07-10T21:23:07.945Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-NATIVEUI3",
-      "note": "Mobile (iOS/Android): compile target scope and who owns signing + store submission"
-    },
-    {
-      "at": "2026-07-10T21:23:03.560Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-JPK-SELECTOR1",
-      "note": "C"
-    },
-    {
-      "at": "2026-07-10T21:22:44.109Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-JOS-BACKUP1",
-      "note": "C"
     }
   ],
   "nextNum": 368,
