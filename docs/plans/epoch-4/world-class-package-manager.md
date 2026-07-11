@@ -437,7 +437,7 @@ live acceptance, and documentation. Work order is binding.
 
 ### E4-JP19 — explain and store-operation parity-plus
 
-- `jet explain`/`jet dossier` lenses expose why/why-not version, why-depends,
+- `jet explain`/`jet inspect dossier` lenses expose why/why-not version, why-depends,
   what-depends, closure, referrers, why-live,
   cache decision, rebuild reason, action/derivation, environment origin,
   overlay winner, trust chain, repair source.

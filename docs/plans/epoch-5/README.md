@@ -27,7 +27,7 @@ plan; do not duplicate it here).
 | E4-M2 | generated source: materialize, additive-only, lock-hashed, `--locked` | §15.3 | E4-M1 |
 | E4-M3 | authority: tiers, `#Impure` + permit, dependency deny, provenance | §15.4 | E4-M1; flag seam awaits D-BUILDFLAGS1 |
 | E4-M4 | observe + enforce: `ProgramInfo` snapshot, `b.error` | §15.6 | E4-M1 (parallel with M2/M3) |
-| E4-M5 | scope: entry homes, grant chain flag ⊂ pkg ⊂ workspace, `jet audit` | §15.5 | E4-M1 + E4-M3 |
+| E4-M5 | scope: entry homes, grant chain flag ⊂ pkg ⊂ workspace, `jet inspect audit` | §15.5 | E4-M1 + E4-M3 |
 | E4-M6 | build-graph expansion (targets/actions/…) | §12 | decisions ratified; implement typed graph cards #219-#227 |
 
 Build order (§15.1 DAG): **M1 → M4 ∥ (M2, M3) → M5 → M6**.
@@ -56,7 +56,7 @@ Build order (§15.1 DAG): **M1 → M4 ∥ (M2, M3) → M5 → M6**.
 
 Gated on D-E4EXIT1=C as ratified. §15's five exit-criteria blocks still pass:
 each has examples, `tests/ui` fixtures, targeted driver tests, `jet
-explain-build` / `jet audit-effects`, and no-`fn build` byte-identical
+explain-build` / `jet inspect audit-effects`, and no-`fn build` byte-identical
 behavior. #95 is no longer owner-decision blocked; implementation now runs
 through the typed target/action graph first, because full build parity needs
 typed targets and declared actions at the graph boundary. Follow-on cards keep

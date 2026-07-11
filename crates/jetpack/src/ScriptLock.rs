@@ -1,4 +1,4 @@
-//! U11 (D-JPK-SCRIPTDEP1=A): the `<script>.lock` sidecar `jet lock <script>`
+//! U11 (D-JPK-SCRIPTDEP1=A): the `<script>.lock` sidecar `jet store lock <script>`
 //! writes for a manifest-less script's inline `use pkg#version;` deps.
 //!
 //! Hand-written TOML-ish shape (no external crate — I6), the same style as

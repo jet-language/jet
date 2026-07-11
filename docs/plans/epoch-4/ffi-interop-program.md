@@ -30,7 +30,7 @@ surface:
     `<lib>: <lang>@"ref"`;
   - *overlay* — `#Extern module py.h5instrument { … }` refines generated types,
     overlay wins.
-- **`jet bind <lang>`** is the per-language binder. It writes inspectable,
+- **`jet inspect bind <lang>`** is the per-language binder. It writes inspectable,
   committable bindings to `.jet/bindings/<lang>/<lib>.jet`. Existing binders:
   `Source`→`crates/jet-driver/src/CBind.rs` (C, native std-only prototype
   parser), `crates/jet-driver/src/FFI.rs` (`extern rust`, materializes a cached
@@ -162,16 +162,16 @@ contexts:
   opt-in tier for packages needing full Node APIs / native addons.
 
 Recommended D-FFI-JS1: **target-dispatched JS host** (browser on web, JS-on-
-wasm on native, Node-broker opt-in), typed via the `jet bind js` stub path.
+wasm on native, Node-broker opt-in), typed via the `jet inspect bind js` stub path.
 One `use js.X` surface; the host is chosen by the compile target, call sites
 never change.
 
 **Typed surface + the D-NPMTYPE1 reconciliation (key sub-decision).**
 `D-NPMTYPE1=A` set the floor: typed npm surfaces are **first-party hand-authored
 Jet stub packages**, *no `.d.ts` parsing*. The D-FFI-UNIFY1 frame promotes
-`jet bind js` to a real binder that emits `.jet/bindings/js/<lib>.jet`. These
+`jet inspect bind js` to a real binder that emits `.jet/bindings/js/<lib>.jet`. These
 compose but the depth ballot must state the reconciliation explicitly:
-**`jet bind js` generates a committable, Jet-checked stub from the package's
+**`jet inspect bind js` generates a committable, Jet-checked stub from the package's
 `.d.ts` (inspectable binder output, not runtime `.d.ts` semantics), superseding
 D-NPMTYPE1's hand-authored-only floor** — this is what "tap ALL npm
 immediately" requires; long-tail packages with no `.d.ts` fall back to a
@@ -200,7 +200,7 @@ D-WEBBACKEND1 implementation; native JS-on-wasm rides the #5 wasmtime embed.
 Both are unblocked at the ballot level.
 
 **Implementation once D-FFI-JS1 ratifies.**
-1. `JsBinder impl ForeignBinder`: resolve npm ref → `jet bind js` emits typed
+1. `JsBinder impl ForeignBinder`: resolve npm ref → `jet inspect bind js` emits typed
    `.jet/bindings/js/<lib>.jet` (from `.d.ts` where present, else `Any`
    fallback surface).
 2. Web host: wire the stub to the D-WEBBACKEND1 JS emitter (the npm package
@@ -226,7 +226,7 @@ depth axis is how much projection sits on top of that seam: **hand-exported
 C-ABI only (shallow)** vs **swift-bridge-style generated bridge (projects
 classes/String/Array/errors, auto-emits the `@_cdecl` shims)** vs **full
 Clang-importer projection of `.swiftinterface`**. Recommended:
-**swift-bridge-style generated projection over the C-ABI seam** — `jet bind
+**swift-bridge-style generated projection over the C-ABI seam** — `jet inspect bind
 swift` runs `swiftc` to emit `@_cdecl` shims for the declared surface and
 generates typed Jet wrappers; the C-ABI is the stable transport underneath
 (honoring D-JSWIFTFFI1), the projection is the "feels native" depth the frame
@@ -278,7 +278,7 @@ on surface, sound on sequence**. Corrections this program supersedes:
 |---|---|
 | `import npm:"pkg"` syntax | **Wrong surface.** Canonical is `use js.<lib>` in the `<lang>.<lib>` namespace; `import npm:"…"` was never ratified and contradicts the frame. Kill it. |
 | "JS interop = a web-target import protocol, not a separate FFI mechanism" | **Superseded.** JS is now one instance of the *one* FFI structure. It is not web-only: the native JS-on-wasm host (§4) extends it to CLI/server. |
-| "Type stubs hand-authored like @types/, raise D-NPMTYPE1" | D-NPMTYPE1 ratified (=A, hand-authored floor). Frame promotes `jet bind js` to generate committable stubs; §4 reconciles (the one prior-ratification amendment D-FFI-JS1 must confirm). |
+| "Type stubs hand-authored like @types/, raise D-NPMTYPE1" | D-NPMTYPE1 ratified (=A, hand-authored floor). Frame promotes `jet inspect bind js` to generate committable stubs; §4 reconciles (the one prior-ratification amendment D-FFI-JS1 must confirm). |
 | "Swift via C-ABI deferred until D-NATIVEUI1 ships" | **Still correct.** D-NATIVEUI1 ratified=A; Swift stays sequenced after JS + native backend. No change. |
 | Gated on D-WEBBACKEND1 + D-WASM1 | **Still correct** for the *web* JS host; the *native* JS host is additionally gated on the #5 wasmtime embed. Both now ratified at ballot level. |
 

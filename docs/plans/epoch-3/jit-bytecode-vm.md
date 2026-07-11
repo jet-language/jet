@@ -14,7 +14,7 @@ a performance tier, not a second language.
 
 - Beginner: `jet dev` stays one command. Backend choice is invisible unless the
   user asks for timing or explanation.
-- Expert: `jet dossier dev-runtime` and JSON traces expose bytecode, coverage,
+- Expert: `jet inspect dossier dev-runtime` and JSON traces expose bytecode, coverage,
   fallback tier, heap state, traps, and hot-swap decisions.
 - Hybrid: the VM consumes executable TIR through `JitBackend`; no separate AST
   interpreter semantics, no bytecode-only feature surface.

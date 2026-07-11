@@ -49,7 +49,7 @@ publish. *(E1211, the writer's original pick, is taken: "`packages:` block uses 
 
 ### Step 3 — Semver compatibility tests (`Source/Publish/SemVer.rs`, `Source/Publish/Diff.rs`)
 
-`Publish/SemVer.rs` and `Publish/Diff.rs` exist. Wire them into `jet publish` (pre-publish
+`Publish/SemVer.rs` and `Publish/Diff.rs` exist. Wire them into `jet registry publish` (pre-publish
 gate in `Source/CmdSupply.rs`):
 
 Before a publish:
@@ -84,15 +84,15 @@ project.
 top of the checksum:
 
 - **Consumer is silent unless it fails.** When a dependency has a pinned author key and a
-  signature, `jet fetch` verifies it offline and says nothing on success; on a mismatch it
+  signature, `jet store fetch` verifies it offline and says nothing on success; on a mismatch it
   emits a teaching diagnostic (new code from the free E12xx range at impl) and refuses the
   install. No key command is ever required to *consume* a package.
 - **`require_signed` stays OFF by default**, a per-registry / per-dependency policy an org can
   turn on. It is **not** a gate that refuses unsigned packages out of the box — unsigned
   packages still install with checksum integrity (Tier B).
-- **Publishing auto-keys on the magic path.** `jet publish` generates and stores a keypair on
-  first publish (`~/.jet/keys/ed25519`) — no separate `jet keygen` step — then prints one line
-  nudging `jet key backup`. Experts opt into explicit keygen, hardware keys, and out-of-band
+- **Publishing auto-keys on the magic path.** `jet registry publish` generates and stores a keypair on
+  first publish (`~/.jet/keys/ed25519`) — no separate `jet registry keygen` step — then prints one line
+  nudging `jet registry key backup`. Experts opt into explicit keygen, hardware keys, and out-of-band
   fingerprint pinning.
 - **Key distribution:** TOFU on first pin (author public key published in the registry index),
   with the pinned fingerprint recorded in the lockfile; experts may require an out-of-band
@@ -107,9 +107,9 @@ subprocess. Tier B reuses the existing SHA-256.
 - add `LockedPackage::signature: Option<String>` + pinned-key fingerprint to `Lock.rs`;
 - implement `verify_signature(pubkey, sig, content)` and keygen/sign in `Source/Publish/Sign.rs`
   (new file);
-- `jet fetch` verifies opt-in signatures after the mandatory `verify_entry` (Tier B) in
+- `jet store fetch` verifies opt-in signatures after the mandatory `verify_entry` (Tier B) in
   `Fetch.rs`;
-- `jet keygen` / `jet key backup` verbs + `jet publish` auto-keygen-on-first-publish in
+- `jet registry keygen` / `jet registry key backup` verbs + `jet registry publish` auto-keygen-on-first-publish in
   `main.rs`;
 - enforce `require_signed` only where a registry/dep opts in.
 
@@ -117,12 +117,12 @@ subprocess. Tier B reuses the existing SHA-256.
 
 `Publish/Vendor.rs` is a stub. Implement:
 
-`jet vendor` command: copies all locked deps into `vendor/` in the project root, writes
+`jet registry vendor` command: copies all locked deps into `vendor/` in the project root, writes
 `vendor/manifest.json` with name + version + fingerprint for each. In `--locked` mode,
 `Fetch.rs` checks for `vendor/<name>/` before attempting network access (git subprocess);
 if found and fingerprint matches, use the local copy. This enables fully offline builds.
 
-**CLI:** `jet vendor` verb in `Source/main.rs`. `--vendor-dir <path>` flag to relocate.
+**CLI:** `jet registry vendor` verb in `Source/main.rs`. `--vendor-dir <path>` flag to relocate.
 
 ### Step 6 — SBOM integration into build output (`Source/Publish/SBOM.rs`, `Source/CmdCompile.rs`)
 
@@ -132,7 +132,7 @@ if found and fingerprint matches, use the local copy. This enables fully offline
   binary.
 - The SBOM includes: root package, all locked deps with their tree-hash checksums, and the
   Jet compiler version.
-- `jet publish` always writes the SBOM to the registry index (prepublish gate in
+- `jet registry publish` always writes the SBOM to the registry index (prepublish gate in
   `CmdSupply.rs`).
 
 **PackageChecksum field** in `SBOM.rs` currently emits `NOASSERTION`; replace with
@@ -140,14 +140,14 @@ if found and fingerprint matches, use the local copy. This enables fully offline
 
 ### Step 7 — Advisory integration (`Source/Publish/Advisory.rs`)
 
-`Advisory.rs` exists. Implement `jet audit`:
+`Advisory.rs` exists. Implement `jet inspect audit`:
 
 - Reads the lockfile; fetches the advisory database (a known git repo URL, or a local
   `advisory-db/` path for offline mode).
 - Cross-references each `(name, version)` against advisories.
 - Prints a table of vulnerabilities by severity; exits nonzero if any CRITICAL advisory
   matches.
-- Gate: `jet publish` runs `jet audit` as a pre-publish check.
+- Gate: `jet registry publish` runs `jet inspect audit` as a pre-publish check.
 
 ---
 
@@ -159,15 +159,15 @@ if found and fingerprint matches, use the local copy. This enables fully offline
 | `Source/Lock.rs` | Bidirectional manifest/lock check; E1217; `signature` + pinned-key fingerprint fields (D-PKGSIGN1 Tier A) |
 | `Source/Fetch.rs` | Vendor fallback; opt-in signature verify after mandatory verify_entry (D-PKGSIGN1) |
 | `Source/Publish/Registry.rs` | enforce `require_signed` only where opted in (off by default) |
-| `Source/CmdSupply.rs` | Semver gate E1218; `jet audit` call; SBOM emit |
+| `Source/CmdSupply.rs` | Semver gate E1218; `jet inspect audit` call; SBOM emit |
 | `Source/CmdCompile.rs` | `--sbom` flag; SBOM write |
-| `Source/Publish/SemVer.rs` | `classify_diff` wired to `jet publish` |
-| `Source/Publish/Diff.rs` | API diff wired to `jet publish` |
+| `Source/Publish/SemVer.rs` | `classify_diff` wired to `jet registry publish` |
+| `Source/Publish/Diff.rs` | API diff wired to `jet registry publish` |
 | `Source/Publish/Vendor.rs` | Full implementation |
-| `Source/Publish/Advisory.rs` | `jet audit` implementation |
+| `Source/Publish/Advisory.rs` | `jet inspect audit` implementation |
 | `Source/Publish/SBOM.rs` | Real checksum in PackageChecksum |
 | `Source/Publish/Sign.rs` (new, D-PKGSIGN1 Tier A) | Ed25519 keygen + sign + verify; native ring-layer Ed25519/SHA-512 (I6) |
-| `Source/main.rs` | `jet vendor`, `jet audit`, `jet keygen`, `jet key backup`, `--sbom`; `jet publish` auto-keygen on first publish |
+| `Source/main.rs` | `jet registry vendor`, `jet inspect audit`, `jet registry keygen`, `jet registry key backup`, `--sbom`; `jet registry publish` auto-keygen on first publish |
 | `docs/spec/diagnostics.md` | E1217, E1218 entries (E1204 already present) |
 | `tests/ui/` | e1204_tampered_store, e1217, e1218 snapshots |
 
@@ -192,11 +192,11 @@ Done — the buildable, registry-independent surface:
 - **Step 3 (E1218)** — local SemVer gate in `run_publish`: diffs the current public API against
   the frozen API snapshot (`ApiFreeze::load_snapshot`); a breaking change under a non-major bump
   is E1218 (`--force` overrides). Distinct from the registry-side E2601.
-- **Step 5 — `jet vendor [--vendor-dir <path>]`** — copies deps into a vendor tree (default
+- **Step 5 — `jet registry vendor [--vendor-dir <path>]`** — copies deps into a vendor tree (default
   `vendor/`, relocatable) + writes `vendor/manifest.json` (name/version/fingerprint per dep).
 - **Step 6 — `jet build --sbom`** — writes `<bin>.spdx` (SPDX 2.3) next to the binary.
   Dep `PackageChecksum` already carries the real `SHA256: <tree_hash>`.
-- **Step 7 — `jet audit`** — advisory scan with a per-advisory `Severity` (low|medium|high|
+- **Step 7 — `jet inspect audit`** — advisory scan with a per-advisory `Severity` (low|medium|high|
   critical); exits nonzero **only on CRITICAL**, advisory otherwise. E2603 is now severity-
   prefixed. Advisory-DB line format gained an optional 6th `severity` field.
 
@@ -207,10 +207,10 @@ Diagnostics added (I4): E1217, E1218 in `docs/spec/diagnostics.md` + covered by
 
 - **Step 4 / Tier A** — Ed25519 author signing in full: `Source/Publish/Sign.rs`, native
   Ed25519/SHA-512 ring primitives, `LockedPackage::signature` + pinned-key fingerprint,
-  `jet keygen`/`jet key backup`, `jet publish` auto-keygen-on-first-publish, signature verify
-  in `jet fetch`, and `require_signed` enforcement. Every one of these needs the
+  `jet registry keygen`/`jet registry key backup`, `jet registry publish` auto-keygen-on-first-publish, signature verify
+  in `jet store fetch`, and `require_signed` enforcement. Every one of these needs the
   registry-publish handshake (key distribution via the registry index, TOFU pinning) that
   c96's open publish/registry ballot owns. `require_signed` already exists on `RegistryConfig`
   (OFF by default) and stays inert until then.
-- **`jet publish` registry upload** + the "publish always emits an SBOM to the registry index"
+- **`jet registry publish` registry upload** + the "publish always emits an SBOM to the registry index"
   half of D-SUPPLY1 — both need the live registry (c96).

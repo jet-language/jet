@@ -1,18 +1,18 @@
 //! U11 (D-JPK-SCRIPTDEP1=A): inline script dependencies — a manifest-less
 //! `.jet` script may open with `use pkg#version;` instead of shipping a
-//! `pkg.jet`. `jet run` resolves + locks by file-content hash, `jet lock`
+//! `pkg.jet`. `jet run` resolves + locks by file-content hash, `jet store lock`
 //! writes a `<script>.lock` sidecar, and `jet init` lifts the inline refs
 //! into a generated `pkg.jet`. See
 //! docs/plans/epoch-4/{vision,implementation}.md.
 //!
 //! Resolution today: the Jet package registry has no source-fetch path yet —
-//! `jet publish` writes only the sparse index line (`Publish/Index.rs`),
+//! `jet registry publish` writes only the sparse index line (`Publish/Index.rs`),
 //! never the source tree, so consuming a registry dep by name is still
 //! E1207 (M12.2). Until that lands, an inline dep resolves from a local,
 //! offline source only:
 //!
 //!   1. `<script_dir>/.jet/inline-deps/<name>/<version>/` — a committed (or
-//!      previously `jet lock`-populated) local copy. `.jet/` is the existing
+//!      previously `jet store lock`-populated) local copy. `.jet/` is the existing
 //!      managed-folder convention (`.jet/lock`, `.jet/main.jet`).
 //!   2. `JET_INLINE_DEPS_FIXTURES=<dir>` — an offline test/dev override with
 //!      the same `<name>/<version>/` shape, checked only when the env var is
@@ -61,7 +61,7 @@ pub fn collect_from_imports(imports: &[ImportDecl]) -> Vec<InlineDep> {
 
 /// A selector is "pinned" when it names an exact three-part version
 /// (`1.4.2`). Anything looser (`1.4`, `1`, `latest`, `*`) is L0203 — fine to
-/// write (rung 0 stays magic), but not reproducible without `jet lock`.
+/// write (rung 0 stays magic), but not reproducible without `jet store lock`.
 pub fn is_pinned(selector: &str) -> bool {
     let parts: Vec<&str> = selector.split('.').collect();
     parts.len() == 3
@@ -221,11 +221,11 @@ pub fn l0203_unpinned(dep: &InlineDep) -> Diagnostic {
             "`use {}#{};` isn't pinned to an exact version",
             dep.name, dep.selector
         ),
-        "an inline script dependency has no lockfile until you run `jet lock`; a loose selector \
+        "an inline script dependency has no lockfile until you run `jet store lock`; a loose selector \
          (`1.4` rather than `1.4.2`) can resolve to a different version on a fresh clone."
             .to_string(),
         format!(
-            "write the exact version Jet resolved (`use {}#<major.minor.patch>;`), or run `jet lock` to pin it in `<script>.lock`.",
+            "write the exact version Jet resolved (`use {}#<major.minor.patch>;`), or run `jet store lock` to pin it in `<script>.lock`.",
             dep.name
         ),
         Some(dep.span),
@@ -234,7 +234,7 @@ pub fn l0203_unpinned(dep: &InlineDep) -> Diagnostic {
 
 /// SHA-256 of a script file's bytes, formatted as `sha256-<hex>` (the same
 /// `content_hash` shape as `tree_hash`/`LockedPackage`/`IndexEntry`) — the
-/// key `jet lock`/`jet run` use to detect an edited script (U11 "locks by
+/// key `jet store lock`/`jet run` use to detect an edited script (U11 "locks by
 /// file-content hash").
 pub fn file_hash(path: &Path) -> std::io::Result<String> {
     let bytes = fs::read(path)?;

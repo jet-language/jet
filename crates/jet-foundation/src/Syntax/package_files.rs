@@ -183,7 +183,7 @@ pub const KW_REORDER_RETIRED: &str = "reorder"; // D-MIGRATE2F
 /// only to emit the E0911 teaching error pointing at `remove`.
 pub const KW_DROP_RETIRED: &str = "drop"; // D-MIGRATE2D
 
-/// D-MIGRATE2C (ratified): `jet schema` subcommand and its verbs. `status`
+/// D-MIGRATE2C (ratified): `jet inspect schema` subcommand and its verbs. `status`
 /// reports each `@PublishedSchema` type's pinned shape; `squash --before <ver>`
 /// re-baselines snapshots to the current shape. There is NO `check` verb —
 /// `jet build`'s E0910 is already the CI gate.
@@ -221,7 +221,7 @@ pub const SCHEMA_CACHE_SUBDIR: &str = "cache/schema"; // D-MIGRATE1
 /// S2/D-MEM1 (was c129/D-CAP4/D-CAP6/D-CAP8): subdirectory under the project
 /// `.jet/` managed folder where public-fn signature snapshots are stored.
 /// Full path is `<project_root>/.jet/cache/api/<package>.api`. Written at
-/// `jet publish` time, unconditionally, for every library target; read by the
+/// `jet registry publish` time, unconditionally, for every library target; read by the
 /// local pre-publish SemVer gate (E1218). Committed — it is a durable
 /// interface contract, not a build artifact.
 pub const API_CACHE_SUBDIR: &str = "cache/api";

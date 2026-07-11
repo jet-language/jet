@@ -1054,7 +1054,7 @@ fn main() {
             return;
         }
         "key" => {
-            // c146: `jet key backup [<dest>] [--registry <name>]`.
+            // c146: `jet registry key backup [<dest>] [--registry <name>]`.
             match args.get(1).map(|s| s.as_str()) {
                 Some("backup") => {
                     let registry = flag_value(&raw, "--registry");
@@ -1063,13 +1063,13 @@ fn main() {
                 }
                 Some(other) => {
                     eprintln!(
-                        "error: unknown `jet key` subcommand `{}` — did you mean `jet key backup`?",
+                        "error: unknown `jet registry key` subcommand `{}` — did you mean `jet registry key backup`?",
                         other
                     );
                     exit(ExitCodes::USER_ERROR);
                 }
                 None => {
-                    eprintln!("error: `jet key` needs a subcommand — try `jet key backup`.");
+                    eprintln!("error: `jet registry key` needs a subcommand — try `jet registry key backup`.");
                     exit(ExitCodes::USER_ERROR);
                 }
             }

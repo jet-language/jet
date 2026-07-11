@@ -316,7 +316,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
                     println!("  signing: generated a new key for registry `{}`.", reg);
                     println!("    public key: {}", pub_hex);
                     println!(
-                        "    `jet key backup` writes this to {} — losing it means losing your ability to publish signed updates.",
+                        "    `jet registry key backup` writes this to {} — losing it means losing your ability to publish signed updates.",
                         seed_path.display()
                     );
                 }
@@ -415,7 +415,7 @@ pub(crate) fn run_keygen(registry: Option<&str>, force: bool) {
             println!("  secret key:  {}", seed_path.display());
             println!("  public file: {}", pub_path.display());
             println!(
-                "`jet key backup` writes this to {} — losing it means losing your ability to publish signed updates.",
+                "`jet registry key backup` writes this to {} — losing it means losing your ability to publish signed updates.",
                 seed_path.display()
             );
         }
@@ -429,7 +429,7 @@ pub(crate) fn run_keygen(registry: Option<&str>, force: bool) {
     }
 }
 
-/// `jet key backup [<dest>] [--registry <name>]` — copy the secret signing key
+/// `jet registry key backup [<dest>] [--registry <name>]` — copy the secret signing key
 /// to `<dest>` (default `./jet-signing-key.backup`) so the publisher can store
 /// it somewhere safe (c146, D-PKGSIGN1). The backup is not encrypted — it is the
 /// user's own copy to protect.

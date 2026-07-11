@@ -203,7 +203,7 @@ pub fn e1248(path: &Path) -> Diagnostic {
          who pinned it (TOFU) would see a key-rotation warning on your next publish."
             .to_string(),
         "use `jet registry keygen --force` if you're sure (e.g. the old key was compromised), or back it \
-         up first with `jet key backup`."
+         up first with `jet registry key backup`."
             .to_string(),
         None,
     )

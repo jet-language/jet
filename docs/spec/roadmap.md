@@ -53,7 +53,7 @@ reachable, E2002/L2001 registered (honestly empty pre-1.0 deprecation registry).
 
 **E2-M3 — Developer command UX** verified 2026-06-16. Stable exit-code table,
 TTY-aware color (NO_COLOR/FORCE_COLOR/--color), versioned `--json` schema,
-`jet explain` for every code, `jet doctor` (offline + `--fix` + C-FFI section),
+`jet explain` for every code, `jet self doctor` (offline + `--fix` + C-FFI section),
 no-args greeting + did-you-mean (E2101/E2102/L2101), completions + man page
 from one registry, unified CLI/LSP fix engine, external `jet-<name>` discovery,
 OSC 8 hyperlinks, `jet build -v`. Digit separators (S67) already shipped.
@@ -132,12 +132,12 @@ M0–M14, v1.0 arc, verified 2026-06-14.
 
 - **E2-M1** — tasks and channels without data races; ownership proves sendability.
 - **E2-M2** — release policy, editions/epochs, `edition:` in `pkg.jet`, deprecation policy.
-- **E2-M3** — developer CLI polish: TTY color, `jet explain`, `jet doctor`, fix engine, man pages, completions.
+- **E2-M3** — developer CLI polish: TTY color, `jet explain`, `jet self doctor`, fix engine, man pages, completions.
 - **E2-M4** — `jet dev`: watch server, interpreter-backed dev loop, <200ms latency budget.
 - **E2-M5** — tier-2 references: `view`/`ref` hardening, zero-copy patterns.
 - **E2-M6** — library authoring: associated types, error conversion for `?`, argument labels/defaults (S61), trait delegation (S62).
 - **E2-M7** — streaming I/O: file handles, `Reader`/`Writer`, RAII cleanup (S63), `Path`.
-- **E2-M8** — supply chain: `jet publish` (pre-publish gate), `jet vendor`, `jet audit`, SBOM; PubGrub resolver. Registry upload deferred (D-PKGS1, M12.2); Jetpack hangar cleanup is `jet clean`.
+- **E2-M8** — supply chain: `jet registry publish` (pre-publish gate), `jet registry vendor`, `jet inspect audit`, SBOM; PubGrub resolver. Registry upload deferred (D-PKGS1, M12.2); Jetpack hangar cleanup is `jet clean`.
 - **E2-M9** — first-party library ring: `core.regex`, `core.encoding.{csv,toml,yaml,json}`, `core.log`, `core.time`, `core.crypto`, `core.archive` (gzip/zip/tar — D-DEP-ARCHIVE1), `core.db` (SQLite via rusqlite bundled — D-DEP-DB1).
 - **E2-M10** — networking: blocking TCP/UDP, HTTP client/server (`core.http`; client HTTPS became default later under D-TLS1; server HTTPS uses D-TLSSERVE1's named `tls:` option). Advanced client TLS configuration remains `core.tls`.
 - **E2-M11** — testing/docs/bench: doctests, coverage, `jet bench`, property testing.
@@ -214,9 +214,9 @@ rollout stays future Epoch 7 work.
 
 ### Epoch 1 tail
 
-**M12.2** — registry, semver resolver, `jet publish` / `vendor` / `audit`
+**M12.2** — registry, semver resolver, `jet registry publish` / `vendor` / `audit`
 (architecture: [`epoch-4/README.md`](../../docs/plans/epoch-4/README.md)). M12.1 verified
-2026-06-13. `jet publish` runs the pre-publish gate, but registry upload is not
+2026-06-13. `jet registry publish` runs the pre-publish gate, but registry upload is not
 implemented; use git-based dependencies. Jetpack hangar cleanup uses `jet clean`.
 
 ---

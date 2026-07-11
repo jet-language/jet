@@ -274,8 +274,8 @@ box.
 
 Derived from it: SBOM, SLSA-style provenance (builder identity, external
 parameters, resolved deps, output digests), and the human surfaces —
-`jet explain-build` (what ran, what it read, why this rebuilt) and
-`jet audit` / `jet audit-effects` (every declared gate across the resolved
+`jet inspect explain-build` (what ran, what it read, why this rebuilt) and
+`jet inspect audit` / `jet inspect audit-effects` (every declared gate across the resolved
 dependency graph, read statically, nothing executed). Determinism makes
 caching and reproducible builds fall out of the same records.
 
@@ -343,8 +343,8 @@ ballots ratified the graph shape:
   policy grants; remote execution waits on sandbox/provenance proof.
 - **D-BUILDSCHED1=A / #223:** deterministic graph scheduler with automatic
   parallelism and named pools: cpu, memory, linker, console, gpu.
-- **D-BUILDQUERY1=A / #224:** `jet graph`, `jet query build`, and
-  `jet explain-build <target/file/action>` share graph/provenance data with
+- **D-BUILDQUERY1=A / #224:** `jet inspect graph`, `jet inspect query build`, and
+  `jet inspect explain-build <target/file/action>` share graph/provenance data with
   the LSP.
 - **D-BUILDLEGACY1=A / #225:** CMake/Make/Gradle/npm/cargo wrappers are Tier-2
   legacy actions with declared inputs, outputs, and caps; optional graph import
@@ -474,7 +474,7 @@ fn run() -> Unit ? {
 - If DSL blocks become reader macros, keep a fixed stdlib whitelist in
   `Syntax.rs`; reject third-party grammar mutation.
 - If generated source becomes unreadable noise, require materialized files,
-  lock hashes, source provenance, LSP navigation, and `jet explain-build`.
+  lock hashes, source provenance, LSP navigation, and `jet inspect explain-build`.
 - If legacy interop smuggles ambient authority, keep wrappers Tier-2 with
   declared inputs/outputs/caps. CI can ban them.
 
@@ -735,7 +735,7 @@ fn build(b: BuildContext) #(Fs) -> BuildPlan ? {        // Tier-1 effect declara
 CLI: `jet build --profile=ci --locked` is hermetic by default — Tier 2 opens
 only via an explicit grant (today's ratified blanket is `--allow-impure`,
 D-CTEFFECT1/E3411; the build-grant spelling is balloted as D-BUILDFLAGS1);
-`jet audit-effects` (static, executes nothing).
+`jet inspect audit-effects` (static, executes nothing).
 
 **Lands in.**
 - Tier gating: extend `crates/jet-comptime/src/Comptime/Purity.rs` (the shipped
@@ -748,7 +748,7 @@ D-CTEFFECT1/E3411; the build-grant spelling is balloted as D-BUILDFLAGS1);
   capability set handed to the interpreter run.
 - Provenance: extend `Lock.rs` with the selected entry, its declared effects,
   executed `#Impure` regions (+ reason text), and allowed external tool
-  invocations (argv + tool digest). `jet audit-effects` reads statically in
+  invocations (argv + tool digest). `jet inspect audit-effects` reads statically in
   `Source/CmdDevTools.rs`.
 
 **I6 guard.** `exec`/network capabilities that need real OS/network work use the
@@ -783,7 +783,7 @@ dependency Tier-2 denied → E3504; lock records the `#Impure` reason + argv.
 
 **Exit criteria.** Default build is Tier-0/1 only; Tier-2 needs gate + permit;
 three fixtures blessed; provenance visible in `.jet/lock` and via
-`jet audit-effects`; a dependency cannot escalate.
+`jet inspect audit-effects`; a dependency cannot escalate.
 
 ### 15.5 D-BUILDSCOPE1=A — entry home + grant chain
 
@@ -794,7 +794,7 @@ chain mirrors containment: per-invocation flag/prompt (single file) → `pkg.jet
 `build:` standing grant (package) → `workspace.jet` `policy:` ceiling
 (workspace) that no member grant can exceed. A workspace entry runs member
 builds in dependency order and may add workspace-level targets and cap members;
-it may **never** mutate a member's plan. `jet audit` reads all three layers
+it may **never** mutate a member's plan. `jet inspect audit` reads all three layers
 without executing anything.
 
 **API surface (manifest, not grammar).**
@@ -843,12 +843,12 @@ holds. Reuse `metaprogramming/build_entry.jet` for the single-file rung.
 works as single file (flag grant), package (pkg.jet grant), and workspace
 member under a ceiling; workspace entry runs members in dependency order;
 member-plan mutation attempt is impossible by API (read-only handle);
-conflicting entries → E3520; `jet audit` prints all three layers, executes
+conflicting entries → E3520; `jet inspect audit` prints all three layers, executes
 nothing.
 
 **Exit criteria.** One `fn build` survives single-file → package → workspace
 unchanged; grant chain resolves flag ⊂ pkg ⊂ workspace; ceiling caps a member;
-E3520 blessed; `jet audit` static-reads the chain.
+E3520 blessed; `jet inspect audit` static-reads the chain.
 
 ### 15.6 D-METADEPTH2=B — observe + enforce (rung B)
 

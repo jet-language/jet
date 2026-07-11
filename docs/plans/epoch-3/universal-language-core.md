@@ -401,7 +401,7 @@ package/environment/CLI program.
 - Reopen #367. Perform the ratified jet/jetpack/jetos crate and binary split;
   ratchets alone do not satisfy the card (`claim.product-boundaries`).
 - #95/#224 public build product shipped: root `fn build(b: BuildContext)`,
-  typed graph, `jet graph` / `jet query build` / `jet explain-build` provenance,
+  typed graph, `jet inspect graph` / `jet inspect query build` / `jet inspect explain-build` provenance,
   local action cache, sandboxed action execution, and jet→jetpack engine
   dispatch (`claim.package-build` / `public-build-product`).
 - Root `jet` owns the language/dev loop, Jetpack owns packages/build/store/env,

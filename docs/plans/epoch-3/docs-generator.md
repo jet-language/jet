@@ -42,7 +42,7 @@ emits stable HTML and machine-readable docs data.
 6. HTML renderer: deterministic static site, no remote assets, search index
    generated locally, accessible navigation.
 7. Package docs: include public API, examples, dependency/effect summary, version
-   info, and links to `jet dossier` lenses.
+   info, and links to `jet inspect dossier` lenses.
 8. CI gate: optional docs check verifies links, doctests, stale examples, and
    missing public docs according to package policy.
 
@@ -63,5 +63,5 @@ emits stable HTML and machine-readable docs data.
 - `jet doc` generates deterministic local HTML by default.
 - `jet doc --json` emits the stable machine-readable docs schema.
 - `jet doc --check` runs doc link, doctest, and stale-example checks for CI.
-- `jet dossier` may link to generated docs facts, but it is not the primary docs
+- `jet inspect dossier` may link to generated docs facts, but it is not the primary docs
   generation command.

@@ -19,7 +19,7 @@ the compiler (I6); every diagnostic gets `docs/spec/diagnostics.md` + a snapshot
 - **Frozen-forward identity block**: the `payload:` block and the `jet:` line
   have grammar every past and future `jet` can parse. Version dispatch can never
   be wedged by later manifest evolution (the Go `go.mod` contract).
-- Verbs: `jet toolchain` (show the pin + resolved version), `jet update jet`
+- Verbs: `jet self toolchain` (show the pin + resolved version), `jet update jet`
   (move the pin deliberately).
 
 ## Dependency order
@@ -111,7 +111,7 @@ under the fixture; no re-exec loop; honest error on platform miss.
 
 ## Slice T4 — verbs
 
-1. `jet toolchain`: prints the pin (`jet:` channel), the locked exact version,
+1. `jet self toolchain`: prints the pin (`jet:` channel), the locked exact version,
    the hangar object id (`jet-<version>-<fp>`, D-PM1), and realized/​missing
    state. Read-only.
 2. `jet update jet [<channel>]`: re-resolves the channel, updates the lock's
@@ -120,7 +120,7 @@ under the fixture; no re-exec loop; honest error on platform miss.
    channel by default, so a lifted project is reproducible from birth.
 
 Wire both into the CLI registry (`Jetpack/CLI.rs` verb match) and the jet-side
-dispatch contract (`jet toolchain` / `jet update` route to the jetpack engine
+dispatch contract (`jet self toolchain` / `jet update` route to the jetpack engine
 per DISPATCH1).
 
 Tests: `jet_toolchain_reports_pin`, `jet_update_jet_moves_lock`,
@@ -140,7 +140,7 @@ Tests: `jet_toolchain_reports_pin`, `jet_update_jet_moves_lock`,
       never silent use of the wrong `jet`.
 - [ ] `--offline` with satisfied lock never touches the network (D-JPK-OFFLINE1
       golden sweep includes the toolchain path).
-- [ ] `jet toolchain`, `jet update jet` implemented + tested; `jet init` writes a
+- [ ] `jet self toolchain`, `jet update jet` implemented + tested; `jet init` writes a
       pin.
 - [ ] Diagnostics `E1233`–`E1235` in `docs/spec/diagnostics.md` with snapshots.
 - [ ] Full `cargo test` green; example under `examples/features/` shows a pinned

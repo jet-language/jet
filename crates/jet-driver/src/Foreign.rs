@@ -191,7 +191,7 @@ pub fn is_active_namespace_import(imp: &ImportDecl) -> bool {
 /// C keeps its richer merge/link path in `CFFI::assemble`; this pass handles
 /// active binders whose cache is already plain Jet source. Missing caches still
 /// get an empty synthetic module so unused imports type-check and real symbol
-/// use fails as a normal missing member until `jet bind <lang>` materializes it.
+/// use fails as a normal missing member until `jet inspect bind <lang>` materializes it.
 pub fn assemble_active_namespaces(bundle: &mut ProgramBundle) -> Result<(), Vec<Diagnostic>> {
     let mut surfaces: HashMap<(ForeignLanguage, String), usize> = HashMap::new();
     let user_module_count = bundle.modules.len();

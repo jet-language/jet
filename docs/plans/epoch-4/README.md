@@ -74,7 +74,7 @@ unratified role filenames.
 
 | Gate | Decision | Outcome | Implementation meaning |
 |---|---|---|---|
-| U11 | `D-JPK-SCRIPTDEP1` | A | `use pkg#ver` inside a bare script; `jet run` resolves and locks by file hash; `jet lock <file>` writes a sidecar; `jet init` lifts deps into `pkg.jet`. |
+| U11 | `D-JPK-SCRIPTDEP1` | A | `use pkg#ver` inside a bare script; `jet run` resolves and locks by file hash; `jet store lock <file>` writes a sidecar; `jet init` lifts deps into `pkg.jet`. |
 | U12 | `D-JPK-SERVICE1` | A | `services:` in `env.*`; jetpack supervises project-local processes; `jet services up/down/health/logs`; `jet dev` health-gates before running code. |
 | U13 | `D-JPK-SECRET1` | A | `secret("name")`; encrypted repo file; activation-time memory-only decrypt; reads require `Secret` effect; no plaintext in hangar. |
 | U13a | `D-JPK-SECRETCRYPTO1` | A | Use a vetted crypto bridge for age-style encryption; compiler stays zero-external-crate. |

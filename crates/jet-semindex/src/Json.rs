@@ -180,7 +180,7 @@ fn json_member(m: &MemberFact) -> String {
 }
 
 impl SemIndex {
-    /// Stable JSON document for tests and `jet semindex --json`.
+    /// Stable JSON document for tests and `jet inspect semindex --json`.
     pub fn to_json(&self) -> String {
         let defs: Vec<String> = self.definitions().iter().map(json_def).collect();
         let refs: Vec<String> = self.references().iter().map(json_ref).collect();

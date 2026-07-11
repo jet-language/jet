@@ -2898,7 +2898,7 @@ pub(crate) fn check_func_body_bundle(
     }
     global_addr_taken.extend(std::mem::take(&mut ck.inline_addr_taken));
     // D-EXPANDCLI1 (card #183): roll this function's resolved ref-owner facts
-    // into the whole-bundle accumulator for `jet expand --facts refs`.
+    // into the whole-bundle accumulator for `jet inspect expand --facts refs`.
     // D-CTEFFECT1 Tier-1: drain embed inputs into the caller's accumulator.
     embed_inputs_out.extend(std::mem::take(&mut ck.ct_embed_inputs));
     // D-EFF1: record this function's effect summary for the whole-program fixpoint.

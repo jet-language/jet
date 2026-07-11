@@ -188,13 +188,13 @@ for the active platform; falls back to embedded, or errors under
 Exit: a ring import resolves from the hangar when staged and from the embedded
 template otherwise, with identical program behavior; version coherence asserted.
 
-## Slice T4 — `jet build` / `jet vendor` / `jet audit` surface (no gate)
+## Slice T4 — `jet build` / `jet registry vendor` / `jet inspect audit` surface (no gate)
 
 1. `jet build` realizes all deps from source (or cache) and reports per-package
    `built | substituted | cached` (mirror the `D-JPK-CACHE1` example output).
-2. `jet vendor` writes vendored + hash-pinned sources for every crate-backed dep
-   (D-BFS1 / the `jet vendor` mention in the manifest law).
-3. `jet audit` reads the build recipes, effects, and locked source hashes
+2. `jet registry vendor` writes vendored + hash-pinned sources for every crate-backed dep
+   (D-BFS1 / the `jet registry vendor` mention in the manifest law).
+3. `jet inspect audit` reads the build recipes, effects, and locked source hashes
    **without executing** anything (D-BUILDSCOPE1 audit contract).
 
 Tests: `jet_build_reports_source_states`, `jet_vendor_writes_pinned_sources`,
@@ -213,7 +213,7 @@ Tests: `jet_build_reports_source_states`, `jet_vendor_writes_pinned_sources`,
 - [ ] T3: ring libraries resolve from the hangar when staged, embedded fallback
       otherwise, per the ratified `D-JPK-RINGSHIP1` model; version coherence
       asserted.
-- [ ] T4: `jet build` reports source states; `jet vendor` / `jet audit`
+- [ ] T4: `jet build` reports source states; `jet registry vendor` / `jet inspect audit`
       implemented and tested.
 - [ ] Diagnostics `E1236`–`E1240` in `docs/spec/diagnostics.md` with snapshots.
 - [ ] `D-JPK-OFFLINE1` golden sweep covers the source-build verbs.

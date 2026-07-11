@@ -75,7 +75,7 @@ on exact diagnostic decisions.
 
 The profile audit JSON is stable and contains memory layout, linker source,
 allocator, panic behavior, unavailable Core APIs, and MMIO unsafe reasons. The
-ratified user-facing shape is a `jet dossier target` lens plus a build artifact;
+ratified user-facing shape is a `jet inspect dossier target` lens plus a build artifact;
 CLI/package wiring lands in the later surface slice.
 
 ## Running under QEMU (D-CROSS3 local harness)

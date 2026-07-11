@@ -46,7 +46,7 @@ Known expert gates to verify:
 - `#Unsafe("reason")` / `#Unsafe fn` for operations that can violate I1.
 - `#Layout(c)` / `#Layout(columnar)` and typed target profiles for layout/ABI.
 - `policy no_alloc` and target allocator facts for allocation ceilings.
-- `jet expand --facts`, `jet dossier`, `--json`, and generated-source views for
+- `jet inspect expand --facts`, `jet inspect dossier`, `--json`, and generated-source views for
   inspection.
 
 Deliverable: `docs/spec/beginner-expert-map.md` with one row per surface feature,
@@ -96,9 +96,9 @@ the gap is a one-line doc label.
 
 Check that every magic default has an expert view:
 
-- syntax and sema facts: `jet expand --facts`, semantic index, dossier
+- syntax and sema facts: `jet inspect expand --facts`, semantic index, dossier
 - build/package/env: graph, lock explain, audit, trust grants, provenance
-- target/embedded: `jet dossier target` plus stable audit JSON
+- target/embedded: `jet inspect dossier target` plus stable audit JSON
 - proof/perf: `jet prove`, replay artifacts, budget reports
 
 Deliverable: missing-view gaps become plan cards or ballot text.

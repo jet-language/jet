@@ -138,7 +138,7 @@ impl RunReport {
 }
 
 /// Validate a recipe against the safety contract without running it — the read
-/// path `jet audit` uses (D-BUILDSCOPE1: audit never executes). Returns the
+/// path `jet inspect audit` uses (D-BUILDSCOPE1: audit never executes). Returns the
 /// first violation as a diagnostic.
 pub fn validate(recipe: &BuildRecipe, ctx: &BuildContext) -> Result<(), Diagnostic> {
     for step in &recipe.steps {
@@ -570,7 +570,7 @@ pub fn e1236(url: &str) -> Diagnostic {
              The fetch of `{url}` carries no `sha256:`, so its result can't be pinned and the \
              build would not be reproducible."
         ),
-        "add the source hash: `fetch(\"…\", sha256: \"…\")`, or vendor the source with `jet vendor`."
+        "add the source hash: `fetch(\"…\", sha256: \"…\")`, or vendor the source with `jet registry vendor`."
             .to_string(),
         None,
     )
@@ -581,7 +581,7 @@ fn e1236_offline(url: &str) -> Diagnostic {
         "E1236",
         "a build step needs the network but the build is offline".to_string(),
         format!("`--offline` forbids any network fetch; `{url}` is not in the local fetch cache."),
-        "run once online to populate the cache, or `jet vendor` the source and rebuild."
+        "run once online to populate the cache, or `jet registry vendor` the source and rebuild."
             .to_string(),
         None,
     )
@@ -595,7 +595,7 @@ fn e1236_no_transport(url: &str) -> Diagnostic {
             "`{url}` is a remote URL; the build seam holds no network capability by itself \
              (zero-external-crate compiler)."
         ),
-        "provide a `file://` mirror, or `jet vendor` the source so the build is offline."
+        "provide a `file://` mirror, or `jet registry vendor` the source so the build is offline."
             .to_string(),
         None,
     )
@@ -850,7 +850,7 @@ mod tests {
 
     #[test]
     fn validate_is_pure_read_no_exec() {
-        // `jet audit` uses validate(): it flags violations without running any
+        // `jet inspect audit` uses validate(): it flags violations without running any
         // step. A recipe with an exec of a missing tool validates to E1238 and
         // never spawns a process.
         let base = scratch("audit");

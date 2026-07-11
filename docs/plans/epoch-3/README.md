@@ -44,12 +44,12 @@ and JIT/debugger successors outside Epoch 3.
 | [`plugin-api.md`](plugin-api.md) / [`../sidequests/plugin-target.md`](../sidequests/plugin-target.md) | D-PLUGIN1, D-DEP-WASM1 | Sandboxed WASM plugin target + formal plugin ABI |
 | [`../sidequests/epoch-3-handoff.md`](../sidequests/epoch-3-handoff.md) | 2026-06-27 sweep | Current unblocked/gated card handoff |
 | Tower cards c129–c131 | S56, D-METAREFLECT1, D-METADERIVE1 | User-defined derives and typed reflection |
-| [`c-header-bindings.md`](c-header-bindings.md) | D-CBIND2…6 ✅ ratified | `jet bind` engine — surface in **E2-M14** / S59 |
+| [`c-header-bindings.md`](c-header-bindings.md) | D-CBIND2…6 ✅ ratified | `jet inspect bind` engine — surface in **E2-M14** / S59 |
 | [`testing-docs-ergonomics.md`](testing-docs-ergonomics.md) | D-TEST1, D-TEST4 | property testing (w/ shrinking), doctests, coverage — syntax-gated M11 niceties (owner, 2026-06-18: → Epoch 3) |
 | [`../sidequests/compression-codecs.md`](../sidequests/compression-codecs.md) | D-CODECS1 | `core.compress.gzip` + `core.compress.zstd` |
 | [`../sidequests/unicode-text.md`](../sidequests/unicode-text.md) | D-GRAPHEME1 | Opt-in Unicode grapheme + normalization package |
 | [`../sidequests/raylib-graphics.md`](../sidequests/raylib-graphics.md) | D-RAYLIB1 | Official `core.raylib` graphics bridge |
-| [`dossier-umbrella.md`](dossier-umbrella.md) | D-WD2, D-DOSSIER1 | `jet dossier` as umbrella over existing semantic facts |
+| [`dossier-umbrella.md`](dossier-umbrella.md) | D-WD2, D-DOSSIER1 | `jet inspect dossier` as umbrella over existing semantic facts |
 | [`typed-data-core.md`](typed-data-core.md) | D-WD9 | typed data Core plus accelerator bridges |
 | [`core-game-substrate.md`](core-game-substrate.md) | D-WD10 | stable `core.game` substrate |
 | [`typed-target-profiles.md`](typed-target-profiles.md) | D-WD11 | typed embedded and freestanding target profiles |

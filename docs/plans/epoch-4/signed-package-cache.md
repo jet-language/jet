@@ -8,9 +8,9 @@ is a pure implementation plan.
 
 ## 0. Gate check — is c96 still blocking?
 
-No. `c96` ("M12.2 registry + jet publish UX") is `phase: done`. Its own log
+No. `c96` ("M12.2 registry + jet registry publish UX") is `phase: done`. Its own log
 records the split precisely: c96 shipped the **local** publish surface —
-dirty-tree gate (E2605), test gate, SemVer diff (E1218/E2601), `jet yank`
+dirty-tree gate (E2605), test gate, SemVer diff (E1218/E2601), `jet registry yank`
 marker (E2606), resolver (`select_highest_compatible`, E2602) — and
 deliberately left the **actual git-registry network push** stubbed
 (`Source/CmdSupply.rs` prints "registry upload pending c56"), by design,
@@ -22,7 +22,7 @@ satisfied: everything c56 needs from c96 (manifest, lock schema, resolver,
 
 `D-JPK-CACHE1=A` (ratified 2026-07-02) splits this card's scope explicitly:
 
-- **NOW (this card, E4):** (a) make `jet publish`/`jet yank` actually push to
+- **NOW (this card, E4):** (a) make `jet registry publish`/`jet registry yank` actually push to
   the git-registry index instead of validating-and-explaining; (b) freeze the
   binary-cache **envelope fields** (output hash, platform key, signature
   slot, provenance link) into the hangar/lock schema so nothing later has to
@@ -36,7 +36,7 @@ Card body's "signed binary/source cache was design-only... out of scope"
 note is stale as of D-JPK-CACHE1; the design is no longer open, it's ratified
 and scoped as above.
 
-## 2. Part A — git-registry push (make `jet publish`/`jet yank` real)
+## 2. Part A — git-registry push (make `jet registry publish`/`jet registry yank` real)
 
 The registry is **not** a bespoke network service — `Source/Publish/Registry.rs`
 already models it as a git repo (`RegistryConfig.url`, default
@@ -141,8 +141,8 @@ Next free jet/CLI code after E1225 is **E1226**:
 
 | Code | What/why/fix |
 |---|---|
-| E1226 | `jet publish` refused: `{name}` `{version}` already exists in the registry index and is not yanked. Published versions are immutable (D-VERSION1) — a version can never be overwritten, only yanked. Fix: bump the version in `pkg.jet` and publish again, or `jet yank` the existing version first if it was a mistake (yanking hides it from new resolution, it does not free the version number). |
-| E1227 | `jet publish`/`jet yank` couldn't reach the registry index at `{url}`: `{detail}`. The git push failed (network, auth, or a stale local clone). Fix: check network/credentials for `{url}`, or run with a `--registry` pointing at a reachable mirror. |
+| E1226 | `jet registry publish` refused: `{name}` `{version}` already exists in the registry index and is not yanked. Published versions are immutable (D-VERSION1) — a version can never be overwritten, only yanked. Fix: bump the version in `pkg.jet` and publish again, or `jet registry yank` the existing version first if it was a mistake (yanking hides it from new resolution, it does not free the version number). |
+| E1227 | `jet registry publish`/`jet registry yank` couldn't reach the registry index at `{url}`: `{detail}`. The git push failed (network, auth, or a stale local clone). Fix: check network/credentials for `{url}`, or run with a `--registry` pointing at a reachable mirror. |
 
 Add both to the two diagnostics.md tables (summary line ~485 range, full
 message/why/fix table near the E12xx block) — do not add only one.
@@ -152,9 +152,9 @@ message/why/fix table near the E12xx block) — do not add only one.
 - `examples/features/jetpack/publish-push.jet`-style test harness (not a
   runnable `.jet` example — this is CLI behavior): an integration test under
   `tests/` that spins up a scratch bare git repo as the "registry", runs
-  `jet publish` against it, asserts the index file gained the JSONL line, then
-  runs `jet publish` again with the same version and asserts E1226.
-- A second test: `jet yank <version>` against the scratch registry, assert
+  `jet registry publish` against it, asserts the index file gained the JSONL line, then
+  runs `jet registry publish` again with the same version and asserts E1226.
+- A second test: `jet registry yank <version>` against the scratch registry, assert
   the line's `yanked` flips to `true` and a subsequent resolve skips it.
 - Lockfile round-trip test (schema-only, §3) lives beside the existing
   `content_hash` round-trip test in `crates/jet-driver/src/Lock.rs`'s test
@@ -163,11 +163,11 @@ message/why/fix table near the E12xx block) — do not add only one.
 
 ## 6. Exit criteria
 
-- `jet publish` against a real (scratch, in tests) git registry index
+- `jet registry publish` against a real (scratch, in tests) git registry index
   actually writes and pushes an entry; the old "upload pending c56" message
   is gone from both `run_publish` and `run_yank`.
 - Version immutability enforced at push time (E1226), not just documented.
-- `jet yank` flips the index entry, doesn't delete it.
+- `jet registry yank` flips the index entry, doesn't delete it.
 - `LockedPackage` carries the four frozen envelope fields, all optional,
   fully round-tripping; nothing populates them yet (that's E6).
 - Two new E-codes in both diagnostics.md tables + ui snapshots.

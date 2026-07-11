@@ -498,7 +498,7 @@ fn is_executable(p: &Path) -> bool {
 // T4 — verbs
 // ──────────────────────────────────────────────
 
-/// `jet toolchain` — read-only pin/version/status report (T4).
+/// `jet self toolchain` — read-only pin/version/status report (T4).
 pub fn report_pin(root: &Path) -> String {
     let manifest = read_manifest(root);
     let id = manifest

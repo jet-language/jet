@@ -27,7 +27,7 @@ meets all seven proofs before its pillar counts:
 | **Docs** | `README.md` in the slice dir (build / run / test / deploy walkthrough); `///` on every public fn; doctests green via `jet test` |
 | **Tests** | `#Test` blocks on the core logic; property tests where the domain has invariants; all in the suite |
 | **Golden (I5)** | a deterministic mode with committed expected output, enforced by `tests/slices.rs` |
-| **Packaging** | `pkg.jet` manifest; `jet publish` pre-publish gate green (build + tests + API diff); SBOM/`jet vendor` where deps exist |
+| **Packaging** | `pkg.jet` manifest; `jet registry publish` pre-publish gate green (build + tests + API diff); SBOM/`jet registry vendor` where deps exist |
 | **Diagnostics** | ≥1 new `tests/ui` fixture per slice: a realistic mistake from that domain, with the code/what/why/fix voice (I4) |
 | **Performance** | a `jet bench` target with a pinned regression budget, plus a binary/bundle size budget in `tests/release_gates.rs` style |
 | **Deployment** | a working deploy artifact proven by test: cross-compiled binary, QEMU boot, static web `build/`, or native binary with system-dep story |
@@ -96,7 +96,7 @@ loop during development.
 **Gaps it will expose:** graceful-shutdown/signal API; request-scoped
 deadline ergonomics; connection scale before the D-MNIO1 native parkers land;
 TLS is `core.tls` package-only (plain HTTP in-core); registry-less dep story
-(`jet publish` upload still deferred, D-PKGS1).
+(`jet registry publish` upload still deferred, D-PKGS1).
 
 **Slice-specific proofs:** golden = probe script drives a scripted
 curl-sequence against an ephemeral port, responses diffed (timestamps/id

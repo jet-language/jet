@@ -1255,7 +1255,7 @@ fn build_plan_diagnostic(error: &crate::Comptime::Build::BuildError) -> Diagnost
         "E3502",
         format!("build plan is invalid: {error:?}"),
         "all graph handles must belong to one selected root build and every action output must have one owner".to_string(),
-        "fix the named graph node and use `jet explain-build` to inspect its inputs".to_string(),
+        "fix the named graph node and use `jet inspect explain-build` to inspect its inputs".to_string(),
         None,
     )
 }

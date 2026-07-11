@@ -73,9 +73,9 @@ The filename is organization. The declaration is meaning.
 | Rung | User writes | Command |
 |---|---|---|
 | 0 script | one `.jet` file, optionally `use pkg#ver` | `jet run app.jet` |
-| 1 package | `pkg.jet` with `payload`, `deps`, `packages` | `jet build`, `jet add`, `jet publish` |
+| 1 package | `pkg.jet` with `payload`, `deps`, `packages` | `jet build`, `jet add`, `jet registry publish` |
 | 2 environment | `module env.dev { ... }` in any `.jet` file | `jet env`, `jet dev`, `jet services` |
-| 3 machine | `module system.laptop { ... }` | `jet switch`, `jet rollback`, `jet generations` |
+| 3 machine | `module system.laptop { ... }` | `jet switch`, `jet store rollback`, `jet store generations` |
 | 4 fleet | `module fleet.prod { ... }` | `jet push prod` |
 
 Climbing a rung adds a module namespace, not a new configuration language.
@@ -91,7 +91,7 @@ fn run() {
 }
 ```
 
-`jet run stats.jet` resolves, locks by file-content hash, and runs. `jet lock
+`jet run stats.jet` resolves, locks by file-content hash, and runs. `jet store lock
 stats.jet` writes a sidecar for committed reproducibility. `jet init` lifts the
 inline deps into a generated `pkg.jet`. Rung 0 stays manifest-free.
 
@@ -199,8 +199,8 @@ module system.laptop {
 
 ```
 $ jet switch --name "pre-gpu-driver"
-$ jet generations
-$ jet rollback
+$ jet store generations
+$ jet store rollback
 ```
 
 The module system must support typed options, defaults, `force`, final-value
