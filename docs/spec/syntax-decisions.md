@@ -590,8 +590,33 @@ inside `module name { … }`, never file top-level.
 **U4 — Import-tree discovery**: `imports: find("./modules")` auto-discovers
 `.jet` files and merges typed contributions; no manual lists.
 
-**D-GENMOD1 — Generic modules**: ML-functor style — a module parameterized by
-type/value; instantiation yields a specialized normal module (E0850–E0854).
+**D-GENMOD1 / D-GENMOD2 — Generic modules**: ML-functor style — a module
+parameterized by types and values; instantiation yields a specialized normal
+module. Type parameters (`K: Hash`) and value parameters (`capacity: Int`) share
+one `<…>` list, and application mirrors it: `module Cache64 = Cache<String,
+64>`.
+
+**D-GENMOD-VALUE1=A — Closed value specialization**: value parameters are
+immutable Tier-0 comptime values of type `Bool`, `Int`, `Char`, `String`, or a
+fieldless enum. Arguments are evaluated and normalized before specialization;
+they do not convert between value types. An `Int` value parameter may also fill
+the narrowly approved generic-module layout slot `[T#capacity]` under S26,
+S76, and D-FIXARR1.
+
+**D-GENMOD-BODY1=A — Full module bodies, definition-site scope**: a generic
+module admits every declaration and legal marker admitted by an ordinary
+module: functions, structs, enums, tags, runtime and comptime constants,
+traits, trait/error-conversion/OS-gated impls, tests, benches, ordinary and
+generic nested modules, and aliases. Names outside the template resolve in the
+template's definition-site lexical scope. A specialization gains no additional
+authority from its application site.
+
+**D-GENMOD-IDENTITY1=A — Applicative instance identity**: one resolved template
+DefinitionId plus one normalized argument tuple identifies one module instance.
+Repeated applications of that pair project the same nominal member types,
+InstanceFingerprint, sema result, TIR/codegen specialization, cache entry, and
+LSP references. A different normalized argument tuple or resolved template
+definition is a different instance.
 
 **U17 — Library packages**: consumed with ordinary `use <pkg>`; executables
 go on PATH, never `use`. **D-PRELUDEX1**: `#NoPrelude` opts a file out of
