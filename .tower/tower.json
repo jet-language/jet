@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 495,
-    "rev": 3419,
+    "rev": 3426,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -2027,7 +2027,7 @@
     },
     {
       "milestoneId": "e3-universal-product-parity",
-      "assignee": null,
+      "assignee": "fable-medium",
       "id": "c2iizmyx",
       "num": 126,
       "title": "Concurrency runtime push: Go-scale M:N tasks + structured combinators",
@@ -2041,6 +2041,11 @@
       "plan": "Canonical concurrency implementation plan (D-ASYNCRT1=A, D-MNIO1=A, D-CONCCOMB1=A, D-RACEWIN1=A, D-CONCSELECT1=A). Build one model only: task/channel/taskgroup. No @async/await, no user coroutine primitive, no second race/select mechanism.\n\nAlready shipped foundations to preserve:\n- #102: taskgroup g { ... }, g.task { ... }, wait/join, scope-exit ownership, existing g.all/g.race/g.any vertical slice.\n- #101: task handles expose coroutine-grade controls (pause/resume/cancel/trace); coroutine substrate stays internal.\n- #112: #Context(deadline:) flows through taskgroups and wait points; E3003 owns deadline diagnostics.\n- #126 M1/M2: current scheduler vertical slice, channels/timers/yield hook, 160_scheduler_spawn.\n\nImplementation order for dumb agents:\n1. Inventory current behavior first. Read docs/spec/philosophy.md, syntax-decisions.md entries for D-ASYNCRT1/D-MNIO1/D-NURSERY1/D-TASKSCOPE1/D-CONCCOMB1/D-RACEWIN1/D-CONCSELECT1/D-DEADLINE1/D-COROUTINE1, docs/plans/epoch-3/concurrency-vision.md, Source/Prelude/Scheduler.rs, Source/Interpreter.rs, crates/jet-codegen/src/Prelude/Scheduler.rs, task/channel sema/codegen, and tests for examples 131, 157, 158, 160.\n2. Write missing acceptance tests before code. Add/extend examples/features concurrency examples plus CLI/golden tests for: 100k idle parked tasks or smallest CI-safe equivalent with a scale benchmark guard; channel receive wakes one parked task without busy-wait; taskgroup scope cancels losing race tasks; g.all fail-fast cancels siblings; g.race returns first success and cancels losers; g.any returns first completion including errors; if g.select() arms deregister losers; deadline firing wakes parked I/O/channel/task waits with Jet-owned E3003; detached tasks require explicit expert policy/name.\n3. Replace cooperative-only scheduler gaps with real parker abstraction. Define internal runtime traits, not user syntax: Scheduler, Parker, TimerWheel, IoParker. Start with portable readiness fallback for tests; implement D-MNIO1 native backends behind cfg modules (Linux epoll/io_uring path, macOS/BSD kqueue, Windows IOCP). No external runtime dependency unless owner approves a new dep card.\n4. Route every blocking-looking stdlib wait through the parker. Channel recv/send, timers/sleep, task join/wait, TCP accept/read/write, HTTP client/server waits must park Jet tasks, not OS threads. Real OS-blocking fallback must run on an explicit blocking pool and be observable; never silently block scheduler workers.\n5. Finish structured combinators in taskgroup only. g.all/g.race/g.any/select are methods or scoped operations on the taskgroup; they create no detached work and return/propagate through one cancellation model. Implement D-RACEWIN1 inside g.race; #103 is merged here. Implement D-CONCCOMB1 here; #36 is merged here.\n6. Implement D-CONCSELECT1 exactly as ratified: if-fused select over g.select() arms. Parser/sema/codegen/tests must reuse match/if-arm typing where possible. Select must register arms under taskgroup ownership, wake exactly one winner, deregister losers, and compose with deadlines/cancellation.\n7. Add observability and misuse diagnostics. Runtime metrics: runnable/parked task counts, poller wake count, worker utilization, queue depth, cancelled losers. Diagnostics/lints: forgotten task handle wait, swallowed cancellation, deadline ignored, detached task without policy/name, real blocking call on scheduler worker.\n8. Prove parity and scale. cargo test green; examples 131/157/158/160 still pass; add deterministic scheduler tests with fake clock; add stress tests gated for CI budget; add a benchmark/report target that demonstrates 100k parked connections/tasks when run locally. rustc errors remain ICE-only; all user errors are sema/driver diagnostics.\n\nExit criteria:\n- One coherent public model in docs/spec/spec.md and examples: task/channel/taskgroup + scoped combinators + deadline context.\n- No @async/await surface, no function coloring, no separate user coroutine API.\n- Native parker path exists per platform or has named cfg-tested fallback with honest diagnostic/metric.\n- race/all/any/select cannot leak losing tasks past taskgroup scope.\n- CI-safe tests prove cancellation/deadline/wake correctness; local stress target proves 100k parked tasks/connections target.\n- docs/plans/epoch-3/async-networking.md and concurrency-vision.md match implementation.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "fable-medium",
+          "text": "Claimed by fable-medium. Worktree builder starting on 2026-07-09 audit-gap tranche: real pause/cancel semantics, native poller source in emitted programs, scale closure. IOCP (Windows-native) left as named gap pending a Windows execution lane."
+        },
         {
           "at": "2026-07-09",
           "by": "codex-main",
@@ -2088,10 +2093,11 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-07-10",
+      "updated": "2026-07-11",
       "criteria": [],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-11T10:44:15.238Z"
     },
     {
       "milestoneId": "e3-universal-product-parity",
@@ -2166,6 +2172,11 @@
       "plan": "D-METADERIVE1=A: implement user derive output as source fragments. Steps: (1) parser for `derive Trait for T { ... }`; (2) sema registers derive providers and enforces local-only orphan rule (trait or type local); (3) derive body runs at comptime with `T.reflect()` and `$name` splices; (4) emitted Jet text re-enters lexer/parser/sema per R11/D-CTCODEGEN1, never injects pre-parsed AST; (5) diagnostics for generated-fragment failure pin at the user `#[Trait]` trigger with optional generated context; (6) examples and goldens for a custom derive; (7) follow-up card for emit-template quoting, not a blocker.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "fable-medium",
+          "text": "Claimed by fable-medium (medium-workOrder burndown lane). Worktree builder started on R11 built-in derive source re-entry per ratified D-METADERIVE1=A."
+        },
         {
           "at": "2026-07-09",
           "by": "codex-main",
@@ -7230,6 +7241,11 @@
       "blockedBy": [],
       "assignee": "fable-medium",
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "fable-medium",
+          "text": "Claimed by fable-medium (medium-workOrder burndown lane). Worktree builder started on corpus expansion tranche per codex-main 2026-07-11 scoping (criteria 1-4)."
+        },
         {
           "at": "2026-07-11",
           "by": "codex-main",
@@ -23159,8 +23175,11 @@
       ],
       "rec": "A",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-11T01:56:21.912Z"
+      "status": "ratified",
+      "created": "2026-07-11T01:56:21.912Z",
+      "outcome": "A",
+      "comment": "I want to be able to use flags regardless, this way it will be better ux for people who want the language to get out of the way if they know what theyre doing",
+      "ratifiedAt": "2026-07-11"
     },
     {
       "id": "D-CODEMOD-BATCH1",
@@ -23211,8 +23230,10 @@
       ],
       "rec": "A",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-11T02:29:22.513Z"
+      "status": "ratified",
+      "created": "2026-07-11T02:29:22.513Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-11"
     },
     {
       "id": "D-PROVE-SEM1",
@@ -23263,8 +23284,10 @@
       ],
       "rec": "A",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-11T03:06:11.253Z"
+      "status": "ratified",
+      "created": "2026-07-11T03:06:11.253Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-11"
     },
     {
       "id": "D-JPROOF1",
@@ -26114,6 +26137,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-11T10:44:17.193Z",
+      "by": "fable-medium",
+      "action": "card.update",
+      "ref": "c2iizmyx",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T10:44:16.958Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-PROVE-SEM1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-11T10:44:15.238Z",
+      "by": "fable-medium",
+      "action": "card.claim",
+      "ref": "c2iizmyx",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T10:43:59.443Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CODEMOD-BATCH1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-11T10:43:44.089Z",
+      "by": "fable-medium",
+      "action": "card.update",
+      "ref": "c0ewbiud",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T10:43:42.088Z",
+      "by": "fable-medium",
+      "action": "card.update",
+      "ref": "c2nizvzp",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T10:43:31.917Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-REPLCOREEFFECT1",
+      "note": "A"
+    },
     {
       "at": "2026-07-11T10:41:42.394Z",
       "by": "terra-452-jit",
@@ -29564,55 +29636,6 @@
       "action": "card.release",
       "ref": "c0rb4k1d",
       "note": ""
-    },
-    {
-      "at": "2026-07-10T20:30:08.337Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0rb4k1d",
-      "note": "#6 No external compiler/comptime dependencies are added and foc"
-    },
-    {
-      "at": "2026-07-10T20:30:08.187Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0rb4k1d",
-      "note": "#5 BigInt is supported by the JIT tier and removed from the com"
-    },
-    {
-      "at": "2026-07-10T20:30:08.034Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0rb4k1d",
-      "note": "#4 Every effect-free parity gap found by the inventory is imple"
-    },
-    {
-      "at": "2026-07-10T20:30:07.881Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0rb4k1d",
-      "note": "#3 A canonical machine-checked inventory classifies 100 percent"
-    },
-    {
-      "at": "2026-07-10T20:30:07.729Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0rb4k1d",
-      "note": "#2 The existing BigInt feature example produces byte-identical "
-    },
-    {
-      "at": "2026-07-10T20:30:07.572Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0rb4k1d",
-      "note": "#1 REPL exact transcripts pass BigInt construction from Int and"
-    },
-    {
-      "at": "2026-07-10T20:30:07.416Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0rb4k1d",
-      "note": "phase,plan,logEntry"
     }
   ],
   "nextNum": 368,
