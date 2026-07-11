@@ -136,15 +136,6 @@ fn load_plan(theme: &Theme, target: &Target) -> Option<EnvPlan> {
 }
 
 fn validate_system_options(theme: &Theme, system: &SystemPlan) -> bool {
-    if let Some((key, priority, values)) = option_conflict(system) {
-        theme.error_coded(
-            "E0967",
-            &format!("`{key}` got conflicting values: {}", values.join(", ")),
-            &format!("multiple modules contributed different values at the winning priority {priority}; source order never breaks an option conflict."),
-            "make the winning contributions agree, disable one module by its stable module ID, or assign one contribution a distinct Default, Force, or Priority(n) tier.",
-        );
-        return false;
-    }
     if let Some(bad) = system.options.iter().find(|o| {
         let ns = o.key.split('.').next().unwrap_or("");
         !Syntax::OS_OPTION_NAMESPACES.contains(&ns)

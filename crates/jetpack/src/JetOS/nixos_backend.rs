@@ -1490,7 +1490,10 @@ mod tests {
     }
 
     fn opt(key: &str, value: &str) -> ModuleEval::OptionPlan {
-        ModuleEval::OptionPlan::ordinary(key, value)
+        ModuleEval::OptionPlan {
+            key: key.to_string(),
+            value: value.to_string(),
+        }
     }
 
     fn full_system() -> SystemPlan {

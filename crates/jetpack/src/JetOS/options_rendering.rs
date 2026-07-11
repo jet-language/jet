@@ -16,6 +16,14 @@ fn option_value(system: &SystemPlan, keys: &[&str]) -> Option<String> {
         .find_map(|key| resolved_option_value(system, key))
 }
 
+fn raw_option_value(system: &SystemPlan, key: &str) -> Option<String> {
+    system
+        .options
+        .iter()
+        .find(|o| o.key == key)
+        .map(|o| clean_value(&o.value))
+}
+
 fn resolved_option_value(system: &SystemPlan, key: &str) -> Option<String> {
     resolved_option(system, key).map(|r| r.value)
 }
@@ -32,7 +40,6 @@ struct OptionContender {
     value: String,
     tier: String,
     priority: i64,
-    module_id: String,
     source_order: usize,
     winner: bool,
 }
@@ -44,11 +51,10 @@ impl ResolvedOption {
             .iter()
             .map(|c| {
                 format!(
-                    "{{\"value\":{},\"tier\":{},\"priority\":{},\"module_id\":{},\"source_order\":{},\"winner\":{}}}",
+                    "{{\"value\":{},\"tier\":{},\"priority\":{},\"source_order\":{},\"winner\":{}}}",
                     JSON::quote(&c.value),
                     JSON::quote(&c.tier),
                     c.priority,
-                    JSON::quote(&c.module_id),
                     c.source_order,
                     if c.winner { "true" } else { "false" }
                 )
@@ -67,37 +73,30 @@ impl ResolvedOption {
 }
 
 fn resolved_option(system: &SystemPlan, key: &str) -> Option<ResolvedOption> {
+    let tier = raw_option_value(system, &format!("{key}.tier"))
+        .map(|s| clean_symbol(&s))
+        .unwrap_or_else(|| "Normal".to_string());
+    let priority = raw_option_value(system, &format!("{key}.priority"))
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or_else(|| tier_priority(&tier));
     let mut contenders = Vec::new();
-    for option in &system.options {
+    for (idx, option) in system.options.iter().enumerate() {
         if option.key == key {
             contenders.push(OptionContender {
                 value: clean_value(&option.value),
-                tier: option.priority.label(),
-                priority: option.priority.weight(),
-                module_id: option.module_id.clone(),
-                source_order: option.source_order,
+                tier: tier.clone(),
+                priority,
+                source_order: idx,
                 winner: false,
             });
         }
     }
-    let highest = contenders.iter().map(|c| c.priority).max()?;
-    let mut highest_values = contenders
-        .iter()
-        .filter(|c| c.priority == highest)
-        .map(|c| c.value.as_str())
-        .collect::<Vec<_>>();
-    highest_values.sort_unstable();
-    highest_values.dedup();
-    if highest_values.len() > 1 {
-        return None;
-    }
     let winner_idx = contenders
         .iter()
         .enumerate()
-        .filter(|(_, contender)| contender.priority == highest)
-        .min_by(|(_, a), (_, b)| {
-            a.module_id
-                .cmp(&b.module_id)
+        .max_by(|(_, a), (_, b)| {
+            a.priority
+                .cmp(&b.priority)
                 .then_with(|| a.source_order.cmp(&b.source_order))
         })
         .map(|(idx, _)| idx)?;
@@ -112,25 +111,12 @@ fn resolved_option(system: &SystemPlan, key: &str) -> Option<ResolvedOption> {
     })
 }
 
-fn option_conflict(system: &SystemPlan) -> Option<(String, i64, Vec<String>)> {
-    let mut keys = system.options.iter().map(|o| o.key.clone()).collect::<Vec<_>>();
-    keys.sort();
-    keys.dedup();
-    for key in keys {
-        let contenders = system.options.iter().filter(|o| o.key == key).collect::<Vec<_>>();
-        let highest = contenders.iter().map(|o| o.priority.weight()).max()?;
-        let mut values = contenders
-            .iter()
-            .filter(|o| o.priority.weight() == highest)
-            .map(|o| clean_value(&o.value))
-            .collect::<Vec<_>>();
-        values.sort();
-        values.dedup();
-        if values.len() > 1 {
-            return Some((key, highest, values));
-        }
+fn tier_priority(tier: &str) -> i64 {
+    match tier {
+        "Default" => 100,
+        "Force" => 10_000,
+        _ => 1_000,
     }
-    None
 }
 
 fn is_option_priority_metadata(key: &str) -> bool {

@@ -161,52 +161,6 @@ pub struct DevServicePlan {
 pub struct OptionPlan {
     pub key: String,
     pub value: String,
-    /// Stable source module identity (U3). This survives import ordering and
-    /// is the identity named by disable/explain output.
-    pub module_id: String,
-    /// Source order within the complete evaluated configuration.
-    pub source_order: usize,
-    pub priority: OptionPriority,
-}
-
-impl OptionPlan {
-    pub fn ordinary(key: impl Into<String>, value: impl Into<String>) -> Self {
-        Self {
-            key: key.into(),
-            value: value.into(),
-            module_id: "<direct>".to_string(),
-            source_order: 0,
-            priority: OptionPriority::Normal,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OptionPriority {
-    Default,
-    Normal,
-    Priority(i64),
-    Force,
-}
-
-impl OptionPriority {
-    pub fn weight(self) -> i64 {
-        match self {
-            Self::Default => 100,
-            Self::Normal => 1_000,
-            Self::Priority(weight) => weight,
-            Self::Force => 10_000,
-        }
-    }
-
-    pub fn label(self) -> String {
-        match self {
-            Self::Default => "Default".to_string(),
-            Self::Normal => "Normal".to_string(),
-            Self::Priority(weight) => format!("Priority({weight})"),
-            Self::Force => "Force".to_string(),
-        }
-    }
 }
 
 /// D-JPK-IMAGE1 (=A, ratified 2026-07-01): which referent an `Image`'s `from:`

@@ -109,7 +109,7 @@ fn evaluate_module<'a>(
                 adapters.extend(found_adapters);
             }
             (Namespace::System, ContribValue::System(lit)) => {
-                systems.push(evaluate_system(&m.name, &c.path, lit, src, base_dir, funcs)?);
+                systems.push(evaluate_system(&c.path, lit, src, base_dir, funcs)?);
             }
             (Namespace::Image, ContribValue::Image(lit)) => {
                 images.push(evaluate_image(&c.path, lit, src, base_dir, funcs)?);
