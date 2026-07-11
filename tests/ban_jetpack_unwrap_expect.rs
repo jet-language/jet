@@ -214,7 +214,12 @@ fn matching(tokens: &[Token], start: usize, open: char, close: char) -> Option<u
 
 fn cfg_truth(tokens: &[Token]) -> Truth {
     let mut cursor = 0;
-    parse_cfg_expr(tokens, &mut cursor)
+    let truth = parse_cfg_expr(tokens, &mut cursor);
+    if cursor == tokens.len() {
+        truth
+    } else {
+        Truth::Maybe
+    }
 }
 
 fn parse_cfg_expr(tokens: &[Token], cursor: &mut usize) -> Truth {
@@ -319,6 +324,7 @@ fn scan_scope(
             }
         }
         if !test_only
+            && !pending_test
             && i + 2 < end
             && punct(&tokens[i], '.')
             && matches!(&tokens[i + 1].kind, TokenKind::Ident(name) if name == "unwrap" || name == "expect")
@@ -367,7 +373,13 @@ fn collect_rs_files(dir: &Path, files: &mut Vec<PathBuf>) {
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.is_dir() {
+        let Ok(metadata) = fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if metadata.file_type().is_symlink() {
+            continue;
+        }
+        if metadata.is_dir() {
             collect_rs_files(&path, files);
         } else if path.extension().is_some_and(|extension| extension == "rs") {
             files.push(path);
@@ -454,6 +466,9 @@ mod tests { fn helper() { value.unwrap(); } }
 #[test]
 fn direct_test() { value.expect("test"); }
 
+#[cfg(test)]
+const TEST_ONLY: usize = value.unwrap();
+
 fn after() { value.unwrap(); }
 "#;
     let findings = scan_source("fixture.rs", source);
@@ -469,8 +484,47 @@ fn maybe_production() { value.unwrap(); }
 
 #[cfg(all(test, unix))]
 fn definitely_test() { value.expect("test"); }
+
+#[cfg(test = "custom")]
+fn key_value_is_not_builtin_test_cfg() { value.expect("production"); }
 "#;
     let findings = scan_source("fixture.rs", source);
-    assert_eq!(findings.len(), 1);
+    assert_eq!(findings.len(), 2);
     assert_eq!(findings[0].item, "fn maybe_production");
+    assert_eq!(
+        findings[1].item,
+        "fn key_value_is_not_builtin_test_cfg"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn file_walk_does_not_follow_outside_or_cyclic_symlinks() {
+    use std::os::unix::fs::symlink;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock after epoch")
+        .as_nanos();
+    let base = std::env::temp_dir().join(format!(
+        "jetpack-unwrap-ratchet-{}-{nonce}",
+        std::process::id()
+    ));
+    let scan_root = base.join("scan");
+    let outside = base.join("outside");
+    fs::create_dir_all(&scan_root).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(scan_root.join("safe.rs"), "fn safe() {}\n").unwrap();
+    fs::write(outside.join("escape.rs"), "fn escaped() { value.unwrap(); }\n").unwrap();
+    symlink(&outside, scan_root.join("outside-link")).unwrap();
+    symlink(&scan_root, scan_root.join("cycle")).unwrap();
+
+    let mut files = Vec::new();
+    collect_rs_files(&scan_root, &mut files);
+    files.sort();
+
+    assert_eq!(files, vec![scan_root.join("safe.rs")]);
+    assert!(outside.join("escape.rs").is_file());
+    fs::remove_dir_all(&base).unwrap();
 }
