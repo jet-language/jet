@@ -226,3 +226,18 @@ No open E4 ballots remain from the 2026-07-03 prep pass. The listed gates are
 ratified in Tower and recorded in `docs/spec/syntax-decisions.md`; any new
 user-typeable syntax, command, manifest field, provider prefix, or diagnostic
 family still needs its own ballot before implementation.
+
+## Jetpack health
+
+Run `jetpack doctor` first when package-manager state looks wrong. It reads the
+Hangar metadata and hashes each realized output, checks configured registry or
+mirror endpoints, detects abandoned locks and objects unused for 30 days, and
+checks that the default publishing key pair exists. It never repairs or deletes
+state.
+
+Network registries are not contacted by default. Local `file://` registries are
+always checked; pass `--online` to probe HTTP(S) endpoints, or `--offline` to
+force the offline-safe report. `--json` emits the same ordered checks for tools.
+Healthy, degraded, and broken reports exit 0, 1, and 2. Follow each printed fix;
+`jetpack clean` handles stale Hangar/cache objects, while `jet registry keygen`
+creates the publishing key.

@@ -4,6 +4,7 @@ struct Flags {
     no_color: bool,
     fixtures: Option<PathBuf>,
     offline: bool,
+    online: bool,
     /// U19: one-shot bypass of the env/dev trust gate (`--trust`). Never
     /// persists a grant — unlike accepting the interactive prompt.
     trust: bool,
@@ -61,6 +62,7 @@ fn parse_args(args: &[String]) -> Parsed {
         no_color: false,
         fixtures: None,
         offline: false,
+        online: false,
         trust: false,
         packages: Vec::new(),
         flake: false,
@@ -91,6 +93,7 @@ fn parse_args(args: &[String]) -> Parsed {
             "--color=never" => flags.no_color = true,
             "--color=auto" | "--color=always" => {}
             "--offline" => flags.offline = true,
+            "--online" => flags.online = true,
             a if a == Syntax::CLI_FLAG_YES_SHORT || a == Syntax::CLI_FLAG_YES_LONG => {
                 flags.assume_yes = true;
             }
@@ -183,25 +186,29 @@ pub fn main(args: Vec<String>) -> i32 {
     };
     let parsed = parse_args(rest);
     let theme = Theme::resolve(parsed.flags.no_color);
-    if let Err(error) = Store::migrate_nix_gc_roots(&Store::resolve()) {
-        Store::report_integrity(
-            &theme,
-            &Store::IntegrityFailure {
-                package: "Nix compatibility closure".to_string(),
-                version: "legacy".to_string(),
-                expected: "durable GC root".to_string(),
-                actual: error.to_string(),
-                reason: "Nix GC-root migration".to_string(),
-                disposition: "Jetpack stopped before any package path could be consumed."
-                    .to_string(),
-                fix: "Restore access to `nix-store`, then rerun this command before using the package."
-                    .to_string(),
-            },
-        );
-        return 2;
+    // Doctor must observe state without repairing or migrating it.
+    if verb != "doctor" {
+        if let Err(error) = Store::migrate_nix_gc_roots(&Store::resolve()) {
+            Store::report_integrity(
+                &theme,
+                &Store::IntegrityFailure {
+                    package: "Nix compatibility closure".to_string(),
+                    version: "legacy".to_string(),
+                    expected: "durable GC root".to_string(),
+                    actual: error.to_string(),
+                    reason: "Nix GC-root migration".to_string(),
+                    disposition: "Jetpack stopped before any package path could be consumed."
+                        .to_string(),
+                    fix: "Restore access to `nix-store`, then rerun this command before using the package."
+                        .to_string(),
+                },
+            );
+            return 2;
+        }
     }
 
     match verb.as_str() {
+        "doctor" => cmd_doctor(&theme, &parsed),
         "run" => cmd_run(&theme, &parsed),
         "enter" => cmd_enter(&theme, &parsed),
         v if v == Syntax::DEV_SUBCOMMAND => cmd_dev(&theme, &parsed),

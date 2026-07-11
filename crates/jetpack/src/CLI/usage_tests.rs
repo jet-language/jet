@@ -31,6 +31,7 @@ fn usage() -> String {
   {bin} bridge flake                   print an env.* shim translated from ./flake.nix
 
 {store}
+  {bin} doctor [--online]              check hangar, registry, locks, cache, and signing
   {bin} build [<source>:<package>]     realize a package/environment, don't enter
   {bin} list                           show realized packages
   {bin} hangar du                      honest per-object hangar disk usage
@@ -91,6 +92,7 @@ fn usage() -> String {
 {flags}
   --no-color                           disable colored output (also: NO_COLOR)
   --offline                            resolve from fixtures only, never network
+  --online                             (doctor) probe configured network registries
   -y, --yes                            apply a mutation plan without prompting
   --shell-on-fail                      after a failed build, open a shell in preserved scratch
   --fixtures <dir>                     read provider output from captured fixtures
@@ -122,6 +124,13 @@ fn usage() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn doctor_is_in_canonical_route_registry_and_help() {
+        assert!(Syntax::JETPACK_VERBS.contains(&"doctor"));
+        assert!(usage().contains("jetpack doctor [--online]"));
+        assert_eq!(RuntimePolicy::verb_policy("doctor", &[]).verb, "doctor");
+    }
 
     #[test]
     fn splits_trailing_command() {

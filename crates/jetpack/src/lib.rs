@@ -23,6 +23,7 @@ pub mod CFFI;
 pub mod CLI;
 pub mod Components;
 pub mod Discovery;
+pub mod Doctor;
 pub mod EffectBudget;
 pub mod EnvFile;
 pub mod Envelope;

@@ -342,6 +342,8 @@ pub const REF_SOURCE_PATH: &str = "path";
 
 /// D-JPK2/9: the Phase 1 verb set.
 pub const JETPACK_VERBS: &[&str] = &[
+    // Card #479: reuses D-DX2's existing `doctor` spelling for Jetpack health.
+    "doctor",
     "run",
     "enter",
     "build",

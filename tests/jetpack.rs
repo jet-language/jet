@@ -119,6 +119,81 @@ fn json_string(json: &jet::Jetpack::JSON::Json, key: &str) -> String {
         .to_string()
 }
 
+#[test]
+fn doctor_checks_real_state_and_is_read_only() {
+    let project = Scratch::new("doctor-project");
+    let root = Scratch::new("doctor-root");
+    let keys = Scratch::new("doctor-keys");
+    let registry = project.join("registry");
+    fs::create_dir_all(&registry).unwrap();
+    fs::write(keys.join("jet.ed25519"), [7u8; 32]).unwrap();
+    fs::write(keys.join("jet.ed25519.pub"), "11".repeat(32)).unwrap();
+
+    let healthy = jetpack()
+        .args(["doctor", "--json", "--offline"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("JET_KEYS_DIR", &keys.path)
+        .env("JET_REGISTRY_URL", format!("file://{}", registry.display()))
+        .output().unwrap();
+    assert!(healthy.status.success(), "stderr: {}", String::from_utf8_lossy(&healthy.stderr));
+    let healthy_json = jet::Jetpack::JSON::parse(&String::from_utf8_lossy(&healthy.stdout)).unwrap();
+    assert_eq!(json_string(&healthy_json, "status"), "healthy");
+
+    fs::remove_file(keys.join("jet.ed25519")).unwrap();
+    let degraded = jetpack()
+        .args(["doctor", "--offline"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("JET_KEYS_DIR", &keys.path)
+        .env("JET_REGISTRY_URL", format!("file://{}", registry.display()))
+        .output().unwrap();
+    assert_eq!(degraded.status.code(), Some(1));
+    let degraded_text = String::from_utf8(degraded.stderr).unwrap();
+    assert!(degraded_text.contains("[warn] signing"), "{degraded_text}");
+    assert!(degraded_text.ends_with("result: degraded\n"), "{degraded_text}");
+    fs::write(keys.join("jet.ed25519"), [7u8; 32]).unwrap();
+
+    let output = root.join("owned-output");
+    fs::create_dir_all(&output).unwrap();
+    fs::write(output.join("payload"), "trusted bytes").unwrap();
+    let envelope = jet::Jetpack::Envelope::Envelope::for_output(
+        &output.to_string_lossy(), "path:demo", "test-recipe");
+    let roots = jet::Jetpack::Store::Roots { root: root.path.clone(), dev_mode: false };
+    let entry = jet::Jetpack::Store::record(&roots, "demo", "1", "path:demo",
+        &output.to_string_lossy(), "", "", &envelope).unwrap();
+    let meta = root.join(&format!("hangar/{}/meta.json", entry.id));
+    let old_meta = fs::read_to_string(&meta).unwrap();
+    let stale_meta = old_meta.replace(
+        &format!("\"last_used_at\": \"{}\"", entry.last_used_at),
+        "\"last_used_at\": \"0\"");
+    fs::write(&meta, &stale_meta).unwrap();
+    fs::write(output.join("payload"), "corrupt bytes").unwrap();
+    fs::create_dir_all(root.join(".locks")).unwrap();
+    let stale_lock = root.join(".locks/abandoned.lock");
+    fs::write(&stale_lock, "pid=4294967294\n").unwrap();
+    fs::remove_file(keys.join("jet.ed25519")).unwrap();
+    let before_meta = fs::read(&meta).unwrap();
+    let before_lock = fs::read(&stale_lock).unwrap();
+
+    let broken = jetpack()
+        .args(["doctor", "--json", "--offline"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("JET_KEYS_DIR", &keys.path)
+        .env("JET_REGISTRY_URL", format!("file://{}", project.join("missing").display()))
+        .output().unwrap();
+    assert_eq!(broken.status.code(), Some(2));
+    let text = String::from_utf8(broken.stdout).unwrap();
+    assert!(text.contains("failed its content digest"), "{text}");
+    assert!(text.contains("local index missing"), "{text}");
+    assert!(text.contains("stale lock"), "{text}");
+    assert!(text.contains("unused for more than 30 days"), "{text}");
+    assert!(text.contains("signing key for `jet` is missing"), "{text}");
+    assert_eq!(fs::read(&meta).unwrap(), before_meta, "doctor changed metadata");
+    assert_eq!(fs::read(&stale_lock).unwrap(), before_lock, "doctor changed lock state");
+}
+
 #[derive(Clone)]
 struct StudioTestOwner {
     session_id: String,

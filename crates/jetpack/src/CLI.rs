@@ -7,6 +7,7 @@ use super::Bridge;
 use super::BuildDebug;
 use super::Components;
 use super::Discovery;
+use super::Doctor;
 use super::Image;
 use super::ManifestTOML;
 use super::Output::{self, Theme};
@@ -39,3 +40,20 @@ include!("CLI/bridge_os_studio.rs");
 include!("CLI/studio_server.rs");
 include!("CLI/studio_transactions.rs");
 include!("CLI/usage_tests.rs");
+
+fn cmd_doctor(_theme: &Theme, parsed: &Parsed) -> i32 {
+    if !parsed.positional.is_empty() || parsed.command.is_some() {
+        eprintln!("jetpack doctor takes no positional arguments");
+        return 2;
+    }
+    let report = Doctor::run(
+        &std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+        parsed.flags.online && !parsed.flags.offline,
+    );
+    if parsed.flags.json {
+        println!("{}", report.to_json());
+    } else {
+        eprint!("{}", report.to_human());
+    }
+    report.exit_code()
+}
