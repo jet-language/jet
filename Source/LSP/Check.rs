@@ -13,6 +13,13 @@ pub fn check_document(path: &str, text: &str) -> Vec<Diagnostic> {
     diags
 }
 
+/// D-BUILDQUERY1 editor view. This is the same overlay evaluation and JSON
+/// serializer used by CLI build inspection, not an LSP-owned graph model.
+pub fn build_graph_json(path: &str, text: &str) -> Result<Option<String>, Vec<Diagnostic>> {
+    crate::Driver::query_build_plan_with_overlay(path, text)
+        .map(|plan| plan.map(|plan| crate::Driver::build_plan_json(&plan)))
+}
+
 /// Check one document, also returning the bundle and effect facts for symbol analysis.
 pub fn check_document_with_bundle(
     path: &str,

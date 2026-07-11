@@ -380,6 +380,31 @@ impl BuildPlan {
         })
     }
 
+    /// Explain the most recent real execution of a named action. Inspection
+    /// reads execution provenance only; it never runs an action or probes the
+    /// ambient machine.
+    pub fn last_rebuild_explanation(
+        &self,
+        project_root: &Path,
+        action_name: &str,
+    ) -> io::Result<Option<RebuildExplanation>> {
+        let Some(action) = self.actions.iter().find(|action| action.name == action_name) else {
+            return Ok(None);
+        };
+        let Some(status) = read_last_rebuild_status(project_root, action.id)? else {
+            return Ok(None);
+        };
+        self.why_rebuilt(
+            ActionHandle {
+                id: action.id,
+                context: self.context,
+            },
+            status,
+        )
+        .map(Some)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, format!("{error:?}")))
+    }
+
     pub fn execution_model(&self) -> Result<BuildExecutionModel, BuildError> {
         let selected = self.selected_action_ids()?;
         let prereqs = self.action_prereqs_for(&selected)?;

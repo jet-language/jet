@@ -566,6 +566,22 @@ pub fn query_build_plan(
     .map(|output| output.build.map(|build| build.plan))
 }
 
+/// Ratified D-BUILDQUERY1 query expressions. `build` is deliberately the only
+/// expression until another query spelling is owner-ratified.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuildQueryExpression {
+    Build,
+}
+
+pub fn evaluate_build_query(
+    file: &str,
+    expression: BuildQueryExpression,
+) -> Result<Option<crate::Comptime::Build::BuildPlan>, Vec<Diagnostic>> {
+    match expression {
+        BuildQueryExpression::Build => query_build_plan(file),
+    }
+}
+
 /// LSP variant: the open document is authoritative even before save.
 pub fn query_build_plan_with_overlay(
     file: &str,

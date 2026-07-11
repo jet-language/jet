@@ -1,7 +1,7 @@
 //! D-BUILDENTRY1/D-BUILDACTION1: real Jet `fn build` vertical.
 
-use jet::Comptime::Build::{ActionOutcome, BuildCapability};
-use jet::Driver::{BuildRunOptions, compile_bundle_path_build};
+use jet::Comptime::Build::{ActionOutcome, BuildCapability, CacheHitReason};
+use jet::Driver::{BuildQueryExpression, BuildRunOptions, compile_bundle_path_build};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -100,6 +100,18 @@ fn run() { print("ok") }
             ..
         }
     )));
+    let rebuilt = build
+        .plan
+        .last_rebuild_explanation(&root, "stamp")
+        .unwrap()
+        .expect("real execution must persist rebuild provenance");
+    assert_eq!(
+        rebuilt.status,
+        jet::Comptime::Build::ActionCacheStatus::Hit(
+            CacheHitReason::LocalActionRecordMatched
+        )
+    );
+    assert_eq!(rebuilt.reason, "local action record matched");
 }
 
 #[test]
@@ -293,6 +305,21 @@ fn graph_overlay_uses_unsaved_text_and_canonical_cli_facts() {
     assert_eq!(overlay.targets()[0].name, "unsaved");
     let json = jet::Driver::build_plan_json(&overlay);
     assert!(json.contains("\"files\"") && json.contains("\"toolchains\"") && json.contains("\"generated\""));
+    let editor_json = jet::LSP::build_graph_json(entry.to_str().unwrap(), unsaved)
+        .unwrap()
+        .expect("overlay has build graph");
+    assert_eq!(editor_json, json, "editor and CLI must serialize one BuildPlan graph");
+    let queried = jet::Driver::evaluate_build_query(
+        entry.to_str().unwrap(),
+        BuildQueryExpression::Build,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        jet::Driver::build_plan_json(&queried),
+        jet::Driver::build_plan_json(&disk),
+        "fixed `build` expression must evaluate typed graph facts"
+    );
 }
 
 #[test]

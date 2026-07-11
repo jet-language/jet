@@ -313,12 +313,12 @@ fn build_graph_response(
         .and_then(|document| json_get(document, "uri"))
         .and_then(json_str)?;
     let document = server.docs.get(uri)?;
-    let plan = match crate::Driver::query_build_plan_with_overlay(&document.path, &document.text) {
-        Ok(Some(plan)) => plan,
+    let graph = match super::Check::build_graph_json(&document.path, &document.text) {
+        Ok(Some(graph)) => graph,
         Ok(None) => return Some(response(id, "null")),
         Err(_) => return Some(response(id, "null")),
     };
-    Some(response(id, &crate::Driver::build_plan_json(&plan)))
+    Some(response(id, &graph))
 }
 
 /// c121 Step 5: append one `{"method":…,"us":…}` JSON line to

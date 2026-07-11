@@ -26,45 +26,41 @@ pub(crate) fn run_build_query(command: &str, args: &[&String], mode: OutputMode)
         exit(ExitCodes::USAGE);
     };
     let src = fs::read_to_string(file).unwrap_or_default();
-    let output = match jet::Driver::compile_bundle_path_build(
-        file,
-        jet::Driver::BuildRunOptions {
-            grants: Default::default(),
-            execute: false,
-            allow_impure: false,
-            locked: false,
-            freestanding: false,
-            web_target: false,
-            plugin_target: false,
-            cross_target: None,
-        },
-    ) {
-        Ok(output) => output,
+    let plan = match if command == "query" {
+        jet::Driver::evaluate_build_query(file, jet::Driver::BuildQueryExpression::Build)
+    } else {
+        jet::Driver::query_build_plan(file)
+    } {
+        Ok(plan) => plan,
         Err(diags) => {
             report_problems(mode, file, &src, &diags);
             exit(ExitCodes::USER_ERROR);
         }
     };
-    let Some(build) = output.build else {
+    let Some(plan) = plan else {
         if mode.json { println!("{{\"schema_version\":1,\"build\":null}}"); }
         else { println!("default pipeline: no root fn build"); }
         return;
     };
     if let Some(subject) = subject {
-        if let Some(explanation) = build.plan.explain_target_named(subject) {
+        if let Some(explanation) = plan.explain_target_named(subject) {
             print_build_explanation(&explanation, mode.json);
             return;
         }
-        if let Some(explanation) = build.plan.explain_action_named(subject) {
+        if let Some(mut explanation) = plan.explain_action_named(subject) {
+            let project_root = std::path::Path::new(file).parent().unwrap_or(std::path::Path::new("."));
+            if let Ok(Some(rebuild)) = plan.last_rebuild_explanation(project_root, subject) {
+                explanation.provenance.push(format!("rebuild={}", rebuild.reason));
+            }
             print_build_explanation(&explanation, mode.json);
             return;
         }
-        print_build_explanation(&build.plan.explain_file(subject), mode.json);
+        print_build_explanation(&plan.explain_file(subject), mode.json);
         return;
     }
-    let graph = build.plan.graph();
+    let graph = plan.graph();
     if mode.json {
-        println!("{}", jet::Driver::build_plan_json(&build.plan));
+        println!("{}", jet::Driver::build_plan_json(&plan));
     } else {
         for target in graph.targets { println!("target\t{}\t{:?}", target.name, target.kind); }
         for action in graph.actions { println!("action\t{}\t{}", action.name, action.outputs.join(",")); }

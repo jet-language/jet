@@ -154,13 +154,32 @@ fn execute_one_action(
         &effective_probe_facts,
     ).map_err(BuildExecutionError::InvalidGraph)?;
     let record_path = records.join(key.as_str().trim_start_matches("act-sha256:"));
+    let previous_key = read_last_rebuild_record(project_root, action.id)
+        .map_err(|error| io_action(action, error))?
+        .map(|record| record.key);
     if action.cache == ActionCache::Cached {
         if let Some(record) = read_action_record(records, &record_path, key.clone()) {
             if cas.restore_action_outputs(project_root, action, &record).is_ok() {
+                write_last_rebuild_record(
+                    project_root,
+                    action.id,
+                    &key,
+                    ActionCacheStatus::Hit(CacheHitReason::LocalActionRecordMatched),
+                )?;
                 return Ok(ActionOutcome::RestoredFromCache);
             }
         }
     }
+
+    let rebuild_status = if action.cache == ActionCache::UncachedPhony {
+        ActionCacheStatus::Miss(CacheMissReason::UncachedAction)
+    } else if record_path.exists() {
+        ActionCacheStatus::Miss(CacheMissReason::DeclaredOutputMissing)
+    } else if previous_key.as_ref().is_some_and(|old| old != &key) {
+        ActionCacheStatus::Miss(CacheMissReason::ActionKeyChanged)
+    } else {
+        ActionCacheStatus::Miss(CacheMissReason::NoLocalActionRecord)
+    };
 
     let sandbox = project_root.join(".jet/build-sandbox").join(format!(
         "{}-{}-{}", std::process::id(), action.id.0, key.as_str().trim_start_matches("act-sha256:")
@@ -213,13 +232,94 @@ fn execute_one_action(
     let outcome = ActionOutcome::Succeeded { exit_code: code };
     if action.cache == ActionCache::Cached {
         let record = cas.capture_declared_outputs(
-            project_root, action, key, outcome,
+            project_root, action, key.clone(), outcome,
             ActionCacheProvenance::miss(CacheMissReason::NoLocalActionRecord),
         ).map_err(|e| io_action(action, e))?;
         write_action_record(&record_path, &record).map_err(|e| io_action(action, e))?;
     }
+    write_last_rebuild_record(project_root, action.id, &key, rebuild_status)?;
     fs::remove_dir_all(&sandbox).map_err(|e| io_action(action, e))?;
     Ok(outcome)
+}
+
+struct LastRebuildRecord {
+    key: ActionKey,
+    status: ActionCacheStatus,
+}
+
+fn rebuild_record_path(project_root: &Path, action: ActionId) -> PathBuf {
+    project_root
+        .join(".jet/build-cache/explanations")
+        .join(action.0.to_string())
+}
+
+fn rebuild_status_code(status: ActionCacheStatus) -> &'static str {
+    match status {
+        ActionCacheStatus::Hit(CacheHitReason::LocalActionRecordMatched) => "hit-local",
+        ActionCacheStatus::Hit(CacheHitReason::DeclaredOutputsRestored) => "hit-output",
+        ActionCacheStatus::Miss(CacheMissReason::NoLocalActionRecord) => "miss-new",
+        ActionCacheStatus::Miss(CacheMissReason::ActionKeyChanged) => "miss-key",
+        ActionCacheStatus::Miss(CacheMissReason::DeclaredOutputMissing) => "miss-output",
+        ActionCacheStatus::Miss(CacheMissReason::RemoteDenied) => "miss-remote",
+        ActionCacheStatus::Miss(CacheMissReason::UncachedAction) => "miss-uncached",
+    }
+}
+
+fn parse_rebuild_status(code: &str) -> Option<ActionCacheStatus> {
+    Some(match code {
+        "hit-local" => ActionCacheStatus::Hit(CacheHitReason::LocalActionRecordMatched),
+        "hit-output" => ActionCacheStatus::Hit(CacheHitReason::DeclaredOutputsRestored),
+        "miss-new" => ActionCacheStatus::Miss(CacheMissReason::NoLocalActionRecord),
+        "miss-key" => ActionCacheStatus::Miss(CacheMissReason::ActionKeyChanged),
+        "miss-output" => ActionCacheStatus::Miss(CacheMissReason::DeclaredOutputMissing),
+        "miss-remote" => ActionCacheStatus::Miss(CacheMissReason::RemoteDenied),
+        "miss-uncached" => ActionCacheStatus::Miss(CacheMissReason::UncachedAction),
+        _ => return None,
+    })
+}
+
+fn read_last_rebuild_record(
+    project_root: &Path,
+    action: ActionId,
+) -> io::Result<Option<LastRebuildRecord>> {
+    let root = project_root.join(".jet/build-cache/explanations");
+    let path = rebuild_record_path(project_root, action);
+    let bytes = match secure_read_file(&root, &path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let text = String::from_utf8(bytes)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "rebuild explanation is not UTF-8"))?;
+    let mut lines = text.lines();
+    let Some(key) = lines.next() else { return Ok(None) };
+    let Some(status) = lines.next().and_then(parse_rebuild_status) else { return Ok(None) };
+    Ok(Some(LastRebuildRecord {
+        key: ActionKey(key.to_string()),
+        status,
+    }))
+}
+
+fn read_last_rebuild_status(
+    project_root: &Path,
+    action: ActionId,
+) -> io::Result<Option<ActionCacheStatus>> {
+    Ok(read_last_rebuild_record(project_root, action)?.map(|record| record.status))
+}
+
+fn write_last_rebuild_record(
+    project_root: &Path,
+    action: ActionId,
+    key: &ActionKey,
+    status: ActionCacheStatus,
+) -> Result<(), BuildExecutionError> {
+    let root = project_root.join(".jet/build-cache/explanations");
+    let path = rebuild_record_path(project_root, action);
+    let text = format!("{}\n{}\n", key.as_str(), rebuild_status_code(status));
+    atomic_restore_file(&root, &path, text.as_bytes()).map_err(|error| BuildExecutionError::Io {
+        action: format!("rebuild explanation {}", action.0),
+        detail: error.to_string(),
+    })
 }
 
 fn prepare_output_destination(root: &Path, output: &Path) -> io::Result<()> {
