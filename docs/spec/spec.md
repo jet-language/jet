@@ -1874,10 +1874,18 @@ or revoke on reuse. `--allow-fs`, `--allow-env`, `--allow-exec`,
 `--allow-net`, and `--allow-io` skip ordinary prompts for their roots;
 matching `--deny-*` flags override them. Piped and transcript sessions never
 prompt and deny unflagged effects with E1803. Filesystem access is confined to
-the project root and rejects absolute paths, parent traversal, and symlinks.
-Process execution resolves the executable to a canonical path before
-authorization, starts with an empty environment in the project root, captures
-stdout and stderr, and kills commands that exceed 30 seconds.
+the project root descriptor fixed at session start; every later component is
+opened descriptor-relative without following symlinks. Platforms unable to
+enforce that confinement fail closed. Ambient random draws require `Rand`, but
+explicitly seeded `Rng` values are injected data. REPL-owned `print`/`eprint`
+capture is inherent and needs no `Io` grant.
+
+Process execution opens the canonical executable before authorization and
+launches that exact descriptor without resolving its pathname again. Stdin is
+closed unless a future separately authorized stream surface supplies it. The
+child starts in the verified project directory with an empty environment;
+stdout and stderr are captured. Interrupts forward to its process group, and
+the REPL kills and reaps that group after 30 seconds.
 Native-only modules still report E1802.
 
 ## Editions & release policy (E2-M2)

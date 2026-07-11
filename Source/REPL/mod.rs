@@ -73,12 +73,18 @@ pub(crate) trait EffectPrompt {
 struct ReplPolicy {
     flags: ReplFlags,
     root: std::path::PathBuf,
+    root_dir: std::io::Result<std::fs::File>,
     session: HashSet<crate::Comptime::ReplEffectRequest>,
 }
 
 impl ReplPolicy {
     fn new(flags: ReplFlags, root: &Path) -> Self {
-        Self { flags, root: root.to_path_buf(), session: HashSet::new() }
+        Self {
+            flags,
+            root: root.to_path_buf(),
+            root_dir: std::fs::File::open(root),
+            session: HashSet::new(),
+        }
     }
 
     fn authorizer<'a>(&'a mut self, prompt: Option<&'a mut dyn EffectPrompt>) -> ReplAuthorization<'a> {
@@ -161,6 +167,223 @@ impl crate::Comptime::ReplAuthorizer for ReplAuthorization<'_> {
     fn reset_session(&mut self) {
         self.policy.session.clear();
     }
+
+    fn fs_read(&mut self, path: &str) -> std::io::Result<Vec<u8>> {
+        rooted_fs::read(self.policy.root_dir.as_ref().map_err(clone_io_error)?, path)
+    }
+
+    fn fs_write(&mut self, path: &str, bytes: &[u8], append: bool) -> std::io::Result<()> {
+        rooted_fs::write(
+            self.policy.root_dir.as_ref().map_err(clone_io_error)?,
+            path,
+            bytes,
+            append,
+        )
+    }
+
+    fn fs_exists(&mut self, path: &str) -> std::io::Result<bool> {
+        rooted_fs::exists(self.policy.root_dir.as_ref().map_err(clone_io_error)?, path)
+    }
+
+    fn fs_is_dir(&mut self, path: &str) -> std::io::Result<bool> {
+        rooted_fs::is_dir(self.policy.root_dir.as_ref().map_err(clone_io_error)?, path)
+    }
+
+    fn fs_create_dir(&mut self, path: &str) -> std::io::Result<()> {
+        rooted_fs::create_dir(self.policy.root_dir.as_ref().map_err(clone_io_error)?, path)
+    }
+
+    fn fs_remove(&mut self, path: &str) -> std::io::Result<()> {
+        rooted_fs::remove(self.policy.root_dir.as_ref().map_err(clone_io_error)?, path)
+    }
+
+    fn verified_root(&mut self) -> std::io::Result<std::fs::File> {
+        self.policy.root_dir.as_ref().map_err(clone_io_error)?.try_clone()
+    }
+}
+
+fn clone_io_error(error: &std::io::Error) -> std::io::Error {
+    std::io::Error::new(error.kind(), error.to_string())
+}
+
+#[cfg(target_os = "linux")]
+mod rooted_fs {
+    use std::ffi::{CString, OsStr};
+    use std::fs::File;
+    use std::io::{Read, Write};
+    use std::os::fd::{AsRawFd, FromRawFd, RawFd};
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::{Component, Path};
+
+    const O_RDONLY: i32 = 0;
+    const O_WRONLY: i32 = 1;
+    const O_CREAT: i32 = 64;
+    const O_TRUNC: i32 = 512;
+    const O_APPEND: i32 = 1024;
+    const O_NONBLOCK: i32 = 2048;
+    const O_DIRECTORY: i32 = 65_536;
+    const O_NOFOLLOW: i32 = 131_072;
+    const O_CLOEXEC: i32 = 524_288;
+    const AT_REMOVEDIR: i32 = 0x200;
+
+    unsafe extern "C" {
+        fn openat(dirfd: i32, pathname: *const i8, flags: i32, mode: u32) -> i32;
+        fn mkdirat(dirfd: i32, pathname: *const i8, mode: u32) -> i32;
+        fn unlinkat(dirfd: i32, pathname: *const i8, flags: i32) -> i32;
+    }
+
+    fn c_name(name: &OsStr) -> std::io::Result<CString> {
+        CString::new(name.as_bytes()).map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "path contains NUL")
+        })
+    }
+
+    fn components(path: &str) -> std::io::Result<Vec<&OsStr>> {
+        let path = Path::new(path);
+        if path.is_absolute() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "absolute paths are outside the REPL root",
+            ));
+        }
+        let mut names = Vec::new();
+        for component in path.components() {
+            match component {
+                Component::Normal(name) => names.push(name),
+                Component::CurDir => {}
+                _ => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        "path traversal is outside the REPL root",
+                    ))
+                }
+            }
+        }
+        if names.is_empty() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "empty filesystem path",
+            ));
+        }
+        Ok(names)
+    }
+
+    fn with_parent<T>(
+        root: &File,
+        path: &str,
+        operation: impl FnOnce(RawFd, &CString) -> std::io::Result<T>,
+    ) -> std::io::Result<T> {
+        let names = components(path)?;
+        let mut parents = Vec::new();
+        let mut dirfd = root.as_raw_fd();
+        for name in &names[..names.len() - 1] {
+            let name = c_name(name)?;
+            let fd = unsafe {
+                openat(
+                    dirfd,
+                    name.as_ptr(),
+                    O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC,
+                    0,
+                )
+            };
+            if fd < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            parents.push(unsafe { File::from_raw_fd(fd) });
+            dirfd = fd;
+        }
+        operation(dirfd, &c_name(names[names.len() - 1])?)
+    }
+
+    fn open(root: &File, path: &str, flags: i32, mode: u32) -> std::io::Result<File> {
+        with_parent(root, path, |dirfd, name| {
+            let fd = unsafe { openat(dirfd, name.as_ptr(), flags | O_NOFOLLOW | O_CLOEXEC, mode) };
+            if fd < 0 {
+                Err(std::io::Error::last_os_error())
+            } else {
+                Ok(unsafe { File::from_raw_fd(fd) })
+            }
+        })
+    }
+
+    pub fn read(root: &File, path: &str) -> std::io::Result<Vec<u8>> {
+        let mut file = open(root, path, O_RDONLY, 0)?;
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)?;
+        Ok(bytes)
+    }
+
+    pub fn write(root: &File, path: &str, bytes: &[u8], append: bool) -> std::io::Result<()> {
+        let flags = O_WRONLY | O_CREAT | if append { O_APPEND } else { O_TRUNC };
+        let mut file = open(root, path, flags, 0o666)?;
+        file.write_all(bytes)
+    }
+
+    pub fn exists(root: &File, path: &str) -> std::io::Result<bool> {
+        match open(root, path, O_RDONLY | O_NONBLOCK, 0) {
+            Ok(_) => Ok(true),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(e) => Err(e),
+        }
+    }
+
+    pub fn is_dir(root: &File, path: &str) -> std::io::Result<bool> {
+        match open(root, path, O_RDONLY | O_DIRECTORY, 0) {
+            Ok(_) => Ok(true),
+            Err(e) if matches!(e.raw_os_error(), Some(20)) => Ok(false),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(e) => Err(e),
+        }
+    }
+
+    pub fn create_dir(root: &File, path: &str) -> std::io::Result<()> {
+        with_parent(root, path, |dirfd, name| {
+            let result = unsafe { mkdirat(dirfd, name.as_ptr(), 0o777) };
+            if result < 0 {
+                Err(std::io::Error::last_os_error())
+            } else {
+                Ok(())
+            }
+        })
+    }
+
+    pub fn remove(root: &File, path: &str) -> std::io::Result<()> {
+        with_parent(root, path, |dirfd, name| {
+            let result = unsafe { unlinkat(dirfd, name.as_ptr(), 0) };
+            if result == 0 {
+                return Ok(());
+            }
+            let first = std::io::Error::last_os_error();
+            if first.raw_os_error() != Some(21) {
+                return Err(first);
+            }
+            let result = unsafe { unlinkat(dirfd, name.as_ptr(), AT_REMOVEDIR) };
+            if result < 0 {
+                Err(std::io::Error::last_os_error())
+            } else {
+                Ok(())
+            }
+        })
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+mod rooted_fs {
+    use std::fs::File;
+
+    fn unsupported<T>() -> std::io::Result<T> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "this platform cannot enforce descriptor-relative no-follow REPL filesystem access",
+        ))
+    }
+
+    pub fn read(_: &File, _: &str) -> std::io::Result<Vec<u8>> { unsupported() }
+    pub fn write(_: &File, _: &str, _: &[u8], _: bool) -> std::io::Result<()> { unsupported() }
+    pub fn exists(_: &File, _: &str) -> std::io::Result<bool> { unsupported() }
+    pub fn is_dir(_: &File, _: &str) -> std::io::Result<bool> { unsupported() }
+    pub fn create_dir(_: &File, _: &str) -> std::io::Result<()> { unsupported() }
+    pub fn remove(_: &File, _: &str) -> std::io::Result<()> { unsupported() }
 }
 
 /// Effect markers used to classify a Stmts turn as "effectful" for
@@ -2452,7 +2675,12 @@ mod tests {
     }
 
     #[test]
-    fn typed_binding_stub_name_matches_moved_name() {
-        assert_eq!(Session::binding_stub_name("s: String :: \"\""), "s");
+    fn typed_binding_is_preserved_as_an_exact_statement() {
+        let kind = classify("s: String :: \"\"", 1).expect("classify");
+        let InputKind::Stmts(stmts, _, check_src) = kind else {
+            panic!("expected statement input");
+        };
+        assert_eq!(check_src, "s: String :: \"\";");
+        assert!(matches!(stmts.as_slice(), [Stmt::Val(_)]));
     }
 }

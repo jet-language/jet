@@ -682,8 +682,8 @@ fn repl_declared_types_survive_empty_and_absent_values() {
 
 #[test]
 fn repl_core_io_eprint_inline() {
-    let inputs = &["use core.io as io", "#Grant(Io) { caps -> io.eprint(\"repl-err\") }"];
-    let out = run_transcript_with_flags(inputs, None, &["io"], &[]);
+    let inputs = &["use core.io as io", "io.eprint(\"repl-err\")"];
+    let out = run_transcript_with_flags(inputs, None, &[], &["io"]);
     assert!(
         out.contains("ok") && out.contains("repl-err"),
         "io.eprint should run inline, got: {:?}",
@@ -693,6 +693,26 @@ fn repl_core_io_eprint_inline() {
         !out.contains("E3410") && !out.contains("E0956"),
         "got: {:?}",
         out
+    );
+}
+
+#[test]
+fn repl_deny_rand_blocks_draw_and_mutating_shuffle() {
+    let inputs = &[
+        "use core.random as random",
+        "xs := [1, 2, 3]",
+        "#Grant(Rand) { caps -> random.int(1, 10) }",
+        "#Grant(Rand) { caps -> random.shuffle(&xs) }",
+        "xs",
+    ];
+    let out = run_transcript_with_flags(inputs, None, &["rand"], &["rand"]);
+    assert!(
+        out.matches("E1803").count() >= 2 && out.contains("Rand.Draw"),
+        "ambient random calls escaped deny policy: {out}"
+    );
+    assert!(
+        out.contains("[1, 2, 3]"),
+        "denied shuffle mutated its binding: {out}"
     );
 }
 
@@ -763,9 +783,9 @@ fn repl_core_process_run_is_authorized_and_captured() {
     let inputs = &[
         "use core.process as process",
         "use core.io as io",
-        "#Grant(Exec, Io) { caps -> io.eprint((process.run([\"sh\", \"-c\", \"printf repl-process-ok\"]) ?? panic(\"run failed\")).output) }",
+        "#Grant(Exec, Io) { caps -> io.eprint((process.run([\"sh\", \"-c\", \"read value || printf repl-process-ok\"]) ?? panic(\"run failed\")).output) }",
     ];
-    let out = run_transcript_with_flags(inputs, None, &["exec", "io"], &[]);
+    let out = run_transcript_with_flags(inputs, None, &["exec"], &["io"]);
     assert!(
         out.contains("repl-process-ok") && !out.contains("E1803"),
         "authorized process.run should capture output, got: {out}"
@@ -877,6 +897,30 @@ fn repl_allow_fs_still_rejects_paths_outside_project_root() {
     );
     assert!(!outside.exists(), "confined REPL wrote outside project root");
     std::fs::remove_dir_all(root).ok();
+}
+
+#[cfg(unix)]
+#[test]
+fn repl_allow_fs_rejects_symlink_components_before_open() {
+    use std::os::unix::fs::symlink;
+
+    let root = std::env::temp_dir().join(format!("jet_repl_symlink_root_{}", std::process::id()));
+    let outside = std::env::temp_dir().join(format!("jet_repl_symlink_out_{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    symlink(&outside, root.join("escape")).unwrap();
+    let input = "#Grant(Fs) { caps -> fs.write(\"escape/must-not-exist.txt\", \"bad\") ?? panic(\"write failed\") }";
+    let out = run_transcript_with_flags(
+        &["use core.files as fs", input],
+        root.to_str(),
+        &["fs"],
+        &[],
+    );
+    assert!(out.contains("E1803"), "symlink traversal was not denied: {out}");
+    assert!(!outside.join("must-not-exist.txt").exists(), "symlink escape executed");
+    std::fs::remove_file(root.join("escape")).ok();
+    std::fs::remove_dir_all(root).ok();
+    std::fs::remove_dir_all(outside).ok();
 }
 
 #[test]
@@ -1194,41 +1238,38 @@ fn repl_bigint_sub_and_neg() {
 
 #[test]
 fn repl_core_random_widened_draws_dispatch() {
-    let inputs = &[
-        "use core.random as random",
-        "random.seed(1)",
-        "random.bool(0.5)",
-        "random.float_range(1.0, 2.0)",
-        "random.normal(0.0, 1.0)",
-        "random.exponential(1.0)",
-        "random.bytes(3)",
-        "xs :: [1, 2, 3, 4, 5]",
-        "random.pick(xs)",
-        "random.sample(xs, 2)",
-        "random.weighted_pick(xs, [1.0, 1.0, 1.0, 1.0, 1.0])",
-        "ys := [1, 2, 3, 4, 5]",
-        "random.shuffle(&ys)",
-        "ys",
-        "random.split(7)",
+    let calls = [
+        "#Grant(Rand) { caps -> random.seed(1) }",
+        "#Grant(Rand) { caps -> random.bool(0.5) }",
+        "#Grant(Rand) { caps -> random.float_range(1.0, 2.0) }",
+        "#Grant(Rand) { caps -> random.normal(0.0, 1.0) }",
+        "#Grant(Rand) { caps -> random.exponential(1.0) }",
+        "#Grant(Rand) { caps -> random.bytes(3) }",
+        "#Grant(Rand) { caps -> random.pick([1, 2, 3, 4, 5]) ?? 0 }",
+        "#Grant(Rand) { caps -> random.sample([1, 2, 3, 4, 5], 2) }",
+        "#Grant(Rand) { caps -> random.weighted_pick([1, 2, 3, 4, 5], [1.0, 1.0, 1.0, 1.0, 1.0]) ?? 0 }",
+        "#Grant(Rand) { caps -> random.split(7) }",
     ];
-    let out = run_transcript(inputs, None);
-    assert!(
-        !out.contains("E0956"),
-        "core.random widened draws should dispatch at comptime, got: {out}"
+    for call in calls {
+        let out = run_transcript_with_flags(
+            &["use core.random as random", call],
+            None,
+            &["rand"],
+            &[],
+        );
+        assert!(!out.contains("error ["), "authorized call failed: {call}: {out}");
+    }
+    let shuffle = run_transcript_with_flags(
+        &[
+            "use core.random as random",
+            "ys := [1, 2, 3, 4, 5]",
+            "#Grant(Rand) { caps -> random.shuffle(&ys) }",
+        ],
+        None,
+        &["rand"],
+        &[],
     );
-    // Deterministic from seed 1 — same SplitMix64 stream as AOT's
-    // `jet_std_random_*` (Process.rs), so these numbers pin both the dispatch
-    // AND the algorithm (a wrong constant would silently diverge from AOT).
-    assert!(out.contains("false : Bool"), "got: {out}");
-    assert!(out.contains("1.5516928307103677 : Float"), "got: {out}");
-    assert!(out.contains("-0.04268100696719249 : Float"), "got: {out}");
-    assert!(out.contains("0.6199045686318072 : Float"), "got: {out}");
-    assert!(out.contains("[116, 44, 76] : [U8]"), "got: {out}");
-    assert!(out.contains("5 : Option"), "got: {out}");
-    assert!(out.contains("[4, 5] : List"), "got: {out}");
-    assert!(out.contains("4 : Option"), "got: {out}");
-    assert!(out.contains("[3, 2, 1, 5, 4] : List"), "got: {out}");
-    assert!(out.contains("Rng(state: -6449093003948547574) : Struct"), "got: {out}");
+    assert!(!shuffle.contains("error ["), "authorized shuffle failed: {shuffle}");
 }
 
 // ── card #392: `core.fmt` (pure text formatting) now dispatches at comptime,

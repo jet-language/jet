@@ -1039,6 +1039,32 @@ impl<'a> Interp<'a> {
                     let CtValue::List(mut items) = list else {
                         return Err(unsupported("random.shuffle needs a list", span));
                     };
+                    if self.repl_mode {
+                        let request = super::ReplEffectRequest {
+                            root: "Rand".to_string(),
+                            operation: "Draw".to_string(),
+                            resource: "shuffle".to_string(),
+                        };
+                        if !self.repl_grants.iter().any(|cap| cap == "Rand") {
+                            return Err(Diagnostic::error(
+                                "E1803",
+                                "Rand.Draw for `shuffle` has no REPL runtime authority".to_string(),
+                                "REPL ambient randomness requires lexical `#Grant(Rand)` authority; the RNG state did not advance".to_string(),
+                                "wrap this draw in `#Grant(Rand) { caps -> ... }` and approve it or pass `--allow-rand`".to_string(),
+                                Some(span),
+                            ));
+                        }
+                        let Some(authorizer) = self.repl_authorizer.as_deref_mut() else {
+                            return Err(Diagnostic::error(
+                                "E1803",
+                                "Rand.Draw for `shuffle` was denied".to_string(),
+                                "this REPL mode has no runtime authority provider; the RNG state did not advance".to_string(),
+                                "restart with `jet repl --allow-rand`".to_string(),
+                                Some(span),
+                            ));
+                        };
+                        authorizer.authorize(&request, span)?;
+                    }
                     with_ambient_rng(|st| shuffle_ct_list(st, &mut items));
                     self.write_back(&arg.expr, CtValue::List(items), scope)?;
                     return Ok(CtValue::Unit);
@@ -1118,11 +1144,33 @@ impl<'a> Interp<'a> {
                         | "core.exec"
                         | "core.net"
                         | "core.process"
-                );
+                ) || (self.repl_mode && module == "core.random" && method != "rng");
                 if is_tier2 {
+                    if self.repl_mode && matches!((module.as_str(), method), ("core.io", "eprint")) {
+                        return apply_impure_core_call(
+                            &module,
+                            method,
+                            argv,
+                            span,
+                            self.base_dir,
+                            self.sink.as_deref_mut(),
+                            true,
+                            None,
+                            None,
+                        );
+                    }
+                    let ambient_random = self.repl_mode
+                        && module == "core.random"
+                        && !matches!(method, "rng");
+                    if ambient_random {
+                        // Ambient draws and global seeding consume/mutate session RNG state.
+                        // Explicit `random.rng(seed)` is injected data and stays pure.
+                    }
+                    let mut repl_executable = None;
+                    let mut repl_root = None;
                     if self.repl_mode {
                         if matches!((module.as_str(), method), ("core.process", "run")) {
-                            pin_repl_command(&mut argv, self.base_dir, span)?;
+                            repl_executable = Some(pin_repl_command(&mut argv, self.base_dir, span)?);
                         }
                         let request = repl_effect_request(&module, method, &argv);
                         let granted = self.repl_grants.iter().any(|cap| {
@@ -1147,6 +1195,17 @@ impl<'a> Interp<'a> {
                             ));
                         };
                         authorizer.authorize(&request, span)?;
+                        if module == "core.files" {
+                            return apply_repl_fs_call(method, &argv, span, authorizer);
+                        }
+                        if ambient_random {
+                            return apply_core_call(&module, method, argv, span, true);
+                        }
+                        if module == "core.process" && method == "run" {
+                            repl_root = Some(authorizer.verified_root().map_err(|error| {
+                                unsupported(&format!("REPL project root handle is unavailable: {error}"), span)
+                            })?);
+                        }
                     }
                     if self.impure_depth == 0 {
                         if self.repl_mode {
@@ -1179,9 +1238,11 @@ impl<'a> Interp<'a> {
                         argv,
                         span,
                         self.base_dir,
-                        self.sink.as_deref_mut(),
-                        self.repl_mode,
-                    );
+                            self.sink.as_deref_mut(),
+                            self.repl_mode,
+                            repl_executable.as_ref(),
+                            repl_root.as_ref(),
+                        );
                 }
                 return apply_core_call(&module, method, argv, span, self.repl_mode);
             }
@@ -1529,6 +1590,7 @@ fn repl_effect_request(module: &str, method: &str, args: &[CtValue]) -> super::R
         ("core.io", "args") => ("Io", "Read", "argv".to_string()),
         ("core.process", "run") => ("Exec", "Run", shown(0, "<command>")),
         ("core.process", "exit") => ("Exec", "Exit", shown(0, "0")),
+        ("core.random", _) => ("Rand", "Draw", method.to_string()),
         ("core.net", _) => ("Net", method, shown(0, "<network resource>")),
         ("core.exec", _) => ("Exec", method, shown(0, "<command>")),
         _ => ("Io", method, module.to_string()),
@@ -1540,11 +1602,62 @@ fn repl_effect_request(module: &str, method: &str, args: &[CtValue]) -> super::R
     }
 }
 
+fn apply_repl_fs_call(
+    method: &str,
+    args: &[CtValue],
+    span: Span,
+    authorizer: &mut dyn super::ReplAuthorizer,
+) -> Result<CtValue, Diagnostic> {
+    let one = |i: usize| {
+        args.get(i)
+            .ok_or_else(|| unsupported("core.files call has the wrong number of arguments", span))
+    };
+    let path = as_string(one(0)?, span)?;
+    let io_error = |error| CtValue::ResErr(Box::new(io_error_value(&path, error)));
+    match method {
+        "read" => Ok(match authorizer.fs_read(&path) {
+            Ok(bytes) => match String::from_utf8(bytes) {
+                Ok(text) => CtValue::ResOk(Box::new(CtValue::Str(text))),
+                Err(error) => io_error(std::io::Error::new(std::io::ErrorKind::InvalidData, error)),
+            },
+            Err(error) => io_error(error),
+        }),
+        "read_bytes" => Ok(match authorizer.fs_read(&path) {
+            Ok(bytes) => CtValue::ResOk(Box::new(CtValue::Bytes(bytes))),
+            Err(error) => io_error(error),
+        }),
+        "write" | "append_all" => {
+            let content = as_string(one(1)?, span)?;
+            Ok(match authorizer.fs_write(&path, content.as_bytes(), method == "append_all") {
+                Ok(()) => CtValue::ResOk(Box::new(CtValue::Unit)),
+                Err(error) => io_error(error),
+            })
+        }
+        "exists" => authorizer
+            .fs_exists(&path)
+            .map(CtValue::Bool)
+            .map_err(|error| unsupported(&format!("secure filesystem check failed: {error}"), span)),
+        "is_dir" => authorizer
+            .fs_is_dir(&path)
+            .map(CtValue::Bool)
+            .map_err(|error| unsupported(&format!("secure filesystem check failed: {error}"), span)),
+        "create_dir" => Ok(match authorizer.fs_create_dir(&path) {
+            Ok(()) => CtValue::ResOk(Box::new(CtValue::Unit)),
+            Err(error) => io_error(error),
+        }),
+        "remove" => Ok(match authorizer.fs_remove(&path) {
+            Ok(()) => CtValue::ResOk(Box::new(CtValue::Unit)),
+            Err(error) => io_error(error),
+        }),
+        _ => Err(unsupported(&format!("core.files.{method}"), span)),
+    }
+}
+
 fn pin_repl_command(
     args: &mut [CtValue],
     base_dir: &std::path::Path,
     span: Span,
-) -> Result<(), Diagnostic> {
+) -> Result<std::fs::File, Diagnostic> {
     let Some(CtValue::List(words)) = args.first_mut() else {
         return Err(unsupported("process.run expects a list of command words", span));
     };
@@ -1572,13 +1685,25 @@ fn pin_repl_command(
             span,
         ));
     };
+    let executable = std::fs::File::open(&resolved).map_err(|error| {
+        unsupported(
+            &format!("process.run could not pin executable `{}`: {error}", resolved.display()),
+            span,
+        )
+    })?;
+    if !executable.metadata().is_ok_and(|metadata| metadata.is_file()) {
+        return Err(unsupported("process.run executable is not a regular file", span));
+    }
     *program = resolved.to_string_lossy().into_owned();
-    Ok(())
+    Ok(executable)
 }
 
 fn run_repl_process(
     cmd: &[String],
     base_dir: &std::path::Path,
+    pinned_executable: Option<&std::fs::File>,
+    verified_root: Option<&std::fs::File>,
+    timeout: std::time::Duration,
 ) -> std::io::Result<std::process::Output> {
     use std::fs::OpenOptions;
     use std::process::Stdio;
@@ -1608,13 +1733,45 @@ fn run_repl_process(
             return Err(e);
         }
     };
-    let child = std::process::Command::new(&cmd[0])
+    #[cfg(target_os = "linux")]
+    use std::os::fd::AsRawFd;
+    #[cfg(target_os = "linux")]
+    use std::os::unix::process::CommandExt;
+
+    #[cfg(target_os = "linux")]
+    let executable = pinned_executable
+        .map(|file| format!("/proc/self/fd/{}", file.as_raw_fd()))
+        .unwrap_or_else(|| cmd[0].clone());
+    #[cfg(not(target_os = "linux"))]
+    let executable = if pinned_executable.is_some() {
+        let _ = std::fs::remove_file(&stdout_path);
+        let _ = std::fs::remove_file(&stderr_path);
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "this platform cannot launch a descriptor-pinned REPL executable",
+        ));
+    } else {
+        cmd[0].clone()
+    };
+    #[cfg(target_os = "linux")]
+    let cwd = verified_root
+        .map(|file| format!("/proc/self/fd/{}", file.as_raw_fd()))
+        .unwrap_or_else(|| base_dir.to_string_lossy().into_owned());
+    #[cfg(not(target_os = "linux"))]
+    let cwd = base_dir;
+    let mut command = std::process::Command::new(executable);
+    command
         .args(&cmd[1..])
-        .current_dir(base_dir)
+        .current_dir(cwd)
         .env_clear()
+        .stdin(Stdio::null())
         .stdout(Stdio::from(stdout_file))
-        .stderr(Stdio::from(stderr_file))
-        .spawn();
+        .stderr(Stdio::from(stderr_file));
+    #[cfg(target_os = "linux")]
+    if pinned_executable.is_some() {
+        command.process_group(0);
+    }
+    let child = command.spawn();
     let mut child = match child {
         Ok(child) => child,
         Err(e) => {
@@ -1623,13 +1780,22 @@ fn run_repl_process(
             return Err(e);
         }
     };
+    #[cfg(target_os = "linux")]
+    let _signal_forward = pinned_executable.map(|_| ReplSignalForward::install(child.id() as i32));
 
-    let deadline = Instant::now() + Duration::from_secs(30);
+    let deadline = Instant::now() + timeout;
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
             Ok(None) => {}
             Err(e) => {
+                #[cfg(target_os = "linux")]
+                if pinned_executable.is_some() {
+                    kill_repl_process_group(child.id() as i32);
+                } else {
+                    let _ = child.kill();
+                }
+                #[cfg(not(target_os = "linux"))]
                 let _ = child.kill();
                 let _ = child.wait();
                 let _ = std::fs::remove_file(&stdout_path);
@@ -1638,6 +1804,13 @@ fn run_repl_process(
             }
         }
         if Instant::now() >= deadline {
+            #[cfg(target_os = "linux")]
+            if pinned_executable.is_some() {
+                kill_repl_process_group(child.id() as i32);
+            } else {
+                let _ = child.kill();
+            }
+            #[cfg(not(target_os = "linux"))]
             let _ = child.kill();
             let _ = child.wait();
             let _ = std::fs::remove_file(&stdout_path);
@@ -1649,6 +1822,12 @@ fn run_repl_process(
         }
         std::thread::sleep(Duration::from_millis(10));
     };
+    #[cfg(target_os = "linux")]
+    if pinned_executable.is_some() {
+        // A command that backgrounds descendants does not get to leak them past
+        // the REPL operation boundary after its group leader exits.
+        kill_repl_process_group(child.id() as i32);
+    }
     let stdout = std::fs::read(&stdout_path);
     let stderr = std::fs::read(&stderr_path);
     let _ = std::fs::remove_file(&stdout_path);
@@ -1658,6 +1837,50 @@ fn run_repl_process(
         stdout: stdout?,
         stderr: stderr?,
     })
+}
+
+#[cfg(target_os = "linux")]
+static REPL_CHILD_GROUP: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
+#[cfg(target_os = "linux")]
+unsafe extern "C" {
+    fn kill(pid: i32, signal: i32) -> i32;
+    fn signal(signal: i32, handler: usize) -> usize;
+}
+
+#[cfg(target_os = "linux")]
+extern "C" fn forward_repl_interrupt(signal_number: i32) {
+    let group = REPL_CHILD_GROUP.load(std::sync::atomic::Ordering::Relaxed);
+    if group > 0 {
+        unsafe { kill(-group, signal_number) };
+    }
+}
+
+#[cfg(target_os = "linux")]
+struct ReplSignalForward {
+    previous: usize,
+}
+
+#[cfg(target_os = "linux")]
+impl ReplSignalForward {
+    fn install(group: i32) -> Self {
+        REPL_CHILD_GROUP.store(group, std::sync::atomic::Ordering::SeqCst);
+        let previous = unsafe { signal(2, forward_repl_interrupt as *const () as usize) };
+        Self { previous }
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for ReplSignalForward {
+    fn drop(&mut self) {
+        REPL_CHILD_GROUP.store(0, std::sync::atomic::Ordering::SeqCst);
+        unsafe { signal(2, self.previous) };
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn kill_repl_process_group(group: i32) {
+    unsafe { kill(-group, 9) };
 }
 
 // ---------------------------------------------------------------------------
@@ -3487,6 +3710,8 @@ fn apply_impure_core_call(
     base_dir: &std::path::Path,
     sink: Option<&mut super::Interpreter::DevSink>,
     repl_mode: bool,
+    pinned_executable: Option<&std::fs::File>,
+    verified_root: Option<&std::fs::File>,
 ) -> Result<CtValue, Diagnostic> {
     let one = |i: usize| {
         args.get(i).ok_or_else(|| {
@@ -3665,7 +3890,13 @@ fn apply_impure_core_call(
                     )],
                 })));
             }
-            match run_repl_process(&cmd, base_dir) {
+            match run_repl_process(
+                &cmd,
+                base_dir,
+                pinned_executable,
+                verified_root,
+                std::time::Duration::from_secs(30),
+            ) {
                 Ok(out) => Ok(CtValue::ResOk(Box::new(CtValue::Struct {
                     type_name: "ProcessResult".to_string(),
                     fields: vec![
@@ -3699,5 +3930,33 @@ fn apply_impure_core_call(
             &format!("`{}.{}()` at comptime (impure tier)", module, method),
             span,
         )),
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod repl_process_tests {
+    use super::run_repl_process;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn timeout_kills_and_reaps_the_process_group() {
+        let executable = std::fs::File::open("/bin/sh").expect("pin /bin/sh");
+        let root = std::fs::File::open(".").expect("open cwd");
+        let cmd = vec![
+            "/bin/sh".to_string(),
+            "-c".to_string(),
+            "while :; do :; done".to_string(),
+        ];
+        let started = Instant::now();
+        let error = run_repl_process(
+            &cmd,
+            std::path::Path::new("."),
+            Some(&executable),
+            Some(&root),
+            Duration::from_millis(50),
+        )
+        .expect_err("long process must time out");
+        assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+        assert!(started.elapsed() < Duration::from_secs(2));
     }
 }

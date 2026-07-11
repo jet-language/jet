@@ -122,6 +122,7 @@ fn ui_snapshots() {
         // D-CTEFFECT1: files marked `// @allow_impure` compile with the
         // allow-impure flag so E3411/E3412 snapshots can exercise the gate.
         let allow_impure = src.lines().any(|l| l.trim() == "// @allow_impure");
+        let repl_deny = src.lines().any(|l| l.trim() == "// @repl_deny");
         // D-PLUGIN1=B (c81): files marked `// @plugin_target` compile via
         // `jet build --target=plugin`'s front end so plugin-only diagnostics
         // (E1257-E1260) can exercise the gate.
@@ -157,6 +158,13 @@ fn ui_snapshots() {
                 Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
                 Ok(_) => "(no errors)\n".to_string(),
             }
+        } else if repl_deny {
+            let inputs = src
+                .lines()
+                .filter(|line| !line.trim_start().starts_with("//"))
+                .filter(|line| !line.trim().is_empty())
+                .collect::<Vec<_>>();
+            jet::REPL::run_transcript_with_flags(&inputs, None, &[], &["fs"])
         } else if all_diags {
             let diags = jet::check_with_path(&file_arg);
             if diags.is_empty() {

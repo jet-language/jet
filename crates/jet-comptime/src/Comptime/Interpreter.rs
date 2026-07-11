@@ -144,6 +144,13 @@ pub struct ReplEffectRequest {
 /// aborts before the Core operation executes.
 pub trait ReplAuthorizer {
     fn authorize(&mut self, request: &ReplEffectRequest, span: Span) -> Result<(), Diagnostic>;
+    fn fs_read(&mut self, path: &str) -> std::io::Result<Vec<u8>>;
+    fn fs_write(&mut self, path: &str, bytes: &[u8], append: bool) -> std::io::Result<()>;
+    fn fs_exists(&mut self, path: &str) -> std::io::Result<bool>;
+    fn fs_is_dir(&mut self, path: &str) -> std::io::Result<bool>;
+    fn fs_create_dir(&mut self, path: &str) -> std::io::Result<()>;
+    fn fs_remove(&mut self, path: &str) -> std::io::Result<()>;
+    fn verified_root(&mut self) -> std::io::Result<std::fs::File>;
     fn reset_session(&mut self) {}
 }
 
