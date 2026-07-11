@@ -79,6 +79,11 @@ fn click_select_details() {
 }
 
 #[test]
+fn node_drag_persists_without_source_change() {
+    run_canvas_scenario("node-drag-persists-without-source-change");
+}
+
+#[test]
 fn read_graph_overview() {
     run_canvas_scenario("read-graph-overview");
 }
@@ -247,17 +252,41 @@ fn run_canvas_scenario(name: &str) {
 fn ensure_jet_built() {
     BUILD_JET.call_once(|| {
         let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let bin = repo.join("target/debug/jet");
-        if bin.exists() {
-            return;
-        }
+        let target = canvas_cargo_target_dir(&repo);
         let status = Command::new("cargo")
             .current_dir(&repo)
+            .env("CARGO_TARGET_DIR", &target)
             .arg("build")
             .status()
             .expect("cargo build for Canvas scenarios");
         assert!(status.success(), "cargo build failed before Canvas scenarios");
+        assert!(
+            target.join("debug/jet").is_file(),
+            "cargo build did not produce the Canvas scenario jet binary"
+        );
     });
+}
+
+fn cargo_target_dir(repo: &Path) -> PathBuf {
+    match std::env::var_os("CARGO_TARGET_DIR") {
+        Some(dir) if Path::new(&dir).is_absolute() => PathBuf::from(dir),
+        Some(dir) => repo.join(dir),
+        None => repo.join("target"),
+    }
+}
+
+fn canvas_cargo_target_dir(repo: &Path) -> PathBuf {
+    // Cargo fingerprints include source paths, but one shared target can still
+    // reuse another worktree's same-name package artifacts. Keep the cache in
+    // the configured shared target while keying its fingerprint namespace by
+    // this checkout. Running `cargo build` every time then becomes a cheap
+    // no-op only when Cargo proves this worktree's embedded Canvas JS current.
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in repo.as_os_str().as_encoded_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    cargo_target_dir(repo).join(format!("canvas-scenarios-{hash:016x}"))
 }
 
 fn tool_available(name: &str) -> bool {
@@ -296,13 +325,26 @@ impl CanvasCase {
     }
 }
 
+impl Drop for CanvasCase {
+    fn drop(&mut self) {
+        if let Err(err) = fs::remove_dir_all(&self.dir) {
+            if err.kind() != std::io::ErrorKind::NotFound {
+                eprintln!(
+                    "warning: could not remove Canvas scenario artifacts at {}: {err}",
+                    self.dir.display()
+                );
+            }
+        }
+    }
+}
+
 struct DevServer {
     child: Child,
 }
 
 impl DevServer {
     fn start(repo: &Path, cwd: &Path, entry: &Path, port: u16) -> DevServer {
-        let jet = repo.join("target/debug/jet");
+        let jet = canvas_cargo_target_dir(repo).join("debug/jet");
         let mut child = Command::new(jet)
             .current_dir(cwd)
             .arg("dev")

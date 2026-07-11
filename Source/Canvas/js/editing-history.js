@@ -444,8 +444,13 @@
 
   function rememberSelectedNodePositions(graph) {
     if (!graph) return;
+    // The first manual placement turns off automatic reflow for this graph.
+    // Freeze every node at its currently rendered graph position at that
+    // boundary; otherwise untouched nodes snap back to raw backend layout as
+    // soon as the selected node is saved.
+    const freezeCurrentLayout = !hasSavedNodePositions(graph);
     for (const node of graph.nodes || []) {
-      if (selectedNodeIds.has(node.node_id)) rememberNodePosition(graph, node);
+      if (freezeCurrentLayout || selectedNodeIds.has(node.node_id)) rememberNodePosition(graph, node);
     }
     saveEditorState();
   }

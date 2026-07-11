@@ -62,9 +62,9 @@
   }
 
   function reflowGraph(graph) {
-    autoNodeOffsets = new Map();
     if (!graph || !graph.nodes || graph.nodes.length === 0) return;
     if (drag && drag.mode === "node") return;
+    autoNodeOffsets = new Map();
     if (hasSavedNodePositions(graph)) return;
     const colGap = 40;
     const ranked = rankedGraphLayout(graph);
