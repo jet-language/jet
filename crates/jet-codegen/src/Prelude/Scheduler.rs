@@ -450,7 +450,8 @@ impl IoPoller {
         self.iocp_notify();
     }
 
-    #[cfg(target_os = "windows")]
+    // jet:scheduler-native-notify-begin
+    #[cfg(all(target_os = "windows", feature = "jet_native_io"))]
     fn iocp_notify(&self) {
         #[link(name = "kernel32")]
         extern "system" {
@@ -460,6 +461,12 @@ impl IoPoller {
         if port != 0 {
             unsafe { PostQueuedCompletionStatus(port, 0, 0, std::ptr::null_mut()); }
         }
+    }
+    // jet:scheduler-native-notify-end
+
+    #[cfg(all(target_os = "windows", not(feature = "jet_native_io")))]
+    fn iocp_notify(&self) {
+        self.notify.notify_one();
     }
 
     fn run(self: Arc<Self>) {
@@ -507,6 +514,7 @@ impl IoPoller {
         }
     }
 
+    // jet:scheduler-native-epoll-begin
     #[cfg(all(target_os = "linux", feature = "jet_native_io"))]
     fn run_linux_epoll(self: Arc<Self>) {
         use std::collections::HashMap;
@@ -595,12 +603,14 @@ impl IoPoller {
             }
         }
     }
+    // jet:scheduler-native-epoll-end
 
     #[cfg(not(all(target_os = "linux", feature = "jet_native_io")))]
     fn run_linux_epoll(self: Arc<Self>) {
         self.run_portable_poll();
     }
 
+    // jet:scheduler-native-kqueue-begin
     #[cfg(all(
         any(
             target_os = "macos",
@@ -738,6 +748,7 @@ impl IoPoller {
             }
         }
     }
+    // jet:scheduler-native-kqueue-end
 
     #[cfg(not(all(
         any(
@@ -755,6 +766,7 @@ impl IoPoller {
         self.run_portable_poll();
     }
 
+    // jet:scheduler-native-iocp-begin
     #[cfg(all(target_os = "windows", feature = "jet_native_io"))]
     fn run_iocp(self: Arc<Self>) {
         use std::collections::HashMap;
@@ -997,6 +1009,7 @@ impl IoPoller {
             }
         }
     }
+    // jet:scheduler-native-iocp-end
     // jet:scheduler-native-end
 
     #[cfg(not(all(target_os = "windows", feature = "jet_native_io")))]
