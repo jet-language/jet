@@ -582,9 +582,10 @@ pub(crate) fn run_dev_entry(file: &str, mode: OutputMode) {
 }
 
 /// D-JPK-TASKRUN1 (card #476): `jet run --task <name> <file>` — compile with
-/// the named `#Task fn` swapped in as the entry (same `compile_with_entry`
-/// path `fn dev()` uses), then run the binary with `program_args` (typed CLI
-/// args via D-CLIFLAG1 ride for free once the task is the entry).
+/// the named `#Task fn` as the entry via a synthetic `fn run { task(…) }`
+/// wrapper (same `compile_with_entry` path `fn dev()` uses; the task keeps
+/// its source name so plain-call deps stay resolvable), then run the binary
+/// with `program_args` (typed CLI args via D-CLIFLAG1 ride for free).
 pub(crate) fn run_task_entry(
     file: &str,
     task: &str,

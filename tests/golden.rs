@@ -201,6 +201,13 @@ fn examples_compile_and_run() {
 }
 
 fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
+    // D-JPK-TASKRUN1 / I5 (card #476): task_runner proves both `#Task` entry
+    // paths — leaf `greet` stays callable while sibling `seed` calls it.
+    if entry.stem == "jetpack/task_runner" {
+        check_task_runner_tasks(entry, env);
+        return;
+    }
+
     let src = fs::read_to_string(&entry.path).unwrap();
     let stem = entry.stem.as_str();
     let uses_ffi_bridge = matches!(
@@ -428,6 +435,93 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
                 }
             }
         }
+    }
+}
+
+/// I5 for `examples/features/jetpack/task_runner.jet`: compile+run both
+/// `#Task` entries via `compile_with_entry` (same path as `jet run --task`).
+fn check_task_runner_tasks(entry: &GoldenEntry, env: &GoldenEnv) {
+    let src = fs::read_to_string(&entry.path).unwrap();
+    let path = entry.path.to_str().expect("example path is utf8");
+    for (task, expected_name) in [("greet", "task_runner.greet"), ("seed", "task_runner.seed")] {
+        let compiled = match jet::compile_with_entry(path, task) {
+            Ok(c) => c,
+            Err(diags) => panic!(
+                "task_runner --task={task} failed the front end:\n{}",
+                jet::render_diagnostics(&entry.shown, &src, &diags)
+            ),
+        };
+        assert!(
+            !strip_vetted_prelude_modules(&compiled.rust).contains("unsafe"),
+            "generated Rust for task_runner --task={task} contains ungated `unsafe`"
+        );
+        assert!(
+            compiled.rust.contains("fn main()"),
+            "generated Rust for task_runner --task={task} has no fn main"
+        );
+        if !env.have_rustc {
+            continue;
+        }
+        let dir = std::env::temp_dir();
+        let rs = dir.join(format!(
+            "jet_golden_{}_{}_{}.rs",
+            std::process::id(),
+            "jetpack_task_runner",
+            task
+        ));
+        let bin = dir.join(format!(
+            "jet_golden_{}_{}_{}",
+            std::process::id(),
+            "jetpack_task_runner",
+            task
+        ));
+        fs::write(&rs, &compiled.rust).unwrap();
+        let out = Command::new("rustc")
+            .args(["--edition", "2021"])
+            .arg(&rs)
+            .arg("-o")
+            .arg(&bin)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "I2 violated: rustc rejected task_runner --task={task}:\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let run = Command::new(&bin).output().unwrap();
+        assert!(
+            run.status.success(),
+            "task_runner --task={task} failed at runtime:\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&run.stdout),
+            String::from_utf8_lossy(&run.stderr)
+        );
+        let out_path = env
+            .ex_dir
+            .join("expected")
+            .join(format!("jetpack/{expected_name}.out"));
+        assert!(
+            out_path.is_file(),
+            "missing examples/features/expected/jetpack/{expected_name}.out"
+        );
+        let actual = String::from_utf8_lossy(&run.stdout);
+        if env.update_expected {
+            fs::write(&out_path, actual.as_bytes()).unwrap();
+        } else {
+            let expected = fs::read_to_string(&out_path).unwrap();
+            if actual != expected {
+                panic!(
+                    "output mismatch for task_runner --task={task}:\n{}",
+                    unified_diff(
+                        &format!("examples/features/expected/jetpack/{expected_name}.out"),
+                        &format!("examples/features/jetpack/task_runner --task={task} stdout"),
+                        &expected,
+                        &actual,
+                    )
+                );
+            }
+        }
+        let _ = fs::remove_file(&rs);
+        let _ = fs::remove_file(&bin);
     }
 }
 

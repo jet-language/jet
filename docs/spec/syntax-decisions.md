@@ -3277,9 +3277,12 @@ job per this same law).
 run|dev|build|test` (E0928); `jetpack run <name>` discovers `#Task fn`s in
 the project entry and dispatches via `jet run --task <name> <entry>`
 (D-JPK-DISPATCH1); unknown names list declared tasks (E1294). Typed task
-args reuse D-CLIFLAG1 once the task is the entry. D-SERVICE1 still has no
-typed builder/worker/group to carry a schedule into a service runtime —
-that remains a future card, not a corner cut here.
+args reuse D-CLIFLAG1 once the task is the entry. Entry dispatch injects a
+synthetic `fn run { task(…) }` wrapper so the selected `#Task fn` keeps its
+name — a sibling's plain-call dependency (ballot: dependency = plain
+function call) does not die with E0102. D-SERVICE1 still has no typed
+builder/worker/group to carry a schedule into a service runtime — that
+remains a future card, not a corner cut here.
 
 **D-JPK-TOOLRUN1=A — unified `jetpack tool` noun**: `jetpack tool run <ref>`
 executes a package binary ephemerally across all providers (generalizing the

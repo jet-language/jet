@@ -1805,15 +1805,13 @@ pub fn compile_fuzz(
 }
 
 /// c-devserver (owner-directed 2026-07-01): `jet dev <file>` when the file
-/// defines a top-level `fn dev()` — compiles NATIVELY with `dev()` swapped in
-/// as the program's real entry point instead of `run()`. Mechanically: an
-/// AST-level rename before sema ever runs (I3: codegen stays dumb; sema never
-/// special-cases any entry name other than `"run"` — see
-/// `Registration.rs`/`Bundle.rs`'s `funcs.get("run")` checks. The function
-/// literally named `entry_fn` becomes literally named `run`; whatever was
-/// previously named `run` (if anything) is renamed to a collision-free name
-/// first, so a file with both `fn run()` and `fn dev()` never has two entry
-/// candidates.
+/// defines a top-level `fn dev()` — compiles NATIVELY with `dev()` as the
+/// program's real entry instead of `run()`. Mechanically: before sema runs,
+/// park any existing `fn run` and inject a synthetic `fn run() { entry_fn() }`
+/// (I3: codegen stays dumb; sema never special-cases any entry name other
+/// than `"run"` — see `Registration.rs`/`Bundle.rs`'s `funcs.get("run")`).
+/// The selected function keeps its source name so callers (D-JPK-TASKRUN1
+/// plain-call task deps) still resolve. Same path serves `jet run --task`.
 /// Native only — never freestanding/impure/web (those toggles don't apply to
 /// the `fn dev()` entry path; a `dev()` function's job is to configure and run
 /// an ordinary value like `core.devserver`, nothing more).
@@ -1873,35 +1871,106 @@ pub fn compile_bundle_path_with_entry(
     })
 }
 
-/// Rename the function literally named `entry_fn` in the entry module to
-/// `run`, first moving any pre-existing `run` out of the way. A no-op when
-/// `entry_fn` is already `"run"`.
+/// Make `entry_fn` the program entry without renaming it for name resolution.
 ///
-/// D-JPK-TASKRUN1: when the swapped-in function was a `#Task fn`, clear the
-/// task marker after the rename — otherwise sema sees a synthetic
-/// `#Task fn run` and fires E0928 (reserved lifecycle name). The marker's
-/// job was dispatch selection; once it's the entry, it's just `fn run`.
+/// Sema/codegen still require a literal `fn run` (Registration/Bundle
+/// `funcs.get("run")`). D-JPK-TASKRUN1 also says a cross-task dependency is a
+/// plain call — so renaming `#Task fn greet` → `run` would break
+/// `seed()`'s `greet()` with E0102. Fix: park any existing `fn run` as
+/// `__jet_unused_run`, then inject a synthetic `fn run(…) { entry_fn(…) }`
+/// that forwards params (and return) while leaving `entry_fn` callable.
+///
+/// The wrapper is never `#Task` (avoids E0928 on reserved lifecycle name
+/// `run`). A no-op when `entry_fn` is already `"run"`, or when no function
+/// named `entry_fn` exists (caller surfaces E0101 / E1294 separately).
 fn swap_entry_point(bundle: &mut crate::AST::ProgramBundle, entry_fn: &str) {
     if entry_fn == "run" {
         return;
     }
+    use crate::Diagnostics::Span;
+    use crate::AST::{Call, CallArg, CallArgFlags, Expr, Func, Item, Stmt};
+
     let items = &mut bundle.modules[bundle.entry].items;
+    let Some(target) = items.iter().find_map(|item| match item {
+        Item::Func(f) if f.name == entry_fn => Some(f.clone()),
+        _ => None,
+    }) else {
+        return;
+    };
+
     for item in items.iter_mut() {
-        if let crate::AST::Item::Func(f) = item {
+        if let Item::Func(f) = item {
             if f.name == "run" {
                 f.name = "__jet_unused_run".to_string();
             }
         }
     }
-    for item in items.iter_mut() {
-        if let crate::AST::Item::Func(f) = item {
-            if f.name == entry_fn {
-                f.name = "run".to_string();
-                f.is_task = false;
-                f.task_span = None;
-            }
-        }
-    }
+
+    let zero = Span::new(0, 0);
+    let args: Vec<CallArg> = target
+        .params
+        .iter()
+        .map(|p| CallArg {
+            convention: p.convention,
+            expr: Expr::Ident(p.name.clone(), p.name_span),
+            span: p.name_span,
+            flags: CallArgFlags::default(),
+            label: None,
+            spread: p.variadic,
+        })
+        .collect();
+    let call = Expr::Call(Call {
+        name: entry_fn.to_string(),
+        name_span: target.name_span,
+        args,
+        range_checked: false,
+    });
+    let body = if target.return_type.is_some() {
+        vec![Stmt::Return(Some(call), zero)]
+    } else {
+        vec![Stmt::Expr(call)]
+    };
+
+    items.push(Item::Func(Func {
+        span: target.span,
+        is_pub: false,
+        is_package_pub: false,
+        external_type: None,
+        name: "run".to_string(),
+        name_span: target.name_span,
+        meta: None,
+        type_params: target.type_params.clone(),
+        params: target.params.clone(),
+        return_type: target.return_type.clone(),
+        return_type_span: target.return_type_span,
+        is_unsafe: false,
+        unsafe_reason: None,
+        unsafe_span: None,
+        is_pure: false,
+        is_sanitizer: false,
+        declared_effects: None,
+        effect_via: None,
+        state_requires: None,
+        state_transition: None,
+        is_reactive: false,
+        is_replayable: false,
+        replayable_span: None,
+        is_task: false,
+        task_span: None,
+        every: None,
+        is_must_use: false,
+        must_use_span: None,
+        maturity: None,
+        maturity_span: None,
+        is_inline: false,
+        is_inline_always: false,
+        inline_span: None,
+        web_marker: None,
+        pre: Vec::new(),
+        post: Vec::new(),
+        inline_foreign: None,
+        body,
+    }));
 }
 
 /// Bench pipeline.

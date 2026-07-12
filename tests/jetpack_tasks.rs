@@ -130,6 +130,66 @@ fn run() {}
 }
 
 #[test]
+fn jet_run_task_leaf_stays_callable_from_sibling() {
+    // D-JPK-TASKRUN1: dependency = plain call. Selecting leaf `greet` as
+    // entry must not rename it away — sibling `seed`'s `greet()` must not
+    // die with E0102, and both tasks must run.
+    let scratch = Scratch::new("task-dep");
+    write_main(
+        &scratch.path,
+        r#"
+#Task
+fn greet() {
+    print("leaf-ok")
+}
+#Task
+fn seed() {
+    greet()
+    print("dep-ok")
+}
+fn run() { print("run-entry") }
+"#,
+    );
+    let entry = scratch.path.join("main.jet");
+    let path = entry.to_str().unwrap();
+
+    let greet = jet()
+        .args(["run", "--task=greet", path])
+        .output()
+        .unwrap();
+    assert!(
+        greet.status.success(),
+        "leaf --task=greet must not E0102; stderr: {}",
+        String::from_utf8_lossy(&greet.stderr)
+    );
+    let greet_out = String::from_utf8_lossy(&greet.stdout);
+    assert!(
+        greet_out.contains("leaf-ok"),
+        "stdout: {greet_out}"
+    );
+    assert!(
+        !String::from_utf8_lossy(&greet.stderr).contains("E0102"),
+        "stderr: {}",
+        String::from_utf8_lossy(&greet.stderr)
+    );
+
+    let seed = jet()
+        .args(["run", "--task=seed", path])
+        .output()
+        .unwrap();
+    assert!(
+        seed.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&seed.stderr)
+    );
+    let seed_out = String::from_utf8_lossy(&seed.stdout);
+    assert!(
+        seed_out.contains("leaf-ok") && seed_out.contains("dep-ok"),
+        "stdout: {seed_out}"
+    );
+}
+
+#[test]
 fn jet_run_task_typed_cli_args() {
     let scratch = Scratch::new("task-cli");
     write_main(
