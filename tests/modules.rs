@@ -52,6 +52,7 @@ fn perf_budget_sema_elaborates_defaults_and_field_spans() {
         limit: .AtMost(2MiB),
     }]
 }
+
 "#;
     let (tokens, lex_diags) = jet::Lexer::lex(src);
     assert!(lex_diags.is_empty(), "lex diagnostics: {lex_diags:?}");
@@ -69,6 +70,64 @@ fn perf_budget_sema_elaborates_defaults_and_field_spans() {
         let span = spec.field_spans.get(field).expect("field span");
         assert_eq!(&src[span.start..span.end], field);
     }
+}
+
+fn collect_perf_specs(src: &str) -> Result<Vec<jet::Sema::BudgetSpec>, Vec<jet::Diagnostics::Diagnostic>> {
+    let (tokens, lex_diags) = jet::Lexer::lex(src);
+    assert!(lex_diags.is_empty(), "lex diagnostics: {lex_diags:?}");
+    let program = jet::Parser::parse(&tokens).expect("parse");
+    jet::Sema::collect_budget_specs(&program)
+}
+
+#[test]
+fn perf_budget_sema_rejects_duplicate_identity_and_effective_overlap() {
+    let duplicate_name = r#"module perf.release {
+    budgets: [
+        Budget.{ name: "binary", metric: .BinarySize, limit: .AtMost(2MiB) },
+        Budget.{ name: "binary", metric: .ArtifactSize, limit: .AtMost(3MiB) },
+    ]
+}
+"#;
+    let diagnostics = collect_perf_specs(duplicate_name).expect_err("duplicate identity");
+    assert_eq!(diagnostics.last().expect("diagnostic").code, "E2904");
+
+    let overlap = r#"module perf.release {
+    budgets: [
+        Budget.{ name: "binary", metric: .BinarySize, limit: .AtMost(2MiB) },
+        Budget.{ name: "shipping", metric: .BinarySize, limit: .AtMost(3MiB) },
+    ]
+}
+"#;
+    let diagnostics = collect_perf_specs(overlap).expect_err("effective overlap");
+    assert_eq!(diagnostics.last().expect("diagnostic").code, "E2904");
+}
+
+#[test]
+fn perf_budget_sema_accepts_disjoint_target_applicability() {
+    let src = r#"module perf.release {
+    budgets: [
+        Budget.{
+            name: "linux",
+            metric: .BinarySize,
+            limit: .AtMost(2MiB),
+            applies: BudgetApplies.{
+                targets: .Only([.Triple("x86_64-unknown-linux-gnu")]),
+                profiles: .All,
+            },
+        },
+        Budget.{
+            name: "windows",
+            metric: .BinarySize,
+            limit: .AtMost(2MiB),
+            applies: BudgetApplies.{
+                targets: .Only([.Triple("x86_64-pc-windows-msvc")]),
+                profiles: .All,
+            },
+        },
+    ]
+}
+"#;
+    assert_eq!(collect_perf_specs(src).expect("disjoint budgets").len(), 2);
 }
 
 #[test]
