@@ -254,6 +254,16 @@ Redundant `..` on a full pattern is E0327. Nesting one level. Dispatch-arm
 struct-pattern heads (`.{ kind: "page", target, .. } -> …`) are source-shipped;
 #341 owns the remaining user-facing dispatch/pattern wording audit.
 
+**D-BINPAT1=A — binary patterns** *(ratified by owner 2026-07-12, card
+#506)*: `b"…"` binary pattern literals join the ONE pattern engine
+(D-PARSESTR1's grammar and matcher, byte mode). Bit-typed holes —
+`b"{version:U4}{ihl:U4}{len:U16be}{rest:...}"` — with widths U1–U64,
+`le`/`be` suffixes on multi-byte reads, and a final `{name:...}` rest
+capture. Valid wherever string patterns are: `==` pattern tests,
+if-table arms (refutable — table needs `else`), and consume mode via
+`Reader.take_pattern(b"…")` (D-SHIFT1, prefix match + advance). Same
+non-greedy anchoring and E0147-class ambiguity law as text holes.
+
 **S77 — Field punning**: in a struct literal, bare `name` ≡ `name: name` when
 a binding of that name is in scope; mixes freely with explicit fields.
 
@@ -827,9 +837,20 @@ methods, dispatches) and `tag` (no methods, erases). Methods on a tag E0732;
 tag where dispatch expected E0731. **D-QUAL4**: type-position value tags are
 prefix — `#Tainted String`.
 
-**D-MATURITY1**: `@Experimental` / `@Tested` / `@Hardened` are doc-only
-markers before `fn` — parsed onto `Func.maturity`, formatter-preserved, zero
-sema/codegen effect (no call-site propagation). Retired `#` spelling is E0062.
+**D-MATURITY1 (superseded by D-MARK-META1=B, 2026-07-12)**: the maturity
+trio `@Experimental`/`@Tested`/`@Hardened` leaves the grammar — maturity
+is a `#Meta` field: `#Meta(maturity: .Experimental | .Tested |
+.Hardened)`. Same semantics (doc-only, parsed onto `Func.maturity`,
+formatter-preserved, zero sema/codegen effect). Retired `@` spellings get
+ordinary unknown-marker errors (greenfield, no teaching residue; the old
+E0062 row retires with them).
+
+**D-MARK-META1=B — doc-metadata growth law + trio fold** *(ratified by
+owner 2026-07-12, card #509)*: every tool-facing, behavior-free
+annotation is a `#Meta(…)` field — ballot-ed as a field, never a new
+marker (extends D-CANVASMETA1's field-ballot hook). Applied immediately
+to the shipped maturity trio (above). `@Doc` stays: it is the CLI
+help-text carrier (D-CLIFLAG1), not free metadata.
 
 **D-PATCH1 — Typed patches** *(ratified 2026-07-03, card #181)*: `@[Patchable]`
 on a struct `T` synthesizes `T.Patch` — every field wrapped `T?` (Option),
@@ -983,6 +1004,15 @@ borrowed view is a compile error; **D-ASYNCRT1** M:N green threads, no
 `.sender()` method. Destructure with the existing S74 tuple form:
 `(tx, rx) := tasks.channel<T>()`; a second sender is `copy tx`. A
 `Receiver<T>` is what `g.select().recv(rx)` takes.
+
+**D-STM1=A — atomic memory transactions** *(ratified by owner
+2026-07-12, card #506)*: `#Transact` gains the `Shared<T>` plane — reads
+and writes to Shared handles inside the block form one atomic commit,
+retried on conflict; either every handle's change lands or none does.
+No new marker (I8); E0746 keeps rejecting irreversible effects inside.
+The single-task local-rollback behavior (D-TXN1–4) is unchanged.
+Expert floor: `Shared.edit_all` canonical-order multi-lock stays
+available for code that wants locking, not retry, semantics.
 
 **D-CANCELMODEL1 = C** *(ratified 2026-07-11, card #126)*: cancellation is
 preemptive at wait points. A cancelled task (race loser, fail-fast sibling,
@@ -1420,6 +1450,23 @@ the D-FFI-PY1 precedent):**
   word-split or glob-expanded; `core.process.run(cmd: Sh)` executes
   without a shell parsing user data; `Sh.raw("…")` is the sole audited
   escape; `sh"…"` prefix per D-TYPEDTEXT2.
+- **Phase 5 (ratified by owner 2026-07-12, card #507)**:
+  **D-FFI-COM1=A** — `com.*` Windows COM/IDispatch automation root,
+  Windows-gated (honest error elsewhere); typed stubs generated from
+  type libraries via `jet inspect bind com` (committable); dynamic
+  IDispatch fallback behind `#Unsafe`; the Office/VBA estate becomes
+  automatable and migratable. **D-FFI-PWSH1=A** — `pwsh.*` sidecar
+  PowerShell 7+ worker; cmdlet objects cross as `DataTree`; pipelines
+  callable. **D-FFI-DART1=A** — dual surface: `dart.*` library binder
+  (dart_api_dl) plus the Flutter embedding path (Jet compute compiled to
+  C-ABI, callable from Flutter apps); interop floor for the mobile
+  strategy (#480). **D-FFI-TCL1=A** — `tcl.*` in-process interpreter;
+  live tool sessions for the EDA estate with typed result parsing.
+  **D-FFI-ADA1=A** — `ada.*` GNAT C-ABI binder; Ada range/constraint
+  facts recorded in the binding become checked boundary errors; pairs
+  with `jet prove`. **D-FFI-PASCAL1=A** — `pascal.*` FreePascal cdecl
+  binder; classes as opaque handles (cpp precedent, no templates); the
+  Delphi estate gets call-in-place plus D-MIGRATE-SRC1 migration.
 - **D-MIGRATE-SRC1=A**: source-importer framework law — `jet import
   <lang> <dir>` gains per-language semantic source importers; output is
   editable canonical Jet (D-WD5), every untranslatable construct is a
@@ -1831,6 +1878,35 @@ index, not a substitute for that law.
   are implicit; Jet does not maintain a have/have-not ledger of unbuilt or
   declined stdlib domains.
 
+**Framework-lessons Core wave (ratified by owner 2026-07-12, card
+#506; D-VALIDATE1 still open):**
+
+- **D-AUTH1=A**: `core.auth` batteries — sessions (signed rotating
+  cookies; httponly/secure/samesite defaults), password login (argon2id
+  via the crypto suite), OAuth/OIDC client, email magic links, JWT/PASETO
+  verification. `app.auth(users: db)` is the magic default; every knob
+  expert-overridable; secrets carry the `.Credential` taint kind; policy
+  may require stronger factors.
+- **D-SYNC1=A**: `core.sync` CRDT value types — `SyncText`,
+  `SyncMap<K,V>`, `SyncList<T>`, `SyncCounter`; `@Codable`,
+  deterministic merge, ride the live-query channel via
+  `app.sync(doc, over: session)`; offline edits merge conflict-free on
+  reconnect; expert access to merge metadata.
+- **D-DBPOLICY1=A**: typed row policies —
+  `db.policy<Ticket>((user, row) => …)`; enforced below app code on
+  every query/mutation/live-query path: provable satisfaction at compile
+  time where the effect machinery can see it, generated runtime filter
+  otherwise; active policies appear in audit output.
+- **D-ENVHOOK1=A**: `jet env hook <shell>` prints an opt-in shell hook;
+  entering a directory with `env.jet` activates (first activation of an
+  untrusted env prompts per the D-JPK-GRANTCMD1 trust law), leaving
+  deactivates; `JET_ENV_DISABLE` escape.
+- **D-OBSERVE-LIVE1=A**: `jet inspect live <target>` — live task tree,
+  channel depths, deadlines, effect activity, arena/GC stats; attaches
+  to a `jet dev` session or an `--observe`-enabled process; a viewer
+  over the existing observability rails (no new fact producer); the same
+  facts feed Canvas's proof rail.
+
 **Filesystem & time**: typed `Path` (`from`/`join`/`parent`/`extension`/
 `stem`), `write_atomic()`, lazy cycle-safe `walk()` (D-PATHFS1 shipped).
 `core.files` now ships D-FSOPS1 depth: `Stat`, `WalkEntry`, `TempDir`,
@@ -1851,6 +1927,21 @@ primitives require `core.crypto.expert` behind `#Unsafe` (D-CRYPTOENV1,
 E0510/E0511). Versioned `JETC` envelope header gives algorithm agility;
 PQ algorithms later (D-PQCRYPTO1). `core.encoding` hex/base64 + `core.uuid`
 v4/v7 (D-UUIDENC1).
+
+**D-CORE-SECRETS1=A — one secrets home** *(ratified by owner
+2026-07-12, card #509)*: `core.vault` owns secret storage AND lifecycle
+(rotation schedules, expiry, audit facts); `core.secrets` leaves the
+registry (ordinary unknown-module error). Generic TTL wrapping stays in
+`core.time.expiring`; `core.crypto` stays primitives and envelopes. The
+teachable rule: crypto moves bytes, vault keeps secrets.
+
+**D-CORENS2=A — core namespace admission law** *(ratified by owner
+2026-07-12, card #509)*: a new top-level `core.<name>` requires a
+domain — a coherent problem area with a plausible member family —
+ratified by ballot; features join an existing domain. Applied today:
+`core.devserver` → `core.web.devserver`, `core.async.loadable` →
+`core.reactive.loadable` (clean breaks, ordinary unknown-module
+errors).
 
 **D-CORE-COMPRESS1=A — compression split by job** *(ratified 2026-07-11,
 card #499)*: `core.compress` owns stream codecs (`gzip`, `zstd`, future
@@ -2628,6 +2719,15 @@ language/compiler/dev loop, `jetpack` owns packages/env/build substrate, and
 `jetos` owns OS workflows. Compatibility shims such as `jet os ...` may route
 to the owning binary with a clear teaching/provenance message until release
 policy retires them.
+
+**D-ARCH-SOURCE1=A — dissolve the Source/ monolith** *(ratified by
+owner 2026-07-12, card #508)*: the root crate reduces to `main.rs` plus
+`CmdCompile.rs` (the R5 rustc/ICE edge). New seam crates under the same
+I6/path-dependency law: `jet-cli` (verb registry, dispatch, help,
+completions, greeting), `jet-repl`, `jet-debug`; dev-server glue joins
+`jet-driver`/`jet-cli`. tests/workspace_crates.rs and truthfulness.rs
+extend to the new members. Landing order: interactive tiers first, CLI
+next, architecture.md updated last, when it is true.
 
 **D-LINTPOLICY1=A — the override law** *(ratified by owner 2026-07-11,
 card #505)*: binding on every current and future expert gate.

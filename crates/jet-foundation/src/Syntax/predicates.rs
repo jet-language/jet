@@ -132,13 +132,13 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core.http",
     // D-REGEXENGINE1=A: std-only linear regex in the generated prelude.
     "core.regex",
-    // D-DEP-ARCHIVE1=A (ratified): gzip compress/decompress via the `flate2` crate FFI bridge.
+    // D-CORE-COMPRESS1=A / D-DEP-ARCHIVE1=A: zip/tar containers only.
     "core.archive",
     // D-RAYLIB1=A / D-GAME1=B: official first-party raylib graphics bridge.
     "core.raylib",
     // D-GAME1/2/3 + D-WD10 + D-GAME-*: stable headless game substrate.
     "core.game",
-    // D-CODECS1 (ratified): standalone compression codecs, separate from `core.archive`.
+    // D-CORE-COMPRESS1=A / D-CODECS1: canonical stream codecs.
     // `flate2` (gzip) and `zstd` FFI bridges.
     "core.compress.gzip",
     "core.compress.zstd",

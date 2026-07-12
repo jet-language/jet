@@ -64,8 +64,8 @@ fn extern_entry(ef: &ExternFn, block: &ExternRustBlock, _file: &str) -> ExternEn
 /// program has no `extern rust` declarations and does not use `core.archive`,
 /// `jet.db`, or `core.compress.{gzip,zstd}`.
 ///
-/// `core.archive` (D-DEP-ARCHIVE1), `jet.db`
-/// (D-DEP-DB1), and `core.compress` (D-CODECS1) are delivered through this
+/// `core.archive` (zip/tar; D-CORE-COMPRESS1), `jet.db` (D-DEP-DB1), and
+/// `core.compress` (gzip/zstd; D-CORE-COMPRESS1) are delivered through this
 /// same hidden-cargo bridge: when a program imports any of them, the bridge
 /// crate gains the matching dependency and a hand-written runtime
 /// (`Source/Prelude/Archive.rs`, `Source/Prelude/Db.rs`,
@@ -159,10 +159,6 @@ pub fn prepare(bundle: &ProgramBundle) -> Result<Option<FfiLink>, Vec<Diagnostic
     )
     .map(Some)
 }
-
-/// The `flate2` crate version that backs `core.archive` gzip (D-DEP-ARCHIVE1).
-/// Lives only here — never in the compiler's Cargo.toml (I6).
-pub const ARCHIVE_CRATE_SPEC: (&str, &str) = ("flate2", "1");
 
 /// The `zip` crate version that backs `core.archive` zip (D-DEP-ARCHIVE1).
 /// Lives only here — never in the compiler's Cargo.toml (I6).
@@ -273,7 +269,7 @@ const FEATURED_DEPS: &[(&str, &str)] = &[
 ];
 
 /// Hand-written archive runtime emitted into the bridge crate when `core.archive`
-/// is used. This is the only code that touches the `flate2`, `zip`, and `tar` crates.
+/// is used. This is the only code that touches the `zip` and `tar` crates.
 const ARCHIVE_RUNTIME: &str = include_str!("Prelude/Archive.rs");
 
 /// Hand-written database runtime emitted into the bridge crate when `jet.db`
@@ -331,12 +327,10 @@ pub const AGE_CRATE_SPEC: (&str, &str) = ("age", "0.10");
 /// touched.
 const SECRETS_RUNTIME: &str = include_str!("Prelude/SecretsCrypto.rs");
 
-/// The `flate2` crate version that backs `core.compress.gzip` (D-CODECS1).
-/// Same crate as `core.archive`'s gzip; `core.compress` must also work standalone,
-/// independent of `core.archive`, so it is inserted whenever `core.compress.gzip`
-/// is used even if `core.archive` isn't. Lives only here — never in the
-/// compiler's Cargo.toml (I6).
-pub const COMPRESS_GZIP_CRATE_SPEC: (&str, &str) = ARCHIVE_CRATE_SPEC;
+/// The `flate2` crate version that backs canonical `core.compress.gzip`
+/// (D-CORE-COMPRESS1=A / D-CODECS1). Lives only here — never in the compiler's
+/// Cargo.toml (I6).
+pub const COMPRESS_GZIP_CRATE_SPEC: (&str, &str) = ("flate2", "1");
 
 /// The `zstd` crate version that backs `core.compress.zstd` (D-CODECS1). Pure
 /// bootstrap dep: the `zstd` crate is a Rust binding that vendors/builds the C
@@ -409,10 +403,6 @@ fn build_bridge_full(
 ) -> Result<FfiLink, Vec<Diagnostic>> {
     let mut deps = collect_crate_deps(entries);
     if needs_archive {
-        deps.insert(
-            ARCHIVE_CRATE_SPEC.0.to_string(),
-            ARCHIVE_CRATE_SPEC.1.to_string(),
-        );
         deps.insert(ZIP_CRATE_SPEC.0.to_string(), ZIP_CRATE_SPEC.1.to_string());
         deps.insert(TAR_CRATE_SPEC.0.to_string(), TAR_CRATE_SPEC.1.to_string());
     }
@@ -478,9 +468,7 @@ fn build_bridge_full(
         );
     }
     if needs_compress {
-        // core.compress must work standalone, independent of core.archive, so
-        // flate2 is inserted here too; BTreeMap::insert with the same key/value
-        // when core.archive also pulled it in is a harmless no-op overwrite.
+        // D-CORE-COMPRESS1=A: only core.compress pulls stream-codec deps.
         deps.insert(
             COMPRESS_GZIP_CRATE_SPEC.0.to_string(),
             COMPRESS_GZIP_CRATE_SPEC.1.to_string(),
@@ -1151,8 +1139,7 @@ fn emit_wrapper_lib(
         "// Auto-generated FFI wrappers — do not edit.\n#![allow(warnings)]\n\nfn ffi_panic() -> ! {\n    eprintln!(\"panic: a foreign function panicked\");\n    std::process::exit(70);\n}\n\n",
     );
     if needs_archive {
-        // D-DEP-ARCHIVE1: the archive runtime is the only place `flate2`, `zip`,
-        // and `tar` crates are touched.
+        // D-CORE-COMPRESS1=A: archive runtime touches only zip/tar containers.
         out.push_str(ARCHIVE_RUNTIME);
         out.push('\n');
     }

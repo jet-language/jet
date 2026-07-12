@@ -1441,14 +1441,9 @@ pub fn core_fixed_sig(
             ],
             Some(result_ty(Type::String, Type::String)),
         )),
-        // D-DEP-ARCHIVE1=A: core.archive — gzip compress/decompress via the `flate2` crate FFI bridge.
-        // Both functions take `[U8]` and return `[U8]`. Compression is infallible; decompression
-        // returns an empty list on corrupt input (no error path exposed to the caller).
-        ("core.archive", "gzip_compress" | "gzip_decompress") => Some((
-            vec![(read, Type::List(Box::new(u8_ty())))],
-            Some(Type::List(Box::new(u8_ty()))),
-        )),
-        // D-DEP-ARCHIVE1=A: zip_compress — create a single-entry zip archive.
+        // D-CORE-COMPRESS1=A / D-DEP-ARCHIVE1=A: core.archive owns only
+        // container formats. Stream gzip lives in core.compress.gzip.
+        // zip_compress creates a single-entry zip archive.
         // Takes (name: String, data: [U8]) → [U8].
         ("core.archive", "zip_compress") => Some((
             vec![(read, Type::String), (read, Type::List(Box::new(u8_ty())))],
@@ -1539,8 +1534,8 @@ pub fn core_fixed_sig(
             ],
             Some(Type::Named("RaylibColor".to_string())),
         )),
-        // D-CODECS1: core.compress.gzip / core.compress.zstd — standalone codec APIs,
-        // separate from core.archive. `compress` takes `[U8]` and is infallible;
+        // D-CORE-COMPRESS1=A / D-CODECS1: core.compress.gzip / zstd are the
+        // only public stream-codec APIs. `compress` takes `[U8]` and is infallible;
         // `decompress` is fallible (malformed compressed stream → `Err(String)`),
         // following the same house style as core.encoding.hex/base64 `decode`.
         ("core.compress.gzip", "compress") | ("core.compress.zstd", "compress") => Some((

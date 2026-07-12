@@ -498,10 +498,9 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "split",
             "split_limit",
         ],
-        // D-DEP-ARCHIVE1=A: archive ring package — gzip + zip + tar.
+        // D-CORE-COMPRESS1=A: archive owns containers; stream codecs live in
+        // core.compress with no archive re-export.
         "core.archive" => &[
-            "gzip_compress",
-            "gzip_decompress",
             "zip_compress",
             "zip_decompress",
             "tar_add",
@@ -523,7 +522,7 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "set_target_fps",
             "color",
         ],
-        // D-CODECS1: standalone compression codecs, separate from core.archive.
+        // D-CORE-COMPRESS1=A / D-CODECS1: canonical stream codecs.
         "core.compress.gzip" => &["compress", "decompress"],
         "core.compress.zstd" => &["compress", "decompress"],
         // D-DEP-DB1: SQLite ring package.

@@ -1610,15 +1610,9 @@ pub(crate) fn emit_tir_core_call(
             arg(1),
             arg(2)
         ),
-        // D-DEP-ARCHIVE1=A: core.archive — gzip compress/decompress via the FFI bridge crate.
-        // Arguments are `[U8]` (Vec<u8>); bridge functions take `&[u8]` (auto-coerce from &Vec<u8>).
-        ("core.archive", "gzip_compress") => {
-            format!("{}(&({}))", regex_fn("jet_archive_gzip_compress"), arg(0))
-        }
-        ("core.archive", "gzip_decompress") => {
-            format!("{}(&({}))", regex_fn("jet_archive_gzip_decompress"), arg(0))
-        }
-        // D-DEP-ARCHIVE1=A: core.archive — zip compress/decompress via the `zip` crate FFI bridge.
+        // D-CORE-COMPRESS1=A / D-DEP-ARCHIVE1=A: core.archive owns only
+        // zip/tar containers. Stream codecs lower through core.compress.
+        // Zip compress/decompress use the `zip` crate FFI bridge.
         // zip_compress takes (&str, &[u8]); zip_decompress takes &[u8].
         ("core.archive", "zip_compress") => {
             format!(
@@ -1727,8 +1721,8 @@ pub(crate) fn emit_tir_core_call(
                 arg(3)
             )
         }
-        // D-CODECS1: core.compress.gzip / core.compress.zstd — standalone codec APIs
-        // (separate from core.archive) via the FFI bridge crate. `compress` is
+        // D-CORE-COMPRESS1=A / D-CODECS1: canonical gzip/zstd stream codecs
+        // via the FFI bridge crate. `compress` is
         // infallible; `decompress` returns a Rust `Result<Vec<u8>, String>` which is
         // already the runtime shape of the Jet `Result<[U8], String>` value — no
         // extra wrapping needed (same pattern as `jet.crypto`'s seal/open).

@@ -1,9 +1,8 @@
-//! D-DEP-ARCHIVE1=A — core.archive integration.
+//! D-CORE-COMPRESS1=A — stream codecs and archive containers have one home each.
 //!
-//! `core.archive` delivers gzip compress/decompress via the same hidden FFI
-//! bridge as `jet.regex` (Source/FFI.rs → Source/Prelude/Archive.rs, backed
-//! by the `flate2` crate). These tests are gated on cargo/rustc availability
-//! like the FFI golden tests.
+//! `core.compress` delivers gzip/zstd streams; `core.archive` delivers zip/tar
+//! containers through the hidden FFI bridge. These tests are gated on
+//! cargo/rustc availability like the FFI golden tests.
 //!
 //! D-BFS1: a separate test exercises the build-from-source path — realizing
 //! the ring package source (`corelib/core.archive/`) through CoreProvider and
@@ -38,8 +37,8 @@ fn run() {
     );
 }
 
-/// Compile, FFI-link, and run an archive program; return stdout.
-fn run_archive(src: &str) -> String {
+/// Compile, FFI-link, and run a Core bridge program; return stdout.
+fn run_core_bridge(src: &str) -> String {
     use std::sync::atomic::{AtomicU64, Ordering};
     static SEQ: AtomicU64 = AtomicU64::new(0);
     let dir = std::env::temp_dir().join(format!(
@@ -54,15 +53,15 @@ fn run_archive(src: &str) -> String {
 
     let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
         panic!(
-            "front end rejected archive fixture:\n{}",
+            "front end rejected Core bridge fixture:\n{}",
             jet::render_diagnostics(&shown, src, &diags)
         )
     });
-    assert!(out.ffi.is_some(), "core.archive must produce an FFI bridge");
+    assert!(out.ffi.is_some(), "Core codec/container call must produce an FFI bridge");
     let user_rust = common::strip_scheduler_native(&common::strip_vetted_module(&out.rust, "jet_atomic_windows"));
     assert!(
         !user_rust.contains("unsafe"),
-        "I1: archive output must not contain unsafe"
+        "I1: Core bridge output must not contain unsafe"
     );
 
     let rs = dir.join("archive_test.rs");
@@ -92,52 +91,49 @@ fn run_archive(src: &str) -> String {
 }
 
 #[test]
-fn gzip_compress_decompress_round_trip() {
+fn gzip_round_trip_uses_core_compress() {
     if !have_toolchain() {
-        eprintln!("note: cargo/rustc not found; skipping core.archive integration test");
+        eprintln!("note: cargo/rustc not found; skipping core.compress integration test");
         return;
     }
     let src = r#"
-use core.archive as ar
+use core.compress.gzip as gz
 
 fn run() {
 original: [U8] :: [72, 101, 108, 108, 111]
-    compressed :: ar.gzip_compress(original)
+    compressed :: gz.compress(original)
     print((compressed.len() > 5))
-    restored :: ar.gzip_decompress(compressed)
+    restored :: gz.decompress(compressed) ?? panic("bad gzip")
     print((restored == original))
 }
 "#;
-    let out = run_archive(src);
+    let out = run_core_bridge(src);
     assert_eq!(out, "true\ntrue\n", "gzip round-trip failed: {out:?}");
 }
 
 #[test]
-fn gzip_compress_reduces_repetitive_data() {
+fn archive_zip_and_tar_round_trip_bytes() {
     if !have_toolchain() {
         eprintln!("note: cargo/rustc not found; skipping core.archive integration test");
         return;
     }
-    // Highly repetitive data compresses to less than its original length.
     let src = r#"
 use core.archive as ar
 
 fn run() {
-data: [U8] :: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                   0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    compressed :: ar.gzip_compress(data)
-    print((compressed.len() < data.len()))
-    restored :: ar.gzip_decompress(compressed)
-    print((restored.len() == data.len()))
+data: [U8] :: [72, 101, 108, 108, 111]
+    zipped :: ar.zip_compress("hello.txt", data)
+    print((ar.zip_decompress(zipped) == data))
+    empty: [U8] :: []
+    tarred :: ar.tar_add(empty, "hello.txt", data)
+    print((ar.tar_get(tarred, "hello.txt") == data))
+    print((ar.tar_names_json(tarred) == "[\"hello.txt\"]"))
 }
 "#;
-    let out = run_archive(src);
+    let out = run_core_bridge(src);
     assert_eq!(
-        out, "true\ntrue\n",
-        "compression/decompression of repetitive data failed: {out:?}"
+        out, "true\ntrue\ntrue\n",
+        "zip/tar byte round-trip failed: {out:?}"
     );
 }
 

@@ -107,11 +107,9 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     // still an open gap at comptime, but out of this test's coverage either
     // way; left for a future card rather than folded into this one's scope.
     //
-    // core.archive / core.compress.*: gzip/zip/tar/zstd — needs a hand-rolled
+    // core.archive / core.compress.*: zip/tar and gzip/zstd — needs a hand-rolled
     // (I6) compression implementation ported into the interpreter, not a
     // one-line Rust std call.
-    ("core.archive", "gzip_compress"),
-    ("core.archive", "gzip_decompress"),
     ("core.archive", "tar_add"),
     ("core.archive", "tar_get"),
     ("core.archive", "tar_names_json"),

@@ -1,17 +1,16 @@
-// core.compress runtime (D-CODECS1) — standalone gzip/zstd codecs.
+// core.compress runtime (D-CORE-COMPRESS1=A / D-CODECS1) — gzip/zstd streams.
 //
 // This file is emitted verbatim into the hidden FFI bridge crate (see
 // Source/FFI.rs) when a Jet program uses `core.compress.gzip` or
 // `core.compress.zstd`. The compiler crate (`Source/`) never depends on
 // `flate2` or `zstd`; it only ships this text. Owner-approved I6 bootstrap
-// exception (same posture as `core.archive`, D-DEP-ARCHIVE1): `flate2`
+// exception (same approved dependency family as D-DEP-ARCHIVE1): `flate2`
 // (pure-Rust, `miniz_oxide` back-end) and `zstd` (Rust binding, vendors and
 // builds the C zstd source via `zstd-sys`) live inside the `core.compress`
 // ring package and are built from vendored/fetched source. Native-ize
 // obligation before the end of Epoch 3 (I6).
 //
-// Unlike `core.archive`'s gzip (which silently returns an empty vec on
-// corrupt input), `core.compress` decompress is fallible end-to-end: a
+// Decompression is fallible end-to-end: a
 // malformed compressed stream is safety-critical misuse and must surface
 // as a Jet `Result` `Err`, not a silent empty buffer.
 
