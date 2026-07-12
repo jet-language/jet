@@ -13,6 +13,11 @@
 use std::io::{self, IsTerminal, Read};
 use std::process::{Command, Stdio};
 
+#[cfg(target_os = "linux")]
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(target_os = "linux")]
+use std::sync::Arc;
+
 /// RAII guard: puts the controlling terminal into raw mode and restores the
 /// saved `stty -g` state on drop — including on panic (this workspace does
 /// not set `panic = "abort"`, so unwinding still runs `Drop`). Must never be
@@ -79,6 +84,121 @@ impl RawGuard {
 impl Drop for RawGuard {
     fn drop(&mut self) {
         self.restore_now();
+    }
+}
+
+/// D-FE-REPL-INTERRUPT1=A: temporary SIGINT delivery while one raw REPL
+/// submission evaluates. Editing keeps `-isig` so Ctrl-C remains a decoded
+/// key; evaluation enables `isig` so a tight interpreter loop can be stopped
+/// without a second stdin reader racing the editor.
+pub struct EvaluationInterruptGuard {
+    #[cfg(target_os = "linux")]
+    saved_terminal: String,
+    #[cfg(target_os = "linux")]
+    previous_handler: usize,
+    #[cfg(target_os = "linux")]
+    stop_watcher: Arc<AtomicBool>,
+    #[cfg(target_os = "linux")]
+    watcher: Option<std::thread::JoinHandle<()>>,
+}
+
+#[cfg(target_os = "linux")]
+unsafe extern "C" {
+    fn signal(signal: i32, handler: usize) -> usize;
+}
+
+#[cfg(target_os = "linux")]
+extern "C" fn note_evaluation_interrupt(_: i32) {
+    crate::Comptime::note_repl_interrupt();
+    crate::Comptime::warn_repl_runtime_call_stopping();
+}
+
+impl EvaluationInterruptGuard {
+    pub fn enable() -> Option<Self> {
+        #[cfg(not(target_os = "linux"))]
+        {
+            None
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let saved = Command::new("stty")
+                .arg("-g")
+                .stdin(Stdio::inherit())
+                .stderr(Stdio::null())
+                .output()
+                .ok()?;
+            if !saved.status.success() {
+                return None;
+            }
+            let saved_terminal = String::from_utf8_lossy(&saved.stdout).trim().to_string();
+            if saved_terminal.is_empty() {
+                return None;
+            }
+            crate::Comptime::begin_repl_interruptible_turn();
+            let previous_handler = unsafe { signal(2, note_evaluation_interrupt as *const () as usize) };
+            let enabled = Command::new("stty")
+                .arg("isig")
+                .stdin(Stdio::inherit())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .is_ok_and(|status| status.success());
+            if !enabled {
+                unsafe { signal(2, previous_handler) };
+                crate::Comptime::end_repl_interruptible_turn();
+                return None;
+            }
+            let stop_watcher = Arc::new(AtomicBool::new(false));
+            let stop = stop_watcher.clone();
+            let watcher = std::thread::spawn(move || {
+                let mut waiting_since = None;
+                let mut warned = false;
+                while !stop.load(Ordering::SeqCst) {
+                    if crate::Comptime::repl_interrupt_count() > 0
+                        && crate::Comptime::repl_runtime_call_active()
+                    {
+                        let since = waiting_since.get_or_insert_with(std::time::Instant::now);
+                        if !warned && since.elapsed() >= std::time::Duration::from_millis(100) {
+                            crate::Comptime::warn_repl_runtime_call_stopping();
+                            warned = true;
+                        }
+                    } else {
+                        waiting_since = None;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+            });
+            Some(Self {
+                saved_terminal,
+                previous_handler,
+                stop_watcher,
+                watcher: Some(watcher),
+            })
+        }
+    }
+
+    pub fn count(&self) -> usize {
+        crate::Comptime::repl_interrupt_count()
+    }
+}
+
+impl Drop for EvaluationInterruptGuard {
+    fn drop(&mut self) {
+        #[cfg(target_os = "linux")]
+        {
+            self.stop_watcher.store(true, Ordering::SeqCst);
+            if let Some(watcher) = self.watcher.take() {
+                let _ = watcher.join();
+            }
+            let _ = Command::new("stty")
+                .arg(&self.saved_terminal)
+                .stdin(Stdio::inherit())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+            unsafe { signal(2, self.previous_handler) };
+            crate::Comptime::end_repl_interruptible_turn();
+        }
     }
 }
 
@@ -239,6 +359,7 @@ pub fn terminal_width() -> usize {
             parts.next()?; // rows
             parts.next()?.parse::<usize>().ok() // cols
         })
+        .filter(|width| *width > 0)
         .unwrap_or(80)
 }
 

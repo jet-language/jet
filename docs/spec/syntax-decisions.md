@@ -1573,6 +1573,17 @@ Escape then Enter always inserts a newline. Enter on an empty continuation
 line force-submits. One-line Enter stays unchanged. Cooked and non-TTY input
 keeps bracket-balance continuation.
 
+**D-FE-REPL-INTERRUPT1=A (ratified 2026-07-11)**: Ctrl-C during raw REPL
+evaluation interrupts the current turn while keeping prior session state.
+Jet-controlled execution polls every interpreter instruction and before and
+after runtime calls, returning to a restored prompt within 100 ms. Blocking
+external calls follow their cancellation contracts and produce a visible
+still-stopping warning. No bindings from the interrupted turn commit; prior
+external effects remain and the REPL says so. The turn is recorded as
+`interrupted` and remains rerunnable. A second Ctrl-C during the active turn
+exits the REPL; outside evaluation, Ctrl-C clears nonempty input first and
+exits from an empty prompt.
+
 ### Core library
 
 **S9 — Print**: `print` (adds newline).

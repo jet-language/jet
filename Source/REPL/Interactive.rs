@@ -59,7 +59,11 @@ pub(crate) fn run_interactive(project_dir: Option<&str>, color: bool, mut guard:
                 let turns_before = session.turns.len();
                 let mut prompt = InteractiveEffectPrompt { reader: &mut reader, guard: &mut guard };
                 let mut authorizer = policy.authorizer(Some(&mut prompt));
-                if execute_line(&trimmed, &mut session, &base_dir, color, true, false, &mut authorizer) {
+                let interrupt = super::Terminal::EvaluationInterruptGuard::enable();
+                let quit = execute_line(&trimmed, &mut session, &base_dir, color, true, false, &mut authorizer);
+                let double_interrupt = interrupt.as_ref().is_some_and(|guard| guard.count() >= 2);
+                drop(interrupt);
+                if quit || double_interrupt {
                     break;
                 }
                 if bindings_pane_visible && session.turns.len() > turns_before {

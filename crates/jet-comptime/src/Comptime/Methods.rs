@@ -1073,6 +1073,11 @@ impl<'a> Interp<'a> {
                 for a in args {
                     argv.push(self.eval(&a.expr, scope)?);
                 }
+                // D-FE-REPL-INTERRUPT1=A: poll before and after every Core
+                // runtime call. Long host calls stay marked so the raw UI can
+                // explain why cancellation has not returned yet.
+                self.poll_repl_interrupt();
+                let _runtime_call = super::ReplRuntimeCallGuard::new(self.repl_interruptible);
                 // Card #392 pass 5: `core.data`'s typed table/lazy pipeline — a
                 // generic call-site-typed surface built from ordinary Jet
                 // lambdas over dynamically-typed `CtValue` rows, so (unlike
@@ -1855,6 +1860,8 @@ unsafe extern "C" {
 
 #[cfg(target_os = "linux")]
 extern "C" fn forward_repl_interrupt(signal_number: i32) {
+    super::note_repl_interrupt();
+    super::warn_repl_runtime_call_stopping();
     let group = REPL_CHILD_GROUP.load(std::sync::atomic::Ordering::Relaxed);
     if group > 0 {
         unsafe { kill(-group, signal_number) };
