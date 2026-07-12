@@ -121,7 +121,7 @@ fn workspace_crates_keep_declared_dependency_direction() {
     assert_deps("crates/jet-net/Cargo.toml", &[]);
     assert_deps(
         "crates/jet-semindex/Cargo.toml",
-        &["jet-driver", "jet-foundation", "jet-lexer", "jet-sema"],
+        &["jet-driver", "jet-foundation", "jet-sema"],
     );
     assert_deps("crates/jet-impact/Cargo.toml", &["jet-semindex"]);
     assert_deps(
@@ -211,7 +211,9 @@ fn direct_jetpack_imports_stay_behind_known_boundaries() {
                 .unwrap()
                 .to_string_lossy()
                 .replace('\\', "/");
-            if rel.contains("/tests/") || code_text.contains("use jetpack as pkg;") {
+            // The boundary test audits consumers, not Jetpack's own source or
+            // embedded test fixtures.
+            if rel.contains("/tests/") || rel.starts_with("crates/jetpack/") {
                 continue;
             }
             actual.insert(rel);
