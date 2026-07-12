@@ -1,3 +1,5 @@
+use super::*;
+
 /// c109 Phase 6: format call/method arguments, reproducing `emit_call_args`
 /// (Source/Codegen/Expression.rs) byte-for-byte. The clone wrapper (`.clone()` or
 /// `Arc::clone(&…)`) is applied to the raw value first, then the borrow wrapper
@@ -74,7 +76,7 @@ pub(crate) fn emit_tir_str(parts: &[TStrPart], cx: &Cx) -> String {
 }
 
 /// Walk a lowered select-builder chain and collect channel/timer arm expressions.
-fn collect_select_arms(builder: &TExpr, cx: &Cx) -> (Vec<String>, Vec<String>) {
+pub(super) fn collect_select_arms(builder: &TExpr, cx: &Cx) -> (Vec<String>, Vec<String>) {
     let mut recvs = Vec::new();
     let mut afters = Vec::new();
     let mut cur = builder;
@@ -111,7 +113,7 @@ fn collect_select_arms(builder: &TExpr, cx: &Cx) -> (Vec<String>, Vec<String>) {
 }
 
 /// D-SWIZZLE1: render a read swizzle as lane extract(s) and optional `VecN` ctor.
-fn emit_math_swizzle_read(cx: &Cx, type_name: &str, recv: &TExpr, lanes: &[u8]) -> String {
+pub(super) fn emit_math_swizzle_read(cx: &Cx, type_name: &str, recv: &TExpr, lanes: &[u8]) -> String {
     let r = emit_tir_expr(recv, cx);
     if lanes.len() == 1 {
         return format!("({r}).0[{}]", lanes[0] as usize);
@@ -161,7 +163,7 @@ fn emit_math_swizzle_read(cx: &Cx, type_name: &str, recv: &TExpr, lanes: &[u8]) 
 }
 
 /// D-SWIZZLE1: render a write swizzle as ordered lane stores.
-fn emit_math_swizzle_assign_stmt(base: &str, type_name: &str, lanes: &[u8], value: &str) -> String {
+pub(super) fn emit_math_swizzle_assign_stmt(base: &str, type_name: &str, lanes: &[u8], value: &str) -> String {
     if lanes.len() == 1 {
         let lane = lanes[0] as usize;
         let val = if type_name == "F32x4" {

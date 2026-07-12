@@ -1,3 +1,5 @@
+use super::*;
+use super::helpers::is_pod_uninit_type;
 pub(crate) fn check_meta_attr_fields(meta: &MetaAttr) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
     let mut seen_category = false;

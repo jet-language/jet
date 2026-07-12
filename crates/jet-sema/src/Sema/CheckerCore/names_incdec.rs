@@ -1,3 +1,4 @@
+use super::*;
 impl<'a> Checker<'a> {
         /// Declare one name bound by a destructuring pattern (S74).
         pub(crate) fn declare_bound(&mut self, name: &str, span: Span, ty: Type, mutable: bool) {

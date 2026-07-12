@@ -110,42 +110,6 @@ fn lower_spawn_function(
     Ok(())
 }
 
-fn stmt_has_return(stmts: &[TStmt]) -> bool {
-    stmts.iter().any(|s| match s {
-        TStmt::Return(_) => true,
-        TStmt::If {
-            then_body,
-            else_body,
-            ..
-        } => stmt_has_return(then_body) || else_body.as_ref().is_some_and(|b| stmt_has_return(b)),
-        TStmt::Loop { body, .. }
-        | TStmt::While { body, .. }
-        | TStmt::Range { body, .. }
-        | TStmt::ForIn { body, .. }
-        | TStmt::Region(body) => stmt_has_return(body),
-        TStmt::CountedLoop {
-            init, step, body, ..
-        } => {
-            stmt_has_return(std::slice::from_ref(init))
-                || stmt_has_return(std::slice::from_ref(step))
-                || stmt_has_return(body)
-        }
-        TStmt::EnumMatch {
-            arms, else_body, ..
-        } => {
-            arms.iter().any(|a| stmt_has_return(&a.body))
-                || else_body.as_ref().is_some_and(|b| stmt_has_return(b))
-        }
-        TStmt::MixedSwitch {
-            arms, else_body, ..
-        } => {
-            arms.iter().any(|(_, b)| stmt_has_return(b))
-                || else_body.as_ref().is_some_and(|b| stmt_has_return(b))
-        }
-        _ => false,
-    })
-}
-
 fn lower_function(
     module: &mut JITModule,
     host: &HostFns,
@@ -213,11 +177,11 @@ fn lower_function(
         }
 
         lctx.lower_stmts(&tir.body)?;
-        if !stmt_has_return(&tir.body) {
+        if !lctx.dead {
             if let Some(ret) = &tir.ret {
-                if tir.name == "run"
-                    && matches!(ret, Type::Result { ok, .. }
-                        if matches!(ok.as_ref(), Type::Named(n) if n == "Void" || n == "Unit"))
+                if matches!(ret, Type::Result { ok, err }
+                    if matches!(ok.as_ref(), Type::Named(n) if n == "Void" || n == "Unit")
+                        && matches!(err.as_ref(), Type::Named(n) if n == "Error"))
                 {
                     let tag = lctx.b.ins().iconst(types::I8, 1);
                     let unit = lctx.b.ins().iconst(types::I64, 0);

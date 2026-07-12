@@ -1118,6 +1118,7 @@ fn emit_test_main_cov(tests: &[&TestDef], out: &mut String, coverage: bool) {
     out.push_str("#[derive(Clone, Copy)]\n");
     out.push_str("struct JetTestSlot { name: &'static str, skip: bool, run: fn() -> Result<(), String> }\n");
     out.push_str("fn main() {\n");
+    out.push_str("    jet_std_env_init();\n");
     out.push_str("    let mut slots: Vec<JetTestSlot> = vec![\n");
     for (i, test) in tests.iter().enumerate() {
         let name = escape_rust_str(&test.name);
@@ -1786,6 +1787,7 @@ fn emit_fuzz_main(cx: &Cx, test: &TestDef, idx: usize, file_label: &str, out: &m
     let file_lit = escape_rust_str(file_label);
 
     out.push_str("fn main() {\n");
+    out.push_str("    jet_std_env_init();\n");
     out.push_str("    let corpus_dir = std::env::var(\"JET_FUZZ_CORPUS\").unwrap_or_else(|_| \".jet-fuzz-corpus\".to_string());\n");
     out.push_str("    let _ = std::fs::create_dir_all(&corpus_dir);\n");
     out.push_str("    let iterations: u64 = std::env::var(\"JET_FUZZ_ITERATIONS\").ok().and_then(|s| s.parse().ok()).unwrap_or(1000);\n");
@@ -2041,6 +2043,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
     }
 
     out.push_str("fn main() {\n");
+    out.push_str("    jet_std_env_init();\n");
     for (i, bench) in benches.iter().enumerate() {
         let name = escape_rust_str(&bench.name);
         out.push_str(&format!(

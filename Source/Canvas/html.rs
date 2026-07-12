@@ -1,3 +1,5 @@
+use super::validation_json::json_escape;
+
 pub fn canvas_html() -> String {
     canvas_html_for("/canvas")
 }

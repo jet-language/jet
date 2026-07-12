@@ -1,3 +1,4 @@
+use super::*;
 /// D-UNINIT1 engine (reused by D-UNINIT-SENTINEL1): a `:= uninit` binding is
 /// restricted to plain-data ("POD") types — no heap ownership, no Drop glue —
 /// so an uninitialized value can never expose freed/owned state. v1 allows
@@ -16,7 +17,7 @@ pub(crate) fn is_pod_uninit_type(ty: &Type) -> bool {
 /// within one `layout { … }` block. Not a general expression hasher — it
 /// only needs to be stable and injective enough for the small shapes a
 /// constraint line can take (`Binary`/`MethodCall`/`Ident`/literals).
-fn layout_constraint_fingerprint(e: &Expr) -> String {
+pub(super) fn layout_constraint_fingerprint(e: &Expr) -> String {
     match e {
         Expr::Binary(op, l, r, _) => format!(
             "({} {:?} {})",
@@ -48,7 +49,7 @@ fn layout_constraint_fingerprint(e: &Expr) -> String {
     }
 }
 
-fn no_any_type(span: Span) -> Diagnostic {
+pub(super) fn no_any_type(span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0350",
         "Jet does not have an `Any` type".to_string(),

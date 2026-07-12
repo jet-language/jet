@@ -1,3 +1,5 @@
+use super::*;
+
 pub(crate) fn emit_tir_stmts(stmts: &[TStmt], cx: &Cx, out: &mut String, indent: usize) {
     for s in stmts {
         emit_tir_stmt(s, cx, out, indent);

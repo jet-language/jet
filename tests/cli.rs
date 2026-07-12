@@ -747,6 +747,9 @@ fn completions_generate_for_every_shell() {
             shell
         );
         let s = String::from_utf8_lossy(&out.stdout);
+        for flag in ["--structural", "--out", "--report", "--repo"] {
+            assert!(s.contains(flag), "{shell} completion missing {flag}");
+        }
         check_snapshot(&format!("completions_{}.txt", shell), &s);
     }
 }
@@ -757,6 +760,9 @@ fn man_page_golden() {
     let mut s = String::from_utf8_lossy(&out.stdout).into_owned();
     // Scrub the version so the snapshot is stable across releases.
     s = s.replace(env!("CARGO_PKG_VERSION"), "VERSION");
+    for flag in ["--structural", "--out", "--report", "--repo"] {
+        assert!(s.contains(flag), "man page missing {flag}");
+    }
     check_snapshot("man.txt", &s);
 }
 

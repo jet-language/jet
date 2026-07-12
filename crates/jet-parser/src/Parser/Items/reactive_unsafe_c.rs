@@ -1,3 +1,5 @@
+use super::super::{Diagnostic, Func, Parser, Span, StrTokPart, Syntax, TokKind, describe};
+
 impl<'a> Parser<'a> {
         /// D-REACTCORE1: is the cursor at `#Reactive fn …` or `#Reactive pub fn …`?
         pub(crate) fn at_reactive_fn(&self) -> bool {
@@ -25,7 +27,7 @@ impl<'a> Parser<'a> {
         }
     
         /// True when `fn` / `pub fn` follows a web partition marker, allowing a line break.
-        fn token_after_web_marker_is_fn(&self, start: usize) -> bool {
+        pub(super) fn token_after_web_marker_is_fn(&self, start: usize) -> bool {
             let mut i = self.pos + start;
             while i < self.toks.len() {
                 match &self.toks[i].kind {
@@ -71,7 +73,7 @@ impl<'a> Parser<'a> {
         }
     
         /// D-UNSAFE2: is the cursor at `#Unsafe fn …` or `#Unsafe("…") fn …`?
-        fn at_unsafe_fn(&self) -> bool {
+        pub(super) fn at_unsafe_fn(&self) -> bool {
             if !matches!(self.peek().kind, TokKind::Hash) {
                 return false;
             }
@@ -100,7 +102,7 @@ impl<'a> Parser<'a> {
         /// D-UNSAFE2 (ratified 2026-06-22, opt B): parse `#Unsafe("reason") fn …`
         /// or bare `#Unsafe fn …` (reason-less; L3101 fires in sema). The body is
         /// checked like any other fn; the contract is enforced at call sites (E3103).
-        fn unsafe_fn(&mut self) -> Result<Func, Diagnostic> {
+        pub(super) fn unsafe_fn(&mut self) -> Result<Func, Diagnostic> {
             let start = self.peek().span;
             self.expect(TokKind::Hash, "before `Unsafe`")?;
             self.expect_kw(TokKind::KwUnsafe, "to mark a whole-function contract")?;
@@ -152,7 +154,7 @@ impl<'a> Parser<'a> {
         /// S59 (E2-M14): is the cursor at the start of a C FFI module — `#Extern
         /// module …` or `#Bindgen module …`? Retired lowercase markers are also
         /// recognized here so E0060 can recover to the canonical form.
-        fn at_c_module(&self) -> bool {
+        pub(super) fn at_c_module(&self) -> bool {
             if !matches!(self.peek().kind, TokKind::Hash) {
                 return false;
             }
@@ -168,7 +170,7 @@ impl<'a> Parser<'a> {
             intro_is_c && matches!(self.peek3().kind, TokKind::KwModule)
         }
     
-        fn at_retired_at_c_module(&self) -> bool {
+        pub(super) fn at_retired_at_c_module(&self) -> bool {
             if !matches!(self.peek().kind, TokKind::At) {
                 return false;
             }
@@ -183,7 +185,7 @@ impl<'a> Parser<'a> {
         /// S59 (E2-M14): parse `#Extern module c.<lib> { … }` (overlay) or
         /// `#Bindgen module c.<lib>.__bindgen__ { … }` (generated cache). Body
         /// declarations share the `extern_fn` shape (`fn name(args) -> T = "Sym";`).
-        fn c_module(&mut self) -> Result<crate::AST::CModule, Diagnostic> {
+        pub(super) fn c_module(&mut self) -> Result<crate::AST::CModule, Diagnostic> {
             use crate::AST::CModuleKind;
             let start = self.bump().span; // `#`
             let kind = match &self.peek().kind {
@@ -227,7 +229,7 @@ impl<'a> Parser<'a> {
             self.c_module_after_kind(start, kind)
         }
     
-        fn retired_at_c_module(&mut self) -> Result<crate::AST::CModule, Diagnostic> {
+        pub(super) fn retired_at_c_module(&mut self) -> Result<crate::AST::CModule, Diagnostic> {
             use crate::AST::CModuleKind;
             let start = self.bump().span; // `@`
             let kind = match &self.peek().kind {
@@ -374,7 +376,7 @@ impl<'a> Parser<'a> {
             })
         }
     
-        pub(super) fn expect_plain_string(
+        pub(in crate::Parser) fn expect_plain_string(
             &mut self,
             context: &str,
             why_interp: &str,

@@ -1377,6 +1377,50 @@ fn run_cranelift_outcome(src: &str, tag: &str) -> ProgramOutput {
     }
 }
 
+struct RejectJitFallback;
+
+impl JitBackend for RejectJitFallback {
+    fn run(&mut self, _: &jet::AST::ProgramBundle, _: bool) -> RunOutcome {
+        panic!("resident JIT unexpectedly used its fallback")
+    }
+
+    fn hot_swap(
+        &mut self,
+        _: &str,
+        _: &jet::AST::ProgramBundle,
+        _: bool,
+    ) -> Result<RunOutcome, Vec<jet::Diagnostics::Diagnostic>> {
+        panic!("resident JIT unexpectedly used its fallback")
+    }
+
+    fn restart(&mut self, _: &jet::AST::ProgramBundle, _: bool) -> RunOutcome {
+        panic!("resident JIT unexpectedly used its fallback")
+    }
+}
+
+fn run_cranelift_without_fallback(src: &str, tag: &str) -> ProgramOutput {
+    let p = std::env::temp_dir().join(format!("jet_jit_no_fallback_{tag}.jet"));
+    fs::write(&p, src).unwrap();
+    let shown = p.to_string_lossy().to_string();
+    let bundle = checked_bundle_from_path(&shown);
+    assert!(
+        jet_jit::resident_jit_safe_bundle(&bundle),
+        "`{tag}` must use resident JIT: {}",
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+    );
+    jet_jit::try_compile_bundle(&bundle)
+        .unwrap_or_else(|e| panic!("`{tag}` JIT compile failed: {e}"));
+    let mut backend = CraneliftBackend::new(RejectJitFallback);
+    match backend.run(&bundle, false) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(ds) => panic!("`{tag}` JIT returned diagnostics: {ds:?}"),
+    }
+}
+
 #[test]
 fn resident_jit_result_abi_covers_calls_ok_err_try_and_entry() {
     if skip_if_cranelift_host_unsupported() {
@@ -1427,6 +1471,103 @@ fn run() -> Void ? {
         };
         assert_eq!(interpreted, expected, "JIT/interpreter Result drift for `{tag}`");
     }
+}
+
+#[test]
+fn resident_jit_fallible_void_cfg_fallthrough_matches_aot() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let src = r#"
+fn plain() -> Void ? {
+    print("plain fallthrough")
+}
+
+fn one_arm(stop: Bool) -> Void ? {
+    if stop {
+        return err("helper stopped")
+    }
+    print("helper fallthrough")
+}
+
+fn run() -> Void ? {
+    plain()?
+    one_arm(false)?
+    if false {
+        return err("run stopped")
+    }
+    print("run fallthrough")
+}
+"#;
+    let expected = ProgramOutput::ran(
+        "plain fallthrough\nhelper fallthrough\nrun fallthrough\n".into(),
+        "".into(),
+        0,
+    );
+    assert_eq!(
+        run_cranelift_without_fallback(src, "fallible_void_cfg"),
+        expected,
+        "resident JIT must synthesize Ok on every reachable fallthrough"
+    );
+
+    let path = std::env::temp_dir().join("jet_jit_fallible_void_cfg.jet");
+    fs::write(&path, src).unwrap();
+    let shown = path.to_string_lossy().to_string();
+    let dir = std::env::temp_dir().join(format!("jet_jit_fallible_void_cfg_{}", std::process::id()));
+    assert_eq!(
+        compiled_binary_output(&dir, "fallible_void_cfg", 0, "fallible_void_cfg", &shown),
+        expected,
+        "AOT and resident JIT fallthrough semantics must match"
+    );
+
+    let terminating_cfg = r#"
+fn direct_ok() -> Int ? {
+    return ok(7)
+}
+
+fn both_arms(stop: Bool) -> Void ? {
+    if stop {
+        return err("left branch")
+    } else {
+        return err("right branch")
+    }
+}
+
+fn direct_err() -> Int ? {
+    return err("direct error")
+}
+
+fn run() -> Void ? {
+    print(direct_ok()?)
+    both_arms(true)?
+    print(direct_err()?)
+}
+"#;
+    let expected_err = ProgramOutput::ran("7\n".into(), "left branch\n".into(), 1);
+    assert_eq!(
+        run_cranelift_without_fallback(terminating_cfg, "fallible_void_terminating_cfg"),
+        expected_err,
+        "direct and both-arm terminators must not receive a second terminator"
+    );
+
+    let err_path = std::env::temp_dir().join("jet_jit_fallible_void_terminating_cfg.jet");
+    fs::write(&err_path, terminating_cfg).unwrap();
+    let err_shown = err_path.to_string_lossy().to_string();
+    let err_dir = std::env::temp_dir().join(format!(
+        "jet_jit_fallible_void_direct_err_{}",
+        std::process::id()
+    ));
+    assert_eq!(
+        compiled_binary_output(
+            &err_dir,
+            "fallible_void_terminating_cfg",
+            0,
+            "fallible_void_terminating_cfg",
+            &err_shown,
+        ),
+        expected_err,
+        "AOT and resident JIT direct Err semantics must match"
+    );
 }
 
 #[test]

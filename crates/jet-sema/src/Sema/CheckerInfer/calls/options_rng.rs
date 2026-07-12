@@ -1,3 +1,4 @@
+use super::*;
 impl<'a> Checker<'a> {
         /// D-DET-CAPAPI: the generic `Rng` draws — `rng.pick(list) -> T?` (uniform
         /// choice; null on empty) and `rng.shuffle(&list)` (in-place Fisher–Yates).
@@ -10,7 +11,7 @@ impl<'a> Checker<'a> {
         /// elaborated FIRST (out of source order — the closure `f` is written first but
         /// typed last), mirroring how `.zip` resolves its pair before a chained
         /// `.map(f)` would type its closure.
-        fn check_option_lift2(
+        pub(super) fn check_option_lift2(
             &mut self,
             args: &mut Vec<crate::AST::CallArg>,
             span: Span,
@@ -105,7 +106,7 @@ impl<'a> Checker<'a> {
         /// D-HOLE1: `a: T?`.zip(`b: U?`) -> `(a: T, b: U)?` — present only when both
         /// operands are present, `null` if either is. See the call site's comment for why
         /// this bypasses the flat builtin-method-arg table (heterogeneous `U`).
-        fn finish_option_zip(
+        pub(super) fn finish_option_zip(
             &mut self,
             a_inner: Type,
             args: &mut [crate::AST::CallArg],
@@ -144,7 +145,7 @@ impl<'a> Checker<'a> {
             Some(ret)
         }
     
-        fn finish_rng_generic(
+        pub(super) fn finish_rng_generic(
             &mut self,
             receiver: &Expr,
             method: &str,
@@ -267,7 +268,7 @@ impl<'a> Checker<'a> {
         /// fallback the general call path uses — `check_type_assignable` only
         /// reports its special shapes, so a plain mismatch (String where `[U8]`
         /// is wanted, `U16` where `Int` is wanted) must not pass silently.
-        fn check_shift_arg(&mut self, label: &str, want: &Type, arg: &mut crate::AST::CallArg) {
+        pub(super) fn check_shift_arg(&mut self, label: &str, want: &Type, arg: &mut crate::AST::CallArg) {
             let saved = self.expected_type.replace(want.clone());
             let got = self.infer(&mut arg.expr);
             self.expected_type = saved;

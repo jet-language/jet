@@ -1,3 +1,5 @@
+use super::*;
+
 /// D-COV1: 1-based line number of a byte offset in the source, for coverage probes.
 pub(crate) fn cov_line(cx: &Cx, offset: usize) -> usize {
     line_at_byte_offset(&cx.src, offset)

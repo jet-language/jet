@@ -1,8 +1,13 @@
+use super::super::{
+    Diagnostic, EnumDef, ImplDef, Item, Parser, Span, Syntax, TokKind, Token, TraitImplBlock,
+    Variant, VariantField, VariantPayload,
+};
+
 impl<'a> Parser<'a> {
         /// Parse `enum Name { … }` given that pub/is_pub was already handled. Factors
         /// out the body of `enum_def` (mirrors `struct_def_after_pub`) so the
         /// `#SingleUse enum` path can reuse it.
-        fn enum_def_after_pub(
+        pub(super) fn enum_def_after_pub(
             &mut self,
             is_pub: bool,
             is_package_pub: bool,
@@ -189,7 +194,7 @@ impl<'a> Parser<'a> {
     
         /// D-ERR-CONV (ratified 2026-06-19): dispatch `impl …` to either the normal
         /// `ImplDef` path or the `impl Source -> Target { body }` error-conversion path.
-        pub(super) fn impl_or_error_conv(&mut self) -> Result<Item, Diagnostic> {
+        pub(in crate::Parser) fn impl_or_error_conv(&mut self) -> Result<Item, Diagnostic> {
             let item_start = self.peek().span.start;
             self.expect_kw(TokKind::KwImpl, "to start an `impl` block")?;
             // D-IMPLDOT1=A: trait impl is `impl Type.Trait { … }`. D-PROTO1/D-PROTO2 add
@@ -323,7 +328,7 @@ impl<'a> Parser<'a> {
         /// stamps the OS gate onto the resulting `ImplDef` afterward — no need to
         /// thread a new parameter through every `impl` parse path or its other
         /// caller (`Modules.rs`'s inline-module item loop calls this same helper).
-        pub(super) fn os_gated_impl(
+        pub(in crate::Parser) fn os_gated_impl(
             &mut self,
             os: crate::Syntax::OsTarget,
         ) -> Result<Item, Diagnostic> {
@@ -360,7 +365,7 @@ impl<'a> Parser<'a> {
         }
     
         /// S28: `impl Trait { … }` inside a struct/enum body.
-        fn trait_impl_block(&mut self) -> Result<TraitImplBlock, Diagnostic> {
+        pub(super) fn trait_impl_block(&mut self) -> Result<TraitImplBlock, Diagnostic> {
             self.expect_kw(TokKind::KwImpl, "to start a trait impl block")?;
             let (trait_name, trait_span) = self.expect_ident("after `impl`")?;
             self.expect(TokKind::LBrace, "to open the trait impl body")?;
@@ -399,7 +404,7 @@ impl<'a> Parser<'a> {
         }
     
         /// S55: `derive Comparable;` inside a type body.
-        fn derive_line(&mut self) -> Result<(String, Span), Diagnostic> {
+        pub(super) fn derive_line(&mut self) -> Result<(String, Span), Diagnostic> {
             let start = self.bump().span;
             let (trait_name, _) = self.expect_ident("after `derive`")?;
             self.finish_stmt()?;
@@ -407,18 +412,18 @@ impl<'a> Parser<'a> {
         }
     
         /// True when the cursor is at a `#[ … ]` bracket-marker group (D-ATTR2).
-        pub(super) fn at_marker_list(&self) -> bool {
+        pub(in crate::Parser) fn at_marker_list(&self) -> bool {
             matches!(self.peek().kind, TokKind::Hash) && matches!(self.peek2().kind, TokKind::LBracket)
         }
     
         /// D-MARKER-FAMILY1/G2: true at a `@[ … ]` contract-derive bracket group —
         /// the `@` sibling of `at_marker_list`.
-        pub(super) fn at_contract_marker_list(&self) -> bool {
+        pub(in crate::Parser) fn at_contract_marker_list(&self) -> bool {
             matches!(self.peek().kind, TokKind::At) && matches!(self.peek2().kind, TokKind::LBracket)
         }
     
         /// D-ATTR1/D-MARKER-CANON1: a PascalCase `#Marker` immediately before `struct`/`enum`.
-        pub(super) fn at_single_type_marker(&self) -> bool {
+        pub(in crate::Parser) fn at_single_type_marker(&self) -> bool {
             if !matches!(self.peek().kind, TokKind::Hash) {
                 return false;
             }
@@ -434,7 +439,7 @@ impl<'a> Parser<'a> {
         /// D-MARKER-FAMILY1/G3: a PascalCase `@Marker` immediately before
         /// `struct`/`enum` — the `@` sibling of `at_single_type_marker` (contract
         /// derives: Codable, Encode, Decode, Debug, Summarize, Comparable).
-        pub(super) fn at_single_contract_type_marker(&self) -> bool {
+        pub(in crate::Parser) fn at_single_contract_type_marker(&self) -> bool {
             if !matches!(self.peek().kind, TokKind::At) {
                 return false;
             }

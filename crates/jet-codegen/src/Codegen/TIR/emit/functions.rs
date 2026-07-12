@@ -1,3 +1,5 @@
+use super::*;
+
 /// Emit a covered function from its TIR, reusing the same pure formatting helpers
 /// as `emit_func` so the output is byte-identical to the AST path (golden parity).
 /// The only difference is that every decision is *read off the TIR* rather than

@@ -1,3 +1,4 @@
+use super::*;
 /// D-MUSTUSE1 (c18iwxqx): built-in handle types whose bare statement result must
 /// not be silently ignored (E0419). `scope.guard` returns `ScopeGuard` — bind it
 /// or cleanup runs at end of the statement, not scope exit. `TransactionGuard` is
@@ -365,7 +366,7 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
 }
 
 impl<'a> Checker<'a> {
-    fn check_game_run_scene_edit(&mut self, expr: &Expr) {
+    pub(super) fn check_game_run_scene_edit(&mut self, expr: &Expr) {
         let Some(root) = expr_root_ident(expr) else {
             self.diags.push(Diagnostic::error(
                 "E0202",
@@ -393,7 +394,7 @@ impl<'a> Checker<'a> {
     }
 }
 
-fn game_run_label_error(
+pub(super) fn game_run_label_error(
     diags: &mut Vec<Diagnostic>,
     label: &str,
     arg: &crate::AST::CallArg,

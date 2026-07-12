@@ -1,3 +1,5 @@
+use super::*;
+
 /// D-INCR1: Rust place string for `++`/`--` read/update on an lvalue operand.
 fn lower_incdec_place(operand: &Expr, cx: &Cx, env: &mut LowerEnv) -> String {
     match operand {

@@ -47,13 +47,6 @@ fn jet_process_command(
     } else {
         jet_std_env_snapshot_raw()
     };
-    for name in &spec.env_remove {
-        jet_env_validate_name(name).map_err(|error| jet_std::IoError::Other {
-            message: error.jet_show(),
-        })?;
-        let name = std::ffi::OsStr::new(name);
-        child_env.retain(|(candidate, _)| !jet_env_key_eq(candidate.as_os_str(), name));
-    }
     for (name, value) in &spec.env_set {
         jet_env_validate_name(name).map_err(|error| jet_std::IoError::Other {
             message: error.jet_show(),
@@ -66,6 +59,13 @@ fn jet_process_command(
             !jet_env_key_eq(candidate.as_os_str(), os_name.as_os_str())
         });
         child_env.push((os_name, std::ffi::OsString::from(value)));
+    }
+    for name in &spec.env_remove {
+        jet_env_validate_name(name).map_err(|error| jet_std::IoError::Other {
+            message: error.jet_show(),
+        })?;
+        let name = std::ffi::OsStr::new(name);
+        child_env.retain(|(candidate, _)| !jet_env_key_eq(candidate.as_os_str(), name));
     }
     command.env_clear();
     command.envs(child_env);

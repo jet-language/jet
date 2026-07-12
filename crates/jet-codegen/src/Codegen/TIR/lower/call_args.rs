@@ -1,3 +1,5 @@
+use super::*;
+
 /// Last expression-producing statement in a lambda block (mirrors sema tail rules).
 /// Only the **final** statement may be a tail; an earlier `send()`/`call()` followed
 /// by a loop is not a tail expression.

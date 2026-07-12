@@ -28,14 +28,17 @@ install-driver --repo <path>` installs the opt-in Git driver.
 ## Shipped contract
 
 `jet-semindex` emits one `DefinitionFact` per compiler-owned top-level item.
-`stable_id` hashes typed signature and AST ownership/slot shape. It survives
-formatting, source moves, symbol renames, and body-literal edits. `content_id`
-hashes normalized definition source and
+`stable_id` hashes compiler-owned semantic ancestry and definition kind, never
+signature or body shape. Same-kind siblings can share this ancestry ID, so the
+merge engine uses it only when the remaining candidate is unique. `signature_id`
+classifies typed signature changes independently. All three identities survive
+formatting, source moves, and symbol renames as appropriate; `content_id` hashes normalized definition source and
 changes for semantic edits. Human spelling and paths stay separate from both
 machine identities.
 
-Structural diff matches stable identity first, then an unambiguous human
-identity from checked sema facts. Structural merge uses the base program as its
+Structural diff reserves exact checked identities first, then uses rename,
+signature, and ancestry identities only when each match is unambiguous.
+Structural merge uses the base program as its
 ancestry map. One-sided edits and edits to different definitions compose;
 overlapping edits, delete/edit pairs, competing additions, and ambiguous
 identity matches stop as typed conflicts. Merge output is formatted, reparsed,

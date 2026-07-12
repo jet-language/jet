@@ -13,11 +13,11 @@ use crate::AST::{
 };
 use std::collections::{HashMap, HashSet};
 
-include!("calls/helpers_call_values.rs");
-include!("calls/lambdas.rs");
-include!("calls/builtin_methods.rs");
-include!("calls/options_rng.rs");
-include!("calls/method_calls.rs");
-include!("calls/direct_calls.rs");
-include!("calls/variadic.rs");
-include!("calls/helpers.rs");
+mod helpers_call_values;
+mod lambdas;
+mod builtin_methods;
+mod options_rng;
+mod method_calls;
+mod direct_calls;
+mod variadic;
+mod helpers;

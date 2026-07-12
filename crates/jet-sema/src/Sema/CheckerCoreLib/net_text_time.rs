@@ -1,3 +1,4 @@
+use super::*;
 /// E2-M10: type-check a method call on a networking opaque type.
 /// Returns `Some(return_type)` when the method is valid.
 pub fn net_method_return(

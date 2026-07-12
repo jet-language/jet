@@ -1,6 +1,8 @@
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::super::fixed_sigs::core_fixed_sig;
+    use super::super::module_items::core_module_items;
+    use crate::AST::Type;
 
     #[test]
     fn raylib_skeleton_signatures_are_registered() {

@@ -1,4 +1,13 @@
-fn debug_ok(
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use crate::Diagnostics::Diagnostic;
+use jet_semindex::SourceSpan;
+
+use super::schema_api::source_revision;
+use super::validation_json::{json_str, json_string_field, json_usize_field, parse_json_string, span_json};
+
+pub(super) fn debug_ok(
     src: &str,
     graph_json: &str,
     transcript: &str,
@@ -42,7 +51,7 @@ fn debug_ok(
     )
 }
 
-fn debug_error(kind: &str, message: &str) -> String {
+pub(super) fn debug_error(kind: &str, message: &str) -> String {
     format!(
         "{{\"protocol\":\"jet.canvas.debug\",\"schema_version\":{},\"ok\":false,\"kind\":{},\"message\":{}}}",
         DEBUG_SCHEMA_VERSION,
@@ -51,14 +60,14 @@ fn debug_error(kind: &str, message: &str) -> String {
     )
 }
 
-fn debug_diagnostics_error(path: &Path, src: &str, diags: &[Diagnostic]) -> String {
+pub(super) fn debug_diagnostics_error(path: &Path, src: &str, diags: &[Diagnostic]) -> String {
     debug_error(
         "diagnostic",
         &crate::render_diagnostics(&path.display().to_string(), src, diags),
     )
 }
 
-fn required_debug_string(text: &str, key: &str) -> Result<String, String> {
+pub(super) fn required_debug_string(text: &str, key: &str) -> Result<String, String> {
     json_string_field(text, key)
         .ok_or_else(|| debug_error("bad_request", &format!("missing `{key}`")))
 }
@@ -119,7 +128,7 @@ fn line_of_offset(src: &str, offset: usize) -> usize {
         + 1
 }
 
-fn line_from_anchor(src: &str, anchor: &str) -> Option<usize> {
+pub(super) fn line_from_anchor(src: &str, anchor: &str) -> Option<usize> {
     let (start, _) = anchor.split_once(':')?;
     let offset = start.parse::<usize>().ok()?;
     Some(line_of_offset(src, offset))
@@ -159,7 +168,7 @@ fn record_id_for_span(json: &str, id_key: &str, active: SourceSpan) -> Option<St
     best.map(|(_, id)| id)
 }
 
-fn span_overlaps(a: SourceSpan, b: SourceSpan) -> bool {
+pub(super) fn span_overlaps(a: SourceSpan, b: SourceSpan) -> bool {
     a.start <= b.end && b.start <= a.end
 }
 
@@ -253,11 +262,11 @@ fn trace_json(transcript: &str) -> String {
         .join(",")
 }
 
-fn canonical_path(path: &Path) -> PathBuf {
+pub(super) fn canonical_path(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
-fn git_root(path: &Path) -> Option<PathBuf> {
+pub(super) fn git_root(path: &Path) -> Option<PathBuf> {
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
     let out = Command::new("git")
         .args(["-C"])
@@ -276,7 +285,7 @@ fn git_root(path: &Path) -> Option<PathBuf> {
     }
 }
 
-fn git_relative_path(root: &Path, path: &Path) -> String {
+pub(super) fn git_relative_path(root: &Path, path: &Path) -> String {
     let abs = canonical_path(path);
     let root = canonical_path(root);
     abs.strip_prefix(&root)
@@ -285,7 +294,7 @@ fn git_relative_path(root: &Path, path: &Path) -> String {
         .replace('\\', "/")
 }
 
-fn git_output(root: &Path, args: &[&str]) -> Option<String> {
+pub(super) fn git_output(root: &Path, args: &[&str]) -> Option<String> {
     let out = Command::new("git")
         .arg("-C")
         .arg(root)
@@ -299,7 +308,7 @@ fn git_output(root: &Path, args: &[&str]) -> Option<String> {
     }
 }
 
-fn untracked_diff(rel: &str, src: &str) -> String {
+pub(super) fn untracked_diff(rel: &str, src: &str) -> String {
     let mut diff = format!("--- /dev/null\n+++ b/{rel}\n");
     for line in src.lines() {
         diff.push('+');

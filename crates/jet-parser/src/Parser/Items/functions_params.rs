@@ -1,6 +1,11 @@
+use super::super::{
+    AccessConvention, Diagnostic, EnumDef, Func, MetaAttr, Param, Parser, Span, StructDef, Syntax,
+    TokKind, Type,
+};
+
 impl<'a> Parser<'a> {
         #[allow(clippy::too_many_arguments)]
-        fn func_after_fn(
+        pub(super) fn func_after_fn(
             &mut self,
             is_pub: bool,
             is_package_pub: bool,
@@ -179,7 +184,7 @@ impl<'a> Parser<'a> {
         }
     
         #[allow(clippy::too_many_arguments)]
-        fn bump_then_func_after_fn(
+        pub(super) fn bump_then_func_after_fn(
             &mut self,
             is_pub: bool,
             is_package_pub: bool,
@@ -225,7 +230,7 @@ impl<'a> Parser<'a> {
         /// `None` when the cursor is not at `#(`. D-EFFTREE1: an entry may be a
         /// dotted effect path (`Fs.Read`); sema validates the root against the
         /// known effect vocabulary.
-        fn parse_opt_effect_annotation(&mut self) -> Result<Option<Vec<(String, Span)>>, Diagnostic> {
+        pub(super) fn parse_opt_effect_annotation(&mut self) -> Result<Option<Vec<(String, Span)>>, Diagnostic> {
             // Trait methods (and any caller that can't host a `#(via f)` pass-through)
             // route through here: a `via` clause is parsed and discarded as a list,
             // so it surfaces as an unknown-effect E0119 in sema rather than silently
@@ -280,7 +285,7 @@ impl<'a> Parser<'a> {
             Ok((Some(effects), None))
         }
     
-        fn param(&mut self) -> Result<Param, Diagnostic> {
+        pub(super) fn param(&mut self) -> Result<Param, Diagnostic> {
             let mut convention = self.parse_access_prefix();
             let (name, name_span) = if matches!(self.peek().kind, TokKind::KwSelf) {
                 let span = self.bump().span;
@@ -387,7 +392,7 @@ impl<'a> Parser<'a> {
             }
         }
     
-        pub(super) fn struct_def(&mut self, nested: bool) -> Result<StructDef, Diagnostic> {
+        pub(in crate::Parser) fn struct_def(&mut self, nested: bool) -> Result<StructDef, Diagnostic> {
             let (is_pub, is_package_pub) = if nested {
                 (false, false)
             } else {
@@ -478,7 +483,7 @@ impl<'a> Parser<'a> {
             })
         }
     
-        pub(super) fn enum_def(&mut self, nested: bool) -> Result<EnumDef, Diagnostic> {
+        pub(in crate::Parser) fn enum_def(&mut self, nested: bool) -> Result<EnumDef, Diagnostic> {
             let (is_pub, is_package_pub) = if nested {
                 (false, false)
             } else {

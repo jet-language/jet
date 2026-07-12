@@ -1,3 +1,5 @@
+use super::*;
+use super::serde_diags::apply_serde_ok;
 impl<'a> Checker<'a> {
         fn serde_trait_impl(&self, name: &str, trait_name: &str) -> bool {
             if self.trait_reg.implements_trait(name, trait_name) {
@@ -99,13 +101,13 @@ impl<'a> Checker<'a> {
             }
         }
     
-        fn check_encodable(&mut self, t: &Type, span: Span) {
+        pub(super) fn check_encodable(&mut self, t: &Type, span: Span) {
             if !self.is_encodable(t) {
                 self.diags.push(e2411(&t.show(), true, span));
             }
         }
-    
-        fn check_decodable(&mut self, t: &Type, span: Span) {
+
+        pub(super) fn check_decodable(&mut self, t: &Type, span: Span) {
             if !self.is_decodable(t) {
                 self.diags.push(e2411(&t.show(), false, span));
             }

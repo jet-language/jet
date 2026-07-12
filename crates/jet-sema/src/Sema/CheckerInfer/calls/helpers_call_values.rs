@@ -1,5 +1,6 @@
+use super::*;
 impl<'a> Checker<'a> {
-        fn synthesized_string_arg(value: String, span: Span) -> crate::AST::CallArg {
+        pub(super) fn synthesized_string_arg(value: String, span: Span) -> crate::AST::CallArg {
             crate::AST::CallArg {
                 convention: AccessConvention::Read,
                 expr: Expr::Str(vec![StrPart::Lit(value)], span),
@@ -14,7 +15,7 @@ impl<'a> Checker<'a> {
             }
         }
     
-        fn type_arg_name(t: &Type) -> String {
+        pub(super) fn type_arg_name(t: &Type) -> String {
             match t {
                 Type::Named(n) => n.clone(),
                 Type::Apply { name, args } if args.is_empty() => name.clone(),
@@ -22,7 +23,7 @@ impl<'a> Checker<'a> {
             }
         }
     
-        fn core_module_path_from_receiver(&self, receiver: &Expr) -> Option<(String, Span)> {
+        pub(super) fn core_module_path_from_receiver(&self, receiver: &Expr) -> Option<(String, Span)> {
             match receiver {
                 Expr::Ident(alias, span) => self.core_imports.get(alias).cloned().map(|m| (m, *span)),
                 Expr::Field(base, leaf, _) => {

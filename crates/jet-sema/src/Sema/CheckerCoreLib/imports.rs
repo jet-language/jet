@@ -1,3 +1,4 @@
+use super::*;
 impl<'a> Checker<'a> {
         /// D-MOD2: check a call `alias.method(args)` where `alias` is an inline code module.
         /// The function was registered as `{alias}__{method}` in `self.funcs`.

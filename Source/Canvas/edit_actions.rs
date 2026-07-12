@@ -1,4 +1,27 @@
-fn apply_noop(path: &Path, src: &str) -> Result<String, String> {
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use crate::Diagnostics::{Diagnostic, Severity, Span, TextEdit};
+use crate::AST::{self, Expr, Item, Stmt};
+use crate::FixEngine;
+use jet_semindex::SourceSpan;
+
+use super::debug_source_git::canonical_path;
+use super::graph_helpers::{
+    diagnostics_error, edit, edit_error, edit_ok, function_signature_span, graph_id,
+    graph_id_name_span, indentation_at, insert_offset, line_after, line_start, snippet,
+};
+use super::graph_json::func_source_span;
+use super::graph_projection::trait_method_signature;
+use super::project_scan::project_file;
+use super::query_actions::{core_member_params, default_arg_for_type};
+use super::validation_json::{
+    extract_params, find_comment_hint, find_hint_region, find_simple_helper, normalize_bounds,
+    parse_simple_call, quoted_attr, replace_ident, validate_comment_alpha, validate_comment_color,
+    wire_span_from_json_chunk,
+};
+
+pub(super) fn apply_noop(path: &Path, src: &str) -> Result<String, String> {
     let formatted =
         crate::format_source(src).map_err(|diags| diagnostics_error(path, src, &diags))?;
     let changed = formatted != src;
@@ -8,7 +31,7 @@ fn apply_noop(path: &Path, src: &str) -> Result<String, String> {
     Ok(edit_ok(changed, path))
 }
 
-fn apply_rename(path: &Path, src: &str, from: &str, to: &str) -> Result<String, String> {
+pub(super) fn apply_rename(path: &Path, src: &str, from: &str, to: &str) -> Result<String, String> {
     let idx = jet_semindex::open(path).map_err(|e| edit_error("check", &e.to_string()))?;
     let mut edits = Vec::new();
     for def in idx.definitions().iter().filter(|d| d.name == from) {
@@ -28,7 +51,7 @@ fn apply_rename(path: &Path, src: &str, from: &str, to: &str) -> Result<String, 
     write_checked_formatted(path, src, &changed)
 }
 
-fn apply_create_function(
+pub(super) fn apply_create_function(
     path: &Path,
     src: &str,
     name: &str,
@@ -51,7 +74,7 @@ fn apply_create_function(
     write_checked_formatted(path, src, &changed)
 }
 
-fn apply_create_trait_impl(
+pub(super) fn apply_create_trait_impl(
     path: &Path,
     src: &str,
     type_name: &str,
@@ -137,7 +160,7 @@ fn find_trait_def<'a>(
     None
 }
 
-fn apply_edit_function_signature(
+pub(super) fn apply_edit_function_signature(
     path: &Path,
     src: &str,
     graph_id: &str,
@@ -155,7 +178,7 @@ fn apply_edit_function_signature(
     write_checked_formatted(path, src, &changed)
 }
 
-fn apply_inline_edit(
+pub(super) fn apply_inline_edit(
     path: &Path,
     src: &str,
     inline_id: &str,
@@ -173,7 +196,7 @@ fn apply_inline_edit(
     write_checked_formatted(path, src, &changed)
 }
 
-fn apply_promote_inline(
+pub(super) fn apply_promote_inline(
     path: &Path,
     src: &str,
     inline_id: &str,
@@ -205,7 +228,7 @@ fn apply_promote_inline(
     write_checked_formatted(path, src, &changed)
 }
 
-fn apply_visible_conversion(
+pub(super) fn apply_visible_conversion(
     path: &Path,
     src: &str,
     inline_id: &str,
@@ -225,11 +248,11 @@ fn apply_visible_conversion(
     write_checked_formatted(path, src, &changed)
 }
 
-fn apply_break_link(path: &Path, src: &str, wire_id: &str) -> Result<String, String> {
+pub(super) fn apply_break_link(path: &Path, src: &str, wire_id: &str) -> Result<String, String> {
     rewrite_wire_expr(path, src, wire_id, "#Todo")
 }
 
-fn apply_move_link(
+pub(super) fn apply_move_link(
     path: &Path,
     src: &str,
     wire_id: &str,
@@ -261,7 +284,7 @@ fn rewrite_wire_expr(
     write_checked_formatted(path, src, &changed)
 }
 
-fn apply_insert_call(
+pub(super) fn apply_insert_call(
     path: &Path,
     src: &str,
     graph_id: &str,
@@ -532,7 +555,7 @@ fn core_call_is_fallible(module: &str, member: &str) -> bool {
     )
 }
 
-fn canvas_action_candidate(
+pub(super) fn canvas_action_candidate(
     path: &Path,
     src: &str,
     graph_id: &str,
@@ -593,7 +616,7 @@ fn temp_canvas_check_path(path: &Path) -> PathBuf {
     tmp
 }
 
-fn apply_insert_structural(
+pub(super) fn apply_insert_structural(
     path: &Path,
     src: &str,
     graph_id: &str,
@@ -638,7 +661,7 @@ fn apply_insert_structural(
     write_checked_formatted(path, src, &changed)
 }
 
-fn apply_create_comment_region(
+pub(super) fn apply_create_comment_region(
     path: &Path,
     src: &str,
     graph_id: &str,
@@ -686,7 +709,7 @@ fn apply_create_comment_region(
     write_checked_formatted(path, src, &changed)
 }
 
-fn apply_update_comment_region(
+pub(super) fn apply_update_comment_region(
     path: &Path,
     src: &str,
     region_id: &str,
@@ -726,11 +749,11 @@ fn apply_update_comment_region(
     write_checked_formatted(path, src, &changed)
 }
 
-fn apply_delete_comment_region(path: &Path, src: &str, region_id: &str) -> Result<String, String> {
+pub(super) fn apply_delete_comment_region(path: &Path, src: &str, region_id: &str) -> Result<String, String> {
     apply_delete_hint_region(path, src, region_id, "comment")
 }
 
-fn apply_delete_hint_region(
+pub(super) fn apply_delete_hint_region(
     path: &Path,
     src: &str,
     region_id: &str,
@@ -752,7 +775,7 @@ fn apply_delete_hint_region(
     write_checked_formatted(path, src, &changed)
 }
 
-fn apply_create_collapse_region(
+pub(super) fn apply_create_collapse_region(
     path: &Path,
     src: &str,
     graph_id: &str,
@@ -790,7 +813,7 @@ fn apply_create_collapse_region(
     write_checked_formatted(path, src, &changed)
 }
 
-fn extract_inline_candidate(
+pub(super) fn extract_inline_candidate(
     path: &Path,
     src: &str,
     inline_id: &str,
@@ -834,7 +857,7 @@ fn extract_inline_candidate(
     .map_err(|_| edit_error("overlap", "Canvas extract edits overlapped"))
 }
 
-fn inline_helper_candidate(
+pub(super) fn inline_helper_candidate(
     path: &Path,
     src: &str,
     inline_id: Option<&str>,
@@ -891,7 +914,7 @@ struct StatementLoc {
     index: usize,
 }
 
-fn apply_reorder_statements(
+pub(super) fn apply_reorder_statements(
     path: &Path,
     src: &str,
     graph_id: &str,
@@ -979,7 +1002,7 @@ fn apply_reorder_statements(
     write_checked_formatted(path, src, &changed)
 }
 
-fn apply_add_pattern_arm(
+pub(super) fn apply_add_pattern_arm(
     path: &Path,
     src: &str,
     graph_id: &str,
@@ -1032,7 +1055,7 @@ fn apply_add_pattern_arm(
     write_checked_formatted(path, src, &changed)
 }
 
-fn apply_edit_pattern_arm(
+pub(super) fn apply_edit_pattern_arm(
     path: &Path,
     src: &str,
     graph_id: &str,
@@ -1055,7 +1078,7 @@ fn apply_edit_pattern_arm(
     write_checked_formatted(path, src, &changed)
 }
 
-fn apply_remove_pattern_arm(
+pub(super) fn apply_remove_pattern_arm(
     path: &Path,
     src: &str,
     graph_id: &str,
@@ -1081,7 +1104,7 @@ fn apply_remove_pattern_arm(
     write_checked_formatted(path, src, &changed)
 }
 
-fn apply_append_multi_input(
+pub(super) fn apply_append_multi_input(
     path: &Path,
     src: &str,
     node_span: SourceSpan,
@@ -1120,7 +1143,7 @@ fn apply_append_multi_input(
     write_checked_formatted(path, src, &changed)
 }
 
-fn apply_remove_multi_input_element(
+pub(super) fn apply_remove_multi_input_element(
     path: &Path,
     src: &str,
     node_span: SourceSpan,
@@ -2260,7 +2283,7 @@ fn same_span(a: SourceSpan, b: SourceSpan) -> bool {
     a.start == b.start && a.end == b.end
 }
 
-fn write_checked_formatted(path: &Path, before: &str, candidate: &str) -> Result<String, String> {
+pub(super) fn write_checked_formatted(path: &Path, before: &str, candidate: &str) -> Result<String, String> {
     let formatted = crate::format_source(candidate)
         .map_err(|diags| diagnostics_error(path, candidate, &diags))?;
     let path_str = path.to_string_lossy();

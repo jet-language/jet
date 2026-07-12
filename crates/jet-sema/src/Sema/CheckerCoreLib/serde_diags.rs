@@ -1,3 +1,4 @@
+use super::*;
 /// E2-M15: modules that require an OS and are forbidden in `--freestanding` builds.
 pub(crate) fn is_freestanding_forbidden(module: &str) -> bool {
     matches!(
@@ -133,7 +134,7 @@ pub(crate) fn e2409(style: &str, span: Span) -> Diagnostic {
 /// it (or is imported/non-local, hence trusted) and every type arg at a
 /// wire-reaching position satisfies it too (`elem_ok`). A phantom/skip-only param
 /// position imposes no obligation, so `Id<Kind>` is fine for any `Kind`.
-fn apply_serde_ok(
+pub(super) fn apply_serde_ok(
     name: &str,
     args: &[Type],
     reg: &TraitRegistry,
@@ -400,7 +401,7 @@ pub(crate) fn wrong_core_arity(name: &str, want: usize, got: usize, span: Span) 
 
 /// D-A11YGATE1=B: is `expr` a single, non-interpolated literal string part?
 /// Shared by E2930 (empty-label check) and E2931 (duplicate-label check).
-fn is_empty_string_literal(expr: &Expr) -> bool {
+pub(super) fn is_empty_string_literal(expr: &Expr) -> bool {
     matches!(
         expr,
         Expr::Str(parts, _) if parts.iter().all(|p| matches!(p, crate::AST::StrPart::Lit(s) if s.is_empty()))
@@ -409,7 +410,7 @@ fn is_empty_string_literal(expr: &Expr) -> bool {
 
 /// D-A11YGATE1=B: the literal text of `expr` when it's a plain (non-interpolated)
 /// string literal, else `None`.
-fn literal_string_value(expr: &Expr) -> Option<String> {
+pub(super) fn literal_string_value(expr: &Expr) -> Option<String> {
     let Expr::Str(parts, _) = expr else {
         return None;
     };

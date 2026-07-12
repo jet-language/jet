@@ -6,7 +6,7 @@
 /// wrong version). Force the point back on; the one still-documented edge
 /// case is a trailing zero merged into the fraction (`1.10` vs `1.1` are
 /// indistinguishable once lexed — see `Parser::inline_version`).
-fn format_version_segment(f: f64) -> String {
+pub(super) fn format_version_segment(f: f64) -> String {
     let s = f.to_string();
     if s.contains('.') {
         s
@@ -15,7 +15,7 @@ fn format_version_segment(f: f64) -> String {
     }
 }
 
-fn parse_invariant_bounds(text: &str) -> Option<(i64, i64)> {
+pub(super) fn parse_invariant_bounds(text: &str) -> Option<(i64, i64)> {
     let mut lo = i64::MIN;
     let mut hi = i64::MAX;
     let mut saw = false;

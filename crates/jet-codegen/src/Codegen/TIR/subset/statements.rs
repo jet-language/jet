@@ -1,3 +1,5 @@
+use super::*;
+
 fn scoped_stmts_in_subset(
     body: &[Stmt],
     cx: &Cx,

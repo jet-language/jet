@@ -1,3 +1,10 @@
+use super::super::{
+    Diagnostic, Item, Parser, Program, Span, Syntax, TokKind, describe, string_literal_value,
+    retired_s14_teaching_enabled,
+};
+use super::TargetMarker;
+use super::helpers::format_version_segment;
+
 impl<'a> Parser<'a> {
         /// D-MEM1/S7 (D-NOALLOC-SEM1=A): `policy no_alloc;` — the file's
         /// allocation floor. `no_alloc` is the only ratified policy name today;
@@ -347,7 +354,7 @@ impl<'a> Parser<'a> {
             })
         }
     
-        pub(super) fn program(&mut self) -> Program {
+        pub(in crate::Parser) fn program(&mut self) -> Program {
             let mut imports = Vec::new();
             let mut items = Vec::new();
             let mut web_target_ceiling = None;

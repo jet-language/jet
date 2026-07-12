@@ -1,3 +1,5 @@
+use super::*;
+
 /// c109 Phase 6: is this `Expr::MethodCall` inside the subset? Two shapes only:
 /// the synthetic `.clone()`, or a user-defined instance method on a covered type.
 pub(crate) fn method_call_in_subset(

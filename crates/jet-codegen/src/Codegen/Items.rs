@@ -513,10 +513,10 @@ pub(crate) fn emit_cli_entry_if_needed(cx: &Cx, items: &[Item], out: &mut String
     if run_fn.params.is_empty() {
         if is_fallible_void_entry_return(run_fn) {
             out.push_str(
-                "fn main() {\n    if let Err(__jet_err) = user_run() {\n        eprintln!(\"{}\", __jet_err);\n        std::process::exit(1);\n    }\n}\n\n",
+                "fn main() {\n    jet_std_env_init();\n    if let Err(__jet_err) = user_run() {\n        eprintln!(\"{}\", __jet_err);\n        std::process::exit(1);\n    }\n}\n\n",
             );
         } else {
-            out.push_str("fn main() {\n    user_run();\n}\n\n");
+            out.push_str("fn main() {\n    jet_std_env_init();\n    user_run();\n}\n\n");
         }
         return;
     }
@@ -548,7 +548,7 @@ pub(crate) fn emit_cli_entry_if_needed(cx: &Cx, items: &[Item], out: &mut String
     }) {
         if s.derives.iter().any(|(t, _)| t == "Cli") {
             out.push_str(&format!(
-                "fn main() {{\n    let __argv = jet_std_io_args();\n    let __spec = __jet_cli_spec_{name}();\n    match jet_args_parse(&__spec, &__argv) {{\n        Ok(__parsed) => {{\n            if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n            match __jet_cli_decode_{name}(&__spec, &__parsed) {{\n                Ok(__args) => {{ user_run({call_arg}); }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n    }}\n}}\n\n",
+                "fn main() {{\n    jet_std_env_init();\n    let __argv = jet_std_io_args();\n    let __spec = __jet_cli_spec_{name}();\n    match jet_args_parse(&__spec, &__argv) {{\n        Ok(__parsed) => {{\n            if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n            match __jet_cli_decode_{name}(&__spec, &__parsed) {{\n                Ok(__args) => {{ user_run({call_arg}); }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n    }}\n}}\n\n",
                 name = name,
                 call_arg = arg_expr("__args"),
             ));
@@ -611,7 +611,7 @@ fn emit_cli_subcommand_entry(
     let _ = cx;
 
     out.push_str(&format!(
-        "fn main() {{\n    let __argv = jet_std_io_args();\n    if __argv.len() < 2 {{\n        println!(\"Usage: <program> <command> [options]\\n\\nCommands:\\n{usage}\");\n        return;\n    }}\n    let __sub = __argv[1].to_lowercase();\n    let mut __rest: Vec<String> = vec![format!(\"{{}} {{}}\", __argv[0], __sub)];\n    __rest.extend_from_slice(&__argv[2..]);\n    match __sub.as_str() {{\n{arms}        __other => {{\n            eprintln!(\"unknown command `{{}}`\\n\\nknown commands: {cmds}\", __other);\n            std::process::exit(2);\n        }}\n    }}\n}}\n\n",
+        "fn main() {{\n    jet_std_env_init();\n    let __argv = jet_std_io_args();\n    if __argv.len() < 2 {{\n        println!(\"Usage: <program> <command> [options]\\n\\nCommands:\\n{usage}\");\n        return;\n    }}\n    let __sub = __argv[1].to_lowercase();\n    let mut __rest: Vec<String> = vec![format!(\"{{}} {{}}\", __argv[0], __sub)];\n    __rest.extend_from_slice(&__argv[2..]);\n    match __sub.as_str() {{\n{arms}        __other => {{\n            eprintln!(\"unknown command `{{}}`\\n\\nknown commands: {cmds}\", __other);\n            std::process::exit(2);\n        }}\n    }}\n}}\n\n",
         usage = usage_lines,
         arms = arms,
         cmds = cmd_names.join(", "),

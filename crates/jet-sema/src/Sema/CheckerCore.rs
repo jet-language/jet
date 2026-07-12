@@ -10,13 +10,14 @@ use crate::AST::{
 };
 use std::collections::{HashMap, HashSet};
 
-include!("CheckerCore/scopes.rs");
-include!("CheckerCore/type_assign.rs");
-include!("CheckerCore/blocks.rs");
-include!("CheckerCore/statements.rs");
-include!("CheckerCore/control_flow.rs");
-include!("CheckerCore/switches.rs");
-include!("CheckerCore/types.rs");
-include!("CheckerCore/bindings.rs");
-include!("CheckerCore/names_incdec.rs");
-include!("CheckerCore/helpers.rs");
+mod scopes;
+mod type_assign;
+mod blocks;
+mod statements;
+mod control_flow;
+mod switches;
+mod types;
+mod bindings;
+pub(crate) use bindings::*;
+mod names_incdec;
+mod helpers;

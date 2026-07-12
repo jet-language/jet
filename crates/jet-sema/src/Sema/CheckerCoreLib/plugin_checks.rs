@@ -1,3 +1,4 @@
+use super::*;
 impl<'a> Checker<'a> {
         /// D-DEP-WASM1=A / D-PLUGIN1=B (c81): `(name: String, args: [T]) -> T ?
         /// String` argument elaboration shared by `.call`/`.call_int` — a plugin

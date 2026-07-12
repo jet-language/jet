@@ -1,3 +1,4 @@
+use super::*;
 /// D-ARGS1: type-check a method call on `ArgsSpec` (the builder).
 /// Builder methods return `ArgsSpec` for chaining; `parse` returns `ParsedArgs ? String`.
 /// Returns `Some(Some(ty))` for valid calls, `Some(None)` for void (none here),

@@ -1,6 +1,7 @@
+use super::*;
 /// D-ANY-JAI1/D-VARARGBOUND1 (c7jaiany): E1313 — a trait-bounded variadic
 /// call-site argument doesn't implement one of the bound trait(s).
-fn e1313(
+pub(super) fn e1313(
     arg_ty_name: &str,
     trait_name: &str,
     param_name: &str,

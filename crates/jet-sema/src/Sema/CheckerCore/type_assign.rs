@@ -1,3 +1,5 @@
+use super::*;
+use super::helpers::no_any_type;
 impl<'a> Checker<'a> {
         pub(crate) fn check_declared_type(&mut self, ty: &Type, span: Span) {
             if let Some(chain) = generic_depth_exceeded(ty) {

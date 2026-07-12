@@ -1,3 +1,5 @@
+use super::*;
+
 fn tuple_fields(ty: Option<&Type>) -> Option<Vec<(String, Type)>> {
     match ty {
         Some(Type::Tuple(fields)) => Some(

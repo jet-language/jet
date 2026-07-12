@@ -4,25 +4,30 @@
 //! by a second path: projection comes from `ProgramBundle` + semindex facts, and
 //! writes go back through `jet fmt` before the file is replaced.
 
-use std::collections::{HashMap, HashSet};
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::Command;
-
-use crate::Diagnostics::{Diagnostic, Severity, Span, TextEdit};
-use crate::AST::{self, Expr, Item, Stmt};
-use crate::{FixEngine, SHA256};
-use jet_semindex::{SemIndex, SemIndexEffectFacts, SourceSpan, SymbolKind};
-
-include!("Canvas/schema_api.rs");
-include!("Canvas/html.rs");
-include!("Canvas/js.rs");
-include!("Canvas/project_scan.rs");
-include!("Canvas/project_transactions.rs");
-include!("Canvas/graph_projection.rs");
-include!("Canvas/graph_json.rs");
-include!("Canvas/query_actions.rs");
-include!("Canvas/edit_actions.rs");
-include!("Canvas/graph_helpers.rs");
-include!("Canvas/debug_source_git.rs");
-include!("Canvas/validation_json.rs");
+#[path = "Canvas/schema_api.rs"]
+mod schema_api;
+pub use schema_api::*;
+#[path = "Canvas/html.rs"]
+mod html;
+pub use html::*;
+#[path = "Canvas/js.rs"]
+mod js;
+pub use js::*;
+#[path = "Canvas/project_scan.rs"]
+mod project_scan;
+#[path = "Canvas/project_transactions.rs"]
+mod project_transactions;
+#[path = "Canvas/graph_projection.rs"]
+mod graph_projection;
+#[path = "Canvas/graph_json.rs"]
+mod graph_json;
+#[path = "Canvas/query_actions.rs"]
+mod query_actions;
+#[path = "Canvas/edit_actions.rs"]
+mod edit_actions;
+#[path = "Canvas/graph_helpers.rs"]
+mod graph_helpers;
+#[path = "Canvas/debug_source_git.rs"]
+mod debug_source_git;
+#[path = "Canvas/validation_json.rs"]
+mod validation_json;

@@ -1,3 +1,5 @@
+use super::*;
+
 /// Resolve the subject's Jet type for binding payloads, mirroring `expr_jet_ty`'s
 /// reach (only an Ident resolves via its slot). Enough for the covered subset (the
 /// subject is an enum-typed local/param). Other forms resolve to `None` (the

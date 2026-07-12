@@ -1,3 +1,4 @@
+use super::*;
 impl<'a> Checker<'a> {
         pub(crate) fn check_if(&mut self, ifs: &mut IfStmt) {
             let before = self.moved.clone();

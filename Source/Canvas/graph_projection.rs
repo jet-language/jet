@@ -1,4 +1,25 @@
-fn project_checked(
+use std::path::Path;
+
+use crate::AST::{self, Expr, Item, Stmt};
+use jet_semindex::{SemIndex, SemIndexEffectFacts, SourceSpan, SymbolKind};
+
+use super::graph_helpers::{
+    assignment_title, binding_type, call_has_effects, call_ret, effect_badges, expr_title,
+    expr_type, graph_id, insert_offset, lvalue_type, pure_leaf, snippet, starts_uppercase,
+    text_matches, wire_ident_refs,
+};
+use super::graph_json::{
+    add_arm_pin, add_execution_overlay, add_inline, add_node, add_pin, add_region,
+    add_source_comment_regions, add_wire, add_wire_with_span, graph_to_json, meta_attr_json,
+    set_pin_append, set_pin_source_span,
+};
+use super::schema_api::{
+    GraphBuilder, GraphEditAnchor, InlineExpr, NodeQueryRef, NodeRec, PinRec, Projection,
+    source_revision,
+};
+use super::validation_json::{json_str, span_json};
+
+pub(super) fn project_checked(
     path: &Path,
     src: &str,
     bundle: &AST::ProgramBundle,
@@ -234,7 +255,7 @@ fn inline_trait_impl_fact_json(type_name: &str, block: &AST::TraitImplBlock) -> 
     )
 }
 
-fn trait_method_signature(m: &AST::TraitMethodSig) -> String {
+pub(super) fn trait_method_signature(m: &AST::TraitMethodSig) -> String {
     let params = m
         .params
         .iter()

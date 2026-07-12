@@ -1,3 +1,4 @@
+use super::*;
 impl<'a> Checker<'a> {
         pub(crate) fn infer_method_call(
             &mut self,

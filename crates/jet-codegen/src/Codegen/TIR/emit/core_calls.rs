@@ -1,3 +1,5 @@
+use super::*;
+
 pub(crate) fn emit_tir_core_call(
     module: &str,
     method: &str,

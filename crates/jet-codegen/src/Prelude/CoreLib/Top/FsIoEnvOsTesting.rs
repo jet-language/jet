@@ -474,6 +474,13 @@ fn jet_env_table() -> &'static std::sync::RwLock<JetEnvEntries> {
     })
 }
 
+// Called as the first instruction of every generated executable entry. Keeping
+// the constructor separate from accessors prevents a user initializer, `run`,
+// or foreign call from changing the host block before Jet owns its snapshot.
+fn jet_std_env_init() {
+    let _ = jet_env_table();
+}
+
 fn jet_env_read() -> std::sync::RwLockReadGuard<'static, JetEnvEntries> {
     jet_env_table().read().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
@@ -503,19 +510,26 @@ fn jet_env_key_cmp(left: &std::ffi::OsStr, right: &std::ffi::OsStr) -> std::cmp:
     }
     let left: Vec<u16> = left.encode_wide().collect();
     let right: Vec<u16> = right.encode_wide().collect();
+    let (Ok(left_len), Ok(right_len)) = (i32::try_from(left.len()), i32::try_from(right.len()))
+    else {
+        return left.cmp(&right);
+    };
     let result = unsafe {
         CompareStringOrdinal(
             left.as_ptr(),
-            left.len() as i32,
+            left_len,
             right.as_ptr(),
-            right.len() as i32,
+            right_len,
             1,
         )
     };
     match result {
         1 => std::cmp::Ordering::Less,
+        2 => std::cmp::Ordering::Equal,
         3 => std::cmp::Ordering::Greater,
-        _ => std::cmp::Ordering::Equal,
+        // Zero is API failure, never equality. Unknown results also preserve
+        // distinct keys through an exact deterministic fallback.
+        _ => left.cmp(&right),
     }
 }
 // JET_VETTED_UNSAFE_END: jet_env_windows

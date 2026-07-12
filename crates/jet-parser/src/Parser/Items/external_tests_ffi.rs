@@ -1,5 +1,9 @@
+use super::super::{
+    Diagnostic, ImplDef, Item, Parser, Span, StrTokPart, Syntax, TokKind, describe,
+};
+
 impl<'a> Parser<'a> {
-        fn normalize_external_method_item(item: Item) -> Item {
+        pub(super) fn normalize_external_method_item(item: Item) -> Item {
             match item {
                 Item::Func(mut f) => {
                     if let Some((type_name, type_span)) = f.external_type.take() {
@@ -25,32 +29,32 @@ impl<'a> Parser<'a> {
         }
     
         /// D-VISDEFAULT2=A: is the cursor at `#PubFile`?
-        fn at_pub_file(&self) -> bool {
+        pub(super) fn at_pub_file(&self) -> bool {
             matches!(self.peek().kind, TokKind::Hash)
                 && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_PUB_FILE)
         }
 
         /// D-PRELUDEX1=A: is the cursor at `#NoPrelude`?
-        fn at_no_prelude(&self) -> bool {
+        pub(super) fn at_no_prelude(&self) -> bool {
             matches!(self.peek().kind, TokKind::Hash)
                 && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_NO_PRELUDE)
         }
     
         /// S43 (D-CASING1 follow-on): true when the cursor is at the `#Test` marker.
-        pub(super) fn at_test_def(&self) -> bool {
+        pub(in crate::Parser) fn at_test_def(&self) -> bool {
             matches!(self.peek().kind, TokKind::Hash)
                 && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_TEST)
         }
     
         /// Parse `#Test "name" { … }` (D-CASING1 follow-on). The bare lowercase
         /// `test` path enters via `test_def_after_kw` after emitting E0052.
-        pub(super) fn test_def(&mut self) -> Result<crate::AST::TestDef, Diagnostic> {
+        pub(in crate::Parser) fn test_def(&mut self) -> Result<crate::AST::TestDef, Diagnostic> {
             self.expect(TokKind::Hash, "before `Test`")?;
             self.bump(); // the `Test` marker ident (guaranteed by at_test_def)
             self.test_def_after_kw()
         }
     
-        fn test_def_after_kw(&mut self) -> Result<crate::AST::TestDef, Diagnostic> {
+        pub(super) fn test_def_after_kw(&mut self) -> Result<crate::AST::TestDef, Diagnostic> {
             let item_start = self.toks[self.pos.saturating_sub(1)].span.start;
             // D-TEST1 (ratified 2026-06-22, option B): the property-test form is
             // `#Test fn name(params) { … }`. A parameter list means inputs are
@@ -97,14 +101,14 @@ impl<'a> Parser<'a> {
         }
     
         /// D-BENCH1/D-BENCH-MARKER1=A: true when cursor is at `#Bench`.
-        pub(super) fn at_bench_def(&self) -> bool {
+        pub(in crate::Parser) fn at_bench_def(&self) -> bool {
             matches!(self.peek().kind, TokKind::Hash)
                 && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_BENCH)
         }
     
         /// Parse `#Bench("name") { … }` (D-BENCH1/D-BENCH-MARKER1=A). Structurally identical to
         /// `test_def`; there is no retired lowercase spelling for benches.
-        pub(super) fn bench_def(&mut self) -> Result<crate::AST::BenchDef, Diagnostic> {
+        pub(in crate::Parser) fn bench_def(&mut self) -> Result<crate::AST::BenchDef, Diagnostic> {
             let item_start = self.peek().span.start;
             self.expect(TokKind::Hash, "before `Bench`")?;
             self.bump(); // the `Bench` marker ident (guaranteed by at_bench_def)
@@ -123,11 +127,11 @@ impl<'a> Parser<'a> {
     
         /// S14: a bare lowercase `test` introduces a test block only when followed by
         /// a quoted name (so an ordinary identifier named `test` is unaffected).
-        fn foreign_test_follows(&self) -> bool {
+        pub(super) fn foreign_test_follows(&self) -> bool {
             matches!(self.peek2().kind, TokKind::Str(_))
         }
     
-        fn foreign_test_diag(&self, span: Span) -> Diagnostic {
+        pub(super) fn foreign_test_diag(&self, span: Span) -> Diagnostic {
             Diagnostic::error(
                 "E0052",
                 format!(
@@ -147,14 +151,14 @@ impl<'a> Parser<'a> {
         /// S60 (D-CASING1 follow-on) / D-MARKERMOVE1/2: true when the cursor is at
         /// `@Pure fn`/`@Pure pub` — or the retired `@Pure` spelling, so `func()`
         /// can consume it and teach E0062 instead of falling through elsewhere.
-        pub(super) fn at_pure_fn(&self) -> bool {
+        pub(in crate::Parser) fn at_pure_fn(&self) -> bool {
             matches!(self.peek().kind, TokKind::Hash | TokKind::At)
                 && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_PURE)
                 && matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub)
         }
     
         /// D-TAINT1: true when the cursor is at `#Sanitizer fn`/`#Sanitizer pub fn`.
-        pub(super) fn at_sanitizer_fn(&self) -> bool {
+        pub(in crate::Parser) fn at_sanitizer_fn(&self) -> bool {
             matches!(self.peek().kind, TokKind::Hash)
                 && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_SANITIZER)
                 && matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub)
@@ -162,7 +166,7 @@ impl<'a> Parser<'a> {
     
         /// D-REPLAY1: true when the cursor is at `#Replayable fn` /
         /// `#Replayable pub fn`.
-        pub(super) fn at_replayable_fn(&self) -> bool {
+        pub(in crate::Parser) fn at_replayable_fn(&self) -> bool {
             matches!(self.peek().kind, TokKind::Hash)
                 && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_REPLAYABLE)
                 && matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub)
@@ -171,7 +175,7 @@ impl<'a> Parser<'a> {
         /// D-MUSTUSE1 (c18iwxqx) / D-MARKERMOVE1: true when the cursor is at
         /// `@MustUse fn` / `@MustUse pub fn` — or the retired `@MustUse` spelling,
         /// so `func()` can consume it and teach E0062.
-        pub(super) fn at_must_use_fn(&self) -> bool {
+        pub(in crate::Parser) fn at_must_use_fn(&self) -> bool {
             matches!(self.peek().kind, TokKind::Hash | TokKind::At)
                 && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_MUST_USE)
                 && matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub)
@@ -198,7 +202,7 @@ impl<'a> Parser<'a> {
     
         /// D-STATE1: true when the cursor is at `#State(…)` (a require-state fn marker).
         /// Token stream: `# State (`.
-        pub(super) fn at_state_fn(&self) -> bool {
+        pub(in crate::Parser) fn at_state_fn(&self) -> bool {
             matches!(self.peek().kind, TokKind::Hash)
                 && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_STATE)
                 && matches!(self.peek3().kind, TokKind::LParen)
@@ -206,7 +210,7 @@ impl<'a> Parser<'a> {
     
         /// D-STATE1: true when the cursor is at `#Transition(…)` (a transition fn marker).
         /// Token stream: `# Transition (`.
-        pub(super) fn at_transition_fn(&self) -> bool {
+        pub(in crate::Parser) fn at_transition_fn(&self) -> bool {
             matches!(self.peek().kind, TokKind::Hash)
                 && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_TRANSITION)
                 && matches!(self.peek3().kind, TokKind::LParen)
@@ -214,7 +218,7 @@ impl<'a> Parser<'a> {
     
         /// S14: bare lowercase `pure` introduces a function only when `fn`/`pub`
         /// follows (so an ordinary identifier named `pure` is unaffected).
-        fn foreign_pure_follows(&self) -> bool {
+        pub(super) fn foreign_pure_follows(&self) -> bool {
             matches!(self.peek2().kind, TokKind::KwFn | TokKind::KwPub)
         }
     
@@ -223,11 +227,11 @@ impl<'a> Parser<'a> {
         /// ordinary identifier named `sanitizer` elsewhere is unaffected). The
         /// modifier is now the marker `#Sanitizer` — point the user at it (E0059),
         /// mirroring `pure` → `@Pure` (E0053).
-        fn foreign_sanitizer_follows(&self) -> bool {
+        pub(super) fn foreign_sanitizer_follows(&self) -> bool {
             matches!(self.peek2().kind, TokKind::KwFn | TokKind::KwPub)
         }
     
-        fn foreign_sanitizer_diag(&self, span: Span) -> Diagnostic {
+        pub(super) fn foreign_sanitizer_diag(&self, span: Span) -> Diagnostic {
             Diagnostic::error(
                 "E0059",
                 format!(
@@ -244,7 +248,7 @@ impl<'a> Parser<'a> {
             )
         }
     
-        fn foreign_pure_diag(&self, span: Span) -> Diagnostic {
+        pub(super) fn foreign_pure_diag(&self, span: Span) -> Diagnostic {
             Diagnostic::error(
                 "E0053",
                 format!(
@@ -335,7 +339,7 @@ impl<'a> Parser<'a> {
     
         /// A `#Test`/`#Bench` block name: one plain string literal, no
         /// interpolation. `kw` is the marker keyword for the error copy.
-        fn expect_marker_name(&mut self, kw: &str) -> Result<(String, Span), Diagnostic> {
+        pub(super) fn expect_marker_name(&mut self, kw: &str) -> Result<(String, Span), Diagnostic> {
             let parts = match &self.peek().kind {
                 TokKind::Str(parts) => parts.clone(),
                 other => {
@@ -375,7 +379,7 @@ impl<'a> Parser<'a> {
         }
     
         /// S50 (M7): `extern rust "crate@version" { fn … = "rust::path"; }`
-        fn extern_rust_block(&mut self) -> Result<crate::AST::ExternRustBlock, Diagnostic> {
+        pub(super) fn extern_rust_block(&mut self) -> Result<crate::AST::ExternRustBlock, Diagnostic> {
             let start = self.bump().span;
             if !matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_RUST) {
                 return Err(Diagnostic::error(
@@ -424,7 +428,7 @@ impl<'a> Parser<'a> {
             })
         }
     
-        fn extern_fn(&mut self) -> Result<crate::AST::ExternFn, Diagnostic> {
+        pub(super) fn extern_fn(&mut self) -> Result<crate::AST::ExternFn, Diagnostic> {
             let fn_span = self.peek().span;
             self.expect_kw(TokKind::KwFn, "to declare a foreign function")?;
             let fn_start = fn_span.start;

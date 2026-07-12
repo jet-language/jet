@@ -1,3 +1,4 @@
+use super::*;
 impl<'a> Checker<'a> {
         pub(crate) fn resolve_type(&self, ty: Type) -> Type {
             match ty {

@@ -11,13 +11,24 @@ use crate::AST::{
 };
 use std::collections::HashSet;
 
-include!("subset/entry.rs");
-include!("subset/types.rs");
-include!("subset/structs_enums.rs");
-include!("subset/statements.rs");
-include!("subset/patterns.rs");
-include!("subset/expressions.rs");
-include!("subset/methods.rs");
-include!("subset/builtin_methods.rs");
-include!("subset/core_calls.rs");
-include!("subset/handles.rs");
+mod entry;
+mod types;
+mod structs_enums;
+mod statements;
+mod patterns;
+mod expressions;
+mod methods;
+mod builtin_methods;
+mod core_calls;
+mod handles;
+
+pub(crate) use entry::*;
+pub(crate) use types::*;
+pub(crate) use structs_enums::*;
+pub(crate) use statements::*;
+pub(crate) use patterns::*;
+pub(crate) use expressions::*;
+pub(crate) use methods::*;
+pub(crate) use builtin_methods::*;
+pub(crate) use core_calls::*;
+pub(crate) use handles::*;

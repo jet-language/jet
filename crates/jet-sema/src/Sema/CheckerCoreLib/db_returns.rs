@@ -1,3 +1,4 @@
+use super::*;
 /// D-DBDRIVER1: the resolved return type of a covered `DbConnection` method, read
 /// from `check_db_connection_method`'s authoritative match (arity/diagnostics
 /// already ran in sema; this is a pure lookup for codegen's TIR totality

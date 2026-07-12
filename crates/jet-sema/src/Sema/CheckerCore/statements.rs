@@ -1,3 +1,5 @@
+use super::*;
+use super::helpers::layout_constraint_fingerprint;
 impl<'a> Checker<'a> {
         /// Check two alternative branches with independent move states, then
         /// keep the union (a value moved in either branch counts as gone).

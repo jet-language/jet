@@ -1,10 +1,12 @@
+use super::*;
+use super::helpers::e1313;
 impl<'a> Checker<'a> {
         /// D-ANY-JAI1/D-VARARGBOUND1 (c7jaiany): check each trait-bounded variadic
         /// call-site argument against `bounds` (E1313) and infer its type. `tail`
         /// is the already-split-off trailing slice of `call.args`; the caller
         /// re-attaches it once the rest of `check_call`'s per-index checking (which
         /// only understands one shared element type) has run past it.
-        fn check_variadic_bound_tail(
+        pub(super) fn check_variadic_bound_tail(
             &mut self,
             call: &Call,
             sig: &crate::AST::FuncSig,
@@ -60,7 +62,7 @@ impl<'a> Checker<'a> {
     
         /// D-VARIADIC1: pack trailing call arguments (and spreads) into the final list
         /// parameter so codegen sees a normal fixed-arity call.
-        fn normalize_variadic_call(&mut self, call: &mut Call, sig: &crate::AST::FuncSig) {
+        pub(super) fn normalize_variadic_call(&mut self, call: &mut Call, sig: &crate::AST::FuncSig) {
             let fixed = sig.params.len().saturating_sub(1);
             let Some((variadic_conv, variadic_ty)) = sig.params.last().cloned() else {
                 return;

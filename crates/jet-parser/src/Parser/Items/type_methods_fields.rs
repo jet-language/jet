@@ -1,5 +1,10 @@
+use super::super::{
+    ConstAttr, ConstDef, Diagnostic, Field, Func, Parser, Span, Syntax, TokKind, TraitMethodSig,
+    retired_s14_teaching_enabled,
+};
+
 impl<'a> Parser<'a> {
-        fn trait_method_sig(&mut self, is_pure: bool) -> Result<TraitMethodSig, Diagnostic> {
+        pub(super) fn trait_method_sig(&mut self, is_pure: bool) -> Result<TraitMethodSig, Diagnostic> {
             let start = self.peek().span;
             self.expect_kw(TokKind::KwFn, "to start a trait method signature")?;
             let (name, name_span) = self.expect_ident("after `fn`")?;
@@ -49,7 +54,7 @@ impl<'a> Parser<'a> {
         }
     
         /// S27: method inside a type body or `impl` block.
-        fn method_in_type(&mut self) -> Result<Func, Diagnostic> {
+        pub(super) fn method_in_type(&mut self) -> Result<Func, Diagnostic> {
             let (is_must_use, must_use_span) = if self.at_must_use_fn() {
                 (true, Some(self.bump_must_use_marker()?))
             } else {
@@ -128,7 +133,7 @@ impl<'a> Parser<'a> {
             )
         }
     
-        fn field(&mut self) -> Result<Field, Diagnostic> {
+        pub(super) fn field(&mut self) -> Result<Field, Diagnostic> {
             let (is_pub, is_package_pub) = self.parse_pub_qualifier();
             let (name, name_span) = self.expect_ident("for a field name")?;
             self.expect(TokKind::Colon, "after a field name")?;
@@ -160,12 +165,12 @@ impl<'a> Parser<'a> {
         /// top level only — this predicate is never consulted by the statement
         /// parser, so a local binding's `@Persist` falls through to the E0145
         /// teaching diagnostic in `Statements.rs` instead).
-        fn at_persist_const(&self) -> bool {
+        pub(super) fn at_persist_const(&self) -> bool {
             matches!(&self.peek().kind, TokKind::At)
                 && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::CONTRACT_PERSIST)
         }
     
-        pub(super) fn const_def(&mut self) -> Result<ConstDef, Diagnostic> {
+        pub(in crate::Parser) fn const_def(&mut self) -> Result<ConstDef, Diagnostic> {
             let item_start = self.peek().span.start;
             let meta = if self.at_meta_attr() {
                 let meta = self.parse_meta_attr()?;
@@ -231,7 +236,7 @@ impl<'a> Parser<'a> {
         }
     
         /// S57 (M9.5): `comptime NAME = expr;` — a compile-time constant binding.
-        pub(super) fn comptime_def(&mut self) -> Result<ConstDef, Diagnostic> {
+        pub(in crate::Parser) fn comptime_def(&mut self) -> Result<ConstDef, Diagnostic> {
             let item_start = self.peek().span.start;
             let meta = if self.at_meta_attr() {
                 let meta = self.parse_meta_attr()?;

@@ -1,3 +1,7 @@
+use super::super::{
+    Diagnostic, Item, Marker, Parser, Span, Syntax, TagDef, TokKind, TraitDef, describe,
+};
+
 impl<'a> Parser<'a> {
         /// Parse one marker name and optional `(args)`; cursor sits on the name.
         fn parse_one_marker(&mut self) -> Result<Marker, Diagnostic> {
@@ -92,7 +96,7 @@ impl<'a> Parser<'a> {
     
         /// E0062: a contract marker (moved to `@` by D-MARKERMOVE1/2/3) was
         /// written with `#`. `name` is the marker's bare name (no sigil).
-        pub(super) fn e0062_contract_on_hash(name: &str, span: Span) -> Diagnostic {
+        pub(in crate::Parser) fn e0062_contract_on_hash(name: &str, span: Span) -> Diagnostic {
             Diagnostic::error(
                 "E0062",
                 format!("`#{name}` states a contract — write it with `@`, not `#`"),
@@ -106,7 +110,7 @@ impl<'a> Parser<'a> {
         }
     
         /// E0063: a directive marker (stays on `#`) was written with `@`.
-        pub(super) fn e0063_directive_on_at(name: &str, span: Span) -> Diagnostic {
+        pub(in crate::Parser) fn e0063_directive_on_at(name: &str, span: Span) -> Diagnostic {
             Diagnostic::error(
                 "E0063",
                 format!("`@{name}` is a compiler directive — write it with `#`, not `@`"),
@@ -120,7 +124,7 @@ impl<'a> Parser<'a> {
     
         /// D-ATTR2 / D-SERDE2–8: parse `#[ … ]` bracket-marker groups. A second
         /// consecutive `#[ … ]` line is teaching error E0999 (merge into one list).
-        fn parse_marker_groups(&mut self) -> Result<Vec<Marker>, Diagnostic> {
+        pub(super) fn parse_marker_groups(&mut self) -> Result<Vec<Marker>, Diagnostic> {
             let mut out = Vec::new();
             let mut groups = 0usize;
             while self.at_marker_list() {
@@ -184,7 +188,7 @@ impl<'a> Parser<'a> {
         /// field, both optional and stackable (e.g. `@[Redact] #[Rename("x")]`).
         /// Used at field position, which only ever supports the bracket form
         /// (no bare `@Redact`/`#Rename` without brackets).
-        fn parse_field_markers(&mut self) -> Result<Vec<Marker>, Diagnostic> {
+        pub(super) fn parse_field_markers(&mut self) -> Result<Vec<Marker>, Diagnostic> {
             let mut out = Vec::new();
             loop {
                 if self.at_contract_marker_list() {
@@ -314,7 +318,7 @@ impl<'a> Parser<'a> {
         /// stack). Then parses the struct/enum they attach to. Single dispatch
         /// entry point for both sigils at type-marker position (Items.rs top
         /// match, Modules.rs inline-module body).
-        pub(super) fn type_def_with_any_markers(&mut self) -> Result<Item, Diagnostic> {
+        pub(in crate::Parser) fn type_def_with_any_markers(&mut self) -> Result<Item, Diagnostic> {
             let mut markers = Vec::new();
             loop {
                 // A marker line may end with an auto-inserted/explicit `;` before
@@ -340,7 +344,7 @@ impl<'a> Parser<'a> {
         }
     
         /// S28: top-level `trait Name { fn sig(self) -> T; … }`.
-        pub(super) fn trait_def(&mut self, nested: bool) -> Result<TraitDef, Diagnostic> {
+        pub(in crate::Parser) fn trait_def(&mut self, nested: bool) -> Result<TraitDef, Diagnostic> {
             let item_start = self.peek().span.start;
             let (is_pub, is_package_pub) = if nested {
                 (false, false)
@@ -394,7 +398,7 @@ impl<'a> Parser<'a> {
         /// methods. The body is parsed permissively (it may syntactically contain
         /// method signatures so a stray method doesn't derail the parser); sema
         /// reports each method as E0732.
-        pub(super) fn tag_def(&mut self, nested: bool) -> Result<TagDef, Diagnostic> {
+        pub(in crate::Parser) fn tag_def(&mut self, nested: bool) -> Result<TagDef, Diagnostic> {
             let (is_pub, is_package_pub) = if nested {
                 (false, false)
             } else {

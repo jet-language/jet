@@ -1,3 +1,5 @@
+use super::*;
+
 /// c109 Phase 4: `ty` is a plain user enum the subset can lower. It must be a
 /// bare `Type::Named(E)` that:
 ///  - is a known enum (`cx.enum_variants` has it), not a struct/trait/foreign/core

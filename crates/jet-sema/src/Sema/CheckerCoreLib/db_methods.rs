@@ -1,3 +1,4 @@
+use super::*;
 impl<'a> Checker<'a> {
         /// D-DBDRIVER1: `(sql: String, params: [DbValue])` argument elaboration shared
         /// by `.query`/`.query_one`/`.execute` — SQL text plus a separate bind list,

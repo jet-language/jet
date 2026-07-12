@@ -1,3 +1,4 @@
+use super::*;
 impl<'a> Checker<'a> {
         pub(crate) fn check_condition_with_bindings(
             &mut self,

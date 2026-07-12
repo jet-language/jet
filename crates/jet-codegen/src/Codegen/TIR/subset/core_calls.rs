@@ -1,3 +1,5 @@
+use super::*;
+
 /// c109 Phase 10: is a core/stdlib call `(module, method)` one the TIR lowers? The
 /// covered set is exactly the **type-monomorphic** core calls — those whose full
 /// signature (param conventions + return type) is fixed by `Sema::core_fixed_sig`.

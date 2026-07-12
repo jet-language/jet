@@ -1,9 +1,12 @@
+use super::super::{Diagnostic, Func, Parser, Span, StrTokPart, Syntax, TokKind, describe};
+use super::TargetMarker;
+
 impl<'a> Parser<'a> {
         /// D-MUSTUSE1 / D-MARKERMOVE1 (I7/R3 chokepoint): consume a `@MustUse` /
         /// retired `@MustUse` prefix already confirmed present by `at_must_use_fn`.
         /// Teaches E0062 and keeps parsing when the retired `#` spelling is used,
         /// instead of cascading into an unrelated parse error.
-        fn bump_must_use_marker(&mut self) -> Result<Span, Diagnostic> {
+        pub(super) fn bump_must_use_marker(&mut self) -> Result<Span, Diagnostic> {
             let start = self.peek().span;
             let sigil = self.bump(); // `#` or `@`
             let (name, name_span) = self.expect_ident("after the marker sigil")?;
@@ -17,7 +20,7 @@ impl<'a> Parser<'a> {
         /// S60 (D-CASING1 follow-on) / D-MARKERMOVE1/2: consume a `@Pure` /
         /// retired `@Pure` prefix already confirmed present by `at_pure_fn`.
         /// Teaches E0062 when the retired `#` spelling is used.
-        fn bump_pure_marker(&mut self) {
+        pub(super) fn bump_pure_marker(&mut self) {
             let sigil = self.bump(); // `#` or `@`
             let name_tok = self.bump(); // `Pure`
             if matches!(sigil.kind, TokKind::Hash) {
@@ -47,7 +50,7 @@ impl<'a> Parser<'a> {
         /// D-METHODMACRO1=A: parse the `@Inline`/`@InlineAlways` marker slot —
         /// zero or one marker, with a second one (either name, either order)
         /// rejected as E0920 (pick one). Shared by `func()` and `method_in_type()`.
-        fn parse_inline_marker(&mut self) -> Result<(bool, bool, Option<Span>), Diagnostic> {
+        pub(super) fn parse_inline_marker(&mut self) -> Result<(bool, bool, Option<Span>), Diagnostic> {
             if !self.at_inline_fn() {
                 return Ok((false, false, None));
             }
@@ -79,7 +82,7 @@ impl<'a> Parser<'a> {
             )
         }
     
-        pub(super) fn func(&mut self) -> Result<Func, Diagnostic> {
+        pub(in crate::Parser) fn func(&mut self) -> Result<Func, Diagnostic> {
             while matches!(self.peek().kind, TokKind::Semi) {
                 self.bump();
             }
@@ -195,7 +198,7 @@ impl<'a> Parser<'a> {
     
         /// D-PREPOST1: is the cursor at `@Pre(`/`@Post(` (or the retired `#`
         /// spelling, so `parse_contract_clause` can teach E0062)?
-        fn at_contract_clause_fn(&self, kw: &str) -> bool {
+        pub(super) fn at_contract_clause_fn(&self, kw: &str) -> bool {
             matches!(self.peek().kind, TokKind::Hash | TokKind::At)
                 && matches!(&self.peek2().kind, TokKind::Ident(n) if n == kw)
                 && matches!(self.peek3().kind, TokKind::LParen)
@@ -231,7 +234,7 @@ impl<'a> Parser<'a> {
         }
     
         /// D-WASM1=A: is the cursor at `#Target(Wasm|Js)`?
-        pub(super) fn at_web_target(&self) -> bool {
+        pub(in crate::Parser) fn at_web_target(&self) -> bool {
             matches!(self.peek().kind, TokKind::Hash)
                 && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_TARGET)
                 && matches!(self.peek3().kind, TokKind::LParen)
@@ -291,7 +294,7 @@ impl<'a> Parser<'a> {
         /// D-WASM1=A / D-WEBDEFAULT1 (ratified 2026-07-01, c134): `#Target(Wasm)` / `#Target(Js)`
         /// (a partition ceiling) or `#Target(Web)` (this file's default CLI
         /// backend — a different axis, same marker).
-        pub(super) fn parse_web_target_marker(&mut self) -> Result<TargetMarker, Diagnostic> {
+        pub(in crate::Parser) fn parse_web_target_marker(&mut self) -> Result<TargetMarker, Diagnostic> {
             self.bump(); // `#`
             self.bump(); // `Target`
             self.expect(TokKind::LParen, "after `#Target`")?;
@@ -372,7 +375,7 @@ impl<'a> Parser<'a> {
         }
     
         /// D-STATE1: parse `#State(StateName)` and return `(name, marker_span)`.
-        fn parse_state_require_marker(&mut self) -> Result<(String, Span), Diagnostic> {
+        pub(super) fn parse_state_require_marker(&mut self) -> Result<(String, Span), Diagnostic> {
             let start = self.bump().span.start; // `#`
             self.bump(); // `State`
             self.expect(TokKind::LParen, "after `#State`")?;
@@ -384,7 +387,7 @@ impl<'a> Parser<'a> {
     
         /// D-STATE1: parse `#Transition(From -> To)`. `From` may be the wildcard `_`
         /// (an entry transition → `from = None`).
-        fn parse_transition_marker(&mut self) -> Result<crate::AST::StateTransition, Diagnostic> {
+        pub(super) fn parse_transition_marker(&mut self) -> Result<crate::AST::StateTransition, Diagnostic> {
             let start = self.bump().span.start; // `#`
             self.bump(); // `Transition`
             self.expect(TokKind::LParen, "after `#Transition`")?;

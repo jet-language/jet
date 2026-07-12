@@ -1,4 +1,9 @@
-fn validate_ident(name: &str) -> Result<(), String> {
+use jet_semindex::SourceSpan;
+
+use super::graph_helpers::{edit_error, project_edit_error, query_error};
+use super::graph_json::{CommentHint, canvas_collapse_hints, canvas_comment_hints};
+
+pub(super) fn validate_ident(name: &str) -> Result<(), String> {
     let mut chars = name.chars();
     let Some(first) = chars.next() else {
         return Err(edit_error("bad_request", "empty identifier"));
@@ -11,7 +16,7 @@ fn validate_ident(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_query_ident(name: &str) -> Result<(), String> {
+pub(super) fn validate_query_ident(name: &str) -> Result<(), String> {
     let mut chars = name.chars();
     let Some(first) = chars.next() else {
         return Err(query_error("bad_request", "empty identifier"));
@@ -24,7 +29,7 @@ fn validate_query_ident(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_ident_for_project(name: &str) -> Result<(), String> {
+pub(super) fn validate_ident_for_project(name: &str) -> Result<(), String> {
     let mut chars = name.chars();
     let Some(first) = chars.next() else {
         return Err(project_edit_error("bad_request", "empty identifier"));
@@ -40,14 +45,14 @@ fn validate_ident_for_project(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_qualified_name(name: &str) -> Result<(), String> {
+pub(super) fn validate_qualified_name(name: &str) -> Result<(), String> {
     for part in name.split('.') {
         validate_ident(part)?;
     }
     Ok(())
 }
 
-fn validate_signature_fragment(fragment: &str) -> Result<(), String> {
+pub(super) fn validate_signature_fragment(fragment: &str) -> Result<(), String> {
     if fragment.contains('{') || fragment.contains('}') || fragment.contains('\n') {
         return Err(edit_error(
             "bad_request",
@@ -57,7 +62,7 @@ fn validate_signature_fragment(fragment: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_type_fragment(fragment: &str) -> Result<(), String> {
+pub(super) fn validate_type_fragment(fragment: &str) -> Result<(), String> {
     if fragment.trim().is_empty()
         || fragment.contains('{')
         || fragment.contains('}')
@@ -68,7 +73,7 @@ fn validate_type_fragment(fragment: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_function_signature(signature: &str) -> Result<(), String> {
+pub(super) fn validate_function_signature(signature: &str) -> Result<(), String> {
     if signature.contains('{') || signature.contains('}') || signature.contains('\n') {
         return Err(edit_error(
             "bad_request",
@@ -84,14 +89,14 @@ fn validate_function_signature(signature: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_single_line_fragment(fragment: &str, label: &str) -> Result<(), String> {
+pub(super) fn validate_single_line_fragment(fragment: &str, label: &str) -> Result<(), String> {
     if fragment.trim().is_empty() || fragment.contains('\n') || fragment.contains('\r') {
         return Err(edit_error("bad_request", label));
     }
     Ok(())
 }
 
-fn validate_comment_color(color: &str) -> Result<(), String> {
+pub(super) fn validate_comment_color(color: &str) -> Result<(), String> {
     let ok = color.len() == 7
         && color.starts_with('#')
         && color[1..].chars().all(|c| c.is_ascii_hexdigit());
@@ -105,7 +110,7 @@ fn validate_comment_color(color: &str) -> Result<(), String> {
     }
 }
 
-fn validate_comment_alpha(alpha: &str) -> Result<(), String> {
+pub(super) fn validate_comment_alpha(alpha: &str) -> Result<(), String> {
     let Ok(value) = alpha.parse::<f32>() else {
         return Err(edit_error(
             "bad_request",
@@ -122,7 +127,7 @@ fn validate_comment_alpha(alpha: &str) -> Result<(), String> {
     }
 }
 
-fn normalize_bounds(bounds: &str) -> Result<String, String> {
+pub(super) fn normalize_bounds(bounds: &str) -> Result<String, String> {
     let nums = bounds
         .trim()
         .trim_start_matches('(')
@@ -140,11 +145,11 @@ fn normalize_bounds(bounds: &str) -> Result<String, String> {
     Ok(format!("{},{},{},{}", nums[0], nums[1], nums[2], nums[3]))
 }
 
-fn quoted_attr(value: &str) -> String {
+pub(super) fn quoted_attr(value: &str) -> String {
     json_str(value)
 }
 
-fn find_comment_hint(src: &str, graph_json: &str, region_id: &str) -> Option<CommentHint> {
+pub(super) fn find_comment_hint(src: &str, graph_json: &str, region_id: &str) -> Option<CommentHint> {
     for chunk in graph_json.split("\"region_id\":").skip(1) {
         let (id, _) = parse_json_string(chunk.trim_start())?;
         if id != region_id {
@@ -159,7 +164,7 @@ fn find_comment_hint(src: &str, graph_json: &str, region_id: &str) -> Option<Com
     None
 }
 
-fn find_hint_region(
+pub(super) fn find_hint_region(
     src: &str,
     graph_json: &str,
     region_id: &str,
@@ -187,7 +192,7 @@ fn find_hint_region(
     None
 }
 
-fn extract_params(graph_json: &str, expr: &str) -> Vec<(String, String)> {
+pub(super) fn extract_params(graph_json: &str, expr: &str) -> Vec<(String, String)> {
     let mut out = Vec::new();
     for ident in identifiers(expr) {
         if let Some(ty) = graph_type_for_name(graph_json, &ident) {
@@ -235,7 +240,7 @@ fn identifiers(expr: &str) -> Vec<String> {
     out
 }
 
-fn parse_simple_call(call: &str) -> Option<(String, Vec<String>)> {
+pub(super) fn parse_simple_call(call: &str) -> Option<(String, Vec<String>)> {
     let open = call.find('(')?;
     let close = call.rfind(')')?;
     let name = call[..open].trim();
@@ -251,7 +256,7 @@ fn parse_simple_call(call: &str) -> Option<(String, Vec<String>)> {
     Some((name.to_string(), args))
 }
 
-fn find_simple_helper(src: &str, name: &str) -> Option<(Vec<String>, String)> {
+pub(super) fn find_simple_helper(src: &str, name: &str) -> Option<(Vec<String>, String)> {
     let needle = format!("fn {name}(");
     let start = src.find(&needle)?;
     let params_start = start + needle.len();
@@ -272,7 +277,7 @@ fn find_simple_helper(src: &str, name: &str) -> Option<(Vec<String>, String)> {
     Some((params, returned.trim().to_string()))
 }
 
-fn replace_ident(expr: &str, ident: &str, replacement: &str) -> String {
+pub(super) fn replace_ident(expr: &str, ident: &str, replacement: &str) -> String {
     let mut out = String::new();
     let mut current = String::new();
     for c in expr.chars().chain(std::iter::once(' ')) {
@@ -293,7 +298,7 @@ fn replace_ident(expr: &str, ident: &str, replacement: &str) -> String {
     out.trim_end().to_string()
 }
 
-fn attr_string(text: &str, key: &str) -> Option<String> {
+pub(super) fn attr_string(text: &str, key: &str) -> Option<String> {
     let needle = format!("{key}=");
     let pos = text.find(&needle)?;
     let rest = text[pos + needle.len()..].trim_start();
@@ -307,7 +312,7 @@ fn attr_string(text: &str, key: &str) -> Option<String> {
     )
 }
 
-fn attr_span(text: &str, key: &str) -> Option<SourceSpan> {
+pub(super) fn attr_span(text: &str, key: &str) -> Option<SourceSpan> {
     let raw = attr_string(text, key)?;
     let (start, end) = raw.split_once("..")?;
     Some(SourceSpan {
@@ -316,7 +321,7 @@ fn attr_span(text: &str, key: &str) -> Option<SourceSpan> {
     })
 }
 
-fn attr_bounds(text: &str, key: &str) -> Option<(i32, i32, i32, i32)> {
+pub(super) fn attr_bounds(text: &str, key: &str) -> Option<(i32, i32, i32, i32)> {
     let needle = format!("{key}=");
     let pos = text.find(&needle)?;
     let rest = text[pos + needle.len()..].trim_start();
@@ -334,22 +339,22 @@ fn attr_bounds(text: &str, key: &str) -> Option<(i32, i32, i32, i32)> {
     }
 }
 
-fn required_string(text: &str, key: &str) -> Result<String, String> {
+pub(super) fn required_string(text: &str, key: &str) -> Result<String, String> {
     json_string_field(text, key)
         .ok_or_else(|| edit_error("bad_request", &format!("missing `{key}`")))
 }
 
-fn required_query_string(text: &str, key: &str) -> Result<String, String> {
+pub(super) fn required_query_string(text: &str, key: &str) -> Result<String, String> {
     json_string_field(text, key)
         .ok_or_else(|| query_error("bad_request", &format!("missing `{key}`")))
 }
 
-fn required_project_string(text: &str, key: &str) -> Result<String, String> {
+pub(super) fn required_project_string(text: &str, key: &str) -> Result<String, String> {
     json_string_field(text, key)
         .ok_or_else(|| project_edit_error("bad_request", &format!("missing `{key}`")))
 }
 
-fn json_string_field(text: &str, key: &str) -> Option<String> {
+pub(super) fn json_string_field(text: &str, key: &str) -> Option<String> {
     let needle = format!("\"{key}\"");
     let pos = text.find(&needle)?;
     let rest = &text[pos + needle.len()..];
@@ -358,7 +363,7 @@ fn json_string_field(text: &str, key: &str) -> Option<String> {
     parse_json_string(rest.trim_start()).map(|(s, _)| s)
 }
 
-fn json_bool_field(text: &str, key: &str) -> Option<bool> {
+pub(super) fn json_bool_field(text: &str, key: &str) -> Option<bool> {
     let needle = format!("\"{key}\"");
     let pos = text.find(&needle)?;
     let rest = &text[pos + needle.len()..];
@@ -373,7 +378,7 @@ fn json_bool_field(text: &str, key: &str) -> Option<bool> {
     }
 }
 
-fn json_usize_field(text: &str, key: &str) -> Option<usize> {
+pub(super) fn json_usize_field(text: &str, key: &str) -> Option<usize> {
     let needle = format!("\"{key}\"");
     let pos = text.find(&needle)?;
     let rest = &text[pos + needle.len()..];
@@ -387,7 +392,7 @@ fn json_usize_field(text: &str, key: &str) -> Option<usize> {
         .ok()
 }
 
-fn json_usize_array(text: &str, key: &str) -> Vec<usize> {
+pub(super) fn json_usize_array(text: &str, key: &str) -> Vec<usize> {
     let needle = format!("\"{key}\"");
     let Some(pos) = text.find(&needle) else {
         return Vec::new();
@@ -425,7 +430,7 @@ fn json_usize_array(text: &str, key: &str) -> Vec<usize> {
     out
 }
 
-fn json_array_body<'a>(text: &'a str, key: &str) -> Option<&'a str> {
+pub(super) fn json_array_body<'a>(text: &'a str, key: &str) -> Option<&'a str> {
     let needle = format!("\"{key}\"");
     let pos = text.find(&needle)?;
     let rest = &text[pos + needle.len()..];
@@ -464,7 +469,7 @@ fn json_array_body<'a>(text: &'a str, key: &str) -> Option<&'a str> {
     None
 }
 
-fn json_object_bodies(text: &str) -> Vec<&str> {
+pub(super) fn json_object_bodies(text: &str) -> Vec<&str> {
     let bytes = text.as_bytes();
     let mut out = Vec::new();
     let mut start = None;
@@ -506,7 +511,7 @@ fn json_object_bodies(text: &str) -> Vec<&str> {
     out
 }
 
-fn wire_span_from_json_chunk(chunk: &str, wire_id: &str) -> Option<SourceSpan> {
+pub(super) fn wire_span_from_json_chunk(chunk: &str, wire_id: &str) -> Option<SourceSpan> {
     let (id, _) = parse_json_string(chunk.trim_start())?;
     if id != wire_id {
         return None;
@@ -524,7 +529,7 @@ fn wire_span_from_json_chunk(chunk: &str, wire_id: &str) -> Option<SourceSpan> {
     })
 }
 
-fn json_string_array(text: &str, key: &str) -> Vec<String> {
+pub(super) fn json_string_array(text: &str, key: &str) -> Vec<String> {
     let needle = format!("\"{key}\"");
     let Some(pos) = text.find(&needle) else {
         return Vec::new();
@@ -556,7 +561,7 @@ fn json_string_array(text: &str, key: &str) -> Vec<String> {
     out
 }
 
-fn parse_json_string(text: &str) -> Option<(String, usize)> {
+pub(super) fn parse_json_string(text: &str) -> Option<(String, usize)> {
     let mut chars = text.char_indices();
     if chars.next()?.1 != '"' {
         return None;
@@ -585,11 +590,11 @@ fn parse_json_string(text: &str) -> Option<(String, usize)> {
     None
 }
 
-fn span_json(span: SourceSpan) -> String {
+pub(super) fn span_json(span: SourceSpan) -> String {
     format!("{{\"start\":{},\"end\":{}}}", span.start, span.end)
 }
 
-fn json_strs(values: &[String]) -> String {
+pub(super) fn json_strs(values: &[String]) -> String {
     values
         .iter()
         .map(|s| json_str(s))
@@ -597,15 +602,15 @@ fn json_strs(values: &[String]) -> String {
         .join(",")
 }
 
-fn json_str(s: &str) -> String {
+pub(super) fn json_str(s: &str) -> String {
     format!("\"{}\"", json_escape(s))
 }
 
-fn json_optional_str(value: Option<&str>) -> String {
+pub(super) fn json_optional_str(value: Option<&str>) -> String {
     value.map(json_str).unwrap_or_else(|| "null".to_string())
 }
 
-fn json_escape(s: &str) -> String {
+pub(super) fn json_escape(s: &str) -> String {
     let mut out = String::new();
     for c in s.chars() {
         match c {

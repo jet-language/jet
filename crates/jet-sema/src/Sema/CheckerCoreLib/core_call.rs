@@ -1,3 +1,5 @@
+use super::*;
+use super::core_types::game_run_label_error;
 impl<'a> Checker<'a> {
         pub(crate) fn infer_core_call(
             &mut self,

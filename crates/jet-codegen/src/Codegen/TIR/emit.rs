@@ -5,9 +5,16 @@
 use super::*;
 use crate::AST::{AccessConvention, BinOp, Type, UnOp};
 
-include!("emit/functions.rs");
-include!("emit/statements.rs");
-include!("emit/expressions.rs");
-include!("emit/encoding.rs");
-include!("emit/core_calls.rs");
-include!("emit/helpers.rs");
+mod functions;
+mod statements;
+mod expressions;
+mod encoding;
+mod core_calls;
+mod helpers;
+
+pub(crate) use functions::*;
+pub(crate) use statements::*;
+pub(crate) use expressions::*;
+pub(crate) use encoding::*;
+pub(crate) use core_calls::*;
+pub(crate) use helpers::*;

@@ -1,3 +1,4 @@
+use super::*;
 impl<'a> Checker<'a> {
         pub(crate) fn check_lambda(
             &mut self,

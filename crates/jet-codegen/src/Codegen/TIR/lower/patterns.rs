@@ -1,3 +1,5 @@
+use super::*;
+
 /// D-SHIFT1 (c7shift): lower `cursor.take_pattern("…")`. Builds the
 /// `(name, type)` canonical hole list the SAME way sema did when it set this
 /// call's `resolved_ret` (untyped hole binds `String`), so the

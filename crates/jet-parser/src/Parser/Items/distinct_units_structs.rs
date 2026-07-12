@@ -1,10 +1,13 @@
+use super::super::{Diagnostic, Parser, Span, Syntax, TokKind, describe, string_literal_value};
+use super::helpers::parse_invariant_bounds;
+
 impl<'a> Parser<'a> {
         // --- statements ------------------------------------------------------
     
         // --- distinct types --------------------------------------------------
     
         /// D-DIST1/D-BIND4: true when the cursor is at `Name :: distinct`.
-        fn at_distinct_def(&self) -> bool {
+        pub(super) fn at_distinct_def(&self) -> bool {
             matches!(&self.peek().kind, TokKind::Ident(_))
                 && matches!(&self.peek2().kind, TokKind::ColonColon)
                 && matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::KW_DISTINCT)
@@ -31,7 +34,7 @@ impl<'a> Parser<'a> {
         /// E0062) precedes `Name :: distinct` at the cursor. The `@Numeric`-only
         /// sibling of the old `at_numeric_distinct_def` predicate, generalized to
         /// the four fixed bundles.
-        fn at_bundle_distinct_def(&self) -> bool {
+        pub(super) fn at_bundle_distinct_def(&self) -> bool {
             let mut i = self.pos;
             let mut saw_marker = false;
             loop {
@@ -375,7 +378,7 @@ impl<'a> Parser<'a> {
     
         /// D-QUAL3 (ratified 2026-06-24): true when `#UnitFamily(` is at the cursor.
         /// Token stream: `# UnitFamily (`.
-        fn at_unit_family_def(&self) -> bool {
+        pub(super) fn at_unit_family_def(&self) -> bool {
             matches!(&self.peek().kind, TokKind::Hash)
                 && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_UNIT_FAMILY)
                 && matches!(&self.peek3().kind, TokKind::LParen)
@@ -424,7 +427,7 @@ impl<'a> Parser<'a> {
     
         /// D-REPRC1: true when `#layout(…) struct` or `#layout(…) pub struct` is at
         /// the cursor. Token stream: `# layout ( variant ) [struct | pub]`.
-        fn at_layout_struct(&self) -> bool {
+        pub(super) fn at_layout_struct(&self) -> bool {
             if !matches!(&self.peek().kind, TokKind::Hash) {
                 return false;
             }
@@ -439,7 +442,7 @@ impl<'a> Parser<'a> {
         /// `c` (C-compatible) and `columnar` (struct-of-arrays) are supported;
         /// `packed`, `align` parse-and-error; the partial form `columnar: f, g`
         /// (D-SOA2B) is rejected (deferred post-v1).
-        fn layout_struct_def(
+        pub(super) fn layout_struct_def(
             &mut self,
             outer_is_pub: bool,
         ) -> Result<crate::AST::StructDef, Diagnostic> {
@@ -513,7 +516,7 @@ impl<'a> Parser<'a> {
         /// Note: the lexer inserts a `Semi` after an identifier at end-of-line, so the
         /// token stream is `@ PublishedSchema [Semi] struct` — we check peek4 (pos+3)
         /// when peek3 is a `Semi`, or peek3 when the marker is on the same line.
-        fn at_published_schema_struct(&self) -> bool {
+        pub(super) fn at_published_schema_struct(&self) -> bool {
             if !matches!(&self.peek().kind, TokKind::Hash | TokKind::At) {
                 return false;
             }
@@ -536,7 +539,7 @@ impl<'a> Parser<'a> {
         /// D-LIN1 (ratified 2026-06-21): true when `#SingleUse struct` / `#SingleUse enum`
         /// (with an optional newline `Semi` after the marker) is at the cursor. The
         /// `pub #SingleUse …` case is handled inline in the `KwPub` dispatch arm.
-        fn at_single_use_type(&self) -> bool {
+        pub(super) fn at_single_use_type(&self) -> bool {
             if !matches!(&self.peek().kind, TokKind::Hash) {
                 return false;
             }
@@ -558,7 +561,7 @@ impl<'a> Parser<'a> {
         /// Sets the `is_single_use` flag on the produced struct/enum so sema can enforce
         /// must-consume-once (E0140/E0141) and no-alias (E0142). The marker erases in
         /// codegen (I3).
-        fn single_use_type_def(&mut self, outer_is_pub: bool) -> Result<crate::AST::Item, Diagnostic> {
+        pub(super) fn single_use_type_def(&mut self, outer_is_pub: bool) -> Result<crate::AST::Item, Diagnostic> {
             let attr_start = self.peek().span;
             self.bump(); // consume `#`
             let (attr, attr_name_span) = self.expect_ident("after `#`")?;
@@ -600,7 +603,7 @@ impl<'a> Parser<'a> {
         /// D-MUSTUSE1 (c18iwxqx) / D-MARKERMOVE1: true when `@MustUse struct` /
         /// `@MustUse enum` is at the cursor. Also matches the retired `@MustUse`
         /// spelling so `must_use_type_def` can teach E0062.
-        fn at_must_use_type(&self) -> bool {
+        pub(super) fn at_must_use_type(&self) -> bool {
             if !matches!(&self.peek().kind, TokKind::Hash | TokKind::At) {
                 return false;
             }
@@ -619,7 +622,7 @@ impl<'a> Parser<'a> {
         }
     
         /// D-MUSTUSE1/D-MARKERMOVE1: parse `@MustUse [pub] (struct|enum) Name { … }`.
-        fn must_use_type_def(&mut self, outer_is_pub: bool) -> Result<crate::AST::Item, Diagnostic> {
+        pub(super) fn must_use_type_def(&mut self, outer_is_pub: bool) -> Result<crate::AST::Item, Diagnostic> {
             let attr_start = self.peek().span;
             let sigil = self.bump(); // consume `#` or `@`
             let (attr, attr_name_span) = self.expect_ident("after the marker sigil")?;
@@ -660,7 +663,7 @@ impl<'a> Parser<'a> {
         }
     
         /// D-MIGRATE1: true when `migration <TypeName> {` is at the cursor (contextual).
-        fn at_migration_block(&self) -> bool {
+        pub(super) fn at_migration_block(&self) -> bool {
             matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_MIGRATION)
                 && matches!(&self.peek2().kind, TokKind::Ident(_))
                 && matches!(&self.peek3().kind, TokKind::LBrace)
@@ -669,7 +672,7 @@ impl<'a> Parser<'a> {
         /// D-MIGRATE1/D-MARKERMOVE1 (ratified 2026-06-22 / 2026-07-01): parse
         /// `@PublishedSchema [pub] struct Name { … }`. The retired `@PublishedSchema`
         /// spelling teaches E0062.
-        fn published_schema_struct_def(
+        pub(super) fn published_schema_struct_def(
             &mut self,
             outer_is_pub: bool,
         ) -> Result<crate::AST::StructDef, Diagnostic> {
@@ -719,11 +722,11 @@ impl<'a> Parser<'a> {
     
         /// Parse `struct Name { … }` given that pub/is_pub was already handled.
         /// Factors out the body of `struct_def` when the `pub` keyword is already consumed.
-        fn struct_def_after_pub(&mut self, is_pub: bool) -> Result<crate::AST::StructDef, Diagnostic> {
+        pub(super) fn struct_def_after_pub(&mut self, is_pub: bool) -> Result<crate::AST::StructDef, Diagnostic> {
             self.struct_def_after_pub_pkg(is_pub, false)
         }
     
-        fn struct_def_after_pub_pkg(
+        pub(super) fn struct_def_after_pub_pkg(
             &mut self,
             is_pub: bool,
             is_package_pub: bool,

@@ -1,3 +1,52 @@
+use std::collections::HashMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use crate::Diagnostics::{Diagnostic, Severity};
+use crate::SHA256;
+use jet_semindex::SourceSpan;
+
+use super::debug_source_git::{
+    canonical_path, debug_diagnostics_error, debug_error, debug_ok, git_output,
+    git_relative_path, git_root, line_from_anchor, required_debug_string, untracked_diff,
+};
+use super::edit_actions::{
+    apply_add_pattern_arm, apply_append_multi_input, apply_break_link,
+    apply_create_collapse_region, apply_create_comment_region, apply_create_function,
+    apply_create_trait_impl, apply_delete_comment_region, apply_delete_hint_region,
+    apply_edit_function_signature, apply_edit_pattern_arm, apply_inline_edit, apply_insert_call,
+    apply_insert_structural, apply_move_link, apply_noop, apply_promote_inline,
+    apply_remove_multi_input_element, apply_remove_pattern_arm, apply_rename,
+    apply_reorder_statements, apply_update_comment_region, apply_visible_conversion,
+    canvas_action_candidate, extract_inline_candidate, inline_helper_candidate,
+    write_checked_formatted,
+};
+use super::graph_helpers::{
+    canvas_action_preview_ok, diagnostics_json, edit, edit_error, graph_id, insert_offset,
+    preview_ok, project_edit_error, query_error,
+};
+use super::project_scan::{
+    ProjectContext, env_project_json, lock_project_json, packages_project_json,
+    project_context_for_entry, project_file, targets_project_json, workspace_project_json,
+};
+use super::project_transactions::{
+    apply_project_add_dependency, apply_project_add_env_service, apply_project_add_target,
+    apply_project_add_workspace_member, apply_project_create_package, apply_project_edit_pkg_field,
+    apply_project_remove_dependency, clean_project_rel_path, rel_path,
+    required_project_touched_files, validate_touched_project_files,
+};
+use super::query_actions::{
+    canvas_actions, canvas_core_catalog, canvas_core_catalog_query, canvas_find,
+    canvas_preview_rename, canvas_references, canvas_source_to_graph,
+};
+use super::validation_json::{
+    json_bool_field, json_str, json_string_array, json_string_field, json_usize_array,
+    json_usize_field, required_project_string, required_query_string, required_string,
+    validate_function_signature, validate_ident, validate_qualified_name, validate_query_ident,
+    validate_signature_fragment, validate_single_line_fragment, validate_type_fragment,
+};
+
 pub const GRAPH_SCHEMA_VERSION: u32 = 1;
 pub const EDIT_SCHEMA_VERSION: u32 = 1;
 pub const DEBUG_SCHEMA_VERSION: u32 = 1;
@@ -8,20 +57,20 @@ pub const CORE_CATALOG_SCHEMA_VERSION: u32 = 1;
 pub const PROOF_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone)]
-struct InlineExpr {
+pub(super) struct InlineExpr {
     id: String,
     span: SourceSpan,
 }
 
 #[derive(Debug, Clone)]
-struct GraphEditAnchor {
+pub(super) struct GraphEditAnchor {
     graph_id: String,
     insert_offset: usize,
     fallible: bool,
 }
 
 #[derive(Debug, Clone)]
-struct NodeQueryRef {
+pub(super) struct NodeQueryRef {
     graph_id: String,
     node_id: String,
     kind: String,
@@ -30,7 +79,7 @@ struct NodeQueryRef {
 }
 
 #[derive(Debug, Clone)]
-struct Projection {
+pub(super) struct Projection {
     json: String,
     inline_exprs: Vec<InlineExpr>,
     graph_anchors: Vec<GraphEditAnchor>,
@@ -38,7 +87,7 @@ struct Projection {
 }
 
 #[derive(Default)]
-struct GraphBuilder {
+pub(super) struct GraphBuilder {
     graph_id: String,
     nodes: Vec<NodeRec>,
     pins: Vec<PinRec>,
@@ -52,7 +101,7 @@ struct GraphBuilder {
 }
 
 #[derive(Clone)]
-struct NodeRec {
+pub(super) struct NodeRec {
     id: String,
     kind: String,
     archetype: String,
@@ -65,7 +114,7 @@ struct NodeRec {
     meta_json: Option<String>,
 }
 
-struct PinRec {
+pub(super) struct PinRec {
     id: String,
     node_id: String,
     name: String,
@@ -82,7 +131,7 @@ struct PinRec {
     element_index: Option<usize>,
 }
 
-struct WireRec {
+pub(super) struct WireRec {
     id: String,
     from_pin: String,
     to_pin: String,
@@ -92,7 +141,7 @@ struct WireRec {
     to_span: Option<SourceSpan>,
 }
 
-struct InlineRec {
+pub(super) struct InlineRec {
     id: String,
     node_id: String,
     role: String,

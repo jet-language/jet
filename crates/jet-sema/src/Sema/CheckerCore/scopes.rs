@@ -1,3 +1,4 @@
+use super::*;
 impl<'a> Checker<'a> {
         pub(crate) fn push_scope(&mut self) {
             self.scopes.push(HashMap::new());

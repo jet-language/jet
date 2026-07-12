@@ -1,4 +1,17 @@
-fn graph_id(module_display: &str, f: &AST::Func) -> String {
+use std::fs;
+use std::path::Path;
+
+use crate::Diagnostics::{Diagnostic, Severity, Span, TextEdit};
+use crate::AST::{self, Expr};
+use jet_semindex::{SemIndex, SourceSpan, SymbolKind};
+
+use super::graph_json::add_wire_with_span;
+use super::project_scan::project_file;
+use super::query_actions::canvas_authority_context;
+use super::schema_api::{GraphBuilder, NodeQueryRef, Projection, source_revision};
+use super::validation_json::{json_str, span_json};
+
+pub(super) fn graph_id(module_display: &str, f: &AST::Func) -> String {
     let file = Path::new(module_display)
         .file_name()
         .and_then(|s| s.to_str())
@@ -9,7 +22,7 @@ fn graph_id(module_display: &str, f: &AST::Func) -> String {
     )
 }
 
-fn graph_id_name_span(graph_id: &str) -> Option<SourceSpan> {
+pub(super) fn graph_id_name_span(graph_id: &str) -> Option<SourceSpan> {
     let (_, range) = graph_id.rsplit_once('@')?;
     let (start, end) = range.split_once('-')?;
     Some(SourceSpan {
@@ -18,7 +31,7 @@ fn graph_id_name_span(graph_id: &str) -> Option<SourceSpan> {
     })
 }
 
-fn function_signature_span(src: &str, name_span: SourceSpan) -> Result<SourceSpan, String> {
+pub(super) fn function_signature_span(src: &str, name_span: SourceSpan) -> Result<SourceSpan, String> {
     let start = line_start(src, name_span.start);
     let Some(brace_rel) = src[name_span.end.min(src.len())..].find('{') else {
         return Err(edit_error(
@@ -33,28 +46,28 @@ fn function_signature_span(src: &str, name_span: SourceSpan) -> Result<SourceSpa
     Ok(SourceSpan { start, end })
 }
 
-fn insert_offset(src: &str, f: &AST::Func) -> usize {
+pub(super) fn insert_offset(src: &str, f: &AST::Func) -> usize {
     if let Some(first) = f.body.first() {
         return line_start(src, first.span().start);
     }
     line_after(src, f.name_span.end)
 }
 
-fn line_start(src: &str, offset: usize) -> usize {
+pub(super) fn line_start(src: &str, offset: usize) -> usize {
     src[..offset.min(src.len())]
         .rfind('\n')
         .map(|i| i + 1)
         .unwrap_or(0)
 }
 
-fn line_after(src: &str, offset: usize) -> usize {
+pub(super) fn line_after(src: &str, offset: usize) -> usize {
     src[offset.min(src.len())..]
         .find('\n')
         .map(|i| offset + i + 1)
         .unwrap_or(src.len())
 }
 
-fn indentation_at(src: &str, offset: usize) -> String {
+pub(super) fn indentation_at(src: &str, offset: usize) -> String {
     let start = line_start(src, offset);
     src[start..offset.min(src.len())]
         .chars()
@@ -62,7 +75,7 @@ fn indentation_at(src: &str, offset: usize) -> String {
         .collect()
 }
 
-fn assignment_title(target: &AST::LValue, op: Option<AST::BinOp>) -> String {
+pub(super) fn assignment_title(target: &AST::LValue, op: Option<AST::BinOp>) -> String {
     let op = op
         .map(|op| format!("{op:?}="))
         .unwrap_or_else(|| "=".to_string());
@@ -73,7 +86,7 @@ fn assignment_title(target: &AST::LValue, op: Option<AST::BinOp>) -> String {
     }
 }
 
-fn lvalue_type(g: &GraphBuilder, target: &AST::LValue) -> String {
+pub(super) fn lvalue_type(g: &GraphBuilder, target: &AST::LValue) -> String {
     match target {
         AST::LValue::Local { name, .. } => g
             .local_types
@@ -84,7 +97,7 @@ fn lvalue_type(g: &GraphBuilder, target: &AST::LValue) -> String {
     }
 }
 
-fn expr_title(expr: &Expr) -> &'static str {
+pub(super) fn expr_title(expr: &Expr) -> &'static str {
     match expr {
         Expr::StructLit { .. } => "construct",
         Expr::EnumLit { .. } => "variant",
@@ -105,18 +118,18 @@ fn expr_title(expr: &Expr) -> &'static str {
     }
 }
 
-fn starts_uppercase(s: &str) -> bool {
+pub(super) fn starts_uppercase(s: &str) -> bool {
     s.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
 }
 
-fn binding_type(g: &GraphBuilder, name: &str, b: &AST::Binding) -> String {
+pub(super) fn binding_type(g: &GraphBuilder, name: &str, b: &AST::Binding) -> String {
     b.ty.as_ref()
         .map(AST::Type::name)
         .or_else(|| g.local_types.get(name).cloned())
         .unwrap_or_else(|| "unknown".to_string())
 }
 
-fn expr_type(g: &GraphBuilder, index: &SemIndex, expr: &Expr) -> String {
+pub(super) fn expr_type(g: &GraphBuilder, index: &SemIndex, expr: &Expr) -> String {
     match expr {
         Expr::Int(_, _, _) => "Int".to_string(),
         Expr::Float(_, _, is_f32) => if *is_f32 { "F32" } else { "Float" }.to_string(),
@@ -159,7 +172,7 @@ fn op_is_bool(op: AST::BinOp) -> bool {
     )
 }
 
-fn call_ret(index: &SemIndex, name: &str) -> Option<String> {
+pub(super) fn call_ret(index: &SemIndex, name: &str) -> Option<String> {
     index.definitions().iter().find_map(|d| {
         if d.name == name {
             if let SymbolKind::Function { ret, .. } = &d.kind {
@@ -170,7 +183,7 @@ fn call_ret(index: &SemIndex, name: &str) -> Option<String> {
     })
 }
 
-fn effect_badges(index: &SemIndex, function: &str) -> Vec<&'static str> {
+pub(super) fn effect_badges(index: &SemIndex, function: &str) -> Vec<&'static str> {
     if let Some(effects) = index.effect_of(function) {
         if !effects.direct.is_empty() || !effects.inferred.is_empty() {
             return vec!["effects"];
@@ -179,14 +192,14 @@ fn effect_badges(index: &SemIndex, function: &str) -> Vec<&'static str> {
     Vec::new()
 }
 
-fn call_has_effects(index: &SemIndex, function: &str) -> bool {
+pub(super) fn call_has_effects(index: &SemIndex, function: &str) -> bool {
     index
         .effect_of(function)
         .map(|effects| !effects.direct.is_empty() || !effects.inferred.is_empty())
         .unwrap_or(false)
 }
 
-fn pure_leaf(expr: &Expr) -> bool {
+pub(super) fn pure_leaf(expr: &Expr) -> bool {
     match expr {
         Expr::Str(_, _)
         | Expr::Int(_, _, _)
@@ -209,7 +222,7 @@ fn pure_leaf(expr: &Expr) -> bool {
     }
 }
 
-fn wire_ident_refs(g: &mut GraphBuilder, expr: &Expr, input_pin: &str) {
+pub(super) fn wire_ident_refs(g: &mut GraphBuilder, expr: &Expr, input_pin: &str) {
     if let Expr::Ident(name, span) = expr {
         if let Some(out) = g.local_pins.get(name).cloned() {
             add_wire_with_span(g, &out, input_pin, "data", Some((*span).into()));
@@ -217,21 +230,21 @@ fn wire_ident_refs(g: &mut GraphBuilder, expr: &Expr, input_pin: &str) {
     }
 }
 
-fn snippet(src: &str, span: Span) -> String {
+pub(super) fn snippet(src: &str, span: Span) -> String {
     src.get(span.start..span.end)
         .unwrap_or("")
         .trim()
         .to_string()
 }
 
-fn edit(span: SourceSpan, text: &str) -> TextEdit {
+pub(super) fn edit(span: SourceSpan, text: &str) -> TextEdit {
     TextEdit {
         span: Span::new(span.start, span.end),
         new_text: text.to_string(),
     }
 }
 
-fn edit_ok(changed: bool, path: &Path) -> String {
+pub(super) fn edit_ok(changed: bool, path: &Path) -> String {
     let src = fs::read_to_string(path).unwrap_or_default();
     format!(
         "{{\"protocol\":\"jet.canvas.edit\",\"schema_version\":{},\"changed\":{},\"revision\":{},\"source_text\":{}}}",
@@ -242,7 +255,7 @@ fn edit_ok(changed: bool, path: &Path) -> String {
     )
 }
 
-fn preview_ok(before: &str, after: &str) -> String {
+pub(super) fn preview_ok(before: &str, after: &str) -> String {
     format!(
         "{{\"protocol\":\"jet.canvas.preview\",\"schema_version\":{},\"changed\":{},\"diff\":{},\"after_revision\":{}}}",
         EDIT_SCHEMA_VERSION,
@@ -252,7 +265,7 @@ fn preview_ok(before: &str, after: &str) -> String {
     )
 }
 
-fn canvas_action_preview_ok(
+pub(super) fn canvas_action_preview_ok(
     path: &Path,
     before: &str,
     after: &str,
@@ -276,7 +289,7 @@ fn canvas_action_preview_ok(
     )
 }
 
-fn query_ok(op: &str, src: &str, results_json: &str, extra_fields: &str) -> String {
+pub(super) fn query_ok(op: &str, src: &str, results_json: &str, extra_fields: &str) -> String {
     format!(
         "{{\"protocol\":\"jet.canvas.query\",\"schema_version\":{},\"ok\":true,\"op\":{},\"revision\":{},\"results\":{},{} }}",
         QUERY_SCHEMA_VERSION,
@@ -287,7 +300,7 @@ fn query_ok(op: &str, src: &str, results_json: &str, extra_fields: &str) -> Stri
     )
 }
 
-fn query_result_json(
+pub(super) fn query_result_json(
     kind: &str,
     title: &str,
     symbol: &str,
@@ -315,14 +328,14 @@ fn query_result_json(
     )
 }
 
-fn open_query_context(path: &Path, src: &str) -> Result<(Projection, SemIndex), String> {
+pub(super) fn open_query_context(path: &Path, src: &str) -> Result<(Projection, SemIndex), String> {
     let projection =
         project_file(path).map_err(|diags| query_diagnostics_error(path, src, &diags))?;
     let index = jet_semindex::open(path).map_err(|e| query_error("check", &e.to_string()))?;
     Ok((projection, index))
 }
 
-fn node_for_span(projection: &Projection, span: SourceSpan) -> Option<NodeQueryRef> {
+pub(super) fn node_for_span(projection: &Projection, span: SourceSpan) -> Option<NodeQueryRef> {
     projection
         .node_refs
         .iter()
@@ -331,7 +344,7 @@ fn node_for_span(projection: &Projection, span: SourceSpan) -> Option<NodeQueryR
         .cloned()
 }
 
-fn nearest_node(projection: &Projection, offset: usize) -> Option<NodeQueryRef> {
+pub(super) fn nearest_node(projection: &Projection, offset: usize) -> Option<NodeQueryRef> {
     projection
         .node_refs
         .iter()
@@ -345,16 +358,16 @@ fn nearest_node(projection: &Projection, offset: usize) -> Option<NodeQueryRef> 
         .cloned()
 }
 
-fn spans_overlap(a: SourceSpan, b: SourceSpan) -> bool {
+pub(super) fn spans_overlap(a: SourceSpan, b: SourceSpan) -> bool {
     a.start <= b.end && b.start <= a.end
 }
 
-fn contains_ci(text: &str, needle: &str) -> bool {
+pub(super) fn contains_ci(text: &str, needle: &str) -> bool {
     text.to_ascii_lowercase()
         .contains(&needle.to_ascii_lowercase())
 }
 
-fn text_matches(src: &str, needle: &str) -> Vec<SourceSpan> {
+pub(super) fn text_matches(src: &str, needle: &str) -> Vec<SourceSpan> {
     let mut out = Vec::new();
     if needle.is_empty() {
         return out;
@@ -371,7 +384,7 @@ fn text_matches(src: &str, needle: &str) -> Vec<SourceSpan> {
     out
 }
 
-fn dedupe_results(results: &mut Vec<String>) {
+pub(super) fn dedupe_results(results: &mut Vec<String>) {
     let mut seen = Vec::<String>::new();
     results.retain(|r| {
         if seen.iter().any(|s| s == r) {
@@ -406,7 +419,7 @@ fn floor_char_boundary(src: &str, mut offset: usize) -> usize {
     offset
 }
 
-fn simple_diff(before: &str, after: &str) -> String {
+pub(super) fn simple_diff(before: &str, after: &str) -> String {
     let before_lines = before.lines().collect::<Vec<_>>();
     let after_lines = after.lines().collect::<Vec<_>>();
     let mut out = String::from("--- before\n+++ after\n");
@@ -427,7 +440,7 @@ fn simple_diff(before: &str, after: &str) -> String {
     out
 }
 
-fn edit_error(kind: &str, message: &str) -> String {
+pub(super) fn edit_error(kind: &str, message: &str) -> String {
     format!(
         "{{\"protocol\":\"jet.canvas.edit\",\"schema_version\":{},\"ok\":false,\"kind\":{},\"message\":{}}}",
         EDIT_SCHEMA_VERSION,
@@ -454,7 +467,7 @@ fn edit_error_with_diagnostics(
     )
 }
 
-fn query_error(kind: &str, message: &str) -> String {
+pub(super) fn query_error(kind: &str, message: &str) -> String {
     format!(
         "{{\"protocol\":\"jet.canvas.query\",\"schema_version\":{},\"ok\":false,\"kind\":{},\"message\":{}}}",
         QUERY_SCHEMA_VERSION,
@@ -481,7 +494,7 @@ fn query_error_with_diagnostics(
     )
 }
 
-fn project_edit_ok(
+pub(super) fn project_edit_ok(
     op: &str,
     preview: bool,
     changed: bool,
@@ -504,7 +517,7 @@ fn project_edit_ok(
     )
 }
 
-fn project_edit_error(kind: &str, message: &str) -> String {
+pub(super) fn project_edit_error(kind: &str, message: &str) -> String {
     format!(
         "{{\"protocol\":\"jet.canvas.project.edit\",\"schema_version\":{},\"ok\":false,\"kind\":{},\"message\":{}}}",
         PROJECT_SCHEMA_VERSION,
@@ -513,7 +526,7 @@ fn project_edit_error(kind: &str, message: &str) -> String {
     )
 }
 
-fn diagnostics_error(path: &Path, src: &str, diags: &[Diagnostic]) -> String {
+pub(super) fn diagnostics_error(path: &Path, src: &str, diags: &[Diagnostic]) -> String {
     edit_error_with_diagnostics(
         "diagnostic",
         &crate::render_diagnostics(&path.display().to_string(), src, diags),
@@ -523,7 +536,7 @@ fn diagnostics_error(path: &Path, src: &str, diags: &[Diagnostic]) -> String {
     )
 }
 
-fn query_diagnostics_error(path: &Path, src: &str, diags: &[Diagnostic]) -> String {
+pub(super) fn query_diagnostics_error(path: &Path, src: &str, diags: &[Diagnostic]) -> String {
     query_error_with_diagnostics(
         "diagnostic",
         &crate::render_diagnostics(&path.display().to_string(), src, diags),
@@ -533,7 +546,7 @@ fn query_diagnostics_error(path: &Path, src: &str, diags: &[Diagnostic]) -> Stri
     )
 }
 
-fn diagnostics_json(path: &Path, src: &str, diags: &[Diagnostic]) -> String {
+pub(super) fn diagnostics_json(path: &Path, src: &str, diags: &[Diagnostic]) -> String {
     diags
         .iter()
         .map(|d| diagnostic_payload_json(path, src, d))

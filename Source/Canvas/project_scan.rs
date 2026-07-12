@@ -1,4 +1,15 @@
-fn project_file(path: &Path) -> Result<Projection, Vec<Diagnostic>> {
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use crate::Diagnostics::{Diagnostic, Severity};
+use crate::SHA256;
+
+use super::graph_projection::project_checked;
+use super::project_transactions::{diagnostic_json, rel_path};
+use super::schema_api::{Projection, source_revision};
+use super::validation_json::{json_optional_str, json_str};
+
+pub(super) fn project_file(path: &Path) -> Result<Projection, Vec<Diagnostic>> {
     let path_str = path.to_string_lossy();
     let src = fs::read_to_string(path).unwrap_or_default();
     let (diags, bundle, facts) = crate::Driver::check_file_with_effect_facts(&path_str, None, true);
@@ -17,13 +28,13 @@ fn project_file(path: &Path) -> Result<Projection, Vec<Diagnostic>> {
 }
 
 #[derive(Clone)]
-struct ProjectFileRec {
+pub(super) struct ProjectFileRec {
     path: String,
     revision: String,
     kind: String,
 }
 
-struct ProjectContext {
+pub(super) struct ProjectContext {
     entry_path: PathBuf,
     project_root: PathBuf,
     manifest_root: Option<PathBuf>,
@@ -32,19 +43,19 @@ struct ProjectContext {
     project_revision: String,
 }
 
-struct TouchedProjectFile {
+pub(super) struct TouchedProjectFile {
     path: String,
     revision: String,
 }
 
-struct ProjectChange {
+pub(super) struct ProjectChange {
     path: PathBuf,
     rel: String,
     before: String,
     after: String,
 }
 
-fn project_context_for_entry(path: &Path) -> ProjectContext {
+pub(super) fn project_context_for_entry(path: &Path) -> ProjectContext {
     let entry_dir = path.parent().unwrap_or_else(|| Path::new("."));
     let manifest_root = crate::Loader::find_manifest_root(entry_dir);
     let workspace_root = find_workspace_root(manifest_root.as_deref().unwrap_or(entry_dir));
@@ -174,7 +185,7 @@ fn collect_jet_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-fn project_revision_from_files(files: &[ProjectFileRec]) -> String {
+pub(super) fn project_revision_from_files(files: &[ProjectFileRec]) -> String {
     let mut acc = String::new();
     for file in files {
         acc.push_str(&file.path);
@@ -187,7 +198,7 @@ fn project_revision_from_files(files: &[ProjectFileRec]) -> String {
     source_revision(&acc)
 }
 
-fn workspace_project_json(project_root: &Path, workspace_root: Option<&Path>) -> String {
+pub(super) fn workspace_project_json(project_root: &Path, workspace_root: Option<&Path>) -> String {
     let Some(root) = workspace_root else {
         return "null".to_string();
     };
@@ -220,7 +231,7 @@ fn workspace_project_json(project_root: &Path, workspace_root: Option<&Path>) ->
     )
 }
 
-fn packages_project_json(
+pub(super) fn packages_project_json(
     project_root: &Path,
     manifest_root: Option<&Path>,
     workspace_root: Option<&Path>,
@@ -249,7 +260,7 @@ fn package_dirs(manifest_root: Option<&Path>, workspace_root: Option<&Path>) -> 
     dirs
 }
 
-fn targets_project_json(
+pub(super) fn targets_project_json(
     project_root: &Path,
     manifest_root: Option<&Path>,
     workspace_root: Option<&Path>,
@@ -352,7 +363,7 @@ struct EnvProjectJson {
     diagnostics: String,
 }
 
-fn env_project_json(project_root: &Path) -> EnvProjectJson {
+pub(super) fn env_project_json(project_root: &Path) -> EnvProjectJson {
     let path = project_root.join(crate::Syntax::ENV_FILE);
     let Ok(src) = fs::read_to_string(&path) else {
         return EnvProjectJson {
@@ -434,7 +445,7 @@ fn dev_service_project_json(service: &crate::Jetpack::ModuleEval::DevServicePlan
     )
 }
 
-fn lock_project_json(project_root: &Path) -> String {
+pub(super) fn lock_project_json(project_root: &Path) -> String {
     let lock_path = project_root.join(crate::Syntax::UNIFIED_LOCK_FILE);
     if !lock_path.is_file() {
         return String::new();

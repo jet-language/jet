@@ -1,6 +1,8 @@
+use super::super::{Diagnostic, Parser, Span, Syntax, TokKind, describe};
+
 impl<'a> Parser<'a> {
         /// D-MIGRATE1 (ratified 2026-06-22): parse `migration TypeName { rename a -> b; … }`.
-        fn migration_decl(&mut self) -> Result<crate::AST::MigrationDecl, Diagnostic> {
+        pub(super) fn migration_decl(&mut self) -> Result<crate::AST::MigrationDecl, Diagnostic> {
             let start = self.peek().span;
             self.bump(); // consume `migration` ident
             let (type_name, type_span) = self.expect_ident("as the migrated type name")?;
@@ -172,7 +174,7 @@ impl<'a> Parser<'a> {
         }
     
         /// D-STATE-DECL: true when `state <TypeName> {` is at the cursor (contextual).
-        fn at_state_block(&self) -> bool {
+        pub(super) fn at_state_block(&self) -> bool {
             if !matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_STATE_DECL) {
                 return false;
             }
@@ -193,11 +195,11 @@ impl<'a> Parser<'a> {
         ///
         /// The state names are comma-separated PascalCase identifiers. The block may have
         /// a trailing comma; semicolons between names are allowed for formatting flexibility.
-        fn state_decl(&mut self, is_pub: bool) -> Result<crate::AST::StateDecl, Diagnostic> {
+        pub(super) fn state_decl(&mut self, is_pub: bool) -> Result<crate::AST::StateDecl, Diagnostic> {
             self.state_decl_with_pkg(is_pub, false)
         }
     
-        fn state_decl_with_pkg(
+        pub(super) fn state_decl_with_pkg(
             &mut self,
             is_pub: bool,
             is_package_pub: bool,
@@ -233,18 +235,18 @@ impl<'a> Parser<'a> {
         }
     
         /// D-PROTO1/D-PROTO2: true when `protocol Name {` is at the cursor (contextual).
-        fn at_protocol_block(&self) -> bool {
+        pub(super) fn at_protocol_block(&self) -> bool {
             matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_PROTOCOL)
                 && matches!(&self.peek2().kind, TokKind::Ident(_))
                 && matches!(&self.peek3().kind, TokKind::LBrace)
         }
     
         /// D-PROTO1/D-PROTO2: parse `[pub] protocol Name { … }`.
-        fn protocol_decl(&mut self, is_pub: bool) -> Result<crate::AST::ProtocolDecl, Diagnostic> {
+        pub(super) fn protocol_decl(&mut self, is_pub: bool) -> Result<crate::AST::ProtocolDecl, Diagnostic> {
             self.protocol_decl_with_pkg(is_pub, false)
         }
     
-        fn protocol_decl_with_pkg(
+        pub(super) fn protocol_decl_with_pkg(
             &mut self,
             is_pub: bool,
             is_package_pub: bool,
@@ -383,7 +385,7 @@ impl<'a> Parser<'a> {
     
         /// D-METADERIVE1=A (amended 2026-07-01): `derive T.Trait { … }` — user-authored
         /// derive block. The retired `derive Trait for T` spelling teaches the dot form (E2714).
-        fn user_derive_def(&mut self) -> Result<crate::AST::DeriveDef, Diagnostic> {
+        pub(super) fn user_derive_def(&mut self) -> Result<crate::AST::DeriveDef, Diagnostic> {
             let start = self.peek().span.start;
             self.bump(); // consume `derive`
             let (type_param, type_param_span) = self.expect_ident("after `derive`")?;

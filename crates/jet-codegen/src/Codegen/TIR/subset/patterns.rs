@@ -1,3 +1,5 @@
+use super::*;
+
 /// c109 Phase 15: an arm head that `emit_switch_arm_cond` would emit as a PLAIN
 /// expression (`_ => emit_expr(cond)`) — NOT a variant/Eq-to-variant pattern (which it
 /// routes through `emit_pattern_matches`) and NOT an arm-head range (shape B). This is

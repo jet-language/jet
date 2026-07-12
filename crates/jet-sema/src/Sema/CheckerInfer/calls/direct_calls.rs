@@ -1,3 +1,4 @@
+use super::*;
 impl<'a> Checker<'a> {
         /// Check a call. Returns:
         ///   None             — problem already reported

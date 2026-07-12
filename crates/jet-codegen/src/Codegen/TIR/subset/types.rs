@@ -1,3 +1,5 @@
+use super::*;
+
 /// Resolve a `Self` type reference to the owning concrete type. Other types pass
 /// through unchanged. (In current Jet a literal `Self` return rarely type-checks —
 /// sema treats `Self` and the concrete name as distinct — but resolving it here

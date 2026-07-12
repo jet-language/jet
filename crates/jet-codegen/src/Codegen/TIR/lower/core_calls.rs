@@ -1,3 +1,5 @@
+use super::*;
+
 /// c109 Phase 13: lower a closure-taking core call (`tasks.spawn`/`http.serve`/
 /// `scope.guard`) into a bespoke `CoreClosureCall` node, reproducing `emit_core_call`
 /// (Source/Codegen/Expression.rs) byte-for-byte. Returns `None` when `(module,

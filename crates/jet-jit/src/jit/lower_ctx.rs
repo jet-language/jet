@@ -309,22 +309,33 @@ impl LowerCtx<'_, '_> {
                 self.b.switch_to_block(then_block);
                 self.b.seal_block(then_block);
                 self.lower_stmts_scoped(then_body)?;
-                if !self.dead {
+                let then_reaches_merge = !self.dead;
+                if then_reaches_merge {
                     self.b.ins().jump(merge_block, &[]);
                 }
 
                 self.b.switch_to_block(else_block);
                 self.b.seal_block(else_block);
+                // Reachability is branch-local. In particular, an absent else
+                // is a live fallthrough even when the then branch returned.
+                self.dead = false;
                 if let Some(body) = else_body {
-                    self.lower_stmts_scoped(body)?;
+                    self.lower_stmts(body)?;
                 }
-                if !self.dead {
+                let else_reaches_merge = !self.dead;
+                if else_reaches_merge {
                     self.b.ins().jump(merge_block, &[]);
                 }
 
-                self.b.switch_to_block(merge_block);
-                self.b.seal_block(merge_block);
-                self.dead = false;
+                if then_reaches_merge || else_reaches_merge {
+                    self.b.switch_to_block(merge_block);
+                    self.b.seal_block(merge_block);
+                    self.dead = false;
+                } else {
+                    // Both branches terminated. Leave the unreferenced merge
+                    // block detached and keep later statements unreachable.
+                    self.dead = true;
+                }
             }
             TStmt::Loop { label, body } => {
                 let header = self.b.create_block();

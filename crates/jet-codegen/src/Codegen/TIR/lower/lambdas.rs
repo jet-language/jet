@@ -1,3 +1,5 @@
+use super::*;
+
 /// c109 Phase 11: lower a lambda/closure literal (`Expr::Lambda`) to a `TLambda`,
 /// reproducing `emit_lambda` (Source/Codegen/Expression.rs) byte-for-byte. Every
 /// capture/escape/Fn-vs-FnMut decision is the TOTAL `Lambda.meta` fact — no capture

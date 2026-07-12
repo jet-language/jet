@@ -1,3 +1,4 @@
+use super::*;
 impl<'a> Checker<'a> {
         /// D-REACT1=B: a reactive `Signal<T>`/`Derived<T>` holds ordinary data that can
         /// be cloned to its dependents. Reject a function-typed value (E2913); everything

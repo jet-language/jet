@@ -1,5 +1,3 @@
-use super::*;
-
 /// D-WEBDEFAULT1 (ratified 2026-07-01, c134): what a `#Target(…)` marker parsed to — a
 /// partition-ceiling `Bucket` (`Wasm`/`Js`, existing D-WASM1 meaning),
 /// `DefaultWeb` (`Web` — this file's default CLI backend, a different axis),
@@ -11,15 +9,27 @@ pub(super) enum TargetMarker {
     Os(crate::Syntax::OsTarget),
 }
 
-include!("Items/imports_policy.rs");
-include!("Items/external_tests_ffi.rs");
-include!("Items/reactive_unsafe_c.rs");
-include!("Items/markers_contracts.rs");
-include!("Items/visibility_items.rs");
-include!("Items/functions_params.rs");
-include!("Items/enums_traits.rs");
-include!("Items/marker_groups.rs");
-include!("Items/type_methods_fields.rs");
-include!("Items/distinct_units_structs.rs");
-include!("Items/states_protocols.rs");
-include!("Items/helpers.rs");
+#[path = "Items/imports_policy.rs"]
+mod imports_policy;
+#[path = "Items/external_tests_ffi.rs"]
+mod external_tests_ffi;
+#[path = "Items/reactive_unsafe_c.rs"]
+mod reactive_unsafe_c;
+#[path = "Items/markers_contracts.rs"]
+mod markers_contracts;
+#[path = "Items/visibility_items.rs"]
+mod visibility_items;
+#[path = "Items/functions_params.rs"]
+mod functions_params;
+#[path = "Items/enums_traits.rs"]
+mod enums_traits;
+#[path = "Items/marker_groups.rs"]
+mod marker_groups;
+#[path = "Items/type_methods_fields.rs"]
+mod type_methods_fields;
+#[path = "Items/distinct_units_structs.rs"]
+mod distinct_units_structs;
+#[path = "Items/states_protocols.rs"]
+mod states_protocols;
+#[path = "Items/helpers.rs"]
+mod helpers;

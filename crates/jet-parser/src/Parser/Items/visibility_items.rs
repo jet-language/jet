@@ -1,6 +1,8 @@
+use super::super::{Diagnostic, Func, Item, MetaAttr, Parser, Span, Syntax, TokKind};
+
 impl<'a> Parser<'a> {
         /// D-VISDEFAULT2=A: parse one top-level item after `priv` / `private`.
-        fn item_after_visibility(
+        pub(super) fn item_after_visibility(
             &mut self,
             is_pub: bool,
             is_package_pub: bool,
@@ -85,7 +87,7 @@ impl<'a> Parser<'a> {
         }
     
         /// D-VISDEFAULT2=A: parse top-level item visibility (`priv`, `pub`, defaults).
-        fn parse_item_visibility(&mut self) -> (bool, bool) {
+        pub(super) fn parse_item_visibility(&mut self) -> (bool, bool) {
             if matches!(self.peek().kind, TokKind::KwPub | TokKind::KwPriv)
                 && matches!(self.peek2().kind, TokKind::Colon)
             {
@@ -279,7 +281,7 @@ impl<'a> Parser<'a> {
         /// D-PUBPKG1=A: parse an optional `pub` or `pub(package)` qualifier.
         /// Returns `(is_pub, is_package_pub)`. On `pub(other)` pushes E0411 and returns `(true, false)`.
         /// Non-failing: never returns Err.
-        fn parse_pub_qualifier(&mut self) -> (bool, bool) {
+        pub(super) fn parse_pub_qualifier(&mut self) -> (bool, bool) {
             if !matches!(self.peek().kind, TokKind::KwPub) {
                 return (false, false);
             }

@@ -1,4 +1,20 @@
-fn required_project_touched_files(request: &str) -> Result<Vec<TouchedProjectFile>, String> {
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use crate::Diagnostics::{Diagnostic, Severity};
+
+use super::graph_helpers::{edit, project_edit_error, project_edit_ok, simple_diff};
+use super::project_scan::{
+    ProjectChange, ProjectContext, ProjectFileRec, TouchedProjectFile, project_context_for_entry,
+    project_revision_from_files,
+};
+use super::schema_api::source_revision;
+use super::validation_json::{
+    json_array_body, json_bool_field, json_object_bodies, json_str, json_string_field,
+    json_usize_field, required_project_string, validate_ident_for_project,
+};
+
+pub(super) fn required_project_touched_files(request: &str) -> Result<Vec<TouchedProjectFile>, String> {
     let files_body = json_array_body(request, "files")
         .ok_or_else(|| project_edit_error("bad_request", "missing `files`"))?;
     let mut files = Vec::new();
@@ -19,7 +35,7 @@ fn required_project_touched_files(request: &str) -> Result<Vec<TouchedProjectFil
     Ok(files)
 }
 
-fn validate_touched_project_files(
+pub(super) fn validate_touched_project_files(
     ctx: &ProjectContext,
     touched: &[TouchedProjectFile],
 ) -> Result<(), String> {
@@ -49,7 +65,7 @@ fn validate_touched_project_files(
     Ok(())
 }
 
-fn apply_project_add_dependency(
+pub(super) fn apply_project_add_dependency(
     ctx: &ProjectContext,
     request: &str,
     touched: &[TouchedProjectFile],
@@ -84,7 +100,7 @@ fn apply_project_add_dependency(
     finish_project_changes(ctx, request, "add_dependency", vec![change])
 }
 
-fn apply_project_remove_dependency(
+pub(super) fn apply_project_remove_dependency(
     ctx: &ProjectContext,
     request: &str,
     touched: &[TouchedProjectFile],
@@ -117,7 +133,7 @@ fn apply_project_remove_dependency(
     finish_project_changes(ctx, request, "remove_dependency", vec![change])
 }
 
-fn apply_project_edit_pkg_field(
+pub(super) fn apply_project_edit_pkg_field(
     ctx: &ProjectContext,
     request: &str,
     touched: &[TouchedProjectFile],
@@ -150,7 +166,7 @@ fn apply_project_edit_pkg_field(
     )
 }
 
-fn apply_project_add_target(
+pub(super) fn apply_project_add_target(
     ctx: &ProjectContext,
     request: &str,
     touched: &[TouchedProjectFile],
@@ -194,7 +210,7 @@ fn project_manifest_rel(ctx: &ProjectContext, request: &str) -> String {
     })
 }
 
-fn apply_project_create_package(
+pub(super) fn apply_project_create_package(
     ctx: &ProjectContext,
     request: &str,
     touched: &[TouchedProjectFile],
@@ -283,7 +299,7 @@ fn apply_project_create_package(
     finish_project_changes(ctx, request, "create_package", changes)
 }
 
-fn apply_project_add_workspace_member(
+pub(super) fn apply_project_add_workspace_member(
     ctx: &ProjectContext,
     request: &str,
     touched: &[TouchedProjectFile],
@@ -335,7 +351,7 @@ fn apply_project_add_workspace_member(
     finish_project_changes(ctx, request, "add_workspace_member", vec![change])
 }
 
-fn apply_project_add_env_service(
+pub(super) fn apply_project_add_env_service(
     ctx: &ProjectContext,
     request: &str,
     touched: &[TouchedProjectFile],
@@ -622,7 +638,7 @@ fn require_touched_revision(
     ))
 }
 
-fn clean_project_rel_path(path: &str) -> Result<String, String> {
+pub(super) fn clean_project_rel_path(path: &str) -> Result<String, String> {
     let path = path.trim().trim_start_matches("./");
     if path.is_empty() || path.contains('\\') || Path::new(path).is_absolute() {
         return Err(project_edit_error(
@@ -895,7 +911,7 @@ fn project_file_kind_for_rel(rel: &str) -> &'static str {
     }
 }
 
-fn diagnostic_json(d: &Diagnostic) -> String {
+pub(super) fn diagnostic_json(d: &Diagnostic) -> String {
     format!(
         "{{\"code\":{},\"what\":{},\"why\":{},\"fix\":{}}}",
         json_str(&d.code),
@@ -905,7 +921,7 @@ fn diagnostic_json(d: &Diagnostic) -> String {
     )
 }
 
-fn rel_path(root: &Path, path: &Path) -> String {
+pub(super) fn rel_path(root: &Path, path: &Path) -> String {
     path.strip_prefix(root)
         .unwrap_or(path)
         .to_string_lossy()

@@ -1,4 +1,20 @@
-fn canvas_find(path: &Path, src: &str, query: &str) -> Result<String, String> {
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use crate::FixEngine;
+use jet_semindex::{SemIndex, SourceSpan, SymbolKind};
+
+use super::graph_helpers::{
+    call_has_effects, contains_ci, dedupe_results, edit, nearest_node, node_for_span,
+    open_query_context, query_diagnostics_error, query_error, query_ok, query_result_json,
+    simple_diff, spans_overlap, text_matches,
+};
+use super::project_scan::{env_project_json, project_file};
+use super::project_transactions::rel_path;
+use super::schema_api::source_revision;
+use super::validation_json::{json_optional_str, json_str, json_string_field, span_json};
+
+pub(super) fn canvas_find(path: &Path, src: &str, query: &str) -> Result<String, String> {
     let (projection, index) = open_query_context(path, src)?;
     let needle = query.trim();
     if needle.is_empty() {
@@ -64,7 +80,7 @@ fn canvas_find(path: &Path, src: &str, query: &str) -> Result<String, String> {
     ))
 }
 
-fn canvas_references(path: &Path, src: &str, symbol: &str) -> Result<String, String> {
+pub(super) fn canvas_references(path: &Path, src: &str, symbol: &str) -> Result<String, String> {
     let (projection, index) = open_query_context(path, src)?;
     let mut results = Vec::new();
     for def in index.definitions().iter().filter(|d| d.name == symbol) {
@@ -98,7 +114,7 @@ fn canvas_references(path: &Path, src: &str, symbol: &str) -> Result<String, Str
     ))
 }
 
-fn canvas_source_to_graph(path: &Path, src: &str, span: SourceSpan) -> Result<String, String> {
+pub(super) fn canvas_source_to_graph(path: &Path, src: &str, span: SourceSpan) -> Result<String, String> {
     let projection =
         project_file(path).map_err(|diags| query_diagnostics_error(path, src, &diags))?;
     let mut results = projection
@@ -138,7 +154,7 @@ fn canvas_source_to_graph(path: &Path, src: &str, span: SourceSpan) -> Result<St
     ))
 }
 
-fn canvas_preview_rename(path: &Path, src: &str, symbol: &str, to: &str) -> Result<String, String> {
+pub(super) fn canvas_preview_rename(path: &Path, src: &str, symbol: &str, to: &str) -> Result<String, String> {
     let (projection, index) = open_query_context(path, src)?;
     let mut edits = Vec::new();
     let mut results = Vec::new();
@@ -188,7 +204,7 @@ fn canvas_preview_rename(path: &Path, src: &str, symbol: &str, to: &str) -> Resu
     ))
 }
 
-fn canvas_actions(path: &Path, src: &str) -> Result<String, String> {
+pub(super) fn canvas_actions(path: &Path, src: &str) -> Result<String, String> {
     let (_projection, index) = open_query_context(path, src)?;
     let authority = canvas_authority_context(path);
     let mut entries = Vec::new();
@@ -233,12 +249,12 @@ fn canvas_actions(path: &Path, src: &str) -> Result<String, String> {
     ))
 }
 
-fn canvas_core_catalog_query(path: &Path, src: &str, request: &str) -> Result<String, String> {
+pub(super) fn canvas_core_catalog_query(path: &Path, src: &str, request: &str) -> Result<String, String> {
     let query = json_string_field(request, "query").unwrap_or_default();
     canvas_core_catalog(path, src, &query)
 }
 
-fn canvas_core_catalog(_path: &Path, src: &str, query: &str) -> Result<String, String> {
+pub(super) fn canvas_core_catalog(_path: &Path, src: &str, query: &str) -> Result<String, String> {
     let catalog = core_catalog_entries(query);
     let modules = catalog
         .iter()
@@ -1052,7 +1068,7 @@ fn canvas_builtin_action_json(
     )
 }
 
-fn core_member_params(module_path: &str, member_name: &str, signature: &str) -> Vec<(String, String)> {
+pub(super) fn core_member_params(module_path: &str, member_name: &str, signature: &str) -> Vec<(String, String)> {
     if let Some(params) = params_from_signature(signature) {
         return params;
     }
@@ -1148,7 +1164,7 @@ fn type_for_param_name(name: &str) -> String {
     .to_string()
 }
 
-fn default_arg_for_type(ty: &str) -> String {
+pub(super) fn default_arg_for_type(ty: &str) -> String {
     let ty = ty.trim().trim_end_matches('?').trim();
     match ty {
         "Bool" => "true".to_string(),
@@ -1289,7 +1305,7 @@ struct CanvasAuthority {
     project_root: PathBuf,
 }
 
-fn canvas_authority_context(path: &Path) -> CanvasAuthority {
+pub(super) fn canvas_authority_context(path: &Path) -> CanvasAuthority {
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
     if let Some(root) = crate::Loader::find_manifest_root(dir) {
         let manifest_path = root.join(crate::Syntax::PAYLOAD_FILE);

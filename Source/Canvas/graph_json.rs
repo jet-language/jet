@@ -1,4 +1,15 @@
-fn add_node(
+use std::collections::{HashMap, HashSet};
+
+use crate::Diagnostics::Span;
+use crate::AST;
+use jet_semindex::SourceSpan;
+
+use super::debug_source_git::span_overlaps;
+use super::graph_helpers::{graph_id, line_start, snippet};
+use super::schema_api::{GraphBuilder, InlineRec, NodeRec, PinRec, WireRec};
+use super::validation_json::{attr_bounds, attr_span, attr_string, json_str, json_strs, span_json};
+
+pub(super) fn add_node(
     g: &mut GraphBuilder,
     id: &str,
     kind: &str,
@@ -24,7 +35,7 @@ fn add_node(
     });
 }
 
-fn add_pin(
+pub(super) fn add_pin(
     g: &mut GraphBuilder,
     node_id: &str,
     name: &str,
@@ -59,7 +70,7 @@ fn add_pin(
     id
 }
 
-fn add_arm_pin(
+pub(super) fn add_arm_pin(
     g: &mut GraphBuilder,
     node_id: &str,
     name: &str,
@@ -88,24 +99,24 @@ fn add_arm_pin(
     id
 }
 
-fn set_pin_source_span(g: &mut GraphBuilder, pin_id: &str, span: SourceSpan) {
+pub(super) fn set_pin_source_span(g: &mut GraphBuilder, pin_id: &str, span: SourceSpan) {
     if let Some(pin) = g.pins.iter_mut().find(|pin| pin.id == pin_id) {
         pin.span = span;
     }
 }
 
-fn set_pin_append(g: &mut GraphBuilder, pin_id: &str, op: &str, index: usize) {
+pub(super) fn set_pin_append(g: &mut GraphBuilder, pin_id: &str, op: &str, index: usize) {
     if let Some(pin) = g.pins.iter_mut().find(|pin| pin.id == pin_id) {
         pin.append_op = Some(op.to_string());
         pin.element_index = Some(index);
     }
 }
 
-fn add_wire(g: &mut GraphBuilder, from_pin: &str, to_pin: &str, kind: &str) {
+pub(super) fn add_wire(g: &mut GraphBuilder, from_pin: &str, to_pin: &str, kind: &str) {
     add_wire_with_span(g, from_pin, to_pin, kind, None);
 }
 
-fn add_wire_with_span(
+pub(super) fn add_wire_with_span(
     g: &mut GraphBuilder,
     from_pin: &str,
     to_pin: &str,
@@ -143,7 +154,7 @@ fn add_control_wire(
     });
 }
 
-fn add_region(g: &mut GraphBuilder, ordinal: usize, kind: &str, title: &str, span: Span) {
+pub(super) fn add_region(g: &mut GraphBuilder, ordinal: usize, kind: &str, title: &str, span: Span) {
     g.regions.push(format!(
         "{{\"region_id\":{},\"kind\":{},\"title\":{},\"source_span\":{}}}",
         json_str(&format!("{}:region:{ordinal}:{kind}", g.graph_id)),
@@ -153,7 +164,7 @@ fn add_region(g: &mut GraphBuilder, ordinal: usize, kind: &str, title: &str, spa
     ));
 }
 
-fn meta_attr_json(meta: Option<&AST::MetaAttr>) -> Option<String> {
+pub(super) fn meta_attr_json(meta: Option<&AST::MetaAttr>) -> Option<String> {
     let meta = meta?;
     let facts = meta.facts();
     if facts.category.is_none() && !facts.tunable {
@@ -171,7 +182,7 @@ fn meta_attr_json(meta: Option<&AST::MetaAttr>) -> Option<String> {
     ))
 }
 
-fn add_source_comment_regions(g: &mut GraphBuilder, src: &str, f: &AST::Func) {
+pub(super) fn add_source_comment_regions(g: &mut GraphBuilder, src: &str, f: &AST::Func) {
     let func_span = func_source_span(f);
     for hint in canvas_comment_hints(src) {
         if !span_overlaps(hint.anchor, func_span) {
@@ -205,7 +216,7 @@ fn add_source_comment_regions(g: &mut GraphBuilder, src: &str, f: &AST::Func) {
     }
 }
 
-fn add_execution_overlay(g: &mut GraphBuilder) {
+pub(super) fn add_execution_overlay(g: &mut GraphBuilder) {
     let exec_nodes = execution_nodes_in_order(g);
 
     for node in &exec_nodes {
@@ -386,7 +397,7 @@ fn ensure_exec_pin(
     id
 }
 
-fn func_source_span(f: &AST::Func) -> SourceSpan {
+pub(super) fn func_source_span(f: &AST::Func) -> SourceSpan {
     let mut start = f.name_span.start;
     let mut end = f.name_span.end;
     for stmt in &f.body {
@@ -398,7 +409,7 @@ fn func_source_span(f: &AST::Func) -> SourceSpan {
 }
 
 #[derive(Clone)]
-struct CommentHint {
+pub(super) struct CommentHint {
     anchor: SourceSpan,
     hint_span: SourceSpan,
     title: String,
@@ -407,7 +418,7 @@ struct CommentHint {
     bounds: (i32, i32, i32, i32),
 }
 
-fn canvas_comment_hints(src: &str) -> Vec<CommentHint> {
+pub(super) fn canvas_comment_hints(src: &str) -> Vec<CommentHint> {
     let mut out = Vec::new();
     let mut offset = 0usize;
     for line in src.split_inclusive('\n') {
@@ -435,7 +446,7 @@ fn comment_region_id(graph_id: &str, span: SourceSpan) -> String {
     format!("{graph_id}:comment:{}-{}", span.start, span.end)
 }
 
-fn canvas_collapse_hints(src: &str) -> Vec<CommentHint> {
+pub(super) fn canvas_collapse_hints(src: &str) -> Vec<CommentHint> {
     let mut out = Vec::new();
     let mut offset = 0usize;
     for line in src.split_inclusive('\n') {
@@ -463,7 +474,7 @@ fn collapse_region_id(graph_id: &str, span: SourceSpan) -> String {
     format!("{graph_id}:collapse:{}-{}", span.start, span.end)
 }
 
-fn add_inline(
+pub(super) fn add_inline(
     g: &mut GraphBuilder,
     node_id: &str,
     ordinal: usize,
@@ -482,7 +493,7 @@ fn add_inline(
     });
 }
 
-fn graph_to_json(g: &GraphBuilder, f: &AST::Func, src: &str) -> String {
+pub(super) fn graph_to_json(g: &GraphBuilder, f: &AST::Func, src: &str) -> String {
     let nodes = g.nodes.iter().map(node_json).collect::<Vec<_>>().join(",");
     let pins = g.pins.iter().map(pin_json).collect::<Vec<_>>().join(",");
     let wires = g.wires.iter().map(wire_json).collect::<Vec<_>>().join(",");
