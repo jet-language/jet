@@ -115,11 +115,13 @@ fn workspace_crates_keep_declared_dependency_direction() {
         ],
     );
     assert_deps("crates/jet-queries/Cargo.toml", &[]);
-    assert_deps("crates/jet-rt/Cargo.toml", &[]);
+    // Runtime values reuse foundation's compiler-owned, std-only BigInt value;
+    // direction remains inward toward the dependency-free foundation layer.
+    assert_deps("crates/jet-rt/Cargo.toml", &["jet-foundation"]);
     assert_deps("crates/jet-net/Cargo.toml", &[]);
     assert_deps(
         "crates/jet-semindex/Cargo.toml",
-        &["jet-driver", "jet-foundation", "jet-sema"],
+        &["jet-driver", "jet-foundation", "jet-lexer", "jet-sema"],
     );
     assert_deps("crates/jet-impact/Cargo.toml", &["jet-semindex"]);
     assert_deps(
@@ -194,9 +196,14 @@ fn direct_jetpack_imports_stay_behind_known_boundaries() {
             .map(|line| line.split_once("//").map(|(code, _)| code).unwrap_or(line))
             .collect::<Vec<_>>()
             .join("\n");
+        // Match the crate token, not internal modules such as
+        // `Syntax::jetpack_config`.
         if code_text.contains("crate::Jetpack")
-            || code_text.contains("pub use jetpack")
-            || code_text.contains("use jetpack")
+            || code_text.lines().any(|line| {
+                matches!(line.trim(), "use jetpack;" | "pub use jetpack;")
+            })
+            || code_text.contains("pub use jetpack as ")
+            || code_text.contains("use jetpack as ")
             || code_text.contains("jetpack::")
         {
             let rel = file
