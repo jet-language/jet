@@ -144,24 +144,6 @@ impl<'a> Parser<'a> {
             )
         }
     
-        /// D-MATURITY1=B / D-MARKERMOVE1: true when the cursor is at a maturity-tag
-        /// marker before `fn`/`pub`. Handles both `@Experimental fn` (same line) and
-        /// `@Experimental\npub fn` (next line, where the lexer inserts a synthetic
-        /// `;` terminator after the marker). Matches on either sigil — a stray
-        /// `@Experimental` is still recognized here so `func()` can teach E0062
-        /// instead of falling through to an unrelated parse error.
-        pub(super) fn at_maturity_fn(&self) -> bool {
-            matches!(self.peek().kind, TokKind::Hash | TokKind::At)
-                && matches!(&self.peek2().kind, TokKind::Ident(n)
-                    if n == Syntax::ATTR_EXPERIMENTAL
-                        || n == Syntax::ATTR_TESTED
-                        || n == Syntax::ATTR_HARDENED)
-                && matches!(
-                    self.peek3().kind,
-                    TokKind::KwFn | TokKind::KwPub | TokKind::Semi | TokKind::Eof
-                )
-        }
-    
         /// S60 (D-CASING1 follow-on) / D-MARKERMOVE1/2: true when the cursor is at
         /// `@Pure fn`/`@Pure pub` — or the retired `@Pure` spelling, so `func()`
         /// can consume it and teach E0062 instead of falling through elsewhere.

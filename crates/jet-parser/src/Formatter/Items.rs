@@ -24,6 +24,11 @@ impl<'a> Fmt<'a> {
                     self.fmt_expr(value, Prec::OrFallback);
                 }
                 MetaField::Tunable { .. } => self.write(Syntax::META_FIELD_TUNABLE),
+                MetaField::Maturity { value, .. } => {
+                    self.write(Syntax::META_FIELD_MATURITY);
+                    self.write(": ");
+                    self.fmt_expr(value, Prec::OrFallback);
+                }
                 MetaField::Unknown { name, value, .. } => {
                     self.write(name);
                     if let Some(value) = value {
@@ -481,12 +486,6 @@ impl<'a> Fmt<'a> {
         // D-REPLAY1: `#Replayable` deterministic replay guard precedes `pub`/`fn`.
         if f.is_replayable {
             self.write(&format!("#{} ", Syntax::ATTR_REPLAYABLE));
-        }
-        // D-MATURITY1=B: `@Experimental`/`@Tested`/`@Hardened` — doc-only,
-        // formatter-preserved (zero sema). Emitted before `@MustUse` to match
-        // the parser's consumption order.
-        if let Some(tag) = f.maturity {
-            self.write(&format!("@{} ", tag.as_str()));
         }
         // D-MUSTUSE1 (c18iwxqx): `@MustUse fn` / method precedes `pub`/`fn`.
         if f.is_must_use {

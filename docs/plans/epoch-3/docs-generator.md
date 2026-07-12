@@ -22,7 +22,7 @@ emits stable HTML and machine-readable docs data.
 ## Current Anchors
 
 - S49/D-TEST4: `///` docs and doctests are ratified.
-- D-MATURITY1: `@Experimental`, `@Tested`, `@Hardened` are doc-only API tags.
+- D-MARK-META1=B: `#Meta(maturity: .Experimental | .Tested | .Hardened)` is doc-only API metadata.
 - D-SEMINDEX1: semantic index owns symbols, references, types, calls, effects.
 - D-WD2: dossier is an umbrella over facts, not a second checker.
 - `docs/reference/**` is current hand-written reference output.
@@ -37,7 +37,7 @@ emits stable HTML and machine-readable docs data.
    inline code, links, and headings.
 4. Doctest integration: run fenced `jet` snippets through `jet test`; attach
    pass/fail and output expectations to `DocItem`.
-5. Maturity tags: render `@Experimental`, `@Tested`, `@Hardened` as badges with
+5. Maturity metadata: render `.Experimental`, `.Tested`, `.Hardened` as badges with
    copy that says "documentation tag only".
 6. HTML renderer: deterministic static site, no remote assets, search index
    generated locally, accessible navigation.

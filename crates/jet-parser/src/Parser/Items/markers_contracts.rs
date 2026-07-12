@@ -14,32 +14,6 @@ impl<'a> Parser<'a> {
             Ok(Span::new(start.start, name_span.end))
         }
 
-        /// D-MATURITY1=B / D-MARKERMOVE1: consume `@Experimental`/`@Tested`/
-        /// `@Hardened` (or retired `#` spelling → E0062). Returns the tag + span.
-        fn bump_maturity_marker(
-            &mut self,
-        ) -> Result<(crate::AST::MaturityTag, Span), Diagnostic> {
-            let start = self.peek().span;
-            let sigil = self.bump(); // `#` or `@`
-            let (name, name_span) = self.expect_ident("after the marker sigil")?;
-            let full = Span::new(start.start, name_span.end);
-            if matches!(sigil.kind, TokKind::Hash) {
-                self.diags
-                    .push(Self::e0062_contract_on_hash(&name, full));
-            }
-            let tag = if name == Syntax::ATTR_EXPERIMENTAL {
-                crate::AST::MaturityTag::Experimental
-            } else if name == Syntax::ATTR_TESTED {
-                crate::AST::MaturityTag::Tested
-            } else if name == Syntax::ATTR_HARDENED {
-                crate::AST::MaturityTag::Hardened
-            } else {
-                // `at_maturity_fn` already matched one of the three names.
-                crate::AST::MaturityTag::Experimental
-            };
-            Ok((tag, full))
-        }
-
         /// S60 (D-CASING1 follow-on) / D-MARKERMOVE1/2: consume a `@Pure` /
         /// retired `@Pure` prefix already confirmed present by `at_pure_fn`.
         /// Teaches E0062 when the retired `#` spelling is used.
@@ -106,16 +80,6 @@ impl<'a> Parser<'a> {
         }
     
         pub(super) fn func(&mut self) -> Result<Func, Diagnostic> {
-            // D-MATURITY1=B: `@Experimental`/`@Tested`/`@Hardened` before other
-            // fn markers (and before `fn`/`pub`). Next-line form inserts a
-            // synthetic `;` — skip it after the tag so `@MustUse`/`@Pure`/…
-            // still parse.
-            let (maturity, maturity_span) = if self.at_maturity_fn() {
-                let (tag, span) = self.bump_maturity_marker()?;
-                (Some(tag), Some(span))
-            } else {
-                (None, None)
-            };
             while matches!(self.peek().kind, TokKind::Semi) {
                 self.bump();
             }
@@ -204,6 +168,11 @@ impl<'a> Parser<'a> {
             while matches!(self.peek().kind, TokKind::Semi) {
                 self.bump();
             }
+            // D-MARK-META1=B: maturity is exclusively a closed `#Meta` field.
+            let (maturity, maturity_span) = meta
+                .as_ref()
+                .and_then(crate::AST::MetaAttr::maturity)
+                .map_or((None, None), |(tag, span)| (Some(tag), Some(span)));
             let f = self.func_with_modifiers_full(
                 is_pure,
                 is_sanitizer,

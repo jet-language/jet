@@ -676,7 +676,8 @@ pub struct BenchDef {
     pub body: Vec<Stmt>,
 }
 
-/// D-MATURITY1=B: doc-only API stability tag on a function. Parsed and
+/// D-MARK-META1=B: doc-only API maturity value on a function. Parsed from
+/// `#Meta(maturity: .…)` and
 /// formatter-preserved; zero sema/codegen effect (no call-site propagation).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MaturityTag {
@@ -764,7 +765,7 @@ pub struct Func {
     /// drop the return value as a bare expression statement (E0419).
     pub is_must_use: bool,
     pub must_use_span: Option<Span>,
-    /// D-MATURITY1=B: `@Experimental` / `@Tested` / `@Hardened` — documentation
+    /// D-MARK-META1=B: `#Meta(maturity: .…)` — documentation
     /// stability tag. Stored for fmt/docs/IDE; erased for sema and codegen.
     pub maturity: Option<MaturityTag>,
     pub maturity_span: Option<Span>,

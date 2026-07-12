@@ -70,9 +70,7 @@ the I7/R3 chokepoint.
 | `#Codable` | `@Codable` | `ATTR_CODABLE` (`"Codable"`) | D-SERDE4 | struct / enum decl |
 | `#Encode` | `@Encode` | `ATTR_ENCODE` (`"Encode"`) | D-SERDE4 | struct / enum decl |
 | `#Decode` | `@Decode` | `ATTR_DECODE` (`"Decode"`) | D-SERDE4 | struct / enum decl |
-| `#Experimental` | `@Experimental` | `ATTR_EXPERIMENTAL` | D-MATURITY1 | fn decl |
-| `#Tested` | `@Tested` | `ATTR_TESTED` | D-MATURITY1 | fn decl |
-| `#Hardened` | `@Hardened` | `ATTR_HARDENED` | D-MATURITY1 | fn decl |
+| standalone maturity markers | `#Meta(maturity: .Experimental | .Tested | .Hardened)` | `META_FIELD_MATURITY` | D-MARK-META1 | fn decl |
 | `#PublishedSchema` | `@PublishedSchema` | `ATTR_PUBLISHED_SCHEMA` | D-MIGRATE1 | struct decl |
 | `#Redact` | `@Redact` | `ATTR_REDACT` (`"Redact"`) | D-DEBUG-REDACT | field decl |
 | `#Numeric` | `@Numeric` | `ATTR_NUMERIC` (`"Numeric"`) | D-DIST3 | distinct-type decl **(merges — see §3)** |
@@ -241,7 +239,7 @@ Test: `nix develop -c cargo build -p jet-foundation`.
 Files: `crates/jet-parser/src/Parser/{Items.rs,Statements.rs,Modules.rs,Types.rs}`,
 `crates/jet-parser/src/Formatter/{Items.rs,Statements.rs,mod.rs}`.
 - **Parse the `@` plane.** Add `At`-token dispatch paralleling the `Hash` predicates:
-  `at_pure_fn`/`at_must_use_fn`/`at_maturity_fn` (`Items.rs:1073,1088,1102`),
+  `at_pure_fn`/`at_must_use_fn`,
   `at_marker_list`/`at_single_type_marker` (`Items.rs:715,717`; `Modules.rs:387,389`),
   the layout/`published_schema` dispatch in `parse_type_after_markers` (`Items.rs:3286`),
   the `#Numeric` distinct-type path (`Items.rs:3748`), the `#Redact` field path, and the

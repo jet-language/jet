@@ -283,13 +283,13 @@ pub const RENAME_ALL_PASCAL: &str = "pascal"; // D-SERDE3
 pub const RENAME_ALL_KEBAB: &str = "kebab"; // D-SERDE3
 pub const RENAME_ALL_SCREAMING: &str = "screaming"; // D-SERDE3
 
-// ── Maturity tags (D-MATURITY1=B, ratified 2026-06-28) ──────────────────────
-// Doc-convention markers; parser accepts+ignores them before `fn`/`pub fn`.
-// No sema propagation; no codegen effect. I7: registered here so the LSP and
-// formatter recognise them as valid items.
-pub const ATTR_EXPERIMENTAL: &str = "Experimental"; // D-MATURITY1
-pub const ATTR_TESTED: &str = "Tested"; // D-MATURITY1
-pub const ATTR_HARDENED: &str = "Hardened"; // D-MATURITY1
+// ── Maturity metadata values (D-MARK-META1=B, ratified 2026-07-12) ──────────
+// Closed values for `#Meta(maturity: .Experimental | .Tested | .Hardened)`.
+// They are not standalone markers and therefore are absent from marker-plane
+// registries. No sema/codegen effect.
+pub const ATTR_EXPERIMENTAL: &str = "Experimental"; // D-MARK-META1
+pub const ATTR_TESTED: &str = "Tested"; // D-MARK-META1
+pub const ATTR_HARDENED: &str = "Hardened"; // D-MARK-META1
 
 // ── Explicit discard (D-IGNORERET2=A, ratified 2026-06-28) ──────────────────
 // `.drop("reason")` — method-style terminal that silences E0402 for a fallible

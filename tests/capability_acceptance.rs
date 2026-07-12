@@ -195,16 +195,16 @@ fn prelude_opt_out() {
     );
 }
 
-/// claim.maturity-tags / maturity-convention — D-MATURITY1=B.
+/// claim.maturity-tags / maturity-convention — D-MARK-META1=B.
 #[test]
 fn maturity_convention() {
     // CAPABILITY_CLAIM: claim.maturity-tags / maturity-convention
     let docs = read("docs/reference/maturity-tags.md");
     assert!(
-        docs.contains("@Experimental")
-            && docs.contains("@Tested")
-            && docs.contains("@Hardened"),
-        "reference docs must name all three maturity tags"
+        docs.contains("#Meta(maturity: .Experimental)")
+            && docs.contains(".Tested")
+            && docs.contains(".Hardened"),
+        "reference docs must name all three maturity metadata values"
     );
     assert!(
         docs.contains("do not propagate")
@@ -219,15 +219,15 @@ fn maturity_convention() {
         syntax.contains("ATTR_EXPERIMENTAL")
             && syntax.contains("ATTR_TESTED")
             && syntax.contains("ATTR_HARDENED"),
-        "Syntax.rs must register maturity tag constants (I7)"
+        "Syntax.rs must register maturity values (I7)"
     );
 
     let example = read("examples/features/syntax/maturity_tags.jet");
     assert!(
-        example.contains("@Experimental")
-            && example.contains("@Tested")
-            && example.contains("@Hardened"),
-        "I5 example must use all three @ maturity tags"
+        example.contains("#Meta(maturity: .Experimental)")
+            && example.contains("#Meta(maturity: .Tested)")
+            && example.contains("#Meta(maturity: .Hardened)"),
+        "I5 example must use all three maturity metadata values"
     );
     let expected = read("examples/features/expected/syntax/maturity_tags.out");
     let got = run_example("examples/features/syntax/maturity_tags.jet");
@@ -238,10 +238,10 @@ fn maturity_convention() {
     );
 
     // Zero sema effect: no diagnostic/codegen policy keyed on maturity.
-    let e0062 = read("tests/ui/marker_experimental_hash.stderr");
+    let retired_at = read("tests/ui/marker_experimental_at.stderr");
     assert!(
-        e0062.contains("E0062") && e0062.contains("@Experimental"),
-        "retired `#Experimental` must teach `@Experimental` (E0062)"
+        retired_at.contains("isn't a known marker") && retired_at.contains("Experimental"),
+        "retired standalone `@Experimental` must be an ordinary unknown marker"
     );
 
     let sema_hits = Command::new("rg")

@@ -54,6 +54,25 @@ impl<'a> Parser<'a> {
                     let span = Span::new(field_span.start, value.span().end);
                     if name == Syntax::META_FIELD_CATEGORY {
                         fields.push(MetaField::Category { value, span });
+                    } else if name == Syntax::META_FIELD_MATURITY {
+                        let valid = matches!(&value,
+                            Expr::EnumLit { type_name, variant, args, .. }
+                                if type_name.is_empty()
+                                    && args.is_empty()
+                                    && matches!(variant.as_str(),
+                                        Syntax::ATTR_EXPERIMENTAL
+                                            | Syntax::ATTR_TESTED
+                                            | Syntax::ATTR_HARDENED));
+                        if !valid {
+                            self.diags.push(Diagnostic::error(
+                                "E0352",
+                                "`#Meta` maturity needs a known maturity value".to_string(),
+                                "maturity metadata is a closed documentation scale".to_string(),
+                                "write `maturity: .Experimental`, `.Tested`, or `.Hardened`".to_string(),
+                                Some(value.span()),
+                            ));
+                        }
+                        fields.push(MetaField::Maturity { value, span });
                     } else {
                         fields.push(MetaField::Unknown {
                             name,

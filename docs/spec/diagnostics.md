@@ -278,6 +278,7 @@ before continuing.
 | E0349 | parse | `#Meta` written outside binding/function/const position (D-CANVASMETA1) |
 | E0350 | sema  | `Any` type requested, but Jet has no general top type (D-DYNAMIC-TYPE1) |
 | E0351 | sema  | retired `Data` value-tree name; use `DataTree` (D-SERDE13) |
+| E0352 | sema  | invalid `#Meta` maturity value (D-MARK-META1) |
 | L0301 | sema  | unreachable dispatch pattern arm (lint)   |
 | E0401 | sema  | fallible value used where plain `T` expected |
 | E0402 | sema  | fallible call ignored as a statement      |
@@ -1065,6 +1066,7 @@ already-freed arena), these track the views themselves.
 |------|------|-----|-----|
 | E0350 | Jet does not have an `Any` type. | A value should keep a precise shape: use an enum for known variants, generics or traits for abstraction, `T?` for absence, and `DataTree` for parsed dynamic data. | Replace `Any` with the specific mechanism for this value. |
 | E0351 | The value tree is named `DataTree`, not `Data`. | `DataTree` is the one name a hand codec constructs and returns and every format's `parse` yields; its variants are `.Null`, `.Bool`, `.Int`, `.Float`, `.Text`, `.Array`, and `.Object`. | Write `DataTree` instead of `Data`. |
+| E0352 | `#Meta` maturity needs a known maturity value. | Maturity metadata is a closed documentation scale. | Write `maturity: .Experimental`, `.Tested`, or `.Hardened`. |
 
 ## Statement switch attribute diagnostics (D-CANVASSTATE1)
 

@@ -2054,18 +2054,21 @@ fn fmt_preserves_inline_dep_version() {
 
 #[test]
 fn fmt_preserves_maturity_tags() {
-    // D-MATURITY1=B: `@Experimental`/`@Tested`/`@Hardened` are doc-only but
+    // D-MARK-META1=B: maturity fields are doc-only but
     // must round-trip (fmt STABILITY — not just accept-without-crash).
     let src = "\
-@Experimental fn experimental_label() -> String {
+#Meta(maturity: .Experimental)
+fn experimental_label() -> String {
     return \"exp\"
 }
 
-@Tested fn tested_label() -> String {
+#Meta(maturity: .Tested)
+fn tested_label() -> String {
     return \"tested\"
 }
 
-@Hardened fn hardened_label() -> String {
+#Meta(maturity: .Hardened)
+fn hardened_label() -> String {
     return \"hard\"
 }
 
@@ -2075,15 +2078,14 @@ fn run() {
     print(hardened_label())
 }
 ";
-    assert_fmt_stable(src, "maturity tags (D-MATURITY1=B)");
+    assert_fmt_stable(src, "maturity metadata (D-MARK-META1=B)");
 }
 
 #[test]
 fn fmt_preserves_maturity_tags_next_line() {
-    // Next-line form parses; fmt canonicalizes to the same-line marker slot
-    // used by `@MustUse`/`@Pure` (one marker-placement rule).
+    // Metadata on the preceding line parses and round-trips canonically.
     let src = "\
-@Experimental
+#Meta(maturity: .Experimental)
 fn experimental_label() -> String {
     return \"exp\"
 }
@@ -2092,10 +2094,10 @@ fn run() {
     print(experimental_label())
 }
 ";
-    let out = jet::format_source(src).expect("next-line maturity should parse");
+    let out = jet::format_source(src).expect("next-line maturity metadata should parse");
     assert!(
-        out.contains("@Experimental"),
-        "fmt must not drop @Experimental; got:\n{out}"
+        out.contains("#Meta(maturity: .Experimental)"),
+        "fmt must not drop maturity metadata; got:\n{out}"
     );
     let twice = jet::format_source(&out).expect("re-fmt");
     assert_eq!(out, twice, "maturity next-line canonicalize must be idempotent");

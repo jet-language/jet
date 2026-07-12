@@ -21,7 +21,7 @@ leaking expert concepts into beginner onboarding.
 
 ## Current Law
 
-- D-MATURITY1: `@Experimental`, `@Tested`, `@Hardened` are doc-only markers
+- D-MARK-META1=B: `#Meta(maturity: .Experimental | .Tested | .Hardened)` is doc-only metadata
   before `fn`, parsed and erased.
 - D-WD11 plus D-TARGET-SURFACE1/MEMORY1/LINKER1/ALLOC1/AUDIT1: embedded and
   freestanding work uses typed target profiles and dossier/audit output.
@@ -39,7 +39,7 @@ leaking expert concepts into beginner onboarding.
 4. Verify `docs/reference/maturity-tags.md` says tags are doc-only and do not
    alter sema, codegen, release policy, effects, or access.
 5. Add examples that are documentation-only if behavior already exists:
-   `@Experimental`, `@Tested`, `@Hardened` on public functions; embedded profile
+   `#Meta(maturity: .Experimental | .Tested | .Hardened)` on public functions; embedded profile
    audit JSON excerpt once surface slice lands.
 6. Cross-link from `docs/reference/core-library.md`, `docs/spec/roadmap.md`,
    and `docs/plans/epoch-3/typed-target-profiles.md`.

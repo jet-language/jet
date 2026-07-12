@@ -65,6 +65,7 @@ pub enum IndexKind {
 pub enum MetaField {
     Category { value: Expr, span: Span },
     Tunable { span: Span },
+    Maturity { value: Expr, span: Span },
     Unknown {
         name: String,
         value: Option<Expr>,
@@ -104,10 +105,29 @@ impl MetaAttr {
                     }
                 }
                 MetaField::Tunable { .. } => out.tunable = true,
+                MetaField::Maturity { .. } => {}
                 MetaField::Unknown { .. } => {}
             }
         }
         out
+    }
+}
+
+impl MetaAttr {
+    /// D-MARK-META1=B: extract a valid closed maturity value for `Func` docs.
+    pub fn maturity(&self) -> Option<(crate::AST::MaturityTag, Span)> {
+        self.fields.iter().find_map(|field| {
+            let MetaField::Maturity { value, span } = field else { return None };
+            let Expr::EnumLit { type_name, variant, args, .. } = value else { return None };
+            if !type_name.is_empty() || !args.is_empty() { return None; }
+            let tag = match variant.as_str() {
+                crate::Syntax::ATTR_EXPERIMENTAL => crate::AST::MaturityTag::Experimental,
+                crate::Syntax::ATTR_TESTED => crate::AST::MaturityTag::Tested,
+                crate::Syntax::ATTR_HARDENED => crate::AST::MaturityTag::Hardened,
+                _ => return None,
+            };
+            Some((tag, *span))
+        })
     }
 }
 

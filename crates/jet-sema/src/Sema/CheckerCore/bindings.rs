@@ -2,6 +2,7 @@ pub(crate) fn check_meta_attr_fields(meta: &MetaAttr) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
     let mut seen_category = false;
     let mut seen_tunable = false;
+    let mut seen_maturity = false;
     for field in &meta.fields {
         match field {
             MetaField::Category { value, span } => {
@@ -54,22 +55,54 @@ pub(crate) fn check_meta_attr_fields(meta: &MetaAttr) -> Vec<Diagnostic> {
                 }
                 seen_tunable = true;
             }
+            MetaField::Maturity { value, span } => {
+                if seen_maturity {
+                    diags.push(Diagnostic::error(
+                        "E0346",
+                        "`#Meta` repeats `maturity`".to_string(),
+                        "a declaration has one maturity value".to_string(),
+                        "keep one `maturity: .Experimental`, `.Tested`, or `.Hardened` field".to_string(),
+                        Some(*span),
+                    ));
+                }
+                seen_maturity = true;
+                let valid = matches!(value,
+                    Expr::EnumLit { type_name, variant, args, .. }
+                        if type_name.is_empty()
+                            && args.is_empty()
+                            && matches!(variant.as_str(),
+                                Syntax::ATTR_EXPERIMENTAL
+                                    | Syntax::ATTR_TESTED
+                                    | Syntax::ATTR_HARDENED));
+                if !valid {
+                    diags.push(Diagnostic::error(
+                        "E0352",
+                        "`#Meta` maturity needs a known maturity value".to_string(),
+                        "maturity metadata is a closed documentation scale".to_string(),
+                        "write `maturity: .Experimental`, `.Tested`, or `.Hardened`".to_string(),
+                        Some(value.span()),
+                    ));
+                }
+            }
             MetaField::Unknown { name, span, .. } => {
                 let fix = if edit_distance(name, Syntax::META_FIELD_CATEGORY) <= 2 {
                     format!("did you mean `{}`?", Syntax::META_FIELD_CATEGORY)
                 } else if edit_distance(name, Syntax::META_FIELD_TUNABLE) <= 2 {
                     format!("did you mean `{}`?", Syntax::META_FIELD_TUNABLE)
+                } else if edit_distance(name, Syntax::META_FIELD_MATURITY) <= 2 {
+                    format!("did you mean `{}`?", Syntax::META_FIELD_MATURITY)
                 } else {
                     format!(
-                        "use `{}` or `{}`",
+                        "use `{}`, `{}`, or `{}`",
                         Syntax::META_FIELD_CATEGORY,
-                        Syntax::META_FIELD_TUNABLE
+                        Syntax::META_FIELD_TUNABLE,
+                        Syntax::META_FIELD_MATURITY
                     )
                 };
                 diags.push(Diagnostic::error(
                     "E0345",
                     format!("`#Meta` does not have a `{}` field", name),
-                    "`#Meta` is intentionally small today: one category label and one tunable flag".to_string(),
+                    "`#Meta` fields are owner-ratified tooling metadata".to_string(),
                     fix,
                     Some(*span),
                 ));

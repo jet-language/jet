@@ -619,12 +619,6 @@ impl<'a> Parser<'a> {
                             self.func().map(Item::Func)
                         }
                     }
-                    // D-MATURITY1=B / D-MARKERMOVE1: `@Experimental`/`@Tested`/`@Hardened`
-                    // before fn/pub fn — stored on Func for fmt/docs (zero sema).
-                    // Old `#` spelling is E0062 (taught inside `func()`).
-                    TokKind::Hash | TokKind::At if self.at_maturity_fn() => {
-                        self.func().map(Item::Func)
-                    }
                     // S60 (D-CASING1 follow-on) / D-MARKERMOVE2: `@Pure fn name(…)`
                     // purity modifier (old `#Pure` spelling is E0062, taught in `func()`).
                     TokKind::Hash | TokKind::At if self.at_pure_fn() => self.func().map(Item::Func),
@@ -990,6 +984,32 @@ impl<'a> Parser<'a> {
                             ),
                             Some(Span::new(hash.start, name_tok.span.end)),
                         ));
+                        continue;
+                    }
+                    // D-MARK-META1=B: maturity words are closed `#Meta` values,
+                    // never standalone markers on either plane. Reject them as
+                    // ordinary unknown markers with no retired-spelling teaching.
+                    TokKind::Hash | TokKind::At
+                        if matches!(&self.peek2().kind, TokKind::Ident(n)
+                            if n == Syntax::ATTR_EXPERIMENTAL
+                                || n == Syntax::ATTR_TESTED
+                                || n == Syntax::ATTR_HARDENED) =>
+                    {
+                        let sigil = self.bump();
+                        let name_tok = self.bump(); // guard proves Ident
+                        let name = match &name_tok.kind {
+                            TokKind::Ident(name) => name.clone(),
+                            _ => unreachable!(),
+                        };
+                        let name_span = name_tok.span;
+                        self.diags.push(Diagnostic::error(
+                            "E0003",
+                            format!("`{}{}` isn't a known marker", if matches!(sigil.kind, TokKind::Hash) { "#" } else { "@" }, name),
+                            "maturity is tooling metadata, not a standalone marker".to_string(),
+                            "remove this marker".to_string(),
+                            Some(Span::new(sigil.span.start, name_span.end)),
+                        ));
+                        self.sync_top();
                         continue;
                     }
                     TokKind::KwConst | TokKind::Hash => self.const_def().map(Item::Const),

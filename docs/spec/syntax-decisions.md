@@ -458,7 +458,7 @@ until the lazy protocol lands; no second adapter spelling is introduced.
 `SortedSet<T>`, ring-buffer `Deque<T>`, `PriorityQueue<T>`, `Lru<K,V>`,
 `Bag<T>`, `BitSet`, and `ByteBuffer` in Core (E0506). `[K: V]` is the default
 ordered map spelling; specialized map names stay reserved. **D-ENC-DYN1**:
-`Data` is the single dynamic value
+`DataTree` is the single dynamic value
 (`.Object/.Array/.Int/.Float/.Text/.Bool/.Null`); `Json`/`Toml`/`Yaml`/`Csv`
 are aliases over it. **Declined**: `[..]T` spelling — zero-copy comes as
 `View<T>` library type (D-DYNARRAY1).
@@ -769,7 +769,7 @@ types/expressions where `@` never does. `$` is splice-only. Loop-label suffix
 `@` is a different slot.
 
 **D-MARKERMOVE1/2/3 — Plane assignments**: on `@`: `Pure`, `MustUse`,
-`Codable`, `Encode`, `Decode`, `Experimental`, `Tested`, `Hardened`,
+`Codable`, `Encode`, `Decode`,
 `PublishedSchema`, `Redact`, `Numeric`, `Debug`, `Summarize`, `Comparable`
 (user derives of the same names stay `#`). `@Pure` also valid as a
 function-type bound (`f: @Pure fn(Int) -> Int`). Field-level wire markers
@@ -1651,8 +1651,8 @@ carve-out. Ratifying this also fixes cross-module `decode<T>` (derive output
 previously referenced entry-file-local paths).
 
 **D-SERDE13 = B / D-SERDE14 = A / D-SERDE15 = A** *(ratified 2026-07-11, card
-#131)*: the value tree's one user-facing name is **`DataTree`** — the old
-`Data` spelling becomes a teaching error pointing at `DataTree` (no alias,
+#131)*: the value tree's one user-facing name is **`DataTree`** — the retired `Data`
+spelling becomes a teaching error pointing at `DataTree` (no alias,
 I8); tree accessors (`.field`/`.at`/`.int`/`.text`/…) return `T ? DecodeError`
 everywhere, with the accessor auto-filling `path` from where it read, so `?`
 chains inside a hand `decode` with no mapping ceremony; hand-built object
@@ -1711,7 +1711,7 @@ index, not a substitute for that law.
   extension mapping plus `type/subtype; param=value` parsing. `core.http` and
   `core.web` consume typed values instead of re-solving string escaping.
 - **D-ENCSTREAM1=A**: each `core.encoding` codec has one adapter identity with
-  whole-value and reader/writer stream modes over the shared `Data`/`DataTree`
+  whole-value and reader/writer stream modes over the shared `DataTree`
   and `Codable` machinery. Streaming is a mode of that adapter, never a second
   codec library.
 
@@ -1721,19 +1721,19 @@ index, not a substitute for that law.
   `^files.FileWriter`, take shared `EncodingLimits.safe()`, and return
   `EncodingError`; readers provide `next(&self)`, writers `write(&self)`,
   `flush(&self)`, and required idempotent `finish(&self)`. Items are `DataEvent`
-  for JSON/CBOR, `Data` for JSONL, `[String]` for CSV, and D-ENCXML1's exact
-  tagged `Data` event algebra for XML. Blocking calls provide backpressure; no
+  for JSON/CBOR, `DataTree` for JSONL, `[String]` for CSV, and D-ENCXML1's exact
+  tagged `DataTree` event algebra for XML. Blocking calls provide backpressure; no
   hidden task, queue, partial-success state, or `WouldBlock` exists. Clean EOF
   follows complete structural/trailing-input validation; the first terminal
   error is cloned forever. `EncodingLimits` owns buffer/depth/item/total/entity
   expansion bounds and all constructors validate fields before IO. Shared
   `EncodingError` records format, kind, zero-based byte offset, optional
-  one-based line/column, Data path, reason, and handle-free IO cause. Whole and
-  stream paths share parser, Data tree, errors, limits, canonical bytes, and
-  bounded-memory law. Shipped `json.events(Data) -> String` is unchanged;
+  one-based line/column, DataTree path, reason, and handle-free IO cause. Whole and
+  stream paths share parser, value tree, errors, limits, canonical bytes, and
+  bounded-memory law. Shipped `json.events(DataTree) -> String` is unchanged;
   pull events exist only through `json.reader` until an edition migration.
 
-  **D-ENCXML1=A** selects one lossless namespace-aware ordinary-`Data` XML
+  **D-ENCXML1=A** selects one lossless namespace-aware ordinary-`DataTree` XML
   algebra, not an `XmlDocument` or `XMLEvent` type. XML 1.0 Fifth Edition plus
   Namespaces 1.0 is the floor. `parse` accepts Unicode/UTF-8 declarations;
   `parse_bytes` additionally detects UTF-8 BOM and UTF-16 LE/BE BOM. The closed
@@ -1766,9 +1766,9 @@ index, not a substitute for that law.
   and audits hashing/signing fixtures. No 2027 legacy branch exists.
 
   **D-ENCBIN1=A / D-ENC-CBOR-SURFACE1=A** select RFC 8949 CBOR. The only whole
-  surface is `parse([U8], options) -> Data`, `decode<T: Codable>`, `to_bytes`,
+  surface is `parse([U8], options) -> DataTree`, `decode<T: Codable>`, `to_bytes`,
   and `to_bytes_canonical`, returning closed `CBORError`. `[U8]` uses native
-  byte strings through typed Codable; untyped `Data` rejects byte strings,
+  byte strings through typed Codable; untyped `DataTree` rejects byte strings,
   tags, bignums, non-text/duplicate map keys, and unsupported values rather than
   coercing. `CBOROptions` bounds depth/items/input and live allocation and may
   require canonical input. Canonical output is RFC 8949 section 4.2.1 Core:
@@ -1776,7 +1776,7 @@ index, not a substitute for that law.
   zero, and pure bytewise lexicographic complete encoded-key order. Canonical
   validation checks original bytes. Ordinary output is preferred interoperable
   CBOR, not a cross-version hash promise. Edition 2026 keeps shipped
-  `encode(Data)`/Data-returning `decode`; edition 2027 migrates to the ratified
+  `encode(DataTree)`/`DataTree`-returning `decode`; edition 2027 migrates to the ratified
   names, edition 2028 removes forwarding entries, and `jet fix` owns rewrites.
 
   **D-ENCBASE-STRICT1=A** makes edition-2027 base64/base64url/base32 decoding

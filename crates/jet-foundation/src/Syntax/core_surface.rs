@@ -70,6 +70,9 @@ pub const META_FIELD_CATEGORY: &str = "category";
 /// D-CANVASMETA1=B: `#Meta` tunable flag field name.
 pub const META_FIELD_TUNABLE: &str = "tunable";
 
+/// D-MARK-META1=B: `#Meta` maturity field name.
+pub const META_FIELD_MATURITY: &str = "maturity";
+
 /// S3 (ratified): block delimiters.
 pub const BLOCK_OPEN: &str = "{";
 pub const BLOCK_CLOSE: &str = "}";

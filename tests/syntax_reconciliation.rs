@@ -72,6 +72,13 @@ const SYNTAX_STATUS_MATRIX: &str =
     "docs/plans/epoch-3/syntax-law-source-status-matrix-2026-07-07.md";
 const MARKER_PLANE_MATRIX: &str =
     "docs/plans/epoch-3/marker-plane-source-of-truth-matrix-2026-07-07.md";
+const DATATREE_NORMATIVE_SURFACES: &[&str] = &[
+    "docs/spec/syntax-decisions.md",
+    "docs/spec/encoding-decisions.md",
+    "docs/reference/core-library.md",
+    "examples/features/serde/datatree_accessors.jet",
+    "examples/features/serde/encoding_breadth.jet",
+];
 const MATRIX_UNBUILT_MARKERS: &[&str] = &[
     "S74-D-DESTRUCT1-ARM",
     "D-IGNORERET1",
@@ -174,7 +181,7 @@ const MARKER_PLANE_ROWS: &[(&str, &[&str])] = &[
     ),
     (
         "maturity-markers",
-        &["@Experimental", "@Tested", "@Hardened"],
+        &["#Meta(maturity: .Experimental", ".Tested", ".Hardened"],
     ),
     (
         "retired-paused-marker-spellings",
@@ -210,6 +217,42 @@ fn live_surface_has_no_retired_spellings() {
     assert!(
         failures.is_empty(),
         "retired syntax found:\n{}",
+        failures.join("\n")
+    );
+}
+
+#[test]
+fn dynamic_encoding_surface_uses_datatree_name() {
+    let mut failures = Vec::new();
+    for relative in DATATREE_NORMATIVE_SURFACES {
+        let text = fs::read_to_string(relative).unwrap_or_else(|error| {
+            panic!("cannot read DataTree inventory surface {relative}: {error}")
+        });
+        for (index, line) in text.lines().enumerate() {
+            let historical = [
+                "retired `Data`",
+                "old `Data`",
+                "former `Data`",
+                "historical `Data`",
+                "pre-`DataTree`",
+                "edition 2026",
+            ]
+            .iter()
+            .any(|label| line.contains(label));
+            let bare_dynamic_name = line.match_indices("Data").any(|(at, _)| {
+                let before = line[..at].chars().next_back();
+                let after = line[at + "Data".len()..].chars().next();
+                !before.is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+                    && !after.is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+            });
+            if bare_dynamic_name && !historical {
+                failures.push(format!("{relative}:{}: {}", index + 1, line.trim()));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "current dynamic-encoding surfaces must use `DataTree`; label historical `Data` references explicitly:\n{}",
         failures.join("\n")
     );
 }
