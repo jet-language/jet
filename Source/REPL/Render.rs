@@ -194,7 +194,7 @@ mod tests {
     fn discovery_hints_match_available_modes() {
         assert_eq!(
             render_discovery_hint(true, false),
-            "Try: Tab complete · ?name docs · ^P pin · ^F fold · ^R rerun · ^B bindings"
+            "Try: Tab complete · ?name docs · F3 history · ^P pin · ^F fold · ^R rerun · ^B bindings"
         );
         assert_eq!(
             render_discovery_hint(false, false),
