@@ -508,6 +508,23 @@ fn clone_trait(source: &crate::AST::TraitDef) -> crate::AST::TraitDef {
     }
 }
 
+fn clone_tag(source: &crate::AST::TagDef) -> crate::AST::TagDef {
+    crate::AST::TagDef { is_pub: source.is_pub, is_package_pub: source.is_package_pub,
+        name: source.name.clone(), name_span: source.name_span, methods: source.methods.clone(), span: source.span }
+}
+
+fn specialize_tag(source: &crate::AST::TagDef, types: &HashMap<String, Type>,
+    values: &HashMap<String, crate::AST::CtValue>) -> crate::AST::TagDef {
+    let mut result = clone_tag(source);
+    result.name = mapped_definition_name(&source.name, types);
+    for method in &mut result.methods {
+        for param in &mut method.params { param.ty = specialize_module_type(&param.ty, types, values); }
+        if let Some(ret) = &mut method.return_type { *ret = specialize_module_type(ret, types, values); }
+        if let Some(body) = &mut method.default_body { substitute_stmts(body, types, values); }
+    }
+    result
+}
+
 fn clone_impl(source: &crate::AST::ImplDef) -> crate::AST::ImplDef {
     crate::AST::ImplDef {
         span: source.span,
@@ -625,10 +642,10 @@ fn specialize_module_type(
     values: &HashMap<String, crate::AST::CtValue>,
 ) -> Type {
     let mut resolved = crate::Generics::substitute_type(ty, types);
-    fn lengths(ty: &mut Type, values: &HashMap<String, crate::AST::CtValue>) {
+    fn lengths(ty: &mut Type, types: &HashMap<String, Type>, values: &HashMap<String, crate::AST::CtValue>) {
         match ty {
             Type::FixedList { elem, len, len_symbol } => {
-                lengths(elem, values);
+                lengths(elem, types, values);
                 if let Some((name, _)) = len_symbol.take() {
                     if let Some(crate::AST::CtValue::Int(value)) = values.get(&name) {
                         if *value >= 0 {
@@ -637,17 +654,20 @@ fn specialize_module_type(
                     }
                 }
             }
-            Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => lengths(inner, values),
-            Type::Map { key, value, .. } => { lengths(key, values); lengths(value, values); }
-            Type::Result { ok, err } => { lengths(ok, values); lengths(err, values); }
-            Type::Fn { params, ret, .. } => { for param in params { lengths(param, values); } if let Some(ret) = ret { lengths(ret, values); } }
-            Type::Apply { args, .. } => args.iter_mut().for_each(|arg| lengths(arg, values)),
-            Type::Tuple(fields) => fields.iter_mut().for_each(|(_, ty)| lengths(ty, values)),
-            Type::Tagged { inner, .. } => lengths(inner, values),
+            Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => lengths(inner, types, values),
+            Type::Map { key, value, .. } => { lengths(key, types, values); lengths(value, types, values); }
+            Type::Result { ok, err } => { lengths(ok, types, values); lengths(err, types, values); }
+            Type::Fn { params, ret, .. } => { for param in params { lengths(param, types, values); } if let Some(ret) = ret { lengths(ret, types, values); } }
+            Type::Apply { args, .. } => args.iter_mut().for_each(|arg| lengths(arg, types, values)),
+            Type::Tuple(fields) => fields.iter_mut().for_each(|(_, ty)| lengths(ty, types, values)),
+            Type::Tagged { marker, inner } => {
+                if let Some(Type::Named(mapped)) = types.get(marker) { *marker = mapped.clone(); }
+                lengths(inner, types, values);
+            }
             _ => {}
         }
     }
-    lengths(&mut resolved, values);
+    lengths(&mut resolved, types, values);
     resolved
 }
 
@@ -670,6 +690,7 @@ fn specialize_nested_code_module(
             }
             Item::CodeModule(child) => Some(Item::CodeModule(specialize_nested_code_module(child, params, args, types, values))),
             Item::Trait(def) => Some(Item::Trait(specialize_trait(def, params, args, types, values))),
+            Item::Tag(def) => Some(Item::Tag(specialize_tag(def, types, values))),
             Item::Impl(def) => Some(Item::Impl(specialize_impl(def, params, args, types, values))),
             Item::ErrorConv(def) => Some(Item::ErrorConv(specialize_error_conv(def, types, values))),
             Item::Test(def) => Some(Item::Test(specialize_test(def, &module.name, types, values))),
@@ -725,7 +746,7 @@ fn specialize_struct(
         .trait_impls
         .iter()
         .map(|block| crate::AST::TraitImplBlock {
-            trait_name: block.trait_name.clone(),
+            trait_name: mapped_definition_name(&block.trait_name, &types),
             trait_span: block.trait_span,
             methods: block
                 .methods
@@ -768,7 +789,7 @@ fn specialize_struct(
         fields,
         methods,
         trait_impls,
-        derives: source.derives.clone(),
+        derives: source.derives.iter().map(|(name, span)| (mapped_definition_name(name, &types), *span)).collect(),
         is_published_schema: source.is_published_schema,
         published_schema_span: source.published_schema_span,
         is_single_use: source.is_single_use,
@@ -861,7 +882,7 @@ fn specialize_enum(
         .trait_impls
         .iter()
         .map(|block| crate::AST::TraitImplBlock {
-            trait_name: block.trait_name.clone(),
+            trait_name: mapped_definition_name(&block.trait_name, &types),
             trait_span: block.trait_span,
             methods: block
                 .methods
@@ -904,7 +925,7 @@ fn specialize_enum(
         variants,
         methods,
         trait_impls,
-        derives: source.derives.clone(),
+        derives: source.derives.iter().map(|(name, span)| (mapped_definition_name(name, &types), *span)).collect(),
         is_single_use: source.is_single_use,
         single_use_span: source.single_use_span,
         is_must_use: source.is_must_use,
@@ -967,8 +988,11 @@ fn clone_definition_items(items: &[Item]) -> Vec<Item> {
             Item::Struct(def) => Some(Item::Struct(clone_struct(def))),
             Item::Enum(def) => Some(Item::Enum(clone_enum(def))),
             Item::Trait(def) => Some(Item::Trait(clone_trait(def))),
+            Item::Tag(def) => Some(Item::Tag(clone_tag(def))),
             Item::Impl(def) => Some(Item::Impl(clone_impl(def))),
             Item::ErrorConv(def) => Some(Item::ErrorConv(clone_error_conv(def))),
+            Item::Test(def) => Some(Item::Test(clone_test(def))),
+            Item::Bench(def) => Some(Item::Bench(clone_bench(def))),
             Item::Const(def) => Some(Item::Const(crate::AST::ConstDef {
                 span: def.span,
                 name: def.name.clone(),
@@ -1000,8 +1024,11 @@ fn clone_generic_module_def(
             Item::Struct(s) => Some(Item::Struct(clone_struct(s))),
             Item::Enum(e) => Some(Item::Enum(clone_enum(e))),
             Item::Trait(t) => Some(Item::Trait(clone_trait(t))),
+            Item::Tag(t) => Some(Item::Tag(clone_tag(t))),
             Item::Impl(i) => Some(Item::Impl(clone_impl(i))),
             Item::ErrorConv(ec) => Some(Item::ErrorConv(clone_error_conv(ec))),
+            Item::Test(test) => Some(Item::Test(clone_test(test))),
+            Item::Bench(bench) => Some(Item::Bench(clone_bench(bench))),
             Item::Const(c) => Some(Item::Const(crate::AST::ConstDef {
                 span: c.span,
                 name: c.name.clone(),
@@ -1069,8 +1096,11 @@ fn clone_generic_body_item(
         Item::Struct(def) => Some(Item::Struct(clone_struct(def))),
         Item::Enum(def) => Some(Item::Enum(clone_enum(def))),
         Item::Trait(def) => Some(Item::Trait(clone_trait(def))),
+        Item::Tag(def) => Some(Item::Tag(clone_tag(def))),
         Item::Impl(def) => Some(Item::Impl(clone_impl(def))),
         Item::ErrorConv(def) => Some(Item::ErrorConv(clone_error_conv(def))),
+        Item::Test(def) => Some(Item::Test(clone_test(def))),
+        Item::Bench(def) => Some(Item::Bench(clone_bench(def))),
         Item::Const(_) => clone_definition_items(std::slice::from_ref(item)).pop(),
         Item::CodeModule(module) => Some(Item::CodeModule(CodeModule {
             name: module.name.clone(), name_span: module.name_span,
@@ -1087,6 +1117,46 @@ fn clone_generic_body_item(
 struct AliasExpansion {
     module: CodeModule,
     declarations: Vec<Item>,
+}
+
+fn specialize_nested_template_outer(
+    source: &GenericModuleDef,
+    types: &HashMap<String, Type>,
+    values: &HashMap<String, crate::AST::CtValue>,
+) -> GenericModuleDef {
+    let mut dropped = Vec::new();
+    let mut result = clone_generic_module_def(source, &mut dropped);
+    result.body = result.body.into_iter().map(|item| match item {
+        Item::Func(func) => Item::Func(specialize_func(func, &[], &[], types, values)),
+        Item::Struct(def) => Item::Struct(specialize_struct(&def, "", &[], &[], types, values)),
+        Item::Enum(def) => Item::Enum(specialize_enum(&def, "", &[], &[], types, values)),
+        Item::Trait(def) => Item::Trait(specialize_trait(&def, &[], &[], types, values)),
+        Item::Tag(def) => Item::Tag(specialize_tag(&def, types, values)),
+        Item::Impl(def) => Item::Impl(specialize_impl(&def, &[], &[], types, values)),
+        Item::ErrorConv(def) => Item::ErrorConv(specialize_error_conv(&def, types, values)),
+        Item::Test(def) => Item::Test(specialize_test(&def, &source.name, types, values)),
+        Item::Bench(def) => Item::Bench(specialize_bench(&def, &source.name, types, values)),
+        Item::GenericModule(def) => Item::GenericModule(specialize_nested_template_outer(&def, types, values)),
+        other => other,
+    }).collect();
+    result
+}
+
+fn specialize_nested_alias_outer(
+    source: &ModuleAliasDef,
+    types: &HashMap<String, Type>,
+    values: &HashMap<String, crate::AST::CtValue>,
+) -> ModuleAliasDef {
+    let mut args = source.args.clone();
+    for arg in &mut args {
+        match arg {
+            ModuleArg::Type(ty, _) => *ty = specialize_module_type(ty, types, values),
+            ModuleArg::Value(expr, _) => substitute_expr(expr, types, values),
+        }
+    }
+    ModuleAliasDef { name: source.name.clone(), name_span: source.name_span,
+        is_pub: source.is_pub, is_package_pub: source.is_package_pub, target: source.target.clone(),
+        target_span: source.target_span, args, span: source.span }
 }
 
 #[derive(Clone)]
@@ -1349,6 +1419,7 @@ fn expand_alias(
             Item::Struct(def) => Some(&def.name),
             Item::Enum(def) => Some(&def.name),
             Item::Trait(def) => Some(&def.name),
+            Item::Tag(def) => Some(&def.name),
             _ => None,
         };
         if let Some(name) = name {
@@ -1360,6 +1431,7 @@ fn expand_alias(
             Item::Struct(def) => Some(&def.name),
             Item::Enum(def) => Some(&def.name),
             Item::Trait(def) => Some(&def.name),
+            Item::Tag(def) => Some(&def.name),
             _ => None,
         };
         if let Some(name) = name {
@@ -1400,6 +1472,9 @@ fn expand_alias(
             ))),
             Item::Trait(def) => declarations.push(Item::Trait(specialize_trait(
                 def, &[], &[], &definition_types, &definition_values,
+            ))),
+            Item::Tag(def) => declarations.push(Item::Tag(specialize_tag(
+                def, &definition_types, &definition_values,
             ))),
             Item::Impl(def) => declarations.push(Item::Impl(specialize_impl(
                 def, &[], &[], &definition_types, &definition_values,
@@ -1465,6 +1540,11 @@ fn expand_alias(
                 def, &info.params, &resolved_args, &definition_types, &definition_values,
             )));
         }
+        if let Item::Tag(def) = item {
+            declarations.push(Item::Tag(specialize_tag(
+                def, &definition_types, &definition_values,
+            )));
+        }
         if let Item::Impl(def) = item {
             declarations.push(Item::Impl(specialize_impl(
                 def, &info.params, &resolved_args, &definition_types, &definition_values,
@@ -1473,6 +1553,16 @@ fn expand_alias(
         if let Item::ErrorConv(def) = item {
             declarations.push(Item::ErrorConv(specialize_error_conv(
                 def, &definition_types, &definition_values,
+            )));
+        }
+        if let Item::Test(def) = item {
+            declarations.push(Item::Test(specialize_test(
+                def, &alias.name, &definition_types, &definition_values,
+            )));
+        }
+        if let Item::Bench(def) = item {
+            declarations.push(Item::Bench(specialize_bench(
+                def, &alias.name, &definition_types, &definition_values,
             )));
         }
     }
@@ -1506,6 +1596,47 @@ fn expand_alias(
             _ => None,
         })
         .collect::<Vec<_>>());
+
+    // BODY1: nested generic templates close over the outer instance. Resolve
+    // their aliases now, while the outer type/value environment is concrete.
+    let nested_defs: Vec<GenericModuleDef> = template.body.iter().filter_map(|item| {
+        let Item::GenericModule(def) = item else { return None };
+        Some(specialize_nested_template_outer(def, &definition_types, &definition_values))
+    }).collect();
+    if !nested_defs.is_empty() {
+        let mut nested_traits = TraitRegistry::default();
+        for def in &nested_defs { nested_traits.register_items(&def.body, diags); }
+        let nested_enums: HashMap<String, bool> = nested_defs.iter().flat_map(|def| def.body.iter()).filter_map(|item| {
+            let Item::Enum(def) = item else { return None };
+            Some((def.name.clone(), def.variants.iter().all(|v| matches!(v.payload, VariantPayload::Unit))))
+        }).collect();
+        let nested_funcs: HashMap<String, &Func> = nested_defs.iter().flat_map(|def| def.body.iter()).filter_map(|item| {
+            let Item::Func(def) = item else { return None }; Some((def.name.clone(), def))
+        }).collect();
+        let nested_templates: HashMap<String, TemplateInfo> = nested_defs.iter().map(|def| {
+            let mut dropped = Vec::new();
+            (def.name.clone(), TemplateInfo { def: clone_generic_module_def(def, &mut dropped),
+                non_fn_kinds: dropped, params: resolve_params(def, &nested_traits, &nested_enums, diags),
+                source_module: consumer_module, source_items: Vec::new(), source_values: definition_values.clone() })
+        }).collect();
+        let nested_alias_defs: Vec<ModuleAliasDef> = template.body.iter().filter_map(|item| {
+            let Item::ModuleAlias(def) = item else { return None };
+            Some(specialize_nested_alias_outer(def, &definition_types, &definition_values))
+        }).collect();
+        let nested_aliases: HashMap<String, &ModuleAliasDef> = nested_alias_defs.iter()
+            .map(|def| (def.name.clone(), def)).collect();
+        let mut ordered: Vec<&ModuleAliasDef> = nested_alias_defs.iter().collect();
+        ordered.sort_by_key(|def| local_alias_depth(def, &nested_aliases));
+        for nested_alias in ordered {
+            let Some(mut resolved_alias) = resolve_local_alias(nested_alias, &nested_aliases, &nested_templates, diags) else { continue };
+            resolved_alias.name = format!("{}__{}", alias.name, nested_alias.name);
+            if let Some(expansion) = expand_alias(&resolved_alias, consumer_module, &nested_templates,
+                diags, &nested_traits, &nested_funcs, &definition_values, &nested_enums) {
+                body.push(Item::CodeModule(expansion.module));
+                declarations.extend(expansion.declarations);
+            }
+        }
+    }
     Some(AliasExpansion {
         module: CodeModule {
             name: alias.name.clone(),
