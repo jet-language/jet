@@ -1494,3 +1494,130 @@ fn plugin_missing_wasm_tools_is_e1259() {
         "must never panic, only report a clean diagnostic (I2):\n{stderr}"
     );
 }
+
+// ── D-ILE1 / D-CLI-BARE1: bare entry resolution (card #497 verifier bounce) ──
+//
+// `resolve_bare_entry` (Source/main.rs) delegated to a `find_project_entry`
+// that only ever checked `main.jet`/`.jet/main.jet`, never the ratified
+// D-ILE1 search order (`src/main.jet` then `<package>.jet`, the package name
+// from `pkg.jet`'s `payload.name`). The shipped
+// `examples/features/packages/monorepo` fixture (members `hello.jet` /
+// `ranker.jet`, neither named `main.jet`) exposed it end to end: bare `jet
+// run` at the workspace root couldn't see either member as runnable, `-p
+// hello` said "no workspace member named `hello`", and `cd`-ing into a
+// member and running bare failed too.
+
+/// Recursively copy a directory tree — sandboxes the shipped monorepo
+/// fixture into an isolated cwd so `jet run`'s `build/` output never lands in
+/// the checked-in example and concurrent test runs never collide.
+fn copy_dir_all(src: &Path, dst: &Path) {
+    fs::create_dir_all(dst).unwrap();
+    for entry in fs::read_dir(src).unwrap() {
+        let entry = entry.unwrap();
+        let dest_path = dst.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_dir_all(&entry.path(), &dest_path);
+        } else {
+            fs::copy(entry.path(), &dest_path).unwrap();
+        }
+    }
+}
+
+#[test]
+fn monorepo_bare_entry_honors_d_ile1_search_order() {
+    let fixture =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/features/packages/monorepo");
+    let root = isolated_cwd("monorepo_d_ile1");
+    fs::remove_dir_all(&root).ok();
+    copy_dir_all(&fixture, &root);
+
+    let run = |dir: &Path, extra_args: &[&str]| -> std::process::Output {
+        Command::new(jet())
+            .arg("run")
+            .args(extra_args)
+            .current_dir(dir)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap()
+    };
+
+    // 1. Bare `jet run` at the workspace root: both members resolve via
+    //    D-ILE1 (`<package>.jet`, since neither has `src/main.jet`), so the
+    //    result is the D-CLI-BARE1 ambiguity error naming both.
+    let out = run(&root, &[]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "ambiguous bare run is USAGE:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("ambiguous"),
+        "expected the D-CLI-BARE1 ambiguity error:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("hello") && stderr.contains("ranker"),
+        "ambiguity error should list both runnable members by their real pkg.jet name:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("hello\"") && !stderr.contains("ranker\""),
+        "member names must not carry a stray trailing quote:\n{stderr}"
+    );
+
+    // 2. `-p hello` picks the member unambiguously and actually runs it.
+    let out = run(&root, &["-p", "hello"]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "-p hello should run: stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("hello from the monorepo"),
+        "stdout: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+
+    // 3. `-p ranker` likewise.
+    let out = run(&root, &["-p", "ranker"]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "-p ranker should run: stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("ranker: #1 monorepo demo"),
+        "stdout: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+
+    // 4. `cd packages/hello && jet run` (bare, single-package convention):
+    //    the member directory's own `pkg.jet` names it `hello`, so D-ILE1
+    //    resolves `hello.jet` directly — no workspace ambiguity from inside.
+    let member_dir = root.join("packages/hello");
+    let out = run(&member_dir, &[]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "bare run inside a member should run its own entry: stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("hello from the monorepo"),
+        "stdout: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+
+    // 5. Outside any package or workspace, the bare-form usage error is
+    //    unchanged (D-CLI-BARE1: "outside a package the bare form stays the
+    //    current usage error").
+    let outside = isolated_cwd("monorepo_d_ile1_outside");
+    let out = run(&outside, &[]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(
+        stderr.contains("no file given and no `pkg.jet` found"),
+        "outside-package bare error text must stay the current usage error:\n{stderr}"
+    );
+}

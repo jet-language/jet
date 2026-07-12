@@ -188,82 +188,108 @@ fn encode_string(value: &str, out: &mut String) {
     out.push('"');
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Rational {
-    pub num: i128,
-    pub den: i128,
+/// A signed, arbitrary precision wire integer. Limbs are little-endian base 1e9.
+/// Zero has sign 0 and no limbs; all other values have sign -1 or 1.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BigInt { sign: i8, limbs: Vec<u32> }
+
+impl BigInt {
+    pub fn zero() -> Self { Self { sign: 0, limbs: Vec::new() } }
+    pub fn one() -> Self { Self::from_i128(1) }
+    pub fn from_i128(value: i128) -> Self {
+        Self::parse(&value.to_string()).expect("i128 decimal is canonical")
+    }
+    pub fn parse(text: &str) -> Result<Self, String> {
+        if !valid_integer(text) { return Err(format!("non-canonical integer `{text}`")); }
+        let (sign, digits) = match text.strip_prefix('-') { Some(v) => (-1, v), None => (1, text) };
+        if digits == "0" { return Ok(Self::zero()); }
+        let mut limbs = Vec::new();
+        let mut end = digits.len();
+        while end != 0 {
+            let start = end.saturating_sub(9);
+            limbs.push(digits[start..end].parse::<u32>().map_err(|_| "invalid integer")?);
+            end = start;
+        }
+        Ok(Self { sign, limbs })
+    }
+    pub fn is_zero(&self) -> bool { self.sign == 0 }
+    pub fn is_negative(&self) -> bool { self.sign < 0 }
+    pub fn abs(&self) -> Self { let mut out = self.clone(); if out.sign < 0 { out.sign = 1; } out }
+    pub fn neg(&self) -> Self { let mut out = self.clone(); out.sign = -out.sign; out }
+    fn normalize(&mut self) { while self.limbs.last() == Some(&0) { self.limbs.pop(); } if self.limbs.is_empty() { self.sign = 0; } }
+    fn abs_cmp(&self, rhs: &Self) -> Ordering {
+        self.limbs.len().cmp(&rhs.limbs.len()).then_with(|| self.limbs.iter().rev().cmp(rhs.limbs.iter().rev()))
+    }
+    fn abs_add(&self, rhs: &Self) -> Self {
+        const B: u64 = 1_000_000_000;
+        let mut out = Vec::with_capacity(self.limbs.len().max(rhs.limbs.len()) + 1); let mut carry = 0;
+        for i in 0..self.limbs.len().max(rhs.limbs.len()) { let n = u64::from(*self.limbs.get(i).unwrap_or(&0)) + u64::from(*rhs.limbs.get(i).unwrap_or(&0)) + carry; out.push((n % B) as u32); carry = n / B; }
+        if carry != 0 { out.push(carry as u32); } Self { sign: 1, limbs: out }
+    }
+    fn abs_sub(&self, rhs: &Self) -> Self { // |self| >= |rhs|
+        const B: i64 = 1_000_000_000; let mut out = Vec::with_capacity(self.limbs.len()); let mut borrow = 0;
+        for i in 0..self.limbs.len() { let mut n = i64::from(self.limbs[i]) - i64::from(*rhs.limbs.get(i).unwrap_or(&0)) - borrow; if n < 0 { n += B; borrow = 1; } else { borrow = 0; } out.push(n as u32); }
+        let mut value = Self { sign: 1, limbs: out }; value.normalize(); value
+    }
+    pub fn add(&self, rhs: &Self) -> Self {
+        if self.sign == 0 { return rhs.clone(); } if rhs.sign == 0 { return self.clone(); }
+        if self.sign == rhs.sign { let mut out = self.abs_add(rhs); out.sign = self.sign; out }
+        else { match self.abs_cmp(rhs) { Ordering::Greater => { let mut out = self.abs_sub(rhs); out.sign = self.sign; out }, Ordering::Less => { let mut out = rhs.abs_sub(self); out.sign = rhs.sign; out }, Ordering::Equal => Self::zero() } }
+    }
+    pub fn sub(&self, rhs: &Self) -> Self { self.add(&rhs.neg()) }
+    pub fn mul(&self, rhs: &Self) -> Self {
+        const B: u64 = 1_000_000_000; if self.is_zero() || rhs.is_zero() { return Self::zero(); }
+        let mut out = vec![0u64; self.limbs.len() + rhs.limbs.len()];
+        for (i, &a) in self.limbs.iter().enumerate() { let mut carry = 0u64; for (j, &b) in rhs.limbs.iter().enumerate() { let at = i+j; let n = out[at] + u64::from(a)*u64::from(b) + carry; out[at] = n%B; carry=n/B; } out[i+rhs.limbs.len()] += carry; }
+        let mut value = Self { sign: self.sign * rhs.sign, limbs: out.into_iter().map(|v| v as u32).collect() }; value.normalize(); value
+    }
+    fn mul_small(&self, rhs: u32) -> Self { if rhs == 0 || self.is_zero() { return Self::zero(); } let mut out=Vec::with_capacity(self.limbs.len()+1); let mut carry=0u64; for &a in &self.limbs { let n=u64::from(a)*u64::from(rhs)+carry; out.push((n%1_000_000_000) as u32); carry=n/1_000_000_000; } if carry>0 { out.push(carry as u32); } Self { sign: 1, limbs: out } }
+    pub fn div_rem_abs(&self, rhs: &Self) -> Result<(Self, Self), String> {
+        if rhs.is_zero() { return Err("integer division by zero".into()); } let divisor=rhs.abs(); let dividend=self.abs();
+        if dividend.abs_cmp(&divisor)==Ordering::Less { return Ok((Self::zero(), dividend)); }
+        let mut quotient=vec![0u32; dividend.limbs.len()]; let mut remainder=Self::zero();
+        for i in (0..dividend.limbs.len()).rev() { remainder.limbs.insert(0, dividend.limbs[i]); remainder.sign=1; remainder.normalize(); let mut lo=0u32; let mut hi=999_999_999u32; while lo<hi { let mid=lo+(hi-lo)/2+1; if divisor.mul_small(mid).abs_cmp(&remainder)!=Ordering::Greater { lo=mid; } else { hi=mid-1; } } quotient[i]=lo; if lo!=0 { remainder=remainder.abs_sub(&divisor.mul_small(lo)); } }
+        let mut q=Self { sign: if quotient.iter().all(|x|*x==0){0}else{1}, limbs:quotient }; q.normalize(); Ok((q,remainder))
+    }
+    pub fn exact_div(&self, rhs: &Self) -> Result<Self, String> { let (mut q,r)=self.div_rem_abs(rhs)?; if !r.is_zero(){return Err("integer division is not exact".into());} q.sign=self.sign*rhs.sign; q.normalize(); Ok(q) }
+    pub fn gcd(mut left: Self, mut right: Self) -> Result<Self,String> { left=left.abs(); right=right.abs(); while !right.is_zero() { let (_,r)=left.div_rem_abs(&right)?; left=right; right=r; } Ok(left) }
 }
+impl std::fmt::Display for BigInt { fn fmt(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result { if self.sign<0 { write!(f,"-")?; } if self.sign==0 { return write!(f,"0"); } let mut it=self.limbs.iter().rev(); write!(f,"{}",it.next().unwrap())?; for limb in it { write!(f,"{limb:09}")?; } Ok(()) } }
+impl Ord for BigInt { fn cmp(&self,rhs:&Self)->Ordering { self.sign.cmp(&rhs.sign).then_with(|| if self.sign<0 { self.abs_cmp(rhs).reverse() } else { self.abs_cmp(rhs) }) } }
+impl PartialOrd for BigInt { fn partial_cmp(&self,rhs:&Self)->Option<Ordering>{Some(self.cmp(rhs))} }
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Rational { pub num: BigInt, pub den: BigInt }
 
 impl Rational {
-    pub const ZERO: Rational = Rational { num: 0, den: 1 };
-
     pub fn new(num: i128, den: i128) -> Result<Self, String> {
-        if den == 0 { return Err("rational denominator is zero".into()); }
-        let (num, den) = if den < 0 { (-num, -den) } else { (num, den) };
-        if num == 0 { return Ok(Self::ZERO); }
-        let divisor = gcd(num.unsigned_abs(), den as u128) as i128;
-        Ok(Self { num: num / divisor, den: den / divisor })
+        Self::from_bigints(BigInt::from_i128(num), BigInt::from_i128(den))
     }
-
-    pub fn integer(value: i128) -> Self { Self { num: value, den: 1 } }
-    pub fn add(self, rhs: Self) -> Result<Self, String> {
-        let left = self.num.checked_mul(rhs.den).ok_or("rational addition overflow")?;
-        let right = rhs.num.checked_mul(self.den).ok_or("rational addition overflow")?;
-        let den = self.den.checked_mul(rhs.den).ok_or("rational addition overflow")?;
-        Self::new(left.checked_add(right).ok_or("rational addition overflow")?, den)
-    }
-    pub fn sub(self, rhs: Self) -> Result<Self, String> { self.add(rhs.neg()) }
-    pub fn mul(self, rhs: Self) -> Result<Self, String> {
-        Self::new(self.num.checked_mul(rhs.num).ok_or("rational multiplication overflow")?, self.den.checked_mul(rhs.den).ok_or("rational multiplication overflow")?)
-    }
-    pub fn div(self, rhs: Self) -> Result<Self, String> {
-        if rhs.num == 0 { return Err("rational division by zero".into()); }
-        Self::new(self.num.checked_mul(rhs.den).ok_or("rational division overflow")?, self.den.checked_mul(rhs.num).ok_or("rational division overflow")?)
-    }
-    pub fn neg(self) -> Self { Self { num: -self.num, den: self.den } }
-    pub fn abs(self) -> Self { if self.num < 0 { self.neg() } else { self } }
-    pub fn max_zero(self) -> Self { if self.num < 0 { Self::ZERO } else { self } }
-    pub fn to_json(self) -> CanonicalJson {
+    pub fn parse(num:&str,den:&str)->Result<Self,String>{Self::from_bigints(BigInt::parse(num)?,BigInt::parse(den)?)}
+    pub fn from_bigints(mut num:BigInt,mut den:BigInt)->Result<Self,String>{if den.is_zero(){return Err("rational denominator is zero".into());}if den.is_negative(){num=num.neg();den=den.neg();}if num.is_zero(){return Ok(Self::zero());}let divisor=BigInt::gcd(num.clone(),den.clone())?;Ok(Self{num:num.exact_div(&divisor)?,den:den.exact_div(&divisor)?})}
+    pub fn zero()->Self{Self{num:BigInt::zero(),den:BigInt::one()}}
+    pub fn integer(value: i128) -> Self { Self { num: BigInt::from_i128(value), den: BigInt::one() } }
+    pub fn add(&self,rhs:&Self)->Result<Self,String>{Self::from_bigints(self.num.mul(&rhs.den).add(&rhs.num.mul(&self.den)),self.den.mul(&rhs.den))}
+    pub fn sub(&self,rhs:&Self)->Result<Self,String>{self.add(&rhs.neg())}
+    pub fn mul(&self,rhs:&Self)->Result<Self,String>{Self::from_bigints(self.num.mul(&rhs.num),self.den.mul(&rhs.den))}
+    pub fn div(&self,rhs:&Self)->Result<Self,String>{if rhs.num.is_zero(){return Err("rational division by zero".into());}Self::from_bigints(self.num.mul(&rhs.den),self.den.mul(&rhs.num))}
+    pub fn neg(&self)->Self{Self{num:self.num.neg(),den:self.den.clone()}}
+    pub fn abs(&self)->Self{Self{num:self.num.abs(),den:self.den.clone()}}
+    pub fn max_zero(&self)->Self{if self.num.is_negative(){Self::zero()}else{self.clone()}}
+    pub fn to_json(&self) -> CanonicalJson {
         CanonicalJson::object([
-            ("den".into(), CanonicalJson::Integer(self.den.to_string())),
-            ("num".into(), CanonicalJson::Integer(self.num.to_string())),
+            ("den".into(), CanonicalJson::Integer(self.den.to_string())), ("num".into(), CanonicalJson::Integer(self.num.to_string())),
         ]).expect("unique rational keys")
     }
 }
 
 impl Ord for Rational {
     fn cmp(&self, rhs: &Self) -> Ordering {
-        match (self.num < 0, rhs.num < 0) {
-            (true, false) => Ordering::Less,
-            (false, true) => Ordering::Greater,
-            (false, false) => compare_unsigned_fractions(self.num as u128, self.den as u128, rhs.num as u128, rhs.den as u128),
-            (true, true) => compare_unsigned_fractions(self.num.unsigned_abs(), self.den as u128, rhs.num.unsigned_abs(), rhs.den as u128).reverse(),
-        }
+        self.num.mul(&rhs.den).cmp(&rhs.num.mul(&self.den))
     }
 }
 impl PartialOrd for Rational { fn partial_cmp(&self, rhs: &Self) -> Option<Ordering> { Some(self.cmp(rhs)) } }
 
-fn gcd(mut left: u128, mut right: u128) -> u128 {
-    while right != 0 { let remainder = left % right; left = right; right = remainder; }
-    left
-}
-
-fn compare_unsigned_fractions(mut an: u128, mut ad: u128, mut bn: u128, mut bd: u128) -> Ordering {
-    let mut reverse = false;
-    loop {
-        let aq = an / ad;
-        let bq = bn / bd;
-        if aq != bq { return if reverse { bq.cmp(&aq) } else { aq.cmp(&bq) }; }
-        let ar = an % ad;
-        let br = bn % bd;
-        match (ar == 0, br == 0) {
-            (true, true) => return Ordering::Equal,
-            (true, false) => return if reverse { Ordering::Greater } else { Ordering::Less },
-            (false, true) => return if reverse { Ordering::Less } else { Ordering::Greater },
-            (false, false) => { an = ad; ad = ar; bn = bd; bd = br; reverse = !reverse; }
-        }
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Statistics {
@@ -281,10 +307,10 @@ pub fn statistics(samples: &[Rational]) -> Result<Statistics, String> {
     let mut sorted = samples.to_vec();
     sorted.sort();
     let p50 = nearest_rank(&sorted, 500, 1000)?;
-    let mut sum = Rational::ZERO;
-    for sample in &sorted { sum = sum.add(*sample)?; }
-    let mean = sum.div(Rational::integer(sorted.len() as i128))?;
-    let mut deviations = sorted.iter().map(|sample| sample.sub(p50).map(Rational::abs)).collect::<Result<Vec<_>, _>>()?;
+    let mut sum = Rational::zero();
+    for sample in &sorted { sum = sum.add(sample)?; }
+    let mean = sum.div(&Rational::integer(sorted.len() as i128))?;
+    let mut deviations = sorted.iter().map(|sample| sample.sub(&p50).map(|v| v.abs())).collect::<Result<Vec<_>, _>>()?;
     deviations.sort();
     Ok(Statistics {
         p50,
@@ -300,13 +326,13 @@ pub fn statistics(samples: &[Rational]) -> Result<Statistics, String> {
 fn nearest_rank(sorted: &[Rational], numerator: usize, denominator: usize) -> Result<Rational, String> {
     if sorted.is_empty() { return Err("rank requires at least one value".into()); }
     let rank = sorted.len().checked_mul(numerator).ok_or("rank overflow")?.div_ceil(denominator);
-    Ok(sorted[rank.max(1) - 1])
+    Ok(sorted[rank.max(1) - 1].clone())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Percentile { P50, P90, P95, P99, P999 }
 pub fn estimator(samples: &[Rational], percentile: Option<Percentile>) -> Result<Rational, String> {
-    if samples.len() == 1 && percentile.is_none() { return Ok(samples[0]); }
+    if samples.len() == 1 && percentile.is_none() { return Ok(samples[0].clone()); }
     let stats = statistics(samples)?;
     Ok(match percentile.unwrap_or(Percentile::P50) {
         Percentile::P50 => stats.p50, Percentile::P90 => stats.p90,
@@ -373,7 +399,7 @@ pub fn evaluate(
             return Ok(finish(candidate_point, None, None, if pass { Evidence::Pass } else { Evidence::Regression }, enforcement, Vec::new()));
         }
         Comparison::AbsoluteFrom { limit, direction: limit_direction } => {
-            let point = match limit_direction { LimitDirection::AtMost => candidate_point.sub(*limit)?, LimitDirection::AtLeast => limit.sub(candidate_point)? };
+            let point = match limit_direction { LimitDirection::AtMost => candidate_point.sub(limit)?, LimitDirection::AtLeast => limit.sub(&candidate_point)? };
             let policy = policy.ok_or("AbsoluteFrom requires a measurement policy")?;
             let values = bootstrap_values(evidence_id, context_key, baseline_report_ids, candidate, &[], percentile, comparison, direction, policy)?;
             (point, values)
@@ -381,7 +407,7 @@ pub fn evaluate(
         Comparison::RelativeTo { limit_basis_points, goal } => {
             if baseline.is_empty() { return Err("RelativeTo baseline samples are empty".into()); }
             let baseline_point = estimator(baseline, percentile)?;
-            if baseline_point == Rational::ZERO { return Ok(finish(Rational::ZERO, None, None, Evidence::Unavailable, enforcement, Vec::new())); }
+            if baseline_point == Rational::zero() { return Ok(finish(Rational::zero(), None, None, Evidence::Unavailable, enforcement, Vec::new())); }
             let point = relative_stat(candidate_point, baseline_point, *limit_basis_points, *goal, direction)?;
             let policy = policy.ok_or("RelativeTo requires a measurement policy")?;
             let values = bootstrap_values(evidence_id, context_key, baseline_report_ids, candidate, baseline, percentile, comparison, direction, policy)?;
@@ -392,9 +418,9 @@ pub fn evaluate(
     if policy.lower_rank == 0 || policy.upper_rank == 0 || policy.lower_rank > bootstrap.len() || policy.upper_rank > bootstrap.len() {
         return Err("bootstrap ranks are outside the replicate set".into());
     }
-    let lower = bootstrap[policy.lower_rank - 1];
-    let upper = bootstrap[policy.upper_rank - 1];
-    let evidence = if upper <= Rational::ZERO { Evidence::Pass } else if lower > Rational::ZERO { Evidence::Regression } else { Evidence::Inconclusive };
+    let lower = bootstrap[policy.lower_rank - 1].clone();
+    let upper = bootstrap[policy.upper_rank - 1].clone();
+    let evidence = if upper <= Rational::zero() { Evidence::Pass } else if lower > Rational::zero() { Evidence::Regression } else { Evidence::Inconclusive };
     Ok(finish(point, Some(lower), Some(upper), evidence, enforcement, bootstrap))
 }
 
@@ -416,11 +442,11 @@ fn bootstrap_values(evidence_id: &str, context_key: &str, baseline_report_ids: &
         let candidate_resample = resample(candidate, candidate.len(), &mut stream)?;
         let candidate_estimator = estimator(&candidate_resample, percentile)?;
         let value = match comparison {
-            Comparison::AbsoluteFrom { limit, direction } => match direction { LimitDirection::AtMost => candidate_estimator.sub(*limit)?, LimitDirection::AtLeast => limit.sub(candidate_estimator)? },
+            Comparison::AbsoluteFrom { limit, direction } => match direction { LimitDirection::AtMost => candidate_estimator.sub(limit)?, LimitDirection::AtLeast => limit.sub(&candidate_estimator)? },
             Comparison::RelativeTo { limit_basis_points, goal } => {
                 let baseline_resample = resample(baseline, baseline.len(), &mut stream)?;
                 let baseline_estimator = estimator(&baseline_resample, percentile)?;
-                if baseline_estimator == Rational::ZERO { return Err("RelativeTo bootstrap baseline estimator is zero".into()); }
+                if baseline_estimator == Rational::zero() { return Err("RelativeTo bootstrap baseline estimator is zero".into()); }
                 relative_stat(candidate_estimator, baseline_estimator, *limit_basis_points, *goal, direction)?
             }
             Comparison::Absolute { .. } => return Err("Absolute does not bootstrap".into()),
@@ -433,11 +459,11 @@ fn bootstrap_values(evidence_id: &str, context_key: &str, baseline_report_ids: &
 
 fn relative_stat(candidate: Rational, baseline: Rational, limit_basis_points: i128, goal: RelativeGoal, direction: Direction) -> Result<Rational, String> {
     let delta = match (goal, direction) {
-        (RelativeGoal::RegressionAtMost, Direction::LowerIsBetter) | (RelativeGoal::ImprovementAtLeast, Direction::HigherIsBetter) => candidate.sub(baseline)?.max_zero(),
-        (RelativeGoal::RegressionAtMost, Direction::HigherIsBetter) | (RelativeGoal::ImprovementAtLeast, Direction::LowerIsBetter) => baseline.sub(candidate)?.max_zero(),
+        (RelativeGoal::RegressionAtMost, Direction::LowerIsBetter) | (RelativeGoal::ImprovementAtLeast, Direction::HigherIsBetter) => candidate.sub(&baseline)?.max_zero(),
+        (RelativeGoal::RegressionAtMost, Direction::HigherIsBetter) | (RelativeGoal::ImprovementAtLeast, Direction::LowerIsBetter) => baseline.sub(&candidate)?.max_zero(),
     };
-    let basis_points = delta.mul(Rational::integer(10_000))?.div(baseline)?;
-    match goal { RelativeGoal::RegressionAtMost => basis_points.sub(Rational::integer(limit_basis_points)), RelativeGoal::ImprovementAtLeast => Rational::integer(limit_basis_points).sub(basis_points) }
+    let basis_points = delta.mul(&Rational::integer(10_000))?.div(&baseline)?;
+    match goal { RelativeGoal::RegressionAtMost => basis_points.sub(&Rational::integer(limit_basis_points)), RelativeGoal::ImprovementAtLeast => Rational::integer(limit_basis_points).sub(&basis_points) }
 }
 
 const BOOTSTRAP_DOMAIN: &[u8] = b"jet.performance-budget.bootstrap.v1\0";
@@ -466,7 +492,7 @@ impl<'a> ShaStream<'a> {
     }
 }
 fn resample(values: &[Rational], count: usize, stream: &mut ShaStream<'_>) -> Result<Vec<Rational>, String> {
-    (0..count).map(|_| stream.index(values.len()).map(|index| values[index])).collect()
+    (0..count).map(|_| stream.index(values.len()).map(|index| values[index].clone())).collect()
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -479,13 +505,13 @@ pub fn trend(report_ids: &[String], estimators: &[Rational], direction: Directio
     let mut slopes = Vec::new();
     for left in 0..estimators.len() {
         for right in left + 1..estimators.len() {
-            let numerator = match direction { Direction::LowerIsBetter => estimators[left].sub(estimators[right])?, Direction::HigherIsBetter => estimators[right].sub(estimators[left])? };
-            slopes.push(numerator.div(Rational::integer((right - left) as i128))?);
+            let numerator = match direction { Direction::LowerIsBetter => estimators[left].sub(&estimators[right])?, Direction::HigherIsBetter => estimators[right].sub(&estimators[left])? };
+            slopes.push(numerator.div(&Rational::integer((right - left) as i128))?);
         }
     }
     slopes.sort();
     let score = nearest_rank(&slopes, 500, 1000)?;
-    let label = if score > Rational::ZERO { TrendLabel::Improving } else if score < Rational::ZERO { TrendLabel::Regressing } else { TrendLabel::Stable };
+    let label = if score > Rational::zero() { TrendLabel::Improving } else if score < Rational::zero() { TrendLabel::Regressing } else { TrendLabel::Stable };
     Ok(Trend { report_ids: report_ids.to_vec(), estimators: estimators.to_vec(), score: Some(score), label })
 }
 
