@@ -201,6 +201,40 @@ use std::time::{Duration, Instant};
 
 type Job = Box<dyn FnOnce() + Send>;
 
+thread_local! {
+    static JET_SCHEDULER_CATCHING_PANIC: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
+}
+
+static JET_SCHEDULER_PANIC_HOOK: OnceLock<()> = OnceLock::new();
+
+fn jet_scheduler_install_panic_hook() {
+    JET_SCHEDULER_PANIC_HOOK.get_or_init(|| {
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let caught_task = JET_SCHEDULER_CATCHING_PANIC
+                .try_with(|flag| flag.get())
+                .unwrap_or(false);
+            if !caught_task {
+                previous(info);
+            }
+        }));
+    });
+}
+
+fn jet_scheduler_catch_task_unwind<F, T>(f: F) -> std::thread::Result<T>
+where
+    F: FnOnce() -> T,
+{
+    jet_scheduler_install_panic_hook();
+    JET_SCHEDULER_CATCHING_PANIC.with(|flag| {
+        let previous = flag.replace(true);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+        flag.set(previous);
+        result
+    })
+}
+
 fn jet_scheduler_fatal(msg: &str) -> ! {
     if jet_scheduler_panic_should_unwind() {
         panic!("{}", msg);
@@ -2059,10 +2093,7 @@ where
             let _ = tx.send(JetSchedulerResult::Cancelled);
             return;
         }
-        let prev_hook = std::panic::take_hook();
-        std::panic::set_hook(Box::new(|_| {}));
-        let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
-        std::panic::set_hook(prev_hook);
+        let out = jet_scheduler_catch_task_unwind(f);
         jet_scheduler_task_panic_leave();
         jet_scheduler_set_task_control(None);
         let _ = tx.send(match out {
