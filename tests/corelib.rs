@@ -28,10 +28,26 @@ fn encoding_stream_foundation_types_are_real_jet_values() {
         r#"
 use core.encoding as encoding
 use core.encoding.json as json
+use core.encoding.jsonl as jsonl
+use core.encoding.csv as csv
+use core.encoding.xml as xml
+use core.encoding.cbor as cbor
 
-fn retain(reader: json.JSONReader) -> json.JSONReader {
-    return reader
-}
+fn keep_error(v: ^encoding.EncodingError) -> encoding.EncodingError { return v }
+fn keep_cause(v: ^encoding.EncodingCause) -> encoding.EncodingCause { return v }
+fn keep_event(v: ^encoding.DataEvent) -> encoding.DataEvent { return v }
+fn keep_format(v: ^encoding.EncodingFormat) -> encoding.EncodingFormat { return v }
+fn keep_kind(v: ^encoding.EncodingErrorKind) -> encoding.EncodingErrorKind { return v }
+fn keep_json_reader(v: ^json.JSONReader) -> json.JSONReader { return v }
+fn keep_json_writer(v: ^json.JSONWriter) -> json.JSONWriter { return v }
+fn keep_jsonl_reader(v: ^jsonl.JSONLReader) -> jsonl.JSONLReader { return v }
+fn keep_jsonl_writer(v: ^jsonl.JSONLWriter) -> jsonl.JSONLWriter { return v }
+fn keep_csv_reader(v: ^csv.CSVReader) -> csv.CSVReader { return v }
+fn keep_csv_writer(v: ^csv.CSVWriter) -> csv.CSVWriter { return v }
+fn keep_xml_reader(v: ^xml.XMLReader) -> xml.XMLReader { return v }
+fn keep_xml_writer(v: ^xml.XMLWriter) -> xml.XMLWriter { return v }
+fn keep_cbor_reader(v: ^cbor.CBORReader) -> cbor.CBORReader { return v }
+fn keep_cbor_writer(v: ^cbor.CBORWriter) -> cbor.CBORWriter { return v }
 
 fn run() {
     limits: encoding.EncodingLimits := encoding.EncodingLimits.safe()

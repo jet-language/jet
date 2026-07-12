@@ -1,15 +1,12 @@
 // D-IGNORERET2=A: explicit discard of fallible / @MustUse results.
-// `.drop("reason")` is the blessed per-call discard terminal.
-// `#Suppress(MustUse) { … }` suppresses E0402 in lexical scope.
+// `.drop("reason")` is the sole discard spelling (D-MARK-DISCARD1=A —
+// the `#Suppress(MustUse) { … }` lexical-scope form is retired outright).
 use core.files as fs
 
 fn run() {
     // `.drop("reason")` silences E0402 for a fallible result.
     fs.write("/tmp/jet_discard_out.txt", "hello").drop("best-effort write, not critical")
-    // `#Suppress(MustUse)` suppresses all E0402 in the block.
-    #Suppress(MustUse) {
-        fs.write("/tmp/jet_discard_a.txt", "x")
-        fs.write("/tmp/jet_discard_b.txt", "y")
-    }
+    fs.write("/tmp/jet_discard_a.txt", "x").drop("best-effort write, not critical")
+    fs.write("/tmp/jet_discard_b.txt", "y").drop("best-effort write, not critical")
     print("discard ok")
 }

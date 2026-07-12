@@ -660,7 +660,7 @@ fn run() { print(summarize(4)) }
 fn host_dev_entry_is_not_web_runtime_and_run_prints_literal_from_tir() {
     let src = r#"#Target(Web)
 use core.devserver as devserver
-#Js
+#Target(Js)
 fn dev() {
     server :: devserver.app()
     server.port(8080)
@@ -749,7 +749,7 @@ fn web_reactive_dom_snapshot_roundtrip() {
 
 #[test]
 fn web_click_counter_dom_roundtrip() {
-    // 196_ui_web_click.jet: every top-level `#Js fn` is exported (not just
+    // 196_ui_web_click.jet: every top-level `#Target(Js) fn` is exported (not just
     // `main`), and `paint()` mounts a real, reused DOM element when a
     // `document` exists. This proves both, end to end: a fake `document` (no
     // browser, no new dependency) stands in for the click-driven host page
@@ -776,7 +776,7 @@ fn web_events_and_storage_roundtrip() {
     let src = r##"#Target(Web)
 use core.web as web
 
-#Js
+#Target(Js)
 fn init() {
     saved :: web.storage.local.get("tasks") ?? "[]"
     web.storage.local.set("tasks", saved)

@@ -402,6 +402,23 @@ impl Cx {
         let (alias, leaf) = name.split_once('.')?;
         match (self.core_imports.get(alias).map(String::as_str), leaf) {
             (Some("core.env"), "EnvError") => Some("EnvError"),
+            (Some("core.encoding"), "DataTree") => Some("DataTree"),
+            (Some("core.encoding"), "EncodingLimits") => Some("EncodingLimits"),
+            (Some("core.encoding"), "EncodingError") => Some("EncodingError"),
+            (Some("core.encoding"), "EncodingCause") => Some("EncodingCause"),
+            (Some("core.encoding"), "EncodingFormat") => Some("EncodingFormat"),
+            (Some("core.encoding"), "EncodingErrorKind") => Some("EncodingErrorKind"),
+            (Some("core.encoding"), "DataEvent") => Some("DataEvent"),
+            (Some("core.encoding.json"), "JSONReader") => Some("JSONReader"),
+            (Some("core.encoding.json"), "JSONWriter") => Some("JSONWriter"),
+            (Some("core.encoding.jsonl"), "JSONLReader") => Some("JSONLReader"),
+            (Some("core.encoding.jsonl"), "JSONLWriter") => Some("JSONLWriter"),
+            (Some("core.encoding.csv"), "CSVReader") => Some("CSVReader"),
+            (Some("core.encoding.csv"), "CSVWriter") => Some("CSVWriter"),
+            (Some("core.encoding.xml"), "XMLReader") => Some("XMLReader"),
+            (Some("core.encoding.xml"), "XMLWriter") => Some("XMLWriter"),
+            (Some("core.encoding.cbor"), "CBORReader") => Some("CBORReader"),
+            (Some("core.encoding.cbor"), "CBORWriter") => Some("CBORWriter"),
             _ => None,
         }
     }

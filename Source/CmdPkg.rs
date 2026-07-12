@@ -105,7 +105,7 @@ pub(crate) fn run_fetch(locked: bool) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = crate::require_manifest_root(
         &cwd,
-        "error: no `pkg.jet` found — run `jet store fetch` inside a project",
+        "error: no `pkg.jet` found — run `jet fetch` inside a project",
     );
     do_fetch(&root, locked);
 }
@@ -151,14 +151,15 @@ pub(crate) fn run_update(dep: Option<&str>) {
     }
 }
 
-pub(crate) fn run_store_verify() {
+/// `jet hangar verify` (D-CLI-STORE2=A, was `jet store verify`).
+pub(crate) fn run_hangar_verify() {
     let store_dir = jet::Store::store_dir();
     let entries = jet::Store::list_entries();
     if entries.is_empty() {
-        println!("store is empty ({})", store_dir.display());
+        println!("hangar is empty ({})", store_dir.display());
         return;
     }
-    println!("verifying {} store entries...", entries.len());
+    println!("verifying {} hangar entries...", entries.len());
     // Without lockfile context we can only verify tree hashes against themselves.
     // Full verification requires the lock file; this checks for obvious corruption.
     let mut ok = 0;
@@ -179,22 +180,11 @@ pub(crate) fn run_store_verify() {
     }
 }
 
-pub(crate) fn run_gc() {
-    // Without a global registry of in-use locks, we print a stub message.
-    // Full gc would walk all .jet/lock files; M12.1 ships the infrastructure.
-    let entries = jet::Store::list_entries();
-    println!(
-        "store has {} entries; use `jet store verify` to check hashes",
-        entries.len()
-    );
-    println!("(gc: removing unreferenced entries requires a future registry — coming in M12.2)");
-}
-
-/// D-PURE3=B (E2-M16): print recorded store generations.
-pub(crate) fn run_store_generations() {
+/// `jet hangar generations` (D-PURE3=B / D-CLI-STORE2=A, was `jet store generations`).
+pub(crate) fn run_hangar_generations() {
     let gens = jet::Store::list_generations();
     if gens.is_empty() {
-        println!("no store generations recorded yet");
+        println!("no hangar generations recorded yet");
         println!("hint: generations are recorded when packages are installed");
         return;
     }
@@ -207,13 +197,13 @@ pub(crate) fn run_store_generations() {
     }
 }
 
-/// D-PURE3=B (E2-M16): roll back to a prior store generation.
-pub(crate) fn run_store_rollback(gen_str: &str) {
+/// `jet hangar rollback <gen>` (D-PURE3=B / D-CLI-STORE2=A, was `jet store rollback`).
+pub(crate) fn run_hangar_rollback(gen_str: &str) {
     let gen_number = match gen_str.parse::<u64>() {
         Ok(n) => n,
         Err(_) => {
-            eprintln!("error: `jet store rollback` needs a generation number");
-            eprintln!(" fix: run `jet store generations` to see available generations");
+            eprintln!("error: `jet hangar rollback` needs a generation number");
+            eprintln!(" fix: run `jet hangar generations` to see available generations");
             exit(ExitCodes::USAGE);
         }
     };
@@ -223,11 +213,11 @@ pub(crate) fn run_store_rollback(gen_str: &str) {
                 "rolled back to generation {} (entry hash: {})",
                 g.number, g.entry_hash
             );
-            println!("hint: the store is append-only; run `jet store fetch` to restore the generation's packages");
+            println!("hint: the store is append-only; run `jet fetch` to restore the generation's packages");
         }
         Err(e) => {
             eprintln!("error: {}", e);
-            eprintln!(" fix: run `jet store generations` to see available generations");
+            eprintln!(" fix: run `jet hangar generations` to see available generations");
             exit(ExitCodes::USER_ERROR);
         }
     }

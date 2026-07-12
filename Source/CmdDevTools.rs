@@ -96,25 +96,6 @@ pub(crate) fn run_dev(
     }
 }
 
-/// `jet serve <entry>` (c77) — `jet dev <entry> --swap`: force the resident/
-/// swap path, so a type-stable edit hot-swaps and a type-changing edit announces
-/// a clean restart. Shares the whole watch loop with `jet dev`. `policy`
-/// defaults to `Swap` but `--watch=off` (run once) and the other overrides
-/// still apply.
-///
-/// `use_interpreter` — D-JIT2=A opt-out flag (`--interpret`): forces tier-0
-/// interpreter; otherwise `CraneliftBackend` is used (M0 still delegates,
-/// M1+ will JIT-compile the covered subset).
-pub(crate) fn run_serve(
-    file: &str,
-    try_anyway: bool,
-    policy: WatchPolicy,
-    mode: OutputMode,
-    use_interpreter: bool,
-) {
-    run_dev(file, try_anyway, policy, mode, use_interpreter);
-}
-
 /// Handle one detected file change: pick swap vs rerun vs restart and render.
 /// Returns the freshly loaded bundle (or `None` if it failed to load) for the
 /// next diff.

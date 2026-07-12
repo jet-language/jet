@@ -1,5 +1,7 @@
 // D-MUSTUSE1 (c18iwxqx): `@MustUse` on types, functions, and methods.
-// Explicit discard reuses D-IGNORERET2 `.drop("reason")` and `#Suppress(MustUse)`.
+// Explicit discard: `.drop("reason")` is the sole discard spelling
+// (D-IGNORERET2=A, amended by D-MARK-DISCARD1=A — the `#Suppress(MustUse)`
+// lexical-scope form is retired outright).
 use core.scope as scope
 
 @MustUse struct Token {
@@ -14,10 +16,8 @@ fn run() {
     t := mint(7)
     print(t.id)
     mint(99).drop("best-effort mint for metrics")
-    #Suppress(MustUse) {
-        mint(1)
-        mint(2)
-    }
+    mint(1).drop("best-effort mint for metrics")
+    mint(2).drop("best-effort mint for metrics")
     _g := scope.guard(() => {
         print("cleanup")
     })

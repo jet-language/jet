@@ -38,16 +38,26 @@ pub struct CommandSpec {
     pub headline: bool,
 }
 
-/// D-CLI-SURFACE1=B / D-CLI-SURFACE2=A: authoritative nested command registry.
+/// D-CLI-SURFACE1=B / D-CLI-SURFACE2=A / D-CLI-SURFACE3=B: authoritative
+/// nested command registry.
 pub struct CommandGroup {
     pub name: &'static str,
     pub summary: &'static str,
     pub actions: &'static [NestedCommandSpec],
+    /// True when every subword of this group is modeled by `actions` — the
+    /// bare group form and `<group> help` print the CLI-owned summary, and an
+    /// unmodeled subword is E2101. False for `os` (D-CLI-SURFACE3=B): jetos
+    /// owns a wider native verb surface (`check`/`build`/`switch`/…) that
+    /// stays opaque to this registry, so only the migrated verbs
+    /// (`push`/`bridge`/`services`/`config`) are modeled and everything else
+    /// — including bare `jet os` and `jet os help` — falls through to the
+    /// real `jet os` dispatcher unchanged.
+    pub exhaustive: bool,
 }
 
 /// One canonical nested spelling and the real legacy dispatcher seam it reaches.
-/// `HandlerKey::Store` keeps the group because that handler consumes the group word
-/// itself (`store verify`, `store rollback`, and `store generations`).
+/// `HandlerKey::Hangar` keeps the group because that handler consumes the group word
+/// itself (`hangar verify`, `hangar rollback`, `hangar generations`, `hangar du`, …).
 pub struct NestedCommandSpec {
     pub name: &'static str,
     pub summary: &'static str,
@@ -60,7 +70,9 @@ pub struct NestedCommandSpec {
 pub enum HandlerKey {
     Publish, Yank, Keygen, Key, Vendor,
     Graph, Query, ExplainBuild, Impact, Dossier, Semindex, Expand, Schema, Codemod, Audit, Sbom, Bind,
-    Store, Gc, Fetch, Lock,
+    Logs, Search, Info, Outdated,
+    Hangar,
+    Push, Bridge, Services, Config,
     Toolchain, Upgrade, Doctor, Completions, Man, Devtools, Lsp,
 }
 
@@ -72,15 +84,18 @@ impl HandlerKey {
             Self::Query => "query", Self::ExplainBuild => "explain-build", Self::Impact => "impact",
             Self::Dossier => "dossier", Self::Semindex => "semindex", Self::Expand => "expand",
             Self::Schema => "schema", Self::Codemod => "codemod", Self::Audit => "audit",
-            Self::Sbom => "sbom", Self::Bind => "bind", Self::Store => "store", Self::Gc => "gc",
-            Self::Fetch => "fetch", Self::Lock => "lock", Self::Toolchain => "toolchain",
+            Self::Sbom => "sbom", Self::Bind => "bind",
+            Self::Logs => "logs", Self::Search => "search", Self::Info => "info", Self::Outdated => "outdated",
+            Self::Hangar => "hangar",
+            Self::Push => "push", Self::Bridge => "bridge", Self::Services => "services", Self::Config => "config",
+            Self::Toolchain => "toolchain",
             Self::Upgrade => "upgrade", Self::Doctor => "doctor", Self::Completions => "completions",
             Self::Man => "man", Self::Devtools => "devtools", Self::Lsp => "lsp",
         }
     }
 
     pub const fn keeps_group(self) -> bool {
-        matches!(self, Self::Store)
+        matches!(self, Self::Hangar)
     }
 }
 
@@ -104,14 +119,31 @@ const INSPECT_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "audit", summary: "check dependencies against the advisory database", handler: HandlerKey::Audit },
     NestedCommandSpec { name: "sbom", summary: "emit a software bill of materials", handler: HandlerKey::Sbom },
     NestedCommandSpec { name: "bind", summary: "generate a C binding cache from a header", handler: HandlerKey::Bind },
+    NestedCommandSpec { name: "logs", summary: "show latest Jetpack build logs", handler: HandlerKey::Logs },
+    NestedCommandSpec { name: "search", summary: "search the local offline Jetpack package index", handler: HandlerKey::Search },
+    NestedCommandSpec { name: "info", summary: "show local offline Jetpack package metadata", handler: HandlerKey::Info },
+    NestedCommandSpec { name: "outdated", summary: "report Jetpack channel refs with newer locks available", handler: HandlerKey::Outdated },
 ];
-const STORE_ACTIONS: &[NestedCommandSpec] = &[
-    NestedCommandSpec { name: "verify", summary: "verify store objects and references", handler: HandlerKey::Store },
-    NestedCommandSpec { name: "rollback", summary: "roll back a store generation", handler: HandlerKey::Store },
-    NestedCommandSpec { name: "generations", summary: "list store generations", handler: HandlerKey::Store },
-    NestedCommandSpec { name: "gc", summary: "remove unreferenced store entries", handler: HandlerKey::Gc },
-    NestedCommandSpec { name: "fetch", summary: "download and link all dependencies", handler: HandlerKey::Fetch },
-    NestedCommandSpec { name: "lock", summary: "lock a script's inline dependencies", handler: HandlerKey::Lock },
+// D-CLI-STORE2=A / D-JPK-STORECLI1=D: the physical store lives under `hangar`.
+// `du` is real (jetpack's honest per-object disk accounting); verify/rollback/
+// generations keep their existing real jet-local generation-tracking logic
+// (renamed from `store`); repair/copy/import/export/dump/restore/sign are
+// ratified verb NAMES with no ratified operational design yet (no dump
+// format, signing-key policy, or repair algorithm has been specified) — they
+// route to a real, honest "not built yet" handler rather than a silent no-op
+// or invented behavior.
+const HANGAR_ACTIONS: &[NestedCommandSpec] = &[
+    NestedCommandSpec { name: "verify", summary: "verify store objects and references", handler: HandlerKey::Hangar },
+    NestedCommandSpec { name: "repair", summary: "repair a corrupted store object (not yet built)", handler: HandlerKey::Hangar },
+    NestedCommandSpec { name: "copy", summary: "copy a store object to or from another store (not yet built)", handler: HandlerKey::Hangar },
+    NestedCommandSpec { name: "import", summary: "import a store object from an archive (not yet built)", handler: HandlerKey::Hangar },
+    NestedCommandSpec { name: "export", summary: "export a store object to an archive (not yet built)", handler: HandlerKey::Hangar },
+    NestedCommandSpec { name: "dump", summary: "dump a store object to a portable archive (not yet built)", handler: HandlerKey::Hangar },
+    NestedCommandSpec { name: "restore", summary: "restore a store object from a dump (not yet built)", handler: HandlerKey::Hangar },
+    NestedCommandSpec { name: "sign", summary: "sign a store object (not yet built)", handler: HandlerKey::Hangar },
+    NestedCommandSpec { name: "rollback", summary: "roll back a store generation", handler: HandlerKey::Hangar },
+    NestedCommandSpec { name: "generations", summary: "list store generations", handler: HandlerKey::Hangar },
+    NestedCommandSpec { name: "du", summary: "honest per-object hangar disk usage", handler: HandlerKey::Hangar },
 ];
 const SELF_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "toolchain", summary: "show the project's pinned Jet toolchain", handler: HandlerKey::Toolchain },
@@ -122,12 +154,23 @@ const SELF_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "devtools", summary: "run checked developer generators", handler: HandlerKey::Devtools },
     NestedCommandSpec { name: "lsp", summary: "run the language server", handler: HandlerKey::Lsp },
 ];
+// D-CLI-SURFACE3=B: `push`/`bridge`/`services`/`config` move under `jet os`.
+// This group is *not* exhaustive (see `CommandGroup::exhaustive`) — jetos's
+// own native verbs (`check`/`build`/`switch`/…, D-JPK-OSVERB1) stay entirely
+// owned by the `jet os` dispatcher and are not modeled here.
+const OS_ACTIONS: &[NestedCommandSpec] = &[
+    NestedCommandSpec { name: "push", summary: "deploy a fleet through Jetpack", handler: HandlerKey::Push },
+    NestedCommandSpec { name: "bridge", summary: "translate a foreign environment description into Jetpack form", handler: HandlerKey::Bridge },
+    NestedCommandSpec { name: "services", summary: "manage project-local dev services", handler: HandlerKey::Services },
+    NestedCommandSpec { name: "config", summary: "manage jet configuration (`config trust add/list/remove`, U19)", handler: HandlerKey::Config },
+];
 
 pub const COMMAND_GROUPS: &[CommandGroup] = &[
-    CommandGroup { name: "registry", summary: "publishing, signing, yanking, and vendoring", actions: REGISTRY_ACTIONS },
-    CommandGroup { name: "inspect", summary: "semantic, build, schema, supply, and binding inspection", actions: INSPECT_ACTIONS },
-    CommandGroup { name: "store", summary: "package-store integrity and lifecycle", actions: STORE_ACTIONS },
-    CommandGroup { name: "self", summary: "Jet installation, diagnostics, completions, and machine tooling", actions: SELF_ACTIONS },
+    CommandGroup { name: "registry", summary: "publishing, signing, yanking, and vendoring", actions: REGISTRY_ACTIONS, exhaustive: true },
+    CommandGroup { name: "inspect", summary: "semantic, build, schema, supply, discovery, and binding inspection", actions: INSPECT_ACTIONS, exhaustive: true },
+    CommandGroup { name: "hangar", summary: "physical package-store integrity and lifecycle", actions: HANGAR_ACTIONS, exhaustive: true },
+    CommandGroup { name: "self", summary: "Jet installation, diagnostics, completions, and machine tooling", actions: SELF_ACTIONS, exhaustive: true },
+    CommandGroup { name: "os", summary: "deploy, bridge, services, and config live under the jetos front door", actions: OS_ACTIONS, exhaustive: false },
 ];
 
 pub fn command_group(name: &str) -> Option<&'static CommandGroup> {
@@ -153,7 +196,8 @@ pub fn moved_command_group(name: &str) -> Option<&'static str> {
 /// completions; the greeting picks the `headline` ones.
 pub const COMMANDS: &[CommandSpec] = &[
     CommandSpec { name: "registry", summary: "publishing, signing, yanking, and vendoring", headline: false },
-    CommandSpec { name: "inspect", summary: "semantic, build, schema, supply, and binding inspection", headline: false },
+    CommandSpec { name: "inspect", summary: "semantic, build, schema, supply, discovery, and binding inspection", headline: false },
+    CommandSpec { name: "hangar", summary: "physical package-store integrity and lifecycle", headline: false },
     CommandSpec { name: "self", summary: "Jet installation, diagnostics, completions, and machine tooling", headline: false },
     CommandSpec {
         name: "diff",
@@ -197,7 +241,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "serve",
-        summary: "watch a resident program and hot-swap type-stable edits",
+        summary: "retired (D-CLI-DEVSERVE1=A) — teaches `jet dev --swap`",
         headline: false,
     },
     CommandSpec {
@@ -312,12 +356,12 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "lock",
-        summary: "resolve a manifest-less script's inline `use pkg#version;` deps and write its .lock sidecar (D-JPK-SCRIPTDEP1)",
+        summary: "retired (D-CLI-STORE2=A) — teaches `jet fetch --lock <script.jet>`",
         headline: false,
     },
     CommandSpec {
         name: "store",
-        summary: "inspect or verify the package store",
+        summary: "retired (D-CLI-STORE2=A) — teaches `jet hangar`/`jet clean`/`jet fetch`",
         headline: false,
     },
     CommandSpec {
@@ -327,7 +371,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "gc",
-        summary: "remove unreferenced store entries",
+        summary: "retired (D-CLI-SURFACE3=B) — teaches `jet clean`",
         headline: false,
     },
     CommandSpec {
@@ -487,12 +531,18 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
 ];
 
-/// D-CLI-SURFACE1=B / D-CLI-SURFACE2=A: canonical top-level frequency ring.
-/// Moved handler names remain in the internal registry only so normalized
-/// grouped argv reaches the real dispatcher; generators must never advertise
-/// those retired bare spellings.
+/// D-CLI-STORE2=A / D-CLI-DEVSERVE1=A / D-CLI-SURFACE3=B: words with no
+/// group-prepend replacement — each is a bespoke teaching error (not a
+/// `jet <group> <word>` rename), so `moved_command_group` can't find them.
+/// Never advertise them in help/man/completions.
+const RETIRED_BARE: &[&str] = &["store", "gc", "serve", "lock"];
+
+/// D-CLI-SURFACE1=B / D-CLI-SURFACE2=A / D-CLI-SURFACE3=B: canonical top-level
+/// frequency ring. Moved handler names remain in the internal registry only so
+/// normalized grouped argv reaches the real dispatcher; generators must never
+/// advertise those retired bare spellings, nor the bespoke-retired words above.
 pub fn is_canonical_top_level(name: &str) -> bool {
-    moved_command_group(name).is_none()
+    moved_command_group(name).is_none() && !RETIRED_BARE.contains(&name)
 }
 
 /// Every global flag the driver understands. Used to flag-check and to suggest
@@ -512,6 +562,10 @@ pub const FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--stdin-path", help: "with fmt -: path label used in diagnostics when reading from stdin" },
     FlagSpec { long: "--small", help: "with build/run: smallest binary (S15)" },
     FlagSpec { long: "--locked", help: "with fetch: verify only, refuse network" },
+    // D-CLI-STORE2=A: script locking folds into `fetch`, not a separate verb.
+    FlagSpec { long: "--lock", help: "with fetch: lock a manifest-less script's inline deps instead of fetching a project" },
+    // D-CLI-BARE1=A: workspace member selection for bare run/dev/debug/bench/check/build.
+    FlagSpec { long: "-p", help: "with run/dev/debug/bench/check/build: pick a workspace member by name" },
     FlagSpec { long: "--annotated", help: "with new: include commented example deps" },
     FlagSpec { long: "--force", help: "with publish: bypass pre-publish gate (with warning)" },
     FlagSpec { long: "--message", help: "with yank: human-readable reason for yanking the version" },
@@ -526,9 +580,9 @@ pub const FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--fix", help: "with doctor: apply auto-fixable problems" },
     FlagSpec { long: "--dry-run", help: "with fix: show changes without writing" },
     FlagSpec { long: "--try-anyway", help: "with dev: interpret past unsupported features (no guarantees)" },
-    FlagSpec { long: "--restart", help: "with dev/serve: always rerun from scratch on save (c77)" },
-    FlagSpec { long: "--swap", help: "with dev/serve: hot-swap type-stable edits, restart on type change (c77)" },
-    FlagSpec { long: "--watch", help: "with dev/serve: --watch=off runs once and exits (c77)" },
+    FlagSpec { long: "--restart", help: "with dev: always rerun from scratch on save (c77)" },
+    FlagSpec { long: "--swap", help: "with dev: hot-swap type-stable edits, restart on type change (c77; D-CLI-DEVSERVE1=A: was `jet serve`)" },
+    FlagSpec { long: "--watch", help: "with dev: --watch=off runs once and exits (c77)" },
     // E2-M18 REPL flags.
     FlagSpec { long: "--project", help: "with repl: load pkg.jet from this directory for import context (D-REPL10)" },
     // E2-M16 flags.
@@ -605,7 +659,7 @@ pub fn owns_flag_vocabulary(name: &str) -> bool {
             | "remove"
             | "bind"
             | "lsp"
-            | "store"
+            | "hangar"
             | "config"
             | "update"
             | "outdated"
@@ -932,13 +986,21 @@ mod tests {
             ("inspect", "semindex", Semindex, "semindex", false), ("inspect", "expand", Expand, "expand", false),
             ("inspect", "schema", Schema, "schema", false), ("inspect", "codemod", Codemod, "codemod", false),
             ("inspect", "audit", Audit, "audit", false), ("inspect", "sbom", Sbom, "sbom", false),
-            ("inspect", "bind", Bind, "bind", false), ("store", "verify", Store, "store", true),
-            ("store", "rollback", Store, "store", true), ("store", "generations", Store, "store", true),
-            ("store", "gc", Gc, "gc", false), ("store", "fetch", Fetch, "fetch", false),
-            ("store", "lock", Lock, "lock", false), ("self", "toolchain", Toolchain, "toolchain", false),
+            ("inspect", "bind", Bind, "bind", false),
+            ("inspect", "logs", Logs, "logs", false), ("inspect", "search", Search, "search", false),
+            ("inspect", "info", Info, "info", false), ("inspect", "outdated", Outdated, "outdated", false),
+            ("hangar", "verify", Hangar, "hangar", true), ("hangar", "repair", Hangar, "hangar", true),
+            ("hangar", "copy", Hangar, "hangar", true), ("hangar", "import", Hangar, "hangar", true),
+            ("hangar", "export", Hangar, "hangar", true), ("hangar", "dump", Hangar, "hangar", true),
+            ("hangar", "restore", Hangar, "hangar", true), ("hangar", "sign", Hangar, "hangar", true),
+            ("hangar", "rollback", Hangar, "hangar", true), ("hangar", "generations", Hangar, "hangar", true),
+            ("hangar", "du", Hangar, "hangar", true),
+            ("self", "toolchain", Toolchain, "toolchain", false),
             ("self", "upgrade", Upgrade, "upgrade", false), ("self", "doctor", Doctor, "doctor", false),
             ("self", "completions", Completions, "completions", false), ("self", "man", Man, "man", false),
             ("self", "devtools", Devtools, "devtools", false), ("self", "lsp", Lsp, "lsp", false),
+            ("os", "push", Push, "push", false), ("os", "bridge", Bridge, "bridge", false),
+            ("os", "services", Services, "services", false), ("os", "config", Config, "config", false),
         ];
         assert_eq!(COMMAND_GROUPS.iter().map(|g| g.actions.len()).sum::<usize>(), expected.len());
         for (group_name, action_name, handler, dispatch_word, keeps_group) in expected {

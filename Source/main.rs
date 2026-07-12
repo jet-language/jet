@@ -37,15 +37,15 @@ use CmdCompile::{
 };
 use CmdDevTools::{
     run_bench, run_bind, run_completions, run_dev, run_devtools, run_doctor, run_emit_rust,
-    run_eval, run_explain, run_lint_a11y, run_repl, run_serve, watch_policy_from, WatchPolicy,
+    run_eval, run_explain, run_lint_a11y, run_repl, watch_policy_from, WatchPolicy,
 };
 use CmdDevWeb::run_dev_web;
 use CmdDossier::run_dossier;
 use CmdExpand::run_expand;
 use CmdImpact::run_impact;
 use CmdPkg::{
-    run_add, run_fetch, run_gc, run_remove, run_store_generations, run_store_rollback,
-    run_store_verify, run_update,
+    run_add, run_fetch, run_hangar_generations, run_hangar_rollback, run_hangar_verify,
+    run_remove, run_update,
 };
 use CmdSchema::run_schema;
 use CmdSemIndex::run_semindex;
@@ -593,8 +593,14 @@ fn normalize_frequency_ring_argv(raw: &mut Vec<String>) {
         exit(ExitCodes::USAGE);
     }
     let Some(group) = raw.first().cloned() else { return };
+    // D-CLI-SURFACE3=B: `os` is not exhaustive — jetos's own native verbs
+    // (`check`/`build`/`switch`/…, D-JPK-OSVERB1) stay opaque to this
+    // registry, so bare `jet os` / `jet os help` fall through unchanged to
+    // the real `jet os` dispatcher instead of being hijacked by this
+    // group's (partial) action list.
+    let exhaustive = jet::CLI::command_group(&group).map(|spec| spec.exhaustive).unwrap_or(false);
     if let Some(spec) = jet::CLI::command_group(&group) {
-        if raw.len() == 1 || raw.get(1).map(String::as_str) == Some("help") {
+        if exhaustive && (raw.len() == 1 || raw.get(1).map(String::as_str) == Some("help")) {
             println!("jet {group} — {}", spec.summary);
             for action in spec.actions {
                 println!("  {:<15} {}", action.name, action.summary);
@@ -603,17 +609,15 @@ fn normalize_frequency_ring_argv(raw: &mut Vec<String>) {
         }
     }
     let Some(sub) = raw.get(1).cloned() else { return };
-    if jet::CLI::command_group(&group).is_some() {
-        if jet::CLI::nested_command(&group, &sub).is_none() {
-            if raw.iter().any(|arg| arg == "--json") {
-                println!("{{\"schema_version\":1,\"diagnostics\":[{{\"schema_version\":1,\"code\":\"E2101\",\"severity\":\"error\",\"message\":\"`{}` isn't a jet {} command\",\"why\":\"jet {} accepts only commands in its named area\",\"fix\":\"run `jet {} help`\",\"detail\":null,\"file\":null,\"line\":null,\"col\":null,\"span\":null,\"edit\":null}}]}}", esc(&sub), esc(&group), esc(&group), esc(&group));
-            } else {
-                eprintln!("Error [E2101]: `{sub}` isn't a jet {group} command.");
-                eprintln!(" Why: jet {group} accepts only commands in its named area.");
-                eprintln!(" Fix: run `jet {group} help`.");
-            }
-            exit(ExitCodes::USAGE);
+    if exhaustive && jet::CLI::nested_command(&group, &sub).is_none() {
+        if raw.iter().any(|arg| arg == "--json") {
+            println!("{{\"schema_version\":1,\"diagnostics\":[{{\"schema_version\":1,\"code\":\"E2101\",\"severity\":\"error\",\"message\":\"`{}` isn't a jet {} command\",\"why\":\"jet {} accepts only commands in its named area\",\"fix\":\"run `jet {} help`\",\"detail\":null,\"file\":null,\"line\":null,\"col\":null,\"span\":null,\"edit\":null}}]}}", esc(&sub), esc(&group), esc(&group), esc(&group));
+        } else {
+            eprintln!("Error [E2101]: `{sub}` isn't a jet {group} command.");
+            eprintln!(" Why: jet {group} accepts only commands in its named area.");
+            eprintln!(" Fix: run `jet {group} help`.");
         }
+        exit(ExitCodes::USAGE);
     }
     if let Some((_, action)) = jet::CLI::nested_command(&group, &sub) {
         if !action.handler.keeps_group() {
@@ -633,6 +637,25 @@ fn esc(s: &str) -> String {
         c if c.is_control() => format!("\\u{:04x}", c as u32).chars().collect(),
         c => vec![c],
     }).collect()
+}
+
+/// D-CLI-STORE2=A / D-CLI-DEVSERVE1=A / D-CLI-SURFACE3=B: E2101 teaching error
+/// for a word retired with **no** single `jet <group> <same-word>` rename (so
+/// the generic `moved_command` mechanism in `normalize_frequency_ring_argv`
+/// doesn't apply) — `verb` renamed outright to `replacement`, a full `jet …`
+/// command line the caller has already composed for this exact invocation.
+fn teach_retired(verb: &str, replacement: &str, why: &str, json: bool) -> ! {
+    if json {
+        println!(
+            "{{\"schema_version\":1,\"diagnostics\":[{{\"schema_version\":1,\"code\":\"E2101\",\"severity\":\"error\",\"message\":\"`{}` isn't a jet command\",\"why\":\"{}\",\"fix\":\"run `{}`\",\"detail\":null,\"file\":null,\"line\":null,\"col\":null,\"span\":null,\"edit\":null}}]}}",
+            esc(verb), esc(why), esc(replacement)
+        );
+    } else {
+        eprintln!("Error [E2101]: `{verb}` isn't a jet command.");
+        eprintln!(" Why: {why}.");
+        eprintln!(" Fix: run `{replacement}`.");
+    }
+    exit(ExitCodes::USAGE);
 }
 
 /// Validate every `--flag` in argv against the registry. The first unknown flag
@@ -826,11 +849,26 @@ fn main() {
     };
     // Positional args only. Keep bare `-` (stdin for `jet fmt -`); drop every
     // other dash-flag including short forms like `-u` / `-v` so they never become
-    // the file target (D-TOOL4).
-    let args: Vec<&String> = jet_argv
-        .iter()
-        .filter(|a| *a == "-" || !a.starts_with('-'))
-        .collect();
+    // the file target (D-TOOL4). D-CLI-BARE1=A: `-p <member>` also swallows its
+    // value — a workspace member name is never a positional file/program arg.
+    let args: Vec<&String> = {
+        let mut out = Vec::new();
+        let mut skip_next = false;
+        for a in jet_argv.iter() {
+            if skip_next {
+                skip_next = false;
+                continue;
+            }
+            if a == "-p" {
+                skip_next = true;
+                continue;
+            }
+            if a.as_str() == "-" || !a.starts_with('-') {
+                out.push(a);
+            }
+        }
+        out
+    };
 
     if args.first().map(|s| s.as_str()) == Some("lsp") {
         let sub = args.get(1).map(|s| s.as_str());
@@ -1021,6 +1059,12 @@ fn main() {
             return;
         }
         "fetch" => {
+            // D-CLI-STORE2=A: script locking folds into `fetch --lock
+            // <script.jet>` — the old standalone `jet lock` verb is retired.
+            if let Some(script) = flag_value(&raw, "--lock") {
+                run_lock(Some(script), mode);
+                return;
+            }
             run_fetch(locked);
             return;
         }
@@ -1039,15 +1083,30 @@ fn main() {
         // script's inline `use pkg#version;` deps into the freshly written
         // `pkg.jet`; bare `jet init` is unchanged.
         "init" => run_init(args.get(1).map(|s| s.as_str())),
-        // U11: `jet store lock <script.jet>` resolves its inline deps and writes
-        // `<script.jet>.lock`.
+        // D-CLI-STORE2=A: `jet lock`/`jet store lock` retired — script locking
+        // is a `jet fetch` flag, not a separate verb.
         "lock" => {
-            run_lock(args.get(1).map(|s| s.as_str()), mode);
-            return;
+            let rest = raw.get(1..).map(|s| s.join(" ")).unwrap_or_default();
+            let replacement = if rest.is_empty() {
+                "jet fetch --lock <script.jet>".to_string()
+            } else {
+                format!("jet fetch --lock {rest}")
+            };
+            teach_retired(
+                "lock",
+                &replacement,
+                "script locking is a `jet fetch` flag, not a separate command",
+                json,
+            );
         }
+        // D-CLI-SURFACE3=B: the four silent aliases die — `gc` teaches `jet clean`.
         "gc" => {
-            run_gc();
-            return;
+            teach_retired(
+                "gc",
+                "jet clean",
+                "`jet clean` is the sole GC+optimize entry (D-CLI-STORE2=A)",
+                json,
+            );
         }
         "publish" => {
             let force = raw.iter().any(|a| a == "--force");
@@ -1315,11 +1374,11 @@ fn main() {
             run_repl(project.as_deref(), &allow, &deny);
             return;
         }
-        // Teaching error: E0043 `jet install` → `jet store fetch`
+        // Teaching error: E0043 `jet install` -> `jet fetch`
         "install" => {
             eprintln!("Error [E0043]: `jet install` isn't a Jet command");
-            eprintln!(" Why: Jet uses `jet store fetch` to download and link dependencies");
-            eprintln!(" Fix: run `jet store fetch` to install all dependencies listed in pkg.jet");
+            eprintln!(" Why: Jet uses `jet fetch` to download and link dependencies");
+            eprintln!(" Fix: run `jet fetch` to install all dependencies listed in pkg.jet");
             exit(ExitCodes::USER_ERROR);
         }
         "dev" => {
@@ -1399,32 +1458,21 @@ fn main() {
             run_dev(file, try_anyway, policy, mode, use_interpreter);
             return;
         }
+        // D-CLI-DEVSERVE1=A: `jet serve` is deleted — `jet dev` is the only dev
+        // loop (it auto-detects rerun vs resident hot-swap; `--swap` forces
+        // hot-swap). The word stays unclaimed for a future ratified job.
         "serve" => {
-            // c77 (D-DEVMODE1=A): `jet serve <entry>` == `jet dev <entry> --swap`.
-            // Force the resident/swap path — a type-stable edit hot-swaps, a
-            // type-changing edit announces a clean restart (D-HOTSWAP1).
-            let try_anyway = raw.iter().any(|a| a == "--try-anyway");
-            // c139 (D-JIT2=A): --interpret forces tier-0 interpreter.
-            let use_interpreter = raw.iter().any(|a| a == "--interpret");
-            let file = match args.get(1) {
-                Some(f) => f.as_str(),
-                None => {
-                    eprintln!(
-                        "error: `jet serve` needs a file to serve: {} serve <file.{}>",
-                        jet::Syntax::BINARY_NAME,
-                        jet::Syntax::FILE_EXT
-                    );
-                    eprintln!(
-                        " note: `jet serve` is `jet dev <file> --swap` — it keeps a resident program up and hot-swaps type-stable edits"
-                    );
-                    exit(ExitCodes::USAGE);
-                }
+            let file = args.get(1).map(|s| s.as_str());
+            let replacement = match file {
+                Some(f) => format!("jet dev {f} --swap"),
+                None => "jet dev <file.jet> --swap".to_string(),
             };
-            // `serve` forces the swap path by default, but `--watch=off` still
-            // runs once and exits.
-            let policy = watch_policy_from(&raw, WatchPolicy::Swap);
-            run_serve(file, try_anyway, policy, mode, use_interpreter);
-            return;
+            teach_retired(
+                "serve",
+                &replacement,
+                "`jet dev` is the only dev loop now; `--swap` forces its hot-swap path (D-CLI-DEVSERVE1=A)",
+                json,
+            );
         }
         "debug" => {
             // D-DBG1/D-DBG3: `jet debug <file>` — the source-level step
@@ -1439,37 +1487,111 @@ fn main() {
             // meaning (I8), the backend choice is never a separate flag.
             let raw_frames = raw.iter().any(|a| a == "--raw-frames"); // D-DBG2
             let dap = raw.iter().any(|a| a == "--dap");
-            let file = match args.get(1) {
-                Some(f) => f.as_str(),
+            // D-CLI-BARE1=A: bare `jet debug` inside a package resolves the
+            // entry the same way run/build/check/bench do; outside a package
+            // the usage error is unchanged.
+            let file: String = match args.get(1) {
+                Some(f) => f.to_string(),
                 None => {
-                    eprintln!(
-                        "error: `jet debug` needs a file to debug: {} debug <file.{}>",
-                        jet::Syntax::BINARY_NAME,
-                        jet::Syntax::FILE_EXT
-                    );
-                    exit(ExitCodes::USAGE);
+                    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+                    match jet::Loader::find_manifest_root(&cwd) {
+                        Some(root) => {
+                            let member_flag = flag_value(&raw, "-p");
+                            resolve_bare_entry("debug", &root, member_flag)
+                                .to_string_lossy()
+                                .into_owned()
+                        }
+                        None => {
+                            eprintln!(
+                                "error: `jet debug` needs a file to debug: {} debug <file.{}>",
+                                jet::Syntax::BINARY_NAME,
+                                jet::Syntax::FILE_EXT
+                            );
+                            exit(ExitCodes::USAGE);
+                        }
+                    }
                 }
             };
-            let resolved = resolve_source_path(file);
+            let resolved = resolve_source_path(&file);
             let use_native = dap || jet::Debug::needs_native(&resolved).unwrap_or(false);
             if !use_native {
                 exit(jet::Debug::run_debug(&resolved));
             }
             exit(run_debug_native(&resolved, raw_frames, dap, mode));
         }
+        // D-CLI-STORE2=A: `jet store` is dissolved — physical verbs moved to
+        // `jet hangar`, GC+optimize is the sole `jet clean` intent, and
+        // dependency fetch is the flat `jet fetch` (script locking is `jet
+        // fetch --lock <script.jet>`). No single group-prepend rename fits
+        // every former `store` subcommand, so this names the real spelling
+        // per subcommand instead of using the generic `moved_command` path.
         "store" => {
             let sub = args.get(1).map(|s| s.as_str()).unwrap_or("");
-            match sub {
-                "verify" => run_store_verify(),
+            let tail = |from: usize| -> String {
+                args.get(from..)
+                    .map(|rest| rest.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(" "))
+                    .unwrap_or_default()
+            };
+            let replacement = match sub {
+                "verify" => "jet hangar verify".to_string(),
                 "rollback" => {
-                    // D-PURE3=B (E2-M16): roll back to a prior store generation.
-                    let gen_str = args.get(2).map(|s| s.as_str()).unwrap_or("");
-                    run_store_rollback(gen_str);
+                    let rest = tail(2);
+                    if rest.is_empty() { "jet hangar rollback <gen>".to_string() } else { format!("jet hangar rollback {rest}") }
                 }
-                "generations" => run_store_generations(),
+                "generations" => "jet hangar generations".to_string(),
+                "gc" => "jet clean".to_string(),
+                "fetch" => "jet fetch".to_string(),
+                "lock" => {
+                    let rest = tail(2);
+                    if rest.is_empty() { "jet fetch --lock <script.jet>".to_string() } else { format!("jet fetch --lock {rest}") }
+                }
+                "" => "jet hangar / jet clean / jet fetch".to_string(),
+                other => format!("jet hangar {other}"),
+            };
+            teach_retired(
+                "store",
+                &replacement,
+                "the store group is dissolved into `jet hangar`, `jet clean`, and `jet fetch` (D-CLI-STORE2=A)",
+                json,
+            );
+        }
+        // D-CLI-STORE2=A / D-JPK-STORECLI1=D: `jet hangar` owns every physical
+        // store verb. `verify`/`rollback`/`generations` reuse the existing
+        // real generation-tracking logic (renamed from `store`); `du` is
+        // jetpack's real honest per-object disk accounting. `repair`/`copy`/
+        // `import`/`export`/`dump`/`restore`/`sign` are ratified verb NAMES
+        // with no ratified operational design yet (no dump format, signing-key
+        // policy, or repair algorithm has shipped) — they answer honestly
+        // rather than faking success or silently doing nothing.
+        "hangar" => {
+            let sub = args.get(1).map(|s| s.as_str()).unwrap_or("");
+            match sub {
+                "verify" => run_hangar_verify(),
+                "rollback" => {
+                    let gen_str = args.get(2).map(|s| s.as_str()).unwrap_or("");
+                    run_hangar_rollback(gen_str);
+                }
+                "generations" => run_hangar_generations(),
+                "du" => {
+                    exit(EngineDispatch::dispatch(
+                        jet::Syntax::JETPACK_BINARY_NAME,
+                        "hangar",
+                        &raw,
+                    ));
+                }
+                "repair" | "copy" | "import" | "export" | "dump" | "restore" | "sign" => {
+                    eprintln!("error: `jet hangar {sub}` isn't built yet");
+                    eprintln!(
+                        " why: D-JPK-STORECLI1 names this verb, but its operational design (archive format, signing-key policy, repair algorithm) hasn't shipped"
+                    );
+                    eprintln!(
+                        " fix: `jet hangar verify`, `jet hangar rollback <gen>`, `jet hangar generations`, and `jet hangar du` work today"
+                    );
+                    exit(ExitCodes::USAGE);
+                }
                 _ => {
-                    eprintln!("error: unknown store subcommand `{}`", sub);
-                    eprintln!(" fix: try `jet store verify`, `jet store generations`, or `jet store rollback <gen>`");
+                    eprintln!("error: unknown hangar subcommand `{}`", sub);
+                    eprintln!(" fix: run `jet hangar help` to see every hangar command");
                     exit(ExitCodes::USAGE);
                 }
             }
@@ -1496,20 +1618,31 @@ fn main() {
         _ => {}
     }
 
+    // D-CLI-BARE1=A: `-p <member>` picks a workspace member for the bare-entry
+    // resolver below; declared here so its borrow outlives `target`.
+    let bare_member_flag = flag_value(&raw, "-p");
+    // D-CLI-BARE1=A: owns the `String` a bare `bench` resolves to, so `target`
+    // (a `&str`) can borrow it — `run_compile_cmd`'s callers return before
+    // `target` is used, but `bench` falls through to the shared variable.
+    let mut bare_bench_entry = String::new();
     let target = match args.get(1) {
         Some(f) => f.as_str(),
         None => {
-            // No target: try project-root mode for run/build/test.
+            // No target: try project-root mode for run/build/test/bench.
             match cmd {
-                "run" | "build" | "test" | "check" => {
+                "run" | "build" | "test" | "check" | "bench" => {
                     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
                     if let Some(root) = jet::Loader::find_manifest_root(&cwd) {
-                        let entry = find_project_entry(&root);
+                        let entry = resolve_bare_entry(cmd, &root, bare_member_flag);
                         let entry_str = entry.to_string_lossy().to_string();
                         match cmd {
                             "test" => {
                                 run_test(&entry_str, false, mode);
                                 return;
+                            }
+                            "bench" => {
+                                bare_bench_entry = entry_str;
+                                bare_bench_entry.as_str()
                             }
                             _ => {
                                 // D-CLI1: use passthrough slice if `--` was present;
@@ -1542,23 +1675,24 @@ fn main() {
                                 return;
                             }
                         }
-                    }
-                    // D-JPK-FILENAME2=B (A2): a retired manifest filename in
-                    // place of `pkg.jet` gets the E1226 teaching diagnostic
-                    // instead of the generic "no pkg.jet found" message.
-                    if let Some(msg) = jet::Loader::stale_manifest_name_message(&cwd) {
-                        eprint!("{}", msg);
+                    } else {
+                        // D-JPK-FILENAME2=B (A2): a retired manifest filename in
+                        // place of `pkg.jet` gets the E1226 teaching diagnostic
+                        // instead of the generic "no pkg.jet found" message.
+                        if let Some(msg) = jet::Loader::stale_manifest_name_message(&cwd) {
+                            eprint!("{}", msg);
+                            exit(ExitCodes::USAGE);
+                        }
+                        eprintln!(
+                            "error: no file given and no `pkg.jet` found in this directory or above"
+                        );
+                        eprintln!(
+                            " fix: run `jet {} <file.{}>` or cd into a project",
+                            cmd,
+                            jet::Syntax::FILE_EXT
+                        );
                         exit(ExitCodes::USAGE);
                     }
-                    eprintln!(
-                        "error: no file given and no `pkg.jet` found in this directory or above"
-                    );
-                    eprintln!(
-                        " fix: run `jet {} <file.{}>` or cd into a project",
-                        cmd,
-                        jet::Syntax::FILE_EXT
-                    );
-                    exit(ExitCodes::USAGE);
                 }
                 _ => {
                     eprint!("{}", usage());
@@ -1724,8 +1858,8 @@ fn main() {
         // Teaching error: E0042 foreign manifest filename, E0043 `jet install`
         "install" => {
             eprintln!("Error [E0043]: `jet install` isn't a Jet command");
-            eprintln!(" Why: Jet uses `jet store fetch` to download and link dependencies");
-            eprintln!(" Fix: run `jet store fetch` to install all dependencies listed in pkg.jet");
+            eprintln!(" Why: Jet uses `jet fetch` to download and link dependencies");
+            eprintln!(" Fix: run `jet fetch` to install all dependencies listed in pkg.jet");
             exit(ExitCodes::USER_ERROR);
         }
         _ => {
@@ -1887,6 +2021,59 @@ pub(crate) fn find_project_entry(root: &Path) -> PathBuf {
         return dot_jet;
     }
     root.join(format!("main.{}", jet::Syntax::FILE_EXT))
+}
+
+/// D-CLI-BARE1=A: shared bare-entry resolver for `run`/`dev`/`debug`/`bench`/
+/// `check`/`build` inside a package — the one rule all six share instead of
+/// each hand-rolling its own "no file given" fallback.
+///
+/// A `workspace.jet` member list (D-JPK-WORKSPACE, `crate::Jetpack::WorkspaceFile`)
+/// with more than one runnable member (a member whose own entry resolves to a
+/// real file, D-ILE1) is an ambiguity naming every member; `-p <member>`
+/// picks one explicitly, or the caller can always name a file directly. A
+/// plain project (no workspace, or a workspace with exactly zero or one
+/// runnable member) resolves exactly like `find_project_entry` always has —
+/// no behavior change for the overwhelmingly common single-package case.
+fn resolve_bare_entry(cmd: &str, root: &Path, member_flag: Option<&str>) -> PathBuf {
+    if let Some(Ok(plan)) = jet::Jetpack::WorkspaceFile::load(root) {
+        let runnable: Vec<(String, PathBuf)> = plan
+            .members
+            .iter()
+            .filter_map(|m| {
+                let entry = find_project_entry(&root.join(&m.path));
+                entry.is_file().then(|| (m.name.clone(), entry))
+            })
+            .collect();
+        if let Some(want) = member_flag {
+            return match runnable.iter().find(|(name, _)| name == want) {
+                Some((_, entry)) => entry.clone(),
+                None => {
+                    let names: Vec<&str> = plan.members.iter().map(|m| m.name.as_str()).collect();
+                    eprintln!("error: no workspace member named `{want}`");
+                    eprintln!(" fix: pick one of: {}", names.join(", "));
+                    exit(ExitCodes::USAGE);
+                }
+            };
+        }
+        match runnable.len() {
+            1 => return runnable.into_iter().next().unwrap().1,
+            n if n >= 2 => {
+                let names: Vec<&str> = runnable.iter().map(|(n, _)| n.as_str()).collect();
+                eprintln!(
+                    "error: `jet {cmd}` is ambiguous — {} workspace members can run",
+                    names.len()
+                );
+                eprintln!(
+                    " why: this workspace declares multiple runnable members: {}",
+                    names.join(", ")
+                );
+                eprintln!(" fix: pick one with `jet {cmd} -p <member>`, or run its file directly");
+                exit(ExitCodes::USAGE);
+            }
+            _ => {} // no runnable member — fall through to the single-project convention
+        }
+    }
+    find_project_entry(root)
 }
 
 fn run_version() {
@@ -2077,13 +2264,14 @@ fn lift_inline_deps_into_manifest(cwd: &Path, script: &str) {
     }
 }
 
-/// `jet store lock <script.jet>` — U11: resolve a manifest-less script's inline
+/// `jet fetch --lock <script.jet>` (D-CLI-STORE2=A, was `jet store lock` /
+/// `jet lock`) — U11: resolve a manifest-less script's inline
 /// `use pkg#version;` deps and write the `<script.jet>.lock` sidecar,
 /// keyed by the script's own content hash (edit the script, the lock goes
 /// stale — the same "locks by file-content hash" contract `jet run` uses).
 fn run_lock(script: Option<&str>, mode: OutputMode) {
     let Some(raw_arg) = script else {
-        eprintln!("error: `jet store lock` needs a script path, e.g. `jet store lock stats.jet`");
+        eprintln!("error: `jet fetch --lock` needs a script path, e.g. `jet fetch --lock stats.jet`");
         exit(ExitCodes::USER_ERROR);
     };
     let file = resolve_source_path(raw_arg);
@@ -2092,7 +2280,7 @@ fn run_lock(script: Option<&str>, mode: OutputMode) {
 
     if jet::Loader::find_manifest_root(script_dir).is_some() {
         eprintln!(
-            "error: `{file}` belongs to a project with a `{}` — use `jet store fetch` to lock its dependencies",
+            "error: `{file}` belongs to a project with a `{}` — use `jet fetch` to lock its dependencies",
             jet::Syntax::PAYLOAD_FILE
         );
         exit(ExitCodes::USER_ERROR);

@@ -166,6 +166,7 @@ fn jet_http_srv_read(stream: &mut std::net::TcpStream) -> Result<String, JetHttp
     const MAX_BODY_BYTES: usize = 1024 * 1024;
     let mut raw = Vec::new();
     let mut buf = [0u8; 8192];
+    let mut complete = false;
     loop {
         let n = stream
             .read(&mut buf)
@@ -185,11 +186,18 @@ fn jet_http_srv_read(stream: &mut std::net::TcpStream) -> Result<String, JetHttp
             let body_start = header_end + 4;
             if raw.len().saturating_sub(body_start) >= content_len {
                 raw.truncate(body_start + content_len);
+                complete = true;
                 break;
             }
         } else if raw.len() > MAX_HEADER_BYTES {
             return Err(JetHttpReadError { status: 431, message: "request headers are too large" });
         }
+    }
+    if !complete {
+        return Err(JetHttpReadError {
+            status: 400,
+            message: "request ended before its declared framing was complete",
+        });
     }
     String::from_utf8(raw).map_err(|_| JetHttpReadError { status: 400, message: "request is not valid UTF-8" })
 }

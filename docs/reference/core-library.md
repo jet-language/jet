@@ -396,10 +396,11 @@ Card 301 audit state:
 | Redirects, cookies, forms, multipart, proxy, phase timeouts | Shipped: request builder methods above |
 | Router params and wildcard routes | Shipped: `:name` params plus final `*` wildcard (`param("wildcard")`) |
 | SSE, static files, Range, access log, request body limits | Shipped: server helpers above |
-| Bounded streaming bodies | Shipped as explicit size checks and one-shot bodies today; streaming handles stay on the socket layer |
-| Graceful shutdown | Shipped for tests via `serve_once*`; long-lived cancellation composes through `core.tasks`/listener ownership |
-| HTTP/2 | Not in `core.http` HTTP/1.1 audit closeout; tracked as a transport upgrade, not a placeholder API |
-| WebSocket | Ratified as standalone `core.ws` (D-WS1=B), not hidden inside `core.http` |
+| Bounded hostile request parsing | Partial: HTTP/1.1 rejects headers over 32 KiB, more than 100 headers, request lines over 8 KiB, bodies over 1 MiB, ambiguous Content-Length, Content-Length with Transfer-Encoding, folded headers, and malformed framing before dispatch |
+| Bounded streaming bodies | Not shipped: request and response bodies are still buffered `String` values rather than D-HTTP-CORE2 streaming byte bodies with backpressure |
+| Graceful shutdown | Not shipped: `serve_once*` is a deterministic test entrypoint, not the D-HTTP-SERVER2 drain/cancel/report lifecycle |
+| Pooling and HTTP/2 | Not shipped: the current request-scoped bridge does not implement D-HTTP-CLIENT2's shared `Client` pool or native HTTP/2 transport |
+| WebSocket | Ratified as standalone `core.ws` (D-WS1=B); implementation and interoperability proof remain open |
 
 Example: `examples/features/net/http_rest_service.jet`.
 

@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 517,
-    "rev": 4451,
+    "rev": 4477,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -4539,7 +4539,7 @@
       "priority": "P1",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-ENCSTREAM1=A: Hybrid: same codec modules, tree and stream modes. Every codec module keeps one adapter identity: parse/to_string/decode<T> for whole values and reader/writer event streams for large inputs. XML, JSONL, canonical JSON, and CBOR all flow through Data/DataTree and Codable, so streaming is a mode of the same codec, not a second library.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: corelib audit: core.encoding — format breadth (XML, binary interchange, streaming)\n\nCurrent law: Existing linked decisions: D-ENCBIN1=ratified/A. D-CORENS1 keeps all first-party modules under core.*; I6 forbids compiler deps; D-STDRUBRIC1 requires mechanical core API laws.\n\nBuild order: Audit current Core/API/prelude/docs/tests first; write failing UI/golden/unit fixtures; implement std-only or approved bridge code; update docs/reference and syntax-decisions when law changes; run targeted tests, then full nix develop -c cargo test before close.\n\nAcceptance: Examples/goldens or UI snapshots prove each shipped behavior; stdlib map records shipped/carded/declined rows; no rustc/user-hostile errors; no compiler external deps.\n\nDependencies/collisions: Respect neighboring core cards: io/args/process separate; text before regex; net/url before http; encoding before data/db; random never owns secrets.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "terra-296-builder",
       "log": [
         {
           "at": "2026-07-12",
@@ -4673,7 +4673,8 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-12T13:25:40.410Z"
     },
     {
       "id": "c0wx96s2",
@@ -4976,8 +4977,28 @@
       "priority": "P0",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-HTTPDEPTH1=A: Hybrid: batteries-included core.http on typed foundations. core.http owns Client, Server, Router, middleware, streaming bodies, forms/multipart, cookies, redirects, timeouts, TLS policy, SSE, and the ratified WebSocket home. It consumes core.url/core.mime/core.net types and lets experts drop lower to those layers without changing the HTTP model.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: corelib audit: core.http — client/server parity with Go net/http + requests ergonomics\n\nCurrent law: Existing linked decisions: D-WS1=ratified/B. D-CORENS1 keeps all first-party modules under core.*; I6 forbids compiler deps; D-STDRUBRIC1 requires mechanical core API laws.\n\nBuild order: Audit current Core/API/prelude/docs/tests first; write failing UI/golden/unit fixtures; implement std-only or approved bridge code; update docs/reference and syntax-decisions when law changes; run targeted tests, then full nix develop -c cargo test before close.\n\nAcceptance: Examples/goldens or UI snapshots prove each shipped behavior; stdlib map records shipped/carded/declined rows; no rustc/user-hostile errors; no compiler external deps.\n\nDependencies/collisions: Respect neighboring core cards: io/args/process separate; text before regex; net/url before http; encoding before data/db; random never owns secrets.",
       "blockedBy": [],
-      "assignee": "terra-301-builder",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "terra-301-builder",
+          "text": "[handoff] Six measurable criteria now govern close. Hostile/incomplete framing tranche green via real raw TCP; remaining broad HTTP laws documented in card log and criteria."
+        },
+        {
+          "at": "2026-07-12",
+          "by": "codex-orchestrator",
+          "text": "[verify] Parent independently reran raw-TCP http_server_limits golden: 1/1 green. Hostile framing rejection tranche is preserved; no broad criterion falsely met. Continue remaining typed HTTP, client transport, router/middleware, bounded server lifecycle, core.ws, and native protocol/platform work later."
+        },
+        {
+          "at": "2026-07-12",
+          "by": "terra-301-builder",
+          "text": "Focused real-network proof green: JET_GOLDEN_FILTER=examples/features/net/http_server_limits.jet cargo test --test golden examples_compile_and_run -- --nocapture => 1 passed. Raw TCP CL+TE request receives 400 and handler does not run; declared 1MiB+1 body receives 413 and handler does not run. cargo check -p jet-codegen also green; git diff --check scoped clean. No full criterion met: criterion 3 also requires router/middleware/backpressure/shutdown/HTTP2; criterion 6 requires the remaining focused/platform matrix."
+        },
+        {
+          "at": "2026-07-12",
+          "by": "terra-301-builder",
+          "text": "Safety tranche implemented in native server prelude: strict UTF-8; 32KiB headers/100 fields/8KiB request line/1MiB body; incomplete framing, obs-fold, whitespace-before-colon, conflicting Content-Length, CL+TE and unsupported TE reject before handler with 400/413/431. Added live raw-TCP golden for CL+TE smuggling and oversized declared body; corrected reference audit false claims for streaming, shutdown, pool/HTTP2, WebSocket. Isolated cargo check -p jet-codegen green. Live golden execution currently blocked by unrelated shared Source/CLI.rs incomplete command-registry edit (missing HandlerKey variants/CommandGroup fields); no HTTP compile failure observed. Nix shell also transiently rebuilt without rustfmt amid concurrent work."
+        },
         {
           "at": "2026-07-12",
           "by": "terra-301-builder",
@@ -5088,8 +5109,7 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
-      "claimedAt": "2026-07-12T13:13:51.790Z"
+      "refs": []
     },
     {
       "id": "c0184j6s",
@@ -15236,12 +15256,16 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "verify",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
       "assignee": "claude-main",
       "log": [
+        {
+          "at": "2026-07-12",
+          "text": "Requested acceptance — minted D-ACCEPT-515."
+        },
         {
           "at": "2026-07-12",
           "by": "owner",
@@ -15262,29 +15286,65 @@
         {
           "n": 1,
           "text": "Now page shows a Needs your verification section (top priority) listing every needsAcceptance card sitting in verify with its D-ACCEPT ballot",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-12T13:16:00.872Z"
+          "status": "verified",
+          "metBy": "terra-515-builder",
+          "verifiedBy": "claude-main",
+          "evidence": "Independent verify: 149/149 Tower tests re-run green by claude-main (incl. 8 acceptance-queue behavioral tests covering accept->done owner-attributed, bounce->building w/ comment, unflagged verify rows, checkInstructions assembly/remint); UI/store surfaces spot-checked (Needs your verification section, verifyQueue, duty--verify css, checkInstructions in mint+render fallback chain).",
+          "at": "2026-07-12T13:28:03.544Z"
         },
         {
           "n": 2,
           "text": "Cards in verify lane without the needsAcceptance flag/ballot still render as their own row so nothing hides",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-12T13:16:26.780Z"
+          "status": "verified",
+          "metBy": "terra-515-builder",
+          "verifiedBy": "claude-main",
+          "evidence": "Independent verify: 149/149 Tower tests re-run green by claude-main (incl. 8 acceptance-queue behavioral tests covering accept->done owner-attributed, bounce->building w/ comment, unflagged verify rows, checkInstructions assembly/remint); UI/store surfaces spot-checked (Needs your verification section, verifyQueue, duty--verify css, checkInstructions in mint+render fallback chain).",
+          "at": "2026-07-12T13:28:03.648Z"
         },
         {
           "n": 3,
           "text": "Each entry shows WHAT TO CHECK and WHAT CONFIRMS IT, sourced from the ballot's checkInstructions, else card criteria+evidence, else refs, never an empty box",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-12T13:17:00.860Z"
+          "status": "verified",
+          "metBy": "terra-515-builder",
+          "verifiedBy": "claude-main",
+          "evidence": "Independent verify: 149/149 Tower tests re-run green by claude-main (incl. 8 acceptance-queue behavioral tests covering accept->done owner-attributed, bounce->building w/ comment, unflagged verify rows, checkInstructions assembly/remint); UI/store surfaces spot-checked (Needs your verification section, verifyQueue, duty--verify css, checkInstructions in mint+render fallback chain).",
+          "at": "2026-07-12T13:28:03.750Z"
+        },
+        {
+          "n": 4,
+          "text": "Accept ratifies the acceptance ballot as owner (or closes directly for ballot-less rows) and the card transitions to done",
+          "status": "verified",
+          "metBy": "terra-515-builder",
+          "verifiedBy": "claude-main",
+          "evidence": "Independent verify: 149/149 Tower tests re-run green by claude-main (incl. 8 acceptance-queue behavioral tests covering accept->done owner-attributed, bounce->building w/ comment, unflagged verify rows, checkInstructions assembly/remint); UI/store surfaces spot-checked (Needs your verification section, verifyQueue, duty--verify css, checkInstructions in mint+render fallback chain).",
+          "at": "2026-07-12T13:28:03.854Z"
+        },
+        {
+          "n": 5,
+          "text": "Bounce (with comment box) returns the card to building with the owner's comment logged",
+          "status": "verified",
+          "metBy": "terra-515-builder",
+          "verifiedBy": "claude-main",
+          "evidence": "Independent verify: 149/149 Tower tests re-run green by claude-main (incl. 8 acceptance-queue behavioral tests covering accept->done owner-attributed, bounce->building w/ comment, unflagged verify rows, checkInstructions assembly/remint); UI/store surfaces spot-checked (Needs your verification section, verifyQueue, duty--verify css, checkInstructions in mint+render fallback chain).",
+          "at": "2026-07-12T13:28:03.956Z"
+        },
+        {
+          "n": 6,
+          "text": "mintAcceptance carries a structured checkInstructions field (toCheck/confirms) assembled from criteria+refs; old ballots without it still render via client fallback",
+          "status": "verified",
+          "metBy": "terra-515-builder",
+          "verifiedBy": "claude-main",
+          "evidence": "Independent verify: 149/149 Tower tests re-run green by claude-main (incl. 8 acceptance-queue behavioral tests covering accept->done owner-attributed, bounce->building w/ comment, unflagged verify rows, checkInstructions assembly/remint); UI/store surfaces spot-checked (Needs your verification section, verifyQueue, duty--verify css, checkInstructions in mint+render fallback chain).",
+          "at": "2026-07-12T13:28:04.063Z"
+        },
+        {
+          "n": 7,
+          "text": "Tower/test acceptance-queue.test.mjs behavioral tests pass; full suite stays green",
+          "status": "verified",
+          "metBy": "terra-515-builder",
+          "verifiedBy": "claude-main",
+          "evidence": "Independent verify: 149/149 Tower tests re-run green by claude-main (incl. 8 acceptance-queue behavioral tests covering accept->done owner-attributed, bounce->building w/ comment, unflagged verify rows, checkInstructions assembly/remint); UI/store surfaces spot-checked (Needs your verification section, verifyQueue, duty--verify css, checkInstructions in mint+render fallback chain).",
+          "at": "2026-07-12T13:28:04.165Z"
         }
       ],
       "refs": [],
@@ -31994,6 +32054,55 @@
       "created": "2026-07-12T12:32:17.156Z",
       "outcome": "A",
       "ratifiedAt": "2026-07-12"
+    },
+    {
+      "id": "D-ACCEPT-515",
+      "cardId": "c0nqsqn5",
+      "group": "acceptance",
+      "title": "Accept #515 — Tower Now page: owner-verification queue with acceptance flow",
+      "gist": "Close #515, or bounce it back to building.",
+      "lesson": "",
+      "explainer": "",
+      "story": "",
+      "inWild": "",
+      "detail": "1. Now page shows a Needs your verification section (top priority) listing every needsAcceptance card sitting in verify with its D-ACCEPT ballot — verified (Independent verify: 149/149 Tower tests re-run green by claude-main (incl. 8 acceptance-queue behavioral tests covering accept->done owner-attributed, bounce->building w/ comment, unflagged verify rows, checkInstructions assembly/remint); UI/store surfaces spot-checked (Needs your verification section, verifyQueue, duty--verify css, checkInstructions in mint+render fallback chain).) [verified by claude-main]\n2. Cards in verify lane without the needsAcceptance flag/ballot still render as their own row so nothing hides — verified (Independent verify: 149/149 Tower tests re-run green by claude-main (incl. 8 acceptance-queue behavioral tests covering accept->done owner-attributed, bounce->building w/ comment, unflagged verify rows, checkInstructions assembly/remint); UI/store surfaces spot-checked (Needs your verification section, verifyQueue, duty--verify css, checkInstructions in mint+render fallback chain).) [verified by claude-main]\n3. Each entry shows WHAT TO CHECK and WHAT CONFIRMS IT, sourced from the ballot's checkInstructions, else card criteria+evidence, else refs, never an empty box — verified (Independent verify: 149/149 Tower tests re-run green by claude-main (incl. 8 acceptance-queue behavioral tests covering accept->done owner-attributed, bounce->building w/ comment, unflagged verify rows, checkInstructions assembly/remint); UI/store surfaces spot-checked (Needs your verification section, verifyQueue, duty--verify css, checkInstructions in mint+render fallback chain).) [verified by claude-main]\n4. Accept ratifies the acceptance ballot as owner (or closes directly for ballot-less rows) and the card transitions to done — verified (Independent verify: 149/149 Tower tests re-run green by claude-main (incl. 8 acceptance-queue behavioral tests covering accept->done owner-attributed, bounce->building w/ comment, unflagged verify rows, checkInstructions assembly/remint); UI/store surfaces spot-checked (Needs your verification section, verifyQueue, duty--verify css, checkInstructions in mint+render fallback chain).) [verified by claude-main]\n5. Bounce (with comment box) returns the card to building with the owner's comment logged — verified (Independent verify: 149/149 Tower tests re-run green by claude-main (incl. 8 acceptance-queue behavioral tests covering accept->done owner-attributed, bounce->building w/ comment, unflagged verify rows, checkInstructions assembly/remint); UI/store surfaces spot-checked (Needs your verification section, verifyQueue, duty--verify css, checkInstructions in mint+render fallback chain).) [verified by claude-main]\n6. mintAcceptance carries a structured checkInstructions field (toCheck/confirms) assembled from criteria+refs; old ballots without it still render via client fallback — verified (Independent verify: 149/149 Tower tests re-run green by claude-main (incl. 8 acceptance-queue behavioral tests covering accept->done owner-attributed, bounce->building w/ comment, unflagged verify rows, checkInstructions assembly/remint); UI/store surfaces spot-checked (Needs your verification section, verifyQueue, duty--verify css, checkInstructions in mint+render fallback chain).) [verified by claude-main]\n7. Tower/test acceptance-queue.test.mjs behavioral tests pass; full suite stays green — verified (Independent verify: 149/149 Tower tests re-run green by claude-main (incl. 8 acceptance-queue behavioral tests covering accept->done owner-attributed, bounce->building w/ comment, unflagged verify rows, checkInstructions assembly/remint); UI/store surfaces spot-checked (Needs your verification section, verifyQueue, duty--verify css, checkInstructions in mint+render fallback chain).) [verified by claude-main]",
+      "options": [
+        {
+          "key": "accept",
+          "name": "Accept — close the card"
+        },
+        {
+          "key": "bounce",
+          "name": "Bounce — back to building (comment why)"
+        }
+      ],
+      "comparisons": [],
+      "rec": null,
+      "recommendation": null,
+      "hybrid": null,
+      "checkInstructions": {
+        "toCheck": [
+          "Now page shows a Needs your verification section (top priority) listing every needsAcceptance card sitting in verify with its D-ACCEPT ballot",
+          "Cards in verify lane without the needsAcceptance flag/ballot still render as their own row so nothing hides",
+          "Each entry shows WHAT TO CHECK and WHAT CONFIRMS IT, sourced from the ballot's checkInstructions, else card criteria+evidence, else refs, never an empty box",
+          "Accept ratifies the acceptance ballot as owner (or closes directly for ballot-less rows) and the card transitions to done",
+          "Bounce (with comment box) returns the card to building with the owner's comment logged",
+          "mintAcceptance carries a structured checkInstructions field (toCheck/confirms) assembled from criteria+refs; old ballots without it still render via client fallback",
+          "Tower/test acceptance-queue.test.mjs behavioral tests pass; full suite stays green"
+        ],
+        "confirms": [
+          "Now page shows a Needs your verification section (top priority) listing every needsAcceptance card sitting in verify with its D-ACCEPT ballot — Independent verify: 149/149 Tower tests re-run green by claude-main (incl. 8 acceptance-queue behavioral tests covering accept->done owner-attributed, bounce->building w/ comment, unflagged verify rows, checkInstructions assembly/remint); UI/store surfaces spot-checked (Needs your verification section, verifyQueue, duty--verify css, checkInstructions in mint+render fallback chain). (verified by claude-main)",
+          "Cards in verify lane without the needsAcceptance flag/ballot still render as their own row so nothing hides — Independent verify: 149/149 Tower tests re-run green by claude-main (incl. 8 acceptance-queue behavioral tests covering accept->done owner-attributed, bounce->building w/ comment, unflagged verify rows, checkInstructions assembly/remint); UI/store surfaces spot-checked (Needs your verification section, verifyQueue, duty--verify css, checkInstructions in mint+render fallback chain). (verified by claude-main)",
+          "Each entry shows WHAT TO CHECK and WHAT CONFIRMS IT, sourced from the ballot's checkInstructions, else card criteria+evidence, else refs, never an empty box — Independent verify: 149/149 Tower tests re-run green by claude-main (incl. 8 acceptance-queue behavioral tests covering accept->done owner-attributed, bounce->building w/ comment, unflagged verify rows, checkInstructions assembly/remint); UI/store surfaces spot-checked (Needs your verification section, verifyQueue, duty--verify css, checkInstructions in mint+render fallback chain). (verified by claude-main)",
+          "Accept ratifies the acceptance ballot as owner (or closes directly for ballot-less rows) and the card transitions to done — Independent verify: 149/149 Tower tests re-run green by claude-main (incl. 8 acceptance-queue behavioral tests covering accept->done owner-attributed, bounce->building w/ comment, unflagged verify rows, checkInstructions assembly/remint); UI/store surfaces spot-checked (Needs your verification section, verifyQueue, duty--verify css, checkInstructions in mint+render fallback chain). (verified by claude-main)",
+          "Bounce (with comment box) returns the card to building with the owner's comment logged — Independent verify: 149/149 Tower tests re-run green by claude-main (incl. 8 acceptance-queue behavioral tests covering accept->done owner-attributed, bounce->building w/ comment, unflagged verify rows, checkInstructions assembly/remint); UI/store surfaces spot-checked (Needs your verification section, verifyQueue, duty--verify css, checkInstructions in mint+render fallback chain). (verified by claude-main)",
+          "mintAcceptance carries a structured checkInstructions field (toCheck/confirms) assembled from criteria+refs; old ballots without it still render via client fallback — Independent verify: 149/149 Tower tests re-run green by claude-main (incl. 8 acceptance-queue behavioral tests covering accept->done owner-attributed, bounce->building w/ comment, unflagged verify rows, checkInstructions assembly/remint); UI/store surfaces spot-checked (Needs your verification section, verifyQueue, duty--verify css, checkInstructions in mint+render fallback chain). (verified by claude-main)",
+          "Tower/test acceptance-queue.test.mjs behavioral tests pass; full suite stays green — Independent verify: 149/149 Tower tests re-run green by claude-main (incl. 8 acceptance-queue behavioral tests covering accept->done owner-attributed, bounce->building w/ comment, unflagged verify rows, checkInstructions assembly/remint); UI/store surfaces spot-checked (Needs your verification section, verifyQueue, duty--verify css, checkInstructions in mint+render fallback chain). (verified by claude-main)"
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T13:28:27.601Z"
     }
   ],
   "questions": [
@@ -32821,6 +32930,195 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-12T13:28:27.601Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0nqsqn5",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-12T13:28:27.601Z",
+      "by": "agent",
+      "action": "decision.add",
+      "ref": "D-ACCEPT-515",
+      "note": "Accept #515 — Tower Now page: owner-verification queue with acceptance flow"
+    },
+    {
+      "at": "2026-07-12T13:28:04.165Z",
+      "by": "claude-main",
+      "action": "card.criteria-verify",
+      "ref": "c0nqsqn5",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-12T13:28:04.063Z",
+      "by": "claude-main",
+      "action": "card.criteria-verify",
+      "ref": "c0nqsqn5",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-12T13:28:03.956Z",
+      "by": "claude-main",
+      "action": "card.criteria-verify",
+      "ref": "c0nqsqn5",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-12T13:28:03.854Z",
+      "by": "claude-main",
+      "action": "card.criteria-verify",
+      "ref": "c0nqsqn5",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-12T13:28:03.750Z",
+      "by": "claude-main",
+      "action": "card.criteria-verify",
+      "ref": "c0nqsqn5",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-12T13:28:03.648Z",
+      "by": "claude-main",
+      "action": "card.criteria-verify",
+      "ref": "c0nqsqn5",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-12T13:28:03.544Z",
+      "by": "claude-main",
+      "action": "card.criteria-verify",
+      "ref": "c0nqsqn5",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-12T13:25:40.410Z",
+      "by": "terra-296-builder",
+      "action": "card.claim",
+      "ref": "c0uxsyns",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T13:25:36.675Z",
+      "by": "terra-301-builder",
+      "action": "card.release",
+      "ref": "c0075iyb",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-12T13:25:36.587Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0075iyb",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-12T13:24:39.031Z",
+      "by": "terra-301-builder",
+      "action": "card.update",
+      "ref": "c0075iyb",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-12T13:21:45.132Z",
+      "by": "terra-515-builder",
+      "action": "card.update",
+      "ref": "c0nqsqn5",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-12T13:20:38.699Z",
+      "by": "terra-515-builder",
+      "action": "card.update",
+      "ref": "c0nqsqn5",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T13:20:28.616Z",
+      "by": "terra-301-builder",
+      "action": "card.update",
+      "ref": "c0075iyb",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-12T13:20:17.578Z",
+      "by": "terra-515-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0nqsqn5",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-12T13:20:02.801Z",
+      "by": "terra-515-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0nqsqn5",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-12T13:19:48.756Z",
+      "by": "terra-515-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0nqsqn5",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-12T13:19:34.277Z",
+      "by": "terra-515-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0nqsqn5",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-12T13:19:20.146Z",
+      "by": "terra-515-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0nqsqn5",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-12T13:19:05.527Z",
+      "by": "terra-515-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0nqsqn5",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-12T13:18:50.852Z",
+      "by": "terra-515-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0nqsqn5",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-12T13:18:01.645Z",
+      "by": "terra-515-builder",
+      "action": "card.criteria-add",
+      "ref": "c0nqsqn5",
+      "note": "#7 Tower/test acceptance-queue.test.mjs behavioral tests pass; "
+    },
+    {
+      "at": "2026-07-12T13:17:46.904Z",
+      "by": "terra-515-builder",
+      "action": "card.criteria-add",
+      "ref": "c0nqsqn5",
+      "note": "#6 mintAcceptance carries a structured checkInstructions field "
+    },
+    {
+      "at": "2026-07-12T13:17:29.727Z",
+      "by": "terra-515-builder",
+      "action": "card.criteria-add",
+      "ref": "c0nqsqn5",
+      "note": "#5 Bounce (with comment box) returns the card to building with "
+    },
+    {
+      "at": "2026-07-12T13:17:15.241Z",
+      "by": "terra-515-builder",
+      "action": "card.criteria-add",
+      "ref": "c0nqsqn5",
+      "note": "#4 Accept ratifies the acceptance ballot as owner (or closes di"
+    },
     {
       "at": "2026-07-12T13:17:00.860Z",
       "by": "terra-515-builder",
@@ -36131,195 +36429,6 @@
       "action": "card.add",
       "ref": "c0gv4b2r",
       "note": "Surface condensation: CLI verb law (store noun, serve/dev, ring completion, bare project verbs)"
-    },
-    {
-      "at": "2026-07-12T00:36:17.753Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c008rjua",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-07-12T00:28:59.551Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c06tccyz",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T00:28:59.471Z",
-      "by": "sol-455-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c06tccyz",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-12T00:28:59.385Z",
-      "by": "terra-455-builder",
-      "action": "card.criteria-meet",
-      "ref": "c06tccyz",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-12T00:28:59.303Z",
-      "by": "sol-455-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c06tccyz",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-12T00:28:59.217Z",
-      "by": "terra-455-builder",
-      "action": "card.criteria-meet",
-      "ref": "c06tccyz",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-12T00:28:59.134Z",
-      "by": "sol-455-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c06tccyz",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-12T00:28:59.049Z",
-      "by": "terra-455-builder",
-      "action": "card.criteria-meet",
-      "ref": "c06tccyz",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-12T00:28:58.962Z",
-      "by": "sol-455-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c06tccyz",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-12T00:28:58.880Z",
-      "by": "terra-455-builder",
-      "action": "card.criteria-meet",
-      "ref": "c06tccyz",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-12T00:18:04.301Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c06tccyz",
-      "note": "assignee,logEntry"
-    },
-    {
-      "at": "2026-07-12T00:17:37.766Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c06tccyz",
-      "note": "#4 Current integrated dev boundary tests are truthful: io/stdin"
-    },
-    {
-      "at": "2026-07-12T00:17:15.470Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c06tccyz",
-      "note": "#3 lower_ctx documentation maps lowering regions to TIR variant"
-    },
-    {
-      "at": "2026-07-12T00:16:56.435Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c06tccyz",
-      "note": "#2 A temporary dummy TIR variant produces non-exhaustive compil"
-    },
-    {
-      "at": "2026-07-12T00:16:37.101Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c06tccyz",
-      "note": "#1 All real TIR-enum consumers use exhaustive named dispatch wi"
-    },
-    {
-      "at": "2026-07-12T00:15:10.770Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c144",
-      "note": "epoch,logEntry"
-    },
-    {
-      "at": "2026-07-12T00:14:51.269Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0t4root",
-      "note": "epoch,logEntry"
-    },
-    {
-      "at": "2026-07-12T00:14:29.117Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0zqnb18",
-      "note": "epoch,logEntry"
-    },
-    {
-      "at": "2026-07-12T00:14:10.038Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0m9tjqj",
-      "note": "epoch,logEntry"
-    },
-    {
-      "at": "2026-07-12T00:11:30.776Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c11pkkov",
-      "note": "body"
-    },
-    {
-      "at": "2026-07-12T00:10:48.633Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c11pkkov",
-      "note": "body"
-    },
-    {
-      "at": "2026-07-12T00:09:45.273Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c11pkkov",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-12T00:09:36.517Z",
-      "by": "owner",
-      "action": "card.add",
-      "ref": "c11pkkov",
-      "note": "Allow user definition of operators for classes/structs - even python does this"
-    },
-    {
-      "at": "2026-07-12T00:08:25.721Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c2nizvzp",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T00:03:29.790Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-TOWER-HISTORY1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-11T23:59:51.345Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0df169q",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-11T23:59:45.108Z",
-      "by": "codex-orchestrator",
-      "action": "question.delete",
-      "ref": "q0q92or4",
-      "note": ""
     }
   ],
   "nextNum": 368,

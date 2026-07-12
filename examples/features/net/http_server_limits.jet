@@ -15,11 +15,27 @@ fn run() {
     })
 
     smuggling :: net.tcp_connect(addr) ?? panic("connect smuggling")
-    smuggling.write_all("POST / HTTP/1.1\r\nHost: local\r\nContent-Length: 4\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n".bytes()) ?? panic("write smuggling")
-    print(smuggling.read_text(8192) ?? panic("read smuggling"))
+    smuggling_request := "".bytes()
+    loop line in ["POST / HTTP/1.1", "Host: local", "Content-Length: 4", "Transfer-Encoding: chunked", "", "0", ""] {
+        loop byte in line.bytes() { smuggling_request.push(byte) }
+        smuggling_request.push(13)
+        smuggling_request.push(10)
+    }
+    smuggling.write_all(smuggling_request) ?? panic("write smuggling")
+    smuggling_response :: smuggling.read_text(8192) ?? panic("read smuggling")
+    print(smuggling_response.starts_with("HTTP/1.1 400 Bad Request"))
+    print(smuggling_response.contains("handler ran"))
 
     oversized :: net.tcp_connect(addr) ?? panic("connect oversized")
-    oversized.write_all("POST / HTTP/1.1\r\nHost: local\r\nContent-Length: 1048577\r\n\r\n".bytes()) ?? panic("write oversized")
-    print(oversized.read_text(8192) ?? panic("read oversized"))
+    oversized_request := "".bytes()
+    loop line in ["POST / HTTP/1.1", "Host: local", "Content-Length: 1048577", ""] {
+        loop byte in line.bytes() { oversized_request.push(byte) }
+        oversized_request.push(13)
+        oversized_request.push(10)
+    }
+    oversized.write_all(oversized_request) ?? panic("write oversized")
+    oversized_response :: oversized.read_text(8192) ?? panic("read oversized")
+    print(oversized_response.starts_with("HTTP/1.1 413 Payload Too Large"))
+    print(oversized_response.contains("handler ran"))
     server.join()
 }
