@@ -662,6 +662,7 @@ fn specialize_module_type(
             Type::Tuple(fields) => fields.iter_mut().for_each(|(_, ty)| lengths(ty, types, values)),
             Type::Tagged { marker, inner } => {
                 if let Some(Type::Named(mapped)) = types.get(marker) { *marker = mapped.clone(); }
+                **inner = crate::Generics::substitute_type(inner, types);
                 lengths(inner, types, values);
             }
             _ => {}
