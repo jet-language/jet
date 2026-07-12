@@ -153,16 +153,16 @@ fn validate_web_func_tir(
     *cx.current_type_params.borrow_mut() = f.type_params.iter().map(|p| p.name.clone()).collect();
     let covered = f.pre.is_empty() && f.post.is_empty() && TIR::tir_covers(f, cx);
     if covered {
-        let tir = TIR::lower_func(f, cx);
+        let tir = TIR::lower_web_func(f, cx);
         let supported = if !require_web_emit {
             true
         } else if bucket == WebBucket::Js {
             web_stmts_supported(&tir.body)
                 && (tir.ret.is_none() || web_stmts_guarantee_return(&tir.body))
         } else {
-            web_wasm_stmts_supported(&tir.body, bundle)
+            web_wasm_stmts_supported(&tir.body, bundle, &tir.web_param_reconstructions)
                 && (tir.ret.is_none() || web_stmts_guarantee_return(&tir.body))
-                && web_wasm_abi_supported(bundle, f)
+                && web_wasm_abi_supported(f, &tir)
         };
         if supported {
             cx.current_type_params.borrow_mut().clear();
@@ -189,43 +189,57 @@ fn web_stmts_guarantee_return(stmts: &[TIR::TStmt]) -> bool {
     })
 }
 
-fn web_wasm_abi_supported(bundle: &ProgramBundle, f: &Func) -> bool {
+fn web_wasm_abi_supported(f: &Func, tir: &TIR::TFunc) -> bool {
     let ty_supported = if f.web_marker == Some(WebPartitionMarker::WasmExport) {
         wasm_export_ty
     } else {
         wasm_ty
     };
-    flatten_abi_params(bundle, &f.params.iter().map(|p| (p.name.clone(), p.ty.clone())).collect::<Vec<_>>())
+    flattened_web_params(tir)
         .iter().all(|(_, ty)| ty_supported(ty).is_some())
         // Owned strings can stay inside an internal Rust/Wasm parameter list,
         // but this emitter has no string return representation yet.
         && f.return_type.as_ref().map(|ty| wasm_export_ty(ty).is_some()).unwrap_or(true)
 }
 
-fn web_wasm_stmts_supported(stmts: &[TIR::TStmt], bundle: &ProgramBundle) -> bool {
+fn web_wasm_stmts_supported(
+    stmts: &[TIR::TStmt],
+    bundle: &ProgramBundle,
+    reconstructions: &[TIR::TWebParamReconstruction],
+) -> bool {
     stmts.iter().all(|stmt| match stmt {
         TIR::TStmt::LineMarker(_) | TIR::TStmt::Return(None) => true,
-        TIR::TStmt::Let { init, .. } | TIR::TStmt::ExprStmt(init) | TIR::TStmt::Return(Some(init)) => web_wasm_expr_supported(init, bundle),
-        TIR::TStmt::Assign { value, .. } => web_wasm_expr_supported(value, bundle),
+        TIR::TStmt::Let { init, .. } | TIR::TStmt::ExprStmt(init) | TIR::TStmt::Return(Some(init)) => web_wasm_expr_supported(init, bundle, reconstructions),
+        TIR::TStmt::Assign { value, .. } => web_wasm_expr_supported(value, bundle, reconstructions),
         TIR::TStmt::If { cond: TIR::TIfCond::Plain(cond), then_body, else_body, .. } => {
-            web_wasm_expr_supported(cond, bundle)
-                && web_wasm_stmts_supported(then_body, bundle)
-                && else_body.as_deref().map(|body| web_wasm_stmts_supported(body, bundle)).unwrap_or(true)
+            web_wasm_expr_supported(cond, bundle, reconstructions)
+                && web_wasm_stmts_supported(then_body, bundle, reconstructions)
+                && else_body.as_deref().map(|body| web_wasm_stmts_supported(body, bundle, reconstructions)).unwrap_or(true)
         }
         _ => false,
     })
 }
 
-fn web_wasm_expr_supported(expr: &TIR::TExpr, bundle: &ProgramBundle) -> bool {
+fn web_wasm_expr_supported(
+    expr: &TIR::TExpr,
+    bundle: &ProgramBundle,
+    reconstructions: &[TIR::TWebParamReconstruction],
+) -> bool {
     match &expr.kind {
         TIR::TExprKind::IntLit(..) | TIR::TExprKind::FloatLit(_) | TIR::TExprKind::BoolLit(_) | TIR::TExprKind::Local(_) => true,
         TIR::TExprKind::StrLit(parts) => parts.iter().all(|part| matches!(part, TIR::TStrPart::Lit(_))),
-        TIR::TExprKind::Binary { lhs, rhs, .. } => web_wasm_expr_supported(lhs, bundle) && web_wasm_expr_supported(rhs, bundle),
+        TIR::TExprKind::Binary { lhs, rhs, .. } => web_wasm_expr_supported(lhs, bundle, reconstructions) && web_wasm_expr_supported(rhs, bundle, reconstructions),
         TIR::TExprKind::Unary { operand, .. } | TIR::TExprKind::Clone(operand) | TIR::TExprKind::Print(operand) => {
-            web_wasm_expr_supported(operand, bundle)
+            web_wasm_expr_supported(operand, bundle, reconstructions)
+        }
+        TIR::TExprKind::Field { recv, field_rust, boxed: false } => {
+            let TIR::TExprKind::Local(local) = &recv.kind else { return false };
+            reconstructions.iter().any(|r| {
+                r.local_rust == *local && r.fields.iter().any(|(field, _, _)| field == field_rust)
+            })
         }
         TIR::TExprKind::Call { name, args } => wasm_callee_bucket(bundle, web_name(name)) == Some(WebBucket::Wasm)
-            && args.iter().all(|a| web_wasm_expr_supported(&a.value, bundle)),
+            && args.iter().all(|a| web_wasm_expr_supported(&a.value, bundle, reconstructions)),
         _ => false,
     }
 }
@@ -390,7 +404,7 @@ fn collect_module_funcs(
                         .map(|p| (p.name.clone(), p.ty.clone()))
                         .collect(),
                     return_type: f.return_type.clone(),
-                    tir: TIR::lower_func(f, cx),
+                    tir: TIR::lower_web_func(f, cx),
                 });
             }
             Item::CodeModule(cm) => {
@@ -520,24 +534,25 @@ fn struct_fields_in_items<'a>(items: &'a [Item], name: &str) -> Option<&'a [crat
     None
 }
 
-/// Flatten `@[Codable]` struct parameters into scalar WASM params (D-JSBIND1).
-fn flatten_abi_params(bundle: &ProgramBundle, params: &[(String, Type)]) -> Vec<(String, Type)> {
+/// Flatten only from facts carried by checked TIR lowering. This is the Wasm
+/// signature source of truth; Web emission never infers a struct layout.
+fn flattened_web_params(tir: &TIR::TFunc) -> Vec<(String, Type)> {
     let mut out = Vec::new();
-    for (name, ty) in params {
-        if let Type::Named(n) = ty {
-            if let Some(fields) = find_struct_fields(bundle, n) {
-                if fields
+    for (name, ty, _) in &tir.params {
+        if let Some(reconstruction) = tir
+            .web_param_reconstructions
+            .iter()
+            .find(|r| r.local_rust == *name)
+        {
+            out.extend(
+                reconstruction
+                    .fields
                     .iter()
-                    .all(|f| matches!(f.ty, Type::Int | Type::IntN { .. }))
-                {
-                    for field in fields {
-                        out.push((format!("{name}_{}", field.name), field.ty.clone()));
-                    }
-                    continue;
-                }
-            }
+                    .map(|(_, flat, ty)| (flat.clone(), ty.clone())),
+            );
+        } else {
+            out.push((name.clone(), ty.clone()));
         }
-        out.push((name.clone(), ty.clone()));
     }
     out
 }
@@ -596,6 +611,20 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
         out.push_str("#[no_mangle]\npub extern \"C\" fn jet_wasm_nop() {}\n");
         return Ok(out);
     }
+    let mut emitted_structs = std::collections::HashSet::new();
+    for f in &wasm_funcs {
+        for reconstruction in &f.tir.web_param_reconstructions {
+            if !emitted_structs.insert(reconstruction.rust_type.clone()) {
+                continue;
+            }
+            out.push_str(&format!("struct {} {{\n", reconstruction.rust_type));
+            for (field, _, ty) in &reconstruction.fields {
+                let rust_ty = wasm_ty(ty).ok_or_else(|| web_emit_error(f))?;
+                out.push_str(&format!("    {field}: {rust_ty},\n"));
+            }
+            out.push_str("}\n\n");
+        }
+    }
     for f in wasm_funcs {
         let export = f.marker == Some(WebPartitionMarker::WasmExport)
             || (f.name == "run"
@@ -606,8 +635,53 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
     Ok(out)
 }
 
-fn emit_wasm_fn(bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut String, funcs: &[FuncWeb]) -> WebEmitResult<()> {
-    if export {
+fn emit_wasm_fn(_bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut String, funcs: &[FuncWeb]) -> WebEmitResult<()> {
+    let reconstructed_export = export && !f.tir.web_param_reconstructions.is_empty();
+    if reconstructed_export {
+        out.push_str(&format!(
+            "#[no_mangle]\npub extern \"C\" fn {}(",
+            wasm_export_symbol(&f.name)
+        ));
+        let flat = flattened_web_params(&f.tir);
+        let params: Vec<String> = flat
+            .iter()
+            .map(|(name, ty)| wasm_ty(ty).map(|t| format!("{name}: {t}")))
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(|| web_emit_error(f))?;
+        out.push_str(&params.join(", "));
+        out.push(')');
+        if let Some(ret) = &f.return_type {
+            out.push_str(&format!(" -> {} ", wasm_ty(ret).ok_or_else(|| web_emit_error(f))?));
+        }
+        out.push_str("{\n");
+        for reconstruction in &f.tir.web_param_reconstructions {
+            let fields = reconstruction
+                .fields
+                .iter()
+                .map(|(field, flat, _)| format!("{field}: {flat}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            out.push_str(&format!(
+                "    let {} = {} {{ {} }};\n",
+                reconstruction.local_rust, reconstruction.rust_type, fields
+            ));
+        }
+        let args = f
+            .tir
+            .params
+            .iter()
+            .map(|(name, _, _)| name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        if f.return_type.is_some() {
+            out.push_str(&format!("    return jet_wasm_{}({args});\n", f.name));
+        } else {
+            out.push_str(&format!("    jet_wasm_{}({args});\n", f.name));
+        }
+        out.push_str("}\n\n");
+    }
+
+    if export && !reconstructed_export {
         out.push_str(&format!(
             "#[no_mangle]\npub extern \"C\" fn {}(",
             wasm_export_symbol(&f.name)
@@ -615,10 +689,18 @@ fn emit_wasm_fn(bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut Str
     } else {
         out.push_str(&format!("fn jet_wasm_{}(", f.name));
     }
-    let flat = flatten_abi_params(bundle, &f.params);
-    let params: Vec<String> = flat
+    let params: Vec<String> = f.tir.params
         .iter()
-        .map(|(name, ty)| wasm_ty(ty).map(|t| format!("user_{name}: {t}")))
+        .map(|(name, ty, _)| {
+            let rust_ty = f
+                .tir
+                .web_param_reconstructions
+                .iter()
+                .find(|r| r.local_rust == *name)
+                .map(|r| r.rust_type.as_str())
+                .or_else(|| wasm_ty(ty));
+            rust_ty.map(|t| format!("{name}: {t}"))
+        })
         .collect::<Option<Vec<_>>>()
         .ok_or_else(|| web_emit_error(f))?;
     out.push_str(&params.join(", "));
@@ -627,7 +709,14 @@ fn emit_wasm_fn(bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut Str
         out.push_str(&format!(" -> {} ", wasm_ty(ret).ok_or_else(|| web_emit_error(f))?));
     }
     out.push_str("{\n");
-    emit_wasm_body(&f.tir.body, out, 1, funcs).map_err(|()| web_emit_error(f))?;
+    emit_wasm_body(
+        &f.tir.body,
+        out,
+        1,
+        funcs,
+        &f.tir.web_param_reconstructions,
+    )
+    .map_err(|()| web_emit_error(f))?;
     out.push_str("}\n\n");
     Ok(())
 }
@@ -650,20 +739,26 @@ fn wasm_export_ty(ty: &Type) -> Option<&'static str> {
     }
 }
 
-fn emit_wasm_body(body: &[TIR::TStmt], out: &mut String, indent: usize, funcs: &[FuncWeb]) -> Result<(), ()> {
+fn emit_wasm_body(
+    body: &[TIR::TStmt],
+    out: &mut String,
+    indent: usize,
+    funcs: &[FuncWeb],
+    reconstructions: &[TIR::TWebParamReconstruction],
+) -> Result<(), ()> {
     let pad = "    ".repeat(indent);
     for stmt in body {
         match stmt {
-            TIR::TStmt::Return(Some(expr)) => out.push_str(&format!("{pad}return {};\n", wasm_emit_expr(expr, funcs)?)),
-            TIR::TStmt::ExprStmt(expr) => out.push_str(&format!("{pad}{};\n", wasm_emit_expr(expr, funcs)?)),
-            TIR::TStmt::Let { name, init, .. } => out.push_str(&format!("{pad}let mut {} = {};\n", mangle(name), wasm_emit_expr(init, funcs)?)),
-            TIR::TStmt::Assign { place, op, value, .. } => out.push_str(&format!("{pad}{place} {}= {};\n", op.as_ref().map(binop).unwrap_or(""), wasm_emit_expr(value, funcs)?)),
+            TIR::TStmt::Return(Some(expr)) => out.push_str(&format!("{pad}return {};\n", wasm_emit_expr(expr, funcs, reconstructions)?)),
+            TIR::TStmt::ExprStmt(expr) => out.push_str(&format!("{pad}{};\n", wasm_emit_expr(expr, funcs, reconstructions)?)),
+            TIR::TStmt::Let { name, init, .. } => out.push_str(&format!("{pad}let mut {} = {};\n", mangle(name), wasm_emit_expr(init, funcs, reconstructions)?)),
+            TIR::TStmt::Assign { place, op, value, .. } => out.push_str(&format!("{pad}{place} {}= {};\n", op.as_ref().map(binop).unwrap_or(""), wasm_emit_expr(value, funcs, reconstructions)?)),
             TIR::TStmt::If { cond: TIR::TIfCond::Plain(cond), then_body, else_body, .. } => {
-                out.push_str(&format!("{pad}if {} {{\n", wasm_emit_expr(cond, funcs)?));
-                emit_wasm_body(then_body, out, indent + 1, funcs)?;
+                out.push_str(&format!("{pad}if {} {{\n", wasm_emit_expr(cond, funcs, reconstructions)?));
+                emit_wasm_body(then_body, out, indent + 1, funcs, reconstructions)?;
                 if let Some(else_body) = else_body {
                     out.push_str(&format!("{pad}}} else {{\n"));
-                    emit_wasm_body(else_body, out, indent + 1, funcs)?;
+                    emit_wasm_body(else_body, out, indent + 1, funcs, reconstructions)?;
                 }
                 out.push_str(&format!("{pad}}}\n"));
             }
@@ -675,7 +770,11 @@ fn emit_wasm_body(body: &[TIR::TStmt], out: &mut String, indent: usize, funcs: &
     Ok(())
 }
 
-fn wasm_emit_expr(expr: &TIR::TExpr, funcs: &[FuncWeb]) -> Result<String, ()> {
+fn wasm_emit_expr(
+    expr: &TIR::TExpr,
+    funcs: &[FuncWeb],
+    reconstructions: &[TIR::TWebParamReconstruction],
+) -> Result<String, ()> {
     Ok(match &expr.kind {
         TIR::TExprKind::IntLit(n, _) => n.to_string(),
         TIR::TExprKind::FloatLit(n) => n.to_string(),
@@ -691,22 +790,31 @@ fn wasm_emit_expr(expr: &TIR::TExpr, funcs: &[FuncWeb]) -> Result<String, ()> {
         TIR::TExprKind::Local(name) => name.clone(),
         TIR::TExprKind::Binary { op, lhs, rhs, .. } => format!(
             "({} {} {})",
-            wasm_emit_expr(lhs, funcs)?,
+            wasm_emit_expr(lhs, funcs, reconstructions)?,
             binop(op),
-            wasm_emit_expr(rhs, funcs)?
+            wasm_emit_expr(rhs, funcs, reconstructions)?
         ),
-        TIR::TExprKind::Unary { op, operand } => format!("({}{})", unop(op), wasm_emit_expr(operand, funcs)?),
-        TIR::TExprKind::Clone(inner) => wasm_emit_expr(inner, funcs)?,
-        TIR::TExprKind::Print(inner) => format!("println!(\"{{}}\", {})", wasm_emit_expr(inner, funcs)?),
+        TIR::TExprKind::Unary { op, operand } => format!("({}{})", unop(op), wasm_emit_expr(operand, funcs, reconstructions)?),
+        TIR::TExprKind::Clone(inner) => wasm_emit_expr(inner, funcs, reconstructions)?,
+        TIR::TExprKind::Print(inner) => format!("println!(\"{{}}\", {})", wasm_emit_expr(inner, funcs, reconstructions)?),
+        TIR::TExprKind::Field { recv, field_rust, boxed: false } => {
+            let TIR::TExprKind::Local(local) = &recv.kind else { return Err(()) };
+            if !reconstructions.iter().any(|r| {
+                r.local_rust == *local && r.fields.iter().any(|(field, _, _)| field == field_rust)
+            }) {
+                return Err(());
+            }
+            format!("({}).{}", wasm_emit_expr(recv, funcs, reconstructions)?, field_rust)
+        }
         TIR::TExprKind::Call { name, args } => {
             let source = web_name(name);
             let mut callees = funcs.iter().filter(|f| f.name == source && f.bucket == WebBucket::Wasm);
-            let callee = callees.next().ok_or(())?;
+            callees.next().ok_or(())?;
             if callees.next().is_some() {
                 return Err(());
             }
-            let symbol = if callee.marker == Some(WebPartitionMarker::WasmExport) { wasm_export_symbol(source) } else { format!("jet_wasm_{source}") };
-            format!("{symbol}({})", args.iter().map(|a| wasm_emit_expr(&a.value, funcs)).collect::<Result<Vec<_>, _>>()?.join(", "))
+            let symbol = format!("jet_wasm_{source}");
+            format!("{symbol}({})", args.iter().map(|a| wasm_emit_expr(&a.value, funcs, reconstructions)).collect::<Result<Vec<_>, _>>()?.join(", "))
         }
         _ => return Err(()),
     })

@@ -280,6 +280,11 @@ pub struct TFunc {
     /// convention is kept so the emitter reproduces the `&`/by-value Rust form
     /// without re-deciding (it mirrors `rust_param_type`).
     pub params: Vec<(String, Type, AccessConvention)>,
+    /// Web-export boundary facts. A Codable struct parameter stays a typed value
+    /// in the executable TIR body, while the external Wasm wrapper receives its
+    /// scalar fields. Lowering resolves every Rust name/type here; Web emission
+    /// only formats the wrapper and never re-discovers struct semantics.
+    pub web_param_reconstructions: Vec<TWebParamReconstruction>,
     /// Resolved return type, or `None` for a unit-returning function.
     pub ret: Option<Type>,
     /// c109 Phase 17: the rendered Rust generic clause (`<T: Clone>` / `<T, U>` / empty),
@@ -314,6 +319,16 @@ pub struct TFunc {
     /// inside an `impl` block (indented), with the `self` receiver form per the
     /// resolved convention (or no receiver for a static method).
     pub kind: TFuncKind,
+}
+
+/// One typed parameter reconstructed by a flattened WebAssembly export wrapper.
+pub struct TWebParamReconstruction {
+    /// Mangled local consumed by the executable TIR body (`user_p`).
+    pub local_rust: String,
+    /// Resolved Rust struct head (`user_Point`).
+    pub rust_type: String,
+    /// `(mangled field, flattened ABI parameter, resolved scalar type)`.
+    pub fields: Vec<(String, String, Type)>,
 }
 
 /// D-SERDE2 (card #131 S1-bridge): which built-in codec trait a hand impl method

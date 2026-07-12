@@ -73,6 +73,23 @@ fn codable_struct_wasm_export_is_abi_safe() {
 }
 
 #[test]
+fn ordinary_wasm_struct_field_does_not_gain_export_boundary_support() {
+    let src = r#"struct Point { x: Int, y: Int }
+
+#Wasm
+fn read_x(p: Point) -> Int { return p.x }
+
+fn run() {}
+"#;
+    let diags = jet::compile_web_with_path(src, "tests/fixtures/web_internal_struct_field.jet")
+        .expect_err("ordinary Wasm fields must remain outside the supported subset");
+    assert_eq!(
+        diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
+        ["E-WEB-TIR-UNSUPPORTED"]
+    );
+}
+
+#[test]
 fn web_partition_report_generated_for_web_compile() {
     let src = include_str!("../examples/features/web/web_compute.jet");
     let out = jet::compile_web_with_path(src, "examples/features/web/web_compute.jet")

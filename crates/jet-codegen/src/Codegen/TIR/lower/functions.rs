@@ -8,10 +8,28 @@ pub(crate) fn cov_line(cx: &Cx, offset: usize) -> usize {
 }
 
 pub(crate) fn lower_func(f: &Func, cx: &Cx) -> TFunc {
+    lower_func_with_web_boundary(f, cx, false)
+}
+
+/// Lower a web function through the same executable TIR as every other target,
+/// but retain the one target-boundary fact a flattened `#WasmExport` needs:
+/// an all-integer Codable struct parameter is an owned typed local inside the
+/// function and scalar fields only at the external ABI. Sema already proved the
+/// export type legal; this pass only materializes resolved names/types.
+pub(crate) fn lower_web_func(f: &Func, cx: &Cx) -> TFunc {
+    lower_func_with_web_boundary(
+        f,
+        cx,
+        f.web_marker == Some(crate::Syntax::WebPartitionMarker::WasmExport),
+    )
+}
+
+fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool) -> TFunc {
     let mut env = LowerEnv::new(f.name.clone());
     // Mirror emit_func's parameter slot construction: a non-scalar `Read` param
     // (String, Char) is a borrow in Rust and reads as `(*name)`.
     let mut params = Vec::new();
+    let mut web_param_reconstructions = Vec::new();
     for p in &f.params {
         let rust_name = cx.mangle_name(&p.name);
         let param_ty = if p.variadic {
@@ -24,6 +42,36 @@ pub(crate) fn lower_func(f: &Func, cx: &Cx) -> TFunc {
         // renders it `T`, no `&`), EXACTLY as `emit_func` forces `conv = Move` for an
         // `is_type_param` param. A param typed `Stack<T>` is NOT a type-var param — it keeps
         // its source convention (`Read` → `&user_Stack<T>`, deref'd place `(*user_s)`).
+        if reconstruct_web_params {
+            if let Type::Named(type_name) = &param_ty {
+                if let Some(fields) = cx.struct_fields.get(type_name) {
+                    if !fields.is_empty()
+                        && fields
+                            .iter()
+                            .all(|(_, ty)| matches!(ty, Type::Int | Type::IntN { .. }))
+                    {
+                        let flat_fields = fields
+                            .iter()
+                            .map(|(field, ty)| {
+                                (
+                                    cx.mangle_name(field),
+                                    cx.mangle_name(&format!("{}_{}", p.name, field)),
+                                    ty.clone(),
+                                )
+                            })
+                            .collect();
+                        env.bind(&p.name, rust_name.clone(), Some(param_ty.clone()));
+                        params.push((rust_name.clone(), param_ty.clone(), p.convention));
+                        web_param_reconstructions.push(TWebParamReconstruction {
+                            local_rust: rust_name,
+                            rust_type: cx.mangle_name(type_name),
+                            fields: flat_fields,
+                        });
+                        continue;
+                    }
+                }
+            }
+        }
         let mut slot_param = p.clone();
         slot_param.ty = param_ty.clone();
         let place = param_place_generic(&rust_name, &slot_param, &f.type_params);
@@ -34,6 +82,7 @@ pub(crate) fn lower_func(f: &Func, cx: &Cx) -> TFunc {
     TFunc {
         name: f.name.clone(),
         params,
+        web_param_reconstructions,
         ret: f.return_type.clone(),
         generics: render_generics(&f.type_params),
         is_main: false,
@@ -207,6 +256,7 @@ pub(crate) fn lower_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
     TFunc {
         name: f.name.clone(),
         params,
+        web_param_reconstructions: Vec::new(),
         ret: f
             .return_type
             .as_ref()
@@ -289,6 +339,7 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx, trait_name:
     TFunc {
         name: f.name.clone(),
         params,
+        web_param_reconstructions: Vec::new(),
         ret: f
             .return_type
             .as_ref()
@@ -377,6 +428,7 @@ pub(crate) fn lower_delegation_method(f: &Func, field: &str, cx: &Cx) -> TFunc {
     TFunc {
         name: f.name.clone(),
         params: Vec::new(),
+        web_param_reconstructions: Vec::new(),
         ret: f.return_type.clone(),
         // The signature is fully pre-rendered (`sig`); `is_view`/`generics` are unused for delegation.
         generics: String::new(),
