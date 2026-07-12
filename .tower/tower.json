@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 515,
-    "rev": 4299,
+    "rev": 4317,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -2324,7 +2324,7 @@
     },
     {
       "milestoneId": null,
-      "assignee": null,
+      "assignee": "sol-136-builder",
       "id": "c2sj0bd9",
       "num": 136,
       "title": "Adaptive runtime (battery/network/load/carbon-aware)",
@@ -2394,11 +2394,67 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-07-11",
+      "updated": "2026-07-12",
       "workOrder": 105,
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "core.perf.Perf default_fidelity, fidelity, override_fidelity, and reset_fidelity execute end to end with exact AOT, interpreter/dev, and JIT-equivalent values, errors, and side effects.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T10:34:16.375Z"
+        },
+        {
+          "n": 2,
+          "text": "JIT Result support is general across function signatures, direct calls, entry outcomes, Ok, Err, and ? propagation with exact typed payloads; fidelity does not use a status-only special case.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T10:34:16.736Z"
+        },
+        {
+          "n": 3,
+          "text": "Override validation rejects every non-finite or out-of-range Float without changing prior state; concurrent reads and writes are race-free and deterministic under explicit test control.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T10:34:17.079Z"
+        },
+        {
+          "n": 4,
+          "text": "No automatic scheduler adaptation, platform signal provider, deprecated alias, hidden policy, or runtime cost appears in programs that never use core.perf.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T10:34:17.420Z"
+        },
+        {
+          "n": 5,
+          "text": "Runnable example, golden, parity/JIT/corelib regressions, docs, and focused no-facade checks pass from a fresh compiler build.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T10:34:17.761Z"
+        },
+        {
+          "n": 6,
+          "text": "Independent reviewer verifies the general Result ABI, false-green edges, cross-tier parity, docs, and absence of hidden adaptation before close.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T10:34:18.104Z"
+        }
+      ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-12T10:33:43.428Z"
     },
     {
       "milestoneId": null,
@@ -2476,7 +2532,7 @@
     },
     {
       "milestoneId": null,
-      "assignee": null,
+      "assignee": "sol-143-builder",
       "id": "c2zj0p7p",
       "num": 143,
       "title": "Structural merge (merge by semantic identity, not text)",
@@ -2549,10 +2605,83 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-07-10",
+      "updated": "2026-07-12",
       "workOrder": 107,
-      "claimedAt": "2026-07-06T20:26:15.543Z",
-      "criteria": [],
+      "claimedAt": "2026-07-12T10:33:43.631Z",
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Stable semantic identities and content-addressed definition facts are produced from the live semantic index and survive formatting, file moves, and symbol renames without a parallel AST identity system.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T10:34:18.445Z"
+        },
+        {
+          "n": 2,
+          "text": "jet diff --structural reports semantic additions, deletions, moves, renames, signature changes, and body changes through one typed model with human identity plus stable internal ID.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T10:34:18.780Z"
+        },
+        {
+          "n": 3,
+          "text": "jet merge --structural performs real three-way merge: disjoint structural edits compose, overlapping semantic edits conflict, and every emitted Jet file reparses and passes sema before success.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T10:34:19.122Z"
+        },
+        {
+          "n": 4,
+          "text": "Text, JSON, editor-facing, and exit-status outputs render the same conflict schema deterministically; malformed inputs and unresolved conflicts fail honestly without success-shaped output.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T10:34:19.471Z"
+        },
+        {
+          "n": 5,
+          "text": "jet merge install-driver configures an opt-in Git driver idempotently without clobbering unrelated repository config; standalone commands remain usable by other VCS tools.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T10:34:19.809Z"
+        },
+        {
+          "n": 6,
+          "text": "Hostile focused tests cover comment/format-only churn, reorder, rename plus edit, delete versus edit, signature/body conflicts, duplicate identities, syntax errors, and deterministic reruns.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T10:34:20.148Z"
+        },
+        {
+          "n": 7,
+          "text": "Docs, CLI help/completions, examples or fixtures, stable JSON contract, and focused semindex/CLI/merge tests match shipped behavior.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T10:34:20.500Z"
+        },
+        {
+          "n": 8,
+          "text": "Independent reviewer attacks identity collisions, unsound auto-merge, parser/sema bypass, report drift, and Git config mutation before close.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T10:34:20.861Z"
+        }
+      ],
       "needsAcceptance": false,
       "refs": []
     },
@@ -4181,7 +4310,7 @@
       "priority": "P1",
       "plan": "No owner gate: D-OSFACTS1=A fixes core.os.on_interrupt. Failing tests first. Replace one-thread-per-registration and non-Windows no-op with one process-lifetime dispatcher: additive ordered handlers, platform callback only increments an atomic counter, dispatcher drains events and invokes all handlers outside locks; registration acknowledged before return and one handler panic cannot kill later handlers. Unix keeps vetted signal FFI; Windows uses SetConsoleCtrlHandler for CTRL_C_EVENT under a vetted generated-runtime boundary. Unsupported targets fail honestly, never silently discard. Generated interrupt machinery strips entirely when unused. Add structural emission/stripping tests, real multi-handler lifecycle proof, native Windows console proof in CI, and process-lifetime docs. No external deps. Parent full suite.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "sol-292-builder",
       "log": [
         {
           "at": "2026-07-11",
@@ -4235,7 +4364,7 @@
         }
       ],
       "created": "2026-07-07T17:23:32.693Z",
-      "updated": "2026-07-11",
+      "updated": "2026-07-12",
       "workOrder": 24,
       "criteria": [
         {
@@ -4330,7 +4459,8 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-12T10:33:43.225Z"
     },
     {
       "id": "c0uxsyns",
@@ -30936,8 +31066,10 @@
         ]
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-07-12T07:01:34.272Z"
+      "status": "ratified",
+      "created": "2026-07-12T07:01:34.272Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-12"
     },
     {
       "id": "D-API-CTOR1",
@@ -31990,6 +32122,132 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-12T10:34:20.862Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c2zj0p7p",
+      "note": "#8 Independent reviewer attacks identity collisions, unsound au"
+    },
+    {
+      "at": "2026-07-12T10:34:20.500Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c2zj0p7p",
+      "note": "#7 Docs, CLI help/completions, examples or fixtures, stable JSO"
+    },
+    {
+      "at": "2026-07-12T10:34:20.148Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c2zj0p7p",
+      "note": "#6 Hostile focused tests cover comment/format-only churn, reord"
+    },
+    {
+      "at": "2026-07-12T10:34:19.810Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c2zj0p7p",
+      "note": "#5 jet merge install-driver configures an opt-in Git driver ide"
+    },
+    {
+      "at": "2026-07-12T10:34:19.472Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c2zj0p7p",
+      "note": "#4 Text, JSON, editor-facing, and exit-status outputs render th"
+    },
+    {
+      "at": "2026-07-12T10:34:19.122Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c2zj0p7p",
+      "note": "#3 jet merge --structural performs real three-way merge: disjoi"
+    },
+    {
+      "at": "2026-07-12T10:34:18.780Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c2zj0p7p",
+      "note": "#2 jet diff --structural reports semantic additions, deletions,"
+    },
+    {
+      "at": "2026-07-12T10:34:18.446Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c2zj0p7p",
+      "note": "#1 Stable semantic identities and content-addressed definition "
+    },
+    {
+      "at": "2026-07-12T10:34:18.104Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c2sj0bd9",
+      "note": "#6 Independent reviewer verifies the general Result ABI, false-"
+    },
+    {
+      "at": "2026-07-12T10:34:17.762Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c2sj0bd9",
+      "note": "#5 Runnable example, golden, parity/JIT/corelib regressions, do"
+    },
+    {
+      "at": "2026-07-12T10:34:17.420Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c2sj0bd9",
+      "note": "#4 No automatic scheduler adaptation, platform signal provider,"
+    },
+    {
+      "at": "2026-07-12T10:34:17.079Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c2sj0bd9",
+      "note": "#3 Override validation rejects every non-finite or out-of-range"
+    },
+    {
+      "at": "2026-07-12T10:34:16.736Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c2sj0bd9",
+      "note": "#2 JIT Result support is general across function signatures, di"
+    },
+    {
+      "at": "2026-07-12T10:34:16.375Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c2sj0bd9",
+      "note": "#1 core.perf.Perf default_fidelity, fidelity, override_fidelity"
+    },
+    {
+      "at": "2026-07-12T10:33:43.631Z",
+      "by": "sol-143-builder",
+      "action": "card.claim",
+      "ref": "c2zj0p7p",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T10:33:43.428Z",
+      "by": "sol-136-builder",
+      "action": "card.claim",
+      "ref": "c2sj0bd9",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T10:33:43.226Z",
+      "by": "sol-292-builder",
+      "action": "card.claim",
+      "ref": "c0qi7dc2",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T10:32:58.441Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-API-STORE1",
+      "note": "A"
+    },
     {
       "at": "2026-07-12T10:27:09.195Z",
       "by": "claude-main",
@@ -35363,132 +35621,6 @@
       "action": "card.criteria-meet",
       "ref": "c0ai04g0",
       "note": "#2"
-    },
-    {
-      "at": "2026-07-11T22:12:21.345Z",
-      "by": "codex-main",
-      "action": "card.criteria-meet",
-      "ref": "c0ai04g0",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-11T22:04:06.091Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-PERFBUDGET-INTEGRATION1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-11T22:03:57.676Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-PERFBUDGET-PROVIDER1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-11T22:03:45.766Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-PERFBUDGET-GAMEMIGRATE1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-11T22:03:20.700Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-PERFBUDGET-BENCHMIGRATE1",
-      "note": "B"
-    },
-    {
-      "at": "2026-07-11T22:02:55.996Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CABI-PLATFORM1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-11T22:00:38.739Z",
-      "by": "codex-84-builder",
-      "action": "card.update",
-      "ref": "c1cix784",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-11T21:54:36.118Z",
-      "by": "codex-84-builder",
-      "action": "card.update",
-      "ref": "c1cix784",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-11T21:54:28.634Z",
-      "by": "codex-84-builder",
-      "action": "card.criteria-meet",
-      "ref": "c1cix784",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-11T21:54:23.507Z",
-      "by": "codex-84-builder",
-      "action": "card.criteria-meet",
-      "ref": "c1cix784",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-11T21:54:18.115Z",
-      "by": "codex-84-builder",
-      "action": "card.criteria-meet",
-      "ref": "c1cix784",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-11T21:54:08.694Z",
-      "by": "codex-84-builder",
-      "action": "card.claim",
-      "ref": "c1cix784",
-      "note": ""
-    },
-    {
-      "at": "2026-07-11T21:49:49.795Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-PERFBUDGET-INTEGRATION1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-11T21:49:49.712Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-PERFBUDGET-PROVIDER1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-11T21:49:49.631Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-PERFBUDGET-GAMEMIGRATE1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-11T21:49:49.544Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-PERFBUDGET-BENCHMIGRATE1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-11T21:49:49.463Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-CABI-PLATFORM1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-11T21:43:18.670Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CABI-RESULT1",
-      "note": "C"
     }
   ],
   "nextNum": 368,
