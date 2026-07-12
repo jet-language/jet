@@ -38,6 +38,12 @@ ext4/Limine); the QEMU proof harness with honest `real-guest` vs
 `plumbing` tiers; the semantic NixOS importer. These are the foundation —
 epoch cards extend them, never rebuild them.
 
+Priority source law is now fixed by `D-JOS-PRIORITY-SURFACE2=A`: ordinary
+contributions stay plain values; only an expert override uses
+`OptionValue.{ value, priority }` with `.Default`, `.Force`, or `.Priority(n)`.
+This keeps real option paths ending in `priority` ordinary. Explain retains the
+wrapper and all contenders; realization receives only the selected value.
+
 ## Pillars
 
 ### P0 — Package pipeline without nix (jetpack)

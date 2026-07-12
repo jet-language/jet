@@ -30,8 +30,10 @@ test('cli end-to-end: init → epoch → milestone → card → decision → nex
 
   // decision via stdin-less file
   const ballot = JSON.stringify({ cardId: '#1', id: 'D-CLI1', title: 'Choose',
-    gist: 'g', story: 's', inWild: 'w', rec: 'B',
-    options: [{ key: 'A', name: 'a', code: 'a()' }, { key: 'B', name: 'b', code: 'b()' }] });
+    gist: 'g', lesson: 'teach from zero', story: 's', inWild: 'w', rec: 'B',
+    recommendation: { why: 'B wins here.', whyNot: [{ key: 'A', reason: 'A loses the needed behavior.' }], tradeoff: 'B adds one visible step.' },
+    hybrid: { result: 'B', synthesis: 'B combines the useful parts.', harvest: [{ key: 'A', aspect: 'A is explicit.', use: 'Borrow its clear names.' }, { key: 'B', aspect: 'B is brief.', use: 'Keep it.' }] },
+    options: [{ key: 'A', name: 'a', detail: 'A is explicit.', code: 'a()' }, { key: 'B', name: 'b', detail: 'B is brief.', code: 'b()' }] });
   const bp = join(cwd, 'ballot.json');
   writeFileSync(bp, ballot);
   run(cwd, ['decision', 'add', '--file', bp, '--by', 'tester']);

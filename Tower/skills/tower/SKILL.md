@@ -97,7 +97,10 @@ board and move on.
 Writes with `--by` other than `owner` are gated; `--by owner` bypasses
 everything (bypass event-logged). Full table in Tower/AGENTS.md; headlines:
 
-- `decision add` needs a full ballot (gist/story/inWild/options[].code/rec)
+- `decision add` needs a plain-language ballot with
+  gist/lesson/story/inWild/options[].code/rec plus structured recommendation
+  reasons for the winner and every loser, plus a last-pass hybrid that harvests
+  the strongest compatible idea from every option
   or `E_BALLOT` — save unfinished work with `--draft`, finish later with
   `decision update <id> --ready`.
 - `decision ratify` / `card activate` are owner-only (`E_OWNER_ONLY`) unless

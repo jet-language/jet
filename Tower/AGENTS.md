@@ -126,10 +126,19 @@ reopens it to `building` with the owner's comment logged. A second done
 attempt while one acceptance ballot is still open is a no-op, not a duplicate
 mint.
 
-Ballot-ready decisions carry: `gist` (one plain sentence), `story` (a named
-person, why this exists), `inWild` (realistic code where the choice bites),
-`options[]` each with `{key,name,detail,code}` worked examples,
-`comparisons[]` when relevant, `rec` + why. The owner decides from the ballot
+Ballot-ready decisions carry: `gist` (one plain sentence), `lesson` (a
+zero-context mini lesson defining the concept, mechanics, vocabulary, stakes,
+and one tiny example), `story` (a named person, why this exists), `inWild`
+(realistic code where the choice bites),
+`options[]` each with plain `{key,name,detail,code}` worked examples and optional
+hidden `technical` law, `comparisons[]` when relevant, `rec`, and structured
+`recommendation:{why,whyNot,tradeoff}`. `whyNot` covers every losing option.
+`hybrid:{result,synthesis,harvest}` is written last, covers every option, and
+must produce the recommended option. It harvests each compatible strength or
+names the exact semantic conflict that prevents combining it.
+Plain prose uses one idea per sentence, defines jargon, expands acronyms, and
+leads with user impact. Write-time density limits are 32 words per sentence and
+90 per paragraph. The owner decides from the ballot
 alone — if they'd need to ask you something to decide, it isn't ready.
 
 ### Archive (#461) — history is separate from live
@@ -187,7 +196,7 @@ always bypasses (bypass event-logged). D-TWRGUARD1=C.
 
 | Guard | Trigger | Error | Escape |
 |---|---|---|---|
-| Ballot-ready | `decision add` missing gist/story/inWild/options[].code/rec | `E_BALLOT` | `--draft`, then `decision update <id> --ready` once complete |
+| Ballot-ready | missing required fields, last-pass hybrid, complete recommendation rationale, or plain-language density limits | `E_BALLOT` | `--draft`, rewrite, then `decision update <id> --ready` |
 | Owner-only ratify | `decision ratify` by a non-owner | `E_OWNER_ONLY` | `--quote "owner's words"` |
 | Owner-only activate | `card activate` by a non-owner | `E_OWNER_ONLY` | `--quote "owner's words"` |
 | Frozen lane | any write to a `frozen` card | `E_OWNER_LANE` | none — `tower card activate` first |

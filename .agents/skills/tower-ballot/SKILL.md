@@ -1,6 +1,6 @@
 ---
 name: tower-ballot
-description: Author a ballot-ready decision on a Tower card — the standard for what the owner needs to decide from the ballot alone (gist, story, in-the-wild example, worked options, recommendation). Use when raising an owner-facing choice, when asked to "queue a decision", "make this ballot-ready", or when a plan hits a choice only the owner may make.
+description: Author a ballot-ready decision on a Tower card — the standard for teaching the underlying concept, then presenting the gist, story, in-the-wild example, worked options, and recommendation needed to decide from the ballot alone. Use when raising an owner-facing choice, when asked to "queue a decision", "make this ballot-ready", or when a plan hits a choice only the owner may make.
 ---
 
 # Tower — raise a ballot-ready decision
@@ -12,24 +12,56 @@ ballot is not ready. A plan-writer proposes; the owner picks.
 ## Required fields
 
 - **`gist`** — one short plain-language sentence naming the choice.
+- **`lesson`** — a self-contained mini lesson for a reader starting with virtually
+  no subject knowledge. Define the concept and unavoidable terms, give a useful
+  mental model, explain how it works, show a tiny concrete example, and explain
+  why it matters here. Teach enough that the reader could accurately explain the
+  idea to someone else. Do not argue for an option yet, assume background
+  knowledge, or turn this into a glossary dump. Aim for a quick two-to-four-minute
+  read; use short paragraphs and plain language.
 - **`story`** — a real person doing real work, showing why the choice exists.
 - **`inWild`** — plausible project code/usage where the choice matters.
 - **`options[]`** — `{key, name, detail, code}` for every genuine option.
-  Each option shows exactly what the person types and sees, including errors.
+  `detail` explains the option in plain language: what changes for the user,
+  what it gains, and what it gives up. Each option shows exactly what the
+  person types and sees, including errors. Put exact protocol, type, ABI,
+  schema, or lowering law in optional `technical`; Focus Mode hides it behind
+  “Technical details” so precision does not bury the decision.
 - **`comparisons[]`** — `{lang, note, code}` when another product materially
   informs the choice.
-- **`rec`** — recommended option key, with its one-line reason in
-  `detail` or `explainer`.
+- **`rec`** — recommended option key.
+- **`recommendation`** — `{why, whyNot, tradeoff}`. `why` explains why the
+  recommendation best serves this decision. `whyNot` contains one
+  `{key, reason}` for every other option and explains why each loses here.
+  `tradeoff` names the recommended option's real downside and why accepting it
+  is still right. Never restate option names or say only “best balance.”
+- **`hybrid`** — `{result, synthesis, harvest}` written only after all options
+  are complete. `result` is the final synthesized option key and must equal
+  `rec`. `synthesis` explains the combined design. `harvest` contains one
+  `{key, aspect, use}` per option: name that option's strongest idea, then show
+  how the synthesis uses it or why it cannot fit without breaking semantics.
 - **`group`** — a configured `decisionGroups` value from
   `.tower/config.json`.
 
 ## Required review pass
 
+- **Plain language:** assume technical curiosity but no subject expertise.
+  Prefer common words. Expand acronyms on first use. Define every unavoidable
+  term where it first appears. Use one idea per sentence, lead with user impact,
+  and move formal law into `technical`. Tower rejects prose sentences over 32
+  words and paragraphs over 90 words; passing those limits is only a floor, not
+  proof that dense jargon is acceptable.
+
 - **Beginner:** ceremony-free defaults; expert policy stays hidden until needed.
 - **Expert:** explicit control over graph, authority, generated code, toolchain,
   cache, scheduler, and audit behavior.
-- **Hybrid:** prefer one canonical semantic mechanism with ergonomic entrypoints
-  over siloed beginner/expert systems (I8).
+- **Hybrid — always last:** first let genuinely different ideas develop on
+  their own. Then harvest the best compatible part of every option into one
+  canonical mechanism with a simple beginner path and explicit expert control.
+  Do not start with a compromise and call it hybrid. Do not average spellings.
+  If one strength cannot combine, name the exact semantic conflict in
+  `hybrid.harvest[].use`. Rewrite the chosen option so it actually contains the
+  harvested design before recommending it.
 - **Kill criteria:** reject any option that hollows out the useful default,
   dictates a file/project structure, or carves around a safety/invariant
   guarantee. Fix the option before it reaches the owner.
@@ -39,6 +71,13 @@ ballot is not ready. A plan-writer proposes; the owner picks.
 
 - Concrete over abstract: show terminal output, file contents, exact errors, and
   complete workflows. Define unavoidable jargon.
+- Write the lesson before the options. Test it against a zero-context reader:
+  after reading only `gist` + `lesson`, they should understand the mechanism,
+  stakes, and vocabulary needed to compare every option.
+- Read every plain-language field without its code or technical appendix. If a
+  technically inclined newcomer cannot retell it, rewrite it. Remove stacked
+  nouns, unexplained abbreviations, internal IDs, and implementation vocabulary
+  that does not change the owner's choice.
 - Naming ballots need many high-quality original candidates in Jet's aviation
   family. Do not echo the owner's suggestion or offer derivative variants.
 - Cut repetition. Drive every option from the same full real-world example.
@@ -64,16 +103,30 @@ ballot is not ready. A plan-writer proposes; the owner picks.
   "title": "Cache invalidation strategy",
   "group": "architecture",
   "gist": "How cached results expire.",
+  "lesson": "A cache keeps a reusable copy of expensive work. Invalidation is the rule that decides when that copy is too old to trust...",
   "story": "Dana ships a pricing page. A vendor updates a rate at 9am; ...",
   "inWild": "...",
   "options": [
-    { "key": "A", "name": "TTL per entry", "detail": "...", "code": "..." },
-    { "key": "B", "name": "Event-driven purge", "detail": "...", "code": "..." }
+    { "key": "A", "name": "TTL per entry", "detail": "...", "technical": "...", "code": "..." },
+    { "key": "B", "name": "Event-driven purge", "detail": "...", "technical": "...", "code": "..." }
   ],
   "comparisons": [
     { "lang": "Rails", "note": "...", "code": "..." }
   ],
-  "rec": "B"
+  "rec": "B",
+  "hybrid": {
+    "result": "B",
+    "synthesis": "B keeps immediate purge events and borrows A's fallback clock for missed events.",
+    "harvest": [
+      { "key": "A", "aspect": "A stale entry eventually expires without an event.", "use": "Use its clock only as a safety net." },
+      { "key": "B", "aspect": "Known updates purge immediately.", "use": "Keep this as the primary rule." }
+    ]
+  },
+  "recommendation": {
+    "why": "Updates become visible as soon as the source announces them, without serving known-stale prices.",
+    "whyNot": [{ "key": "A", "reason": "A time limit still serves stale prices until its clock expires." }],
+    "tradeoff": "Every writer must emit a purge event. That is acceptable because this system already owns every price update."
+  }
 }
 ```
 

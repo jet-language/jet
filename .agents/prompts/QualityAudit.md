@@ -79,7 +79,11 @@ Work plan:
 4. Queue owner decisions:
    - For every language syntax/design gate, create a ballot-ready Tower decision.
    - One question per ballot.
-   - Include gist, story, concrete examples, options, recommendation, beginner/expert/hybrid pass.
+   - Use plain language. Include gist, zero-context mini lesson, story, concrete
+     examples, and options. Recommendation must explain why it wins, why each
+     alternative loses here, and which downside it accepts. Let independent
+     options develop first, then run hybridization last and harvest every
+     compatible strength into the final option.
 
 5. Verify:
    - Run targeted tests for touched areas.

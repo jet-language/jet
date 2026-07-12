@@ -221,6 +221,14 @@ package/environment/CLI program.
 
 ### UL1 — P0 semantic and security stop-line
 
+Card #436 is governed by `D-CABI-CALLBACK1=A`, `D-CABI-RESULT1=C`, and
+`D-CABI-PLATFORM1=A`. C callbacks are non-null, monomorphic, C-safe,
+capture-free or named `@Pure`, and restricted to the foreign-thread-safe
+subset. Generic Result stays outside C declarations; raw status/out-pointer
+functions get ordinary Jet wrappers. Alternate native conventions use a local
+per-function `#Abi` marker, with C as the default, the exact target matrix in
+the syntax ledger, no module inheritance, and no invented symbol decoration.
+
 - Reopen #180 for C FFI types that sema accepts but codegen cannot emit.
 - Reopen #302/#64 for cryptographic randomness and full reference-vector/live
   backend proof; predictable fallback is forbidden.

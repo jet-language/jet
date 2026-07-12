@@ -313,8 +313,11 @@ all such gates. For each gate:
 1. Run the beginner, expert, and hybrid passes.
 2. Have Terra independently review the proposed ballot before it reaches the
    owner.
-3. Create one ballot-ready decision with gist, story, realistic example,
-   comparisons where useful, worked options, and recommendation.
+3. Create one ballot-ready decision in plain language with gist, a zero-context
+   mini lesson, story, realistic example, comparisons where useful, and worked
+   options. Run hybridization last: harvest the strongest compatible idea from
+   every option into the final option. Recommendation must explain why it wins,
+   why every alternative loses here, and which downside it accepts.
 4. Queue it through Tower and leave the gated work in `deciding`.
 5. Continue independent ungated work.
 

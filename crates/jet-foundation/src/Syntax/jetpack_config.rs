@@ -123,6 +123,11 @@ pub const PERF_FIELD_BUDGETS: &str = "budgets";
 pub const TYPE_BUDGET: &str = "Budget";
 pub const TYPE_BUDGET_APPLIES: &str = "BudgetApplies";
 
+/// D-JOS-PRIORITY-SURFACE2=A: typed wrapper used only when one option
+/// contribution needs explicit precedence. Plain values remain ordinary.
+pub const TYPE_OPTION_VALUE: &str = "OptionValue";
+pub const OPTION_PRIORITY_TIERS: &[&str] = &["Default", "Force", "Priority"];
+
 /// D-PERFBUDGET-GRAMMAR1=A: closed typed Budget vocabulary. Leading-dot enum
 /// cases use these exact spellings; no metric-key shorthand or aliases exist.
 pub const PERF_BUDGET_SCOPES: &[&str] =
@@ -135,7 +140,7 @@ pub const PERF_BUDGET_METRICS: &[&str] = &[
     "BinarySize", "ArtifactSize", "GeneratedUnsafe", "PublicApiItems",
     "DependencyCount", "EffectCount", "AllocationCount", "AllocationBytes",
     "StartupTime", "FrameTime", "Latency", "Throughput", "MemoryHighWater",
-    "BenchTime", "ServiceReadiness",
+    "BenchTime", "ServiceReadiness", "SceneAssetBytes", "DrawCalls",
 ];
 pub const PERF_BUDGET_PERCENTILES: &[&str] = &["P50", "P90", "P95", "P99", "P999"];
 pub const PERF_BUDGET_COMPARISONS: &[&str] = &["Absolute", "AbsoluteFrom", "RelativeTo"];

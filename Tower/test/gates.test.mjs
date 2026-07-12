@@ -18,8 +18,10 @@ const fresh = () => {
 };
 
 const ballot = (extra = {}) => ({
-  gist: 'a plain sentence', story: 'Dana hits this while shipping X.', inWild: 'real code here', rec: 'A',
-  options: [{ key: 'A', name: 'Option A', code: 'a()' }, { key: 'B', name: 'Option B', code: 'b()' }],
+  gist: 'a plain sentence', lesson: 'Concept, mechanics, terms, stakes, and a tiny example.', story: 'Dana hits this while shipping X.', inWild: 'real code here', rec: 'A',
+  options: [{ key: 'A', name: 'Option A', detail: 'A is explicit.', code: 'a()' }, { key: 'B', name: 'Option B', detail: 'B is brief.', code: 'b()' }],
+  recommendation: { why: 'A best serves this decision.', whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'A adds one explicit step, which keeps behavior visible.' },
+  hybrid: { result: 'A', synthesis: 'A combines the useful parts.', harvest: [{ key: 'A', aspect: 'A is explicit.', use: 'Keep it.' }, { key: 'B', aspect: 'B is brief.', use: 'Borrow its short names.' }] },
   ...extra,
 });
 
@@ -31,8 +33,8 @@ test('addDecision refuses an incomplete ballot with E_BALLOT naming the gaps', (
   assert.throws(
     () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Pick one' })),
     (e) => e instanceof TowerError && e.code === 'E_BALLOT'
-      && /gist/.test(e.message) && /story/.test(e.message) && /inWild/.test(e.message)
-      && /options/.test(e.message) && /rec/.test(e.message));
+      && /gist/.test(e.message) && /lesson/.test(e.message) && /story/.test(e.message) && /inWild/.test(e.message)
+      && /options/.test(e.message) && /rec/.test(e.message) && /recommendation/.test(e.message) && /hybrid/.test(e.message));
 });
 
 test('addDecision refuses options missing a code field', () => {
@@ -40,7 +42,7 @@ test('addDecision refuses options missing a code field', () => {
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
   assert.throws(
     () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Pick one',
-      ...ballot(), options: [{ key: 'A', name: 'a' }, { key: 'B', name: 'b', code: 'b()' }] })),
+      ...ballot(), options: [{ key: 'A', name: 'a', detail: 'A.' }, { key: 'B', name: 'b', detail: 'B.', code: 'b()' }] })),
     (e) => e.code === 'E_BALLOT' && /options\[\]\.code/.test(e.message));
 });
 
@@ -49,6 +51,31 @@ test('addDecision accepts a full ballot', () => {
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
   const { result } = st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Pick one', ...ballot() }));
   assert.equal(result.draft, false);
+});
+
+test('addDecision rejects dense plain-language prose', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
+  const dense = Array.from({ length: 33 }, (_, i) => `word${i}`).join(' ') + '.';
+  assert.throws(
+    () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Pick one', ...ballot({ lesson: dense }) })),
+    (e) => e.code === 'E_BALLOT' && /plain language/.test(e.message) && /33 words/.test(e.message));
+});
+
+test('recommendation must explain every losing option', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
+  assert.throws(
+    () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Pick one', ...ballot({ recommendation: { why: 'A wins.', whyNot: [], tradeoff: 'A costs one step.' } }) })),
+    (e) => e.code === 'E_BALLOT' && /recommendation\.whyNot\[B\]/.test(e.message));
+});
+
+test('hybrid pass must harvest every option into the recommendation', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
+  assert.throws(
+    () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Pick one', ...ballot({ hybrid: { result: 'B', synthesis: 'B combines ideas.', harvest: [] } }) })),
+    (e) => e.code === 'E_BALLOT' && /hybrid\.result \(must match rec\)/.test(e.message) && /hybrid\.harvest\[A\]/.test(e.message));
 });
 
 test('--draft exempts validation and stays out of the decide lane + counts', () => {

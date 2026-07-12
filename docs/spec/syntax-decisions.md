@@ -1307,6 +1307,28 @@ Link resolution: declared `<lib>: c@system` / `c@"vendor/path"` in `pkg.jet`
 binds scalars and `char*`↔String; `#define` constants only. Old
 `@extern`/`#extern` spellings E0060. `#Bindgen`/`#Extern` PascalCase.
 
+**D-CABI-CALLBACK1=A / D-CABI-RESULT1=C / D-CABI-PLATFORM1=A** *(ratified
+2026-07-11, card #436)*: C callbacks accept only C-convention function values
+whose arguments and return are C-safe. A callback is non-null, monomorphic,
+named `@Pure` or a capture-free `@Pure` lambda, and safe for foreign threads:
+no heap allocation, mutable static or thread-local state, scheduler access, or
+panic-capable path. Its pointer is stable for the program lifetime and may be
+called concurrently or reentrantly. There is no hidden context pointer,
+nullable callback, or alternate callback ABI. Unsupported cases are E3203.
+Generic `Result<T, E>` remains illegal in C declarations: expose a raw C status
+plus out-pointer function and write an ordinary Jet wrapper that initializes
+the out value and maps the status. The compiler invents no error adapter.
+`#Abi(name)` is a per-function marker with no module inheritance. Omission means
+C. `system` selects the target-native convention; `cdecl`, `stdcall`, and
+`fastcall` exist only on Windows x86, `win64` only on Windows x86_64, and
+`sysv64` only on non-Windows x86_64. ARM/AArch64 accept only C/system.
+Unknown, target-invalid, and variadic-invalid choices are E3212/E3213/E3214;
+variadics allow only C and Windows-x86 cdecl. Symbols are used exactly as
+written. ABI participates in compatibility, overlay merge, caching, wrappers,
+and bindgen. Alternate-ABI functions are direct-call-only and are E3203 when
+taken as values. Bindgen records both portable declared `system` and the
+resolved target ABI.
+
 **D-FFI-UNIFY1 — FFI structure law**: every foreign language mounts as a
 namespace `<lang>.<lib>` with the same three tiers (S59 generalized): script
 tier (`use "xxhash.h" as xx` — bind on first compile), project tier
@@ -2302,6 +2324,12 @@ local UI cache ratified by D-JOS-STUDIO-STATE1.
   ordinary, `Force`) backed by explicit expert `Priority(n)` weights inside the
   same mechanism. Explain output shows all contenders. Module disabling uses
   stable module IDs.
+- **D-JOS-PRIORITY-SURFACE2=A**: an ordinary option contribution stays a plain
+  value. Expert precedence wraps only that contribution as
+  `OptionValue.{ value, priority }`, where priority is `.Default`, `.Force`, or
+  `.Priority(n)`. The distinct record cannot collide with a real dotted option
+  key such as `filesystem.swap.fast.priority`. Explain output retains wrapper
+  metadata and every contender; the option consumer receives only `value`.
 - **D-JOS-THEME1=A**: `theme.<name>` modules are reusable theme profiles. A
   system references one and may override specific targets inline; the theme
   engine projects GTK, Qt, terminals, editors, display manager, and Studio
@@ -2414,7 +2442,9 @@ specialized decisions there override umbrella examples.
 
 **D-PERFBUDGET-SURFACE1=A / D-PERFBUDGET-BASELINE1=A /
 D-PERFBUDGET-GRAMMAR1=A / D-PERFBUDGET-REPORT1=A /
-D-PERFBUDGET-OUTPUT1=A**: performance budgets use typed
+D-PERFBUDGET-OUTPUT1=A / D-PERFBUDGET-BENCHMIGRATE1=B /
+D-PERFBUDGET-GAMEMIGRATE1=A / D-PERFBUDGET-PROVIDER1=A /
+D-PERFBUDGET-INTEGRATION1=A**: performance budgets use typed
 `module perf.<role> { budgets: [Budget.{ ... }] }` declarations, pinned
 statistical baselines, one canonical `BudgetReport`, and exact `jet budget
 check` / plan-first `jet budget update` projections. Full closed grammar,

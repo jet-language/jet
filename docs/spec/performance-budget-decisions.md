@@ -1,6 +1,6 @@
 # Performance budget decisions
 
-This document is the durable current law for the five ratified performance-budget decisions. All selected outcomes are A. Later implementation must preserve this law as one evaluator and one report model; illustrative text from rejected options is not law.
+This document is the durable current law for nine ratified performance-budget decisions. SURFACE1, BASELINE1, GRAMMAR1, REPORT1, OUTPUT1, GAMEMIGRATE1, PROVIDER1, and INTEGRATION1 selected A; BENCHMIGRATE1 selected B. Later implementation must preserve this law as one evaluator and one report model; illustrative text from rejected options is not law.
 
 ## Declaration surface and baseline policy
 
@@ -34,13 +34,18 @@ Every BudgetSpec retains spans for module, whole entry, name, scope, metric, pro
 
 Beginner: name+metric+limit covers a package/compiler deterministic gate when provider/comparison are unambiguous; defaults are Fail and Current. Expert: exact attachment, provider, percentile, absolute SLA or relative trend, baseline, enforcement, target class/triple, and profile are typed fields. Hybrid: omitted fields elaborate to the same BudgetSpec; no shorthand parser or second policy engine.
 
-I8 migration gate: current #Bench/bench_budget output and game budgets are separate prototypes. This grammar must not ship alongside a second bench budget policy. Before implementation closes #241, D-PERFBUDGET-BENCHMIGRATE1 must map every bench_budget field/result into BudgetSpec and remove its parser, facts, output, and enforcement path; a paired owner decision must map every game-budget field/result to Scene/SceneProbe BudgetSpec and remove the game parser, facts, output, and enforcement path. Unmappable semantics remain owner-gated. No alias, adapter, dormant parser, or second enforcement path may survive.
+I8 migration gate: current #Bench/bench_budget output and game budgets are separate prototypes. The ratified BENCHMIGRATE1 and GAMEMIGRATE1 laws below remove both before #241 closes. No alias, adapter, dormant parser, or second enforcement path may survive.
 
 Compatibility: no perf namespace or BudgetSpec/Report implementation exists. Ratification adds perf, Budget/BudgetApplies/enums, KiB/MiB/GiB/pct suffixes, parser/sema facts, and syntax reconciliation. Projects without perf modules are unchanged. OUTPUT1 below governs command spelling and copy.
 
-Implementation still requires the ratified measurement-provider protocols, build/dev/CI/Canvas/LSP/prove/dossier integrations, D-PERFBUDGET-BENCHMIGRATE1, and mandatory paired game migration/retirement decision. No alias, adapter, dormant parser, or second enforcement path may ship.
+Implementation must use the ratified provider, integration, and prototype-retirement laws below. No alias, adapter, dormant parser, or second enforcement path may ship.
 
 A gives beginners a real deterministic gate with one ordinary literal while preserving exact provider, SLA/trend, target/triple, profile, source, collision, and arithmetic semantics for experts through the same BudgetSpec. Integrated closure summary: Direction is closed, not provider-defined. Lower-is-better is BinarySize, ArtifactSize, GeneratedUnsafe, PublicApiItems, DependencyCount, EffectCount, AllocationCount, AllocationBytes, StartupTime, FrameTime, Latency, MemoryHighWater, BenchTime, and ServiceReadiness; Throughput alone is higher-is-better. AtMost/AtLeast and regression/improvement use exactly that direction. AllocationCount/AllocationBytes are statistical unless AllocationProbe pins one finite named workload, exact input bytes, warmup and measured iteration counts, allocator implementation/version, process isolation, exact event/byte counting, and identical integer results across repeats; only that deterministic contract permits Absolute. Target selectors in Only are a union: each Class and Triple independently adds members, so a triple need not belong to a listed class; profiles likewise union, and the axes form a Cartesian product. `perf` is a lowercase reserved top-level role namespace; module perf.<role> requires one nonempty lowercase snake_case role segment. Built-in profiles are exactly .Dev/.Release/.Small/.Test/.Bench. Named(text) requires nonempty lowercase snake_case, may not case-insensitively equal a built-in, and must resolve uniquely to a declared containing-package profile; cross-package identity is `<dependency-package>::<profile>` using the resolved dependency name, never an import alias. The same dependency-qualified resolution law applies to Env/Service/Scene/Bench/Target names; wrong kind, casing, package, absence, or ambiguity rejects. Baseline ids are nonempty slash-separated lowercase kebab-case segments (`[a-z0-9]+(?:-[a-z0-9]+)*` each), with no empty/dot segment, whitespace, uppercase, leading/trailing slash, or package qualifier; malformed ids reject at compile time; well-formed ids remain valid declarations, while a missing pinned generation is runtime unavailable and uses the downstream bootstrap/report gate. I8 close gate is mandatory for both prototypes: D-PERFBUDGET-BENCHMIGRATE1 maps every bench_budget fact/result to BudgetSpec and removes its parser/facts/output/enforcement; a paired owner decision does the same for every game budget through Scene/SceneProbe. Unmappable semantics remain owner-gated; no alias, adapter, dormant parser, or second enforcement path may survive.
+
+The later GAMEMIGRATE1 law extends the lower-is-better list with
+`SceneAssetBytes` and `DrawCalls`. The later BENCHMIGRATE1 law supersedes the
+older mapping language above: it deletes `bench_budget` without source
+transformation after recording the retirement ledger.
 
 Selected surface: **Typed Budget list with defaults**. budgets is a list of Budget literals. Every field maps directly to one BudgetSpec axis; omitted fields elaborate under the exact defaults above. Metric/unit/direction/provider errors are rejected before reports exist. Recommended: ordinary Jet values provide a small beginner form and the full expert contract without a metric-key mini-language.
 
@@ -177,7 +182,22 @@ jet budget check
 # budgets failed: 1 budget failed · report 8bdb1120b90a
 ```
 
+## D-PERFBUDGET-BENCHMIGRATE1=B — Delete the legacy helper without source transformation
+
+`#Bench` and typed `BudgetSpec` remain. Every first-party `bench_budget` use is removed mechanically, with a retirement ledger that records how its name, body, and `max_ns` intent map to the replacement. Fixed warmups/trials, floating mean and standard deviation, stderr/environment rendering, and Bool return behavior are explicitly retired rather than copied into the new model. The old helper, parser, facts, output, and evaluator are deleted. External calls receive the ordinary unresolved-member diagnostic. There is no migration command, compatibility alias, teaching parser, adapter, or second evaluator.
+
+## D-PERFBUDGET-GAMEMIGRATE1=A — Exact game-budget migration
+
+The closed metric set adds `SceneAssetBytes` and `DrawCalls(percentile)`. Game fields map exactly: `frame_ms` to `FrameTime(.P99)` in nanoseconds, `memory_mb` to `MemoryHighWater` in MiB, `asset_kb` to `SceneAssetBytes` in KiB, and `draw_calls` to `DrawCalls(.P99)` as Count. Each uses `AbsoluteFrom` and `AtMost`. One `SceneProbe` pins backend build, target, device, replay/input, scene-ready event, 120 warmup frames, 600 measured frames, viewport, and settings; it defines the sample stream and max/percentile estimators. The entire former `Game.Budgets` declaration, display, and evaluator path is deleted. Old uses receive ordinary unresolved diagnostics; no alias or second engine survives.
+
+## D-PERFBUDGET-PROVIDER1=A — In-process typed provider registry
+
+Providers are resolved deterministically from the compiler-owned registry, never from `PATH`. A `ProviderRequest` fixes schema/version, request id, provider/context/budget hashes, ordered metrics, workload, and policy. Canonical sorting and hashing use REPORT1 bytes. Providers emit a contiguous ordered stream of typed `Sample`, `Unavailable`, then one final `Complete`; providers collect evidence only, while the shared engine owns policy and outcomes. Limits are 1,000,000 samples, 16 MiB total bytes, 4,096 specs, and 512 scalars of detail. Valid unavailability or too few samples is E2906; malformed streams, panic, or timeout are E2908; unsupported pairs are E2903; unresolved providers are E2905. Provider identity and context remain part of every fact.
+
+## D-PERFBUDGET-INTEGRATION1=A — Intent-owned refresh with compatible reuse
+
+Every build runs deterministic Fail gates. Bench owns `BenchMeasurement`; dev owns explicitly requested startup, service, and scene probes. These commands refresh evidence when the relevant digest changes. Read-only dossier, Canvas, and LSP views never measure. CI runs `jet budget check`. Prove never measures and adds no parallel flags or report types: it translates compatible budget results into the existing proof Evidence model. Exact compatible slices may satisfy matching facts but never stand in for the whole policy. Missing, stale, mismatched, unavailable, inconclusive, warning, and failure states remain visible under REPORT1/OUTPUT1; failures fail. Every surface reads the same `BudgetReport` and shared evaluator.
+
 ## Reconciliation and precedence
 
 D-PERFBUDGET-GRAMMAR1 owns declarations, closed vocabulary, defaults, inference, constant normalization, exact arithmetic, applicability, collision detection, source spans, and mandatory retirement of prior bench/game budget engines. D-PERFBUDGET-REPORT1 owns canonical report/baseline bytes, identifiers, evidence and context, statistical decisions, storage, retention, migration, path security, and CAS. D-PERFBUDGET-OUTPUT1 owns command validation, confirmation, projection, ordering, diagnostics, fixtures, annotations, and exits. Where an older SURFACE1 or BASELINE1 example differs, these later specialized laws govern. No section authorizes runtime implementation before the card's parser, sema, provider, migration, diagnostics, and test slices land end to end.
-

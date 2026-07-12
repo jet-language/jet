@@ -723,21 +723,105 @@ export function releaseCard(s, ref, by, handoff) {
 // ---- mutations: decisions --------------------------------------------------
 
 // D-TWRGUARD1=C (#458): the ballot-ready standard (tower-ballot skill) —
-// gist/story/inWild/options[].code/rec — enforced at write time. Acceptance
+// gist/lesson/story/inWild/options[].code/rec/recommendation — enforced at write
+// time. Acceptance
 // ballots (`mintAcceptance` above) are a fixed system-generated evidence
 // format, not a narrative ballot, and are exempt.
+const PLAIN_SENTENCE_WORDS = 32;
+const PLAIN_PARAGRAPH_WORDS = 90;
+const words = (text) => String(text || '').match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) || [];
+
+function proseDensityGaps(label, text) {
+  if (!text || !String(text).trim()) return [];
+  const gaps = [];
+  const paragraphs = String(text).trim().split(/\n\s*\n/);
+  paragraphs.forEach((paragraph, pi) => {
+    const paragraphWords = words(paragraph).length;
+    if (paragraphWords > PLAIN_PARAGRAPH_WORDS)
+      gaps.push(`${label} paragraph ${pi + 1} has ${paragraphWords} words (max ${PLAIN_PARAGRAPH_WORDS})`);
+    const sentences = paragraph.split(/(?<=[.!?])\s+/).filter(Boolean);
+    sentences.forEach((sentence, si) => {
+      const sentenceWords = words(sentence).length;
+      if (sentenceWords > PLAIN_SENTENCE_WORDS)
+        gaps.push(`${label} sentence ${si + 1} has ${sentenceWords} words (max ${PLAIN_SENTENCE_WORDS})`);
+    });
+  });
+  return gaps;
+}
+
+export function plainLanguageGaps(p) {
+  const gaps = [
+    ...proseDensityGaps('gist', p.gist),
+    ...proseDensityGaps('lesson', p.lesson),
+    ...proseDensityGaps('story', p.story),
+  ];
+  for (const option of p.options || [])
+    gaps.push(...proseDensityGaps(`option ${option?.key || '?'}`, option?.detail));
+  for (const comparison of p.comparisons || [])
+    gaps.push(...proseDensityGaps(`comparison ${comparison?.lang || '?'}`, comparison?.note));
+  const recommendation = p.recommendation || {};
+  gaps.push(...proseDensityGaps('recommendation why', recommendation.why));
+  gaps.push(...proseDensityGaps('recommendation tradeoff', recommendation.tradeoff));
+  for (const rejected of recommendation.whyNot || [])
+    gaps.push(...proseDensityGaps(`recommendation why not ${rejected?.key || '?'}`, rejected?.reason));
+  const hybrid = p.hybrid || {};
+  gaps.push(...proseDensityGaps('hybrid synthesis', hybrid.synthesis));
+  for (const item of hybrid.harvest || []) {
+    gaps.push(...proseDensityGaps(`hybrid ${item?.key || '?'} aspect`, item?.aspect));
+    gaps.push(...proseDensityGaps(`hybrid ${item?.key || '?'} use`, item?.use));
+  }
+  return gaps;
+}
+
 export function ballotGaps(p) {
   const missing = [];
   if (!p.gist || !String(p.gist).trim()) missing.push('gist');
+  if (!p.lesson || !String(p.lesson).trim()) missing.push('lesson');
   if (!p.story || !String(p.story).trim()) missing.push('story');
   if (!p.inWild || !String(p.inWild).trim()) missing.push('inWild');
   const opts = Array.isArray(p.options) ? p.options : [];
   if (opts.length < 2) missing.push('options (need at least 2)');
   else {
+    const noKey = opts.filter(o => !o || !o.key || !String(o.key).trim());
+    if (noKey.length) missing.push('options[].key');
+    const noName = opts.filter(o => !o || !o.name || !String(o.name).trim());
+    if (noName.length) missing.push(`options[].name (missing on ${noName.map((o, i) => (o && o.key) || `#${i + 1}`).join(', ')})`);
+    const noDetail = opts.filter(o => !o || !o.detail || !String(o.detail).trim());
+    if (noDetail.length) missing.push(`options[].detail (missing on ${noDetail.map((o, i) => (o && o.key) || `#${i + 1}`).join(', ')})`);
     const noCode = opts.filter(o => !o || !o.code || !String(o.code).trim());
     if (noCode.length) missing.push(`options[].code (missing on ${noCode.map((o, i) => (o && o.key) || `#${i + 1}`).join(', ')})`);
   }
   if (!p.rec || !String(p.rec).trim()) missing.push('rec');
+  const optionKeys = opts.map(o => o?.key).filter(Boolean);
+  if (p.rec && !optionKeys.includes(p.rec)) missing.push('rec (must match an option key)');
+  const recommendation = p.recommendation;
+  if (!recommendation || typeof recommendation !== 'object') {
+    missing.push('recommendation');
+  } else {
+    if (!recommendation.why || !String(recommendation.why).trim()) missing.push('recommendation.why');
+    if (!recommendation.tradeoff || !String(recommendation.tradeoff).trim()) missing.push('recommendation.tradeoff');
+    const whyNot = Array.isArray(recommendation.whyNot) ? recommendation.whyNot : [];
+    for (const key of optionKeys.filter(key => key !== p.rec)) {
+      const item = whyNot.find(x => x?.key === key);
+      if (!item || !item.reason || !String(item.reason).trim()) missing.push(`recommendation.whyNot[${key}]`);
+    }
+  }
+  const hybrid = p.hybrid;
+  if (!hybrid || typeof hybrid !== 'object') {
+    missing.push('hybrid');
+  } else {
+    if (!hybrid.result || !optionKeys.includes(hybrid.result)) missing.push('hybrid.result (must match an option key)');
+    else if (p.rec && hybrid.result !== p.rec) missing.push('hybrid.result (must match rec)');
+    if (!hybrid.synthesis || !String(hybrid.synthesis).trim()) missing.push('hybrid.synthesis');
+    const harvest = Array.isArray(hybrid.harvest) ? hybrid.harvest : [];
+    for (const key of optionKeys) {
+      const item = harvest.find(x => x?.key === key);
+      if (!item || !item.aspect || !String(item.aspect).trim() || !item.use || !String(item.use).trim())
+        missing.push(`hybrid.harvest[${key}]`);
+    }
+  }
+  const dense = plainLanguageGaps(p);
+  if (dense.length) missing.push(`plain language: ${dense.join('; ')}`);
   return missing;
 }
 
@@ -751,9 +835,9 @@ export function addDecision(s, p) {
     if (gaps.length) fail('E_BALLOT', `ballot not ready — missing: ${gaps.join(', ')} (pass --draft to save a work-in-progress ballot)`);
   }
   const d = { id: p.id || newId('D-'), cardId: card.id, group: p.group || 'other',
-    title: String(p.title).trim(), gist: p.gist || '', explainer: p.explainer || '', story: p.story || '',
+    title: String(p.title).trim(), gist: p.gist || '', lesson: p.lesson || '', explainer: p.explainer || '', story: p.story || '',
     inWild: p.inWild || '', detail: p.detail || '', options: p.options || [], comparisons: p.comparisons || [],
-    rec: p.rec || null, draft, status: 'open', created: now() };
+    rec: p.rec || null, recommendation: p.recommendation || null, hybrid: p.hybrid || null, draft, status: 'open', created: now() };
   s.decisions.push(d);
   logEvent(s, { by: p.by, action: 'decision.add', ref: d.id, note: draft ? `${d.title} (draft)` : d.title });
   return d;
@@ -807,7 +891,7 @@ export function reopenDecision(s, decisionId, by) {
 
 export function updateDecision(s, id, patch, by) {
   const d = s.decisions.find(x => x.id === id) || fail('E_NOT_FOUND', `no decision ${id}`);
-  for (const k of ['title', 'gist', 'explainer', 'story', 'inWild', 'detail', 'options', 'comparisons', 'rec', 'group'])
+  for (const k of ['title', 'gist', 'lesson', 'explainer', 'story', 'inWild', 'detail', 'options', 'comparisons', 'rec', 'recommendation', 'hybrid', 'group'])
     if (k in patch) d[k] = patch[k];
   // --ready clears draft, but only once the ballot standard is actually met.
   if (patch.ready) {
@@ -833,8 +917,8 @@ export function mintVerdict(s, ref, outcome, title, by) {
   const id = `D-VERDICT-${c.num}-${k}`;
   const d = { id, cardId: c.id, group: 'verdict',
     title: title || `Verdict on #${c.num} — ${c.title}`,
-    gist: '', explainer: '', story: '', inWild: '', detail: '', options: [], comparisons: [],
-    rec: null, draft: false, status: 'ratified', outcome, comment: outcome,
+    gist: '', lesson: '', explainer: '', story: '', inWild: '', detail: '', options: [], comparisons: [],
+    rec: null, recommendation: null, hybrid: null, draft: false, status: 'ratified', outcome, comment: outcome,
     created: now(), ratifiedAt: today() };
   s.decisions.push(d);
   c.log.unshift({ at: today(), by, text: `Verdict recorded (${id}): ${outcome}` });
@@ -1027,7 +1111,8 @@ function decisionForBrief(d) {
   const base = { id: d.id, cardId: d.cardId, group: d.group, status: d.status, draft: !!d.draft,
     title: d.title, gist: d.gist, outcome: d.outcome ?? null, comment: d.comment ?? '', ratifiedAt: d.ratifiedAt ?? null };
   if (d.status === 'ratified') return base;
-  return { ...base, story: d.story, explainer: d.explainer, inWild: d.inWild, detail: d.detail, rec: d.rec,
+  return { ...base, lesson: d.lesson, story: d.story, explainer: d.explainer, inWild: d.inWild, detail: d.detail, rec: d.rec,
+    recommendation: d.recommendation, hybrid: d.hybrid,
     options: d.options || [], comparisons: d.comparisons || [] };
 }
 

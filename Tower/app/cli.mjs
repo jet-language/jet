@@ -213,7 +213,7 @@ function cmdDecision(store, { pos, flags }) {
     case 'add': {
       const p = readPayload(flags) || {};
       const payload = { ...p, by };
-      for (const f of ['id', 'cardId', 'title', 'gist', 'story', 'explainer', 'inWild', 'detail', 'rec', 'group'])
+      for (const f of ['id', 'cardId', 'title', 'gist', 'lesson', 'story', 'explainer', 'inWild', 'detail', 'rec', 'group'])
         if (flags[f] !== undefined) payload[f] = flags[f];
       if (flags.card !== undefined) payload.cardId = flags.card;
       if (flags.draft !== undefined) payload.draft = flags.draft === true || flags.draft === 'true';
@@ -222,7 +222,7 @@ function cmdDecision(store, { pos, flags }) {
     }
     case 'update': {
       const p = readPayload(flags) || {};
-      for (const f of ['title', 'gist', 'story', 'explainer', 'inWild', 'detail', 'rec', 'group'])
+      for (const f of ['title', 'gist', 'lesson', 'story', 'explainer', 'inWild', 'detail', 'rec', 'group'])
         if (flags[f] !== undefined) p[f] = flags[f];
       if (flags.ready !== undefined) p.ready = flags.ready === true || flags.ready === 'true';
       const { result } = store.mutate((s) => db.updateDecision(s, id, p, by));
@@ -444,10 +444,16 @@ function renderBrief(p) {
       if (d.status === 'ratified') {
         L.push(`    → ${d.outcome}${d.comment ? `  — ${d.comment}` : ''}`);
       } else {
+        if (d.lesson) L.push(`    learn first: ${d.lesson}`);
         if (d.story) L.push(`    story: ${d.story}`);
         if (d.inWild) L.push(`    in the wild: ${d.inWild}`);
         if (d.rec) L.push(`    rec: ${d.rec}`);
-        for (const o of d.options || []) L.push(`    [${o.key}] ${o.name}${o.detail ? ` — ${o.detail}` : ''}${o.code ? `\n      ${String(o.code).split('\n').join('\n      ')}` : ''}`);
+        if (d.recommendation?.why) L.push(`    why: ${d.recommendation.why}`);
+        for (const rejected of d.recommendation?.whyNot || []) L.push(`    why not ${rejected.key}: ${rejected.reason}`);
+        if (d.recommendation?.tradeoff) L.push(`    accepted tradeoff: ${d.recommendation.tradeoff}`);
+        if (d.hybrid?.synthesis) L.push(`    hybrid result ${d.hybrid.result}: ${d.hybrid.synthesis}`);
+        for (const item of d.hybrid?.harvest || []) L.push(`    harvest ${item.key}: ${item.aspect} — ${item.use}`);
+        for (const o of d.options || []) L.push(`    [${o.key}] ${o.name}${o.detail ? ` — ${o.detail}` : ''}${o.technical ? `\n      technical: ${String(o.technical).split('\n').join('\n      ')}` : ''}${o.code ? `\n      ${String(o.code).split('\n').join('\n      ')}` : ''}`);
       }
     }
   }
@@ -647,7 +653,7 @@ const HELP = `tower — file-backed project board for an owner + AI agents
   Phases: ${PHASE_IDS.join(' ')}
 
   Guards (agent-hard, owner-soft — --by owner bypasses; see Tower/AGENTS.md):
-    ballot validation (E_BALLOT), owner-only ratify/activate (E_OWNER_ONLY),
+    ballot validation (lesson included; E_BALLOT), owner-only ratify/activate (E_OWNER_ONLY),
     frozen/triage write guard (E_OWNER_LANE), ratified-decision delete guard
     (E_HAS_RATIFIED), building-release handoff (E_HANDOFF).
 `;

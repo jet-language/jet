@@ -22,8 +22,10 @@ const fresh = () => {
 };
 
 const ballot = (extra = {}) => ({
-  gist: 'a plain sentence', story: 'Dana hits this while shipping X.', inWild: 'real code in Source/foo.rs',
-  rec: 'A', options: [{ key: 'A', name: 'Option A', detail: 'does A', code: 'a()' }, { key: 'B', name: 'Option B', code: 'b()' }],
+  gist: 'a plain sentence', lesson: 'Concept, mechanics, terms, stakes, and a tiny example.', story: 'Dana hits this while shipping X.', inWild: 'real code in Source/foo.rs',
+  rec: 'A', options: [{ key: 'A', name: 'Option A', detail: 'does A', code: 'a()' }, { key: 'B', name: 'Option B', detail: 'does B', code: 'b()' }],
+  recommendation: { why: 'A best serves this decision.', whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'A adds one visible step.' },
+  hybrid: { result: 'A', synthesis: 'A combines the useful parts.', harvest: [{ key: 'A', aspect: 'A is explicit.', use: 'Keep it.' }, { key: 'B', aspect: 'B is brief.', use: 'Borrow its short names.' }] },
   ...extra,
 });
 
@@ -128,12 +130,15 @@ test('an open decision carries its full options text verbatim (owner decides fro
   const p = buildBrief(st.load(), '#1');
   const d = p.decisions.find(x => x.id === 'D-2');
   assert.equal(d.status, 'open');
+  assert.equal(d.lesson, 'Concept, mechanics, terms, stakes, and a tiny example.');
   assert.equal(d.story, 'Priya wants a terse literal.');
   assert.equal(d.inWild, 'x := [1,2,3] in examples/features/lists.jet');
   assert.equal(d.rec, 'A');
+  assert.equal(d.recommendation.whyNot[0].key, 'B');
+  assert.equal(d.hybrid.result, 'A');
   assert.deepEqual(d.options, [
     { key: 'A', name: 'Option A', detail: 'does A', code: 'a()' },
-    { key: 'B', name: 'Option B', code: 'b()' },
+    { key: 'B', name: 'Option B', detail: 'does B', code: 'b()' },
   ]);
 });
 

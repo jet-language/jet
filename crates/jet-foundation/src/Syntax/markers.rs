@@ -54,6 +54,10 @@ pub const CONTRACT_PATCHABLE: &str = "Patchable"; // D-PATCH1
 /// Same status as `CONTRACT_CLI`: registered here, feature built elsewhere.
 pub const CONTRACT_DOC: &str = "Doc"; // D-CLIFLAG1
 
+/// D-CABI-PLATFORM1=A: per-function native calling-convention marker for C
+/// declarations. C remains the implicit default; alternate ABIs never inherit.
+pub const ATTR_ABI: &str = "Abi"; // D-CABI-PLATFORM1
+
 /// D-MARKER-FAMILY1 / D-MARKERMOVE1 / D-MARKERMOVE3 (I7/R3 chokepoint): every
 /// name that lives on the `@` contract plane. Union of the D-MARKERMOVE1
 /// move list (§2a), the D-CONTRACTCASE1 recase set (§2b), D-MARKERMOVE3's
@@ -136,6 +140,7 @@ pub const DIRECTIVE_MARKERS: &[&str] = &[
     ATTR_REPLAYABLE,
     ATTR_INVARIANT,
     ATTR_LAYOUT,
+    ATTR_ABI,
     ATTR_SUPPRESS,
     ATTR_EXTERN_MODULE,
     ATTR_BINDGEN,

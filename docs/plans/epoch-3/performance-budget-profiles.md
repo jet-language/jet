@@ -83,3 +83,19 @@ jet bench --budget ci/linux-x64
 Deterministic budgets remain hard gates. Statistical budgets compare against
 evidence-bound baselines so CI catches real regressions without raw one-run
 threshold flake.
+
+## Ratified Closure Law
+
+- `D-PERFBUDGET-BENCHMIGRATE1=B`: delete `bench_budget` after mechanically
+  removing first-party uses and recording retired semantics. Keep `#Bench` and
+  the typed budget engine; add no compatibility parser, alias, or transformer.
+- `D-PERFBUDGET-GAMEMIGRATE1=A`: map game frame, memory, asset, and draw-call
+  limits exactly into Scene/SceneProbe budgets, with fixed replay and sampling
+  context, then delete the old game-budget engine.
+- `D-PERFBUDGET-PROVIDER1=A`: collect measurements through one deterministic,
+  in-process typed provider registry. Providers collect evidence; the shared
+  evaluator alone decides policy.
+- `D-PERFBUDGET-INTEGRATION1=A`: build, bench, and explicitly requested dev
+  work own measurement refresh. CI checks; prove translates compatible facts;
+  dossier, Canvas, and LSP remain read-only. Every surface consumes the same
+  report and evaluator.

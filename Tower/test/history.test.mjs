@@ -18,8 +18,10 @@ const fresh = () => {
 };
 
 const ballot = (extra = {}) => ({
-  gist: 'a plain sentence', story: 'Dana hits this while shipping X.', inWild: 'real code here', rec: 'A',
-  options: [{ key: 'A', name: 'Option A', code: 'a()' }, { key: 'B', name: 'Option B', code: 'b()' }],
+  gist: 'a plain sentence', lesson: 'Concept, mechanics, terms, stakes, and a tiny example.', story: 'Dana hits this while shipping X.', inWild: 'real code here', rec: 'A',
+  options: [{ key: 'A', name: 'Option A', detail: 'A is explicit.', code: 'a()' }, { key: 'B', name: 'Option B', detail: 'B is brief.', code: 'b()' }],
+  recommendation: { why: 'A wins here.', whyNot: [{ key: 'B', reason: 'B loses the needed behavior.' }], tradeoff: 'A adds one visible step.' },
+  hybrid: { result: 'A', synthesis: 'A combines the useful parts.', harvest: [{ key: 'A', aspect: 'A is explicit.', use: 'Keep it.' }, { key: 'B', aspect: 'B is brief.', use: 'Borrow its short names.' }] },
   ...extra,
 });
 

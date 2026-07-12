@@ -885,6 +885,7 @@ function focusGo(delta) { focusIdx = Math.max(0, Math.min(focusIds.length - 1, f
 const optName = (d, key) => ((d.options || []).find(x => x.key === key) || {}).name || '';
 function availFacets(d) {
   const f = [];
+  if (d.lesson) f.push(['lesson', 'Learn this first']);
   if (d.story) f.push(['story', 'Story']);
   if (d.explainer) f.push(['why', 'Why it matters']);
   if (d.inWild) f.push(['wild', 'In the wild']);
@@ -893,6 +894,7 @@ function availFacets(d) {
   return f;
 }
 function facetBody(d, fk) {
+  if (fk === 'lesson') return `<p>${esc(d.lesson).replace(/\n/g, '<br>')}</p>`;
   if (fk === 'story') return `<p>${esc(d.story)}</p>`;
   if (fk === 'why') return `<p>${esc(d.explainer)}</p>`;
   if (fk === 'wild') return codeBlock(d.inWild);
@@ -939,7 +941,12 @@ function renderFocus() {
       <div class="optslabel">Choose one
         ${(d.options || []).length >= 2 ? `<button class="btn btn--ghost btn--sm" id="f-compare" style="margin-left:10px;text-transform:none;letter-spacing:0">${focusCompare ? '☰ Stack' : '⇆ Compare'}</button>` : ''}</div>
       <div class="opts ${focusCompare ? 'opts--compare' : ''}" id="f-opts"></div>
-      ${d.rec ? `<div class="recline"><b>Recommendation:</b> ${esc(d.rec)}${optName(d, d.rec) ? ' — ' + esc(optName(d, d.rec)) : ''}</div>` : ''}
+      ${d.hybrid?.synthesis ? `<div class="hybrid"><b>Hybrid pass — ${esc(d.hybrid.result)}:</b> ${esc(d.hybrid.synthesis)}
+        ${(d.hybrid.harvest || []).map(x => `<p><b>From ${esc(x.key)}:</b> ${esc(x.aspect || '')} — ${esc(x.use || '')}</p>`).join('')}</div>` : ''}
+      ${d.rec ? `<div class="recline"><b>Recommendation:</b> ${esc(d.rec)}${optName(d, d.rec) ? ' — ' + esc(optName(d, d.rec)) : ''}
+        ${d.recommendation?.why ? `<p><b>Why this wins:</b> ${esc(d.recommendation.why)}</p>` : ''}
+        ${(d.recommendation?.whyNot || []).map(x => `<p><b>Why not ${esc(x.key)}:</b> ${esc(x.reason || '')}</p>`).join('')}
+        ${d.recommendation?.tradeoff ? `<p><b>Accepted tradeoff:</b> ${esc(d.recommendation.tradeoff)}</p>` : ''}</div>` : ''}
       <textarea class="fcomment" id="f-comment" placeholder="Comment (optional) — recorded with your decision">${esc(d.comment || '')}</textarea>
       <div class="deck-actions">
         ${chosen ? `<button class="btn btn--ghost btn--sm" id="f-clear">✕ Clear choice</button>` : ''}
@@ -962,6 +969,7 @@ function renderFocus() {
         <button class="opt__h"><span class="opt__num">${idx + 1}</span><span class="opt__name">${esc(o.key)} — ${esc(o.name)}</span>
           ${o.key === d.rec ? '<span class="opt__rec">recommended</span>' : ''}<span class="opt__check">✓ chosen</span></button>
         ${o.detail ? `<div class="opt__detail">${esc(o.detail)}</div>` : ''}
+        ${o.technical ? `<details class="opt__technical"><summary>Technical details</summary><div>${esc(o.technical).replace(/\n/g, '<br>')}</div></details>` : ''}
         ${o.code ? `<div class="opt__code">${codeBlock(o.code)}</div>` : ''}</div>`);
     $('.opt__h', node).addEventListener('click', () => { if (pick[d.id] === o.key) delete pick[d.id]; else pick[d.id] = o.key; updateChoice(); });
     opts.appendChild(node);

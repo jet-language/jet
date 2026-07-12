@@ -58,8 +58,10 @@ test('server round-trip: add, state, validation, conflict, next', async () => {
 
 test('server ratify flow advances the card', async () => {
   await post('decision/add', { cardId: '#1', id: 'D-S1', title: 'pick',
-    gist: 'g', story: 's', inWild: 'w', rec: 'A',
-    options: [{ key: 'A', name: 'a', code: 'a()' }, { key: 'B', name: 'b', code: 'b()' }] });
+    gist: 'g', lesson: 'teach from zero', story: 's', inWild: 'w', rec: 'A',
+    recommendation: { why: 'A wins here.', whyNot: [{ key: 'B', reason: 'B loses the needed behavior.' }], tradeoff: 'A adds one visible step.' },
+    hybrid: { result: 'A', synthesis: 'A combines the useful parts.', harvest: [{ key: 'A', aspect: 'A is explicit.', use: 'Keep it.' }, { key: 'B', aspect: 'B is brief.', use: 'Borrow its short names.' }] },
+    options: [{ key: 'A', name: 'a', detail: 'A is explicit.', code: 'a()' }, { key: 'B', name: 'b', detail: 'B is brief.', code: 'b()' }] });
   let state = await (await fetch(url('/api/state'))).json();
   assert.equal(state.cards[0].lane.lane, 'decide');
   const r = await post('clearance', { decisionId: 'D-S1', outcome: 'A', by: 'owner' });
