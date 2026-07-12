@@ -79,6 +79,11 @@ const DATATREE_NORMATIVE_SURFACES: &[&str] = &[
     "examples/features/serde/datatree_accessors.jet",
     "examples/features/serde/encoding_breadth.jet",
 ];
+const ACTIVE_MATURITY_DOCS: &[&str] = &[
+    "docs/plans/epoch-3/marker-family.md",
+    "docs/sidequests/beginner-expert-mode-audit.md",
+    "docs/proposals/surface-condensation.md",
+];
 const MATRIX_UNBUILT_MARKERS: &[&str] = &[
     "S74-D-DESTRUCT1-ARM",
     "D-IGNORERET1",
@@ -253,6 +258,43 @@ fn dynamic_encoding_surface_uses_datatree_name() {
     assert!(
         failures.is_empty(),
         "current dynamic-encoding surfaces must use `DataTree`; label historical `Data` references explicitly:\n{}",
+        failures.join("\n")
+    );
+}
+
+#[test]
+fn active_maturity_docs_use_meta_field_only() {
+    let retired = [
+        "@Experimental",
+        "@Tested",
+        "@Hardened",
+        "#Experimental",
+        "#Tested",
+        "#Hardened",
+    ];
+    let mut failures = Vec::new();
+    for relative in ACTIVE_MATURITY_DOCS {
+        let text = fs::read_to_string(relative)
+            .unwrap_or_else(|error| panic!("cannot read maturity surface {relative}: {error}"));
+        for required in [
+            "#Meta(maturity:",
+            ".Experimental",
+            ".Tested",
+            ".Hardened",
+        ] {
+            if !text.contains(required) {
+                failures.push(format!("{relative} does not teach `{required}`"));
+            }
+        }
+        for spelling in retired {
+            if text.contains(spelling) {
+                failures.push(format!("{relative} teaches standalone `{spelling}`"));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "active maturity docs drifted from the sole `#Meta(maturity: ...)` surface:\n{}",
         failures.join("\n")
     );
 }

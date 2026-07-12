@@ -283,13 +283,15 @@ after editing; dead prelude code never warns**), `crates/jet-codegen/src/Prelude
 Test: `nix develop -c cargo build`; `nix develop -c jet run examples/features/01_hello.jet`.
 
 ### Phase 5 — examples + expected
-Re-grep first: `nix develop -c rg -l '#(Pure|MustUse|Codable|Encode|Decode|Experimental|
-Tested|Hardened|PublishedSchema|Redact|Numeric)\b' examples`. Respell each hit to `@`.
+Re-grep first: `nix develop -c rg -l '#(Pure|MustUse|Codable|Encode|Decode|
+PublishedSchema|Redact|Numeric)\b' examples`. Respell each hit to `@`.
 Include the bracket form `#[Codable …]` → `@[Codable] #[…serde…]` split (G2). Expected
 outputs (`examples/features/expected/*.out` or the reorganized equivalent) rarely contain
 markers but re-check. Known hot examples (verify names — reorg in flight): the `pure`/
 `determinism`/`effects` set, `must_use`, `serde_derive`, `serde_generic`, `distinct_types`,
 `unit_family`, `display_debug` (`#Redact`), `migrations`/`migrations2` (`#PublishedSchema`).
+Maturity is not part of this marker respell: its sole surface is
+`#Meta(maturity: .Experimental | .Tested | .Hardened)`.
 Test: `nix develop -c cargo test --test golden` (front-end pass + no `unsafe` + expected out).
 
 ### Phase 6 — tests/ui + other fixtures re-bless

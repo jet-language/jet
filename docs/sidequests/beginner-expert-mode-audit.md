@@ -19,7 +19,8 @@ Prove Jet keeps one language with two faces:
 - I1/I2/I3/I8: safe by default, rustc hidden, sema owns checks, one canonical
   mechanism.
 - S58/D-LL1: `use core.mem` plus `#Unsafe("reason")` gate raw memory.
-- D-MATURITY1: `@Experimental`, `@Tested`, `@Hardened` are doc-only API tags.
+- D-MARK-META1=B: `#Meta(maturity: .Experimental | .Tested | .Hardened)` is
+  the sole doc-only API maturity surface.
 - D-TARGET-* and D-WD11: embedded/freestanding facts stay hidden until a typed
   target profile is selected.
 - D-WD2/D-EXPANDCLI1/D-SEMINDEX1: expert transparency is through dossier/facts,

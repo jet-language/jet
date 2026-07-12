@@ -91,10 +91,9 @@ work. Expert pass: explicit file/`-p member` always wins.
   `DataTree`, but later ratified texts (D-ENCSTREAM-SURFACE1, D-ENCXML1,
   D-ENC-DYN1 index entries) still speak `Data`. Sweep docs + surface to
   the ratified name.
-- **Maturity-marker plane check**: D-MATURITY1 ratifies
-  `@Experimental/@Tested/@Hardened` (retired `#` spelling = E0062);
-  `Syntax.rs` still carries them in `#`-plane marker lists. Verify plane
-  wiring, fix drift, re-bless.
+- **Maturity metadata check**: D-MARK-META1=B makes
+  `#Meta(maturity: .Experimental | .Tested | .Hardened)` the sole maturity
+  surface. The closed values stay out of standalone marker registries.
 - **D-CLI-SURFACE1 implementation drift**: `doctor`, `devtools`, `gc`,
   `toolchain` still dispatch flat (silent aliases); law requires grouped
   spelling + teaching error. Implementation card (gated on A7 for the
@@ -106,15 +105,13 @@ Full census: 63 markers (24 `@` / 39 `#`), 111 keyword entries, ~70 core
 modules, 587 diagnostic codes. Three ballots fall out; drift fixes are
 cards (see `architecture-infra.md`).
 
-### E1. Marker growth law + maturity trio — D-MARK-META1
+### E1. Marker growth law + maturity field — D-MARK-META1
 
-Doc-only metadata now spans three surfaces: the maturity trio
-(`@Experimental`/`@Tested`/`@Hardened`, D-MATURITY1), `#Meta(category,
-tunable)` (D-CANVASMETA1), and `@Doc` (D-CLIFLAG1). Each was ratified
-alone; together they are three ways to attach tool-facing metadata.
-Ballot: a growth law — every future doc-only annotation is a `#Meta`
-field (one ballot per field), and whether the shipped trio folds in or
-stays.
+Doc-only metadata uses `#Meta`: `category` and `tunable` come from
+D-CANVASMETA1, while
+`#Meta(maturity: .Experimental | .Tested | .Hardened)` comes from
+D-MARK-META1=B. Every future doc-only annotation is a ratified `#Meta` field,
+preserving one tool-facing metadata mechanism.
 
 ### E2. Three secret-adjacent modules — D-CORE-SECRETS1
 
