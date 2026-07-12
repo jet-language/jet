@@ -912,7 +912,7 @@ mod generation_closure_tests {
             root: guard.0.join("jetpack-root"),
             dev_mode: true,
         };
-        let envelope = super::super::Envelope::Envelope::for_output(
+        let envelope = crate::Envelope::Envelope::for_output(
             &package.to_string_lossy(),
             "nixpkgs:package",
             "nix",
@@ -921,7 +921,7 @@ mod generation_closure_tests {
             source_fingerprint: "source".to_string(),
             recipe_fingerprint: "recipe".to_string(),
             policy_fingerprint: "policy".to_string(),
-            platform: super::super::Envelope::host_platform(),
+            platform: crate::Envelope::host_platform(),
         };
         let entry = Store::record_verified(
             &roots,

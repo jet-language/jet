@@ -32,6 +32,7 @@ pub mod Image;
 pub mod JSON;
 pub mod JetOS;
 pub mod JetPin;
+pub mod LintPolicy;
 pub mod Lock;
 pub mod Manifest;
 pub mod ManifestTOML;

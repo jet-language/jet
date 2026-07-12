@@ -1303,6 +1303,91 @@ fn cli_build_enforces_effect_budget_e1220() {
 }
 
 #[test]
+fn cli_build_lint_never_blocks_by_default() {
+    // D-LINTPOLICY1=A (the override law, card #505): warnings never fail a
+    // build by default. A money-named `Float` field fires lint L0504, but
+    // with no `policy.lints` block in `pkg.jet` the build still succeeds.
+    if !jet_bin().is_file() {
+        eprintln!(
+            "note: skipping cli_build_lint_never_blocks_by_default (run `cargo build` first)"
+        );
+        return;
+    }
+    let tmp = tmp_dir("lintpolicy_default");
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+
+    write(&tmp, "pkg.jet", &min_manifest("app", "0.1.0"));
+    write(
+        &tmp,
+        "main.jet",
+        "struct Invoice { price: Float }\nfn run() { print(\"hi\"); }\n",
+    );
+
+    let out = jet_cmd(&["build", "main.jet"], &tmp, &store);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    // A denied lint would fail *before* the effect summary prints (see
+    // `cli_build_enforces_lint_policy_e1293`); reaching the summary with no
+    // `E1293` proves the L0504 warning never blocked. Asserted this way
+    // rather than on overall `jet build` success because the rustc stage has
+    // an unrelated pre-existing failure in this environment
+    // (`jet_std_env_init`) that would otherwise mask what this test checks.
+    assert!(
+        stderr.contains("L0504"),
+        "expected the L0504 lint to still print as a warning, got:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("effects:"),
+        "expected the build to proceed past the lint gate to the effect summary, got:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("E1293"),
+        "no `policy.lints` block was declared — E1293 must never fire, got:\n{stderr}"
+    );
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn cli_build_enforces_lint_policy_e1293() {
+    // D-LINTPOLICY1=A: a team's own `policy: { lints: { deny: [L0504] } }`
+    // in `pkg.jet` turns that same warning into a build failure (E1293),
+    // naming the denied lint. No other `pkg.jet` gets this behavior — the
+    // wall is opt-in, per team (the override law's third clause).
+    if !jet_bin().is_file() {
+        eprintln!("note: skipping cli_build_enforces_lint_policy_e1293 (run `cargo build` first)");
+        return;
+    }
+    let tmp = tmp_dir("lintpolicy_deny");
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+
+    write(
+        &tmp,
+        "pkg.jet",
+        &(min_manifest("app", "0.1.0") + "\npolicy: {\n    lints: { deny: [L0504] },\n}\n"),
+    );
+    write(
+        &tmp,
+        "main.jet",
+        "struct Invoice { price: Float }\nfn run() { print(\"hi\"); }\n",
+    );
+
+    let out = jet_cmd(&["build", "main.jet"], &tmp, &store);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !out.status.success(),
+        "expected the build to fail once policy.lints denies L0504, stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("E1293") && stderr.contains("L0504"),
+        "expected E1293 naming L0504, got:\n{stderr}"
+    );
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
 fn manifest_toolchain_ok() {
     let raw = min_manifest("myapp", "0.1.0");
     let mf = jet::Manifest::parse(&PathBuf::from("pkg.jet"), &raw).unwrap();

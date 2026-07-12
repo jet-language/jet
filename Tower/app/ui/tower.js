@@ -50,10 +50,10 @@ function toast(text, err = false) {
 // else's interleaved write.
 const UNDOABLE = { 'card/delete': 'Card deleted', 'clearance': 'Decision recorded', 'clearance/batch': 'Decisions recorded', 'idea/delete': 'Idea dismissed', 'milestone/delete': 'Milestone deleted' };
 
-const api = async (route, payload) => {
+const api = async (route, payload, headers = {}) => {
   let r;
   try {
-    r = await fetch('/api/' + route, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload || {}) });
+    r = await fetch('/api/' + route, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(payload || {}) });
   } catch {
     toast('server unreachable — action NOT saved', true);
     throw new Error('offline');
@@ -169,6 +169,7 @@ const CFG = () => S.config || {};
 const TERM = (k, fb) => ((CFG().terms || {})[k] || fb);
 const epochTag = (e) => e ? (e.num != null ? `${TERM('epoch', 'Epoch')} ${e.num}` : e.id) : '';
 const openDecisions = () => S.decisions.filter(d => d.status !== 'ratified');
+const openGenericDecisions = () => openDecisions().filter(d => d.group !== 'acceptance');
 
 // waiting-time chip: shown once something has sat for 6+ hours
 function ageChip(iso) {
@@ -198,7 +199,7 @@ function verifyQueue() {
 function duties() {
   const out = [];
   for (const v of verifyQueue()) out.push({ type: 'verify', id: v.card.id, card: v.card, ballot: v.ballot });
-  for (const d of openDecisions()) if (d.group !== 'acceptance') out.push({ type: 'decision', id: d.id, decision: d });
+  for (const d of openGenericDecisions()) out.push({ type: 'decision', id: d.id, decision: d });
   return out;
 }
 
@@ -266,8 +267,8 @@ function viewNow() {
   const items = duties();
   v.innerHTML = `<div class="viewhead"><h1 class="h1">Now</h1>
     <span class="viewhead__sub">${items.length ? `<b>${items.length}</b> waiting on you — clear the beacon` : 'nothing needs you'}</span>
-    ${openDecisions().length ? `<div class="viewhead__actions"><button class="btn btn--red" id="focus-all">Decide all →</button></div>` : ''}</div>`;
-  $('#focus-all')?.addEventListener('click', () => focusAll(openDecisions()[0].id));
+    ${openGenericDecisions().length ? `<div class="viewhead__actions"><button class="btn btn--red" id="focus-all">Decide all →</button></div>` : ''}</div>`;
+  $('#focus-all')?.addEventListener('click', () => focusAll(openGenericDecisions()[0].id));
 
   const dig = digestBlock();
   if (dig) v.appendChild(dig);
@@ -406,6 +407,15 @@ function acceptanceContent(card, ballot) {
   return { toCheck: [raw], confirms: [] };
 }
 
+// Owner verification is deliberately transport-distinct from generic ballot
+// clearance. Each click gets a short-lived challenge bound to this browser
+// session, ballot, and outcome, then consumes it exactly once.
+async function ownerAcceptance(decisionId, outcome, comment) {
+  const headers = { 'x-tower-owner-action': 'verify' };
+  const issued = await api('acceptance/challenge', { decisionId, outcome }, headers);
+  return api('acceptance/resolve', { challenge: issued.challenge, decisionId, outcome, comment }, headers);
+}
+
 function dutyVerify(card, ballot) {
   const content = acceptanceContent(card, ballot);
   const node = el(`<div class="duty duty--verify">
@@ -430,7 +440,7 @@ function dutyVerify(card, ballot) {
       </div>
     </div>`);
   const doAccept = () => ballot
-    ? api('clearance', { decisionId: ballot.id, outcome: 'accept', by: 'owner' })
+    ? ownerAcceptance(ballot.id, 'accept')
     : api('card/update', { id: card.id, phase: 'done', logEntry: 'Accepted — closed (no formal ballot).', by: 'owner' });
   $('[data-accept]', node).addEventListener('click', doAccept);
   node.__primary = doAccept;
@@ -439,7 +449,7 @@ function dutyVerify(card, ballot) {
   $('[data-bounce]', node).addEventListener('click', () => { box.hidden = !box.hidden; if (!box.hidden) $('textarea', box).focus(); });
   $('[data-bounce-send]', node).addEventListener('click', () => {
     const comment = $('textarea', box).value.trim();
-    if (ballot) api('clearance', { decisionId: ballot.id, outcome: 'bounce', comment, by: 'owner' });
+    if (ballot) ownerAcceptance(ballot.id, 'bounce', comment);
     else api('card/update', { id: card.id, phase: 'building', logEntry: `Bounced back to building: ${comment || '(no comment)'}`, by: 'owner' });
   });
   return node;
@@ -793,7 +803,9 @@ function showDetail(id) {
       </div>`);
     $('[data-focus]', box)?.addEventListener('click', () => { closeDetail(); focusAll(de.id); });
     $('[data-reopen]', box)?.addEventListener('click', () => api('clearance/reopen', { decisionId: de.id, by: 'owner' }));
-    box.querySelectorAll('[data-opt]').forEach(b => b.addEventListener('click', () => api('clearance', { decisionId: de.id, outcome: b.dataset.opt, by: 'owner' })));
+    box.querySelectorAll('[data-opt]').forEach(b => b.addEventListener('click', () => de.group === 'acceptance'
+      ? ownerAcceptance(de.id, b.dataset.opt)
+      : api('clearance', { decisionId: de.id, outcome: b.dataset.opt, by: 'owner' })));
     dd.appendChild(box);
   }
 
@@ -850,7 +862,7 @@ function closeDetail() { openCard = null; $('#detail').hidden = true; $('#scrim'
 
 // ---- focus mode --------------------------------------------------------------------
 function focusAll(startId) {
-  const ids = openDecisions().map(d => d.id);
+  const ids = openGenericDecisions().map(d => d.id);
   if (!ids.length) return;
   focusIds = ids; focusIdx = Math.max(0, ids.indexOf(startId)); focusFacet = null; askOpen = false;
   renderFocus();
@@ -1051,7 +1063,7 @@ function paletteItems(q) {
   const hit = (s) => s.toLowerCase().includes(needle);
   const items = [];
   for (const v of VIEWS) if (!q || hit(v.name)) items.push({ label: `view · ${v.name}`, act: () => go(v.id) });
-  for (const d of openDecisions()) if (!q || hit(d.id + ' ' + d.title)) items.push({ label: `decide · ${d.id} — ${d.title.slice(0, 60)}`, act: () => focusAll(d.id) });
+  for (const d of openGenericDecisions()) if (!q || hit(d.id + ' ' + d.title)) items.push({ label: `decide · ${d.id} — ${d.title.slice(0, 60)}`, act: () => focusAll(d.id) });
   for (const c of S.cards) {
     if (c.phase === 'done' && q.length < 2) continue;
     if (!q || hit('#' + c.num + ' ' + c.title)) items.push({ label: `card · #${c.num} ${c.title.slice(0, 60)} (${c.phase})`, act: () => showDetail(c.id) });

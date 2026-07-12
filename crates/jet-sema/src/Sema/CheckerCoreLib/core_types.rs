@@ -184,7 +184,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-REGEXENGINE1=A: std-only linear regex values.
         | "Regex" | "RegexFlags" | "Match"
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP types.
-        | "HttpClientReq" | "HttpClientResp" | "HttpMux" | "HttpSrvReq" | "HttpSrvResp" | "HttpServerTls" | "HttpServer" | "HttpShutdownReport"
+        | "HttpClientReq" | "HttpClientResp" | "HttpMux" | "HttpHandler" | "HttpSrvReq" | "HttpSrvResp" | "HttpServerTls" | "HttpServer" | "HttpShutdownReport"
         // D-TYPEDTEXT1=D: typed text — a checked query/markup template built by
         // expected-type elaboration of a string literal (E0149 guards a plain
         // runtime `String` from filling this position).

@@ -1270,6 +1270,7 @@ pub(crate) fn lower_method_call(
             ("HttpClientResp", "body") | ("HttpClientResp", "header") => Type::String,
             ("HttpClientResp", "cookies") => Type::List(Box::new(Type::String)),
             ("HttpMux", _) => unit_type(),
+            ("HttpHandler", "handle") => Type::Named("HttpSrvResp".to_string()),
             ("HttpSrvReq", "method") | ("HttpSrvReq", "path") | ("HttpSrvReq", "body") => {
                 Type::String
             }
@@ -1289,6 +1290,7 @@ pub(crate) fn lower_method_call(
         let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
         let op = if kind.starts_with("HttpServer")
             || kind == "HttpMux"
+            || kind == "HttpHandler"
             || kind == "HttpSrvReq"
             || kind == "HttpSrvResp"
         {

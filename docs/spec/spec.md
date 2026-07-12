@@ -1403,6 +1403,19 @@ dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
   `policy: { trust: { default: prompt, ci: { prompt: deny }, services: { postgres: prompt } } }`.
   Policy decisions are `allow`, `prompt`, or `deny`; unknown fields are a
   manifest error.
+- **The override law (D-LINTPOLICY1=A):** warnings and lints never fail a
+  build by default — errors stay reserved for programs Jet cannot compile
+  safely or unambiguously (I1 memory/type safety has no override and is
+  outside this law). Every bypass is spelled at the site or on the command
+  line, never in hidden config, and lands in the audit record (`jet inspect
+  dossier`, effect-budget provenance, build facts). Walls are team policy
+  only: `pkg.jet`'s `policy: { lints: { deny: […] } }` joins `policy.trust`
+  under the one `policy:` namespace (D-JPK-POLICYSURFACE1) — `deny:` lists
+  lint codes (e.g. `L0504`), and a lint that fires while its code is listed
+  fails the build with E1293 instead of only warning. Absent entirely, every
+  lint stays a warning (I1/D-LINTPOLICY1 default); host/org policy narrows,
+  never widens (already law). This is the one policy surface for lint walls
+  — no per-call flag or attribute may duplicate it (I8).
 - **Offline guarantee (U29):** once a package ref is realized into the hangar,
   realize-class verbs can use it again with `--offline` and no provider
   metadata refresh. Network-class verbs (`add`, `update`, `outdated`,

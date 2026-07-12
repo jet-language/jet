@@ -365,6 +365,15 @@ pub const POLICY_TRUST_FIELD_SERVICES: &str = "services"; // D-JPK-GRANTSCHEMA1
 pub const POLICY_TRUST_DECISION_PROMPT: &str = "prompt"; // D-JPK-GRANTSCHEMA1
 pub const POLICY_TRUST_DECISION_DENY: &str = "deny"; // D-JPK-GRANTSCHEMA1
 pub const POLICY_TRUST_DECISION_ALLOW: &str = "allow"; // D-JPK-GRANTSCHEMA1
+/// D-LINTPOLICY1=A (the override law, card #505): the `policy: { lints: { … } }`
+/// sub-block, joining `trust` under the one `policy:` namespace
+/// (D-JPK-POLICYSURFACE1). Warnings never fail a build by default (I1 memory/
+/// type safety is never in scope here); a team opts into a wall by naming
+/// lint codes here. Manifest keys only, no language grammar.
+pub const POLICY_FIELD_LINTS: &str = "lints"; // D-LINTPOLICY1
+/// D-LINTPOLICY1: the `deny:` field inside `policy.lints { … }` — lint codes
+/// (e.g. `L0504`) that fail the build when they fire, instead of warning.
+pub const LINTS_FIELD_DENY: &str = "deny"; // D-LINTPOLICY1
 
 /// Levenshtein edit distance between two strings (used for "did you mean?" suggestions).
 pub fn edit_distance(a: &str, b: &str) -> usize {

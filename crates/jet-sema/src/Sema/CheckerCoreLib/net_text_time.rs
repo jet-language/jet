@@ -200,7 +200,11 @@ pub fn http_type_method_return(
             _ => None,
         },
         Type::Named(n) if n == "HttpMux" => match method {
-            "get" | "post" | "put" | "delete" | "patch" => Some(None),
+            "get" | "post" | "put" | "delete" | "patch" | "head" | "options" | "middleware" => Some(None),
+            _ => None,
+        },
+        Type::Named(n) if n == "HttpHandler" => match method {
+            "handle" => mk("HttpSrvResp"),
             _ => None,
         },
         Type::Named(n) if n == "HttpSrvReq" => match method {

@@ -19,6 +19,7 @@ struct JetHttpSrvReq {
 }
 
 type JetHttpMuxHandlerFn = std::sync::Arc<dyn Fn(JetHttpSrvReq) -> JetHttpSrvResp + Send + Sync>;
+type JetHttpMuxMiddlewareFn = std::sync::Arc<dyn Fn(JetHttpMuxHandlerFn) -> JetHttpMuxHandlerFn + Send + Sync>;
 
 struct JetHttpMuxRoute {
     method: String,
@@ -27,7 +28,10 @@ struct JetHttpMuxRoute {
 }
 
 #[derive(Clone)]
-struct JetHttpMux(std::sync::Arc<std::sync::Mutex<Vec<JetHttpMuxRoute>>>);
+struct JetHttpMux(
+    std::sync::Arc<std::sync::Mutex<Vec<JetHttpMuxRoute>>>,
+    std::sync::Arc<std::sync::Mutex<Vec<JetHttpMuxMiddlewareFn>>>,
+);
 
 #[derive(Clone)]
 struct JetHttpServerTls {
@@ -96,7 +100,10 @@ impl std::fmt::Display for JetHttpReadError {
 
 impl JetHttpMux {
     fn new() -> Self {
-        JetHttpMux(std::sync::Arc::new(std::sync::Mutex::new(Vec::new())))
+        JetHttpMux(
+            std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+        )
     }
     fn add<F>(&self, method: &str, pattern: &str, f: F)
     where
@@ -108,6 +115,13 @@ impl JetHttpMux {
             handler: std::sync::Arc::new(f) as JetHttpMuxHandlerFn,
         });
     }
+}
+
+fn jet_http_mux_middleware<F>(mux: &JetHttpMux, middleware: F)
+where
+    F: Fn(JetHttpMuxHandlerFn) -> JetHttpMuxHandlerFn + Send + Sync + 'static,
+{
+    mux.1.lock().unwrap().push(std::sync::Arc::new(middleware));
 }
 
 fn jet_http_mux_new() -> JetHttpMux {
@@ -153,6 +167,7 @@ fn jet_http_mux_serve(addr: &String, mux: JetHttpMux) -> Result<(), String> {
 }
 
 fn jet_http_server_bind(addr: &String, mux: JetHttpMux) -> Result<JetHttpServer, String> {
+    jet_http_mux_validate(&mux)?;
     let listener = std::net::TcpListener::bind(addr.as_str())
         .map_err(|error| format!("bind on `{addr}` failed: {error}"))?;
     let local_addr = listener.local_addr().map_err(|error| format!("local address failed: {error}"))?.to_string();
@@ -517,15 +532,44 @@ fn jet_http_srv_parse(raw: &str) -> JetHttpSrvReq {
 
 fn jet_http_mux_dispatch(mux: &JetHttpMux, req: JetHttpSrvReq) -> JetHttpSrvResp {
     let routes = mux.0.lock().unwrap();
-    for route in routes.iter() {
-        if route.method != req.method {
-            continue;
-        }
-        if let Some(params) = jet_http_match_path(&route.pattern, &req.path) {
-            let mut r2 = req.clone();
-            r2.params = params;
-            return (route.handler)(r2);
-        }
+    let path_matches: Vec<(&JetHttpMuxRoute, std::collections::BTreeMap<String, String>, (usize, usize, usize))> = routes
+        .iter()
+        .filter_map(|route| jet_http_match_path(&route.pattern, &req.path).map(|(params, score)| (route, params, score)))
+        .collect();
+    let requested_method = req.method.to_uppercase();
+    let effective_method = if requested_method == "HEAD"
+        && !path_matches.iter().any(|(route, _, _)| route.method == "HEAD")
+    { "GET" } else { requested_method.as_str() };
+    if requested_method == "OPTIONS" && !path_matches.iter().any(|(route, _, _)| route.method == "OPTIONS") {
+        let allow = jet_http_allowed_methods(&path_matches);
+        return JetHttpSrvResp { status: 204, body: String::new(), headers: [("Allow".to_string(), allow)].into_iter().collect() };
+    }
+    if let Some((route, params, _)) = path_matches.iter()
+        .filter(|(route, _, _)| route.method == effective_method)
+        .max_by_key(|(_, _, score)| *score)
+    {
+        let mut r2 = req.clone();
+        r2.params = params.clone();
+        let middlewares = mux.1.lock().unwrap().clone();
+        let mut handler = route.handler.clone();
+        for middleware in middlewares.iter().rev() { handler = middleware(handler); }
+        let mut response = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(r2))) {
+            Ok(response) => response,
+            Err(_) => JetHttpSrvResp {
+                status: 500,
+                body: "500 Internal Server Error".to_string(),
+                headers: std::collections::BTreeMap::new(),
+            },
+        };
+        if requested_method == "HEAD" { response.body.clear(); }
+        return response;
+    }
+    if !path_matches.is_empty() {
+        return JetHttpSrvResp {
+            status: 405,
+            body: "405 Method Not Allowed".to_string(),
+            headers: [("Allow".to_string(), jet_http_allowed_methods(&path_matches))].into_iter().collect(),
+        };
     }
     JetHttpSrvResp {
         status: 404,
@@ -537,36 +581,74 @@ fn jet_http_mux_dispatch(mux: &JetHttpMux, req: JetHttpSrvReq) -> JetHttpSrvResp
 fn jet_http_match_path(
     pattern: &str,
     path: &str,
-) -> Option<std::collections::BTreeMap<String, String>> {
+) -> Option<(std::collections::BTreeMap<String, String>, (usize, usize, usize))> {
     let p_segs: Vec<&str> = pattern.split('/').collect();
     let r_segs: Vec<&str> = path.split('?').next().unwrap_or(path).split('/').collect();
-    if p_segs.last() == Some(&"*") && r_segs.len() >= p_segs.len() {
-        let mut params = std::collections::BTreeMap::new();
-        for (p, r) in p_segs[..p_segs.len() - 1]
-            .iter()
-            .zip(r_segs[..p_segs.len() - 1].iter())
-        {
-            if let Some(key) = p.strip_prefix(':') {
-                params.insert(key.to_string(), r.to_string());
-            } else if *p != *r {
-                return None;
-            }
-        }
-        params.insert("wildcard".to_string(), r_segs[p_segs.len() - 1..].join("/"));
-        return Some(params);
-    }
-    if p_segs.len() != r_segs.len() {
-        return None;
-    }
     let mut params = std::collections::BTreeMap::new();
-    for (p, r) in p_segs.iter().zip(r_segs.iter()) {
-        if let Some(key) = p.strip_prefix(':') {
-            params.insert(key.to_string(), r.to_string());
-        } else if *p != *r {
+    let mut literals = 0usize;
+    let mut singles = 0usize;
+    let mut wildcard = false;
+    let mut pi = 0usize;
+    let mut ri = 0usize;
+    while pi < p_segs.len() {
+        let p = p_segs[pi];
+        if let Some(name) = p.strip_prefix("{*").and_then(|s| s.strip_suffix('}')) {
+            wildcard = true;
+            params.insert(name.to_string(), r_segs[ri..].join("/"));
+            ri = r_segs.len();
+            pi += 1;
+            break;
+        }
+        let r = *r_segs.get(ri)?;
+        if let Some(name) = p.strip_prefix('{').and_then(|s| s.strip_suffix('}')) {
+            params.insert(name.to_string(), r.to_string());
+            singles += 1;
+        } else if p == r {
+            literals += 1;
+        } else {
             return None;
         }
+        pi += 1;
+        ri += 1;
     }
-    Some(params)
+    if pi != p_segs.len() || ri != r_segs.len() { return None; }
+    Some((params, (literals, usize::from(!wildcard), usize::MAX - singles)))
+}
+
+fn jet_http_allowed_methods(
+    matches: &[(&JetHttpMuxRoute, std::collections::BTreeMap<String, String>, (usize, usize, usize))],
+) -> String {
+    let mut methods = std::collections::BTreeSet::new();
+    for (route, _, _) in matches { methods.insert(route.method.clone()); }
+    if methods.contains("GET") { methods.insert("HEAD".to_string()); }
+    methods.insert("OPTIONS".to_string());
+    methods.into_iter().collect::<Vec<_>>().join(", ")
+}
+
+fn jet_http_mux_validate(mux: &JetHttpMux) -> Result<(), String> {
+    let routes = mux.0.lock().unwrap();
+    let mut seen = std::collections::BTreeSet::new();
+    for route in routes.iter() {
+        if !route.pattern.starts_with('/') { return Err(format!("invalid HTTP route `{}`: routes must start with `/`", route.pattern)); }
+        let segments: Vec<&str> = route.pattern.split('/').collect();
+        let mut names = std::collections::BTreeSet::new();
+        let mut canonical = Vec::new();
+        for (index, segment) in segments.iter().enumerate() {
+            if segment.starts_with(':') || *segment == "*" { return Err(format!("invalid HTTP route `{}`: use `{{name}}` or final `{{*name}}` parameters", route.pattern)); }
+            if let Some(name) = segment.strip_prefix("{*").and_then(|s| s.strip_suffix('}')) {
+                if name.is_empty() || index + 1 != segments.len() { return Err(format!("invalid HTTP route `{}`: catch-all must be named and final", route.pattern)); }
+                if !names.insert(name) { return Err(format!("invalid HTTP route `{}`: duplicate parameter `{name}`", route.pattern)); }
+                canonical.push("{*}".to_string());
+            } else if let Some(name) = segment.strip_prefix('{').and_then(|s| s.strip_suffix('}')) {
+                if name.is_empty() || !names.insert(name) { return Err(format!("invalid HTTP route `{}`: parameter names must be non-empty and unique", route.pattern)); }
+                canonical.push("{}".to_string());
+            } else if segment.contains('{') || segment.contains('}') { return Err(format!("invalid HTTP route `{}`: malformed parameter", route.pattern)); }
+            else { canonical.push((*segment).to_string()); }
+        }
+        let key = (route.method.clone(), canonical.join("/"));
+        if !seen.insert(key) { return Err(format!("HTTP route conflict for {} `{}`", route.method, route.pattern)); }
+    }
+    Ok(())
 }
 
 fn jet_http_srv_format(resp: &JetHttpSrvResp) -> String {

@@ -14,6 +14,9 @@ import { configFile, writeJSON } from '../app/paths.mjs';
 import { serve } from '../app/server.mjs';
 import * as db from '../app/store.mjs';
 
+const resolveAcceptance = db.createAcceptanceResolver();
+const provenance = (outcome) => ({ kind: 'owner-ui', session: 'test-session', challenge: `test-${outcome}`, issuedFor: 'D-ACCEPT-1', outcome });
+
 const fresh = () => {
   const dir = mkdtempSync(join(tmpdir(), 'tower-avq-'));
   writeJSON(join(dir, 'tower.json'), empty('Test'));
@@ -53,7 +56,7 @@ test('mintAcceptance stamps checkInstructions onto D-ACCEPT and re-mint refreshe
 
   // bounce, add a second criterion, re-attempt — the ballot's instructions
   // must refresh to match, not keep serving round-1 evidence.
-  st.mutate((s) => db.ratify(s, 'D-ACCEPT-1', 'bounce', 'add more coverage', 'owner'));
+  st.mutate((s) => resolveAcceptance(s, 'D-ACCEPT-1', 'bounce', 'add more coverage', provenance('bounce')));
   st.mutate((s) => db.addCriterion(s, '#1', 'second thing works', 'planner'));
   st.mutate((s) => db.meetCriterion(s, '#1', 2, { evidence: 'ran it too', by: 'builder' }));
   st.mutate((s) => db.verifyCriterion(s, '#1', 2, { evidence: 'checked it too', by: 'verifier' }));
@@ -85,13 +88,37 @@ const dir = mkdtempSync(join(tmpdir(), 'tower-avq-srv-'));
 writeJSON(join(dir, 'tower.json'), empty('Srv'));
 writeJSON(configFile(dir), { project: 'Srv' });
 const store = openStore(dir);
-const PORT = 7959;
+const PORT = 17959;
 const server = serve(store, PORT, false);
 after(() => server.close());
 const url = (p) => `http://localhost:${PORT}${p}`;
 const post = async (route, body) => {
   const r = await fetch(url('/api/' + route), { method: 'POST', body: JSON.stringify(body) });
   return { status: r.status, json: await r.json() };
+};
+
+const ownerSession = async () => {
+  const page = await fetch(url('/'), { headers: { accept: 'text/html' } });
+  const cookie = page.headers.get('set-cookie')?.split(';', 1)[0];
+  assert.ok(cookie, 'owner page must establish an HttpOnly in-memory session');
+  return cookie;
+};
+
+const ownerResolve = async (cookie, decisionId, outcome, comment) => {
+  const issued = await fetch(url('/api/acceptance/challenge'), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie, 'x-tower-owner-action': 'verify' },
+    body: JSON.stringify({ decisionId, outcome }),
+  });
+  const issuedBody = await issued.json();
+  assert.equal(issued.status, 200, issuedBody.message);
+  const challenge = issuedBody.result;
+  const resolved = await fetch(url('/api/acceptance/resolve'), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie, 'x-tower-owner-action': 'verify' },
+    body: JSON.stringify({ challenge: challenge.challenge, decisionId, outcome, comment }),
+  });
+  return { status: resolved.status, json: await resolved.json(), challenge: challenge.challenge };
 };
 
 test('needsAcceptance card in verify: state carries the D-ACCEPT ballot until owner acts', async () => {
@@ -109,38 +136,108 @@ test('needsAcceptance card in verify: state carries the D-ACCEPT ballot until ow
   assert.deepEqual(ballot.checkInstructions.confirms, ['does the thing — checked (verified by verifier)']);
 });
 
-test('Accept via POST /api/clearance closes the card with owner attribution logged', async () => {
-  const r = await post('clearance', { decisionId: 'D-ACCEPT-1', outcome: 'accept', by: 'owner' });
+test('forged #515/#516 path: generic clearance rejects caller-supplied owner and agent quote, then audits both', async () => {
+  for (const payload of [
+    { decisionId: 'D-ACCEPT-1', outcome: 'accept', by: 'owner' },
+    { decisionId: 'D-ACCEPT-1', outcome: 'accept', by: 'agent', quote: 'owner said accept' },
+  ]) {
+    const r = await post('clearance', payload);
+    assert.equal(r.status, 403);
+    assert.equal(r.json.error, 'E_ACCEPTANCE_OWNER_UI');
+  }
+  const state = await (await fetch(url('/api/state'))).json();
+  assert.equal(state.cards.find(c => c.num === 1).phase, 'verify');
+  assert.equal(state.decisions.find(d => d.id === 'D-ACCEPT-1').status, 'open');
+  assert.equal(state.events.filter(e => e.action === 'acceptance.reject' && e.ref === 'D-ACCEPT-1').length, 2);
+});
+
+test('generic clearance batch rejects acceptance atomically and audits it', async () => {
+  const r = await post('clearance/batch', { by: 'owner', decisions: [{ decisionId: 'D-ACCEPT-1', outcome: 'accept' }] });
+  assert.equal(r.status, 403);
+  assert.equal(r.json.error, 'E_ACCEPTANCE_OWNER_UI');
+  const state = await (await fetch(url('/api/state'))).json();
+  assert.equal(state.cards.find(c => c.num === 1).phase, 'verify');
+  assert.equal(state.decisions.find(d => d.id === 'D-ACCEPT-1').status, 'open');
+  assert.ok(state.events.some(e => e.action === 'acceptance.reject' && e.note.includes('clearance/batch')));
+});
+
+test('caller-supplied owner cannot close the card or clear needsAcceptance around the ballot', async () => {
+  for (const payload of [
+    { id: '#1', phase: 'done', by: 'owner' },
+    { id: '#1', needsAcceptance: false, by: 'owner' },
+  ]) {
+    const r = await post('card/update', payload);
+    assert.equal(r.status, 403);
+    assert.equal(r.json.error, 'E_ACCEPTANCE_OWNER_UI');
+  }
+  const state = await (await fetch(url('/api/state'))).json();
+  assert.equal(state.cards.find(c => c.num === 1).phase, 'verify');
+  assert.equal(state.cards.find(c => c.num === 1).needsAcceptance, true);
+  assert.equal(state.decisions.find(d => d.id === 'D-ACCEPT-1').status, 'open');
+  assert.equal(state.events.filter(e => e.action === 'acceptance.reject' && e.ref === 'D-ACCEPT-1').length, 5);
+});
+
+test('dedicated owner UI action accepts atomically with immutable provenance', async () => {
+  const cookie = await ownerSession();
+  const r = await ownerResolve(cookie, 'D-ACCEPT-1', 'accept');
   assert.equal(r.status, 200);
   assert.equal(r.json.result.status, 'ratified');
   const state = await (await fetch(url('/api/state'))).json();
   const card = state.cards.find(c => c.num === 1);
   assert.equal(card.phase, 'done');
-  const ratifyEvent = state.events.find(e => e.action === 'decision.ratify' && e.ref === 'D-ACCEPT-1');
+  const ratifyEvent = state.events.find(e => e.action === 'acceptance.resolve' && e.ref === 'D-ACCEPT-1');
   assert.ok(ratifyEvent, 'ratification must be in the event log');
   assert.equal(ratifyEvent.by, 'owner');
+  assert.match(ratifyEvent.note, /owner-ui session=.* challenge=.* outcome=accept/);
+  assert.equal(state.decisions.find(d => d.id === 'D-ACCEPT-1').provenance.kind, 'owner-ui');
 });
 
-test('Bounce via POST /api/clearance returns the card to building with the comment logged', async () => {
+test('dedicated owner UI action bounces with the comment logged', async () => {
   await post('card/add', { title: 'Second flagged card', needsAcceptance: true, by: 'owner' });
   await post('card/update', { id: '#2', phase: 'done', by: 'builder' }); // no criteria — mints straight away
-  const r = await post('clearance', { decisionId: 'D-ACCEPT-2', outcome: 'bounce', comment: 'missing the edge case', by: 'owner' });
+  const cookie = await ownerSession();
+  const r = await ownerResolve(cookie, 'D-ACCEPT-2', 'bounce', 'missing the edge case');
   assert.equal(r.status, 200);
   const state = await (await fetch(url('/api/state'))).json();
   const card = state.cards.find(c => c.num === 2);
   assert.equal(card.phase, 'building');
   assert.match(card.log[0].text, /Bounced back to building: missing the edge case/);
-  const ratifyEvent = state.events.find(e => e.action === 'decision.ratify' && e.ref === 'D-ACCEPT-2');
+  const ratifyEvent = state.events.find(e => e.action === 'acceptance.resolve' && e.ref === 'D-ACCEPT-2');
   assert.equal(ratifyEvent.by, 'owner');
+});
+
+test('owner provenance fails closed for missing session, replay, wrong decision/outcome, and non-loopback marker', async () => {
+  await post('card/add', { title: 'Third flagged card', needsAcceptance: true, by: 'owner' });
+  await post('card/update', { id: '#3', phase: 'done', by: 'builder' });
+  await post('card/add', { title: 'Fourth flagged card', needsAcceptance: true, by: 'owner' });
+  await post('card/update', { id: '#4', phase: 'done', by: 'builder' });
+  let r = await fetch(url('/api/acceptance/challenge'), { method: 'POST', body: JSON.stringify({ decisionId: 'D-ACCEPT-3', outcome: 'accept' }) });
+  assert.equal(r.status, 403);
+  const cookie = await ownerSession();
+  r = await fetch(url('/api/acceptance/challenge'), { method: 'POST', headers: { cookie, 'x-tower-owner-action': 'verify', 'x-forwarded-for': '203.0.113.1' }, body: JSON.stringify({ decisionId: 'D-ACCEPT-3', outcome: 'accept' }) });
+  assert.equal(r.status, 403);
+  const issue = async () => {
+    const issued = await fetch(url('/api/acceptance/challenge'), { method: 'POST', headers: { cookie, 'x-tower-owner-action': 'verify' }, body: JSON.stringify({ decisionId: 'D-ACCEPT-3', outcome: 'accept' }) });
+    return (await issued.json()).result.challenge;
+  };
+  let challenge = await issue();
+  r = await fetch(url('/api/acceptance/resolve'), { method: 'POST', headers: { cookie, 'x-tower-owner-action': 'verify' }, body: JSON.stringify({ challenge, decisionId: 'D-ACCEPT-4', outcome: 'accept' }) });
+  assert.equal(r.status, 403);
+  challenge = await issue();
+  r = await fetch(url('/api/acceptance/resolve'), { method: 'POST', headers: { cookie, 'x-tower-owner-action': 'verify' }, body: JSON.stringify({ challenge, decisionId: 'D-ACCEPT-3', outcome: 'bounce' }) });
+  assert.equal(r.status, 403);
+  const ok = await ownerResolve(cookie, 'D-ACCEPT-3', 'accept');
+  const replay = await fetch(url('/api/acceptance/resolve'), { method: 'POST', headers: { cookie, 'x-tower-owner-action': 'verify' }, body: JSON.stringify({ challenge: ok.challenge, decisionId: 'D-ACCEPT-3', outcome: 'accept' }) });
+  assert.equal(replay.status, 403);
 });
 
 test('a card parked in verify without the flag has no D-ACCEPT ballot but is still in state.cards for the Now page to list', async () => {
   await post('card/add', { title: 'Unflagged in verify', by: 'owner' });
-  const upd = await post('card/update', { id: '#3', phase: 'verify', by: 'some-agent' });
+  const upd = await post('card/update', { id: '#5', phase: 'verify', by: 'some-agent' });
   assert.equal(upd.status, 200);
   const state = await (await fetch(url('/api/state'))).json();
-  const card = state.cards.find(c => c.num === 3);
+  const card = state.cards.find(c => c.num === 5);
   assert.equal(card.phase, 'verify');
   assert.equal(card.needsAcceptance, false);
-  assert.equal(state.decisions.find(d => d.id === 'D-ACCEPT-3'), undefined);
+  assert.equal(state.decisions.find(d => d.id === 'D-ACCEPT-5'), undefined);
 });

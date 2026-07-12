@@ -506,6 +506,8 @@ const CARD_FIELDS = ['title', 'body', 'kind', 'track', 'epoch', 'milestoneId', '
 // phase override ('verify') when acceptance was minted, else null.
 function applyDoneGate(s, c, targetPhase, by) {
   if (targetPhase !== 'done') return null;
+  if (c.needsAcceptance && by === 'owner')
+    fail('E_ACCEPTANCE_OWNER_UI', `card #${c.num} requires owner verification — caller-supplied by:owner cannot close it; use the dedicated owner verification UI`);
   const items = c.criteria || [];
   const unverified = items.filter(i => i.status !== 'verified');
   const gated = items.length > 0 && unverified.length > 0;
@@ -516,7 +518,7 @@ function applyDoneGate(s, c, targetPhase, by) {
     logEvent(s, { by, action: 'card.criteria-bypass', ref: c.id, note: 'owner bypass' });
     return null;
   }
-  if (c.needsAcceptance && by !== 'owner') {
+  if (c.needsAcceptance) {
     mintAcceptance(s, c);
     return 'verify';
   }
@@ -596,6 +598,9 @@ export function updateCard(s, ref, patch, config) {
       fail('E_NOT_FOUND', `blockedBy: no card or decision ${id}`);
   }
   if ('refs' in patch) checkRefs(patch.refs);
+  const openAcceptance = s.decisions.find(d => d.cardId === c.id && d.group === 'acceptance' && d.status !== 'ratified');
+  if (openAcceptance && 'needsAcceptance' in patch && !(patch.needsAcceptance === true || patch.needsAcceptance === 'true'))
+    fail('E_ACCEPTANCE_OWNER_UI', `${openAcceptance.id} is open — needsAcceptance cannot be cleared to bypass owner verification`);
   assertOwnerLane(c, patch, patch.by);
   const phaseOverride = 'phase' in patch ? applyDoneGate(s, c, patch.phase, patch.by) : null;
   for (const k of CARD_FIELDS) {
@@ -851,6 +856,8 @@ function appendSyntaxChores(s, c, by) {
 
 export function ratify(s, decisionId, outcome, comment, by, quote) {
   const d = s.decisions.find(x => x.id === decisionId) || fail('E_NOT_FOUND', `no decision ${decisionId}`);
+  if (d.group === 'acceptance' || d.id.startsWith('D-ACCEPT-'))
+    fail('E_ACCEPTANCE_OWNER_UI', `${d.id} is an owner-verification ballot — generic ratify, --by owner, and --quote cannot resolve it; use the dedicated owner verification UI`);
   if (!outcome) fail('E_INVALID', 'ratify needs an outcome (option key)');
   if (Array.isArray(d.options) && d.options.length && !d.options.some(o => o.key === outcome))
     fail('E_INVALID', `outcome "${outcome}" is not one of this decision's option keys: ${d.options.map(o => o.key).join(', ')}`);
@@ -859,22 +866,52 @@ export function ratify(s, decisionId, outcome, comment, by, quote) {
   if (comment != null) d.comment = comment;
   d.ratifiedAt = today();
   const c = s.cards.find(x => x.id === d.cardId);
-  // Acceptance ballots (D-ACCEPT-<num>, minted by the done-gate) resolve the
-  // card directly: accept closes it, bounce sends it back to building.
-  if (d.id.startsWith('D-ACCEPT-') && c) {
-    if (outcome === 'accept') {
-      c.phase = 'done';
-      c.log.unshift({ at: today(), by: by || 'owner', text: `Accepted — ${d.id} ratified accept.` });
-    } else if (outcome === 'bounce') {
-      c.phase = 'building';
-      c.log.unshift({ at: today(), by: by || 'owner', text: `Bounced back to building: ${comment || '(no comment)'}` });
-    }
-    c.updated = today();
-  }
   if (d.group === 'syntax') appendSyntaxChores(s, c, by);
   advanceClearedCard(s, d.cardId);
   logEvent(s, { by: by || 'owner', action: 'decision.ratify', ref: d.id, note: quoteNote ? `${outcome} (${quoteNote})` : outcome });
   return d;
+}
+
+// Acceptance has a transport-distinct mutation. The only resolver is minted
+// in server memory and never exposed through the CLI or generic route table.
+// This prevents caller-controlled `by`, quotes, and batch payloads from
+// crossing the owner-verification boundary.
+export function createAcceptanceResolver() {
+  const authority = Symbol('tower-owner-acceptance');
+  return (s, decisionId, outcome, comment, provenance, presentedAuthority = authority) => {
+    if (presentedAuthority !== authority) fail('E_ACCEPTANCE_OWNER_UI', 'invalid owner-verification authority');
+    const d = s.decisions.find(x => x.id === decisionId) || fail('E_NOT_FOUND', `no decision ${decisionId}`);
+    if (d.group !== 'acceptance' || !d.id.startsWith('D-ACCEPT-'))
+      fail('E_ACCEPTANCE_OWNER_UI', `${d.id} is not an owner-verification ballot`);
+    if (d.status === 'ratified') fail('E_INVALID', `${d.id} is already resolved`);
+    if (outcome !== 'accept' && outcome !== 'bounce') fail('E_INVALID', 'acceptance outcome must be accept or bounce');
+    if (!provenance || provenance.kind !== 'owner-ui' || !provenance.session || !provenance.challenge)
+      fail('E_ACCEPTANCE_OWNER_UI', 'missing owner-verification provenance');
+    const c = s.cards.find(x => x.id === d.cardId) || fail('E_NOT_FOUND', `no card for ${d.id}`);
+
+    d.status = 'ratified';
+    d.outcome = outcome;
+    if (comment != null) d.comment = comment;
+    d.ratifiedAt = today();
+    d.provenance = Object.freeze({ ...provenance });
+    d.provenanceHistory = [...(d.provenanceHistory || []), Object.freeze({ ...provenance })];
+    if (outcome === 'accept') {
+      c.phase = 'done';
+      c.log.unshift({ at: today(), by: 'owner', text: `Accepted — ${d.id} resolved through owner verification UI.` });
+    } else {
+      c.phase = 'building';
+      c.log.unshift({ at: today(), by: 'owner', text: `Bounced back to building: ${comment || '(no comment)'}` });
+    }
+    c.updated = today();
+    logEvent(s, { by: 'owner', action: 'acceptance.resolve', ref: d.id,
+      note: `owner-ui session=${provenance.session} challenge=${provenance.challenge} outcome=${outcome}` });
+    return d;
+  };
+}
+
+export function auditAcceptanceRejection(s, decisionId, route, reason, by) {
+  logEvent(s, { by: by || 'unknown', action: 'acceptance.reject', ref: decisionId || 'unknown',
+    note: `${route}: ${reason}` });
 }
 
 export function reopenDecision(s, decisionId, by) {

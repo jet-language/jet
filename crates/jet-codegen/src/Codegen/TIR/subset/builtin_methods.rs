@@ -221,6 +221,7 @@ pub(crate) fn is_http_type(recv_type: Option<&str>) -> bool {
             "HttpClientReq"
                 | "HttpClientResp"
                 | "HttpMux"
+                | "HttpHandler"
                 | "HttpSrvReq"
                 | "HttpSrvResp"
                 | "HttpServer"
@@ -248,7 +249,8 @@ pub(crate) fn is_http_method_name(recv_type: Option<&str>, method: &str) -> bool
                 | "send"
         ),
         Some("HttpClientResp") => matches!(method, "status" | "body" | "header" | "cookies"),
-        Some("HttpMux") => matches!(method, "get" | "post" | "put" | "delete" | "patch"),
+        Some("HttpMux") => matches!(method, "get" | "post" | "put" | "delete" | "patch" | "head" | "options" | "middleware"),
+        Some("HttpHandler") => method == "handle",
         Some("HttpSrvReq") => matches!(
             method,
             "method" | "path" | "body" | "param" | "header" | "body_len" | "under_limit"

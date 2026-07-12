@@ -58,7 +58,11 @@ underlines line up under wide characters and emoji.
 
 Lint warnings use the same shape with `Warning [L02xx]:` instead of
 `Error [E02xx]:`. Lints do not block compilation; the driver prints them
-before continuing.
+before continuing. This is the default and stays the default (D-LINTPOLICY1=A,
+the override law) — a team opts a named lint into a build failure only through
+`pkg.jet`'s `policy: { lints: { deny: […] } }`, which turns a matching lint
+into E1293 (see the package management diagnostics table). No other gate may
+duplicate this — it is the one surface for lint walls (I8).
 
 ## Voice rules
 
@@ -614,6 +618,7 @@ before continuing.
 | E1290 | jetpack | real JetOS replacement proof was requested with fake/script VM tools (D-JOS-REALGUEST1) |
 | E1291 | jetpack | a jetos real-tier system option/service/package has no NixOS mapping (D-JOS-NIXBACKEND1) |
 | E1292 | jet   | signing key generation needs cryptographic randomness (D-CRYPTO-KEYGEN-DIAG1, D-CRYPTO-KEYGEN-CODE2) |
+| E1293 | jet   | a lint denied by `pkg.jet` `policy.lints.deny` fired — build failure instead of a warning (D-LINTPOLICY1, the override law) |
 | E2001 | jet   | `pkg.jet` requests an edition this toolchain can't provide (E2-M2, D-REL3) |
 | E2002 | jet   | a deprecated item is used past its migration window (E2-M2, D-REL5) |
 | E2101 | jet   | unknown or moved command spelling, with the canonical grouped spelling (E2-M3, D-DX, D-CLI-SURFACE1, D-CLI-SURFACE2) |
@@ -1411,6 +1416,7 @@ snapshots in `tests/jetpack.rs` (the `tests/ui/` harness only renders front-end
 | E1290 | jetos real VM proof needs real tools. | D-JOS-REALGUEST1=C requires actual installed-guest behavior before JetOS can claim NixOS replacement readiness. Script fixtures and fake QEMU tools may test harness plumbing, but they cannot close replacement acceptance. | Rerun without `--real` for plumbing tests, or put real QEMU/image/media tools on PATH before claiming replacement proof. |
 | E1291 | jetos real tier could not map every system declaration to NixOS. | D-JOS-NIXBACKEND1=C generates a hidden NixOS backend from the checked `SystemPlan` and refuses to silently drop an option, service, or package it cannot translate — every unmapped declaration is listed together, before `nix` ever runs. | Rename or drop the unmapped keys/packages/services, or map them to the nearest supported real-tier option (see the option/service/package mapping table for `--real`). |
 | E1292 | Jet could not create the package-signing key. | The operating system could not provide cryptographic randomness. | Retry as a new operation on a supported host; no key files were created. |
+| E1293 | `` lint `{code}` is denied by policy: {what} `` | D-LINTPOLICY1=A (the override law): warnings never fail a build by default — but `pkg.jet`'s `policy: { lints: { deny: […] } }` is the one surface a team uses to wall a named lint into a build failure. This fires in place of the plain warning, once, when a listed lint's code matches. | Fix the underlying lint (same fix the warning already gave), or remove the code from `policy.lints.deny` if this team no longer wants the wall. |
 | L0203 | `use {name}#{selector};` isn't pinned to an exact version. | An inline script dependency (U11) has no lockfile until `jet fetch --lock` runs; a loose selector (`1.4` rather than `1.4.2`) can resolve to a different version on a fresh clone (D-JPK-SCRIPTDEP1). | Write the exact version Jet resolved (`use {name}#<major.minor.patch>;`), or run `jet fetch --lock` to pin it in `<script>.lock`. |
 | L0204 | `{field}` in `{file}` has no `env.*` equivalent yet. | `jet bridge flake` (U16) is a best-effort translator; some `flake.nix`/`devenv.nix` fields (`shellHook`, multiple named devShells, `buildInputs` vs `nativeBuildInputs`) have no ratified `env.*` spelling. | Review the generated shim and add `{field}`'s effect by hand if you need it — the shim is a starting point, not a full translation. |
 | L0205 | Build sandboxing is unavailable; adapter builds will run unsandboxed. | D-JPK-NODAEMON1 forbids privileged helpers and daemons. When the platform cannot offer an unprivileged sandbox, Jetpack must say so instead of silently downgrading. | Run `jetpack config sandbox require` to refuse fallback. |

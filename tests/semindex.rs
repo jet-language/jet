@@ -317,6 +317,85 @@ fn run() {
 }
 
 #[test]
+fn semindex_dossier_bypass_facts() {
+    // D-LINTPOLICY1=A (the override law, card #505): every spelled bypass
+    // — `#Unsafe(reason)` region, `#Unsafe(reason) fn`, `.drop(reason)`, and
+    // `#[allow(lint)]` — surfaces as a fact in the dossier, program-wide.
+    let src = r#"
+struct Invoice {
+    #[allow(float_money)]
+    price: Float,
+}
+
+#Unsafe("caller must ensure the pointer is valid") fn risky_fn() {
+    print("danger")
+}
+
+fn run() {
+    #Unsafe("index checked against len") {
+        print("audited")
+    }
+    #Unsafe("risky_fn's contract is upheld here") {
+        risky_fn()
+    }
+    fetch_it().drop("telemetry only")
+}
+
+fn fetch_it() -> Int {
+    return 1
+}
+"#;
+    let path = temp_fixture("dossier_bypass_facts.jet", src);
+    let idx = open(&path).expect("bypass-fact fixture indexes");
+    let dossier = idx.dossier("run");
+
+    let kinds: Vec<&str> = dossier
+        .bypass_facts
+        .iter()
+        .map(|b| b.kind.as_str())
+        .collect();
+    assert!(
+        kinds.contains(&"lint_allow"),
+        "expected a lint_allow bypass fact, got: {kinds:?}"
+    );
+    assert!(
+        kinds.contains(&"unsafe_region"),
+        "expected an unsafe_region bypass fact, got: {kinds:?}"
+    );
+    assert!(
+        kinds.contains(&"unsafe_fn"),
+        "expected an unsafe_fn bypass fact, got: {kinds:?}"
+    );
+    assert!(
+        kinds.contains(&"explicit_drop"),
+        "expected an explicit_drop bypass fact, got: {kinds:?}"
+    );
+
+    let allow = dossier
+        .bypass_facts
+        .iter()
+        .find(|b| b.kind.as_str() == "lint_allow")
+        .expect("lint_allow fact present");
+    assert_eq!(allow.site, "price");
+    assert_eq!(allow.detail, "float_money");
+
+    let drop = dossier
+        .bypass_facts
+        .iter()
+        .find(|b| b.kind.as_str() == "explicit_drop")
+        .expect("explicit_drop fact present");
+    assert_eq!(drop.detail, "telemetry only");
+
+    let json = dossier.to_json();
+    assert!(json.contains("\"bypass_facts\""));
+    assert!(json.contains("\"lint_allow\""));
+
+    let text = dossier.render_text();
+    assert!(text.contains("bypass facts"));
+    assert!(text.contains("float_money"));
+}
+
+#[test]
 fn jet_semindex_cli_json_smoke() {
     let bin = PathBuf::from(env!("CARGO_BIN_EXE_jet"));
     let path = fixture("basics/hello.jet");

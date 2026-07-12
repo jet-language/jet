@@ -1830,7 +1830,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 // D-NETDEP1=A / D-HTTPLIB1=A: HTTP server method call.
                 THandleOp::HttpServerMethod { kind, method } => {
                     match (kind.as_str(), method.as_str()) {
-                        ("HttpMux", "get" | "post" | "put" | "delete" | "patch") => {
+                        ("HttpMux", "get" | "post" | "put" | "delete" | "patch" | "head" | "options") => {
                             format!(
                                 "{{ {}jet_http_mux_add(&({}), \"{}\", &({}), {}) }}",
                                 root,
@@ -1840,6 +1840,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                                 a(1)
                             )
                         }
+                        ("HttpMux", "middleware") => {
+                            format!("{{ {}jet_http_mux_middleware(&({}), {}) }}", root, recv, a(0))
+                        }
+                        ("HttpHandler", "handle") => format!("({})({})", recv, a(0)),
                         ("HttpSrvReq", "method") => {
                             format!("{}jet_http_srv_req_method(&({}))", root, recv)
                         }

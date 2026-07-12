@@ -8,7 +8,7 @@ use jet_sema::{effect_key, SemIndexEffectFacts};
 use std::collections::HashMap;
 
 use crate::Json::{convert_defs, convert_effects, convert_refs};
-use crate::Types::{CallEdge, DefinitionAnchor, DefinitionFact, MemberFact, MemberKind, MemberOrigin, SemIndex, StructuralNode, StructuralSlotKind, SymbolDef, SymbolKind};
+use crate::Types::{BypassFact, BypassKind, CallEdge, DefinitionAnchor, DefinitionFact, MemberFact, MemberKind, MemberOrigin, SemIndex, StructuralNode, StructuralSlotKind, SymbolDef, SymbolKind};
 
 /// The semantic kind of a defined symbol (LSP-facing; uses AST types internally).
 #[derive(Debug, Clone)]
@@ -90,6 +90,9 @@ pub struct SymbolDB {
     pub hover: Vec<HoverEntry>,
     pub inlay: Vec<InlayHint>,
     pub nodes: Vec<StructuralNode>,
+    /// D-LINTPOLICY1=A: every spelled bypass (`#Unsafe`, `.drop(reason)`,
+    /// `#[allow(lint)]`) collected during the walk.
+    pub bypasses: Vec<BypassFact>,
 }
 
 struct CallerFrame {
@@ -121,6 +124,7 @@ impl SymbolDB {
             hover: Vec::new(),
             inlay: Vec::new(),
             nodes: Vec::new(),
+            bypasses: Vec::new(),
         }
     }
 
@@ -138,6 +142,7 @@ impl SymbolDB {
             self.nodes.clone(),
             definition_facts,
         );
+        self.index.set_bypasses(self.bypasses.clone());
     }
 
     /// Find the definition whose def_span contains `offset` in module at `path`.
@@ -396,6 +401,28 @@ fn record_func_type_nodes(f: &AST::Func, mp: &str, ctx: &mut WalkCtx<'_>) {
     }
 }
 
+/// D-LINTPOLICY1=A: record one `BypassFact` per lint name inside an
+/// `#[allow(lint, …)]` marker (D-DECIMAL1 and kin) — any marker whose
+/// `name` is `"allow"`, wherever it appears (struct or field).
+fn collect_allow_markers(markers: &[AST::Marker], site: &str, mp: &str, ctx: &mut WalkCtx<'_>) {
+    for marker in markers {
+        if marker.name != "allow" {
+            continue;
+        }
+        for arg in &marker.args {
+            if let AST::Expr::Ident(lint_name, _) = arg {
+                ctx.db.bypasses.push(BypassFact {
+                    kind: BypassKind::LintAllow,
+                    site: site.to_string(),
+                    detail: lint_name.clone(),
+                    module_path: mp.to_string(),
+                    span: marker.span.into(),
+                });
+            }
+        }
+    }
+}
+
 fn record_call(ctx: &mut WalkCtx<'_>, mp: &str, callee: &str, span: Span) {
     if let Some(caller) = &ctx.caller {
         ctx.db.calls.push(CallEdge {
@@ -636,6 +663,18 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 text: hover_text,
             });
             ctx.db.defs.push(sym);
+            // D-LINTPOLICY1=A: `#Unsafe("reason") fn …` is a spelled
+            // whole-function bypass, distinct from an in-body `#Unsafe`
+            // region.
+            if f.is_unsafe {
+                ctx.db.bypasses.push(BypassFact {
+                    kind: BypassKind::UnsafeFn,
+                    site: f.name.clone(),
+                    detail: f.unsafe_reason.clone().unwrap_or_default(),
+                    module_path: mp.to_string(),
+                    span: f.unsafe_span.unwrap_or(f.name_span).into(),
+                });
+            }
             // param defs
             for p in &f.params {
                 if p.name == Syntax::KW_SELF {
@@ -672,6 +711,13 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
             structural_slot(ctx, "field_types", StructuralSlotKind::List, |ctx| {
                 for field in &s.fields { record_node(ctx, "type", "type", mp, field.ty_span); }
             });
+            // D-LINTPOLICY1=A: `#[allow(lint)]` (D-DECIMAL1 and kin) is a
+            // spelled source-level lint suppression — the struct itself, and
+            // each field, may carry one.
+            collect_allow_markers(&s.serde_markers, &s.name, mp, ctx);
+            for field in &s.fields {
+                collect_allow_markers(&field.serde_markers, &field.name, mp, ctx);
+            }
             for field in &s.fields {
                 if let Some(computed) = &field.computed {
                     structural_slot(ctx, "computed_fields", StructuralSlotKind::List, |ctx| collect_expr(computed, mp, ctx));
@@ -1275,8 +1321,19 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
             structural_slot(ctx, "condition", StructuralSlotKind::Scalar, |ctx| collect_expr(cond, mp, ctx));
             structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx));
         }
+        // D-LINTPOLICY1=A: an `#Unsafe("reason") { … }` audited region is a
+        // spelled bypass — record it before recursing into its body.
+        AST::Stmt::Unsafe { audit, body, span } => {
+            ctx.db.bypasses.push(BypassFact {
+                kind: BypassKind::UnsafeRegion,
+                site: active_scope(ctx).to_string(),
+                detail: audit.clone().unwrap_or_default(),
+                module_path: mp.to_string(),
+                span: (*span).into(),
+            });
+            structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx));
+        }
         AST::Stmt::Loop { body, .. }
-        | AST::Stmt::Unsafe { body, .. }
         | AST::Stmt::Impure { body, .. }
         | AST::Stmt::Reactive { body, .. }
         | AST::Stmt::Shield { body, .. }
@@ -1443,6 +1500,25 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
             ctx.db
                 .refs
                 .push(scoped_ref(method.clone(), *method_span, mp, ctx));
+            // D-LINTPOLICY1=A: `.drop("reason")` is the sole intentional
+            // discard spelling (D-IGNORERET2) — a spelled bypass of the
+            // must-use return-value check. Record it before the args walk.
+            if method == Syntax::METHOD_DROP {
+                let reason = args.first().and_then(|a| match &a.expr {
+                    AST::Expr::Str(parts, _) => match parts.as_slice() {
+                        [AST::StrPart::Lit(s)] => Some(s.clone()),
+                        _ => None,
+                    },
+                    _ => None,
+                });
+                ctx.db.bypasses.push(BypassFact {
+                    kind: BypassKind::ExplicitDrop,
+                    site: active_scope(ctx).to_string(),
+                    detail: reason.unwrap_or_default(),
+                    module_path: mp.to_string(),
+                    span: (*method_span).into(),
+                });
+            }
             structural_slot(ctx, "args", StructuralSlotKind::List, |ctx| {
                 for arg in args { collect_expr(&arg.expr, mp, ctx); }
             });

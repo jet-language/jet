@@ -267,6 +267,13 @@ pub(crate) fn run_compile_cmd(
         }
     }
 
+    // D-LINTPOLICY1=A (the override law): visible lints from this compile,
+    // captured here (out of the `match` arm's scope) so the `policy.lints`
+    // deny-path enforcement below can see them alongside the already-loaded
+    // `pkg.jet` manifest.
+    #[allow(unused_assignments)]
+    let mut visible_lints: Vec<jet::Diagnostics::Diagnostic> = Vec::new();
+
     let compile_result = if cmd == "build" {
         jet::compile_programmable_build_opts(
             file,
@@ -298,6 +305,7 @@ pub(crate) fn run_compile_cmd(
                 // D-A11YGATE1=B (c134 Phase 6): a11y lints (E2930/E2931) are opt-in
                 // via `jet lint --a11y`; ordinary build/run never surfaces them.
                 let lints = crate::CmdDevTools::visible_lints(&out.lints);
+                visible_lints = lints.clone();
                 if !lints.is_empty() {
                     if mode.json {
                         eprint!("{}", jet::render_all_json(file, &src, &lints));
@@ -381,6 +389,17 @@ pub(crate) fn run_compile_cmd(
                     let violations = jet::Jetpack::EffectBudget::enforce(&entries, &manifest);
                     if !violations.is_empty() {
                         report_problems(mode, file, &src, &violations);
+                        exit(ExitCodes::USER_ERROR);
+                    }
+                    // D-LINTPOLICY1=A (the override law): a team's
+                    // `policy.lints.deny` promotes named lints from warnings
+                    // to a build failure (E1293); absent entirely, every
+                    // lint above already printed as a warning and nothing
+                    // blocks (I1/D-LINTPOLICY1 default).
+                    let lint_violations =
+                        jet::Jetpack::LintPolicy::enforce(&visible_lints, &manifest);
+                    if !lint_violations.is_empty() {
+                        report_problems(mode, file, &src, &lint_violations);
                         exit(ExitCodes::USER_ERROR);
                     }
                     // Record per-dependency effect provenance + grants in the

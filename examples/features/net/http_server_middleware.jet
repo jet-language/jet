@@ -1,0 +1,40 @@
+// D-HTTP-SERVER2=A: middleware composes on the same Handler server engine.
+use core.http.client as Client
+use core.http.server as Server
+use core.tasks as tasks
+use core.time as time
+
+fn outer(next: HttpHandler) -> HttpHandler {
+    return (req: HttpSrvReq) => next.handle(req).header("x-outer", "after")
+}
+
+fn inner(next: HttpHandler) -> HttpHandler {
+    return (req: HttpSrvReq) => if req.path() == "/blocked" {
+        Server.response(403, "blocked")
+    } else {
+        next.handle(req).header("x-inner", "after")
+    }
+}
+
+fn run() {
+    mux :: Server.mux()
+    mux.middleware(outer)
+    mux.middleware(inner)
+    mux.get("/ok", (req: HttpSrvReq) => Server.response(200, "handler"))
+    mux.get("/blocked", (req: HttpSrvReq) => Server.response(200, "must not run"))
+
+    server :: Server.bind("127.0.0.1:0", mux) ?? panic("bind")
+    addr :: server.local_addr() ?? panic("address")
+    serving :: tasks.spawn(() => server.serve() ?? panic("serve"))
+    time.sleep(20)
+    success :: Client.get("http://{addr}/ok") ?? panic("ok")
+    print(success.status())
+    print(success.body())
+    print(success.header("x-inner") ?? "missing")
+    print(success.header("x-outer") ?? "missing")
+    blocked :: Client.get("http://{addr}/blocked") ?? panic("blocked")
+    print(blocked.status())
+    print(blocked.body())
+    server.shutdown(time.ms(100)) ?? panic("shutdown")
+    serving.join()
+}

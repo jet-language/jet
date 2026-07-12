@@ -555,6 +555,62 @@ fn parse_trust_decision(value: &str) -> Result<TrustDecision, ManifestError> {
     }
 }
 
+/// D-LINTPOLICY1=A (the override law): parse `policy: { lints: { deny: […] } }`.
+/// `deny:` is the only ratified field — the law makes warn-never-block the
+/// default, so there is no `allow:` to widen (host/org policy narrows, never
+/// widens; already law).
+pub(super) fn parse_lints_policy(body: &str) -> Result<Option<Vec<String>>, ManifestError> {
+    let Some(lints_body) = super::Helpers::block_body(body, Syntax::POLICY_FIELD_LINTS, '{', '}')
+    else {
+        return Ok(None);
+    };
+    let mut deny = Vec::new();
+    for (key, value) in key_value_entries(&lints_body) {
+        if key == Syntax::LINTS_FIELD_DENY {
+            deny = parse_lint_code_list(value.trim())?;
+        } else {
+            return Err(ManifestError::BadLintsPolicy {
+                detail: format!(
+                    "unknown `policy.lints` field `{key}` — allowed: `{}`",
+                    Syntax::LINTS_FIELD_DENY,
+                ),
+            });
+        }
+    }
+    Ok(Some(deny))
+}
+
+/// A `[L0504, L0801]`-shaped list of lint codes (D-LINTPOLICY1). Each entry
+/// must be shaped like a lint code (`L` followed by 4 digits, the same code
+/// shown in `Warning [L0504]: …`); existence in the diagnostic registry is
+/// not checked here — an unknown-but-well-shaped code simply never fires,
+/// same as an unused Rust `#[allow(...)]`.
+fn parse_lint_code_list(value: &str) -> Result<Vec<String>, ManifestError> {
+    let names = parse_string_list(value).map_err(|_| ManifestError::BadLintsPolicy {
+        detail: format!(
+            "`{}:` must be a list like `[L0504, L0801]`",
+            Syntax::LINTS_FIELD_DENY
+        ),
+    })?;
+    for name in &names {
+        if !is_lint_code_shape(name) {
+            return Err(ManifestError::BadLintsPolicy {
+                detail: format!("`{name}` isn't shaped like a lint code (`L` + 4 digits)"),
+            });
+        }
+    }
+    Ok(names)
+}
+
+fn is_lint_code_shape(s: &str) -> bool {
+    let mut chars = s.chars();
+    if chars.next() != Some('L') {
+        return false;
+    }
+    let rest: Vec<char> = chars.collect();
+    rest.len() == 4 && rest.iter().all(|c| c.is_ascii_digit())
+}
+
 /// A `[ Db, Net ]`-shaped list of effect names, each validated against the
 /// closed D-EFF4 vocabulary (`crate::Sema::Effects::Effect`). D-EFFTREE1: an
 /// entry may be a dotted effect path (`Fs.Read`) — only the root is checked

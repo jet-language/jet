@@ -775,7 +775,14 @@ impl<'a> Checker<'a> {
                             }
                             self.note_move_if_direct_ident(e);
                             if let Some(et) = et {
-                                if et != rt {
+                                let http_handler_lambda = matches!(
+                                    (&rt, &et),
+                                    (Type::Named(name), Type::Fn { params, ret: Some(ret), .. })
+                                        if name == "HttpHandler"
+                                            && params == &vec![Type::Named("HttpSrvReq".to_string())]
+                                            && ret.as_ref() == &Type::Named("HttpSrvResp".to_string())
+                                );
+                                if et != rt && !http_handler_lambda {
                                     self.diags.push(Diagnostic::error(
                                         "E0113",
                                         format!(

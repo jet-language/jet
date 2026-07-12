@@ -141,6 +141,14 @@ function cmdCard(store, { pos, flags }) {
         if (flags[f] !== undefined) patch[k] = flags[f];
       if (flags.blockedBy !== undefined) patch.blockedBy = flags.blockedBy === '' ? [] : String(flags.blockedBy).split(',');
       if (flags.refs !== undefined) patch.refs = flags.refs === '' ? [] : String(flags.refs).split(',').map(x => x.trim()).filter(Boolean);
+      const current = db.findCard(store.load(), ref);
+      const openAcceptance = current && store.load().decisions.find(d => d.cardId === current.id && d.group === 'acceptance' && d.status !== 'ratified');
+      const clearsAcceptance = 'needsAcceptance' in patch && !(patch.needsAcceptance === true || patch.needsAcceptance === 'true');
+      if (current && (current.needsAcceptance && patch.phase === 'done' && by === 'owner' || openAcceptance && clearsAcceptance)) {
+        const id = openAcceptance?.id || `D-ACCEPT-${current.num}`;
+        store.mutate((s) => db.auditAcceptanceRejection(s, id, 'cli card update', 'owner-verification bypass rejected', by));
+        throw new TowerError('E_ACCEPTANCE_OWNER_UI', `card #${current.num} requires the dedicated owner verification UI`);
+      }
       const { result, state } = store.mutate((s, cfg) => db.updateCard(s, ref, patch, cfg), { expectRev: flags.expectRev });
       return out(flags, `updated card #${result.num} → ${db.laneOf(result, state.decisions, state.cards).lane}`, result);
     }
@@ -222,6 +230,12 @@ function cmdDecision(store, { pos, flags }) {
       return out(flags, `updated decision ${result.id}${p.ready ? ' — ballot-ready' : ''}`, result);
     }
     case 'ratify': {
+      const decision = store.load().decisions.find(d => d.id === id);
+      if (decision && (decision.group === 'acceptance' || decision.id.startsWith('D-ACCEPT-'))) {
+        store.mutate((s) => db.auditAcceptanceRejection(s, id, 'cli decision ratify',
+          'CLI cannot resolve owner verification', by));
+        throw new TowerError('E_ACCEPTANCE_OWNER_UI', `${id} requires the dedicated owner verification UI; --by owner and --quote are not accepted`);
+      }
       const { result } = store.mutate((s) => db.ratify(s, id, flags.outcome, flags.comment, by, flags.quote), { expectRev: flags.expectRev });
       return out(flags, `ratified ${result.id} → ${result.outcome}`, result);
     }
@@ -622,7 +636,7 @@ const HELP = `tower — file-backed project board for an owner + AI agents
   tower decision list|show|add|update|ratify|reopen|delete
   tower decision add --draft                              save a work-in-progress ballot, skip validation
   tower decision update <id> --ready                       validate + clear draft
-  tower decision ratify <id> --outcome K [--quote "…"]     agents need --quote; owner needs nothing
+  tower decision ratify <id> --outcome K [--quote "…"]     generic ballots only; acceptance requires owner UI
   tower verdict '#N' --outcome "..." [--title "…"] --by owner
                                             record an owner ruling as a ratified decision (not a log note)
   tower archive  status|show <id>|restore <id> --by owner

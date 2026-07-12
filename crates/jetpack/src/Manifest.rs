@@ -414,6 +414,9 @@ fn to_diagnostic(path: &Path, err: &ManifestError) -> Diagnostic {
         ManifestError::BadTrustPolicy { detail } => {
             e1206(&file, &format!("`policy.trust` is malformed: {detail}"))
         }
+        ManifestError::BadLintsPolicy { detail } => {
+            e1206(&file, &format!("`policy.lints` is malformed: {detail}"))
+        }
     }
 }
 

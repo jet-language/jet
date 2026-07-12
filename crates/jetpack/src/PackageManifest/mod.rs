@@ -47,8 +47,8 @@ use super::RefSpec::{RefError, Source};
 use crate::Syntax;
 use Helpers::block_body;
 use ParseBlocks::{
-    parse_build_allow, parse_deps, parse_effects, parse_grants, parse_package, parse_packages,
-    parse_trust_policy,
+    parse_build_allow, parse_deps, parse_effects, parse_grants, parse_lints_policy, parse_package,
+    parse_packages, parse_trust_policy,
 };
 
 /// D-BUILDPROFILE1: optimization level for a named build profile. Stored in
@@ -242,6 +242,12 @@ pub struct PackManifest {
     /// D-JPK-GRANTSCHEMA1=A: reviewed trust policy facts for the unified grant
     /// graph.
     pub trust_policy: Option<TrustPolicy>,
+    /// D-LINTPOLICY1=A (the override law): lint codes from
+    /// `policy: { lints: { deny: […] } }` that fail the build when they fire.
+    /// `None` when no `policy.lints` block is present at all (warn-never-block
+    /// stays the default, I1/D-LINTPOLICY1); `Some(vec![])` is an explicit
+    /// empty deny list (a no-op wall).
+    pub lints_deny: Option<Vec<String>>,
 }
 
 /// Why a `pkg.jet` package manifest could not be parsed. These are internal
@@ -287,6 +293,9 @@ pub enum ManifestError {
     BadEffectsBlock { detail: String },
     /// D-JPK-GRANTSCHEMA1=A: malformed `policy.trust`.
     BadTrustPolicy { detail: String },
+    /// D-LINTPOLICY1=A: malformed `policy.lints` — an unknown field, a
+    /// non-list `deny:` value, or an entry not shaped like a lint code.
+    BadLintsPolicy { detail: String },
 }
 
 /// Top-level keys reserved for a future Jet feature; using them non-empty
@@ -372,6 +381,13 @@ pub fn parse(text: &str) -> Result<PackManifest, ManifestError> {
         None => None,
     };
 
+    // D-LINTPOLICY1=A: `policy: { lints: { deny: […] } }` — absent entirely
+    // means warn-never-block stays the default.
+    let lints_deny = match block_body(&text, Syntax::MANIFEST_BLOCK_POLICY, '{', '}') {
+        Some(body) => parse_lints_policy(&body)?,
+        None => None,
+    };
+
     for &section in RESERVED_SECTIONS {
         if let Some(body) = block_body(&text, section, '{', '}') {
             if !body.trim().is_empty() {
@@ -391,6 +407,7 @@ pub fn parse(text: &str) -> Result<PackManifest, ManifestError> {
         effects_deny,
         grants,
         trust_policy,
+        lints_deny,
     })
 }
 

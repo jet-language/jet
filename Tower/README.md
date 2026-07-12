@@ -48,6 +48,9 @@ Migrating from a v3-era board: `node Tower/tower.mjs import old-tower.json --nam
   gates `--phase done` for anyone but the owner, and the verifier must differ
   from whoever met it. Flag a card `needsAcceptance` to also require an owner
   accept/bounce ballot (auto-minted) once its checklist is clean.
+  Acceptance is owner-UI-only: generic ratify, batch clearance, CLI
+  `--by owner`, and agent quotes cannot resolve `D-ACCEPT-*`; rejected
+  attempts remain in the audit log.
 - **Decisions** — ballot-ready choices attached to a card; only the owner
   ratifies. A card with an open decision surfaces as **Decide** no matter its
   stage.

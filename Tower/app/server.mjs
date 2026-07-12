@@ -40,6 +40,12 @@ const send = (res, code, obj) => { res.writeHead(code, { 'content-type': 'applic
 // BOOT identifies this server process; clients reload (when idle) if it
 // changes, so a server upgrade never leaves stale UI code running.
 const BOOT = randomBytes(6).toString('base64url');
+const ACCEPTANCE_TTL_MS = 30_000;
+const OWNER_SESSION_TTL_MS = 8 * 60 * 60 * 1000;
+const OWNER_SESSION_COOKIE = 'tower-owner-session';
+const ownerSessions = new Map();
+const acceptanceChallenges = new Map();
+const resolveAcceptance = db.createAcceptanceResolver();
 const TOWER_BIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'tower.mjs');
 const projected = (store) => ({ ...store.project(), boot: BOOT, cli: `node ${TOWER_BIN}` });
 const sseClients = new Set();
@@ -114,14 +120,34 @@ const routes = {
 };
 
 const STATUS = { E_NOT_FOUND: 404, E_INVALID: 400, E_USAGE: 400, E_CONFLICT: 409, E_CLAIMED: 409, E_NO_DATA: 500, E_CRITERIA: 409, E_CRITERIA_SELF: 400,
-  E_BALLOT: 400, E_OWNER_ONLY: 403, E_OWNER_LANE: 403, E_HAS_RATIFIED: 409, E_HANDOFF: 400 };
+  E_BALLOT: 400, E_OWNER_ONLY: 403, E_OWNER_LANE: 403, E_ACCEPTANCE_OWNER_UI: 403, E_HAS_RATIFIED: 409, E_HANDOFF: 400 };
 
 // ---- auth ----------------------------------------------------------------------
 const PUBLIC = new Set(['/manifest.webmanifest', '/sw.js', '/icon.svg']);
 const COOKIE = (token) => `tower=${token}; Path=/; Max-Age=31536000; SameSite=Lax; HttpOnly`;
+const OWNER_COOKIE = (token) => `${OWNER_SESSION_COOKIE}=${token}; Path=/; Max-Age=${OWNER_SESSION_TTL_MS / 1000}; SameSite=Strict; HttpOnly`;
+const cookieValue = (req, name) => new RegExp(`(?:^|;\\s*)${name}=([^;]+)`).exec(req.headers.cookie || '')?.[1];
 function isLocal(req) {
   const a = req.socket.remoteAddress || '';
   return a === '127.0.0.1' || a === '::1' || a.startsWith('::ffff:127.');
+}
+function ownerLoopback(req) {
+  if (!isLocal(req)) return false;
+  const forwarded = String(req.headers['x-forwarded-for'] || '').trim();
+  return !forwarded || forwarded === '127.0.0.1' || forwarded === '::1';
+}
+function ownerSession(req) {
+  const token = cookieValue(req, OWNER_SESSION_COOKIE);
+  const session = token && ownerSessions.get(token);
+  if (!session || session.expires < Date.now()) {
+    if (token) ownerSessions.delete(token);
+    return null;
+  }
+  return { token, ...session };
+}
+function auditAcceptanceReject(store, decisionId, route, reason, by) {
+  store.mutate((s) => db.auditAcceptanceRejection(s, decisionId, route, reason, by));
+  broadcast(store);
 }
 // A locked-out navigation gets a real unlock page, never raw JSON.
 const UNLOCK_HTML = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -180,6 +206,14 @@ export function serve(store, port = 7878, open = false) {
       const url = new URL(req.url, 'http://x');
       const ok = authed(req, res, token, url);
       if (ok !== true) return;
+
+      // A loopback browser navigation establishes an HttpOnly, process-local
+      // owner UI session. It is not a file-readable/static bearer credential.
+      if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html') && ownerLoopback(req) && !ownerSession(req)) {
+        const sessionToken = randomBytes(32).toString('base64url');
+        ownerSessions.set(sessionToken, { auditId: randomBytes(8).toString('base64url'), expires: Date.now() + OWNER_SESSION_TTL_MS });
+        res.setHeader('set-cookie', OWNER_COOKIE(sessionToken));
+      }
 
       // ---- reads ----
       if (req.method === 'GET' && url.pathname === '/api/state') return send(res, 200, projected(store));
@@ -262,11 +296,72 @@ export function serve(store, port = 7878, open = false) {
         broadcast(store);
         return send(res, 200, { ok: true, state: projected(store) });
       }
+      if (req.method === 'POST' && (url.pathname === '/api/acceptance/challenge' || url.pathname === '/api/acceptance/resolve')) {
+        const p = await jsonBody(req);
+        const route = url.pathname.slice(5);
+        const reject = (message) => {
+          auditAcceptanceReject(store, p.decisionId, route, message, 'owner-ui-rejected');
+          return send(res, 403, { error: 'E_ACCEPTANCE_OWNER_UI', message });
+        };
+        if (!ownerLoopback(req)) return reject('owner verification is accepted only from a direct loopback connection');
+        if (req.headers['x-tower-owner-action'] !== 'verify') return reject('missing owner verification UI interaction marker');
+        const session = ownerSession(req);
+        if (!session) return reject('missing or expired owner UI session');
+
+        if (url.pathname.endsWith('/challenge')) {
+          const s = store.load();
+          const d = s.decisions.find(x => x.id === p.decisionId);
+          if (!d || d.status === 'ratified' || d.group !== 'acceptance' || !d.id.startsWith('D-ACCEPT-'))
+            return reject('decision is not a live owner-verification ballot');
+          if (p.outcome !== 'accept' && p.outcome !== 'bounce') return reject('acceptance outcome must be accept or bounce');
+          const c = s.cards.find(x => x.id === d.cardId);
+          if (!c || c.phase !== 'verify') return reject('owner-verification card is not in verify');
+          const challenge = randomBytes(32).toString('base64url');
+          acceptanceChallenges.set(challenge, { session: session.token, sessionAudit: session.auditId,
+            challengeAudit: randomBytes(8).toString('base64url'), decisionId: d.id, outcome: p.outcome,
+            expires: Date.now() + ACCEPTANCE_TTL_MS });
+          return send(res, 200, { ok: true, result: { challenge, expiresInMs: ACCEPTANCE_TTL_MS } });
+        }
+
+        const challenge = acceptanceChallenges.get(p.challenge);
+        if (p.challenge) acceptanceChallenges.delete(p.challenge); // consume before every validation: one attempt only
+        if (!challenge || challenge.expires < Date.now()) return reject('missing, expired, or replayed owner-verification challenge');
+        if (challenge.session !== session.token) return reject('owner-verification challenge belongs to another UI session');
+        if (challenge.decisionId !== p.decisionId) return reject('owner-verification challenge is bound to another decision');
+        if (challenge.outcome !== p.outcome) return reject('owner-verification challenge is bound to another outcome');
+        const provenance = { kind: 'owner-ui', session: session.auditId, challenge: challenge.challengeAudit,
+          issuedFor: challenge.decisionId, outcome: challenge.outcome, resolvedAt: new Date().toISOString() };
+        const { result } = store.mutate((s) => resolveAcceptance(s, p.decisionId, p.outcome, p.comment, provenance));
+        broadcast(store);
+        return send(res, 200, { ok: true, result, state: projected(store) });
+      }
       if (req.method === 'POST' && url.pathname.startsWith('/api/')) {
         const name = url.pathname.slice(5);
         const fn = routes[name];
         if (!fn) return send(res, 404, { error: 'E_USAGE', message: `unknown route ${name}` });
         const p = await jsonBody(req);
+        if (name === 'clearance' || name === 'clearance/batch') {
+          const ids = name === 'clearance' ? [p.decisionId] : (p.decisions || []).map(d => d.decisionId);
+          const acceptance = ids.filter(id => {
+            const d = store.load().decisions.find(x => x.id === id);
+            return d && (d.group === 'acceptance' || d.id.startsWith('D-ACCEPT-'));
+          });
+          if (acceptance.length) {
+            for (const id of acceptance) auditAcceptanceReject(store, id, name, 'generic clearance cannot resolve owner verification', p.by);
+            return send(res, 403, { error: 'E_ACCEPTANCE_OWNER_UI', message: 'owner-verification ballots require the dedicated owner UI action' });
+          }
+        }
+        if (name === 'card/update') {
+          const s = store.load();
+          const c = db.findCard(s, p.id);
+          const ballot = c && s.decisions.find(d => d.cardId === c.id && d.group === 'acceptance' && d.status !== 'ratified');
+          const clearsFlag = 'needsAcceptance' in p && !(p.needsAcceptance === true || p.needsAcceptance === 'true');
+          if (c?.needsAcceptance && p.phase === 'done' && p.by === 'owner' || ballot && clearsFlag) {
+            const id = ballot?.id || `D-ACCEPT-${c.num}`;
+            auditAcceptanceReject(store, id, name, 'caller-supplied by:owner or flag clearing cannot bypass owner verification', p.by);
+            return send(res, 403, { error: 'E_ACCEPTANCE_OWNER_UI', message: 'owner verification requires the dedicated owner UI action' });
+          }
+        }
         const { result } = store.mutate((s, cfg) => fn(s, p, cfg), { expectRev: p.expectRev });
         // side effect: new ballots/questions push to the owner's devices
         if (name === 'decision/add' || name === 'question/add') pushOwner(store, name);

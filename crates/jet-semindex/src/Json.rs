@@ -4,8 +4,8 @@ use jet_foundation::Diagnostics::Span;
 
 use crate::Build::{SymDef, SymKind, SymRef};
 use crate::Types::{
-    CallEdge, DefinitionFact, EffectFact, MemberFact, MemberKind, MemberOrigin, SemIndex, SourceSpan, SymbolDef,
-    SymbolKind, SymbolRef, TypeDossier,
+    BypassFact, BypassKind, CallEdge, DefinitionFact, EffectFact, MemberFact, MemberKind, MemberOrigin, SemIndex,
+    SourceSpan, SymbolDef, SymbolKind, SymbolRef, TypeDossier,
 };
 
 fn escape(s: &str) -> String {
@@ -223,13 +223,15 @@ impl TypeDossier {
         };
         let members: Vec<String> = self.members.iter().map(json_member).collect();
         let refs: Vec<String> = self.references.iter().map(json_ref).collect();
+        let bypasses: Vec<String> = self.bypass_facts.iter().map(json_bypass).collect();
         format!(
-            "{{\"schema_version\":{},\"target\":{},\"definition\":{},\"members\":[{}],\"references\":[{}]}}",
+            "{{\"schema_version\":{},\"target\":{},\"definition\":{},\"members\":[{}],\"references\":[{}],\"bypass_facts\":[{}]}}",
             self.schema_version,
             json_str(&self.target),
             def_json,
             members.join(","),
-            refs.join(",")
+            refs.join(","),
+            bypasses.join(",")
         )
     }
 
@@ -270,8 +272,50 @@ impl TypeDossier {
                 r.module_path, r.span.start, r.span.end
             ));
         }
+        // D-LINTPOLICY1=A: every spelled bypass in the program, named and
+        // recorded — the override law's audit clause made visible.
+        out.push_str(&format!(
+            "bypass facts\n  count: {}\n",
+            self.bypass_facts.len()
+        ));
+        for b in &self.bypass_facts {
+            let detail = if b.detail.is_empty() {
+                "(no reason given)".to_string()
+            } else {
+                b.detail.clone()
+            };
+            out.push_str(&format!(
+                "  {} at `{}` ({}) @ {}:{}..{}\n",
+                bypass_kind_text(b.kind),
+                b.site,
+                detail,
+                b.module_path,
+                b.span.start,
+                b.span.end
+            ));
+        }
         out
     }
+}
+
+fn bypass_kind_text(kind: BypassKind) -> &'static str {
+    match kind {
+        BypassKind::UnsafeRegion => "#Unsafe region",
+        BypassKind::UnsafeFn => "#Unsafe fn",
+        BypassKind::ExplicitDrop => ".drop(reason)",
+        BypassKind::LintAllow => "#[allow(lint)]",
+    }
+}
+
+fn json_bypass(b: &BypassFact) -> String {
+    format!(
+        "{{\"kind\":{},\"site\":{},\"detail\":{},\"module_path\":{},\"span\":{}}}",
+        json_str(b.kind.as_str()),
+        json_str(&b.site),
+        json_str(&b.detail),
+        json_str(&b.module_path),
+        json_span(b.span)
+    )
 }
 
 fn origin_text(origin: &MemberOrigin) -> String {

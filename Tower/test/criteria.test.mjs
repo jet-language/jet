@@ -9,6 +9,9 @@ import { openStore, empty, TowerError } from '../app/store.mjs';
 import { writeJSON } from '../app/paths.mjs';
 import * as db from '../app/store.mjs';
 
+const resolveAcceptance = db.createAcceptanceResolver();
+const ownerProvenance = (outcome) => ({ kind: 'owner-ui', session: 'test-session', challenge: `test-${outcome}`, issuedFor: 'D-ACCEPT-1', outcome });
+
 const fresh = () => {
   const dir = mkdtempSync(join(tmpdir(), 'tower-test-'));
   writeJSON(join(dir, 'tower.json'), empty('Test'));
@@ -75,7 +78,7 @@ test('flagged card: agent done-attempt with clean checklist mints D-ACCEPT, stay
   assert.match(d.title, /Accept #1/);
   assert.deepEqual(d.options.map(o => o.key), ['accept', 'bounce']);
 
-  st.mutate((s) => db.ratify(s, 'D-ACCEPT-1', 'accept', null, 'owner'));
+  st.mutate((s) => resolveAcceptance(s, 'D-ACCEPT-1', 'accept', null, ownerProvenance('accept')));
   const s2 = st.load();
   assert.equal(s2.cards[0].phase, 'done');
   assert.equal(s2.decisions.find(x => x.id === 'D-ACCEPT-1').status, 'ratified');
@@ -89,7 +92,7 @@ test('flagged card: owner bounce reopens to building with the comment logged', (
   assert.equal(before.cards[0].phase, 'verify');
   assert.ok(before.decisions.find(x => x.id === 'D-ACCEPT-1'));
 
-  st.mutate((s) => db.ratify(s, 'D-ACCEPT-1', 'bounce', 'not there yet — missing edge case', 'owner'));
+  st.mutate((s) => resolveAcceptance(s, 'D-ACCEPT-1', 'bounce', 'not there yet — missing edge case', ownerProvenance('bounce')));
   const s2 = st.load();
   assert.equal(s2.cards[0].phase, 'building');
   const logText = s2.cards[0].log.map(l => l.text).join(' | ');
@@ -111,7 +114,7 @@ test('after a bounce, a fresh done-attempt re-opens the same D-ACCEPT id (no id 
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A', needsAcceptance: true }, cfg));
   st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'agent-1' }, cfg));
-  st.mutate((s) => db.ratify(s, 'D-ACCEPT-1', 'bounce', 'fix it', 'owner'));
+  st.mutate((s) => resolveAcceptance(s, 'D-ACCEPT-1', 'bounce', 'fix it', ownerProvenance('bounce')));
   assert.equal(st.load().cards[0].phase, 'building');
   // round 2
   st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'agent-1' }, cfg));

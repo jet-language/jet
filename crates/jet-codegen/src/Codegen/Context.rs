@@ -609,6 +609,7 @@ impl Cx {
             Type::Named(name) if name == "HttpClientReq" => "JetHttpClientReq".to_string(),
             Type::Named(name) if name == "HttpClientResp" => "JetHttpClientResp".to_string(),
             Type::Named(name) if name == "HttpMux" => "JetHttpMux".to_string(),
+            Type::Named(name) if name == "HttpHandler" => "JetHttpMuxHandlerFn".to_string(),
             Type::Named(name) if name == "HttpServer" => "JetHttpServer".to_string(),
             Type::Named(name) if name == "HttpShutdownReport" => "JetHttpShutdownReport".to_string(),
             Type::Named(name) if name == "HttpSrvReq" => "JetHttpSrvReq".to_string(),

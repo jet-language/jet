@@ -150,5 +150,100 @@ fn server_handle_binds_serves_and_rejects_second_shutdown() {
     let report = jet_http_server_shutdown(&server, &jet_std::Duration { ms: 100 }).expect("shutdown");
     assert_eq!(report.user_completed, 1);
     assert!(jet_http_server_shutdown(&server, &jet_std::Duration { ms: 100 }).unwrap_err().contains("already requested"));
-    assert_eq!(serve_thread.join().expect("serve join").completed, 1);
+    assert_eq!(serve_thread.join().expect("serve join").user_completed, 1);
+    assert!(jet_http_server_serve(&server)
+        .unwrap_err()
+        .contains("only be served once"));
+}
+
+#[test]
+fn canonical_router_precedence_methods_and_conflicts() {
+    let mux = jet_http_mux_new();
+    jet_http_mux_add(&mux, "GET", "/files/{*path}", |req| {
+        jet_http_srv_response(200, &format!("wild:{}", jet_http_srv_req_param(&req, &"path".to_string()).unwrap()))
+    });
+    jet_http_mux_add(&mux, "GET", "/files/{id}", |req| {
+        jet_http_srv_response(200, &format!("param:{}", jet_http_srv_req_param(&req, &"id".to_string()).unwrap()))
+    });
+    jet_http_mux_add(&mux, "GET", "/files/static", |_| jet_http_srv_response(200, &"static".to_string()));
+    jet_http_mux_add(&mux, "POST", "/files/{id}", |_| jet_http_srv_response(201, &"posted".to_string()));
+
+    let request = |method: &str, path: &str| JetHttpSrvReq {
+        method: method.to_string(), path: path.to_string(), params: Default::default(),
+        body: String::new(), headers: Default::default(),
+    };
+    assert_eq!(jet_http_mux_dispatch(&mux, request("GET", "/files/static")).body, "static");
+    assert_eq!(jet_http_mux_dispatch(&mux, request("GET", "/files/42")).body, "param:42");
+    assert_eq!(jet_http_mux_dispatch(&mux, request("GET", "/files/a/b")).body, "wild:a/b");
+    let head = jet_http_mux_dispatch(&mux, request("HEAD", "/files/static"));
+    assert_eq!(head.status, 200);
+    assert!(head.body.is_empty());
+    assert_eq!(jet_http_mux_dispatch(&mux, request("DELETE", "/files/42")).status, 405);
+    let options = jet_http_mux_dispatch(&mux, request("OPTIONS", "/files/42"));
+    assert_eq!(options.status, 204);
+    assert_eq!(options.headers.get("Allow").unwrap(), "GET, HEAD, OPTIONS, POST");
+
+    let conflict = jet_http_mux_new();
+    jet_http_mux_add(&conflict, "GET", "/users/{id}", |_| jet_http_srv_response(200, &String::new()));
+    jet_http_mux_add(&conflict, "GET", "/users/{name}", |_| jet_http_srv_response(200, &String::new()));
+    assert!(jet_http_server_bind(&"127.0.0.1:0".to_string(), conflict).err().expect("conflict").contains("route conflict"));
+    let legacy = jet_http_mux_new();
+    jet_http_mux_add(&legacy, "GET", "/users/:id", |_| jet_http_srv_response(200, &String::new()));
+    assert!(jet_http_server_bind(&"127.0.0.1:0".to_string(), legacy).err().expect("legacy pattern").contains("use `{name}`"));
+}
+
+#[test]
+fn middleware_orders_short_circuits_contains_panics_and_isolates_requests() {
+    let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mux = jet_http_mux_new();
+    for name in ["outer", "inner"] {
+        let events = events.clone();
+        jet_http_mux_middleware(&mux, move |next| {
+            let events = events.clone();
+            let name = name.to_string();
+            std::sync::Arc::new(move |req| {
+                events.lock().unwrap().push(format!("{name}:before:{}", req.path));
+                let response = next(req.clone());
+                events.lock().unwrap().push(format!("{name}:after:{}", req.path));
+                response
+            })
+        });
+    }
+    jet_http_mux_add(&mux, "GET", "/ok/{id}", |req| {
+        jet_http_srv_response(200, &jet_http_srv_req_param(&req, &"id".to_string()).unwrap())
+    });
+    jet_http_mux_add(&mux, "GET", "/panic", |_| panic!("private failure detail"));
+    let request = |path: &str| JetHttpSrvReq {
+        method: "GET".to_string(), path: path.to_string(), params: Default::default(),
+        body: String::new(), headers: Default::default(),
+    };
+    assert_eq!(jet_http_mux_dispatch(&mux, request("/ok/one")).body, "one");
+    assert_eq!(&*events.lock().unwrap(), &[
+        "outer:before:/ok/one", "inner:before:/ok/one",
+        "inner:after:/ok/one", "outer:after:/ok/one",
+    ]);
+    let panic_response = jet_http_mux_dispatch(&mux, request("/panic"));
+    assert_eq!(panic_response.status, 500);
+    assert_eq!(panic_response.body, "500 Internal Server Error");
+
+    let short = jet_http_mux_new();
+    let handler_calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    jet_http_mux_middleware(&short, |_| std::sync::Arc::new(|_| jet_http_srv_response(403, &"blocked".to_string())));
+    let calls = handler_calls.clone();
+    jet_http_mux_add(&short, "GET", "/", move |_| {
+        calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        jet_http_srv_response(200, &"wrong".to_string())
+    });
+    assert_eq!(jet_http_mux_dispatch(&short, request("/")).status, 403);
+    assert_eq!(handler_calls.load(std::sync::atomic::Ordering::Relaxed), 0);
+
+    let mut threads = Vec::new();
+    for id in 0..16 {
+        let mux = mux.clone();
+        threads.push(std::thread::spawn(move || {
+            let req = JetHttpSrvReq { method: "GET".to_string(), path: format!("/ok/{id}"), params: Default::default(), body: String::new(), headers: Default::default() };
+            assert_eq!(jet_http_mux_dispatch(&mux, req).body, id.to_string());
+        }));
+    }
+    for thread in threads { thread.join().unwrap(); }
 }

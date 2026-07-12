@@ -82,6 +82,46 @@ pub struct MemberFact {
     pub span: SourceSpan,
 }
 
+/// D-LINTPOLICY1=A (the override law): the kind of spelled bypass a
+/// `BypassFact` records. Every expert escape hatch this law governs is
+/// audited the same way — named at the site, never hidden.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BypassKind {
+    /// `#Unsafe("reason") { … }` — an audited region (S58).
+    UnsafeRegion,
+    /// `#Unsafe("reason") fn …` — an audited whole-function contract (S58).
+    UnsafeFn,
+    /// `.drop("reason")` — the sole intentional-discard spelling (D-IGNORERET2).
+    ExplicitDrop,
+    /// `#[allow(lint)]` — a source-level lint suppression (D-DECIMAL1 and kin).
+    LintAllow,
+}
+
+impl BypassKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            BypassKind::UnsafeRegion => "unsafe_region",
+            BypassKind::UnsafeFn => "unsafe_fn",
+            BypassKind::ExplicitDrop => "explicit_drop",
+            BypassKind::LintAllow => "lint_allow",
+        }
+    }
+}
+
+/// D-LINTPOLICY1=A: one spelled bypass, as the override law's audit clause
+/// requires — every bypass lands in the record, not just the flag/marker at
+/// the site. `site` names what was bypassed (a function, a call's receiver
+/// expression, a field); `detail` carries the reason string (`#Unsafe`/
+/// `.drop`) or the suppressed lint name (`#[allow(...)]`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BypassFact {
+    pub kind: BypassKind,
+    pub site: String,
+    pub detail: String,
+    pub module_path: String,
+    pub span: SourceSpan,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypeDossier {
     pub schema_version: u32,
@@ -89,6 +129,12 @@ pub struct TypeDossier {
     pub definition: Option<SymbolDef>,
     pub members: Vec<MemberFact>,
     pub references: Vec<SymbolRef>,
+    /// D-LINTPOLICY1=A: every spelled bypass in the whole checked program
+    /// (`#Unsafe(reason)`, `.drop(reason)`, `#[allow(lint)]`) — the override
+    /// law's audit clause made concrete. Program-wide, not scoped to
+    /// `target`, so a dossier is where a reviewer sees every expert escape
+    /// hatch at once.
+    pub bypass_facts: Vec<BypassFact>,
 }
 
 /// One named definition in the program.
@@ -198,6 +244,10 @@ pub struct SemIndex {
     members: Vec<MemberFact>,
     nodes: Vec<StructuralNode>,
     definition_facts: Vec<DefinitionFact>,
+    /// D-LINTPOLICY1=A: spelled bypasses across the whole checked program.
+    /// Set separately from the constructor (`set_bypasses`) so existing
+    /// callers of `SemIndex::new` are unaffected.
+    bypasses: Vec<BypassFact>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -226,7 +276,19 @@ impl SemIndex {
             members,
             nodes,
             definition_facts,
+            bypasses: Vec::new(),
         }
+    }
+
+    /// D-LINTPOLICY1=A: attach the whole-program bypass facts collected
+    /// during the walk. Separate from `new` so it can be filled after the
+    /// walk without reordering every existing constructor call.
+    pub(crate) fn set_bypasses(&mut self, bypasses: Vec<BypassFact>) {
+        self.bypasses = bypasses;
+    }
+
+    pub fn bypasses(&self) -> &[BypassFact] {
+        &self.bypasses
     }
 
     pub fn schema_version(&self) -> u32 {
@@ -314,12 +376,22 @@ impl SemIndex {
                 .then(a.span.start.cmp(&b.span.start))
                 .then(a.span.end.cmp(&b.span.end))
         });
+        // D-LINTPOLICY1=A: bypass facts are program-wide, not `target`-scoped
+        // — the dossier is where every spelled expert escape hatch is
+        // visible in one audit, not just the ones touching this symbol.
+        let mut bypass_facts = self.bypasses.clone();
+        bypass_facts.sort_by(|a, b| {
+            a.module_path
+                .cmp(&b.module_path)
+                .then(a.span.start.cmp(&b.span.start))
+        });
         TypeDossier {
             schema_version: SCHEMA_VERSION,
             target: owner.to_string(),
             definition,
             members,
             references,
+            bypass_facts,
         }
     }
 

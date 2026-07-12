@@ -65,6 +65,34 @@ test('cli without init fails with a helpful hint', () => {
   assert.match(r.out, /tower init/);
 });
 
+test('CLI --by owner and --quote cannot resolve acceptance; rejection is audited', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'tower-cli-accept-'));
+  run(cwd, ['init', '--name', 'CLI Accept Guard']);
+  run(cwd, ['card', 'add', '--title', 'Owner must inspect', '--by', 'builder']);
+  run(cwd, ['card', 'update', '#1', '--needs-acceptance', 'true', '--by', 'builder']);
+  run(cwd, ['card', 'update', '#1', '--phase', 'done', '--by', 'builder']);
+  for (const args of [
+    ['card', 'update', '#1', '--phase', 'done', '--by', 'owner'],
+    ['card', 'update', '#1', '--needs-acceptance', 'false', '--by', 'owner'],
+  ]) {
+    const rejected = run(cwd, args, false);
+    assert.equal(rejected.code, 1);
+    assert.match(rejected.out, /dedicated owner verification UI/);
+  }
+  for (const args of [
+    ['decision', 'ratify', 'D-ACCEPT-1', '--outcome', 'accept', '--by', 'owner'],
+    ['decision', 'ratify', 'D-ACCEPT-1', '--outcome', 'accept', '--by', 'agent', '--quote', 'accept it'],
+  ]) {
+    const rejected = run(cwd, args, false);
+    assert.equal(rejected.code, 1);
+    assert.match(rejected.out, /dedicated owner verification UI/);
+  }
+  const state = JSON.parse(run(cwd, ['state']).out);
+  assert.equal(state.cards[0].phase, 'verify');
+  assert.equal(state.decisions.find(d => d.id === 'D-ACCEPT-1').status, 'open');
+  assert.equal(state.events.filter(e => e.action === 'acceptance.reject').length, 4);
+});
+
 test('init appends the secrets ignore to an existing data ignore file', () => {
   const cwd = mkdtempSync(join(tmpdir(), 'tower-existing-ignore-'));
   const dataDir = join(cwd, '.tower');

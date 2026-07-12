@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 519,
-    "rev": 4531,
+    "nextNum": 520,
+    "rev": 4550,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -23,7 +23,8 @@
         "radar:e6",
         "radar-sq",
         "radar:e3",
-        "radar:e4"
+        "radar:e4",
+        "radar:e5"
       ]
     },
     "digestCursor": "2026-07-12T12:59:52.783Z"
@@ -5019,8 +5020,28 @@
       "priority": "P0",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-HTTPDEPTH1=A: Hybrid: batteries-included core.http on typed foundations. core.http owns Client, Server, Router, middleware, streaming bodies, forms/multipart, cookies, redirects, timeouts, TLS policy, SSE, and the ratified WebSocket home. It consumes core.url/core.mime/core.net types and lets experts drop lower to those layers without changing the HTTP model.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: corelib audit: core.http — client/server parity with Go net/http + requests ergonomics\n\nCurrent law: Existing linked decisions: D-WS1=ratified/B. D-CORENS1 keeps all first-party modules under core.*; I6 forbids compiler deps; D-STDRUBRIC1 requires mechanical core API laws.\n\nBuild order: Audit current Core/API/prelude/docs/tests first; write failing UI/golden/unit fixtures; implement std-only or approved bridge code; update docs/reference and syntax-decisions when law changes; run targeted tests, then full nix develop -c cargo test before close.\n\nAcceptance: Examples/goldens or UI snapshots prove each shipped behavior; stdlib map records shipped/carded/declined rows; no rustc/user-hostile errors; no compiler external deps.\n\nDependencies/collisions: Respect neighboring core cards: io/args/process separate; text before regex; net/url before http; encoding before data/db; random never owns secrets.",
       "blockedBy": [],
-      "assignee": "terra-301-builder",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "terra-301-builder",
+          "text": "[handoff] Interrupted for owner-verification integrity incident. HTTP safety/lifecycle/router/middleware work preserved and logged; real Jet middleware golden was in progress after Nix 504. Resume after #515/#516 acceptance provenance is secured."
+        },
+        {
+          "at": "2026-07-12",
+          "by": "terra-301-builder",
+          "text": "D-HTTP-SERVER2 middleware engine tranche advanced without a parallel facade. HttpMux now stores ratified middleware(fn(next)->Handler) wrappers and dispatch composes declaration order outermost-first, reverse response unwind. Short-circuit responses skip the handler; per-request panic containment maps private failures to redacted 500; Arc/immutable request flow keeps concurrent requests isolated. Sema/TIR recognizes the exact middleware spelling and lowers to the same mux. Isolated production-prelude test passes 1/1 proving outer-before/inner, inner-after/outer, short circuit with zero handler calls, redacted panic mapping, and 16 concurrent parameterized requests. Full real-Jet higher-order closure golden remains required before this public lowering is claimed complete; broad criterion 3 remains open and no criterion met."
+        },
+        {
+          "at": "2026-07-12",
+          "by": "terra-301-builder",
+          "text": "D-HTTP-SERVER2 Router tranche advanced in the same production HttpMux/Server engine: canonical {name} and final {*name} matching replaces prototype :name and bare *; literal > param > wildcard precedence; HEAD explicit-or-GET fallback with body suppression; automatic OPTIONS; 405 plus deterministic Allow; bind-time malformed/legacy/duplicate-equivalent route rejection. Public head/options lowering added across sema/TIR. Isolated production-prelude router test passes 1/1, including static/param/wildcard, HEAD, OPTIONS, 405, conflict and legacy rejection. Cargo integration rerun is temporarily blocked before HTTP by concurrent Jetpack PackManifest lints_deny/BadLintsPolicy incomplete edits; prior lifecycle 4/4 and Jet golden 1/1 remain the parent baseline. Middleware composition and broader criterion remain open; no criterion met."
+        },
+        {
+          "at": "2026-07-12",
+          "by": "terra-301-builder",
+          "text": "D-HTTP-SERVER2 public lifecycle tranche now reaches real Jet source end to end. Added Server.bind/local_addr/serve/shutdown plus ShutdownReport lowering through sema, TIR, codegen into the same bounded production listener engine; fixed generated record ABI to Jet user_* fields with Int-compatible i64 counters. Golden examples/features/net/http_server_lifecycle.jet passes and proves ephemeral bind, real serve task, shutdown report, and join. Real socket tests/http_server_lifecycle.rs passes 4/4: bounded overload 503 with healthy drain, header/body timeouts, grace cancellation with no late response, handle lifecycle plus second-shutdown and second-serve rejection. Broad criterion 3 remains open for Router/middleware, keepalive/pipelining, HTTP/2, TLS same-engine migration, connection/per-IP limits, write/keepalive deadlines, serve_listener and Context form; no criterion falsely met."
+        },
         {
           "at": "2026-07-12",
           "by": "terra-301-builder",
@@ -5156,8 +5177,7 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
-      "claimedAt": "2026-07-12T14:08:37.994Z"
+      "refs": []
     },
     {
       "id": "c0184j6s",
@@ -14753,13 +14773,18 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
       "workOrder": 26,
-      "assignee": null,
+      "assignee": "claude-main",
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "claude-main",
+          "text": "Decisions confirmed genuinely owner-ratified (event log 02:29-02:30 after agent blanket-ratify was reopened 02:22). Slice order: D-LINTPOLICY1 builder launched (sema lint law + inspect dossier + policy.lints deny path). D-SCHEDULE1 next (parser quiet). D-LIVEQUERY1 last — its codegen/ws surface collides with live external codegen agent; also app.live E2E proof blocked by repo-wide #292 jet_std_env_init ICE until that lands."
+        },
         {
           "at": "2026-07-12",
           "by": "claude-main",
@@ -14846,7 +14871,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-12T01:09:49.290Z",
-      "updated": "2026-07-12"
+      "updated": "2026-07-12",
+      "claimedAt": "2026-07-12T14:27:11.578Z"
     },
     {
       "id": "c0n6vj96",
@@ -15319,12 +15345,17 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "done",
+      "phase": "verify",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
       "assignee": "claude-main",
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "codex-orchestrator",
+          "text": "[correction] Owner states he did not perform D-ACCEPT-515 acceptance. Prior owner-attributed ratification is invalid; ballot reopened and card restored to verify. Only an explicit owner verification action may close this card."
+        },
         {
           "at": "2026-07-12",
           "by": "owner",
@@ -15430,12 +15461,17 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "done",
+      "phase": "verify",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
       "assignee": "terra-516-builder",
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "codex-orchestrator",
+          "text": "[correction] Owner states he did not perform D-ACCEPT-516 acceptance. Prior owner-attributed ratification is invalid; ballot reopened and card restored to verify. Only an explicit owner verification action may close this card."
+        },
         {
           "at": "2026-07-12",
           "by": "owner",
@@ -15550,6 +15586,71 @@
       "needsAcceptance": false,
       "created": "2026-07-12T14:24:58.205Z",
       "updated": "2026-07-12"
+    },
+    {
+      "id": "c0n3n975",
+      "num": 519,
+      "title": "Tower: hard owner-only acceptance provenance",
+      "body": "Owner order 2026-07-12: nobody except the owner may accept or bounce needsAcceptance verification. Generic decision ratify, batch clearance, agent quotes, and arbitrary by:owner payloads must never resolve acceptance ballots. Restore #515/#516 and make acceptance provenance mechanically distinct, audited, and regression-tested.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "building",
+      "priority": "P0",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": "terra-519-owner-accept",
+      "log": [
+        {
+          "at": "2026-07-12",
+          "by": "codex-orchestrator",
+          "text": "[start] Owner-only acceptance provenance repair after forged by:owner closure of #515/#516. Both restored before implementation."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Acceptance ballots cannot be resolved by generic decision ratify, clearance batch, agent quote, or caller-supplied by:owner; every bypass attempt is rejected and audited.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T14:46:54.058Z"
+        },
+        {
+          "n": 2,
+          "text": "Dedicated owner-verification action uses server-issued single-use provenance bound to the live owner UI session; replay, missing token, wrong card/outcome, and non-loopback requests fail closed.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T14:46:54.220Z"
+        },
+        {
+          "n": 3,
+          "text": "Accept and bounce still work from the owner verification UI, update card/ballot atomically, and retain explicit immutable provenance distinct from agent verification.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T14:46:54.380Z"
+        },
+        {
+          "n": 4,
+          "text": "Regression tests reproduce the forged #515/#516 path and prove it impossible; #515/#516 remain verify/open until the owner explicitly acts.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T14:46:54.531Z"
+        }
+      ],
+      "refs": [],
+      "needsAcceptance": true,
+      "created": "2026-07-12T14:46:37.170Z",
+      "updated": "2026-07-12",
+      "claimedAt": "2026-07-12T14:47:51.071Z"
     }
   ],
   "decisions": [
@@ -32272,10 +32373,8 @@
         ]
       },
       "draft": false,
-      "status": "ratified",
-      "created": "2026-07-12T13:28:27.601Z",
-      "outcome": "accept",
-      "ratifiedAt": "2026-07-12"
+      "status": "open",
+      "created": "2026-07-12T13:28:27.601Z"
     },
     {
       "id": "D-ACCEPT-516",
@@ -32319,10 +32418,8 @@
         ]
       },
       "draft": false,
-      "status": "ratified",
-      "created": "2026-07-12T13:54:28.211Z",
-      "outcome": "accept",
-      "ratifiedAt": "2026-07-12"
+      "status": "open",
+      "created": "2026-07-12T13:54:28.211Z"
     },
     {
       "id": "D-CLI-OSIMAGE1",
@@ -33231,6 +33328,132 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-12T14:47:51.071Z",
+      "by": "terra-519-owner-accept",
+      "action": "card.claim",
+      "ref": "c0n3n975",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T14:47:12.782Z",
+      "by": "terra-519-owner-accept",
+      "action": "card.claim",
+      "ref": "c0n3n975",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T14:46:54.688Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0n3n975",
+      "note": "phase,logEntry,needsAcceptance"
+    },
+    {
+      "at": "2026-07-12T14:46:54.531Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0n3n975",
+      "note": "#4 Regression tests reproduce the forged #515/#516 path and pro"
+    },
+    {
+      "at": "2026-07-12T14:46:54.380Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0n3n975",
+      "note": "#3 Accept and bounce still work from the owner verification UI,"
+    },
+    {
+      "at": "2026-07-12T14:46:54.221Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0n3n975",
+      "note": "#2 Dedicated owner-verification action uses server-issued singl"
+    },
+    {
+      "at": "2026-07-12T14:46:54.058Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0n3n975",
+      "note": "#1 Acceptance ballots cannot be resolved by generic decision ra"
+    },
+    {
+      "at": "2026-07-12T14:46:37.170Z",
+      "by": "codex-orchestrator",
+      "action": "card.add",
+      "ref": "c0n3n975",
+      "note": "Tower: hard owner-only acceptance provenance"
+    },
+    {
+      "at": "2026-07-12T14:45:27.564Z",
+      "by": "terra-301-builder",
+      "action": "card.release",
+      "ref": "c0075iyb",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-12T14:44:58.467Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0zpoz3m",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T14:44:52.191Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0nqsqn5",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T14:44:46.977Z",
+      "by": "codex-orchestrator",
+      "action": "decision.reopen",
+      "ref": "D-ACCEPT-516",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T14:44:36.133Z",
+      "by": "codex-orchestrator",
+      "action": "decision.reopen",
+      "ref": "D-ACCEPT-515",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T14:36:30.527Z",
+      "by": "terra-301-builder",
+      "action": "card.update",
+      "ref": "c0075iyb",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T14:33:37.081Z",
+      "by": "terra-301-builder",
+      "action": "card.update",
+      "ref": "c0075iyb",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T14:28:21.737Z",
+      "by": "terra-301-builder",
+      "action": "card.update",
+      "ref": "c0075iyb",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T14:27:11.683Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0qdl0gg",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T14:27:11.578Z",
+      "by": "claude-main",
+      "action": "card.claim",
+      "ref": "c0qdl0gg",
+      "note": ""
+    },
     {
       "at": "2026-07-12T14:26:02.459Z",
       "by": "claude-main",
@@ -36604,132 +36827,6 @@
       "action": "card.criteria-add",
       "ref": "c0iftbrr",
       "note": "#8 docs match: spec.md derive/marker chapters, diagnostics.md r"
-    },
-    {
-      "at": "2026-07-12T01:15:57.743Z",
-      "by": "claude-main",
-      "action": "card.criteria-add",
-      "ref": "c0iftbrr",
-      "note": "#7 Debug auto-derives when every field qualifies; @Debug remove"
-    },
-    {
-      "at": "2026-07-12T01:15:57.647Z",
-      "by": "claude-main",
-      "action": "card.criteria-add",
-      "ref": "c0iftbrr",
-      "note": "#6 #Suppress(MustUse) removed from parser/sema/formatter; .drop"
-    },
-    {
-      "at": "2026-07-12T01:15:57.552Z",
-      "by": "claude-main",
-      "action": "card.criteria-add",
-      "ref": "c0iftbrr",
-      "note": "#5 #Wasm/#Js removed from Syntax.rs + parser; #Target(Wasm/Js) "
-    },
-    {
-      "at": "2026-07-12T01:15:57.452Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0iftbrr",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T01:13:15.878Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-LINTPOLICY1",
-      "note": "The override law: warnings never block by default; every bypass is spelled and recorded; teams add walls via policy"
-    },
-    {
-      "at": "2026-07-12T01:13:15.779Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-SCHEDULE1",
-      "note": "Schedule-as-code: a declarative #Every marker on #Task functions"
-    },
-    {
-      "at": "2026-07-12T01:13:15.682Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-LIVEQUERY1",
-      "note": "Live queries: effect-tracked server functions with automatic subscription invalidation"
-    },
-    {
-      "at": "2026-07-12T01:12:27.051Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-FFI-SH1",
-      "note": "Shell as typed text (`Sh`) vs explicit argv-list API"
-    },
-    {
-      "at": "2026-07-12T01:12:26.952Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-FFI-R1",
-      "note": "R binder host model — sidecar R worker vs in-process embed"
-    },
-    {
-      "at": "2026-07-12T01:12:26.855Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-FFI-PHP1",
-      "note": "PHP host model — sidecar worker pool vs embed SAPI"
-    },
-    {
-      "at": "2026-07-12T01:12:26.754Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-FFI-PERL1",
-      "note": "Perl host model — sidecar worker vs in-process embed"
-    },
-    {
-      "at": "2026-07-12T01:12:26.650Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-FFI-RUBY1",
-      "note": "Ruby host model — sidecar worker vs in-process embed"
-    },
-    {
-      "at": "2026-07-12T01:12:26.554Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-FFI-LUA1",
-      "note": "Lua host model — in-process VM vs sidecar worker"
-    },
-    {
-      "at": "2026-07-12T01:12:26.458Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-FFI-FORTRAN1",
-      "note": "Fortran binder — dedicated `fortran.*` root or C-wrap"
-    },
-    {
-      "at": "2026-07-12T01:12:26.361Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-FFI-DOTNET1",
-      "note": ".NET host model — `cs.*` binder (C#, F# ride along)"
-    },
-    {
-      "at": "2026-07-12T01:12:26.263Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-FFI-JVM1",
-      "note": "JVM host model — `java.*` binder (Kotlin, Scala ride along)"
-    },
-    {
-      "at": "2026-07-12T01:12:26.164Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-FFI-GO1",
-      "note": "Go host model — `go.*` binder"
-    },
-    {
-      "at": "2026-07-12T01:09:49.290Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0qdl0gg",
-      "note": "Framework lessons: live queries, schedule-as-code, expert-override law"
     }
   ],
   "nextNum": 368,
