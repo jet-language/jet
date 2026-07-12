@@ -562,7 +562,21 @@ mod tests {
         assert!(output.contains("build ok"), "{output}");
         assert!(output.contains("test failed (1)"), "{output}");
         assert!(output.contains("-> test failed. Rerun: jet test"), "{output}");
-        assert!(output.contains("git master changed") || output.contains("git master clean"), "{output}");
+        let branch = String::from_utf8(
+            Command::new("git")
+                .args(["rev-parse", "--abbrev-ref", "HEAD"])
+                .output()
+                .expect("git rev-parse")
+                .stdout,
+        )
+        .expect("utf8 branch")
+        .trim()
+        .to_string();
+        assert!(
+            output.contains(&format!("git {branch} changed"))
+                || output.contains(&format!("git {branch} clean")),
+            "expected git {branch} changed|clean in: {output}"
+        );
         assert!(output.contains("running build"), "{output}");
         assert_no_esc_after_marker(&output);
         assert!(!output.contains("unknown"), "{output}");
