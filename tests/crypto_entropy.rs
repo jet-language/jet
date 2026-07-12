@@ -269,7 +269,7 @@ fn crypto_runtime_sources_contain_no_predictable_fallback() {
         .expect("crypto random shim closes");
     let sources = [
         include_str!("../crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs"),
-        include_str!("../crates/jetpack/src/Prelude/Crypto.rs"),
+        include_str!("../crates/jet-pkg-model/src/Prelude/Crypto.rs"),
         crypto_random,
     ]
     .join("\n");
@@ -312,7 +312,7 @@ fn golden_i1_scan_strips_only_the_vetted_entropy_module() {
 
 #[test]
 fn keygen_entropy_failure_uses_closed_silent_helper_status() {
-    let ffi = include_str!("../crates/jetpack/src/FFI.rs");
+    let ffi = include_str!("../crates/jet-pkg-model/src/FFI.rs");
     let keygen = ffi
         .split("\"keygen\" => {{")
         .nth(1)

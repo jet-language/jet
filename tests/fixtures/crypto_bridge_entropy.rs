@@ -1,5 +1,5 @@
 include!("../../crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
-include!("../../crates/jetpack/src/Prelude/Crypto.rs");
+include!("../../crates/jet-pkg-model/src/Prelude/Crypto.rs");
 
 #[cfg(test)]
 mod tests {
