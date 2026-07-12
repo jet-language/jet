@@ -362,6 +362,7 @@ mod tests {
 
     fn method(name: &str, is_pub: bool) -> Func {
         Func {
+            span: span(),
             is_pub,
             is_package_pub: false,
             external_type: None,
@@ -371,6 +372,7 @@ mod tests {
             type_params: Vec::new(),
             params: Vec::new(),
             return_type: Some(Type::Named("String".to_string())),
+            return_type_span: Some(span()),
             is_unsafe: false,
             unsafe_reason: None,
             unsafe_span: None,
@@ -400,6 +402,7 @@ mod tests {
     #[test]
     fn type_info_includes_methods_and_type_params() {
         let s = StructDef {
+            span: span(),
             is_pub: true,
             is_package_pub: false,
             name: "Point".to_string(),
