@@ -13,9 +13,9 @@
 use std::io::{self, IsTerminal, Read};
 use std::process::{Command, Stdio};
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 use std::sync::atomic::{AtomicBool, Ordering};
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 use std::sync::Arc;
 
 /// RAII guard: puts the controlling terminal into raw mode and restores the
@@ -92,22 +92,26 @@ impl Drop for RawGuard {
 /// key; evaluation enables `isig` so a tight interpreter loop can be stopped
 /// without a second stdin reader racing the editor.
 pub struct EvaluationInterruptGuard {
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     saved_terminal: String,
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     previous_handler: usize,
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     stop_watcher: Arc<AtomicBool>,
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     watcher: Option<std::thread::JoinHandle<()>>,
 }
 
-#[cfg(target_os = "linux")]
+// POSIX `signal(3)` is deliberately used instead of spelling `struct
+// sigaction`: its layout differs across Darwin and BSD ABIs. The disposition
+// is pointer-sized on every supported Unix ABI; keeping it opaque also lets us
+// faithfully restore SIG_DFL/SIG_IGN values as well as function handlers.
+#[cfg(unix)]
 unsafe extern "C" {
     fn signal(signal: i32, handler: usize) -> usize;
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 extern "C" fn note_evaluation_interrupt(_: i32) {
     crate::Comptime::note_repl_interrupt();
     crate::Comptime::warn_repl_runtime_call_stopping();
@@ -115,11 +119,14 @@ extern "C" fn note_evaluation_interrupt(_: i32) {
 
 impl EvaluationInterruptGuard {
     pub fn enable() -> Option<Self> {
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(unix))]
         {
+            eprintln!(
+                "warning: active REPL evaluation interruption is unavailable on this platform"
+            );
             None
         }
-        #[cfg(target_os = "linux")]
+        #[cfg(unix)]
         {
             let saved = Command::new("stty")
                 .arg("-g")
@@ -184,7 +191,7 @@ impl EvaluationInterruptGuard {
 
 impl Drop for EvaluationInterruptGuard {
     fn drop(&mut self) {
-        #[cfg(target_os = "linux")]
+        #[cfg(unix)]
         {
             self.stop_watcher.store(true, Ordering::SeqCst);
             if let Some(watcher) = self.watcher.take() {

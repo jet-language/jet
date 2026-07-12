@@ -1145,6 +1145,39 @@ fn repl_core_process_run_is_authorized_and_captured() {
     );
 }
 
+#[test]
+fn repl_interrupt_signal_paths_cover_apple_and_bsd_unix() {
+    let terminal = include_str!("../Source/Term.rs");
+    let evaluation_path = terminal
+        .split("pub struct EvaluationInterruptGuard")
+        .nth(1)
+        .and_then(|source| source.split("/// One decoded input event.").next())
+        .expect("evaluation interrupt implementation");
+    assert!(
+        evaluation_path.contains("#[cfg(unix)]"),
+        "raw evaluation interrupt must compile on POSIX Unix"
+    );
+    assert!(
+        !evaluation_path.contains("target_os = \"linux\""),
+        "raw evaluation interrupt must not exclude Apple or BSD"
+    );
+
+    let methods = include_str!("../crates/jet-comptime/src/Comptime/Methods.rs");
+    let forwarding_path = methods
+        .split("static REPL_CHILD_GROUP")
+        .nth(1)
+        .and_then(|source| source.split("// ---------------------------------------------------------------------------").next())
+        .expect("runtime child interrupt forwarding implementation");
+    assert!(
+        forwarding_path.contains("#[cfg(unix)]"),
+        "runtime child forwarding must compile on POSIX Unix"
+    );
+    assert!(
+        !forwarding_path.contains("target_os = \"linux\""),
+        "runtime child forwarding must not exclude Apple or BSD"
+    );
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn repl_tty_ctrl_c_reaches_child_group_and_restores_input() {

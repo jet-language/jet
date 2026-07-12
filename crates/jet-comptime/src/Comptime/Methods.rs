@@ -1706,6 +1706,19 @@ fn pin_repl_command(
     Ok(executable)
 }
 
+#[cfg(target_os = "linux")]
+fn repl_descriptor_path(fd: std::os::fd::RawFd) -> String {
+    format!("/proc/self/fd/{fd}")
+}
+
+// Darwin and BSD expose inherited descriptors through fdescfs at `/dev/fd`.
+// Resolve executable and cwd through the already-open descriptor, preserving
+// the REPL's path-swap protection without relying on Linux `/proc`.
+#[cfg(all(unix, not(target_os = "linux")))]
+fn repl_descriptor_path(fd: std::os::fd::RawFd) -> String {
+    format!("/dev/fd/{fd}")
+}
+
 fn run_repl_process(
     cmd: &[String],
     base_dir: &std::path::Path,
@@ -1741,16 +1754,16 @@ fn run_repl_process(
             return Err(e);
         }
     };
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     use std::os::fd::AsRawFd;
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     use std::os::unix::process::CommandExt;
 
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     let executable = pinned_executable
-        .map(|file| format!("/proc/self/fd/{}", file.as_raw_fd()))
+        .map(|file| repl_descriptor_path(file.as_raw_fd()))
         .unwrap_or_else(|| cmd[0].clone());
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(unix))]
     let executable = if pinned_executable.is_some() {
         let _ = std::fs::remove_file(&stdout_path);
         let _ = std::fs::remove_file(&stderr_path);
@@ -1761,11 +1774,11 @@ fn run_repl_process(
     } else {
         cmd[0].clone()
     };
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     let cwd = verified_root
-        .map(|file| format!("/proc/self/fd/{}", file.as_raw_fd()))
+        .map(|file| repl_descriptor_path(file.as_raw_fd()))
         .unwrap_or_else(|| base_dir.to_string_lossy().into_owned());
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(unix))]
     let cwd = base_dir;
     let mut command = std::process::Command::new(executable);
     command
@@ -1775,7 +1788,7 @@ fn run_repl_process(
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout_file))
         .stderr(Stdio::from(stderr_file));
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     if pinned_executable.is_some() {
         command.process_group(0);
     }
@@ -1788,9 +1801,9 @@ fn run_repl_process(
             return Err(e);
         }
     };
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     let _signal_forward = pinned_executable.map(|_| ReplSignalForward::install(child.id() as i32));
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     let _terminal_signals = pinned_executable.and_then(|_| ReplTerminalSignals::enable());
 
     let deadline = Instant::now() + timeout;
@@ -1799,13 +1812,13 @@ fn run_repl_process(
             Ok(Some(status)) => break status,
             Ok(None) => {}
             Err(e) => {
-                #[cfg(target_os = "linux")]
+                #[cfg(unix)]
                 if pinned_executable.is_some() {
                     kill_repl_process_group(child.id() as i32);
                 } else {
                     let _ = child.kill();
                 }
-                #[cfg(not(target_os = "linux"))]
+                #[cfg(not(unix))]
                 let _ = child.kill();
                 let _ = child.wait();
                 let _ = std::fs::remove_file(&stdout_path);
@@ -1814,13 +1827,13 @@ fn run_repl_process(
             }
         }
         if Instant::now() >= deadline {
-            #[cfg(target_os = "linux")]
+            #[cfg(unix)]
             if pinned_executable.is_some() {
                 kill_repl_process_group(child.id() as i32);
             } else {
                 let _ = child.kill();
             }
-            #[cfg(not(target_os = "linux"))]
+            #[cfg(not(unix))]
             let _ = child.kill();
             let _ = child.wait();
             let _ = std::fs::remove_file(&stdout_path);
@@ -1832,7 +1845,7 @@ fn run_repl_process(
         }
         std::thread::sleep(Duration::from_millis(10));
     };
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     if pinned_executable.is_some() {
         // A command that backgrounds descendants does not get to leak them past
         // the REPL operation boundary after its group leader exits.
@@ -1849,16 +1862,19 @@ fn run_repl_process(
     })
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 static REPL_CHILD_GROUP: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
 
-#[cfg(target_os = "linux")]
+// POSIX `signal(3)` keeps platform-specific `sigaction` layouts out of this
+// std-only crate. Store returned disposition opaquely so nested guards restore
+// either prior Jet handler or SIG_DFL/SIG_IGN exactly.
+#[cfg(unix)]
 unsafe extern "C" {
     fn kill(pid: i32, signal: i32) -> i32;
     fn signal(signal: i32, handler: usize) -> usize;
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 extern "C" fn forward_repl_interrupt(signal_number: i32) {
     super::note_repl_interrupt();
     super::warn_repl_runtime_call_stopping();
@@ -1868,12 +1884,12 @@ extern "C" fn forward_repl_interrupt(signal_number: i32) {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 struct ReplSignalForward {
     previous: usize,
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 impl ReplSignalForward {
     fn install(group: i32) -> Self {
         REPL_CHILD_GROUP.store(group, std::sync::atomic::Ordering::SeqCst);
@@ -1882,7 +1898,7 @@ impl ReplSignalForward {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 impl Drop for ReplSignalForward {
     fn drop(&mut self) {
         REPL_CHILD_GROUP.store(0, std::sync::atomic::Ordering::SeqCst);
@@ -1890,17 +1906,17 @@ impl Drop for ReplSignalForward {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 fn kill_repl_process_group(group: i32) {
     unsafe { kill(-group, 9) };
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 struct ReplTerminalSignals {
     saved: String,
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 impl ReplTerminalSignals {
     fn enable() -> Option<Self> {
         use std::io::IsTerminal;
@@ -1934,7 +1950,7 @@ impl ReplTerminalSignals {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 impl Drop for ReplTerminalSignals {
     fn drop(&mut self) {
         use std::process::Stdio;
@@ -4006,7 +4022,7 @@ fn apply_impure_core_call(
     }
 }
 
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(all(test, unix))]
 mod repl_process_tests {
     use super::run_repl_process;
     use std::time::{Duration, Instant};
