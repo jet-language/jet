@@ -255,6 +255,7 @@ impl<'a> Checker<'a> {
                 self.scopes.last_mut().unwrap().insert(
                     p.name.clone(),
                     LocalInfo {
+                        def_span: p.name_span,
                         ty: pty.clone(),
                         // D-MEM1 S6: `Shared<T>.edit(f)`'s closure param is the one
                         // builtin-closure shape that binds its param mutable with no

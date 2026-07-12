@@ -455,20 +455,23 @@ impl<'a> Checker<'a> {
                 if self.is_string_view(name) && !self.allow_string_view_read {
                     self.report_string_view_unsupported_use(name, "be used directly here", *span);
                 }
-                if let Some(info) = self.lookup(name) {
+                if let Some(info) = self.lookup(name).cloned() {
+                    self.record_local_reference(*span, &info);
                     return Some(info.ty.clone());
                 }
-                if let Some(t) = self.consts.get(name) {
-                    return Some(t.clone());
+                if let Some(t) = self.consts.get(name).cloned() {
+                    self.record_const_reference(name, *span);
+                    return Some(t);
                 }
-                if let Some(sig) = self.funcs.get(name) {
+                if let Some(sig) = self.funcs.get(name).cloned() {
                     // D-METHODMACRO1=A: a bare top-level function name resolved here
                     // is read as a VALUE, not called (a direct call never reaches this
                     // arm — `check_call` short-circuits on a known global function
                     // name before inferring its callee as an expression). This is
                     // exactly "this function's address was taken" for E0918.
+                    self.record_current_function_reference(name, *span);
                     self.inline_addr_taken.insert(name.clone());
-                    return Some(func_sig_to_fn_type(sig));
+                    return Some(func_sig_to_fn_type(&sig));
                 }
                 self.unknown_name(name, *span);
                 None
@@ -1869,16 +1872,16 @@ impl<'a> Checker<'a> {
             }
             if let Some(owner_mod) = self.struct_owner_module(type_name, None) {
                 if let Some(fields) = self.struct_fields_of(owner_mod, type_name) {
-                    for (fname, _, fty, _) in fields {
-                        if fname == member {
+                    if let Some((_, _, fty, _)) = fields.iter().find(|(fname, ..)| fname == member) {
+                        let fty = fty.clone();
                             if owner_mod != self.module_idx
                                 && !self.field_is_pub_in(owner_mod, type_name, member)
                             {
                                 self.diags.push(private_item(member, span));
                                 return None;
                             }
-                            return Some(fty.clone());
-                        }
+                        self.record_field_reference(owner_mod, type_name, member, span);
+                        return Some(fty);
                     }
                     // D-FIELDPOL1: a computed field is never in `fields` (it's
                     // not stored) but a *read* still resolves its declared
@@ -1912,16 +1915,16 @@ impl<'a> Checker<'a> {
             if let Some(owner_mod) = self.struct_owner_module(name, None) {
                 if let Some(fields) = self.struct_fields_of(owner_mod, name) {
                     let subst = self.struct_subst(name, args);
-                    for (fname, _, fty, _) in fields {
-                        if fname == member {
+                    if let Some((_, _, fty, _)) = fields.iter().find(|(fname, ..)| fname == member) {
+                        let fty = fty.clone();
                             if owner_mod != self.module_idx
                                 && !self.field_is_pub_in(owner_mod, name, member)
                             {
                                 self.diags.push(private_item(member, span));
                                 return None;
                             }
-                            return Some(self.trait_reg.instantiate_type(fty, &subst));
-                        }
+                        self.record_field_reference(owner_mod, name, member, span);
+                        return Some(self.trait_reg.instantiate_type(&fty, &subst));
                     }
                     // D-FIELDPOL1: see the `Type::Named` branch above — a
                     // computed field resolves for reads even though it's

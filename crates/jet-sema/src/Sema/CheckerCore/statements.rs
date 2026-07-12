@@ -957,6 +957,7 @@ impl<'a> Checker<'a> {
                             self.scopes.last_mut().unwrap().insert(
                                 v,
                                 LocalInfo {
+                                    def_span: vs,
                                     ty: Type::Int,
                                     mutable: false,
                                     param_conv: None,
@@ -1284,6 +1285,7 @@ impl<'a> Checker<'a> {
                         name,
                         *name_span,
                         LocalInfo {
+                            def_span: *name_span,
                             ty: Type::Named(Syntax::TYPE_TASKGROUP.to_string()),
                             mutable: false,
                             param_conv: None,
@@ -1325,6 +1327,7 @@ impl<'a> Checker<'a> {
                         name,
                         *name_span,
                         LocalInfo {
+                            def_span: *name_span,
                             ty: Type::Named(Syntax::LAYOUT_HANDLE_TYPE.to_string()),
                             mutable: false,
                             param_conv: None,

@@ -748,7 +748,8 @@ fn recovery_rejects_hostile_journal_paths_without_touching_outside_file() {
         .output()
         .unwrap();
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("escapes project"));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("escapes retained project"), "{stderr}");
     assert_eq!(fs::read(&outside).unwrap(), b"outside bytes\n");
     assert!(journal_path.exists(), "hostile journal must remain for inspection");
 }

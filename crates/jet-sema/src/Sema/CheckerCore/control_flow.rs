@@ -15,6 +15,7 @@ impl<'a> Checker<'a> {
                     &name,
                     ifs.span,
                     LocalInfo {
+                        def_span: ifs.span,
                         ty,
                         mutable: false,
                         param_conv: None,

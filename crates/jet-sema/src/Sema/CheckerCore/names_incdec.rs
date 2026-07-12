@@ -12,6 +12,7 @@ impl<'a> Checker<'a> {
                 name,
                 span,
                 LocalInfo {
+                    def_span: span,
                     ty,
                     mutable,
                     param_conv: None,

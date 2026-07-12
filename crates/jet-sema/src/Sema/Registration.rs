@@ -39,6 +39,7 @@ impl<'a> Checker<'a> {
                     self.scopes.last_mut().unwrap().insert(
                         p.name.clone(),
                         LocalInfo {
+                            def_span: p.name_span,
                             ty: self_ty,
                             mutable: matches!(p.convention, AccessConvention::Write),
                             param_conv: Some(p.convention),
@@ -84,6 +85,7 @@ impl<'a> Checker<'a> {
                 self.scopes.last_mut().unwrap().insert(
                     p.name.clone(),
                     LocalInfo {
+                        def_span: p.name_span,
                         ty: pty,
                         mutable: matches!(p.convention, AccessConvention::Write),
                         param_conv: Some(p.convention),
@@ -161,6 +163,7 @@ impl<'a> Checker<'a> {
                 "result",
                 f.name_span,
                 LocalInfo {
+                    def_span: f.name_span,
                     ty: result_ty,
                     mutable: false,
                     param_conv: None,
@@ -2190,6 +2193,7 @@ pub(crate) fn check_func_body(
     let empty_unqualified_file: HashMap<String, (String, usize)> = HashMap::new();
     let empty_func_pub: HashMap<String, bool> = HashMap::new();
     let empty_func_pkg_pub: HashMap<String, bool> = HashMap::new();
+    let mut reference_anchors = HashMap::new();
     let mut ck = Checker {
         funcs,
         registry,
@@ -2204,6 +2208,8 @@ pub(crate) fn check_func_body(
         unqualified_file: &empty_unqualified_file,
         func_pub: &empty_func_pub,
         func_pkg_pub: &empty_func_pkg_pub,
+        module_path: "<memory>",
+        reference_anchors: &mut reference_anchors,
         diags: Vec::new(),
         scopes: vec![HashMap::new()],
         moved: HashMap::new(),

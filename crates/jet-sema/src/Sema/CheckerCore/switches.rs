@@ -62,6 +62,7 @@ impl<'a> Checker<'a> {
                         Syntax::KW_IT,
                         span,
                         LocalInfo {
+                            def_span: span,
                             ty: st,
                             mutable: false,
                             param_conv: None,
@@ -132,6 +133,7 @@ impl<'a> Checker<'a> {
                                 &name,
                                 pspan,
                                 LocalInfo {
+                                    def_span: pspan,
                                     ty,
                                     mutable: false,
                                     param_conv: None,
@@ -165,6 +167,7 @@ impl<'a> Checker<'a> {
                             &name,
                             arm.cond.span(),
                             LocalInfo {
+                                def_span: arm.cond.span(),
                                 ty,
                                 mutable: false,
                                 param_conv: None,

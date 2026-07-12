@@ -279,6 +279,10 @@ fn record_node(ctx: &mut WalkCtx<'_>, class: &str, shape: &str, mp: &str, span: 
     if span.end >= span.start {
         let id = ctx.db.nodes.len();
         let parent = ctx.structural_parents.last().copied();
+        assert!(
+            parent.is_none() || ctx.structural_slot != "root",
+            "compiler structural child missing explicit slot: {class}/{shape}"
+        );
         let ordinal = ctx.db.nodes.iter().filter(|node| {
             node.parent == parent && node.slot == ctx.structural_slot
         }).count();
@@ -575,15 +579,17 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 &f.params,
                 mp,
                 |ctx| {
-                    collect_stmts(&f.body, mp, module, ctx);
+                    structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(&f.body, mp, module, ctx));
                 },
             );
         }
         Item::Struct(s) => {
+            structural_slot(ctx, "field_types", StructuralSlotKind::List, |ctx| {
+                for field in &s.fields { record_node(ctx, "type", "type", mp, field.ty_span); }
+            });
             for field in &s.fields {
-                record_node(ctx, "type", "type", mp, field.ty_span);
                 if let Some(computed) = &field.computed {
-                    collect_expr(computed, mp, ctx);
+                    structural_slot(ctx, "computed_fields", StructuralSlotKind::List, |ctx| collect_expr(computed, mp, ctx));
                 }
             }
             let fields: Vec<(String, AST::Type)> = s
@@ -687,7 +693,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                     },
                     &meth.params,
                     mp,
-                    |ctx| collect_stmts(body, mp, module, ctx),
+                    |ctx| structural_slot(ctx, "method_bodies", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx)),
                 );
             }
             for tb in &s.trait_impls {
@@ -723,7 +729,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                         },
                         &meth.params,
                         mp,
-                        |ctx| collect_stmts(&meth.body, mp, module, ctx),
+                        |ctx| structural_slot(ctx, "method_bodies", StructuralSlotKind::List, |ctx| collect_stmts(&meth.body, mp, module, ctx)),
                     );
                 }
             }
@@ -733,12 +739,12 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 match &variant.payload {
                     AST::VariantPayload::Unit => {}
                     AST::VariantPayload::Single(_, span) => {
-                        record_node(ctx, "type", "type", mp, *span);
+                        structural_slot(ctx, "variant_types", StructuralSlotKind::List, |ctx| { record_node(ctx, "type", "type", mp, *span); });
                     }
                     AST::VariantPayload::Named(fields) => {
-                        for field in fields {
-                            record_node(ctx, "type", "type", mp, field.ty_span);
-                        }
+                        structural_slot(ctx, "variant_types", StructuralSlotKind::List, |ctx| {
+                            for field in fields { record_node(ctx, "type", "type", mp, field.ty_span); }
+                        });
                     }
                 }
             }
@@ -819,7 +825,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                     },
                     &meth.params,
                     mp,
-                    |ctx| collect_stmts(&meth.body, mp, module, ctx),
+                    |ctx| structural_slot(ctx, "method_bodies", StructuralSlotKind::List, |ctx| collect_stmts(&meth.body, mp, module, ctx)),
                 );
             }
             for tb in &e.trait_impls {
@@ -855,7 +861,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                         },
                         &meth.params,
                         mp,
-                        |ctx| collect_stmts(&meth.body, mp, module, ctx),
+                        |ctx| structural_slot(ctx, "method_bodies", StructuralSlotKind::List, |ctx| collect_stmts(&meth.body, mp, module, ctx)),
                     );
                 }
             }
@@ -971,7 +977,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                     },
                     &meth.params,
                     mp,
-                    |ctx| collect_stmts(&meth.body, mp, module, ctx),
+                    |ctx| structural_slot(ctx, "method_bodies", StructuralSlotKind::List, |ctx| collect_stmts(&meth.body, mp, module, ctx)),
                 );
             }
         }
@@ -988,13 +994,13 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 module_path: mp.to_string(),
                 text: format!("const `{}`", c.name),
             });
-            collect_expr(&c.value, mp, ctx);
+            structural_slot(ctx, "value", StructuralSlotKind::Scalar, |ctx| collect_expr(&c.value, mp, ctx));
         }
         Item::Test(t) => {
-            collect_stmts(&t.body, mp, module, ctx);
+            structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(&t.body, mp, module, ctx));
         }
         Item::Bench(b) => {
-            collect_stmts(&b.body, mp, module, ctx);
+            structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(&b.body, mp, module, ctx));
         }
         Item::ExternRust(_) => {}
         Item::Module(m) => {
@@ -1019,15 +1025,15 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
             });
             if let Some(body) = &m.body {
                 let prev = std::mem::replace(&mut ctx.scope_identity, identity);
-                for item in body {
-                    collect_item(item, mp, module, ctx);
-                }
+                structural_slot(ctx, "items", StructuralSlotKind::List, |ctx| {
+                    for item in body { collect_item(item, mp, module, ctx); }
+                });
                 ctx.scope_identity = prev;
             }
         }
         // D-DIST1: distinct types aren't yet indexed for symbols/hover.
         Item::Distinct(value) => {
-            record_node(ctx, "type", "type", mp, value.base_span);
+            structural_slot(ctx, "base", StructuralSlotKind::Scalar, |ctx| { record_node(ctx, "type", "type", mp, value.base_span); });
         }
         // D-TYPEALIAS1: type aliases aren't yet indexed for symbols/hover.
         Item::TypeAlias(value) => {
@@ -1130,17 +1136,17 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
             }
             match kind {
                 AST::ForKind::Range { start, end, step } => {
-                    collect_expr(start, mp, ctx);
-                    collect_expr(end, mp, ctx);
+                    structural_slot(ctx, "range_start", StructuralSlotKind::Scalar, |ctx| collect_expr(start, mp, ctx));
+                    structural_slot(ctx, "range_end", StructuralSlotKind::Scalar, |ctx| collect_expr(end, mp, ctx));
                     if let Some(step) = step {
-                        collect_expr(step, mp, ctx);
+                        structural_slot(ctx, "range_step", StructuralSlotKind::Scalar, |ctx| collect_expr(step, mp, ctx));
                     }
                 }
                 AST::ForKind::In { collection } => {
-                    collect_expr(collection, mp, ctx);
+                    structural_slot(ctx, "collection", StructuralSlotKind::Scalar, |ctx| collect_expr(collection, mp, ctx));
                 }
             }
-            collect_stmts(body, mp, module, ctx);
+            structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx));
         }
         AST::Stmt::Switch {
             subject,
@@ -1156,13 +1162,15 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
             else_body,
             ..
         } => {
-            collect_expr(subject, mp, ctx);
-            for arm in arms {
-                collect_expr(&arm.cond, mp, ctx);
-                collect_stmts(&arm.body, mp, module, ctx);
-            }
+            structural_slot(ctx, "subject", StructuralSlotKind::Scalar, |ctx| collect_expr(subject, mp, ctx));
+            structural_slot(ctx, "arm_conditions", StructuralSlotKind::List, |ctx| {
+                for arm in arms { collect_expr(&arm.cond, mp, ctx); }
+            });
+            structural_slot(ctx, "arm_bodies", StructuralSlotKind::List, |ctx| {
+                for arm in arms { collect_stmts(&arm.body, mp, module, ctx); }
+            });
             if let Some(eb) = else_body {
-                collect_stmts(eb, mp, module, ctx);
+                structural_slot(ctx, "else_body", StructuralSlotKind::List, |ctx| collect_stmts(eb, mp, module, ctx));
             }
         }
         AST::Stmt::CountedLoop {
@@ -1178,9 +1186,9 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
                     ty: None,
                 },
             });
-            collect_expr(&init.init, mp, ctx);
-            collect_expr(cond, mp, ctx);
-            collect_stmts(body, mp, module, ctx);
+            structural_slot(ctx, "initializer", StructuralSlotKind::Scalar, |ctx| collect_expr(&init.init, mp, ctx));
+            structural_slot(ctx, "condition", StructuralSlotKind::Scalar, |ctx| collect_expr(cond, mp, ctx));
+            structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx));
         }
         AST::Stmt::Loop { body, .. }
         | AST::Stmt::Unsafe { body, .. }
@@ -1196,55 +1204,55 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
         | AST::Stmt::Grant { body, .. }
         | AST::Stmt::Transact { body, .. }
         | AST::Stmt::AssumeDet { body, .. } => {
-            collect_stmts(body, mp, module, ctx);
+            structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx));
         }
         AST::Stmt::Break(_)
         | AST::Stmt::Continue(_)
         | AST::Stmt::BreakLabel(..)
         | AST::Stmt::ContinueLabel(..) => {}
         // D-CTMARKER1: collect symbols from comptime block body.
-        AST::Stmt::ComptimeBlock { body, .. } => collect_stmts(body, mp, module, ctx),
+        AST::Stmt::ComptimeBlock { body, .. } => structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx)),
         AST::Stmt::ComptimeIf {
             cond,
             then_body,
             else_body,
             ..
         } => {
-            collect_expr(cond, mp, ctx);
-            collect_stmts(then_body, mp, module, ctx);
+            structural_slot(ctx, "condition", StructuralSlotKind::Scalar, |ctx| collect_expr(cond, mp, ctx));
+            structural_slot(ctx, "then_body", StructuralSlotKind::List, |ctx| collect_stmts(then_body, mp, module, ctx));
             if let Some(eb) = else_body {
-                collect_stmts(eb, mp, module, ctx);
+                structural_slot(ctx, "else_body", StructuralSlotKind::List, |ctx| collect_stmts(eb, mp, module, ctx));
             }
         }
         AST::Stmt::ContextBlock { fields, body, .. } => {
-            for (_, e, _) in fields {
-                collect_expr(e, mp, ctx);
-            }
-            collect_stmts(body, mp, module, ctx);
+            structural_slot(ctx, "fields", StructuralSlotKind::List, |ctx| {
+                for (_, e, _) in fields { collect_expr(e, mp, ctx); }
+            });
+            structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx));
         }
         // D-TERM1 (ratified 2026-06-22): collect symbols from live block body.
         AST::Stmt::Live { body, .. } => {
-            collect_stmts(body, mp, module, ctx);
+            structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx));
         }
         // D-DOTSCOPE1: collect symbols from a scope-member region body.
         AST::Stmt::ScopeMember { body, .. } => {
-            collect_stmts(body, mp, module, ctx);
+            structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx));
         }
         // D-IGNORERET2=A: collect symbols from suppress-must-use block body.
         AST::Stmt::SuppressMustUse { body, .. } => {
-            collect_stmts(body, mp, module, ctx);
+            structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx));
         }
     }
     if structural_id.is_some() { ctx.structural_parents.pop(); }
 }
 
 fn collect_if(if_stmt: &AST::IfStmt, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<'_>) {
-    collect_expr(&if_stmt.cond, mp, ctx);
-    collect_stmts(&if_stmt.then_body, mp, module, ctx);
+    structural_slot(ctx, "condition", StructuralSlotKind::Scalar, |ctx| collect_expr(&if_stmt.cond, mp, ctx));
+    structural_slot(ctx, "then_body", StructuralSlotKind::List, |ctx| collect_stmts(&if_stmt.then_body, mp, module, ctx));
     if let Some(eb) = &if_stmt.else_branch {
         match eb {
-            AST::ElseBranch::ElseIf(inner) => collect_if(inner, mp, module, ctx),
-            AST::ElseBranch::Else(body) => collect_stmts(body, mp, module, ctx),
+            AST::ElseBranch::ElseIf(inner) => structural_slot(ctx, "else_if", StructuralSlotKind::Scalar, |ctx| collect_if(inner, mp, module, ctx)),
+            AST::ElseBranch::Else(body) => structural_slot(ctx, "else_body", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx)),
         }
     }
 }
@@ -1257,21 +1265,21 @@ fn collect_lvalue(lv: &AST::LValue, mp: &str, ctx: &mut WalkCtx<'_>) {
                 .push(scoped_ref(name.clone(), *name_span, mp, ctx));
         }
         AST::LValue::Index { base, index, .. } => {
-            collect_expr(base, mp, ctx);
-            collect_expr(index, mp, ctx);
+            structural_slot(ctx, "target_base", StructuralSlotKind::Scalar, |ctx| collect_expr(base, mp, ctx));
+            structural_slot(ctx, "target_index", StructuralSlotKind::Scalar, |ctx| collect_expr(index, mp, ctx));
         }
         // D-MUTSELF1: `place.field = v` — record references in the base place.
-        AST::LValue::Field { base, .. } => collect_expr(base, mp, ctx),
+        AST::LValue::Field { base, .. } => structural_slot(ctx, "target_base", StructuralSlotKind::Scalar, |ctx| collect_expr(base, mp, ctx)),
     }
 }
 
 fn collect_binding(b: &AST::Binding, mp: &str, ctx: &mut WalkCtx<'_>) {
     if let Some(span) = b.ty_span {
-        record_node(ctx, "type", "type", mp, span);
+        structural_slot(ctx, "type", StructuralSlotKind::Scalar, |ctx| { record_node(ctx, "type", "type", mp, span); });
     }
     // S74: a destructuring binding brings each named field/element into scope.
     if let Some(pat) = &b.pattern {
-        collect_expr(&b.init, mp, ctx);
+        structural_slot(ctx, "initializer", StructuralSlotKind::Scalar, |ctx| collect_expr(&b.init, mp, ctx));
         for n in pat.names() {
             ctx.db.defs.push(SymDef {
                 identity: scoped_local_identity(ctx, "local", &n.name),
@@ -1320,7 +1328,7 @@ fn collect_binding(b: &AST::Binding, mp: &str, ctx: &mut WalkCtx<'_>) {
             });
         }
     }
-    collect_expr(&b.init, mp, ctx);
+    structural_slot(ctx, "initializer", StructuralSlotKind::Scalar, |ctx| collect_expr(&b.init, mp, ctx));
 }
 
 fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
@@ -1378,89 +1386,93 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
             structural_slot(ctx, "rhs", StructuralSlotKind::Scalar, |ctx| collect_expr(r, mp, ctx));
         }
         AST::Expr::CompareChain { operands, .. } => {
-            for e in operands {
-                collect_expr(e, mp, ctx);
-            }
+            structural_slot(ctx, "operands", StructuralSlotKind::List, |ctx| {
+                for e in operands { collect_expr(e, mp, ctx); }
+            });
         }
         AST::Expr::Unary(_, inner, _) | AST::Expr::IncDec { operand: inner, .. } => {
-            collect_expr(inner, mp, ctx)
+            structural_slot(ctx, "operand", StructuralSlotKind::Scalar, |ctx| collect_expr(inner, mp, ctx));
         }
         AST::Expr::Deref(inner, _) | AST::Expr::RawOf(inner, _) | AST::Expr::Copy(inner, _) => {
-            collect_expr(inner, mp, ctx)
+            structural_slot(ctx, "operand", StructuralSlotKind::Scalar, |ctx| collect_expr(inner, mp, ctx));
         }
         AST::Expr::Index { base, index, .. } => {
-            collect_expr(base, mp, ctx);
-            collect_expr(index, mp, ctx);
+            structural_slot(ctx, "base", StructuralSlotKind::Scalar, |ctx| collect_expr(base, mp, ctx));
+            structural_slot(ctx, "index", StructuralSlotKind::Scalar, |ctx| collect_expr(index, mp, ctx));
         }
         AST::Expr::Slice {
             base, start, end, ..
         } => {
-            collect_expr(base, mp, ctx);
-            collect_expr(start, mp, ctx);
-            collect_expr(end, mp, ctx);
+            structural_slot(ctx, "base", StructuralSlotKind::Scalar, |ctx| collect_expr(base, mp, ctx));
+            structural_slot(ctx, "start", StructuralSlotKind::Scalar, |ctx| collect_expr(start, mp, ctx));
+            structural_slot(ctx, "end", StructuralSlotKind::Scalar, |ctx| collect_expr(end, mp, ctx));
         }
         AST::Expr::Str(parts, _) => {
-            for part in parts {
-                if let AST::StrPart::Interp(inner, _) = part {
-                    collect_expr(inner, mp, ctx);
+            structural_slot(ctx, "interpolations", StructuralSlotKind::List, |ctx| {
+                for part in parts {
+                    if let AST::StrPart::Interp(inner, _) = part { collect_expr(inner, mp, ctx); }
                 }
-            }
+            });
         }
         AST::Expr::ListLit(items, _) => {
             structural_slot(ctx, "items", StructuralSlotKind::List, |ctx| {
                 for i in items { collect_expr(i, mp, ctx); }
             });
         }
-        AST::Expr::Spread(inner, _) => collect_expr(inner, mp, ctx),
+        AST::Expr::Spread(inner, _) => structural_slot(ctx, "value", StructuralSlotKind::Scalar, |ctx| collect_expr(inner, mp, ctx)),
         AST::Expr::MapLit(pairs, _) => {
-            for (k, v) in pairs {
-                collect_expr(k, mp, ctx);
-                collect_expr(v, mp, ctx);
-            }
+            structural_slot(ctx, "keys", StructuralSlotKind::List, |ctx| {
+                for (k, _) in pairs { collect_expr(k, mp, ctx); }
+            });
+            structural_slot(ctx, "values", StructuralSlotKind::List, |ctx| {
+                for (_, v) in pairs { collect_expr(v, mp, ctx); }
+            });
         }
         AST::Expr::TupleLit(fields, _, _) => {
-            for (_, expr) in fields {
-                collect_expr(expr, mp, ctx);
-            }
+            structural_slot(ctx, "fields", StructuralSlotKind::List, |ctx| {
+                for (_, expr) in fields { collect_expr(expr, mp, ctx); }
+            });
         }
         AST::Expr::StructLit { fields, .. } => {
-            for (_, _, expr) in fields {
-                collect_expr(expr, mp, ctx);
-            }
+            structural_slot(ctx, "fields", StructuralSlotKind::List, |ctx| {
+                for (_, _, expr) in fields { collect_expr(expr, mp, ctx); }
+            });
         }
         AST::Expr::EnumLit { args, .. } => {
-            for arg in args {
-                match arg {
-                    AST::EnumLitArg::Positional(e) => collect_expr(e, mp, ctx),
-                    AST::EnumLitArg::Named { expr, .. } => collect_expr(expr, mp, ctx),
+            structural_slot(ctx, "args", StructuralSlotKind::List, |ctx| {
+                for arg in args {
+                    match arg {
+                        AST::EnumLitArg::Positional(e) => collect_expr(e, mp, ctx),
+                        AST::EnumLitArg::Named { expr, .. } => collect_expr(expr, mp, ctx),
+                    }
                 }
-            }
+            });
         }
         AST::Expr::Tainted(inner, _) // D-TAINT1: tag erased; recurse into the value.
         | AST::Expr::Present(inner, _)
         | AST::Expr::Ok(inner, _)
         | AST::Expr::Err(inner, _)
-        | AST::Expr::Try(inner, _, _) => collect_expr(inner, mp, ctx),
+        | AST::Expr::Try(inner, _, _) => structural_slot(ctx, "value", StructuralSlotKind::Scalar, |ctx| collect_expr(inner, mp, ctx)),
         AST::Expr::OrFallback {
             value, fallback, ..
         } => {
-            collect_expr(value, mp, ctx);
+            structural_slot(ctx, "value", StructuralSlotKind::Scalar, |ctx| collect_expr(value, mp, ctx));
             match fallback {
-                AST::OrFallback::Value(v) => collect_expr(v, mp, ctx),
+                AST::OrFallback::Value(v) => structural_slot(ctx, "fallback", StructuralSlotKind::Scalar, |ctx| collect_expr(v, mp, ctx)),
                 AST::OrFallback::Panic { args, .. } => {
-                    for a in args {
-                        collect_expr(&a.expr, mp, ctx);
-                    }
+                    structural_slot(ctx, "fallback_args", StructuralSlotKind::List, |ctx| {
+                        for a in args { collect_expr(&a.expr, mp, ctx); }
+                    });
                 }
                 AST::OrFallback::Return(v, _) => {
                     if let Some(v) = v {
-                        collect_expr(v, mp, ctx);
+                        structural_slot(ctx, "fallback", StructuralSlotKind::Scalar, |ctx| collect_expr(v, mp, ctx));
                     }
                 }
                 AST::OrFallback::Break(_) | AST::OrFallback::Continue(_) => {}
             }
         }
-        AST::Expr::PatternTest { subject, .. } => collect_expr(subject, mp, ctx),
+        AST::Expr::PatternTest { subject, .. } => structural_slot(ctx, "subject", StructuralSlotKind::Scalar, |ctx| collect_expr(subject, mp, ctx)),
         AST::Expr::Lambda(l) => {
             for p in &l.params {
                 ctx.db.defs.push(SymDef {
@@ -1474,23 +1486,22 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
                 });
             }
             match &l.body {
-                AST::LambdaBody::Expr(e) => collect_expr(e, mp, ctx),
+                AST::LambdaBody::Expr(e) => structural_slot(ctx, "body", StructuralSlotKind::Scalar, |ctx| collect_expr(e, mp, ctx)),
                 AST::LambdaBody::Block(stmts) => {
-                    for s in stmts {
-                        if let AST::Stmt::Val(b) = s {
-                            collect_binding(b, mp, ctx);
-                        } else {
-                            collect_expr_stmt(s, mp, ctx);
+                    structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| {
+                        for s in stmts {
+                            if let AST::Stmt::Val(b) = s { collect_binding(b, mp, ctx); }
+                            else { collect_expr_stmt(s, mp, ctx); }
                         }
-                    }
+                    });
                 }
             }
         }
         AST::Expr::CallValue { callee, args, .. } => {
-            collect_expr(callee, mp, ctx);
-            for a in args {
-                collect_expr(&a.expr, mp, ctx);
-            }
+            structural_slot(ctx, "callee", StructuralSlotKind::Scalar, |ctx| collect_expr(callee, mp, ctx));
+            structural_slot(ctx, "args", StructuralSlotKind::List, |ctx| {
+                for a in args { collect_expr(&a.expr, mp, ctx); }
+            });
         }
         AST::Expr::If {
             cond,
@@ -1500,22 +1511,27 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
             else_value,
             ..
         } => {
-            collect_expr(cond, mp, ctx);
-            for s in then_body.iter().chain(else_body.iter()) {
-                if let AST::Stmt::Val(b) = s {
-                    collect_binding(b, mp, ctx);
-                } else {
-                    collect_expr_stmt(s, mp, ctx);
+            structural_slot(ctx, "condition", StructuralSlotKind::Scalar, |ctx| collect_expr(cond, mp, ctx));
+            structural_slot(ctx, "then_body", StructuralSlotKind::List, |ctx| {
+                for s in then_body {
+                    if let AST::Stmt::Val(b) = s { collect_binding(b, mp, ctx); }
+                    else { collect_expr_stmt(s, mp, ctx); }
                 }
-            }
-            collect_expr(then_value, mp, ctx);
-            collect_expr(else_value, mp, ctx);
+            });
+            structural_slot(ctx, "then_value", StructuralSlotKind::Scalar, |ctx| collect_expr(then_value, mp, ctx));
+            structural_slot(ctx, "else_body", StructuralSlotKind::List, |ctx| {
+                for s in else_body {
+                    if let AST::Stmt::Val(b) = s { collect_binding(b, mp, ctx); }
+                    else { collect_expr_stmt(s, mp, ctx); }
+                }
+            });
+            structural_slot(ctx, "else_value", StructuralSlotKind::Scalar, |ctx| collect_expr(else_value, mp, ctx));
         }
         AST::Expr::FanOut { callee, items, .. } => {
-            collect_expr(callee, mp, ctx);
-            for item in items {
-                collect_expr(item, mp, ctx);
-            }
+            structural_slot(ctx, "callee", StructuralSlotKind::Scalar, |ctx| collect_expr(callee, mp, ctx));
+            structural_slot(ctx, "items", StructuralSlotKind::List, |ctx| {
+                for item in items { collect_expr(item, mp, ctx); }
+            });
         }
         AST::Expr::Int(_, _, _)
         | AST::Expr::Float(_, _, _)
@@ -1528,7 +1544,7 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
         | AST::Expr::ComptimeSplice { .. }
         // D-SHIFT1 (c7shift): a leaf literal, no nested `Expr` to recurse into.
         | AST::Expr::StrMatchLit(_, _) => {}
-        AST::Expr::Paren(inner, _) => collect_expr(inner, mp, ctx),
+        AST::Expr::Paren(inner, _) => structural_slot(ctx, "inner", StructuralSlotKind::Scalar, |ctx| collect_expr(inner, mp, ctx)),
     }
     if structural_id.is_some() { ctx.structural_parents.pop(); }
 }

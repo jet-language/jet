@@ -690,6 +690,7 @@ impl<'a> Checker<'a> {
                 }
                 return None;
             };
+            self.record_current_function_reference(&call.name, call.name_span);
     
             // D-EFF1: record the call-graph edge for transitive effect inference.
             // A foreign (`extern`) callee has an un-inspectable body, so it forces

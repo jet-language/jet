@@ -107,6 +107,7 @@ impl<'a> Checker<'a> {
                 self.scopes.last_mut().unwrap().insert(
                     name,
                     LocalInfo {
+                        def_span: name_span,
                         ty: ty.clone(),
                         mutable: false,
                         param_conv: None,
