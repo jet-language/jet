@@ -136,7 +136,7 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
     } else {
         (Vec::new(), ExitCodes::OK)
     };
-    let test_failed = tests.iter().filter(|item| (item.kind == 0 || item.kind == 3) && item.state == 1).count();
+    let test_failed = tests.iter().filter(|item| (item.kind == 0 || item.kind == 3 || item.kind == 4) && item.state == 1).count();
     let exit_code = if producer_exit == ExitCodes::ICE {
         ExitCodes::ICE
     } else if producer_exit == ExitCodes::RUNTIME_PANIC {
@@ -205,7 +205,7 @@ fn run_test_producers(target: &Target) -> (Vec<TestItem>, i32) {
     let mut items = Vec::new();
     let mut highest_exit = ExitCodes::OK;
     for member in &target.members {
-        if !jet::has_test_blocks(&member.path) {
+        if !jet::has_test_blocks(&member.path) && jet::Doctest::discover(&String::from_utf8_lossy(&member.bytes)).is_empty() {
             continue;
         }
         let report_path = std::env::temp_dir().join(format!(
@@ -539,6 +539,7 @@ fn render_report(target: &Target, items: &[FrontEndItem], tests: &[TestItem], pr
         let (kind, facet, producer) = match item.kind {
             1 => ("contract", "contracts", "jet-runtime"),
             3 => ("property", "tests", "jet-property"),
+            4 => ("doctest", "tests", "jet-doctest"),
             _ => ("unit", "tests", "jet-test"),
         };
         let (state, outcome, reason) = match item.state { 0 => ("executed", "passed", "null"), 1 => ("executed", "failed", "null"), 2 => ("skipped", "not_run", "\"fail_fast_policy\""), _ => ("unavailable", "unavailable", "\"producer_start_failed\"") };
@@ -564,6 +565,8 @@ fn render_report(target: &Target, items: &[FrontEndItem], tests: &[TestItem], pr
     let property_passed = tests.iter().filter(|item| item.kind == 3 && item.state == 0).count();
     let property_failed = tests.iter().filter(|item| item.kind == 3 && item.state == 1).count();
     let property_cases: u32 = tests.iter().filter(|item| item.kind == 3).map(|item| item.line).sum();
+    let doctest_passed = tests.iter().filter(|item| item.kind == 4 && item.state == 0).count();
+    let doctest_failed = tests.iter().filter(|item| item.kind == 4 && item.state == 1).count();
     let unit_selected = unit_passed + unit_failed + unit_skipped;
     format!("{{\"diagnostics\":[{}],\"evidence\":[{evidence}],\"evidencePolicy\":\"allow_incomplete\",\"exitCode\":{exit_code},\"result\":\"{}\",\"schemaVersion\":1,\"summaries\":{{\"contract\":{{\"declared\":0,\"failed\":0,\"notObserved\":0,\"observed\":0,\"passed\":0,\"selected\":0,\"skipped\":0}},\"deterministicBudget\":{{\"failed\":0,\"met\":0,\"selected\":0,\"skipped\":0,\"unavailable\":0}},\"doctest\":{{\"failed\":0,\"passed\":0,\"selected\":0,\"skipped\":0}},\"frontEnd\":{{\"failed\":{failed},\"proved\":{proved},\"selected\":{},\"skipped\":0}},\"property\":{{\"failed\":0,\"generatedCases\":0,\"passed\":0,\"selected\":0,\"shrunkFailures\":0,\"skipped\":0}},\"solver\":{{\"disproved\":0,\"proved\":0,\"selected\":0,\"unavailable\":0,\"unknown\":0}},\"statisticalBudget\":{{\"failed\":0,\"met\":0,\"selected\":0,\"skipped\":0,\"unavailable\":0}},\"unit\":{{\"failed\":{unit_failed},\"passed\":{unit_passed},\"selected\":{unit_selected},\"skipped\":{unit_skipped}}}}},\"target\":{{\"inputSha256\":{},\"kind\":\"{}\",\"members\":[{members}],\"root\":{}}},\"tool\":{{\"jet\":{},\"proofProducer\":\"jet-prove\",\"targetTriple\":{}}}}}", diagnostics.join(","), if failed == 0 && unit_failed == 0 { if unit_unavailable > 0 { "pass_incomplete" } else { "pass" } } else { "fail" }, items.len(), json(&target.input_sha256), target.kind, json(&target.root), json(env!("CARGO_PKG_VERSION")), json(std::env::consts::ARCH))
     .replace(
@@ -573,6 +576,10 @@ fn render_report(target: &Target, items: &[FrontEndItem], tests: &[TestItem], pr
     .replace(
         "\"property\":{\"failed\":0,\"generatedCases\":0,\"passed\":0,\"selected\":0,\"shrunkFailures\":0,\"skipped\":0}",
         &format!("\"property\":{{\"failed\":{property_failed},\"generatedCases\":{property_cases},\"passed\":{property_passed},\"selected\":{},\"shrunkFailures\":{property_failed},\"skipped\":0}}", property_passed + property_failed),
+    )
+    .replace(
+        "\"doctest\":{\"failed\":0,\"passed\":0,\"selected\":0,\"skipped\":0}",
+        &format!("\"doctest\":{{\"failed\":{doctest_failed},\"passed\":{doctest_passed},\"selected\":{},\"skipped\":0}}", doctest_passed + doctest_failed),
     )
     .replace(
         "\"result\":\"pass\"",

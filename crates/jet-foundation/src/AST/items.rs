@@ -1010,6 +1010,30 @@ pub enum StructLayout {
     Columnar,
 }
 
+/// D-REPRC2: selected C enum tag representation. `CInt` is C's `int`;
+/// fixed-width forms are the explicit expert override.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CEnumTag { CInt, U8, I8, U16, I16, U32, I32, U64, I64 }
+
+impl EnumDef {
+    pub fn c_layout_tag(&self) -> Option<CEnumTag> {
+        let marker = self.type_markers.iter().find(|m| m.name == crate::Syntax::ATTR_LAYOUT)?;
+        let Some(Expr::Ident(first, _)) = marker.args.first() else { return None };
+        if !first.eq_ignore_ascii_case("c") { return None; }
+        Some(match marker.args.get(1) {
+            None => CEnumTag::CInt,
+            Some(Expr::Ident(n, _)) => match n.as_str() {
+                "U8" => CEnumTag::U8, "I8" => CEnumTag::I8,
+                "U16" => CEnumTag::U16, "I16" => CEnumTag::I16,
+                "U32" => CEnumTag::U32, "I32" => CEnumTag::I32,
+                "U64" => CEnumTag::U64, "I64" => CEnumTag::I64,
+                _ => return None,
+            },
+            _ => return None,
+        })
+    }
+}
+
 /// D-ATTR2 / D-SERDE2–8: one `#[Name]` or `#[Name(arg, …)]` bracket marker.
 /// Derive-trait markers (`Codable`/`Encode`/`Decode`/`Comparable`/…) are lifted
 /// into `derives` at parse time (Codable expands to Encode+Decode); the serde
@@ -1256,6 +1280,9 @@ pub struct Variant {
     pub name: String,
     pub name_span: Span,
     pub payload: VariantPayload,
+    /// D-REPRC2: explicit C discriminant (`Variant = 7`). Only meaningful on
+    /// unit variants; sema rejects it elsewhere.
+    pub discriminant: Option<i64>,
     /// D-SERDE5: per-variant serde markers (`Rename`). Empty when none.
     pub serde_markers: Vec<Marker>,
 }

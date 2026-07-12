@@ -442,16 +442,33 @@ impl<'a> Parser<'a> {
         /// `c` (C-compatible) and `columnar` (struct-of-arrays) are supported;
         /// `packed`, `align` parse-and-error; the partial form `columnar: f, g`
         /// (D-SOA2B) is rejected (deferred post-v1).
-        pub(super) fn layout_struct_def(
+        pub(super) fn layout_type_def(
             &mut self,
             outer_is_pub: bool,
-        ) -> Result<crate::AST::StructDef, Diagnostic> {
+        ) -> Result<crate::AST::Item, Diagnostic> {
             let attr_start = self.peek().span;
             self.bump(); // consume `#`
             let (attr_name, attr_name_span) = self.expect_ident("after `#`")?;
             debug_assert_eq!(attr_name, Syntax::ATTR_LAYOUT);
             self.expect(TokKind::LParen, "after `#Layout`")?;
             let (variant, variant_span) = self.expect_ident("inside `#Layout(…)`")?;
+            let mut tag_width = None;
+            if variant == Syntax::LAYOUT_C && matches!(self.peek().kind, TokKind::Comma) {
+                self.bump();
+                let (label, label_span) = if matches!(self.peek().kind, TokKind::KwTag) {
+                    let span = self.bump().span;
+                    ("tag".to_string(), span)
+                } else {
+                    self.expect_ident("after `,` in `#Layout(c, …)`")?
+                };
+                if label != "tag" {
+                    return Err(Diagnostic::error("E1105", format!("`{label}` isn't a C enum layout option"),
+                        "D-REPRC2 supports only the enum tag width override here.".to_string(),
+                        "Write `#Layout(c, tag: U8)` or use `#Layout(c)`.".to_string(), Some(label_span)));
+                }
+                self.expect(TokKind::Colon, "after `tag` in `#Layout(c, tag: …)`")?;
+                tag_width = Some(self.expect_ident("for the C enum tag width")?);
+            }
             // D-SOA2B: partial columnar (`#layout(columnar: x, y)`) is deferred — a
             // `:` after the variant is the partial form. Reject with a clear message.
             if variant == Syntax::LAYOUT_COLUMNAR && matches!(&self.peek().kind, TokKind::Colon) {
@@ -500,11 +517,29 @@ impl<'a> Parser<'a> {
                 } else {
                     false
                 };
-            let mut def = self.struct_def_after_pub(is_pub)?;
-            def.layout = layout;
-            def.layout_span = Some(attr_span);
             let _ = attr_name_span;
-            Ok(def)
+            if matches!(self.peek().kind, TokKind::KwEnum) {
+                if layout != Some(crate::AST::StructLayout::C) {
+                    return Err(Diagnostic::error("E1105", "Only C layout applies to enums.".to_string(),
+                        "Columnar layout describes struct collections, not enum representation.".to_string(),
+                        "Use `#Layout(c)` on this enum.".to_string(), Some(variant_span)));
+                }
+                let mut def = self.enum_def_after_pub(is_pub, false)?;
+                let mut args = vec![crate::AST::Expr::Ident("c".to_string(), variant_span)];
+                if let Some((width, span)) = tag_width { args.push(crate::AST::Expr::Ident(width, span)); }
+                def.type_markers.push(crate::AST::Marker { name: Syntax::ATTR_LAYOUT.to_string(), name_span: attr_name_span, args, span: attr_span, sigil: '#', ct: None });
+                Ok(crate::AST::Item::Enum(def))
+            } else {
+                if tag_width.is_some() {
+                    return Err(Diagnostic::error("E1105", "A tag width applies only to enums.".to_string(),
+                        "Structs have fields and padding but no discriminant tag.".to_string(),
+                        "Remove `tag: …`, or put this layout on an enum.".to_string(), Some(attr_span)));
+                }
+                let mut def = self.struct_def_after_pub(is_pub)?;
+                def.layout = layout;
+                def.layout_span = Some(attr_span);
+                Ok(crate::AST::Item::Struct(def))
+            }
         }
     
         // --- published-schema marker + migration blocks (D-MIGRATE1) -----------

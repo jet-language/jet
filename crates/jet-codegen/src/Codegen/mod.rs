@@ -1123,7 +1123,7 @@ fn emit_test_main_cov(tests: &[&TestDef], out: &mut String, coverage: bool) {
     out.push_str("struct JetTestSlot { name: &'static str, skip: bool, property: bool, run: fn() -> Result<(), String> }\n");
     out.push_str("fn main() {\n");
     out.push_str("    jet_std_env_init();\n");
-    out.push_str("    if let Ok(path) = std::env::var(\"JET_TEST_PROOF_REPORT\") { if let Ok(mut file) = std::fs::File::create(path) { use std::io::Write as _; let _ = file.write_all(b\"JETTEST2\"); } }\n");
+    out.push_str("    if let Ok(path) = std::env::var(\"JET_TEST_PROOF_REPORT\") { if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) { use std::io::Write as _; if file.metadata().map(|m| m.len() == 0).unwrap_or(false) { let _ = file.write_all(b\"JETTEST2\"); } } }\n");
     out.push_str("    let mut slots: Vec<JetTestSlot> = vec![\n");
     for (i, test) in tests.iter().enumerate() {
         let name = escape_rust_str(&test.name);

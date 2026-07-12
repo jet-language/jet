@@ -328,6 +328,9 @@ impl<'a> Fmt<'a> {
             for (i, a) in m.args.iter().enumerate() {
                 if i > 0 {
                     self.write(", ");
+                    if m.name == Syntax::ATTR_LAYOUT && i == 1 {
+                        self.write("tag: ");
+                    }
                 }
                 self.fmt_expr(a, Prec::OrFallback);
             }
@@ -859,6 +862,10 @@ impl<'a> Fmt<'a> {
                 }
                 self.write(")");
             }
+        }
+        if let Some(value) = v.discriminant {
+            self.write(" = ");
+            self.write(&value.to_string());
         }
     }
 

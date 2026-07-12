@@ -88,6 +88,7 @@ fn clone_variant(v: &crate::AST::Variant) -> crate::AST::Variant {
         name: v.name.clone(),
         name_span: v.name_span,
         payload: v.payload.clone(),
+        discriminant: v.discriminant,
         serde_markers: v.serde_markers.clone(),
     }
 }

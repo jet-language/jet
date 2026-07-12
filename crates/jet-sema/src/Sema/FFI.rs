@@ -131,7 +131,13 @@ pub(crate) fn c_named_type_ok(name: &str, registry: &TypeRegistry) -> bool {
         // card #436 report). Reject every enum at the C boundary rather than
         // let sema accept a shape CModule codegen can't lower (I2/I3); a
         // future `#Layout(c) enum` design needs an owner ballot first.
-        Some(TypeDef::Enum { .. }) => false,
+        Some(TypeDef::Enum { variants, c_layout_tag, .. }) => {
+            c_layout_tag.is_some() && variants.values().all(|(_, payload)| match payload {
+                VariantPayload::Unit => true,
+                VariantPayload::Single(ty, _) => is_c_abi_type(ty, registry),
+                VariantPayload::Named(fields) => fields.iter().all(|f| is_c_abi_type(&f.ty, registry)),
+            })
+        }
         // D-DIST1: distinct types are repr(transparent) over their base, so
         // they share the base's C ABI exactly — treat as C-compatible iff
         // the base is.

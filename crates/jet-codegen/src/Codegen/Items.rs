@@ -630,6 +630,17 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
         derives.push("Eq");
         derives.push("Hash");
     }
+    if let Some(tag) = e.c_layout_tag() {
+        let repr = match tag {
+            crate::AST::CEnumTag::CInt => "C",
+            crate::AST::CEnumTag::U8 => "C, u8", crate::AST::CEnumTag::I8 => "C, i8",
+            crate::AST::CEnumTag::U16 => "C, u16", crate::AST::CEnumTag::I16 => "C, i16",
+            crate::AST::CEnumTag::U32 => "C, u32", crate::AST::CEnumTag::I32 => "C, i32",
+            crate::AST::CEnumTag::U64 => "C, u64", crate::AST::CEnumTag::I64 => "C, i64",
+        };
+        emit_c_enum_declaration(e, tag, out);
+        out.push_str(&format!("#[repr({repr})]\n"));
+    }
     out.push_str(&format!(
         "#[derive({})]\npub enum user_{} {{\n",
         derives.join(", "),
@@ -638,11 +649,16 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
     for v in &e.variants {
         match &v.payload {
             VariantPayload::Unit => {
-                out.push_str(&format!("    {},\n", mangle_variant(&v.name)));
+                if let Some(d) = v.discriminant {
+                    out.push_str(&format!("    {} = {},\n", mangle_variant(&v.name), d));
+                } else {
+                    out.push_str(&format!("    {},\n", mangle_variant(&v.name)));
+                }
             }
             VariantPayload::Single(t, _) => {
                 let ty = cx.field_rust_type(&e.name, &v.name, t);
-                out.push_str(&format!("    {}({}),\n", mangle_variant(&v.name), ty));
+                let d = v.discriminant.map(|n| format!(" = {n}")).unwrap_or_default();
+                out.push_str(&format!("    {}({}){},\n", mangle_variant(&v.name), ty, d));
             }
             VariantPayload::Named(fs) => {
                 out.push_str(&format!("    {} {{\n", mangle_variant(&v.name)));
@@ -651,7 +667,8 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
                     let ty = cx.field_rust_type(&e.name, &key, &f.ty);
                     out.push_str(&format!("        {}: {},\n", mangle(&f.name), ty));
                 }
-                out.push_str("    },\n");
+                let d = v.discriminant.map(|n| format!(" = {n}")).unwrap_or_default();
+                out.push_str(&format!("    }}{},\n", d));
             }
         }
     }
@@ -670,6 +687,47 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
             e.name
         ));
     }
+}
+
+fn c_decl_type(ty: &Type) -> String {
+    match ty {
+        Type::Int => "long long".into(), Type::Float => "double".into(),
+        Type::Bool => "_Bool".into(), Type::Char => "uint32_t".into(),
+        Type::IntN { signed, bits } => format!("{}int{}_t", if *signed { "" } else { "u" }, bits),
+        Type::Float32 => "float".into(), Type::Named(n) => n.clone(),
+        Type::Tagged { inner, .. } => c_decl_type(inner),
+        _ => "/* rejected by sema */ void".into(),
+    }
+}
+
+/// D-REPRC2: exact C declaration carried beside generated Rust so bindgen/header
+/// extraction can copy it byte-for-byte. This is compilable C, not a prose sketch.
+fn emit_c_enum_declaration(e: &EnumDef, tag: crate::AST::CEnumTag, out: &mut String) {
+    let payload = e.variants.iter().any(|v| !matches!(v.payload, VariantPayload::Unit));
+    out.push_str("/* D-REPRC2-C-DECL\n#include <stdint.h>\n#include <stdbool.h>\n");
+    if !payload && tag == crate::AST::CEnumTag::CInt {
+        out.push_str(&format!("typedef enum {} {{\n", e.name));
+        for (i, v) in e.variants.iter().enumerate() {
+            let d = v.discriminant.unwrap_or(i as i64);
+            out.push_str(&format!("  {}_{} = {},\n", e.name, v.name.replace('.', "_"), d));
+        }
+        out.push_str(&format!("}} {};\n", e.name));
+    } else {
+        let tag_ty = match tag { crate::AST::CEnumTag::CInt => "int", crate::AST::CEnumTag::U8 => "uint8_t", crate::AST::CEnumTag::I8 => "int8_t", crate::AST::CEnumTag::U16 => "uint16_t", crate::AST::CEnumTag::I16 => "int16_t", crate::AST::CEnumTag::U32 => "uint32_t", crate::AST::CEnumTag::I32 => "int32_t", crate::AST::CEnumTag::U64 => "uint64_t", crate::AST::CEnumTag::I64 => "int64_t" };
+        out.push_str(&format!("typedef {} {}_Tag;\nenum {{\n", tag_ty, e.name));
+        for (i, v) in e.variants.iter().enumerate() { out.push_str(&format!("  {}_{} = {},\n", e.name, v.name.replace('.', "_"), v.discriminant.unwrap_or(i as i64))); }
+        out.push_str("};\n");
+        if payload {
+            out.push_str(&format!("typedef union {}_Payload {{\n", e.name));
+            for v in &e.variants { match &v.payload {
+                VariantPayload::Unit => {}
+                VariantPayload::Single(t, _) => out.push_str(&format!("  {} {};\n", c_decl_type(t), v.name.replace('.', "_"))),
+                VariantPayload::Named(fs) => { out.push_str("  struct {\n"); for f in fs { out.push_str(&format!("    {} {};\n", c_decl_type(&f.ty), f.name)); } out.push_str(&format!("  }} {};\n", v.name.replace('.', "_"))); }
+            }}
+            out.push_str(&format!("}} {}_Payload;\ntypedef struct {} {{ {}_Tag tag; {}_Payload payload; }} {};\n", e.name, e.name, e.name, e.name, e.name));
+        }
+    }
+    out.push_str("D-REPRC2-C-DECL */\n");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

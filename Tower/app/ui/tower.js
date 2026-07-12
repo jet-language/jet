@@ -388,24 +388,31 @@ function dutyDecision(d) {
 }
 
 // ---- #515: needs-your-verification queue -----------------------------------
-// Content sources, in priority order: (1) the acceptance ballot's own
-// checkInstructions field, assembled server-side when it was minted; (2) the
-// card's exit criteria — text as "what to check", evidence as "what
-// confirms it"; (3) the card's refs (files/commands worth opening). If none
-// of that exists (old ballot, no criteria, no refs) fall back to whatever
-// prose the ballot does carry — never render an empty box.
+// Pass 2 (2026-07-12, owner directive): entries were too long and asked the
+// owner to run commands he can't run away from his computer. Content
+// sources, in priority order: (1) the acceptance ballot's own
+// checkInstructions — new shape {proof, visualCheck} assembled server-side
+// when minted; (2) old-shape {toCheck, confirms} ballots minted before this
+// pass, still live until a bounce/remint refreshes them; (3) the card's exit
+// criteria; (4) the card's refs. If none of that exists fall back to
+// whatever prose the ballot carries — never render an empty box. visualCheck
+// is never derived client-side (only the server heuristic sets it — no
+// visual claim without the ref evidence behind it).
 function acceptanceContent(card, ballot) {
   const ci = ballot?.checkInstructions;
+  if (ci && (Array.isArray(ci.proof) || 'visualCheck' in ci))
+    return { proof: ci.proof || [], visualCheck: ci.visualCheck || null };
   if (ci && ((ci.toCheck || []).length || (ci.confirms || []).length))
-    return { toCheck: ci.toCheck || [], confirms: ci.confirms || [] };
+    return { proof: (ci.confirms || []).length ? ci.confirms : ci.toCheck, visualCheck: null };
   const items = (card?.criteria || []);
   if (items.length)
-    return { toCheck: items.map(i => i.text), confirms: items.filter(i => i.evidence).map(i => `${i.text} — ${i.evidence}${i.verifiedBy ? ` (verified by ${i.verifiedBy})` : ''}`) };
+    return { proof: items.map(i => `${i.text} — ${i.evidence ? i.evidence : i.status}`), visualCheck: null };
   const refs = card?.refs || [];
-  if (refs.length) return { toCheck: refs.map(r => `Check ${r}`), confirms: [] };
+  if (refs.length) return { proof: refs.map(r => `Check ${r}`), visualCheck: null };
   const raw = (ballot && (ballot.detail || ballot.gist)) || 'No check instructions recorded on this card — open it for context.';
-  return { toCheck: [raw], confirms: [] };
+  return { proof: [raw], visualCheck: null };
 }
+const PROOF_INLINE_MAX = 2;
 
 // Owner verification is deliberately transport-distinct from generic ballot
 // clearance. Each click gets a short-lived challenge bound to this browser
@@ -418,16 +425,20 @@ async function ownerAcceptance(decisionId, outcome, comment) {
 
 function dutyVerify(card, ballot) {
   const content = acceptanceContent(card, ballot);
+  const inline = content.proof.slice(0, PROOF_INLINE_MAX);
+  const rest = content.proof.slice(PROOF_INLINE_MAX);
+  const yourCheck = content.visualCheck || 'Everything machine-verified — accept to close.';
   const node = el(`<div class="duty duty--verify">
       <div class="duty__top"><span class="duty__kind">Verify</span>
         <span class="num">${ticket(card)}</span>
         <span class="duty__meta">${ballot ? esc(ballot.id) : 'in verify — no acceptance ballot yet'}</span>${ageChip(ballot ? ballot.created : card.updated)}</div>
       <h2 class="duty__title">${esc(card.title)}</h2>
       <div class="verifyblock">
-        <div class="verifyblock__h">What to check</div>
-        <ul class="verifyblock__list">${content.toCheck.map(t => `<li>${esc(t)}</li>`).join('') || '<li class="verifyblock__empty">(nothing recorded — open the card)</li>'}</ul>
-        <div class="verifyblock__h">What confirms it</div>
-        <ul class="verifyblock__list">${content.confirms.length ? content.confirms.map(t => `<li>${esc(t)}</li>`).join('') : '<li class="verifyblock__empty">(no evidence recorded yet)</li>'}</ul>
+        <div class="verifyblock__h">Proof</div>
+        <ul class="verifyblock__list">${inline.map(t => `<li>${esc(t)}</li>`).join('') || '<li class="verifyblock__empty">(nothing recorded — open the card)</li>'}</ul>
+        ${rest.length ? `<details class="verifyblock__more"><summary>+${rest.length} more</summary><ul class="verifyblock__list">${rest.map(t => `<li>${esc(t)}</li>`).join('')}</ul></details>` : ''}
+        <div class="verifyblock__h">Your check</div>
+        <p class="verifyblock__visual">${esc(yourCheck)}</p>
       </div>
       <div class="duty__actions">
         <button class="btn btn--red btn--sm" data-accept>Accept — close the card</button>

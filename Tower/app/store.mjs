@@ -278,7 +278,12 @@ export function clearanceOf(card, decisions) {
 export function laneOf(card, decisions, cards) {
   if (card.phase === 'done')   return { lane: 'done', who: null, label: 'Done' };
   if (card.phase === 'frozen') return { lane: 'frozen', who: 'owner', label: 'Frozen — owner reactivates it' };
-  const open = decisions.filter(d => d.cardId === card.id && isBlocking(d));
+  // Acceptance ballots (D-ACCEPT-*) get the dedicated verify treatment on
+  // the Now page, not the generic decide deck — exclude them here too, or a
+  // verify-phase card with an open acceptance ballot mislabels as 'decide'
+  // (#515/#516 bug: card tile click sent the owner into focusAll() looking
+  // for a ballot that's deliberately excluded from that deck — dead end).
+  const open = decisions.filter(d => d.cardId === card.id && isBlocking(d) && d.group !== 'acceptance');
   if (open.length) return { lane: 'decide', who: 'owner', label: `${open.length} decision${open.length > 1 ? 's' : ''} to make`, decisions: open.map(d => d.id) };
   const blockers = (card.blockedBy || []).filter(id => {
     const b = cards.find(c => c.id === id);
@@ -392,7 +397,10 @@ export function project(s, config = null) {
   });
   const milestones = s.milestones.map(m => ({ ...m, progress: milestoneProgress(m, s.cards) }));
   const inLane = (l) => cards.filter(c => c.lane.lane === l);
-  const openDecisions = s.decisions.filter(isBlocking);
+  // Acceptance ballots are a distinct owner duty (verify queue), not a
+  // generic decision — keep the decide/push-notification counts to the
+  // plain ballot deck, same split laneOf() and openGenericDecisions() use.
+  const openDecisions = s.decisions.filter(d => isBlocking(d) && d.group !== 'acceptance');
   // #461 walk-back buffer: ratifications still inside the retire window —
   // reopenable in one tap while fresh. Older ratified decisions can stay
   // live because their card is active; they aren't "recent" and would bury
@@ -523,17 +531,27 @@ function applyDoneGate(s, c, targetPhase, by) {
   return null;
 }
 
-// #515: structured, owner-readable "how to check this" text assembled from
-// the card's exit criteria (what to verify + evidence already on file) and
-// its refs (files/commands worth opening). Additive field on the acceptance
-// ballot — old ballots minted before this simply lack it, and the Now page
-// falls back to computing the same thing client-side from card data.
+// #515 pass 2 (2026-07-12, owner directive): acceptance entries were too
+// long and demanded commands the owner can't run away from his computer.
+// `proof` is one short machine-evidence line per criterion (what already
+// ran, not what to go run); `visualCheck` is AT MOST one line, and only
+// present when the change is actually visual — never an instruction to run
+// a command. Additive/replacing field on the acceptance ballot; old ballots
+// minted before this carry the old {toCheck,confirms} shape until a bounce
+// or an explicit remint refreshes them — the Now page renders both.
+const PROOF_LINE_MAX = 100;
+const shorten = (s, n = PROOF_LINE_MAX) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+const VISUAL_REF_RE = /Tower\/app\/ui\/|\.(png|jpe?g|gif|svg)$|canvas|screenshot|\/web(\/|$)/i;
+
 export function acceptanceCheckInstructions(c) {
   const items = c.criteria || [];
   const refs = c.refs || [];
-  const toCheck = [...items.map(i => i.text), ...refs.map(r => `Check ${r}`)];
-  const confirms = items.filter(i => i.evidence).map(i => `${i.text} — ${i.evidence}${i.verifiedBy ? ` (verified by ${i.verifiedBy})` : ''}`);
-  return (toCheck.length || confirms.length) ? { toCheck, confirms } : null;
+  const proof = items
+    .filter(i => i.status !== 'open')
+    .map(i => shorten(`${i.text} — ${i.status}${i.evidence ? ` (${i.evidence})` : ''}`));
+  const visualRef = refs.find(r => VISUAL_REF_RE.test(r));
+  const visualCheck = visualRef ? `Open ${visualRef} — glance, confirm it looks right.` : null;
+  return (proof.length || visualCheck) ? { proof, visualCheck } : null;
 }
 
 function mintAcceptance(s, c) {

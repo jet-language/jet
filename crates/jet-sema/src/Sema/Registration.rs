@@ -2655,6 +2655,7 @@ pub(crate) fn register_enum(
             methods: HashMap::new(),
             single_use: e.is_single_use,
             must_use: e.is_must_use,
+            c_layout_tag: e.c_layout_tag(),
         },
     );
 }

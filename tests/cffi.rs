@@ -593,6 +593,48 @@ fn run() {
     let _ = fs::remove_dir_all(&root);
 }
 
+#[test]
+fn cffi_repr_c_enums_match_native_c_layout() {
+    if !have_rustc() { return; }
+    let root = std::env::temp_dir().join(format!("jet_cffi_reprc2_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root); fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("reprc2.c"), r#"#include <stdint.h>
+#include <stddef.h>
+typedef enum { STATUS_OK=0, STATUS_LOST=7 } Status;
+typedef enum __attribute__((packed)) { PACKET_PING=3, PACKET_DATA=7 } PacketTag;
+typedef union { long long ping; struct { long long x; long long y; } data; } PacketPayload;
+typedef struct { PacketTag tag; PacketPayload payload; } Packet;
+int32_t repr_status(Status s){return (int32_t)s;} int32_t repr_packet(Packet p){return (int32_t)p.tag*100+p.payload.ping;}
+int32_t repr_packet_size(void){return sizeof(Packet);} int32_t repr_packet_align(void){return _Alignof(Packet);}
+int32_t repr_packet_payload_offset(void){return offsetof(Packet,payload);}"#).unwrap();
+    let cc = ["cc","gcc","clang"].iter().find(|x| Command::new(x).arg("--version").output().is_ok()).unwrap();
+    assert!(Command::new(cc).args(["-c"]).arg(root.join("reprc2.c")).arg("-o").arg(root.join("reprc2.o")).status().unwrap().success());
+    assert!(Command::new("ar").arg("rcs").arg(root.join("libreprc2.a")).arg(root.join("reprc2.o")).status().unwrap().success());
+    let main = root.join("main.jet");
+    fs::write(&main, r#"use c.reprc2 as c
+#Layout(c)
+enum Status { Ok = 0; Lost = 7 }
+#Layout(c, tag: U8)
+enum Packet { Ping(Int) = 3; Data(x: Int, y: Int) = 7 }
+#Extern module c.reprc2 {
+ fn repr_status(s: Status) -> I32 = "repr_status"
+ fn repr_packet(p: Packet) -> I32 = "repr_packet"
+ fn repr_packet_size() -> I32 = "repr_packet_size"
+ fn repr_packet_align() -> I32 = "repr_packet_align"
+ fn repr_packet_payload_offset() -> I32 = "repr_packet_payload_offset"
+}
+fn run() { print(c.repr_status(Status.Lost)); print(c.repr_packet(Packet.Ping(41))); print(c.repr_packet_size()); print(c.repr_packet_align()); print(c.repr_packet_payload_offset()) }
+"#).unwrap();
+    let src=fs::read_to_string(&main).unwrap(); let out=jet::compile_with_path(&src,main.to_str().unwrap()).unwrap_or_else(|d|panic!("{}",jet::render_diagnostics(main.to_str().unwrap(),&src,&d)));
+    assert!(out.rust.contains("#[repr(C, u8)]") && out.rust.contains("user_Lost = 7") && out.rust.contains("user_Ping(i64) = 3"));
+    assert!(out.rust.contains("typedef uint8_t Packet_Tag;") && out.rust.contains("typedef union Packet_Payload") && out.rust.contains("typedef struct Packet"));
+    fs::write(root.join("main.rs"),out.rust).unwrap();
+    let built=Command::new("rustc").args(["--edition","2021"]).arg(root.join("main.rs")).arg("-o").arg(root.join("main_bin")).arg("-L").arg(format!("native={}",root.display())).arg("-lreprc2").output().unwrap();
+    assert!(built.status.success(),"I2: {}",String::from_utf8_lossy(&built.stderr)); let run=Command::new(root.join("main_bin")).output().unwrap();
+    assert!(run.status.success(),"{}",String::from_utf8_lossy(&run.stderr)); assert_eq!(String::from_utf8_lossy(&run.stdout),"7\n341\n24\n8\n8\n");
+    let _=fs::remove_dir_all(root);
+}
+
 /// Card #436: a runtime-built `String` (not a literal — so sema's E3211
 /// comptime check can't catch it) with an embedded NUL byte, passed to a
 /// C-boundary function, must fail LOUDLY at runtime (a panic), never silently

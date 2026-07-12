@@ -128,10 +128,14 @@ attempt while one acceptance ballot is still open is a no-op, not a duplicate
 mint.
 
 Acceptance is not generic ratification. Only the dedicated owner-verification
-buttons in the loopback UI may accept or bounce. The server binds each click to
-an HttpOnly in-memory UI session and a short-lived, single-use challenge for
-that exact ballot and outcome. CLI ratify, `clearance`, batch clearance,
-`--quote`, and caller-supplied `by: owner` are rejected and audited.
+buttons may accept or bounce, from a loopback device or a remote device that
+presents the configured `auth.token` (the same trust boundary every other
+remote write already uses — see Auth note above; no token configured means no
+remote device can prove it's the owner, so acceptance stays loopback-only).
+The server binds each click to an HttpOnly in-memory UI session and a
+short-lived, single-use challenge for that exact ballot and outcome. CLI
+ratify, `clearance`, batch clearance, `--quote`, and caller-supplied
+`by: owner` are rejected and audited.
 
 Ballot-ready decisions carry: `gist` (one plain sentence), `lesson` (a
 zero-context mini lesson defining the concept, mechanics, vocabulary, stakes,
@@ -205,7 +209,7 @@ always bypasses (bypass event-logged). D-TWRGUARD1=C.
 |---|---|---|---|
 | Ballot-ready | missing required fields, last-pass hybrid, complete recommendation rationale, or plain-language density limits | `E_BALLOT` | `--draft`, rewrite, then `decision update <id> --ready` |
 | Owner-only ratify | `decision ratify` by a non-owner, for a non-acceptance ballot | `E_OWNER_ONLY` | `--quote "owner's words"` |
-| Owner acceptance provenance | Any generic ratify, clearance, quote, or batch attempt on `D-ACCEPT-*` | `E_ACCEPTANCE_OWNER_UI` | Owner uses the loopback verification UI |
+| Owner acceptance provenance | Any generic ratify, clearance, quote, or batch attempt on `D-ACCEPT-*` | `E_ACCEPTANCE_OWNER_UI` | Owner uses the verification UI (loopback or an `auth.token`-authenticated device) |
 | Frozen lane | any write to a `frozen` card | `E_OWNER_LANE` | none — owner moves it out with `tower card update --phase ... --by owner` |
 | Ratified-decision delete | `card delete` on a card with a ratified decision | `E_HAS_RATIFIED` | let it retire (`tower archive status`) or `tower archive restore` then re-detach — applies to owner too |
 | Outcome/option match | `decision ratify --outcome K` not one of the decision's option keys | `E_INVALID` | pass a real option key |
@@ -247,7 +251,7 @@ POST /api/card/add|update|claim|release|delete   (release: {handoff})
 POST /api/card/criteria-add {id,text}  criteria-meet {id,n,evidence}  criteria-verify {id,n,evidence}
 POST /api/decision/add|update|delete   (add: {draft}; update: {ready})
 POST /api/clearance {decisionId,outcome,comment,quote}  (generic ballots only; quote = on-behalf-of)
-POST /api/acceptance/challenge {decisionId,outcome}     (loopback owner UI; session-bound, short TTL)
+POST /api/acceptance/challenge {decisionId,outcome}     (owner UI, loopback or auth.token; session-bound, short TTL)
 POST /api/acceptance/resolve {challenge,decisionId,outcome,comment}  (single-use)
 POST /api/verdict {id,outcome,title}                    (owner-only; mints a ratified decision)
 POST /api/question/add|answer|delete

@@ -25,7 +25,7 @@ pub use items::{
     VmTestFieldValue, PerfLit, Namespace, TypeParam, TraitDef, TagDef, ProtocolDirection, ProtocolMessage,
     ProtocolDecl, StateDecl, DeriveDef, TraitMethodSig, TraitImplBlock, ExternRustBlock, ExternFn,
     TestDef, BenchDef, MaturityTag, Func, ContractClause, StateTransition, EveryMarker,
-    EveryArg, EverySchedule, EveryScheduleError, Param, StructLayout,
+    EveryArg, EverySchedule, EveryScheduleError, Param, StructLayout, CEnumTag,
     Marker, StructDef, TypeAliasDef, DistinctDef, UnitFamilyDef, EnumDef, EnumGroup, Variant,
     VariantPayload, VariantField, ImplDef, Field,
 };

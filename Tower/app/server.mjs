@@ -136,6 +136,19 @@ function ownerLoopback(req) {
   const forwarded = String(req.headers['x-forwarded-for'] || '').trim();
   return !forwarded || forwarded === '127.0.0.1' || forwarded === '::1';
 }
+// #515 P0 fix: the dev box (loopback) is always trusted, but a remote/phone
+// device was ALWAYS rejected here even though the rest of this server
+// already treats a device presenting the configured auth.token as the
+// owner (see authed() below) — the exact case the README's "Live + remote"
+// PWA/push setup exists for. Reuse that same trust boundary: loopback OR
+// the shared token, never a bare LAN/tailnet IP with no proof of identity.
+function ownerTrusted(req, token) {
+  if (ownerLoopback(req)) return true;
+  if (!token) return false;
+  const cookie = cookieValue(req, 'tower');
+  const bearer = /^Bearer (.+)$/.exec(req.headers.authorization || '')?.[1];
+  return cookie === token || bearer === token;
+}
 function ownerSession(req) {
   const token = cookieValue(req, OWNER_SESSION_COOKIE);
   const session = token && ownerSessions.get(token);
@@ -207,9 +220,10 @@ export function serve(store, port = 7878, open = false) {
       const ok = authed(req, res, token, url);
       if (ok !== true) return;
 
-      // A loopback browser navigation establishes an HttpOnly, process-local
-      // owner UI session. It is not a file-readable/static bearer credential.
-      if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html') && ownerLoopback(req) && !ownerSession(req)) {
+      // A loopback (or token-authenticated remote) browser navigation
+      // establishes an HttpOnly, process-local owner UI session. It is not
+      // a file-readable/static bearer credential.
+      if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html') && ownerTrusted(req, token) && !ownerSession(req)) {
         const sessionToken = randomBytes(32).toString('base64url');
         ownerSessions.set(sessionToken, { auditId: randomBytes(8).toString('base64url'), expires: Date.now() + OWNER_SESSION_TTL_MS });
         res.setHeader('set-cookie', OWNER_COOKIE(sessionToken));
@@ -303,7 +317,9 @@ export function serve(store, port = 7878, open = false) {
           auditAcceptanceReject(store, p.decisionId, route, message, 'owner-ui-rejected');
           return send(res, 403, { error: 'E_ACCEPTANCE_OWNER_UI', message });
         };
-        if (!ownerLoopback(req)) return reject('owner verification is accepted only from a direct loopback connection');
+        if (!ownerTrusted(req, token)) return reject(token
+          ? 'owner verification is accepted only from a direct loopback connection or this device\'s auth.token'
+          : 'owner verification is accepted only from a direct loopback connection — set auth.token in .tower/secrets.json to allow a remote device to act as owner');
         if (req.headers['x-tower-owner-action'] !== 'verify') return reject('missing owner verification UI interaction marker');
         const session = ownerSession(req);
         if (!session) return reject('missing or expired owner UI session');

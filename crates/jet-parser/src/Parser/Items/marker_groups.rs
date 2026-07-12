@@ -13,6 +13,17 @@ impl<'a> Parser<'a> {
             if matches!(self.peek().kind, TokKind::LParen) {
                 self.bump(); // `(`
                 while !matches!(self.peek().kind, TokKind::RParen | TokKind::Eof) {
+                    // D-REPRC2's expert spelling is `#Layout(c, tag: U8)`.
+                    // Marker arguments otherwise use ordinary expressions; retain the
+                    // width as the second expression while the fixed `tag:` label is
+                    // reconstructed by the formatter.
+                    if name == Syntax::ATTR_LAYOUT
+                        && matches!(&self.peek().kind, TokKind::Ident(n) if n == "tag")
+                        && matches!(self.peek2().kind, TokKind::Colon)
+                    {
+                        self.bump();
+                        self.bump();
+                    }
                     args.push(self.expr_no_struct_lit()?);
                     if matches!(self.peek().kind, TokKind::Comma) {
                         self.bump();
@@ -289,7 +300,7 @@ impl<'a> Parser<'a> {
                         TokKind::Ident(n) if n == Syntax::ATTR_LAYOUT
                     ) =>
                 {
-                    self.layout_struct_def(is_pub).map(Item::Struct)
+                    self.layout_type_def(is_pub)
                 }
                 TokKind::Hash | TokKind::At
                     if matches!(

@@ -807,7 +807,7 @@ impl<'a> Parser<'a> {
                                     } =>
                                 {
                                     self.bump(); // consume `pub`
-                                    self.layout_struct_def(true).map(Item::Struct)
+                                    self.layout_type_def(true)
                                 }
                                 // D-MIGRATE1/D-MARKERMOVE1: `pub @PublishedSchema struct
                                 // Name { … }` (retired `pub @PublishedSchema` teaches E0062).
@@ -941,7 +941,7 @@ impl<'a> Parser<'a> {
                     }
                     // D-REPRC1: `#layout(c) struct Name { … }`
                     TokKind::Hash if self.at_layout_struct() => {
-                        self.layout_struct_def(false).map(Item::Struct)
+                        self.layout_type_def(false)
                     }
                     // D-MIGRATE1/D-MARKERMOVE1: `@PublishedSchema struct Name { … }`
                     TokKind::Hash | TokKind::At if self.at_published_schema_struct() => {

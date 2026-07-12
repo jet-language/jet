@@ -1,6 +1,17 @@
 //! M6 phase 1: `jet fmt` idempotence — fmt(fmt(x)) == fmt(x).
 
 use std::fs;
+
+#[test]
+fn repr_c_enum_surface_is_stable() {
+    let src = "#Layout(c, tag: U8)\nenum Packet { Ping(Int) = 3; Data(x: I32, y: I32) = 7 }\n";
+    let once = jet::format_source(src).expect("C-layout enum should format");
+    assert!(once.contains("#Layout(c, tag: U8)"));
+    assert!(once.contains("Ping(Int) = 3"));
+    assert!(once.contains("Data(x: I32, y: I32) = 7"));
+    let twice = jet::format_source(&once).expect("formatted C-layout enum should parse");
+    assert_eq!(once, twice, "C-layout enum formatting must be stable");
+}
 use std::path::PathBuf;
 
 #[path = "support/fmt_lossless.rs"]

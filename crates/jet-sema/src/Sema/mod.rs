@@ -71,6 +71,8 @@ pub(crate) enum TypeDef {
         single_use: bool,
         /// D-MUSTUSE1 (c18iwxqx): `@MustUse` was present before `enum`.
         must_use: bool,
+        /// D-REPRC2: present only for `#Layout(c[, tag: Width])`.
+        c_layout_tag: Option<crate::AST::CEnumTag>,
     },
     /// D-DIST1 (ratified 2026-06-19): a distinct type — a nominal wrapper over
     /// a base type. No implicit coercion either direction (E0128). Arithmetic
@@ -849,6 +851,7 @@ mod CheckerFieldPolicy;
 mod CheckerInfer;
 mod CheckerInline;
 mod CheckerItems;
+mod CheckerMarkers;
 mod CheckerOwnership;
 mod CheckerPatchable;
 mod CheckerSchedule;
@@ -908,6 +911,7 @@ pub use PolicyFacts::{
 // manifest parsing need root validation and ancestor-subsumption coverage
 // too, not just the bare enum.
 pub(crate) use CheckerInline::{check_inline_always_fn, e0918_address_taken};
+pub(crate) use CheckerMarkers::check_marker_vocabulary;
 pub(crate) use CheckerSchedule::check_every_marker;
 pub use Effects::{effect_covers, effect_root, parse_effect_name, show_set, Effect, EffectSet};
 pub use Purity::{check_pure_fn, check_pure_program_root, e3401, e3402, e3403};

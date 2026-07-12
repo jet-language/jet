@@ -808,6 +808,13 @@ pub(crate) fn check_bundle_opts(
         })
         .collect();
 
+    // D-MARK-VOCAB1 (card #518): the dynamic half of the `@` contract-plane
+    // vocabulary — every `derive T.Name { … }` provider in the bundle, not
+    // just this module's own, per the same bundle-wide orphan-rule view as
+    // `derive_providers` above.
+    let known_derive_names: HashSet<String> =
+        derive_providers.iter().map(|(_, name, _, _, _)| name.clone()).collect();
+
     for (idx, module) in bundle.modules.iter_mut().enumerate() {
         super::Protocol::expand_module_protocols(&mut module.items, &mut diags);
         // D-DOTSCOPE1: validate contextual `.member { … }` scope statements
@@ -1241,6 +1248,10 @@ pub(crate) fn check_bundle_opts(
         // now that the trait registry resolves field/variant types — keeps the emitted
         // `impl`s rustc-clean (I2).
         diags.extend(validate_serde_items(&module.items, &st.trait_reg));
+        // D-MARK-VOCAB1 (card #518): a marker name outside the registered
+        // `@`/`#` plane vocabulary is E0927, instead of silently doing
+        // nothing (the parser accepts any PascalCase name structurally).
+        diags.extend(check_marker_vocabulary(&module.items, &known_derive_names));
         // D-CLIFLAG1: validate `@[Cli]`-derived structs (E1305/E1306), same
         // timing as the serde pass above (trait registry must be built so
         // `Cli` is visible on `s.derives`).

@@ -461,6 +461,7 @@ duplicate this — it is the one surface for lint walls (I8).
 | E0922 | sema  | explicit `Debug` derive (`@Debug`, `@[.., Debug]`, body `derive Debug;`) — `Debug` auto-derives, the opt-in spelling is retired (D-MARK-DEBUG1=A) |
 | E0925 | parse | `#Task`/`#Every(…)` written somewhere D-SCHEDULE1 doesn't place them — a method, or `#Every(…)` without `#Task` (card #505) |
 | E0926 | sema  | `#Every(…)`'s argument isn't a valid schedule — bad duration unit, non-positive duration, or malformed/out-of-range `"HH:MM"` (D-SCHEDULE1, card #505) |
+| E0927 | sema  | a `@Name`/`#Name` marker isn't in the registered vocabulary for its plane — a typo, or a spelling no longer supported (card #518) |
 | E0951 | sema  | comptime code reaches an impure operation (shows call path) |
 | E0952 | sema  | comptime budget exhausted (fuel) |
 | E0953 | sema  | comptime panic = user-authored compile error (message verbatim) |
@@ -1646,6 +1647,40 @@ recognizable shape whose *value* isn't a real schedule.
 | a schedule interval must be a positive duration. | `#Every(0ms)` or a negative duration never becomes due. | Write a duration greater than zero, e.g. `#Every(5min)`. |
 | this daily schedule isn't a plain `"HH:MM"` time. | a wall-clock trigger is exactly two digits, a colon, and two digits — 24h time, no seconds, no timezone. | Write a fixed daily time like `#Every("03:00")`. |
 | this daily schedule's hour/minute is out of range. | 24h hours run `00`..=`23`, minutes run `00`..=`59`. | Write an hour between `00` and `23` and a minute between `00` and `59`. |
+
+### E0927 — unregistered marker (card #518)
+
+The parser accepts any PascalCase name after `@`/`#` structurally — it can't
+tell "this is a marker Jet knows about" from "this looks like one." Before
+this check, an unrecognized name (a typo, or a spelling that used to mean
+something and was later retired) silently compiled to nothing. E0927 closes
+that gap: every marker name is checked against the registered vocabulary for
+its plane — `CONTRACT_MARKERS`/`DIRECTIVE_MARKERS`
+(`crates/jet-foundation/src/Syntax/markers.rs`) plus, on the `@` plane, any
+`derive T.Name { … }` provider in the build (D-METADERIVE1=A user derives are
+a legal, dynamic addition — never flagged). `@Debug` stays E0922's job
+(D-MARK-DEBUG1=A); a name that's real but on the wrong plane stays E0062/E0063
+(D-MARKER-FAMILY1) — E0927 only fires once neither of those already explains
+it.
+
+A handful of retired spellings get a targeted fix instead of a bare "did you
+mean" guess, because the nearest surviving name wouldn't actually replace
+them:
+
+| What | Why | Fix |
+|------|-----|-----|
+| `` `#Wasm`/`#Js` is retired — it no longer does anything ``. | the per-backend target markers were folded into one family. | Write `#Target(Wasm)` or `#Target(Js)` instead (D-MARK-TARGET1=A). |
+| `` `#Suppress` is retired — it no longer does anything ``. | a block-scoped suppression marker isn't the discard mechanism anymore. | Call `.drop("reason")` on the unused value instead (D-MARK-DISCARD1=A). |
+| `` `#Uninit` is retired — it no longer does anything ``. | stored uninitialized-sentinel fields were removed outright. | Give the field a real initial value (D-UNINIT-SENTINEL1). |
+| `` `#Ref`/`@Ref` is retired — it no longer does anything ``. | stored-reference fields were deleted outright. | Hold an owned value instead (D-MEM1/S3). |
+
+Anything else unrecognized gets an ordinary "did you mean `X`?" (edit
+distance ≤ 2 against the plane's vocabulary) or, with no close match, a
+pointer to `docs/spec/syntax-decisions.md`.
+
+| What | Why | Fix |
+|------|-----|-----|
+| `` `@Name`/`#Name` isn't a known marker ``. | markers are a closed, registered vocabulary (I7), not any PascalCase word. | Fix the spelling (`did you mean`), or check `docs/spec/syntax-decisions.md` for the full marker list. |
 
 ## Process for a new diagnostic
 

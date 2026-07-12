@@ -942,6 +942,7 @@ fn run_doctests(
         if fs::write(&tmp, &program).is_err() {
             eprintln!("error: couldn't stage doctest from `{}`", shown);
             all_ok = false;
+            write_doctest_proof_record(&label, shown, block.fence_line, false, "producer_start_failed");
             continue;
         }
         let tmp_shown = tmp.to_string_lossy().into_owned();
@@ -954,6 +955,7 @@ fn run_doctests(
                 println!("{}: FAIL (does not compile)", label);
                 report_problems(mode, &tmp_shown, &program, &diags);
                 all_ok = false;
+                write_doctest_proof_record(&label, shown, block.fence_line, false, "does not compile");
                 let _ = fs::remove_file(&tmp);
                 continue;
             }
@@ -980,6 +982,7 @@ fn run_doctests(
             Err(e) => {
                 eprintln!("error: couldn't run {}: {}", label, e);
                 all_ok = false;
+                write_doctest_proof_record(&label, shown, block.fence_line, false, "producer_start_failed");
                 let _ = fs::remove_file(&tmp);
                 let _ = fs::remove_file(&bin);
                 let _ = fs::remove_file(&generated_rs);
@@ -993,6 +996,7 @@ fn run_doctests(
             println!("{}: FAIL (runtime error)", label);
             eprint!("{}", String::from_utf8_lossy(&out.stderr));
             all_ok = false;
+            write_doctest_proof_record(&label, shown, block.fence_line, false, "runtime error");
             continue;
         }
         let stdout = String::from_utf8_lossy(&out.stdout);
@@ -1019,6 +1023,7 @@ fn run_doctests(
             eprint!("{}", jet::render_diagnostics(shown, src, &[diag]));
         }
         println!("{}: {}", label, if block_ok { "pass" } else { "FAIL" });
+        write_doctest_proof_record(&label, shown, block.fence_line, block_ok, if block_ok { "" } else { "output mismatch" });
     }
     if did_rewrite {
         if let Err(e) = fs::write(path, &rewritten) {
@@ -1027,6 +1032,22 @@ fn run_doctests(
         }
     }
     all_ok
+}
+
+fn write_doctest_proof_record(name: &str, file: &str, line: usize, passed: bool, message: &str) {
+    let Ok(path) = std::env::var("JET_TEST_PROOF_REPORT") else { return };
+    let Ok(mut report) = fs::OpenOptions::new().create(true).append(true).open(path) else { return };
+    use std::io::Write as _;
+    if report.metadata().map(|m| m.len() == 0).unwrap_or(false) {
+        let _ = report.write_all(b"JETTEST2");
+    }
+    let _ = report.write_all(&[4, if passed { 0 } else { 1 }]);
+    let _ = report.write_all(&(line as u64).to_be_bytes());
+    for bytes in [name.as_bytes(), message.as_bytes(), file.as_bytes()] {
+        let _ = report.write_all(&(bytes.len() as u64).to_be_bytes());
+        let _ = report.write_all(bytes);
+    }
+    let _ = report.flush();
 }
 
 /// Replace the `// => …` claim on 1-based `line` with `actual`. Returns false when
