@@ -639,15 +639,15 @@ fn run() { print(c.repr_status(Status.Lost)); print(c.repr_packet(Packet.Ping(41
 fn cffi_named_pure_callback_has_stable_c_symbol() {
     if !have_rustc() { return; }
     let root=std::env::temp_dir().join(format!("jet_cffi_cb_{}",std::process::id())); let _=fs::remove_dir_all(&root); fs::create_dir_all(&root).unwrap();
-    fs::write(root.join("cb.c"),"#include <stdint.h>\ntypedef int32_t (*cb_t)(int32_t);\nint32_t call_twice(cb_t cb,int32_t x){ return cb(cb(x)); }\n").unwrap();
+    fs::write(root.join("cb.c"),"#include <stdint.h>\n#include <pthread.h>\ntypedef int32_t (*cb_t)(int32_t);\nint32_t call_twice(cb_t cb,int32_t x){ return cb(cb(x)); }\ntypedef struct { cb_t cb; int32_t x; int32_t out; } Job;\nstatic void* run_job(void* p){ Job* j=(Job*)p; j->out=j->cb(j->x); return 0; }\nint32_t call_parallel(cb_t cb){ pthread_t t[4]; Job j[4]; for(int i=0;i<4;i++){j[i]=(Job){cb,i,0}; pthread_create(&t[i],0,run_job,&j[i]);} int32_t s=0; for(int i=0;i<4;i++){pthread_join(t[i],0);s+=j[i].out;} return s; }\n").unwrap();
     let cc=["cc","gcc","clang"].iter().find(|x|Command::new(x).arg("--version").output().is_ok()).unwrap();
     assert!(Command::new(cc).args(["-c"]).arg(root.join("cb.c")).arg("-o").arg(root.join("cb.o")).status().unwrap().success());
     assert!(Command::new("ar").arg("rcs").arg(root.join("libcb.a")).arg(root.join("cb.o")).status().unwrap().success());
-    let main=root.join("main.jet"); fs::write(&main,"use c.cb as c\n@Pure fn increment(x: I32) -> I32 { return x + 1 }\n#Extern module c.cb { fn call_twice(cb: @Pure fn(I32) -> I32, x: I32) -> I32 = \"call_twice\"; }\nfn run() { print(c.call_twice(increment, 40)) }\n").unwrap();
+    let main=root.join("main.jet"); fs::write(&main,"use c.cb as c\n@Pure fn increment(x: I32) -> I32 { return x + 1 }\n#Extern module c.cb { fn call_twice(cb: @Pure fn(I32) -> I32, x: I32) -> I32 = \"call_twice\"; fn call_parallel(cb: @Pure fn(I32) -> I32) -> I32 = \"call_parallel\"; }\nfn run() { print(c.call_twice(increment, 40)); print(c.call_parallel(increment)) }\n").unwrap();
     let src=fs::read_to_string(&main).unwrap(); let out=jet::compile_with_path(&src,main.to_str().unwrap()).unwrap_or_else(|d|panic!("{}",jet::render_diagnostics(main.to_str().unwrap(),&src,&d)));
     assert!(out.rust.contains("extern \"C\" fn user_increment")); assert!(out.rust.contains("extern \"C\" fn(i32) -> i32"));
-    fs::write(root.join("main.rs"),out.rust).unwrap(); let built=Command::new("rustc").args(["--edition","2021"]).arg(root.join("main.rs")).arg("-o").arg(root.join("main_bin")).arg("-L").arg(format!("native={}",root.display())).arg("-lcb").output().unwrap();
-    assert!(built.status.success(),"I2: {}",String::from_utf8_lossy(&built.stderr)); let run=Command::new(root.join("main_bin")).output().unwrap(); assert_eq!(String::from_utf8_lossy(&run.stdout),"42\n"); let _=fs::remove_dir_all(root);
+    fs::write(root.join("main.rs"),out.rust).unwrap(); let built=Command::new("rustc").args(["--edition","2021"]).arg(root.join("main.rs")).arg("-o").arg(root.join("main_bin")).arg("-L").arg(format!("native={}",root.display())).arg("-lcb").arg("-lpthread").output().unwrap();
+    assert!(built.status.success(),"I2: {}",String::from_utf8_lossy(&built.stderr)); let run=Command::new(root.join("main_bin")).output().unwrap(); assert_eq!(String::from_utf8_lossy(&run.stdout),"42\n10\n"); let _=fs::remove_dir_all(root);
 }
 
 /// Card #436: a runtime-built `String` (not a literal — so sema's E3211
