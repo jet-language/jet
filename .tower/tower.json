@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 506,
-    "rev": 4064,
+    "rev": 4067,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -27917,6 +27917,225 @@
       "draft": false,
       "status": "open",
       "created": "2026-07-12T01:13:15.878Z"
+    },
+    {
+      "id": "D-FFI-COBOL1",
+      "cardId": "c0xede68",
+      "group": "runtime",
+      "title": "cobol.* binder — call the COBOL estate in place",
+      "gist": "Whether Jet ships a cobol.* binder so Jet code can call existing COBOL programs directly.",
+      "lesson": "COBOL is a business programming language from 1959. It still runs core batch jobs at banks, insurers, and government agencies, and almost nobody writes new COBOL. A copybook is a COBOL include file that describes a record layout: fixed-width fields at fixed byte offsets, with money often stored as a packed decimal (called COMP-3), not a floating-point number.\n\nGnuCOBOL is an open-source COBOL compiler that translates COBOL into C and exposes each program through the C calling convention (the C ABI).\n\nD-FFI-UNIFY1 is Jet's ratified rule that every foreign language mounts as `<lang>.<lib>`, generates safe wrappers, and turns foreign toolchain errors into normal Jet diagnostics. @Codable is Jet's ratified struct marker for types that map to an external wire format. Decimal is Jet's exact base-10 number type from core.numeric; Float is binary and rounds, so it is wrong for money.",
+      "explainer": "",
+      "story": "Marcus Bell maintains payroll for a county government. The gross-to-net calculation lives in a 1980s COBOL program, PR-CALC, that nobody dares rewrite: it encodes decades of tax and pension rules, and it is correct. Marcus wants a new Jet web portal to show each employee their net pay, computed by the exact same code the nightly batch uses. Today he would shell out to the batch job or reimplement the rules and risk a mismatch.",
+      "inWild": "A Jet payroll service calls the county's COBOL net-pay program with a typed copybook struct and gets an exact Decimal back, no reimplementation.\n\n```jet\nuse cobol.payroll as pay\n\n// copybook PR-EMP-REC imported as a struct; money is Decimal, not Float\nrec :: pay.PrEmpRec.{\n    emp_id: \"004821\",\n    gross:  Decimal(\"5320.00\"),\n    filing: .married,\n}\nnet :: pay.pr_calc(rec)?          // calls the real COBOL PR-CALC\nprint(\"net pay: {net.take_home}\") // net pay: 4187.63\n```",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "GnuCOBOL C-ABI binder",
+          "detail": "`use cobol.<lib>` compiles the COBOL source with GnuCOBOL on a cache miss and calls each program through the generated C ABI, exactly like the ratified C binder (S59). Copybooks import as @Codable structs: each field carries fixed-width offset and length facts, and COMP-3 money fields become Decimal from core.numeric, never Float. Wrappers are safe by construction (I1); a GnuCOBOL compile error becomes a Jet diagnostic (I2), never raw compiler output.",
+          "code": "$ jet inspect bind cobol ./payroll\ncobol.payroll → .jet/bindings/cobol/payroll.jet\n  PR-CALC        program → fn pay.pr_calc(rec: PrEmpRec) -> PrResult\n  PR-EMP-REC     copybook → struct PrEmpRec  (@Codable, #[Layout(cobol)])\n    EMP-ID   PIC X(6)          → emp_id: String   @ off 0  len 6\n    GROSS    PIC S9(7)V99 COMP-3 → gross: Decimal @ off 6  len 5 (packed)\n\n// A bad field type is a Jet diagnostic, not a GnuCOBOL error:\n$ jet build\nerror[JT0412]: money field bound to Float loses cents\n  --> portal/pay.jet:9\n   |\n 9 |     gross: Float,\n   |            ^^^^^ COMP-3 field GROSS is exact base-10\n   = fix: use Decimal; COMP-3 stores packed decimal, Float rounds"
+        },
+        {
+          "key": "B",
+          "name": "No binder — hand-wrap or rewrite",
+          "detail": "Jet ships no COBOL support. Teams keep doing what they do today: call the batch job over a file or queue, hand-write a C shim, or rewrite the program in another language. The estate stays a black box behind a batch boundary, and any migration is big-bang because there is no way to call one program at a time from Jet.",
+          "code": "// No cobol root. Marcus writes a shim by hand and calls it unsafely.\nuse c.payroll_shim as shim   // C wrapper he wrote and must maintain\n\n#Unsafe(\"raw copybook bytes — no typed layout\")\nblock {\n    buf :: pack_emp_record(\"004821\", 5320.00)  // manual byte packing\n    shim.call_pr_calc(buf.ptr, buf.len)         // offsets by hand\n}\n// One wrong offset or a Float cent = silently wrong paychecks."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "IBM watsonx Code Assistant for Z",
+          "note": "IBM's flagship COBOL story is AI-assisted rewrite to Java — a translation project that leaves two codebases to reconcile. The binder path instead calls the proven COBOL in place, so the running logic never forks.",
+          "code": "// watsonx: COBOL --(AI translate)--> Java, then reconcile behavior.\n// Jet binder: Jet --(C ABI)--> the same COBOL, no second codebase."
+        },
+        {
+          "lang": "Strangler-fig pattern (Fowler)",
+          "note": "The standard safe-migration pattern wraps a legacy system, then replaces it piece by piece behind a stable interface. The cobol.* binder is the wrapping step; D-FFI-UNIFY1 in-situ replacement is the piece-by-piece step.",
+          "code": "// 1. use cobol.payroll        (wrap: call it in place)\n// 2. Jet package shadows pay.pr_calc, proven equal   (replace one program)\n// 3. call sites never change    (D-FFI-UNIFY1 surface stability)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The binder turns an untouchable estate into a set of callable, typed programs. Marcus calls the real PR-CALC from Jet with a typed copybook struct, gets exact Decimal money, and never reimplements a tax rule. It reuses the ratified C-ABI binder wholesale, so COBOL is just another D-FFI-UNIFY1 language.",
+        "tradeoff": "GnuCOBOL becomes a provisioned runtime dependency, acquired only when a project uses cobol.*, hash-pinned and jetpack-managed like CPython for py.*. That cost buys safe, gradual, call-site-stable access to code that otherwise stays behind a batch wall.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Leaves every team hand-writing C shims and packing copybook bytes by hand under #Unsafe, where one wrong offset or a Float cent is a silently wrong paycheck. It forces big-bang rewrites because no single program can be called in isolation."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "Ship the GnuCOBOL C-ABI binder as the one COBOL surface. Option B is not a second mechanism to keep; it is the status quo the binder replaces. The binder subsumes B's only real use — reaching the estate — while removing its footguns.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "Typed copybooks + Decimal money over the C ABI",
+            "use": "The shipped mechanism: programs become functions, copybooks become @Codable structs with layout facts, COMP-3 money is Decimal, errors are Jet diagnostics."
+          },
+          {
+            "key": "B",
+            "aspect": "The estate must stay callable in its current form",
+            "use": "Kept as the binder's guarantee: call in place with no rewrite, so migration is gradual and the running COBOL logic is never forked."
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T01:20:17.421Z"
+    },
+    {
+      "id": "D-FFI-OCTAVE1",
+      "cardId": "c0xede68",
+      "group": "runtime",
+      "title": "octave.* sidecar — call MATLAB-compatible .m code from Jet",
+      "gist": "Whether Jet ships an octave.* root that runs existing .m scripts in a sidecar and marshals matrices to typed Jet values.",
+      "lesson": "MATLAB is a commercial numerical computing environment used heavily in engineering and academia; its programs are `.m` script files built around matrix math. GNU Octave is an open-source language that runs most MATLAB `.m` code unchanged and needs no MATLAB license.\n\nA sidecar is a separate helper process Jet talks to over a typed message boundary, so a crash or bug in it cannot corrupt Jet's own memory. Jet already uses this model for Python (D-FFI-PY1) and R.\n\n`Matrix<M,N>` is Jet's fixed-size numeric matrix type and `Tensor<T>` its N-dimensional array. An effect root is Jet's way of marking that calling into a subsystem carries a tracked effect, like `#(Py)` for Python. jetpack is Jet's package manager; it provisions foreign toolchains so the user never installs them by hand.",
+      "explainer": "",
+      "story": "Diane Fletcher is a controls engineer. Her team's flight-surface filter was designed years ago in MATLAB as `designNotchFilter.m`, validated against flight data, and treated as ground truth. She is writing the new control loop in Jet. She wants to call that exact filter-design function during startup, get its coefficient matrix, and run the loop natively. Buying MATLAB seats for the whole team, or porting math she does not want to re-validate, are both off the table.",
+      "inWild": "A Jet control loop calls an existing MATLAB-compatible .m filter-design function and gets a typed Matrix back.\n\n```jet\nuse octave.filters as flt\n\n// designNotchFilter.m returns a 2x3 coefficient matrix [b; a]\ncoeffs: Matrix<2, 3> :: flt.design_notch_filter(freq: 60.0, q: 30.0)?\nloop {\n    y :: biquad(coeffs, sample_in())   // native Jet, runs every tick\n    sample_out(y)\n}\n```",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Sidecar Octave worker",
+          "detail": "`use octave.<lib>` runs a supervised Octave worker in a sidecar, exactly like the ratified py and R roots. Matrices round-trip as typed values: an Octave matrix becomes `Matrix<M,N>` when the shape is known, or `Tensor<T>` otherwise, and Jet matrices marshal back the same way. Any `.m` script is callable. Calls carry an `#(Octave)` effect. Octave is provisioned by jetpack, acquired only when a project uses octave.*. Octave errors are laundered into Jet diagnostics (I2).",
+          "code": "$ jet inspect bind octave ./filters\noctave.filters → .jet/bindings/octave/filters.jet\n  designNotchFilter.m → fn flt.design_notch_filter(freq: F64, q: F64)\n                        -> Matrix<2, 3>  #(Octave)\n\n// A shape mismatch is a Jet diagnostic, not an Octave stack trace:\n$ jet build\nerror[JT0431]: matrix shape mismatch at boundary\n  --> loop/ctl.jet:5\n   |\n 5 |     coeffs: Matrix<3, 3> :: flt.design_notch_filter(freq: 60.0, q: 30.0)?\n   |             ^^^^^^^^^^^^^ script returns 2x3, binding declares 3x3\n   = fix: annotate Matrix<2, 3>, or Tensor<F64> for a dynamic shape"
+        },
+        {
+          "key": "B",
+          "name": "No octave root — export to C or rewrite",
+          "detail": "Jet ships no Octave support. To reach MATLAB logic, Diane either runs it through MATLAB Coder (a proprietary tool that generates C from a licensed MATLAB install) and binds the C, or rewrites the algorithm in Jet. The open path is a full manual port; the automated path requires paid MATLAB seats, the exact cost the team is trying to avoid.",
+          "code": "// No octave root. Two bad choices:\n// 1. MATLAB Coder: needs a MATLAB license, emits C, then use c.*\n// 2. Rewrite designNotchFilter by hand and re-validate against flight data\nfn design_notch_filter(freq: F64, q: F64) -> Matrix<2, 3> {\n    // ... hundreds of lines re-derived; every sign error is a flight risk\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "rpy2 (Python ↔ R)",
+          "note": "rpy2 proved the sidecar bridge model: run the foreign numeric runtime in a companion process and marshal arrays across a typed boundary. Jet's octave root is the same shape as its already-shipped py and R roots, so it is a fourth instance of one mechanism, not a new one.",
+          "code": "# rpy2: robjects.r['designNotchFilter'](60, 30) -> R matrix -> numpy\n// Jet:  flt.design_notch_filter(freq: 60.0, q: 30.0) -> Matrix<2,3>"
+        },
+        {
+          "lang": "MATLAB Engine API",
+          "note": "MathWorks' own bridge requires a licensed MATLAB runtime on every machine that calls it. The Octave sidecar gives the same MATLAB-compatible call surface with an open runtime jetpack provisions, so there is no per-seat license gate.",
+          "code": "// Engine API: needs MATLAB installed + licensed to run at all.\n// octave.*: jetpack fetches Octave; no license, same .m surface."
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The sidecar lets Diane call her validated `.m` filter design straight from Jet, get a typed Matrix, and run the loop natively — no rewrite, no MATLAB seats. It slots into the existing py/R sidecar precedent, so octave.* is just another D-FFI-UNIFY1 language with crash isolation for free.",
+        "tradeoff": "Octave becomes a jetpack-provisioned runtime dependency, acquired only when a project uses octave.*. Sidecar calls cross a process boundary, so hot inner loops should marshal once and compute in Jet. That is how the worked example uses it: fetch coefficients once, run the loop natively.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Both of its paths are dead ends for this team. MATLAB Coder demands the paid seats they are avoiding. A hand rewrite means re-deriving and re-validating flight-critical math where a single sign error is a safety hazard."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "Ship the sidecar Octave worker as the one octave surface. Option B is not a second mechanism; it is the status quo the root replaces. The sidecar delivers B's goal — reaching MATLAB logic — without the license gate or the re-validation risk.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "Typed matrix round-trip over a crash-isolated sidecar",
+            "use": "The shipped mechanism: .m scripts become effect-carrying functions, matrices map to Matrix<M,N>/Tensor<T>, Octave provisioned by jetpack, errors laundered."
+          },
+          {
+            "key": "B",
+            "aspect": "MATLAB-compatible surface without a MATLAB license",
+            "use": "Kept as a design requirement the sidecar satisfies: the open Octave runtime runs the same .m code, so no seat cost and no forced rewrite."
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T01:20:17.517Z"
+    },
+    {
+      "id": "D-MIGRATE-SRC1",
+      "cardId": "c0xede68",
+      "group": "tooling",
+      "title": "Source-level importer framework — jet import <lang> <dir>",
+      "gist": "The law every per-language source importer must obey when it translates foreign source code into editable Jet.",
+      "lesson": "Jet already imports foreign metadata: `jet import <ecosystem> <path>` (D-JPK-IMPORTCMD1) reads a manifest — an npm package.json, a PyPI project, a Cargo.toml — and writes canonical, editable Jet describing the project. Nothing imports the actual source code.\n\nThis ballot fixes the framework law for source importers, not any one language; each per-language importer (cobol2jet, py2jet, c2jet, and so on) ships later under this law.\n\nKey ratified rules it must extend: editable canonical output means the importer emits normal Jet you own and edit, never a sealed artifact (D-WD5). A TODO diagnostic (D-JPK-IMPORTTODO1) is a structured error carrying what could not be translated, why, the fix, the source path, and the migration status. The omissions discipline (D-JOS-NIXIMPORT1=C) means anything the importer cannot represent is reported explicitly and audited, never silently dropped.\n\nA binder-backed FFI stub is a generated Jet function whose body calls the original foreign code through that language's binder — a placeholder that runs correctly until a human ports the body.",
+      "explainer": "",
+      "story": "Marcus Bell, the same county payroll maintainer, has the COBOL binder working: Jet calls PR-CALC in place. Now he wants to actually own the code — read it, diff it, unit-test it as Jet, and delete the COBOL. He runs `jet import cobol ./payroll`. The result must be Jet he can read and trust, with an honest list of exactly what did not translate — not a pile of machine-generated code he cannot follow.",
+      "inWild": "`jet import cobol ./payroll` converts programs and copybooks to editable Jet, lists every construct it could not translate as a TODO diagnostic, and drops one unresolved program to a binder-backed stub.\n\n```shell\n$ jet import cobol ./payroll\npayroll/ → jet/payroll/           37 programs, 214 copybooks\n  copybooks   → @Codable structs   (fixed-width via #[Layout(cobol)] facts)\n  PERFORM     → fn call graph       35 / 37 programs fully translated\n  goldens     → 18 Jet tests        (batch fixtures carried over)\n  1 binder stub: PR-DIST calls cobol.payroll in place (body not translated)\n\n11 TODO diagnostics (JT01xx):\n  JT0102  jet/payroll/dist.jet:44  GO TO fan-in from 3 sites → verify control flow\n  JT0107  jet/payroll/tax.jet:12   ALTER statement has no Jet form → hand-port\n\n$ jet import cobol ./payroll --dry-run   # preview, write nothing\n$ jet import cobol ./payroll --update    # re-run; keeps your edits, re-flags TODOs",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Semantic importer framework law",
+          "detail": "One law all per-language source importers obey. Output is editable canonical Jet (D-WD5), never a black box. Every construct the importer cannot faithfully translate becomes an explicit TODO diagnostic (D-JPK-IMPORTTODO1) with what/why/fix/source/status. Omissions are reported, never silently dropped (D-JOS-NIXIMPORT1 discipline). Detectable tests and goldens carry over as Jet tests. \n\nImport is idempotent and re-runnable with D-JPK-IMPORTCMD1's update/dry-run/conflict policy. A body the importer cannot translate falls back to a binder-backed FFI stub plus a TODO — so option B's behavior is this framework's guaranteed per-construct floor, not a separate mode.",
+          "code": "// Guaranteed shape of any importer's output, per construct:\n//   translatable body  → real editable Jet + carried-over tests\n//   untranslatable body → binder stub + TODO (never silent, never sealed)\n\nfn pr_calc(rec: PrEmpRec) -> PrResult {          // fully translated body\n    tax :: rec.gross * bracket_rate(rec.filing)\n    PrResult.{ take_home: rec.gross - tax }\n}\n\n// TODO JT0102: GO TO fan-in — importer could not prove control flow\nfn pr_dist(rec: PrEmpRec) -> DistResult {\n    cobol.payroll.pr_dist(rec)?                  // binder stub fallback\n}"
+        },
+        {
+          "key": "B",
+          "name": "Facts-only importers",
+          "detail": "Importers emit only a skeleton: struct and function signatures plus FFI stubs that call the old code through the binder. No bodies are ever translated; humans port every body by hand. Smaller promise, still gradual, still call-site-stable — but the estate's actual logic stays foreign forever unless someone hand-ports it, and the importer never gets to translate the easy 90%.",
+          "code": "// Every body is a stub; nothing is ever translated automatically.\nfn pr_calc(rec: PrEmpRec) -> PrResult {\n    cobol.payroll.pr_calc(rec)?   // still COBOL; Marcus ports by hand\n}\nfn pr_dist(rec: PrEmpRec) -> DistResult {\n    cobol.payroll.pr_dist(rec)?   // still COBOL\n}\n// jet/ is a shell over the estate; the logic never becomes Jet on its own."
+        },
+        {
+          "key": "C",
+          "name": "No source importers",
+          "detail": "Binders are the whole migration story: call the estate in place forever, never translate source. `jet import` stays metadata-only. Teams reach foreign code but can never own it as Jet, so the foreign toolchain stays a permanent dependency and the estate is never actually retired.",
+          "code": "// Only call-in-place exists; no path to Jet source.\nuse cobol.payroll as pay\npay.pr_calc(rec)?   // forever COBOL; GnuCOBOL is a permanent dependency\n// `jet import cobol ./payroll`  → error: no source importer for cobol"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "c2rust",
+          "note": "c2rust proved automated transpile-in works, but its output is unreadable machine Rust nobody maintains — the exact failure mode A's editable-canonical rule exists to prevent. A's TODO-and-stop discipline keeps the output honest instead of emitting opaque code to hit 100%.",
+          "code": "// c2rust: emits compiling-but-unreadable Rust; humans avoid touching it.\n// Jet A: emits readable Jet + explicit TODOs where it could not translate."
+        },
+        {
+          "lang": "py2many",
+          "note": "py2many transpiles Python to several languages best-effort, silently degrading on constructs it cannot map. A forbids the silent-degrade: an untranslatable construct is a binder stub plus a TODO diagnostic, so the migration status is always visible and auditable.",
+          "code": "// py2many: unsupported construct → wrong or dropped output, quietly.\n// Jet A: unsupported construct → binder stub + TODO JT01xx, loudly."
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A gives Marcus Jet he can read, diff, and test, plus an honest list of exactly what did not translate. It translates the easy majority, drops the rest to running binder stubs with TODOs, and re-runs idempotently. It extends the ratified importer discipline instead of inventing a new one.",
+        "tradeoff": "A is a framework law, not one importer; each language's importer ships later and cites it. That is the point: fixing the law once means every future importer is honest, editable, and re-runnable by construction, with no per-language relitigation of the rules.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Facts-only refuses to translate any body, so the estate's logic stays foreign until a human ports all of it by hand. A already contains B as its per-construct fallback, and adds the automatic translation of everything the importer can prove — strictly more, never less."
+          },
+          {
+            "key": "C",
+            "reason": "Call-in-place-only means the foreign toolchain is a permanent dependency and the estate is never retired. It gives teams no path to ever own their code as Jet, which contradicts the replace half of the polyglot north star."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "A is already the hybrid. It is the semantic framework with B folded in as its guaranteed per-construct fallback and C's binder as the transport that fallback rides on. One law: translate what you can prove, stub-and-TODO what you cannot, never seal or silently drop.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "Editable canonical Jet + explicit TODO diagnostics + idempotent re-run",
+            "use": "The framework law itself: readable output you own, every gap reported with what/why/fix, carried-over tests, update/dry-run/conflict policy."
+          },
+          {
+            "key": "B",
+            "aspect": "Binder-backed FFI stub for untranslatable bodies",
+            "use": "Absorbed as A's per-construct fallback floor: a body the importer cannot translate becomes a running binder stub plus a TODO, never a silent drop."
+          },
+          {
+            "key": "C",
+            "aspect": "Call-the-estate-in-place via binders",
+            "use": "Kept as the transport under the stub fallback: the binder is how a not-yet-ported body still runs, so the imported project builds and passes tests from day one."
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T01:20:17.612Z"
     }
   ],
   "questions": [
@@ -28718,6 +28937,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-12T01:20:17.613Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-MIGRATE-SRC1",
+      "note": "Source-level importer framework — jet import <lang> <dir>"
+    },
+    {
+      "at": "2026-07-12T01:20:17.517Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-FFI-OCTAVE1",
+      "note": "octave.* sidecar — call MATLAB-compatible .m code from Jet"
+    },
+    {
+      "at": "2026-07-12T01:20:17.421Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-FFI-COBOL1",
+      "note": "cobol.* binder — call the COBOL estate in place"
+    },
     {
       "at": "2026-07-12T01:15:58.519Z",
       "by": "claude-main",
@@ -32196,27 +32436,6 @@
       "action": "card.criteria-verify",
       "ref": "ccq07pav",
       "note": "#1"
-    },
-    {
-      "at": "2026-07-11T13:08:04.237Z",
-      "by": "terra-241-surface",
-      "action": "card.criteria-meet",
-      "ref": "ccq07pav",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-11T12:53:24.347Z",
-      "by": "fable-medium",
-      "action": "card.update",
-      "ref": "c2nizvzp",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-11T12:53:04.361Z",
-      "by": "fable-medium",
-      "action": "card.update",
-      "ref": "c2iizmyx",
-      "note": "logEntry"
     }
   ],
   "nextNum": 368,
