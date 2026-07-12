@@ -607,7 +607,7 @@ fn compiler_code_has_no_include_splices() {
     // spliced into generated bridge crates at codegen time. jetpack is a
     // tool crate (jetpack run/build), not a compiler seam crate, and this
     // include! is a test-only splice for the template's own unit tests.
-    const ALLOWLIST: &[&str] = &["crates/jetpack/src/FFI.rs.DISABLED_FOR_PROOF"];
+    const ALLOWLIST: &[&str] = &["crates/jetpack/src/FFI.rs"];
 
     let root = root();
     let mut dirs = vec![root.join("Source")];
