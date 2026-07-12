@@ -457,6 +457,9 @@ impl<'a> Checker<'a> {
         if enum_name == "ProcessStreamMode" {
             return Some(core_process_stream_mode_variants());
         }
+        if enum_name == "EnvError" {
+            return Some(core_env_error_variants());
+        }
         // D-TEXTWIDTH1=B: `TextWidthAmbiguous`/`TextWidthControls` — synthesise
         // their variant table so `.Narrow`/`.Wide`/`.Zero`/`.Reject` dot-literals
         // resolve (D-ENUMDOT2), same mechanism as `ProcessStreamMode`.

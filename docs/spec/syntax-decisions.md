@@ -1742,6 +1742,19 @@ index, not a substitute for that law.
 - **D-COREARGS1=A**: `ArgsSpec` is the one CLI parsing model. Typed
   `fn run(args: T)` derives an `ArgsSpec`; library/tooling code may build the
   same spec dynamically for subcommands, env fallbacks, completions, and tests.
+- **D-ENV-MUTATE1=A**: `core.env` uses one process-global, raw-preserving
+  logical environment. `unset(name) -> Bool ? EnvError` removes a key and
+  `vars() -> [String] ? EnvError` returns a deterministic, owned names-only
+  snapshot. Unix identity and ordering use exact bytes; Windows identity uses
+  `CompareStringOrdinal` ignoring case while preserving the last spelling and
+  exact UTF-16 value. `get`, `home_dir`, mutations, and child launches share
+  this table. Child launch clones it atomically, composes `env_clear`, `env`,
+  and `env_remove`, then passes raw entries to the OS. Jet mutations never
+  mutate libc `environ` or the Windows process environment block. Invalid
+  names and values fail without revealing inputs; `vars` fails as a whole on
+  any non-Unicode entry. Existing editions keep `set -> Void` and report
+  invalid input through E3001; its fallible `Void ? EnvError` signature waits
+  for a major release plus edition opt-in.
 - **D-MATHLIB2=A**: `core.math` is the canonical callable surface for libm and
   explicit checked/saturating/wrapping integer families. Value-context docs,
   LSP completion, and snippets may discover helpers, but emitted code uses the

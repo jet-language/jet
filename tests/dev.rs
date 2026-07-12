@@ -1383,24 +1383,27 @@ fn resident_jit_result_abi_covers_calls_ok_err_try_and_entry() {
         return;
     }
     let success = r#"
-fn choose(okay: Bool) -> Float ? String {
-    if okay { return ok(0.25) }
+fn choose_ok() -> Float ? String {
+    return ok(0.25)
+}
+
+fn choose_err() -> Float ? String {
     return err("typed boom")
 }
 
-fn forward(okay: Bool) -> Float ? String {
-    value :: choose(okay)?
+fn forward() -> Float ? String {
+    value :: choose_ok()?
     return ok(value + 0.25)
 }
 
 fn run() -> Void ? {
-    print(forward(true)?)
+    print(forward()?)
 }
 "#;
     let success_jit = run_cranelift_outcome(success, "result_success");
     assert_eq!(success_jit, ProgramOutput::ran("0.5\n".into(), "".into(), 0));
 
-    let failure = success.replace("forward(true)", "forward(false)");
+    let failure = success.replace("choose_ok()?", "choose_err()?");
     let failure_jit = run_cranelift_outcome(&failure, "result_failure");
     assert_eq!(
         failure_jit,
@@ -1443,16 +1446,29 @@ fn run() -> Void ? {
     print(Perf.fidelity())
 }
 "#;
+    let expected_valid = ProgramOutput::ran("1.0\n0.25\n1.0\n".into(), "".into(), 0);
+    assert_eq!(run_cranelift_outcome(valid, "fidelity_valid"), expected_valid);
+    let valid_path = std::env::temp_dir().join("jet_jit_fidelity_valid_interp.jet");
+    fs::write(&valid_path, valid).unwrap();
+    let valid_shown = valid_path.to_string_lossy().to_string();
+    let interpreted = match dev_iteration(&valid_shown, false, true) {
+        RunOutcome::Ran { stdout, stderr, exit_code } => {
+            ProgramOutput::ran(stdout, stderr, exit_code)
+        }
+        RunOutcome::Problems(ds) => panic!("fidelity interpreter failed: {ds:?}"),
+    };
+    assert_eq!(interpreted, expected_valid);
+    let aot_dir = std::env::temp_dir().join(format!("jet_jit_fidelity_aot_{}", std::process::id()));
     assert_eq!(
-        run_cranelift_outcome(valid, "fidelity_valid"),
-        ProgramOutput::ran("1.0\n0.25\n1.0\n".into(), "".into(), 0)
+        compiled_binary_output(&aot_dir, "fidelity", 0, "fidelity", &valid_shown),
+        expected_valid
     );
 
     for (value, tag) in [
         ("-0.01", "negative"),
         ("1.01", "above_one"),
-        ("Float.Infinity", "infinite"),
-        ("Float.NaN", "nan"),
+        ("(1.0 / 0.0)", "infinite"),
+        ("(0.0 / 0.0)", "nan"),
     ] {
         let src = format!(
             r#"use core.perf as Perf
@@ -1469,6 +1485,13 @@ fn run() -> Void ? {{
                 .contains("core.perf.Perf.override_fidelity needs 0.0 through 1.0"),
             "{tag}: {:?}",
             got.stderr
+        );
+        let read = r#"use core.perf as Perf
+fn run() { print(Perf.fidelity()) }"#;
+        assert_eq!(
+            run_cranelift_outcome(read, &format!("{tag}_state")),
+            ProgramOutput::ran("0.375\n".into(), "".into(), 0),
+            "{tag} changed fidelity before returning Err"
         );
     }
 }

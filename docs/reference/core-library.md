@@ -672,7 +672,9 @@ use core.env as env
 fn run() {
     home :: env.home_dir()               // String? — may be None
     mode :: env.get("MODE") ?? "dev"     // String? from the environment
-    env.set("MODE", "prod")              // set for child processes
+    env.set("MODE", "prod")              // set in Jet's process environment
+    removed :: env.unset("CI") ?? false
+    names :: env.vars() ?? []              // sorted names; never bulk values
     here :: env.current_dir() ?? return  // current working directory
     print(home ?? "(no home)")
     print(mode)
@@ -684,8 +686,26 @@ fn run() {
 |----------|---------|--------------|
 | `get(name)` | `String?` | Environment variable, or None if unset |
 | `set(name, value)` | nothing | Set an environment variable |
+| `unset(name)` | `Bool ? EnvError` | Remove a variable; true when it existed |
+| `vars()` | `[String] ? EnvError` | Sorted owned snapshot of variable names |
 | `current_dir()` | `String ? IOError` | Current working directory |
 | `home_dir()` | `String?` | User home directory, if known |
+
+Jet captures the inherited environment without decoding it and owns one
+process-global logical overlay. Mutations are visible to later Jet reads and
+child launches, but do not mutate libc's environment or the Windows process
+environment block; foreign APIs must receive changed values explicitly.
+Every child gets one atomic overlay snapshot before its `ProcessSpec`
+`env_clear`, `env`, and `env_remove` overrides are applied. Raw Unix bytes and
+Windows UTF-16 values survive child inheritance. `vars()` returns names only
+and fails with `EnvError.NonUnicode` if any current name or value cannot be
+decoded losslessly; it never skips or replaces an entry.
+
+`EnvError` has `InvalidName`, `InvalidValue`, and `NonUnicode`. Names must be
+nonempty and contain neither NUL nor `=`; values cannot contain NUL. Current
+editions retain the source-compatible `set -> Void` signature and report an
+invalid call as E3001. A future major release and edition opt-in changes `set`
+to `Void ? EnvError`.
 
 ---
 

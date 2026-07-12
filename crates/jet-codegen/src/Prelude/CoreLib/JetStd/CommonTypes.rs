@@ -617,6 +617,17 @@
             format!("{:?}", self)
         }
     }
+    impl super::JetShow for EnvError {
+        fn jet_show(&self) -> String {
+            match self {
+                EnvError::InvalidName => "invalid environment variable name".to_string(),
+                EnvError::InvalidValue => "invalid environment variable value".to_string(),
+                EnvError::NonUnicode => {
+                    "environment contains a name or value that is not valid Unicode".to_string()
+                }
+            }
+        }
+    }
     impl super::JetShow for Utf8Error {
         fn jet_show(&self) -> String {
             self.message.clone()
@@ -823,4 +834,3 @@
             }
         }
     }
-

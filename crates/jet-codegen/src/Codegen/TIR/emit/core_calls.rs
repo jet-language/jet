@@ -364,6 +364,8 @@ pub(crate) fn emit_tir_core_call(
             arg(0),
             arg(1)
         ),
+        ("core.env", "unset") => format!("{}(&({}))", helper("jet_std_env_unset"), arg(0)),
+        ("core.env", "vars") => format!("{}()", helper("jet_std_env_vars")),
         ("core.env", "current_dir") => format!("{}()", helper("jet_std_env_current_dir")),
         ("core.env", "home_dir") => format!("{}()", helper("jet_std_env_home_dir")),
         ("core.os", "name") => format!("{}()", helper("jet_std_os_name")),

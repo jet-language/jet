@@ -6,6 +6,14 @@ mod jet_std {
         Other { message: String },
     }
 
+    // D-ENV-MUTATE1=A: failures never carry input or host-backend text.
+    #[derive(Clone, Debug, PartialEq)]
+    pub enum EnvError {
+        InvalidName,
+        InvalidValue,
+        NonUnicode,
+    }
+
     #[derive(Clone, Debug, PartialEq)]
     pub struct Utf8Error {
         pub message: String,
@@ -1169,4 +1177,3 @@ mod jet_std {
         }
         out
     }
-

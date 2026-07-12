@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{CallArg, Expr, Func, LambdaBody, StrPart, Type, UnOp};
@@ -15,6 +16,9 @@ use super::Diagnostics::{comptime_panic, unsupported};
 use super::Diagnostics::{EARLY_RETURN_CODE, ERR_PROPAGATE_CODE};
 use super::Interpreter::{Flow, Interp};
 use super::Value::CtValue;
+
+const PERF_DEFAULT_FIDELITY_BITS: u32 = 1.0f32.to_bits();
+static PERF_FIDELITY: AtomicU32 = AtomicU32::new(PERF_DEFAULT_FIDELITY_BITS);
 
 /// D-CTIO1 (ratified 2026-06-22): a comptime embed path must be a string
 /// literal that stays inside the project — never computed, never absolute, and
@@ -2590,6 +2594,29 @@ fn apply_core_call(
     };
 
     match (module, method) {
+        // D-FIDELITY-API1=A: explicit runtime-global signal. Interpreter owns
+        // same f32-backed range and validation contract as AOT/JIT.
+        ("core.perf", "fidelity") => Ok(CtValue::Float(
+            f32::from_bits(PERF_FIDELITY.load(Ordering::SeqCst)) as f64,
+        )),
+        ("core.perf", "default_fidelity") => Ok(CtValue::Float(
+            f32::from_bits(PERF_DEFAULT_FIDELITY_BITS) as f64,
+        )),
+        ("core.perf", "override_fidelity") => {
+            let value = as_float(one(0)?, span)?;
+            if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+                return Ok(CtValue::ResErr(Box::new(CtValue::Str(format!(
+                    "core.perf.Perf.override_fidelity needs 0.0 through 1.0, got {}",
+                    value
+                )))));
+            }
+            PERF_FIDELITY.store((value as f32).to_bits(), Ordering::SeqCst);
+            Ok(CtValue::ResOk(Box::new(CtValue::Unit)))
+        }
+        ("core.perf", "reset_fidelity") => {
+            PERF_FIDELITY.store(PERF_DEFAULT_FIDELITY_BITS, Ordering::SeqCst);
+            Ok(CtValue::Unit)
+        }
         // --- core.math whitelist ---
         ("core.math", "sqrt") => Ok(CtValue::Float(as_float(one(0)?, span)?.sqrt())),
         ("core.math", "floor") => Ok(CtValue::Float(as_float(one(0)?, span)?.floor())),

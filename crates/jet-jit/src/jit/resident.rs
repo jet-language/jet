@@ -93,11 +93,16 @@ fn ensure_resident_module(program: &JitProgram) -> Result<(), String> {
 }
 
 fn resident_invoke() -> Result<RunOutcome, String> {
-    let code = RESIDENT_MODULE
+    let (code, main_returns_result) = RESIDENT_MODULE
         .with(|slot| {
             slot.borrow()
                 .as_ref()
-                .map(|r| r.module.get_finalized_function(r.main_id))
+                .map(|r| {
+                    (
+                        r.module.get_finalized_function(r.main_id),
+                        r.main_returns_result,
+                    )
+                })
         })
         .ok_or_else(|| "resident module missing".to_string())?;
 
@@ -107,10 +112,17 @@ fn resident_invoke() -> Result<RunOutcome, String> {
         runtime.invocations += 1;
         runtime.stdout.clear();
         runtime.stderr.clear();
+        runtime.results.clear();
         let ptr: *mut JitRuntime = runtime;
         Concurrency::set_active_runtime(Some(ptr));
-        let entry: extern "C" fn() = unsafe { std::mem::transmute(code) };
-        entry();
+        let entry_result = if main_returns_result {
+            let entry: extern "C" fn() -> i64 = unsafe { std::mem::transmute(code) };
+            Some(entry())
+        } else {
+            let entry: extern "C" fn() = unsafe { std::mem::transmute(code) };
+            entry();
+            None
+        };
         jet_codegen::scheduler::jet_scheduler_drain();
         Concurrency::set_active_runtime(None);
         if let Some(msg) = runtime.trapped.take() {
@@ -121,6 +133,23 @@ fn resident_invoke() -> Result<RunOutcome, String> {
             // resident process starts clean.
             reset_run_heap(runtime);
             return Ok(RunOutcome::Problems(vec![jit_panic_diag(&msg)]));
+        }
+        if let Some(handle) = entry_result {
+            let result = jit_result(runtime, handle)
+                .ok_or_else(|| "jit fallible entry returned invalid Result handle".to_string())?;
+            if !result.ok {
+                let message = runtime
+                    .heap
+                    .clone_string(result.bits as i64)
+                    .ok_or_else(|| "jit fallible entry returned non-string error".to_string())?;
+                runtime.stderr.push_str(&message);
+                runtime.stderr.push('\n');
+                return Ok(RunOutcome::Ran {
+                    stdout: runtime.stdout.clone(),
+                    stderr: runtime.stderr.clone(),
+                    exit_code: 1,
+                });
+            }
         }
         Ok(RunOutcome::Ran {
             stdout: runtime.stdout.clone(),

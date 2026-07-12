@@ -1186,14 +1186,14 @@ const JET_PERF_DEFAULT_FIDELITY_BITS: u32 = 1065353216; // 1.0f32 bits
 static JET_PERF_FIDELITY: std::sync::atomic::AtomicU32 =
     std::sync::atomic::AtomicU32::new(JET_PERF_DEFAULT_FIDELITY_BITS);
 fn jet_perf_fidelity() -> f64 {
-    let bits = JET_PERF_FIDELITY.load(std::sync::atomic::Ordering::Relaxed);
+    let bits = JET_PERF_FIDELITY.load(std::sync::atomic::Ordering::SeqCst);
     f32::from_bits(bits) as f64
 }
 fn jet_perf_default_fidelity() -> f64 {
     f32::from_bits(JET_PERF_DEFAULT_FIDELITY_BITS) as f64
 }
 fn jet_perf_store_fidelity(v: f64) {
-    JET_PERF_FIDELITY.store((v as f32).to_bits(), std::sync::atomic::Ordering::Relaxed);
+    JET_PERF_FIDELITY.store((v as f32).to_bits(), std::sync::atomic::Ordering::SeqCst);
 }
 fn jet_perf_override_fidelity(v: f64) -> Result<(), String> {
     if !v.is_finite() || v < 0.0 || v > 1.0 {
@@ -1208,7 +1208,7 @@ fn jet_perf_override_fidelity(v: f64) -> Result<(), String> {
 fn jet_perf_reset_fidelity() {
     JET_PERF_FIDELITY.store(
         JET_PERF_DEFAULT_FIDELITY_BITS,
-        std::sync::atomic::Ordering::Relaxed,
+        std::sync::atomic::Ordering::SeqCst,
     );
 }
 

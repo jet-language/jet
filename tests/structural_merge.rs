@@ -30,10 +30,31 @@ fn structural_diff_classifies_body_and_rename_with_stable_ids() {
 }
 
 #[test]
+fn structural_diff_ignores_format_comments_and_reports_signature_and_move() {
+    let root = dir("diff_hostile");
+    let old_dir = root.join("old");
+    let new_dir = root.join("new");
+    fs::create_dir_all(&old_dir).unwrap();
+    fs::create_dir_all(&new_dir).unwrap();
+    let before = write(&old_dir, "same.jet", "// old comment\nfn score(n: Int) -> Int { return n }\nfn run() { print(score(1)) }\n");
+    let after = write(&new_dir, "same.jet", "// new comment\nfn score(n: Int, bonus: Int) -> Int {\n    return n + bonus\n}\nfn run() { print(score(1, 2)) }\n");
+    let output = run(&["diff", "--structural", before.to_str().unwrap(), after.to_str().unwrap(), "--report", "json"]);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let report = String::from_utf8_lossy(&output.stdout);
+    assert!(report.contains("\"kind\":\"signature_changed\""), "{report}");
+    assert!(report.contains("\"kind\":\"moved\""), "{report}");
+
+    let same = write(&root, "format.jet", "fn score(n: Int) -> Int {\n    // only comment\n    return n\n}\nfn run() { print(score(1)) }\n");
+    let no_churn = run(&["diff", "--structural", before.to_str().unwrap(), same.to_str().unwrap()]);
+    assert!(no_churn.status.success());
+    assert_eq!(String::from_utf8_lossy(&no_churn.stdout), "no structural changes\n");
+}
+
+#[test]
 fn structural_merge_composes_disjoint_edits_and_rechecks_output() {
     let root = dir("disjoint");
     let base = write(&root, "base.jet", BASE);
-    let ours = write(&root, "ours.jet", "fn left() -> Int { return 10 }\nfn right() -> Int { return 2 }\nfn run() { print(left() + right()) }\n");
+    let ours = write(&root, "ours.jet", "// retained file header\nfn left() -> Int { return 10 }\nfn right() -> Int { return 2 }\nfn run() { print(left() + right()) }\n");
     let theirs = write(&root, "theirs.jet", "fn left() -> Int { return 1 }\nfn right() -> Int { return 20 }\nfn run() { print(left() + right()) }\n");
     let merged = root.join("merged.jet");
     let output = run(&["merge", "--structural", base.to_str().unwrap(), ours.to_str().unwrap(), theirs.to_str().unwrap(), "--out", merged.to_str().unwrap()]);
@@ -41,6 +62,7 @@ fn structural_merge_composes_disjoint_edits_and_rechecks_output() {
     let source = fs::read_to_string(&merged).unwrap();
     assert!(source.contains("return 10"), "{source}");
     assert!(source.contains("return 20"), "{source}");
+    assert!(source.contains("retained file header"), "{source}");
     assert!(run(&["check", merged.to_str().unwrap()]).status.success());
 }
 

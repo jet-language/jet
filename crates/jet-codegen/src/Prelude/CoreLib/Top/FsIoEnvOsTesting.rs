@@ -451,11 +451,164 @@ fn jet_std_io_progress(text: &String) -> Result<(), jet_std::IoError> {
     }
 }
 
-fn jet_std_env_get(name: &String) -> Option<String> {
-    std::env::var(name).ok()
+// D-ENV-MUTATE1=A: Jet owns a raw, process-global logical environment. User
+// mutation never calls libc `setenv` or changes the Windows environment block.
+// One lock supplies get/set/unset/vars and atomic child snapshots.
+type JetEnvEntries = Vec<(std::ffi::OsString, std::ffi::OsString)>;
+
+fn jet_env_table() -> &'static std::sync::RwLock<JetEnvEntries> {
+    static TABLE: std::sync::OnceLock<std::sync::RwLock<JetEnvEntries>> =
+        std::sync::OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut entries: JetEnvEntries = Vec::new();
+        for (name, value) in std::env::vars_os() {
+            if let Some(old) = entries
+                .iter()
+                .position(|(candidate, _)| jet_env_key_eq(candidate.as_os_str(), name.as_os_str()))
+            {
+                entries.remove(old);
+            }
+            entries.push((name, value));
+        }
+        std::sync::RwLock::new(entries)
+    })
 }
-fn jet_std_env_set(name: &String, value: &String) {
-    std::env::set_var(name, value);
+
+fn jet_env_read() -> std::sync::RwLockReadGuard<'static, JetEnvEntries> {
+    jet_env_table().read().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn jet_env_write() -> std::sync::RwLockWriteGuard<'static, JetEnvEntries> {
+    jet_env_table().write().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+#[cfg(unix)]
+fn jet_env_key_cmp(left: &std::ffi::OsStr, right: &std::ffi::OsStr) -> std::cmp::Ordering {
+    use std::os::unix::ffi::OsStrExt;
+    left.as_bytes().cmp(right.as_bytes())
+}
+
+// JET_VETTED_UNSAFE_BEGIN: jet_env_windows
+#[cfg(windows)]
+fn jet_env_key_cmp(left: &std::ffi::OsStr, right: &std::ffi::OsStr) -> std::cmp::Ordering {
+    use std::os::windows::ffi::OsStrExt;
+    extern "system" {
+        fn CompareStringOrdinal(
+            left: *const u16,
+            left_len: i32,
+            right: *const u16,
+            right_len: i32,
+            ignore_case: i32,
+        ) -> i32;
+    }
+    let left: Vec<u16> = left.encode_wide().collect();
+    let right: Vec<u16> = right.encode_wide().collect();
+    let result = unsafe {
+        CompareStringOrdinal(
+            left.as_ptr(),
+            left.len() as i32,
+            right.as_ptr(),
+            right.len() as i32,
+            1,
+        )
+    };
+    match result {
+        1 => std::cmp::Ordering::Less,
+        3 => std::cmp::Ordering::Greater,
+        _ => std::cmp::Ordering::Equal,
+    }
+}
+// JET_VETTED_UNSAFE_END: jet_env_windows
+
+#[cfg(not(any(unix, windows)))]
+fn jet_env_key_cmp(left: &std::ffi::OsStr, right: &std::ffi::OsStr) -> std::cmp::Ordering {
+    left.cmp(right)
+}
+
+fn jet_env_key_eq(left: &std::ffi::OsStr, right: &std::ffi::OsStr) -> bool {
+    jet_env_key_cmp(left, right) == std::cmp::Ordering::Equal
+}
+
+fn jet_env_validate_name(name: &str) -> Result<(), jet_std::EnvError> {
+    if name.is_empty() || name.contains('\0') || name.contains('=') {
+        Err(jet_std::EnvError::InvalidName)
+    } else {
+        Ok(())
+    }
+}
+
+fn jet_env_validate_value(value: &str) -> Result<(), jet_std::EnvError> {
+    if value.contains('\0') {
+        Err(jet_std::EnvError::InvalidValue)
+    } else {
+        Ok(())
+    }
+}
+
+fn jet_std_env_get(name: &String) -> Option<String> {
+    let name = std::ffi::OsStr::new(name);
+    jet_env_read()
+        .iter()
+        .find(|(candidate, _)| jet_env_key_eq(candidate.as_os_str(), name))
+        .and_then(|(_, value)| value.to_str().map(str::to_string))
+}
+
+fn jet_std_env_set(name: &String, value: &String) -> Result<(), jet_std::EnvError> {
+    jet_env_validate_name(name)?;
+    jet_env_validate_value(value)?;
+    let os_name = std::ffi::OsString::from(name);
+    let mut entries = jet_env_write();
+    if let Some(old) = entries
+        .iter()
+        .position(|(candidate, _)| jet_env_key_eq(candidate.as_os_str(), os_name.as_os_str()))
+    {
+        entries.remove(old);
+    }
+    entries.push((os_name, std::ffi::OsString::from(value)));
+    Ok(())
+}
+
+fn jet_std_env_unset(name: &String) -> Result<bool, jet_std::EnvError> {
+    jet_env_validate_name(name)?;
+    let os_name = std::ffi::OsStr::new(name);
+    let mut entries = jet_env_write();
+    if let Some(old) = entries
+        .iter()
+        .position(|(candidate, _)| jet_env_key_eq(candidate.as_os_str(), os_name))
+    {
+        entries.remove(old);
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
+fn jet_std_env_vars() -> Result<Vec<String>, jet_std::EnvError> {
+    let entries = jet_env_read();
+    let mut names = Vec::with_capacity(entries.len());
+    for (name, value) in entries.iter() {
+        let decoded_name = name.to_str().ok_or(jet_std::EnvError::NonUnicode)?;
+        value.to_str().ok_or(jet_std::EnvError::NonUnicode)?;
+        names.push((name.clone(), decoded_name.to_string()));
+    }
+    names.sort_by(|(left, _), (right, _)| {
+        let folded = jet_env_key_cmp(left.as_os_str(), right.as_os_str());
+        if folded != std::cmp::Ordering::Equal {
+            return folded;
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::ffi::OsStrExt;
+            return left.encode_wide().cmp(right.encode_wide());
+        }
+        #[cfg(not(windows))]
+        std::cmp::Ordering::Equal
+    });
+    Ok(names.into_iter().map(|(_, name)| name).collect())
+}
+
+fn jet_std_env_snapshot_raw() -> JetEnvEntries {
+    jet_env_read().clone()
 }
 fn jet_std_env_current_dir() -> Result<String, jet_std::IoError> {
     std::env::current_dir()
@@ -465,9 +618,8 @@ fn jet_std_env_current_dir() -> Result<String, jet_std::IoError> {
         })
 }
 fn jet_std_env_home_dir() -> Option<String> {
-    std::env::var("HOME")
-        .ok()
-        .or_else(|| std::env::var("USERPROFILE").ok())
+    jet_std_env_get(&"HOME".to_string())
+        .or_else(|| jet_std_env_get(&"USERPROFILE".to_string()))
 }
 
 fn jet_std_os_name() -> String {

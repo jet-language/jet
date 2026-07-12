@@ -428,6 +428,7 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
     let s = strip_mod(&s, "jet_atomic_windows");
     let s = strip_mod(&s, "jet_gtk");
     let mut s = strip_scheduler_native(&s);
+    s = strip_vetted_module(&s, "jet_env_windows");
     while s.contains("mod user___c_") {
         let before = s.clone();
         s = strip_mod(&s, "user___c_");

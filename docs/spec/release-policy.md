@@ -36,6 +36,19 @@ toolchain that still supports edition *N*. New syntax that would break old code
 lands only behind a *newer* edition; pinning an older edition opts out of it.
 A toolchain advertises the editions it supports in `jet --version`.
 
+### Environment safety correction (D-ENV-MUTATE1)
+
+`core.env` mutations now change Jet's locked logical environment rather than
+the host process environment. Valid Jet behavior remains compatible: a later
+`core.env.get` observes the write, and every `core.process` child inherits it.
+Foreign code that calls libc `getenv` or reads the Windows environment block
+after a Jet mutation now sees the original host value. This is the ratified
+narrow safety exception to the normal compatibility promise: mutating a
+process-global host environment while foreign threads may read it cannot meet
+Jet's memory-safety guarantee. Pass changed values to foreign APIs explicitly.
+Existing editions keep `core.env.set -> Void`; its fallible
+`Void ? EnvError` signature requires a future major release and edition opt-in.
+
 ## Deprecation policy + migration window
 
 1. An item is marked **deprecated** as of a specific edition, with a named

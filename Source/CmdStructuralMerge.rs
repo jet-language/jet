@@ -13,6 +13,12 @@ struct Unit {
     source: String,
 }
 
+struct Document {
+    units: Vec<Unit>,
+    prefix: String,
+    suffix: String,
+}
+
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum ChangeKind { Added, Removed, Renamed, Moved, Signature, Body }
 
@@ -45,7 +51,7 @@ pub(crate) fn run_diff(args: &[String]) {
     if paths.len() != 2 { fail("`jet diff --structural` needs two checked Jet files", "jet diff --structural before.jet after.jet"); }
     let before = load(Path::new(&paths[0]));
     let after = load(Path::new(&paths[1]));
-    let changes = structural_diff(&before, &after);
+    let changes = structural_diff(&before.units, &after.units);
     let report = report_mode(args);
     if report == "text" {
         if changes.is_empty() { println!("no structural changes"); }
@@ -85,7 +91,7 @@ pub(crate) fn run_merge(args: &[String]) {
     else { println!("{{\"schema_version\":1,\"kind\":\"structural_merge\",\"status\":\"merged\",\"output\":{}}}", json_string(&output_path.display().to_string())); }
 }
 
-fn load(path: &Path) -> Vec<Unit> {
+fn load(path: &Path) -> Document {
     let source = fs::read_to_string(path).unwrap_or_else(|err| fail(&format!("could not read `{}`: {err}", path.display()), "pass a readable Jet source file"));
     let index = open(path).unwrap_or_else(|err| render_index_error(&format!("`{}` did not pass parser and sema", path.display()), err));
     let mut units = Vec::new();
@@ -94,7 +100,13 @@ fn load(path: &Path) -> Vec<Unit> {
         units.push(Unit { fact: fact.clone(), source: slice.trim().to_string() });
     }
     units.sort_by_key(|unit| unit.fact.span.start);
-    units
+    let first = units.first().map_or(source.len(), |unit| unit.fact.span.start);
+    let last = units.last().map_or(0, |unit| unit.fact.span.end);
+    Document {
+        units,
+        prefix: source.get(..first).unwrap_or("").to_string(),
+        suffix: source.get(last..).unwrap_or("").to_string(),
+    }
 }
 
 fn structural_diff(before: &[Unit], after: &[Unit]) -> Vec<Change> {
@@ -136,19 +148,19 @@ fn match_units(base: &[Unit], side: &[Unit]) -> BTreeMap<usize, Option<usize>> {
     result
 }
 
-fn merge_units(base: &[Unit], ours: &[Unit], theirs: &[Unit]) -> (String, Vec<Conflict>) {
-    let ours_matches = match_units(base, ours);
-    let theirs_matches = match_units(base, theirs);
+fn merge_units(base: &Document, ours: &Document, theirs: &Document) -> (String, Vec<Conflict>) {
+    let ours_matches = match_units(&base.units, &ours.units);
+    let theirs_matches = match_units(&base.units, &theirs.units);
     let mut ours_used = BTreeSet::new();
     let mut theirs_used = BTreeSet::new();
     let mut merged = Vec::new();
     let mut conflicts = Vec::new();
-    for (index, original) in base.iter().enumerate() {
+    for (index, original) in base.units.iter().enumerate() {
         let oi = ours_matches.get(&index).copied().flatten();
         let ti = theirs_matches.get(&index).copied().flatten();
         if let Some(i) = oi { ours_used.insert(i); }
         if let Some(i) = ti { theirs_used.insert(i); }
-        match (oi.map(|i| &ours[i]), ti.map(|i| &theirs[i])) {
+        match (oi.map(|i| &ours.units[i]), ti.map(|i| &theirs.units[i])) {
             (None, None) => {}
             (Some(o), None) if o.fact.content_id == original.fact.content_id => {}
             (None, Some(t)) if t.fact.content_id == original.fact.content_id => {}
@@ -159,8 +171,8 @@ fn merge_units(base: &[Unit], ours: &[Unit], theirs: &[Unit]) -> (String, Vec<Co
             (Some(o), Some(t)) => conflicts.push(conflict("overlapping_edit", original, o, t)),
         }
     }
-    let ours_added: Vec<&Unit> = ours.iter().enumerate().filter(|(i, _)| !ours_used.contains(i)).map(|(_, u)| u).collect();
-    let theirs_added: Vec<&Unit> = theirs.iter().enumerate().filter(|(i, _)| !theirs_used.contains(i)).map(|(_, u)| u).collect();
+    let ours_added: Vec<&Unit> = ours.units.iter().enumerate().filter(|(i, _)| !ours_used.contains(i)).map(|(_, u)| u).collect();
+    let theirs_added: Vec<&Unit> = theirs.units.iter().enumerate().filter(|(i, _)| !theirs_used.contains(i)).map(|(_, u)| u).collect();
     let mut added_names = BTreeMap::new();
     for unit in ours_added.iter().chain(theirs_added.iter()) {
         let key = (&unit.fact.kind, &unit.fact.name);
@@ -169,7 +181,29 @@ fn merge_units(base: &[Unit], ours: &[Unit], theirs: &[Unit]) -> (String, Vec<Co
             if previous.fact.content_id != unit.fact.content_id { conflicts.push(conflict("competing_add", unit, previous, unit)); }
         } else { added_names.insert(key, unit); merged.push(unit.source.clone()); }
     }
-    (format!("{}\n", merged.join("\n\n")), conflicts)
+    let prefix = merge_shell("prefix", &base.prefix, &ours.prefix, &theirs.prefix, &mut conflicts);
+    let suffix = merge_shell("suffix", &base.suffix, &ours.suffix, &theirs.suffix, &mut conflicts);
+    (format!("{}{}\n{}", prefix, merged.join("\n\n"), suffix), conflicts)
+}
+
+fn merge_shell(
+    label: &'static str,
+    base: &str,
+    ours: &str,
+    theirs: &str,
+    conflicts: &mut Vec<Conflict>,
+) -> String {
+    if ours == theirs { return ours.to_string(); }
+    if ours == base { return theirs.to_string(); }
+    if theirs == base { return ours.to_string(); }
+    conflicts.push(Conflict {
+        kind: "file_scope_edit",
+        stable_id: format!("file:{label}"),
+        human_identity: format!("file {label}"),
+        ours: format!("sha256:{}", jet::SHA256::sha256_hex(ours.as_bytes())),
+        theirs: format!("sha256:{}", jet::SHA256::sha256_hex(theirs.as_bytes())),
+    });
+    base.to_string()
 }
 
 fn conflict(kind: &'static str, base: &Unit, ours: &Unit, theirs: &Unit) -> Conflict {
@@ -216,5 +250,5 @@ fn report_mode(args: &[String]) -> &str { flag_value(args, "--report").unwrap_or
 fn json_string(value: &str) -> String { format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")) }
 fn change_json(change: &Change) -> String { format!("{{\"kind\":{},\"stable_id\":{},\"before\":{},\"after\":{}}}", json_string(change.kind.name()), json_string(&change.stable_id), change.before.as_ref().map(|v| json_string(v)).unwrap_or_else(|| "null".into()), change.after.as_ref().map(|v| json_string(v)).unwrap_or_else(|| "null".into())) }
 fn conflict_json(conflict: &Conflict) -> String { format!("{{\"kind\":{},\"stable_id\":{},\"human_identity\":{},\"ours\":{},\"theirs\":{}}}", json_string(conflict.kind), json_string(&conflict.stable_id), json_string(&conflict.human_identity), json_string(&conflict.ours), json_string(&conflict.theirs)) }
-fn render_index_error(context: &str, error: SemIndexError) -> ! { eprintln!("error: {context}"); if let SemIndexError::Load(diags) = error { for diagnostic in diags { eprintln!("  {}: {}", diagnostic.code, diagnostic.message); } } eprintln!(" fix: correct source errors; structural tools never merge unchecked code"); exit(1) }
+fn render_index_error(context: &str, error: SemIndexError) -> ! { eprintln!("error: {context}"); let SemIndexError::Load(diags) = error; for diagnostic in diags { eprintln!("  {}: {}", diagnostic.code, diagnostic.what); } eprintln!(" fix: correct source errors; structural tools never merge unchecked code"); exit(1) }
 fn fail(message: &str, fix: &str) -> ! { eprintln!("error: {message}\n fix: {fix}"); exit(2) }

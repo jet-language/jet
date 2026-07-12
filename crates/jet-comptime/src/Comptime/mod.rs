@@ -433,7 +433,7 @@ pub fn run_main(
     base_dir: &Path,
     sink: &mut DevSink,
     program: &ProgramInfo,
-) -> Result<(), Diagnostic> {
+) -> Result<CtValue, Diagnostic> {
     let mut interp = Interp {
         funcs,
         base_dir,
@@ -459,8 +459,14 @@ pub fn run_main(
         migrations: &program.migrations,
     };
     let mut scope = HashMap::new();
-    interp.exec_block(&main.body, &mut scope)?;
-    Ok(())
+    match interp.exec_block(&main.body, &mut scope) {
+        Ok(Interpreter::Flow::Return(value)) => Ok(value),
+        Ok(_) => Ok(CtValue::Unit),
+        Err(d) if d.code == Diagnostics::ERR_PROPAGATE_CODE => {
+            Ok(CtValue::ResErr(Box::new(CtValue::Str(d.what))))
+        }
+        Err(d) => Err(d),
+    }
 }
 
 /// D-DBG3: whole-program interpretation under the source-level debugger.

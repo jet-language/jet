@@ -18,7 +18,7 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "style_force",
             "progress",
         ],
-        "core.env" => &["get", "set", "current_dir", "home_dir"],
+        "core.env" => &["get", "set", "unset", "vars", "current_dir", "home_dir"],
         "core.os" => &[
             "name",
             "family",

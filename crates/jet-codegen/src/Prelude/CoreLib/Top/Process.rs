@@ -39,15 +39,36 @@ fn jet_process_command(
     if let Some(cwd) = &spec.cwd {
         command.current_dir(cwd);
     }
-    if spec.env_clear {
-        command.env_clear();
-    }
+    // D-ENV-MUTATE1=A: clone one logical-environment snapshot under its read
+    // lock, then compose ProcessSpec overrides in owned memory. Every launch is
+    // untorn and never rereads the mutable host environment.
+    let mut child_env = if spec.env_clear {
+        Vec::new()
+    } else {
+        jet_std_env_snapshot_raw()
+    };
     for name in &spec.env_remove {
-        command.env_remove(name);
+        jet_env_validate_name(name).map_err(|error| jet_std::IoError::Other {
+            message: error.jet_show(),
+        })?;
+        let name = std::ffi::OsStr::new(name);
+        child_env.retain(|(candidate, _)| !jet_env_key_eq(candidate.as_os_str(), name));
     }
     for (name, value) in &spec.env_set {
-        command.env(name, value);
+        jet_env_validate_name(name).map_err(|error| jet_std::IoError::Other {
+            message: error.jet_show(),
+        })?;
+        jet_env_validate_value(value).map_err(|error| jet_std::IoError::Other {
+            message: error.jet_show(),
+        })?;
+        let os_name = std::ffi::OsString::from(name);
+        child_env.retain(|(candidate, _)| {
+            !jet_env_key_eq(candidate.as_os_str(), os_name.as_os_str())
+        });
+        child_env.push((os_name, std::ffi::OsString::from(value)));
     }
+    command.env_clear();
+    command.envs(child_env);
     // D-PROCESS1=A: no `.stdin(...)` call (default) closes the child's stdin —
     // no accidental terminal/parent-stdin inheritance.
     command.stdin(match &spec.stdin {
@@ -405,4 +426,3 @@ fn jet_std_crypto_random_bytes(n: i64) -> Vec<u8> {
     jet_uuid_fill_random(&mut out);
     out
 }
-

@@ -81,20 +81,80 @@ fn codegen_is_raw_locked_and_never_mutates_host_env() {
 use core.env as env
 use core.process as process
 
+fn remove(name: String) -> Bool ? env.EnvError {
+    return env.unset(name)?
+}
+
 fn run() {
     env.set("MODE", "test")
-    _ :: env.unset("CI")
-    _ :: env.vars()
-    _ :: process.run(["worker"])
+    removed :: remove("CI")
+    names :: env.vars()
+    child :: process.run(["worker"])
 }
 "#,
     );
     assert!(out.rust.contains("std::env::vars_os()"));
-    assert!(out.rust.contains("RwLock<Vec<(std::ffi::OsString, std::ffi::OsString)>>"));
+    assert!(out.rust.contains("type JetEnvEntries = Vec<(std::ffi::OsString, std::ffi::OsString)>"));
+    assert!(out.rust.contains("RwLock<JetEnvEntries>"));
     assert!(out.rust.contains("command.env_clear()"));
     assert!(out.rust.contains("command.envs(child_env)"));
     assert!(!out.rust.contains("std::env::set_var"));
     assert!(!out.rust.contains("std::env::remove_var"));
+}
+
+#[cfg(unix)]
+#[test]
+fn raw_non_unicode_value_survives_child_snapshot_and_vars_fails_whole_snapshot() {
+    use std::os::unix::ffi::OsStringExt;
+
+    let src = r#"
+use core.env as env
+use core.process as process
+
+fn run() {
+    child :: process.run(["./raw_probe"]) ?? panic("raw child failed")
+    print(child.output)
+    if env.vars() == {
+        ok(_) -> { print("unexpected vars success") }
+        err(e) -> { print(e) }
+    }
+}
+"#;
+    let (dir, out) = compile("raw", src);
+    let probe_rs = dir.join("raw_probe.rs");
+    fs::write(
+        &probe_rs,
+        r#"
+use std::os::unix::ffi::OsStrExt;
+fn main() {
+    let raw = std::env::var_os("JET_RAW_VALUE").expect("missing raw env");
+    println!("{}", raw.as_os_str().as_bytes() == [0x66, 0x80, 0x6f]);
+}
+"#,
+    )
+    .unwrap();
+    let probe_build = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&probe_rs)
+        .arg("-o")
+        .arg(dir.join("raw_probe"))
+        .output()
+        .unwrap();
+    assert!(probe_build.status.success(), "{}", String::from_utf8_lossy(&probe_build.stderr));
+    let bin = build(&dir, "raw", &out);
+    let run = Command::new(bin)
+        .current_dir(&dir)
+        .env(
+            "JET_RAW_VALUE",
+            std::ffi::OsString::from_vec(vec![0x66, 0x80, 0x6f]),
+        )
+        .output()
+        .unwrap();
+    assert_eq!(run.status.code(), Some(0), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout),
+        "true\n\nenvironment contains a name or value that is not valid Unicode\n"
+    );
 }
 
 #[test]

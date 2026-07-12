@@ -557,7 +557,13 @@ fn resident_safe_func_detail(tir: &TFunc, callees: &HashSet<String>) -> Option<S
 fn resident_safe_program(program: &JitProgram) -> bool {
     let names: HashSet<String> = program.funcs.iter().map(|f| f.name.clone()).collect();
     let main_ok = program.funcs.iter().any(|f| {
-        f.name == "run" && f.params.is_empty() && f.ret.is_none() && resident_safe_func(f, &names)
+        f.name == "run"
+            && f.params.is_empty()
+            && (f.ret.is_none()
+                || matches!(&f.ret, Some(Type::Result { ok, err })
+                    if matches!(ok.as_ref(), Type::Named(n) if n == "Void" || n == "Unit")
+                        && matches!(err.as_ref(), Type::String | Type::Named(_))))
+            && resident_safe_func(f, &names)
     });
     if !main_ok {
         return false;

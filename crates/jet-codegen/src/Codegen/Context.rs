@@ -186,6 +186,7 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         n if is_json_type_name(n) => Some("DataTree"),
         n if n == Syntax::TYPE_JSON_ERROR || n == "JsonError" => Some("JsonError"),
         n if n == Syntax::TYPE_IO_ERROR || n == "IoError" => Some("IoError"),
+        "EnvError" => Some("EnvError"),
         n if n == Syntax::TYPE_UTF8_ERROR || n == "Utf8Error" => Some("Utf8Error"),
         "ProcessResult" => Some("ProcessResult"),
         "ProcessSpec" => Some("ProcessSpec"),

@@ -97,7 +97,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "ProcessStreamMode" | "ProcessStdin" | "ProcessStdoutStream" | "ProcessStderrStream" | "ProcessLines"
         // D-TEXTWIDTH1=B: `TextWidth` (dot-ctor struct, `core_constructable_fields`)
         // + its two dot-literal enum fields + the `.Reject` policy error.
-        | "TextWidth" | "TextWidthAmbiguous" | "TextWidthControls" | "TextError"
+        | "TextWidth" | "TextWidthAmbiguous" | "TextWidthControls" | "TextError" | "EnvError"
         // D-DET1: deterministic injected capability handles.
         // D-DET-CAPAPI: `Duration` value type for the widened clock surface.
         | "Clock" | "Rng" | "Duration"
@@ -483,6 +483,17 @@ pub(crate) fn core_process_stream_mode_variants(
         m.insert((*name).to_string(), (zero, VariantPayload::Unit));
     }
     m
+}
+
+pub(crate) fn core_env_error_variants(
+) -> std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)> {
+    use crate::AST::VariantPayload;
+    use crate::Diagnostics::Span;
+    let zero = Span::new(0, 0);
+    ["InvalidName", "InvalidValue", "NonUnicode"]
+        .into_iter()
+        .map(|name| (name.to_string(), (zero, VariantPayload::Unit)))
+        .collect()
 }
 
 pub(crate) fn core_net_control_variants(

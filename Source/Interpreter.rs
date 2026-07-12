@@ -615,7 +615,16 @@ pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
     let base_dir = &bundle.project_root;
     let mut sink = crate::Comptime::DevSink::new();
     match crate::Comptime::run_main(main, &funcs, base_dir, &mut sink, &program) {
-        Ok(()) => RunOutcome::Ran {
+        Ok(crate::Comptime::CtValue::ResErr(error)) => {
+            sink.stderr.push_str(&error.jet_show());
+            sink.stderr.push('\n');
+            RunOutcome::Ran {
+                stdout: sink.stdout,
+                stderr: sink.stderr,
+                exit_code: 1,
+            }
+        }
+        Ok(_) => RunOutcome::Ran {
             stdout: sink.stdout,
             stderr: sink.stderr,
             exit_code: 0,

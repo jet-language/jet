@@ -569,6 +569,34 @@ pub(crate) fn lower_method_call(
             }
         }
     }
+    // D-ENV-MUTATE1=A: current editions retain `env.set -> Void`, but invalid
+    // runtime strings must produce existing E3001 at the Jet call span. Lower
+    // this compatibility wrapper with all panic facts resolved before emit.
+    if method == "set" && args.len() == 2 {
+        if let Expr::Ident(alias, _) = receiver {
+            if !env.locals.contains_key(alias)
+                && cx.core_imports.get(alias).is_some_and(|module| module == "core.env")
+            {
+                let name = emit_tir_expr(&lower_expr(&args[0].expr, cx, env), cx);
+                let value = emit_tir_expr(&lower_expr(&args[1].expr, cx, env), cx);
+                let (src_line, line, col) = tir_src_line_at(&cx.src, method_span.start);
+                let caret = (method_span.end - method_span.start) as u32;
+                let locals = render_safe_locals(env);
+                let rendered = format!(
+                    "{{ let __jet_env_name = ({name}); let __jet_env_value = ({value}); if let Err(__jet_env_error) = {root}jet_std_env_set(&__jet_env_name, &__jet_env_value) {{ jet_panic_rich({file}, {line}, {fn_name}, {src_line}, {col}, {caret}, &format!(\"core.env.set: {{}}\", __jet_env_error.jet_show()), &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }} }}",
+                    root = cx.root_prefix,
+                    file = escape_rust_str(&cx.file),
+                    fn_name = escape_rust_str(&env.fn_name),
+                    src_line = escape_rust_str(src_line.trim_end()),
+                );
+                return TExpr {
+                    ty: unit_type(),
+                    kind: TExprKind::RequireStop(rendered),
+                };
+            }
+        }
+    }
+
     // c109 Phase 10: a core/stdlib module call `alias.method(args)`. The gate proved
     // `recv_type == None` + receiver is a core-import alias + `core_call_covered`.
     // Mirror `emit_core_call` (Source/Codegen/Expression.rs): resolve the module here

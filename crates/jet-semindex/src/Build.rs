@@ -475,6 +475,8 @@ fn build_definition_facts(
             structural.push_str(&descendant.shape);
         }
         let source = module.source.get(node.span.start..node.span.end).unwrap_or("");
+        structural.push('|');
+        structural.push_str(&identity_insensitive_source(source));
         out.push(DefinitionFact {
             stable_id: format!("def:{}", &jet_foundation::SHA256::sha256_hex(structural.as_bytes())[..16]),
             content_id: format!("sha256:{}", jet_foundation::SHA256::sha256_hex(normalize_definition(source).as_bytes())),
@@ -529,6 +531,33 @@ fn normalize_definition(source: &str) -> String {
         } else if ch == '/' && chars.peek() == Some(&'/') {
             chars.next();
             for next in chars.by_ref() { if next == '\n' { break; } }
+        } else if !ch.is_whitespace() {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+/// Preserve literals/operators while erasing user-chosen identifier spelling.
+/// Structural nodes retain grammatical roles; this stream distinguishes
+/// otherwise identical bodies without making a rename change stable identity.
+fn identity_insensitive_source(source: &str) -> String {
+    let mut out = String::new();
+    let mut chars = source.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '/' && chars.peek() == Some(&'/') {
+            chars.next();
+            for next in chars.by_ref() { if next == '\n' { break; } }
+        } else if ch == '"' {
+            out.push('"');
+            while let Some(next) = chars.next() {
+                out.push(next);
+                if next == '\\' { if let Some(escaped) = chars.next() { out.push(escaped); } }
+                else if next == '"' { break; }
+            }
+        } else if ch.is_alphabetic() || ch == '_' {
+            while chars.peek().is_some_and(|next| next.is_alphanumeric() || *next == '_') { chars.next(); }
+            out.push('_');
         } else if !ch.is_whitespace() {
             out.push(ch);
         }

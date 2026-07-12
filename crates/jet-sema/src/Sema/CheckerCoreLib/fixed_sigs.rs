@@ -247,6 +247,17 @@ pub fn core_fixed_sig(
             Some(Type::Option(Box::new(Type::String))),
         )),
         ("core.env", "set") => Some((vec![(read, Type::String), (read, Type::String)], None)),
+        ("core.env", "unset") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(Type::Bool, Type::Named("EnvError".to_string()))),
+        )),
+        ("core.env", "vars") => Some((
+            vec![],
+            Some(result_ty(
+                Type::List(Box::new(Type::String)),
+                Type::Named("EnvError".to_string()),
+            )),
+        )),
         ("core.env", "current_dir") => Some((vec![], Some(result_ty(Type::String, io_error_ty())))),
         ("core.env", "home_dir") => Some((vec![], Some(Type::Option(Box::new(Type::String))))),
         ("core.os", "name" | "family" | "arch" | "temp_dir" | "executable" | "hostname" | "username") => {

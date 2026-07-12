@@ -479,6 +479,11 @@ fn strip_vetted_prelude_modules(rust_code: &str) -> String {
         "// jet:scheduler-native-begin",
         "// jet:scheduler-native-end",
     );
+    s = strip_region(
+        &s,
+        "// JET_VETTED_UNSAFE_BEGIN: jet_env_windows",
+        "// JET_VETTED_UNSAFE_END: jet_env_windows",
+    );
     while s.contains("mod user___c_") {
         let before = s.clone();
         s = strip_mod(&s, "user___c_");
