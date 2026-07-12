@@ -1104,6 +1104,100 @@ fn expand_alias(
     })
 }
 
+fn report_generic_module_cycles(items: &[Item], diags: &mut Vec<Diagnostic>) -> bool {
+    fn collect_alias_edges(items: &[Item], edges: &mut Vec<(String, crate::Diagnostics::Span)>) {
+        for item in items {
+            match item {
+                Item::ModuleAlias(alias) => {
+                    edges.push((alias.target.clone(), alias.target_span));
+                }
+                Item::GenericModule(module) => collect_alias_edges(&module.body, edges),
+                _ => {}
+            }
+        }
+    }
+
+    let mut graph: HashMap<String, Vec<(String, crate::Diagnostics::Span)>> = HashMap::new();
+    for item in items {
+        match item {
+            Item::ModuleAlias(alias) => {
+                graph
+                    .entry(alias.name.clone())
+                    .or_default()
+                    .push((alias.target.clone(), alias.target_span));
+            }
+            Item::GenericModule(module) => {
+                let mut edges = Vec::new();
+                collect_alias_edges(&module.body, &mut edges);
+                graph.insert(module.name.clone(), edges);
+            }
+            _ => {}
+        }
+    }
+    for edges in graph.values_mut() {
+        edges.sort_by(|a, b| a.0.cmp(&b.0));
+    }
+
+    fn visit(
+        node: &str,
+        graph: &HashMap<String, Vec<(String, crate::Diagnostics::Span)>>,
+        state: &mut HashMap<String, u8>,
+        stack: &mut Vec<String>,
+        reported: &mut HashSet<String>,
+        diags: &mut Vec<Diagnostic>,
+    ) {
+        state.insert(node.to_string(), 1);
+        stack.push(node.to_string());
+        if let Some(edges) = graph.get(node) {
+            for (target, span) in edges {
+                if !graph.contains_key(target) {
+                    continue;
+                }
+                match state.get(target).copied().unwrap_or(0) {
+                    0 => visit(target, graph, state, stack, reported, diags),
+                    1 => {
+                        let start = stack.iter().position(|name| name == target).unwrap_or(0);
+                        let mut chain = stack[start..].to_vec();
+                        chain.push(target.clone());
+                        let text = chain.join(" -> ");
+                        if reported.insert(text.clone()) {
+                            diags.push(Diagnostic::error(
+                                "E0855",
+                                format!("generic module instantiation forms a cycle: {text}"),
+                                "module aliases must form an acyclic dependency graph so specialization reaches one stable result".to_string(),
+                                format!("break the cycle: {text}"),
+                                Some(*span),
+                            ));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        stack.pop();
+        state.insert(node.to_string(), 2);
+    }
+
+    let mut nodes: Vec<String> = graph.keys().cloned().collect();
+    nodes.sort();
+    let mut state = HashMap::new();
+    let mut stack = Vec::new();
+    let mut reported = HashSet::new();
+    for node in nodes {
+        if state.get(&node).copied().unwrap_or(0) == 0 {
+            visit(
+                &node,
+                &graph,
+                &mut state,
+                &mut stack,
+                &mut reported,
+                diags,
+            );
+        }
+    }
+    !reported.is_empty()
+}
+
 /// D-GENMOD2=A: expand every `ModuleAlias` in each module's item list into a
 /// concrete `CodeModule` using the corresponding `GenericModule` template.
 /// Templates and aliases are removed from the item list after expansion.
@@ -1112,6 +1206,9 @@ pub(crate) fn expand_generic_module_aliases(
     diags: &mut Vec<Diagnostic>,
 ) {
     for module in bundle.modules.iter_mut() {
+        if report_generic_module_cycles(&module.items, diags) {
+            continue;
+        }
         let mut traits=TraitRegistry::default();traits.register_items(&module.items,diags);
         let enums:HashMap<String,bool>=module.items.iter().filter_map(|item|if let Item::Enum(def)=item{Some((def.name.clone(),def.variants.iter().all(|v|matches!(v.payload,VariantPayload::Unit))))}else{None}).collect();
         let funcs:HashMap<String,&Func>=module.items.iter().filter_map(|item|if let Item::Func(f)=item{Some((f.name.clone(),f))}else{None}).collect();

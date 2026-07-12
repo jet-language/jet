@@ -66,6 +66,10 @@ fn method(name: &str, is_pub: bool) -> Func {
         is_inline_always: false,
         inline_span: None,
         meta: None,
+        is_task: false,
+        task_span: None,
+        every: None,
+        inline_foreign: None,
         body: Vec::new(),
     }
 }
