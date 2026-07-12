@@ -571,6 +571,10 @@ fn render_report(target: &Target, items: &[FrontEndItem], tests: &[TestItem], pr
         &format!("\"contract\":{{\"declared\":{contract_selected},\"failed\":{contract_failed},\"notObserved\":0,\"observed\":{contract_selected},\"passed\":{contract_passed},\"selected\":{contract_selected},\"skipped\":0}}"),
     )
     .replace(
+        "\"property\":{\"failed\":0,\"generatedCases\":0,\"passed\":0,\"selected\":0,\"shrunkFailures\":0,\"skipped\":0}",
+        &format!("\"property\":{{\"failed\":{property_failed},\"generatedCases\":{property_cases},\"passed\":{property_passed},\"selected\":{},\"shrunkFailures\":{property_failed},\"skipped\":0}}", property_passed + property_failed),
+    )
+    .replace(
         "\"result\":\"pass\"",
         if exit_code == ExitCodes::RUNTIME_PANIC || contract_failed > 0 {
             "\"result\":\"fail\""

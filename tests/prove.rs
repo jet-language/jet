@@ -106,6 +106,24 @@ fn prove_captures_contract_results_and_runtime_panics_structurally() {
 }
 
 #[test]
+fn prove_reports_real_property_cases_shrinks_and_continues() {
+    let root = workspace("properties");
+    fs::write(root.join("a_pass.jet"), "#Test fn identity(n: Int) { require_eq(n, n) }\n").unwrap();
+    fs::write(root.join("b_shrink.jet"), "#Test fn always_small(n: Int) { require(n < 50) }\n").unwrap();
+    fs::write(root.join("c_later.jet"), "#Test(\"later unit\") { require(true) }\n").unwrap();
+
+    let out = Command::new(jet()).current_dir(&root).args(["prove", ".", "--json"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1), "stderr={} stdout={}", String::from_utf8_lossy(&out.stderr), String::from_utf8_lossy(&out.stdout));
+    assert!(out.stderr.is_empty());
+    let report = String::from_utf8(out.stdout).unwrap();
+    assert!(report.contains("\"kind\":\"property\",\"outcome\":\"passed\""), "{report}");
+    assert!(report.contains("\"kind\":\"property\",\"outcome\":\"failed\""), "{report}");
+    assert!(report.contains("\"generatedCases\":200"), "passing property did not execute 200 cases: {report}");
+    assert!(report.contains("\"shrinkTrace\":[{\"name\":\"minimized_inputs\",\"value\":\"n = 50\"}]"), "{report}");
+    assert!(report.contains("\"path\":\"./c_later.jet\""), "later producer did not continue: {report}");
+}
+
+#[test]
 fn mandatory_env_init_does_not_pull_optional_core_env_surface() {
     let root = workspace("env_prelude");
     fs::write(root.join("plain.jet"), "fn run() {}\n").unwrap();
