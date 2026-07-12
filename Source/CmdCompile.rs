@@ -866,10 +866,17 @@ fn run_test_file(path: &Path, opts: &TestRunOpts, mode: OutputMode) -> bool {
     if opts.serial {
         cmd.env("JET_TEST_SERIAL", "1");
     }
-    let out = cmd.output().unwrap_or_else(|e| {
-        eprintln!("error: couldn't run tests in `{}`: {}", shown, e);
-        exit(ExitCodes::USER_ERROR);
-    });
+    let out = match cmd.output() {
+        Ok(out) => out,
+        Err(e) => {
+            let _ = fs::remove_file(&bin);
+            if let Some(co) = &cov_out {
+                let _ = fs::remove_file(co);
+            }
+            eprintln!("error: couldn't run tests in `{}`: {}", shown, e);
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
     print!("{}", String::from_utf8_lossy(&out.stdout));
     if !out.stderr.is_empty() {
         eprint!("{}", String::from_utf8_lossy(&out.stderr));
@@ -933,6 +940,7 @@ fn run_doctests(
             }
         };
         let bin = tmp.with_extension("");
+        let generated_rs = PathBuf::from("build").join(format!("{}.rs", stem(&tmp_shown)));
         build(
             &tmp_shown,
             &rust_code,
@@ -955,11 +963,13 @@ fn run_doctests(
                 all_ok = false;
                 let _ = fs::remove_file(&tmp);
                 let _ = fs::remove_file(&bin);
+                let _ = fs::remove_file(&generated_rs);
                 continue;
             }
         };
         let _ = fs::remove_file(&tmp);
         let _ = fs::remove_file(&bin);
+        let _ = fs::remove_file(&generated_rs);
         if !out.status.success() {
             println!("{}: FAIL (runtime error)", label);
             eprint!("{}", String::from_utf8_lossy(&out.stderr));
@@ -1587,10 +1597,14 @@ pub(crate) fn run_fuzz(file: &str, test_name: Option<&str>, opts: FuzzRunOpts, m
         cmd.env("JET_FUZZ_SEED", seed.to_string());
     }
     cmd.env("JET_FUZZ_CORPUS", &corpus);
-    let status = cmd.status().unwrap_or_else(|e| {
-        eprintln!("error: couldn't run the fuzz harness for `{}`: {}", file, e);
-        exit(ExitCodes::USER_ERROR);
-    });
+    let status = match cmd.status() {
+        Ok(status) => status,
+        Err(e) => {
+            let _ = fs::remove_file(&bin);
+            eprintln!("error: couldn't run the fuzz harness for `{}`: {}", file, e);
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
     let _ = fs::remove_file(&bin);
     exit(status.code().unwrap_or(ExitCodes::USER_ERROR));
 }
