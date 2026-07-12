@@ -7,9 +7,34 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 
 fn jetpack() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_jetpack"))
+    Command::new(jetpack_bin())
+}
+
+fn jetpack_bin() -> &'static PathBuf {
+    static BIN: OnceLock<PathBuf> = OnceLock::new();
+    BIN.get_or_init(|| {
+        if let Some(path) = option_env!("CARGO_BIN_EXE_jetpack") {
+            return PathBuf::from(path);
+        }
+        let target_dir = std::env::var_os("CARGO_TARGET_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target"));
+        let bin = target_dir
+            .join("debug")
+            .join(format!("jetpack{}", std::env::consts::EXE_SUFFIX));
+        if !bin.is_file() {
+            let status = Command::new(env!("CARGO"))
+                .args(["build", "-p", "jetpack", "--bin", "jetpack"])
+                .current_dir(env!("CARGO_MANIFEST_DIR"))
+                .status()
+                .unwrap();
+            assert!(status.success(), "building jetpack test binary failed");
+        }
+        bin
+    })
 }
 
 fn jet() -> Command {

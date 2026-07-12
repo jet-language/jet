@@ -4,9 +4,34 @@ use jetpack::RuntimePolicy;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 
 fn jetpack() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_jetpack"))
+    Command::new(jetpack_bin())
+}
+
+fn jetpack_bin() -> &'static PathBuf {
+    static BIN: OnceLock<PathBuf> = OnceLock::new();
+    BIN.get_or_init(|| {
+        if let Some(path) = option_env!("CARGO_BIN_EXE_jetpack") {
+            return PathBuf::from(path);
+        }
+        let target_dir = std::env::var_os("CARGO_TARGET_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target"));
+        let bin = target_dir
+            .join("debug")
+            .join(format!("jetpack{}", std::env::consts::EXE_SUFFIX));
+        if !bin.is_file() {
+            let status = Command::new(env!("CARGO"))
+                .args(["build", "-p", "jetpack", "--bin", "jetpack"])
+                .current_dir(env!("CARGO_MANIFEST_DIR"))
+                .status()
+                .unwrap();
+            assert!(status.success(), "building jetpack test binary failed");
+        }
+        bin
+    })
 }
 
 struct Scratch {
@@ -171,7 +196,11 @@ fn available_userns_never_labels_unsandboxed_child_strong() {
 
 #[test]
 fn jetpack_runtime_code_has_no_privileged_helper_tokens() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("crates/jet-driver/src/Jetpack");
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let roots = [
+        manifest_dir.join("crates/jetpack/src"),
+        manifest_dir.join("crates/jet-pkg-model/src"),
+    ];
     let forbidden = [
         "Command::new(\"sudo\")",
         "shell_command(\"sudo",
@@ -182,8 +211,18 @@ fn jetpack_runtime_code_has_no_privileged_helper_tokens() {
         "jetpackd",
         "daemon socket",
     ];
-    for path in rust_files(&root) {
-        if path.file_name().and_then(|n| n.to_str()) == Some("JetOS.rs") {
+    let mut files = Vec::new();
+    for root in &roots {
+        files.extend(rust_files(root));
+    }
+    for path in files {
+        // JetOS activation code legitimately shells out to systemctl etc.
+        // under the explicit `jet os switch` transient-sudo path (see
+        // runtime_policy_names_no_daemon_no_root_contract); it moved from a
+        // single JetOS.rs file to a JetOS/ module directory, so exempt both.
+        let is_jetos = path.file_name().and_then(|n| n.to_str()) == Some("JetOS.rs")
+            || path.components().any(|c| c.as_os_str() == "JetOS");
+        if is_jetos {
             continue;
         }
         let text = fs::read_to_string(&path).unwrap();
