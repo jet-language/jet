@@ -397,6 +397,7 @@ mod tests {
             is_task: false,
             task_span: None,
             every: None,
+            inline_foreign: None,
             inline_span: None,
             body: Vec::new(),
         }

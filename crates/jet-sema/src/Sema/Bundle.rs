@@ -1350,6 +1350,16 @@ pub(crate) fn expand_generic_module_aliases(
                 _ => None,
             })
             .collect();
+        let mut projections = HashMap::new();
+        for alias in aliases.values().copied() {
+            if aliases.contains_key(&alias.target) {
+                let mut terminal = aliases[&alias.target];
+                while let Some(next) = aliases.get(&terminal.target).copied() {
+                    terminal = next;
+                }
+                projections.insert(alias.name.clone(), terminal.name.clone());
+            }
+        }
 
         // Expand aliases into CodeModules, collect separately.
         let mut expansions: Vec<(usize, AliasExpansion)> = Vec::new();
@@ -1368,15 +1378,15 @@ pub(crate) fn expand_generic_module_aliases(
             if alias_chain_contains(alias, &aliases, &invalid_aliases) {
                 continue;
             }
-            // A forward alias is a projection of the already-bound terminal
-            // instance, not a second specialization with fresh nominal types.
-            if aliases.contains_key(&alias.target) {
-                continue;
-            }
                 let Some(resolved) = resolve_local_alias(alias, &aliases, &templates, diags) else {
                     invalid_aliases.insert(alias.name.clone());
                     continue;
                 };
+                // A valid forward alias is a projection of the already-bound
+                // terminal instance, not a second specialization.
+                if aliases.contains_key(&alias.target) {
+                    continue;
+                }
                 if let Some(cm) = expand_alias(&resolved, &templates, diags,&traits,&funcs,&globals,&enums) {
                     expansions.push((idx, cm));
                 } else {
@@ -1395,10 +1405,19 @@ pub(crate) fn expand_generic_module_aliases(
             module.items[idx] = Item::CodeModule(expansion.module);
             declarations.extend(expansion.declarations);
         }
+        for (alias, canonical) in &projections {
+            let names = HashSet::from([alias.clone()]);
+            for item in &mut module.items {
+                if let Item::Func(func) = item {
+                    rewrite_inline_calls_stmts(&mut func.body, &names, canonical);
+                }
+            }
+        }
         module
             .items
-            .retain(|i| !matches!(i, Item::GenericModule(_)));
+            .retain(|i| !matches!(i, Item::GenericModule(_) | Item::ModuleAlias(_)));
         module.items.extend(declarations);
+        debug_assert!(!module.items.iter().any(|item| matches!(item, Item::ModuleAlias(_))));
     }
 }
 
@@ -1569,8 +1588,12 @@ pub(crate) fn rewrite_inline_calls_expr(
             }
         }
         Expr::PtrFromAddr { addr, .. } => rewrite_inline_calls_expr(addr, siblings, modname),
-        Expr::Ident(_, _)
-        | Expr::Char(_, _)
+        Expr::Ident(name, _) => {
+            if siblings.contains(name) {
+                *name = modname.to_string();
+            }
+        }
+        Expr::Char(_, _)
         | Expr::Int(_, _, _)
         | Expr::Float(_, _, _)
         | Expr::Bool(_, _)
@@ -2062,23 +2085,7 @@ pub(crate) fn check_bundle_opts(
                 Item::ProtocolDecl(_) => {}
                 // D-METADERIVE1=A: user-authored derive blocks are expanded below; skip here.
                 Item::UserDerive(_) => {}
-                // D-GENMOD2=A: a forward alias that survived expansion projects
-                // the terminal code module. It contributes no declarations.
-                Item::ModuleAlias(alias) => {
-                    st.code_modules
-                        .insert(alias.name.clone(), alias.target.clone());
-                }
-                Item::GenericModule(_) => {}
-            }
-        }
-        // Collapse multi-hop forward aliases to the canonical terminal module.
-        let aliases = st.code_modules.clone();
-        for target in st.code_modules.values_mut() {
-            while let Some(next) = aliases.get(target) {
-                if next == target {
-                    break;
-                }
-                *target = next.clone();
+                Item::GenericModule(_) | Item::ModuleAlias(_) => {}
             }
         }
         // D-METADERIVE1=A: user-derive expansion — run after struct/func registration so

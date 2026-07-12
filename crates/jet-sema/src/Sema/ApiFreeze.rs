@@ -293,6 +293,7 @@ mod tests {
             is_task: false,
             task_span: None,
             every: None,
+            inline_foreign: None,
             is_sanitizer: false,
             declared_effects: None,
             effect_via: None,

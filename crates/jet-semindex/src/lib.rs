@@ -146,7 +146,7 @@ mod tests {
 
     #[test]
     fn schema_version_constant() {
-        assert_eq!(SCHEMA_VERSION, 3);
+        assert_eq!(SCHEMA_VERSION, 4);
     }
 
     #[test]
@@ -179,7 +179,7 @@ mod tests {
         let path = fixture("basics/hello.jet");
         let idx = open(&path).expect("hello example should index");
         let json = idx.to_json();
-        assert!(json.contains("\"schema_version\":3"));
+        assert!(json.contains("\"schema_version\":4"));
         assert!(json.contains("\"definitions\""));
         assert!(json.contains("\"identity\""));
         assert!(json.contains("\"references\""));
