@@ -8,7 +8,7 @@ use jet_sema::{effect_key, SemIndexEffectFacts};
 use std::collections::HashMap;
 
 use crate::Json::{convert_defs, convert_effects, convert_refs};
-use crate::Types::{BypassFact, BypassKind, CallEdge, DefinitionAnchor, DefinitionFact, MemberFact, MemberKind, MemberOrigin, SemIndex, StructuralNode, StructuralSlotKind, SymbolDef, SymbolKind};
+use crate::Types::{BypassFact, BypassKind, CallEdge, DefinitionAnchor, DefinitionFact, InstanceFact, MemberFact, MemberKind, MemberOrigin, SemIndex, StructuralNode, StructuralSlotKind, SymbolDef, SymbolKind};
 
 /// The semantic kind of a defined symbol (LSP-facing; uses AST types internally).
 #[derive(Debug, Clone)]
@@ -143,6 +143,15 @@ impl SymbolDB {
             definition_facts,
         );
         self.index.set_bypasses(self.bypasses.clone());
+        self.index.set_instances(bundle.modules.iter().flat_map(|module| module.items.iter().filter_map(|item| {
+            let Item::CodeModule(cm) = item else { return None };
+            let identity = cm.instance_identity.as_ref()?;
+            Some(InstanceFact {
+                name: cm.name.clone(), module_path: module.display.clone(),
+                fingerprint: identity.fingerprint.clone(),
+                full_key_hex: identity.full_key.iter().map(|byte| format!("{byte:02x}")).collect(),
+            })
+        })).collect());
     }
 
     /// Find the definition whose def_span contains `offset` in module at `path`.
@@ -1146,7 +1155,8 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
         // S59: C FFI boundary modules aren't yet indexed for symbols/hover.
         Item::CModule(_) => {}
         Item::CodeModule(m) => {
-            let identity = module_identity(&ctx.scope_identity, &m.name);
+            let identity = m.instance_identity.as_ref().map(|instance| format!("instance:{}", instance.fingerprint))
+                .unwrap_or_else(|| module_identity(&ctx.scope_identity, &m.name));
             ctx.db.defs.push(SymDef {
                 identity: identity.clone(),
                 name: m.name.clone(),

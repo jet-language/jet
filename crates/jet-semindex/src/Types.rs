@@ -4,7 +4,15 @@ use jet_foundation::Diagnostics::Span;
 
 /// Schema version for JSON snapshots and API consumers. Bump when the exported
 /// fact shape changes incompatibly.
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstanceFact {
+    pub name: String,
+    pub module_path: String,
+    pub fingerprint: String,
+    pub full_key_hex: String,
+}
 
 /// Byte span in a source file (same coordinates as diagnostics).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -248,6 +256,7 @@ pub struct SemIndex {
     /// Set separately from the constructor (`set_bypasses`) so existing
     /// callers of `SemIndex::new` are unaffected.
     bypasses: Vec<BypassFact>,
+    instances: Vec<InstanceFact>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -277,6 +286,7 @@ impl SemIndex {
             nodes,
             definition_facts,
             bypasses: Vec::new(),
+            instances: Vec::new(),
         }
     }
 
@@ -286,6 +296,9 @@ impl SemIndex {
     pub(crate) fn set_bypasses(&mut self, bypasses: Vec<BypassFact>) {
         self.bypasses = bypasses;
     }
+
+    pub(crate) fn set_instances(&mut self, instances: Vec<InstanceFact>) { self.instances = instances; }
+    pub fn instances(&self) -> &[InstanceFact] { &self.instances }
 
     pub fn bypasses(&self) -> &[BypassFact] {
         &self.bypasses

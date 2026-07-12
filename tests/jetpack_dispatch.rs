@@ -36,8 +36,10 @@ fn jet_clean_delegates_to_jetpack_clean() {
 }
 
 
+/// D-CLI-SURFACE3=B: `outdated` moved under `jet inspect` — bare
+/// `jet outdated` is now a teaching error (E2101) naming the new spelling.
 #[test]
-fn top_level_jet_outdated_dispatches_to_jetpack() {
+fn bare_jet_outdated_is_a_teaching_error_naming_jet_inspect_outdated() {
     let proj = Scratch::new("proj");
     let root = Scratch::new("root");
     let fixtures = Scratch::new("fx");
@@ -66,6 +68,49 @@ module dev {
 
     let out = jet()
         .args(["outdated", "--no-color", "--fixtures"])
+        .arg(&fixtures.path)
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2), "bare `jet outdated` must be rejected");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("E2101"), "stderr: {stderr}");
+    assert!(stderr.contains("jet inspect outdated"), "stderr: {stderr}");
+}
+
+/// `jet inspect outdated` is the canonical top-level spelling and still
+/// dispatches through to the jetpack engine.
+#[test]
+fn jet_inspect_outdated_dispatches_to_jetpack() {
+    let proj = Scratch::new("proj");
+    let root = Scratch::new("root");
+    let fixtures = Scratch::new("fx");
+    fs::write(
+        proj.join("env.jet"),
+        r#"
+module dev {
+    sources: { default: github@acme/tools#latest }
+    env.dev: Env.{ packages: [default.greet] }
+}
+"#,
+    )
+    .unwrap();
+    fs::create_dir_all(proj.join(".jet")).unwrap();
+    fs::write(
+        proj.join(".jet/lock"),
+        "version = 1\n\n[[source_channel]]\nname = \"default\"\nchannel = \"latest\"\nexact = \"github:acme/tools#v1.2.0\"\n\n[root]\ndependencies = []\n",
+    )
+    .unwrap();
+    write_channel_fixture(
+        &fixtures.path,
+        "github:acme/tools",
+        "latest",
+        "github:acme/tools#v1.3.0",
+    );
+
+    let out = jet()
+        .args(["inspect", "outdated", "--no-color", "--fixtures"])
         .arg(&fixtures.path)
         .current_dir(&proj.path)
         .env("JETPACK_ROOT", &root.path)
