@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 514,
-    "rev": 4250,
+    "rev": 4253,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -6397,12 +6397,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "done",
+      "phase": "building",
       "priority": "P0",
       "plan": "Order: (1) read docs/spec/architecture.md R1–R12 + spec.md sections per area; (2) per audit area, spawn adversarial review (opus-tier reasoning) over the relevant sema modules — CheckerCore.rs, CheckerInfer/, CheckerCoreLib.rs, Bundle.rs; (3) write attack programs as tests/ui fixtures — expect reject; write miscompile candidates as differential fixtures — expect byte-identical interpreter/compiled output; (4) extend tests/fuzz_sema.rs: grammar-directed generation from crates/jet-foundation/src/Syntax.rs so the fuzzer only speaks ratified syntax; (5) fix confirmed holes smallest-first, full suite between fixes; (6) audit notes + corpus docs; full nix develop -c cargo test green at close.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "terra-native-ledger",
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "codex-main",
+          "text": "Reopened after independent false-green review: inherited SEMA_SOUNDNESS_CASE can make exact ledger lanes pass with zero fixtures, and manifest omits minimum-count plus valid native/rustc corpus proof. Fix must sanitize selector env, add non-vacuous/full acceptance lanes, rerun hostile ledger gates, then reverify c7."
+        },
         {
           "at": "2026-07-11",
           "by": "fable-medium",
@@ -6496,6 +6501,15 @@
           "verifiedBy": "sol-353-review",
           "evidence": "Independent review found selector globally requires exactly one fixture/category, unrelated categories return cleanly, full runs require all categories nonempty, and invalid/valid/differential oracles are real. No claim of forced JIT execution.",
           "at": "2026-07-11T10:24:21.530Z"
+        },
+        {
+          "n": 7,
+          "text": "Capability-ledger native-language proof is non-vacuous under hostile inherited selector environment, replays minimum-count plus valid native/rustc acceptance and differential/unsafe lanes, and fails on missing or ambiguous fixture selectors.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T07:15:49.020Z"
         }
       ],
       "needsAcceptance": false,
@@ -13752,6 +13766,11 @@
       "log": [
         {
           "at": "2026-07-12",
+          "by": "codex-main",
+          "text": "Owner ratified D-MARK-META1=B after original criterion was written. Criterion 2 atomically replaced through Tower CLI before implementation: maturity trio migrates to #Meta(maturity: ...); obsolete standalone @/# forms must reject. No obsolete surface will ship."
+        },
+        {
+          "at": "2026-07-12",
           "by": "terra-500-builder",
           "text": "Implementing narrowed consistency sweep: DataTree naming and maturity markers on the @ plane only. CLI remap excluded and owned by #497."
         },
@@ -13769,16 +13788,16 @@
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-12T07:07:35.865Z"
+          "at": "2026-07-12T07:15:27.530Z"
         },
         {
           "n": 2,
-          "text": "Experimental, Tested, and Hardened maturity markers live only on the @ marker plane across Syntax.rs, parser/sema, formatter stability, generated grammars, docs, and snapshots; obsolete # plane acceptance is rejected.",
+          "text": "D-MARK-META1=B is implemented end to end: Experimental, Tested, and Hardened leave the standalone marker grammar; #Meta(maturity: .Experimental|.Tested|.Hardened) is the sole current surface across Syntax.rs, parser/sema, formatter stability, generated grammars, docs, and snapshots; retired @ and # standalone forms reject normally.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-12T07:07:36.190Z"
+          "at": "2026-07-12T07:15:27.530Z"
         },
         {
           "n": 3,
@@ -13787,7 +13806,7 @@
           "metBy": "codex-main",
           "verifiedBy": "card296-audit",
           "evidence": "Independent Sol audit confirms #500 item 3 duplicates #497 and must not implement the old self/store map; #497 is the atomic owner of later CLI law.",
-          "at": "2026-07-12T07:07:37.192Z"
+          "at": "2026-07-12T07:15:27.530Z"
         }
       ],
       "refs": [
@@ -31598,6 +31617,27 @@
   ],
   "events": [
     {
+      "at": "2026-07-12T07:15:49.356Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0ewbiud",
+      "note": "phase,assignee,logEntry"
+    },
+    {
+      "at": "2026-07-12T07:15:49.020Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c0ewbiud",
+      "note": "#7 Capability-ledger native-language proof is non-vacuous under"
+    },
+    {
+      "at": "2026-07-12T07:15:27.530Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0llk894",
+      "note": "criteria,logEntry"
+    },
+    {
       "at": "2026-07-12T07:12:14.165Z",
       "by": "terra-500-builder",
       "action": "card.update",
@@ -35075,27 +35115,6 @@
       "action": "card.release",
       "ref": "c0iyfhaf",
       "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-11T18:45:02.619Z",
-      "by": "terra-359-builder",
-      "action": "card.update",
-      "ref": "c0iyfhaf",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-11T18:39:19.524Z",
-      "by": "sol-361-builder",
-      "action": "card.release",
-      "ref": "c0nhjxh4",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-11T18:39:07.284Z",
-      "by": "sol-361-builder",
-      "action": "card.update",
-      "ref": "c0nhjxh4",
-      "note": "logEntry"
     }
   ],
   "nextNum": 368,
