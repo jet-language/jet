@@ -547,13 +547,14 @@ fn lexical_scope_for_def(
             .min_by_key(|node| node.span.end.saturating_sub(node.span.start))
             .map(|node| (node.id, "body".to_string()))
     })?;
-    let mut span = db.nodes.get(parent).map_or(def_span, |node| node.span);
-    for node in &nodes {
-        if descends_through_slot(db, node.id, parent, &slot) {
-            span.start = span.start.min(node.span.start);
-            span.end = span.end.max(node.span.end);
-        }
-    }
+    let slot_nodes = nodes
+        .iter()
+        .filter(|node| descends_through_slot(db, node.id, parent, &slot))
+        .collect::<Vec<_>>();
+    let span = SourceSpan {
+        start: slot_nodes.iter().map(|node| node.span.start).min().unwrap_or(def_span.start),
+        end: slot_nodes.iter().map(|node| node.span.end).max().unwrap_or(def_span.end),
+    };
     Some(SemanticLexicalScope {
         identity: format!("scope:{module_path}:{parent}:{slot}"),
         structural_parent: parent,

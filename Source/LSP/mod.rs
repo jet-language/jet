@@ -192,4 +192,40 @@ mod tests {
             item.label == "len" && item.detail.as_deref() == Some(len.signature.as_str())
         }));
     }
+    #[test]
+    fn completion_excludes_locals_from_other_functions() {
+        let src = "fn first() {\n    hidden :: 1\n}\nfn second() {\n    \n}\n";
+        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
+        let db = build_symbol_db(&bundle.expect("bundle"), &facts);
+        let offset = src.rfind("    \n").unwrap() + 4;
+        assert!(!compute_completions(&db, src, offset, "test.jet", None, None)
+            .iter()
+            .any(|item| item.label == "hidden"));
+    }
+
+    #[test]
+    fn completion_respects_then_else_slot_boundaries() {
+        let src = "fn run(flag: Bool) {\n    if flag {\n        then_only :: 1\n        print(then_only)\n    } else {\n        else_only :: 2\n        print(else_only)\n    }\n}\n";
+        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
+        let db = build_symbol_db(&bundle.expect("bundle"), &facts);
+        let then_offset = src.find("print(then_only)").unwrap();
+        let then_items = compute_completions(&db, src, then_offset, "test.jet", None, None);
+        assert!(then_items.iter().any(|item| item.label == "then_only"));
+        assert!(!then_items.iter().any(|item| item.label == "else_only"));
+        let else_offset = src.find("print(else_only)").unwrap();
+        let else_items = compute_completions(&db, src, else_offset, "test.jet", None, None);
+        assert!(else_items.iter().any(|item| item.label == "else_only"));
+        assert!(!else_items.iter().any(|item| item.label == "then_only"));
+    }
+
+    #[test]
+    fn completion_keeps_then_local_out_of_empty_else() {
+        let src = "fn run(flag: Bool) {\n    if flag {\n        then_only :: 1\n    } else {\n        \n    }\n}\n";
+        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
+        let db = build_symbol_db(&bundle.expect("bundle"), &facts);
+        let offset = src.rfind("        \n").unwrap() + 8;
+        assert!(!compute_completions(&db, src, offset, "test.jet", None, None)
+            .iter()
+            .any(|item| item.label == "then_only"));
+    }
 }
