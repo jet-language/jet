@@ -94,7 +94,12 @@ function declarationClaims(overrides) {
 
 function cliCommands() {
   const text = readFileSync(join(ROOT, "Source/CLI.rs"), "utf8");
-  return [...text.matchAll(/CommandSpec\s*\{\s*name:\s*"([^"]+)"/g)].map((match) => match[1]);
+  // A command may appear once in the nested group registry and once in the
+  // canonical top-level inventory. Ownership is per public spelling, not per
+  // registry occurrence.
+  const occurrences = [...text.matchAll(/CommandSpec\s*\{\s*name:\s*"([^"]+)"/g)]
+    .map((match) => match[1]);
+  return [...new Set(occurrences)];
 }
 
 function coreModules() {

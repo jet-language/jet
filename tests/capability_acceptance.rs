@@ -61,6 +61,62 @@ fn run_example(rel: &str) -> String {
         .to_string()
 }
 
+/// claim.metaprogramming / source-reentry — D-METADERIVE1.
+#[test]
+fn derive_source_reentry() {
+    // CAPABILITY_CLAIM: claim.metaprogramming / source-reentry
+    let registration = read("crates/jet-sema/src/Sema/Registration.rs");
+    let codegen_items = read("crates/jet-codegen/src/Codegen/Items.rs");
+    assert!(
+        registration.contains("parse_builtin_serde_fragment")
+            && registration.contains("impl {}.Encode")
+            && registration.contains("impl {}.Decode"),
+        "built-in codecs must emit ordinary Jet impl fragments and parse them"
+    );
+    for retired in [
+        "__JetSerdeCarrier",
+        "__JetSerdeGenerated",
+        "trait_impls.extend",
+    ] {
+        assert!(
+            !registration.contains(retired),
+            "retired AST transplant path remains: {retired}"
+        );
+    }
+    assert!(
+        !codegen_items.contains("emit_struct_serde")
+            && !codegen_items.contains("emit_enum_serde"),
+        "direct Rust serde synthesis must stay deleted"
+    );
+
+    let source = r#"
+use core.encoding.json as json
+@[Codable]
+struct Point { x: Int }
+fn run() {
+    p: Point := .{ x: 7 }
+    print(json.to_string(p))
+}
+"#;
+    let dir = std::env::temp_dir().join(format!(
+        "jet_capability_derive_reentry_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).expect("create derive acceptance dir");
+    let path = dir.join("main.jet");
+    fs::write(&path, source).expect("write derive acceptance source");
+    let compiled = jet::compile_with_path(source, path.to_str().unwrap()).unwrap_or_else(|diags| {
+        panic!("generated codec did not re-enter the front end: {diags:#?}")
+    });
+    assert!(
+        compiled.rust.contains("impl user_Encode for user_Point")
+            && compiled.rust.contains("impl user_Decode for user_Point"),
+        "ordinary parsed codec impls must reach TIR/codegen"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
 /// claim.discard-control / audited-discard — D-IGNORERET2=A + D-MUSTUSE1.
 #[test]
 fn audited_discard() {

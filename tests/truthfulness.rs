@@ -412,6 +412,7 @@ fn compiler_seam_crates_have_only_path_dependencies() {
     const EXEMPTIONS: &[(&str, &[&str])] = &[
         ("jet-jit", &["D-JITDEP1", "D-JIT2"]),
         ("jet-net", &["D-NETDEP1", "D-TLS1"]),
+        ("jetpack", &["D-TLS1"]),
     ];
 
     let root = root();
