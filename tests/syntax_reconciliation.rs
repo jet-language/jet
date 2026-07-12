@@ -84,6 +84,10 @@ const ACTIVE_MATURITY_DOCS: &[&str] = &[
     "docs/sidequests/beginner-expert-mode-audit.md",
     "docs/proposals/surface-condensation.md",
 ];
+const MARKER_CENSUS_DOCS: &[&str] = &[
+    "docs/proposals/architecture-infra.md",
+    "docs/proposals/surface-condensation.md",
+];
 const MATRIX_UNBUILT_MARKERS: &[&str] = &[
     "S74-D-DESTRUCT1-ARM",
     "D-IGNORERET1",
@@ -297,6 +301,27 @@ fn active_maturity_docs_use_meta_field_only() {
         "active maturity docs drifted from the sole `#Meta(maturity: ...)` surface:\n{}",
         failures.join("\n")
     );
+}
+
+#[test]
+fn proposal_marker_census_matches_syntax_registry() {
+    let contracts = jet::Syntax::CONTRACT_MARKERS.len();
+    let directives = jet::Syntax::DIRECTIVE_MARKERS.len();
+    assert!(contracts > 0 && directives > 0, "marker registries must be non-empty");
+    let expected = format!(
+        "{} registered markers ({} `@` / {} `#`)",
+        contracts + directives,
+        contracts,
+        directives
+    );
+    for relative in MARKER_CENSUS_DOCS {
+        let text = fs::read_to_string(relative)
+            .unwrap_or_else(|error| panic!("cannot read marker census doc {relative}: {error}"));
+        assert!(
+            text.contains(&expected),
+            "{relative} marker census must match Syntax registries: expected `{expected}`"
+        );
+    }
 }
 
 #[test]
