@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 522,
-    "rev": 4805,
+    "rev": 4808,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -32956,8 +32956,184 @@
       },
       "checkInstructions": null,
       "draft": false,
+      "status": "ratified",
+      "created": "2026-07-12T21:15:56.518Z",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-12"
+    },
+    {
+      "id": "D-VALIDATE2",
+      "cardId": "c0n6vj96",
+      "group": "safety",
+      "title": "The error shape decode<T>() returns when a validate block fails",
+      "gist": "When decode<T>() auto-runs a struct's validate block, what value does the caller's error arm hold if more than one rule fails.",
+      "lesson": "Decoding is turning raw bytes (JSON, YAML, a CSV row, …) into a typed Jet value. `json.decode<Signup>(text)` is the call every format shares.\n\nA field error is a small record — a field path plus a plain-language reason, like `{path: \"email\", reason: \"email required\"}`. `DecodeError` is the type Jet has always used to report why a decode failed. It carries one path, one reason, one problem.\n\nA validate block, just ratified as D-VALIDATE1, lets a struct declare rules next to its fields. One example rule: `check(password.len() >= 12, at: password, \"needs at least 12 characters\")`. Unlike a plain decode failure, a validate block runs every rule and collects every failure into a list. A signup form can then show \"email required\" AND \"password too short\" at once, instead of making the user fix one mistake, resubmit, and discover the next.\n\nD-VALIDATE1 also said `decode<T>()` runs a type's validate block automatically, with no extra call needed. That is where the two designs collide. Decoding has always handed back ONE error, and validation now produces a LIST — something has to give, and only the owner can say what.\n\nThis matters because `decode<T>()` is the single most common way malformed data enters a Jet program: a web form, an API request body, a config file. Whatever it returns on failure is what nearly every Jet program's error-handling code gets written against.",
+      "explainer": "",
+      "story": "Priya is building a signup endpoint. A request comes in with a blank email and an 8-character password. She calls `json.decode<Signup>(body)` and wants to send the browser back every field that's wrong at once, so the user isn't stuck resubmitting three times to find all their mistakes.\n\nShe writes a `match` on the result and needs to know: is the error she gets back a single `DecodeError` like decoding has always produced? Or something new that can carry a whole list of field problems?",
+      "inWild": "A `Signup` struct with a `validate` block, decoded straight from an HTTP request body: `json.decode<Signup>(req.body())`. The JSON has two problems at once — an empty email and a too-short password — and the handler wants to report both in one response.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "DecodeError becomes one type with an accumulated case",
+          "detail": "`DecodeError` — the type every decode path already returns — turns from a plain path+reason record into a type with two shapes. One shape is the ordinary single-cause failure decoding has always produced (missing field, wrong type); the other is a new list-of-field-problems failure for a validate block. Every function that already promised `? DecodeError` keeps that promise; nothing about a function's declared error type changes.\n\nThe cost: `DecodeError` is used everywhere decoding happens today, not just inside `decode<T>()` — including a struct field's low-level `.field()`/`.int()`/`.text()` reads, and any hand-written decoder that builds a `DecodeError` directly. All of that code stops being a plain path+reason record and must be updated to handle the new second shape, even on types that never declare a validate block.",
+          "technical": "`DecodeError` becomes a variant type: one arm keeps today's `{path, reason}` shape (parse/shape failure — decoding source data was structurally wrong); a second arm carries `[FieldError]` (validate block failure — the data parsed fine but broke a rule). `fn jet_decode(tree) -> Result<Self, DecodeError>` is unchanged; only what fills the `Err` side is new. Every existing `DecodeError.{ path: …, reason: … }` construction (hand-written `Decode` implementations included) must be rewritten as the new variant's spelling.",
+          "code": "struct Signup {\n    email: String\n    password: String\n    validate {\n        check(email.len() > 0, at: email, \"email required\")\n        check(password.len() >= 12, at: password, \"needs at least 12 characters\")\n    }\n}\n\nfn run() {\n    body := \"{\\\"email\\\":\\\"\\\",\\\"password\\\":\\\"short\\\"}\"\n    if json.decode<Signup>(body) == {\n        ok(s) -> print(\"ok: {s.email}\")\n        err(DecodeError.Invalid(errs)) -> {\n            print(\"{errs.len()} problem(s)\")\n            loop e in errs { print(\"  {e.path}: {e.reason}\") }\n        }\n        err(DecodeError.Shape(e)) -> print(\"bad request: {e.reason}\")\n    }\n}\n\n// prints:\n// 2 problem(s)\n//   email: email required\n//   password: needs at least 12 characters"
+        },
+        {
+          "key": "B",
+          "name": "decode<T>() returns a new outcome type; DecodeError stays untouched",
+          "detail": "`decode<T>()` alone gets a new return type that can hold either shape of failure. `DecodeError` itself is not touched at all — the type every other decode path (`.field()`, `.int()`, hand-written decoders) already returns stays exactly the plain path+reason record it is today.\n\nThe reader gets the same benefit as option A: a struct's validate block failure shows every field problem at once through the ordinary `decode<T>()` call. But only code that actually calls `decode<T>()` on a validate-carrying type ever has to think about the new shape. Everything that reads a raw `DecodeError` today keeps compiling unchanged.",
+          "technical": "A new type — call it `DecodeOutcome` — with two arms: `Shape(DecodeError)` for today's parse/shape failure, `Invalid([FieldError])` for a validate block's accumulated failures. `decode<T>()`'s signature becomes `Result<T, DecodeOutcome>`; every other decode-surface function (`DataTree.field/.at/.int/.text/.bool/.float`, the `Decode` trait itself, hand-written decoders) is untouched — `DecodeError` keeps its current plain-record shape everywhere else.",
+          "code": "struct Signup {\n    email: String\n    password: String\n    validate {\n        check(email.len() > 0, at: email, \"email required\")\n        check(password.len() >= 12, at: password, \"needs at least 12 characters\")\n    }\n}\n\nfn run() {\n    body := \"{\\\"email\\\":\\\"\\\",\\\"password\\\":\\\"short\\\"}\"\n    if json.decode<Signup>(body) == {\n        ok(s) -> print(\"ok: {s.email}\")\n        err(DecodeOutcome.Invalid(errs)) -> {\n            print(\"{errs.len()} problem(s)\")\n            loop e in errs { print(\"  {e.path}: {e.reason}\") }\n        }\n        err(DecodeOutcome.Shape(e)) -> print(\"bad request: {e.reason}\")\n    }\n}\n\n// prints:\n// 2 problem(s)\n//   email: email required\n//   password: needs at least 12 characters"
+        },
+        {
+          "key": "C",
+          "name": "decode<T>() stops at the first failing rule",
+          "detail": "`DecodeError` never changes shape. `decode<T>()` still runs the validate block automatically, but the moment one rule fails, decoding stops right there and hands back one ordinary `DecodeError`, exactly like a missing field does today. The full list of every failing rule is only available by calling `Type.validate(value)` (or `Validate.over(s)`) directly.\n\nThis keeps decoding's long-standing single-error contract completely untouched. But it also means the one call beginners reach for first — `decode<T>()` — quietly does NOT give the \"see every problem at once\" behavior a validate block exists for. A form built straight on `decode<T>()` shows the user one mistake, then the next, one resubmit at a time.",
+          "technical": "`decode<T>()`'s auto-run calls the synthesized `validate` function but short-circuits its rule loop on the first failing `check`, wrapping it as an ordinary `DecodeError { path, reason }` instead of collecting into `[FieldError]`. `Type.validate(value) -> Self ? [FieldError]` (already shipped) is the only path that runs every rule and returns the full list.",
+          "code": "struct Signup {\n    email: String\n    password: String\n    validate {\n        check(email.len() > 0, at: email, \"email required\")\n        check(password.len() >= 12, at: password, \"needs at least 12 characters\")\n    }\n}\n\nfn run() {\n    body := \"{\\\"email\\\":\\\"\\\",\\\"password\\\":\\\"short\\\"}\"\n    if json.decode<Signup>(body) == {\n        ok(s) -> print(\"ok: {s.email}\")\n        err(e) -> print(\"bad request: {e.reason}\")\n    }\n}\n\n// prints only the FIRST problem:\n// bad request: email required\n// (password's failure is invisible until email is fixed and the form is resubmitted)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Zod (TypeScript)",
+          "note": "Zod's `safeParse` always returns every issue at once, in one `ZodError` carrying an `issues` array — one result type, whether the input was shapeless JSON or a well-shaped value that failed a refinement. Closest in spirit to option A: one error type covers both failure classes.",
+          "code": "const r = Signup.safeParse(body);\nif (!r.success) r.error.issues.forEach(i => console.log(i.path, i.message));"
+        },
+        {
+          "lang": "Rust (serde + validator)",
+          "note": "serde's `Deserialize` and the separate `validator` crate's `Validate` are two distinct traits with two distinct error types — a parse failure and a validation failure are never the same Result. Closest in spirit to option B: two failure classes, two types, joined only at the call site that runs both.",
+          "code": "let v: Signup = serde_json::from_str(body)?;   // serde::Error\nv.validate()?;                                  // validator::ValidationErrors"
+        }
+      ],
+      "rec": "B",
+      "recommendation": {
+        "why": "It delivers the exact benefit a validate block exists for: decode<T>() on a Signup-shaped request shows every broken field at once, not one at a time. It touches only the one call site that needed to change. Every other place DecodeError already appears (DataTree.field()/.int()/.text(), the Decode trait, hand-written decoders) keeps working exactly as written today.",
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "Turning DecodeError itself into a two-shaped type reaches far past decode<T>(). It reaches every low-level decode read and every hand-written Decode implementation that builds a DecodeError directly, including one already shipped as an example, even on types with no validate block at all. A change meant for one call site should not force every decode-surface user to learn a new shape."
+          },
+          {
+            "key": "C",
+            "reason": "The whole reason a validate block accumulates instead of stopping at the first failure is so a person fixes every mistake in one pass. Making decode<T>() stop at the first failing rule throws that away for the exact call beginners reach for first. It hides the real accumulating behavior behind a second, less obvious call (Type.validate)."
+          }
+        ],
+        "tradeoff": "Every decode<T>() call now returns a slightly richer error — two arms instead of one — even for a type with no validate block, since the wrapping is uniform across every call. Code that used to read a bare DecodeError off decode<T>()'s failure arm now matches on which arm it is. That one small adjustment is what buys every validate-carrying type its full field-by-field error report for free."
+      },
+      "hybrid": {
+        "result": "B",
+        "synthesis": "B is the base. It carries A's real prize: a validate-carrying type's decode<T>() caller gets the exact same full accumulated field list Type.validate() would give, never a weaker one-at-a-time report. It also carries C's discipline of never touching the plain DecodeError record everywhere it already appears today. The new outcome type is uniform across every decode<T>() call, not only validate-carrying ones, because decode<T>() has one generic signature. Giving it a different return shape per type would be a deeper change than this ballot scopes.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "One error value that accumulates every failing rule instead of stopping at the first.",
+            "use": "Kept exactly — DecodeOutcome.Invalid([FieldError]) IS that accumulated value; only its home type changes (a new DecodeOutcome, not a mutated DecodeError)."
+          },
+          {
+            "key": "B",
+            "aspect": "A single new type scoped to decode<T>() alone, leaving the rest of the decode surface untouched.",
+            "use": "Adopted as the mechanism."
+          },
+          {
+            "key": "C",
+            "aspect": "The plain path+reason DecodeError record never changes shape anywhere it already appears.",
+            "use": "Kept in full for every existing DecodeError use: DataTree.field()/.int()/.text(), hand-written decoders. C's other idea — widening decode<T>()'s result only for validate-carrying types — cannot fit decode<T>()'s single generic signature without a different type per struct. Only the untouched-DecodeError half survives into B."
+          }
+        ]
+      },
+      "checkInstructions": null,
+      "draft": false,
       "status": "open",
-      "created": "2026-07-12T21:15:56.518Z"
+      "created": "2026-07-12T22:54:40.600Z"
+    },
+    {
+      "id": "D-VALIDATE3",
+      "cardId": "c0n6vj96",
+      "group": "safety",
+      "title": "Whether validate blocks get a built-in rule vocabulary beyond check()",
+      "gist": "Whether common per-field rules like \"is an email\" or \"at least N characters\" get their own short spelling, or every rule stays a hand-written check() condition.",
+      "lesson": "A validate block, ratified as D-VALIDATE1, is a section inside a struct that lists rules a value must satisfy. Today it holds only one kind of statement: `check(condition, at: field, \"message\")`. `condition` is any true/false expression. `at:` names the field the failure is reported against, and the string is the message shown to the user.\n\nA rule vocabulary means short, purpose-built spellings for rules that come up constantly, like is this text an email address, or is this string at least N characters long. Instead of writing that boolean logic by hand every time, a name like `.email()` or `.min_len(12)` says it directly.\n\nA canned message is text the compiler supplies automatically when a named rule fails, instead of the user typing their own string. \"must be a valid email address\" is a canned message; \"email required\" is a hand-written one.\n\nThis matters because check() by itself works for any rule, but every field-level rule becomes its own from-scratch boolean expression and its own hand-typed message, no matter how common the rule is. The struct definition is Jet's one schema — whatever this decision picks becomes how every Jet program spells its most common data rules.",
+      "explainer": "",
+      "story": "Devon is writing a Signup struct with fields most apps have: an email that must look like an email, and a password with a minimum length. He types `check(email.len() > 0, at: email, \"email required\")`. He realizes he will retype some version of this same boolean logic in every struct with an email field, in every project, for as long as he uses Jet.\n\nHe wants to know: does Jet give these everyday rules a name, or does every project keep hand-rolling the same handful of conditions?",
+      "inWild": "A Signup struct with an email field and a password field, each needing the same few rules most forms need: the email must be present and look like an email, the password must meet a minimum length, and the password must not equal the email.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Closed starter vocabulary with canned messages",
+          "detail": "A small, fixed set of dot-chain rule methods ships on bare field names inside a validate block: `.not_empty()`, `.email()`, `.min_len(n)`, `.max_len(n)`, `.has_digit()`. Each expands to an ordinary check() call with a message the compiler supplies. Cross-field rules keep using check() directly, exactly as today.\n\nThe list is closed — a fixed set the owner ratifies once, not an open plugin surface. Adding a new rule name later needs its own ballot, the same way Jet's other closed vocabularies work today (the blessed-abbreviation list, the ambient-surface registry).",
+          "technical": "Each vocabulary method is sugar: `email.email()` lowers to `check(core.validate.is_email(value.email), at: email, \"must be a valid email address\")`, so it shares the exact check()-based engine and [FieldError] accumulation D-VALIDATE1 already specified. No second engine, no second error type.",
+          "code": "struct Signup {\n    email: String\n    password: String\n\n    validate {\n        email.not_empty()\n        password.min_len(12)\n        check(password != email, at: password, \"password can't be the email\")\n    }\n}\n\n// decoding {\"email\":\"\",\"password\":\"short\"}:\n// 2 problem(s)\n//   email: is required\n//   password: must be at least 12 characters"
+        },
+        {
+          "key": "B",
+          "name": "No vocabulary — check() is the one mechanism",
+          "detail": "Nothing new ships. Every rule, common or not, is a hand-written check() call with a hand-written condition and a hand-written message. This is exactly what card #506 already shipped.\n\nOne mechanism, no compiler-owned message text, nothing to ratify or extend later. The cost falls on every struct: the same email-shaped, length-bounded rules get retyped by hand in every project that needs them.",
+          "technical": "No change to CheckerValidate.rs; the shipped `extract_check_rule` already requires every validate-block statement to be a `check(cond, at: field, \"msg\")` call, and this option keeps that the permanent, only shape.",
+          "code": "struct Signup {\n    email: String\n    password: String\n\n    validate {\n        check(email.len() > 0, at: email, \"email required\")\n        check(password.len() >= 12, at: password, \"needs at least 12 characters\")\n        check(password != email, at: password, \"password can't be the email\")\n    }\n}\n\n// decoding {\"email\":\"\",\"password\":\"short\"}:\n// 2 problem(s)\n//   email: email required\n//   password: needs at least 12 characters"
+        },
+        {
+          "key": "C",
+          "name": "Vocabulary as plain functions, used inside check()",
+          "detail": "A `core.validate` module ships plain, pure functions — `is_email(s)`, `has_min_len(s, n)`, `has_max_len(s, n)`, `has_digit(s)` — each returning true or false. They are ordinary function calls a user composes inside a check() condition. No new statement shape, no canned message; the user still writes every message by hand.\n\ncheck() stays the one and only statement a validate block accepts. The vocabulary only saves the work of writing the boolean logic, not the check()/at:/message ceremony around it.",
+          "technical": "`core.validate.is_email`, `.has_min_len`, `.has_max_len`, `.has_digit` are ordinary `@Pure` functions in a stdlib module, callable anywhere a Bool expression is legal, including a check() condition and Validate.over(s)'s chain. No parser or CheckerValidate.rs change beyond exposing the module.",
+          "code": "use core.validate as v\n\nstruct Signup {\n    email: String\n    password: String\n\n    validate {\n        check(email.len() > 0, at: email, \"email required\")\n        check(v.is_email(email), at: email, \"must be a valid email address\")\n        check(v.has_min_len(password, 12), at: password, \"needs at least 12 characters\")\n        check(password != email, at: password, \"password can't be the email\")\n    }\n}\n\n// decoding {\"email\":\"\",\"password\":\"short\"}:\n// 2 problem(s)\n//   email: email required\n//   password: needs at least 12 characters"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Pydantic (Python)",
+          "note": "Pydantic ships named field constraints (EmailStr, Field(min_length=12)) with built-in messages, then lets a custom validator add anything the constraint set can't express. Closest to option A: a closed named vocabulary plus an escape hatch.",
+          "code": "class Signup(BaseModel):\n    email: EmailStr\n    password: str = Field(min_length=12)"
+        },
+        {
+          "lang": "Zod (TypeScript)",
+          "note": "Zod's `.email()`/`.min(12)` chain methods are themselves built from small reusable refinement functions under the hood, while every custom rule is still a plain predicate passed to `.refine()`. Closest to option C's engine, wrapped in option A's chain sugar.",
+          "code": "z.string().email().min(12)\nz.string().refine(s => isEmail(s), \"must be a valid email address\")"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "D-VALIDATE1's own ratified text already describes rules as \"dot-chains on bare field names,\" with check() reserved for cross-field rules. Option A is what finishes that promise. It also matches how Jet already closes off small vocabularies elsewhere — the blessed-abbreviation list, the ambient-surface registry — ratified once, extended only by a future ballot.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Leaving every field-level rule as hand-rolled boolean logic backs away from the dot-chain spelling D-VALIDATE1's own text already committed to. It also keeps the exact repetition Jet strips out elsewhere in the language, like inferred constructors and inherited fields."
+          },
+          {
+            "key": "C",
+            "reason": "The predicate functions cut only the condition-writing work. Every rule still needs its own full check(condition, at: field, \"message\") wrapper, so the field-name and message ceremony D-VALIDATE1's dot-chain spelling was meant to remove is still there on every line."
+          }
+        ],
+        "tradeoff": "A canned message is generic where a hand-written one can be specific to the form it's on: is required, instead of email required. That is acceptable because check() still sits right there for any rule that needs its own wording. The vocabulary is only for the common case."
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "A is the base. check() stays exactly what B already ships: the always-available way to write any rule the vocabulary doesn't name, especially every cross-field rule. Underneath, each vocabulary method is C's idea in different clothes — a small pure predicate function, wired to a canned message and a check() call — so A ships one engine, not two.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "Closed dot-chain vocabulary with canned messages.",
+            "use": "Adopted as the user-facing surface."
+          },
+          {
+            "key": "B",
+            "aspect": "check() as the one statement a validate block accepts.",
+            "use": "Kept unchanged — the vocabulary only adds sugar in front of it; every cross-field and custom rule still writes check() directly."
+          },
+          {
+            "key": "C",
+            "aspect": "Rule logic as plain, reusable pure functions rather than a new marker system.",
+            "use": "Kept as the implementation underneath the sugar — each dot-chain method lowers to one of these functions inside an ordinary check() call, so the vocabulary adds no second engine."
+          }
+        ]
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T22:58:34.888Z"
     }
   ],
   "questions": [
@@ -33785,6 +33961,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-12T22:58:34.888Z",
+      "by": "terra-506b-ballot",
+      "action": "decision.add",
+      "ref": "D-VALIDATE3",
+      "note": "Whether validate blocks get a built-in rule vocabulary beyond check()"
+    },
+    {
+      "at": "2026-07-12T22:54:40.600Z",
+      "by": "terra-506b-ballot",
+      "action": "decision.add",
+      "ref": "D-VALIDATE2",
+      "note": "The error shape decode<T>() returns when a validate block fails"
+    },
+    {
+      "at": "2026-07-12T22:48:07.210Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-JOS-ENGINEHOME1",
+      "note": "C"
+    },
     {
       "at": "2026-07-12T22:47:16.574Z",
       "by": "claude-main",
@@ -37263,27 +37460,6 @@
       "action": "decision.update",
       "ref": "D-VALIDATE1",
       "note": ""
-    },
-    {
-      "at": "2026-07-12T10:24:18.944Z",
-      "by": "claude-main",
-      "action": "decision.update",
-      "ref": "D-API-STORE1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-12T10:20:53.930Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-ARTIFACT-EXT1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-12T10:20:53.464Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-ARTIFACT-EXT1",
-      "note": "A"
     }
   ],
   "nextNum": 368,
