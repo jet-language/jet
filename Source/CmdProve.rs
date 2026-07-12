@@ -43,6 +43,7 @@ struct TestItem {
     message: String,
     line: u32,
     name: String,
+    seed: String,
 }
 
 struct ProducerRecord {
@@ -135,7 +136,7 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
     } else {
         (Vec::new(), ExitCodes::OK)
     };
-    let test_failed = tests.iter().filter(|item| item.kind == 0 && item.state == 1).count();
+    let test_failed = tests.iter().filter(|item| (item.kind == 0 || item.kind == 3) && item.state == 1).count();
     let exit_code = if producer_exit == ExitCodes::ICE {
         ExitCodes::ICE
     } else if producer_exit == ExitCodes::RUNTIME_PANIC {
@@ -236,12 +237,13 @@ fn run_test_producers(target: &Target) -> (Vec<TestItem>, i32) {
                             let claim = format!("{}:{}:{}", record.kind, record.name, record.message);
                             items.push(TestItem {
                                 id: evidence_id(target, if record.kind == 1 { "contract" } else { "unit" }, &member.path, "0:0-0:0", &claim),
-                                path: if record.file.is_empty() { member.path.clone() } else { record.file },
+                                path: if record.kind == 3 || record.file.is_empty() { member.path.clone() } else { record.file.clone() },
                                 state: record.state,
                                 kind: record.kind,
                                 message: record.message,
                                 line: record.line,
                                 name: record.name,
+                                seed: if record.kind == 3 { record.file } else { String::new() },
                             });
                         }
                     }
@@ -260,6 +262,7 @@ fn run_test_producers(target: &Target) -> (Vec<TestItem>, i32) {
                     message: String::new(),
                     line: 0,
                     name: String::new(),
+                    seed: String::new(),
                 });
             }
         }
@@ -533,7 +536,11 @@ fn render_report(target: &Target, items: &[FrontEndItem], tests: &[TestItem], pr
         format!("{{\"attachment\":null,\"budget\":null,\"contract\":null,\"count\":1,\"diagnosticIndexes\":{indexes},\"facet\":\"all\",\"id\":{},\"kind\":\"front_end\",\"outcome\":\"{outcome}\",\"producer\":\"jet-sema\",\"property\":null,\"reason\":null,\"solver\":null,\"source\":{{\"column\":1,\"line\":1,\"path\":{}}},\"state\":\"checked\"}}", json(&item.id), json(&item.path))
     }).collect::<Vec<_>>();
     for item in tests {
-        let (kind, facet, producer) = if item.kind == 1 { ("contract", "contracts", "jet-runtime") } else { ("unit", "tests", "jet-test") };
+        let (kind, facet, producer) = match item.kind {
+            1 => ("contract", "contracts", "jet-runtime"),
+            3 => ("property", "tests", "jet-property"),
+            _ => ("unit", "tests", "jet-test"),
+        };
         let (state, outcome, reason) = match item.state { 0 => ("executed", "passed", "null"), 1 => ("executed", "failed", "null"), 2 => ("skipped", "not_run", "\"fail_fast_policy\""), _ => ("unavailable", "unavailable", "\"producer_start_failed\"") };
         let diagnostic_indexes = if item.kind == 2 || (item.kind == 1 && item.state == 1) {
             let index = diagnostics.len();
@@ -543,7 +550,8 @@ fn render_report(target: &Target, items: &[FrontEndItem], tests: &[TestItem], pr
         } else { "[]".into() };
         if item.kind == 2 { continue; }
         let contract = if item.kind == 1 { format!("{{\"marker\":{},\"observation\":\"{}\",\"site\":{{\"column\":1,\"line\":{},\"path\":{}}}}}", json(&item.name), if item.state == 0 { "reached_pass" } else { "reached_fail" }, item.line, json(&item.path)) } else { "null".into() };
-        evidence_rows.push(format!("{{\"attachment\":null,\"budget\":null,\"contract\":{contract},\"count\":1,\"diagnosticIndexes\":{diagnostic_indexes},\"facet\":\"{facet}\",\"id\":{},\"kind\":\"{kind}\",\"outcome\":\"{outcome}\",\"producer\":\"{producer}\",\"property\":null,\"reason\":{reason},\"solver\":null,\"source\":{{\"column\":1,\"line\":{},\"path\":{}}},\"state\":\"{state}\"}}", json(&item.id), item.line.max(1), json(&item.path)));
+        let property = if item.kind == 3 { format!("{{\"caseIndex\":{},\"effectiveSeed\":{},\"generatedCases\":{},\"shrinkTrace\":{},\"source\":{{\"column\":1,\"line\":1,\"path\":{}}},\"toolchain\":{{\"jet\":{},\"targetTriple\":{}}}}}", item.line.saturating_sub(1), item.seed.parse::<u64>().unwrap_or(0), item.line, if item.message.is_empty() { "[]".into() } else { format!("[{{\"name\":\"minimized_inputs\",\"value\":{}}}]", json(&item.message)) }, json(&item.path), json(env!("CARGO_PKG_VERSION")), json(std::env::consts::ARCH)) } else { "null".into() };
+        evidence_rows.push(format!("{{\"attachment\":null,\"budget\":null,\"contract\":{contract},\"count\":1,\"diagnosticIndexes\":{diagnostic_indexes},\"facet\":\"{facet}\",\"id\":{},\"kind\":\"{kind}\",\"outcome\":\"{outcome}\",\"producer\":\"{producer}\",\"property\":{property},\"reason\":{reason},\"solver\":null,\"source\":{{\"column\":1,\"line\":{},\"path\":{}}},\"state\":\"{state}\"}}", json(&item.id), item.line.max(1), json(&item.path)));
     }
     let evidence = evidence_rows.join(",");
     let unit_passed = tests.iter().filter(|item| item.kind == 0 && item.state == 0).count();
@@ -553,6 +561,9 @@ fn render_report(target: &Target, items: &[FrontEndItem], tests: &[TestItem], pr
     let contract_passed = tests.iter().filter(|item| item.kind == 1 && item.state == 0).count();
     let contract_failed = tests.iter().filter(|item| item.kind == 1 && item.state == 1).count();
     let contract_selected = contract_passed + contract_failed;
+    let property_passed = tests.iter().filter(|item| item.kind == 3 && item.state == 0).count();
+    let property_failed = tests.iter().filter(|item| item.kind == 3 && item.state == 1).count();
+    let property_cases: u32 = tests.iter().filter(|item| item.kind == 3).map(|item| item.line).sum();
     let unit_selected = unit_passed + unit_failed + unit_skipped;
     format!("{{\"diagnostics\":[{}],\"evidence\":[{evidence}],\"evidencePolicy\":\"allow_incomplete\",\"exitCode\":{exit_code},\"result\":\"{}\",\"schemaVersion\":1,\"summaries\":{{\"contract\":{{\"declared\":0,\"failed\":0,\"notObserved\":0,\"observed\":0,\"passed\":0,\"selected\":0,\"skipped\":0}},\"deterministicBudget\":{{\"failed\":0,\"met\":0,\"selected\":0,\"skipped\":0,\"unavailable\":0}},\"doctest\":{{\"failed\":0,\"passed\":0,\"selected\":0,\"skipped\":0}},\"frontEnd\":{{\"failed\":{failed},\"proved\":{proved},\"selected\":{},\"skipped\":0}},\"property\":{{\"failed\":0,\"generatedCases\":0,\"passed\":0,\"selected\":0,\"shrunkFailures\":0,\"skipped\":0}},\"solver\":{{\"disproved\":0,\"proved\":0,\"selected\":0,\"unavailable\":0,\"unknown\":0}},\"statisticalBudget\":{{\"failed\":0,\"met\":0,\"selected\":0,\"skipped\":0,\"unavailable\":0}},\"unit\":{{\"failed\":{unit_failed},\"passed\":{unit_passed},\"selected\":{unit_selected},\"skipped\":{unit_skipped}}}}},\"target\":{{\"inputSha256\":{},\"kind\":\"{}\",\"members\":[{members}],\"root\":{}}},\"tool\":{{\"jet\":{},\"proofProducer\":\"jet-prove\",\"targetTriple\":{}}}}}", diagnostics.join(","), if failed == 0 && unit_failed == 0 { if unit_unavailable > 0 { "pass_incomplete" } else { "pass" } } else { "fail" }, items.len(), json(&target.input_sha256), target.kind, json(&target.root), json(env!("CARGO_PKG_VERSION")), json(std::env::consts::ARCH))
     .replace(
