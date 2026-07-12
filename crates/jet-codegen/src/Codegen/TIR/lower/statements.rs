@@ -754,12 +754,6 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             let mut scoped = clone_env(env);
             TStmt::Region(lower_stmts(body, cx, &mut scoped))
         }
-        // D-IGNORERET2=A: `#Suppress(MustUse)` erases to a plain block at codegen.
-        // The sema suppression is a compile-time-only fact (I3).
-        Stmt::SuppressMustUse { body, .. } => {
-            let mut scoped = clone_env(env);
-            TStmt::Region(lower_stmts(body, cx, &mut scoped))
-        }
         // D-REACTCORE1: `#Reactive { … }` lowers to `jet_reactive_effect(closure)`.
         // Clone outer captures into the closure (same as a stored lambda).
         Stmt::Reactive { body, .. } => {

@@ -163,7 +163,6 @@ pub(super) fn collect_txn_mut_roots(body: &[Stmt], out: &mut Vec<String>) {
             | Stmt::Unsafe { body, .. }
             | Stmt::Impure { body, .. }
             | Stmt::Reactive { body, .. }
-            | Stmt::SuppressMustUse { body, .. }
             | Stmt::DebugOnly { body, .. }
             | Stmt::Region { body, .. }
             | Stmt::TaskGroup { body, .. }

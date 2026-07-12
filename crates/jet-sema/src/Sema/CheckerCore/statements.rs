@@ -1242,15 +1242,6 @@ impl<'a> Checker<'a> {
                     }
                     self.check_block(body, true);
                 }
-                // D-IGNORERET2=A: `#Suppress(MustUse) { … }` — any fallible / @MustUse
-                // result dropped as a bare statement within this block is allowed without
-                // an explicit `.drop("reason")` call. Semantically a plain block otherwise.
-                Stmt::SuppressMustUse { body, .. } => {
-                    let prev = self.suppress_must_use;
-                    self.suppress_must_use = true;
-                    self.check_block(body, true);
-                    self.suppress_must_use = prev;
-                }
                 Stmt::Off { body, .. } => {
                     let moved = self.moved.clone();
                     let uninit = self.uninit.clone();

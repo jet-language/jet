@@ -188,6 +188,9 @@ impl<'a> Checker<'a> {
             if let Expr::Field(base, leaf, _) = &**receiver {
                 if let Expr::Ident(alias, _) = &**base {
                     if let Some(ns) = self.core_imports.get(alias).cloned() {
+                        if ns == "core.encoding" && leaf == "EncodingLimits" && method == "safe" {
+                            return self.check_static_method("EncodingLimits", method, span, args);
+                        }
                         if ns == "core.solve" && leaf == Syntax::SOLVER_TYPE && method == "new" {
                             if args.len() != 1 {
                                 self.diags.push(Diagnostic::error(
@@ -352,7 +355,8 @@ impl<'a> Checker<'a> {
                         return Some(ty);
                     }
                 }
-                if self.registry.method(type_name, method).is_some() {
+                if (type_name == "EncodingLimits" && method == "safe")
+                    || self.registry.method(type_name, method).is_some() {
                     return self.check_static_method(type_name, method, span, args);
                 }
                 // D-FIDELITY-API1=A: `core.perf.Perf` static API. `use core.perf as Perf`

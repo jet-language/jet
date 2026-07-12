@@ -516,7 +516,11 @@ impl<'a> Parser<'a> {
                         self.bump();
                         continue;
                     }
-                    TokKind::Hash if self.at_web_target() => match self.parse_web_target_marker() {
+                    // D-MARK-TARGET1=A: `#Target(Wasm)`/`#Target(Js)` immediately
+                    // attached to a following `fn`/`pub fn` is the per-function
+                    // bucket override (routed to `at_web_partition_fn` below,
+                    // parsed inside `func()`), not the file/module ceiling.
+                    TokKind::Hash if self.at_web_target() && !self.at_web_partition_fn() => match self.parse_web_target_marker() {
                         Ok(TargetMarker::DefaultWeb) => {
                             if matches!(self.peek().kind, TokKind::KwModule) {
                                 let span = self.peek().span;

@@ -316,7 +316,6 @@ fn child_bodies(s: &Stmt) -> Vec<&[Stmt]> {
         | Stmt::Unsafe { body, .. }
         | Stmt::Impure { body, .. }
         | Stmt::Reactive { body, .. }
-        | Stmt::SuppressMustUse { body, .. }
         | Stmt::Region { body, .. }
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }

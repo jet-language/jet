@@ -291,12 +291,13 @@ pub const ATTR_EXPERIMENTAL: &str = "Experimental"; // D-MARK-META1
 pub const ATTR_TESTED: &str = "Tested"; // D-MARK-META1
 pub const ATTR_HARDENED: &str = "Hardened"; // D-MARK-META1
 
-// ── Explicit discard (D-IGNORERET2=A, ratified 2026-06-28) ──────────────────
-// `.drop("reason")` — method-style terminal that silences E0402 for a fallible
-// or @MustUse result.  `#Suppress(MustUse) { … }` is the lexical-scope form.
+// ── Explicit discard (D-IGNORERET2=A, ratified 2026-06-28; amended by
+// D-MARK-DISCARD1=A, ratified 2026-07-11, card #498) ─────────────────────────
+// `.drop("reason")` — method-style terminal that silences E0402 for a
+// fallible or @MustUse result. It is now the SOLE discard spelling; the
+// `#Suppress(MustUse) { … }` lexical-scope form is retired outright
+// (ordinary unknown-marker error — no ATTR_SUPPRESS registration).
 pub const METHOD_DROP: &str = "drop"; // D-IGNORERET2 (method form; distinct from BUILTIN_DROP fn)
-pub const ATTR_SUPPRESS: &str = "Suppress"; // D-IGNORERET2  #Suppress(MustUse)
-pub const SUPPRESS_MUST_USE: &str = "MustUse"; // D-IGNORERET2  argument of #Suppress
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Canonical keyword/type/builtin tables (c44: single source of truth).

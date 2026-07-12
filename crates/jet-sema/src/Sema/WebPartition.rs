@@ -281,9 +281,7 @@ fn type_show(ty: &Type) -> String {
 
 fn marker_show(marker: Option<WebPartitionMarker>) -> &'static str {
     match marker {
-        Some(WebPartitionMarker::Wasm) => Syntax::ATTR_WASM,
-        Some(WebPartitionMarker::Js) => Syntax::ATTR_JS,
-        Some(WebPartitionMarker::WasmExport) => Syntax::ATTR_WASM_EXPORT,
+        Some(m) => m.name(),
         None => "—",
     }
 }

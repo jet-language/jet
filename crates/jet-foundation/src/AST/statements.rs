@@ -119,14 +119,6 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
-    /// D-IGNORERET2=A (ratified 2026-06-28): `#Suppress(MustUse) { … }` — a
-    /// lexical scope in which all fallible / `@MustUse` statement results are
-    /// allowed to be silently dropped without `.drop("reason")`.  Erases to a
-    /// plain block at codegen; the gate is enforced entirely in sema (I3).
-    SuppressMustUse {
-        body: Vec<Stmt>,
-        span: Span,
-    },
     /// D-CANVASSTATE1=D (ratified 2026-07-09): `#Off <stmt>` / `#Off { … }`.
     /// The body is parsed and checked, but never emitted or executed.
     Off {
@@ -350,7 +342,6 @@ impl Stmt {
             | Stmt::Impure { span, .. }
             | Stmt::Reactive { span, .. }
             | Stmt::Shield { span, .. }
-            | Stmt::SuppressMustUse { span, .. }
             | Stmt::Off { span, .. }
             | Stmt::DebugOnly { span, .. }
             | Stmt::Region { span, .. }

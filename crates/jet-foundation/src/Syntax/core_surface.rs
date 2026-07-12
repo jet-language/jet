@@ -253,17 +253,16 @@ pub const KW_IMPURE: &str = "Impure";
 /// `jet_reactive_scope` / `jet_reactive_effect` — no new evaluation semantics.
 pub const KW_REACTIVE: &str = "Reactive";
 
-/// D-WASM1=A (ratified 2026-06-28, c123): `#Target(Wasm|Js)` — module- or file-level
-/// default web partition ceiling. Sema validates it against inferred `Browser` effects.
+/// D-WASM1=A (ratified 2026-06-28, c123), respelled by D-MARK-TARGET1=A
+/// (ratified 2026-07-11, card #498): `#Target(Wasm|Js)` is the one target-
+/// marker family, covering both the module-/file-level partition ceiling
+/// AND the per-function bucket override (the retired bare `#Wasm`/`#Js`
+/// spellings). Sema validates it against inferred `Browser` effects.
 pub const ATTR_TARGET: &str = "Target";
 
-/// D-WASM1=A: per-function override — force WASM compilation bucket.
-pub const ATTR_WASM: &str = "Wasm";
-
-/// D-WASM1=A: per-function override — force JS compilation bucket.
-pub const ATTR_JS: &str = "Js";
-
-/// D-WASM1=A: export this WASM function to the generated JS loader.
+/// D-WASM1=A: export this WASM function to the generated JS loader. A
+/// different job (export surface) from the `#Target(Wasm|Js)` partition
+/// family above — D-MARK-TARGET1=A leaves it untouched.
 pub const ATTR_WASM_EXPORT: &str = "WasmExport";
 
 /// D-WASM1=A: `#Target(Js)` argument spelling.

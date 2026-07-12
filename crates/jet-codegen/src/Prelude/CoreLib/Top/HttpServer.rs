@@ -35,6 +35,17 @@ struct JetHttpServerTls {
     key_pem: String,
 }
 
+struct JetHttpReadError {
+    status: i64,
+    message: &'static str,
+}
+
+impl std::fmt::Display for JetHttpReadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
 impl JetHttpMux {
     fn new() -> Self {
         JetHttpMux(std::sync::Arc::new(std::sync::Mutex::new(Vec::new())))
@@ -104,7 +115,7 @@ fn jet_http_mux_serve(addr: &String, mux: JetHttpMux) -> Result<(), String> {
             let raw = match jet_http_srv_read(&mut stream) {
                 Ok(raw) => raw,
                 Err(e) => {
-                    eprintln!("http read failed: {}", e);
+                    let _ = stream.write_all(jet_http_srv_read_error_response(&e).as_bytes());
                     return;
                 }
             };
@@ -132,7 +143,15 @@ fn jet_http_mux_serve_once_listener(
         .inner
         .accept()
         .map_err(|e| format!("accept failed: {}", e))?;
-    let raw = jet_http_srv_read(&mut stream)?;
+    let raw = match jet_http_srv_read(&mut stream) {
+        Ok(raw) => raw,
+        Err(error) => {
+            stream
+                .write_all(jet_http_srv_read_error_response(&error).as_bytes())
+                .map_err(|e| format!("http write failed: {}", e))?;
+            return Ok(());
+        }
+    };
     let req = jet_http_srv_parse(&raw);
     let resp = jet_http_mux_dispatch(mux, req);
     let text = jet_http_srv_format(&resp);
@@ -141,43 +160,97 @@ fn jet_http_mux_serve_once_listener(
         .map_err(|e| format!("http write failed: {}", e))
 }
 
-fn jet_http_srv_read(stream: &mut std::net::TcpStream) -> Result<String, String> {
+fn jet_http_srv_read(stream: &mut std::net::TcpStream) -> Result<String, JetHttpReadError> {
     use std::io::Read;
+    const MAX_HEADER_BYTES: usize = 32 * 1024;
+    const MAX_BODY_BYTES: usize = 1024 * 1024;
     let mut raw = Vec::new();
     let mut buf = [0u8; 8192];
     loop {
         let n = stream
             .read(&mut buf)
-            .map_err(|e| format!("http read failed: {}", e))?;
+            .map_err(|_| JetHttpReadError { status: 400, message: "request read failed" })?;
         if n == 0 {
             break;
         }
         raw.extend_from_slice(&buf[..n]);
         if let Some(header_end) = jet_http_header_end(&raw) {
+            if header_end > MAX_HEADER_BYTES {
+                return Err(JetHttpReadError { status: 431, message: "request headers are too large" });
+            }
+            let content_len = jet_http_validate_headers(&raw[..header_end])?;
+            if content_len > MAX_BODY_BYTES {
+                return Err(JetHttpReadError { status: 413, message: "request body is too large" });
+            }
             let body_start = header_end + 4;
-            let content_len = jet_http_content_length(&raw[..header_end]);
             if raw.len().saturating_sub(body_start) >= content_len {
+                raw.truncate(body_start + content_len);
                 break;
             }
+        } else if raw.len() > MAX_HEADER_BYTES {
+            return Err(JetHttpReadError { status: 431, message: "request headers are too large" });
         }
     }
-    Ok(String::from_utf8_lossy(&raw).into_owned())
+    String::from_utf8(raw).map_err(|_| JetHttpReadError { status: 400, message: "request is not valid UTF-8" })
 }
 
 fn jet_http_header_end(raw: &[u8]) -> Option<usize> {
     raw.windows(4).position(|w| w == b"\r\n\r\n")
 }
 
-fn jet_http_content_length(header: &[u8]) -> usize {
-    let text = String::from_utf8_lossy(header);
-    for line in text.lines() {
-        if let Some((k, v)) = line.split_once(':') {
-            if k.trim().eq_ignore_ascii_case("content-length") {
-                return v.trim().parse::<usize>().unwrap_or(0);
+fn jet_http_validate_headers(header: &[u8]) -> Result<usize, JetHttpReadError> {
+    let text = std::str::from_utf8(header)
+        .map_err(|_| JetHttpReadError { status: 400, message: "request headers are not valid UTF-8" })?;
+    let mut lines = text.split("\r\n");
+    let request_line = lines.next().unwrap_or("");
+    if request_line.len() > 8 * 1024 || request_line.split(' ').count() != 3 {
+        return Err(JetHttpReadError { status: 400, message: "request line is malformed" });
+    }
+    let mut count = 0usize;
+    let mut content_length = None;
+    let mut has_transfer_encoding = false;
+    for line in lines {
+        count += 1;
+        if count > 100 {
+            return Err(JetHttpReadError { status: 431, message: "request has too many headers" });
+        }
+        if line.starts_with(' ') || line.starts_with('\t') {
+            return Err(JetHttpReadError { status: 400, message: "folded request headers are not allowed" });
+        }
+        let (name, value) = line.split_once(':')
+            .ok_or(JetHttpReadError { status: 400, message: "request header is malformed" })?;
+        if name.is_empty() || name.ends_with(' ') || name.ends_with('\t') {
+            return Err(JetHttpReadError { status: 400, message: "request header name is malformed" });
+        }
+        if name.eq_ignore_ascii_case("content-length") {
+            let parsed = value.trim().parse::<usize>()
+                .map_err(|_| JetHttpReadError { status: 400, message: "content-length is malformed" })?;
+            if content_length.replace(parsed).is_some_and(|old| old != parsed) {
+                return Err(JetHttpReadError { status: 400, message: "conflicting content-length headers" });
             }
+        } else if name.eq_ignore_ascii_case("transfer-encoding") {
+            has_transfer_encoding = true;
         }
     }
-    0
+    if has_transfer_encoding && content_length.is_some() {
+        return Err(JetHttpReadError { status: 400, message: "content-length and transfer-encoding cannot be combined" });
+    }
+    if has_transfer_encoding {
+        return Err(JetHttpReadError { status: 400, message: "transfer-encoding is not supported" });
+    }
+    Ok(content_length.unwrap_or(0))
+}
+
+fn jet_http_srv_read_error_response(error: &JetHttpReadError) -> String {
+    let reason = match error.status {
+        413 => "Payload Too Large",
+        431 => "Request Header Fields Too Large",
+        _ => "Bad Request",
+    };
+    format!(
+        "HTTP/1.1 {} {}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        error.status, reason
+    )
 }
 
 fn jet_http_mux_serve_tls<V, H>(
@@ -431,4 +504,3 @@ fn jet_http_srv_static_file_range(
 fn jet_http_srv_access_log(req: &JetHttpSrvReq, status: i64) -> String {
     format!("{} {} {}", req.method, req.path, status)
 }
-

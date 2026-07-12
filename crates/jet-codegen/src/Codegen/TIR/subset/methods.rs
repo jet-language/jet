@@ -719,6 +719,19 @@ pub(crate) fn method_call_in_subset(
                     .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
         }
     }
+    // D-ENCSTREAM-SURFACE1=A: `encoding.EncodingLimits.safe()` is a
+    // qualified shared-type constructor, not a submodule call.
+    if recv_type.is_none() && method == "safe" && args.is_empty() {
+        if let Expr::Field(base, leaf, _) = receiver {
+            if leaf == "EncodingLimits" {
+                if let Expr::Ident(alias, _) = base.as_ref() {
+                    if cx.core_imports.get(alias).map(String::as_str) == Some("core.encoding") {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
     // Shape (j) [c109 Phase 16]: an enum-variant CONSTRUCTION `Enum.Variant(args)`.
     // The parser/sema never produce an `Expr::EnumLit` node for a payload variant —
     // a `Type.Variant(args)` stays a `MethodCall` (sema type-checks it via

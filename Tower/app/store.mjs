@@ -522,6 +522,19 @@ function applyDoneGate(s, c, targetPhase, by) {
   return null;
 }
 
+// #515: structured, owner-readable "how to check this" text assembled from
+// the card's exit criteria (what to verify + evidence already on file) and
+// its refs (files/commands worth opening). Additive field on the acceptance
+// ballot — old ballots minted before this simply lack it, and the Now page
+// falls back to computing the same thing client-side from card data.
+export function acceptanceCheckInstructions(c) {
+  const items = c.criteria || [];
+  const refs = c.refs || [];
+  const toCheck = [...items.map(i => i.text), ...refs.map(r => `Check ${r}`)];
+  const confirms = items.filter(i => i.evidence).map(i => `${i.text} — ${i.evidence}${i.verifiedBy ? ` (verified by ${i.verifiedBy})` : ''}`);
+  return (toCheck.length || confirms.length) ? { toCheck, confirms } : null;
+}
+
 function mintAcceptance(s, c) {
   const id = `D-ACCEPT-${c.num}`;
   const existing = s.decisions.find(d => d.id === id);
@@ -530,10 +543,12 @@ function mintAcceptance(s, c) {
   const evidence = items.length
     ? items.map(i => `${i.n}. ${i.text} — ${i.status}${i.evidence ? ` (${i.evidence})` : ''}${i.verifiedBy ? ` [verified by ${i.verifiedBy}]` : ''}`).join('\n')
     : '(no exit criteria on this card — direct acceptance request)';
+  const checkInstructions = acceptanceCheckInstructions(c);
   if (existing) {
     // a prior round was bounced; re-open the same ballot id for round 2
     existing.status = 'open';
     existing.detail = evidence;
+    existing.checkInstructions = checkInstructions;
     delete existing.outcome; delete existing.comment; delete existing.ratifiedAt;
   } else {
     addDecision(s, {
@@ -541,6 +556,7 @@ function mintAcceptance(s, c) {
       title: `Accept #${c.num} — ${c.title}`,
       gist: `Close #${c.num}, or bounce it back to building.`,
       detail: evidence,
+      checkInstructions,
       options: [
         { key: 'accept', name: 'Accept — close the card' },
         { key: 'bounce', name: 'Bounce — back to building (comment why)' },
@@ -837,7 +853,8 @@ export function addDecision(s, p) {
   const d = { id: p.id || newId('D-'), cardId: card.id, group: p.group || 'other',
     title: String(p.title).trim(), gist: p.gist || '', lesson: p.lesson || '', explainer: p.explainer || '', story: p.story || '',
     inWild: p.inWild || '', detail: p.detail || '', options: p.options || [], comparisons: p.comparisons || [],
-    rec: p.rec || null, recommendation: p.recommendation || null, hybrid: p.hybrid || null, draft, status: 'open', created: now() };
+    rec: p.rec || null, recommendation: p.recommendation || null, hybrid: p.hybrid || null,
+    checkInstructions: p.checkInstructions || null, draft, status: 'open', created: now() };
   s.decisions.push(d);
   logEvent(s, { by: p.by, action: 'decision.add', ref: d.id, note: draft ? `${d.title} (draft)` : d.title });
   return d;
@@ -891,7 +908,7 @@ export function reopenDecision(s, decisionId, by) {
 
 export function updateDecision(s, id, patch, by) {
   const d = s.decisions.find(x => x.id === id) || fail('E_NOT_FOUND', `no decision ${id}`);
-  for (const k of ['title', 'gist', 'lesson', 'explainer', 'story', 'inWild', 'detail', 'options', 'comparisons', 'rec', 'recommendation', 'hybrid', 'group'])
+  for (const k of ['title', 'gist', 'lesson', 'explainer', 'story', 'inWild', 'detail', 'options', 'comparisons', 'rec', 'recommendation', 'hybrid', 'checkInstructions', 'group'])
     if (k in patch) d[k] = patch[k];
   // --ready clears draft, but only once the ballot standard is actually met.
   if (patch.ready) {

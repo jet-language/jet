@@ -370,7 +370,6 @@ impl<'a> StateCtx<'a> {
             | Stmt::Impure { body, .. }
             | Stmt::Reactive { body, .. }
             | Stmt::Shield { body, .. }
-            | Stmt::SuppressMustUse { body, .. }
             | Stmt::Off { body, .. }
             | Stmt::DebugOnly { body, .. }
             | Stmt::Region { body, .. }

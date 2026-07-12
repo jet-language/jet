@@ -246,7 +246,6 @@ pub(crate) fn check_pure_stmt(
         | Stmt::Impure { body, .. }
         | Stmt::Reactive { body, .. }
         | Stmt::Shield { body, .. }
-        | Stmt::SuppressMustUse { body, .. }
         | Stmt::Off { body, .. }
         | Stmt::DebugOnly { body, .. }
         | Stmt::Region { body, .. }
@@ -674,7 +673,6 @@ fn check_pure_stmt_with_path(
         | Stmt::Impure { body, .. }
         | Stmt::Reactive { body, .. }
         | Stmt::Shield { body, .. }
-        | Stmt::SuppressMustUse { body, .. }
         | Stmt::Off { body, .. }
         | Stmt::DebugOnly { body, .. }
         | Stmt::Region { body, .. }
@@ -1178,7 +1176,6 @@ fn walk_stmt_for_calls(
         | Stmt::Impure { body, .. }
         | Stmt::Reactive { body, .. }
         | Stmt::Shield { body, .. }
-        | Stmt::SuppressMustUse { body, .. }
         | Stmt::Off { body, .. }
         | Stmt::DebugOnly { body, .. }
         | Stmt::Region { body, .. }

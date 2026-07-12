@@ -186,17 +186,6 @@ impl<'a> Fmt<'a> {
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
-            // D-IGNORERET2=A: `#Suppress(MustUse) { … }` round-trips verbatim.
-            Stmt::SuppressMustUse { body, .. } => {
-                self.write(&format!(
-                    "#{}({}) {{",
-                    Syntax::ATTR_SUPPRESS,
-                    Syntax::SUPPRESS_MUST_USE
-                ));
-                self.newline();
-                self.with_indent(|f| f.fmt_block_stmts(body));
-                self.end_block();
-            }
             Stmt::Off { body, .. } => self.fmt_statement_switch_attr(Syntax::ATTR_OFF, body),
             Stmt::DebugOnly { body, .. } => {
                 self.fmt_statement_switch_attr(Syntax::ATTR_DEBUG_ONLY, body)

@@ -299,8 +299,6 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
         Stmt::Reactive { body, .. } => scoped_stmts_in_subset(body, cx, locals),
         // D-SHIELDNAME1=A: runtime enter/RAII-leave guards wrap a lexical block.
         Stmt::Shield { body, .. } => scoped_stmts_in_subset(body, cx, locals),
-        // D-IGNORERET2=A: `#Suppress(MustUse)` erases to a plain block at codegen (I3).
-        Stmt::SuppressMustUse { body, .. } => scoped_stmts_in_subset(body, cx, locals),
         // D-CANVASSTATE1=D: `#Off` erases; `#DebugOnly` lowers in a lexical
         // debug-only block, so its local declarations do not extend `locals`.
         Stmt::Off { .. } => true,

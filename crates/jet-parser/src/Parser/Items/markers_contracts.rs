@@ -158,10 +158,10 @@ impl<'a> Parser<'a> {
                     let span = self.peek().span;
                     return Err(Diagnostic::error(
                         "E0003",
-                        "only one web partition marker (`#Wasm`, `#Js`, `#WasmExport`) is allowed per function"
+                        "only one web partition marker (`#Target(Wasm)`, `#Target(Js)`, `#WasmExport`) is allowed per function"
                             .to_string(),
                         "per-function web overrides are mutually exclusive".to_string(),
-                        "keep one of `#Wasm`, `#Js`, or `#WasmExport`".to_string(),
+                        "keep one of `#Target(Wasm)`, `#Target(Js)`, or `#WasmExport`".to_string(),
                         Some(span),
                     ));
                 } else {
@@ -349,29 +349,53 @@ impl<'a> Parser<'a> {
                 })
         }
     
-        /// D-WASM1=A: consume `#Wasm` / `#Js` / `#WasmExport` when present.
+        /// D-MARK-TARGET1=A (ratified 2026-07-11, card #498): consume
+        /// `#Target(Wasm)` / `#Target(Js)` (per-function bucket override) or
+        /// the untouched bare `#WasmExport`, when present.
         fn try_parse_web_partition_marker(
             &mut self,
         ) -> Result<Option<crate::Syntax::WebPartitionMarker>, Diagnostic> {
             if !matches!(self.peek().kind, TokKind::Hash) {
                 return Ok(None);
             }
-            let marker = match &self.peek2().kind {
-                TokKind::Ident(n) if n == Syntax::ATTR_WASM => crate::Syntax::WebPartitionMarker::Wasm,
-                TokKind::Ident(n) if n == Syntax::ATTR_JS => crate::Syntax::WebPartitionMarker::Js,
-                TokKind::Ident(n) if n == Syntax::ATTR_WASM_EXPORT => {
-                    crate::Syntax::WebPartitionMarker::WasmExport
+            // Bare `#WasmExport` — untouched by D-MARK-TARGET1.
+            if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_WASM_EXPORT) {
+                if !matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub)
+                    && !self.token_after_web_marker_is_fn(2)
+                {
+                    return Ok(None);
                 }
-                _ => return Ok(None),
-            };
-            if !matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub)
-                && !self.token_after_web_marker_is_fn(2)
-            {
-                return Ok(None);
+                self.bump(); // `#`
+                self.bump(); // `WasmExport`
+                return Ok(Some(crate::Syntax::WebPartitionMarker::WasmExport));
             }
-            self.bump(); // `#`
-            self.bump(); // marker name
-            Ok(Some(marker))
+            // `#Target(Wasm)` / `#Target(Js)` per-function override.
+            if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_TARGET)
+                && matches!(self.peek3().kind, TokKind::LParen)
+            {
+                let marker = match &self.peek4().kind {
+                    TokKind::Ident(n) if n == Syntax::WEB_BUCKET_WASM => {
+                        Some(crate::Syntax::WebPartitionMarker::Wasm)
+                    }
+                    TokKind::Ident(n) if n == Syntax::WEB_BUCKET_JS => {
+                        Some(crate::Syntax::WebPartitionMarker::Js)
+                    }
+                    _ => None,
+                };
+                if let Some(marker) = marker {
+                    if matches!(self.peek5().kind, TokKind::RParen)
+                        && self.token_after_web_marker_is_fn(5)
+                    {
+                        self.bump(); // `#`
+                        self.bump(); // `Target`
+                        self.bump(); // `(`
+                        self.bump(); // `Wasm` / `Js`
+                        self.bump(); // `)`
+                        return Ok(Some(marker));
+                    }
+                }
+            }
+            Ok(None)
         }
     
         /// D-STATE1: parse `#State(StateName)` and return `(name, marker_span)`.

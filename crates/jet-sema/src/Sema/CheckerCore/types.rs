@@ -10,6 +10,24 @@ impl<'a> Checker<'a> {
                 Type::Named(n) if crate::Syntax::is_data_type_name(&n) => {
                     Type::Named(crate::Syntax::TYPE_DATA.to_string())
                 }
+                // D-ENCSTREAM-SURFACE1=A: shared types live in core.encoding
+                // and format handles live in their codec modules. Canonicalize
+                // the user's import alias while retaining one runtime type.
+                Type::Named(n)
+                    if n.split_once('.').is_some_and(|(alias, leaf)| {
+                        self.core_imports.get(alias).is_some_and(|module| {
+                            (module == "core.encoding" && matches!(leaf,
+                                "DataTree" | "EncodingLimits" | "EncodingError" |
+                                "EncodingCause" | "EncodingFormat" |
+                                "EncodingErrorKind" | "DataEvent")) ||
+                            matches!((module.as_str(), leaf),
+                                ("core.encoding.json", "JSONReader" | "JSONWriter") |
+                                ("core.encoding.jsonl", "JSONLReader" | "JSONLWriter") |
+                                ("core.encoding.csv", "CSVReader" | "CSVWriter") |
+                                ("core.encoding.xml", "XMLReader" | "XMLWriter") |
+                                ("core.encoding.cbor", "CBORReader" | "CBORWriter"))
+                        })
+                    }) => Type::Named(n.split_once('.').unwrap().1.to_string()),
                 // D-ENV-MUTATE1=A: Core docs spell the exported error through
                 // the user's chosen module alias (`env.EnvError`). Canonicalize
                 // that qualified spelling to the one built-in runtime type.

@@ -489,8 +489,6 @@ impl<'a> Parser<'a> {
                     | Syntax::ATTR_EXTERN_MODULE
                     | Syntax::ATTR_BINDGEN
                     | Syntax::ATTR_TARGET
-                    | Syntax::ATTR_WASM
-                    | Syntax::ATTR_JS
                     | Syntax::ATTR_WASM_EXPORT
             )
         }

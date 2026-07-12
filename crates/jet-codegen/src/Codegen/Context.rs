@@ -244,6 +244,22 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // D-SERDE2: the format-agnostic value tree + typed-decode error live in jet_std.
         "DataTree" => Some("DataTree"),
         "DecodeError" => Some("DecodeError"),
+        "EncodingLimits" => Some("EncodingLimits"),
+        "EncodingError" => Some("EncodingError"),
+        "EncodingCause" => Some("EncodingCause"),
+        "EncodingFormat" => Some("EncodingFormat"),
+        "EncodingErrorKind" => Some("EncodingErrorKind"),
+        "DataEvent" => Some("DataEvent"),
+        "JSONReader" => Some("JSONReader"),
+        "JSONWriter" => Some("JSONWriter"),
+        "JSONLReader" => Some("JSONLReader"),
+        "JSONLWriter" => Some("JSONLWriter"),
+        "CSVReader" => Some("CSVReader"),
+        "CSVWriter" => Some("CSVWriter"),
+        "XMLReader" => Some("XMLReader"),
+        "XMLWriter" => Some("XMLWriter"),
+        "CBORReader" => Some("CBORReader"),
+        "CBORWriter" => Some("CBORWriter"),
         // D-MIGRATE3=A: decode-time migration transparency's plain status struct
         // (the generic `DecodeResult<T>` has its own `rust_type` arm below, since
         // this table only covers non-generic names).

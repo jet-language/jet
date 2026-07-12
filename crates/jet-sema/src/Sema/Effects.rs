@@ -982,7 +982,6 @@ fn stmt_handle_escape(stmt: &crate::AST::Stmt, handle: &str) -> Option<Span> {
         | Stmt::Impure { body, .. }
         | Stmt::Reactive { body, .. }
         | Stmt::Shield { body, .. }
-        | Stmt::SuppressMustUse { body, .. }
         | Stmt::DebugOnly { body, .. }
         | Stmt::Region { body, .. }
         | Stmt::TaskGroup { body, .. }

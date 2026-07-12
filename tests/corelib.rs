@@ -20,6 +20,33 @@ mod dns_resolver_policy {
     }
 }
 
+#[test]
+fn encoding_stream_foundation_types_are_real_jet_values() {
+    let dir = std::env::temp_dir().join(format!("jet_encoding_foundation_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(&dir, "encoding_foundation.jet",
+        r#"
+use core.encoding as encoding
+use core.encoding.json as json
+
+fn retain(reader: json.JSONReader) -> json.JSONReader {
+    return reader
+}
+
+fn run() {
+    limits: encoding.EncodingLimits := encoding.EncodingLimits.safe()
+    print("{limits.buffer_bytes}:{limits.max_depth}:{limits.max_item_bytes}:{limits.max_expansion_depth}:{limits.max_expansion_bytes}")
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(stdout, "65536:256:16777216:32:8388608\n");
+    assert_eq!(stderr, "");
+    let _ = fs::remove_dir_all(&dir);
+}
+
 fn compile_temp(name: &str, src: &str) -> jet::CompileOutput {
     let dir = std::env::temp_dir().join(format!("jet_corelib_test_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();

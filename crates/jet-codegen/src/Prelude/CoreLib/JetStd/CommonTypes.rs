@@ -9,6 +9,44 @@
         Capture,
     }
 
+    // D-ENCSTREAM-SURFACE1=A: shared, handle-free encoding ABI.  These are
+    // ordinary owned values; codec state itself remains behind non-Clone
+    // format-native handles below.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct EncodingLimits {
+        pub buffer_bytes: i64,
+        pub max_depth: i64,
+        pub max_item_bytes: i64,
+        pub max_total_bytes: Option<i64>,
+        pub max_expansion_depth: i64,
+        pub max_expansion_bytes: i64,
+    }
+    impl EncodingLimits {
+        pub fn safe() -> Self { Self { buffer_bytes: 65536, max_depth: 256, max_item_bytes: 16777216, max_total_bytes: None, max_expansion_depth: 32, max_expansion_bytes: 8388608 } }
+    }
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub enum EncodingFormat { JSON, JSONL, CSV, XML, CBOR }
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub enum EncodingErrorKind { Syntax, Truncated, Unsupported, Limit, IO, State }
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct EncodingCause { pub kind: String, pub os_code: Option<i64>, pub message: String }
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct EncodingError {
+        pub format: EncodingFormat, pub kind: EncodingErrorKind, pub byte_offset: i64,
+        pub line: Option<i64>, pub column: Option<i64>, pub path: String,
+        pub reason: String, pub cause: Option<EncodingCause>,
+    }
+    #[derive(Clone, Debug, PartialEq)]
+    pub enum DataEvent {
+        Null, Bool(bool), Int(i64), Float(f64), Text(String), Bytes(Vec<u8>),
+        ArrayStart, ArrayEnd, ObjectStart, Key(String), ObjectEnd,
+    }
+    pub struct JSONReader { _private: () } pub struct JSONWriter { _private: () }
+    pub struct JSONLReader { _private: () } pub struct JSONLWriter { _private: () }
+    pub struct CSVReader { _private: () } pub struct CSVWriter { _private: () }
+    pub struct XMLReader { _private: () } pub struct XMLWriter { _private: () }
+    pub struct CBORReader { _private: () } pub struct CBORWriter { _private: () }
+
     #[derive(Clone, Debug, PartialEq)]
     pub struct ProcessSpec {
         pub cmd: Vec<String>,

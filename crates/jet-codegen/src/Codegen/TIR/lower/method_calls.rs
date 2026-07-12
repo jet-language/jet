@@ -1749,6 +1749,23 @@ pub(crate) fn lower_method_call(
             };
         }
     }
+    // D-ENCSTREAM-SURFACE1=A: qualified shared type constructor.
+    if method == "safe" && args.is_empty() {
+        if let Expr::Field(base, leaf, _) = receiver {
+            if leaf == "EncodingLimits"
+                && core_module_path_from_receiver(base, &cx.core_imports, env).as_deref() == Some("core.encoding")
+            {
+                return TExpr {
+                    ty: Type::Named("EncodingLimits".to_string()),
+                    kind: TExprKind::StaticCall {
+                        type_prefix: format!("{}jet_std::EncodingLimits", cx.root_prefix),
+                        method_rust: "safe".to_string(),
+                        args: vec![],
+                    },
+                };
+            }
+        }
+    }
     // c109 Phase 7: a STATIC method call `Type.make(args)`. The gate
     // (`static_method_call_in_subset`) proved the receiver is a covered type-name
     // ident and `method` is a registered static method. Mirror the AST path

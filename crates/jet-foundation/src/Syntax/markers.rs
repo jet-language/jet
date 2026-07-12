@@ -79,7 +79,10 @@ pub const CONTRACT_MARKERS: &[&str] = &[
     // ATTR_COMPARABLE ("Comparable") also names the D-CAPBUNDLE1 capability
     // bundle below — same spelling, disambiguated by declaration position
     // (struct/enum derive vs. distinct-type bundle), listed once here.
-    TRAIT_DEBUG,
+    // TRAIT_DEBUG ("Debug") is NOT listed: D-MARK-DEBUG1=A (ratified
+    // 2026-07-11, card #498) retired the standalone opt-in `@Debug` derive —
+    // Debug auto-derives whenever every field qualifies (S55), so it no
+    // longer needs a place on the built-in derive-marker registry.
     ATTR_SUMMARIZE,
     ATTR_COMPARABLE,
     // D-CONTRACTCASE1 recase set (§2b) — pre/post/persist/bundles
@@ -120,9 +123,11 @@ pub const DIRECTIVE_MARKERS: &[&str] = &[
     ATTR_OFF,
     ATTR_DEBUG_ONLY,
     ATTR_META,
+    // D-MARK-TARGET1=A (ratified 2026-07-11, card #498): `#Target(Wasm|Js)`
+    // is the one target-marker family (both the ceiling and the per-function
+    // override use); the bare `#Wasm`/`#Js` spellings are retired and no
+    // longer registered as directive markers (ordinary unknown-marker error).
     ATTR_TARGET,
-    ATTR_WASM,
-    ATTR_JS,
     ATTR_WASM_EXPORT,
     ATTR_HTML,
     DSL_BLOCK_SQL,
@@ -138,7 +143,11 @@ pub const DIRECTIVE_MARKERS: &[&str] = &[
     ATTR_INVARIANT,
     ATTR_LAYOUT,
     ATTR_ABI,
-    ATTR_SUPPRESS,
+    // ATTR_SUPPRESS intentionally absent (D-MARK-DISCARD1=A, ratified
+    // 2026-07-11, card #498): `#Suppress(MustUse) { … }` is retired outright
+    // — `.drop("reason")` is the sole discard spelling — so `#Suppress`
+    // falls through to an ordinary unknown-marker error, same treatment as
+    // ATTR_UNINIT/ATTR_REF above.
     ATTR_EXTERN_MODULE,
     ATTR_BINDGEN,
     "Caller",
@@ -154,11 +163,11 @@ pub const DIRECTIVE_MARKERS: &[&str] = &[
 use super::{
     ATTR_BINDGEN, ATTR_CODABLE, ATTR_COMPARABLE, ATTR_DEBUG_ONLY, ATTR_DECODE, ATTR_DEFAULT,
     ATTR_DENY_UNKNOWN_FIELDS, ATTR_ENCODE, ATTR_EXTERN_MODULE, ATTR_FLATTEN, ATTR_HTML,
-    ATTR_INVARIANT, ATTR_JS, ATTR_LAYOUT, ATTR_META, ATTR_MUST_USE,
+    ATTR_INVARIANT, ATTR_LAYOUT, ATTR_META, ATTR_MUST_USE,
     ATTR_NUMERIC, ATTR_OFF, ATTR_PUBLISHED_SCHEMA, ATTR_REDACT, ATTR_RENAME, ATTR_RENAME_ALL,
-    ATTR_REPLAYABLE, ATTR_SINGLE_USE, ATTR_SKIP, ATTR_SUMMARIZE, ATTR_SUPPRESS, ATTR_TAG,
-    ATTR_TARGET, ATTR_TRACK, ATTR_UNIT_FAMILY, ATTR_UNTAGGED, ATTR_WASM,
+    ATTR_REPLAYABLE, ATTR_SINGLE_USE, ATTR_SKIP, ATTR_SUMMARIZE, ATTR_TAG,
+    ATTR_TARGET, ATTR_TRACK, ATTR_UNIT_FAMILY, ATTR_UNTAGGED,
     ATTR_WASM_EXPORT, DSL_BLOCK_SQL, KW_BENCH, KW_CAPS, KW_GRANT, KW_IMPURE, KW_PURE,
     KW_REACTIVE, KW_SANITIZER, KW_STATE, KW_TAINTED, KW_TEST, KW_TODO, KW_TRANSACT,
-    KW_TRANSITION, KW_UNSAFE, TRAIT_DEBUG,
+    KW_TRANSITION, KW_UNSAFE,
 };

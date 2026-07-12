@@ -842,10 +842,6 @@ fn project_stmt(
             add_region(g, ordinal, "shield", "#Shield", *span);
             project_stmt_block(g, index, src, body, ordinal * 100 + 115, x + 230, y + 70);
         }
-        Stmt::SuppressMustUse { body, span } => {
-            add_region(g, ordinal, "suppress", "#Suppress(MustUse)", *span);
-            project_stmt_block(g, index, src, body, ordinal * 100 + 120, x + 230, y + 70);
-        }
         Stmt::Off { body, .. } | Stmt::DebugOnly { body, .. } => {
             project_stmt_block(g, index, src, body, ordinal * 100 + 125, x + 230, y + 70);
         }

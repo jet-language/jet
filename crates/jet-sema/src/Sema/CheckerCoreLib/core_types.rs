@@ -140,6 +140,14 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "Key"
         // D-SERDE2: the format-agnostic value tree + typed-decode error.
         | "DataTree" | "DecodeError"
+        // D-ENCSTREAM-SURFACE1=A: shared encoding values and codec-native
+        // opaque stream handles.  Handles are intentionally non-Codable and
+        // acquire values only from their format module constructors.
+        | "EncodingLimits" | "EncodingError" | "EncodingCause"
+        | "EncodingFormat" | "EncodingErrorKind" | "DataEvent"
+        | "JSONReader" | "JSONWriter" | "JSONLReader" | "JSONLWriter"
+        | "CSVReader" | "CSVWriter" | "XMLReader" | "XMLWriter"
+        | "CBORReader" | "CBORWriter"
         // D-SIMD2 / D-LINALG1: built-in SIMD lane + linear-algebra value types.
         | "F32x4" | "F64x2"
         | "Vec2" | "Vec3" | "Vec4" | "Mat3" | "Mat4"
@@ -199,6 +207,9 @@ pub(crate) fn core_type_known(name: &str) -> bool {
 }
 
 pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
+    if matches!(type_name, "EncodingLimits" | "EncodingCause" | "EncodingError") {
+        return core_constructable_fields(type_name)?.into_iter().find(|(name, _)| name == field).map(|(_, ty)| ty);
+    }
     if type_name == Syntax::TYPE_BUILD_CONTEXT && field == "program" {
         return Some(Type::Named(Syntax::TYPE_PROGRAM_INFO.to_string()));
     }
@@ -727,6 +738,58 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             ("path".to_string(), str_ty.clone()),
             ("reason".to_string(), str_ty),
         ]),
+        "EncodingLimits" => Some(vec![
+            ("buffer_bytes".to_string(), Type::Int),
+            ("max_depth".to_string(), Type::Int),
+            ("max_item_bytes".to_string(), Type::Int),
+            ("max_total_bytes".to_string(), Type::Option(Box::new(Type::Int))),
+            ("max_expansion_depth".to_string(), Type::Int),
+            ("max_expansion_bytes".to_string(), Type::Int),
+        ]),
+        "EncodingCause" => Some(vec![
+            ("kind".to_string(), Type::String),
+            ("os_code".to_string(), Type::Option(Box::new(Type::Int))),
+            ("message".to_string(), Type::String),
+        ]),
+        "EncodingError" => Some(vec![
+            ("format".to_string(), Type::Named("EncodingFormat".to_string())),
+            ("kind".to_string(), Type::Named("EncodingErrorKind".to_string())),
+            ("byte_offset".to_string(), Type::Int),
+            ("line".to_string(), Type::Option(Box::new(Type::Int))),
+            ("column".to_string(), Type::Option(Box::new(Type::Int))),
+            ("path".to_string(), Type::String),
+            ("reason".to_string(), Type::String),
+            ("cause".to_string(), Type::Option(Box::new(Type::Named("EncodingCause".to_string())))),
+        ]),
         _ => None,
     }
+}
+
+/// D-ENCSTREAM-SURFACE1=A: closed shared stream enums.
+pub(crate) fn core_encoding_variants(
+    enum_name: &str,
+) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>> {
+    use crate::AST::VariantPayload;
+    use crate::Diagnostics::Span;
+    let zero = Span::new(0, 0);
+    let mut variants = std::collections::HashMap::new();
+    let units: &[&str] = match enum_name {
+        "EncodingFormat" => &["JSON", "JSONL", "CSV", "XML", "CBOR"],
+        "EncodingErrorKind" => &["Syntax", "Truncated", "Unsupported", "Limit", "IO", "State"],
+        "DataEvent" => &["Null", "ArrayStart", "ArrayEnd", "ObjectStart", "ObjectEnd"],
+        _ => return None,
+    };
+    for name in units {
+        variants.insert((*name).to_string(), (zero, VariantPayload::Unit));
+    }
+    if enum_name == "DataEvent" {
+        for (name, ty) in [
+            ("Bool", Type::Bool), ("Int", Type::Int), ("Float", Type::Float),
+            ("Text", Type::String), ("Bytes", Type::List(Box::new(u8_ty()))),
+            ("Key", Type::String),
+        ] {
+            variants.insert(name.to_string(), (zero, VariantPayload::Single(ty, zero)));
+        }
+    }
+    Some(variants)
 }

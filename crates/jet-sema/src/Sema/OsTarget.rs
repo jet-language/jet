@@ -112,7 +112,6 @@ fn desugar_child_blocks(stmt: &mut Stmt, active: Os, diags: &mut Vec<Diagnostic>
         | Stmt::Unsafe { body, .. }
         | Stmt::Impure { body, .. }
         | Stmt::Reactive { body, .. }
-        | Stmt::SuppressMustUse { body, .. }
         | Stmt::Region { body, .. }
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }

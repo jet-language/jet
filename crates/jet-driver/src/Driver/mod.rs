@@ -247,7 +247,6 @@ fn collect_mmio_stmts(
             crate::AST::Stmt::Loop { body, .. }
             | crate::AST::Stmt::Impure { body, .. }
             | crate::AST::Stmt::Reactive { body, .. }
-            | crate::AST::Stmt::SuppressMustUse { body, .. }
             | crate::AST::Stmt::Region { body, .. }
             | crate::AST::Stmt::TaskGroup { body, .. } => {
                 collect_mmio_stmts(body, core_aliases, ptrs, unsafe_reason, out);

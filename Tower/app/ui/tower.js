@@ -179,12 +179,27 @@ function ageChip(iso) {
   const label = h < 48 ? Math.round(h) + 'h' : Math.round(h / 24) + 'd';
   return `<span class="agechip ${h > 72 ? 'agechip--hot' : ''}" title="waiting ${label}">${label}</span>`;
 }
-const ageOf = (it) => it.type === 'decision' ? it.decision.created : it.card.created;
+const ageOf = (it) => it.type === 'decision' ? it.decision.created : it.type === 'verify' ? (it.ballot ? it.ballot.created : it.card.updated) : it.card.created;
+
+// #515: every card sitting in the verify lane — with its acceptance ballot
+// (D-ACCEPT-<num>) when one was minted, or bare when a card landed in
+// verify without ever being flagged needsAcceptance. Either way it's owner
+// work waiting to happen, so it must not hide.
+function verifyQueue() {
+  return S.cards.filter(c => c.phase === 'verify').map(c => ({
+    card: c,
+    ballot: (c.decisions || []).find(d => d.id === `D-ACCEPT-${c.num}` && d.status !== 'ratified') || null,
+  }));
+}
 
 // Every owner-blocking item, in the order the beacon + Now view show them.
+// Acceptance ballots are excluded from the plain 'decision' bucket — they
+// get the richer dedicated verification treatment below instead of the
+// generic ballot deck.
 function duties() {
   const out = [];
-  for (const d of openDecisions()) out.push({ type: 'decision', id: d.id, decision: d });
+  for (const v of verifyQueue()) out.push({ type: 'verify', id: v.card.id, card: v.card, ballot: v.ballot });
+  for (const d of openDecisions()) if (d.group !== 'acceptance') out.push({ type: 'decision', id: d.id, decision: d });
   for (const c of toActivate()) out.push({ type: 'activate', id: c.id, card: c });
   return out;
 }
@@ -197,7 +212,8 @@ function renderBeacon() {
   b.classList.toggle('beacon--clear', !items.length);
   for (const it of items.slice(0, 40)) {
     const h = (Date.now() - new Date(ageOf(it) || Date.now()).getTime()) / 3.6e6;
-    const seg = el(`<button class="beacon__seg" style="opacity:${Math.min(1, .55 + h / 96).toFixed(2)}" title="${esc(it.type === 'decision' ? it.decision.title : 'greenlight: ' + it.card.title)}"></button>`);
+    const title = it.type === 'decision' ? it.decision.title : it.type === 'verify' ? 'verify: ' + it.card.title : 'greenlight: ' + it.card.title;
+    const seg = el(`<button class="beacon__seg" style="opacity:${Math.min(1, .55 + h / 96).toFixed(2)}" title="${esc(title)}"></button>`);
     seg.addEventListener('click', () => jumpTo(it));
     b.appendChild(seg);
   }
@@ -271,6 +287,12 @@ function viewNow() {
   }
 
   const section = (title) => v.appendChild(el(`<div class="nowsection"><span class="nowsection__t">${title}</span><span class="nowsection__rule"></span></div>`));
+
+  // #515: top priority placement — cards done building and waiting on the
+  // owner's own eyes go first, above the ballot deck and the greenlights.
+  const verifies = items.filter(i => i.type === 'verify');
+  if (verifies.length) section('Needs your verification');
+  for (const it of verifies) v.appendChild(dutyVerify(it.card, it.ballot));
 
   const decs = items.filter(i => i.type === 'decision');
   if (decs.length) section('Decisions');
@@ -385,6 +407,65 @@ function dutyActivate(c) {
   $('[data-go]', node).addEventListener('click', () => api('card/activate', { id: c.id, by: 'owner' }));
   $('[data-open]', node).addEventListener('click', () => showDetail(c.id));
   node.__primary = () => api('card/activate', { id: c.id, by: 'owner' });
+  return node;
+}
+
+// ---- #515: needs-your-verification queue -----------------------------------
+// Content sources, in priority order: (1) the acceptance ballot's own
+// checkInstructions field, assembled server-side when it was minted; (2) the
+// card's exit criteria — text as "what to check", evidence as "what
+// confirms it"; (3) the card's refs (files/commands worth opening). If none
+// of that exists (old ballot, no criteria, no refs) fall back to whatever
+// prose the ballot does carry — never render an empty box.
+function acceptanceContent(card, ballot) {
+  const ci = ballot?.checkInstructions;
+  if (ci && ((ci.toCheck || []).length || (ci.confirms || []).length))
+    return { toCheck: ci.toCheck || [], confirms: ci.confirms || [] };
+  const items = (card?.criteria || []);
+  if (items.length)
+    return { toCheck: items.map(i => i.text), confirms: items.filter(i => i.evidence).map(i => `${i.text} — ${i.evidence}${i.verifiedBy ? ` (verified by ${i.verifiedBy})` : ''}`) };
+  const refs = card?.refs || [];
+  if (refs.length) return { toCheck: refs.map(r => `Check ${r}`), confirms: [] };
+  const raw = (ballot && (ballot.detail || ballot.gist)) || 'No check instructions recorded on this card — open it for context.';
+  return { toCheck: [raw], confirms: [] };
+}
+
+function dutyVerify(card, ballot) {
+  const content = acceptanceContent(card, ballot);
+  const node = el(`<div class="duty duty--verify">
+      <div class="duty__top"><span class="duty__kind">Verify</span>
+        <span class="num">${ticket(card)}</span>
+        <span class="duty__meta">${ballot ? esc(ballot.id) : 'in verify — no acceptance ballot yet'}</span>${ageChip(ballot ? ballot.created : card.updated)}</div>
+      <h2 class="duty__title">${esc(card.title)}</h2>
+      <div class="verifyblock">
+        <div class="verifyblock__h">What to check</div>
+        <ul class="verifyblock__list">${content.toCheck.map(t => `<li>${esc(t)}</li>`).join('') || '<li class="verifyblock__empty">(nothing recorded — open the card)</li>'}</ul>
+        <div class="verifyblock__h">What confirms it</div>
+        <ul class="verifyblock__list">${content.confirms.length ? content.confirms.map(t => `<li>${esc(t)}</li>`).join('') : '<li class="verifyblock__empty">(no evidence recorded yet)</li>'}</ul>
+      </div>
+      <div class="duty__actions">
+        <button class="btn btn--red btn--sm" data-accept>Accept — close the card</button>
+        <button class="btn btn--ghost btn--sm" data-bounce>Bounce</button>
+        <button class="btn btn--ghost btn--sm" data-open>Open card</button>
+      </div>
+      <div class="bouncebox" hidden>
+        <textarea placeholder="Why bounce this back? (recorded on the card)"></textarea>
+        <button class="btn btn--amber btn--sm" data-bounce-send>Send bounce</button>
+      </div>
+    </div>`);
+  const doAccept = () => ballot
+    ? api('clearance', { decisionId: ballot.id, outcome: 'accept', by: 'owner' })
+    : api('card/update', { id: card.id, phase: 'done', logEntry: 'Accepted — closed (no formal ballot).', by: 'owner' });
+  $('[data-accept]', node).addEventListener('click', doAccept);
+  node.__primary = doAccept;
+  $('[data-open]', node).addEventListener('click', () => showDetail(card.id));
+  const box = $('.bouncebox', node);
+  $('[data-bounce]', node).addEventListener('click', () => { box.hidden = !box.hidden; if (!box.hidden) $('textarea', box).focus(); });
+  $('[data-bounce-send]', node).addEventListener('click', () => {
+    const comment = $('textarea', box).value.trim();
+    if (ballot) api('clearance', { decisionId: ballot.id, outcome: 'bounce', comment, by: 'owner' });
+    else api('card/update', { id: card.id, phase: 'building', logEntry: `Bounced back to building: ${comment || '(no comment)'}`, by: 'owner' });
+  });
   return node;
 }
 

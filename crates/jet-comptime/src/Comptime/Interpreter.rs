@@ -559,9 +559,6 @@ impl<'a> Interp<'a> {
             // comptime there are no tasks or deadlines, so it is a transparent no-op
             // wrapper — execute the body directly.
             Stmt::Shield { body, .. } => self.exec_block(body, scope),
-            // D-IGNORERET2=A: `#Suppress(MustUse)` is a sema-only gate; it erases
-            // at codegen and is transparent to the comptime interpreter.
-            Stmt::SuppressMustUse { body, .. } => self.exec_block(body, scope),
             // D-CANVASSTATE1=D: `#Off` is real checked code but never executes.
             Stmt::Off { .. } => Ok(Flow::Normal),
             // D-CANVASSTATE1=D: comptime execution is a dev/debug tier.

@@ -143,7 +143,6 @@ impl<'a> Parser<'a> {
                             Stmt::Impure { span, .. } => span.end,
                             Stmt::Reactive { span, .. } => span.end,
                             Stmt::Shield { span, .. } => span.end,
-                            Stmt::SuppressMustUse { span, .. } => span.end,
                             Stmt::Off { span, .. } => span.end,
                             Stmt::DebugOnly { span, .. } => span.end,
                             Stmt::Region { span, .. } => span.end,

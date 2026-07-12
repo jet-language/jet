@@ -1323,10 +1323,6 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
         AST::Stmt::ScopeMember { body, .. } => {
             structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx));
         }
-        // D-IGNORERET2=A: collect symbols from suppress-must-use block body.
-        AST::Stmt::SuppressMustUse { body, .. } => {
-            structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx));
-        }
     }
     if structural_id.is_some() { ctx.structural_parents.pop(); }
 }

@@ -36,15 +36,6 @@ pub enum WebPartitionMarker {
 }
 
 impl WebPartitionMarker {
-    pub fn parse(name: &str) -> Option<Self> {
-        match name {
-            Syntax::ATTR_WASM => Some(WebPartitionMarker::Wasm),
-            Syntax::ATTR_JS => Some(WebPartitionMarker::Js),
-            Syntax::ATTR_WASM_EXPORT => Some(WebPartitionMarker::WasmExport),
-            _ => None,
-        }
-    }
-
     pub fn bucket(self) -> WebBucket {
         match self {
             WebPartitionMarker::Wasm | WebPartitionMarker::WasmExport => WebBucket::Wasm,
@@ -52,12 +43,15 @@ impl WebPartitionMarker {
         }
     }
 
-    /// The marker's source spelling (without the `#`), for re-emission by
-    /// `jet fmt` — inverse of `parse`.
+    /// The marker's source spelling (without the leading `#`), for
+    /// re-emission by `jet fmt`. D-MARK-TARGET1=A (ratified 2026-07-11, card
+    /// #498): the per-function override now shares the `#Target(Wasm|Js)`
+    /// spelling with the file/module ceiling — the old bare `#Wasm`/`#Js`
+    /// markers are retired. `#WasmExport` (a different job) is untouched.
     pub fn name(self) -> &'static str {
         match self {
-            WebPartitionMarker::Wasm => Syntax::ATTR_WASM,
-            WebPartitionMarker::Js => Syntax::ATTR_JS,
+            WebPartitionMarker::Wasm => "Target(Wasm)",
+            WebPartitionMarker::Js => "Target(Js)",
             WebPartitionMarker::WasmExport => Syntax::ATTR_WASM_EXPORT,
         }
     }
@@ -101,9 +95,8 @@ pub fn web_cross_partition(
         "the web backend keeps DOM/view code in JS and compute in WASM; a direct call across that boundary is not allowed yet"
             .to_string(),
         format!(
-            "move the call behind a generated bridge, colocate both functions in the same bucket, or adjust `#{}` / `#{}` markers",
+            "move the call behind a generated bridge, colocate both functions in the same bucket, or adjust their `#{}(Wasm|Js)` markers",
             Syntax::ATTR_TARGET,
-            Syntax::ATTR_WASM,
         ),
         span,
     )
@@ -120,10 +113,9 @@ pub fn web_target_browser(
         "the web backend keeps DOM/view code in JS and compute in WASM; a Wasm-pinned function cannot call browser APIs directly"
             .to_string(),
         format!(
-            "remove the `#{}` / `#{}` pin, move browser work into a `#{}` function, or drop the browser API calls",
-            Syntax::ATTR_WASM,
+            "remove the `#{}(Wasm)` pin, move browser work into a `#{}(Js)` function, or drop the browser API calls",
             Syntax::ATTR_TARGET,
-            Syntax::ATTR_JS,
+            Syntax::ATTR_TARGET,
         ),
         span,
     )

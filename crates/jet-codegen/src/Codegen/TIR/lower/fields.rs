@@ -200,6 +200,27 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
     if name == "DecodeError" && !cx.struct_fields.contains_key(name) {
         return matches!(field, "path" | "reason").then_some(Type::String);
     }
+    if name == "EncodingLimits" && !cx.struct_fields.contains_key(name) {
+        return match field {
+            "buffer_bytes" | "max_depth" | "max_item_bytes" | "max_expansion_depth" | "max_expansion_bytes" => Some(Type::Int),
+            "max_total_bytes" => Some(Type::Option(Box::new(Type::Int))),
+            _ => None,
+        };
+    }
+    if name == "EncodingCause" && !cx.struct_fields.contains_key(name) {
+        return match field { "kind" | "message" => Some(Type::String), "os_code" => Some(Type::Option(Box::new(Type::Int))), _ => None };
+    }
+    if name == "EncodingError" && !cx.struct_fields.contains_key(name) {
+        return match field {
+            "format" => Some(Type::Named("EncodingFormat".to_string())),
+            "kind" => Some(Type::Named("EncodingErrorKind".to_string())),
+            "byte_offset" => Some(Type::Int),
+            "line" | "column" => Some(Type::Option(Box::new(Type::Int))),
+            "path" | "reason" => Some(Type::String),
+            "cause" => Some(Type::Option(Box::new(Type::Named("EncodingCause".to_string())))),
+            _ => None,
+        };
+    }
     if name == "GameScene" {
         return match field {
             "assets" => Some(Type::Named("GameAssets".to_string())),

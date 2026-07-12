@@ -8,22 +8,31 @@ impl<'a> Parser<'a> {
                 && matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub)
         }
     
-        /// D-WASM1=A: is the cursor at `#Wasm fn` / `#Js fn` / `#WasmExport fn`?
+        /// D-MARK-TARGET1=A (ratified 2026-07-11, card #498): is the cursor at
+        /// `#Target(Wasm) fn` / `#Target(Js) fn` (per-function bucket
+        /// override, unified with the file/module ceiling spelling) or the
+        /// untouched `#WasmExport fn`?
         pub(crate) fn at_web_partition_fn(&self) -> bool {
             if !matches!(self.peek().kind, TokKind::Hash) {
                 return false;
             }
-            let is_marker = matches!(
-                &self.peek2().kind,
-                TokKind::Ident(n)
-                    if n == Syntax::ATTR_WASM
-                        || n == Syntax::ATTR_JS
-                        || n == Syntax::ATTR_WASM_EXPORT
-            );
-            if !is_marker {
-                return false;
+            // `#WasmExport fn` (untouched by D-MARK-TARGET1).
+            if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_WASM_EXPORT) {
+                return self.token_after_web_marker_is_fn(2);
             }
-            self.token_after_web_marker_is_fn(2)
+            // `#Target(Wasm) fn` / `#Target(Js) fn` per-function override.
+            if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_TARGET)
+                && matches!(self.peek3().kind, TokKind::LParen)
+            {
+                let is_bucket = matches!(
+                    &self.peek4().kind,
+                    TokKind::Ident(n) if n == Syntax::WEB_BUCKET_WASM || n == Syntax::WEB_BUCKET_JS
+                );
+                if is_bucket && matches!(self.peek5().kind, TokKind::RParen) {
+                    return self.token_after_web_marker_is_fn(5);
+                }
+            }
+            false
         }
     
         /// True when `fn` / `pub fn` follows a web partition marker, allowing a line break.
