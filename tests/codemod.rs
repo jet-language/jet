@@ -156,8 +156,10 @@ fn codemod_undo_refuses_changed_file() {
 #[test]
 fn batch_rules_reindex_across_clean_and_fixture_roots_then_undo_exactly() {
     let project = temp_dir("batch_chain");
-    let example = project.join("examples/report.jet");
-    let fixture = project.join("tests/ui/report_type.jet");
+    let example_relative = PathBuf::from("examples").join("report.jet");
+    let example = project.join(&example_relative);
+    let fixture_relative = PathBuf::from("tests").join("ui").join("report_type.jet");
+    let fixture = project.join(&fixture_relative);
     let fixture_stderr = fixture.with_extension("stderr");
     let migrations = project.join("migrations");
     fs::create_dir_all(example.parent().unwrap()).unwrap();
@@ -178,25 +180,25 @@ fn batch_rules_reindex_across_clean_and_fixture_roots_then_undo_exactly() {
     fs::write(&fixture, fixture_before).unwrap();
 
     let object = migrations.join("batch.codemod.json");
-    fs::write(
-        &object,
+    let object_text =
         r#"{
   "version": 2,
   "name": "ReportV2",
   "project": "..",
   "roots": [
-    {"path": "examples/report.jet", "validate": "clean"},
-    {"path": "tests/ui/report_type.jet", "validate": "fixture"}
+    {"path": "$EXAMPLE", "validate": "clean"},
+    {"path": "$FIXTURE", "validate": "fixture"}
   ],
   "rules": [
     {"id": "rename-report", "kind": "symbol_rename", "from": {"name": "report", "symbol_kind": "function"}, "to": "summarize", "matches": 4},
     {"id": "parse-needs-base", "kind": "ast_rewrite", "node": "expr", "match": "legacy_parse($input)", "replace": "parse_int($input, base: 10)", "matches": 2}
   ],
-  "snapshot_after": {"tests/ui/report_type.jet": "migrations/report_type.after.stderr"}
+  "snapshot_after": {"$FIXTURE": "migrations/report_type.after.stderr"}
 }
-"#,
-    )
-    .unwrap();
+"#
+        .replace("$EXAMPLE", example_relative.to_str().unwrap())
+        .replace("$FIXTURE", fixture_relative.to_str().unwrap());
+    fs::write(&object, object_text).unwrap();
 
     let dry = Command::new(jet())
         .args(["inspect", "codemod", "dry-run", object.to_str().unwrap()])

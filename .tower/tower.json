@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 510,
-    "rev": 4140,
+    "nextNum": 512,
+    "rev": 4146,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -14161,6 +14161,54 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-12T02:47:09.710Z",
+      "updated": "2026-07-12"
+    },
+    {
+      "id": "c0z8bodp",
+      "num": 510,
+      "title": "Mechanical splits: nine >2500-LOC modules + giant test files",
+      "body": "From docs/proposals/architecture-infra.md (no ballot needed — no behavior change). Split along existing section seams, snapshot/golden-pinned: Comptime/Methods.rs (4.0k), Sema/Registration.rs (3.4k), Sema/Bundle.rs (3.2k), Parser/Statements.rs (3.1k), Prelude/Core.rs (2.8k), Source/REPL/mod.rs (2.7k — coordinate with D-ARCH-SOURCE1 outcome), codegen/scheduler.rs (2.7k), jetpack Provider.rs (2.5k), Store.rs (2.5k). Tests: split tests/jetpack.rs (7.0k) and tests/tir.rs (4.8k) by feature family so targeted --test runs stay cheap. Full suite green before/after; no API changes.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "workOrder": 31,
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/proposals/architecture-infra.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-12T02:52:08.352Z",
+      "updated": "2026-07-12"
+    },
+    {
+      "id": "c00ukytt",
+      "num": 511,
+      "title": "Syntax.rs census-drift sweep + docs hygiene",
+      "body": "From docs/proposals/architecture-infra.md. Syntax.rs drift vs ratified law: prune retired keyword entry for view (D-MEM1 killed it), resolve it/Clock/taskgroup entry status against ratified law (verify each is either live-ratified, a foreign-teaching word, or stale — document which), move @Experimental/@Tested/@Hardened out of #-plane marker arrays per D-MATURITY1, confirm #Wasm/#Js/#Suppress removal lands with card 498; then jet devtools grammars + re-bless. Docs hygiene: delete empty docs/design/; fold docs/reviews/ (2 files) into docs/proposals/ (migrate unique ideas per single-source law, confirm list first); verify .agents/ vs .claude/agents/ duplication intent and de-duplicate or document; document or remove the corelib/core.archive/pkgs/archive workspace exclusion.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "workOrder": 32,
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/proposals/architecture-infra.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-12T02:52:08.449Z",
       "updated": "2026-07-12"
     }
   ],
@@ -28481,6 +28529,308 @@
       "created": "2026-07-12T01:20:17.612Z",
       "outcome": "A",
       "ratifiedAt": "2026-07-12"
+    },
+    {
+      "id": "D-ARCH-SOURCE1",
+      "cardId": "c0qlbeaf",
+      "group": "tooling",
+      "title": "Dissolve the 45k-line Source/ monolith into seam crates",
+      "gist": "The root crate claims to be a thin binary host but holds 45k lines; move the REPL, debugger, CLI, and dev server into seam crates.",
+      "lesson": "The compiler was split into workspace seam crates (D-COMPILERSEAMS1/2): jet-lexer, jet-parser, jet-sema, jet-codegen, and friends, each with machine-checked dependency direction. architecture.md says the root crate is now \"a thin facade and binary host.\"\n\nMeasured today: the root `Source/` holds 79 files and 44,993 lines. It contains the REPL (2,746 lines in one file), the debugger, the whole CLI registry and dispatch, the dev server glue, and CmdCompile. Only CmdCompile is pinned to the root by law — R5 says the rustc invocation and ICE banner live there.\n\nA seam crate is just a workspace member with declared dependencies; the I6 truthfulness test checks each one uses only path dependencies.",
+      "explainer": "",
+      "story": "Dorothy joins to work on the REPL. She expects a crate named for it. Instead she finds a 2,700-line file inside a 45k-line root crate that also owns the CLI, the debugger, and the build edge. Every REPL change rebuilds the whole root; every root change rebuilds her tests. The map in architecture.md does not match the territory she is standing in.",
+      "inWild": "Source/            79 files, 44,993 LOC   # \"thin facade and binary host\"\n  REPL/mod.rs      2,746 LOC\n  CmdCompile.rs    rustc edge + ICE banner (R5 — must stay at the root)\n  CLI.rs + main.rs verb registry, dispatch, help, greeting\n  Dev*/…           dev server glue\ncrates/jet-sema    76 files, 43,716 LOC    # a real seam crate, same size",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Full dissolution — root becomes main.rs plus the build edge",
+          "detail": "Three new seam crates under the same I6/path-dependency law: `jet-cli` (verb registry, dispatch, help, completions, greeting), `jet-repl` (REPL plus its transcript machinery), `jet-debug` (the source-level debugger). Dev-server glue joins `jet-driver` or `jet-cli`. The root keeps `main.rs`, `CmdCompile.rs`, and nothing else — exactly what R5 pins there.\n\ntests/workspace_crates.rs and truthfulness.rs extend to the new members. No behavior change; snapshots and CLI transcripts pin the proof.",
+          "code": "Source/           main.rs + CmdCompile.rs (R5 edge)\ncrates/jet-cli    verb registry, dispatch, help\ncrates/jet-repl   REPL engine + transcripts\ncrates/jet-debug  (jet) prompt, breakpoints, frames\n\n$ cargo test --package jet-repl   # REPL work no longer rebuilds the world"
+        },
+        {
+          "key": "B",
+          "name": "Extract the interactive tiers only",
+          "detail": "`jet-repl` and `jet-debug` move out; the CLI registry and dev glue stay in the root. Smaller motion, and the two most self-contained subsystems get their own homes.\n\nThe root stays around 35k lines and keeps owning dispatch, so the facade claim in architecture.md stays false — just less false.",
+          "code": "Source/           main.rs, CmdCompile.rs, CLI.rs, Dev*/…  (~35k LOC)\ncrates/jet-repl   REPL\ncrates/jet-debug  debugger"
+        },
+        {
+          "key": "C",
+          "name": "Status quo — fix the docs instead",
+          "detail": "Keep the monolith; amend architecture.md to describe the root honestly as the product shell. Zero churn. The costs stay: the biggest crate in the workspace has no seam law, rebuilds are coarse, and newcomer navigation contradicts the crate map everywhere else.",
+          "code": "// architecture.md edit only:\n// \"the root crate is the product shell: CLI, REPL, debugger, dev glue, build edge\""
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "rustc",
+          "note": "The Rust compiler keeps its driver thin and its subsystems in dozens of crates; incremental rebuilds and ownership boundaries are why contributors can navigate it.",
+          "code": "rustc_driver → rustc_interface → rustc_{parse,hir,mir,codegen_*}"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "It makes the ratified architecture true. The seam law already exists and is machine-checked; the root is the one crate exempt from it for no recorded reason. Rebuild granularity and newcomer navigation improve for every future contributor.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Half a move: the CLI registry is the most-touched surface in the root, and it stays outside the seam law."
+          },
+          {
+            "key": "C",
+            "reason": "It ratifies the drift instead of the design, and the biggest crate in the workspace stays the only unlawed one."
+          }
+        ],
+        "tradeoff": "One-time churn in imports, test paths, and a re-pinned workspace_crates.rs dependency table."
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "A lands in B's order: interactive tiers first (most self-contained), CLI next, docs updated last so architecture.md is edited once, when it is true.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "root reduced to main.rs + R5 edge, three new seam crates",
+            "use": "the target state"
+          },
+          {
+            "key": "B",
+            "aspect": "REPL/debugger first as lowest-risk extractions",
+            "use": "becomes A's landing order"
+          },
+          {
+            "key": "C",
+            "aspect": "architecture.md must match reality",
+            "use": "the doc edit happens at the end of A, not instead of it"
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T02:51:28.574Z"
+    },
+    {
+      "id": "D-MARK-META1",
+      "cardId": "c0s8u85x",
+      "group": "syntax",
+      "title": "Doc-metadata growth law: future tool-facing annotations are #Meta fields",
+      "gist": "Three separate surfaces now attach tool-facing metadata to code; fix a growth law so the marker count stops climbing.",
+      "lesson": "The census counts 63 markers. Three of today's surfaces exist only to attach metadata for tools and readers — they change no program behavior. The maturity trio `@Experimental`/`@Tested`/`@Hardened` (D-MATURITY1) documents how battle-tested a function is. `#Meta(category: \"Movement\", tunable)` (D-CANVASMETA1) attaches Canvas/tooling facts. `@Doc(\"…\")` (D-CLIFLAG1) documents a CLI field.\n\nEach was ratified alone and each is fine alone. Together they are three spellings for one job: checked source data that tools read. Without a law, the fourth and fifth metadata markers will arrive the same way.\n\nD-CANVASMETA1 already ends with the right hook: \"New fields require a future ballot.\" This ballot decides whether #Meta is THE home for that growth.",
+      "explainer": "",
+      "story": "Bill writes a physics module and wants to mark a function as tuning-relevant, battle-tested, and categorized for Canvas. Today that is `@Tested` on one line and `#Meta(category: \"Physics\", tunable)` on another — two planes, two spellings, one intent. Next quarter someone proposes `@Benchmarked`, and the count becomes four surfaces.",
+      "inWild": "@Tested\n#Meta(category: \"Physics\", tunable)\nfn integrate(state: &SimState, dt: Float) { … }\n\n// CLI field docs are a third metadata spelling:\nstruct ServeArgs {\n    port: Int  @Doc(\"port to bind\")\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Growth law only — #Meta is the sole future home",
+          "detail": "Everything shipped stays exactly as ratified: the maturity trio, `#Meta`, `@Doc`. The new law binds the future: any new tool-facing, behavior-free annotation must be a `#Meta` field, ballot-ed as a field, never a new marker. The marker count stops growing for metadata reasons, and no shipped code or formatter behavior changes.",
+          "code": "// future need: \"benchmarked\" fact — arrives as a field, not a marker\n#Meta(category: \"Physics\", tunable, benchmarked)\nfn integrate(state: &SimState, dt: Float) { … }\n\n$ jet check sim.jet   # someone tries the old way\nerror[E0061]: unknown marker `@Benchmarked`\n  tool-facing metadata lives in `#Meta(...)` fields (D-MARK-META1)"
+        },
+        {
+          "key": "B",
+          "name": "Fold the maturity trio into #Meta too",
+          "detail": "The growth law from A, plus migration: `@Experimental`/`@Tested`/`@Hardened` become `#Meta(maturity: .Tested)` and the three markers leave the grammar. Three surface slots die and metadata has exactly one home.\n\nThe cost is real churn against a shipped, formatter-preserved decision (D-MATURITY1) whose `#` spelling was itself retired once already — this would be the second respelling of the same feature.",
+          "code": "#Meta(maturity: .Hardened, category: \"Physics\", tunable)\nfn integrate(state: &SimState, dt: Float) { … }\n\n$ jet check sim.jet\nerror[E0061]: unknown marker `@Tested`\n  maturity is a #Meta field: `#Meta(maturity: .Tested)`"
+        },
+        {
+          "key": "C",
+          "name": "No law — decide each future marker on its own",
+          "detail": "Status quo. Every future metadata annotation gets its own ballot with no default shape. History says the count keeps climbing — the census went from zero to three metadata surfaces in one month of ratifications.",
+          "code": "// next quarter, plausibly:\n@Benchmarked\n@Reviewed(\"2026-08\")\nfn integrate(…) { … }   // markers 64 and 65"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust funnels tool metadata through structured attributes (`#[doc]`, `#[cfg_attr]`, tool attributes) rather than minting keywords; the shape absorbed a decade of new needs.",
+          "code": "#[doc(alias = \"integrate\")]\n#[cfg_attr(test, allow(dead_code))]"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A stops the bleeding with zero churn: the law binds every future case, which is where the real growth is. The shipped trio is three markers, formatter-preserved, already taught — respelling it buys three slots at the price of a second migration of the same feature.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Second respelling of maturity in one release cycle; the churn spends owner and user trust on three surface slots the growth law already caps."
+          },
+          {
+            "key": "C",
+            "reason": "No default shape means every future metadata need re-litigates the plane question, and the count keeps climbing."
+          }
+        ],
+        "tradeoff": "The trio stays as a grandfathered exception the docs must explain once."
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "A now, B later if evidence demands: should the trio confuse users in practice, folding it becomes a one-line future ballot under A's law. Nothing in A forecloses B.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "the growth law",
+            "use": "adopted now, zero churn"
+          },
+          {
+            "key": "B",
+            "aspect": "single metadata home",
+            "use": "remains available as a future evidence-driven fold"
+          },
+          {
+            "key": "C",
+            "aspect": "per-case ballots",
+            "use": "kept for #Meta FIELD additions, per D-CANVASMETA1's existing hook"
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T02:51:28.674Z"
+    },
+    {
+      "id": "D-CORE-SECRETS1",
+      "cardId": "c0s8u85x",
+      "group": "stdlib",
+      "title": "One secrets home: merge core.secrets into core.vault",
+      "gist": "Three secret-adjacent core modules exist; the vault/secrets boundary is not teachable, so merge them.",
+      "lesson": "The census found three secret-adjacent modules. `core.vault` is the encrypted secret store (age-style encryption, D-JPK-SECRETCRYPTO1). `core.secrets` holds expiring/rotating secret values (D-TTLVAL1). `core.crypto` is the cryptography suite — primitives and misuse-resistant envelopes (D-CRYPTO-SUITE1).\n\nCrypto is clearly distinct: it transforms bytes and never stores anything. But vault versus secrets is a boundary no one can guess: storage in one module, the rotation and expiry of the same values in another. The TTL mechanism itself is generic and already lives in `core.time.expiring`.\n\nOne semantic job — keep secrets safe over time — currently spans two module names.",
+      "explainer": "",
+      "story": "Nancy stores a database password encrypted and wants it rotated monthly. Storage is `core.vault`. Rotation policy is `core.secrets`. She imports both, passes values between them, and asks in review which module a new helper belongs to. Nobody on the team can state the rule.",
+      "inWild": "use core.vault\nuse core.secrets            // second import for the same password\n\npw :: vault.open(\"db-password\")?\nrotating :: secrets.rotating(pw, every: 30)   // why is this a different module?",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Merge — core.vault owns storage AND lifecycle",
+          "detail": "`core.vault` becomes the one secrets home: encrypted store, rotation schedules, expiry, and audit facts in one module. `core.secrets` leaves the registry — an ordinary unknown-module error, clean break. Generic TTL wrapping stays in `core.time.expiring` (it is not secret-specific). `core.crypto` stays primitives and envelopes.\n\nThe teachable rule: bytes-in-motion is crypto, secrets-at-rest-and-over-time is vault.",
+          "code": "use core.vault\n\npw :: vault.open(\"db-password\")?\nvault.rotate(\"db-password\", every: 30, with: () => gen_password())\n\n$ jet check ops.jet   # after the break\nerror[E0606]: unknown core module `core.secrets`\n  secret storage and rotation live in `core.vault`"
+        },
+        {
+          "key": "B",
+          "name": "Keep the split, document the boundary",
+          "detail": "Both modules stay; the reference docs state the rule (vault stores, secrets schedules). No churn for existing imports. The boundary still has to be memorized, and every new secrets helper re-opens the which-module question the docs claim to settle.",
+          "code": "use core.vault      // storage\nuse core.secrets    // lifecycle\n// reference/core-library.md gains a paragraph explaining why"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "1Password / Vault (HashiCorp)",
+          "note": "Every secrets product ships storage and rotation as one surface; no user-facing product splits them into two libraries.",
+          "code": "vault kv put secret/db pw=…\nvault write sys/rotate/…   # same tool, same mental model"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Storage and lifecycle of the same value is one job; I8 says one mechanism per job. The merged rule (crypto moves bytes, vault keeps secrets) is teachable in a sentence.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A documented unteachable boundary is still unteachable; the split cost recurs on every new helper and every new user."
+          }
+        ],
+        "tradeoff": "Existing `use core.secrets` imports break once (greenfield clean break, ordinary unknown-module error)."
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "A absorbs B's only virtue by making the boundary self-documenting: after the merge there is nothing left to explain.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "one secrets module, storage + lifecycle",
+            "use": "adopted"
+          },
+          {
+            "key": "B",
+            "aspect": "docs state the module rule",
+            "use": "kept — one sentence in core-library.md: crypto moves bytes, vault keeps secrets"
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T02:51:28.772Z"
+    },
+    {
+      "id": "D-CORENS2",
+      "cardId": "c0s8u85x",
+      "group": "stdlib",
+      "title": "Core namespace admission law: a top-level core.* name requires a domain, not a feature",
+      "gist": "47 top-level core modules and growing; fix the admission rule and make the two moves the rule implies today.",
+      "lesson": "The Core library is one `core.*` namespace (D-CORENS1). The census counts about 47 top-level names and 70 modules overall. Most top-level names are genuine domains: files, net, http, crypto, math, game.\n\nTwo are features that grabbed a top-level slot. `core.devserver` configures the dev server — a web-development concern. `core.async.loadable` holds one blessed enum, `Loadable<T,E>` (D-PENDING1), under an `async` prefix that names no other module.\n\nWithout an admission rule, every future convenience lands top-level, and discovery (docs, completion, `jet search`) degrades as the flat list grows.",
+      "explainer": "",
+      "story": "Ruth types `use core.` and completion offers 47 names. She wants the dev-server port setting and reads the whole list twice — it is filed beside files and crypto as if it were a domain. Meanwhile `Loadable` hides under an `async` prefix nothing else uses.",
+      "inWild": "use core.devserver          // dev-server config, top-level beside core.crypto\nuse core.async.loadable      // one enum under a namespace with no other member\n\nstate: Loadable<[Ticket], NetError> := .Idle",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Admission law + the two implied moves",
+          "detail": "Law: a new top-level `core.<name>` requires a domain — a coherent problem area with a plausible family of members — ratified by ballot; features join an existing domain. Applying it today: `core.devserver` becomes `core.web.devserver` (it configures web development), and `core.async.loadable` becomes `core.reactive.loadable` (loading state is UI/reactive state; the `async` prefix dies). Clean breaks, ordinary unknown-module errors.",
+          "code": "use core.web.devserver\nuse core.reactive.loadable\n\n$ jet check app.jet   # after the break\nerror[E0606]: unknown core module `core.devserver`\n  dev-server configuration lives in `core.web.devserver`"
+        },
+        {
+          "key": "B",
+          "name": "Law only, no moves",
+          "detail": "The admission rule binds the future; the two shipped oddities stay put. Zero churn, but the rule's first two counterexamples remain in the registry, which weakens the rule every time someone cites them as precedent.",
+          "code": "// registry unchanged; future additions need a domain case\nuse core.devserver           // grandfathered oddity"
+        },
+        {
+          "key": "C",
+          "name": "No law — the registry grows case by case",
+          "detail": "Status quo. Each addition argues placement from scratch. The flat list keeps growing and completion/docs pay the tax on every user, forever.",
+          "code": "use core.   // 47 names today, more next quarter"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "Go's std curates top-level domains and nests the rest (net/http, encoding/json); the discipline is why its flat list stays learnable after 15 years.",
+          "code": "import \"net/http\"\nimport \"encoding/json\""
+        },
+        {
+          "lang": "Python",
+          "note": "Python's flat 200+-module stdlib is the cautionary tale — nobody holds it in their head, and duplicates accreted (urllib/urllib2/httplib).",
+          "code": "import urllib.request   # after decades of flat sprawl cleanup"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The rule is only credible if the registry obeys it. Two moves now, while the language is greenfield, cost two unknown-module errors; the same moves after 1.0 cost an edition migration.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Grandfathered counterexamples become the precedent every future placement argument cites against the rule."
+          },
+          {
+            "key": "C",
+            "reason": "The flat list is already at the edge of learnable; no rule means it only grows."
+          }
+        ],
+        "tradeoff": "Two clean import breaks for anything using devserver or loadable today."
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "A contains B (the law) and C's flexibility survives inside it — the ballot-per-admission requirement means genuinely new domains still get top-level slots after one decision.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "law + registry made consistent with it",
+            "use": "adopted"
+          },
+          {
+            "key": "B",
+            "aspect": "future-binding rule",
+            "use": "half of A"
+          },
+          {
+            "key": "C",
+            "aspect": "case-by-case judgment",
+            "use": "preserved as the per-admission ballot inside the law"
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T02:51:28.867Z"
     }
   ],
   "questions": [
@@ -29282,6 +29632,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-12T02:52:08.450Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c00ukytt",
+      "note": "Syntax.rs census-drift sweep + docs hygiene"
+    },
+    {
+      "at": "2026-07-12T02:52:08.352Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0z8bodp",
+      "note": "Mechanical splits: nine >2500-LOC modules + giant test files"
+    },
+    {
+      "at": "2026-07-12T02:51:28.868Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-CORENS2",
+      "note": "Core namespace admission law: a top-level core.* name requires a domain, not a feature"
+    },
+    {
+      "at": "2026-07-12T02:51:28.772Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-CORE-SECRETS1",
+      "note": "One secrets home: merge core.secrets into core.vault"
+    },
+    {
+      "at": "2026-07-12T02:51:28.674Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-MARK-META1",
+      "note": "Doc-metadata growth law: future tool-facing annotations are #Meta fields"
+    },
+    {
+      "at": "2026-07-12T02:51:28.574Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-ARCH-SOURCE1",
+      "note": "Dissolve the 45k-line Source/ monolith into seam crates"
+    },
     {
       "at": "2026-07-12T02:47:09.710Z",
       "by": "claude-main",
@@ -32739,48 +33131,6 @@
       "action": "card.criteria-meet",
       "ref": "c021gh90",
       "note": "#4"
-    },
-    {
-      "at": "2026-07-11T16:15:26.996Z",
-      "by": "terra-494-builder",
-      "action": "card.criteria-meet",
-      "ref": "c021gh90",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-11T16:15:26.911Z",
-      "by": "terra-494-builder",
-      "action": "card.criteria-meet",
-      "ref": "c021gh90",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-11T16:15:26.827Z",
-      "by": "terra-494-builder",
-      "action": "card.criteria-meet",
-      "ref": "c021gh90",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-11T16:11:40.748Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c021gh90",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-11T16:11:40.662Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c021gh90",
-      "note": "#4 Mutation proof forces each prerequisite missing under strict"
-    },
-    {
-      "at": "2026-07-11T16:11:40.574Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c021gh90",
-      "note": "#3 Targeted local Canvas scenario runs retain intentional skip "
     }
   ],
   "nextNum": 368,
