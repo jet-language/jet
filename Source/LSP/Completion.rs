@@ -270,7 +270,10 @@ pub(crate) fn compute_completions(
         });
         if let Some(owner) = owner {
             let prefix = current_identifier_prefix(src, offset);
-            for symbol in db.symbols.complete(&prefix, Some(&owner)) {
+            for symbol in db
+                .symbols
+                .complete_visible_in(&prefix, Some(&owner), Some(current_path))
+            {
                 if seen.insert(symbol.identity.clone()) {
                     items.push(CompletionItem {
                         label: symbol.name.clone(),
@@ -327,14 +330,9 @@ pub(crate) fn compute_completions(
         Some(statement)
     };
 
-    for symbol in db.symbols.symbols().iter().filter(|symbol| symbol.owner.is_none()) {
+    for symbol in db.symbols.complete_visible_in("", None, Some(current_path)) {
         if symbol.kind == jet_semindex::SemanticSymbolKind::Keyword
-            && (!context_allows_keyword(src, offset, &symbol.name)
-                || db.symbols.symbols().iter().any(|candidate| {
-                    candidate.owner.is_none()
-                        && candidate.name == symbol.name
-                        && candidate.kind != jet_semindex::SemanticSymbolKind::Keyword
-                }))
+            && !context_allows_keyword(src, offset, &symbol.name)
         {
             continue;
         }

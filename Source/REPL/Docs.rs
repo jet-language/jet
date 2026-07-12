@@ -54,7 +54,7 @@ pub(crate) fn completion_candidates(
     owner: Option<&str>,
 ) -> Vec<jet_semindex::SemanticSymbol> {
     symbol_index(session)
-        .complete(prefix, owner)
+        .complete_visible(prefix, owner)
         .into_iter()
         .filter(|symbol| {
             owner.is_some()
@@ -91,11 +91,7 @@ fn render(symbol: &jet_semindex::SemanticSymbol) -> String {
 
 pub fn lookup(session: &Session, name: &str) -> Option<String> {
     let index = symbol_index(session);
-    if let Some(symbol) = index.lookup_qualified(name) {
-        return Some(render(symbol));
-    }
-    let matches = index.lookup(name);
-    (matches.len() == 1).then(|| render(matches[0]))
+    index.resolve_visible(name).map(render)
 }
 
 #[cfg(test)]
@@ -120,5 +116,19 @@ mod tests {
         let doc = lookup(&session, "answer").expect("binding should resolve");
         assert!(doc.starts_with("answer: Int :: 42\n"));
         assert!(doc.contains("Source: this session"));
+    }
+
+    #[test]
+    fn completion_dedups_shadowed_session_item() {
+        let mut session = Session::new();
+        session
+            .item_srcs
+            .push("fn answer() -> Int { return 1 }".to_string());
+        session
+            .scope
+            .insert("answer".to_string(), crate::AST::CtValue::Int(42));
+        let candidates = completion_candidates(&session, "ans", None);
+        assert_eq!(candidates.len(), 1, "{candidates:?}");
+        assert_eq!(candidates[0].identity, "session:binding:answer");
     }
 }

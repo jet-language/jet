@@ -113,11 +113,85 @@ impl SemanticSymbolIndex {
             .collect()
     }
 
+    /// Resolve the symbol visible through an unqualified spelling, or an
+    /// explicitly qualified symbol when `name` contains its owner.
+    ///
+    /// Identity lookup remains lossless; this method applies Jet's shadowing
+    /// order only at a consumer's visible-name boundary.
+    pub fn resolve_visible(&self, name: &str) -> Option<&SemanticSymbol> {
+        self.resolve_visible_in(name, None)
+    }
+
+    pub fn resolve_visible_in(
+        &self,
+        name: &str,
+        module_path: Option<&str>,
+    ) -> Option<&SemanticSymbol> {
+        let qualified = name.contains('.');
+        self.symbols
+            .iter()
+            .filter(|symbol| {
+                if qualified {
+                    symbol.qualified_name == name
+                } else {
+                    symbol.owner.is_none() && symbol.name == name
+                }
+            })
+            .filter_map(|symbol| visibility_rank(symbol, module_path).map(|rank| (rank, symbol)))
+            .min_by_key(|(rank, _)| *rank)
+            .map(|(_, symbol)| symbol)
+    }
+
     pub fn complete(&self, prefix: &str, owner: Option<&str>) -> Vec<&SemanticSymbol> {
         self.symbols
             .iter()
             .filter(|symbol| symbol.owner.as_deref() == owner && symbol.name.starts_with(prefix))
             .collect()
+    }
+
+    /// Complete visible spellings once while retaining every symbol by
+    /// identity and every explicitly qualified owner path.
+    pub fn complete_visible(&self, prefix: &str, owner: Option<&str>) -> Vec<&SemanticSymbol> {
+        self.complete_visible_in(prefix, owner, None)
+    }
+
+    pub fn complete_visible_in(
+        &self,
+        prefix: &str,
+        owner: Option<&str>,
+        module_path: Option<&str>,
+    ) -> Vec<&SemanticSymbol> {
+        let explicit_qualified = owner.is_none() && prefix.contains('.');
+        let mut visible: Vec<(&str, u8, &SemanticSymbol)> = Vec::new();
+        for symbol in &self.symbols {
+            let matches = if explicit_qualified {
+                symbol.qualified_name.starts_with(prefix)
+            } else {
+                symbol.owner.as_deref() == owner && symbol.name.starts_with(prefix)
+            };
+            if !matches {
+                continue;
+            }
+            let Some(rank) = visibility_rank(symbol, module_path) else {
+                continue;
+            };
+            let spelling = if explicit_qualified {
+                symbol.qualified_name.as_str()
+            } else {
+                symbol.name.as_str()
+            };
+            if let Some((_, current_rank, current)) =
+                visible.iter_mut().find(|(name, _, _)| *name == spelling)
+            {
+                if rank < *current_rank {
+                    *current_rank = rank;
+                    *current = symbol;
+                }
+            } else {
+                visible.push((spelling, rank, symbol));
+            }
+        }
+        visible.into_iter().map(|(_, _, symbol)| symbol).collect()
     }
 
     pub fn at(&self, module_path: &str, offset: usize) -> Option<&SemanticSymbol> {
@@ -137,6 +211,41 @@ impl SemanticSymbolIndex {
                 .then(a.identity.cmp(&b.identity))
         });
     }
+}
+
+fn visibility_rank(symbol: &SemanticSymbol, module_path: Option<&str>) -> Option<u8> {
+    if symbol.identity.starts_with("session:binding:") {
+        return Some(0);
+    }
+    if matches!(symbol.kind, SemanticSymbolKind::Local | SemanticSymbolKind::Parameter) {
+        if module_path.is_some_and(|path| {
+            matches!(symbol.provenance, SemanticProvenance::Source { .. })
+                && symbol.module_path != path
+        }) {
+            return None;
+        }
+        return Some(1);
+    }
+    if !symbol.identity.starts_with("import:") {
+        match symbol.provenance {
+            SemanticProvenance::Session => return Some(2),
+            SemanticProvenance::Source { .. } => {
+                return Some(if module_path.is_none_or(|path| symbol.module_path == path) {
+                    2
+                } else {
+                    5
+                });
+            }
+            _ => {}
+        }
+    }
+    if symbol.identity.starts_with("import:") {
+        if module_path.is_some_and(|path| symbol.module_path != path) {
+            return None;
+        }
+        return Some(3);
+    }
+    Some(4)
 }
 
 pub fn build_semantic_symbol_index(db: &SymbolDB, bundle: &ProgramBundle) -> SemanticSymbolIndex {
