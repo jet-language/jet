@@ -3094,6 +3094,10 @@ implementation milestone is pending.
 | ID   | Question                                   | Needed by |
 | ---- | ------------------------------------------ | --------- |
 | S56  | typed reflection / user derives | **Epoch 3** — [`docs/plans/epoch-3/user-derives-reflection.md`](../../docs/plans/epoch-3/user-derives-reflection.md) |
+| D-FFI-SH1 | `Sh` typed text (third D-TYPEDTEXT1 instance) | Polyglot P3 — Tower card #503 |
+| D-SCHEDULE1 | `#Every(…)` schedule marker on `#Task fn` | Framework lessons — Tower card #505 |
+| D-LIVEQUERY1 / D-LINTPOLICY1 | live queries; override law | Tower card #505 |
+| D-FFI-* binder wave | go/java/cs/fortran/lua/ruby/perl/php/r + cobol/octave + D-MIGRATE-SRC1 | Tower cards #502–#504 |
 
 
 ## Decision log
