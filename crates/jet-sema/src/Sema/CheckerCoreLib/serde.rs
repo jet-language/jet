@@ -1,8 +1,48 @@
 impl<'a> Checker<'a> {
+        fn serde_trait_impl(&self, name: &str, trait_name: &str) -> bool {
+            if self.trait_reg.implements_trait(name, trait_name) {
+                return true;
+            }
+            let Some(modules) = self.modules else { return false };
+            if let Some((alias, leaf)) = name.split_once('.') {
+                return self.imports.get(alias).is_some_and(|idx|
+                    modules[*idx].trait_reg.implements_trait(leaf, trait_name)
+                        && self.type_is_pub_in(*idx, leaf));
+            }
+            self.imports.values().any(|idx|
+                modules[*idx].trait_reg.implements_trait(name, trait_name)
+                    && self.type_is_pub_in(*idx, name))
+        }
+
+        fn serde_apply_ok(
+            &self,
+            name: &str,
+            args: &[Type],
+            trait_name: &str,
+            elem_ok: &dyn Fn(&Type) -> bool,
+        ) -> bool {
+            if self.trait_reg.implements_trait(name, trait_name) {
+                return apply_serde_ok(name, args, self.trait_reg, trait_name, elem_ok);
+            }
+            let Some(modules) = self.modules else { return false };
+            let foreign = if let Some((alias, leaf)) = name.split_once('.') {
+                self.imports.get(alias).and_then(|idx| {
+                    self.type_is_pub_in(*idx, leaf).then_some((&modules[*idx].trait_reg, leaf))
+                })
+            } else {
+                self.imports.values().find_map(|idx| {
+                    self.type_is_pub_in(*idx, name).then_some((&modules[*idx].trait_reg, name))
+                })
+            };
+            foreign.is_some_and(|(reg, leaf)|
+                reg.implements_trait(leaf, trait_name)
+                    && apply_serde_ok(leaf, args, reg, trait_name, elem_ok))
+        }
+
         /// D-SERDE: a value type the `@[Codable]`/`@[Encode]` derive (or a blanket impl)
         /// can serialize. Primitives, the dynamic `Json` tree, and lists/options/maps of
         /// encodables qualify; a user type must derive `Encode`.
-        fn is_encodable(&self, t: &Type) -> bool {
+        pub(crate) fn is_encodable(&self, t: &Type) -> bool {
             match t {
                 Type::Int
                 | Type::Float
@@ -15,13 +55,16 @@ impl<'a> Checker<'a> {
                 Type::FixedList { elem, .. } => self.is_encodable(elem),
                 Type::Map { key, value } => matches!(**key, Type::String) && self.is_encodable(value),
                 Type::Named(n) => {
-                    is_json_type_name(n) || self.trait_reg.implements_trait(n, crate::Generics::ENCODE)
+                    is_json_type_name(n)
+                        || self.serde_trait_impl(n, crate::Generics::ENCODE)
+                        || self.type_param_scope.iter().any(|p|
+                            p.name == *n && p.bounds.iter().any(|b| b == crate::Generics::ENCODE))
                 }
                 // D-SERDE9/10: a generic instantiation `Name<args>` is encodable when
                 // `Name` derives Encode and every type arg that reaches the wire is
                 // itself encodable. Phantom/skip-only params impose no obligation.
                 Type::Apply { name, args } => {
-                    apply_serde_ok(name, args, self.trait_reg, crate::Generics::ENCODE, &|t| {
+                    self.serde_apply_ok(name, args, crate::Generics::ENCODE, &|t| {
                         self.is_encodable(t)
                     })
                 }
@@ -32,7 +75,7 @@ impl<'a> Checker<'a> {
         /// D-SERDE: a type `decode<T>` can construct. Mirrors [`Self::is_encodable`] but a
         /// user type must derive `Decode` (the dynamic `Json` tree is reached by bare
         /// `decode`, not the typed path).
-        fn is_decodable(&self, t: &Type) -> bool {
+        pub(crate) fn is_decodable(&self, t: &Type) -> bool {
             match t {
                 Type::Int
                 | Type::Float
@@ -44,9 +87,11 @@ impl<'a> Checker<'a> {
                 Type::List(e) | Type::Option(e) | Type::Shared(e) => self.is_decodable(e),
                 Type::FixedList { elem, .. } => self.is_decodable(elem),
                 Type::Map { key, value } => matches!(**key, Type::String) && self.is_decodable(value),
-                Type::Named(n) => self.trait_reg.implements_trait(n, crate::Generics::DECODE),
+                Type::Named(n) => self.serde_trait_impl(n, crate::Generics::DECODE)
+                    || self.type_param_scope.iter().any(|p|
+                        p.name == *n && p.bounds.iter().any(|b| b == crate::Generics::DECODE)),
                 Type::Apply { name, args } => {
-                    apply_serde_ok(name, args, self.trait_reg, crate::Generics::DECODE, &|t| {
+                    self.serde_apply_ok(name, args, crate::Generics::DECODE, &|t| {
                         self.is_decodable(t)
                     })
                 }

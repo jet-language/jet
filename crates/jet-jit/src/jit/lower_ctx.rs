@@ -1970,7 +1970,11 @@ impl LowerCtx<'_, '_> {
             THandleOp::CursorOver => Err("jit handle method unsupported".to_string()),
             THandleOp::CursorTakeUntil => Err("jit handle method unsupported".to_string()),
             THandleOp::CursorSkipWs => Err("jit handle method unsupported".to_string()),
-            THandleOp::CursorTakePattern { .. } => Err("jit handle method unsupported".to_string()),
+            THandleOp::CursorTakePattern { .. }
+            | THandleOp::DataTreeDecode(_)
+            | THandleOp::SerdeEncode => {
+                Err("jit handle method unsupported".to_string())
+            }
         }
     }
 

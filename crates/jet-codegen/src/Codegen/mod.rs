@@ -813,13 +813,13 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
             Item::Struct(s) => {
                 emit_type_impl(&cx, &s.name, &s.type_params, &s.methods, &mut out);
                 for block in &s.trait_impls {
-                    emit_trait_impl(&cx, &s.name, &s.type_params, block, &mut out);
+                    emit_trait_impl(&cx, &s.name, &s.type_params, block, Some(s), &mut out);
                 }
             }
             Item::Enum(e) => {
                 emit_type_impl(&cx, &e.name, &e.type_params, &e.methods, &mut out);
                 for block in &e.trait_impls {
-                    emit_trait_impl(&cx, &e.name, &e.type_params, block, &mut out);
+                    emit_trait_impl(&cx, &e.name, &e.type_params, block, None, &mut out);
                 }
             }
             Item::Impl(i) => {
@@ -828,7 +828,11 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
                     continue;
                 }
                 if i.trait_name.is_some() {
-                    emit_external_trait_impl(&cx, i, &mut out);
+                    let struct_def = prog.items.iter().find_map(|item| match item {
+                        Item::Struct(s) if s.name == i.type_name => Some(s),
+                        _ => None,
+                    });
+                    emit_external_trait_impl(&cx, i, struct_def, &mut out);
                 } else {
                     emit_type_impl(&cx, &i.type_name, &[], &i.methods, &mut out);
                 }
@@ -1005,13 +1009,13 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
             Item::Struct(s) => {
                 emit_type_impl(&cx, &s.name, &s.type_params, &s.methods, &mut out);
                 for block in &s.trait_impls {
-                    emit_trait_impl(&cx, &s.name, &s.type_params, block, &mut out);
+                    emit_trait_impl(&cx, &s.name, &s.type_params, block, Some(s), &mut out);
                 }
             }
             Item::Enum(e) => {
                 emit_type_impl(&cx, &e.name, &e.type_params, &e.methods, &mut out);
                 for block in &e.trait_impls {
-                    emit_trait_impl(&cx, &e.name, &e.type_params, block, &mut out);
+                    emit_trait_impl(&cx, &e.name, &e.type_params, block, None, &mut out);
                 }
             }
             Item::Impl(i) => {
@@ -1020,7 +1024,11 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
                     continue;
                 }
                 if i.trait_name.is_some() {
-                    emit_external_trait_impl(&cx, i, &mut out);
+                    let struct_def = prog.items.iter().find_map(|item| match item {
+                        Item::Struct(s) if s.name == i.type_name => Some(s),
+                        _ => None,
+                    });
+                    emit_external_trait_impl(&cx, i, struct_def, &mut out);
                 } else {
                     emit_type_impl(&cx, &i.type_name, &[], &i.methods, &mut out);
                 }

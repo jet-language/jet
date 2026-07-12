@@ -640,6 +640,13 @@ pub(crate) fn method_call_in_subset(
         }
     }
     if let Some(handle) = recv_type {
+        if (handle == "__SerdeEncode__" && method == "encode" && args.is_empty())
+            || (handle == Syntax::TYPE_DATA
+                && method == Syntax::METHOD_DATATREE_DECODE
+                && args.is_empty())
+        {
+            return expr_in_subset(receiver, cx, locals);
+        }
         if handle_method_op(handle, method, args.len()).is_some() {
             return expr_in_subset(receiver, cx, locals)
                 && args

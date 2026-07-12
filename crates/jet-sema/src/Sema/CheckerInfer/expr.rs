@@ -1788,7 +1788,12 @@ impl<'a> Checker<'a> {
                 return self.infer_core_field(&module, member, *alias_span, span);
             }
         }
-        if let Expr::Ident(type_name, _) = &**inner {
+        if let Expr::Ident(type_name, type_span) = &**inner {
+            // D-SERDE13=B: `Data.Null` etc. — retired spelling, point at `DataTree`.
+            if type_name == "Data" {
+                self.diags.push(data_renamed_to_datatree(*type_span));
+                return Some(json_ty());
+            }
             if is_json_type_name(type_name) {
                 if let Some(ret) = self.check_core_json_lit(member, &mut [], span) {
                     return Some(ret);

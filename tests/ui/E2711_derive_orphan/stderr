@@ -1,3 +1,3 @@
-Error [E2711]: derive orphan rule: `derive T.Named` and `Bar` are both in an imported module
- Why: user-derive expansion can only run in the entry module; both the derive block and the struct are from the same imported file
- Fix: move both `derive Named` and `struct Bar` to your entry module; derive expansion only runs there
+Error [E2711]: derive orphan rule: neither `derive T.Named` nor `Bar` is local
+ Why: a generated implementation is owned locally only when the derive provider or target type lives in the entry module
+ Fix: define `derive T.Named` or `Bar` in the entry module

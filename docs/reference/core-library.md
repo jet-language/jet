@@ -1257,11 +1257,10 @@ fn run() {
 }
 ```
 
-**One dynamic value, four format faces (D-ENC-DYN1).** Every format's untyped
-`parse` returns the same rich dynamic value, internally `DataTree`, user-facing
-as **`Data`** — variants `.Null` / `.Bool` / `.Int` / `.Float` / `.Text` /
-`.Array` / `.Object`. `JSON`, `TOML`, `YAML`, and `CSV` are type aliases over
-`Data` (so `json.parse` reads as `JSON`, `toml.parse` as `TOML`, …), but it's
+**One dynamic value, four format adapters (D-SERDE13).** Every format's untyped
+`parse` returns **`DataTree`** — variants `.Null` / `.Bool` / `.Int` / `.Float` /
+`.Text` / `.Array` / `.Object`. `DataTree` is the only user-facing tree name;
+the old `Data` spelling is a teaching error, not an alias. Every adapter shares
 one structure with one walker and one accessor set (`.field(name)`, `.at(i)`,
 `.int()`, `.float()`, `.text()`, `.bool()`). Integral numbers decode to `.Int`,
 fractional to `.Float`; objects keep field order.
@@ -1481,6 +1480,27 @@ sales :: csv.decode<Sale>(raw) ?? panic("bad csv")   // [Sale]
 print(json.to_string(sales))   // [{"item":"pen","qty":3},{"item":"ink","qty":5}]
 ```
 
+**Hand codecs and subtree dispatch** (D-SERDE2, D-SERDE13–16) use the same
+protocol as built-in derives. Write `impl T.Encode` with `encode(self) ->
+DataTree` and `impl T.Decode` with `decode(tree: DataTree) -> T ? DecodeError`.
+Tree accessors add their field/index path and return `DecodeError`, so `?`
+chains without manual mapping. `tree.decode<T>()` dispatches any subtree
+through `T`'s ordinary `Decode` implementation, including primitives, user
+types, lists, options, and string-keyed maps. A derived parent therefore
+composes with a hand-written field codec; generated and hand-written paths are
+one mechanism.
+
+```jet
+impl Email.Decode {
+    fn decode(tree: DataTree) -> Email ? DecodeError {
+        address := tree.text()?
+        return ok(Email.{ address })
+    }
+}
+
+items := tree.field("items")?.decode<[LineItem]>()?
+```
+
 **Traced decode — was this migrated?** (D-MIGRATE3=A, D-MIGRATE4=A):
 `decode_traced<T>(text)` sits beside `decode<T>` on every codec
 (json/csv/toml/yaml share the decode machinery) and returns
@@ -1527,7 +1547,9 @@ migration blocks pay nothing.
 
 **Enums** serialize externally tagged by default: a unit variant is its bare name
 (`"Closed"`), a payload variant is `{"Variant": payload}`. `#[Tag("type")]` switches
-to internal tagging (`{"type":"Click", …}`); `#[Untagged]` emits the payload alone.
+to internal tagging (`{"type":"Click", …}`); a single unnamed payload uses the
+canonical `value` key (`{"type":"Count","value":7}`). `#[Untagged]` emits the
+payload alone.
 
 Unknown wire keys are ignored by default (forward-compatible); opt into strict
 checking with `#[DenyUnknownFields]`. Diagnostics: E2407 (`#[Rename]` non-string),
@@ -1542,9 +1564,9 @@ the user never spells them. A phantom or `#[Skip]`-only param carries no serde
 bound (only structural `Clone`), so `Id<Kind>` serializes for any `Kind`. A
 non-codable type argument fails at the use site (E2411), not the definition.
 
-> The expert hand-impl path (`impl T: Encode { fn encode … }` over the `DataTree`
-> tree, D-SERDE2) is a future increment; see
-> `docs/sidequests/serde-model.md`.
+The expert hand-impl path is live: `impl T.Encode { fn encode(self) -> DataTree
+{ … } }` and `impl T.Decode { fn decode(tree: DataTree) -> T ? DecodeError {
+… } }`. Generated and hand-written codecs use the same protocol dispatch.
 
 ---
 

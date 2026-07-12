@@ -446,6 +446,14 @@ impl Circle {
   and `struct Pair<T> { … }`. Built-in traits follow S55: auto
   `Printable`/`Equatable`; explicit `@[Comparable]`, `@[Codable]`,
   `@[Encode]`, `@[Decode]`.
+- **Encoding traits (D-SERDE2/D-SERDE16):** `Encode.encode(self) -> DataTree`
+  and `Decode.decode(tree: DataTree) -> Self ? DecodeError` are ordinary Jet
+  trait methods. `DataTree.decode<T>()` is the one public typed-dispatch path;
+  primitive, container, generated, and hand-written implementations all use it.
+  Built-in derives generate Jet source fragments beside the marked type, then
+  run those fragments through the normal parser, sema, TIR, and codegen pipeline.
+  A user-defined derive may expand only when its provider or target type is
+  entry-local; otherwise E2711 points at the derive marker.
 - **Tags (D-QUAL2):** `tag Name;` or `tag Name { }` — a marker qualifier with
   no methods that erases at runtime (codegen emits nothing). Tags are the second
   and only other qualifier kind beside traits; the beginner rule is one
@@ -1174,7 +1182,7 @@ Compiler-known `core.<name>` namespaces backed by Rust std helpers in the
 generated prelude (D-CORENS1/D-CORENS-CANON1): file/terminal/env/process I/O,
 math, random, time, args, sized numeric types with checked-by-default
 overflow, and unified `core.encoding` serialization (JSON/CSV/TOML/YAML over
-one `Data` value, plus `@[Codable]` derive). Every fallible call returns
+one `DataTree` value, plus `@[Codable]` derive). Every fallible call returns
 `T ? E`, handled with `?`/`??`/a pattern test like any M4 result. Importing a
 module is free (R10) — codegen only emits the helpers a program actually
 calls. See core-library.md for the full module list, signatures, and
@@ -2076,11 +2084,9 @@ including the reserved `--help`), E1307 (subcommand payload isn't
 `@[Cli]`), E1308 (`run`'s one parameter isn't a `@[Cli]` struct or an enum
 of `@[Cli]` payloads). See docs/spec/diagnostics.md.
 
-**Known limitation (shared with `@[Codable]`):** the derive's generated
-helper functions use unqualified `jet_std`/`user_*` paths, so — like
-`@[Codable]` — `@[Cli]` only works when the struct and its `fn run` live in
-the entry file, not an imported module file (tracked, not fixed here;
-same gap, same fix when it lands).
+**Known limitation:** `@[Cli]`'s generated helper functions use unqualified
+`jet_std`/`user_*` paths, so the struct and its `fn run` must live in the entry
+file, not an imported module file.
 
 ## `jet inspect expand` — transparency command (D-EXPANDCLI1, card #183)
 

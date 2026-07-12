@@ -447,6 +447,54 @@ fn build_and_run(
     )
 }
 
+fn build_and_run_multi(
+    dir: &PathBuf,
+    name: &str,
+    entry: &str,
+    files: &[(&str, &str)],
+) -> (i32, String, String) {
+    for (rel, src) in files {
+        let path = dir.join(rel);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(path, src).unwrap();
+    }
+    let entry_path = dir.join(entry);
+    let src = fs::read_to_string(&entry_path).unwrap();
+    let shown = entry_path.to_string_lossy();
+    let out = jet::compile_with_path(&src, &shown).unwrap_or_else(|diags| {
+        panic!(
+            "front end rejected multi-file fixture:\n{}",
+            jet::render_diagnostics(&shown, &src, &diags)
+        )
+    });
+    let rs = dir.join(format!("{name}.rs"));
+    let bin = dir.join(name);
+    fs::write(&rs, &out.rust).unwrap();
+    let rustc = Command::new("rustc")
+        .args([
+            "--edition",
+            "2021",
+            rs.to_str().unwrap(),
+            "-o",
+            bin.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        rustc.status.success(),
+        "rustc rejected generated multi-file code:\n{}",
+        String::from_utf8_lossy(&rustc.stderr)
+    );
+    let run = Command::new(&bin).current_dir(dir).output().unwrap();
+    (
+        run.status.code().unwrap_or(0),
+        String::from_utf8_lossy(&run.stdout).into_owned(),
+        String::from_utf8_lossy(&run.stderr).into_owned(),
+    )
+}
+
 #[cfg(unix)]
 fn write_executable(path: &std::path::Path, body: &str) {
     fs::write(path, body).unwrap();
@@ -2500,15 +2548,15 @@ use core.encoding.json as json
 struct Email { addr: String }
 
 impl Email.Encode {
-    fn encode(self) -> Data {
-        m: [String: Data] :: ["email": Data.Text(copy self.addr)]
-        return Data.Object(m)
+    fn encode(self) -> DataTree {
+        m: [String: DataTree] :: ["email": DataTree.Text(copy self.addr)]
+        return DataTree.Object(m)
     }
 }
 
 impl Email.Decode {
-    fn decode(tree: Data) -> Email ? DecodeError {
-        f := tree.field("email") ?? Data.Text("")
+    fn decode(tree: DataTree) -> Email ? DecodeError {
+        f := tree.field("email") ?? DataTree.Text("")
         s := f.text() ?? ""
         return ok(Email.{addr: s})
     }
@@ -2528,6 +2576,325 @@ fn run() {
     assert_eq!(code, 0, "hand codec round trip failed: {stderr}");
     // Custom wire key proves the hand `encode` ran; `back.addr` proves hand `decode` ran.
     assert_eq!(stdout, "{\"email\":\"a@b.com\"}\na@b.com\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// card #131: `DataTree.decode<T>()` dispatches primitive, container,
+/// generated, and hand-written Decode implementations through one spelling.
+#[test]
+fn datatree_decode_dispatches_all_decode_impl_kinds() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc { return; }
+    let dir = std::env::temp_dir().join(format!("jet_datatree_decode_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let src = r#"
+@[Codable]
+struct Point { x: Int }
+struct Email { addr: String }
+impl Email.Decode {
+    fn decode(tree: DataTree) -> Email ? DecodeError {
+        value := tree.field("address") ?? DataTree.Text("")
+        return ok(Email.{ addr: value.text() ?? "" })
+    }
+}
+
+fn run() {
+    i_tree: DataTree := DataTree.Int(41)
+    xs_tree: DataTree := DataTree.Array([DataTree.Int(1), DataTree.Int(2)])
+    p_tree: DataTree := DataTree.Object(["x": DataTree.Int(7)])
+    e_tree: DataTree := DataTree.Object(["address": DataTree.Text("a@b")])
+    i := i_tree.decode<Int>() ?? panic("primitive")
+    xs := xs_tree.decode<[Int]>() ?? panic("list")
+    p := p_tree.decode<Point>() ?? panic("derive")
+    e := e_tree.decode<Email>() ?? panic("hand")
+    print(i + xs[1] + p.x)
+    print(e.addr)
+}
+"#;
+    let out = compile_temp("datatree_decode.jet", src);
+    assert!(out.rust.contains("<i64 as user_Decode>::jet_decode"));
+    assert!(out.rust.contains("<user_Point as user_Decode>::jet_decode"));
+    assert!(out.rust.contains("<user_Email as user_Decode>::jet_decode"));
+    let (code, stdout, stderr) = build_and_run(&dir, "datatree_decode", src, &[], None);
+    assert_eq!(code, 0, "DataTree.decode dispatch failed: {stderr}");
+    assert_eq!(stdout, "50\na@b\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn generated_enum_codecs_reenter_jet_pipeline() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc { return; }
+    let dir = std::env::temp_dir().join(format!("jet_enum_serde_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let src = r#"
+use core.encoding.json as json
+@[Codable]
+enum Event {
+    Idle
+    Count(Int)
+    Named(name: String, enabled: Bool)
+}
+fn run() {
+    a: Event := .Idle
+    b: Event := .Count(3)
+    c: Event := .Named.{ name: "x", enabled: true }
+    print(json.to_string(a))
+    print(json.to_string(b))
+    print(json.to_string(c))
+    back := json.decode<Event>("{{\"Count\":7}}") ?? panic("decode")
+    if back == .Count(n) { print(n) }
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "enum_serde", src, &[], None);
+    assert_eq!(code, 0, "generated enum codec failed: {stderr}");
+    assert_eq!(stdout, "\"Idle\"\n{\"Count\":3}\n{\"Named\":{\"enabled\":true,\"name\":\"x\"}}\n7\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// D-SERDE7: internal tags apply uniformly to unit, single-payload, and
+/// named-payload variants. Exact JSON plus decode proves the AOT contract.
+#[test]
+fn generated_internal_tagged_enum_round_trips_every_variant_shape() {
+    let dir = std::env::temp_dir().join(format!("jet_tagged_enum_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let src = r#"
+use core.encoding.json as json
+
+@[Codable]
+#[Tag("type")]
+enum Event {
+    Idle
+    Count(Int)
+    Named(name: String, enabled: Bool)
+}
+
+fn run() {
+    unit: Event := .Idle
+    tuple: Event := .Count(3)
+    named: Event := .Named.{ name: "x", enabled: true }
+    print(json.to_string(unit))
+    print(json.to_string(tuple))
+    print(json.to_string(named))
+    a := json.decode<Event>("{{\"type\":\"Idle\"}}") ?? panic("unit")
+    b := json.decode<Event>("{{\"type\":\"Count\",\"value\":7}}") ?? panic("tuple")
+    c := json.decode<Event>("{{\"type\":\"Named\",\"name\":\"y\",\"enabled\":false}}") ?? panic("named")
+    print(json.to_string(a))
+    print(json.to_string(b))
+    print(json.to_string(c))
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "tagged_enum", src, &[], None);
+    assert_eq!(code, 0, "generated internally tagged enum failed: {stderr}");
+    assert_eq!(
+        stdout,
+        "{\"type\":\"Idle\"}\n{\"type\":\"Count\",\"value\":3}\n{\"enabled\":true,\"name\":\"x\",\"type\":\"Named\"}\n{\"type\":\"Idle\"}\n{\"type\":\"Count\",\"value\":7}\n{\"enabled\":false,\"name\":\"y\",\"type\":\"Named\"}\n"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn builtin_codec_expansion_has_no_ast_transplant_or_rust_fallback() {
+    let registration = include_str!("../crates/jet-sema/src/Sema/Registration.rs");
+    let items = include_str!("../crates/jet-codegen/src/Codegen/Items.rs");
+    assert!(registration.contains("impl {}.Encode"));
+    assert!(registration.contains("impl {}.Decode"));
+    assert!(registration.contains("Some(trigger_span)"));
+    assert!(!registration.contains("__JetSerdeCarrier"));
+    assert!(!registration.contains("__JetSerdeGenerated"));
+    assert!(!registration.contains("trait_impls.extend"));
+    assert!(!items.contains("emit_struct_serde"));
+    assert!(!items.contains("emit_enum_serde"));
+}
+
+/// Card #131: generated struct codecs preserve field-policy behavior while
+/// running through ordinary Jet bodies: absent options stay off the wire and
+/// computed fields encode through their getter without becoming decode slots.
+#[test]
+fn generated_struct_codecs_preserve_option_and_computed_fields() {
+    let dir = std::env::temp_dir().join(format!("jet_struct_serde_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let src = r#"
+use core.encoding.json as json
+
+@[Codable]
+struct Record {
+    base: Int
+    note: String?
+    doubled: Int => base * 2
+}
+
+fn run() {
+    value := Record.{ base: 4, note: None }
+    print(json.to_string(value))
+    back := json.decode<Record>("{{\"base\":5,\"doubled\":999}}") ?? panic("decode")
+    print(back.base)
+    print(back.doubled)
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "struct_serde", src, &[], None);
+    assert_eq!(code, 0, "generated struct codec failed: {stderr}");
+    assert_eq!(stdout, "{\"base\":4,\"doubled\":8}\n5\n10\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// Card #131: flatten, rename, and decode defaults are behavior of generated
+/// Jet codec bodies, not a hidden Rust-only derive path.
+#[test]
+fn generated_struct_codecs_preserve_flatten_rename_and_default() {
+    let dir = std::env::temp_dir().join(format!("jet_struct_markers_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let src = r#"
+use core.encoding.json as json
+
+@[Codable]
+struct Inner { x: Int  y: Bool }
+
+@[Codable]
+#[RenameAll(camel)]
+struct Outer {
+    display_name: String
+    #[Flatten] inner: Inner
+    #[Default(4 + 5)] count: Int
+}
+
+fn run() {
+    value := Outer.{ display_name: "n", inner: Inner.{ x: 1, y: true }, count: 2 }
+    print(json.to_string(value))
+    back := json.decode<Outer>("{{\"displayName\":\"m\",\"x\":3,\"y\":false}}") ?? panic("decode")
+    print(back.display_name)
+    print(back.inner.x)
+    print(back.count)
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "struct_markers", src, &[], None);
+    assert_eq!(code, 0, "generated marker codec failed: {stderr}");
+    assert_eq!(stdout, "{\"count\":2,\"displayName\":\"n\",\"x\":1,\"y\":true}\nm\n3\n9\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// Card #131 / D-SERDE8: strict unknown-key rejection is emitted as ordinary
+/// Jet control flow and carries the offending wire path plus E2412 reason.
+#[test]
+fn generated_struct_decode_denies_unknown_fields() {
+    let dir = std::env::temp_dir().join(format!("jet_struct_deny_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let src = r#"
+use core.encoding.json as json
+
+@[Codable]
+#[DenyUnknownFields]
+struct Strict { name: String }
+
+fn run() {
+    result := json.decode<Strict>("{{\"name\":\"x\",\"extra\":1}}")
+    if result == err(e) {
+        print(e.path)
+        print(e.reason)
+    }
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "struct_deny", src, &[], None);
+    assert_eq!(code, 0, "generated strict codec failed: {stderr}");
+    assert_eq!(stdout, "extra\nE2412: unknown field `extra`\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// Card #131: built-in Decode fragments live beside their source type, so a
+/// consumer can dispatch through an imported type without entry-local aliases.
+/// The nested List/Option/Map fields also prove D-SERDE16's public dispatch.
+#[test]
+fn generated_decode_dispatches_across_module_boundaries() {
+    let dir = std::env::temp_dir().join(format!("jet_serde_module_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let lib = r#"
+@[Codable]
+pub struct Address { pub city: String }
+
+@[Codable]
+pub struct Order {
+    pub shipping: Address
+    pub quantities: [Int]
+    pub coupon: String?
+    pub labels: [String: Int]
+}
+
+"#;
+    let main = r#"
+use core.encoding.json as json
+use orders
+
+fn run() {
+    order := json.decode<orders.Order>("{{\"shipping\":{{\"city\":\"Paris\"}},\"quantities\":[2,3],\"coupon\":null,\"labels\":{{\"fragile\":1}}}}") ?? panic("decode")
+    print(json.to_string(order))
+}
+"#;
+    let (code, stdout, stderr) = build_and_run_multi(
+        &dir,
+        "serde_module",
+        "main.jet",
+        &[("main.jet", main), ("orders.jet", lib)],
+    );
+    assert_eq!(code, 0, "cross-module generated decode failed: {stderr}");
+    assert_eq!(stdout, "{\"labels\":{\"fragile\":1},\"quantities\":[2,3],\"shipping\":{\"city\":\"Paris\"}}\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// D-METADERIVE1 orphan law: expansion is legal when either derive provider
+/// or target type is entry-local. Both directions must generate usable code.
+#[test]
+fn user_derive_orphan_rule_allows_either_local_side() {
+    let dir = std::env::temp_dir().join(format!("jet_derive_orphan_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let lib = r#"
+derive T.RemoteLabel {
+    info :: T.reflect()
+    name :: info.name
+    emit("impl $name {{ fn remote_label(self) -> String {{ return \"remote:$name\" }} }}")
+}
+
+#[LocalLabel]
+pub struct RemoteType { pub value: Int }
+
+pub fn remote_type_label() -> String {
+    value := RemoteType.{ value: 2 }
+    return value.local_label()
+}
+"#;
+    let main = r#"
+use labels
+
+derive T.LocalLabel {
+    info :: T.reflect()
+    name :: info.name
+    emit("impl $name {{ pub fn local_label(self) -> String {{ return \"local:$name\" }} }}")
+}
+
+#[RemoteLabel]
+struct LocalType { value: Int }
+
+fn run() {
+    local := LocalType.{ value: 1 }
+    print(local.remote_label())
+    print(labels.remote_type_label())
+}
+"#;
+    let (code, stdout, stderr) = build_and_run_multi(
+        &dir,
+        "derive_orphan",
+        "main.jet",
+        &[("main.jet", main), ("labels.jet", lib)],
+    );
+    assert_eq!(code, 0, "local-orphan derive dispatch failed: {stderr}");
+    assert_eq!(stdout, "remote:LocalType\nlocal:RemoteType\n");
     let _ = fs::remove_dir_all(&dir);
 }
 

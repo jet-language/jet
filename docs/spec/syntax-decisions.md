@@ -1478,14 +1478,15 @@ D-ENC-YAML1)*: one format-agnostic data model. `@Codable` (≡
 field-walk, not S56 reflection. Formats are adapters in **`core.encoding`**
 (`core.encoding.{json,csv,toml,yaml}`); encode verbs `to_string` /
 `to_string_pretty`; typed decode `decode<T>` (target inferable from the
-binding type; bare `decode(s)` yields dynamic `Data`). Hand-impl surface:
+binding type; bare `decode(s)` yields dynamic `DataTree`). Hand-impl surface:
 `encode`/`decode` verbs over `DataTree`
-(`.Null/.Bool/.Int/.Float/.Text/.Bytes/.Array/.Object`); `DecodeError
+(`.Null/.Bool/.Int/.Float/.Text/.Array/.Object`); `DecodeError
 { path, reason }`; encode infallible. Field markers (`#` plane):
 `#[Rename("x")]`, `#[Skip]`, `#[Default]`/`#[Default(expr)]`, `#[Flatten]`,
 `#[RenameAll(camel|snake|pascal|kebab|screaming)]` (E2409). Enum wire:
 externally tagged default, single-value variants bare; `#[Tag("type")]`
-internal, `#[Untagged]`. Unknown wire keys ignored by default;
+internal (single unnamed payload under `"value"`), `#[Untagged]`. Unknown wire
+keys ignored by default;
 `#[DenyUnknownFields]` errors (E2412). Generic `@Codable` auto-adds
 `Encode`/`Decode` bounds to wire-reaching type params only. Dynamic trees get
 `?`-chaining accessors (`.field(name)`, `.at(i)`, `.int()`, `.text()`, …).
@@ -1509,6 +1510,13 @@ everywhere, with the accessor auto-filling `path` from where it read, so `?`
 chains inside a hand `decode` with no mapping ceremony; hand-built object
 nodes take the map literal — `DataTree.Object({ "name": v, … })` —
 insertion-ordered, and the pair-list form is not accepted.
+
+**D-SERDE16 = A** *(ratified 2026-07-11, card #131)*: decode an arbitrary
+subtree through its target's public protocol with `tree.decode<T>()`. The
+spelling works uniformly for primitives, user types, `List`, `Option`, and
+`Map`; generated derives emit it as ordinary Jet source. A target without a
+`Decode` implementation is E0905 before codegen. No compiler-only helper,
+hidden alias, alternate codec, or fallback exists.
 
 **CLI & IO**: builder-spec arg parsing `args.spec().flag(…).option(…)
 .positional(…)` with generated `--help` (D-ARGS1). `io.stdin()` handle with

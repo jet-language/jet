@@ -295,7 +295,10 @@ pub(crate) fn is_prelude_struct_name(name: &str) -> bool {
     // D-TEXTWIDTH1=B: `TextWidth` is a plain dot-ctor core struct (no auto
     // fields, unlike HttpRequest's `params`) — see the lowering branch keyed
     // on `type_name == "TextWidth"` in `lower_expr`'s StructLit arm.
-    matches!(name, "HttpRequest" | "HttpResponse" | "TextWidth")
+    matches!(
+        name,
+        "HttpRequest" | "HttpResponse" | "TextWidth" | "DecodeError"
+    )
 }
 
 /// c109 Phase 19: is a FOREIGN (imported user) struct literal `alias.Type { … }` in
@@ -423,6 +426,7 @@ pub(crate) fn fallible_payload_covered(ty: &Type, cx: &Cx) -> bool {
         || is_covered_distinct_ty(ty, cx)
         || is_covered_struct_ty(ty, cx)
         || is_covered_enum_ty(ty, cx)
+        || is_covered_generic_struct_ty(ty, cx)
         || is_covered_collection_ty(ty, cx)
         // c109 Phase 24: a FOREIGN value-type payload (`Note?` on a `ParsedResult` field —
         // `Note` is an imported struct). It renders via `cx.rust_type` to its own Rust

@@ -975,7 +975,8 @@ impl TraitRegistry {
                 let ret_ok = matches!(
                     &m.return_type,
                     Some(Type::Result { ok, err })
-                        if matches!(ok.as_ref(), Type::Named(n) if n == type_name || n == "Self")
+                        if (matches!(ok.as_ref(), Type::Named(n) if n == type_name || n == "Self")
+                            || matches!(ok.as_ref(), Type::Apply { name, .. } if name == type_name))
                             && matches!(err.as_ref(), Type::Named(n) if n == "DecodeError")
                 );
                 !has_self && non_self.len() == 1 && is_data(&non_self[0].ty) && ret_ok

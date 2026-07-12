@@ -276,9 +276,18 @@ impl<'a> Checker<'a> {
                     return self.infer_code_module_call(alias, &mangled, *alias_span, span, args);
                 }
             }
-            if let Expr::Ident(type_name, _) = &**receiver {
-                // D-ENC-DYN1=A+: `Data`/`Json`/`Toml`/`Yaml`/`Csv` name the one dynamic value;
-                // they are reserved core type names (a user type may not redefine them).
+            if let Expr::Ident(type_name, type_span) = &**receiver {
+                // D-SERDE13=B: `Data.Text(x)` etc. — the retired spelling of the value
+                // tree. Point at `DataTree` (no alias, I8) before generic resolution.
+                if type_name == "Data" {
+                    self.diags.push(data_renamed_to_datatree(*type_span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                    return Some(json_ty());
+                }
+                // D-ENC-DYN1=A+: `DataTree`/`Json`/`Toml`/`Yaml`/`Csv` name the one dynamic
+                // value; they are reserved core type names (a user type may not redefine them).
                 if is_json_type_name(type_name) {
                     if let Some(ret) = self.check_core_json_lit(method, args, span) {
                         return Some(ret);
@@ -677,6 +686,57 @@ impl<'a> Checker<'a> {
                 self.allow_string_view_read = false;
             }
             let recv_ty = recv_ty?;
+            // D-SERDE2=A: Encode is one public protocol for hand and generated impls.
+            if method == "encode" {
+                if args.is_empty() && type_args.is_empty() && self.is_encodable(&recv_ty) {
+                    *recv_type_out = Some("__SerdeEncode__".to_string());
+                    return Some(Type::Named(Syntax::TYPE_DATA.to_string()));
+                }
+                if !self.is_encodable(&recv_ty) {
+                    let shown = recv_ty.show();
+                    let shown = shown.trim_matches('`');
+                    self.diags.push(Diagnostic::error(
+                        "E0905",
+                        format!("`{shown}` does not implement `Encode`"),
+                        "`.encode()` can only call the value's Encode contract".to_string(),
+                        format!("derive `Encode` on `{shown}`, or write `impl {shown}.Encode`"),
+                        Some(span),
+                    ));
+                    return None;
+                }
+            }
+            // D-SERDE16=A: public, target-directed Decode dispatch from an ordinary
+            // DataTree subtree. This is the spelling generated derives emit too.
+            if matches!(&recv_ty, Type::Named(n) if Syntax::is_data_type_name(n))
+                && method == Syntax::METHOD_DATATREE_DECODE
+            {
+                *recv_type_out = Some(Syntax::TYPE_DATA.to_string());
+                if !args.is_empty() || type_args.len() != 1 {
+                    self.diags.push(wrong_core_arity("DataTree.decode<T>", 0, args.len(), span));
+                    for arg in args.iter_mut() {
+                        self.infer(&mut arg.expr);
+                    }
+                    return None;
+                }
+                let target = type_args[0].clone();
+                if !self.is_decodable(&target) {
+                    let shown = target.show();
+                    let shown = shown.trim_matches('`');
+                    self.diags.push(Diagnostic::error(
+                        "E0905",
+                        format!("`{shown}` does not implement `Decode`"),
+                        format!("`DataTree.decode<{shown}>()` can only call the type's Decode contract"),
+                        format!("derive `Decode` on `{shown}`, or write `impl {shown}.Decode`"),
+                        Some(span),
+                    ));
+                }
+                let ret = Type::Result {
+                    ok: Box::new(target),
+                    err: Box::new(Type::Named("DecodeError".to_string())),
+                };
+                *resolved_ret_out = Some(ret.clone());
+                return Some(ret);
+            }
             if let Type::Named(ref n) | Type::Apply { name: ref n, .. } = &recv_ty {
                 if n == Syntax::TYPE_TASKGROUP {
                     return self.infer_taskgroup_method(receiver, method, span, args, recv_type_out);

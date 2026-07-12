@@ -277,6 +277,7 @@ before continuing.
 | E0348 | sema  | `#Meta` category is empty (D-CANVASMETA1) |
 | E0349 | parse | `#Meta` written outside binding/function/const position (D-CANVASMETA1) |
 | E0350 | sema  | `Any` type requested, but Jet has no general top type (D-DYNAMIC-TYPE1) |
+| E0351 | sema  | retired `Data` value-tree name; use `DataTree` (D-SERDE13) |
 | L0301 | sema  | unreachable dispatch pattern arm (lint)   |
 | E0401 | sema  | fallible value used where plain `T` expected |
 | E0402 | sema  | fallible call ignored as a statement      |
@@ -878,7 +879,7 @@ Wave-1 ring packages (`core.encoding.{csv,toml,yaml,json}`, `core.log`, `core.ti
 | E2701 | `{parser}` found malformed input at row/line {n} — {detail}. | The ring library parse function encountered text it can't interpret: a missing delimiter, an unclosed quote, or an unexpected character. The row or line number points at the first offending record. | Fix the input at the location named, or validate it before parsing. |
 | E2702 | Crypto API misuse: {detail}. | A `core.crypto` call would use a key, nonce, or algorithm in an unsafe way — for example, an IV too short or a key length the algorithm doesn't accept. Reserved for future static checks. | Follow the fix named in the error; the `core.crypto` API is intentionally restrictive to surface misuse. |
 | E2710 | `` `derive T.{Trait}` body failed while expanding `#[{Trait}]` on `{Type}` ``. | The user-authored derive body ran at compile time (D-METADERIVE1=A, D-CTCODEGEN1=A) and threw a comptime error — typically an undefined name, a bad method call, or a type mismatch in the body. The span points at the `#[Trait]` marker on the struct that triggered expansion. | Fix the `derive T.{Trait}` body: check that every name it references is bound in scope, every method it calls is valid on the reflected type, and every `emit()` argument is a `String`. |
-| E2711 | Derive orphan rule: `` `derive T.{Trait}` `` and `` `{Type}` `` are both in an imported module. | User-derive expansion can only run in the entry module (D-METADERIVE1=A). Both the `derive` block and the struct it targets must live in the entry file; expansion locked to an imported module produces an `impl` the entry module cannot override or suppress. | Move both `derive {Trait}` and `struct {Type}` to your entry module; derive expansion only runs there. |
+| E2711 | Derive orphan rule: neither `` `derive T.{Trait}` `` nor `` `{Type}` `` is local. | A generated implementation has a clear local owner only when its derive provider or target type lives in the entry module (D-METADERIVE1=A). Two imported sides leave the entry package owning neither contract. | Define `derive T.{Trait}` or `{Type}` in the entry module. |
 | E2712 | *retired by D-CTBLOCKEXPOSE1* (was: `$` splice outside comptime context). | Runtime `$name` splices are allowed when a comptime value is in scope. | Define the value with `comptime name = ...`, or remove the `$` prefix. |
 | E2713 | There is no comptime value named `{name}`. | `$name` splices a value that was computed by a `comptime` binding or `comptime {}` block. | Define `comptime {name} = ...` before using `$name`. |
 | E2714 | A user derive is written `derive T.{Trait}`. | The type parameter comes first, joined to the trait name with a dot (D-METADERIVE1, amended 2026-07-01); the `derive {Trait} for T` spelling was retired. | Write `derive T.{Trait} { … }`. |
@@ -1062,7 +1063,8 @@ already-freed arena), these track the views themselves.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E0350 | Jet does not have an `Any` type. | A value should keep a precise shape: use an enum for known variants, generics or traits for abstraction, `T?` for absence, and `Data` for parsed dynamic data. | Replace `Any` with the specific mechanism for this value. |
+| E0350 | Jet does not have an `Any` type. | A value should keep a precise shape: use an enum for known variants, generics or traits for abstraction, `T?` for absence, and `DataTree` for parsed dynamic data. | Replace `Any` with the specific mechanism for this value. |
+| E0351 | The value tree is named `DataTree`, not `Data`. | `DataTree` is the one name a hand codec constructs and returns and every format's `parse` yields; its variants are `.Null`, `.Bool`, `.Int`, `.Float`, `.Text`, `.Array`, and `.Object`. | Write `DataTree` instead of `Data`. |
 
 ## Statement switch attribute diagnostics (D-CANVASSTATE1)
 

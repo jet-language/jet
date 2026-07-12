@@ -30,6 +30,8 @@ pub(crate) struct Cx {
     pub(crate) type_aliases: HashMap<String, (Vec<crate::AST::TypeParam>, Type)>,
     pub(crate) trait_names: HashSet<String>,
     pub(crate) struct_fields: HashMap<String, Vec<(String, Type)>>,
+    /// Generic parameters that occur in non-skipped serialized fields.
+    pub(crate) serde_wire_params: HashMap<String, HashSet<String>>,
     pub(crate) enum_variants: HashMap<String, Vec<(String, VariantPayload)>>,
     /// variant name -> owning enum type (for pattern lowering)
     pub(crate) variant_owner: HashMap<String, String>,
@@ -741,6 +743,18 @@ impl Cx {
             Type::Named(name) if self.trait_names.contains(name) => {
                 format!("Box<dyn {}>", Generics::user_trait_rust(name))
             }
+            Type::Named(name) if name.contains('.') => {
+                let (alias, leaf) = name.split_once('.').unwrap();
+                match self.import_mods.get(alias) {
+                    Some(rust_mod) => format!(
+                        "{}{}::{}",
+                        self.root_prefix,
+                        rust_mod,
+                        user_type_rust(leaf)
+                    ),
+                    None => user_type_rust(name),
+                }
+            }
             Type::Named(name) if self.foreign_types.contains_key(name.as_str()) => {
                 let rust_mod = &self.foreign_types[name.as_str()];
                 format!("{}{}::user_{name}", self.root_prefix, rust_mod)
@@ -942,12 +956,27 @@ impl Cx {
                 format!("jet_gc::Gc<{}>", self.rust_type(&args[0]))
             }
             Type::Apply { name, args } => {
-                if args.is_empty() {
+                let head = if let Some((alias, leaf)) = name.split_once('.') {
+                    self.import_mods.get(alias).map_or_else(
+                        || user_type_rust(name),
+                        |rust_mod| {
+                            format!(
+                                "{}{}::{}",
+                                self.root_prefix,
+                                rust_mod,
+                                user_type_rust(leaf)
+                            )
+                        },
+                    )
+                } else {
                     user_type_rust(name)
+                };
+                if args.is_empty() {
+                    head
                 } else {
                     format!(
                         "{}<{args}>",
-                        user_type_rust(name),
+                        head,
                         args = args
                             .iter()
                             .map(|a| self.rust_type(a))
@@ -1109,6 +1138,7 @@ pub(crate) fn build_cx_items(
         type_aliases: HashMap::new(),
         trait_names: HashSet::new(),
         struct_fields: HashMap::new(),
+        serde_wire_params: HashMap::new(),
         enum_variants: HashMap::new(),
         variant_owner: HashMap::new(),
         boxed_edges: HashSet::new(),
@@ -1210,6 +1240,15 @@ pub(crate) fn build_cx_items(
             }
             Item::Struct(s) => {
                 cx.type_names.insert(s.name.clone());
+                let param_names = s.type_params.iter().map(|p| p.name.as_str()).collect::<HashSet<_>>();
+                let mut wire = HashSet::new();
+                for field in s.fields.iter().filter(|f| f.computed.is_none()
+                    && !f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_SKIP)) {
+                    for name in crate::Generics::free_type_params(&field.ty) {
+                        if param_names.contains(name.as_str()) { wire.insert(name); }
+                    }
+                }
+                cx.serde_wire_params.insert(s.name.clone(), wire);
                 if s.layout == Some(crate::AST::StructLayout::Columnar) {
                     cx.columnar.insert(s.name.clone());
                 }

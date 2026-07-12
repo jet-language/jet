@@ -149,6 +149,14 @@ fn boundary_scan(bundle: &ProgramBundle) -> Option<Boundary> {
                         span: Some(c.span),
                     });
                 }
+                Item::Impl(i)
+                    if matches!(i.trait_name.as_deref(), Some("Encode" | "Decode")) =>
+                {
+                    return Some(Boundary {
+                        feature: "uses a typed encoding implementation".to_string(),
+                        span: i.trait_span.or(Some(i.type_span)),
+                    });
+                }
                 Item::Func(f) => {
                     if f.is_unsafe {
                         return Some(Boundary {

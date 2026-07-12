@@ -53,6 +53,19 @@ pub(crate) fn decode_error_ty() -> Type {
     Type::Named("DecodeError".to_string())
 }
 
+/// D-SERDE13=B: the value tree's one user-facing name is `DataTree`. The old
+/// `Data` spelling is retired (no alias, I8) — point at the new name wherever a
+/// user still writes `Data` as a type or a construction receiver.
+pub(crate) fn data_renamed_to_datatree(span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0351",
+        "the value tree is named `DataTree`, not `Data`".to_string(),
+        "`DataTree` is the one name a hand codec constructs and returns and every format's `parse` yields — its variants are `.Null`/`.Bool`/`.Int`/`.Float`/`.Text`/`.Array`/`.Object`".to_string(),
+        "write `DataTree` instead of `Data`".to_string(),
+        Some(span),
+    )
+}
+
 pub(crate) fn is_json_error_type_name(name: &str) -> bool {
     name == Syntax::TYPE_JSON_ERROR || name == "JsonError"
 }
@@ -682,6 +695,15 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
         "TextWidth" => Some(vec![
             ("ambiguous".to_string(), Type::Named("TextWidthAmbiguous".to_string())),
             ("controls".to_string(), Type::Named("TextWidthControls".to_string())),
+        ]),
+        // D-SERDE2 / D-SERDE14=A: a hand `decode` builds its own rejection with
+        // `DecodeError.{ path: …, reason: … }` and returns it via `err(…)`. Both
+        // fields are `String`; `path` is the wire location (e.g. `""` for a
+        // whole-value reject, `"email"` for a field). Registering it here is what
+        // makes the dot-ctor legal (it was E0119 before this decision).
+        "DecodeError" => Some(vec![
+            ("path".to_string(), str_ty.clone()),
+            ("reason".to_string(), str_ty),
         ]),
         _ => None,
     }

@@ -959,6 +959,23 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     },
                 };
             }
+            // D-SERDE2 / D-SERDE14=A: the public DecodeError dot constructor is a
+            // core struct literal with plain fields and a jet_std Rust head.
+            if type_name == "DecodeError" {
+                let tfields = fields
+                    .iter()
+                    .map(|(name, _, value)| (name.clone(), lower_expr(value, cx, env), false))
+                    .collect();
+                return TExpr {
+                    ty: Type::Named(type_name.clone()),
+                    kind: TExprKind::StructLit {
+                        rust_type: format!("{}jet_std::DecodeError", cx.root_prefix),
+                        fields: tfields,
+                        extra: None,
+                        as_trait: None,
+                    },
+                };
+            }
             // c109 Phase 19: a GENERIC struct literal carries `type_args` (`Pair<T> {…}`).
             // The Rust head is the turbofish `user_<Name>::<args>` (`user_type_apply_rust`),
             // resolved at lowering; fields mangle. A non-generic literal renders `user_<Name>`.
