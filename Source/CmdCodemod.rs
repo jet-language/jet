@@ -281,8 +281,8 @@ fn parse_batch(value: Value, object_path: &Path) -> Batch {
 }
 
 fn run_v2(batch: Batch, apply: bool, yes: bool) {
-    let _lock = Transaction::lock(&batch.project);
-    Transaction::recover(&batch.project);
+    let lock = Transaction::lock(&batch.project);
+    Transaction::recover(&lock);
     let plan = plan_batch(&batch);
     verify_inputs(&plan.inputs);
     print_batch(&batch, &plan);
@@ -306,7 +306,7 @@ fn run_v2(batch: Batch, apply: bool, yes: bool) {
         .collect::<Vec<_>>();
     let log_path = log_path(&batch.project, &batch.name);
     let log = render_v2_log(&batch, &changes);
-    Transaction::commit(&batch.project, &changes, &log_path, log.as_bytes());
+    Transaction::commit(&lock, &changes, &log_path, log.as_bytes());
     println!(
         "codemod `{}` applied\n  files: {}\n  log: {}",
         batch.name,
@@ -1313,8 +1313,8 @@ fn render_v2_log(batch: &Batch, changes: &[Change]) -> String {
 fn undo(path: &Path) {
     let project = replay_log_project(path);
     if !path.exists() {
-        let _lock = Transaction::lock(&project);
-        Transaction::recover(&project);
+        let lock = Transaction::lock(&project);
+        Transaction::recover(&lock);
     }
     let raw = Transaction::read_replay_log(&project, path).unwrap_or_else(|e| {
         fail(&format!(
@@ -1370,8 +1370,8 @@ fn undo_v2(value: Value, path: &Path, project: &Path) {
     let paths = decoded.iter().map(|(path, _, _)| path.clone()).collect::<Vec<_>>();
     Transaction::validate_destinations(project, &paths);
     Transaction::validate_replay_aliases(project, path, &paths);
-    let _lock = Transaction::lock(project);
-    Transaction::recover(project);
+    let lock = Transaction::lock(project);
+    Transaction::recover(&lock);
     let mut changes = Vec::new();
     for (p, before, after) in decoded {
         let current = Transaction::read_destination(project, &p)
@@ -1389,7 +1389,7 @@ fn undo_v2(value: Value, path: &Path, project: &Path) {
         "{{\"schema\":2,\"name\":\"{}-undo\",\"files\":[]}}\n",
         json_escape(&name)
     );
-    Transaction::commit(project, &changes, &undo_log, marker.as_bytes());
+    Transaction::commit(&lock, &changes, &undo_log, marker.as_bytes());
     println!(
         "codemod undo `{name}` applied\n  files: {}\n  source log: {}",
         changes.len(),
@@ -1446,9 +1446,9 @@ fn run_v1(cm: V1, apply: bool) {
         let log = render_v1_log(&cm, &changes);
         let dir = project.join(".jet/codemods");
         let p = dir.join(format!("{}.log.json", sanitize_file_name(&cm.name)));
-        let _lock = Transaction::lock(&project);
-        Transaction::recover(&project);
-        Transaction::commit(&project, &changes, &p, log.as_bytes());
+        let lock = Transaction::lock(&project);
+        Transaction::recover(&lock);
+        Transaction::commit(&lock, &changes, &p, log.as_bytes());
         println!("  log: {}", p.display())
     }
 }
@@ -1484,8 +1484,8 @@ fn undo_v1(value: Value, path: &Path, project: &Path) {
     let paths = decoded.iter().map(|row| row.0.clone()).collect::<Vec<_>>();
     Transaction::validate_destinations(project, &paths);
     Transaction::validate_replay_aliases(project, path, &paths);
-    let _lock = Transaction::lock(project);
-    Transaction::recover(project);
+    let lock = Transaction::lock(project);
+    Transaction::recover(&lock);
     let mut changes = Vec::new();
     for (file, before_hash, after_hash, before_bytes, inverse_edits) in decoded {
         let current = Transaction::read_destination(project, &file)
@@ -1518,7 +1518,7 @@ fn undo_v1(value: Value, path: &Path, project: &Path) {
     }
     let undo_log = path.with_extension("undo.log.json");
     let marker = format!("{{\"schema\":2,\"name\":\"{}-undo\",\"files\":[]}}\n", json_escape(&name));
-    Transaction::commit(project, &changes, &undo_log, marker.as_bytes());
+    Transaction::commit(&lock, &changes, &undo_log, marker.as_bytes());
     println!("codemod undo `{name}` applied")
 }
 

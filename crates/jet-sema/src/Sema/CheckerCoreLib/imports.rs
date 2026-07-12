@@ -26,6 +26,7 @@ impl<'a> Checker<'a> {
                 }
                 return None;
             };
+            self.record_current_function_reference(mangled, span);
             // D-MOD2/3: a qualified `M.item` call from outside the module reaches only
             // its `pub` items — a bare private item escapes its module otherwise.
             if !self.func_pub.get(mangled).copied().unwrap_or(false)
@@ -110,6 +111,7 @@ impl<'a> Checker<'a> {
                     return None;
                 }
                 let sig = target.funcs.get(name).unwrap().clone();
+                self.record_function_reference(mod_idx, name, span);
                 if args.len() != sig.params.len() {
                     self.diags.push(Diagnostic::error(
                         "E0104",

@@ -170,6 +170,15 @@ mod tests {
     }
 
     #[test]
+    fn every_structural_child_has_explicit_slot() {
+        let path = fixture("basics/default_refs.jet");
+        let index = open(&path).expect("default-ref example should index");
+        assert!(index.structural_nodes().iter().all(|node| {
+            node.parent.is_none() || node.slot != "root"
+        }));
+    }
+
+    #[test]
     fn checked_reference_facts_cover_import_members_aliases_and_receivers() {
         let root = std::env::temp_dir().join(format!(
             "jet_semindex_reference_facts_{}",
@@ -182,7 +191,7 @@ mod tests {
         std::fs::write(&library, "pub fn report() { print(\"library\") }\n").unwrap();
         std::fs::write(
             &main,
-            "use \"./library\" as api\nuse api.{report as alias_report}\n\nstruct Worker { value: Int }\nimpl Worker {\n    fn step(self) { print(\"step\") }\n}\n\nfn run() {\n    api.report()\n    alias_report()\n    worker :: Worker.{value: 1}\n    worker.step()\n}\n",
+            "use \"./library\" as api\nuse api.{report as alias_report}\n\nstruct Worker { value: Int }\nimpl Worker {\n    fn step(self) { print(\"worker\") }\n}\nstruct Other { value: Int }\nimpl Other {\n    fn step(self) { print(\"other\") }\n}\n\nfn run() {\n    api.report()\n    alias_report()\n    worker :: Worker.{value: 1}\n    worker.step()\n    other :: Other.{value: 2}\n    other.step()\n}\n",
         )
         .unwrap();
 
@@ -199,6 +208,12 @@ mod tests {
         assert!(target_kind("report").contains(&"function"));
         assert!(target_kind("alias_report").contains(&"function"));
         assert!(target_kind("step").contains(&"function"));
+        let step_targets = index.references().iter()
+            .filter(|reference| reference.name == "step")
+            .filter_map(|reference| reference.target.as_ref())
+            .map(|target| (target.module_path.clone(), target.def_span.start, target.def_span.end))
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(step_targets.len(), 2, "receiver type must select exact method definition");
         let _ = std::fs::remove_dir_all(root);
     }
 }

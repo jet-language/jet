@@ -134,6 +134,7 @@ impl<'a> Checker<'a> {
                 &b.name,
                 b.name_span,
                 LocalInfo {
+                    def_span: b.name_span,
                     ty,
                     mutable: true,
                     param_conv: None,
@@ -455,6 +456,7 @@ impl<'a> Checker<'a> {
                 &b.name,
                 b.name_span,
                 LocalInfo {
+                    def_span: b.name_span,
                     ty: final_ty,
                     mutable: b.mutable && !b.is_comptime,
                     param_conv: None,

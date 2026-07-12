@@ -18,6 +18,7 @@ pub use crate::AST::FuncSig;
 
 #[derive(Debug, Clone)]
 pub(crate) struct MethodSig {
+    name_span: Span,
     params: Vec<(AccessConvention, Type)>,
     return_type: Option<Type>,
     is_static: bool,
@@ -306,6 +307,7 @@ fn func_to_method_sig(f: &Func) -> MethodSig {
     // caller provides (no `self` in the call-site arg list).
     let non_self_params = f.params.iter().filter(|p| p.name != "self");
     MethodSig {
+        name_span: f.name_span,
         params: f
             .params
             .iter()
@@ -487,6 +489,7 @@ fn find_forward_refs_inner(
 
 #[derive(Debug, Clone)]
 pub(crate) struct LocalInfo {
+    def_span: Span,
     ty: Type,
     mutable: bool,
     /// Set when the name is a parameter (with its access convention).
@@ -583,6 +586,10 @@ pub enum CompileMode {
 }
 
 pub(crate) struct ModuleState {
+    module_path: String,
+    func_spans: HashMap<String, Span>,
+    const_spans: HashMap<String, Span>,
+    import_spans: HashMap<String, Span>,
     /// D-PUBPKG1=A: modules under the same project package/workspace root may
     /// see `pub(package)` items. Dependency/hangar modules get their own root.
     package_scope: PathBuf,
@@ -638,6 +645,8 @@ pub(crate) struct Checker<'a> {
     func_pub: &'a HashMap<String, bool>,
     /// D-PUBPKG1=A: package-scoped function visibility flags.
     func_pkg_pub: &'a HashMap<String, bool>,
+    module_path: &'a str,
+    reference_anchors: &'a mut HashMap<(String, usize, usize), Effects::DefinitionAnchorFact>,
     diags: Vec<Diagnostic>,
     scopes: Vec<HashMap<String, LocalInfo>>,
     /// name -> span of the use that gave the value away.
@@ -856,7 +865,7 @@ pub mod Schema;
 mod SchemaMigration;
 mod ScopeMembers;
 mod PolicyFacts;
-mod ReferenceFacts;
+mod CheckerReferences;
 mod State;
 mod Taint;
 mod WebPartition;

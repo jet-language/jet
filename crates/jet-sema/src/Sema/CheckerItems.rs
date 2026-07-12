@@ -28,6 +28,7 @@ impl<'a> Checker<'a> {
             }
             return None;
         };
+        self.record_method_reference(type_name, method, span);
         if !msig.is_static {
             self.diags.push(Diagnostic::error(
                 "E0311",

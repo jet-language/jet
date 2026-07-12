@@ -737,6 +737,10 @@ pub(crate) fn check_bundle_opts(
         .modules
         .iter()
         .map(|m| ModuleState {
+            module_path: m.display.clone(),
+            func_spans: HashMap::new(),
+            const_spans: HashMap::new(),
+            import_spans: HashMap::new(),
             package_scope: package_scope_for(&m.path, &bundle.project_root),
             funcs: HashMap::new(),
             func_pub: HashMap::new(),
@@ -839,7 +843,21 @@ pub(crate) fn check_bundle_opts(
             None
         };
         let st = &mut states[idx];
+        for import in &module.imports {
+            if !matches!(import.kind, crate::AST::ImportKind::Unqualified { .. }) {
+                st.import_spans.insert(import.import_alias(), import.alias_span);
+            }
+        }
         for item in &module.items {
+            match item {
+                Item::Func(f) => {
+                    st.func_spans.insert(f.name.clone(), f.name_span);
+                }
+                Item::Const(c) => {
+                    st.const_spans.insert(c.name.clone(), c.name_span);
+                }
+                _ => {}
+            }
             match item {
                 Item::Func(f) => register_func_item(f, st, &mut diags),
                 Item::Struct(s) => {
@@ -1010,6 +1028,7 @@ pub(crate) fn check_bundle_opts(
                         for inner in body {
                             if let Item::Func(f) = inner {
                                 let mangled = format!("{}__{}", cm.name, f.name);
+                                st.func_spans.insert(mangled.clone(), f.name_span);
                                 st.funcs.insert(mangled.clone(), func_to_sig(f));
                                 st.func_pub.insert(mangled, f.is_pub && !f.is_package_pub);
                                 st.func_pkg_pub
@@ -1776,6 +1795,7 @@ pub(crate) fn check_bundle_opts(
     // Use a temporary to avoid simultaneous &mut borrows of `bundle`.
     let mut embed_inputs = std::mem::take(&mut bundle.comptime_inputs);
     let mut effect_summaries: HashMap<String, EffectSummary> = HashMap::new();
+    let mut reference_anchors = HashMap::new();
     let mut module_effect_summaries: Vec<(String, HashMap<String, EffectSummary>)> = Vec::new();
     // D-METHODMACRO1=A: top-level function names whose address was taken
     // anywhere in the bundle, accumulated across every module below; the
@@ -1794,6 +1814,7 @@ pub(crate) fn check_bundle_opts(
             &mut local_summaries,
             &mut embed_inputs,
             &mut global_addr_taken,
+            &mut reference_anchors,
         ));
         apply_effect_via(&module.items, &mut local_summaries, &mut Vec::new());
         effect_summaries.extend(local_summaries.clone());
@@ -1905,7 +1926,6 @@ pub(crate) fn check_bundle_opts(
     bundle.used_core = used_core;
     apply_helper_layer_inference(bundle, &states, &usage_spans, &mut diags);
     let (public_summaries, public_solved) = qualified_effect_facts(&module_effect_summaries);
-    let reference_anchors = super::ReferenceFacts::collect(bundle);
     (
         diags,
         super::Effects::SemIndexEffectFacts {
@@ -2599,6 +2619,7 @@ pub(crate) fn check_module_bodies(
     summaries: &mut HashMap<String, EffectSummary>,
     embed_inputs_out: &mut Vec<crate::AST::ComptimeInput>,
     global_addr_taken: &mut HashSet<String>,
+    reference_anchors: &mut HashMap<(String, usize, usize), DefinitionAnchorFact>,
 ) -> Vec<Diagnostic> {
     let st = &states[module_idx];
     let mut diags = Vec::new();
@@ -2632,6 +2653,7 @@ pub(crate) fn check_module_bodies(
                     global_addr_taken,
                     no_alloc,
                 no_prelude,
+                reference_anchors,
                 ));
             }
             Item::Struct(s) => {
@@ -2652,6 +2674,7 @@ pub(crate) fn check_module_bodies(
                         global_addr_taken,
                         no_alloc,
                     no_prelude,
+                    reference_anchors,
                     ));
                 }
                 // Trait impls nested in a struct are real method bodies too.
@@ -2721,6 +2744,7 @@ pub(crate) fn check_module_bodies(
                         global_addr_taken,
                         no_alloc,
                     no_prelude,
+                    reference_anchors,
                     ));
                 }
                 for block in &mut e.trait_impls {
@@ -2770,6 +2794,7 @@ pub(crate) fn check_module_bodies(
                         global_addr_taken,
                         no_alloc,
                     no_prelude,
+                    reference_anchors,
                     ));
                 }
             }
@@ -2835,6 +2860,7 @@ pub(crate) fn check_module_bodies(
                     global_addr_taken,
                     no_alloc,
                 no_prelude,
+                reference_anchors,
                 ));
                 t.body = synthetic.body;
             }
@@ -2894,6 +2920,7 @@ pub(crate) fn check_module_bodies(
                     global_addr_taken,
                     no_alloc,
                 no_prelude,
+                reference_anchors,
                 ));
                 b.body = synthetic.body;
             }
@@ -2920,6 +2947,7 @@ pub(crate) fn check_module_bodies(
                                 global_addr_taken,
                                 no_alloc,
                             no_prelude,
+                            reference_anchors,
                             ));
                         }
                     }
@@ -2968,6 +2996,7 @@ pub(crate) fn check_func_body_bundle(
     no_alloc: bool,
     // D-PRELUDEX1=A: this file's `#NoPrelude` state.
     no_prelude: bool,
+    reference_anchors: &mut HashMap<(String, usize, usize), DefinitionAnchorFact>,
 ) -> Vec<Diagnostic> {
     let st = &states[module_idx];
     let mut ck = Checker {
@@ -2984,6 +3013,8 @@ pub(crate) fn check_func_body_bundle(
         unqualified_file: &st.unqualified_file,
         func_pub: &st.func_pub,
         func_pkg_pub: &st.func_pkg_pub,
+        module_path: &st.module_path,
+        reference_anchors,
         diags: Vec::new(),
         scopes: vec![HashMap::new()],
         moved: HashMap::new(),
