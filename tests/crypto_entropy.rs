@@ -311,7 +311,7 @@ fn golden_i1_scan_strips_only_the_vetted_entropy_module() {
 }
 
 #[test]
-fn keygen_entropy_failure_emits_no_unratified_helper_copy() {
+fn keygen_entropy_failure_uses_closed_silent_helper_status() {
     let ffi = include_str!("../crates/jetpack/src/FFI.rs");
     let keygen = ffi
         .split("\"keygen\" => {{")
@@ -320,7 +320,8 @@ fn keygen_entropy_failure_emits_no_unratified_helper_copy() {
         .split("\"sign\" => {{")
         .next()
         .unwrap();
-    assert!(keygen.contains("Err(_) => exit(1)"));
+    assert!(keygen.contains("Err(_) => exit(ENTROPY_UNAVAILABLE)"));
+    assert!(ffi.contains("const ENTROPY_UNAVAILABLE: i32 = 75;"));
     assert!(!keygen.contains("fail(&e"));
     assert!(!keygen.contains("eprintln!"));
 }

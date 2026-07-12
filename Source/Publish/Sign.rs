@@ -448,4 +448,21 @@ mod tests {
         assert_eq!(keys_dir(), PathBuf::from("/tmp/jet_keys_test_dir"));
         std::env::remove_var("JET_KEYS_DIR");
     }
+
+    #[test]
+    fn e1292_command_frame_is_exact() {
+        assert_eq!(
+            render_e1292(),
+            include_str!("../../tests/fixtures/jetpack-diagnostics/keygen_entropy_unavailable.stderr")
+        );
+        let diagnostic = e1292();
+        assert_eq!(diagnostic.code, "E1292");
+    }
+
+    #[test]
+    fn secret_temporary_zeroization_clears_every_byte() {
+        let mut secret = vec![0xa5; 96];
+        volatile_zeroize(&mut secret);
+        assert_eq!(secret, vec![0; 96]);
+    }
 }

@@ -3408,6 +3408,138 @@ fn cli_publish_signs_index_and_auto_keygens() {
     let _ = fs::remove_dir_all(&tmp);
 }
 
+#[cfg(unix)]
+#[test]
+fn cli_keygen_entropy_failure_is_exact_e1292_and_artifact_free() {
+    let _guard = STORE_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let tmp = tmp_dir("keygen_entropy_failure");
+    let home = tmp.join("home");
+    let keys = tmp.join("keys");
+    fs::create_dir_all(&home).unwrap();
+    install_closed_status_crypto_helper(&home);
+
+    let out = jet_cmd_env(
+        &["registry", "keygen"],
+        &tmp,
+        &[
+            ("HOME", home.to_str().unwrap()),
+            ("JET_KEYS_DIR", keys.to_str().unwrap()),
+        ],
+    );
+    assert_eq!(out.status.code(), Some(1));
+    assert!(out.stdout.is_empty(), "stdout must stay empty: {:?}", out.stdout);
+    assert_eq!(
+        String::from_utf8(out.stderr).unwrap(),
+        include_str!("fixtures/jetpack-diagnostics/keygen_entropy_unavailable.stderr")
+    );
+    assert!(!keys.exists(), "entropy failure created a key directory");
+
+    fs::remove_dir_all(&tmp).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn cli_publish_auto_keygen_entropy_failure_mutates_nothing() {
+    if !have_git() {
+        eprintln!("note: skipping auto-keygen entropy failure (git not found)");
+        return;
+    }
+    let _guard = STORE_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let tmp = tmp_dir("publish_entropy_failure");
+    let home = tmp.join("home");
+    let project = tmp.join("project");
+    let bare = tmp.join("registry.git");
+    let registry_url = bare_registry(&bare);
+    let registry_cache = tmp.join("registry-cache");
+    let store = tmp.join("store");
+    let keys = tmp.join("keys");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&project).unwrap();
+    fs::create_dir_all(&store).unwrap();
+    install_closed_status_crypto_helper(&home);
+    init_clean_project(&project, "entropyfail", "1.0.0");
+
+    let out = jet_cmd_env(
+        &["registry", "publish"],
+        &project,
+        &[
+            ("HOME", home.to_str().unwrap()),
+            ("JET_KEYS_DIR", keys.to_str().unwrap()),
+            ("JET_REGISTRY_URL", registry_url.as_str()),
+            ("JET_REGISTRY_CACHE_DIR", registry_cache.to_str().unwrap()),
+            ("JET_STORE_DIR", store.to_str().unwrap()),
+        ],
+    );
+    assert_eq!(out.status.code(), Some(1));
+    assert!(out.stdout.is_empty(), "stdout must stay empty: {:?}", out.stdout);
+    assert_eq!(
+        String::from_utf8(out.stderr).unwrap(),
+        include_str!("fixtures/jetpack-diagnostics/keygen_entropy_unavailable.stderr")
+    );
+    assert!(!keys.exists(), "auto-keygen failure created key artifacts");
+    assert!(!registry_cache.exists(), "auto-keygen failure cloned an index");
+    assert!(
+        read_index_file(&bare, "entropyfail").is_none(),
+        "auto-keygen failure mutated the registry index"
+    );
+    assert!(
+        !project.join(".jet/cache/api").exists()
+            && !project.join(".jet/cache/schema").exists(),
+        "auto-keygen failure created package snapshots"
+    );
+
+    fs::remove_dir_all(&tmp).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn cli_publish_existing_key_bypasses_entropy_keygen() {
+    if !have_git() {
+        eprintln!("note: skipping existing-key entropy bypass (git not found)");
+        return;
+    }
+    let _guard = STORE_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let tmp = tmp_dir("publish_existing_key");
+    let home = tmp.join("home");
+    let project = tmp.join("project");
+    let bare = tmp.join("registry.git");
+    let registry_url = bare_registry(&bare);
+    let registry_cache = tmp.join("registry-cache");
+    let store = tmp.join("store");
+    let keys = tmp.join("keys");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&project).unwrap();
+    fs::create_dir_all(&store).unwrap();
+    fs::create_dir_all(&keys).unwrap();
+    install_closed_status_crypto_helper(&home);
+    init_clean_project(&project, "existingkey", "1.0.0");
+    let seed = vec![0x5au8; 32];
+    fs::write(keys.join("jet.ed25519"), &seed).unwrap();
+    fs::write(keys.join("jet.ed25519.pub"), "00".repeat(32)).unwrap();
+
+    let out = jet_cmd_env(
+        &["registry", "publish"],
+        &project,
+        &[
+            ("HOME", home.to_str().unwrap()),
+            ("JET_KEYS_DIR", keys.to_str().unwrap()),
+            ("JET_REGISTRY_URL", registry_url.as_str()),
+            ("JET_REGISTRY_CACHE_DIR", registry_cache.to_str().unwrap()),
+            ("JET_STORE_DIR", store.to_str().unwrap()),
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "existing-key publish failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(fs::read(keys.join("jet.ed25519")).unwrap(), seed);
+    assert!(read_index_file(&bare, "existingkey").is_some());
+
+    fs::remove_dir_all(&tmp).unwrap();
+}
+
 #[test]
 fn cli_publish_no_sign_leaves_signature_empty() {
     // c146: `--no-sign` opts out; tier-B checksum (content_hash) still present.
