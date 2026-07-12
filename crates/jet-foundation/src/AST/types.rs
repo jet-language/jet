@@ -57,6 +57,10 @@ pub enum Type {
     /// S38/D-LISTMAP-CANON1=A: keyed collection `[K: V]`.
     Map {
         key: Box<Type>,
+        /// Parser-owned boundary of the key inside `[K: V]`.
+        /// Synthesized map types carry `None`; diagnostics then fall back to
+        /// the enclosing type span.
+        key_span: Option<Span>,
         value: Box<Type>,
     },
     Shared(Box<Type>),
@@ -147,7 +151,18 @@ impl PartialEq for Type {
             | (Char, Char)
             | (Float32, Float32) => true,
             (List(a), List(b)) => a == b,
-            (Map { key: k1, value: v1 }, Map { key: k2, value: v2 }) => k1 == k2 && v1 == v2,
+            (
+                Map {
+                    key: k1,
+                    value: v1,
+                    ..
+                },
+                Map {
+                    key: k2,
+                    value: v2,
+                    ..
+                },
+            ) => k1 == k2 && v1 == v2,
             (Shared(a), Shared(b)) => a == b,
             (Option(a), Option(b)) => a == b,
             (Result { ok: o1, err: e1 }, Result { ok: o2, err: e2 }) => o1 == o2 && e1 == e2,
@@ -251,7 +266,7 @@ impl Type {
             Type::String => "String (text)".to_string(),
             Type::Char => "Char (one character)".to_string(),
             Type::List(inner) => format!("[{}]", inner.name()),
-            Type::Map { key, value } => format!("[{}: {}]", key.name(), value.name()),
+            Type::Map { key, value, .. } => format!("[{}: {}]", key.name(), value.name()),
             Type::Shared(inner) => format!("Shared<{}>", inner.name()),
             Type::Option(inner) => format!("{}?", inner.name()),
             Type::Result { ok, err } => format!("{} ? {}", ok.name(), err.name()),
@@ -311,7 +326,7 @@ impl Type {
             Type::String => "String".to_string(),
             Type::Char => "Char".to_string(),
             Type::List(inner) => format!("[{}]", inner.name()),
-            Type::Map { key, value } => format!("[{}: {}]", key.name(), value.name()),
+            Type::Map { key, value, .. } => format!("[{}: {}]", key.name(), value.name()),
             Type::Shared(inner) => format!("Shared<{}>", inner.name()),
             Type::Option(inner) => format!("{}?", inner.name()),
             Type::Result { ok, err } => format!("{} ? {}", ok.name(), err.name()),

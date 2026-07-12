@@ -5,3 +5,11 @@ Error [E3202]: Type `*Int` cannot cross the C boundary here.
     |                   ^^^^
  Why: C FFI allows by-value scalars and `String` in ordinary code; pointers and other gated types need `use core.mem` and an `#Unsafe { … }` region (S58).
  Fix: Move the call inside `#Unsafe`, or change the type to a C-safe value type.
+
+Error [E3202]: Type `*Int` cannot cross the C boundary here.
+  --> tests/ui/cffi_e3202_ptr_boundary.jet:3:24
+    |
+  3 |     fn return_ptr() -> *Int = "DemoReturnPtr";
+    |                        ^^^^
+ Why: C FFI allows by-value scalars and `String` in ordinary code; pointers and other gated types need `use core.mem` and an `#Unsafe { … }` region (S58).
+ Fix: Move the call inside `#Unsafe`, or change the type to a C-safe value type.

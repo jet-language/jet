@@ -15,6 +15,7 @@ impl<'a> Checker<'a> {
                 "Array" => vec![Type::List(Box::new(json.clone()))],
                 "Object" => vec![Type::Map {
                     key: Box::new(Type::String),
+                    key_span: None,
                     value: Box::new(json.clone()),
                 }],
                 _ => {

@@ -53,7 +53,7 @@ impl<'a> Checker<'a> {
                 | Type::Float32 => true,
                 Type::List(e) | Type::Option(e) | Type::Shared(e) => self.is_encodable(e),
                 Type::FixedList { elem, .. } => self.is_encodable(elem),
-                Type::Map { key, value } => matches!(**key, Type::String) && self.is_encodable(value),
+                Type::Map { key, value, .. } => matches!(**key, Type::String) && self.is_encodable(value),
                 Type::Named(n) => {
                     is_json_type_name(n)
                         || self.serde_trait_impl(n, crate::Generics::ENCODE)
@@ -86,7 +86,7 @@ impl<'a> Checker<'a> {
                 | Type::Float32 => true,
                 Type::List(e) | Type::Option(e) | Type::Shared(e) => self.is_decodable(e),
                 Type::FixedList { elem, .. } => self.is_decodable(elem),
-                Type::Map { key, value } => matches!(**key, Type::String) && self.is_decodable(value),
+                Type::Map { key, value, .. } => matches!(**key, Type::String) && self.is_decodable(value),
                 Type::Named(n) => self.serde_trait_impl(n, crate::Generics::DECODE)
                     || self.type_param_scope.iter().any(|p|
                         p.name == *n && p.bounds.iter().any(|b| b == crate::Generics::DECODE)),

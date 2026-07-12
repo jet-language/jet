@@ -172,6 +172,7 @@ impl CtValue {
                     .unwrap_or((Type::String, Type::Int));
                 Type::Map {
                     key: Box::new(k),
+                    key_span: None,
                     value: Box::new(v),
                 }
             }

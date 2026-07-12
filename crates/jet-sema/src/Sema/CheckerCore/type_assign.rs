@@ -220,7 +220,11 @@ impl<'a> Checker<'a> {
                     self.check_declared_type(inner, span);
                 }
                 Type::List(inner) | Type::Shared(inner) => self.check_declared_type(inner, span),
-                Type::Map { key, value } => {
+                Type::Map {
+                    key,
+                    key_span,
+                    value,
+                } => {
                     self.check_declared_type(key, span);
                     self.check_declared_type(value, span);
                     if !is_map_key_type(key) {
@@ -230,7 +234,7 @@ impl<'a> Checker<'a> {
                             "map keys must be Int, String, Bool, Char, or a payload-free enum"
                                 .to_string(),
                             "pick a simpler key type, or store a struct as the value".to_string(),
-                            Some(span),
+                            Some(key_span.unwrap_or(span)),
                         ));
                     }
                 }

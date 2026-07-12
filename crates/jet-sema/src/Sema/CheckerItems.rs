@@ -578,6 +578,7 @@ impl<'a> Checker<'a> {
         if let Some(core_fields) = core_constructable_fields(type_name) {
             let str_map_ty = Type::Map {
                 key: Box::new(Type::String),
+                key_span: None,
                 value: Box::new(Type::String),
             };
             let provided_names: std::collections::HashSet<String> =

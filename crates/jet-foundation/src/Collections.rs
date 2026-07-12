@@ -90,7 +90,7 @@ pub fn builtin_method_return(
         Type::List(inner) => list_method_return(inner, method, arg_count),
         // S76: [T#N] delegates to list methods; length-changing ops are blocked in sema (E0964).
         Type::FixedList { elem, .. } => list_method_return(elem, method, arg_count),
-        Type::Map { key, value } => map_method_return(key, value, method, arg_count),
+        Type::Map { key, value, .. } => map_method_return(key, value, method, arg_count),
         Type::String => string_method_return(method, arg_count),
         Type::Named(n) if n == "Stopwatch" => stopwatch_method_return(method, arg_count),
         // D-DET1: deterministic injected Clock/Rng capability methods. Reading
@@ -515,10 +515,12 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         // D-ITER1: group_by(f: T->K) -> [K: [T]]; sema refines K.
         ("group_by", 1) => Some(Some(Type::Map {
             key: Box::new(Type::String), // placeholder; sema refines
+            key_span: None,
             value: Box::new(Type::List(Box::new(inner.clone()))),
         })),
         ("count_by", 1) => Some(Some(Type::Map {
             key: Box::new(Type::String), // placeholder; sema refines
+            key_span: None,
             value: Box::new(Type::Int),
         })),
         // D-AUTOPAR1=A: parallel adapters. Return types mirror their sequential equivalents;
@@ -1174,7 +1176,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             "view" => Some(vec![Type::Int, Type::Int]),
             _ => Some(vec![]),
         },
-        Type::Map { key, value } => match method {
+        Type::Map { key, value, .. } => match method {
             "insert" => Some(vec![(**key).clone(), (**value).clone()]),
             "get" | "remove" | "contains_key" => Some(vec![(**key).clone()]),
             "each" => Some(vec![Type::Fn {

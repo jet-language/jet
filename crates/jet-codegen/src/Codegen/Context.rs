@@ -450,8 +450,13 @@ impl Cx {
                 args: args.iter().map(|a| self.expand_type_aliases(a)).collect(),
             },
             Type::List(inner) => Type::List(Box::new(self.expand_type_aliases(inner))),
-            Type::Map { key, value } => Type::Map {
+            Type::Map {
+                key,
+                key_span,
+                value,
+            } => Type::Map {
                 key: Box::new(self.expand_type_aliases(key)),
+                key_span: *key_span,
                 value: Box::new(self.expand_type_aliases(value)),
             },
             Type::Shared(inner) => Type::Shared(Box::new(self.expand_type_aliases(inner))),
@@ -505,7 +510,7 @@ impl Cx {
                 self.columnar_list_type(inner).unwrap()
             }
             Type::List(inner) => format!("Vec<{}>", self.rust_type(inner)),
-            Type::Map { key, value } => format!(
+            Type::Map { key, value, .. } => format!(
                 "std::collections::BTreeMap<{}, {}>",
                 self.rust_type(key),
                 self.rust_type(value)
@@ -1704,7 +1709,7 @@ fn field_type_cloneable(ty: &Type, types: &HashSet<String>, param_names: &HashSe
         Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => {
             field_type_cloneable(inner, types, param_names)
         }
-        Type::Map { key, value } => {
+        Type::Map { key, value, .. } => {
             field_type_cloneable(key, types, param_names)
                 && field_type_cloneable(value, types, param_names)
         }
@@ -1935,7 +1940,7 @@ fn walk_type_edge(
         Type::Option(inner) | Type::List(inner) | Type::Shared(inner) => {
             walk_type_edge(owner, edge, inner, stack, cx, boxed);
         }
-        Type::Map { key, value } => {
+        Type::Map { key, value, .. } => {
             walk_type_edge(owner, edge, key, stack, cx, boxed);
             walk_type_edge(owner, edge, value, stack, cx, boxed);
         }

@@ -67,8 +67,13 @@ pub fn substitute_type(ty: &Type, subst: &HashMap<String, Type>) -> Type {
             args: args.iter().map(|a| substitute_type(a, subst)).collect(),
         },
         Type::List(inner) => Type::List(Box::new(substitute_type(inner, subst))),
-        Type::Map { key, value } => Type::Map {
+        Type::Map {
+            key,
+            key_span,
+            value,
+        } => Type::Map {
             key: Box::new(substitute_type(key, subst)),
+            key_span: *key_span,
             value: Box::new(substitute_type(value, subst)),
         },
         Type::Shared(inner) => Type::Shared(Box::new(substitute_type(inner, subst))),
@@ -162,7 +167,7 @@ fn collect_free(ty: &Type, out: &mut HashSet<String>) {
         Type::Named(_) => {}
         Type::Apply { args, .. } => args.iter().for_each(|a| collect_free(a, out)),
         Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => collect_free(inner, out),
-        Type::Map { key, value } => {
+        Type::Map { key, value, .. } => {
             collect_free(key, out);
             collect_free(value, out);
         }
@@ -503,7 +508,7 @@ pub fn generic_depth_exceeded(ty: &Type) -> Option<String> {
                 }
                 stack.push((inner, next));
             }
-            Type::Map { key, value } => {
+            Type::Map { key, value, .. } => {
                 stack.push((key, chain.clone()));
                 stack.push((value, chain));
             }
@@ -615,7 +620,7 @@ pub fn collect_type_param_mentions(
             collect_type_param_mentions(inner, param_names, out)
         }
         Type::FixedList { elem, .. } => collect_type_param_mentions(elem, param_names, out),
-        Type::Map { key, value } => {
+        Type::Map { key, value, .. } => {
             collect_type_param_mentions(key, param_names, out);
             collect_type_param_mentions(value, param_names, out);
         }

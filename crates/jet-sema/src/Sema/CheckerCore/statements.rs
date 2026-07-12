@@ -259,6 +259,7 @@ impl<'a> Checker<'a> {
                             if let Some(Type::Map {
                                 key,
                                 value: map_val_ty,
+                                ..
                             }) = base_ty
                             {
                                 if let Some(kt) = idx_ty {
@@ -986,7 +987,7 @@ impl<'a> Checker<'a> {
                                 Some(Type::List(inner)) => {
                                     self.declare_loop_var(var.clone(), *var_span, inner);
                                 }
-                                Some(Type::Map { key, value }) => {
+                                Some(Type::Map { key, value, .. }) => {
                                     if var2.is_none() {
                                         self.diags.push(Diagnostic::error(
                                             "E0003",

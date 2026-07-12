@@ -73,7 +73,7 @@ pub(crate) fn check_extern_fn(
                 &format!("the return type `{}` can't cross from Rust", rt.name()),
                 "foreign functions must return owned values Jet understands",
                 "use an allowed return type, or flatten the result into simpler parts",
-                ef.name_span,
+                ef.return_type_span.unwrap_or(ef.name_span),
             ));
             ok = false;
         }
@@ -268,10 +268,10 @@ pub(crate) fn check_c_module(
         }
         if let Some(rt) = &ef.return_type {
             if matches!(rt, Type::Apply { name, .. } if name == Syntax::TYPE_PTR) {
-                diags.push(e3202(&rt.name(), ef.name_span));
+                diags.push(e3202(&rt.name(), ef.return_type_span.unwrap_or(ef.name_span)));
                 ok = false;
             } else if !is_c_abi_type(rt, registry) {
-                diags.push(e3203(rt, ef.name_span));
+                diags.push(e3203(rt, ef.return_type_span.unwrap_or(ef.name_span)));
                 ok = false;
             }
         }
@@ -305,7 +305,7 @@ pub(crate) fn is_ffi_type(ty: &Type, registry: &TypeRegistry) -> bool {
         Type::IntN { .. } | Type::Float32 => true,
         Type::Shared(_) => false,
         Type::List(inner) | Type::Option(inner) => is_ffi_type(inner, registry),
-        Type::Map { key, value } => is_ffi_type(key, registry) && is_ffi_type(value, registry),
+        Type::Map { key, value, .. } => is_ffi_type(key, registry) && is_ffi_type(value, registry),
         Type::Result { ok, err } => is_ffi_type(ok, registry) && is_ffi_type(err, registry),
         Type::Named(name) => ffi_named_type_ok(name, registry),
         Type::Apply { .. } | Type::TraitObject(_) | Type::Fn { .. } | Type::Tuple(_) => false,

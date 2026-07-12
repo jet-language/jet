@@ -310,6 +310,7 @@ mod tests {
         use crate::AST::{Field, StructDef, Type};
         let zero = Span::new(0, 0);
         let s = StructDef {
+            span: zero,
             is_pub: false,
             is_package_pub: false,
             name: "Rec".to_string(),
@@ -348,8 +349,6 @@ mod tests {
             single_use_span: None,
             is_must_use: false,
             must_use_span: None,
-            maturity: None,
-            maturity_span: None,
             layout: None,
             layout_span: None,
             serde_markers: Vec::new(),

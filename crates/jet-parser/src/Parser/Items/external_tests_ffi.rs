@@ -462,10 +462,12 @@ impl<'a> Parser<'a> {
             self.validate_variadic_params(&params);
     
             let mut return_type = None;
+            let mut return_type_span = None;
             if matches!(self.peek().kind, TokKind::Arrow) {
                 self.bump();
-                let (ty, _) = self.return_type()?;
+                let (ty, span) = self.return_type()?;
                 return_type = Some(ty);
+                return_type_span = Some(span);
             }
     
             self.expect(TokKind::Eq, "before the Rust path")?;
@@ -481,6 +483,7 @@ impl<'a> Parser<'a> {
                 name_span,
                 params,
                 return_type,
+                return_type_span,
                 rust_path,
                 rust_path_span,
                 span: Span::new(fn_start, end),

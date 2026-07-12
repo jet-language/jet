@@ -125,8 +125,13 @@ fn substitute_type(ty: Type, param_name: &str, replacement: &Type) -> Type {
         Type::Named(ref n) if n == param_name => replacement.clone(),
         Type::Named(_) => ty,
         Type::List(inner) => Type::List(Box::new(substitute_type(*inner, param_name, replacement))),
-        Type::Map { key, value } => Type::Map {
+        Type::Map {
+            key,
+            key_span,
+            value,
+        } => Type::Map {
             key: Box::new(substitute_type(*key, param_name, replacement)),
+            key_span,
             value: Box::new(substitute_type(*value, param_name, replacement)),
         },
         Type::Shared(inner) => {

@@ -252,6 +252,7 @@ impl<'a> Checker<'a> {
                                 };
                                 refined_ret = Some(Type::Map {
                                     key: Box::new((**r).clone()),
+                                    key_span: None,
                                     value: Box::new(value),
                                 });
                             }

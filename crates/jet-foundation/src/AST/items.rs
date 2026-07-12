@@ -643,6 +643,7 @@ pub struct ExternFn {
     pub name_span: Span,
     pub params: Vec<Param>,
     pub return_type: Option<Type>,
+    pub return_type_span: Option<Span>,
     pub rust_path: String,
     pub rust_path_span: Span,
     pub span: Span,

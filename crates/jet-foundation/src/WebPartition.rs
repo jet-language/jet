@@ -78,7 +78,7 @@ pub fn is_abi_safe_type(ty: &Type) -> bool {
         Type::Named(n) if n == "String" => true,
         Type::List(inner) | Type::Option(inner) | Type::Shared(inner) => is_abi_safe_type(inner),
         Type::FixedList { elem, .. } => is_abi_safe_type(elem),
-        Type::Map { key, value } => matches!(**key, Type::String) && is_abi_safe_type(value),
+        Type::Map { key, value, .. } => matches!(**key, Type::String) && is_abi_safe_type(value),
         _ => false,
     }
 }

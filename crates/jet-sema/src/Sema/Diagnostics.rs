@@ -193,7 +193,7 @@ fn is_cloneable_rec(
         Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => {
             is_cloneable_rec(inner, registry, structs, visiting)
         }
-        Type::Map { key, value } => {
+        Type::Map { key, value, .. } => {
             is_cloneable_rec(key, registry, structs, visiting)
                 && is_cloneable_rec(value, registry, structs, visiting)
         }

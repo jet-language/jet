@@ -194,6 +194,7 @@ pub(crate) fn lower_if_cond(
                         format!("{}jet_std::DataTree::Object({})", cx.root_prefix, obj_tmp);
                     let map_ty = ty.clone().unwrap_or(Type::Map {
                         key: Box::new(Type::String),
+                        key_span: None,
                         value: Box::new(Type::Named(Syntax::TYPE_DATA.to_string())),
                     });
                     let prefix = TStmt::Let {

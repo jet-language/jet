@@ -452,7 +452,7 @@ pub(crate) fn is_covered_collection_ty(ty: &Type, cx: &Cx) -> bool {
     match ty {
         Type::List(inner) => collection_elem_covered(inner, cx),
         Type::FixedList { elem, .. } => collection_elem_covered(elem, cx),
-        Type::Map { key, value } => {
+        Type::Map { key, value, .. } => {
             collection_elem_covered(key, cx) && collection_elem_covered(value, cx)
         }
         _ => false,

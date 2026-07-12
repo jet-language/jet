@@ -27,8 +27,13 @@ impl<'a> Checker<'a> {
                     args: args.into_iter().map(|a| self.resolve_type(a)).collect(),
                 },
                 Type::Option(inner) => Type::Option(Box::new(self.resolve_type(*inner))),
-                Type::Map { key, value } => Type::Map {
+                Type::Map {
+                    key,
+                    key_span,
+                    value,
+                } => Type::Map {
                     key: Box::new(self.resolve_type(*key)),
+                    key_span,
                     value: Box::new(self.resolve_type(*value)),
                 },
                 Type::Result { ok, err } => Type::Result {

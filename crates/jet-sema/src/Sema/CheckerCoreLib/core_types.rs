@@ -344,12 +344,14 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         ("HttpRequest", "method" | "path" | "body") => Some(Type::String),
         ("HttpRequest", "headers") => Some(Type::Map {
             key: Box::new(Type::String),
+            key_span: None,
             value: Box::new(Type::String),
         }),
         // E2-M10: HTTP response fields.
         ("HttpResponse", "status" | "body") => Some(Type::String),
         ("HttpResponse", "headers") => Some(Type::Map {
             key: Box::new(Type::String),
+            key_span: None,
             value: Box::new(Type::String),
         }),
         // D-GAME-*: scene-owned headless game substrate fields.
@@ -444,6 +446,7 @@ pub fn core_json_pattern_types(variant: &str) -> Option<Vec<Type>> {
         "Array" => Some(vec![Type::List(Box::new(json.clone()))]),
         "Object" => Some(vec![Type::Map {
             key: Box::new(Type::String),
+            key_span: None,
             value: Box::new(json),
         }]),
         _ => None,
@@ -674,6 +677,7 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
     let str_ty = Type::String;
     let map_ty = Type::Map {
         key: Box::new(Type::String),
+        key_span: None,
         value: Box::new(Type::String),
     };
     match type_name {

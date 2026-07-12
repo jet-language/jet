@@ -20,15 +20,15 @@ impl<'a> Parser<'a> {
         self.type_generic_chain.pop();
     }
 
-    fn type_generic_arg(&mut self, label: &str) -> Result<Type, Diagnostic> {
+    fn type_generic_arg(&mut self, label: &str) -> Result<(Type, Span), Diagnostic> {
         let span = self.peek().span;
         if !self.enter_generic_type_layer(label, span) {
             self.sync_type_arg();
-            return Ok(Type::Int);
+            return Ok((Type::Int, span));
         }
-        let (inner, _) = self.type_()?;
+        let parsed = self.type_()?;
         self.leave_generic_type_layer();
-        Ok(inner)
+        Ok(parsed)
     }
 
     fn type_starts_here(&self) -> bool {
@@ -424,13 +424,14 @@ impl<'a> Parser<'a> {
             }
             TokKind::LBracket => {
                 self.bump();
-                let first = self.type_generic_arg("list/map type")?;
+                let (first, first_span) = self.type_generic_arg("list/map type")?;
                 if matches!(self.peek().kind, TokKind::Colon) {
                     self.bump();
-                    let value = self.type_generic_arg("map value")?;
+                    let (value, _) = self.type_generic_arg("map value")?;
                     self.expect(TokKind::RBracket, "after the value type in `[K: V]`")?;
                     Type::Map {
                         key: Box::new(first),
+                        key_span: Some(first_span),
                         value: Box::new(value),
                     }
                 } else if matches!(self.peek().kind, TokKind::Hash) {
@@ -562,7 +563,7 @@ impl<'a> Parser<'a> {
                     }
                     Syntax::TYPE_SHARED => {
                         self.expect_type_args_open("Shared")?;
-                        let inner = self.type_generic_arg("Shared")?;
+                        let (inner, _) = self.type_generic_arg("Shared")?;
                         self.maybe_close_type_args("after a shared element type")?;
                         Type::Shared(Box::new(inner))
                     }
@@ -571,7 +572,7 @@ impl<'a> Parser<'a> {
                     // type, but teaches the new spelling (E0210).
                     Syntax::TYPE_PTR => {
                         self.expect_type_args_open(Syntax::TYPE_PTR)?;
-                        let inner = self.type_generic_arg(Syntax::TYPE_PTR)?;
+                        let (inner, _) = self.type_generic_arg(Syntax::TYPE_PTR)?;
                         self.maybe_close_type_args(&format!("after `{}<…>`", Syntax::TYPE_PTR))?;
                         self.diags.push(Diagnostic::error(
                             "E0210",
@@ -598,12 +599,12 @@ impl<'a> Parser<'a> {
                             Some(start),
                         ));
                         self.expect_type_args_open("Result")?;
-                        let ok_ty = self.type_generic_arg("Result ok")?;
+                        let (ok_ty, _) = self.type_generic_arg("Result ok")?;
                         self.expect(
                             TokKind::Comma,
                             "between the two types in old `Result<T, E>` syntax",
                         )?;
-                        let err_ty = self.type_generic_arg("Result err")?;
+                        let (err_ty, _) = self.type_generic_arg("Result err")?;
                         self.maybe_close_type_args(
                             "after the error type in old `Result<T, E>` syntax",
                         )?;
@@ -623,7 +624,7 @@ impl<'a> Parser<'a> {
                             self.expect_type_args_open(&name)?;
                             let mut args = Vec::new();
                             loop {
-                                args.push(self.type_generic_arg(&name)?);
+                                args.push(self.type_generic_arg(&name)?.0);
                                 if matches!(self.peek().kind, TokKind::Comma) {
                                     self.bump();
                                     continue;

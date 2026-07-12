@@ -1421,6 +1421,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             TExpr {
                 ty: Type::Map {
                     key: Box::new(kt),
+                    key_span: None,
                     value: Box::new(vt),
                 },
                 kind: TExprKind::MapLit(tentries),

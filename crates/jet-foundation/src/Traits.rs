@@ -1109,7 +1109,7 @@ pub fn rust_type_name_assoc(ty: &Type, assoc: &HashSet<String>) -> String {
                 .join(" + ")
         ),
         Type::Option(inner) => format!("Option<{}>", rust_type_name_assoc(inner, assoc)),
-        Type::Map { key, value } => format!(
+        Type::Map { key, value, .. } => format!(
             "std::collections::BTreeMap<{}, {}>",
             rust_type_name_assoc(key, assoc),
             rust_type_name_assoc(value, assoc)

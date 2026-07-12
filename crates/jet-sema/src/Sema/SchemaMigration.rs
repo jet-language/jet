@@ -762,12 +762,12 @@ mod tests {
 
     fn published_struct(name: &str, fields: Vec<Field>) -> Item {
         Item::Struct(StructDef {
+            span: zero(),
             is_pub: false,
             is_package_pub: false,
             name: name.to_string(),
             name_span: zero(),
-            meta: None,
-                    type_params: vec![],
+            type_params: vec![],
             fields,
             methods: vec![],
             trait_impls: vec![],
@@ -796,7 +796,7 @@ mod tests {
 
     /// Run the diff with a snapshot written into a temp dir pointed at by the
     /// env override. Returns the diagnostic codes produced.
-    fn run_with_snapshot(snapshot: &str, items: &[Item]) -> Vec<&'static str> {
+    fn run_with_snapshot(snapshot: &str, items: &[Item]) -> Vec<String> {
         run_with_snapshot_and_registry(snapshot, items, &TraitRegistry::default())
     }
 
@@ -807,7 +807,7 @@ mod tests {
         snapshot: &str,
         items: &[Item],
         reg: &TraitRegistry,
-    ) -> Vec<&'static str> {
+    ) -> Vec<String> {
         let _guard = ENV_LOCK.lock().unwrap();
         let dir = std::env::temp_dir().join(format!(
             "jet_schema_unit_{}_{}",
@@ -827,7 +827,7 @@ mod tests {
         let diags = check_schema_migrations(items, std::path::Path::new("."), reg);
         std::env::remove_var("JET_SCHEMA_CACHE_DIR");
         std::fs::remove_dir_all(&dir).ok();
-        diags.iter().map(|d| d.code).collect()
+        diags.into_iter().map(|d| d.code).collect()
     }
 
     const SNAP_ONE: &str =

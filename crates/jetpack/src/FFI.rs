@@ -1069,7 +1069,7 @@ fn type_key(ty: &Type) -> String {
         Type::String => "String".into(),
         Type::Char => "Char".into(),
         Type::List(inner) => format!("List<{}>", type_key(inner)),
-        Type::Map { key, value } => format!("Map<{},{}>", type_key(key), type_key(value)),
+        Type::Map { key, value, .. } => format!("Map<{},{}>", type_key(key), type_key(value)),
         Type::Shared(inner) => format!("Shared<{}>", type_key(inner)),
         Type::Option(inner) => format!("{}?", type_key(inner)),
         Type::Result { ok, err } => format!("Result<{},{}>", type_key(ok), type_key(err)),
@@ -1259,7 +1259,7 @@ fn rust_type(ty: &Type, user_types: &HashSet<String>) -> String {
         Type::String => "String".to_string(),
         Type::Char => "char".to_string(),
         Type::List(inner) => format!("Vec<{}>", rust_type(inner, user_types)),
-        Type::Map { key, value } => format!(
+        Type::Map { key, value, .. } => format!(
             "std::collections::BTreeMap<{}, {}>",
             rust_type(key, user_types),
             rust_type(value, user_types)

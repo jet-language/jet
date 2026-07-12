@@ -103,10 +103,18 @@ impl<'a> Checker<'a> {
         // lower — the exact same shape the retired `[:]` literal produced.
         if let Expr::ListLit(elems, span) = e {
             if elems.is_empty() {
-                if let Some(Type::Map { key, value }) = self.expected_type.clone() {
+                if let Some(Type::Map {
+                    key,
+                    key_span,
+                    value,
+                }) = self.expected_type.clone() {
                     let span = *span;
                     *e = Expr::MapLit(Vec::new(), span);
-                    return Some(Type::Map { key, value });
+                    return Some(Type::Map {
+                        key,
+                        key_span,
+                        value,
+                    });
                 }
             }
         }
@@ -1395,8 +1403,16 @@ impl<'a> Checker<'a> {
             // other rewrite reaches here without first resolving a Map
             // expected type. Kept as a defensive fallback with `[]` wording.
             if let Some(expected) = self.expected_type.clone() {
-                if let Type::Map { key, value } = expected {
-                    return Some(Type::Map { key, value });
+                if let Type::Map {
+                    key,
+                    key_span,
+                    value,
+                } = expected {
+                    return Some(Type::Map {
+                        key,
+                        key_span,
+                        value,
+                    });
                 }
             }
             self.diags.push(Diagnostic::error(
@@ -1465,6 +1481,7 @@ impl<'a> Checker<'a> {
         match (key_ty, val_ty) {
             (Some(k), Some(v)) => Some(Type::Map {
                 key: Box::new(k),
+                key_span: None,
                 value: Box::new(v),
             }),
             _ => None,
@@ -1598,7 +1615,7 @@ impl<'a> Checker<'a> {
                 }
                 Some(args[0].clone())
             }
-            Type::Map { key, value } => {
+            Type::Map { key, value, .. } => {
                 *kind = IndexKind::Map;
                 if idx_ty != **key {
                     self.diags.push(Diagnostic::error(

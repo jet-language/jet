@@ -272,14 +272,17 @@ mod tests {
 
     fn func(name: &str, is_pub: bool, params: Vec<Param>, ret: Option<Type>) -> Func {
         Func {
+            span: zero(),
             is_pub,
             is_package_pub: false,
             external_type: None,
             name: name.to_string(),
             name_span: zero(),
+            meta: None,
             type_params: vec![],
             params,
             return_type: ret,
+            return_type_span: None,
             is_unsafe: false,
             unsafe_reason: None,
             unsafe_span: None,

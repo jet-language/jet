@@ -189,6 +189,7 @@ pub(crate) fn db_error_ty() -> Type {
 pub(crate) fn db_row_ty() -> Type {
     Type::Map {
         key: Box::new(Type::String),
+        key_span: None,
         value: Box::new(Type::Named(Syntax::TYPE_DB_VALUE.to_string())),
     }
 }

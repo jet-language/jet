@@ -665,7 +665,7 @@ fn run() {
                 Ok((_program, recovered)) => recovered,
                 Err(diags) => diags,
             };
-            let codes: Vec<&str> = diags.iter().map(|d| d.code).collect();
+            let codes: Vec<&str> = diags.iter().map(|d| d.code.as_str()).collect();
             assert!(
                 codes.iter().all(|code| !RETIRED_CODES.contains(code)),
                 "retired teaching code leaked for {src:?}: {codes:?}"

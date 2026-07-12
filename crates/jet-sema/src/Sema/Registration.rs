@@ -1803,7 +1803,7 @@ fn serde_type_source(ty: &Type) -> String {
         Type::Bool => "Bool".to_string(), Type::String => "String".to_string(),
         Type::Char => "Char".to_string(), Type::Named(n) => n.clone(),
         Type::List(t) => format!("[{}]", serde_type_source(t)),
-        Type::Map { key, value } => format!("[{}: {}]", serde_type_source(key), serde_type_source(value)),
+        Type::Map { key, value, .. } => format!("[{}: {}]", serde_type_source(key), serde_type_source(value)),
         Type::Option(t) => format!("{}?", serde_type_source(t)),
         Type::Result { ok, err } => format!("{} ? {}", serde_type_source(ok), serde_type_source(err)),
         Type::Apply { name, args } => format!("{}<{}>", name, args.iter().map(serde_type_source).collect::<Vec<_>>().join(", ")),

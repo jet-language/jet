@@ -628,7 +628,7 @@ impl<'a> Checker<'a> {
             Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => {
                 self.sendability_problem_inner(inner, true, seen)
             }
-            Type::Map { key, value } => self
+            Type::Map { key, value, .. } => self
                 .sendability_problem_inner(key, true, seen)
                 .or_else(|| self.sendability_problem_inner(value, true, seen)),
             Type::Result { ok, err } => self

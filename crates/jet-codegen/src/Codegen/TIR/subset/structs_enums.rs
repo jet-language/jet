@@ -112,7 +112,7 @@ pub(crate) fn enum_payload_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<Str
         // A collection payload: its element/key/value types must each be a covered
         // value type, with enum references re-checked under the SAME `seen` guard.
         Type::List(inner) => enum_payload_ty_covered(inner, cx, seen),
-        Type::Map { key, value } => {
+        Type::Map { key, value, .. } => {
             enum_payload_ty_covered(key, cx, seen) && enum_payload_ty_covered(value, cx, seen)
         }
         // D-MEM1 S6: a `Pool<T>`/`Id<T>`/`Shared<T>` enum payload.
@@ -344,7 +344,7 @@ pub(crate) fn field_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<String>) -
         // like a list field (`cx.rust_type`), so a struct-lit field value / field read
         // is byte-identical to the list case once its element type is covered.
         Type::FixedList { elem, .. } => field_ty_covered(elem, cx, seen),
-        Type::Map { key, value } => {
+        Type::Map { key, value, .. } => {
             field_ty_covered(key, cx, seen) && field_ty_covered(value, cx, seen)
         }
         Type::Tagged { inner, .. } => field_ty_covered(inner, cx, seen),

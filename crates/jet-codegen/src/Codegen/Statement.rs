@@ -183,6 +183,7 @@ pub(crate) fn variant_binding_types(cx: &Cx, variant: &str) -> Option<Vec<Type>>
             "Array" => Some(vec![Type::List(Box::new(data))]),
             "Object" => Some(vec![Type::Map {
                 key: Box::new(Type::String),
+                key_span: None,
                 value: Box::new(data),
             }]),
             _ => None,

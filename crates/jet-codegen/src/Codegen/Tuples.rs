@@ -34,7 +34,7 @@ fn collect_tuple_shapes_from_type(ty: &Type, out: &mut BTreeMap<String, Vec<(Str
         Type::List(inner) | Type::Option(inner) | Type::Shared(inner) => {
             collect_tuple_shapes_from_type(inner, out);
         }
-        Type::Map { key, value } => {
+        Type::Map { key, value, .. } => {
             collect_tuple_shapes_from_type(key, out);
             collect_tuple_shapes_from_type(value, out);
         }
