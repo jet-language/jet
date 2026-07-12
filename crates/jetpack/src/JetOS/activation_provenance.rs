@@ -1,3 +1,16 @@
+use super::etc_boot_facts::{cachyos_kernel_entry, kernel_package_json};
+use super::generations_activation::current_generation_path;
+use super::options_rendering::{
+    clean_value, collect_names, option_value, package_path_or_literal, service_extra,
+    shell_single_quote,
+};
+use super::root_projection::enable_unit;
+use super::store_realize::RealizedPackage;
+use crate::ModuleEval::SystemPlan;
+use crate::JSON;
+use std::fs;
+use std::path::Path;
+
 pub(super) fn write_activation_diff(
     dir: &Path,
     system: &SystemPlan,

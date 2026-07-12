@@ -1,3 +1,22 @@
+use super::entry::default_config_path;
+use super::generation::build_generation;
+use super::generation_files::{
+    diff_packages, dir_size_bytes, generation_ordinal, read_generation_packages,
+    render_plan_json, write_generation_source_proof,
+};
+use super::generations_activation::{
+    activate_generation, find_rollback_generation, generation_named, latest_generation_for,
+    prove_activation, read_generations, render_generation_proof_json,
+};
+use super::installer_media::{write_image_variant_artifacts, write_installer_media};
+use super::load_validate::{load_target, parse_target_or_report};
+use super::nixos_import::cmd_import;
+use super::types::OsFlags;
+use crate::Output::Theme;
+use crate::Syntax;
+use std::fs;
+use std::path::Path;
+
 pub(super) fn cmd_check(theme: &Theme, args: &[String]) -> i32 {
     let Some(target) = parse_target_or_report(theme, args.first().map(String::as_str)) else {
         return 2;
