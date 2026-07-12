@@ -14,7 +14,7 @@
 //! `KNOWN_OPEN_GAPS` below with a one-line reason) or this test fails.
 //!
 //! Effectful modules (`core.files`/`core.env`/`core.io`/`core.exec`/
-//! `core.net`/`core.process`) are exempt: comptime handles them as a whole
+//! `core.net`/`core.tls`/`core.process`) are exempt: comptime handles them as a whole
 //! via the `is_tier2` wildcard (E3410 `#Impure` gate), not per-method, so a
 //! per-name diff would just be noise — those modules are filtered out below.
 
@@ -31,6 +31,7 @@ const EFFECT_GATED_MODULES: &[&str] = &[
     "core.io",
     "core.exec",
     "core.net",
+    "core.tls",
     "core.process",
     // Not gated by the generic `is_tier2` list — denied unconditionally,
     // earlier in `eval_method`, with its own diagnostic (E1265): a build

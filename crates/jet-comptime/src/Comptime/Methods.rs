@@ -1143,6 +1143,7 @@ impl<'a> Interp<'a> {
                         | "core.io"
                         | "core.exec"
                         | "core.net"
+                        | "core.tls"
                         | "core.process"
                 ) || (self.repl_mode && module == "core.random" && method != "rng");
                 if is_tier2 {
@@ -1592,7 +1593,8 @@ fn repl_effect_request(module: &str, method: &str, args: &[CtValue]) -> super::R
         ("core.process", "run") => ("Exec", "Run", shown(0, "<command>")),
         ("core.process", "exit") => ("Exec", "Exit", shown(0, "0")),
         ("core.random", _) => ("Rand", "Draw", method.to_string()),
-        ("core.net", _) => ("Net", method, shown(0, "<network resource>")),
+        ("core.net" | "core.tls", _) =>
+            ("Net", method, shown(0, "<network resource>")),
         ("core.exec", _) => ("Exec", method, shown(0, "<command>")),
         _ => ("Io", method, module.to_string()),
     };
@@ -3610,7 +3612,8 @@ fn apply_core_call(
         | ("core.env", _)
         | ("core.io", _)
         | ("core.exec", _)
-        | ("core.net", _) => Err(Diagnostic::error(
+        | ("core.net", _)
+        | ("core.tls", _) => Err(Diagnostic::error(
             "E3410",
             format!(
                 "`{}.{}()` is a Tier-2 comptime effect — it requires a `#Impure` gate",
@@ -3978,6 +3981,14 @@ fn apply_impure_core_call(
             format!("`core.net.{}()` is not available at comptime", method),
             "only `core.net.fetch(url, sha256:)` is supported at compile time".to_string(),
             "use `core.net.fetch(url, sha256: \"<hash>\")` for content-hash-pinned downloads"
+                .to_string(),
+            Some(span),
+        )),
+        ("core.tls", _) => Err(Diagnostic::error(
+            "E3412",
+            format!("`core.tls.{}()` is not available at comptime", method),
+            "live TLS sessions cannot be opened during compile-time evaluation".to_string(),
+            "move the TLS operation to runtime; use `core.net.fetch(url, sha256: \"<hash>\")` for content-hash-pinned build-time downloads"
                 .to_string(),
             Some(span),
         )),
