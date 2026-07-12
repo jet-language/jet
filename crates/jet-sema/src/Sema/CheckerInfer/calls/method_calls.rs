@@ -303,8 +303,8 @@ impl<'a> Checker<'a> {
                 }
                 // D-MOD2: inline code module call — `math.double(x)` where `math` is an
                 // inline `module math { … }` in this file. Resolve via mangled name.
-                if self.code_modules.contains_key(alias.as_str()) {
-                    let mangled = format!("{}__{}", alias, method);
+                if let Some(canonical) = self.code_modules.get(alias.as_str()) {
+                    let mangled = format!("{}__{}", canonical, method);
                     return self.infer_code_module_call(alias, &mangled, *alias_span, span, args);
                 }
             }

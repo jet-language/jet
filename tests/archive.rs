@@ -58,7 +58,7 @@ fn run_core_bridge(src: &str) -> String {
         )
     });
     assert!(out.ffi.is_some(), "Core codec/container call must produce an FFI bridge");
-    let user_rust = common::strip_scheduler_native(&common::strip_vetted_module(&out.rust, "jet_atomic_windows"));
+    let user_rust = common::strip_vetted_prelude_modules(&out.rust);
     assert!(
         !user_rust.contains("unsafe"),
         "I1: Core bridge output must not contain unsafe"

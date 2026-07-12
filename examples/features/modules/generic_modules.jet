@@ -39,6 +39,8 @@ module Cache<K, capacity: Int> {
     }
 }
 
+// Forward alias chain: declaration order does not affect resolution.
+module ForwardCache = IntCache
 module IntCache = Cache<Int, 32>
 
 fn run() {
@@ -53,6 +55,9 @@ fn run() {
     print(IntCache__SIZE)
     print(e.key)
     print(e.limit)
+    forwarded :: ForwardCache.entry(9)
+    print(ForwardCache.size())
+    print(forwarded.key)
     if s == {
         Value(v) -> { print(v) }
         Empty -> { print(0) }

@@ -198,7 +198,7 @@ fn check_comptime_src(i: usize, label: &str, src: &str) {
     // module, which shares a file with `jet_atomic_windows`'s vetted FFI
     // internals (I1 gate, `JET_VETTED_UNSAFE_BEGIN/END` markers) — strip it
     // before the I1 check, same as `golden.rs::strip_vetted_prelude_modules`.
-    let user_code = strip_vetted_module(&compiled.rust, "jet_atomic_windows");
+    let user_code = common::strip_vetted_prelude_modules(&compiled.rust);
     assert!(
         !user_code.contains("unsafe"),
         "case `{}` generated unsafe outside the vetted prelude",

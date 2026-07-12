@@ -1198,6 +1198,80 @@ fn report_generic_module_cycles(items: &[Item], diags: &mut Vec<Diagnostic>) -> 
     !reported.is_empty()
 }
 
+fn resolve_local_alias(
+    alias: &ModuleAliasDef,
+    aliases: &HashMap<String, &ModuleAliasDef>,
+    templates: &HashMap<String, TemplateInfo>,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<ModuleAliasDef> {
+    let mut current = alias;
+    while let Some(next) = aliases.get(&current.target).copied() {
+        if !current.args.is_empty() {
+            diags.push(Diagnostic::error(
+                "E0851",
+                format!(
+                    "module alias `{}` passes {} argument(s) but alias `{}` expects 0",
+                    current.name,
+                    current.args.len(),
+                    current.target
+                ),
+                "an alias-to-alias link reuses an already-bound module instance".to_string(),
+                format!("remove the arguments and write `module {} = {}`", current.name, current.target),
+                Some(current.span),
+            ));
+            return None;
+        }
+        current = next;
+    }
+    if !templates.contains_key(&current.target) {
+        return Some(ModuleAliasDef {
+            name: alias.name.clone(),
+            name_span: alias.name_span,
+            is_pub: alias.is_pub,
+            is_package_pub: alias.is_package_pub,
+            target: current.target.clone(),
+            target_span: current.target_span,
+            args: current.args.clone(),
+            span: alias.span,
+        });
+    }
+    Some(ModuleAliasDef {
+        name: alias.name.clone(),
+        name_span: alias.name_span,
+        is_pub: alias.is_pub,
+        is_package_pub: alias.is_package_pub,
+        target: current.target.clone(),
+        target_span: current.target_span,
+        args: current.args.clone(),
+        span: alias.span,
+    })
+}
+
+fn local_alias_depth(alias: &ModuleAliasDef, aliases: &HashMap<String, &ModuleAliasDef>) -> usize {
+    let mut depth = 0;
+    let mut current = alias;
+    while let Some(next) = aliases.get(&current.target).copied() {
+        depth += 1;
+        current = next;
+    }
+    depth
+}
+
+fn alias_chain_contains(
+    alias: &ModuleAliasDef,
+    aliases: &HashMap<String, &ModuleAliasDef>,
+    names: &HashSet<String>,
+) -> bool {
+    let mut current = alias;
+    while let Some(next) = aliases.get(&current.target).copied() {
+        if names.contains(&next.name) {
+            return true;
+        }
+        current = next;
+    }
+    false
+}
+
 /// D-GENMOD2=A: expand every `ModuleAlias` in each module's item list into a
 /// concrete `CodeModule` using the corresponding `GenericModule` template.
 /// Templates and aliases are removed from the item list after expansion.
@@ -1268,14 +1342,46 @@ pub(crate) fn expand_generic_module_aliases(
             })
             .collect();
 
+        let aliases: HashMap<String, &ModuleAliasDef> = module
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                Item::ModuleAlias(alias) => Some((alias.name.clone(), alias)),
+                _ => None,
+            })
+            .collect();
+
         // Expand aliases into CodeModules, collect separately.
         let mut expansions: Vec<(usize, AliasExpansion)> = Vec::new();
-        for (idx, item) in module.items.iter().enumerate() {
-            if let Item::ModuleAlias(alias) = item {
-                if let Some(cm) = expand_alias(alias, &templates, diags,&traits,&funcs,&globals,&enums) {
-                    expansions.push((idx, cm));
-                }
+        let mut ordered_aliases: Vec<(usize, &ModuleAliasDef)> = module
+            .items
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, item)| match item {
+                Item::ModuleAlias(alias) => Some((idx, alias)),
+                _ => None,
+            })
+            .collect();
+        ordered_aliases.sort_by_key(|(_, alias)| local_alias_depth(alias, &aliases));
+        let mut invalid_aliases = HashSet::new();
+        for (idx, alias) in ordered_aliases {
+            if alias_chain_contains(alias, &aliases, &invalid_aliases) {
+                continue;
             }
+            // A forward alias is a projection of the already-bound terminal
+            // instance, not a second specialization with fresh nominal types.
+            if aliases.contains_key(&alias.target) {
+                continue;
+            }
+                let Some(resolved) = resolve_local_alias(alias, &aliases, &templates, diags) else {
+                    invalid_aliases.insert(alias.name.clone());
+                    continue;
+                };
+                if let Some(cm) = expand_alias(&resolved, &templates, diags,&traits,&funcs,&globals,&enums) {
+                    expansions.push((idx, cm));
+                } else {
+                    invalid_aliases.insert(alias.name.clone());
+                }
         }
 
         // Replace/erase: iterate in reverse to preserve indices.
@@ -1956,8 +2062,23 @@ pub(crate) fn check_bundle_opts(
                 Item::ProtocolDecl(_) => {}
                 // D-METADERIVE1=A: user-authored derive blocks are expanded below; skip here.
                 Item::UserDerive(_) => {}
-                // D-GENMOD2=A: templates/aliases already expanded; erase.
-                Item::GenericModule(_) | Item::ModuleAlias(_) => {}
+                // D-GENMOD2=A: a forward alias that survived expansion projects
+                // the terminal code module. It contributes no declarations.
+                Item::ModuleAlias(alias) => {
+                    st.code_modules
+                        .insert(alias.name.clone(), alias.target.clone());
+                }
+                Item::GenericModule(_) => {}
+            }
+        }
+        // Collapse multi-hop forward aliases to the canonical terminal module.
+        let aliases = st.code_modules.clone();
+        for target in st.code_modules.values_mut() {
+            while let Some(next) = aliases.get(target) {
+                if next == target {
+                    break;
+                }
+                *target = next.clone();
             }
         }
         // D-METADERIVE1=A: user-derive expansion — run after struct/func registration so
@@ -2375,11 +2496,11 @@ pub(crate) fn check_bundle_opts(
                 continue;
             };
             let st = &mut states[idx];
-            if st.code_modules.contains_key(module_alias.as_str()) {
+            if let Some(canonical) = st.code_modules.get(module_alias.as_str()) {
                 // Inline module: items are mangled as `{alias}__{item}`.
                 for (orig, alias_opt) in items {
                     let local = alias_opt.as_deref().unwrap_or(orig.as_str());
-                    let mangled = format!("{}__{}", module_alias, orig);
+                    let mangled = format!("{}__{}", canonical, orig);
                     if !st.funcs.contains_key(&mangled) {
                         diags.push(Diagnostic::error(
                             "E0611",
