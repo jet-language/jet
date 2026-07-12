@@ -16,6 +16,7 @@ fn run_repl_process(state: &std::path::Path, input: &[u8], limit: Option<&str>) 
     command
         .arg("repl")
         .env("XDG_STATE_HOME", state)
+        .env_remove("JET_REPL_HISTORY")
         .env("NO_COLOR", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -26,6 +27,29 @@ fn run_repl_process(state: &std::path::Path, input: &[u8], limit: Option<&str>) 
     let mut child = command.spawn().expect("start repl");
     child.stdin.as_mut().unwrap().write_all(input).unwrap();
     child.wait_with_output().expect("finish repl")
+}
+
+fn spawn_repl_process(state: &std::path::Path) -> std::process::Child {
+    use std::process::{Command, Stdio};
+    Command::new(env!("CARGO_BIN_EXE_jet"))
+        .arg("repl")
+        .env("XDG_STATE_HOME", state)
+        .env_remove("JET_REPL_HISTORY")
+        .env("NO_COLOR", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start repl")
+}
+
+fn wait_for_history_dir(state: &std::path::Path) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    while !state.join("jet").is_dir() {
+        assert!(std::time::Instant::now() < deadline, "history directory was not opened");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    std::thread::sleep(std::time::Duration::from_millis(50));
 }
 
 #[test]
@@ -101,6 +125,94 @@ fn repl_history_off_is_session_only_and_visible_storage_failure_falls_back() {
 
 #[cfg(unix)]
 #[test]
+fn repl_history_rejects_symlinked_state_parent_without_chmod_or_escape() {
+    use std::os::unix::fs::{symlink, PermissionsExt};
+    let root = std::env::temp_dir().join(format!("jet_repl_history_link_{}", std::process::id()));
+    let outside = std::env::temp_dir().join(format!("jet_repl_history_outside_{}", std::process::id()));
+    std::fs::remove_dir_all(&root).ok();
+    std::fs::remove_dir_all(&outside).ok();
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::set_permissions(&outside, std::fs::Permissions::from_mode(0o755)).unwrap();
+    symlink(&outside, root.join("linked")).unwrap();
+
+    let output = run_repl_process(&root.join("linked/state"), b"5 + 5\n:quit\n", None);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("session-only history"), "fallback invisible: {stderr:?}");
+    assert!(!outside.join("state").exists(), "history escaped through state symlink");
+    assert_eq!(std::fs::metadata(&outside).unwrap().permissions().mode() & 0o777, 0o755);
+    std::fs::remove_dir_all(root).ok();
+    std::fs::remove_dir_all(outside).ok();
+}
+
+#[cfg(unix)]
+#[test]
+fn repl_history_parent_swap_stays_on_held_directory() {
+    use std::io::Write as _;
+    use std::os::unix::fs::symlink;
+    let state = std::env::temp_dir().join(format!("jet_repl_history_swap_{}", std::process::id()));
+    let outside = std::env::temp_dir().join(format!("jet_repl_history_swap_out_{}", std::process::id()));
+    std::fs::remove_dir_all(&state).ok();
+    std::fs::remove_dir_all(&outside).ok();
+    std::fs::create_dir_all(&outside).unwrap();
+    let mut child = spawn_repl_process(&state);
+    wait_for_history_dir(&state);
+    let held = state.join("held-jet");
+    std::fs::rename(state.join("jet"), &held).unwrap();
+    symlink(&outside, state.join("jet")).unwrap();
+    child.stdin.as_mut().unwrap().write_all(b"4 + 4\n:quit\n").unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    assert!(!outside.join("repl-history").exists(), "swap redirected history write");
+    assert_eq!(std::fs::read_to_string(held.join("repl-history")).unwrap().lines().count(), 1);
+    std::fs::remove_file(state.join("jet")).ok();
+    std::fs::remove_dir_all(state).ok();
+    std::fs::remove_dir_all(outside).ok();
+}
+
+#[test]
+fn repl_history_two_processes_merge_and_clear_cannot_resurrect() {
+    use std::io::Write as _;
+    let state = std::env::temp_dir().join(format!("jet_repl_history_tx_{}", std::process::id()));
+    std::fs::remove_dir_all(&state).ok();
+    let mut first = spawn_repl_process(&state);
+    let mut second = spawn_repl_process(&state);
+    wait_for_history_dir(&state);
+    let mut first_stdin = first.stdin.take().unwrap();
+    let mut second_stdin = second.stdin.take().unwrap();
+    let writer_a = std::thread::spawn(move || first_stdin.write_all(b"left_marker :: 1\n:quit\n"));
+    let writer_b = std::thread::spawn(move || second_stdin.write_all(b"right_marker :: 2\n:quit\n"));
+    writer_a.join().unwrap().unwrap();
+    writer_b.join().unwrap().unwrap();
+    assert!(first.wait().unwrap().success());
+    assert!(second.wait().unwrap().success());
+    let merged = run_repl_process(
+        &state,
+        b":history search left_marker\n:history search right_marker\n:quit\n",
+        None,
+    );
+    let merged = String::from_utf8_lossy(&merged.stdout);
+    assert!(merged.contains("left_marker :: 1") && merged.contains("right_marker :: 2"), "lost update: {merged:?}");
+
+    let mut stale = spawn_repl_process(&state);
+    wait_for_history_dir(&state);
+    let cleared = run_repl_process(&state, b":history clear\n:quit\n", None);
+    assert!(cleared.status.success());
+    stale.stdin.as_mut().unwrap().write_all(b"fresh_marker :: 3\n:quit\n").unwrap();
+    assert!(stale.wait().unwrap().success());
+    let after = run_repl_process(
+        &state,
+        b":history search left_marker\n:history search right_marker\n:history search fresh_marker\n:quit\n",
+        None,
+    );
+    let after = String::from_utf8_lossy(&after.stdout);
+    assert!(after.contains("fresh_marker :: 3"), "fresh write missing: {after:?}");
+    assert!(!after.contains("left_marker :: 1") && !after.contains("right_marker :: 2"), "clear resurrected history: {after:?}");
+    std::fs::remove_dir_all(state).ok();
+}
+
+#[cfg(unix)]
+#[test]
 fn repl_raw_f3_search_recalls_and_submits_persistent_history() {
     use std::process::Command;
     let state = std::env::temp_dir().join(format!("jet_repl_history_f3_{}", std::process::id()));
@@ -122,6 +234,7 @@ fn repl_raw_f3_search_recalls_and_submits_persistent_history() {
         .args(["-c", shell])
         .env("JET_REPL_BIN", env!("CARGO_BIN_EXE_jet"))
         .env("XDG_STATE_HOME", &state)
+        .env_remove("JET_REPL_HISTORY")
         .env("NO_COLOR", "1")
         .output()
         .expect("run raw REPL under PTY");
