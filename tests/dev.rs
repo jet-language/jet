@@ -235,6 +235,26 @@ fn dev_iteration_with_timeout(stem: &str, file: &str, use_interpreter: bool) -> 
     })
 }
 
+/// Exercise the real Cranelift tier while deliberately making the next rung
+/// the interpreter. This keeps authority-boundary tests independent of whether
+/// a host `rustc` subprocess happens to be available, while still detecting
+/// when the JIT itself learns the construct.
+fn jit_with_interpreter_fallback(file: &str) -> RunOutcome {
+    let mut bundle = match jet::Loader::load_entry(file) {
+        Ok(bundle) => bundle,
+        Err(diags) => return RunOutcome::Problems(diags),
+    };
+    let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+        .into_iter()
+        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        .collect::<Vec<_>>();
+    if !errors.is_empty() {
+        return RunOutcome::Problems(errors);
+    }
+    let mut backend = CraneliftBackend::new(InterpreterBackend::new());
+    backend.run(&bundle, false)
+}
+
 /// All `.jet` files directly under a topic directory of `examples/features/`
 /// (one level: `examples/features/<topic>/<name>.jet`). Skips `expected/`
 /// and skips project-directory examples (`<topic>/<name>/main.jet`) — those
@@ -496,6 +516,7 @@ const DEFAULT_BACKEND_BOUNDARIES: &[&str] = &[
 const DEFAULT_BACKEND_EXPECTED_BOUNDARIES: &[&str] = &[
     "io/db_checked_sql",
     "io/path",
+    "io/stdin_filter",
     "tooling/data_pipeline",
     "ui/ui_native_linux",
 ];
@@ -542,7 +563,14 @@ fn check_dev_default_stem(
         };
     }
 
-    let interpreted = match dev_iteration_with_timeout(stem, &file, false) {
+    let outcome = if stem == "io/stdin_filter" {
+        // Pin the JIT -> interpreter authority boundary. The ordinary default
+        // ladder includes AOT, whose successful spawn would hide this JIT gap.
+        jit_with_interpreter_fallback(&file)
+    } else {
+        dev_iteration_with_timeout(stem, &file, false)
+    };
+    let interpreted = match outcome {
         RunOutcome::Ran {
             stdout,
             stderr,
@@ -842,6 +870,18 @@ fn dev_default_matches_compiled_binary() {
         stats.manifested, 0,
         "default jet dev must not carry manifested stdout/stderr/exit-code divergences"
     );
+}
+
+#[test]
+fn stdin_filter_exercises_jit_then_exact_interpreter_boundary() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_dev_stdin_boundary_{}",
+        std::process::id()
+    ));
+    let stats = check_dev_default_stem(0, "io/stdin_filter", &dir, &[]);
+    assert_eq!(stats.ran, 0);
+    assert_eq!(stats.boundary, 1);
+    assert_eq!(stats.boundary_stems, ["io/stdin_filter"]);
 }
 
 /// Every example that runs in the interpreter and has a checked-in
