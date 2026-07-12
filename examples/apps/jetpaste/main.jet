@@ -109,7 +109,7 @@ fn serve(sender: Sender<String>) {
     _created :: conn.execute("CREATE TABLE paste (id TEXT PRIMARY KEY, body TEXT NOT NULL, expires_at INTEGER NOT NULL)", no_params()) ?? panic("create paste table")
     model := PasteModel.new(1, 60, 1000)
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
-    addr :: listener.local_addr()
+    addr :: listener.local_addr() ?? panic("address failed")
     sender.send(copy addr)
     running := true
     loop running {
