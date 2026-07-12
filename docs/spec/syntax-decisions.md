@@ -782,6 +782,13 @@ is E0348, and expression-position use is E0349. `#Meta` has no runtime
 semantics and emits no code; it is checked source data for Canvas/tooling only.
 New fields require a future ballot.
 
+**D-MARK-TARGET1=A — one target-marker family** *(ratified 2026-07-11, card
+#498)*: `#Target(…)` is the only target-partition spelling, for every axis —
+`#Target(Wasm)`, `#Target(Js)`, `#Target(Web)`, `#Target(Os.Linux)`. The
+bare `#Wasm` and `#Js` markers are removed from the grammar (ordinary
+unknown-marker errors, no teaching residue). `#WasmExport` is a different
+job (export surface) and is untouched.
+
 **D-DOTSCOPE1 — Scope members**: inside a `#Marker { }` block body, a
 statement-position `.name { … }` / `.name(args) { … }` resolves against that
 marker's declared scope members (`#Test`: `.expect_fail`, `.setup`,
@@ -1328,6 +1335,29 @@ written. ABI participates in compatibility, overlay merge, caching, wrappers,
 and bindgen. Alternate-ABI functions are direct-call-only and are E3203 when
 taken as values. Bindgen records both portable declared `system` and the
 resolved target ABI.
+
+**D-FFI-ASM1=A — inline assembly** *(ratified 2026-07-11, card #501; gated
+on D-FFI-INLINE1, still open — the `asm` instance of the proposed inline
+tier)*: `#Foreign(asm) fn` bodies are per-target assembly with the Jet
+signature as the operand contract (parameters map to inputs, the return
+value to outputs, named `; -> return` anchors). Requires `use core.mem`
+plus an enclosing `#Unsafe("reason")` (S58); outside the gate is E0208-class.
+Target variants select via the existing `comptime if build.os ==` /
+`#Target` machinery. Lowering emits Rust `asm!` so rustc verifies
+register/clobber facts per target; every user-facing error stays a Jet
+diagnostic (I2). `core.mem.intrinsics` may wrap popular cases as named
+functions on top — beginners meet only the named functions.
+
+**D-FFI-CPP1=A — C++ binder depth** *(ratified 2026-07-11, card #501)*:
+`cpp.*` binds at full depth via a clang-based binder emitting a generated,
+cached C shim crate per library. Classes become opaque owned handles with
+RAII mapped to scope cleanup (S63); methods become ordinary Jet methods;
+exceptions are caught at the shim and surface as `T ? CppError` (fallible
+at every call site); templates instantiate on demand (`cpp.vector<Int>`);
+overloads collapse to argument labels (S61); operator overloads become
+named methods. The overlay tier corrects wrong guesses. Internal staging
+may land C-linkage first, then classes/exceptions, then templates — the
+ratified surface is full depth, so no intermediate stage becomes law.
 
 **D-FFI-UNIFY1 — FFI structure law**: every foreign language mounts as a
 namespace `<lang>.<lib>` with the same three tiers (S59 generalized): script
@@ -2864,17 +2894,49 @@ revokes to safe text fallback.
 
 ### Ratified product and runtime architecture — 2026-07-10 (batch 2)
 
-**D-CLI-SURFACE1=B — frequency-ringed jet command surface**: the ~20 daily
+**D-CLI-SURFACE1=B — frequency-ringed jet command surface** *(as amended by
+D-CLI-STORE2, D-CLI-DEVSERVE1, D-CLI-SURFACE3, 2026-07-11)*: the daily
 dev-loop verbs (`run`, `build`, `test`, `check`, `fix`, `new`, `init`, `add`,
-`remove`, `update`, `fmt`, `lint`, `dev`, `serve`, `repl`, `debug`, `bench`,
-`eval`, `emit`, `explain`, `help`, `version`) stay flat and top-level. The
-long tail moves under four groups on the jet binary: `jet registry`
+`remove`, `update`, `fmt`, `lint`, `dev`, `repl`, `debug`, `bench`,
+`eval`, `emit`, `explain`, `help`, `version`, plus D-CLI-SURFACE3's `env`,
+`fetch`, `search`, `info`, `outdated`, `clean`) stay flat and top-level. The
+long tail lives under groups on the jet binary: `jet registry`
 (publish, yank, keygen, key backup, vendor), `jet inspect` (graph, query,
 explain-build, impact, dossier, semindex, expand, schema, codemod, audit,
-sbom, bind), `jet store` (existing verify/rollback/generations, plus gc,
-fetch, lock), `jet self` (toolchain, upgrade, doctor, completions, man,
+sbom, bind, plus D-CLI-SURFACE3's logs), `jet hangar` (physical store verbs
+per D-CLI-STORE2), `jet self` (toolchain, upgrade, doctor, completions, man,
 devtools). The bare ungrouped spelling of a moved verb is a teaching error
 naming the grouped form, never a silent alias (I8).
+
+**D-CLI-STORE2=A — hangar is the store noun** *(ratified 2026-07-11, card
+#497)*: `jet hangar` owns every physical store verb — verify, repair, copy,
+import, export, dump/restore, sign, rollback, generations, du. `jet clean`
+stays the sole GC+optimize intent. The `jet store` group is dissolved:
+`jet fetch` is a flat daily verb, script locking is `jet fetch --lock
+<script.jet>`, and `jet store …` / bare `jet gc` are teaching errors naming
+the real spelling. Supersedes D-CLI-SURFACE1's `jet store` rows.
+
+**D-CLI-DEVSERVE1=A — `serve` deleted** *(ratified 2026-07-11, card #497)*:
+`jet dev` is the only dev loop (auto-detects rerun vs resident hot-swap;
+`--restart`/`--swap` overrides, per D-DEV4). `jet serve` is a teaching error
+naming `jet dev` (hot-swap: `--swap`). The word stays unclaimed for a future
+ratified job.
+
+**D-CLI-SURFACE3=B — every verb stays on jet, grouped** *(ratified
+2026-07-11, card #497)*: no verb leaves the jet binary. The four silent
+aliases die (`doctor`/`devtools`/`toolchain` → teaching errors naming
+`jet self …`; `gc` → teaching error naming `jet clean`). `env`, `fetch`,
+`clean` join the flat ring; `search`, `info`, `logs`, `outdated` group under
+`jet inspect`; `push`, `bridge`, `services`, `image`, `config` group under
+`jet os`. `jet trust` (D-JPK-GRANTCMD1) and `jet os` (D-JPK-OSVERB1) stay
+as ratified.
+
+**D-CLI-BARE1=A — bare project verbs** *(ratified 2026-07-11, card #497)*:
+one shared entry-resolution rule makes `run`, `dev`, `debug`, `bench`,
+`check`, and `build` bare-capable inside a package: the entry resolves via
+`targets:`/D-ILE1; ambiguity is an error listing the targets (pick with
+`-p <member>` or an explicit file); outside a package the bare form stays
+the current usage error. An explicit file argument always wins.
 
 **D-CLI-SURFACE2=A**: `jet fuzz` remains flat beside testing. The language
 server is canonically `jet self lsp`; first-party editors launch that argv.
