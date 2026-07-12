@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 501,
-    "rev": 3997,
+    "rev": 4002,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -13424,7 +13424,44 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Syntax.rs entry updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T00:49:38.299Z"
+        },
+        {
+          "n": 2,
+          "text": "syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T00:49:38.299Z"
+        },
+        {
+          "n": 3,
+          "text": "jet devtools grammars regenerated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T00:49:38.299Z"
+        },
+        {
+          "n": 4,
+          "text": "snapshots re-blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T00:49:38.299Z"
+        }
+      ],
       "refs": [
         "docs/proposals/surface-condensation.md"
       ],
@@ -25769,6 +25806,310 @@
       "created": "2026-07-11T23:59:34.752Z",
       "outcome": "A",
       "ratifiedAt": "2026-07-12"
+    },
+    {
+      "id": "D-CLI-DEVSERVE1",
+      "cardId": "c0gv4b2r",
+      "group": "tooling",
+      "title": "`jet serve` is a literal alias of `jet dev --swap` — delete or respecialize?",
+      "gist": "Two top-level verbs run the same dev loop; S14 forbids aliases.",
+      "lesson": "`jet dev` is the watch loop: it re-runs your program on every save. D-DEVMODE1 guarantees its output is byte-identical to a release build. Its `--swap` flag keeps the process resident and hot-swaps type-stable edits instead of restarting (D-HOTSWAP1). D-DEV4 also ratified auto-detection: `dev` picks rerun or hot-swap by itself. `jet serve` was added as a friendlier name for the resident mode. But it ships as a one-line alias — `jet serve x.jet` literally dispatches to `jet dev x.jet --swap` (Source/main.rs:1395). S14 says no aliases, ever.",
+      "explainer": "",
+      "story": "June is three weeks into Jet. `jet help` shows both `dev` (\"watch file, re-run on save\") and `serve` (\"resident program, hot-swap edits\"). She asks which one her web app should use and learns they are the same engine. Now she wonders what else in the manual is secretly the same thing. That doubt is exactly what the no-aliases law exists to prevent.",
+      "inWild": "# Both of these run the identical watch loop today:\njet dev app.jet --swap\njet serve app.jet\n\n# D-DEV4 already ratified auto-detection on `dev`:\n# \"auto-detects rerun vs resident hot-swap; --restart/--swap/--watch=off overrides\"",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Delete `serve` — one dev-loop verb",
+          "detail": "`jet dev` is the only dev loop, exactly as D-DEV4 ratified: auto-detects rerun vs resident hot-swap, with `--restart`/`--swap` as expert overrides. `jet serve` becomes a teaching error naming `jet dev`. The word `serve` stays unclaimed. A future ballot can give it real run-as-service semantics when the D-SERVICE1 story needs a CLI entry — no meaning is squatted by an alias meanwhile.",
+          "code": "jet dev app.jet            # magic: picks rerun or hot-swap for you\njet dev app.jet --swap     # expert: force resident hot-swap\n$ jet serve app.jet\nerror[E2101]: `serve` is not a jet command\n  the dev loop is `jet dev app.jet` (hot-swap: `--swap`)"
+        },
+        {
+          "key": "B",
+          "name": "Respecialize `serve` — it runs a service, not a dev loop",
+          "detail": "`jet serve` stops being a dev verb. It builds and runs the project's server target the way production would: no watcher, no interpreter, release profile by default. So `dev` means iterate and `serve` means run-as-service — a memorable beginner story. It costs a real design now: a program with no server target gets an error naming `jet run`. And it mints service semantics before the D-SERVICE1 runtime work has proven what `serve` should do.",
+          "code": "jet dev api.jet            # iterating: watch + hot-swap\njet serve api.jet          # running: release build, resident, no watcher\n$ jet serve script.jet\nerror[E2XXX]: `script.jet` defines no server target\n  `jet serve` runs long-lived services; for a one-shot program use `jet run script.jet`"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Vite (JS)",
+          "note": "The JS ecosystem's split is option B's shape: `vite dev` iterates, `vite preview` serves the built artifact.",
+          "code": "vite dev\nvite preview   # serve the production build locally"
+        },
+        {
+          "lang": "Cargo (Rust)",
+          "note": "Cargo has one verb per job and no aliases; `cargo watch` is a separate tool, not a second spelling of the same one.",
+          "code": "cargo run\ncargo watch -x run"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "D-DEV4 already ratified auto-detection, so the alias adds no capability — only a second spelling for the same loop. S14 is absolute. Deleting now also keeps `serve` free for a real future job.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It invents run-as-service semantics ahead of the D-SERVICE1 runtime that would define them; a verb ratified before its behavior exists invites a second reconciliation later."
+          }
+        ],
+        "tradeoff": "Users who learned `serve` retype `dev` once, guided by the teaching error."
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "A and B are compatible over time: delete the alias now, and re-mint `serve` later as B's run-as-service verb once the service runtime ships and proves the need. A is the hybrid's first step.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "one dev-loop verb with auto-detection",
+            "use": "adopted now"
+          },
+          {
+            "key": "B",
+            "aspect": "serve as a genuine run-as-service verb",
+            "use": "deferred to a future ballot gated on D-SERVICE1 shipping"
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T00:48:31.638Z"
+    },
+    {
+      "id": "D-MARK-TARGET1",
+      "cardId": "c0iftbrr",
+      "group": "syntax",
+      "title": "`#Wasm` / `#Js` duplicate `#Target(Wasm)` / `#Target(Js)` — merge into one marker family?",
+      "gist": "Two marker spellings pick an item's web compilation target; one family should own it.",
+      "lesson": "A hybrid web build (D-WEBKIND1) splits one program across two emitted artifacts: WASM for compute-heavy functions, JS for DOM glue. Item-level markers say which side an item lands on. D-OSTARGET1 ratified `#Target(…)` accepting `Web`, `Browser`, `Wasm`, `Js`, and `Os.Linux/Macos/Windows`. Syntax.rs additionally ships bare `#Wasm` and `#Js` markers from the earlier D-WASM1 work — same job, second spelling. `#WasmExport` names an exported symbol surface; that is a different job and not part of this question.",
+      "explainer": "",
+      "story": "Marcus builds a hybrid web app: image filtering should compile to WASM, DOM glue to JS. One doc example shows `#Wasm fn blur(...)`; another shows `#Target(Wasm) fn blur(...)`. He asks his teammate which one is right. The answer is \"both\" — so now every codebase picks a house style, which is the guess I8 exists to eliminate.",
+      "inWild": "// Both spellings compile today and mean the same partition:\n#Wasm\nfn blur(pixels: [U8], radius: Int) -> [U8] { ... }\n\n#Target(Wasm)\nfn sharpen(pixels: [U8], amount: Float) -> [U8] { ... }\n\n#Js\nfn wire_ui() { web.on(\"#go\", \"click\", (e) => render()) }",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "`#Target(…)` owns the axis; `#Wasm`/`#Js` die",
+          "detail": "One marker family for all target partitioning, exactly as D-OSTARGET1 ratified: `#Target(Wasm)`, `#Target(Js)`, `#Target(Web)`, `#Target(Os.Linux)`. `#Wasm` and `#Js` become ordinary unknown-marker errors — greenfield, no teaching residue. `#WasmExport` is untouched. The OS axis and web axis read identically, so a reader learns one shape that also fits every future axis (plugin, embedded profiles).",
+          "code": "#Target(Wasm)\nfn blur(pixels: [U8], radius: Int) -> [U8] { ... }\n\n#Target(Js)\nfn wire_ui() { web.on(\"#go\", \"click\", (e) => render()) }\n\n$ jet check app.jet   # after the break\nerror[E0061]: unknown marker `#Wasm`\n  target partitioning is `#Target(Wasm)`"
+        },
+        {
+          "key": "B",
+          "name": "Short markers own the web axis; `#Target` narrows to OS only",
+          "detail": "`#Wasm`/`#Js` stay as the web-partition spellings — shortest for the most-typed case in hybrid apps. `#Target(…)` narrows to the OS axis (`#Target(Os.Linux)`), and `#Target(Wasm/Js/Web/Browser)` becomes an error. This saves five characters per marker. The cost: two families for one concept, and a reader must learn that the web and OS axes use different mechanisms for no semantic reason.",
+          "code": "#Wasm\nfn blur(pixels: [U8], radius: Int) -> [U8] { ... }\n\n#Target(Os.Linux)\nimpl LinuxBackend { ... }\n\n$ jet check app.jet\nerror[E0061]: `#Target(Wasm)` is not a target axis\n  web partitioning uses `#Wasm` / `#Js`"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust spells every target condition through one attribute family, cfg. Nobody writes `#[wasm]`; the axis is an argument, not a marker name.",
+          "code": "#[cfg(target_arch = \"wasm32\")]\nfn blur(...) {}"
+        },
+        {
+          "lang": "Swift",
+          "note": "Swift likewise: one `#if os(...)` / `#if arch(...)` conditional family for all axes.",
+          "code": "#if arch(wasm32)\nfunc blur() {}\n#endif"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Axis-as-argument already won for OS targeting and generalizes to every future target. A deletes a whole marker pair from the surface and makes the two axes read identically.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It preserves five characters at the cost of a second mechanism — a trade the ranked priorities never make."
+          }
+        ],
+        "tradeoff": "Hybrid-heavy files type `#Target(...)` more verbosely on every partitioned item."
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "If hybrid-app practice ever proves the verbosity painful, a future ballot could bless a shorthand inside an already-`#Target(Web)` file. Nothing today needs it, so A ships alone.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "one marker family, axis as argument",
+            "use": "adopted now"
+          },
+          {
+            "key": "B",
+            "aspect": "brevity for the hot hybrid case",
+            "use": "deferred; revisit only with real-use evidence of pain"
+          }
+        ]
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-07-12T00:48:31.782Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-12"
+    },
+    {
+      "id": "D-CLI-STORE2",
+      "cardId": "c0gv4b2r",
+      "group": "tooling",
+      "title": "One noun for the package store: hangar, store, or both?",
+      "gist": "Two ratified decisions gave the package store two different CLI nouns; one must win.",
+      "lesson": "The hangar is Jet's shared content-addressed package store at /etc/jet/hangar/ — the same job as Nix's /nix/store. Store commands verify objects, copy them between machines, list generations, and reclaim disk.\n\nTwo decisions ratified on 2026-07-10 collided. D-CLI-SURFACE1=B created a `jet store` command group and put `gc` inside it. D-JPK-STORECLI1=D put the physical verbs under `jet hangar` instead. It also re-affirmed your 2026-07-03 amendment that `jet clean` is the only GC intent. The shipped CLI has all three spellings plus a bare `jet gc` alias. S14 says one canonical spelling per construct, no aliases ever.",
+      "explainer": "",
+      "story": "Ray's CI disk fills up. He wants to check the shared package store for corruption, clean unused entries, and copy a verified object to an air-gapped builder. The manual shows him `jet store verify`, `jet hangar verify`, and `jet clean`. He runs `jet store gc` — a command one ratified decision created and another says must not exist. He cannot tell whether the other spellings do something different or the same thing.",
+      "inWild": "# CI maintenance script — which of these is real?\njet store verify          # D-CLI-SURFACE1=B says this group exists\njet hangar verify         # D-JPK-STORECLI1=D says hangar owns physical verbs\njet store gc              # D-CLI-SURFACE1=B lists gc under store\njet clean                 # owner amendment 2026-07-03: the ONLY gc+optimize intent\njet gc                    # shipped silent alias — S14 says no aliases, ever",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Hangar wins — `jet store` group dissolves",
+          "detail": "`jet hangar` owns every physical store verb: verify, repair, copy, import, export, dump/restore, sign, rollback, generations, du. `jet clean` stays the sole GC+optimize intent. Project-side verbs leave the group: `jet fetch` stays flat, and script locking folds into `jet fetch --lock <script.jet>`. `jet store …` and bare `jet gc` become teaching errors naming the real spelling. One noun survives, and it is the product's own name.",
+          "code": "jet hangar verify\njet hangar copy --to ssh://builder /etc/jet/hangar/abc123\njet hangar generations\njet clean                       # gc + optimize, unchanged\njet fetch --lock tool.jet       # was: jet store lock\n$ jet store verify\nerror[E2101]: `jet store` is not a jet command group\n  the store lives under `jet hangar` — try `jet hangar verify`"
+        },
+        {
+          "key": "B",
+          "name": "Store wins — hangar stays a product name, not a CLI noun",
+          "detail": "`jet store` absorbs D-JPK-STORECLI1's verb list: verify, repair, copy, import, export, dump/restore, sign, rollback, generations. `store gc` dies per your amendment; `jet clean` stays the GC intent. \"Hangar\" remains the store's name in prose and paths (/etc/jet/hangar/) but is never typed as a command. `jet hangar du` respells as `jet store du`. The generic word is easier to guess, but Jet then types a different word than it says.",
+          "code": "jet store verify\njet store copy --to ssh://builder /etc/jet/hangar/abc123\njet store generations\njet clean\n$ jet hangar verify\nerror[E2101]: `jet hangar` is not a jet command group\n  physical store verbs live under `jet store` — try `jet store verify`"
+        },
+        {
+          "key": "C",
+          "name": "Split by audience — `jet store` project-facing, `jet hangar` physical",
+          "detail": "`jet store` keeps the verbs a developer runs against their project's resolved view: fetch, lock, verify, rollback, generations. `jet hangar` keeps the administrator verbs against the shared physical store: repair, copy, import, export, dump/restore, sign, du. `jet clean` stays the GC intent. Two nouns survive with distinct jobs. But the verify/rollback boundary between them is genuinely fuzzy, and users must memorize which side a verb lives on.",
+          "code": "jet store verify            # my project's resolved store view\njet hangar repair           # the shared physical store\njet hangar copy --to ssh://builder abc123\njet clean"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Nix",
+          "note": "Nix splits `nix store` from `nix profile`/`nix flake` and users routinely cannot guess which noun owns a verb. Its third gc spelling is the exact confusion Jet should not replicate.",
+          "code": "nix store verify --all\nnix store optimise\nnix-collect-garbage   # third spelling for gc"
+        },
+        {
+          "lang": "Cargo",
+          "note": "Cargo has no store noun at all — one `cargo clean` intent; everything else is invisible. Jet already matches that beginner ceiling with `jet clean`.",
+          "code": "cargo clean"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "D-JPK-STORECLI1 is the more specific, verb-by-verb law and already chose hangar. Hangar is the product's own aviation name, the word users already see in every store path. A store/hangar synonym pair is exactly the two-names-one-thing confusion I8 exists to kill.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It keeps the generic word but breaks the product's own vocabulary: paths, docs, and errors all say hangar while the CLI refuses the word."
+          },
+          {
+            "key": "C",
+            "reason": "Two nouns for one store makes every verb placement a memorization test; the project/physical boundary is too fuzzy to teach."
+          }
+        ],
+        "tradeoff": "`hangar` is a Jet-ism newcomers must learn once; the teaching error on `jet store` teaches it at first contact."
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "A already absorbs B's single-noun virtue and C's clean physical/project split: physical verbs live under one noun, project verbs stay flat daily verbs. No compatible idea remains outside A.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "hangar as the one physical-store noun",
+            "use": "adopted wholesale"
+          },
+          {
+            "key": "B",
+            "aspect": "exactly one surviving noun",
+            "use": "A keeps one noun too — it just picks the product's own name"
+          },
+          {
+            "key": "C",
+            "aspect": "project verbs separate from physical verbs",
+            "use": "A keeps fetch/lock flat on the daily ring instead of minting a second noun"
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T00:49:06.879Z"
+    },
+    {
+      "id": "D-CLI-SURFACE3",
+      "cardId": "c0gv4b2r",
+      "group": "tooling",
+      "title": "Complete the CLI verb map: 18 verbs still outside the ratified ring and groups",
+      "gist": "Every jet verb needs a ratified home; 18 have none and 4 are silent aliases the law forbids.",
+      "lesson": "D-CLI-SURFACE1=B (2026-07-10) fixed a two-ring CLI. About 20 daily verbs stay flat (run, build, test, dev, repl, fmt, ...). The long tail lives under four groups: `jet registry`, `jet inspect`, `jet store`, `jet self`. A moved verb's bare spelling must be a teaching error, never a silent alias.\n\nSeparately, D-PRODUCT-SPLIT1=C ratified product ownership: jet owns the language and dev loop, jetpack owns packages/env/build substrate, jetos owns OS workflows. Eighteen shipped verbs were in neither decision's table. Four of them (doctor, devtools, gc, toolchain) are silent duplicates of grouped verbs — the exact thing SURFACE1 banned.",
+      "explainer": "",
+      "story": "Priya prints `jet help` to learn the tool. She expects the promised small daily ring plus four groups. The real listing also shows env, fetch, search, info, logs, outdated, clean, push, trust, bridge, services, image, os, config, toolchain, doctor, devtools, and gc floating outside both. She types `jet doctor` and it silently works, even though the law says that spelling moved to `jet self doctor`.",
+      "inWild": "$ jet doctor          # works — but law says `jet self doctor`\n$ jet devtools bless  # works — but law says `jet self devtools bless`\n$ jet gc              # works — but `jet clean` is the sole GC intent\n$ jet toolchain       # works — but law says `jet self toolchain`\n# and 14 more verbs with no ratified ring/group row:\n# env fetch search info logs outdated clean push trust bridge services image os config",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Product-split placement — jet keeps the dev loop, engine verbs go to their owners",
+          "detail": "Daily developer verbs join the flat ring: env, fetch, search, info, outdated, clean. Already-ratified product verbs stay put: `jet trust` (D-JPK-GRANTCMD1) and `jet os` (D-JPK-OSVERB1). Engine and ops verbs move to the owning binary: `jetpack push/bridge/services/image/config/logs`, each with a jet-side teaching shim. The four silent aliases die as teaching errors naming `jet self doctor`, `jet self devtools`, `jet clean`, and `jet self toolchain`.",
+          "code": "# flat ring gains (daily-loop):\njet env    jet fetch    jet search    jet info    jet outdated    jet clean\n# stays (already ratified):\njet trust grant ...     jet os switch ...\n# moves to the engine binary:\njetpack push prod-fleet\njetpack services up\n$ jet doctor\nerror[E2101]: `doctor` moved — try `jet self doctor`"
+        },
+        {
+          "key": "B",
+          "name": "Everything stays on jet; unplaced verbs get grouped",
+          "detail": "No verb leaves the jet binary. The four aliases die. Ops verbs group under existing nouns: `push`, `bridge`, `services`, `image`, `config` under `jet os`; `search`, `info`, `logs`, `outdated` under `jet inspect`. `env`, `fetch`, and `clean` join the flat ring. One binary to learn. But `jet inspect search` is heavier than daily discovery deserves, and `jet os services` stretches the os noun past its ratified meaning.",
+          "code": "jet env    jet fetch    jet clean\njet inspect search http\njet inspect info core.http\njet os push prod-fleet\n$ jet gc\nerror[E2101]: `gc` moved — try `jet clean`"
+        },
+        {
+          "key": "C",
+          "name": "Freeze the status quo minus aliases",
+          "detail": "All 14 real verbs stay flat top-level on jet; only the four silent aliases become teaching errors. Smallest motion. But the flat surface stays at roughly 35 verbs. That is the crowding D-CLI-SURFACE1 was ratified to end — the ring stops meaning anything.",
+          "code": "jet push prod-fleet     # stays flat\njet bridge flake        # stays flat\n$ jet devtools\nerror[E2101]: `devtools` moved — try `jet self devtools`"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "git",
+          "note": "git's porcelain/plumbing split is the survivable big CLI: ~20 daily verbs in `git help`, the long tail behind `git help -a`. SURFACE1 chose this shape; this ballot finishes it.",
+          "code": "git help        # 21 common verbs\ngit help -a     # everything else, grouped"
+        },
+        {
+          "lang": "Nix (old CLI)",
+          "note": "nix-env/nix-store/nix-collect-garbage grew ungoverned top-level spellings for years. The 2.x `nix <noun> <verb>` redesign is the cleanup Jet can do before 1.0 instead of after.",
+          "code": "nix-env -e pkg           # legacy flat sprawl\nnix profile remove pkg   # governed redesign"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A is the only option consistent with both prior ratifications at once: SURFACE1's small ring and PRODUCT-SPLIT1's ownership. Daily verbs stay one keystroke; fleet/ops verbs sit with the binary that owns their behavior.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It bloats `jet inspect` and `jet os` with verbs those nouns don't own, trading noun coherence for single-binary purity nobody asked for."
+          },
+          {
+            "key": "C",
+            "reason": "A 35-verb flat surface abandons the ratified ring; the help screen stops teaching what matters daily."
+          }
+        ],
+        "tradeoff": "Fleet and service users retype `jetpack push` etc. once, guided by teaching shims. Store-group rows here stay agnostic: D-CLI-STORE2 on the same card picks the store noun independently."
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "A is already the hybrid: it takes B's group discipline for jet-owned verbs, C's zero-motion for the daily six, and PRODUCT-SPLIT1's ownership for engine verbs. No stronger compatible combination remains.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "ownership-based placement with teaching shims",
+            "use": "adopted wholesale"
+          },
+          {
+            "key": "B",
+            "aspect": "grouping discipline on the jet binary",
+            "use": "A applies it to jet-owned verbs (self/inspect groups) only"
+          },
+          {
+            "key": "C",
+            "aspect": "minimal motion for daily verbs",
+            "use": "A promotes the daily six into the ring untouched"
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T00:49:06.976Z"
     }
   ],
   "questions": [
@@ -26570,6 +26911,69 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-12T00:49:38.299Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-MARK-TARGET1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-12T00:49:38.299Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0iftbrr",
+      "note": "#4 snapshots re-blessed"
+    },
+    {
+      "at": "2026-07-12T00:49:38.299Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0iftbrr",
+      "note": "#3 jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-07-12T00:49:38.299Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0iftbrr",
+      "note": "#2 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-07-12T00:49:38.299Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0iftbrr",
+      "note": "#1 Syntax.rs entry updated"
+    },
+    {
+      "at": "2026-07-12T00:49:06.977Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-CLI-SURFACE3",
+      "note": "Complete the CLI verb map: 18 verbs still outside the ratified ring and groups"
+    },
+    {
+      "at": "2026-07-12T00:49:06.879Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-CLI-STORE2",
+      "note": "One noun for the package store: hangar, store, or both?"
+    },
+    {
+      "at": "2026-07-12T00:48:31.782Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-MARK-TARGET1",
+      "note": "`#Wasm` / `#Js` duplicate `#Target(Wasm)` / `#Target(Js)` — merge into one marker family?"
+    },
+    {
+      "at": "2026-07-12T00:48:31.639Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-CLI-DEVSERVE1",
+      "note": "`jet serve` is a literal alias of `jet dev --swap` — delete or respecialize?"
+    },
     {
       "at": "2026-07-12T00:42:29.884Z",
       "by": "claude-main",
@@ -30006,69 +30410,6 @@
       "action": "card.criteria-meet",
       "ref": "c0ewbiud",
       "note": "#1"
-    },
-    {
-      "at": "2026-07-11T11:26:45.489Z",
-      "by": "terra-456-store-final",
-      "action": "card.claim",
-      "ref": "c083j754",
-      "note": ""
-    },
-    {
-      "at": "2026-07-11T11:24:07.749Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c01lj8gw",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-11T11:23:51.720Z",
-      "by": "terra-451-shell",
-      "action": "card.release",
-      "ref": "c01lj8gw",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-11T11:23:51.547Z",
-      "by": "sol-451-shell-review",
-      "action": "card.criteria-verify",
-      "ref": "c01lj8gw",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-11T11:23:51.380Z",
-      "by": "terra-451-shell",
-      "action": "card.criteria-meet",
-      "ref": "c01lj8gw",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-11T11:23:51.160Z",
-      "by": "codex-main",
-      "action": "card.criteria-add",
-      "ref": "c01lj8gw",
-      "note": "#3 Focused codemod/dev-shell proofs and repository full verific"
-    },
-    {
-      "at": "2026-07-11T11:23:50.984Z",
-      "by": "codex-main",
-      "action": "card.criteria-add",
-      "ref": "c01lj8gw",
-      "note": "#2 The ratified v2 batch codemod executes ordered semantic symb"
-    },
-    {
-      "at": "2026-07-11T11:23:50.810Z",
-      "by": "codex-main",
-      "action": "card.criteria-add",
-      "ref": "c01lj8gw",
-      "note": "#1 The Nix dev shell provides jq, gh, and fd; shell entry and v"
-    },
-    {
-      "at": "2026-07-11T11:10:23.234Z",
-      "by": "terra-451-shell",
-      "action": "card.claim",
-      "ref": "c01lj8gw",
-      "note": ""
     }
   ],
   "nextNum": 368,
