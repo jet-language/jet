@@ -1307,7 +1307,11 @@ fn collect_stmts(stmts: &[AST::Stmt], mp: &str, module: &LoadedModule, ctx: &mut
 }
 
 fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<'_>) {
-    let structural_id = record_node(ctx, "stmt", &stmt_shape(stmt), mp, stmt.span());
+    let span = match stmt {
+        AST::Stmt::If(if_stmt) => if_stmt.span,
+        _ => stmt.span(),
+    };
+    let structural_id = record_node(ctx, "stmt", &stmt_shape(stmt), mp, span);
     if let Some(id) = structural_id { ctx.structural_parents.push(id); }
     match stmt {
         AST::Stmt::Val(b) => {
