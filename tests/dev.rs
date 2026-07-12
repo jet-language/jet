@@ -1022,6 +1022,83 @@ fn task_program_runs_via_jit() {
     );
 }
 
+/// Scheduler workers catch user-task panics. Parallel tasks must never race by
+/// swapping Rust's process-global panic hook and leak a raw worker panic line.
+#[test]
+fn caught_task_panics_keep_stderr_deterministic_under_parallel_repetition() {
+    if !have_rustc() {
+        eprintln!("note: rustc not found; skipping scheduler panic-hook regression");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!(
+        "jet_dev_scheduler_panic_hook_{}",
+        std::process::id()
+    ));
+    let file = "examples/features/concurrency/all_failfast.jet";
+    let expected = ProgramOutput::ran(
+        String::new(),
+        "panic: a task panicked\n".to_string(),
+        70,
+    );
+    let first = compiled_binary_output(&dir, "scheduler_panic_hook", 0, "all_failfast", file);
+    assert_eq!(first, expected);
+
+    for iteration in 0..8 {
+        let fallback = match dev_iteration(file, false, false) {
+            RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => ProgramOutput::ran(stdout, stderr, exit_code),
+            RunOutcome::Problems(diags) => {
+                panic!("all_failfast fallback run {iteration} stopped at {diags:?}")
+            }
+        };
+        assert_eq!(
+            fallback, expected,
+            "all_failfast fallback run {iteration} leaked non-Jet stderr"
+        );
+    }
+
+    let binary = Arc::new(dir.join("jet_scheduler_panic_hook_0"));
+    let failures = Arc::new(Mutex::new(Vec::new()));
+    let mut workers = Vec::new();
+    for worker in 0..8 {
+        let binary = Arc::clone(&binary);
+        let failures = Arc::clone(&failures);
+        let expected = expected.clone();
+        workers.push(std::thread::spawn(move || {
+            for iteration in 0..8 {
+                let run = command_output_with_timeout(
+                    Command::new(binary.as_ref()),
+                    DEV_DIFF_TIMEOUT,
+                    &format!("scheduler panic run {worker}/{iteration}"),
+                );
+                let got = ProgramOutput::ran(
+                    String::from_utf8_lossy(&run.stdout).into_owned(),
+                    String::from_utf8_lossy(&run.stderr).into_owned(),
+                    run.status.code().unwrap_or(1),
+                );
+                if got != expected {
+                    failures.lock().unwrap().push(format!(
+                        "run {worker}/{iteration}: expected {expected:?}, got {got:?}"
+                    ));
+                }
+            }
+        }));
+    }
+    for worker in workers {
+        worker.join().expect("panic-hook regression worker panicked");
+    }
+    let failures = failures.lock().unwrap();
+    assert!(
+        failures.is_empty(),
+        "caught task panic stderr drifted:\n{}",
+        failures.join("\n")
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
 /// c125 Phase 6 seed: uncovered effectful programs run under default dev via
 /// transparent AOT subprocess fallback. Interpreter mode keeps the honest
 /// E2201 boundary; the default backend owns the gap.
