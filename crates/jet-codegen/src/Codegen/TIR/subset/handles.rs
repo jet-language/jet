@@ -643,6 +643,10 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
         }
         ("core.http.client", "request") => return Type::Named("HttpClientReq".to_string()),
         ("core.http.server", "mux") => return Type::Named("HttpMux".to_string()),
+        ("core.http.server", "bind") => return Type::Result {
+            ok: Box::new(Type::Named("HttpServer".to_string())),
+            err: Box::new(Type::String),
+        },
         ("core.http.server", "tls") => return Type::Named("HttpServerTls".to_string()),
         ("core.http.server", "serve" | "serve_once" | "serve_once_listener") => {
             return Type::Result {

@@ -65,6 +65,7 @@ fn perf_budget_sema_elaborates_defaults_and_field_spans() {
     assert_eq!(spec.metric, "BinarySize");
     assert_eq!(spec.comparison, "Absolute");
     assert_eq!(spec.limit, "AtMost");
+    assert_eq!(spec.enforcement, "Fail");
     assert_eq!(&src[spec.span.start..spec.span.end], "Budget.{\n        name: \"binary\",\n        metric: .BinarySize,\n        limit: .AtMost(2MiB),\n    }");
     for field in ["name", "metric", "limit"] {
         let span = spec.field_spans.get(field).expect("field span");
@@ -126,8 +127,32 @@ fn perf_budget_sema_accepts_disjoint_target_applicability() {
         },
     ]
 }
+
 "#;
     assert_eq!(collect_perf_specs(src).expect("disjoint budgets").len(), 2);
+}
+
+#[test]
+fn perf_budget_sema_resolves_service_scope_and_provider() {
+    let src = r#"module env.dev {
+    services: { api: { enable: true } }
+}
+module perf.release {
+    budgets: [Budget.{
+        name: "ready",
+        scope: .Service("api"),
+        metric: .ServiceReadiness,
+        provider: .ServiceProbe("api"),
+        comparison: .AbsoluteFrom("ci/linux-x64"),
+        limit: .AtMost(2s),
+        enforcement: .Warn,
+    }]
+}
+"#;
+    let specs = collect_perf_specs(src).expect("resolved service budget");
+    assert_eq!(specs[0].scope, "Service(api)");
+    assert_eq!(specs[0].provider, "ServiceProbe(api)");
+    assert_eq!(specs[0].enforcement, "Warn");
 }
 
 #[test]

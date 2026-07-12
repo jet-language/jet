@@ -260,8 +260,9 @@ pub const ATTR_CODABLE: &str = "Codable"; // D-SERDE4
 pub const ATTR_ENCODE: &str = "Encode"; // D-SERDE4
 pub const ATTR_DECODE: &str = "Decode"; // D-SERDE4
                                         // D-MARKERMOVE3 (B, ratified 2026-07-02): the other built-in derive markers
-                                        // that join Codable/Encode/Decode on the contract plane (`@`). `TRAIT_DEBUG`
-                                        // ("Debug") is reused as the auto-derive marker name. User derives
+                                        // that join Codable/Encode/Decode on the contract plane (`@`). `Debug` is
+                                        // NOT one of these — D-MARK-DEBUG1=A retired the explicit derive spelling
+                                        // outright (E0922, Traits.rs); it auto-derives instead (S55). User derives
                                         // (`derive T.Wire { … }`, applied as `#[Wire]`) stay `#` — the built-in/user
                                         // line is the `@`/`#` plane line.
 pub const ATTR_SUMMARIZE: &str = "Summarize"; // D-MARKERMOVE3

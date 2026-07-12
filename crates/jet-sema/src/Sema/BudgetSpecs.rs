@@ -1,4 +1,4 @@
-use crate::AST::{ContribValue, EnumLitArg, Expr, Item, ModuleDecl, Program, ProgramBundle};
+use crate::AST::{ContribValue, EnumLitArg, Expr, Item, ModuleDecl, Namespace, Program, ProgramBundle, SystemFieldValue};
 use crate::Diagnostics::{Diagnostic, Span};
 use std::collections::BTreeMap;
 
@@ -10,6 +10,7 @@ pub struct BudgetSpec {
     pub scope: String,
     pub provider: String,
     pub applicability: BudgetApplicability,
+    pub enforcement: String,
     pub comparison: String,
     pub limit: String,
     pub span: Span,
@@ -58,8 +59,91 @@ fn validate_items(items: &[Item]) -> (Vec<BudgetSpec>, Vec<Diagnostic>) {
             validate_module(module, &mut specs, &mut diags);
         }
     }
+    validate_resolution(&specs, &attachment_catalog(items), &mut diags);
     validate_collisions(&specs, &mut diags);
     (specs, diags)
+}
+
+#[derive(Default)]
+struct AttachmentCatalog {
+    envs: std::collections::BTreeSet<String>,
+    services: std::collections::BTreeSet<String>,
+    targets: std::collections::BTreeSet<String>,
+    scenes: std::collections::BTreeSet<String>,
+    benches: std::collections::BTreeSet<String>,
+}
+
+fn attachment_catalog(items: &[Item]) -> AttachmentCatalog {
+    let mut catalog = AttachmentCatalog::default();
+    for item in items {
+        let Item::Module(module) = item else { continue };
+        for contribution in &module.contributions {
+            match contribution.namespace {
+                Namespace::Env => { catalog.envs.insert(contribution.path.clone()); }
+                Namespace::System | Namespace::Image => { catalog.targets.insert(contribution.path.clone()); }
+                _ => {}
+            }
+            match &contribution.value {
+                ContribValue::Env(env) => catalog.services.extend(env.services.iter().map(|service| service.name.clone())),
+                ContribValue::System(system) => {
+                    for field in &system.fields {
+                        if let SystemFieldValue::Services(services) = &field.value {
+                            catalog.services.extend(services.iter().map(|service| service.name.clone()));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    catalog
+}
+
+fn validate_resolution(specs: &[BudgetSpec], catalog: &AttachmentCatalog, diags: &mut Vec<Diagnostic>) {
+    for spec in specs {
+        if let Some((kind, name)) = named_key(&spec.scope) {
+            let found = match kind {
+                "Env" => catalog.envs.contains(name),
+                "Service" => catalog.services.contains(name),
+                "Scene" => catalog.scenes.contains(name),
+                "Bench" => catalog.benches.contains(name),
+                "Target" => catalog.targets.contains(name),
+                _ => true,
+            };
+            if !found {
+                diags.push(unresolved(spec, "scope", format!("no canonical {kind} attachment named `{name}` exists in the containing package"), "declare that attachment or use its canonical package-qualified identity"));
+                continue;
+            }
+        }
+        if let Some((kind, name)) = named_key(&spec.provider) {
+            let found = match kind {
+                "BuildArtifact" => catalog.targets.contains(name) || name == "Package",
+                "AllocationProbe" => catalog.services.contains(name) || catalog.scenes.contains(name) || catalog.benches.contains(name),
+                "BenchMeasurement" => catalog.benches.contains(name),
+                "ServiceProbe" => catalog.services.contains(name),
+                "SceneProbe" => catalog.scenes.contains(name),
+                _ => true,
+            };
+            if !found {
+                diags.push(unresolved(spec, "provider", format!("no canonical {kind} provider named `{name}` exists in the containing package"), "name a provider attached to a resolved scope"));
+            }
+        }
+    }
+}
+
+fn unresolved(spec: &BudgetSpec, attachment: &str, why: String, fix: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E2905",
+        format!("performance budget {} cannot resolve {}", spec.name, attachment),
+        why,
+        fix.to_string(),
+        spec.field_spans.get(attachment).copied().or(Some(spec.span)),
+    )
+}
+
+fn named_key(value: &str) -> Option<(&str, &str)> {
+    let open = value.find('(')?;
+    value.ends_with(')').then(|| (&value[..open], &value[open + 1..value.len() - 1]))
 }
 
 fn validate_collisions(specs: &[BudgetSpec], diags: &mut Vec<Diagnostic>) {
@@ -183,15 +267,18 @@ fn elaborate(role: &str, entry: &Expr) -> Result<BudgetSpec, Diagnostic> {
     }
     validate_limit_unit(&name, &metric_variant, &limit, limit_expr)?;
     let scope = match map.get("scope") {
-        Some((expr, _)) => enum_key(expr).ok_or_else(|| invalid(&name, "`scope` must be one closed scope value", "use `.Package`, `.Target(name)`, `.Env(name)`, `.Service(name)`, `.Scene(name)`, or `.Bench(name)`", expr.span()))?,
+        Some((expr, _)) => closed_scope(&name, expr)?,
         None => "Package".into(),
     };
     let provider = if let Some((expr, _)) = map.get("provider") {
-        enum_key(expr).ok_or_else(|| invalid(&name, "`provider` must be one closed provider value", "use a typed provider such as `.CompilerFacts` or `.BuildArtifact(name)`", expr.span()))?
+        closed_provider(&name, expr)?
     } else if matches!(metric_variant.as_str(), "GeneratedUnsafe" | "PublicApiItems" | "DependencyCount" | "EffectCount") {
         "CompilerFacts".into()
     } else if matches!(metric_variant.as_str(), "BinarySize" | "ArtifactSize") {
-        format!("BuildArtifact({scope})")
+        match named_key(&scope) {
+            Some(("Target", target)) => format!("BuildArtifact({target})"),
+            _ => "BuildArtifact(Package)".into(),
+        }
     } else {
         String::new()
     };
@@ -199,8 +286,49 @@ fn elaborate(role: &str, entry: &Expr) -> Result<BudgetSpec, Diagnostic> {
         Some((expr, _)) => parse_applicability(&name, expr)?,
         None => BudgetApplicability { targets: BudgetAxis::Current, profiles: BudgetAxis::Current },
     };
+    let enforcement = match map.get("enforcement") {
+        Some((expr, _)) => match enum_variant(expr).as_deref() {
+            Some("Fail") => "Fail".into(),
+            Some("Warn") if !deterministic => "Warn".into(),
+            Some("Warn") => return Err(invalid(&name, "deterministic budgets must use `.Fail` enforcement", "remove `enforcement` or write `.Fail`", expr.span())),
+            _ => return Err(invalid(&name, "`enforcement` must be `.Fail` or `.Warn`", "use `.Fail`, or `.Warn` for a statistical budget", expr.span())),
+        },
+        None => "Fail".into(),
+    };
+    validate_scope_provider_pair(&name, &metric_variant, &scope, &provider, *span)?;
     let field_spans = map.into_iter().map(|(k, (_, s))| (k.to_string(), s)).collect();
-    Ok(BudgetSpec { role: role.into(), name, metric, scope, provider, applicability, comparison, limit, span: *span, field_spans })
+    Ok(BudgetSpec { role: role.into(), name, metric, scope, provider, applicability, enforcement, comparison, limit, span: *span, field_spans })
+}
+
+fn closed_scope(name: &str, expr: &Expr) -> Result<String, Diagnostic> {
+    let key = enum_key(expr).ok_or_else(|| invalid(name, "`scope` must be one closed scope value", "use `.Package`, `.Target(name)`, `.Env(name)`, `.Service(name)`, `.Scene(name)`, or `.Bench(name)`", expr.span()))?;
+    match (enum_variant(expr).as_deref(), named_key(&key)) {
+        (Some("Package"), None) => Ok(key),
+        (Some("Env" | "Service" | "Scene" | "Bench" | "Target"), Some((_, value))) if !value.is_empty() => Ok(key),
+        _ => Err(invalid(name, "`scope` must be one closed scope value with the required name", "use `.Package` or a named scope such as `.Service(\"api\")`", expr.span())),
+    }
+}
+
+fn closed_provider(name: &str, expr: &Expr) -> Result<String, Diagnostic> {
+    let key = enum_key(expr).ok_or_else(|| invalid(name, "`provider` must be one closed provider value", "use a typed provider such as `.CompilerFacts` or `.BuildArtifact(name)`", expr.span()))?;
+    match (enum_variant(expr).as_deref(), named_key(&key)) {
+        (Some("CompilerFacts"), None) => Ok(key),
+        (Some("BuildArtifact" | "AllocationProbe" | "BenchMeasurement" | "ServiceProbe" | "SceneProbe"), Some((_, value))) if !value.is_empty() => Ok(key),
+        _ => Err(invalid(name, "`provider` must be one closed provider value with the required name", "use `.CompilerFacts` or a named provider such as `.ServiceProbe(\"api\")`", expr.span())),
+    }
+}
+
+fn validate_scope_provider_pair(name: &str, metric: &str, scope: &str, provider: &str, span: Span) -> Result<(), Diagnostic> {
+    let valid = match metric {
+        "BinarySize" | "ArtifactSize" => (scope == "Package" || scope.starts_with("Target(")) && provider.starts_with("BuildArtifact("),
+        "GeneratedUnsafe" | "PublicApiItems" | "DependencyCount" | "EffectCount" => (scope == "Package" || scope.starts_with("Target(")) && provider == "CompilerFacts",
+        "ServiceReadiness" => match (named_key(scope), named_key(provider)) {
+            (Some(("Service", scope_name)), Some(("ServiceProbe", provider_name))) => scope_name == provider_name,
+            _ => false,
+        },
+        _ => true,
+    };
+    if valid { Ok(()) } else { Err(invalid(name, format!("`{metric}` cannot use scope `{scope}` with provider `{provider}`"), "choose the metric's ratified scope/provider pair", span)) }
 }
 
 fn parse_applicability(name: &str, expr: &Expr) -> Result<BudgetApplicability, Diagnostic> {

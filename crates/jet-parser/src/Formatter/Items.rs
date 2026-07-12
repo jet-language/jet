@@ -344,14 +344,13 @@ impl<'a> Fmt<'a> {
         if markers.is_empty() {
             return;
         }
-        let contract: Vec<&Marker> = markers
-            .iter()
-            .filter(|m| Syntax::is_contract_marker(&m.name))
-            .collect();
-        let directive: Vec<&Marker> = markers
-            .iter()
-            .filter(|m| !Syntax::is_contract_marker(&m.name))
-            .collect();
+        // D-MARK-DEBUG1 follow-up (card #498): re-emit under the sigil the
+        // marker was actually WRITTEN with, not `is_contract_marker`'s
+        // legality classification — a retired-but-still-typeable name (e.g.
+        // `Debug`) must round-trip byte-identically even after it leaves
+        // `CONTRACT_MARKERS`.
+        let contract: Vec<&Marker> = markers.iter().filter(|m| m.sigil == '@').collect();
+        let directive: Vec<&Marker> = markers.iter().filter(|m| m.sigil != '@').collect();
         self.fmt_marker_group(&contract, Syntax::CONTRACT_PREFIX, lone_hash_ok);
         self.fmt_marker_group(&directive, Syntax::ATTR_PREFIX, lone_hash_ok);
     }
@@ -1059,10 +1058,9 @@ impl<'a> Fmt<'a> {
         // stacking order as struct-level `fmt_type_markers`. Both groups are
         // always bracketed at field position (no bare `@Name` unwrap here —
         // fields don't support it, unlike a lone struct/enum-level marker).
-        let (contract_markers, directive_markers): (Vec<&Marker>, Vec<&Marker>) = field
-            .serde_markers
-            .iter()
-            .partition(|m| Syntax::is_contract_marker(&m.name));
+        // D-MARK-DEBUG1 follow-up: sigil-based split, see `fmt_type_markers`.
+        let (contract_markers, directive_markers): (Vec<&Marker>, Vec<&Marker>) =
+            field.serde_markers.iter().partition(|m| m.sigil == '@');
         self.fmt_field_marker_group(&contract_markers, Syntax::CONTRACT_PREFIX);
         self.fmt_field_marker_group(&directive_markers, Syntax::ATTR_PREFIX);
         self.fmt_pub_qualifier(field.is_pub, field.is_package_pub);

@@ -140,6 +140,7 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
             "get"
                 | "post"
                 | "request"
+                | "bind"
                 | "mux"
                 | "serve"
                 | "serve_once"

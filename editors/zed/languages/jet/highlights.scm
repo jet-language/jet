@@ -140,7 +140,7 @@
 
 ; builtin: input print
 ; marker.directive: Abi Bench Bindgen Caller Caps DebugOnly Default DenyUnknownFields Extern Flatten Grant Html Impure Invariant Layout Meta Off Reactive Rename RenameAll Replayable Sanitizer SingleUse Skip Sql State Tag Tainted Target Test Todo Track Transact Transition UnitFamily Unsafe Untagged WasmExport
-; marker.contract: Cli Codable CodableAsBase Comparable Debug Decode Doc Encode Inline InlineAlways MustUse Numeric Patchable Persist Post Pre Printable PublishedSchema Pure Redact Summarize
+; marker.contract: Cli Codable CodableAsBase Comparable Decode Doc Encode Inline InlineAlways MustUse Numeric Patchable Persist Post Pre Printable PublishedSchema Pure Redact Summarize
 ; sigil: # & ... :: := @ ^
 ; operator: ! != % %= && &= * *= + ++ += - -- -= -> .. .[ .{ / /= < << <<= <= == => > >= >> >>= ? ?. ?? ^= | |= ||
 ; END GENERATED JET SYNTAX HIGHLIGHTS

@@ -159,6 +159,10 @@ impl TraitRegistry {
             for (name, span) in derives {
                 if self.local_tags.contains(name) {
                     diags.push(Generics::e0731(name, "`derive`", *span));
+                } else if name == DEBUG {
+                    // D-MARK-DEBUG1=A: `Debug` auto-derives; an explicit
+                    // `@Debug`/`@[.., Debug]`/`derive Debug;` is retired.
+                    diags.push(Generics::e0922(*span));
                 }
             }
         }

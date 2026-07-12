@@ -904,6 +904,18 @@ pub struct Marker {
     pub name_span: Span,
     pub args: Vec<Expr>,
     pub span: Span,
+    /// D-MARK-DEBUG1 follow-up (card #498): the sigil this marker was
+    /// actually written with — `'@'` (contract plane) or `'#'` (directive/
+    /// serde plane). Set once at parse time (the parser already knows which
+    /// bracket/prefix it is bumping past). The formatter re-emits a marker
+    /// under THIS sigil, not `Syntax::is_contract_marker(&name)` — that
+    /// classification answers "which plane does this name legally belong
+    /// to" (E0062/E0063 teaching, derive-vs-serde split) and can diverge
+    /// from a marker's written sigil once a name is retired from
+    /// `CONTRACT_MARKERS`/`DIRECTIVE_MARKERS` (e.g. `Debug`, still a real
+    /// `@`-plane trait name a user can type, just no longer a registered
+    /// opt-in derive) — re-emission must preserve what the user wrote.
+    pub sigil: char,
     /// Card #131 / D-SERDE5: for a `#[Default(expr)]` field marker, the
     /// compile-time value its argument evaluates to. Sema fills this once
     /// (`eval_default_markers`) so both the AOT codegen tier and the comptime

@@ -184,7 +184,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-REGEXENGINE1=A: std-only linear regex values.
         | "Regex" | "RegexFlags" | "Match"
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP types.
-        | "HttpClientReq" | "HttpClientResp" | "HttpMux" | "HttpSrvReq" | "HttpSrvResp" | "HttpServerTls"
+        | "HttpClientReq" | "HttpClientResp" | "HttpMux" | "HttpSrvReq" | "HttpSrvResp" | "HttpServerTls" | "HttpServer" | "HttpShutdownReport"
         // D-TYPEDTEXT1=D: typed text — a checked query/markup template built by
         // expected-type elaboration of a string literal (E0149 guards a plain
         // runtime `String` from filling this position).
@@ -207,6 +207,9 @@ pub(crate) fn core_type_known(name: &str) -> bool {
 }
 
 pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
+    if type_name == "HttpShutdownReport" && matches!(field, "accepted" | "overloaded" | "completed" | "cancelled") {
+        return Some(Type::Int);
+    }
     if matches!(type_name, "EncodingLimits" | "EncodingCause" | "EncodingError") {
         return core_constructable_fields(type_name)?.into_iter().find(|(name, _)| name == field).map(|(_, ty)| ty);
     }

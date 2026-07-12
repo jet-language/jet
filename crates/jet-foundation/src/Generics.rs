@@ -392,6 +392,28 @@ pub fn e0915(type_show: &str, span: Span) -> Diagnostic {
     )
 }
 
+/// D-MARK-DEBUG1=A (ratified 2026-07-11, card #498): `Debug` no longer has an
+/// explicit derive spelling — `@Debug`, `@[.., Debug]`, and a body
+/// `derive Debug;` line all land here (a struct/enum's `derives` list can
+/// only contain the literal name "Debug" via one of those three explicit
+/// forms; auto-derive never writes into `derives`, see
+/// `Traits::compute_auto_derives`).
+pub fn e0922(span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0922",
+        "`Debug` derives automatically — writing it explicitly is retired".to_string(),
+        "auto-derived `Debug` covers every type whose fields are all debuggable (S55); \
+         D-MARK-DEBUG1 retired the explicit opt-in spelling so there's exactly one way to \
+         get it (I8)."
+            .to_string(),
+        "remove `Debug` here — printing already works via `{value@Debug}` interpolation; \
+         implement `Debug` by hand (`impl T.Debug { fn debug(self) -> String { … } }`) only \
+         if you need custom output."
+            .to_string(),
+        Some(span),
+    )
+}
+
 /// D-DEBUG-REDACT / auto-derive limits: a field type blocks Debug auto-derive.
 pub fn e0916(type_show: &str, field: &str, span: Span) -> Diagnostic {
     Diagnostic::error(

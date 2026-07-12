@@ -4,7 +4,9 @@ use super::super::{
 
 impl<'a> Parser<'a> {
         /// Parse one marker name and optional `(args)`; cursor sits on the name.
-        fn parse_one_marker(&mut self) -> Result<Marker, Diagnostic> {
+        /// `sigil` is the plane prefix the caller already consumed (`'@'` or
+        /// `'#'`) — recorded on the marker for formatter re-emission.
+        fn parse_one_marker(&mut self, sigil: char) -> Result<Marker, Diagnostic> {
             let (name, name_span) = self.expect_ident("for a marker name")?;
             let mut args = Vec::new();
             let mut end = name_span.end;
@@ -26,6 +28,7 @@ impl<'a> Parser<'a> {
                 name_span,
                 args,
                 span: Span::new(name_span.start, end),
+                sigil,
                 ct: None,
             })
         }
@@ -36,7 +39,7 @@ impl<'a> Parser<'a> {
             self.bump(); // `[`
             let mut group = Vec::new();
             loop {
-                let m = self.parse_one_marker()?;
+                let m = self.parse_one_marker('#')?;
                 self.check_marker_plane(&m, false);
                 group.push(m);
                 if matches!(self.peek().kind, TokKind::Comma) {
@@ -59,7 +62,7 @@ impl<'a> Parser<'a> {
             self.bump(); // `[`
             let mut group = Vec::new();
             loop {
-                let m = self.parse_one_marker()?;
+                let m = self.parse_one_marker('@')?;
                 self.check_marker_plane(&m, true);
                 group.push(m);
                 if matches!(self.peek().kind, TokKind::Comma) {
@@ -169,7 +172,7 @@ impl<'a> Parser<'a> {
         /// D-ATTR1: parse a lone `#Marker` (or `#Marker(args)`) before `struct`/`enum`.
         fn parse_single_type_prefix_marker(&mut self) -> Result<Marker, Diagnostic> {
             self.bump(); // `#`
-            let m = self.parse_one_marker()?;
+            let m = self.parse_one_marker('#')?;
             self.check_marker_plane(&m, false);
             Ok(m)
         }
@@ -178,7 +181,7 @@ impl<'a> Parser<'a> {
         /// `struct`/`enum` — the `@` sibling of `parse_single_type_prefix_marker`.
         fn parse_single_contract_type_marker(&mut self) -> Result<Marker, Diagnostic> {
             self.bump(); // `@`
-            let m = self.parse_one_marker()?;
+            let m = self.parse_one_marker('@')?;
             self.check_marker_plane(&m, true);
             Ok(m)
         }

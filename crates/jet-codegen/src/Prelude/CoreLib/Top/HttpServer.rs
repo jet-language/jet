@@ -40,6 +40,54 @@ struct JetHttpReadError {
     message: &'static str,
 }
 
+#[derive(Clone)]
+struct JetHttpServerOptions {
+    workers: usize,
+    admission_queue: usize,
+    read_header_timeout: std::time::Duration,
+    read_idle_timeout: std::time::Duration,
+    read_body_timeout: std::time::Duration,
+    shutdown_grace: std::time::Duration,
+}
+
+impl JetHttpServerOptions {
+    fn safe() -> Self {
+        Self {
+            workers: std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1),
+            admission_queue: 256,
+            read_header_timeout: std::time::Duration::from_secs(5),
+            read_idle_timeout: std::time::Duration::from_secs(30),
+            read_body_timeout: std::time::Duration::from_secs(30),
+            shutdown_grace: std::time::Duration::from_secs(30),
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+struct JetHttpShutdownReport {
+    accepted: usize,
+    overloaded: usize,
+    completed: usize,
+    cancelled: usize,
+}
+
+#[derive(Clone)]
+struct JetHttpServer {
+    inner: std::sync::Arc<JetHttpServerState>,
+}
+
+struct JetHttpServerState {
+    listener: std::sync::Mutex<Option<std::net::TcpListener>>,
+    mux: JetHttpMux,
+    local_addr: String,
+    shutdown: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    shutdown_called: std::sync::atomic::AtomicBool,
+    grace_ms: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    lifecycle: std::sync::atomic::AtomicU8,
+    report: std::sync::Mutex<Option<JetHttpShutdownReport>>,
+    report_ready: std::sync::Condvar,
+}
+
 impl std::fmt::Display for JetHttpReadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.message)
@@ -98,37 +146,147 @@ fn jet_http_srv_response_header(
 }
 
 fn jet_http_mux_serve(addr: &String, mux: JetHttpMux) -> Result<(), String> {
-    use std::io::{Read, Write};
     let listener = std::net::TcpListener::bind(addr.as_str())
         .map_err(|e| format!("bind on `{}` failed: {}", addr, e))?;
-    let mux = std::sync::Arc::new(mux);
-    loop {
-        let (mut stream, _peer) = match listener.accept() {
-            Ok(x) => x,
-            Err(e) => {
-                eprintln!("http accept failed: {}", e);
+    let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    jet_http_server_run_listener(listener, mux, JetHttpServerOptions::safe(), shutdown, None).map(|_| ())
+}
+
+fn jet_http_server_bind(addr: &String, mux: JetHttpMux) -> Result<JetHttpServer, String> {
+    let listener = std::net::TcpListener::bind(addr.as_str())
+        .map_err(|error| format!("bind on `{addr}` failed: {error}"))?;
+    let local_addr = listener.local_addr().map_err(|error| format!("local address failed: {error}"))?.to_string();
+    Ok(JetHttpServer { inner: std::sync::Arc::new(JetHttpServerState {
+        listener: std::sync::Mutex::new(Some(listener)), mux, local_addr,
+        shutdown: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        shutdown_called: std::sync::atomic::AtomicBool::new(false),
+        grace_ms: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(30_000)),
+        lifecycle: std::sync::atomic::AtomicU8::new(0), report: std::sync::Mutex::new(None),
+        report_ready: std::sync::Condvar::new(),
+    }) })
+}
+
+fn jet_http_server_local_addr(server: &JetHttpServer) -> Result<String, String> { Ok(server.inner.local_addr.clone()) }
+
+fn jet_http_server_serve(server: &JetHttpServer) -> Result<JetHttpShutdownReport, String> {
+    use std::sync::atomic::Ordering;
+    server.inner.lifecycle.compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire)
+        .map_err(|_| "HTTP server can only be served once".to_string())?;
+    let listener = server.inner.listener.lock().unwrap().take()
+        .ok_or_else(|| "HTTP server listener was already consumed".to_string())?;
+    let result = jet_http_server_run_listener(listener, server.inner.mux.clone(), JetHttpServerOptions::safe(),
+        server.inner.shutdown.clone(), Some(server.inner.grace_ms.clone()));
+    server.inner.lifecycle.store(2, Ordering::Release);
+    if let Ok(report) = result {
+        *server.inner.report.lock().unwrap() = Some(report);
+        server.inner.report_ready.notify_all();
+        Ok(report)
+    } else { server.inner.report_ready.notify_all(); result }
+}
+
+fn jet_http_server_shutdown(server: &JetHttpServer, grace: &jet_std::Duration) -> Result<JetHttpShutdownReport, String> {
+    use std::sync::atomic::Ordering;
+    if server.inner.shutdown_called.swap(true, Ordering::AcqRel) { return Err("HTTP server shutdown was already requested".to_string()); }
+    if server.inner.lifecycle.load(Ordering::Acquire) != 1 { return Err("HTTP server is not serving".to_string()); }
+    server.inner.grace_ms.store(grace.ms.max(0) as u64, Ordering::Release);
+    server.inner.shutdown.store(true, Ordering::Release);
+    let mut report = server.inner.report.lock().unwrap();
+    while report.is_none() && server.inner.lifecycle.load(Ordering::Acquire) == 1 { report = server.inner.report_ready.wait(report).unwrap(); }
+    (*report).ok_or_else(|| "HTTP server stopped without a shutdown report".to_string())
+}
+
+fn jet_http_server_run_listener(
+    listener: std::net::TcpListener,
+    mux: JetHttpMux,
+    options: JetHttpServerOptions,
+    shutdown: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    dynamic_grace_ms: Option<std::sync::Arc<std::sync::atomic::AtomicU64>>,
+) -> Result<JetHttpShutdownReport, String> {
+    use std::io::{Read, Write};
+    use std::sync::atomic::Ordering;
+    use std::sync::mpsc::{Receiver, SyncSender, TrySendError};
+
+    listener.set_nonblocking(true).map_err(|error| format!("http listener setup failed: {error}"))?;
+    let (tx, rx): (SyncSender<std::net::TcpStream>, Receiver<std::net::TcpStream>) =
+        std::sync::mpsc::sync_channel(options.admission_queue);
+    let rx = std::sync::Arc::new(std::sync::Mutex::new(rx));
+    let active = std::sync::Arc::new(std::sync::Mutex::new(Vec::<std::net::TcpStream>::new()));
+    let completed = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let force_cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let mut workers = Vec::new();
+    for _ in 0..options.workers.max(1) {
+        let worker_rx = rx.clone();
+        let worker_mux = mux.clone();
+        let worker_options = options.clone();
+        let worker_active = active.clone();
+        let worker_completed = completed.clone();
+        let worker_force_cancel = force_cancel.clone();
+        workers.push(std::thread::spawn(move || loop {
+            let received = worker_rx.lock().unwrap().recv();
+            let Ok(mut stream) = received else { break };
+            if worker_force_cancel.load(Ordering::Acquire) {
+                let _ = stream.shutdown(std::net::Shutdown::Both);
                 continue;
             }
-        };
-        let m = mux.clone();
-        std::thread::spawn(move || {
-            let raw = match jet_http_srv_read(&mut stream) {
-                Ok(raw) => raw,
-                Err(e) => {
-                    let _ = stream.write_all(jet_http_srv_read_error_response(&e).as_bytes());
-                    return;
-                }
-            };
-            let req = jet_http_srv_parse(&raw);
-            let resp = jet_http_mux_dispatch(&m, req);
-            let text = jet_http_srv_format(&resp);
-            let _ = stream.write_all(text.as_bytes());
-        });
+            if let Ok(tracked) = stream.try_clone() { worker_active.lock().unwrap().push(tracked); }
+            jet_http_server_handle_stream(&mut stream, &worker_mux, &worker_options);
+            worker_completed.fetch_add(1, Ordering::Relaxed);
+            worker_active.lock().unwrap().retain(|tracked| tracked.peer_addr().ok() != stream.peer_addr().ok());
+        }));
     }
+
+    let mut report = JetHttpShutdownReport::default();
+    while !shutdown.load(Ordering::Acquire) {
+        match listener.accept() {
+            Ok((mut stream, _)) => match tx.try_send(stream) {
+                Ok(()) => report.accepted += 1,
+                Err(TrySendError::Full(returned)) => {
+                    stream = returned;
+                    report.overloaded += 1;
+                    let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(10)));
+                    let mut discard = [0u8; 8192];
+                    let _ = stream.read(&mut discard);
+                    let _ = stream.write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                    let _ = stream.flush();
+                    let _ = stream.shutdown(std::net::Shutdown::Write);
+                }
+                Err(TrySendError::Disconnected(_)) => break,
+            },
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => std::thread::sleep(std::time::Duration::from_millis(2)),
+            Err(error) => return Err(format!("http accept failed: {error}")),
+        }
+    }
+    drop(tx);
+    let grace = dynamic_grace_ms.as_ref()
+        .map(|value| std::time::Duration::from_millis(value.load(Ordering::Acquire)))
+        .unwrap_or(options.shutdown_grace);
+    let deadline = std::time::Instant::now() + grace;
+    while completed.load(Ordering::Acquire) < report.accepted && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    report.completed = completed.load(Ordering::Acquire).min(report.accepted);
+    report.cancelled = report.accepted.saturating_sub(report.completed);
+    if report.cancelled > 0 {
+        force_cancel.store(true, Ordering::Release);
+        for stream in active.lock().unwrap().iter() { let _ = stream.shutdown(std::net::Shutdown::Both); }
+    }
+    for worker in workers {
+        if worker.is_finished() { let _ = worker.join(); }
+    }
+    Ok(report)
+}
+
+fn jet_http_server_handle_stream(stream: &mut std::net::TcpStream, mux: &JetHttpMux, options: &JetHttpServerOptions) {
+    use std::io::Write;
+    let raw = match jet_http_srv_read_with_limits(stream, options) {
+        Ok(raw) => raw,
+        Err(error) => { let _ = stream.write_all(jet_http_srv_read_error_response(&error).as_bytes()); return; }
+    };
+    let response = jet_http_mux_dispatch(mux, jet_http_srv_parse(&raw));
+    let _ = stream.write_all(jet_http_srv_format(&response).as_bytes());
 }
 
 fn jet_http_mux_serve_once(addr: &String, mux: JetHttpMux) -> Result<(), String> {
-    use std::io::{Read, Write};
     let listener = std::net::TcpListener::bind(addr.as_str())
         .map_err(|e| format!("bind on `{}` failed: {}", addr, e))?;
     jet_http_mux_serve_once_listener(&JetTcpListener { inner: listener }, &mux)
@@ -138,7 +296,7 @@ fn jet_http_mux_serve_once_listener(
     listener: &JetTcpListener,
     mux: &JetHttpMux,
 ) -> Result<(), String> {
-    use std::io::{Read, Write};
+    use std::io::Write;
     let (mut stream, _peer) = listener
         .inner
         .accept()
@@ -161,16 +319,29 @@ fn jet_http_mux_serve_once_listener(
 }
 
 fn jet_http_srv_read(stream: &mut std::net::TcpStream) -> Result<String, JetHttpReadError> {
+    jet_http_srv_read_with_limits(stream, &JetHttpServerOptions::safe())
+}
+
+fn jet_http_srv_read_with_limits(stream: &mut std::net::TcpStream, options: &JetHttpServerOptions) -> Result<String, JetHttpReadError> {
     use std::io::Read;
     const MAX_HEADER_BYTES: usize = 32 * 1024;
     const MAX_BODY_BYTES: usize = 1024 * 1024;
     let mut raw = Vec::new();
     let mut buf = [0u8; 8192];
     let mut complete = false;
+    let header_deadline = std::time::Instant::now() + options.read_header_timeout;
+    let mut reading_body = false;
     loop {
+        let timeout = if reading_body {
+            options.read_body_timeout.min(options.read_idle_timeout)
+        } else {
+            header_deadline.saturating_duration_since(std::time::Instant::now()).min(options.read_idle_timeout)
+        };
+        if timeout.is_zero() { return Err(JetHttpReadError { status: 408, message: "request timed out" }); }
+        stream.set_read_timeout(Some(timeout)).map_err(|_| JetHttpReadError { status: 400, message: "request read failed" })?;
         let n = stream
             .read(&mut buf)
-            .map_err(|_| JetHttpReadError { status: 400, message: "request read failed" })?;
+            .map_err(|error| if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) { JetHttpReadError { status: 408, message: "request timed out" } } else { JetHttpReadError { status: 400, message: "request read failed" } })?;
         if n == 0 {
             break;
         }
@@ -184,6 +355,7 @@ fn jet_http_srv_read(stream: &mut std::net::TcpStream) -> Result<String, JetHttp
                 return Err(JetHttpReadError { status: 413, message: "request body is too large" });
             }
             let body_start = header_end + 4;
+            reading_body = true;
             if raw.len().saturating_sub(body_start) >= content_len {
                 raw.truncate(body_start + content_len);
                 complete = true;
@@ -253,6 +425,8 @@ fn jet_http_srv_read_error_response(error: &JetHttpReadError) -> String {
     let reason = match error.status {
         413 => "Payload Too Large",
         431 => "Request Header Fields Too Large",
+        408 => "Request Timeout",
+        503 => "Service Unavailable",
         _ => "Bad Request",
     };
     format!(

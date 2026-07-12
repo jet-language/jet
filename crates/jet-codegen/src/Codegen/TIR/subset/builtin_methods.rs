@@ -223,6 +223,7 @@ pub(crate) fn is_http_type(recv_type: Option<&str>) -> bool {
                 | "HttpMux"
                 | "HttpSrvReq"
                 | "HttpSrvResp"
+                | "HttpServer"
                 | "HttpServerTls",
         )
     )
@@ -253,6 +254,7 @@ pub(crate) fn is_http_method_name(recv_type: Option<&str>, method: &str) -> bool
             "method" | "path" | "body" | "param" | "header" | "body_len" | "under_limit"
         ),
         Some("HttpSrvResp") => matches!(method, "header"),
+        Some("HttpServer") => matches!(method, "local_addr" | "serve" | "shutdown"),
         _ => false,
     }
 }

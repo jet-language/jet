@@ -16,7 +16,11 @@ impl $tname {{
 """)
 }
 
-@[Summarize, Debug]
+// D-MARK-DEBUG1=A: `Debug` no longer has an explicit derive spelling — it
+// auto-derives whenever every field qualifies (S55). `has_marker("Debug")`
+// below reads the type's WRITTEN markers, so it now honestly reports
+// `false` for a type that only qualifies for auto-derive.
+@[Summarize]
 struct Widget {
     pub label: String
     secret: Int

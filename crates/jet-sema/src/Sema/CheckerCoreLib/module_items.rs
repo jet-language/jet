@@ -613,6 +613,7 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         // D-NETDEP1=A / D-HTTPLIB1=A / D-HTTPLIB2=B: HTTP library.
         "core.http.client" => &["get", "post", "request"],
         "core.http.server" => &[
+            "bind",
             "mux",
             "serve",
             "serve_once",

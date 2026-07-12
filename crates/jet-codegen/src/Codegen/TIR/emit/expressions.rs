@@ -1871,6 +1871,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             a(0),
                             a(1)
                         ),
+                        ("HttpServer", "local_addr") => format!("{}jet_http_server_local_addr(&({}))", root, recv),
+                        ("HttpServer", "serve") => format!("{}jet_http_server_serve(&({}))", root, recv),
+                        ("HttpServer", "shutdown") => format!("{}jet_http_server_shutdown(&({}), &({}))", root, recv, a(0)),
                         _ => {
                             if args.is_empty() {
                                 format!("({}).{}()", recv, method)

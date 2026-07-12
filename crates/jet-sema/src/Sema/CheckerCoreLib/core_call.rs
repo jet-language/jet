@@ -2074,6 +2074,19 @@ impl<'a> Checker<'a> {
                     }
                     return Some(Type::Named("HttpMux".to_string()));
                 }
+                ("core.http.server", "bind") => {
+                    if args.len() != 2 {
+                        self.diags.push(wrong_core_arity("bind", 2, args.len(), span));
+                        for arg in args.iter_mut() { self.infer(&mut arg.expr); }
+                        return None;
+                    }
+                    self.expect_core_arg("bind", 0, &Type::String, &mut args[0]);
+                    self.expect_core_arg("bind", 1, &Type::Named("HttpMux".to_string()), &mut args[1]);
+                    return Some(Type::Result {
+                        ok: Box::new(Type::Named("HttpServer".to_string())),
+                        err: Box::new(Type::String),
+                    });
+                }
                 ("core.http.server", "serve") => {
                     if args.len() != 2 && args.len() != 3 {
                         self.diags.push(Diagnostic::error(

@@ -454,6 +454,7 @@ before continuing.
 | E0919 | sema  | `@InlineAlways fn` body exceeds the statement ceiling `@InlineAlways` enforces (D-METHODMACRO1) |
 | E0920 | parse | a function/method written with both `@Inline` and `@InlineAlways` (D-METHODMACRO1) |
 | E0921 | sema  | `policy no_alloc` floor violation — an allocation-shaped expression in the module's own function bodies (D-MEM1/S7, D-NOALLOC-SEM1) |
+| E0922 | sema  | explicit `Debug` derive (`@Debug`, `@[.., Debug]`, body `derive Debug;`) — `Debug` auto-derives, the opt-in spelling is retired (D-MARK-DEBUG1=A) |
 | E0951 | sema  | comptime code reaches an impure operation (shows call path) |
 | E0952 | sema  | comptime budget exhausted (fuel) |
 | E0953 | sema  | comptime panic = user-authored compile error (message verbatim) |
@@ -1595,6 +1596,21 @@ Coverage note: a bare list/map/string literal that isn't one of the four
 shapes above (e.g. `xs := [1, 2, 3]`) is not checked — only the ratified
 denylist is enforced; extending it is a future policy-list ballot, not a
 silent expansion here.
+
+### E0922 — explicit `Debug` derive is retired (D-MARK-DEBUG1=A)
+
+`Debug` auto-derives whenever every field on a struct/enum is debuggable
+(S55) — there is no opt-in spelling to write. `@Debug`, `@[.., Debug]`, and
+a body `derive Debug;` line all hit this error instead of silently doing
+nothing (the pre-D-MARK-DEBUG1 behavior).
+
+| What | Why | Fix |
+|------|-----|-----|
+| `` `Debug` derives automatically — writing it explicitly is retired ``. | Auto-derived `Debug` covers every type whose fields are all debuggable; D-MARK-DEBUG1 retired the explicit opt-in spelling so there's exactly one way to get it (I8). | Remove `Debug` here — printing already works via `{value@Debug}` interpolation; implement `Debug` by hand (`impl T.Debug { fn debug(self) -> String { … } }`) only if you need custom output. |
+
+A hand-written `impl T.Debug { … }` override, and `{value@Debug}`
+interpolation/reflection lookups, are unaffected — only the explicit
+*derive* spelling is retired.
 
 ## Process for a new diagnostic
 

@@ -1279,6 +1279,11 @@ pub(crate) fn lower_method_call(
                 Type::Option(Box::new(Type::String))
             }
             ("HttpSrvResp", "header") => Type::Named("HttpSrvResp".to_string()),
+            ("HttpServer", "local_addr") => Type::Result { ok: Box::new(Type::String), err: Box::new(Type::String) },
+            ("HttpServer", "serve" | "shutdown") => Type::Result {
+                ok: Box::new(Type::Named("HttpShutdownReport".to_string())),
+                err: Box::new(Type::String),
+            },
             _ => unit_type(),
         };
         let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();

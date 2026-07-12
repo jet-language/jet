@@ -214,6 +214,14 @@ pub fn http_type_method_return(
             "header" => mk("HttpSrvResp"),
             _ => None,
         },
+        Type::Named(n) if n == "HttpServer" => match method {
+            "local_addr" => Some(Some(Type::Result { ok: Box::new(Type::String), err: Box::new(Type::String) })),
+            "serve" | "shutdown" => Some(Some(Type::Result {
+                ok: Box::new(Type::Named("HttpShutdownReport".to_string())),
+                err: Box::new(Type::String),
+            })),
+            _ => None,
+        },
         _ => None,
     }
 }

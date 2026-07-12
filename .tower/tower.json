@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 518,
-    "rev": 4504,
+    "rev": 4515,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -20,7 +20,10 @@
         "radar:e8",
         "radar:e7",
         "radar-cards",
-        "radar:e6"
+        "radar:e6",
+        "radar-sq",
+        "radar:e3",
+        "radar:e4"
       ]
     },
     "digestCursor": "2026-07-12T12:59:52.783Z"
@@ -3727,8 +3730,28 @@
       "plan": "Plan seed from D-WD14:\n1. Re-read the ratified ballot and current spec/Tower plans for overlap.\n2. Split into vertical slices if the feature spans compiler, Core, Jetpack, GUI, and OS surfaces.\n3. Queue exact-syntax/subsurface ballots before parser, manifest, CLI, or API surface changes.\n4. Implement the first ungated vertical slice end to end with executable examples and diagnostics.\n5. Prove beginner default UX and expert audit/control UX with tests or transcripts.",
       "blockedBy": [],
       "workOrder": 46,
-      "assignee": "terra-241-builder",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "terra-241-builder",
+          "text": "[handoff] Substantial criterion-5 slices preserved and logged. External Marker.sigil shared-parser mismatch currently blocks rerun; remaining typed budget semantics explicitly listed."
+        },
+        {
+          "at": "2026-07-12",
+          "by": "codex-orchestrator",
+          "text": "[handoff] Parser/AST/formatter, typed BudgetSpec/defaults/spans/E2903, E2904 identity/effective overlap with disjoint applicability, and E2905 typed scope/provider/enforcement plus attachment resolution implemented and focused-green. Parent earlier reran parser/formatter and 3/3 sema green. Latest 4/4 rerun blocked before budget code by concurrent unrelated parser mismatch: Marker now requires sigil but marker_groups.rs initializer lacks it (E0063). Criterion 5 remains open for full metric/value/rate normalization, full selectors/triples/spans, ambiguity/package-qualified graph."
+        },
+        {
+          "at": "2026-07-12",
+          "by": "terra-241-builder",
+          "text": "Criterion 5 E2905 resolution sub-slice landed, criterion remains open. BudgetSpec now retains typed closed scope/provider/enforcement/applicability plus Fail/Package/Current and unambiguous provider defaults. Sema builds attachment catalogs from canonical env/system/image role AST, resolves named service/target attachments and named providers, validates key metric/scope/provider pairs, and emits E2905 on zero-match attachment/provider identities; statistical Warn and deterministic Fail law enforced through E2903. Positive service+ServiceProbe resolution proof and exact E2905 unresolved-scope snapshot landed. Focused proof: cargo check -p jet-sema green; modules perf_budget_sema_* 4/4 pass; reviewed E2905 snapshot blessed and no-update rerun pass; scoped diff-check clean. Remaining criterion 5: complete closed metric/value/percentile/rate normalization, full applicability selector/profile/triple resolution and exact spans, all scope/provider combinations and ambiguous/package-qualified graph resolution."
+        },
+        {
+          "at": "2026-07-12",
+          "by": "terra-241-builder",
+          "text": "Criterion 5 E2904 collision sub-slice landed, criterion remains open. BudgetSpec now carries canonical scope, metric/percentile, provider, target/profile applicability, and spans. Sema rejects duplicate containing-role+name identities and equal scope+metric+provider keys whose target and profile applicability intersect; disjoint Only target partitions remain legal. E2904 points at the second whole Budget entry with exact ratified What/Why/Fix. Focused proof: cargo check -p jet-sema green; modules perf_budget_sema_* 3/3 pass; reviewed E2904 UI snapshot blessed and no-update rerun pass; scoped diff-check clean. Remaining criterion 5 includes full closed scope/provider/metric/enforcement/value validation and E2905 canonical attachment/provider resolution."
+        },
         {
           "at": "2026-07-12",
           "by": "terra-241-builder",
@@ -3877,8 +3900,7 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
-      "claimedAt": "2026-07-12T13:34:07.370Z"
+      "refs": []
     },
     {
       "id": "c008rjua",
@@ -4997,8 +5019,13 @@
       "priority": "P0",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-HTTPDEPTH1=A: Hybrid: batteries-included core.http on typed foundations. core.http owns Client, Server, Router, middleware, streaming bodies, forms/multipart, cookies, redirects, timeouts, TLS policy, SSE, and the ratified WebSocket home. It consumes core.url/core.mime/core.net types and lets experts drop lower to those layers without changing the HTTP model.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: corelib audit: core.http — client/server parity with Go net/http + requests ergonomics\n\nCurrent law: Existing linked decisions: D-WS1=ratified/B. D-CORENS1 keeps all first-party modules under core.*; I6 forbids compiler deps; D-STDRUBRIC1 requires mechanical core API laws.\n\nBuild order: Audit current Core/API/prelude/docs/tests first; write failing UI/golden/unit fixtures; implement std-only or approved bridge code; update docs/reference and syntax-decisions when law changes; run targeted tests, then full nix develop -c cargo test before close.\n\nAcceptance: Examples/goldens or UI snapshots prove each shipped behavior; stdlib map records shipped/carded/declined rows; no rustc/user-hostile errors; no compiler external deps.\n\nDependencies/collisions: Respect neighboring core cards: io/args/process separate; text before regex; net/url before http; encoding before data/db; random never owns secrets.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "terra-301-builder",
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "terra-301-builder",
+          "text": "D-HTTP-SERVER2 lifecycle tranche landed, broad server criterion remains open. Plain production serve now uses a fixed worker pool and bounded admission queue instead of thread-per-connection; saturation returns an explicit 503 without unbounded allocation. Incremental reads apply separate header, idle, and body deadlines and return 408. Shutdown stops accepts, drains accepted work through the grace deadline, force-closes active sockets and rejects queued stragglers after grace, and records accepted/overloaded/completed/cancelled counts so no late response publishes on a cancelled socket. Real raw-TCP proof in tests/http_server_lifecycle.rs: saturation+503+healthy drain, partial-header/body timeout, and grace-bounded straggler cancellation all pass (3/3). Scoped diff-check clean. Nix shell lacks rustfmt binary; compiled test harness reports no warnings. Remaining D-HTTP-SERVER2 lifecycle work: wire ratified public Server.bind/local_addr/serve(Context)/shutdown(Duration)/serve_listener types through sema/TIR, migrate TLS to same bounded engine, keepalive/pipelining/H2 scheduler lifecycle, connection/per-IP limits, write/keepalive deadlines. No criterion met."
+        },
         {
           "at": "2026-07-12",
           "by": "terra-301-builder",
@@ -5129,7 +5156,8 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-12T14:08:37.994Z"
     },
     {
       "id": "c0184j6s",
@@ -32255,6 +32283,87 @@
       "draft": false,
       "status": "open",
       "created": "2026-07-12T13:54:28.211Z"
+    },
+    {
+      "id": "D-CLI-OSIMAGE1",
+      "cardId": "c0gv4b2r",
+      "group": "tooling",
+      "title": "Where the OCI image builder lives on the jet CLI",
+      "gist": "The container-image builder and the jetos disk-image builder both want the word 'image'. Pick the spelling for each so they never collide.",
+      "lesson": "Jet's manifest has an `image.<name>:` block. It describes something you can build. Its `kind:` field says what kind.\n\n`kind: .Oci` means a container image, the format Docker and Podman use. `kind: .Iso`, `.Qcow`, or `.Raw` means a bootable disk image for jetos, Jet's own operating system. Both kinds live under the same manifest word, `image`, but they build very different things. One is an app packaged to run on a server. The other is a whole installable operating system.\n\nToday two separate commands build them. `jet image <name>` builds the container. `jet os image` builds the jetos disk.\n\nA recent cleanup of Jet's command-line surface (card #497) grouped many long-tail commands under short group names, like `jet os` for jetos-related commands. Its rule listed `image` as one of the words that should move under `jet os`. Nobody checked that `jet os image` already means something else.\n\nThis ballot picks how to spell both commands. The goal: the two jobs stay distinct, and nobody types one command expecting one artifact and gets the other.",
+      "explainer": "",
+      "story": "Priya packages a web service. She writes `image.api: { kind: .Oci, from: packages.api, expose: [8080] }` and runs `jet image api` to build a container she can push to a registry. Later she edits her home server's jetos config and runs `jet os image` to rebuild the bootable installer media after a hardware change. Two different jobs. Two different commands today. The #497 cleanup would silently merge one of those commands into a slot the other already owns.",
+      "inWild": "docs/spec/spec.md already documents the split: \".Iso, .Qcow, .Raw, and from: system.<name> are jetos installer inputs handled by jet os image, not by jet image.\" That line was written before the #497 cleanup. The manifest schema already treats the two kinds as siblings under one `image.<name>:` block; only the CLI verb differs.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Stay flat: `jet image` for containers, `jet os image` for jetos",
+          "detail": "The container builder keeps its current, already-shipped spelling, `jet image`, at the top level. jetos disk-image generation keeps its current spelling, `jet os image`. Neither command changes at all. The #497 cleanup's rule is corrected to drop `image` from its list of words that move under `jet os`. `push`, `bridge`, `services`, and `config` still move there, since those are genuinely jetos-domain commands.",
+          "code": "$ jet image api\nbuilding OCI image 'api'...\nwrote oci-layout, index.json, blobs/sha256/3a9f21...\n\n$ jet os image\nbuilding installer media for system.default...\nwrote jetos installer media proof .jetpack/installer/2026-07-12-01/proof.json"
+        },
+        {
+          "key": "B",
+          "name": "Move the container builder into `jet os image`; rename the jetos command to `jet os media`",
+          "detail": "The container builder takes over the exact spelling `jet os image`. The jetos command that used to answer to that spelling is renamed `jet os media`. That word is not invented; the command's own output already says 'installer media' and 'image variant artifacts'.\n\nAnyone with `jet os image` in a script or doc keeps typing the same words after this change, but now gets a different tool. The container builder wants a package name; the old jetos command wanted a host target. The caller sees an argument error, not a message pointing at the new spelling.",
+          "code": "$ jet os image api\nbuilding OCI image 'api'...\nwrote oci-layout, index.json, blobs/sha256/3a9f21...\n\n$ jet os image\nerror: 'image' expects a package name (e.g. jet os image api)\n  hint: building jetos installer media? that command is now jet os media\n\n$ jet os media\nbuilding installer media for system.default...\nwrote jetos installer media proof .jetpack/installer/2026-07-12-01/proof.json"
+        },
+        {
+          "key": "C",
+          "name": "Group both under `jet os`, but give the container builder its own noun: `jet os oci`",
+          "detail": "jetos disk-image generation keeps its current, unchanged spelling, `jet os image`. The container builder moves out of the top level and under `jet os`, spelled `jet os oci`. That word is not invented either; the manifest already spells the container kind `kind: .Oci`. The old flat `jet image` becomes a teaching error naming the new spelling, the same pattern #497 already uses for every other verb it moved into a group.",
+          "code": "$ jet os oci api\nbuilding OCI image 'api'...\nwrote oci-layout, index.json, blobs/sha256/3a9f21...\n\n$ jet image api\nerror: 'jet image' moved\n  run: jet os oci api\n\n$ jet os image\nbuilding installer media for system.default...\nwrote jetos installer media proof .jetpack/installer/2026-07-12-01/proof.json"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Docker/Podman",
+          "note": "A container-image builder and a disk/VM-image builder are never one subcommand, even though both make something people call an 'image'. Jet's manifest already draws that same line with `kind:`. The CLI should keep drawing it.",
+          "code": "$ docker build -t api .\n$ virt-builder fedora-38 -o disk.qcow2"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The container builder and jetos disk-image generation were never one job. The manifest already treats them as siblings distinguished by `kind:`, and the spec text already documents `jet image` plus `jet os image` as the correct, working pair. The #497 rule listed `image` next to real jetos-domain verbs by accident, not by design. Option A just corrects that oversight.",
+        "tradeoff": "The long-tail grouping cleanup keeps one exception: `image` stays flat while its neighbors in that same rule move under `jet os`. That is fine, because `image` was never a jetos-domain verb. It only landed on that list because of a shared English word, not a shared job.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Reusing `jet os image` for a different job than it already does is a silent meaning swap, not a rename. A caller who has run `jet os image` since it shipped gets routed to the wrong tool, with a confusing argument error instead of a message naming the new spelling."
+          },
+          {
+            "key": "C",
+            "reason": "Nests a build-artifact command, the same family as `jet build`, inside `jet os`, whose other members are all host-OS management verbs. That mismatch makes `jet os` harder to predict, for a rename that fixes nothing option A does not already fix for free."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "Beginner and expert both get the status quo: `jet image <name>` for a container, `jet os image` for a bootable disk, exactly as already documented. The manifest's shared `image.<name>: { kind: … }` schema still expresses both artifact kinds from one declaration. Only the CLI entrypoint differs, matching the split the spec already describes. No new noun, no migration, no silent behavior change.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "Zero migration, zero collision, already documented in spec.md.",
+            "use": "This is the whole recommendation: correct the #497 rule text, change no code."
+          },
+          {
+            "key": "B",
+            "aspect": "The jetos command's own output already uses the word 'media' for what it produces.",
+            "use": "Not adopted here since option A needs no rename at all, but worth keeping as a candidate word if the jetos command is ever renamed for its own reasons."
+          },
+          {
+            "key": "C",
+            "aspect": "'oci' is already a manifest-level word (`kind: .Oci`), so it is a safe, non-invented noun.",
+            "use": "Not adopted here since option A never needs a new noun, but confirms 'oci' as the right word if the container builder is ever grouped under a namespace in the future."
+          }
+        ]
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-07-12T14:05:09.788Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-12"
     }
   ],
   "questions": [
@@ -33082,6 +33191,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-12T14:21:33.336Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CLI-OSIMAGE1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-12T14:16:18.470Z",
+      "by": "terra-301-builder",
+      "action": "card.update",
+      "ref": "c0075iyb",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T14:08:37.994Z",
+      "by": "terra-301-builder",
+      "action": "card.claim",
+      "ref": "c0075iyb",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T14:08:29.425Z",
+      "by": "terra-241-builder",
+      "action": "card.release",
+      "ref": "ccq07pav",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-12T14:08:29.336Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "ccq07pav",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-12T14:07:25.896Z",
+      "by": "terra-241-builder",
+      "action": "card.update",
+      "ref": "ccq07pav",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T14:05:09.789Z",
+      "by": "terra-497-ballot",
+      "action": "decision.add",
+      "ref": "D-CLI-OSIMAGE1",
+      "note": "Where the OCI image builder lives on the jet CLI"
+    },
+    {
+      "at": "2026-07-12T14:01:34.170Z",
+      "by": "terra-241-builder",
+      "action": "card.update",
+      "ref": "ccq07pav",
+      "note": "phase,logEntry"
+    },
     {
       "at": "2026-07-12T13:59:10.137Z",
       "by": "claude-main",
@@ -36524,62 +36689,6 @@
       "by": "owner",
       "action": "decision.ratify",
       "ref": "D-MARK-DEBUG1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-12T01:03:15.575Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CORE-COMPRESS1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-12T01:03:07.864Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-FFI-INLINE1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-12T01:02:35.854Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-FFI-ASM1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-12T01:02:35.854Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0skyr40",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-07-12T01:02:35.854Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0skyr40",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-07-12T01:02:35.854Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0skyr40",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-07-12T01:02:35.854Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0skyr40",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-07-12T01:01:18.214Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CLI-BARE1",
       "note": "A"
     }
   ],

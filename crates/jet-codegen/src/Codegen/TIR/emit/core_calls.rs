@@ -2029,6 +2029,7 @@ pub(crate) fn emit_tir_core_call(
             format!("jet_http_client_request_new(&({}), &({}))", arg(0), u)
         }
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP server constructors (CoreLib, no prefix needed).
+        ("core.http.server", "bind") => format!("jet_http_server_bind(&({}), {})", arg(0), arg(1)),
         ("core.http.server", "mux") => format!("jet_http_mux_new()"),
         ("core.http.server", "serve") if args.len() == 3 => {
             let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");

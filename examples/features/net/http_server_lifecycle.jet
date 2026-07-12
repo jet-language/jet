@@ -1,0 +1,17 @@
+// D-HTTP-SERVER2=A: one bound Server owns bounded serve and graceful shutdown.
+use core.http.server as Server
+use core.tasks as tasks
+use core.time as time
+
+fn run() {
+    mux :: Server.mux()
+    mux.get("/", (req: HttpSrvReq) => Server.response(200, "ok"))
+    server :: Server.bind("127.0.0.1:0", mux) ?? panic("bind")
+    addr :: server.local_addr() ?? panic("local address")
+    print(addr.starts_with("127.0.0.1:"))
+    serving :: tasks.spawn(() => server.serve() ?? panic("serve"))
+    time.sleep(20)
+    report :: server.shutdown(time.ms(100)) ?? panic("shutdown")
+    print(report.cancelled)
+    print(serving.join().completed)
+}

@@ -79,15 +79,14 @@ pub const CONTRACT_MARKERS: &[&str] = &[
     // ATTR_COMPARABLE ("Comparable") also names the D-CAPBUNDLE1 capability
     // bundle below — same spelling, disambiguated by declaration position
     // (struct/enum derive vs. distinct-type bundle), listed once here.
-    // TRAIT_DEBUG ("Debug") stays registered here — D-MARK-DEBUG1=A (ratified
-    // 2026-07-11, card #498) retired the standalone opt-in `@Debug` from the
-    // vocabulary a user needs to WRITE (Debug auto-derives whenever every
-    // field qualifies, S55) but the name is still a real `@`-plane trait: a
-    // hand-written `@Debug` (or `{value@Debug}` reflection lookup, see
-    // examples/features/comptime/reflect.jet) must still land on the
-    // contract plane for `is_contract_marker` (E0062 teaching, `jet fmt`
-    // sigil re-emission, LSP surfacing) to stay correct.
-    TRAIT_DEBUG,
+    // TRAIT_DEBUG ("Debug") is deliberately ABSENT — D-MARK-DEBUG1=A (ratified
+    // 2026-07-11, card #498) retired the opt-in `@Debug`/`@[.., Debug]`/
+    // `derive Debug;` spellings outright (Debug auto-derives whenever every
+    // field qualifies, S55; I8 one way to mean it). Writing it explicitly is
+    // E0922 (crates/jet-foundation/src/Traits.rs), not a wrong-plane
+    // teaching error — `Debug` is still a real `@`-plane trait name (a
+    // hand-written `impl T.Debug { … }` override and `{value@Debug}`
+    // reflection stay valid), it's just no longer a name you DERIVE.
     ATTR_SUMMARIZE,
     ATTR_COMPARABLE,
     // D-CONTRACTCASE1 recase set (§2b) — pre/post/persist/bundles
@@ -174,5 +173,5 @@ use super::{
     ATTR_TARGET, ATTR_TRACK, ATTR_UNIT_FAMILY, ATTR_UNTAGGED,
     ATTR_WASM_EXPORT, DSL_BLOCK_SQL, KW_BENCH, KW_CAPS, KW_GRANT, KW_IMPURE, KW_PURE,
     KW_REACTIVE, KW_SANITIZER, KW_STATE, KW_TAINTED, KW_TEST, KW_TODO, KW_TRANSACT,
-    KW_TRANSITION, KW_UNSAFE, TRAIT_DEBUG,
+    KW_TRANSITION, KW_UNSAFE,
 };
