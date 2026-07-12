@@ -488,6 +488,11 @@ const DEFAULT_BACKEND_BOUNDARIES: &[&str] = &[
     // Native path walking touches host filesystem traversal that the default
     // dev interpreter/JIT tier does not own today.
     "io/path",
+    // Ambient stdin has no deterministic source in this differential harness.
+    // The JIT cannot lower StdinHandle iteration and the interpreter correctly
+    // requires runtime authority, so keep this as an explicit E3410 boundary
+    // instead of making the result depend on whether the AOT fallback spawned.
+    "io/stdin_filter",
     // Native GTK backend is intentionally outside default dev's source-level
     // interpreter/JIT surface on this host.
     "ui/ui_native_linux",
@@ -496,6 +501,7 @@ const DEFAULT_BACKEND_BOUNDARIES: &[&str] = &[
 const DEFAULT_BACKEND_EXPECTED_BOUNDARIES: &[&str] = &[
     "io/db_checked_sql",
     "io/path",
+    "io/stdin_filter",
     "tooling/data_pipeline",
     "ui/ui_native_linux",
 ];
@@ -842,6 +848,18 @@ fn dev_default_matches_compiled_binary() {
         stats.manifested, 0,
         "default jet dev must not carry manifested stdout/stderr/exit-code divergences"
     );
+}
+
+#[test]
+fn stdin_filter_is_a_deterministic_default_boundary() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_dev_stdin_boundary_{}",
+        std::process::id()
+    ));
+    let stats = check_dev_default_stem(0, "io/stdin_filter", &dir, &[]);
+    assert_eq!(stats.ran, 0);
+    assert_eq!(stats.boundary, 1);
+    assert_eq!(stats.boundary_stems, ["io/stdin_filter"]);
 }
 
 /// Every example that runs in the interpreter and has a checked-in
