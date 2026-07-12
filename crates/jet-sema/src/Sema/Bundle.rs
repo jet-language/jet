@@ -686,7 +686,7 @@ fn specialize_nested_code_module(
             Item::Const(def) => {
                 let mut value = def.value.clone();
                 substitute_expr(&mut value, types, values);
-                Some(Item::Const(crate::AST::ConstDef { span: def.span, name: def.name.clone(), name_span: def.name_span, value, meta: def.meta.clone(), attrs: def.attrs.clone(), rust_kind: def.rust_kind, is_comptime: def.is_comptime, ct: def.ct.clone(), ty: def.ty.clone(), is_persist: def.is_persist, persist_span: def.persist_span }))
+                Some(Item::Const(crate::AST::ConstDef { span: def.span, name: def.name.clone(), name_span: def.name_span, value, meta: def.meta.clone(), attrs: def.attrs.clone(), rust_kind: def.rust_kind, is_comptime: def.is_comptime, ct: def.ct.clone(), ty: def.ty.as_ref().map(|ty| specialize_module_type(ty, types, values)), is_persist: def.is_persist, persist_span: def.persist_span }))
             }
             Item::CodeModule(child) => Some(Item::CodeModule(specialize_nested_code_module(child, params, args, types, values))),
             Item::Trait(def) => Some(Item::Trait(specialize_trait(def, params, args, types, values))),
@@ -1488,7 +1488,7 @@ fn expand_alias(
     for item in &template.body {
         let Item::Const(source) = item else { continue };
         let mut value = source.value.clone();
-        substitute_expr(&mut value, &type_args, &definition_values);
+        substitute_expr(&mut value, &definition_types, &definition_values);
         let evaluated = crate::Comptime::evaluate(
             &value,
             funcs,
@@ -1509,7 +1509,7 @@ fn expand_alias(
             rust_kind: source.rust_kind,
             is_comptime: source.is_comptime,
             ct: source.ct.clone(),
-            ty: source.ty.clone(),
+            ty: source.ty.as_ref().map(|ty| specialize_module_type(ty, &definition_types, &definition_values)),
             is_persist: source.is_persist,
             persist_span: source.persist_span,
         }));
