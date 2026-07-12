@@ -217,7 +217,10 @@ fn run() {
 #[cfg(unix)]
 #[test]
 fn concurrent_mutation_and_real_child_spawns_take_untorn_snapshots() {
-    let (dir, out) = compile("atomic_spawn", "fn run() {}\n");
+    let (dir, out) = compile(
+        "atomic_spawn",
+        "use core.env as env\nfn run() { print(env.get(\"JET_PAIR_UNUSED\") ?? \"\") }\n",
+    );
     let pair_probe_rs = dir.join("pair_probe.rs");
     fs::write(
         &pair_probe_rs,
@@ -384,7 +387,10 @@ fn jet_test_snapshot_entry() {
 
 #[test]
 fn fallible_set_runtime_hook_is_typed_for_next_edition() {
-    let (dir, out) = compile("fallible_set_hook", "fn run() {}\n");
+    let (dir, out) = compile(
+        "fallible_set_hook",
+        "use core.env as env\nfn run() { print(env.get(\"JET_ENV_UNUSED\") ?? \"\") }\n",
+    );
     let probe = r#"    jet_std_env_init();
     let invalid_name: Result<(), jet_std::EnvError> =
         jet_std_env_set(&"".to_string(), &"value".to_string());

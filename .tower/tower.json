@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 515,
-    "rev": 4418,
+    "nextNum": 516,
+    "rev": 4426,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -23,10 +23,11 @@
         "radar:e3",
         "radar:e5",
         "radar:e6",
-        "radar-sq"
+        "radar-sq",
+        "radar:e4"
       ]
     },
-    "digestCursor": "2026-07-12T12:37:44.711Z"
+    "digestCursor": "2026-07-12T12:59:52.783Z"
   },
   "epochs": [
     {
@@ -4353,6 +4354,11 @@
         {
           "at": "2026-07-12",
           "by": "codex-orchestrator",
+          "text": "[verify] Repaired two env_overlay fixtures that compiled an empty program and therefore stripped the production env runtime they intended to probe. Fixtures now type/use core.env, preserving production stripping law while exercising real emitted runtime. Parent rerun: env_overlay 7/7 green; criteria 7/8 independently verified. Remaining close gate is native Linux/macOS/Windows interrupt/facts matrix, especially real Windows CTRL_C_EVENT; no platform inference."
+        },
+        {
+          "at": "2026-07-12",
+          "by": "codex-orchestrator",
           "text": "[handoff] Implementation complete for criteria 7/8; rerun env_overlay after concurrent sema split compiles, then independent verify. Native Windows runtime/interrupt matrix still required for criteria 1/6/9."
         },
         {
@@ -4482,20 +4488,20 @@
         {
           "n": 7,
           "text": "D-ENV-MUTATE1 process-global raw-preserving overlay implements get, fallible set, unset, deterministic vars, EnvError, Unix bytes, Windows UTF-16/case identity, and edition migration without mutating host libc/Windows environment.",
-          "status": "met",
+          "status": "verified",
           "metBy": "sol-292-builder",
-          "verifiedBy": null,
-          "evidence": "Raw-preserving locked overlay implements get/set/unset/vars/EnvError, deterministic names, Unix raw values, Windows ordinal case identity, and edition migration; focused env tests pass.",
-          "at": "2026-07-12T10:55:34.427Z"
+          "verifiedBy": "codex-orchestrator",
+          "evidence": "Parent reran complete env_overlay suite after repairing fixtures to request actual core.env emission: 7/7 green. Covers raw overlay, invalid-name/value typed hook, deterministic vars, edition behavior, host getenv isolation, and Unix raw non-Unicode values.",
+          "at": "2026-07-12T13:01:01.996Z"
         },
         {
           "n": 8,
           "text": "Every child process receives one atomic overlay snapshot through env_clear/env/env_remove composition; concurrent mutation cannot tear a launch, raw non-Unicode values survive, and comptime/pure/dev ambient denial remains.",
-          "status": "met",
+          "status": "verified",
           "metBy": "sol-292-builder",
-          "verifiedBy": null,
-          "evidence": "Child launch composes one atomic overlay snapshot with env_clear/env/env_remove; raw non-Unicode survival and host getenv isolation pass focused runtime tests.",
-          "at": "2026-07-12T10:55:34.769Z"
+          "verifiedBy": "codex-orchestrator",
+          "evidence": "Parent reran complete env_overlay suite: 7/7 green, including 16 real child launches during paired-key concurrent mutation, untorn atomic snapshots, raw non-Unicode child inheritance, and host isolation.",
+          "at": "2026-07-12T13:01:02.090Z"
         },
         {
           "n": 9,
@@ -15149,6 +15155,28 @@
       "needsAcceptance": false,
       "created": "2026-07-12T10:11:09.718Z",
       "updated": "2026-07-12"
+    },
+    {
+      "id": "c0nqsqn5",
+      "num": 515,
+      "title": "Tower Now page: owner-verification queue with acceptance flow",
+      "body": "Owner order 2026-07-12: every card that needs owner verification to close must surface on the Now page with (1) clear, direct instructions for what to check, (2) what to look for to confirm it works, (3) an in-page way to record acceptance. Acceptance closes the card (verify -> done via the acceptance ballot); bounce returns it to building with the owner comment. Sources: needsAcceptance cards in verify lane + their minted accept/bounce ballots. This card itself must be flagged needsAcceptance and closed through the new flow.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "triage",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": "claude-main",
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "needsAcceptance": true,
+      "created": "2026-07-12T13:00:17.059Z",
+      "updated": "2026-07-12",
+      "claimedAt": "2026-07-12T13:01:14.005Z"
     }
   ],
   "decisions": [
@@ -32652,6 +32680,48 @@
   ],
   "events": [
     {
+      "at": "2026-07-12T13:01:14.006Z",
+      "by": "claude-main",
+      "action": "card.claim",
+      "ref": "c0nqsqn5",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T13:01:13.907Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0nqsqn5",
+      "note": "needsAcceptance"
+    },
+    {
+      "at": "2026-07-12T13:01:10.335Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0qi7dc2",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-12T13:01:02.090Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c0qi7dc2",
+      "note": "#8"
+    },
+    {
+      "at": "2026-07-12T13:01:01.997Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c0qi7dc2",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-12T13:00:17.060Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0nqsqn5",
+      "note": "Tower Now page: owner-verification queue with acceptance flow"
+    },
+    {
       "at": "2026-07-12T12:58:17.185Z",
       "by": "codex-orchestrator",
       "action": "card.claim",
@@ -36108,48 +36178,6 @@
       "action": "card.criteria-add",
       "ref": "ccq07pav",
       "note": "#6 One shared deterministic/statistical evaluator produces cano"
-    },
-    {
-      "at": "2026-07-11T23:48:33.094Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "ccq07pav",
-      "note": "#5 Parser/config AST, formatter, and canonical AST capture perf"
-    },
-    {
-      "at": "2026-07-11T23:46:34.126Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c2nizvzp",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-11T23:45:58.567Z",
-      "by": "sol-131-reviewer",
-      "action": "card.update",
-      "ref": "c2nizvzp",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-11T23:45:50.773Z",
-      "by": "sol-131-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c2nizvzp",
-      "note": "#8"
-    },
-    {
-      "at": "2026-07-11T23:45:50.600Z",
-      "by": "sol-131-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c2nizvzp",
-      "note": "#7"
-    },
-    {
-      "at": "2026-07-11T23:45:50.425Z",
-      "by": "sol-131-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c2nizvzp",
-      "note": "#6"
     }
   ],
   "nextNum": 368,
