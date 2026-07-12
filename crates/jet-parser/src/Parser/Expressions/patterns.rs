@@ -328,7 +328,6 @@ impl<'a> Parser<'a> {
                     break;
                 }
             }
-            let _ = BinEndian::None;
             Ok(out)
         }
 
