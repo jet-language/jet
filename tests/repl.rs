@@ -8,6 +8,130 @@
 
 use jet::REPL::{run_transcript, run_transcript_with_flags};
 
+fn run_repl_process(state: &std::path::Path, input: &[u8], limit: Option<&str>) -> std::process::Output {
+    use std::io::Write as _;
+    use std::process::{Command, Stdio};
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
+    command
+        .arg("repl")
+        .env("XDG_STATE_HOME", state)
+        .env("NO_COLOR", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(limit) = limit {
+        command.env("JET_REPL_HISTORY_LIMIT", limit);
+    }
+    let mut child = command.spawn().expect("start repl");
+    child.stdin.as_mut().unwrap().write_all(input).unwrap();
+    child.wait_with_output().expect("finish repl")
+}
+
+#[test]
+fn repl_history_persists_only_successes_searches_clears_and_is_private() {
+    let state = std::env::temp_dir().join(format!("jet_repl_history_{}", std::process::id()));
+    std::fs::remove_dir_all(&state).ok();
+    let first = run_repl_process(&state, b"answer :: 42\nmissing_name\n:quit\n", None);
+    assert!(first.status.success(), "first session: {:?}", first.status);
+
+    let history = state.join("jet/repl-history");
+    let stored = std::fs::read_to_string(&history).expect("history file");
+    assert_eq!(stored.lines().count(), 1, "failed turn persisted: {stored:?}");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(std::fs::metadata(&history).unwrap().permissions().mode() & 0o777, 0o600);
+    }
+
+    let second = run_repl_process(
+        &state,
+        b":history search answer\n:history search missing\n:history clear\n:quit\n",
+        None,
+    );
+    let out = String::from_utf8_lossy(&second.stdout);
+    assert!(out.contains("answer :: 42"), "search output: {out:?}");
+    assert!(out.contains("No history matches."), "failed turn was searchable: {out:?}");
+    assert!(out.contains("History cleared."), "clear output: {out:?}");
+    assert!(!history.exists(), "clear must erase whole file");
+    std::fs::remove_dir_all(state).ok();
+}
+
+#[test]
+fn repl_history_limit_and_corrupt_tail_recover_visibly() {
+    let state = std::env::temp_dir().join(format!("jet_repl_history_tail_{}", std::process::id()));
+    std::fs::remove_dir_all(&state).ok();
+    let first = run_repl_process(&state, b"1 + 1\n2 + 2\n3 + 3\n:quit\n", Some("2"));
+    assert!(first.status.success());
+    let history = state.join("jet/repl-history");
+    use std::io::Write as _;
+    std::fs::OpenOptions::new().append(true).open(&history).unwrap().write_all(b"broken-tail").unwrap();
+
+    let second = run_repl_process(&state, b":history search +\n:quit\n", Some("2"));
+    let out = String::from_utf8_lossy(&second.stdout);
+    let err = String::from_utf8_lossy(&second.stderr);
+    assert!(!out.contains("1 + 1"), "retention exceeded: {out:?}");
+    assert!(out.contains("2 + 2") && out.contains("3 + 3"), "retained entries missing: {out:?}");
+    assert!(err.contains("corrupt history tail") && err.contains("discarded"), "warning missing: {err:?}");
+    assert!(!std::fs::read_to_string(&history).unwrap().contains("broken-tail"));
+    std::fs::remove_dir_all(state).ok();
+}
+
+#[test]
+fn repl_history_off_is_session_only_and_visible_storage_failure_falls_back() {
+    use std::io::Write as _;
+    use std::process::{Command, Stdio};
+    let state = std::env::temp_dir().join(format!("jet_repl_history_off_{}", std::process::id()));
+    std::fs::remove_dir_all(&state).ok();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .arg("repl").env("XDG_STATE_HOME", &state).env("JET_REPL_HISTORY", "off")
+        .env("NO_COLOR", "1").stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap();
+    child.stdin.as_mut().unwrap().write_all(b"8 + 9\n:history search 8\n:quit\n").unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(String::from_utf8_lossy(&output.stdout).contains("8 + 9"));
+    assert!(!state.join("jet/repl-history").exists());
+
+    let blocked = state.join("blocked");
+    std::fs::create_dir_all(&state).unwrap();
+    std::fs::write(&blocked, b"not a directory").unwrap();
+    let fallback = run_repl_process(&blocked, b":quit\n", None);
+    assert!(String::from_utf8_lossy(&fallback.stderr).contains("session-only history"));
+    std::fs::remove_dir_all(state).ok();
+}
+
+#[cfg(unix)]
+#[test]
+fn repl_raw_f3_search_recalls_and_submits_persistent_history() {
+    use std::process::Command;
+    let state = std::env::temp_dir().join(format!("jet_repl_history_f3_{}", std::process::id()));
+    std::fs::remove_dir_all(&state).ok();
+    assert!(run_repl_process(&state, b"3 + 3\n:quit\n", None).status.success());
+    let shell = r#"
+{
+  sleep 0.2
+  printf '\033OR'
+  sleep 0.1
+  printf '3 +\r'
+  sleep 0.1
+  printf '\r'
+  sleep 0.2
+  printf ':quit\r'
+} | script -qec '"$JET_REPL_BIN" repl' /dev/null
+"#;
+    let output = Command::new("sh")
+        .args(["-c", shell])
+        .env("JET_REPL_BIN", env!("CARGO_BIN_EXE_jet"))
+        .env("XDG_STATE_HOME", &state)
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run raw REPL under PTY");
+    let out = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "PTY status: {:?}\n{out}", output.status);
+    assert!(out.contains("history search>"), "F3 did not open search: {out:?}");
+    assert!(out.contains("6 : Int"), "recalled submission did not execute: {out:?}");
+    std::fs::remove_dir_all(state).ok();
+}
+
 /// Parse a transcript file: return `(inputs, expected_outputs)`.
 /// Lines `> input` become inputs; non-comment, non-`>` lines become expected.
 /// Lines starting with `# ` are comments. Blank expected-output lines are

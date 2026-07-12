@@ -1902,6 +1902,23 @@ stdout and stderr are captured. Interrupts forward to its process group, and
 the REPL kills and reaps that group after 30 seconds.
 Native-only modules still report E1802.
 
+## REPL history
+
+The REPL keeps the latest 2,000 successful submissions between sessions
+(D-FE-REPL-HISTORY1=A). Failed turns and meta-commands are not stored. History
+lives at `$XDG_STATE_HOME/jet/repl-history` on XDG systems or the platform
+state-directory equivalent. Its directory and file are owner-only. Each input
+is stored losslessly, including multiline, effectful, or secret-bearing text;
+Jet cannot truthfully identify every secret.
+
+F3 opens interactive history search. `:history search <text>` is the textual
+path and `:history clear` erases the whole file. `JET_REPL_HISTORY=off` keeps
+history in memory for the current session only. `JET_REPL_HISTORY_LIMIT=N`
+changes the retained-entry bound. If the file ends in a corrupt or incomplete
+record, the REPL discards that tail, preserves the valid prefix, and warns. If
+private storage cannot be opened or written, the REPL warns and continues with
+session-only history.
+
 ## Editions & release policy (E2-M2)
 
 A project pins an **edition** with `edition: "2026"` in its `pkg.jet`

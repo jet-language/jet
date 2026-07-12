@@ -40,6 +40,7 @@ use crate::Diagnostics::Diagnostic;
 use crate::AST::{AccessConvention, CallArg, Expr, Func, Item, Stmt};
 
 pub mod Docs;
+mod History;
 mod Interactive;
 pub mod Render;
 pub mod RerunPlan;
@@ -561,6 +562,10 @@ pub struct Session {
     pub core_imports: HashMap<String, String>,
     /// Notebook controls state: every accepted input gets an addressable turn.
     pub turns: Vec<ReplTurn>,
+    /// D-FE-REPL-HISTORY1=A: successful submissions from this and prior
+    /// sessions. Persistence is enabled only by the real REPL entry point;
+    /// deterministic transcript helpers stay session-only.
+    history: History::History,
 }
 
 #[derive(Clone)]
@@ -612,6 +617,15 @@ impl Session {
             stmt_srcs: Vec::new(),
             core_imports: HashMap::new(),
             turns: Vec::new(),
+            history: History::History::session_only(),
+        }
+    }
+
+    fn enable_persistent_history(&mut self) {
+        let (history, warning) = History::History::open_from_env();
+        self.history = history;
+        if let Some(warning) = warning {
+            eprintln!("{warning}");
         }
     }
 
@@ -656,6 +670,12 @@ impl Session {
             bound_name,
             pending_unfold: None,
         });
+    }
+
+    fn remember_success(&mut self, input: &str) {
+        if let Some(warning) = self.history.record(input) {
+            eprintln!("{warning}");
+        }
     }
 
     /// Build the accumulated item declarations source text (functions, structs…).
@@ -1764,6 +1784,7 @@ fn run_cooked(project_dir: Option<&str>, color: bool, flags: ReplFlags) -> i32 {
             });
 
     let mut session = Session::new();
+    session.enable_persistent_history();
     let mut policy = ReplPolicy::new(flags, &base_dir);
 
     // D-REPL10=A: --project loads the project's source items into the session
@@ -1916,6 +1937,9 @@ pub(crate) fn execute_line(
             rebuild_funcs(session);
             qprintln!("{}", green("ok", color));
             session.record_turn(trimmed, ReplTurnStatus::Ok, "ok".to_string());
+            if !quiet {
+                session.remember_success(trimmed);
+            }
         }
 
         InputKind::Import(src) => {
@@ -1944,6 +1968,9 @@ pub(crate) fn execute_line(
             update_core_imports(&src, &mut session.core_imports);
             qprintln!("{}", green("ok", color));
             session.record_turn(trimmed, ReplTurnStatus::Ok, "ok".to_string());
+            if !quiet {
+                session.remember_success(trimmed);
+            }
         }
 
         InputKind::Stmts(stmts, suppress, _check_src) => {
@@ -2043,6 +2070,9 @@ pub(crate) fn execute_line(
                         _ => None,
                     };
                     session.record_turn_ex(trimmed, ReplTurnStatus::Ok, summary, had_effect, bound_name);
+                    if !quiet {
+                        session.remember_success(trimmed);
+                    }
                     if let Some(full) = pending_unfold {
                         if let Some(t) = session.turns.last_mut() {
                             t.pending_unfold = Some(full);
@@ -2171,6 +2201,7 @@ fn handle_meta(
             }
             Err(msg) => eprintln!("{msg}"),
         },
+        "history" => handle_history(arg, &mut session.history),
         "?" => match arg {
             Some(name) => match Docs::lookup(session, name) {
                 Some(text) => print!("{}", text),
@@ -2255,6 +2286,11 @@ fn help_text(color: bool) -> String {
     ).unwrap();
     writeln!(
         out,
+        "  {} search or erase successful submission history",
+        bold(":history search <text> | clear", color)
+    ).unwrap();
+    writeln!(
+        out,
         "  {}       rerun a prior turn as a preview",
         bold(":rerun <id>", color)
     ).unwrap();
@@ -2274,6 +2310,7 @@ fn help_text(color: bool) -> String {
     writeln!(out).unwrap();
     writeln!(out, "{}", bold("Interactive terminal only", color)).unwrap();
     writeln!(out, "  {}             complete the current name", bold("Tab", color)).unwrap();
+    writeln!(out, "  {}              search successful submission history", bold("F3", color)).unwrap();
     writeln!(out, "  {}              pin or unpin the latest turn", bold("^P", color)).unwrap();
     writeln!(out, "  {}              fold or unfold the latest turn", bold("^F", color)).unwrap();
     writeln!(out, "  {}              edit and rerun a prior turn", bold("^R", color)).unwrap();
@@ -2299,6 +2336,32 @@ fn help_text(color: bool) -> String {
 
 fn print_help(color: bool) {
     print!("{}", help_text(color));
+}
+
+fn handle_history(arg: Option<&str>, history: &mut History::History) {
+    let Some(arg) = arg else {
+        eprintln!("usage: :history search <text> | :history clear");
+        return;
+    };
+    if arg == "clear" {
+        match history.clear() {
+            Ok(()) => println!("History cleared."),
+            Err(error) => eprintln!("warning: history could not be cleared: {error}"),
+        }
+        return;
+    }
+    if let Some(needle) = arg.strip_prefix("search ") {
+        let matches = history.search(needle);
+        if matches.is_empty() {
+            println!("No history matches.");
+        } else {
+            for entry in matches {
+                println!("{entry}");
+            }
+        }
+        return;
+    }
+    eprintln!("usage: :history search <text> | :history clear");
 }
 
 // ── transcript test harness (D-REPL20=A) ──────────────────────────────────
@@ -2464,6 +2527,27 @@ pub fn run_transcript_with_flags(
                         }
                         Err(msg) => out.push_str(&format!("{msg}\n")),
                     },
+                    "history" => {
+                        match arg.as_deref() {
+                            Some("clear") => {
+                                session.history.clear().ok();
+                                out.push_str("History cleared.\n");
+                            }
+                            Some(arg) if arg.starts_with("search ") => {
+                                let needle = &arg[7..];
+                                let matches = session.history.search(needle);
+                                if matches.is_empty() {
+                                    out.push_str("No history matches.\n");
+                                } else {
+                                    for entry in matches {
+                                        out.push_str(entry);
+                                        out.push('\n');
+                                    }
+                                }
+                            }
+                            _ => out.push_str("usage: :history search <text> | :history clear\n"),
+                        }
+                    }
                     "?" => {
                         // D-FE-REPL-DOCS1=B: same shared-docs-index lookup the
                         // cooked/interactive loops use (`Docs::lookup`), so
@@ -2512,6 +2596,7 @@ pub fn run_transcript_with_flags(
                 rebuild_funcs(&mut session);
                 out.push_str("ok\n");
                 session.record_turn(trimmed, ReplTurnStatus::Ok, "ok".to_string());
+                session.remember_success(trimmed);
             }
 
             InputKind::Import(src) => {
@@ -2538,6 +2623,7 @@ pub fn run_transcript_with_flags(
                 update_core_imports(&src, &mut session.core_imports);
                 out.push_str("ok\n");
                 session.record_turn(trimmed, ReplTurnStatus::Ok, "ok".to_string());
+                session.remember_success(trimmed);
             }
 
             InputKind::Stmts(stmts, suppress, _check_src) => {
@@ -2629,6 +2715,7 @@ pub fn run_transcript_with_flags(
                             had_effect,
                             bound_name,
                         );
+                        session.remember_success(trimmed);
                     }
                     Err(d) => {
                         let d = if d.code == "E2202" {
