@@ -75,10 +75,20 @@ fn selected_cases(kind: &str, filter: Option<&str>) -> Vec<PathBuf> {
         .collect()
 }
 
-fn replay(path: &Path) {
+fn require_lane_selection(lane: &str, filter: Option<&str>, selected: usize) {
+    match filter {
+        Some(filter) => assert_eq!(
+            selected, 1,
+            "SEMA_SOUNDNESS_CASE must select exactly one {lane} fixture: {filter}"
+        ),
+        None => assert!(selected > 0, "full {lane} corpus must not be empty"),
+    }
+}
+
+fn replay(path: &Path, test: &str) {
     eprintln!(
-        "replay: SEMA_SOUNDNESS_CASE={} cargo test --test sema_soundness -- --nocapture",
-        relative(path)
+        "replay: SEMA_SOUNDNESS_CASE={} cargo test --test sema_soundness {test} -- --exact --nocapture",
+        relative(path),
     );
 }
 
@@ -129,14 +139,13 @@ fn exact_invalid_corpus_rejects_in_jet() {
     // CAPABILITY_CLAIM: claim.native-language / invalid-front-end-boundary
     let filter = case_filter();
     let selected = selected_cases("invalid", filter.as_deref());
-    if filter.is_some() && selected.is_empty() { return; }
-    assert!(!selected.is_empty(), "full invalid corpus must not be empty");
+    require_lane_selection("invalid", filter.as_deref(), selected.len());
     // Collect every mismatch instead of aborting on the first one: a
     // minimized-fixture corpus this size needs one full pass per edit, not
     // one panic-and-rerun cycle per broken case.
     let mut failures = Vec::new();
     for path in selected {
-        replay(&path);
+        replay(&path, "exact_invalid_corpus_rejects_in_jet");
         let expected = expected_code(&path);
         let fixture = fs::read_to_string(&path).unwrap();
         let src = fixture.replace("__NUL__", "\0");
@@ -196,13 +205,13 @@ fn run_all_collecting_failures(
 
 #[test]
 fn valid_corpus_reaches_rustc() {
+    // CAPABILITY_CLAIM: claim.native-language / valid-native-execution
     let filter = case_filter();
     let selected = selected_cases("valid", filter.as_deref());
-    if filter.is_some() && selected.is_empty() { return; }
-    assert!(!selected.is_empty(), "full valid corpus must not be empty");
+    require_lane_selection("valid", filter.as_deref(), selected.len());
     require_rustc();
     let failures = run_all_collecting_failures(selected, |path| {
-        replay(path);
+        replay(path, "valid_corpus_reaches_rustc");
         let src = fs::read_to_string(path).unwrap();
         let name = path.file_stem().unwrap().to_string_lossy();
         let (code, _, stderr) = build_and_run("jet_sema_sound_valid", &name, &src);
@@ -225,11 +234,10 @@ fn executable_corpus_matches_aot_and_default_dev() {
     // CAPABILITY_CLAIM: claim.native-language / accepted-native-semantics
     let filter = case_filter();
     let selected = selected_cases("differential", filter.as_deref());
-    if filter.is_some() && selected.is_empty() { return; }
-    assert!(!selected.is_empty(), "full differential corpus must not be empty");
+    require_lane_selection("differential", filter.as_deref(), selected.len());
     require_rustc();
     let failures = run_all_collecting_failures(selected, |path| {
-        replay(path);
+        replay(path, "executable_corpus_matches_aot_and_default_dev");
         let src = fs::read_to_string(path).unwrap();
         let name = path.file_stem().unwrap().to_string_lossy();
         let expected = fs::read_to_string(path.with_extension("out"))
@@ -259,12 +267,13 @@ fn executable_corpus_matches_aot_and_default_dev() {
 }
 
 /// Crit #2: the required CI run is at least 250 fixed cases, zero silent
-/// skips. Only meaningful for a full (unfiltered) run — a single-fixture
-/// replay via `SEMA_SOUNDNESS_CASE` is exempt.
+/// skips. The count always covers the complete fixed corpus; a replay selector
+/// cannot weaken this acceptance lane.
 #[test]
 fn full_corpus_meets_minimum_case_count() {
+    // CAPABILITY_CLAIM: claim.native-language / corpus-size-floor
     if case_filter().is_some() {
-        return;
+        selector_routes_exactly_one_fixture_category();
     }
     let total: usize = ["valid", "invalid", "differential"]
         .iter()
@@ -292,12 +301,9 @@ fn generated_rust_has_no_unaudited_unsafe() {
     let filter = case_filter();
     let mut selected = selected_cases("valid", filter.as_deref());
     selected.extend(selected_cases("differential", filter.as_deref()));
-    if filter.is_some() && selected.is_empty() {
-        return;
-    }
-    assert!(!selected.is_empty(), "full valid+differential corpus must not be empty");
+    require_lane_selection("valid or differential", filter.as_deref(), selected.len());
     let failures = run_all_collecting_failures(selected, |path| {
-        replay(path);
+        replay(path, "generated_rust_has_no_unaudited_unsafe");
         let src = fs::read_to_string(path).unwrap();
         // NB: keep this prefix free of the substring "unsafe" — codegen
         // embeds the source path in a `jet:source-map` comment, and a tmp

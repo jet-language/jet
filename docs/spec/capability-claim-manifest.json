@@ -96,8 +96,31 @@
       },
       "class": "proven",
       "disposition": "shipped",
-      "reviewerRationale": "The independently verified 258-case soundness corpus proves Jet-owned rejection, native execution, AOT/default-dev semantics, and safe-codegen provenance across the audited language surface.",
+      "reviewerRationale": "Five exact acceptance lanes enforce the 258-case floor, Jet-owned rejection, valid-corpus native execution, AOT/default-dev differential semantics, and safe-codegen provenance across the audited language surface.",
       "acceptanceLanes": [
+        {
+          "id": "corpus-size-floor",
+          "why": "Proves the fixed valid, invalid, and differential corpus retains at least 250 cases regardless of replay selectors.",
+          "command": [
+            "cargo",
+            "test",
+            "--test",
+            "sema_soundness",
+            "full_corpus_meets_minimum_case_count",
+            "--",
+            "--exact"
+          ],
+          "artifacts": [
+            {
+              "role": "proof",
+              "kind": "file",
+              "path": "tests/sema_soundness.rs",
+              "anchor": "CAPABILITY_CLAIM: claim.native-language / corpus-size-floor",
+              "why": "Exact acceptance test counts every fixed fixture across all three corpus categories.",
+              "contentDigest": "2fc471eca41b371fd36f68c5b292f1dcf84ad7b8b6196004b6c5a66c0c7b339e"
+            }
+          ]
+        },
         {
           "id": "invalid-front-end-boundary",
           "why": "Proves invalid programs reject with exact Jet diagnostics before rustc can speak.",
@@ -117,7 +140,30 @@
               "path": "tests/sema_soundness.rs",
               "anchor": "CAPABILITY_CLAIM: claim.native-language / invalid-front-end-boundary",
               "why": "Executable exact-diagnostic corpus with replayable fixtures and no silent skips.",
-              "contentDigest": "7fc7f6a8a8109aecf1f13150c782f998076cfd43c3156996889787f67c481197"
+              "contentDigest": "2fc471eca41b371fd36f68c5b292f1dcf84ad7b8b6196004b6c5a66c0c7b339e"
+            }
+          ]
+        },
+        {
+          "id": "valid-native-execution",
+          "why": "Proves every accepted valid-corpus fixture compiles through rustc and executes successfully as a native program.",
+          "command": [
+            "cargo",
+            "test",
+            "--test",
+            "sema_soundness",
+            "valid_corpus_reaches_rustc",
+            "--",
+            "--exact"
+          ],
+          "artifacts": [
+            {
+              "role": "proof",
+              "kind": "file",
+              "path": "tests/sema_soundness.rs",
+              "anchor": "CAPABILITY_CLAIM: claim.native-language / valid-native-execution",
+              "why": "Executable valid corpus requires successful native compilation and process completion for every fixture.",
+              "contentDigest": "2fc471eca41b371fd36f68c5b292f1dcf84ad7b8b6196004b6c5a66c0c7b339e"
             }
           ]
         },
@@ -140,7 +186,7 @@
               "path": "tests/sema_soundness.rs",
               "anchor": "CAPABILITY_CLAIM: claim.native-language / accepted-native-semantics",
               "why": "Executable differential corpus compares native AOT with default dev and pinned output.",
-              "contentDigest": "7fc7f6a8a8109aecf1f13150c782f998076cfd43c3156996889787f67c481197"
+              "contentDigest": "2fc471eca41b371fd36f68c5b292f1dcf84ad7b8b6196004b6c5a66c0c7b339e"
             }
           ]
         },
@@ -163,7 +209,7 @@
               "path": "tests/sema_soundness.rs",
               "anchor": "CAPABILITY_CLAIM: claim.native-language / safe-codegen-boundary",
               "why": "Structural provenance scan covers every accepted valid and differential fixture.",
-              "contentDigest": "7fc7f6a8a8109aecf1f13150c782f998076cfd43c3156996889787f67c481197"
+              "contentDigest": "2fc471eca41b371fd36f68c5b292f1dcf84ad7b8b6196004b6c5a66c0c7b339e"
             }
           ]
         }
