@@ -654,6 +654,7 @@ impl<'a> Parser<'a> {
                             arm_head_term: false,
                             pub_file_default: false,
                             in_layout_body: self.in_layout_body,
+                            module_arg_expr_depth: None,
                         };
                         let e = sub.expr()?;
                         if !sub.diags.is_empty() {

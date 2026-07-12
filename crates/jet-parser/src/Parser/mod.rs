@@ -53,6 +53,7 @@ pub fn parse_for_check(toks: &[Token]) -> Result<(Program, Vec<Diagnostic>), Vec
         arm_head_term: false,
         pub_file_default: false,
         in_layout_body: 0,
+        module_arg_expr_depth: None,
     };
     let prog = p.program();
     if p.diags.is_empty() {
@@ -79,6 +80,7 @@ fn parse_inner(toks: &[Token], for_fmt: bool) -> Result<Program, Vec<Diagnostic>
         arm_head_term: false,
         pub_file_default: false,
         in_layout_body: 0,
+        module_arg_expr_depth: None,
     };
     let prog = p.program();
     if p.diags.is_empty() {
@@ -176,6 +178,10 @@ struct Parser<'a> {
     /// so the parser lets `Expr::Binary` through here; sema (E2932/E2933)
     /// enforces that it's actually a valid constraint, not the parser.
     in_layout_body: usize,
+    /// While parsing a value in `Template<...>`, a top-level `>` closes the
+    /// application instead of becoming a comparison. Nested expressions can
+    /// still use `>` normally.
+    module_arg_expr_depth: Option<usize>,
 }
 
 fn too_deep(span: Span) -> Diagnostic {
@@ -683,6 +689,7 @@ fn run() {
             arm_head_term: false,
             pub_file_default: false,
             in_layout_body: 0,
+            module_arg_expr_depth: None,
         };
         let _prog = p.program();
         assert!(

@@ -260,6 +260,14 @@ impl<'a> Parser<'a> {
             let span = self.peek().span;
             self.with_nesting(span, |p| p.expr_or_fallback(true))
         }
+
+        pub(in crate::Parser) fn module_arg_expr(&mut self) -> Result<Expr, Diagnostic> {
+            let previous = self.module_arg_expr_depth;
+            self.module_arg_expr_depth = Some(self.depth + 1);
+            let result = self.expr();
+            self.module_arg_expr_depth = previous;
+            result
+        }
     
         pub(in crate::Parser) fn expr_no_struct_lit(&mut self) -> Result<Expr, Diagnostic> {
             let span = self.peek().span;

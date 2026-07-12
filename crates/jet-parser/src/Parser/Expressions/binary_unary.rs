@@ -122,7 +122,7 @@ impl<'a> Parser<'a> {
                 TokKind::EqEq => Some(BinOp::Eq),
                 TokKind::NotEq => Some(BinOp::Ne),
                 TokKind::Lt => Some(BinOp::Lt),
-                TokKind::Gt => Some(BinOp::Gt),
+                TokKind::Gt if self.module_arg_expr_depth != Some(self.depth) => Some(BinOp::Gt),
                 TokKind::Le => Some(BinOp::Le),
                 TokKind::Ge => Some(BinOp::Ge),
                 _ => None,

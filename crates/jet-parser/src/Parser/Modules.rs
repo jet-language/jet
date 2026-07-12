@@ -556,7 +556,7 @@ impl<'a> Parser<'a> {
                 match &self.peek().kind {
                     TokKind::Int(_) | TokKind::KwTrue | TokKind::KwFalse | TokKind::Char(_) | TokKind::Str(_)
                     | TokKind::LParen | TokKind::Minus | TokKind::Bang => {
-                        let expr = self.expr()?;
+                        let expr = self.module_arg_expr()?;
                         args.push(ModuleArg::Value(expr, arg_start));
                     }
                     TokKind::Ident(_)
@@ -582,7 +582,7 @@ impl<'a> Parser<'a> {
                                 | TokKind::Ge
                         ) =>
                     {
-                        let expr = self.expr()?;
+                        let expr = self.module_arg_expr()?;
                         args.push(ModuleArg::Value(expr, arg_start));
                     }
                     _ => {
