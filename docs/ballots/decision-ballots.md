@@ -35,15 +35,7 @@ drafted to that bar belong on their Tower cards, not here.
 ## Open decisions
 
 Open ballots live in Tower (`node Tower/tower.mjs status`); this file no
-longer mirrors them. As of 2026-07-11 the open set is the polyglot binder
-wave and the framework-lessons wave:
-
-- card #502 — D-FFI-GO1, D-FFI-JVM1, D-FFI-DOTNET1, D-FFI-FORTRAN1
-- card #503 — D-FFI-LUA1, D-FFI-RUBY1, D-FFI-PERL1, D-FFI-PHP1,
-  D-FFI-R1, D-FFI-SH1
-- card #504 — D-FFI-COBOL1, D-FFI-OCTAVE1, D-MIGRATE-SRC1
-- card #505 — D-LIVEQUERY1, D-SCHEDULE1, D-LINTPOLICY1
-
-Everything from the 2026-07-11 surface-condensation and Polyglot Phase 1
-waves (cards #497, #498, #499, #501) was ratified same-day and is
-recorded in `docs/spec/syntax-decisions.md`.
+longer mirrors them. As of 2026-07-11 the open set is empty: the
+surface-condensation, polyglot (all four phases), and framework-lessons
+waves (cards #497–#505) were all ratified same-day and are recorded in
+`docs/spec/syntax-decisions.md`.

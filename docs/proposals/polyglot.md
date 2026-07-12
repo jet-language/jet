@@ -35,7 +35,7 @@ fourth D-FFI-UNIFY1 tier — one directive shape for every language,
 typed boundary, checked at build:
 
 ```jet
-#Foreign(c) fn crc32(data: [U8], seed: U32) -> U32 {
+#FFI(c) fn crc32(data: [U8], seed: U32) -> U32 {
     """
     uint32_t crc32(const uint8_t* data, size_t data_len, uint32_t seed) {
         uint32_t c = ~seed;
@@ -49,8 +49,8 @@ typed boundary, checked at build:
 The Jet signature is the contract: sema type-checks call sites against
 it, the language's binder compiles the body on cache miss, marshaling is
 generated exactly like the script tier, and a body/signature mismatch is
-a Jet diagnostic. Same shape for `#Foreign(asm)`, `#Foreign(py)`, …
-Effects: a `#Foreign` fn declares its effect row like any extern.
+a Jet diagnostic. Same shape for `#FFI(asm)`, `#FFI(py)`, …
+Effects: a `#FFI` fn declares its effect row like any extern.
 
 **Assembly floor (D-FFI-ASM1).** True master-of-ALL bottoms out in asm
 (kernels, crypto, intrinsics SIMD doesn't cover). Inline asm is the
@@ -61,7 +61,7 @@ operands — no bare string globals:
 use core.mem
 
 #Unsafe("cycle counter — no Core surface")
-#Foreign(asm) fn rdtsc() -> U64 {
+#FFI(asm) fn rdtsc() -> U64 {
     """
     rdtsc
     shl rdx, 32
@@ -81,9 +81,9 @@ three ratified tiers plus the inline tier above.
 
 | Lang | Root | Host model | Ballot |
 |---|---|---|---|
-| Assembly | `#Foreign(asm)` only (no lib namespace) | rustc `asm!` lowering per target | D-FFI-ASM1 |
+| Assembly | `#FFI(asm)` only (no lib namespace) | rustc `asm!` lowering per target | D-FFI-ASM1 |
 | C++ | `cpp.*` | clang bindgen; classes → opaque handles, methods → fns, exceptions → `T ? CppError`; templates instantiated on demand | D-FFI-CPP1 |
-| Inline tier (all langs) | `#Foreign(<lang>)` | per-lang binder compiles body | D-FFI-INLINE1 |
+| Inline tier (all langs) | `#FFI(<lang>)` | per-lang binder compiles body | D-FFI-INLINE1 |
 
 ```jet
 use cpp.opencv as cv                       // project tier
