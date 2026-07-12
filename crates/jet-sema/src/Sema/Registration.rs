@@ -1324,14 +1324,9 @@ pub(super) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags: &mut Vec<
             ).collect();
             let needs_mutation = active.iter().any(|f|
                 f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_FLATTEN)
-                || matches!(f.ty, Type::Option(_))
             );
             if !needs_mutation {
-                let pairs = active.iter().map(|f| {
-                    let key = serde_source_field_key(&s.serde_markers, f);
-                    format!("{key:?}: self.{}.encode()", f.name)
-                }).collect::<Vec<_>>().join(", ");
-                source.push_str(&format!("return DataTree.Object([{pairs}])\n"));
+                source.push_str(&serde_ordered_object_source(&s.serde_markers, &active));
             } else {
                 source.push_str("out: [String: DataTree] := []\n");
             for f in &s.fields {
@@ -1693,6 +1688,48 @@ fn serde_source_field_key(container: &[crate::AST::Marker], f: &crate::AST::Fiel
         Some("pascal") => f.name.split('_').map(|p| { let mut c=p.chars(); c.next().map(|x| x.to_uppercase().collect::<String>()+c.as_str()).unwrap_or_default() }).collect(),
         _ => f.name.clone(),
     }
+}
+
+/// Render direct object literals for every optional-field path. Direct literals
+/// lower straight to DataTree's ordered pair vector; routing an omitted field
+/// through Jet's ordinary key-sorted Map would lose declaration order. Each
+/// leaf keeps the remaining fields in source order and leaves absent options
+/// off the wire.
+fn serde_ordered_object_source(
+    container: &[crate::AST::Marker],
+    fields: &[&crate::AST::Field],
+) -> String {
+    fn emit(
+        container: &[crate::AST::Marker],
+        fields: &[&crate::AST::Field],
+        index: usize,
+        pairs: &mut Vec<String>,
+        out: &mut String,
+    ) {
+        let Some(field) = fields.get(index) else {
+            out.push_str(&format!("return DataTree.Object([{}])\n", pairs.join(", ")));
+            return;
+        };
+        let key = serde_source_field_key(container, field);
+        if matches!(field.ty, Type::Option(_)) {
+            let value = format!("serde_value_{index}");
+            out.push_str(&format!("if self.{} == Val({value}) {{\n", field.name));
+            pairs.push(format!("{key:?}: (copy {value}).encode()"));
+            emit(container, fields, index + 1, pairs, out);
+            pairs.pop();
+            out.push_str("} else {\n");
+            emit(container, fields, index + 1, pairs, out);
+            out.push_str("}\n");
+        } else {
+            pairs.push(format!("{key:?}: self.{}.encode()", field.name));
+            emit(container, fields, index + 1, pairs, out);
+            pairs.pop();
+        }
+    }
+
+    let mut out = String::new();
+    emit(container, fields, 0, &mut Vec::new(), &mut out);
+    out
 }
 
 fn serde_source_default(f: &crate::AST::Field) -> Option<String> {

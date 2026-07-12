@@ -2742,6 +2742,42 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// Derived objects keep declaration order across renamed fields and optional
+/// omission. Ordinary maps retain their independent key-ordering behavior.
+#[test]
+fn generated_struct_encode_preserves_order_with_rename_and_option() {
+    let dir = std::env::temp_dir().join(format!("jet_struct_serde_order_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let src = r#"
+use core.encoding.json as json
+
+@[Encode]
+struct Wire {
+    first: String
+    #[Rename("wireSecond")] second: String
+    maybe: String?
+    last: Int
+}
+
+fn run() {
+    absent := Wire.{ first: "a", second: "b", maybe: None, last: 4 }
+    present := Wire.{ first: "a", second: "b", maybe: Val("c"), last: 4 }
+    arbitrary: [String: Int] := ["z": 1, "a": 2]
+    print(json.to_string(absent))
+    print(json.to_string(present))
+    print(json.to_string(arbitrary))
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "struct_serde_order", src, &[], None);
+    assert_eq!(code, 0, "ordered generated struct codec failed: {stderr}");
+    assert_eq!(
+        stdout,
+        "{\"first\":\"a\",\"wireSecond\":\"b\",\"last\":4}\n{\"first\":\"a\",\"wireSecond\":\"b\",\"maybe\":\"c\",\"last\":4}\n{\"a\":2,\"z\":1}\n"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
 /// Card #131: flatten, rename, and decode defaults are behavior of generated
 /// Jet codec bodies, not a hidden Rust-only derive path.
 #[test]
