@@ -304,15 +304,17 @@ fn load_entry_with_overlays_mode(
     )?;
 
     if load_adjacent_unqualified {
-        let aliases: Vec<String> = modules[0]
+        let aliases: Vec<(String, crate::Diagnostics::Span)> = modules[0]
             .imports
             .iter()
             .filter_map(|import| match &import.kind {
-                ImportKind::Unqualified { module_alias, .. } => Some(module_alias.clone()),
+                ImportKind::Unqualified { module_alias, module_alias_span, .. } => {
+                    Some((module_alias.clone(), *module_alias_span))
+                }
                 _ => None,
             })
             .collect();
-        for alias in aliases {
+        for (alias, span) in aliases {
             if modules.iter().any(|module| module.alias == alias) {
                 continue;
             }
@@ -338,6 +340,18 @@ fn load_entry_with_overlays_mode(
                     for_check,
                     &mut parse_teaching,
                 )?;
+                // Supply the real adjacent module edge to sema. The user's
+                // source remains untouched; this is the structural workspace
+                // context corresponding to `use alias.Item`.
+                modules[0].imports.push(ImportDecl {
+                    kind: ImportKind::File(alias.clone(), span),
+                    alias: alias.clone(),
+                    alias_span: span,
+                    span,
+                    is_pub: false,
+                    is_package_pub: false,
+                    inline_version: None,
+                });
             }
         }
     }
