@@ -754,6 +754,7 @@ fn load_file(
         alias,
         imports: imports.clone(),
         items: prog.items,
+        block_spans: prog.block_spans,
         web_target_ceiling: prog.web_target_ceiling,
         pub_file: prog.pub_file,
         no_prelude: prog.no_prelude,

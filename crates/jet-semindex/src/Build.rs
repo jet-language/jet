@@ -8,7 +8,7 @@ use jet_sema::{effect_key, SemIndexEffectFacts};
 use std::collections::HashMap;
 
 use crate::Json::{convert_defs, convert_effects, convert_refs};
-use crate::Types::{BypassFact, BypassKind, CallEdge, DefinitionAnchor, DefinitionFact, InstanceApplicationFact, InstanceFact, MemberFact, MemberKind, MemberOrigin, SemIndex, StructuralNode, StructuralSlotKind, SymbolDef, SymbolKind};
+use crate::Types::{BypassFact, BypassKind, CallEdge, DefinitionAnchor, DefinitionFact, InstanceApplicationFact, InstanceFact, MemberFact, MemberKind, MemberOrigin, SemIndex, StructuralNode, StructuralSlotBoundary, StructuralSlotKind, SymbolDef, SymbolKind};
 use crate::Symbols::{build_semantic_symbol_index, SemanticSymbolIndex};
 
 /// The semantic kind of a defined symbol (LSP-facing; uses AST types internally).
@@ -97,6 +97,7 @@ pub struct SymbolDB {
     /// Sema-owned returned-view summaries keyed by semantic function identity.
     /// Kept beside `SymKind` so existing LSP/REPL consumers retain its shape.
     pub view_provenance: HashMap<String, AST::ViewProvenanceMap>,
+    pub slot_boundaries: Vec<StructuralSlotBoundary>,
     pub symbols: SemanticSymbolIndex,
 }
 
@@ -114,6 +115,8 @@ struct WalkCtx<'a> {
     structural_parents: Vec<usize>,
     structural_slot: String,
     structural_slot_kind: StructuralSlotKind,
+    block_spans: &'a [Span],
+    claimed_block_spans: std::collections::HashSet<(usize, usize)>,
 }
 
 impl SymbolDB {
@@ -131,6 +134,7 @@ impl SymbolDB {
             nodes: Vec::new(),
             bypasses: Vec::new(),
             view_provenance: HashMap::new(),
+            slot_boundaries: Vec::new(),
             symbols: SemanticSymbolIndex::language(),
         }
     }
@@ -385,12 +389,42 @@ fn structural_slot<T>(
     kind: StructuralSlotKind,
     f: impl FnOnce(&mut WalkCtx<'_>) -> T,
 ) -> T {
+    if is_lexical_structural_slot(name) {
+        if let Some(parent) = ctx.structural_parents.last().copied() {
+            let parent_start = ctx.db.nodes[parent].span.start;
+            let parent_end = ctx.db.nodes[parent].span.end;
+            let exact_parent_end = ctx.db.nodes[parent].class == "arm";
+            if let Some(span) = ctx
+                .block_spans
+                .iter()
+                .filter(|span| {
+                    parent_start <= span.start
+                        && (!exact_parent_end || span.end <= parent_end)
+                        && !ctx.claimed_block_spans.contains(&(span.start, span.end))
+                })
+                .min_by_key(|span| span.start)
+                .copied()
+            {
+                ctx.claimed_block_spans.insert((span.start, span.end));
+                ctx.db.slot_boundaries.push(StructuralSlotBoundary {
+                    parent,
+                    slot: name.to_string(),
+                    module_path: ctx.db.nodes[parent].module_path.clone(),
+                    span: span.into(),
+                });
+            }
+        }
+    }
     let old_name = std::mem::replace(&mut ctx.structural_slot, name.to_string());
     let old_kind = std::mem::replace(&mut ctx.structural_slot_kind, kind);
     let value = f(ctx);
     ctx.structural_slot = old_name;
     ctx.structural_slot_kind = old_kind;
     value
+}
+
+fn is_lexical_structural_slot(slot: &str) -> bool {
+    slot == "body" || slot.ends_with("_body") || slot.ends_with("_bodies")
 }
 
 fn expr_shape(expr: &AST::Expr) -> String {
@@ -532,6 +566,8 @@ pub fn build_symbol_db(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> S
             structural_parents: Vec::new(),
             structural_slot: "root".to_string(),
             structural_slot_kind: StructuralSlotKind::List,
+            block_spans: &module.block_spans,
+            claimed_block_spans: std::collections::HashSet::new(),
         };
         for item in &module.items {
             collect_item(item, &mp, module, &mut ctx);
@@ -650,6 +686,8 @@ pub fn structural_nodes_from_parsed(module: &LoadedModule) -> Vec<StructuralNode
         structural_parents: Vec::new(),
         structural_slot: "root".to_string(),
         structural_slot_kind: StructuralSlotKind::List,
+        block_spans: &module.block_spans,
+        claimed_block_spans: std::collections::HashSet::new(),
     };
     for item in &module.items {
         collect_item(item, &mp, module, &mut ctx);
@@ -1395,11 +1433,27 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
             ..
         } => {
             structural_slot(ctx, "subject", StructuralSlotKind::Scalar, |ctx| collect_expr(subject, mp, ctx));
-            structural_slot(ctx, "arm_conditions", StructuralSlotKind::List, |ctx| {
-                for arm in arms { collect_expr(&arm.cond, mp, ctx); }
-            });
-            structural_slot(ctx, "arm_bodies", StructuralSlotKind::List, |ctx| {
-                for arm in arms { collect_stmts(&arm.body, mp, module, ctx); }
+            structural_slot(ctx, "arms", StructuralSlotKind::List, |ctx| {
+                for arm in arms {
+                    let arm_id = record_node(ctx, "arm", "switch_arm", mp, arm.span);
+                    if let Some(id) = arm_id { ctx.structural_parents.push(id); }
+                    structural_slot(ctx, "condition", StructuralSlotKind::Scalar, |ctx| collect_expr(&arm.cond, mp, ctx));
+                    structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(&arm.body, mp, module, ctx));
+                    if let Some(id) = arm_id {
+                        let has_boundary = ctx.db.slot_boundaries.iter().any(|boundary| {
+                            boundary.parent == id && boundary.slot == "body"
+                        });
+                        if !has_boundary && arm.body.len() == 1 {
+                            ctx.db.slot_boundaries.push(StructuralSlotBoundary {
+                                parent: id,
+                                slot: "body".to_string(),
+                                module_path: mp.to_string(),
+                                span: arm.body[0].span().into(),
+                            });
+                        }
+                        ctx.structural_parents.pop();
+                    }
+                }
             });
             if let Some(eb) = else_body {
                 structural_slot(ctx, "else_body", StructuralSlotKind::List, |ctx| collect_stmts(eb, mp, module, ctx));

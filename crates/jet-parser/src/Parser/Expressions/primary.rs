@@ -664,6 +664,7 @@ impl<'a> Parser<'a> {
                             in_layout_body: self.in_layout_body,
                             module_arg_expr_depth: None,
                             policy_declarations: Vec::new(),
+                            block_spans: Vec::new(),
                         };
                         let e = sub.expr()?;
                         if !sub.diags.is_empty() {

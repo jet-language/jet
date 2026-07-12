@@ -208,6 +208,20 @@ mod tests {
         let src = "fn run(flag: Bool) {\n    if flag {\n        then_only :: 1\n        print(then_only)\n    } else {\n        else_only :: 2\n        print(else_only)\n    }\n}\n";
         let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
         let db = build_symbol_db(&bundle.expect("bundle"), &facts);
+        let then_start = src.find("if flag {").unwrap() + "if flag {".len();
+        let then_end = src.find("    } else {").unwrap() + 4;
+        let else_start = src.find("else {").unwrap() + "else {".len();
+        let else_end = src.rfind("    }\n}").unwrap() + 4;
+        assert!(db.slot_boundaries.iter().any(|boundary| {
+            boundary.slot == "then_body"
+                && boundary.span.start == then_start
+                && boundary.span.end == then_end
+        }));
+        assert!(db.slot_boundaries.iter().any(|boundary| {
+            boundary.slot == "else_body"
+                && boundary.span.start == else_start
+                && boundary.span.end == else_end
+        }));
         let then_offset = src.find("print(then_only)").unwrap();
         let then_items = compute_completions(&db, src, then_offset, "test.jet", None, None);
         assert!(then_items.iter().any(|item| item.label == "then_only"));
@@ -227,5 +241,63 @@ mod tests {
         assert!(!compute_completions(&db, src, offset, "test.jet", None, None)
             .iter()
             .any(|item| item.label == "then_only"));
+    }
+
+    #[test]
+    fn completion_sees_parameter_inside_empty_body() {
+        let src = "fn inspect(value: Int) {\n    \n}\n";
+        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
+        let db = build_symbol_db(&bundle.expect("bundle"), &facts);
+        let offset = src.find("    \n").unwrap() + 4;
+        let scope = db
+            .symbols
+            .symbols()
+            .iter()
+            .find(|symbol| symbol.name == "value")
+            .unwrap()
+            .lexical_scope
+            .as_ref()
+            .unwrap();
+        assert_eq!(scope.span.start, src.find('{').unwrap() + 1);
+        assert_eq!(scope.span.end, src.rfind('}').unwrap());
+        assert!(compute_completions(&db, src, offset, "test.jet", None, None)
+            .iter()
+            .any(|item| item.label == "value"));
+    }
+
+    #[test]
+    fn completion_sees_last_local_on_trailing_blank_line() {
+        let src = "fn run() {\n    last_local :: 1\n    \n}\n";
+        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
+        let db = build_symbol_db(&bundle.expect("bundle"), &facts);
+        let offset = src.rfind("    \n").unwrap() + 4;
+        let scope = db
+            .symbols
+            .symbols()
+            .iter()
+            .find(|symbol| symbol.name == "last_local")
+            .unwrap()
+            .lexical_scope
+            .as_ref()
+            .unwrap();
+        assert_eq!(scope.span.end, src.rfind('}').unwrap());
+        assert!(compute_completions(&db, src, offset, "test.jet", None, None)
+            .iter()
+            .any(|item| item.label == "last_local"));
+    }
+
+    #[test]
+    fn slot_boundaries_ignore_comment_and_interpolation_braces() {
+        let src = "fn run(flag: Bool) {\n    text :: \"flag={flag}\"\n    // comment braces: { }\n    \n}\n";
+        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
+        let bundle = bundle.expect("bundle");
+        let expected_start = src.find('{').unwrap() + 1;
+        let expected_end = src.rfind('}').unwrap();
+        assert_eq!(bundle.modules[0].block_spans, vec![crate::Diagnostics::Span::new(expected_start, expected_end)]);
+        let db = build_symbol_db(&bundle, &facts);
+        let offset = src.rfind("    \n").unwrap() + 4;
+        assert!(compute_completions(&db, src, offset, "test.jet", None, None)
+            .iter()
+            .any(|item| item.label == "text"));
     }
 }

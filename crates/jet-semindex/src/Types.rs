@@ -284,6 +284,15 @@ pub struct StructuralNode {
     pub span: SourceSpan,
 }
 
+/// Exact parser-owned boundary of one structural AST slot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructuralSlotBoundary {
+    pub parent: usize,
+    pub slot: String,
+    pub module_path: String,
+    pub span: SourceSpan,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StructuralSlotKind {
     Scalar,

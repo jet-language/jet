@@ -14,8 +14,9 @@ pub use Build::{
     SymKind, SymRef, SymbolDB,
 };
 pub use Types::{
-    CallEdge, DefinitionAnchor, DefinitionFact, EffectFact, InstanceApplicationFact, InstanceFact, MemberFact, MemberKind, MemberOrigin, SemIndex, SourceSpan,
-    StructuralAudit, StructuralNode, StructuralSlotKind, SymbolDef, SymbolKind, SymbolRef, TypeDossier,
+    CallEdge, DefinitionAnchor, DefinitionFact, EffectFact, InstanceApplicationFact, InstanceFact,
+    MemberFact, MemberKind, MemberOrigin, SemIndex, SourceSpan, StructuralAudit, StructuralNode,
+    StructuralSlotBoundary, StructuralSlotKind, SymbolDef, SymbolKind, SymbolRef, TypeDossier,
     ViewProjectionFact, ViewProvenanceFact, ViewSourceFact,
     SCHEMA_VERSION,
 };

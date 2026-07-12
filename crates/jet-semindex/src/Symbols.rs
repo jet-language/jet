@@ -547,14 +547,15 @@ fn lexical_scope_for_def(
             .min_by_key(|node| node.span.end.saturating_sub(node.span.start))
             .map(|node| (node.id, "body".to_string()))
     })?;
-    let slot_nodes = nodes
+    let span = db
+        .slot_boundaries
         .iter()
-        .filter(|node| descends_through_slot(db, node.id, parent, &slot))
-        .collect::<Vec<_>>();
-    let span = SourceSpan {
-        start: slot_nodes.iter().map(|node| node.span.start).min().unwrap_or(def_span.start),
-        end: slot_nodes.iter().map(|node| node.span.end).max().unwrap_or(def_span.end),
-    };
+        .find(|boundary| {
+            boundary.module_path == module_path
+                && boundary.parent == parent
+                && boundary.slot == slot
+        })?
+        .span;
     Some(SemanticLexicalScope {
         identity: format!("scope:{module_path}:{parent}:{slot}"),
         structural_parent: parent,
@@ -563,21 +564,6 @@ fn lexical_scope_for_def(
         depth: depth.max(1),
         declaration_offset: if is_param { 0 } else { def_span.start },
     })
-}
-
-fn descends_through_slot(db: &SymbolDB, mut node_id: usize, parent: usize, slot: &str) -> bool {
-    loop {
-        let Some(node) = db.nodes.get(node_id) else {
-            return false;
-        };
-        if node.parent == Some(parent) {
-            return node.slot == slot;
-        }
-        let Some(next) = node.parent else {
-            return false;
-        };
-        node_id = next;
-    }
 }
 
 fn is_lexical_slot(slot: &str) -> bool {

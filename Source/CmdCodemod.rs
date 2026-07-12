@@ -905,6 +905,7 @@ fn parse_pattern_tree(template: &Template, class: &str) -> PatternTree {
         alias: "pattern".to_string(),
         imports: program.imports,
         items: program.items,
+        block_spans: program.block_spans,
         web_target_ceiling: program.web_target_ceiling,
         pub_file: program.pub_file,
         no_prelude: program.no_prelude,

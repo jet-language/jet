@@ -54,6 +54,7 @@ pub fn parse_for_check(toks: &[Token]) -> Result<(Program, Vec<Diagnostic>), Vec
         in_layout_body: 0,
         module_arg_expr_depth: None,
         policy_declarations: Vec::new(),
+        block_spans: Vec::new(),
     };
     let prog = p.program();
     if p.diags.is_empty() {
@@ -81,6 +82,7 @@ fn parse_inner(toks: &[Token], for_fmt: bool) -> Result<Program, Vec<Diagnostic>
         in_layout_body: 0,
         module_arg_expr_depth: None,
         policy_declarations: Vec::new(),
+        block_spans: Vec::new(),
     };
     let prog = p.program();
     if p.diags.is_empty() {
@@ -180,6 +182,7 @@ struct Parser<'a> {
     /// still use `>` normally.
     module_arg_expr_depth: Option<usize>,
     policy_declarations: Vec<crate::Policy::PolicyDeclaration>,
+    block_spans: Vec<Span>,
 }
 
 fn too_deep(span: Span) -> Diagnostic {
