@@ -2,16 +2,6 @@
 //!
 //! Split out of the original `TIR.rs` for maintainability; behavior unchanged.
 
-use super::*;
-use crate::Diagnostics::Span;
-use crate::Syntax;
-use crate::AST::{
-    AccessConvention, BinOp, BindPattern, ElseBranch, EnumLitArg, Expr, ForKind, Func, IfStmt,
-    IndexKind, LValue, Lambda, LambdaBody, OrFallback, Param, PatSlot, Pattern, Stmt, StrPart,
-    StructPatField, SwitchArm, TryConvert, Type, UnOp, VariantPayload,
-};
-use std::collections::{HashMap, HashSet};
-
 mod env;
 mod functions;
 mod statements;

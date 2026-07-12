@@ -4,16 +4,6 @@
 //! Jetpack engine because it reuses Jetpack's source table, provider boundary,
 //! hangar, and trust/runtime policy.
 
-use super::ModuleEval::{self, EnvPlan, ImageKind, ServicePlan, SystemPlan, VmTestPlan};
-use super::Output::Theme;
-use super::{Provider, RefSpec, Store, JSON};
-use crate::Syntax;
-use std::collections::BTreeSet;
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-
 mod types;
 mod identity;
 mod entry;

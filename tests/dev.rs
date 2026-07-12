@@ -1478,88 +1478,106 @@ fn resident_jit_fallible_void_cfg_fallthrough_matches_aot() {
     if skip_if_cranelift_host_unsupported() {
         return;
     }
-    let src = r#"
+    let one_arm_fallthrough = r#"
 fn direct_ok() -> Int ? {
     return ok(7)
 }
 
 fn run() -> Void ? {
     print(direct_ok()?)
-    if false {
-        return err("run stopped")
+    stop :: false
+    if stop {
+        return err("one-arm stopped")
     }
-    print("run fallthrough")
+    print("one-arm fallthrough")
 }
 "#;
-    let expected = ProgramOutput::ran(
-        "7\nrun fallthrough\n".into(),
-        "".into(),
-        0,
-    );
-    assert_eq!(
-        run_cranelift_without_fallback(src, "fallible_void_cfg"),
-        expected,
-        "resident JIT must synthesize Ok on every reachable fallthrough"
-    );
-
-    let path = std::env::temp_dir().join("jet_jit_fallible_void_cfg.jet");
-    fs::write(&path, src).unwrap();
-    let shown = path.to_string_lossy().to_string();
-    let dir = std::env::temp_dir().join(format!("jet_jit_fallible_void_cfg_{}", std::process::id()));
-    assert_eq!(
-        compiled_binary_output(&dir, "fallible_void_cfg", 0, "fallible_void_cfg", &shown),
-        expected,
-        "AOT and resident JIT fallthrough semantics must match"
-    );
-
-    let terminating_cfg = r#"
+    let nested_fallthrough = r#"
 fn direct_ok() -> Int ? {
     return ok(7)
 }
 
-fn both_arms(stop: Bool) -> Void ? {
-    if stop {
+fn run() -> Void ? {
+    print(direct_ok()?)
+    outer :: true
+    inner :: false
+    if outer {
+        if inner {
+            return err("nested stopped")
+        }
+    }
+    print("nested fallthrough")
+}
+"#;
+    let neither_arm_terminates = r#"
+fn direct_ok() -> Int ? {
+    return ok(7)
+}
+
+fn run() -> Void ? {
+    print(direct_ok()?)
+    if true {
+        print("left continues")
+    } else {
+        print("right continues")
+    }
+    print("neither terminated")
+}
+"#;
+    let both_arms_terminate = r#"
+fn direct_ok() -> Int ? {
+    return ok(7)
+}
+
+fn run() -> Void ? {
+    print(direct_ok()?)
+    if true {
         return err("left branch")
     } else {
         return err("right branch")
     }
 }
-
-fn direct_err() -> Int ? {
-    return err("direct error")
-}
-
-fn run() -> Void ? {
-    print(direct_ok()?)
-    both_arms(true)?
-    print(direct_err()?)
-}
 "#;
-    let expected_err = ProgramOutput::ran("7\n".into(), "left branch\n".into(), 1);
-    assert_eq!(
-        run_cranelift_without_fallback(terminating_cfg, "fallible_void_terminating_cfg"),
-        expected_err,
-        "direct and both-arm terminators must not receive a second terminator"
-    );
 
-    let err_path = std::env::temp_dir().join("jet_jit_fallible_void_terminating_cfg.jet");
-    fs::write(&err_path, terminating_cfg).unwrap();
-    let err_shown = err_path.to_string_lossy().to_string();
-    let err_dir = std::env::temp_dir().join(format!(
-        "jet_jit_fallible_void_direct_err_{}",
-        std::process::id()
-    ));
-    assert_eq!(
-        compiled_binary_output(
-            &err_dir,
-            "fallible_void_terminating_cfg",
-            0,
-            "fallible_void_terminating_cfg",
-            &err_shown,
+    let cases = [
+        (
+            "one_arm_fallthrough",
+            one_arm_fallthrough,
+            ProgramOutput::ran("7\none-arm fallthrough\n".into(), "".into(), 0),
         ),
-        expected_err,
-        "AOT and resident JIT direct Err semantics must match"
-    );
+        (
+            "nested_fallthrough",
+            nested_fallthrough,
+            ProgramOutput::ran("7\nnested fallthrough\n".into(), "".into(), 0),
+        ),
+        (
+            "neither_arm_terminates",
+            neither_arm_terminates,
+            ProgramOutput::ran(
+                "7\nleft continues\nneither terminated\n".into(),
+                "".into(),
+                0,
+            ),
+        ),
+        (
+            "both_arms_terminate",
+            both_arms_terminate,
+            ProgramOutput::ran("7\n".into(), "left branch\n".into(), 1),
+        ),
+    ];
+
+    for (i, (tag, src, expected)) in cases.into_iter().enumerate() {
+        let jit = run_cranelift_without_fallback(src, tag);
+        assert_eq!(jit, expected, "resident JIT CFG result drift for `{tag}`");
+
+        let path = std::env::temp_dir().join(format!("jet_jit_{tag}.jet"));
+        fs::write(&path, src).unwrap();
+        let shown = path.to_string_lossy().to_string();
+        let dir = std::env::temp_dir().join(format!("jet_jit_{tag}_{}", std::process::id()));
+        let aot = compiled_binary_output(&dir, tag, i, tag, &shown);
+        assert_eq!(aot, expected, "AOT CFG result drift for `{tag}`");
+        assert_eq!(jit, aot, "AOT and resident JIT CFG semantics drift for `{tag}`");
+    }
 }
 
 #[test]

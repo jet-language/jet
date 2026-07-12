@@ -1,3 +1,30 @@
+use crate::AST::{BinOp, Type, UnOp};
+use crate::Codegen::Cx;
+use crate::Codegen::mangle;
+use crate::Codegen::user_type_rust;
+use crate::Codegen::TIR::emit::collect_select_arms;
+use crate::Codegen::TIR::emit::emit_math_swizzle_read;
+use crate::Codegen::TIR::emit_tir_call_args;
+use crate::Codegen::TIR::emit_tir_core_call;
+use crate::Codegen::TIR::emit_tir_orfallback_rhs;
+use crate::Codegen::TIR::emit_tir_str;
+use crate::Codegen::TIR::emit_tir_value_block;
+use crate::Codegen::TIR::ListSpreadPart;
+use crate::Codegen::TIR::str_match_scan_closure_ex;
+use crate::Codegen::TIR::TBuiltinOp;
+use crate::Codegen::TIR::TClosureOp;
+use crate::Codegen::TIR::TCoreClosureKind;
+use crate::Codegen::TIR::TEnumArg;
+use crate::Codegen::TIR::TEnumPayload;
+use crate::Codegen::TIR::TExpr;
+use crate::Codegen::TIR::TExprKind;
+use crate::Codegen::TIR::TFnValueKind;
+use crate::Codegen::TIR::THandleOp;
+use crate::Codegen::TIR::TModuleCallForm;
+use crate::Codegen::TIR::TNumericOp;
+use crate::Codegen::TIR::TTryConvert;
+use crate::Codegen::TIR::tuple_join;
+
 /// c109 Phase 16: emit one enum-literal payload arg, applying its resolved
 /// `clone`/`boxed` wrappers — `(…).clone()` first, then `Box::new(…)`, exactly as
 /// `emit_boxed_enum_arg` (Expression.rs) does.
@@ -875,7 +902,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             index,
             line,
         } => {
-            let ty = super::user_type_rust(type_name);
+            let ty = user_type_rust(type_name);
             let b = emit_tir_expr(base, cx);
             let i = emit_tir_expr(index, cx);
             format!(

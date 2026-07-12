@@ -1,3 +1,13 @@
+use super::generation_files::{generations_log, systems_dir};
+use super::options_rendering::risk_classes;
+use super::types::Generation;
+use crate::ModuleEval::SystemPlan;
+use crate::Output::Theme;
+use crate::JSON;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+
 pub(super) fn prove_activation(theme: &Theme, gen: &Generation, system: &SystemPlan) -> bool {
     let risks = risk_classes(system);
     let plan = gen.path.join("plan.json");

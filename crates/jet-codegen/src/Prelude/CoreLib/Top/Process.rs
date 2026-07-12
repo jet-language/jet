@@ -418,11 +418,15 @@ fn jet_std_random_split(seed: i64) -> jet_std::Rng {
     let mixed = (seed as u64) ^ jet_rng_next().rotate_left(17);
     jet_std::Rng { state: mixed }
 }
-// D-RANDSPLIT1=A: CSPRNG bytes via /dev/urandom (POSIX) with SplitMix64 fallback.
-// Cryptographically secure — use for tokens, keys, nonces, and secrets.
+// D-CRYPTO-RNG1=A: cryptographic bytes use the shared fail-closed OS provider.
+// Older editions keep this infallible Rust shim; failure takes the ratified
+// E3001/exit-70 compatibility path and never returns weak or partial bytes.
 fn jet_std_crypto_random_bytes(n: i64) -> Vec<u8> {
-    let n = n.max(0) as usize;
-    let mut out = vec![0u8; n];
-    jet_uuid_fill_random(&mut out);
-    out
+    match jet_crypto_entropy_bytes(n) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            eprintln!("Error [E3001]: panic: core.crypto.random.bytes: {error}");
+            std::process::exit(70);
+        }
+    }
 }

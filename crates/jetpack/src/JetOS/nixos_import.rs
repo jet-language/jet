@@ -1,43 +1,51 @@
+use super::nixos_import_live::live_import_plan;
+use super::types::OsFlags;
+use crate::Output::Theme;
+use crate::Syntax;
+use crate::JSON;
+use std::fs;
+use std::path::{Path, PathBuf};
+
 pub(super) struct NixosImportArgs {
-    source: PathBuf,
-    host: Option<String>,
-    users: Vec<String>,
-    write: bool,
-    out: Option<PathBuf>,
-    facts_only: bool,
+    pub(super) source: PathBuf,
+    pub(super) host: Option<String>,
+    pub(super) users: Vec<String>,
+    pub(super) write: bool,
+    pub(super) out: Option<PathBuf>,
+    pub(super) facts_only: bool,
 }
 
 pub(super) struct NixosImportPlan {
-    source: PathBuf,
-    mode: &'static str,
-    host: String,
-    target: String,
-    nixpkgs_ref: String,
+    pub(super) source: PathBuf,
+    pub(super) mode: &'static str,
+    pub(super) host: String,
+    pub(super) target: String,
+    pub(super) nixpkgs_ref: String,
     /// Additional named sources beyond nixpkgs (label, `github@…` ref) —
     /// e.g. the `nix-cachyos-kernel` pin a `.CachyOS` kernel needs, or a
     /// flake input recovered by package-provenance import.
-    extra_sources: Vec<(String, String)>,
-    packages: Vec<String>,
+    pub(super) extra_sources: Vec<(String, String)>,
+    pub(super) packages: Vec<String>,
     /// Packages recovered from non-nixpkgs flake inputs: `(source_label, pkgs)`.
-    sourced_packages: Vec<(String, Vec<String>)>,
-    omitted_packages: Vec<String>,
-    services: Vec<String>,
-    options: Vec<(String, String)>,
-    users: Vec<NixosImportUser>,
-    modules: Vec<String>,
-    home_modules: Vec<String>,
-    omissions: Vec<String>,
+    pub(super) sourced_packages: Vec<(String, Vec<String>)>,
+    pub(super) omitted_packages: Vec<String>,
+    pub(super) services: Vec<String>,
+    pub(super) options: Vec<(String, String)>,
+    pub(super) users: Vec<NixosImportUser>,
+    pub(super) modules: Vec<String>,
+    pub(super) home_modules: Vec<String>,
+    pub(super) omissions: Vec<String>,
 }
 
 pub(super) struct NixosImportUser {
-    name: String,
-    home: Option<String>,
-    groups: Vec<String>,
-    packages: Vec<String>,
+    pub(super) name: String,
+    pub(super) home: Option<String>,
+    pub(super) groups: Vec<String>,
+    pub(super) packages: Vec<String>,
     /// User packages recovered from non-nixpkgs flake inputs.
-    sourced_packages: Vec<(String, Vec<String>)>,
-    omitted_packages: Vec<String>,
-    home_manager: bool,
+    pub(super) sourced_packages: Vec<(String, Vec<String>)>,
+    pub(super) omitted_packages: Vec<String>,
+    pub(super) home_manager: bool,
 }
 
 pub(super) fn cmd_import(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {

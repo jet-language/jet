@@ -1,3 +1,11 @@
+use crate::AST::{Type};
+use crate::Codegen::Cx;
+use crate::Codegen::TIR::emit_tir_expr;
+use crate::Codegen::TIR::emit_tir_stmts;
+use crate::Codegen::TIR::TExpr;
+use crate::Codegen::TIR::TOrFallback;
+use crate::Codegen::TIR::TStmt;
+
 /// c109 Phase 8/15: format a `??` fallback right-hand side, mirroring
 /// `emit_or_fallback_rhs` (Statement.rs). Value and early-`return` (Phase 8); the
 /// `panic(…)` form (Phase 15) carries its fully-rendered statement string from lowering.

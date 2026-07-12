@@ -1,3 +1,41 @@
+use crate::AST::{BinOp, ElseBranch, Expr, IfStmt, PatSlot, Pattern, Stmt, StructPatField, SwitchArm, Type};
+use crate::Codegen::Cx;
+use crate::Codegen::emit_if_let_pattern;
+use crate::Codegen::emit_match_pattern;
+use crate::Codegen::escape_rust_str;
+use crate::Codegen::is_json_variant;
+use crate::Codegen::is_key_variant;
+use crate::Codegen::mangle;
+use crate::Codegen::TIR::arm_fallible_pattern;
+use crate::Codegen::TIR::arm_head_range;
+use crate::Codegen::TIR::arm_is_plain_cond;
+use crate::Codegen::TIR::arm_str_match_pattern;
+use crate::Codegen::TIR::arm_struct_pattern;
+use crate::Codegen::TIR::clone_env;
+use crate::Codegen::TIR::emit_tir_expr;
+use crate::Codegen::TIR::fork_panic;
+use crate::Codegen::TIR::lower::bool_and_chain;
+use crate::Codegen::TIR::lower_enum_match;
+use crate::Codegen::TIR::LowerEnv;
+use crate::Codegen::TIR::lower_expr;
+use crate::Codegen::TIR::lower_fallible_match;
+use crate::Codegen::TIR::lower::lower_str_match_pattern_bindings;
+use crate::Codegen::TIR::lower_range_switch;
+use crate::Codegen::TIR::lower_stmts;
+use crate::Codegen::TIR::lower::str_match_pattern_cond_expr;
+use crate::Codegen::TIR::lower::struct_pattern_field_type;
+use crate::Codegen::TIR::lower::struct_pattern_subject_field_expr;
+use crate::Codegen::TIR::static_call_type_name_unchecked;
+use crate::Codegen::TIR::TExpr;
+use crate::Codegen::TIR::TExprKind;
+use crate::Codegen::TIR::TForInMethod;
+use crate::Codegen::TIR::TIfCond;
+use crate::Codegen::TIR::tir_recv_jet_ty;
+use crate::Codegen::TIR::TStmt;
+use crate::Codegen::variant_binding_types;
+use crate::Diagnostics::Span;
+use crate::Syntax;
+
 pub(super) fn tracked_float_origin(b: &crate::AST::Binding, ty: &Type, cx: &Cx) -> Option<String> {
     if !b.track || !matches!(ty, Type::Float) {
         return None;

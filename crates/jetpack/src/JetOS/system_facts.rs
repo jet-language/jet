@@ -1,3 +1,18 @@
+use super::etc_boot_facts::{boot_artifact, kernel_package_json};
+use super::identity::jetos_release_label;
+use super::options_rendering::{
+    collect_names, option_rows_json, option_value, parse_list_items, prefixed_options,
+    safe_filename, safe_identifier, service_extra, shell_single_quote,
+};
+use super::root_projection::{copy_file_replace, enable_unit};
+use super::store_realize::RealizedPackage;
+use super::studio_projection::make_executable;
+use super::types::SYSTEMD_INIT_PACKAGE;
+use crate::ModuleEval::SystemPlan;
+use crate::JSON;
+use std::fs;
+use std::path::{Path, PathBuf};
+
 pub(super) fn write_init_facts(
     dir: &Path,
     system: &SystemPlan,

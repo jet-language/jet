@@ -1,3 +1,24 @@
+use crate::AST::{Expr, Lambda, LambdaBody, Stmt, Type};
+use crate::Codegen::Cx;
+use crate::Codegen::mangle;
+use crate::Codegen::TIR::emit_tir_expr;
+use crate::Codegen::TIR::emit_tir_stmts;
+use crate::Codegen::TIR::fork_panic;
+use crate::Codegen::TIR::JitSpawnCapture;
+use crate::Codegen::TIR::lambda_body_ty;
+use crate::Codegen::TIR::LowerEnv;
+use crate::Codegen::TIR::lower_expr;
+use crate::Codegen::TIR::lower::lambda_block_tail;
+use crate::Codegen::TIR::lower_stmts;
+use crate::Codegen::TIR::TExpr;
+use crate::Codegen::TIR::TExprKind;
+use crate::Codegen::TIR::TJitSpawnBody;
+use crate::Codegen::TIR::TJitSpawnLambda;
+use crate::Codegen::TIR::TLambda;
+use crate::Codegen::TIR::TLambdaBody;
+use crate::Codegen::TIR::unit_type;
+use std::collections::HashSet;
+
 /// c109 Phase 11: lower a lambda/closure literal (`Expr::Lambda`) to a `TLambda`,
 /// reproducing `emit_lambda` (Source/Codegen/Expression.rs) byte-for-byte. Every
 /// capture/escape/Fn-vs-FnMut decision is the TOTAL `Lambda.meta` fact — no capture

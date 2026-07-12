@@ -1,3 +1,16 @@
+use crate::AST::{Expr, IndexKind, Type};
+use crate::Codegen::Cx;
+use crate::Codegen::TIR::LowerEnv;
+use crate::Codegen::TIR::lower_expr;
+use crate::Codegen::TIR::struct_field_type;
+use crate::Codegen::TIR::TBuiltinOp;
+use crate::Codegen::TIR::TClosureOp;
+use crate::Codegen::TIR::TExpr;
+use crate::Codegen::TIR::TExprKind;
+use crate::Codegen::TIR::tir_recv_jet_ty;
+use crate::Codegen::TIR::unit_type;
+use crate::Diagnostics::Span;
+
 fn tuple_fields(ty: Option<&Type>) -> Option<Vec<(String, Type)>> {
     match ty {
         Some(Type::Tuple(fields)) => Some(

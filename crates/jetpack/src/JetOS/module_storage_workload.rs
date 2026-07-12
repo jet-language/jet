@@ -1,3 +1,16 @@
+use super::options_rendering::{
+    clean_bool_json, clean_symbol, collect_names, is_option_priority_metadata, option_rows_json,
+    option_value, parse_list_items, prefixed_options, resolved_option, shell_single_quote,
+    strings_json,
+};
+use super::root_projection::enable_unit;
+use super::studio_projection::make_executable;
+use super::user_flatpak_perf::manifest_lines;
+use crate::ModuleEval::SystemPlan;
+use crate::JSON;
+use std::fs;
+use std::path::Path;
+
 pub(super) fn write_module_priority_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     let module_dir = dir.join("module-system");
     fs::create_dir_all(&module_dir)?;

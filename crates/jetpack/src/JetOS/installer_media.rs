@@ -1,3 +1,20 @@
+use super::desktop_store_vm::find_path_tool;
+use super::generation_files::{copy_runtime_file_filtered, sanitize_runtime_branding_bytes, systems_dir};
+use super::identity::jetos_release_label;
+use super::initrd_overlay::{
+    append_installer_initrd_overlay, first_zstd_frame_offset, unique_initrd_temp_path,
+    zstd_decode_file, zstd_encode_file,
+};
+use super::iso_vm_commands::build_hybrid_iso;
+use super::root_projection::copy_dir_recursive_deref;
+use super::types::Generation;
+use super::vm_proof::vm_tools_json;
+use crate::ModuleEval::SystemPlan;
+use crate::JSON;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
 pub(super) fn write_installer_media(
     gen: &Generation,
     system: &SystemPlan,

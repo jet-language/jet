@@ -3,29 +3,9 @@
 //! `jetpack run/build/list/clean/add/remove`. Independent from the `jet`
 //! binary (D-JPK1). All user-facing output flows through `Output::Theme`.
 
-use super::Bridge;
-use super::BuildDebug;
-use super::Components;
-use super::Discovery;
 use super::Doctor;
-use super::Image;
-use super::ManifestTOML;
-use super::Output::{self, Theme};
-use super::Overlay;
-use super::Provider::{self, ProviderError};
-use super::RefSpec::{self, ProviderKind};
-use super::RuntimePolicy;
-use super::Secrets;
-use super::Services;
-use super::Shell::{self, Env, ShellKind};
-use super::Store::{self, Roots};
-use super::Trust;
-use super::{
-    EnvFile, ModuleEval, RefSpec::RefError, SemanticLock, WorkspaceFile, WorkspaceLock, JSON,
-};
-use crate::{Lock, Syntax};
-use std::io::IsTerminal;
-use std::path::{Path, PathBuf};
+use super::Output::Theme;
+use std::path::PathBuf;
 
 mod parse;
 mod workspace_sources;

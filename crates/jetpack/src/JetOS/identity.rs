@@ -1,3 +1,14 @@
+use super::etc_boot_facts::write_etc_tree;
+use super::installer_media::{
+    copy_generation_payload_deref, render_installed_limine_conf, render_installer_limine_conf,
+};
+use super::system_facts::write_hardware_facts;
+use super::types::Generation;
+use crate::ModuleEval::{self, SystemPlan};
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+
 const JETOS_RELEASE_VERSION: &str = "26.10";
 const JETOS_RELEASE_CODENAME: &str = "Apex";
 const JETOS_RELEASE_CODENAME_ID: &str = "apex";

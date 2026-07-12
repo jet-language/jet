@@ -1,3 +1,15 @@
+use super::options_rendering::{
+    clean_bool_json, clean_symbol, is_option_priority_metadata, option_default, option_doc,
+    option_rows_json, option_type, option_value, prefixed_options, resolved_option,
+    service_extra, shell_single_quote,
+};
+use super::root_projection::enable_unit;
+use super::studio_projection::make_executable;
+use crate::ModuleEval::{EnvPlan, ImageKind, SystemPlan};
+use crate::JSON;
+use std::fs;
+use std::path::Path;
+
 pub(super) fn write_theme_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     let theme_dir = dir.join("theme");
     let gtk_dir = dir.join("share/themes/jetos/gtk-4.0");

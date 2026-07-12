@@ -1,3 +1,11 @@
+use crate::AST::{Expr, Type};
+use crate::Codegen::Cx;
+use crate::Codegen::escape_rust_str;
+use crate::Codegen::TIR::emit_tir_expr;
+use crate::Codegen::TIR::LowerEnv;
+use crate::Codegen::TIR::lower_expr;
+use crate::Diagnostics::Span;
+
 /// Resolve the subject's Jet type for binding payloads, mirroring `expr_jet_ty`'s
 /// reach (only an Ident resolves via its slot). Enough for the covered subset (the
 /// subject is an enum-typed local/param). Other forms resolve to `None` (the

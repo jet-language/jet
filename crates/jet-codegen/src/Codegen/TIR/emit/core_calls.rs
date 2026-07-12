@@ -1,3 +1,14 @@
+use crate::AST::{Type};
+use crate::Codegen::Cx;
+use crate::Codegen::mangle;
+use crate::Codegen::TIR::emit_tir_expr;
+use crate::Codegen::TIR::enc_arg_is_json;
+use crate::Codegen::TIR::enc_arg_is_string_rows;
+use crate::Codegen::TIR::enc_ok_is_json;
+use crate::Codegen::TIR::enc_target_rust;
+use crate::Codegen::TIR::enc_target_rust_traced;
+use crate::Codegen::TIR::TExpr;
+
 pub(crate) fn emit_tir_core_call(
     module: &str,
     method: &str,
@@ -492,7 +503,7 @@ pub(crate) fn emit_tir_core_call(
         ("core.random", "seed") => format!("{}({})", helper("jet_std_random_seed"), arg(0)),
         // D-RANDSPLIT1=A: PRNG bytes — fast, NOT crypto-safe.
         ("core.random", "bytes") => format!("{}({})", helper("jet_std_random_bytes"), arg(0)),
-        // D-RANDSPLIT1=A: CSPRNG bytes via /dev/urandom — cryptographically secure.
+        // D-CRYPTO-RNG1=A: shared fail-closed OS CSPRNG provider.
         ("core.crypto.random", "bytes") => {
             format!("{}({})", helper("jet_std_crypto_random_bytes"), arg(0))
         }

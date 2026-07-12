@@ -2,9 +2,6 @@
 //!
 //! Split out of the original `TIR.rs` for maintainability; behavior unchanged.
 
-use super::*;
-use crate::AST::{AccessConvention, BinOp, Type, UnOp};
-
 mod functions;
 mod statements;
 mod expressions;

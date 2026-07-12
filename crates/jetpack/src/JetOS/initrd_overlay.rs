@@ -1,3 +1,14 @@
+use super::desktop_store_vm::find_path_tool;
+use super::generation_files::sanitize_runtime_branding_bytes;
+use super::installer_media::{render_guest_verify_script, render_installer_script};
+use super::types::Generation;
+use crate::ModuleEval::SystemPlan;
+use std::collections::BTreeSet;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
+
 pub(super) fn append_installer_initrd_overlay(
     initrd: &Path,
     system: &SystemPlan,

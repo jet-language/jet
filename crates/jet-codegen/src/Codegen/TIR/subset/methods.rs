@@ -1,3 +1,44 @@
+use crate::AST::{Expr, Type};
+use crate::Codegen::Cx;
+use crate::Codegen::is_db_value_type_name;
+use crate::Codegen::is_db_value_variant;
+use crate::Codegen::is_json_type_name;
+use crate::Codegen::is_json_variant;
+use crate::Codegen::is_key_variant;
+use crate::Codegen::TIR::alloc_new_type;
+use crate::Codegen::TIR::core_call_covered;
+use crate::Codegen::TIR::core_closure_call_in_subset;
+use crate::Codegen::TIR::enum_is_covered;
+use crate::Codegen::TIR::expr_in_subset;
+use crate::Codegen::TIR::game_static_type;
+use crate::Codegen::TIR::handle_method_op;
+use crate::Codegen::TIR::is_civil_time_method_name;
+use crate::Codegen::TIR::is_concurrency_method_name;
+use crate::Codegen::TIR::is_covered_builtin_name;
+use crate::Codegen::TIR::is_covered_enum_ty;
+use crate::Codegen::TIR::is_covered_numeric_method;
+use crate::Codegen::TIR::is_covered_struct_ty;
+use crate::Codegen::TIR::is_devserver_method_name;
+use crate::Codegen::TIR::is_event_handle_type;
+use crate::Codegen::TIR::is_event_method_name;
+use crate::Codegen::TIR::is_http_method_name;
+use crate::Codegen::TIR::is_http_type;
+use crate::Codegen::TIR::is_loadable_method_name;
+use crate::Codegen::TIR::is_measurement_method_name;
+use crate::Codegen::TIR::is_process_handle_method_name;
+use crate::Codegen::TIR::is_reactive_method_name;
+use crate::Codegen::TIR::is_sketch_method_name;
+use crate::Codegen::TIR::is_sketch_type;
+use crate::Codegen::TIR::is_ui_backend_method_name;
+use crate::Codegen::TIR::is_watch_handle_type;
+use crate::Codegen::TIR::is_watch_method_name;
+use crate::Codegen::TIR::lambda_in_subset;
+use crate::Codegen::TIR::router_register_in_subset;
+use crate::Codegen::TIR::solve_new_type;
+use crate::Codegen::TIR::subset::core_call_args_in_subset;
+use crate::Syntax;
+use std::collections::HashSet;
+
 /// c109 Phase 6: is this `Expr::MethodCall` inside the subset? Two shapes only:
 /// the synthetic `.clone()`, or a user-defined instance method on a covered type.
 pub(crate) fn method_call_in_subset(

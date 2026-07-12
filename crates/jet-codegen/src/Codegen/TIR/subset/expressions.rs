@@ -1,3 +1,22 @@
+use crate::AST::{BinOp, EnumLitArg, Expr, IndexKind, Lambda, LambdaBody, OrFallback, Pattern, StrPart, Type};
+use crate::Codegen::Cx;
+use crate::Codegen::is_db_value_type_name;
+use crate::Codegen::is_json_type_name;
+use crate::Codegen::is_json_variant;
+use crate::Codegen::is_key_variant;
+use crate::Codegen::TIR::arg_conv_in_subset;
+use crate::Codegen::TIR::enum_is_covered;
+use crate::Codegen::TIR::foreign_struct_lit_in_subset;
+use crate::Codegen::TIR::is_covered_generic_struct_ty;
+use crate::Codegen::TIR::is_covered_struct_ty;
+use crate::Codegen::TIR::is_numeric_bounds_const;
+use crate::Codegen::TIR::is_prelude_struct_name;
+use crate::Codegen::TIR::method_call_in_subset;
+use crate::Codegen::TIR::stmt_in_subset;
+use crate::Codegen::TIR::struct_lit_constructible;
+use crate::Syntax;
+use std::collections::HashSet;
+
 pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
     match e {
         Expr::Int(..) | Expr::Float(..) | Expr::Bool(..) | Expr::Char(..) => true,

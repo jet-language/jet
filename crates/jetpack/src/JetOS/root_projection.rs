@@ -1,3 +1,7 @@
+use super::generation_files::{copy_runtime_file_filtered, copy_runtime_symlink};
+use std::fs;
+use std::path::{Path, PathBuf};
+
 pub(super) fn write_bootable_root_projection(dir: &Path) -> std::io::Result<()> {
     let root = dir.join("root");
     if root.exists() {

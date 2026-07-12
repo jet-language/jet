@@ -1,3 +1,33 @@
+use crate::AST::{BindPattern, Expr, ForKind, IndexKind, LValue, Stmt, Type};
+use crate::Codegen::Cx;
+#[cfg(test)]
+use crate::Codegen::build_cx;
+#[cfg(test)]
+use crate::Diagnostics::Span;
+use crate::Codegen::mangle;
+use crate::Codegen::TIR::clone_env;
+use crate::Codegen::TIR::emit_tir_expr;
+use crate::Codegen::TIR::label_name;
+use crate::Codegen::TIR::lower::collect_txn_mut_roots;
+use crate::Codegen::TIR::LowerEnv;
+use crate::Codegen::TIR::lower_expr;
+use crate::Codegen::TIR::lower_forin_collection;
+use crate::Codegen::TIR::lower_if;
+use crate::Codegen::TIR::lower::lower_string_view_init;
+use crate::Codegen::TIR::lower::render_reactive_block_closure;
+use crate::Codegen::TIR::lower_switch;
+use crate::Codegen::TIR::lower::timeout_nanos;
+use crate::Codegen::TIR::lower::tracked_float_origin;
+use crate::Codegen::TIR::ScopeMemberKind;
+use crate::Codegen::TIR::TExpr;
+use crate::Codegen::TIR::TExprKind;
+use crate::Codegen::TIR::TFnValueKind;
+use crate::Codegen::TIR::TForInMethod;
+use crate::Codegen::TIR::TStmt;
+use crate::Codegen::TIR::unit_type;
+use crate::Syntax;
+use std::collections::HashMap;
+
 pub(crate) fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TStmt> {
     if !cx.debug_linemap {
         return stmts.iter().map(|s| lower_stmt(s, cx, env)).collect();

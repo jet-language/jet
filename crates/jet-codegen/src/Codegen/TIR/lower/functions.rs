@@ -1,3 +1,20 @@
+use crate::AST::{AccessConvention, Expr, Func, Param, Stmt, Type};
+use crate::Codegen::Cx;
+use crate::Codegen::mangle;
+use crate::Codegen::rust_param_type;
+use crate::Codegen::rust_return_type;
+use crate::Codegen::TIR::emit_tir_expr;
+use crate::Codegen::TIR::emit_tir_stmts;
+use crate::Codegen::TIR::LowerEnv;
+use crate::Codegen::TIR::lower_expr;
+use crate::Codegen::TIR::lower_stmts;
+use crate::Codegen::TIR::resolve_self_ty;
+use crate::Codegen::TIR::SerdeCodec;
+use crate::Codegen::TIR::TFunc;
+use crate::Codegen::TIR::TFuncKind;
+use crate::Codegen::TIR::TWebParamReconstruction;
+use crate::Syntax;
+
 /// D-COV1: 1-based line number of a byte offset in the source, for coverage probes.
 pub(crate) fn cov_line(cx: &Cx, offset: usize) -> usize {
     line_at_byte_offset(&cx.src, offset)

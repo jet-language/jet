@@ -1,3 +1,9 @@
+use crate::AST::{Expr, LValue, Stmt, Type};
+use crate::Codegen::mangle;
+use crate::Syntax;
+use std::collections::HashMap;
+use std::collections::HashSet;
+
 /// Per-function lowering environment: a local name -> (Rust place string, type).
 /// Built from params, extended by `let` bindings. The "place" already accounts
 /// for parameter deref, so `Local` emission needs no further resolution.

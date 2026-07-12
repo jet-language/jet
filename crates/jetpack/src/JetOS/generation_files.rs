@@ -1,3 +1,43 @@
+use super::activation_provenance::{
+    write_activation_diff, write_health_checks, write_provenance, write_systemd_units,
+    write_terminal_environment,
+};
+use super::desktop_store_vm::{
+    write_acceptance_fixture, write_compat_escape_hatches, write_desktop_facts,
+    write_store_cache_facts, write_vm_proof,
+};
+use super::etc_boot_facts::{write_boot_facts, write_etc_tree};
+use super::generations_activation::{now_secs, read_generations};
+use super::initrd_overlay::ldd_dependency_paths;
+use super::module_storage_workload::{
+    write_module_priority_facts, write_storage_facts, write_workload_facts,
+};
+use super::options_rendering::{boot_profile, render_proof};
+use super::root_projection::{copy_file_replace, write_bootable_root_projection};
+use super::store_realize::RealizedPackage;
+use super::studio_projection::{make_executable, write_studio_app_projection};
+use super::system_facts::{
+    write_hardware_facts, write_init_facts, write_network_facts, write_secret_manifest,
+    write_systemd_timer_socket_units,
+};
+use super::theme_fleet_lifecycle::{
+    write_app_module_facts, write_fleet_deploy_facts, write_image_variant_facts,
+    write_lifecycle_facts, write_options_reference, write_service_manager_depth,
+    write_theme_facts,
+};
+use super::types::Target;
+use super::user_flatpak_perf::{
+    write_flatpak_facts, write_performance_facts, write_user_environment_facts,
+};
+use crate::ModuleEval::{EnvPlan, SystemPlan};
+use crate::Store;
+use crate::JSON;
+use std::collections::BTreeSet;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
+
 pub(super) fn generation_dir(system: &SystemPlan, explicit: Option<&str>) -> PathBuf {
     let name = explicit
         .filter(|s| !s.is_empty())

@@ -7,6 +7,18 @@
 /// The `--apply` extractor. Runs over the evaluated NixOS `config` with
 /// builtins only (`lib` is not in scope under `--apply`); every optional
 /// path is `or`-guarded so hosts without a subsystem still evaluate.
+use super::nixos_import::{
+    import_is_ident, import_json_array, import_json_string, import_json_string_array,
+    import_package_list, import_render_string, scan_first_nixos_host, NixosImportArgs,
+    NixosImportPlan, NixosImportUser,
+};
+use super::theme_fleet_lifecycle::write_app_module_facts;
+use crate::JSON;
+use std::collections::BTreeSet;
+use std::fs;
+use std::path::Path;
+use std::process::Command;
+
 const NIXOS_LIVE_EXTRACTOR: &str = r#"c: {
   host = c.networking.hostName;
   stateVersion = c.system.stateVersion;

@@ -1,3 +1,10 @@
+use crate::AST::{Expr, Type, UnOp};
+use crate::Codegen::Cx;
+use crate::Codegen::TIR::emit_tir_expr;
+use crate::Codegen::TIR::LowerEnv;
+use crate::Codegen::TIR::lower_expr;
+use crate::Syntax;
+
 /// D-INCR1: Rust place string for `++`/`--` read/update on an lvalue operand.
 pub(super) fn lower_incdec_place(operand: &Expr, cx: &Cx, env: &mut LowerEnv) -> String {
     match operand {

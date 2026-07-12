@@ -1,3 +1,23 @@
+use super::desktop_store_vm::missing_vm_tools;
+use super::generation::build_generation;
+use super::generation_files::systems_dir;
+use super::generations_activation::latest_generation_for;
+use super::installer_media::write_installer_media;
+use super::load_validate::{load_plan, load_target, parse_target_or_report};
+use super::nixos_backend::{
+    cmd_vm_prove_real, cmd_vm_run_or_build, nixos_backend_dir, real_tier_proof_marker_path,
+};
+use super::types::{OsFlags, Target};
+use super::vm_proof::{
+    prove_vm_guest, qemu_has_local_display, qemu_interactive_run_command, qemu_vnc_endpoint,
+    require_real_vm_tools, require_vm_run_proof, run_interactive_vm_command, run_vmtest,
+    write_vm_install_plan,
+};
+use crate::ModuleEval::{EnvPlan, SystemPlan};
+use crate::Output::Theme;
+use crate::Syntax;
+use std::path::Path;
+
 pub(super) fn cmd_vm(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
     let Some((action, rest)) = args.split_first().map(|(a, r)| (a.as_str(), r)) else {
         theme.error(

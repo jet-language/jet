@@ -1,3 +1,8 @@
+use super::store_realize::RealizedPackage;
+use super::types::BootProfile;
+use crate::ModuleEval::{EnvPlan, ImageKind, ServicePlan, SystemPlan};
+use crate::JSON;
+
 pub(super) fn shell_single_quote(s: &str) -> String {
     let mut quoted = String::from("'");
     for ch in s.chars() {
@@ -28,11 +33,11 @@ pub(super) fn resolved_option_value(system: &SystemPlan, key: &str) -> Option<St
     resolved_option(system, key).map(|r| r.value)
 }
 
-struct ResolvedOption {
+pub(super) struct ResolvedOption {
     key: String,
-    value: String,
-    tier: String,
-    priority: i64,
+    pub(super) value: String,
+    pub(super) tier: String,
+    pub(super) priority: i64,
     contenders: Vec<OptionContender>,
 }
 

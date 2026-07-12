@@ -1,3 +1,24 @@
+use crate::AST::{BindPattern, ElseBranch, Expr, ForKind, IfStmt, IndexKind, LValue, PatSlot, Pattern, Stmt, SwitchArm};
+use crate::Codegen::Cx;
+use crate::Codegen::is_json_variant;
+use crate::Codegen::is_key_variant;
+use crate::Codegen::TIR::add_pattern_binding_names;
+use crate::Codegen::TIR::add_str_match_pattern_binding_names;
+use crate::Codegen::TIR::add_struct_pattern_binding_names;
+use crate::Codegen::TIR::arm_fallible_pattern;
+use crate::Codegen::TIR::arm_head_range;
+use crate::Codegen::TIR::arm_is_plain_cond;
+use crate::Codegen::TIR::arm_str_match_pattern;
+use crate::Codegen::TIR::arm_struct_pattern;
+use crate::Codegen::TIR::arm_variant_pattern;
+use crate::Codegen::TIR::enum_is_covered;
+use crate::Codegen::TIR::expr_in_subset;
+use crate::Codegen::TIR::fallible_pattern_binding;
+use crate::Codegen::TIR::struct_pattern_values_in_subset;
+use crate::Codegen::TIR::variant_pattern_enum;
+use crate::Syntax;
+use std::collections::HashSet;
+
 fn scoped_stmts_in_subset(
     body: &[Stmt],
     cx: &Cx,

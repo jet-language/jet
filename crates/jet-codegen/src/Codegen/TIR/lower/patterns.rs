@@ -1,3 +1,32 @@
+use crate::AST::{BinOp, Expr, PatSlot, Pattern, Stmt, SwitchArm, Type, VariantPayload};
+use crate::Codegen::Cx;
+use crate::Codegen::emit_match_pattern;
+use crate::Codegen::mangle;
+use crate::Codegen::mangle_variant;
+use crate::Codegen::TIR::arm_fallible_pattern;
+use crate::Codegen::TIR::arm_head_range;
+use crate::Codegen::TIR::arm_variant_pattern;
+use crate::Codegen::TIR::clone_env;
+use crate::Codegen::TIR::core_struct_field_rust_name;
+use crate::Codegen::TIR::emit_tir_expr;
+use crate::Codegen::TIR::expr_ast_jet_ty;
+use crate::Codegen::TIR::fork_panic;
+use crate::Codegen::TIR::LowerEnv;
+use crate::Codegen::TIR::lower_expr;
+use crate::Codegen::TIR::lower_stmts;
+use crate::Codegen::TIR::lower::str_match_scan_closure;
+use crate::Codegen::TIR::struct_field_type;
+use crate::Codegen::TIR::TEnumArg;
+use crate::Codegen::TIR::TExpr;
+use crate::Codegen::TIR::TExprKind;
+use crate::Codegen::TIR::THandleOp;
+use crate::Codegen::TIR::TMatchArm;
+use crate::Codegen::TIR::TStmt;
+use crate::Codegen::TIR::tuple_join;
+use crate::Codegen::TIR::unit_type;
+use crate::Codegen::TIR::variant_pattern_enum;
+use crate::Codegen::variant_binding_types;
+
 /// D-SHIFT1 (c7shift): lower `cursor.take_pattern("…")`. Builds the
 /// `(name, type)` canonical hole list the SAME way sema did when it set this
 /// call's `resolved_ret` (untyped hole binds `String`), so the

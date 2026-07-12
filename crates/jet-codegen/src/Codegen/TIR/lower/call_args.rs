@@ -1,3 +1,17 @@
+use crate::AST::{AccessConvention, Expr, Lambda, LambdaBody, Stmt, Type};
+use crate::Codegen::Cx;
+use crate::Codegen::mangle;
+use crate::Codegen::TIR::clone_env;
+use crate::Codegen::TIR::LowerEnv;
+use crate::Codegen::TIR::lower_expr;
+use crate::Codegen::TIR::lower_lambda_expecting;
+use crate::Codegen::TIR::TCallArg;
+use crate::Codegen::TIR::TExpr;
+use crate::Codegen::TIR::TExprKind;
+use crate::Codegen::TIR::TExternArg;
+use crate::Codegen::TIR::TFnCoerce;
+use crate::Codegen::TIR::unit_type;
+
 /// Last expression-producing statement in a lambda block (mirrors sema tail rules).
 /// Only the **final** statement may be a tail; an earlier `send()`/`call()` followed
 /// by a loop is not a tail expression.

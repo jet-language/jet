@@ -1,3 +1,13 @@
+use crate::AST::{Expr, Type};
+use crate::Codegen::Cx;
+use crate::Codegen::is_db_value_type_name;
+use crate::Codegen::TIR::expr_in_subset;
+use crate::Codegen::TIR::lambda_in_subset;
+use crate::Codegen::TIR::THandleOp;
+use crate::Codegen::TIR::unit_type;
+use crate::Syntax;
+use std::collections::HashSet;
+
 /// c109 Phase 13: resolve a handle method `(handle, method, nargs)` into a total
 /// `THandleOp`, reproducing the handle arms of `emit_builtin_method`
 /// (Source/Codegen/Expression.rs). Returns `None` for anything not covered (so the

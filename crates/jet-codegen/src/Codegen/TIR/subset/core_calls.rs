@@ -1,3 +1,9 @@
+use crate::AST::{Expr};
+use crate::Codegen::Cx;
+use crate::Codegen::TIR::expr_in_subset;
+use crate::Codegen::TIR::lambda_in_subset;
+use std::collections::HashSet;
+
 /// c109 Phase 10: is a core/stdlib call `(module, method)` one the TIR lowers? The
 /// covered set is exactly the **type-monomorphic** core calls — those whose full
 /// signature (param conventions + return type) is fixed by `Sema::core_fixed_sig`.

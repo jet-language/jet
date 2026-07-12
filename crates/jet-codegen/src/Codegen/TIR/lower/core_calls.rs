@@ -1,3 +1,21 @@
+use crate::AST::{Expr, Type};
+use crate::Codegen::Cx;
+use crate::Codegen::TIR::core_closure_call_return_ty;
+use crate::Codegen::TIR::emit_tir_expr;
+use crate::Codegen::TIR::lambda_body_ty;
+use crate::Codegen::TIR::LowerEnv;
+use crate::Codegen::TIR::lower_expr;
+use crate::Codegen::TIR::lower_lambda;
+use crate::Codegen::TIR::lower_spawn_lambda_for_jit;
+use crate::Codegen::TIR::render_lambda_str;
+use crate::Codegen::TIR::render_lambda_str_expecting;
+use crate::Codegen::TIR::render_spawn_lambda;
+use crate::Codegen::TIR::TCoreClosureKind;
+use crate::Codegen::TIR::TExpr;
+use crate::Codegen::TIR::TExprKind;
+use crate::Codegen::TIR::unit_type;
+use std::collections::HashMap;
+
 /// c109 Phase 13: lower a closure-taking core call (`tasks.spawn`/`http.serve`/
 /// `scope.guard`) into a bespoke `CoreClosureCall` node, reproducing `emit_core_call`
 /// (Source/Codegen/Expression.rs) byte-for-byte. Returns `None` when `(module,

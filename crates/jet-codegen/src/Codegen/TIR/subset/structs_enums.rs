@@ -1,3 +1,17 @@
+use crate::AST::{Type, VariantPayload};
+use crate::Codegen::alloc_handle_rust_type;
+use crate::Codegen::Cx;
+use crate::Codegen::is_db_value_type_name;
+use crate::Codegen::is_json_type_name;
+use crate::Codegen::net_handle_rust_type;
+use crate::Codegen::TIR::is_covered_distinct_ty;
+use crate::Codegen::TIR::is_covered_fallible_ty;
+use crate::Codegen::TIR::is_covered_foreign_value_ty;
+use crate::Codegen::TIR::is_covered_pool_ty;
+use crate::Codegen::TIR::is_covered_shared_ty;
+use crate::Codegen::TIR::is_type_var_param_ty;
+use std::collections::HashSet;
+
 /// c109 Phase 4: `ty` is a plain user enum the subset can lower. It must be a
 /// bare `Type::Named(E)` that:
 ///  - is a known enum (`cx.enum_variants` has it), not a struct/trait/foreign/core

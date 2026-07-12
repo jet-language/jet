@@ -1,3 +1,14 @@
+use crate::AST::{Func, Stmt, Type};
+use crate::Codegen::Cx;
+use crate::Codegen::TIR::is_covered_enum_ty;
+use crate::Codegen::TIR::is_covered_struct_ty;
+use crate::Codegen::TIR::is_subset_param_ty;
+use crate::Codegen::TIR::resolve_self_ty;
+use crate::Codegen::TIR::stmt_in_subset;
+use crate::Codegen::TIR::struct_is_generic;
+use crate::Syntax;
+use std::collections::HashSet;
+
 /// Conservative structural test: `true` only if `f` is a top-level plain
 /// function whose entire body is inside the Phase-1 subset. The rule is
 /// **exclude on any doubt** — a false negative just keeps the function on the

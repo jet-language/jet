@@ -1,3 +1,13 @@
+use crate::Codegen::Cx;
+use crate::Codegen::mangle;
+use crate::Codegen::user_type_rust;
+use crate::Codegen::TIR::emit::emit_math_swizzle_assign_stmt;
+use crate::Codegen::TIR::emit_tir_expr;
+use crate::Codegen::TIR::ScopeMemberKind;
+use crate::Codegen::TIR::TForInMethod;
+use crate::Codegen::TIR::TIfCond;
+use crate::Codegen::TIR::TStmt;
+
 pub(crate) fn emit_tir_stmts(stmts: &[TStmt], cx: &Cx, out: &mut String, indent: usize) {
     for s in stmts {
         emit_tir_stmt(s, cx, out, indent);
@@ -375,7 +385,7 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
             index,
             value,
         } => {
-            let ty = super::user_type_rust(type_name);
+            let ty = user_type_rust(type_name);
             let b = emit_tir_expr(base, cx);
             let i = emit_tir_expr(index, cx);
             let v = emit_tir_expr(value, cx);
@@ -495,8 +505,8 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                     coll_type,
                     iter_type,
                 }) => {
-                    let coll_rust = super::user_type_rust(coll_type);
-                    let iter_rust = super::user_type_rust(iter_type);
+                    let coll_rust = user_type_rust(coll_type);
+                    let iter_rust = user_type_rust(iter_type);
                     out.push_str(&format!(
                         "{}{}{{ let mut _jet_it = <{coll_rust} as user_Iterable>::iter(({collection_str}));\n",
                         pad, lbl,

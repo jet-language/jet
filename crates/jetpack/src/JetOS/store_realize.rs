@@ -1,3 +1,12 @@
+use super::options_rendering::{clean_symbol, option_value};
+use super::types::{GNOME_DESKTOP_PACKAGES, OsFlags, Target};
+use crate::ModuleEval::SystemPlan;
+use crate::Output::Theme;
+use crate::Provider;
+use crate::RefSpec;
+use crate::Store;
+use std::path::{Path, PathBuf};
+
 pub(super) struct RealizedPackage {
     entry: Store::StoreEntry,
     lease: Store::CacheLease,
@@ -28,7 +37,7 @@ impl RealizedPackage {
         }
     }
 
-    fn consumption_path(&self, path: &str) -> std::io::Result<PathBuf> {
+    pub(super) fn consumption_path(&self, path: &str) -> std::io::Result<PathBuf> {
         if let Some(root) = &self.consumption_override {
             let relative = Path::new(path).strip_prefix(&self.entry.out).map_err(|_| {
                 std::io::Error::other("package member escapes realized output")
@@ -38,15 +47,15 @@ impl RealizedPackage {
         self.lease.stable_path(path)
     }
 
-    fn set_consumption_override(&mut self, path: PathBuf) {
+    pub(super) fn set_consumption_override(&mut self, path: PathBuf) {
         self.consumption_override = Some(path);
     }
 
-    fn original_output(&self) -> &Path {
+    pub(super) fn original_output(&self) -> &Path {
         &self.original_out
     }
 
-    fn original_reference(&self) -> &str {
+    pub(super) fn original_reference(&self) -> &str {
         &self.original_reference
     }
 }

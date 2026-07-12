@@ -1,3 +1,15 @@
+use super::options_rendering::{
+    boot_profile, clean_bool_json, clean_symbol, collect_names, option_rows_json, option_value,
+    package_path_or_literal, parse_list_items, prefixed_options, render_user_profile_json_parts,
+    safe_filename, shell_single_quote, user_names,
+};
+use super::root_projection::enable_unit;
+use super::studio_projection::make_executable;
+use crate::ModuleEval::SystemPlan;
+use crate::JSON;
+use std::fs;
+use std::path::Path;
+
 pub(super) fn write_user_environment_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     let users_dir = dir.join("users");
     let unit_dir = dir.join("etc/systemd/user");

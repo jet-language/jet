@@ -1,3 +1,17 @@
+use super::desktop_store_vm::find_path_tool;
+use super::generation::build_generation;
+use super::generation_files::systems_dir;
+use super::installer_media::write_installer_media;
+use super::load_validate::validate_system_options;
+use super::types::{Generation, OsFlags, VM_GUEST_PROOF_MARKER, VM_PROOF_TIMEOUT_MS, VM_TOOLS};
+use crate::ModuleEval::{EnvPlan, SystemPlan, VmTestPlan};
+use crate::Output::Theme;
+use crate::JSON;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
+
 pub(super) fn write_vm_install_plan(
     gen: &Generation,
     system: &SystemPlan,
@@ -428,8 +442,8 @@ const GUEST_ASSERTIONS: [&str; 9] = [
 ];
 
 pub(super) struct VmCommand {
-    phase: &'static str,
-    argv: Vec<String>,
+    pub(super) phase: &'static str,
+    pub(super) argv: Vec<String>,
 }
 
 fn ovmf_code_path() -> Option<PathBuf> {

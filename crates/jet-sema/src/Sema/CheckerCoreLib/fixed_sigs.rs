@@ -378,8 +378,9 @@ pub fn core_fixed_sig(
         ("core.random", "bytes") => {
             Some((vec![(read, Type::Int)], Some(Type::List(Box::new(u8_ty())))))
         }
-        // D-RANDSPLIT1=A: CSPRNG bytes via /dev/urandom — cryptographically secure.
-        // Use for tokens, keys, nonces, and secrets.
+        // D-CRYPTO-RNG1=A: fail-closed bytes from the target's tier-1 OS CSPRNG.
+        // Older editions keep the infallible source shape and take E3001/exit 70
+        // on invalid length or provider failure; no weak fallback exists.
         ("core.crypto.random", "bytes") => {
             Some((vec![(read, Type::Int)], Some(Type::List(Box::new(u8_ty())))))
         }

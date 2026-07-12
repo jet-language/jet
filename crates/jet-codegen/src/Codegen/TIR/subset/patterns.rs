@@ -1,3 +1,9 @@
+use crate::AST::{BinOp, Expr, PatSlot, Pattern, StructPatField};
+use crate::Codegen::Cx;
+use crate::Codegen::TIR::expr_in_subset;
+use crate::Syntax;
+use std::collections::HashSet;
+
 /// c109 Phase 15: an arm head that `emit_switch_arm_cond` would emit as a PLAIN
 /// expression (`_ => emit_expr(cond)`) — NOT a variant/Eq-to-variant pattern (which it
 /// routes through `emit_pattern_matches`) and NOT an arm-head range (shape B). This is

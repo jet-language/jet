@@ -1,3 +1,15 @@
+use super::etc_boot_facts::{
+    boot_artifact, cachyos_kernel_entry, is_initrd_image, is_linux_kernel_image,
+    missing_kernel_source_files,
+};
+use super::generation_files::copy_profile_tree;
+use super::store_realize::RealizedPackage;
+use super::types::{BootProfile, CACHYOS_KERNEL_PACKAGE, SYSTEMD_INIT_PACKAGE};
+use crate::Output::Theme;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
 pub(super) fn run_kernel_bootstrap_builder(
     theme: &Theme,
     boot: &BootProfile,

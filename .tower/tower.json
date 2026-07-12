@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 515,
-    "rev": 4363,
+    "rev": 4391,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -2324,7 +2324,7 @@
     },
     {
       "milestoneId": null,
-      "assignee": "terra-136-review",
+      "assignee": null,
       "id": "c2sj0bd9",
       "num": 136,
       "title": "Adaptive runtime (battery/network/load/carbon-aware)",
@@ -2337,6 +2337,11 @@
       "plan": "Durable plan: docs/plans/epoch-3/adaptive-runtime.md",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "codex-orchestrator",
+          "text": "[handoff] All implementation and review criteria met. Terra final static review passes after four-case resident-JIT CFG matrix correction. Rerun exact dev Result/fidelity tests and cargo check jet-jit after concurrent jet-codegen split compiles; then independently verify criteria and close."
+        },
         {
           "at": "2026-07-12",
           "by": "codex-orchestrator",
@@ -2460,16 +2465,15 @@
         {
           "n": 6,
           "text": "Independent reviewer verifies the general Result ABI, false-green edges, cross-tier parity, docs, and absence of hidden adaptation before close.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "terra-136-review",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-12T10:34:18.104Z"
+          "evidence": "Independent Terra review verified general Result ABI false-green edges, branch-local CFG reachability, fallback rejection, AOT parity assertions, fidelity validation, and no hidden adaptation. Static pass; final corrected matrix execution blocked by unrelated jet-codegen split.",
+          "at": "2026-07-12T11:44:07.764Z"
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
-      "claimedAt": "2026-07-12T11:34:55.636Z"
+      "refs": []
     },
     {
       "milestoneId": null,
@@ -5018,12 +5022,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P0",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-CRYPTO-SUITE1=A: Hybrid: safe envelopes with audited expert primitives. Beginner APIs are seal/open, sign/verify, password_hash/verify, key agreement, file envelope, and Secret/Key types that refuse accidental display. Expert primitives live under crypto.expert with explicit algorithm selection, audit docs, and unsafe/effect gates where needed. Algorithm agility and key encoding are part of the envelope.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: corelib audit: core.crypto — misuse-resistant suite (AEAD, signatures, KDF, password hashing)\n\nCurrent law: Existing linked decisions: D-PWHASH1=ratified/A. D-CORENS1 keeps all first-party modules under core.*; I6 forbids compiler deps; D-STDRUBRIC1 requires mechanical core API laws.\n\nBuild order: Audit current Core/API/prelude/docs/tests first; write failing UI/golden/unit fixtures; implement std-only or approved bridge code; update docs/reference and syntax-decisions when law changes; run targeted tests, then full nix develop -c cargo test before close.\n\nAcceptance: Examples/goldens or UI snapshots prove each shipped behavior; stdlib map records shipped/carded/declined rows; no rustc/user-hostile errors; no compiler external deps.\n\nDependencies/collisions: Respect neighboring core cards: io/args/process separate; text before regex; net/url before http; encoding before data/db; random never owns secrets.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "terra-302-builder",
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "codex-orchestrator",
+          "text": "[start] Terra single-card pass: remove predictable crypto entropy fallbacks, centralize tier-1 OS CSPRNG provider, fail closed through every consumer, and add hostile/native proof. No Sol."
+        },
         {
           "at": "2026-07-09",
           "by": "codex-main",
@@ -5065,11 +5074,67 @@
         }
       ],
       "created": "2026-07-07T17:23:33.341Z",
-      "updated": "2026-07-10",
+      "updated": "2026-07-12",
       "workOrder": 62,
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "D-CRYPTO-RNG1 uses tier-1 OS entropy on Linux, macOS, and Windows with no clock, counter, constant-state, or deterministic fallback in any production path.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T11:46:09.144Z"
+        },
+        {
+          "n": 2,
+          "text": "Entropy failure propagates one typed CryptoError through random_bytes, key generation, nonce/salt creation, sealing, password hashing, and file envelopes without returning partial bytes or reusing prior state.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T11:46:09.432Z"
+        },
+        {
+          "n": 3,
+          "text": "Every cryptographic randomness consumer uses the same audited provider; concurrent calls, process/fork behavior where applicable, requested-length filling, and zero-length behavior are explicit and race-free.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T11:46:09.723Z"
+        },
+        {
+          "n": 4,
+          "text": "Focused tests inject short-read/failure paths, exercise live native providers, and machine-check absence of predictable fallback; Linux/macOS/Windows matrix claims remain platform-literal.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T11:46:10.003Z"
+        },
+        {
+          "n": 5,
+          "text": "Existing reference vectors, misuse diagnostics, envelope/password/signature/key-agreement examples, goldens, and no-compiler-dependency proof remain green after entropy repair.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T11:46:10.284Z"
+        },
+        {
+          "n": 6,
+          "text": "Independent reviewer verifies OS API contracts, fail-closed propagation, consumer coverage, hostile failures, no fallback, platform honesty, and preservation of the prior crypto suite.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T11:46:10.566Z"
+        }
+      ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-12T11:45:53.657Z"
     },
     {
       "id": "c05o0105",
@@ -7039,8 +7104,13 @@
       "priority": "P1",
       "plan": "# Plan: jet env hybrid prompt\n\nRatified inputs:\n- D-FE-PROMPT1 outcome D with owner modification: show env name and partial path by default.\n\nBlocking decision raised by this plan:\n- D-FE-PROMPT-STRIP1 chooses the user-facing config surface for the optional always-on status strip.\n\nScope after decision clears:\n- crates/jetpack/src/Shell.rs for bash/zsh/fish rc generation.\n- crates/jetpack/src/CLI/run_enter_dev.rs and ModuleEval env config types only if prompt config schema changes.\n- tests/jetpack.rs, tests/env_dev_trust.rs, and focused shell rc tests.\n\nImplementation steps:\n1. Make default prompt include environment label and compact current path in bash, zsh, and fish. Keep current dev-shell branding unmistakable.\n2. Add adaptive receipt/status behavior where feasible in shell rc: transient command receipt, running marker for Jet-owned commands, failure next-action line without restating diagnostics.\n3. Implement ^G glance for build/test/env status if supported by the generated shell rc; unsupported shells get a documented no-op fallback rather than broken control sequences.\n4. Implement optional always-on strip exactly as the ratified D-FE-PROMPT-STRIP1 config says.\n5. Respect NO_COLOR/CLICOLOR and non-TTY shell startup. No powerline-only glyph dependency; words carry the state.\n6. Keep env source truth in env.jet/module eval; no hidden prompt database.\n\nAcceptance:\n- Entering jet env in bash/zsh/fish shows env name and partial path by default.\n- NO_COLOR renders readable words without ANSI reliance.\n- Optional strip can be enabled by the ratified config and shows the same status words as ^G.\n- Existing trust/env behavior and foreign flake fallback remain unchanged.\n\nVerification:\n- nix develop -c cargo test --test jetpack <focused env/shell tests>\n- nix develop -c cargo test --test env_dev_trust\n- nix develop -c cargo test --test jetpack\n- Manual spawned-shell smoke for generated bash/zsh/fish rc where available.\n- Full nix develop -c cargo test before done.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "grok-359-builder",
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "grok-359-verify",
+          "text": "VERIFY FAIL (no criteria verified). Code Shell.rs real (bash/zsh/fish RC: spinner/elapsed/receipts/Ctrl-G/Prompt.path+strip — not stubs). Tip grok/card-359@fc3ff252: jet-codegen will not compile (E0433 Type/Expr undeclared ×4510) so Shell tests unreachable. At claimed proof 32cefaf6: `nix develop -c cargo test -p jetpack Shell` → 10 pass / 1 FAIL: bash_prompt_pty_reports_real_command_and_git_facts_without_color asserts literal `git master changed|clean` while live PTY shows real branch (`git verify-359-tmp clean`); hooks/spinner/receipts work. env_dev_trust blocked ENOSPC after that. Leave building."
+        },
         {
           "at": "2026-07-11",
           "by": "sol-359-reviewer",
@@ -7131,7 +7201,7 @@
         }
       ],
       "created": "2026-07-08T13:10:16.964Z",
-      "updated": "2026-07-11",
+      "updated": "2026-07-12",
       "workOrder": 11,
       "criteria": [
         {
@@ -7172,7 +7242,8 @@
         }
       ],
       "needsAcceptance": true,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-12T11:45:33.282Z"
     },
     {
       "id": "c0l5fmyy",
@@ -7347,8 +7418,13 @@
       "priority": "P1",
       "plan": "# Plan: jetpack/jetos hybrid CLI output\n\nRatified inputs:\n- D-FE-CLI1 outcome D with owner modifications: keep colored + - ~; both -y and --yes; add nh-style dependency chain/graph visualization for long builds/downloads.\n\nScope:\n- crates/jetpack/src/Output.rs, crates/jetpack/src/CLI/*.rs command call sites, crates/jetpack/src/JetOS/commands.rs and generation/proof call sites that already share Theme/Output.\n- tests/jetpack.rs, CLI usage tests, fixture stderr/stdout snapshots where output is pinned.\n\nImplementation steps:\n1. Extend the shared Theme/Output layer with consequence-scaled rendering: quiet ledger, pinned live region for long work, plan gate for mutations, deterministic plain fallback.\n2. Preserve colored +, -, ~ for plan diffs; NO_COLOR replaces color with stable text markers while keeping symbols readable.\n3. Normalize confirmation bypass so -y and --yes are accepted everywhere the mutation confirmation gate appears. Non-TTY mutation without yes prints plan and exits without applying.\n4. Add dependency-chain progress model for long realization/build phases: downloads, builds, cached/reused nodes, current edge, counts, size/elapsed where known. Render as a pinned graph/chain in TTY; append ledger lines in non-TTY.\n5. Wire jetpack add/build/env/gc and jetos plan/build/switch/proof through the same output primitives where they already share command execution paths.\n6. Erase live regions before diagnostics; diagnostics remain verbatim.\n7. Keep JSON output schemas untouched unless a separate schema version decision is raised.\n\nAcceptance:\n- Trivial commands stay quiet.\n- Long build/download commands show useful dependency-chain progress in TTY.\n- Mutations show a plan with + - ~ and require confirmation unless -y/--yes.\n- Non-TTY output is deterministic and non-interactive.\n\nVerification:\n- nix develop -c cargo test --test jetpack <focused CLI output tests>\n- nix develop -c cargo test --test jetpack\n- Add transcript/snapshot coverage for + - ~, -y, --yes, non-TTY no-hang, NO_COLOR, and dependency-chain fallback.\n- Full nix develop -c cargo test before done.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "grok-361-builder",
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "grok-361-builder",
+          "text": "[handoff] Builder grok-361-builder done. Branch grok/card-361 @ 4b75f97e (reset from broken wip HEAD to dee54f45 then gap-fill). Criteria 1-4 met. Focused green: Output:: 19/19; parses_flags/-y; remove_ 3/3; add_then_remove; failed_first_dependency; committed_example_builds_offline; clean_without_yes. Leave building for independent verifier ≠ grok-361-builder. Owner interactive TTY matrix still separate if required."
+        },
         {
           "at": "2026-07-11",
           "by": "codex-card361-fixer",
@@ -7420,11 +7496,49 @@
         }
       ],
       "created": "2026-07-08T13:10:17.238Z",
-      "updated": "2026-07-11",
+      "updated": "2026-07-12",
       "workOrder": 13,
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Trivial ops (add/realize short path) emit quiet ledger rows with colored or NO_COLOR +/-/~ marks; focused tests prove both TTY and NO_COLOR.",
+          "status": "met",
+          "metBy": "grok-361-builder",
+          "verifiedBy": null,
+          "evidence": "Quiet ledger: ready_row (✓ name version) for add/env; plan +/-/~ keep symbols under NO_COLOR and paint ANSI when colored. Proof: nix develop -c cargo test -p jetpack --lib Output:: → 19/19 incl plan_rows_keep_symbols_without_color, plan_rows_paint_symbols_when_colored, theme_resolve_honors_no_color_flag, ready_row_*; integration add_then_remove_edits_env_file prints ✓ hello 0.1.0. Commit 4b75f97e atop dee54f45 on grok/card-361 (/tmp/jet-card-361).",
+          "at": "2026-07-12T11:57:17.343Z"
+        },
+        {
+          "n": 2,
+          "text": "Long realize/build path pins live region, promotes finished rows into ledger, collapses to summary; non-TTY degrades to appended ledger lines.",
+          "status": "met",
+          "metBy": "grok-361-builder",
+          "verifiedBy": null,
+          "evidence": "Long build pins live region (set_dependency_status + finish promote + collapse). Non-TTY/NO_COLOR appends dependency ledger lines. Proof: committed_example_builds_offline_end_to_end asserts building completed K/3 · current: source -> pkg · resolving; live_header/progress_bar/live_region_is_non_tty_when_color_off; jetpack build collapses to build ready ✓; JetOS generation collapses to generation ready. Commit 4b75f97e.",
+          "at": "2026-07-12T11:57:17.430Z"
+        },
+        {
+          "n": 3,
+          "text": "Mutation commands (switch/gc class) print plan with +/~/- marks, gate on confirm unless -y or --yes; both flags bypass identically; non-TTY prints plan and exits without apply.",
+          "status": "met",
+          "metBy": "grok-361-builder",
+          "verifiedBy": null,
+          "evidence": "Mutation plan gate on remove/clean/update/jetos switch: plan_row +/~/- then confirm_apply. -y and --yes both set assume_yes (CLI_FLAG_YES_SHORT/LONG; parses_flags + parses_long_yes_flag). Non-TTY without yes prints plan and exits (confirm_apply_non_tty_without_yes_is_plan_only; remove_without_yes_*; clean_without_yes_*). -y apply parity: remove_with_short_yes_applies_identically_to_long_yes. Commit 4b75f97e.",
+          "at": "2026-07-12T11:57:17.515Z"
+        },
+        {
+          "n": 4,
+          "text": "Long download/build progress shows nh-style dependency/current-edge counts in live region; failure erases region and prints verbatim diagnostic; focused Output+CLI tests pass.",
+          "status": "met",
+          "metBy": "grok-361-builder",
+          "verifiedBy": null,
+          "evidence": "nh-style edge counts via render_dependency_status / set_dependency_status (completed N/M · current: source -> node · state). Failure clears region then diagnostic: realize_ref_outcome clears live before prints; cmd_build clears on fail/holes; store_realize clears before errors; failed_first_dependency_reports_zero_completed_nodes asserts completed 0/2 + diagnostic. Output:: 19/19 + focused jetpack remove_/add_then_remove/failed_first/committed_example/clean_without_yes all ok. Commit 4b75f97e.",
+          "at": "2026-07-12T11:57:17.600Z"
+        }
+      ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-12T11:45:33.390Z"
     },
     {
       "id": "c0prf2ws",
@@ -8521,12 +8635,15 @@
       "phase": "ready",
       "priority": "P0",
       "plan": "docs/plans/epoch-4/world-class-package-manager.md#e4-jp1--hangar-store-v2",
-      "blockedBy": [
-        "c0wetgi3"
-      ],
+      "blockedBy": [],
       "workOrder": 65,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "cursor-e4-burn",
+          "text": "Clear orphan blocker: #418 (c0wetgi3) already done. Unblocks Hangar Store v2."
+        },
         {
           "at": "2026-07-09",
           "by": "codex-main",
@@ -8534,7 +8651,7 @@
         }
       ],
       "created": "2026-07-09T18:16:39.206Z",
-      "updated": "2026-07-10",
+      "updated": "2026-07-12",
       "criteria": [],
       "needsAcceptance": false,
       "refs": []
@@ -9451,14 +9568,18 @@
       "phase": "ready",
       "priority": "P0",
       "plan": "docs/plans/epoch-4/world-class-package-manager.md#e4-jp2--one-derivationaction-ir-and-complete-cache-identity",
-      "blockedBy": [
-        "c0wetgi3"
-      ],
+      "blockedBy": [],
       "workOrder": 71,
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-12",
+          "by": "cursor-e4-burn",
+          "text": "Clear orphan blocker: #418 (c0wetgi3) already done. Unblocks JP2 action IR."
+        }
+      ],
       "created": "2026-07-09T20:38:06.543Z",
-      "updated": "2026-07-10",
+      "updated": "2026-07-12",
       "criteria": [],
       "needsAcceptance": false,
       "refs": []
@@ -12716,7 +12837,7 @@
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "grok-478-builder",
       "log": [
         {
           "at": "2026-07-10",
@@ -12724,11 +12845,40 @@
           "text": "D-JPK-SELECTOR1=C ratified and recorded in docs/spec/syntax-decisions.md. Ready to implement: -p <member> + --affected[-since <ref>], no pattern DSL."
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "jet build/test/run accept repeatable -p <member>; unknown member emits E1231-class diagnostic with did-you-mean; only named members run.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T11:45:34.033Z"
+        },
+        {
+          "n": 2,
+          "text": "jet build/test/run accept --affected and --affected-since <ref>; selects changed members plus dependents via action-cache/input hashes; bad ref errors with suggestion.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T11:45:34.125Z"
+        },
+        {
+          "n": 3,
+          "text": "Focused workspace tests prove -p isolation, --affected-since includes dependents, and bare command still runs all members; no pattern-DSL filter flag.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T11:45:34.229Z"
+        }
+      ],
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-10T21:04:39.991Z",
-      "updated": "2026-07-10"
+      "updated": "2026-07-12",
+      "claimedAt": "2026-07-12T11:45:33.499Z"
     },
     {
       "id": "c0f7jily",
@@ -32204,6 +32354,202 @@
   ],
   "events": [
     {
+      "at": "2026-07-12T11:57:17.690Z",
+      "by": "grok-361-builder",
+      "action": "card.update",
+      "ref": "c0nhjxh4",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T11:57:17.600Z",
+      "by": "grok-361-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0nhjxh4",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-12T11:57:17.515Z",
+      "by": "grok-361-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0nhjxh4",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-12T11:57:17.430Z",
+      "by": "grok-361-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0nhjxh4",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-12T11:57:17.343Z",
+      "by": "grok-361-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0nhjxh4",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-12T11:50:39.256Z",
+      "by": "grok-359-verify",
+      "action": "card.update",
+      "ref": "c0iyfhaf",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-12T11:46:26.922Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0184j6s",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T11:46:10.567Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0184j6s",
+      "note": "#6 Independent reviewer verifies OS API contracts, fail-closed "
+    },
+    {
+      "at": "2026-07-12T11:46:10.284Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0184j6s",
+      "note": "#5 Existing reference vectors, misuse diagnostics, envelope/pas"
+    },
+    {
+      "at": "2026-07-12T11:46:10.004Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0184j6s",
+      "note": "#4 Focused tests inject short-read/failure paths, exercise live"
+    },
+    {
+      "at": "2026-07-12T11:46:09.723Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0184j6s",
+      "note": "#3 Every cryptographic randomness consumer uses the same audite"
+    },
+    {
+      "at": "2026-07-12T11:46:09.432Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0184j6s",
+      "note": "#2 Entropy failure propagates one typed CryptoError through ran"
+    },
+    {
+      "at": "2026-07-12T11:46:09.145Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0184j6s",
+      "note": "#1 D-CRYPTO-RNG1 uses tier-1 OS entropy on Linux, macOS, and Wi"
+    },
+    {
+      "at": "2026-07-12T11:45:53.658Z",
+      "by": "terra-302-builder",
+      "action": "card.claim",
+      "ref": "c0184j6s",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T11:45:34.229Z",
+      "by": "cursor-e4-burn",
+      "action": "card.criteria-add",
+      "ref": "c0rfeel3",
+      "note": "#3 Focused workspace tests prove -p isolation, --affected-since"
+    },
+    {
+      "at": "2026-07-12T11:45:34.125Z",
+      "by": "cursor-e4-burn",
+      "action": "card.criteria-add",
+      "ref": "c0rfeel3",
+      "note": "#2 jet build/test/run accept --affected and --affected-since <r"
+    },
+    {
+      "at": "2026-07-12T11:45:34.033Z",
+      "by": "cursor-e4-burn",
+      "action": "card.criteria-add",
+      "ref": "c0rfeel3",
+      "note": "#1 jet build/test/run accept repeatable -p <member>; unknown me"
+    },
+    {
+      "at": "2026-07-12T11:45:33.934Z",
+      "by": "cursor-e4-burn",
+      "action": "card.criteria-add",
+      "ref": "c0nhjxh4",
+      "note": "#4 Long download/build progress shows nh-style dependency/curre"
+    },
+    {
+      "at": "2026-07-12T11:45:33.839Z",
+      "by": "cursor-e4-burn",
+      "action": "card.criteria-add",
+      "ref": "c0nhjxh4",
+      "note": "#3 Mutation commands (switch/gc class) print plan with +/~/- ma"
+    },
+    {
+      "at": "2026-07-12T11:45:33.743Z",
+      "by": "cursor-e4-burn",
+      "action": "card.criteria-add",
+      "ref": "c0nhjxh4",
+      "note": "#2 Long realize/build path pins live region, promotes finished "
+    },
+    {
+      "at": "2026-07-12T11:45:33.642Z",
+      "by": "cursor-e4-burn",
+      "action": "card.criteria-add",
+      "ref": "c0nhjxh4",
+      "note": "#1 Trivial ops (add/realize short path) emit quiet ledger rows "
+    },
+    {
+      "at": "2026-07-12T11:45:33.499Z",
+      "by": "grok-478-builder",
+      "action": "card.claim",
+      "ref": "c0rfeel3",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T11:45:33.390Z",
+      "by": "grok-361-builder",
+      "action": "card.claim",
+      "ref": "c0nhjxh4",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T11:45:33.282Z",
+      "by": "grok-359-builder",
+      "action": "card.claim",
+      "ref": "c0iyfhaf",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T11:44:28.412Z",
+      "by": "cursor-e4-burn",
+      "action": "card.update",
+      "ref": "c0yxdqju",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-12T11:44:28.311Z",
+      "by": "cursor-e4-burn",
+      "action": "card.update",
+      "ref": "c0to4gms",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-12T11:44:08.054Z",
+      "by": "codex-orchestrator",
+      "action": "card.release",
+      "ref": "c2sj0bd9",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-12T11:44:07.764Z",
+      "by": "terra-136-review",
+      "action": "card.criteria-meet",
+      "ref": "c2sj0bd9",
+      "note": "#6"
+    },
+    {
       "at": "2026-07-12T11:34:55.637Z",
       "by": "terra-136-review",
       "action": "card.claim",
@@ -35506,202 +35852,6 @@
       "action": "card.criteria-add",
       "ref": "c0ai04g0",
       "note": "#8 Per-function #Abi parses, formats, lowers, preserves bindgen"
-    },
-    {
-      "at": "2026-07-11T23:37:02.587Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0ai04g0",
-      "note": "#7 D-CABI-RESULT1 raw status plus audited out-pointer declarati"
-    },
-    {
-      "at": "2026-07-11T23:37:02.469Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0ai04g0",
-      "note": "#6 D-CABI-CALLBACK1 admits only non-null capture-free pure fore"
-    },
-    {
-      "at": "2026-07-11T23:37:02.356Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0ai04g0",
-      "note": "#5 D-REPRC2 C-layout fieldless and payload enums implement expl"
-    },
-    {
-      "at": "2026-07-11T23:24:59.962Z",
-      "by": "sol-131-reviewer",
-      "action": "card.update",
-      "ref": "c2nizvzp",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-11T23:22:06.477Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0qi7dc2",
-      "note": "#10 Independent reviewer verifies hostile input, concurrency, ch"
-    },
-    {
-      "at": "2026-07-11T23:22:06.356Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0qi7dc2",
-      "note": "#9 Native Linux/macOS/Windows facts and interrupt lifecycle use"
-    },
-    {
-      "at": "2026-07-11T23:22:06.241Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0qi7dc2",
-      "note": "#8 Every child process receives one atomic overlay snapshot thr"
-    },
-    {
-      "at": "2026-07-11T23:22:06.123Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0qi7dc2",
-      "note": "#7 D-ENV-MUTATE1 process-global raw-preserving overlay implemen"
-    },
-    {
-      "at": "2026-07-11T23:21:57.786Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0qi7dc2",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-07-11T23:20:34.112Z",
-      "by": "sol-131-builder",
-      "action": "card.criteria-meet",
-      "ref": "c2nizvzp",
-      "note": "#8"
-    },
-    {
-      "at": "2026-07-11T23:20:33.994Z",
-      "by": "sol-131-builder",
-      "action": "card.criteria-meet",
-      "ref": "c2nizvzp",
-      "note": "#7"
-    },
-    {
-      "at": "2026-07-11T23:20:33.872Z",
-      "by": "sol-131-builder",
-      "action": "card.criteria-meet",
-      "ref": "c2nizvzp",
-      "note": "#6"
-    },
-    {
-      "at": "2026-07-11T23:20:33.749Z",
-      "by": "sol-131-builder",
-      "action": "card.criteria-meet",
-      "ref": "c2nizvzp",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-11T23:20:33.624Z",
-      "by": "sol-131-builder",
-      "action": "card.criteria-meet",
-      "ref": "c2nizvzp",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-11T23:20:33.502Z",
-      "by": "sol-131-builder",
-      "action": "card.criteria-meet",
-      "ref": "c2nizvzp",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-11T23:20:33.375Z",
-      "by": "sol-131-builder",
-      "action": "card.criteria-meet",
-      "ref": "c2nizvzp",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-11T23:20:33.250Z",
-      "by": "sol-131-builder",
-      "action": "card.criteria-meet",
-      "ref": "c2nizvzp",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-11T23:20:18.515Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c2nizvzp",
-      "note": "#8 AOT golden, default-dev honest boundary, columnar TIR adapte"
-    },
-    {
-      "at": "2026-07-11T23:20:18.392Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c2nizvzp",
-      "note": "#7 Field rename/default/skip/strict/enum policies, hand codecs,"
-    },
-    {
-      "at": "2026-07-11T23:20:18.269Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c2nizvzp",
-      "note": "#6 Public DataTree Encode/Decode protocols handle primitives, u"
-    },
-    {
-      "at": "2026-07-11T23:20:18.144Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c2nizvzp",
-      "note": "#5 Built-in @Codable/@Encode/@Decode generate ordinary Jet sour"
-    },
-    {
-      "at": "2026-07-11T23:12:00.542Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0uxsyns",
-      "note": "#9 Independent reviewer verifies every hostile corpus, lifecycl"
-    },
-    {
-      "at": "2026-07-11T23:12:00.422Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0uxsyns",
-      "note": "#8 Runnable examples, goldens, normative docs, vendored corpus "
-    },
-    {
-      "at": "2026-07-11T23:12:00.310Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0uxsyns",
-      "note": "#7 Whole/stream engines and AOT/default-dev/comptime consumers "
-    },
-    {
-      "at": "2026-07-11T23:12:00.191Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0uxsyns",
-      "note": "#6 D-JSONCANON1, D-ENC-CBOR-SURFACE1, and D-ENCBASE-STRICT1 cur"
-    },
-    {
-      "at": "2026-07-11T23:12:00.074Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0uxsyns",
-      "note": "#5 JSON/JSONL/CSV/CBOR whole-value and streaming laws pass chun"
-    },
-    {
-      "at": "2026-07-11T23:11:59.951Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0uxsyns",
-      "note": "#4 XML 1.0 Fifth Edition plus Namespaces parsing/rendering, byt"
-    },
-    {
-      "at": "2026-07-11T23:11:59.832Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0uxsyns",
-      "note": "#3 JSON, JSONL, CSV, XML, and CBOR readers/writers implement bo"
     }
   ],
   "nextNum": 368,

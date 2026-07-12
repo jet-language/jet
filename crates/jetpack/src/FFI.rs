@@ -306,6 +306,8 @@ pub const SUBTLE_CRATE_SPEC: (&str, &str) = ("subtle", "2");
 /// Hand-written crypto runtime emitted into the bridge crate when `core.crypto`
 /// seal/open/sign/verify is used (D-CRYPTOENV1, D-DEP-CRYPTO1).
 const CRYPTO_RUNTIME: &str = include_str!("Prelude/Crypto.rs");
+const CRYPTO_ENTROPY_RUNTIME: &str =
+    include_str!("../../jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
 
 /// The `wasmtime` crate version that backs `core.plugin` (D-DEP-WASM1=A, c81).
 /// Lives only here — never in the compiler's Cargo.toml (I6). Reuses the
@@ -773,7 +775,8 @@ fn main() {{
     let cmd = parts.next().unwrap_or("");
     match cmd {{
         "keygen" => {{
-            let (seed, public) = {crate_name}::jet_crypto_keygen_impl();
+            let (seed, public) = {crate_name}::jet_crypto_keygen_impl()
+                .unwrap_or_else(|e| fail(&e.to_string()));
             println!("{{}} {{}}", hex_encode(&seed), hex_encode(&public));
         }}
         "sign" => {{
@@ -1015,6 +1018,7 @@ fn cache_key_full(
     if needs_crypto {
         needs_crypto.hash(&mut h);
         CRYPTO_RUNTIME.hash(&mut h);
+        CRYPTO_ENTROPY_RUNTIME.hash(&mut h);
     }
     if needs_compress {
         needs_compress.hash(&mut h);
@@ -1166,6 +1170,8 @@ fn emit_wrapper_lib(
     }
     if needs_crypto {
         // D-DEP-CRYPTO1=A: the crypto runtime is the only place RustCrypto is touched.
+        out.push_str(CRYPTO_ENTROPY_RUNTIME);
+        out.push('\n');
         out.push_str(CRYPTO_RUNTIME);
         out.push('\n');
     }

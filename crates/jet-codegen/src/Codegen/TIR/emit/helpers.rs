@@ -1,3 +1,10 @@
+use crate::Codegen::Cx;
+use crate::Codegen::TIR::emit_tir_expr;
+use crate::Codegen::TIR::TCallArg;
+use crate::Codegen::TIR::TExpr;
+use crate::Codegen::TIR::TExprKind;
+use crate::Codegen::TIR::TStrPart;
+
 /// c109 Phase 6: format call/method arguments, reproducing `emit_call_args`
 /// (Source/Codegen/Expression.rs) byte-for-byte. The clone wrapper (`.clone()` or
 /// `Arc::clone(&…)`) is applied to the raw value first, then the borrow wrapper

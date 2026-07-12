@@ -1,3 +1,15 @@
+use crate::AST::{Type};
+use crate::Codegen::alloc_handle_rust_type;
+use crate::Codegen::core_rust_type_name;
+use crate::Codegen::Cx;
+use crate::Codegen::file_handle_rust_type;
+use crate::Codegen::layout_handle_rust_type;
+use crate::Codegen::net_handle_rust_type;
+use crate::Codegen::TIR::is_covered_enum_ty;
+use crate::Codegen::TIR::is_covered_struct_ty;
+use crate::Codegen::TIR::struct_is_covered;
+use std::collections::HashSet;
+
 /// Resolve a `Self` type reference to the owning concrete type. Other types pass
 /// through unchanged. (In current Jet a literal `Self` return rarely type-checks —
 /// sema treats `Self` and the concrete name as distinct — but resolving it here

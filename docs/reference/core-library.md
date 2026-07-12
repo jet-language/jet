@@ -428,7 +428,7 @@ fn run() {
 | `sha256(text)` / `sha256_bytes(bytes)` | `String` | SHA-256 hex digest |
 | `sha512_bytes(bytes)` | `String` | SHA-512 hex digest |
 | `blake3_bytes(bytes)` | `String` | BLAKE3 hex digest |
-| `random.bytes(n)` | `[U8]` | CSPRNG bytes for keys, nonces, and tokens |
+| `random.bytes(n)` | `[U8]` (legacy edition) | One fail-closed OS CSPRNG request, capped at 1,048,576 bytes; legacy editions report E3001/exit 70 when the typed provider rejects the length or is unavailable |
 | `seal(key, bytes)` / `open(key, box)` | `[U8] ? String` | Authenticated encryption envelope; default is ChaCha20-Poly1305 with internal nonce |
 | `file_seal(key, bytes)` / `file_open(key, box)` | `[U8] ? String` | Same envelope for file payloads; kept separate for docs and future metadata |
 | `sign(seed, bytes)` / `verify(public, bytes, sig)` | mixed | Ed25519 signatures (`verify` returns `() ? String`) |
@@ -449,6 +449,7 @@ Card 302 audit state:
 | KDF / key agreement | Shipped: HKDF-SHA256 and X25519 with RFC vectors |
 | Hashes / comparison | Shipped: SHA-256, SHA-512, BLAKE3, constant-time equality |
 | File envelope | Shipped: `file_seal/file_open` over the same authenticated envelope |
+| Entropy | Shipped: one D-CRYPTO-RNG1 provider shared by `random.bytes`, envelope nonces, Ed25519 key generation, Argon2id salts, and file envelopes; Linux glibc uses `getrandom`, macOS uses `SecRandomCopyBytes`, Windows MSVC uses `BCryptGenRandom`, WASI preview 1 uses `random_get`; unsupported targets fail closed with no fallback |
 | Secret display types | Not a separate runtime type today; APIs pass `[U8]`, and docs keep key material in byte values. A future `Secret<T>` wrapper must be a real type, not a display shim |
 | PQ hybrid agility | Tracked by #71, not duplicated here |
 

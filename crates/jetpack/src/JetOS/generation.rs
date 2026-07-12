@@ -1,3 +1,20 @@
+use super::generation_files::{generation_dir, write_generation_files};
+use super::generations_activation::{append_generation, now_secs};
+use super::kernel_bootstrap::{run_kernel_bootstrap_builder, validate_boot_payloads};
+use super::nixos_backend::is_nixpkgs_source;
+use super::options_rendering::{boot_profile, option_value};
+use super::store_realize::{
+    desktop_default_required_packages, first_party_package_ref, jetos_runtime_package_ref,
+    realize_ref, try_realize_ref,
+};
+use super::types::{CACHYOS_KERNEL_PACKAGE, Generation, OsFlags, SYSTEMD_INIT_PACKAGE};
+use crate::ModuleEval::{EnvPlan, SystemPlan};
+use crate::Output::Theme;
+use crate::RefSpec;
+use crate::Store;
+use std::collections::BTreeSet;
+use std::fs;
+
 pub(super) fn build_generation(
     theme: &Theme,
     plan: &EnvPlan,

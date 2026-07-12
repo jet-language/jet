@@ -1,3 +1,8 @@
+use crate::ModuleEval::SystemPlan;
+use crate::JSON;
+use std::fs;
+use std::path::Path;
+
 pub(super) fn write_studio_app_projection(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     let studio_dir = dir.join("studio");
     let bin_dir = dir.join("sw/bin");

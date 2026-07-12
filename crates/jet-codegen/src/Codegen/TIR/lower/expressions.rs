@@ -1,3 +1,50 @@
+use crate::AST::{AccessConvention, BinOp, EnumLitArg, Expr, IndexKind, OrFallback, StrPart, TryConvert, Type};
+use crate::Codegen::Cx;
+use crate::Codegen::emit_named_fn_value;
+use crate::Codegen::escape_rust_str;
+use crate::Codegen::is_db_value_type_name;
+use crate::Codegen::is_json_type_name;
+use crate::Codegen::mangle;
+use crate::Codegen::net_handle_rust_type;
+use crate::Codegen::TIR::ast_operand_is_integer;
+use crate::Codegen::TIR::call_return_type;
+use crate::Codegen::TIR::clone_env;
+use crate::Codegen::TIR::core_struct_field_rust_name;
+use crate::Codegen::TIR::emit_tir_expr;
+use crate::Codegen::TIR::int_lit_type;
+use crate::Codegen::TIR::is_numeric_bounds_const;
+use crate::Codegen::TIR::ListSpreadPart;
+use crate::Codegen::TIR::lower_enum_arg;
+use crate::Codegen::TIR::LowerEnv;
+use crate::Codegen::TIR::lower_extern_call_arg;
+use crate::Codegen::TIR::lower::is_binding_free_user_variant_pattern_test;
+use crate::Codegen::TIR::lower_lambda;
+use crate::Codegen::TIR::lower::lower_binding_free_variant_pattern_test;
+use crate::Codegen::TIR::lower::lower_incdec_place;
+use crate::Codegen::TIR::lower_method_call;
+use crate::Codegen::TIR::lower_one_call_arg;
+use crate::Codegen::TIR::lower_stmts;
+use crate::Codegen::TIR::render_panic_stop;
+use crate::Codegen::TIR::render_require;
+use crate::Codegen::TIR::render_require_eq;
+use crate::Codegen::TIR::struct_field_type;
+use crate::Codegen::TIR::TCallArg;
+use crate::Codegen::TIR::TEnumPayload;
+use crate::Codegen::TIR::TExpr;
+use crate::Codegen::TIR::TExprKind;
+use crate::Codegen::TIR::TFnValueKind;
+use crate::Codegen::TIR::tir_enum_lit_prefix;
+use crate::Codegen::TIR::TModuleCallForm;
+use crate::Codegen::TIR::TOrFallback;
+use crate::Codegen::TIR::TStrPart;
+use crate::Codegen::TIR::TTryConvert;
+use crate::Codegen::TIR::unit_type;
+use crate::Codegen::tuple_fields_plain;
+use crate::Codegen::tuple_struct_name;
+use crate::Codegen::user_type_rust;
+use crate::Diagnostics::Span;
+use crate::Syntax;
+
 /// D-MEM1 S6: lower `e` for use as a MUTATING method's receiver (`.push()`,
 /// `.insert()`, …). Ordinarily identical to `lower_expr`; the one exception is
 /// a place rooted in a `Pool` index (`pool[id]`, or `pool[id].field`) — the

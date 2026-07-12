@@ -1,3 +1,9 @@
+use super::desktop_store_vm::find_path_tool;
+use super::root_projection::copy_file_replace;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
 pub(super) fn build_hybrid_iso(staging: &Path, iso: &Path) -> Result<bool, String> {
     if find_path_tool("xorriso").is_none() || find_path_tool("limine").is_none() {
         return Ok(false);
