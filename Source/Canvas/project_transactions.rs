@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use crate::Diagnostics::{Diagnostic, Severity};
 
-use super::graph_helpers::{edit, project_edit_error, project_edit_ok, simple_diff};
+use super::graph_helpers::{project_edit_error, project_edit_ok, simple_diff};
 use super::project_scan::{
     ProjectChange, ProjectContext, ProjectFileRec, TouchedProjectFile, project_context_for_entry,
     project_revision_from_files,

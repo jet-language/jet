@@ -37,7 +37,7 @@ honest replacement for a production language ecosystem.
 | Specification and architecture | A- | Safety, one semantic path, TIR ownership, diagnostics, and beginner/expert priorities are explicit. Some docs describe staged or fallback behavior as shipped. |
 | Front end and native AOT | C+ | Large syntax and sema surface, real native execution, and broad tests. Confirmed accepts-invalid, unsupported-lowering, generic-module, and rustc-leak risks keep it below production grade. |
 | TIR/JIT/comptime/REPL/web parity | D | Coverage manifests and explicit divergences contradict R12. Web validates TIR and then emits from AST-shaped data; REPL/comptime/JIT support proper subsets. |
-| Safety and security | D | Safe intent is strong. Predictable cryptographic-random fallback and silently unsupported C FFI lowering are stop-line defects. |
+| Safety and security | D | Safe intent is strong. Cryptographic randomness now uses one fail-closed OS provider with bounded, zeroized WASI retries; cross-target live proof and silently unsupported C FFI lowering remain stop-lines. |
 | Core | C- | Broad typed signatures and many executable helpers exist. Several modules are thin bridges, partial protocols, deterministic facades, or compiler-emitted templates with weak live conformance. |
 | Concurrency and networking | C- | Structured task vocabulary exists. Pause/cancel controls, blocking server execution, stream-select gaps, platform fallbacks, and ignored scale tests leave the runtime incomplete. |
 | REPL, CLI, dev server, IDE, debug | C | Strong active UX work and broad LSP features. REPL editing/history, dependency-aware watch, real editor DAP, query-engine reuse, testing workflow, profiling, and notebooks remain incomplete. |
@@ -63,9 +63,6 @@ These are source-backed defects, not roadmap speculation:
   `#[Default(expr)]` values with `Default::default()`, silently changing typed
   CLI and decode semantics. The same file directly emits Rust `Codable` impls
   instead of satisfying R11's re-entry law (`Items.rs:667`).
-- `crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingCodecs.rs:387-407` and
-  `crates/jetpack/src/Prelude/Crypto.rs:105-118` fall back from OS entropy to
-  predictable generators. Windows always takes a predictable Core path.
 - `tests/dev.rs:480` skips four default AOT examples; `tests/jit_gaps.txt`
   records 45 covered shapes, 245 gaps, compiler panics, verifier failures, and
   two interpreter/AOT output divergences.
@@ -230,8 +227,12 @@ per-function `#Abi` marker, with C as the default, the exact target matrix in
 the syntax ledger, no module inheritance, and no invented symbol decoration.
 
 - Reopen #180 for C FFI types that sema accepts but codegen cannot emit.
-- Reopen #302/#64 for cryptographic randomness and full reference-vector/live
-  backend proof; predictable fallback is forbidden.
+- #302 now removes predictable randomness through D-CRYPTO-RNG1's shared
+  fail-closed OS provider. D-CRYPTO-WASI-ALLOC2 gives every interrupted WASI
+  call a new exact-count zeroed ownership generation, zeroizes and drops it
+  before retry, allows numeric address reuse, caps calls at seventeen, and
+  exposes no failed bytes. Keep #302/#64 open for the remaining cross-target
+  live backend and full reference-vector proof.
 - Reopen #353 for accepts-invalid, miscompile, generated-unsafe, generic,
   ownership, sendability, and rustc-leak adversary campaigns.
 - Reopen #91 for complete generic modules; reopen #129/#131 for R11-compliant

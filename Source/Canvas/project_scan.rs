@@ -29,30 +29,30 @@ pub(super) fn project_file(path: &Path) -> Result<Projection, Vec<Diagnostic>> {
 
 #[derive(Clone)]
 pub(super) struct ProjectFileRec {
-    path: String,
-    revision: String,
-    kind: String,
+    pub(super) path: String,
+    pub(super) revision: String,
+    pub(super) kind: String,
 }
 
 pub(super) struct ProjectContext {
-    entry_path: PathBuf,
-    project_root: PathBuf,
-    manifest_root: Option<PathBuf>,
-    workspace_root: Option<PathBuf>,
-    files: Vec<ProjectFileRec>,
-    project_revision: String,
+    pub(super) entry_path: PathBuf,
+    pub(super) project_root: PathBuf,
+    pub(super) manifest_root: Option<PathBuf>,
+    pub(super) workspace_root: Option<PathBuf>,
+    pub(super) files: Vec<ProjectFileRec>,
+    pub(super) project_revision: String,
 }
 
 pub(super) struct TouchedProjectFile {
-    path: String,
-    revision: String,
+    pub(super) path: String,
+    pub(super) revision: String,
 }
 
 pub(super) struct ProjectChange {
-    path: PathBuf,
-    rel: String,
-    before: String,
-    after: String,
+    pub(super) path: PathBuf,
+    pub(super) rel: String,
+    pub(super) before: String,
+    pub(super) after: String,
 }
 
 pub(super) fn project_context_for_entry(path: &Path) -> ProjectContext {
@@ -357,10 +357,10 @@ fn package_project_json(project_root: &Path, dir: &Path) -> Option<String> {
     }
 }
 
-struct EnvProjectJson {
-    envs: String,
-    services: String,
-    diagnostics: String,
+pub(super) struct EnvProjectJson {
+    pub(super) envs: String,
+    pub(super) services: String,
+    pub(super) diagnostics: String,
 }
 
 pub(super) fn env_project_json(project_root: &Path) -> EnvProjectJson {

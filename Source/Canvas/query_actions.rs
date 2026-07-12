@@ -11,7 +11,7 @@ use super::graph_helpers::{
 };
 use super::project_scan::{env_project_json, project_file};
 use super::project_transactions::rel_path;
-use super::schema_api::source_revision;
+use super::schema_api::{ACTION_SCHEMA_VERSION, CORE_CATALOG_SCHEMA_VERSION, source_revision};
 use super::validation_json::{json_optional_str, json_str, json_string_field, span_json};
 
 pub(super) fn canvas_find(path: &Path, src: &str, query: &str) -> Result<String, String> {
@@ -1297,11 +1297,11 @@ fn canvas_command_action_json(
     )
 }
 
-struct CanvasAuthority {
-    grant: String,
-    package_id: String,
-    version: String,
-    touched_file: String,
+pub(super) struct CanvasAuthority {
+    pub(super) grant: String,
+    pub(super) package_id: String,
+    pub(super) version: String,
+    pub(super) touched_file: String,
     project_root: PathBuf,
 }
 

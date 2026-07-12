@@ -14,8 +14,8 @@ use super::graph_json::{
     set_pin_append, set_pin_source_span,
 };
 use super::schema_api::{
-    GraphBuilder, GraphEditAnchor, InlineExpr, NodeQueryRef, NodeRec, PinRec, Projection,
-    source_revision,
+    GRAPH_SCHEMA_VERSION, GraphBuilder, GraphEditAnchor, InlineExpr, NodeQueryRef, NodeRec,
+    PinRec, Projection, source_revision,
 };
 use super::validation_json::{json_str, span_json};
 

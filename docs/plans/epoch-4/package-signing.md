@@ -74,13 +74,21 @@ axis, just consistency):
 ```
 
 - `jet registry keygen [--registry <name>]` (default registry `"jet"`): generates a
-  32-byte seed via the same `/dev/urandom`-then-PRNG-fallback
-  (`jet_fill_random`, `Crypto.rs:102`) through the bridge helper's `keygen`
+  32-byte seed through the shared D-CRYPTO-RNG1 direct OS provider, with no
+  predictable fallback, through the bridge helper's `keygen`
   verb, writes both files, refuses to overwrite an existing key without
   `--force` (E-code below), prints the public key + a one-line nudge:
   `` `jet registry key backup` writes this to <path> — losing it means losing your
   ability to publish signed updates. `` (matches the owner Q&A wording
   exactly — this line is product copy, don't rephrase it).
+- D-CRYPTO-KEYGEN-DIAG1=A: OS-entropy failure is a tool error with empty
+  stdout and one exact four-line Jet diagnostic. It leaks no raw provider,
+  helper, dependency, path, generated-code, or key text; exits 1; leaves no
+  key/package/index/temporary artifact; and volatile-zeroizes secret
+  temporaries. Auto-keygen aborts before upload or index mutation. An existing
+  valid key bypasses entropy and is unchanged. The ballot selected E1275, but
+  that code is already assigned to D-JPK-NODAEMON1's sandbox diagnostic;
+  D-CRYPTO-KEYGEN-CODE2 must reconcile the code before this projection ships.
 - `jet registry key backup [<dest>]`: copies the seed file to `<dest>` (default
   `./jet-signing-key.backup`, printed with a warning to store it somewhere
   safe, e.g. a password manager). No encryption of the backup file itself —

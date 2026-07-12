@@ -2253,6 +2253,26 @@ libraries (D-LOCK1). SHA-256 verification always-on (E1204); Ed25519 signing
 opt-in (D-PKGSIGN1). `jet registry vendor`, `jet inspect audit`, `jet build --sbom`
 (D-SUPPLY1; E1217/E1218). Store is content-addressed (D-CASTORE1).
 
+**Cryptographic entropy** *(D-CRYPTO-RNG1, D-CRYPTO-WASI-ALLOC2)*: one
+fail-closed operating-system provider supplies `random.bytes`, envelope
+nonces, signing keys, password salts, and file envelopes. WASI retries
+`random_get` interruption at most sixteen times after the first call. Every
+generation owns a new exact-count zeroed `Vec`; a failed generation is fully
+volatile-zeroized and dropped before the next is created. A later allocation
+may reuse the same numeric address. No bytes, capacity object, provider state,
+or reference crosses ownership lifetimes, and only a successful generation
+can escape.
+
+**Package-key entropy failure** *(D-CRYPTO-KEYGEN-DIAG1=A)*: explicit
+`jet registry keygen` and automatic first-publish key creation fail as a tool
+error when the operating system cannot provide cryptographic randomness.
+Stdout stays empty; no provider/helper/dependency text escapes; no key,
+package, index, or temporary artifact is created; secret temporaries are
+volatile-zeroized; an existing valid key bypasses key generation. The selected
+E1275 spelling conflicts with D-JPK-NODAEMON1's existing E1275 assignment, so
+the command projection remains gated on D-CRYPTO-KEYGEN-CODE2. No divergent
+diagnostic may ship while that code decision is open.
+
 **Build system** *(D-BUILDENTRY1, D-BUILDPOLICY1, D-BUILDSCOPE1, D-BUILDGEN1,
 D-BUILDPROFILE1, D-BUILDNORM1, D-BUILDTARGET1, D-BUILDACTION1,
 D-BUILDTOOLCHAIN1, D-BUILDPROBE1, D-BUILDCACHE1, D-BUILDREMOTE1,

@@ -5,7 +5,7 @@ use crate::AST;
 use jet_semindex::SourceSpan;
 
 use super::debug_source_git::span_overlaps;
-use super::graph_helpers::{graph_id, line_start, snippet};
+use super::graph_helpers::{line_start, snippet};
 use super::schema_api::{GraphBuilder, InlineRec, NodeRec, PinRec, WireRec};
 use super::validation_json::{attr_bounds, attr_span, attr_string, json_str, json_strs, span_json};
 
@@ -410,12 +410,12 @@ pub(super) fn func_source_span(f: &AST::Func) -> SourceSpan {
 
 #[derive(Clone)]
 pub(super) struct CommentHint {
-    anchor: SourceSpan,
-    hint_span: SourceSpan,
-    title: String,
-    color: String,
-    alpha: String,
-    bounds: (i32, i32, i32, i32),
+    pub(super) anchor: SourceSpan,
+    pub(super) hint_span: SourceSpan,
+    pub(super) title: String,
+    pub(super) color: String,
+    pub(super) alpha: String,
+    pub(super) bounds: (i32, i32, i32, i32),
 }
 
 pub(super) fn canvas_comment_hints(src: &str) -> Vec<CommentHint> {

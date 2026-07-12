@@ -8,8 +8,8 @@ use jet_semindex::SourceSpan;
 
 use super::debug_source_git::canonical_path;
 use super::graph_helpers::{
-    diagnostics_error, edit, edit_error, edit_ok, function_signature_span, graph_id,
-    graph_id_name_span, indentation_at, insert_offset, line_after, line_start, snippet,
+    diagnostics_error, edit, edit_error, edit_ok, function_signature_span, graph_id_name_span,
+    indentation_at, line_after, line_start, snippet,
 };
 use super::graph_json::func_source_span;
 use super::graph_projection::trait_method_signature;

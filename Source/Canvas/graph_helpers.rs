@@ -8,7 +8,10 @@ use jet_semindex::{SemIndex, SourceSpan, SymbolKind};
 use super::graph_json::add_wire_with_span;
 use super::project_scan::project_file;
 use super::query_actions::canvas_authority_context;
-use super::schema_api::{GraphBuilder, NodeQueryRef, Projection, source_revision};
+use super::schema_api::{
+    ACTION_SCHEMA_VERSION, EDIT_SCHEMA_VERSION, GraphBuilder, NodeQueryRef,
+    PROJECT_SCHEMA_VERSION, Projection, QUERY_SCHEMA_VERSION, source_revision,
+};
 use super::validation_json::{json_str, span_json};
 
 pub(super) fn graph_id(module_display: &str, f: &AST::Func) -> String {

@@ -6,9 +6,11 @@ use runtime::{
     jet_crypto_entropy_bytes, jet_crypto_entropy_clear_test_provider,
     jet_crypto_entropy_fill, jet_crypto_entropy_fill_with, jet_crypto_entropy_set_test_provider,
     jet_crypto_entropy_clear_zeroize_test_observer,
+    jet_crypto_entropy_clear_wasi_attempt_test_observer,
     jet_crypto_entropy_set_zeroize_test_observer, JetCryptoEntropyError,
+    jet_crypto_entropy_set_wasi_attempt_test_observer,
     jet_crypto_entropy_unsupported_for_test, jet_crypto_entropy_wasi_with_for_test,
-    JetCryptoEntropyStep,
+    JetCryptoEntropyStep, JetCryptoWasiAttemptEvent,
 };
 use std::sync::{Arc, Barrier};
 
@@ -122,6 +124,13 @@ fn injected_partial_failure_returns_no_bytes() {
 
 #[test]
 fn wasi_interrupt_retries_zeroize_each_exact_count_buffer() {
+    let lifecycle = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let observed_lifecycle = std::rc::Rc::clone(&lifecycle);
+    jet_crypto_entropy_set_wasi_attempt_test_observer(move |event, generation, bytes| {
+        observed_lifecycle
+            .borrow_mut()
+            .push((event, generation, bytes.to_vec()));
+    });
     let zeroized = std::rc::Rc::new(std::cell::RefCell::new(Vec::<Vec<u8>>::new()));
     let observed = std::rc::Rc::clone(&zeroized);
     jet_crypto_entropy_set_zeroize_test_observer(move |bytes| {
@@ -143,11 +152,54 @@ fn wasi_interrupt_retries_zeroize_each_exact_count_buffer() {
     assert_eq!(bytes, vec![7; 32]);
     assert_eq!(calls, 3);
     jet_crypto_entropy_clear_zeroize_test_observer();
+    jet_crypto_entropy_clear_wasi_attempt_test_observer();
     assert_eq!(&*zeroized.borrow(), &vec![vec![0; 32], vec![0; 32]]);
+
+    let lifecycle = lifecycle.borrow();
+    let mut live_attempt = None;
+    let mut generations = Vec::new();
+    for (event, generation, snapshot) in lifecycle.iter() {
+        match event {
+            JetCryptoWasiAttemptEvent::Created => {
+                assert!(live_attempt.replace(*generation).is_none());
+                assert_eq!(snapshot, &vec![0; 32]);
+                generations.push(*generation);
+            }
+            JetCryptoWasiAttemptEvent::ProviderReturned(27) => {
+                assert_eq!(live_attempt, Some(*generation));
+                assert_eq!(&snapshot[..4], &[0xa5; 4]);
+            }
+            JetCryptoWasiAttemptEvent::ProviderReturned(0) => {
+                assert_eq!(live_attempt, Some(*generation));
+                assert_eq!(snapshot, &vec![7; 32]);
+            }
+            JetCryptoWasiAttemptEvent::Zeroized => {
+                assert_eq!(live_attempt, Some(*generation));
+                assert_eq!(snapshot, &vec![0; 32]);
+            }
+            JetCryptoWasiAttemptEvent::Released | JetCryptoWasiAttemptEvent::Returned => {
+                assert_eq!(live_attempt.take(), Some(*generation));
+            }
+            JetCryptoWasiAttemptEvent::ProviderReturned(errno) => {
+                panic!("unexpected WASI errno {errno}")
+            }
+        }
+    }
+    assert_eq!(generations, vec![0, 1, 2]);
+    assert!(live_attempt.is_none());
+    assert!(!bytes.contains(&0xa5));
 }
 
 #[test]
 fn wasi_stops_after_seventeen_interrupts() {
+    let generations = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let observed = std::rc::Rc::clone(&generations);
+    jet_crypto_entropy_set_wasi_attempt_test_observer(move |event, generation, bytes| {
+        if event == JetCryptoWasiAttemptEvent::Released {
+            assert!(bytes.is_empty());
+            observed.borrow_mut().push(generation);
+        }
+    });
     let mut calls = 0usize;
     let result = jet_crypto_entropy_wasi_with_for_test(8, |out| {
         calls += 1;
@@ -156,6 +208,8 @@ fn wasi_stops_after_seventeen_interrupts() {
     });
     assert_eq!(result, Err(JetCryptoEntropyError::Unavailable));
     assert_eq!(calls, 17);
+    jet_crypto_entropy_clear_wasi_attempt_test_observer();
+    assert_eq!(&*generations.borrow(), &(0..17).collect::<Vec<_>>());
 }
 
 #[test]

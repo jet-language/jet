@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 515,
-    "rev": 4398,
+    "rev": 4401,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -5022,7 +5022,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P0",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-CRYPTO-SUITE1=A: Hybrid: safe envelopes with audited expert primitives. Beginner APIs are seal/open, sign/verify, password_hash/verify, key agreement, file envelope, and Secret/Key types that refuse accidental display. Expert primitives live under crypto.expert with explicit algorithm selection, audit docs, and unsafe/effect gates where needed. Algorithm agility and key encoding are part of the envelope.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: corelib audit: core.crypto — misuse-resistant suite (AEAD, signatures, KDF, password hashing)\n\nCurrent law: Existing linked decisions: D-PWHASH1=ratified/A. D-CORENS1 keeps all first-party modules under core.*; I6 forbids compiler deps; D-STDRUBRIC1 requires mechanical core API laws.\n\nBuild order: Audit current Core/API/prelude/docs/tests first; write failing UI/golden/unit fixtures; implement std-only or approved bridge code; update docs/reference and syntax-decisions when law changes; run targeted tests, then full nix develop -c cargo test before close.\n\nAcceptance: Examples/goldens or UI snapshots prove each shipped behavior; stdlib map records shipped/carded/declined rows; no rustc/user-hostile errors; no compiler external deps.\n\nDependencies/collisions: Respect neighboring core cards: io/args/process separate; text before regex; net/url before http; encoding before data/db; random never owns secrets.",
       "blockedBy": [
@@ -5030,8 +5030,12 @@
         "D-CRYPTO-WASI-ALLOC2",
         "D-CRYPTO-KEYGEN-DIAG1"
       ],
-      "assignee": null,
+      "assignee": "terra-302-builder",
       "log": [
+        {
+          "at": "2026-07-12",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
         {
           "at": "2026-07-12",
           "by": "codex-orchestrator",
@@ -5152,7 +5156,8 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-12T12:28:54.838Z"
     },
     {
       "id": "c05o0105",
@@ -31710,8 +31715,88 @@
         ]
       },
       "draft": false,
+      "status": "ratified",
+      "created": "2026-07-12T12:17:29.195Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-12"
+    },
+    {
+      "id": "D-CRYPTO-KEYGEN-CODE2",
+      "cardId": "c0184j6s",
+      "group": "safety",
+      "title": "Resolve the package-keygen diagnostic code collision",
+      "gist": "D-CRYPTO-KEYGEN-DIAG1 selected E1275, but E1275 already belongs to the ratified Jetpack sandbox diagnostic. Choose a unique code without changing the keygen failure behavior just approved.",
+      "lesson": "A diagnostic code is a stable identity, not decoration. Tools, snapshots, documentation, and `jet explain` use it to mean exactly one failure. Two unrelated errors cannot share E1275.\n\nE1275 already means that required build sandboxing is unavailable under D-JPK-NODAEMON1. The new keygen ballot accidentally reused it for entropy failure. Every word of the newly approved keygen lifecycle can remain unchanged if only its code moves to the next unassigned Jetpack slot.",
+      "explainer": "The live diagnostics ledger assigns E1275 through E1291. E1292 is the next unassigned Jetpack code. This ballot changes only the code selected by D-CRYPTO-KEYGEN-DIAG1; its class tool, four-line copy, exit 1, redaction, zeroization, retry, and no-artifact rules remain exact.",
+      "story": "Mina's editor receives E1275 after signing-key generation fails. Today E1275 tells tooling to explain sandbox policy, while the terminal says cryptographic randomness failed. A unique code keeps humans and machines on the same explanation.",
+      "inWild": "$ jet registry keygen\nError [E1292]: signing key generation needs cryptographic randomness\n What: Jet could not create the package-signing key\n Why: the operating system could not provide cryptographic randomness\n Fix: retry as a new operation on a supported host; no key files were created",
+      "detail": "E1275 remains unchanged for sandbox-required/unavailable. Under A, every E1275 reference and test stays intact; the keygen implementation, diagnostics ledger, `jet explain`, snapshots, explicit keygen tests, and automatic-publish tests use E1292. No syntax, provider, error class, JSON schema, or cleanup behavior changes.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Move keygen to E1292",
+          "detail": "Recommended. Keep E1275 stable for sandbox policy and assign the exact approved keygen entropy row to the next free Jetpack code, E1292.",
+          "code": "E1275 = sandbox required but unavailable\nE1292 = package-signing key generation lacks OS entropy"
+        },
+        {
+          "key": "B",
+          "name": "Move sandbox off E1275",
+          "detail": "Keep keygen on E1275 and renumber the older sandbox diagnostic. This changes an already-shipped code, its JSON output, snapshots, documentation, and automation solely to preserve the newer accidental assignment.",
+          "code": "E1275 = package keygen entropy failure\nE1292 = sandbox required but unavailable"
+        },
+        {
+          "key": "C",
+          "name": "Share E1275",
+          "detail": "Let both errors use E1275 and distinguish them by message text. `jet explain E1275`, machine consumers, and stable-code guarantees become ambiguous.",
+          "code": "E1275 = sandbox failure OR keygen entropy failure // ambiguous"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "HTTP status plus problem type",
+          "note": "Stable machine identities must not name unrelated failures. Reusing one identifier forces consumers to parse prose, defeating the identifier.",
+          "code": "type: unique-problem-id"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A preserves the existing stable code and changes only the new, not-yet-implemented assignment. It is the smallest truthful reconciliation.",
+        "tradeoff": "The newly ratified ballot's example changes from E1275 to E1292; all other approved behavior remains identical.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B breaks existing sandbox diagnostics and consumers to protect a newer accidental collision."
+          },
+          {
+            "key": "C",
+            "reason": "C destroys one-code-one-meaning and makes `jet explain` and JSON consumers ambiguous."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "Use A's unique E1292 assignment. Preserve B's concern for complete propagation by updating every new keygen fixture and durable document together; reject C's ambiguity entirely.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "Preserve old code and allocate next free code",
+            "use": "Adopt as the diagnostic identity law."
+          },
+          {
+            "key": "B",
+            "aspect": "Full reference migration",
+            "use": "Apply only to the new keygen references, not the existing sandbox row."
+          },
+          {
+            "key": "C",
+            "aspect": "No additional implementation surface",
+            "use": "Keep the implementation small, but retain unique identities."
+          }
+        ]
+      },
+      "draft": false,
       "status": "open",
-      "created": "2026-07-12T12:17:29.195Z"
+      "created": "2026-07-12T12:32:17.156Z"
     }
   ],
   "questions": [
@@ -32539,6 +32624,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-12T12:32:17.156Z",
+      "by": "codex-orchestrator",
+      "action": "decision.add",
+      "ref": "D-CRYPTO-KEYGEN-CODE2",
+      "note": "Resolve the package-keygen diagnostic code collision"
+    },
+    {
+      "at": "2026-07-12T12:28:54.838Z",
+      "by": "terra-302-builder",
+      "action": "card.claim",
+      "ref": "c0184j6s",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T12:27:31.605Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CRYPTO-KEYGEN-DIAG1",
+      "note": "A"
+    },
     {
       "at": "2026-07-12T12:24:42.696Z",
       "by": "owner",
@@ -36017,27 +36123,6 @@
       "action": "card.criteria-add",
       "ref": "cbq06v8j",
       "note": "#8 Hostile tamper, unsupported-effect, symlink/path, limit, cra"
-    },
-    {
-      "at": "2026-07-11T23:40:23.756Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "cbq06v8j",
-      "note": "#7 Proof lenses implement exact facets/order/union/idempotence/"
-    },
-    {
-      "at": "2026-07-11T23:40:23.640Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "cbq06v8j",
-      "note": "#6 Proof solver normalizes finite/Presburger obligations, produ"
-    },
-    {
-      "at": "2026-07-11T23:40:23.521Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "cbq06v8j",
-      "note": "#5 Dev-TIR/AOT capture and replay reproduce exit/stdout/stderr/"
     }
   ],
   "nextNum": 368,

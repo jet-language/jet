@@ -29,6 +29,16 @@ pub enum JetCryptoEntropyStep {
     Failed,
 }
 
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum JetCryptoWasiAttemptEvent {
+    Created,
+    ProviderReturned(u16),
+    Zeroized,
+    Released,
+    Returned,
+}
+
 #[cfg(not(test))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum JetCryptoEntropyStep {
@@ -44,6 +54,9 @@ thread_local! {
     > = std::cell::RefCell::new(None);
     static JET_CRYPTO_ZEROIZE_TEST_OBSERVER: std::cell::RefCell<
         Option<Box<dyn FnMut(&[u8])>>
+    > = std::cell::RefCell::new(None);
+    static JET_CRYPTO_WASI_ATTEMPT_TEST_OBSERVER: std::cell::RefCell<
+        Option<Box<dyn FnMut(JetCryptoWasiAttemptEvent, usize, &[u8])>>
     > = std::cell::RefCell::new(None);
 }
 
@@ -76,6 +89,35 @@ pub fn jet_crypto_entropy_set_zeroize_test_observer(
 pub fn jet_crypto_entropy_clear_zeroize_test_observer() {
     JET_CRYPTO_ZEROIZE_TEST_OBSERVER.with(|slot| {
         *slot.borrow_mut() = None;
+    });
+}
+
+#[cfg(test)]
+pub fn jet_crypto_entropy_set_wasi_attempt_test_observer(
+    observer: impl FnMut(JetCryptoWasiAttemptEvent, usize, &[u8]) + 'static,
+) {
+    JET_CRYPTO_WASI_ATTEMPT_TEST_OBSERVER.with(|slot| {
+        *slot.borrow_mut() = Some(Box::new(observer));
+    });
+}
+
+#[cfg(test)]
+pub fn jet_crypto_entropy_clear_wasi_attempt_test_observer() {
+    JET_CRYPTO_WASI_ATTEMPT_TEST_OBSERVER.with(|slot| {
+        *slot.borrow_mut() = None;
+    });
+}
+
+#[cfg(test)]
+fn jet_crypto_entropy_observe_wasi_attempt(
+    event: JetCryptoWasiAttemptEvent,
+    generation: usize,
+    bytes: &[u8],
+) {
+    JET_CRYPTO_WASI_ATTEMPT_TEST_OBSERVER.with(|slot| {
+        if let Some(observer) = slot.borrow_mut().as_mut() {
+            observer(event, generation, bytes);
+        }
     });
 }
 
@@ -212,23 +254,48 @@ fn jet_crypto_entropy_wasi_with(
     mut provider: impl FnMut(&mut [u8]) -> u16,
 ) -> Result<Vec<u8>, JetCryptoEntropyError> {
     const ERRNO_INTR: u16 = 27;
-    for attempt in 0..17usize {
+    for generation in 0..17usize {
         let mut allocation = vec![0u8; count];
+        #[cfg(test)]
+        jet_crypto_entropy_observe_wasi_attempt(
+            JetCryptoWasiAttemptEvent::Created,
+            generation,
+            &allocation,
+        );
         let errno = provider(&mut allocation);
+        #[cfg(test)]
+        jet_crypto_entropy_observe_wasi_attempt(
+            JetCryptoWasiAttemptEvent::ProviderReturned(errno),
+            generation,
+            &allocation,
+        );
         if errno == 0 {
+            #[cfg(test)]
+            jet_crypto_entropy_observe_wasi_attempt(
+                JetCryptoWasiAttemptEvent::Returned,
+                generation,
+                &allocation,
+            );
             return Ok(allocation);
         }
         jet_crypto_entropy_zeroize(&mut allocation);
-        if errno != ERRNO_INTR || attempt == 16 {
+        #[cfg(test)]
+        jet_crypto_entropy_observe_wasi_attempt(
+            JetCryptoWasiAttemptEvent::Zeroized,
+            generation,
+            &allocation,
+        );
+        drop(allocation);
+        #[cfg(test)]
+        jet_crypto_entropy_observe_wasi_attempt(
+            JetCryptoWasiAttemptEvent::Released,
+            generation,
+            &[],
+        );
+        if errno != ERRNO_INTR || generation == 16 {
             return Err(JetCryptoEntropyError::Unavailable);
         }
     }
-    // TODO(D-CRYPTO-RNG1 owner reconciliation): Rust's global allocator may
-    // reuse an address immediately after this exact-count buffer is dropped.
-    // "At most one attempt allocation" and "physical pointer never reused"
-    // cannot both be guaranteed without a separately ratified allocator seam.
-    // This implementation claims fresh allocations and zeroization, not
-    // physical-address uniqueness.
     unreachable!()
 }
 
@@ -326,5 +393,7 @@ pub use jet_crypto_entropy::{
     jet_crypto_entropy_clear_test_provider, jet_crypto_entropy_fill_with,
     jet_crypto_entropy_clear_zeroize_test_observer, jet_crypto_entropy_set_test_provider,
     jet_crypto_entropy_set_zeroize_test_observer, jet_crypto_entropy_unsupported_for_test,
-    jet_crypto_entropy_wasi_with_for_test, JetCryptoEntropyStep,
+    jet_crypto_entropy_clear_wasi_attempt_test_observer,
+    jet_crypto_entropy_set_wasi_attempt_test_observer, jet_crypto_entropy_wasi_with_for_test,
+    JetCryptoEntropyStep, JetCryptoWasiAttemptEvent,
 };

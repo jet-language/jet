@@ -23,8 +23,8 @@ use super::edit_actions::{
     write_checked_formatted,
 };
 use super::graph_helpers::{
-    canvas_action_preview_ok, diagnostics_json, edit, edit_error, graph_id, insert_offset,
-    preview_ok, project_edit_error, query_error,
+    canvas_action_preview_ok, diagnostics_json, edit_error, preview_ok, project_edit_error,
+    query_error,
 };
 use super::project_scan::{
     ProjectContext, env_project_json, lock_project_json, packages_project_json,
@@ -58,95 +58,95 @@ pub const PROOF_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone)]
 pub(super) struct InlineExpr {
-    id: String,
-    span: SourceSpan,
+    pub(super) id: String,
+    pub(super) span: SourceSpan,
 }
 
 #[derive(Debug, Clone)]
 pub(super) struct GraphEditAnchor {
-    graph_id: String,
-    insert_offset: usize,
-    fallible: bool,
+    pub(super) graph_id: String,
+    pub(super) insert_offset: usize,
+    pub(super) fallible: bool,
 }
 
 #[derive(Debug, Clone)]
 pub(super) struct NodeQueryRef {
-    graph_id: String,
-    node_id: String,
-    kind: String,
-    title: String,
-    span: SourceSpan,
+    pub(super) graph_id: String,
+    pub(super) node_id: String,
+    pub(super) kind: String,
+    pub(super) title: String,
+    pub(super) span: SourceSpan,
 }
 
 #[derive(Debug, Clone)]
 pub(super) struct Projection {
-    json: String,
-    inline_exprs: Vec<InlineExpr>,
-    graph_anchors: Vec<GraphEditAnchor>,
-    node_refs: Vec<NodeQueryRef>,
+    pub(super) json: String,
+    pub(super) inline_exprs: Vec<InlineExpr>,
+    pub(super) graph_anchors: Vec<GraphEditAnchor>,
+    pub(super) node_refs: Vec<NodeQueryRef>,
 }
 
 #[derive(Default)]
 pub(super) struct GraphBuilder {
-    graph_id: String,
-    nodes: Vec<NodeRec>,
-    pins: Vec<PinRec>,
-    wires: Vec<WireRec>,
-    regions: Vec<String>,
-    inline_exprs: Vec<InlineRec>,
-    local_pins: HashMap<String, String>,
-    local_types: HashMap<String, String>,
-    getter_pins: HashMap<String, String>,
-    next_wire: usize,
+    pub(super) graph_id: String,
+    pub(super) nodes: Vec<NodeRec>,
+    pub(super) pins: Vec<PinRec>,
+    pub(super) wires: Vec<WireRec>,
+    pub(super) regions: Vec<String>,
+    pub(super) inline_exprs: Vec<InlineRec>,
+    pub(super) local_pins: HashMap<String, String>,
+    pub(super) local_types: HashMap<String, String>,
+    pub(super) getter_pins: HashMap<String, String>,
+    pub(super) next_wire: usize,
 }
 
 #[derive(Clone)]
 pub(super) struct NodeRec {
-    id: String,
-    kind: String,
-    archetype: String,
-    title: String,
-    span: SourceSpan,
-    x: i32,
-    y: i32,
-    badges: Vec<String>,
-    affordances: Vec<String>,
-    meta_json: Option<String>,
+    pub(super) id: String,
+    pub(super) kind: String,
+    pub(super) archetype: String,
+    pub(super) title: String,
+    pub(super) span: SourceSpan,
+    pub(super) x: i32,
+    pub(super) y: i32,
+    pub(super) badges: Vec<String>,
+    pub(super) affordances: Vec<String>,
+    pub(super) meta_json: Option<String>,
 }
 
 pub(super) struct PinRec {
-    id: String,
-    node_id: String,
-    name: String,
-    direction: String,
-    ty: String,
-    role: Option<String>,
-    pattern_source: Option<String>,
-    capability: String,
-    fallible: bool,
-    effect_grant_need: Option<String>,
-    span: SourceSpan,
-    pattern_source_span: Option<SourceSpan>,
-    append_op: Option<String>,
-    element_index: Option<usize>,
+    pub(super) id: String,
+    pub(super) node_id: String,
+    pub(super) name: String,
+    pub(super) direction: String,
+    pub(super) ty: String,
+    pub(super) role: Option<String>,
+    pub(super) pattern_source: Option<String>,
+    pub(super) capability: String,
+    pub(super) fallible: bool,
+    pub(super) effect_grant_need: Option<String>,
+    pub(super) span: SourceSpan,
+    pub(super) pattern_source_span: Option<SourceSpan>,
+    pub(super) append_op: Option<String>,
+    pub(super) element_index: Option<usize>,
 }
 
 pub(super) struct WireRec {
-    id: String,
-    from_pin: String,
-    to_pin: String,
-    kind: String,
-    span: Option<SourceSpan>,
-    from_span: Option<SourceSpan>,
-    to_span: Option<SourceSpan>,
+    pub(super) id: String,
+    pub(super) from_pin: String,
+    pub(super) to_pin: String,
+    pub(super) kind: String,
+    pub(super) span: Option<SourceSpan>,
+    pub(super) from_span: Option<SourceSpan>,
+    pub(super) to_span: Option<SourceSpan>,
 }
 
 pub(super) struct InlineRec {
-    id: String,
-    node_id: String,
-    role: String,
-    source: String,
-    span: SourceSpan,
+    pub(super) id: String,
+    pub(super) node_id: String,
+    pub(super) role: String,
+    pub(super) source: String,
+    pub(super) span: SourceSpan,
 }
 
 /// Stable source revision used by graph edit transactions.

@@ -4,7 +4,7 @@ use std::process::Command;
 use crate::Diagnostics::Diagnostic;
 use jet_semindex::SourceSpan;
 
-use super::schema_api::source_revision;
+use super::schema_api::{DEBUG_SCHEMA_VERSION, source_revision};
 use super::validation_json::{json_str, json_string_field, json_usize_field, parse_json_string, span_json};
 
 pub(super) fn debug_ok(
