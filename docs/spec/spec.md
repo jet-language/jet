@@ -1911,6 +1911,14 @@ state-directory equivalent. Its directory and file are owner-only. Each input
 is stored losslessly, including multiline, effectful, or secret-bearing text;
 Jet cannot truthfully identify every secret.
 
+State-path traversal rejects symlink/reparse components and holds the opened
+history directory as the authority for later reads, replacements, and erasure.
+Each write and clear takes a bounded, crash-released cross-process lock, then
+re-reads current history before changing it. Concurrent sessions therefore
+merge successful submissions, and a stale session cannot resurrect entries
+removed by `:history clear`. Replacement is atomic and durable on supported
+platforms.
+
 F3 opens interactive history search. `:history search <text>` is the textual
 path and `:history clear` erases the whole file. `JET_REPL_HISTORY=off` keeps
 history in memory for the current session only. `JET_REPL_HISTORY_LIMIT=N`

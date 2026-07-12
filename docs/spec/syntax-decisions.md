@@ -1558,6 +1558,15 @@ and reject absolute paths, parent traversal, and symlinks. `Exec.Exit` always
 gets its own consequence prompt interactively and needs both `#Grant(Exec)`
 and `--allow-exec` outside a TTY.
 
+**D-FE-REPL-HISTORY1=A (ratified 2026-07-11)**: `jet repl` persists the
+latest 2,000 successful submissions per user in the platform state directory.
+F3 opens interactive search; `:history search <text>` is the textual path and
+`:history clear` erases persisted history. `JET_REPL_HISTORY=off` selects
+session-only history; `JET_REPL_HISTORY_LIMIT=N` changes retention. Storage is
+owner-only. Corrupt tails are discarded with a visible warning; unavailable
+private storage visibly falls back to session-only history. Inputs are not
+secret-filtered because Jet cannot reliably identify every secret.
+
 ### Core library
 
 **S9 — Print**: `print` (adds newline).

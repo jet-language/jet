@@ -1,14 +1,17 @@
 //! D-FE-REPL-HISTORY1=A persistent, private REPL submission history.
 
-use std::fs::{self, OpenOptions};
-use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::io;
+use std::path::PathBuf;
+
+#[path = "HistoryPlatform.rs"]
+mod platform;
+use platform::Backend;
 
 pub const DEFAULT_LIMIT: usize = 2_000;
 
 pub(crate) struct History {
     entries: Vec<String>,
-    path: Option<PathBuf>,
+    backend: Option<Backend>,
     limit: usize,
 }
 
@@ -16,7 +19,7 @@ impl History {
     pub(crate) fn session_only() -> Self {
         Self {
             entries: Vec::new(),
-            path: None,
+            backend: None,
             limit: DEFAULT_LIMIT,
         }
     }
@@ -25,97 +28,63 @@ impl History {
         if std::env::var("JET_REPL_HISTORY").is_ok_and(|v| v.eq_ignore_ascii_case("off")) {
             return (Self::session_only(), None);
         }
-        let (limit, limit_warning) = match std::env::var("JET_REPL_HISTORY_LIMIT") {
+        let (limit, mut warnings) = match std::env::var("JET_REPL_HISTORY_LIMIT") {
             Ok(raw) => match raw.parse::<usize>() {
-                Ok(n) => (n, None),
-                Err(_) => (DEFAULT_LIMIT, Some(format!(
-                    "warning: JET_REPL_HISTORY_LIMIT={raw:?} is not a number; using {DEFAULT_LIMIT}"
-                ))),
-            },
-            Err(_) => (DEFAULT_LIMIT, None),
-        };
-        let Some(path) = state_path() else {
-            return (
-                Self {
-                    entries: Vec::new(),
-                    path: None,
-                    limit,
-                },
-                Some(
-                    "warning: REPL history storage is unavailable; continuing with session-only history"
-                        .into(),
+                Ok(n) => (n, Vec::new()),
+                Err(_) => (
+                    DEFAULT_LIMIT,
+                    vec![format!(
+                        "warning: JET_REPL_HISTORY_LIMIT={raw:?} is not a number; using {DEFAULT_LIMIT}"
+                    )],
                 ),
-            );
+            },
+            Err(_) => (DEFAULT_LIMIT, Vec::new()),
         };
-        match Self::open(path, limit) {
-            Ok((history, recovery_warning)) => {
-                let warning = recovery_warning.or(limit_warning);
-                (history, warning)
-            }
-            Err(error) => (
-                Self {
-                    entries: Vec::new(),
-                    path: None,
-                    limit,
-                },
-                Some(format!(
-                    "warning: REPL history storage is unavailable ({error}); continuing with session-only history"
-                )),
-            ),
-        }
-    }
-
-    fn open(path: PathBuf, limit: usize) -> io::Result<(Self, Option<String>)> {
-        let parent = path.parent().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidInput, "history path has no parent")
-        })?;
-        private_dir(parent)?;
-        let mut entries = Vec::new();
-        let mut corrupt = false;
-        if path.exists() {
-            if fs::symlink_metadata(&path)?.file_type().is_symlink() {
-                return Err(io::Error::new(
-                    io::ErrorKind::PermissionDenied,
-                    "history path is a symlink",
-                ));
-            }
-            let bytes = fs::read(&path)?;
-            let mut start = 0;
-            while start < bytes.len() {
-                let Some(relative_end) = bytes[start..].iter().position(|b| *b == b'\n') else {
-                    corrupt = true;
-                    break;
-                };
-                let end = start + relative_end;
-                match decode(&bytes[start..end]) {
-                    Some(entry) => entries.push(entry),
-                    None => {
-                        corrupt = true;
-                        break;
-                    }
-                }
-                start = end + 1;
-            }
-        }
+        let Some(root) = state_root() else {
+            return (Self::fallback(limit), Some(storage_fallback("no platform state directory")));
+        };
+        let backend = match Backend::open(&root) {
+            Ok(backend) => backend,
+            Err(error) => return (Self::fallback(limit), Some(storage_fallback(&error.to_string()))),
+        };
+        let guard = match backend.lock() {
+            Ok(guard) => guard,
+            Err(error) => return (Self::fallback(limit), Some(storage_fallback(&error.to_string()))),
+        };
+        let (mut entries, corrupt) = match load_entries(&backend) {
+            Ok(loaded) => loaded,
+            Err(error) => return (Self::fallback(limit), Some(storage_fallback(&error.to_string()))),
+        };
         let before_trim = entries.len();
         trim(&mut entries, limit);
-        let history = Self {
-            entries,
-            path: Some(path),
-            limit,
-        };
-        if corrupt || history.entries.len() != before_trim {
-            history.rewrite()?;
-        } else if history.path.as_ref().is_some_and(|p| p.exists()) {
-            private_file(history.path.as_ref().unwrap())?;
+        if corrupt || entries.len() != before_trim {
+            if let Err(error) = backend.rewrite(&entries) {
+                return (Self::fallback(limit), Some(storage_fallback(&error.to_string())));
+            }
         }
-        Ok((
-            history,
-            corrupt.then(|| {
+        drop(guard);
+        if corrupt {
+            warnings.push(
                 "warning: corrupt history tail discarded; earlier REPL history was recovered"
-                    .into()
-            }),
-        ))
+                    .into(),
+            );
+        }
+        (
+            Self {
+                entries,
+                backend: Some(backend),
+                limit,
+            },
+            (!warnings.is_empty()).then(|| warnings.join("\n")),
+        )
+    }
+
+    fn fallback(limit: usize) -> Self {
+        Self {
+            entries: Vec::new(),
+            backend: None,
+            limit,
+        }
     }
 
     pub(crate) fn entries(&self) -> &[String] {
@@ -126,16 +95,34 @@ impl History {
         if self.limit == 0 {
             return None;
         }
-        self.entries.push(input.to_string());
-        trim(&mut self.entries, self.limit);
-        let result = self.rewrite();
-        if let Err(error) = result {
-            self.path = None;
-            return Some(format!(
-                "warning: REPL history could not be saved ({error}); continuing with session-only history"
-            ));
+        let Some(backend) = self.backend.as_ref() else {
+            self.entries.push(input.to_string());
+            trim(&mut self.entries, self.limit);
+            return None;
+        };
+        let transaction = (|| -> io::Result<(Vec<String>, bool)> {
+            let _guard = backend.lock()?;
+            let (mut entries, corrupt) = load_entries(backend)?;
+            entries.push(input.to_string());
+            trim(&mut entries, self.limit);
+            backend.rewrite(&entries)?;
+            Ok((entries, corrupt))
+        })();
+        match transaction {
+            Ok((entries, corrupt)) => {
+                self.entries = entries;
+                corrupt.then(|| {
+                    "warning: corrupt history tail discarded while saving; earlier REPL history was recovered"
+                        .into()
+                })
+            }
+            Err(error) => {
+                self.entries.push(input.to_string());
+                trim(&mut self.entries, self.limit);
+                self.backend = None;
+                Some(storage_fallback(&error.to_string()))
+            }
         }
-        None
     }
 
     pub(crate) fn search(&self, needle: &str) -> Vec<&str> {
@@ -148,52 +135,63 @@ impl History {
     }
 
     pub(crate) fn clear(&mut self) -> io::Result<()> {
-        self.entries.clear();
-        if let Some(path) = &self.path {
-            match fs::remove_file(path) {
-                Ok(()) => {}
-                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                Err(error) => return Err(error),
-            }
+        if let Some(backend) = self.backend.as_ref() {
+            let _guard = backend.lock()?;
+            // Re-read while serialized so clear participates in same
+            // transaction order as writers. Unlink then directory-sync makes
+            // successful clear durable before lock release.
+            let _ = load_entries(backend)?;
+            backend.clear()?;
         }
+        self.entries.clear();
         Ok(())
     }
+}
 
-    fn rewrite(&self) -> io::Result<()> {
-        let Some(path) = &self.path else {
-            return Ok(());
+fn storage_fallback(detail: &str) -> String {
+    format!(
+        "warning: REPL history storage is unavailable ({detail}); continuing with session-only history"
+    )
+}
+
+fn load_entries(backend: &Backend) -> io::Result<(Vec<String>, bool)> {
+    let Some(bytes) = backend.read()? else {
+        return Ok((Vec::new(), false));
+    };
+    let mut entries = Vec::new();
+    let mut corrupt = false;
+    let mut start = 0;
+    while start < bytes.len() {
+        let Some(relative_end) = bytes[start..].iter().position(|byte| *byte == b'\n') else {
+            corrupt = true;
+            break;
         };
-        let parent = path.parent().unwrap();
-        private_dir(parent)?;
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static NEXT_TMP: AtomicU64 = AtomicU64::new(0);
-        let tmp = parent.join(format!(
-            ".repl-history.{}.{}.tmp",
-            std::process::id(),
-            NEXT_TMP.fetch_add(1, Ordering::Relaxed)
-        ));
-        let mut options = OpenOptions::new();
-        options.create_new(true).write(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
+        let end = start + relative_end;
+        match decode(&bytes[start..end]) {
+            Some(entry) => entries.push(entry),
+            None => {
+                corrupt = true;
+                break;
+            }
         }
-        let mut file = options.open(&tmp)?;
-        for entry in &self.entries {
-            file.write_all(encode(entry).as_bytes())?;
-            file.write_all(b"\n")?;
-        }
-        file.sync_all()?;
-        fs::rename(&tmp, path)?;
-        private_file(path)
+        start = end + 1;
     }
+    Ok((entries, corrupt))
 }
 
 fn trim(entries: &mut Vec<String>, limit: usize) {
     if entries.len() > limit {
         entries.drain(..entries.len() - limit);
     }
+}
+
+fn render(entries: &[String]) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    for entry in entries {
+        bytes.extend_from_slice(encode(entry).as_bytes());
+        bytes.push(b'\n');
+    }
+    bytes
 }
 
 fn encode(text: &str) -> String {
@@ -226,36 +224,73 @@ fn hex(byte: u8) -> Option<u8> {
     }
 }
 
-fn state_path() -> Option<PathBuf> {
-    if let Some(dir) = std::env::var_os("XDG_STATE_HOME").filter(|v| !v.is_empty()) {
-        return Some(PathBuf::from(dir).join("jet/repl-history"));
+fn state_root() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("XDG_STATE_HOME").filter(|value| !value.is_empty()) {
+        let dir = PathBuf::from(dir);
+        return dir.is_absolute().then_some(dir);
     }
     #[cfg(target_os = "windows")]
     if let Some(dir) = std::env::var_os("LOCALAPPDATA") {
-        return Some(PathBuf::from(dir).join("Jet/repl-history"));
+        return Some(PathBuf::from(dir));
     }
     #[cfg(target_os = "macos")]
     if let Some(home) = std::env::var_os("HOME") {
-        return Some(PathBuf::from(home).join("Library/Application Support/Jet/repl-history"));
+        return Some(PathBuf::from(home).join("Library/Application Support"));
     }
-    std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state/jet/repl-history"))
+    std::env::var_os("HOME").and_then(|home| {
+        let home = PathBuf::from(home);
+        home.is_absolute().then(|| home.join(".local/state"))
+    })
 }
 
-fn private_dir(path: &Path) -> io::Result<()> {
-    fs::create_dir_all(path)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
-    }
-    Ok(())
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-fn private_file(path: &Path) -> io::Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+    fn root(tag: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "jet_repl_history_unit_{tag}_{}_{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("thread")
+        ))
     }
-    Ok(())
+
+    #[test]
+    fn atomic_replacement_supports_repeated_writes() {
+        let root = root("replace");
+        std::fs::remove_dir_all(&root).ok();
+        let backend = Backend::open(&root).unwrap();
+        let _guard = backend.lock().unwrap();
+        backend.rewrite(&["first".into()]).unwrap();
+        backend.rewrite(&["second".into()]).unwrap();
+        let (entries, corrupt) = load_entries(&backend).unwrap();
+        assert_eq!(entries, ["second"]);
+        assert!(!corrupt);
+        drop(_guard);
+        drop(backend);
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn transaction_lock_times_out_then_recovers_after_release() {
+        let root = root("lock");
+        std::fs::remove_dir_all(&root).ok();
+        let first = Backend::open(&root).unwrap();
+        let second = Backend::open(&root).unwrap();
+        let held = first.lock().unwrap();
+        let started = std::time::Instant::now();
+        let error = match second.lock() {
+            Ok(_) => panic!("second store acquired held history lock"),
+            Err(error) => error,
+        };
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        assert!(started.elapsed() < std::time::Duration::from_secs(3));
+        drop(held);
+        let recovered = second.lock().unwrap();
+        drop(recovered);
+        drop(first);
+        drop(second);
+        std::fs::remove_dir_all(root).ok();
+    }
 }
