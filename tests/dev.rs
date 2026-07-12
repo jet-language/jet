@@ -235,6 +235,26 @@ fn dev_iteration_with_timeout(stem: &str, file: &str, use_interpreter: bool) -> 
     })
 }
 
+/// Exercise the real Cranelift tier while deliberately making the next rung
+/// the interpreter. This keeps authority-boundary tests independent of whether
+/// a host `rustc` subprocess happens to be available, while still detecting
+/// when the JIT itself learns the construct.
+fn jit_with_interpreter_fallback(file: &str) -> RunOutcome {
+    let mut bundle = match jet::Loader::load_entry(file) {
+        Ok(bundle) => bundle,
+        Err(diags) => return RunOutcome::Problems(diags),
+    };
+    let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+        .into_iter()
+        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        .collect::<Vec<_>>();
+    if !errors.is_empty() {
+        return RunOutcome::Problems(errors);
+    }
+    let mut backend = CraneliftBackend::new(InterpreterBackend::new());
+    backend.run(&bundle, false)
+}
+
 /// All `.jet` files directly under a topic directory of `examples/features/`
 /// (one level: `examples/features/<topic>/<name>.jet`). Skips `expected/`
 /// and skips project-directory examples (`<topic>/<name>/main.jet`) — those
@@ -488,11 +508,6 @@ const DEFAULT_BACKEND_BOUNDARIES: &[&str] = &[
     // Native path walking touches host filesystem traversal that the default
     // dev interpreter/JIT tier does not own today.
     "io/path",
-    // Ambient stdin has no deterministic source in this differential harness.
-    // The JIT cannot lower StdinHandle iteration and the interpreter correctly
-    // requires runtime authority, so keep this as an explicit E3410 boundary
-    // instead of making the result depend on whether the AOT fallback spawned.
-    "io/stdin_filter",
     // Native GTK backend is intentionally outside default dev's source-level
     // interpreter/JIT surface on this host.
     "ui/ui_native_linux",
@@ -548,7 +563,14 @@ fn check_dev_default_stem(
         };
     }
 
-    let interpreted = match dev_iteration_with_timeout(stem, &file, false) {
+    let outcome = if stem == "io/stdin_filter" {
+        // Pin the JIT -> interpreter authority boundary. The ordinary default
+        // ladder includes AOT, whose successful spawn would hide this JIT gap.
+        jit_with_interpreter_fallback(&file)
+    } else {
+        dev_iteration_with_timeout(stem, &file, false)
+    };
+    let interpreted = match outcome {
         RunOutcome::Ran {
             stdout,
             stderr,
@@ -851,7 +873,7 @@ fn dev_default_matches_compiled_binary() {
 }
 
 #[test]
-fn stdin_filter_is_a_deterministic_default_boundary() {
+fn stdin_filter_exercises_jit_then_exact_interpreter_boundary() {
     let dir = std::env::temp_dir().join(format!(
         "jet_dev_stdin_boundary_{}",
         std::process::id()
