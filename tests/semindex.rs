@@ -159,6 +159,8 @@ fn semantic_visibility_prefers_deepest_latest_same_name_fact() {
     outer.module_path = "test.jet".to_string();
     outer.lexical_scope = Some(jet_semindex::SemanticLexicalScope {
         identity: "outer".to_string(),
+        structural_parent: 1,
+        structural_slot: "body".to_string(),
         span: jet_semindex::SourceSpan { start: 0, end: 100 },
         depth: 1,
         declaration_offset: 10,
@@ -167,6 +169,8 @@ fn semantic_visibility_prefers_deepest_latest_same_name_fact() {
     inner.identity = "local:inner:value@40".to_string();
     inner.lexical_scope = Some(jet_semindex::SemanticLexicalScope {
         identity: "inner".to_string(),
+        structural_parent: 2,
+        structural_slot: "then_body".to_string(),
         span: jet_semindex::SourceSpan { start: 30, end: 70 },
         depth: 2,
         declaration_offset: 40,
@@ -180,6 +184,24 @@ fn semantic_visibility_prefers_deepest_latest_same_name_fact() {
     assert_eq!(index.resolve_visible_at("value", at(50)).unwrap().identity, inner.identity);
     assert_eq!(index.resolve_visible_at("value", at(80)).unwrap().identity, outer.identity);
     assert!(index.resolve_visible_at("value", at(5)).is_none());
+}
+
+#[test]
+fn semantic_scope_provenance_ignores_braces_in_lexer_forms() {
+    let src = "fn run() {\n    if true {\n        seed :: 1\n        text :: \"{seed}\"\n        // } neither is this {\n        scoped :: 1\n        print(scoped)\n    }\n    print(1)\n}\n";
+    let path = temp_fixture("hostile_scope_braces.jet", src);
+    let symbols = open_symbols(&path).expect("semantic symbols");
+    let scoped = symbols.lookup("scoped");
+    assert_eq!(scoped.len(), 1);
+    let scope = scoped[0].lexical_scope.as_ref().expect("checked lexical scope");
+    assert_eq!(scope.structural_slot, "then_body");
+    assert!(scope.identity.contains(&format!(":{}:then_body", scope.structural_parent)));
+    assert!(scope.span.end > src.find("print(scoped)").unwrap());
+    assert!(symbols.resolve_visible_at("scoped", SemanticVisibilityAnchor {
+        module_path: path.to_str().unwrap(),
+        offset: Some(src.rfind("print(1)").unwrap()),
+        session_top_level: false,
+    }).is_none());
 }
 
 #[test]

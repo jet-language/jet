@@ -35,6 +35,8 @@ pub enum SemanticProvenance {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SemanticLexicalScope {
     pub identity: String,
+    pub structural_parent: usize,
+    pub structural_slot: String,
     pub span: SourceSpan,
     pub depth: usize,
     pub declaration_offset: usize,
@@ -371,15 +373,12 @@ pub fn build_semantic_symbol_index(db: &SymbolDB, bundle: &ProgramBundle) -> Sem
             }
         }
         let lexical_scope = if matches!(def.kind, SymKind::Local { .. } | SymKind::Param { .. }) {
-            sources.get(def.module_path.as_str()).and_then(|source| {
-                lexical_scope_for_def(
-                    db,
-                    &def.module_path,
-                    def.def_span.into(),
-                    matches!(def.kind, SymKind::Param { .. }),
-                    source,
-                )
-            })
+            lexical_scope_for_def(
+                db,
+                &def.module_path,
+                def.def_span.into(),
+                matches!(def.kind, SymKind::Param { .. }),
+            )
         } else {
             None
         };
@@ -511,7 +510,6 @@ fn lexical_scope_for_def(
     module_path: &str,
     def_span: SourceSpan,
     is_param: bool,
-    source: &str,
 ) -> Option<SemanticLexicalScope> {
     let nodes = db
         .nodes
@@ -549,76 +547,40 @@ fn lexical_scope_for_def(
             .min_by_key(|node| node.span.end.saturating_sub(node.span.start))
             .map(|node| (node.id, "body".to_string()))
     })?;
-    let children = nodes
-        .iter()
-        .filter(|node| node.parent == Some(parent) && node.slot == slot)
-        .collect::<Vec<_>>();
-    let first = children.iter().map(|node| node.span.start).min().unwrap_or(def_span.start);
-    let last = children.iter().map(|node| node.span.end).max().unwrap_or(def_span.end);
-    let span = enclosing_braces(source, first, last).unwrap_or_else(|| {
-        db.nodes.get(parent).map_or(def_span, |node| node.span)
-    });
+    let mut span = db.nodes.get(parent).map_or(def_span, |node| node.span);
+    for node in &nodes {
+        if descends_through_slot(db, node.id, parent, &slot) {
+            span.start = span.start.min(node.span.start);
+            span.end = span.end.max(node.span.end);
+        }
+    }
     Some(SemanticLexicalScope {
         identity: format!("scope:{module_path}:{parent}:{slot}"),
+        structural_parent: parent,
+        structural_slot: slot,
         span,
         depth: depth.max(1),
         declaration_offset: if is_param { 0 } else { def_span.start },
     })
 }
 
-fn is_lexical_slot(slot: &str) -> bool {
-    slot == "body" || slot.ends_with("_body") || slot.ends_with("_bodies")
+fn descends_through_slot(db: &SymbolDB, mut node_id: usize, parent: usize, slot: &str) -> bool {
+    loop {
+        let Some(node) = db.nodes.get(node_id) else {
+            return false;
+        };
+        if node.parent == Some(parent) {
+            return node.slot == slot;
+        }
+        let Some(next) = node.parent else {
+            return false;
+        };
+        node_id = next;
+    }
 }
 
-fn enclosing_braces(source: &str, first: usize, last: usize) -> Option<SourceSpan> {
-    let bytes = source.as_bytes();
-    let mut stack = Vec::new();
-    let mut pairs = Vec::new();
-    let mut quote = None;
-    let mut escape = false;
-    let mut line_comment = false;
-    let mut block_comment = false;
-    let mut i = 0usize;
-    while i < bytes.len() {
-        let byte = bytes[i];
-        let next = bytes.get(i + 1).copied();
-        if line_comment {
-            line_comment = byte != b'\n';
-        } else if block_comment {
-            if byte == b'*' && next == Some(b'/') {
-                block_comment = false;
-                i += 1;
-            }
-        } else if let Some(mark) = quote {
-            if escape {
-                escape = false;
-            } else if byte == b'\\' {
-                escape = true;
-            } else if byte == mark {
-                quote = None;
-            }
-        } else if byte == b'/' && next == Some(b'/') {
-            line_comment = true;
-            i += 1;
-        } else if byte == b'/' && next == Some(b'*') {
-            block_comment = true;
-            i += 1;
-        } else if byte == b'"' || byte == b'\'' {
-            quote = Some(byte);
-        } else if byte == b'{' {
-            stack.push(i);
-        } else if byte == b'}' {
-            if let Some(open) = stack.pop() {
-                pairs.push((open, i + 1));
-            }
-        }
-        i += 1;
-    }
-    pairs
-        .into_iter()
-        .filter(|(open, close)| *open <= first && last <= *close)
-        .max_by_key(|(open, _)| *open)
-        .map(|(start, end)| SourceSpan { start, end })
+fn is_lexical_slot(slot: &str) -> bool {
+    slot == "body" || slot.ends_with("_body") || slot.ends_with("_bodies")
 }
 
 fn semantic_shape(
