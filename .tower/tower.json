@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 520,
-    "rev": 4550,
+    "rev": 4557,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -14859,11 +14859,11 @@
         {
           "n": 7,
           "text": "override law enforced: policy.lints deny path (E-code + snapshot), bypass facts in jet inspect dossier, existing gates audited for conformance; docs updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "claude-main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-12T02:02:16.232Z"
+          "evidence": "D-LINTPOLICY1=A implemented: policy.lints.deny in pkg.jet (existing L-code vocabulary, no new grammar surface per §0.4 manifest-key precedent) -> E1293 registered + diagnostics.md rows + tests/pkg.rs transcript tests (never-blocks-by-default + deny-path); bypass facts (UnsafeRegion/UnsafeFn/ExplicitDrop/LintAllow) in jet inspect dossier text+JSON via jet-semindex + semindex test; gates audit: effect budgets + policy.trust conform, a11y lint tool-invoked-only left alone, E0209 I1-adjacent left alone, no hardcoded deny flags found. jetpack lib 442/443 (1 unrelated PTY), pkg 135/136 (1 = #292 ICE), semindex 12/12, workspace build clean.",
+          "at": "2026-07-12T14:58:45.787Z"
         }
       ],
       "refs": [
@@ -15596,12 +15596,17 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "verify",
       "priority": "P0",
       "plan": null,
       "blockedBy": [],
-      "assignee": "terra-519-owner-accept",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "terra-519-owner-accept",
+          "text": "Implementation complete; 153/153 Tower tests green. Criteria met for independent verification. #515/#516 remain verify/open. No owner acceptance performed."
+        },
         {
           "at": "2026-07-12",
           "by": "codex-orchestrator",
@@ -15612,45 +15617,54 @@
         {
           "n": 1,
           "text": "Acceptance ballots cannot be resolved by generic decision ratify, clearance batch, agent quote, or caller-supplied by:owner; every bypass attempt is rejected and audited.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "terra-519-owner-accept",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-12T14:46:54.058Z"
+          "evidence": "Generic store ratify plus HTTP clearance/batch, CLI ratify --by owner/--quote, card-update by:owner, and needsAcceptance clearing reject E_ACCEPTANCE_OWNER_UI; transport rejection events persist as acceptance.reject. Tower suite 153/153 green.",
+          "at": "2026-07-12T14:58:44.225Z"
         },
         {
           "n": 2,
           "text": "Dedicated owner-verification action uses server-issued single-use provenance bound to the live owner UI session; replay, missing token, wrong card/outcome, and non-loopback requests fail closed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "terra-519-owner-accept",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-12T14:46:54.220Z"
+          "evidence": "Loopback UI receives random HttpOnly process-memory session; 30s random challenge binds session+decision+outcome and is consumed before validation. Missing session, replay, wrong decision, wrong outcome, and non-loopback-forwarded request tests pass.",
+          "at": "2026-07-12T14:58:44.321Z"
         },
         {
           "n": 3,
           "text": "Accept and bounce still work from the owner verification UI, update card/ballot atomically, and retain explicit immutable provenance distinct from agent verification.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "terra-519-owner-accept",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-12T14:46:54.380Z"
+          "evidence": "UI Accept/Bounce use dedicated challenge+resolve endpoints. Single store mutation updates ballot and card; acceptance.resolve event and append-only provenanceHistory carry non-secret session/challenge audit IDs. Accept and bounce HTTP tests pass.",
+          "at": "2026-07-12T14:58:44.412Z"
         },
         {
           "n": 4,
           "text": "Regression tests reproduce the forged #515/#516 path and prove it impossible; #515/#516 remain verify/open until the owner explicitly acts.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "terra-519-owner-accept",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-12T14:46:54.531Z"
+          "evidence": "acceptance-queue regression recreates forged caller by:owner and quote paths; all bypasses leave ballot open/card verify. Live #515 and #516 inspected: phase verify, D-ACCEPT-515/D-ACCEPT-516 open.",
+          "at": "2026-07-12T14:58:44.499Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "Tower/app/store.mjs",
+        "Tower/app/server.mjs",
+        "Tower/app/cli.mjs",
+        "Tower/app/ui/tower.js",
+        "Tower/test/acceptance-queue.test.mjs",
+        "Tower/test/cli.test.mjs",
+        "Tower/test/criteria.test.mjs",
+        "Tower/AGENTS.md",
+        "Tower/README.md"
+      ],
       "needsAcceptance": true,
       "created": "2026-07-12T14:46:37.170Z",
-      "updated": "2026-07-12",
-      "claimedAt": "2026-07-12T14:47:51.071Z"
+      "updated": "2026-07-12"
     }
   ],
   "decisions": [
@@ -33329,6 +33343,55 @@
   ],
   "events": [
     {
+      "at": "2026-07-12T14:58:45.788Z",
+      "by": "claude-main",
+      "action": "card.criteria-meet",
+      "ref": "c0qdl0gg",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-12T14:58:44.705Z",
+      "by": "terra-519-owner-accept",
+      "action": "card.release",
+      "ref": "c0n3n975",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T14:58:44.615Z",
+      "by": "terra-519-owner-accept",
+      "action": "card.update",
+      "ref": "c0n3n975",
+      "note": "phase,logEntry,refs"
+    },
+    {
+      "at": "2026-07-12T14:58:44.500Z",
+      "by": "terra-519-owner-accept",
+      "action": "card.criteria-meet",
+      "ref": "c0n3n975",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-12T14:58:44.413Z",
+      "by": "terra-519-owner-accept",
+      "action": "card.criteria-meet",
+      "ref": "c0n3n975",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-12T14:58:44.322Z",
+      "by": "terra-519-owner-accept",
+      "action": "card.criteria-meet",
+      "ref": "c0n3n975",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-12T14:58:44.225Z",
+      "by": "terra-519-owner-accept",
+      "action": "card.criteria-meet",
+      "ref": "c0n3n975",
+      "note": "#1"
+    },
+    {
       "at": "2026-07-12T14:47:51.071Z",
       "by": "terra-519-owner-accept",
       "action": "card.claim",
@@ -36778,55 +36841,6 @@
       "action": "card.criteria-add",
       "ref": "c0skyr40",
       "note": "#8 formatter round-trips #Foreign bodies (STABILITY test); gram"
-    },
-    {
-      "at": "2026-07-12T01:15:58.427Z",
-      "by": "claude-main",
-      "action": "card.criteria-add",
-      "ref": "c0skyr40",
-      "note": "#7 cpp binder stage 1 (C-linkage) live behind jet inspect bind "
-    },
-    {
-      "at": "2026-07-12T01:15:58.329Z",
-      "by": "claude-main",
-      "action": "card.criteria-add",
-      "ref": "c0skyr40",
-      "note": "#6 #Foreign(asm) behind use core.mem + #Unsafe; E0208-class gat"
-    },
-    {
-      "at": "2026-07-12T01:15:58.235Z",
-      "by": "claude-main",
-      "action": "card.criteria-add",
-      "ref": "c0skyr40",
-      "note": "#5 #Foreign(<lang>) fn parses; sema checks call sites vs signat"
-    },
-    {
-      "at": "2026-07-12T01:15:58.133Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0skyr40",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T01:15:58.032Z",
-      "by": "claude-main",
-      "action": "card.criteria-add",
-      "ref": "c0k0v4gj",
-      "note": "#1 core.archive gzip helpers moved to core.compress; module reg"
-    },
-    {
-      "at": "2026-07-12T01:15:57.939Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0k0v4gj",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T01:15:57.845Z",
-      "by": "claude-main",
-      "action": "card.criteria-add",
-      "ref": "c0iftbrr",
-      "note": "#8 docs match: spec.md derive/marker chapters, diagnostics.md r"
     }
   ],
   "nextNum": 368,

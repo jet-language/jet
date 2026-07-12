@@ -498,12 +498,10 @@ export function addCard(s, p, config) {
 
 const CARD_FIELDS = ['title', 'body', 'kind', 'track', 'epoch', 'milestoneId', 'phase', 'priority', 'plan', 'blockedBy', 'workOrder', 'assignee', 'criteria', 'needsAcceptance', 'refs'];
 
-// D-TWR-CRIT1=C / D-TWRGUARD1=C: gate --phase done. Agent-hard, owner-soft —
-// a write with by !== 'owner' is refused while any criterion is unverified;
-// by === 'owner' always passes (bypass logged). Once the gate clears, a card
-// flagged needsAcceptance mints an owner accept/bounce ballot instead of
-// closing outright (again: owner writes go straight to done). Returns a
-// phase override ('verify') when acceptance was minted, else null.
+// D-TWR-CRIT1=C / D-TWRGUARD1=C: gate --phase done. Criteria remain
+// owner-soft, but needsAcceptance is transport-hard: caller attribution can
+// never stand in for the dedicated owner UI provenance. Once criteria clear,
+// an agent write mints the acceptance ballot and parks the card in verify.
 function applyDoneGate(s, c, targetPhase, by) {
   if (targetPhase !== 'done') return null;
   if (c.needsAcceptance && by === 'owner')
@@ -877,9 +875,7 @@ export function ratify(s, decisionId, outcome, comment, by, quote) {
 // This prevents caller-controlled `by`, quotes, and batch payloads from
 // crossing the owner-verification boundary.
 export function createAcceptanceResolver() {
-  const authority = Symbol('tower-owner-acceptance');
-  return (s, decisionId, outcome, comment, provenance, presentedAuthority = authority) => {
-    if (presentedAuthority !== authority) fail('E_ACCEPTANCE_OWNER_UI', 'invalid owner-verification authority');
+  return (s, decisionId, outcome, comment, provenance) => {
     const d = s.decisions.find(x => x.id === decisionId) || fail('E_NOT_FOUND', `no decision ${decisionId}`);
     if (d.group !== 'acceptance' || !d.id.startsWith('D-ACCEPT-'))
       fail('E_ACCEPTANCE_OWNER_UI', `${d.id} is not an owner-verification ballot`);

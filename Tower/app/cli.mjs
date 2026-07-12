@@ -144,7 +144,7 @@ function cmdCard(store, { pos, flags }) {
       const current = db.findCard(store.load(), ref);
       const openAcceptance = current && store.load().decisions.find(d => d.cardId === current.id && d.group === 'acceptance' && d.status !== 'ratified');
       const clearsAcceptance = 'needsAcceptance' in patch && !(patch.needsAcceptance === true || patch.needsAcceptance === 'true');
-      if (current && (current.needsAcceptance && patch.phase === 'done' && by === 'owner' || openAcceptance && clearsAcceptance)) {
+      if (current && ((current.needsAcceptance && patch.phase === 'done' && by === 'owner') || (openAcceptance && clearsAcceptance))) {
         const id = openAcceptance?.id || `D-ACCEPT-${current.num}`;
         store.mutate((s) => db.auditAcceptanceRejection(s, id, 'cli card update', 'owner-verification bypass rejected', by));
         throw new TowerError('E_ACCEPTANCE_OWNER_UI', `card #${current.num} requires the dedicated owner verification UI`);

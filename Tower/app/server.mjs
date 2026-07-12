@@ -356,7 +356,7 @@ export function serve(store, port = 7878, open = false) {
           const c = db.findCard(s, p.id);
           const ballot = c && s.decisions.find(d => d.cardId === c.id && d.group === 'acceptance' && d.status !== 'ratified');
           const clearsFlag = 'needsAcceptance' in p && !(p.needsAcceptance === true || p.needsAcceptance === 'true');
-          if (c?.needsAcceptance && p.phase === 'done' && p.by === 'owner' || ballot && clearsFlag) {
+          if ((c?.needsAcceptance && p.phase === 'done' && p.by === 'owner') || (ballot && clearsFlag)) {
             const id = ballot?.id || `D-ACCEPT-${c.num}`;
             auditAcceptanceReject(store, id, name, 'caller-supplied by:owner or flag clearing cannot bypass owner verification', p.by);
             return send(res, 403, { error: 'E_ACCEPTANCE_OWNER_UI', message: 'owner verification requires the dedicated owner UI action' });
