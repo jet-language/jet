@@ -69,6 +69,42 @@ fn jet_cmd_env(args: &[&str], cwd: &Path, envs: &[(&str, &str)]) -> std::process
     cmd.output().expect("jet binary should run")
 }
 
+#[cfg(unix)]
+fn install_closed_status_crypto_helper(home: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let previous_home = std::env::var_os("HOME");
+    std::env::set_var("HOME", home);
+    let helper = jet::Jetpack::FFI::cached_crypto_helper_path();
+    match previous_home {
+        Some(value) => std::env::set_var("HOME", value),
+        None => std::env::remove_var("HOME"),
+    }
+
+    let release = helper.parent().unwrap();
+    let cache_key = release
+        .parent()
+        .and_then(Path::parent)
+        .and_then(Path::file_name)
+        .and_then(|name| name.to_str())
+        .unwrap();
+    fs::create_dir_all(release).unwrap();
+    fs::write(
+        release.join(format!("libjet_ffi_{cache_key}.rlib")),
+        b"test cache sentinel",
+    )
+    .unwrap();
+    let signature = "00".repeat(64);
+    fs::write(
+        &helper,
+        format!(
+            "#!/bin/sh\nIFS= read -r command\ncase \"$command\" in\n  keygen*) printf 'secret helper output' ; printf 'raw OS status and dependency text' >&2 ; exit 75 ;;\n  sign*) printf '%s\\n' '{signature}' ;;\n  verify*) exit 0 ;;\n  *) exit 1 ;;\nesac\n"
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&helper, fs::Permissions::from_mode(0o755)).unwrap();
+}
+
 /// Init an empty bare git repo standing in for a registry index. Returns its
 /// `file://` URL.
 fn bare_registry(dir: &Path) -> String {
