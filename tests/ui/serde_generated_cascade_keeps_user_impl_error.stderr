@@ -1,0 +1,31 @@
+Error [E0105]: method `encode` is defined twice on `Bad`
+  --> tests/ui/serde_generated_cascade_keeps_user_impl_error.jet:3:5
+    |
+  3 | @[Encode]
+    |     ^^^^^
+ Why: each method name may appear only once on a type
+ Fix: rename or remove one of the definitions
+
+Error [E0908]: `Bad` already implements `Encode`
+  --> tests/ui/serde_generated_cascade_keeps_user_impl_error.jet:1:6
+    |
+  1 | struct Plain {}
+    |      ^^^
+ Why: each type may implement a trait only once
+ Fix: remove the duplicate `impl` block
+
+Error [E2411]: `Plain` can't be serialized
+  --> tests/ui/serde_generated_cascade_keeps_user_impl_error.jet:5:5
+    |
+  5 |     inner: Plain
+    |     ^^^^^
+ Why: only types that opt in (and their fields) have a wire form; `Plain` does not
+ Fix: add `@[Codable]` or `@[Encode]` to `Plain`, or remove it from the encoded value
+
+Error [E0113]: `encode` promises to return `DataTree`, but this returns Int (a whole number)
+  --> tests/ui/serde_generated_cascade_keeps_user_impl_error.jet:10:16
+    |
+ 10 |         return 1
+    |                ^
+ Why: the value handed back must match the type after `->`
+ Fix: use `DataTree` here

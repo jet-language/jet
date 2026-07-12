@@ -11,6 +11,7 @@ impl<'a> Parser<'a> {
                             methods: vec![f],
                             delegation_field: None,
                             assoc_type_impls: Vec::new(),
+                            is_generated_serde: false,
                             os_target: None,
                         })
                     } else {

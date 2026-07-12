@@ -1135,6 +1135,9 @@ pub struct ImplDef {
     pub delegation_field: Option<String>,
     /// D-LIB2: `type Name = ConcreteType;` in top-level impl blocks.
     pub assoc_type_impls: Vec<(String, Span, Type)>,
+    /// True only for codec impls synthesized from a serde derive. Parsed user
+    /// impls are always false, even when type and trait names match.
+    pub is_generated_serde: bool,
     /// D-OSTARGET1=A (ratified 2026-07-01, c134): `#Target(Os.Linux|Os.Macos|Os.Windows)`
     /// before this `impl` block — native OS gating (Phase 8 native backends).
     /// `None` means this impl compiles for every OS. Only ratified at item

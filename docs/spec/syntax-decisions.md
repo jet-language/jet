@@ -1380,55 +1380,6 @@ named methods. The overlay tier corrects wrong guesses. Internal staging
 may land C-linkage first, then classes/exceptions, then templates — the
 ratified surface is full depth, so no intermediate stage becomes law.
 
-**Polyglot binder wave (all =A, ratified 2026-07-11, cards #502–#504;
-per-language depth under D-FFI-UNIFY1, host models following the
-D-FFI-PY1 precedent):**
-
-- **D-FFI-GO1=A**: `go.*` — in-process `go build -buildmode=c-archive`
-  static shims; Go runtime rides in-process; blocking calls carry
-  effects; handle pinning bridges Go GC and Jet ownership.
-- **D-FFI-JVM1=A**: `java.*` (Kotlin/Scala ride the same bytecode
-  surface) — embedded JVM via the JNI invocation API, created lazily on
-  first `java.*` call; classes are opaque handles; checked exceptions
-  surface as `T ? JavaError`; JVM provisioned by jetpack (I6).
-- **D-FFI-DOTNET1=A**: `cs.*` (C#/F#) — hostfxr/hostpolicy embed; .NET
-  Tasks bridge to Jet tasks at the boundary; NuGet as jetpack provider.
-- **D-FFI-FORTRAN1=A**: `fortran.*` — ISO_C_BINDING bridge via gfortran;
-  arrays cross as `[T]`/`Tensor<T>` with explicit column-major facts
-  recorded in the binding (order mismatch is a checked error, never a
-  silent transposition).
-- **D-FFI-LUA1=A**: `lua.*` — in-process VM (embedding is Lua's design
-  point); tables ↔ `[K: V]` zero-copy views; effect root `#(Lua)`.
-- **D-FFI-RUBY1=A**: `ruby.*` — sidecar worker (GVL + interpreter global
-  state make embedding hostile); RubyGems as jetpack provider.
-- **D-FFI-PERL1=A**: `perl.*` — sidecar worker; CPAN provider; legacy
-  scripts callable as-is.
-- **D-FFI-PHP1=A**: `php.*` — sidecar fpm-style worker pool; Packagist
-  provider.
-- **D-FFI-R1=A**: `r.*` (root reserved by D-DATA-BRIDGE1) — sidecar
-  Rserve-style worker; `data.frame` ↔ `core.data.Table` typed round-trip;
-  CRAN provider; plots return as SVG values (D-DATA-PLOT1-compatible).
-- **D-FFI-COBOL1=A**: `cobol.*` — GnuCOBOL C-ABI binder; copybooks import
-  as `@Codable` structs with fixed-width/packed-decimal wire facts
-  (COMP-3 money maps to `Decimal`, never `Float`); enables strangler-fig
-  migration of the COBOL estate.
-- **D-FFI-OCTAVE1=A**: `octave.*` — sidecar Octave worker
-  (MATLAB-compatible); matrices ↔ `Matrix<M,N>`/`Tensor<T>`; `.m`
-  scripts callable; jetpack-provisioned.
-- **D-FFI-SH1=A**: `Sh` typed text — the third D-TYPEDTEXT1 instance
-  (same engine, I8): each `{hole}` becomes exactly one argv item, never
-  word-split or glob-expanded; `core.process.run(cmd: Sh)` executes
-  without a shell parsing user data; `Sh.raw("…")` is the sole audited
-  escape; `sh"…"` prefix per D-TYPEDTEXT2.
-- **D-MIGRATE-SRC1=A**: source-importer framework law — `jet import
-  <lang> <dir>` gains per-language semantic source importers; output is
-  editable canonical Jet (D-WD5), every untranslatable construct is a
-  TODO diagnostic (D-JPK-IMPORTTODO1 family), omissions are reported
-  never dropped (D-JOS-NIXIMPORT1 discipline), detectable tests carry
-  over, import is idempotent with update/dry-run/conflict policy; a body
-  the importer cannot translate becomes a binder-backed FFI stub + TODO.
-  Per-language importers ship separately under this law.
-
 **D-FFI-UNIFY1 — FFI structure law**: every foreign language mounts as a
 namespace `<lang>.<lib>` with the same three tiers (S59 generalized): script
 tier (`use "xxhash.h" as xx` — bind on first compile), project tier
@@ -1901,18 +1852,6 @@ injectable `Clock`; constraint layout is a `layout { }` block over
 Components distribute copy-in-and-own: `jetpack add <Component>` copies
 source into `./components/` (no version lock). Native UI wraps platform
 widget FFI, all three desktop platforms against one trait seam *(gated)*.
-
-**D-LIVEQUERY1=A — live queries** *(ratified 2026-07-11, card #505)*:
-`app.live(query, args)` accepts only a function whose effect row is
-inside `Db.Read` and whose body is `@Pure` modulo those reads; anything
-else is a compile error naming the offending effect. Sema records the
-query's read footprint; a committed `#Transact` whose write set
-intersects a live footprint invalidates exactly those subscriptions,
-re-runs them, and pushes results over `core.ws` into a client
-`Signal<T>` (D-REACT1). No invalidation keys exist. Runs in `jet dev`
-and any self-hosted server — no platform dependency. Expert floor stays
-public: `app.subscribe`/`app.invalidate` for sources outside the
-tracker, and an `every:` interval option for untracked queries.
 
 **Web target** *(D-WEBKIND1, D-DOMGEN1, D-WEBBACKEND1, D-OSTARGET1,
 D-WEBDEFAULT1, D-HTMLPAIR1)*: browser target is `wasm32-unknown-unknown` +
@@ -2629,18 +2568,6 @@ language/compiler/dev loop, `jetpack` owns packages/env/build substrate, and
 to the owning binary with a clear teaching/provenance message until release
 policy retires them.
 
-**D-LINTPOLICY1=A — the override law** *(ratified 2026-07-11, card
-#505)*: binding on every current and future expert gate. (1) Warnings
-and lints never fail a build by default — errors are reserved for
-programs Jet cannot compile safely or unambiguously. (2) Every bypass is
-spelled at the site or on the command line, never in hidden config, and
-lands in the audit record (`jet inspect dossier`, effect-budget
-provenance, build facts). (3) Walls are team policy only: the `policy:`
-namespace (D-JPK-POLICYSURFACE1) gains `lints: { deny: [...] }`, joining
-effect budgets and trust; host/org policy narrows, never widens.
-Memory/type safety (I1) has no override and is outside this law.
-Existing gates keep their spellings; behavior and audit become uniform.
-
 **D-LSP1 / D-LSP2**: LSP v2 uses one incremental compiler-service query cache
 (`crates/jet-queries`) shared by editor requests, with full applicable LSP
 3.17 coverage. Every advertised capability must have a named test in
@@ -3052,17 +2979,6 @@ function call, no separate DAG syntax. Invoked `jetpack run <name>`. `run`,
 `dev`, `build`, `test` remain reserved lifecycle verb names a task cannot
 reuse.
 
-**D-SCHEDULE1=A — schedule-as-code** *(ratified 2026-07-11, card #505)*:
-`#Every(…)` is a directive marker on a `#Task fn` (D-JPK-TASKRUN1).
-`#Every(5min)` takes a duration literal (D-UNITLIT1); `#Every("03:00")`
-takes a daily wall-clock time; both are compile-checked. One declaration
-feeds every consumer: `jet dev` runs due tasks in the dev loop, the
-service runtime (D-SERVICE1) schedules them in production, a jetos
-generation projects them as timer units. Complex calendars (cron
-expressions, timezones, jitter) stay with the runtime API or jetos
-timers; operator-side cadence overrides live at the jetos/service layer
-with explain provenance.
-
 **D-JPK-TOOLRUN1=A — unified `jetpack tool` noun**: `jetpack tool run <ref>`
 executes a package binary ephemerally across all providers (generalizing the
 nix-only `jetpack run nixpkgs:pkg` bridge); `jetpack tool install <ref>`
@@ -3181,6 +3097,10 @@ implementation milestone is pending.
 | ID   | Question                                   | Needed by |
 | ---- | ------------------------------------------ | --------- |
 | S56  | typed reflection / user derives | **Epoch 3** — [`docs/plans/epoch-3/user-derives-reflection.md`](../../docs/plans/epoch-3/user-derives-reflection.md) |
+| D-FFI-GO1/JVM1/DOTNET1/FORTRAN1 | managed-runtime binders | Polyglot P2 — Tower card #502 |
+| D-FFI-LUA1/RUBY1/PERL1/PHP1/R1/SH1 | scripting + shell binders | Polyglot P3 — Tower card #503 |
+| D-FFI-COBOL1/OCTAVE1, D-MIGRATE-SRC1 | legacy binders + source-importer law | Polyglot P4 — Tower card #504 |
+| D-LIVEQUERY1, D-SCHEDULE1, D-LINTPOLICY1 | live queries; #Every; override law | Framework lessons — Tower card #505 |
 
 
 ## Decision log

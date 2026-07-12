@@ -268,6 +268,7 @@ impl<'a> Parser<'a> {
                         methods: Vec::new(),
                         delegation_field: Some(field),
                         assoc_type_impls: Vec::new(),
+                        is_generated_serde: false,
                         os_target: None,
                     }));
                 }
@@ -306,6 +307,7 @@ impl<'a> Parser<'a> {
                 methods,
                 delegation_field: None,
                 assoc_type_impls,
+                is_generated_serde: false,
                 os_target: None,
             }))
         }

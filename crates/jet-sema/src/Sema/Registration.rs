@@ -1397,7 +1397,13 @@ pub(super) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags: &mut Vec<
             .unwrap_or(s.name_span);
         match parse_builtin_serde_fragment(&source, &s.name, trigger_span, diags) {
             Some(generated) => {
-                generated_items.extend(generated.into_iter().filter(|item| matches!(item, Item::Impl(_))));
+                generated_items.extend(generated.into_iter().filter_map(|item| match item {
+                    Item::Impl(mut imp) => {
+                        imp.is_generated_serde = true;
+                        Some(Item::Impl(imp))
+                    }
+                    _ => None,
+                }));
             }
             None => {}
         }
@@ -1523,7 +1529,13 @@ fn expand_builtin_enum_serde(
         .unwrap_or(e.name_span);
     match parse_builtin_serde_fragment(&source, &e.name, trigger_span, diags) {
         Some(generated) => {
-            generated_items.extend(generated.into_iter().filter(|item| matches!(item, Item::Impl(_))));
+            generated_items.extend(generated.into_iter().filter_map(|item| match item {
+                Item::Impl(mut imp) => {
+                    imp.is_generated_serde = true;
+                    Some(Item::Impl(imp))
+                }
+                _ => None,
+            }));
         }
         None => {}
     }

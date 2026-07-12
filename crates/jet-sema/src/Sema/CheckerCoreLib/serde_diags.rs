@@ -206,6 +206,70 @@ pub(crate) fn is_decodable_ty(ty: &Type, reg: &TraitRegistry) -> bool {
     }
 }
 
+/// Generated serde bodies are implementation detail. When the declaration pass
+/// already reports E2411 for a field, checking that synthetic body would only
+/// repeat the same problem as E0905 at a generated-code span.
+pub(crate) fn invalid_serde_derive_impls(
+    items: &[crate::AST::Item],
+    reg: &TraitRegistry,
+) -> std::collections::HashSet<(String, String)> {
+    use crate::AST::Item;
+    let mut invalid = std::collections::HashSet::new();
+    for item in items {
+        match item {
+            Item::Struct(s) => {
+                let fields = s
+                    .fields
+                    .iter()
+                    .filter(|f| {
+                        !f.serde_markers.iter().any(|m| {
+                            matches!(
+                                m.name.as_str(),
+                                Syntax::ATTR_SKIP | Syntax::ATTR_FLATTEN
+                            )
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                if s.derives.iter().any(|(t, _)| t == crate::Generics::ENCODE)
+                    && fields.iter().any(|f| !is_encodable_ty(&f.ty, reg))
+                {
+                    invalid.insert((s.name.clone(), crate::Generics::ENCODE.to_string()));
+                }
+                if s.derives.iter().any(|(t, _)| t == crate::Generics::DECODE)
+                    && fields.iter().any(|f| !is_decodable_ty(&f.ty, reg))
+                {
+                    invalid.insert((s.name.clone(), crate::Generics::DECODE.to_string()));
+                }
+            }
+            Item::Enum(e) => {
+                let payloads = e
+                    .variants
+                    .iter()
+                    .flat_map(|v| match &v.payload {
+                        crate::AST::VariantPayload::Unit => Vec::new(),
+                        crate::AST::VariantPayload::Single(t, _) => vec![t],
+                        crate::AST::VariantPayload::Named(fields) => {
+                            fields.iter().map(|f| &f.ty).collect()
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                if e.derives.iter().any(|(t, _)| t == crate::Generics::ENCODE)
+                    && payloads.iter().any(|t| !is_encodable_ty(t, reg))
+                {
+                    invalid.insert((e.name.clone(), crate::Generics::ENCODE.to_string()));
+                }
+                if e.derives.iter().any(|(t, _)| t == crate::Generics::DECODE)
+                    && payloads.iter().any(|t| !is_decodable_ty(t, reg))
+                {
+                    invalid.insert((e.name.clone(), crate::Generics::DECODE.to_string()));
+                }
+            }
+            _ => {}
+        }
+    }
+    invalid
+}
+
 /// True for a `#[Flatten]`-able field type: a named struct (not a primitive/list/map).
 fn is_struct_named(ty: &Type) -> bool {
     matches!(ty, Type::Named(n) if !is_json_type_name(n))
