@@ -71,6 +71,12 @@ pub fn canonical_bytes(bundle: &ProgramBundle) -> Vec<u8> {
     strip_spans(&s).into_bytes()
 }
 
+/// Canonical bytes for an AST fragment. Debug output is used only as the
+/// exhaustive structural encoder; all source-coordinate spans are removed.
+pub fn canonical_fragment<T: std::fmt::Debug>(value: &T) -> Vec<u8> {
+    strip_spans(&format!("{value:?}")).into_bytes()
+}
+
 /// The build-cache key for a parsed program: `SHA256(canonical_bytes + 0 +
 /// profile_tag + 0 + jet_version)`, as 64 lowercase hex chars.
 ///

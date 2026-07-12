@@ -1192,11 +1192,8 @@ fn instance_identity(key: &ModuleInstanceKey, template: &TemplateInfo) -> crate:
     let mut input = full_key.clone();
     // Template/dependency semantics, excluding consumer alias spelling. The
     // resolved definition snapshot includes captured dependency declarations.
-    input.extend_from_slice(format!("{:?}{:?}", template.def.body, template.source_items).as_bytes());
-    for salt in [env!("CARGO_PKG_VERSION"), option_env!("PROFILE").unwrap_or("unknown"), std::env::consts::OS, std::env::consts::ARCH] {
-        input.extend_from_slice(&(salt.len() as u64).to_be_bytes());
-        input.extend_from_slice(salt.as_bytes());
-    }
+    input.extend_from_slice(&crate::CanonicalAST::canonical_fragment(&template.def.body));
+    input.extend_from_slice(&crate::CanonicalAST::canonical_fragment(&template.source_items));
     crate::AST::ModuleInstanceIdentity {
         full_key,
         fingerprint: crate::SHA256::sha256_hex(&input),
