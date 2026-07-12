@@ -682,11 +682,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // c109 Phase 24: a JSON construction — `{root}jet_std::Json::<Variant>(<arg>)`.
         // Reproduces `emit_core_json_lit` (Expression.rs): the arg is wrapped in
         // `(…).clone()` iff its `implicit_clone` flag was set; `Null` has no arg.
-        // D-ENC-DYN1=A+: a dynamic `Data` construction → `{root}jet_std::DataTree::
-        // <Variant>(<arg>)`. The user-facing `Object` payload is a `Map<String, Data>`
-        // (Rust `BTreeMap`); `DataTree::Object` is ordered `Vec<(String, DataTree)>`, so
-        // the map is collected into pairs at the boundary (sorted-key order, matching the
-        // old BTreeMap-backed dynamic value). Scalars/`Array` bind directly.
+        // D-ENC-DYN1=A+ / D-SERDE2: a dynamic `DataTree` construction. Object
+        // literals cross directly into the ordered pair representation so source/Codable
+        // field order survives; routing the literal through Jet's key-sorted Map would
+        // silently alphabetize the wire shape. A computed Map still collects in its
+        // ordinary Map iteration order. Scalars/`Array` bind directly.
         TExprKind::JsonLit { variant, arg } => {
             let prefix = format!("{}jet_std::DataTree", cx.root_prefix);
             match arg {
@@ -700,10 +700,25 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         s
                     };
                     if variant == "Object" {
-                        format!(
-                            "{}::{}(({}).into_iter().collect())",
-                            prefix, variant, arg_str
-                        )
+                        if let TExprKind::MapLit(entries) = &val.kind {
+                            let pairs = entries
+                                .iter()
+                                .map(|(key, value)| {
+                                    format!(
+                                        "(({}).clone(), {})",
+                                        emit_tir_expr(key, cx),
+                                        emit_tir_expr(value, cx)
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            format!("{}::{}(vec![{}])", prefix, variant, pairs)
+                        } else {
+                            format!(
+                                "{}::{}(({}).into_iter().collect())",
+                                prefix, variant, arg_str
+                            )
+                        }
                     } else {
                         format!("{}::{}({})", prefix, variant, arg_str)
                     }
