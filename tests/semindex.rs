@@ -2,7 +2,7 @@
 
 use jet_semindex::{
     open, open_symbols, SemanticProvenance, SemanticSymbol, SemanticSymbolIndex,
-    SemanticSymbolKind, SCHEMA_VERSION,
+    SemanticSymbolKind, SemanticVisibilityAnchor, SCHEMA_VERSION,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -40,6 +40,7 @@ fn fact(
         examples: Vec::new(),
         provenance,
         span: None,
+        lexical_scope: None,
     }
 }
 
@@ -116,6 +117,69 @@ fn semantic_visibility_uses_current_module_context() {
         current.identity
     );
     assert_eq!(index.complete_visible_in("ans", None, Some("current.jet")).len(), 1);
+}
+
+#[test]
+fn semantic_visibility_obeys_lexical_scope_and_declaration_order() {
+    let src = "fn first() {\n    hidden :: 1\n}\nfn run() {\n    value :: 1\n    if true {\n        nested :: 2\n        print(nested)\n    }\n    print(value)\n}\n";
+    let path = temp_fixture("lexical_visibility.jet", src);
+    let symbols = open_symbols(&path).expect("semantic symbols");
+    let anchor = |needle: &str| SemanticVisibilityAnchor {
+        module_path: path.to_str().unwrap(),
+        offset: Some(src.find(needle).unwrap()),
+        session_top_level: false,
+    };
+    assert!(symbols.resolve_visible_at("hidden", anchor("value :: 1")).is_none());
+    assert!(symbols.resolve_visible_at("value", SemanticVisibilityAnchor {
+        module_path: path.to_str().unwrap(),
+        offset: Some(src.find("value :: 1").unwrap() - 1),
+        session_top_level: false,
+    }).is_none());
+    let inner_use = symbols.resolve_visible_at("nested", anchor("print(nested)")).unwrap();
+    assert_eq!(inner_use.span.unwrap().start, src.find("nested :: 2").unwrap());
+    assert!(symbols.resolve_visible_at("nested", SemanticVisibilityAnchor {
+        module_path: path.to_str().unwrap(),
+        offset: Some(src.rfind("print(value)").unwrap()),
+        session_top_level: false,
+    }).is_none());
+    let outer_use = symbols.resolve_visible_at("value", SemanticVisibilityAnchor {
+        module_path: path.to_str().unwrap(),
+        offset: Some(src.rfind("print(value)").unwrap()),
+        session_top_level: false,
+    }).unwrap();
+    assert_eq!(outer_use.span.unwrap().start, src.find("value :: 1").unwrap());
+}
+
+#[test]
+fn semantic_visibility_prefers_deepest_latest_same_name_fact() {
+    let mut outer = fact(
+        "local:outer:value@10", "value", "value", SemanticSymbolKind::Local,
+        SemanticProvenance::Source { module_path: "test.jet".to_string() },
+    );
+    outer.module_path = "test.jet".to_string();
+    outer.lexical_scope = Some(jet_semindex::SemanticLexicalScope {
+        identity: "outer".to_string(),
+        span: jet_semindex::SourceSpan { start: 0, end: 100 },
+        depth: 1,
+        declaration_offset: 10,
+    });
+    let mut inner = outer.clone();
+    inner.identity = "local:inner:value@40".to_string();
+    inner.lexical_scope = Some(jet_semindex::SemanticLexicalScope {
+        identity: "inner".to_string(),
+        span: jet_semindex::SourceSpan { start: 30, end: 70 },
+        depth: 2,
+        declaration_offset: 40,
+    });
+    let index = SemanticSymbolIndex::new(vec![outer.clone(), inner.clone()]);
+    let at = |offset| SemanticVisibilityAnchor {
+        module_path: "test.jet",
+        offset: Some(offset),
+        session_top_level: false,
+    };
+    assert_eq!(index.resolve_visible_at("value", at(50)).unwrap().identity, inner.identity);
+    assert_eq!(index.resolve_visible_at("value", at(80)).unwrap().identity, outer.identity);
+    assert!(index.resolve_visible_at("value", at(5)).is_none());
 }
 
 #[test]

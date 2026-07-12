@@ -33,6 +33,21 @@ pub enum SemanticProvenance {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SemanticLexicalScope {
+    pub identity: String,
+    pub span: SourceSpan,
+    pub depth: usize,
+    pub declaration_offset: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SemanticVisibilityAnchor<'a> {
+    pub module_path: &'a str,
+    pub offset: Option<usize>,
+    pub session_top_level: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SemanticSymbol {
     pub identity: String,
     pub name: String,
@@ -45,6 +60,7 @@ pub struct SemanticSymbol {
     pub examples: Vec<String>,
     pub provenance: SemanticProvenance,
     pub span: Option<SourceSpan>,
+    pub lexical_scope: Option<SemanticLexicalScope>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -127,6 +143,26 @@ impl SemanticSymbolIndex {
         name: &str,
         module_path: Option<&str>,
     ) -> Option<&SemanticSymbol> {
+        self.resolve_with_anchor(name, module_path.map(|module_path| SemanticVisibilityAnchor {
+            module_path,
+            offset: None,
+            session_top_level: false,
+        }))
+    }
+
+    pub fn resolve_visible_at(
+        &self,
+        name: &str,
+        anchor: SemanticVisibilityAnchor<'_>,
+    ) -> Option<&SemanticSymbol> {
+        self.resolve_with_anchor(name, Some(anchor))
+    }
+
+    fn resolve_with_anchor(
+        &self,
+        name: &str,
+        anchor: Option<SemanticVisibilityAnchor<'_>>,
+    ) -> Option<&SemanticSymbol> {
         let qualified = name.contains('.');
         self.symbols
             .iter()
@@ -137,8 +173,8 @@ impl SemanticSymbolIndex {
                     symbol.owner.is_none() && symbol.name == name
                 }
             })
-            .filter_map(|symbol| visibility_rank(symbol, module_path).map(|rank| (rank, symbol)))
-            .min_by_key(|(rank, _)| *rank)
+            .filter_map(|symbol| visibility_key(symbol, anchor).map(|key| (key, symbol)))
+            .min_by_key(|(key, _)| *key)
             .map(|(_, symbol)| symbol)
     }
 
@@ -161,8 +197,34 @@ impl SemanticSymbolIndex {
         owner: Option<&str>,
         module_path: Option<&str>,
     ) -> Vec<&SemanticSymbol> {
+        self.complete_with_anchor(
+            prefix,
+            owner,
+            module_path.map(|module_path| SemanticVisibilityAnchor {
+                module_path,
+                offset: None,
+                session_top_level: false,
+            }),
+        )
+    }
+
+    pub fn complete_visible_at(
+        &self,
+        prefix: &str,
+        owner: Option<&str>,
+        anchor: SemanticVisibilityAnchor<'_>,
+    ) -> Vec<&SemanticSymbol> {
+        self.complete_with_anchor(prefix, owner, Some(anchor))
+    }
+
+    fn complete_with_anchor(
+        &self,
+        prefix: &str,
+        owner: Option<&str>,
+        anchor: Option<SemanticVisibilityAnchor<'_>>,
+    ) -> Vec<&SemanticSymbol> {
         let explicit_qualified = owner.is_none() && prefix.contains('.');
-        let mut visible: Vec<(&str, u8, &SemanticSymbol)> = Vec::new();
+        let mut visible: Vec<(&str, (u8, usize, usize), &SemanticSymbol)> = Vec::new();
         for symbol in &self.symbols {
             let matches = if explicit_qualified {
                 symbol.qualified_name.starts_with(prefix)
@@ -172,7 +234,7 @@ impl SemanticSymbolIndex {
             if !matches {
                 continue;
             }
-            let Some(rank) = visibility_rank(symbol, module_path) else {
+            let Some(key) = visibility_key(symbol, anchor) else {
                 continue;
             };
             let spelling = if explicit_qualified {
@@ -180,15 +242,15 @@ impl SemanticSymbolIndex {
             } else {
                 symbol.name.as_str()
             };
-            if let Some((_, current_rank, current)) =
+            if let Some((_, current_key, current)) =
                 visible.iter_mut().find(|(name, _, _)| *name == spelling)
             {
-                if rank < *current_rank {
-                    *current_rank = rank;
+                if key < *current_key {
+                    *current_key = key;
                     *current = symbol;
                 }
             } else {
-                visible.push((spelling, rank, symbol));
+                visible.push((spelling, key, symbol));
             }
         }
         visible.into_iter().map(|(_, _, symbol)| symbol).collect()
@@ -213,28 +275,48 @@ impl SemanticSymbolIndex {
     }
 }
 
-fn visibility_rank(symbol: &SemanticSymbol, module_path: Option<&str>) -> Option<u8> {
+fn visibility_key(
+    symbol: &SemanticSymbol,
+    anchor: Option<SemanticVisibilityAnchor<'_>>,
+) -> Option<(u8, usize, usize)> {
     if symbol.identity.starts_with("session:binding:") {
-        return Some(0);
+        return Some((0, 0, 0));
     }
     if matches!(symbol.kind, SemanticSymbolKind::Local | SemanticSymbolKind::Parameter) {
-        if module_path.is_some_and(|path| {
-            matches!(symbol.provenance, SemanticProvenance::Source { .. })
-                && symbol.module_path != path
-        }) {
-            return None;
+        if let Some(anchor) = anchor {
+            if anchor.session_top_level {
+                return None;
+            }
+            let scope = symbol.lexical_scope.as_ref()?;
+            if symbol.module_path != anchor.module_path {
+                return None;
+            }
+            if let Some(offset) = anchor.offset {
+                if offset < scope.declaration_offset
+                    || offset < scope.span.start
+                    || scope.span.end < offset
+                {
+                    return None;
+                }
+            }
+            return Some((
+                1,
+                usize::MAX - scope.depth,
+                usize::MAX - scope.declaration_offset,
+            ));
         }
-        return Some(1);
+        return Some((1, 0, 0));
     }
+    let module_path = anchor.map(|anchor| anchor.module_path);
     if !symbol.identity.starts_with("import:") {
         match symbol.provenance {
-            SemanticProvenance::Session => return Some(2),
+            SemanticProvenance::Session => return Some((2, 0, 0)),
             SemanticProvenance::Source { .. } => {
-                return Some(if module_path.is_none_or(|path| symbol.module_path == path) {
+                return Some((if module_path.is_none_or(|path| symbol.module_path == path) {
                     2
                 } else {
                     5
-                });
+                }, 0, 0));
             }
             _ => {}
         }
@@ -243,9 +325,9 @@ fn visibility_rank(symbol: &SemanticSymbol, module_path: Option<&str>) -> Option
         if module_path.is_some_and(|path| symbol.module_path != path) {
             return None;
         }
-        return Some(3);
+        return Some((3, 0, 0));
     }
-    Some(4)
+    Some((4, 0, 0))
 }
 
 pub fn build_semantic_symbol_index(db: &SymbolDB, bundle: &ProgramBundle) -> SemanticSymbolIndex {
@@ -288,8 +370,26 @@ pub fn build_semantic_symbol_index(db: &SymbolDB, bundle: &ProgramBundle) -> Sem
                 };
             }
         }
+        let lexical_scope = if matches!(def.kind, SymKind::Local { .. } | SymKind::Param { .. }) {
+            sources.get(def.module_path.as_str()).and_then(|source| {
+                lexical_scope_for_def(
+                    db,
+                    &def.module_path,
+                    def.def_span.into(),
+                    matches!(def.kind, SymKind::Param { .. }),
+                    source,
+                )
+            })
+        } else {
+            None
+        };
+        let identity = if lexical_scope.is_some() {
+            format!("{}@{}", def.identity, def.def_span.start)
+        } else {
+            def.identity.clone()
+        };
         symbols.push(SemanticSymbol {
-            identity: def.identity.clone(),
+            identity,
             name: def.name.clone(),
             qualified_name,
             owner,
@@ -302,6 +402,7 @@ pub fn build_semantic_symbol_index(db: &SymbolDB, bundle: &ProgramBundle) -> Sem
                 module_path: def.module_path.clone(),
             },
             span: Some(def.def_span.into()),
+            lexical_scope,
         });
     }
     for module in &bundle.modules {
@@ -361,6 +462,7 @@ pub fn build_semantic_symbol_index(db: &SymbolDB, bundle: &ProgramBundle) -> Sem
                                 module_path: module.display.clone(),
                             },
                             span: Some((*items_span).into()),
+                            lexical_scope: None,
                         });
                         symbol.identity = format!(
                             "import:{}::{module_alias}.{original}::{local_name}",
@@ -374,6 +476,7 @@ pub fn build_semantic_symbol_index(db: &SymbolDB, bundle: &ProgramBundle) -> Sem
                             module_path: module.display.clone(),
                         };
                         symbol.span = Some((*items_span).into());
+                        symbol.lexical_scope = None;
                         symbols.push(symbol);
                     }
                 }
@@ -394,12 +497,128 @@ pub fn build_semantic_symbol_index(db: &SymbolDB, bundle: &ProgramBundle) -> Sem
                             module_path: module.display.clone(),
                         },
                         span: Some(import.alias_span.into()),
+                        lexical_scope: None,
                     });
                 }
             }
         }
     }
     SemanticSymbolIndex::new(symbols)
+}
+
+fn lexical_scope_for_def(
+    db: &SymbolDB,
+    module_path: &str,
+    def_span: SourceSpan,
+    is_param: bool,
+    source: &str,
+) -> Option<SemanticLexicalScope> {
+    let nodes = db
+        .nodes
+        .iter()
+        .filter(|node| node.module_path == module_path)
+        .collect::<Vec<_>>();
+    let mut current = nodes
+        .iter()
+        .filter(|node| node.span.start <= def_span.start && def_span.end <= node.span.end)
+        .min_by_key(|node| node.span.end.saturating_sub(node.span.start))
+        .map(|node| node.id)?;
+    let initial = current;
+    let mut innermost = nodes
+        .iter()
+        .find(|node| node.parent == Some(initial) && is_lexical_slot(&node.slot))
+        .map(|node| (initial, node.slot.clone()));
+    let mut depth = usize::from(innermost.is_some());
+    loop {
+        let node = db.nodes.get(current)?;
+        if is_lexical_slot(&node.slot) {
+            depth += 1;
+            if innermost.is_none() {
+                innermost = Some((node.parent?, node.slot.clone()));
+            }
+        }
+        let Some(parent) = node.parent else {
+            break;
+        };
+        current = parent;
+    }
+    let (parent, slot) = innermost.or_else(|| {
+        nodes
+            .iter()
+            .filter(|node| node.class == "item" && node.span.start <= def_span.start && def_span.end <= node.span.end)
+            .min_by_key(|node| node.span.end.saturating_sub(node.span.start))
+            .map(|node| (node.id, "body".to_string()))
+    })?;
+    let children = nodes
+        .iter()
+        .filter(|node| node.parent == Some(parent) && node.slot == slot)
+        .collect::<Vec<_>>();
+    let first = children.iter().map(|node| node.span.start).min().unwrap_or(def_span.start);
+    let last = children.iter().map(|node| node.span.end).max().unwrap_or(def_span.end);
+    let span = enclosing_braces(source, first, last).unwrap_or_else(|| {
+        db.nodes.get(parent).map_or(def_span, |node| node.span)
+    });
+    Some(SemanticLexicalScope {
+        identity: format!("scope:{module_path}:{parent}:{slot}"),
+        span,
+        depth: depth.max(1),
+        declaration_offset: if is_param { 0 } else { def_span.start },
+    })
+}
+
+fn is_lexical_slot(slot: &str) -> bool {
+    slot == "body" || slot.ends_with("_body") || slot.ends_with("_bodies")
+}
+
+fn enclosing_braces(source: &str, first: usize, last: usize) -> Option<SourceSpan> {
+    let bytes = source.as_bytes();
+    let mut stack = Vec::new();
+    let mut pairs = Vec::new();
+    let mut quote = None;
+    let mut escape = false;
+    let mut line_comment = false;
+    let mut block_comment = false;
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let byte = bytes[i];
+        let next = bytes.get(i + 1).copied();
+        if line_comment {
+            line_comment = byte != b'\n';
+        } else if block_comment {
+            if byte == b'*' && next == Some(b'/') {
+                block_comment = false;
+                i += 1;
+            }
+        } else if let Some(mark) = quote {
+            if escape {
+                escape = false;
+            } else if byte == b'\\' {
+                escape = true;
+            } else if byte == mark {
+                quote = None;
+            }
+        } else if byte == b'/' && next == Some(b'/') {
+            line_comment = true;
+            i += 1;
+        } else if byte == b'/' && next == Some(b'*') {
+            block_comment = true;
+            i += 1;
+        } else if byte == b'"' || byte == b'\'' {
+            quote = Some(byte);
+        } else if byte == b'{' {
+            stack.push(i);
+        } else if byte == b'}' {
+            if let Some(open) = stack.pop() {
+                pairs.push((open, i + 1));
+            }
+        }
+        i += 1;
+    }
+    pairs
+        .into_iter()
+        .filter(|(open, close)| *open <= first && last <= *close)
+        .max_by_key(|(open, _)| *open)
+        .map(|(start, end)| SourceSpan { start, end })
 }
 
 fn semantic_shape(
@@ -498,6 +717,7 @@ fn language_symbols() -> Vec<SemanticSymbol> {
             examples: Vec::new(),
             provenance: SemanticProvenance::Builtin { module: "core".to_string() },
             span: None,
+            lexical_scope: None,
         });
     }
     for keyword in Syntax::JET_KEYWORD_LIST {
@@ -513,6 +733,7 @@ fn language_symbols() -> Vec<SemanticSymbol> {
             examples: Vec::new(),
             provenance: SemanticProvenance::Builtin { module: "syntax".to_string() },
             span: None,
+            lexical_scope: None,
         });
     }
     for &(qualified_name, signature, summary, example) in BUILTIN_METHODS {
@@ -529,6 +750,7 @@ fn language_symbols() -> Vec<SemanticSymbol> {
             examples: example.into_iter().map(str::to_string).collect(),
             provenance: SemanticProvenance::Builtin { module: "core.collections".to_string() },
             span: None,
+            lexical_scope: None,
         });
     }
     symbols

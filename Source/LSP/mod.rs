@@ -195,4 +195,15 @@ mod tests {
             item.label == "len" && item.detail.as_deref() == Some(len.signature.as_str())
         }));
     }
+
+    #[test]
+    fn completion_excludes_locals_from_other_functions() {
+        let src = "fn first() {\n    hidden :: 1\n}\nfn second() {\n    \n}\n";
+        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
+        let db = build_symbol_db(&bundle.expect("bundle"), &facts);
+        let offset = src.rfind("    \n").unwrap() + 4;
+        assert!(!compute_completions(&db, src, offset, "test.jet", None, None)
+            .iter()
+            .any(|item| item.label == "hidden"));
+    }
 }

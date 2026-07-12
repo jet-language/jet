@@ -51,7 +51,14 @@ pub(crate) fn compute_hover(
         }
     }
     let name = find_ident_at(tokens, offset)?;
-    if let Some(symbol) = db.symbols.resolve_visible_in(name, Some(path)) {
+    if let Some(symbol) = db.symbols.resolve_visible_at(
+        name,
+        jet_semindex::SemanticVisibilityAnchor {
+            module_path: path,
+            offset: Some(offset),
+            session_top_level: false,
+        },
+    ) {
         return Some(semantic_hover(symbol));
     }
     db.hover_at(path, offset).map(str::to_string)

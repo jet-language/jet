@@ -1717,6 +1717,15 @@ fn live_binding_shadows_same_name_session_item_in_docs_and_completion() {
 }
 
 #[test]
+fn function_local_is_not_visible_in_session_docs() {
+    let out = run_transcript(&["fn f() { hidden :: 1 }", "?hidden"], None);
+    assert!(
+        out.contains("note: `hidden` isn't defined in this session"),
+        "got: {out:?}"
+    );
+}
+
+#[test]
 fn bare_question_mark_alone_shows_help_like_colon_form() {
     let out = run_transcript(&["?"], None);
     assert!(out.contains("REPL meta-commands"), "got: {out:?}");

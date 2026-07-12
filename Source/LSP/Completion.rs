@@ -272,7 +272,15 @@ pub(crate) fn compute_completions(
             let prefix = current_identifier_prefix(src, offset);
             for symbol in db
                 .symbols
-                .complete_visible_in(&prefix, Some(&owner), Some(current_path))
+                .complete_visible_at(
+                    &prefix,
+                    Some(&owner),
+                    jet_semindex::SemanticVisibilityAnchor {
+                        module_path: current_path,
+                        offset: Some(offset),
+                        session_top_level: false,
+                    },
+                )
             {
                 if seen.insert(symbol.identity.clone()) {
                     items.push(CompletionItem {
@@ -330,7 +338,15 @@ pub(crate) fn compute_completions(
         Some(statement)
     };
 
-    for symbol in db.symbols.complete_visible_in("", None, Some(current_path)) {
+    for symbol in db.symbols.complete_visible_at(
+        "",
+        None,
+        jet_semindex::SemanticVisibilityAnchor {
+            module_path: current_path,
+            offset: Some(offset),
+            session_top_level: false,
+        },
+    ) {
         if symbol.kind == jet_semindex::SemanticSymbolKind::Keyword
             && !context_allows_keyword(src, offset, &symbol.name)
         {

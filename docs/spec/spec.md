@@ -1949,6 +1949,12 @@ distinct. Language builtins live in the same index rather than consumer-local
 tables. `jet ?` command facts use the same model, with search categories,
 flags, and cross-links kept as presentation metadata.
 
+Editor visibility queries carry the current module and byte offset. Locals and
+parameters appear only inside their lexical body and after their declaration;
+the deepest, latest visible declaration wins. REPL queries use a session-level
+anchor, so accumulated function locals never leak into `?name` or completion.
+Qualified members and external auto-import candidates remain addressable.
+
 Raw-terminal REPL completion inserts a unique match immediately. Multiple
 matches open a selectable list: Up and Down change selection, Tab advances,
 Enter inserts, and Escape closes the list. Cooked terminals and `NO_COLOR`

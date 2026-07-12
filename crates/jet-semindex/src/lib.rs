@@ -19,8 +19,8 @@ pub use Types::{
     SCHEMA_VERSION,
 };
 pub use Symbols::{
-    build_semantic_symbol_index, SemanticProvenance, SemanticSymbol, SemanticSymbolIndex,
-    SemanticSymbolKind,
+    build_semantic_symbol_index, SemanticLexicalScope, SemanticProvenance, SemanticSymbol,
+    SemanticSymbolIndex, SemanticSymbolKind, SemanticVisibilityAnchor,
 };
 
 use jet_foundation::Diagnostics::Diagnostic;

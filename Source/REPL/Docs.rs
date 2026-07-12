@@ -43,6 +43,7 @@ pub(crate) fn symbol_index(session: &Session) -> jet_semindex::SemanticSymbolInd
             examples: Vec::new(),
             provenance: jet_semindex::SemanticProvenance::Session,
             span: None,
+            lexical_scope: None,
         });
     }
     index
@@ -54,7 +55,15 @@ pub(crate) fn completion_candidates(
     owner: Option<&str>,
 ) -> Vec<jet_semindex::SemanticSymbol> {
     symbol_index(session)
-        .complete_visible(prefix, owner)
+        .complete_visible_at(
+            prefix,
+            owner,
+            jet_semindex::SemanticVisibilityAnchor {
+                module_path: "this session",
+                offset: None,
+                session_top_level: true,
+            },
+        )
         .into_iter()
         .filter(|symbol| {
             owner.is_some()
@@ -91,7 +100,16 @@ fn render(symbol: &jet_semindex::SemanticSymbol) -> String {
 
 pub fn lookup(session: &Session, name: &str) -> Option<String> {
     let index = symbol_index(session);
-    index.resolve_visible(name).map(render)
+    index
+        .resolve_visible_at(
+            name,
+            jet_semindex::SemanticVisibilityAnchor {
+                module_path: "this session",
+                offset: None,
+                session_top_level: true,
+            },
+        )
+        .map(render)
 }
 
 #[cfg(test)]
@@ -130,5 +148,14 @@ mod tests {
         let candidates = completion_candidates(&session, "ans", None);
         assert_eq!(candidates.len(), 1, "{candidates:?}");
         assert_eq!(candidates[0].identity, "session:binding:answer");
+    }
+
+    #[test]
+    fn completion_excludes_accumulated_function_locals() {
+        let mut session = Session::new();
+        session
+            .item_srcs
+            .push("fn f() { hidden :: 1 }".to_string());
+        assert!(completion_candidates(&session, "hid", None).is_empty());
     }
 }
