@@ -14,11 +14,9 @@
 //!
 //! **Layer media type is uncompressed** (`application/vnd.oci.image.layer.v1.tar`,
 //! not the `+gzip` variant) — both are valid, spec-compliant OCI layer types.
-//! `core.archive`'s flate2 bridge (D-DEP-ARCHIVE1) was evaluated for gzip
-//! compression here first, but it lives in `corelib/core.archive/pkgs/archive`
-//! — a crate the root workspace `Cargo.toml` `exclude`s specifically so it
-//! compiles only into *generated user programs* (via the FFI-bridge-template
-//! pattern, never linked into `jetpack` itself). Linking flate2 into
+//! `core.compress.gzip`'s flate2 bridge (D-CORE-COMPRESS1) was evaluated for
+//! gzip compression here first, but that runtime is emitted only into generated
+//! user-program bridge crates, never linked into `jetpack` itself. Linking flate2 into
 //! `jet-driver` directly would violate I6 (zero external crates in the
 //! compiler proper, which `jetpack`/`jet-driver` are part of). Uncompressed
 //! tar sidesteps needing a native DEFLATE implementation to ship a real image

@@ -138,7 +138,7 @@ M0–M14, v1.0 arc, verified 2026-06-14.
 - **E2-M6** — library authoring: associated types, error conversion for `?`, argument labels/defaults (S61), trait delegation (S62).
 - **E2-M7** — streaming I/O: file handles, `Reader`/`Writer`, RAII cleanup (S63), `Path`.
 - **E2-M8** — supply chain: `jet registry publish` (pre-publish gate), `jet registry vendor`, `jet inspect audit`, SBOM; PubGrub resolver. Registry upload deferred (D-PKGS1, M12.2); Jetpack hangar cleanup is `jet clean`.
-- **E2-M9** — first-party library ring: `core.regex`, `core.encoding.{csv,toml,yaml,json}`, `core.log`, `core.time`, `core.crypto`, `core.archive` (gzip/zip/tar — D-DEP-ARCHIVE1), `core.db` (SQLite via rusqlite bundled — D-DEP-DB1).
+- **E2-M9** — first-party library ring: `core.regex`, `core.encoding.{csv,toml,yaml,json}`, `core.log`, `core.time`, `core.crypto`, `core.archive` (zip/tar containers) plus `core.compress` (gzip/zstd streams, D-CORE-COMPRESS1), `core.db` (SQLite via rusqlite bundled — D-DEP-DB1).
 - **E2-M10** — networking: blocking TCP/UDP, HTTP client/server (`core.http`; client HTTPS became default later under D-TLS1; server HTTPS uses D-TLSSERVE1's named `tls:` option). Advanced client TLS configuration remains `core.tls`.
 - **E2-M11** — testing/docs/bench: doctests, coverage, `jet bench`, property testing.
 - **E2-M12** — debug/observe: DAP prep, panic locals, structured logging/tracing/metrics.

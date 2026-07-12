@@ -1188,6 +1188,12 @@ module is free (R10) — codegen only emits the helpers a program actually
 calls. See core-library.md for the full module list, signatures, and
 examples; UI snapshots: `tests/ui/core_*`, teaching errors **E0037**–**E0039**.
 
+D-CORE-COMPRESS1=A splits compression by job. `core.compress.gzip` and
+`core.compress.zstd` are the only byte-stream codec homes; both expose
+`compress` and fallible `decompress`. `core.archive` exposes zip/tar container
+operations only (`zip_compress`, `zip_decompress`, `tar_add`, `tar_get`,
+`tar_names_json`). It has no gzip re-export or compatibility alias.
+
 ## E2-M1 — Concurrency (tasks and channels, verified 2026-06-14)
 
 `core.tasks` provides blocking tasks and typed channels. Import it as a normal

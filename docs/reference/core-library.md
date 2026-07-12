@@ -2292,6 +2292,22 @@ prepare-only API.
 
 ---
 
+## Compression and archives
+
+D-CORE-COMPRESS1=A assigns each operation one public home:
+
+| Module | Job | API |
+|--------|-----|-----|
+| `core.compress.gzip` | gzip byte streams | `compress([U8]) -> [U8]`, `decompress([U8]) -> [U8] ? String` |
+| `core.compress.zstd` | zstd byte streams | `compress([U8]) -> [U8]`, `decompress([U8]) -> [U8] ? String` |
+| `core.archive` | zip/tar containers | `zip_compress`, `zip_decompress`, `tar_add`, `tar_get`, `tar_names_json` |
+
+`core.archive` has no standalone gzip helpers. Compose formats explicitly for
+containers such as `tar.gz`: build tar bytes with `core.archive`, then compress
+those bytes with `core.compress.gzip`.
+
+---
+
 ## Built Core Modules
 
 D-STDLIBLEDGER1 keeps this reference to built modules only. It is not a

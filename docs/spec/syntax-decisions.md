@@ -1535,7 +1535,8 @@ Any crate-backed capability ships as a Jet package wrapping the crate via
 bootstrap wraps (all carry a native-ize obligation): rustls bridge
 (D-NET1/D-HTTPLIB4; `core.http` client default
 HTTPS via rustls + system roots, D-TLS1=A; `core.tls` reserved for advanced
-client TLS config), zip/tar/flate2 (`core.archive`, D-DEP-ARCHIVE1),
+client TLS config), zip/tar (`core.archive`, D-DEP-ARCHIVE1), flate2/zstd
+(`core.compress`, D-CORE-COMPRESS1/D-CODECS1),
 rusqlite-bundled (`core.db`, D-DEP-DB1), ureq/hyper/tungstenite
 (`core.http`, D-NETDEP1/D-HTTPLIB3), Cranelift (`jet-jit`, D-JITDEP1),
 wasmtime (plugins, D-DEP-WASM1), age-style crypto bridge

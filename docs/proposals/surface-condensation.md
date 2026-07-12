@@ -215,5 +215,41 @@ everything numeric.
 Codebase-side: the corelib/ source tree vs the include_str-embedded
 prelude (CoreLib.rs) needs a source-of-truth audit — added to card #511.
 
+## G. Exhaustion pass (2026-07-12, fourth pass — API layer + residue)
+
+Layers swept this pass: the method-level Core API surface against the
+D-STDRUBRIC1 rubric, spec.md's full heading map, every remaining marker
+family, board epochs/milestones. Findings:
+
+### G1. Law 1 vs shipped `len()` — D-API-LEN1 (card #513)
+
+The API rubric's own example ("`length`, not `len`") contradicts S41/S76
+ratified surface (`s.len()`, `.len` compile-time constant). One text
+must bend; ballot with rec to amend the rubric (closed blessed list).
+
+### G2. Marker-family residue — notes, no ballots
+
+- `#Track` (D-PROVENANCE1=B) shipped narrow: Float-local origins only,
+  `.origin() -> String`. Not an I8 violation — an incomplete feature.
+  Belongs on its implementation card's criteria, not a new decision.
+- `@Comparable` names both a derive marker (D-MARKERMOVE3) and a
+  capability bundle on `distinct` types (D-CAPBUNDLE1). One meaning —
+  "this type is comparable" — two mechanisms behind one word, which is
+  the hybrid-pass-compatible shape; no confusion evidence on file.
+- The serde field-marker family (8 `#[...]` markers) is coherent and
+  matches its ratified wire law; no action.
+- Everything else in both marker planes maps 1:1 to a ratified decision
+  with no family outlier remaining after D-BLOCKPLANE1/D-POLICY-WORD1.
+
+### G3. Structures verified healthy
+
+- Board: 9 epochs (e2 arrived → e9 planned), 2 open milestones, lanes
+  lint-clean. No reorganization warranted.
+- spec.md heading map aligns 1:1 with ratified law; it closes with a
+  "Deliberately absent" negative-space record — the discipline this
+  document now mirrors for surface decisions.
+- stdlib-api-laws.md drift table references pre-migration card ids
+  (`c44-follow-*`) — re-mint as real Tower cards (rides card #513).
+
 Analysis of the polyglot/replace-every-language track lives in
 [`polyglot.md`](polyglot.md).
