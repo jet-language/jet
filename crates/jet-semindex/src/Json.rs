@@ -4,7 +4,7 @@ use jet_foundation::Diagnostics::Span;
 
 use crate::Build::{SymDef, SymKind, SymRef};
 use crate::Types::{
-    BypassFact, BypassKind, CallEdge, DefinitionFact, EffectFact, MemberFact, MemberKind, MemberOrigin, SemIndex,
+    BypassFact, BypassKind, CallEdge, DefinitionFact, EffectFact, InstanceFact, MemberFact, MemberKind, MemberOrigin, SemIndex,
     SourceSpan, SymbolDef, SymbolKind, SymbolRef, TypeDossier,
 };
 
@@ -22,6 +22,11 @@ fn escape(s: &str) -> String {
         }
     }
     out
+}
+
+fn json_instance(value: &InstanceFact) -> String {
+    format!("{{\"name\":{},\"module_path\":{},\"fingerprint\":{},\"full_key\":{}}}",
+        json_str(&value.name), json_str(&value.module_path), json_str(&value.fingerprint), json_str(&value.full_key_hex))
 }
 
 fn json_definition_fact(f: &DefinitionFact) -> String {
@@ -202,11 +207,13 @@ impl SemIndex {
         let effects: Vec<String> = self.effects().iter().map(json_effect).collect();
         let members: Vec<String> = self.members().iter().map(json_member).collect();
         let definition_facts: Vec<String> = self.definition_facts().iter().map(json_definition_fact).collect();
+        let instances: Vec<String> = self.instances().iter().map(json_instance).collect();
         format!(
-            "{{\"schema_version\":{},\"definitions\":[{}],\"definition_facts\":[{}],\"references\":[{}],\"calls\":[{}],\"effects\":[{}],\"members\":[{}]}}",
+            "{{\"schema_version\":{},\"definitions\":[{}],\"definition_facts\":[{}],\"instances\":[{}],\"references\":[{}],\"calls\":[{}],\"effects\":[{}],\"members\":[{}]}}",
             self.schema_version(),
             defs.join(","),
             definition_facts.join(","),
+            instances.join(","),
             refs.join(","),
             calls.join(","),
             effects.join(","),
