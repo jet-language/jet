@@ -12,7 +12,7 @@
 //!     the USER's program, not compiler code; their panics are the `jet_panic`
 //!     runtime-panic path (`RUNTIME_PANIC` = 70), a different contract than I2.
 //!   - the compiled scheduler runtime module: one runtime-boundary panic and
-//!     one `#[cfg(test)]` deadline shim.
+//!     five `#[cfg(test)]` runtime/assertion fixtures.
 //!
 //! A file not on the allowlist may have zero bare `panic!`s. A file on the
 //! allowlist may have AT MOST its listed count — so both a brand new bare
@@ -52,8 +52,8 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
     ),
     (
         "crates/jet-codegen/src/scheduler.rs",
-        4,
-        "scheduler runtime-boundary panic, #[cfg(test)] deadline shim, and two #[cfg(test)] cancel/shield result asserts (D-CANCELMODEL1)",
+        6,
+        "one scheduler runtime unwind boundary plus five #[cfg(test)] fixtures: IOCP completion, deadline, cancel result, shield result, and body-panic cleanup",
     ),
     (
         "crates/jet-codegen/src/Codegen/TIR/tests.rs",
@@ -77,8 +77,13 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
     ),
     (
         "Source/REPL/mod.rs",
-        2,
-        "#[cfg(test)] mod tests fixtures",
+        3,
+        "three #[cfg(test)] REPL statement-classifier assertion fixtures",
+    ),
+    (
+        "Source/CLI.rs",
+        1,
+        "#[cfg(test)] nested-command registry assertion fixture",
     ),
     (
         "Source/Interpreter.rs",
@@ -177,8 +182,8 @@ fn compiler_crates_ban_bare_panic_outside_allowlist() {
 #[test]
 fn ban_logic_trips_on_a_seeded_bare_panic() {
     let seeded = r#"
-fn totally_fine() {
-    jet_foundation::ice!(None, "not a bare panic, fine");
+fn already_vetted_test_fixture() {
+    panic!("the allowlist permits this one vetted fixture");
 }
 
 fn seeded_leak() {
@@ -186,16 +191,17 @@ fn seeded_leak() {
 }
 "#;
     let count = count_bare_panics(seeded);
-    let allowed_for_a_brand_new_file = 0;
+    let allowlisted_ceiling_before_seed = 1;
+    assert_eq!(count, 2, "fixture must contain one vetted and one seeded panic");
     assert!(
-        count > allowed_for_a_brand_new_file,
-        "sanity: the seeded fixture must itself contain a bare panic!"
+        count > allowlisted_ceiling_before_seed,
+        "ban logic failed to reject growth past an existing allowlist ceiling"
     );
     // This is the exact comparison compiler_crates_ban_bare_panic_outside_allowlist
-    // makes per-file; a new file (not on ALLOWLIST) allows 0, so the seeded
-    // leak must be reported as a violation.
+    // makes per-file: an already-allowlisted file permits its vetted count,
+    // so one seeded leak must exceed that ceiling and be reported.
     assert!(
-        count > 0,
-        "ban logic failed to flag a seeded bare panic! — the gate is not enforcing anything"
+        count > allowlisted_ceiling_before_seed,
+        "seeded bare panic! did not trip the allowlisted-file ratchet"
     );
 }
