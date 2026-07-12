@@ -1,6 +1,6 @@
 # Epoch 4 completion truth matrix
 
-Audit date: 2026-07-10. This file freezes the exact 41-card Epoch 4 audit set:
+Audit date: 2026-07-11. This file freezes the exact 42-card Epoch 4 audit set:
 historical completion claims, reopened #6/#330, and this stop-line card (#418).
 A `done` card proves only its narrow row below. It never
 proves the broader package-manager capability owned by a named successor.
@@ -60,6 +60,7 @@ rejects unknown classes, and requires non-live rows to name an active successor.
 | #215 | live | `tests/jetpack.rs` | Run visibility only. |
 | #330 | compatibility-only | `crates/jetpack/src/Overlay.rs` | #424/#428 own lock invalidation and provider conformance. |
 | #418 | live | `tests/jetpack_truth.rs` | Truth stop-line only; downstream cards still own breadth. |
+| #479 | live | `crates/jetpack/src/Doctor.rs` | Read-only local health diagnosis only; no repair or broad registry-availability claim. |
 
 ## Stop-line consequences
 
