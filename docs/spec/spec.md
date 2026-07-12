@@ -1902,6 +1902,22 @@ stdout and stderr are captured. Interrupts forward to its process group, and
 the REPL kills and reaps that group after 30 seconds.
 Native-only modules still report E1802.
 
+## REPL multiline editing
+
+Raw-terminal `jet repl` uses syntax-aware Enter
+(D-FE-REPL-MULTILINE1=A). Enter submits input when the REPL parser accepts its
+item, statement, or expression shape. When parsing instead stops at the end of
+the current input, Enter inserts a newline and redraws each continuation with
+the `· ` prompt. Invalid input that already contains the parser's problem
+submits immediately so the normal compiler-owned diagnostic can explain it.
+
+Escape then Enter always inserts a newline, including when the current input
+is already complete. Enter on an empty continuation line force-submits. The
+editor repaints the whole logical buffer after insertion, deletion, history,
+or cursor movement, then restores the cursor to its source position. Cooked
+and non-TTY sessions keep D-REPL9's bracket-balance continuation and `...  `
+prompt; they do not claim parser-aware raw editing.
+
 ## REPL history
 
 The REPL keeps the latest 2,000 successful submissions between sessions
