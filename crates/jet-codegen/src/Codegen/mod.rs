@@ -802,6 +802,13 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
     // the originating Jet file. Panic reports carry Jet file+line directly via
     // jet_panic/jet_panic_rich, so runtime error messages already show Jet terms.
     out.push_str(&format!("// jet:source-map source={}\n", file));
+    for item in &prog.items {
+        if let Item::CodeModule(module) = item {
+            if let Some(identity) = &module.instance_identity {
+                out.push_str(&format!("// jet:generic-instance name={} fingerprint={}\n", module.name, identity.fingerprint));
+            }
+        }
+    }
     out.push_str("#![allow(warnings)]\n\n");
     out.push_str(PRELUDE);
     out.push_str(ENV_INIT_PRELUDE);
@@ -905,6 +912,51 @@ mod tests {
     use super::*;
     use std::collections::{HashMap, HashSet};
     use std::path::PathBuf;
+
+    fn checked_generic_bundle(src: &str, root: &str) -> crate::AST::ProgramBundle {
+        let (tokens, lex) = crate::Lexer::lex(src);
+        assert!(lex.is_empty(), "{lex:?}");
+        let mut program = crate::Parser::parse(&tokens).expect("parse");
+        let mut bundle = crate::AST::ProgramBundle {
+            entry: 0,
+            project_root: PathBuf::from(root),
+            modules: vec![crate::AST::LoadedModule {
+                path: PathBuf::from(root).join("main.jet"), display: "main.jet".into(), source: src.into(), alias: "main".into(),
+                imports: std::mem::take(&mut program.imports), items: std::mem::take(&mut program.items),
+                web_target_ceiling: program.web_target_ceiling, pub_file: program.pub_file,
+                no_prelude: program.no_prelude, html_path: program.html_path,
+                no_alloc_policy: program.no_alloc_policy,
+            }],
+            parse_teaching: Vec::new(), used_core: HashSet::new(), cffi: crate::AST::CFfi::default(),
+            comptime_inputs: Vec::new(), import_targets: HashMap::new(), layer_ceiling: None,
+            inferred_layer: crate::Syntax::RuntimeLayer::Core, web_partitions: HashMap::new(),
+            web_partition_enforced: false, web_partition_report: None, dep_roots: HashMap::new(),
+            active_os: crate::Syntax::OsTarget::host(),
+        };
+        let diagnostics = crate::Sema::check_bundle(&mut bundle, CompileMode::Run);
+        assert!(!diagnostics.iter().any(|d| d.severity == crate::Diagnostics::Severity::Error), "{diagnostics:#?}");
+        bundle
+    }
+
+    #[test]
+    fn generic_instance_provenance_reaches_tir_and_generated_rust() {
+        let source = "module Boxed<T, n: Int> { fn value() -> Int { return n } }\nmodule A = Boxed<Int, 3>\nmodule B = Boxed<Int, 3>\nfn run() {}";
+        let bundle = checked_generic_bundle(source, "pkg-a");
+        let fingerprint = bundle.modules[0].items.iter().find_map(|item| match item {
+            crate::AST::Item::CodeModule(module) => module.instance_identity.as_ref().map(|identity| identity.fingerprint.clone()),
+            _ => None,
+        }).expect("instance identity");
+        let tir = crate::Codegen::TIR::lower_jit_program(&bundle).expect("JIT TIR");
+        assert_eq!(tir.instance_provenance, vec![fingerprint.clone()]);
+        let rust = emit_bundle(&bundle, CompileMode::Run, None);
+        assert_eq!(rust.matches("// jet:generic-instance").count(), 1);
+        assert!(rust.contains(&format!("fingerprint={fingerprint}")));
+
+        let semantic_edit = checked_generic_bundle(
+            "module Boxed<T, n: Int> { fn value() -> Int { return n + 1 } }\nmodule A = Boxed<Int, 3>\nfn run() {}", "pkg-a");
+        let edited_rust = emit_bundle(&semantic_edit, CompileMode::Run, None);
+        assert!(!edited_rust.contains(&format!("fingerprint={fingerprint}")));
+    }
 
     #[test]
     fn raylib_window_example_reaches_sema_and_codegen() {

@@ -74,6 +74,9 @@ pub enum TJitSpawnBody {
 pub struct JitProgram {
     /// Display path of the entry module (for overflow trap messages).
     pub source_file: String,
+    /// #91: canonical generic-instance fingerprints consumed by JIT caches,
+    /// diagnostics, and parity tooling.
+    pub instance_provenance: Vec<String>,
     /// All top-level `tir_covers` functions in the entry module, including `run`.
     pub funcs: Vec<TFunc>,
     /// c139 M4: spawn lambda bodies in program traversal order (parallel to spawn sites in TIR).
@@ -202,6 +205,10 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
         );
     }
     Some(JitProgram {
+        instance_provenance: bundle.modules.iter().flat_map(|module| module.items.iter().filter_map(|item| {
+            let Item::CodeModule(cm) = item else { return None };
+            cm.instance_identity.as_ref().map(|identity| identity.fingerprint.clone())
+        })).collect(),
         source_file: module.display.clone(),
         funcs,
         spawn_lambdas,

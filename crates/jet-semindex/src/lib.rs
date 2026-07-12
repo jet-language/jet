@@ -146,7 +146,7 @@ mod tests {
 
     #[test]
     fn schema_version_constant() {
-        assert_eq!(SCHEMA_VERSION, 4);
+        assert_eq!(SCHEMA_VERSION, 5);
     }
 
     #[test]
@@ -179,14 +179,43 @@ mod tests {
         let path = fixture("basics/hello.jet");
         let idx = open(&path).expect("hello example should index");
         let json = idx.to_json();
-        assert!(json.contains("\"schema_version\":4"));
+        assert!(json.contains("\"schema_version\":5"));
         assert!(json.contains("\"definitions\""));
         assert!(json.contains("\"identity\""));
         assert!(json.contains("\"references\""));
         assert!(json.contains("\"calls\""));
         assert!(json.contains("\"effects\""));
         assert!(json.contains("\"members\""));
+        assert!(json.contains("\"instances\""));
         assert!(json.contains("\"run\""));
+    }
+
+    #[test]
+    fn generic_instance_identity_reaches_index_and_symbol_database() {
+        let root = std::env::temp_dir().join(format!(
+            "jet_semindex_generic_instance_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let main = root.join("main.jet");
+        std::fs::write(
+            &main,
+            "module Boxed<T, n: Int> { pub fn value() -> Int { return n } }\nmodule A = Boxed<Int, 3>\nmodule B = Boxed<Int, 3>\nfn run() {}\n",
+        ).unwrap();
+
+        let index = open(&main).expect("generic module should index");
+        assert_eq!(index.instances().len(), 1, "equivalent aliases share one instance");
+        let instance = &index.instances()[0];
+        assert_eq!(instance.fingerprint.len(), 64);
+        assert!(!instance.full_key_hex.is_empty());
+        assert!(index.definitions().iter().any(|definition| {
+            definition.identity == format!("instance:{}", instance.fingerprint)
+        }));
+        let json = index.to_json();
+        assert!(json.contains(&instance.fingerprint));
+        assert!(json.contains(&instance.full_key_hex));
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

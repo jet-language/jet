@@ -6,12 +6,16 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 fn check(src: &str) -> (ProgramBundle, Vec<Diagnostic>) {
+    check_at(src, ".")
+}
+
+fn check_at(src: &str, root: &str) -> (ProgramBundle, Vec<Diagnostic>) {
     let (tokens, lex) = Lexer::lex(src);
     assert!(lex.is_empty(), "lexer diagnostics: {lex:?}");
     let mut program = Parser::parse(&tokens).expect("source parses");
     let mut bundle = ProgramBundle {
         entry: 0,
-        project_root: PathBuf::from("."),
+        project_root: PathBuf::from(root),
         modules: vec![LoadedModule {
             path: PathBuf::from("generic_module_body.jet"),
             display: "generic_module_body.jet".into(),
@@ -40,6 +44,15 @@ fn check(src: &str) -> (ProgramBundle, Vec<Diagnostic>) {
     };
     let diagnostics = check_bundle(&mut bundle, CompileMode::Eval);
     (bundle, diagnostics)
+}
+
+fn only_instance_fingerprint(src: &str, root: &str) -> String {
+    let (bundle, diagnostics) = check_at(src, root);
+    assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
+    bundle.modules[0].items.iter().find_map(|item| match item {
+        Item::CodeModule(module) => module.instance_identity.as_ref().map(|identity| identity.fingerprint.clone()),
+        _ => None,
+    }).expect("generic instance fingerprint")
 }
 
 fn check_modules(sources: &[(&str, &str, &[(&str, usize)])]) -> (ProgramBundle, Vec<Diagnostic>) {
@@ -147,6 +160,19 @@ fn run() {}
     assert!(!bundle.modules[2].items.iter().any(|item| matches!(item, Item::CodeModule(module) if module.name == "Second")));
     assert!(bundle.modules[2].items.iter().any(|item| matches!(item, Item::CodeModule(module) if module.name == "DifferentArg")));
     assert!(bundle.modules[2].items.iter().any(|item| matches!(item, Item::CodeModule(module) if module.name == "DifferentTemplate")));
+}
+
+#[test]
+fn instance_fingerprint_ignores_spans_but_invalidates_semantic_inputs() {
+    let base = "module Boxed<T, n: Int> { fn value() -> Int { return n } }\nmodule Use = Boxed<Int, 3>\nfn run() {}";
+    let shifted = "\n\nmodule Boxed<T, n: Int> {   fn value() -> Int { return n } }\nmodule Renamed = Boxed<Int, 3>\nfn run() {}";
+    let body = "module Boxed<T, n: Int> { fn value() -> Int { return n + 1 } }\nmodule Use = Boxed<Int, 3>\nfn run() {}";
+    let arg = "module Boxed<T, n: Int> { fn value() -> Int { return n } }\nmodule Use = Boxed<Int, 4>\nfn run() {}";
+    let fp = only_instance_fingerprint(base, "pkg-a");
+    assert_eq!(fp, only_instance_fingerprint(shifted, "pkg-a"));
+    assert_ne!(fp, only_instance_fingerprint(body, "pkg-a"));
+    assert_ne!(fp, only_instance_fingerprint(arg, "pkg-a"));
+    assert_ne!(fp, only_instance_fingerprint(base, "pkg-b"));
 }
 
 #[test]

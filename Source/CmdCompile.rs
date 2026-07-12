@@ -1667,6 +1667,18 @@ fn manifest_fingerprint(file: &str) -> String {
     String::new()
 }
 
+fn native_cache_salt(
+    toolchain: &str,
+    dependency_fingerprint: &str,
+    mode: &str,
+    target: &str,
+    instance_fingerprints: &[String],
+) -> String {
+    let mut instances = instance_fingerprints.to_vec();
+    instances.sort();
+    format!("{toolchain}\u{1}{dependency_fingerprint}\u{1}{mode}\u{1}{target}\u{1}{}", instances.join(","))
+}
+
 /// D-BUILDNORM1=A (Tower #85): the content-cache key for building `file` under
 /// `mode_tag` (`"run"`, `"test"`, `"testcov"`, `"bench"`, `"dev"`, …), computed
 /// from the *pre-sema* canonical AST of the whole program (entry + every module
@@ -1690,7 +1702,7 @@ fn native_cache_key(file: &str, profile_tag: &str, mode_tag: &str) -> Option<Str
     if std::env::var_os("JET_PROVE_FRESH_TEST").is_some() {
         return None;
     }
-    let bundle = jet::Loader::load_entry_with_overlay(file, None, false).ok()?;
+    let mut bundle = jet::Loader::load_entry_with_overlay(file, None, false).ok()?;
     let uses_embed = bundle.modules.iter().any(|m| {
         m.source.contains(jet::Syntax::BUILTIN_EMBED_FILE)
             || m.source.contains(jet::Syntax::BUILTIN_EMBED_BYTES)
@@ -1698,11 +1710,24 @@ fn native_cache_key(file: &str, profile_tag: &str, mode_tag: &str) -> Option<Str
     if uses_embed {
         return None;
     }
-    let salt = format!(
-        "{}\u{1}{}\u{1}{}",
+    // #91: instance identity is a sema product. Run the front end before a
+    // cache lookup so a hit is keyed by resolved template identity rather than
+    // consumer spelling. A hit still skips codegen/rustc, never validation.
+    if jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Check)
+        .iter().any(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
+    {
+        return None;
+    }
+    let mut instances: Vec<String> = bundle.modules.iter().flat_map(|module| module.items.iter().filter_map(|item| {
+        let jet::AST::Item::CodeModule(cm) = item else { return None };
+        cm.instance_identity.as_ref().map(|identity| identity.fingerprint.clone())
+    })).collect();
+    let salt = native_cache_salt(
         jet::Manifest::COMPILER_VERSION,
-        manifest_fingerprint(file),
+        &manifest_fingerprint(file),
         mode_tag,
+        &format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
+        &instances,
     );
     Some(jet::CanonicalAST::ast_cache_key(
         &bundle,
@@ -2445,7 +2470,19 @@ fn missing_linker(stderr: &str) -> Option<String> {
 
 #[cfg(test)]
 mod missing_c_lib_tests {
-    use super::{missing_c_lib, missing_linker};
+    use super::{missing_c_lib, missing_linker, native_cache_salt};
+
+    #[test]
+    fn generic_instance_cache_salt_tracks_every_downstream_input() {
+        let instances = vec!["instance-a".to_string(), "instance-b".to_string()];
+        let base = native_cache_salt("tool-a", "deps-a", "run", "linux-x86_64", &instances);
+        assert_ne!(base, native_cache_salt("tool-b", "deps-a", "run", "linux-x86_64", &instances));
+        assert_ne!(base, native_cache_salt("tool-a", "deps-b", "run", "linux-x86_64", &instances));
+        assert_ne!(base, native_cache_salt("tool-a", "deps-a", "test", "linux-x86_64", &instances));
+        assert_ne!(base, native_cache_salt("tool-a", "deps-a", "run", "macos-aarch64", &instances));
+        assert_ne!(base, native_cache_salt("tool-a", "deps-a", "run", "linux-x86_64", &["instance-c".into()]));
+        assert_eq!(base, native_cache_salt("tool-a", "deps-a", "run", "linux-x86_64", &["instance-b".into(), "instance-a".into()]));
+    }
 
     #[test]
     fn detects_ld_cannot_find() {

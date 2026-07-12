@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 522,
-    "rev": 4787,
+    "rev": 4788,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -8291,6 +8291,11 @@
       "blockedBy": [],
       "assignee": "claude-main",
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "sol-367-planner",
+          "text": "Slice-4 design (docs/plans/epoch-3/product-split-slice4.md). Finding: ModuleEval is ALREADY pure (parse->comptime->merge->typed plans); touches NO Provider/Store/Trust/Toolchain engine. Only jetpack-internal deps: Merge (pure, BTreeMap-only), RefSpec+PackageManifest (already in jet-pkg-model), BuildRecipe STRUCT (engine fns separate). check_build_io is in-crate pure. Boundary = 3 acyclic layers: L1 jet-pkg-model (add pure Merge + BuildRecipe struct); L2 NEW crate jet-env-model (ModuleEval + plan Types EnvPlan/SystemPlan/ImagePlan/FleetPlan/HostPlan/VmTestPlan/Service/DevService/Adapter; deps jet-pkg-model+jet-codegen); L3 realizers dep DOWN on L2 -- env-runtime (run_enter_dev/Shell/Overlay/EnvFile/Services, consumes EnvPlan) and JetOS/* (29 mods, consumes System/Image/Fleet/Host). No env<->OS lateral coupling. Steps: 1 sink Merge+BuildRecipe->pkg-model (re-export legacy paths); 2 create jet-env-model, move ModuleEval+Types, rewrite crate::->jet_codegen/jet_pkg_model, jetpack re-exports ModuleEval shim; 3 repoint realizers to jet_env_model, drop shim; 4 Canvas/driver import repoint (slice-5 seam); 5 workspace_crates guards + architecture.md. Each keeps cargo build green; targeted tests per step (pkg/fleet/image/jetpack_engine/jetpack_jetos/canvas/workspace_crates). No teaching shim owed (no command moves). GATES for owner: (1) does JetOS realization engine relocate to crates/jetos this card or stay in jetpack behind jetos binary (later card)? (2) any command surface move across binaries = D-PRODUCT-SPLIT1=C shim ballot. jet-env-model name is internal, not a ballot."
+        },
         {
           "at": "2026-07-12",
           "by": "claude-main",
@@ -33674,6 +33679,13 @@
   ],
   "events": [
     {
+      "at": "2026-07-12T21:10:03.497Z",
+      "by": "sol-367-planner",
+      "action": "card.update",
+      "ref": "c_audit_367_q80zrm",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-07-12T21:00:29.515Z",
       "by": "terra-367c-builder",
       "action": "card.criteria-meet",
@@ -37165,13 +37177,6 @@
       "action": "decision.ratify",
       "ref": "D-API-LEN1",
       "note": "A"
-    },
-    {
-      "at": "2026-07-12T10:07:54.322Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-API-CONTAINS1",
-      "note": "B"
     }
   ],
   "nextNum": 368,
