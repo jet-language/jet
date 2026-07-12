@@ -249,5 +249,42 @@ must bend; ballot with rec to amend the rubric (closed blessed list).
 - stdlib-api-laws.md drift table references pre-migration card ids
   (`c44-follow-*`) — re-mint as real Tower cards (rides card #513).
 
+## H. Fifth pass (2026-07-12) — lexical core, prelude, artifact names
+
+Layers swept: the M1 lexical/grammar core (EBNF, precedence table,
+terminator rules), the ambient prelude surface, the artifact-extension
+namespace, the env-var namespace.
+
+### H1. Artifact-extension law + `.jreplay` collision — D-ARTIFACT-EXT1 (card #514)
+
+Two extension families ship (`.jetmap`/`.jetnb` vs
+`.jproof`/`.jtrace`/`.jreplay`) and `.jreplay` names two different
+ratified formats: game input replays (D-GAME-REPLAY1) and proof replays
+(D-JREPLAY1). One family law + collision fix.
+
+### H2. Ambient-surface registry — D-PRELUDE-LAW1 (card #514)
+
+The no-prefix list spans D-PRELUDE1 (`print`, `input`), S36 (`panic`,
+`require`), and the comptime gates (`embed_file`, `embed_bytes`, `find`,
+`fetch`). One closed registry + ballot-gated admission, the same shape
+as the namespace/metadata/constructor laws.
+
+### H3. Drift found in the lexical core — criteria on card #500
+
+- spec.md EBNF still shows the retired `~` param sigil (D-MEM1).
+- `input()` documented as `Result(String, IoError)` — non-Jet spelling
+  and an S66 violation (`IOError`).
+- JET_* env vars have no registry page; added as a reference-docs item.
+
+### H4. Verified clean this pass
+
+Precedence table (no surprises; `|` vs `&&` split matches pattern law),
+terminator/continuation rules (S6-R self-consistent, `ends_statement`
+extension rule recorded), string escapes (closed set, E0001 on the
+rest), number literals, extension-optional path resolution, `if`-arm
+grammar (range arms with their three porting-hazard teaching errors),
+label grammar, destructure grammar. The M1 core is coherent; its only
+defects were documentation drift (H3).
+
 Analysis of the polyglot/replace-every-language track lives in
 [`polyglot.md`](polyglot.md).
