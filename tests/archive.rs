@@ -20,6 +20,24 @@ fn have_toolchain() -> bool {
     have_rustc() && Command::new("cargo").arg("--version").output().is_ok()
 }
 
+#[test]
+fn legacy_archive_gzip_is_rejected() {
+    let src = r#"
+use core.archive as ar
+
+fn run() {
+    bytes: [U8] :: [1, 2, 3]
+    ar.gzip_compress(bytes)
+}
+"#;
+    let diags = jet::compile(src)
+        .expect_err("D-CORE-COMPRESS1=A removes gzip from core.archive");
+    assert!(
+        diags.iter().any(|d| d.code == "E1004"),
+        "legacy archive gzip should be an ordinary unknown Core item: {diags:?}"
+    );
+}
+
 /// Compile, FFI-link, and run an archive program; return stdout.
 fn run_archive(src: &str) -> String {
     use std::sync::atomic::{AtomicU64, Ordering};

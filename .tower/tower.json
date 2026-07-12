@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 512,
-    "rev": 4206,
+    "nextNum": 513,
+    "rev": 4213,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -14323,13 +14323,43 @@
       "blockedBy": [],
       "workOrder": 32,
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-12",
+          "by": "claude-main",
+          "text": "Scope addition (Go-simplicity pass F): audit corelib/ source tree vs the include_str-embedded prelude in CoreLib.rs — establish single source of truth, document or fix drift, keep the rebuild-before-smoke-test trap noted in AGENTS.md accurate."
+        }
+      ],
       "criteria": [],
       "refs": [
         "docs/proposals/architecture-infra.md"
       ],
       "needsAcceptance": false,
       "created": "2026-07-12T02:52:08.449Z",
+      "updated": "2026-07-12"
+    },
+    {
+      "id": "c0mqffhd",
+      "num": 512,
+      "title": "Go-simplicity pass: block-plane law, policy/drop word collisions, emit spelling, one math home",
+      "body": "From docs/proposals/surface-condensation.md section F (third pass, 2026-07-12). Family-outlier hunt across every ratified surface, feature-preserving. Five ballots: D-BLOCKPLANE1 (region/live/assume_deterministic become # blocks — the expert-region family gets one universal rule, 3 keywords die), D-POLICY-WORD1 (in-source policy floor respelled #Policy(...) so policy means only the manifest namespace), D-DROP-WORD1 (linear consume drop(x) renamed consume(x) — one meaning per word vs .drop(reason) discard), D-CLI-EMIT1 (jet emit --rust verb vs --emit-rust global flag — one spelling), D-CORE-NUMERIC1 (core.numeric folds into core.math — Go math/big precedent). Section F6 records everything considered and deliberately kept, with reasons, so nothing is re-litigated.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "workOrder": 33,
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/proposals/surface-condensation.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-12T06:42:23.633Z",
       "updated": "2026-07-12"
     }
   ],
@@ -29939,6 +29969,346 @@
       "created": "2026-07-12T02:57:33.796Z",
       "outcome": "A",
       "ratifiedAt": "2026-07-12"
+    },
+    {
+      "id": "D-BLOCKPLANE1",
+      "cardId": "c0mqffhd",
+      "group": "syntax",
+      "title": "Expert regions are # blocks: fold region, live, and assume_deterministic into the marker family",
+      "gist": "Ten scoped-region constructs follow one rule and three are keyword outliers; fold the three so the rule is universal and three keywords die.",
+      "lesson": "A scoped region changes what is legal, or what happens, inside one block. D-MARKER-FAMILY1 puts that job on the `#` directive plane, and the family reads uniformly: `#Unsafe(\"reason\") { }`, `#Transact(name) { }`, `#Shield { }`, `#Caps(Net) { }`, `#Grant(Fs) { }`, `#Reactive { }`, `#Impure(\"reason\") { }`.\n\nThree regions predate or escaped the rule and are bare keywords. `region r { }` names an explicit arena scope (D-REGION1). `live { }` enters raw terminal mode with guaranteed restore (D-TERM1). `assume_deterministic { }` is the expert escape from determinism checking (D-DET1).\n\nA reader who learns \"an expert region is a `#` block\" is wrong three times. A reason-gate is the `(\"reason\")` argument some markers require, so audits can quote why.",
+      "explainer": "",
+      "story": "Vera reviews a hardware-control module. She greps for `#` blocks to audit every expert region — that is the promise of the marker plane. The file also contains `region pool { }` and `assume_deterministic { }`, which her grep misses because two expert regions are spelled like control flow. Her audit ships with a hole she had no way to see.",
+      "inWild": "// today: one family, two grammars\n#Unsafe(\"MMIO write\") { mem.volatile_write(reg, 1) }\n#Transact(tx) { apply_batch()? }\n\nregion pool {                       // keyword outlier 1\n    buf :: arena.alloc(frame)\n}\nlive {                              // keyword outlier 2\n    key :: term.read_key()\n}\nassume_deterministic {              // keyword outlier 3\n    seed :: entropy_sample()\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Fold all three — the rule becomes universal",
+          "detail": "`region r { }` becomes `#Region(r) { }`. `live { }` becomes `#Live { }`. `assume_deterministic { }` becomes `#Nondeterministic(\"reason\") { }`, gaining the reason-gate its siblings `#Unsafe`/`#Impure` already carry — an audited escape should say why. The three keywords leave the grammar as ordinary syntax errors (greenfield, no teaching residue).\n\nOne rule survives with zero exceptions: an expert region is a `#` block. Grep-for-`#` audits become complete. The keyword list shrinks by three.",
+          "code": "#Region(pool) {\n    buf :: arena.alloc(frame)\n}\n#Live {\n    key :: term.read_key()\n}\n#Nondeterministic(\"hardware entropy sample\") {\n    seed :: entropy_sample()\n}\n\n$ jet check probe.jet   # after the break\nerror[E0003]: unknown statement `region`\n  scoped regions are # blocks — `#Region(pool) { … }`"
+        },
+        {
+          "key": "B",
+          "name": "Fold the two expert regions; `live` stays a keyword",
+          "detail": "`region` and `assume_deterministic` move to the plane; `live { }` stays a keyword on the argument that raw terminal mode is a beginner-adjacent I/O feature, not an expert escape.\n\nThe rule then needs a footnote (\"except live\"), and the audit-by-grep story keeps one hole. Two keywords die instead of three.",
+          "code": "#Region(pool) { … }\n#Nondeterministic(\"…\") { … }\nlive {                     // the surviving exception\n    key :: term.read_key()\n}"
+        },
+        {
+          "key": "C",
+          "name": "Status quo — three keyword regions stay",
+          "detail": "No churn. The marker family keeps three exceptions, the audit grep keeps its holes, and every future region proposal can cite either grammar as precedent — which is how the fork happened.",
+          "code": "region pool { … }\nlive { … }\nassume_deterministic { … }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "Go's simplicity is families with no exceptions: one loop, one declaration shape. The lesson is the zero-exception rule, not the keyword count.",
+          "code": "for { }        // the only loop, no variants to memorize"
+        },
+        {
+          "lang": "Rust",
+          "note": "Rust spells every scoped behavior change as a block keyword (`unsafe`, `async`) AND attributes — two grammars for one job is the drift Jet can still avoid.",
+          "code": "unsafe { }\n#[allow(…)] { }   // both exist; readers learn both"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Zero-exception rules are what make a big surface feel small — that is the Go lesson this pass exists to apply. All three constructs are region directives by D-MARKER-FAMILY1's own definition, and the audit-by-grep completeness is a real safety property.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A rule with a footnote is a rule readers stop trusting; live is still a region that changes terminal legality, whoever uses it."
+          },
+          {
+            "key": "C",
+            "reason": "It leaves two grammars as precedent for every future region, so the family keeps forking."
+          }
+        ],
+        "tradeoff": "Three retired spellings become ordinary syntax errors; existing examples and snapshots re-bless once."
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "A absorbs B's concern inside the plane: `#Live` needs no reason argument, so the beginner-adjacent case stays ceremony-free while joining the family.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "universal # rule, three keywords retired",
+            "use": "adopted"
+          },
+          {
+            "key": "B",
+            "aspect": "live is lighter than the expert escapes",
+            "use": "#Live takes no reason argument; #Nondeterministic does"
+          },
+          {
+            "key": "C",
+            "aspect": "zero churn",
+            "use": "rejected — the churn is three spellings, paid once, greenfield"
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T06:45:21.316Z"
+    },
+    {
+      "id": "D-POLICY-WORD1",
+      "cardId": "c0mqffhd",
+      "group": "syntax",
+      "title": "One meaning for `policy`: respell the in-source module floor as #Policy(…)",
+      "gist": "The word policy names two unrelated surfaces — a module allocation floor in source and the manifest governance namespace; give it one meaning.",
+      "lesson": "`policy no_alloc` is a bare item inside a module file (D-NOALLOC-SEM1). It floors that one module: four allocation-shaped expressions become error E0921 inside it. Nothing else reads it.\n\n`policy:` in the manifest is the governance namespace (D-JPK-POLICYSURFACE1): trust, providers, licenses, replacements — and D-LINTPOLICY1 just added `lints:` to it. It governs the whole workspace and feeds prompts, locks, and audit.\n\nSame word, two homes, two scopes, two jobs. A directive that changes what compiles inside a scope is the `#` plane's exact definition (D-MARKER-FAMILY1).",
+      "explainer": "",
+      "story": "Owen reads a teammate's PR: `policy no_alloc` at the top of a module. He has just configured `policy: { lints: … }` in pkg.jet, so he assumes this is the same system reaching into source, and looks for the module's entry in the manifest. There isn't one. Two features are sharing one name and he learned the wrong lesson first.",
+      "inWild": "// hot_path.jet — in-source floor\npolicy no_alloc\n\nfn mix(a: F32x4, b: F32x4) -> F32x4 { … }\n\n// pkg.jet — governance namespace, unrelated mechanism\npolicy: {\n    lints: { deny: [float_money] },\n    trust: { default: prompt },\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Respell the module floor as `#Policy(no_alloc)`",
+          "detail": "The in-source item becomes a module-level directive: `#Policy(no_alloc)`. Future floors ratified for modules (D-MEM1 names `no_alloc` as the first) arrive as arguments, not new keywords. The bare `policy` keyword leaves the grammar; the word means the manifest namespace, alone.\n\nThe directive plane is the honest home: it changes what compiles in a scope, exactly like `#Unsafe` changes legality in a block.",
+          "code": "#Policy(no_alloc)\n\nfn mix(a: F32x4, b: F32x4) -> F32x4 { … }\n\n$ jet check hot_path.jet   # after the break\nerror[E0003]: unknown statement `policy`\n  module floors are `#Policy(no_alloc)`; manifest governance is pkg.jet `policy:`"
+        },
+        {
+          "key": "B",
+          "name": "Keep both spellings, document the difference",
+          "detail": "Zero churn; the reference docs explain that source `policy` and manifest `policy:` are different systems. The collision stays: every new reader resolves it the hard way, and future module floors keep the keyword growing in parallel with the namespace.",
+          "code": "policy no_alloc          // source: module floor\npolicy: { trust: … }     // manifest: governance\n// + a docs paragraph explaining they never meet"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "Go compiler directives are comments-with-shape (`//go:noinline`), never keywords — scope-local build behavior stays off the keyword list.",
+          "code": "//go:noinline\nfunc mix(a, b float32) float32 { … }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "One word, one meaning is the cheapest kind of simplicity, and the directive plane is this feature's definitionally correct home. The floor mechanism also gains a growth path (new floors are arguments) instead of new keywords.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Documentation cannot un-collide a word; the confusion re-occurs per reader, forever, and the keyword still grows in parallel with the namespace."
+          }
+        ],
+        "tradeoff": "One retired spelling; the D-NOALLOC-SEM1 checker is untouched, only its trigger respells."
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "A keeps B's zero-semantic-change property — the local-only walk, E0921, and the ratified scope cut all survive verbatim; only the spelling moves plane.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "#Policy(…) module directive",
+            "use": "adopted"
+          },
+          {
+            "key": "B",
+            "aspect": "no semantic churn",
+            "use": "preserved — checker and diagnostics unchanged"
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T06:45:21.417Z"
+    },
+    {
+      "id": "D-DROP-WORD1",
+      "cardId": "c0mqffhd",
+      "group": "syntax",
+      "title": "One meaning for `drop`: rename the linear consume to `consume(x)`",
+      "gist": "Two unrelated features share the word drop — discarding a result and consuming a linear value; rename the rarer one.",
+      "lesson": "`.drop(\"reason\")` discards a fallible or `@MustUse` result with visible intent (D-IGNORERET, just re-ratified as the sole discard spelling). It is everyday surface.\n\n`drop(x)` is something else entirely. A `#SingleUse` value (D-LIN1) must be consumed exactly once on every path — passed by `^`, returned, or explicitly finished with `drop(x)` inside an `#Unsafe(\"reason\")` block. That is the expert linear-types tier, and its `drop` does not discard an unwanted result; it satisfies a consumption obligation.\n\nOne word, two semantics. Every language that overloaded a common word this way (Rust's `drop` function versus Drop trait versus drop glue) pays in forum confusion forever.",
+      "explainer": "",
+      "story": "Hank learns `.drop(\"best-effort\")` in week one — the discard verb. In month three he handles a `#SingleUse` session token and reads `drop(token)` in the expert docs. He assumes it discards the token's result and wonders what error he is suppressing. It suppresses nothing; it fulfills a linearity proof. The word taught him wrong.",
+      "inWild": "// everyday: discard a result, say why\ncleanup_temp().drop(\"best-effort\")\n\n// expert tier: satisfy a linear obligation (D-LIN1)\n#SingleUse\nstruct SessionToken { … }\n\n#Unsafe(\"token retired before handoff\")\n{ drop(token) }        // same word, unrelated meaning",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Rename the linear consume to `consume(x)`",
+          "detail": "The linear finisher becomes `consume(x)` — the law it satisfies already says \"must be consumed exactly once\", so the word teaches itself. `.drop(\"reason\")` keeps sole ownership of the discard meaning. The retired `drop(x)` spelling becomes an ordinary unknown-identifier error inside the gate.\n\nBlast radius is tiny: `consume` only exists inside `#Unsafe` blocks on `#SingleUse` values — the narrowest expert surface in the language.",
+          "code": "#Unsafe(\"token retired before handoff\")\n{ consume(token) }\n\ncleanup_temp().drop(\"best-effort\")   // unchanged, sole meaning\n\n$ jet check session.jet   # after the break\nerror[E0104]: unknown function `drop`\n  a #SingleUse value is finished with `consume(x)`;\n  discarding a result is `.drop(\"reason\")`"
+        },
+        {
+          "key": "B",
+          "name": "Status quo — context disambiguates",
+          "detail": "Keep both. The call shapes differ (method with a string versus free function in a gate), so the compiler is never confused — only people are. The Rust precedent says the confusion is permanent and generates the same explanation in every teaching thread.",
+          "code": "drop(token)                          // linear consume\ncleanup_temp().drop(\"best-effort\")   // discard\n// docs explain the difference, forever"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust's `drop` names a free function, a trait, and compiler glue; \"what does drop actually do here\" is a perennial forum thread. The overload never stopped costing.",
+          "code": "drop(x);            // the function\nimpl Drop for X {}  // the trait — related but not the same thing"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "One word, one meaning — bought at the smallest possible price, since the linear tier is the least-typed surface in the language and `consume` states the obligation it fulfills.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "The compiler never needed the fix; readers do, and they pay per reader forever while the fix costs one tiny expert spelling once."
+          }
+        ],
+        "tradeoff": "One expert spelling retires; D-LIN1 diagnostics re-bless with the new word."
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "Nothing to combine — B is the absence of A. The teaching text in A's error message carries B's only asset: the reminder that the two features exist.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "consume(x) as the linear finisher",
+            "use": "adopted"
+          },
+          {
+            "key": "B",
+            "aspect": "both features stay fully available",
+            "use": "true under A as well — only the word changes"
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T06:45:21.516Z"
+    },
+    {
+      "id": "D-CLI-EMIT1",
+      "cardId": "c0mqffhd",
+      "group": "tooling",
+      "title": "One spelling for the generated Rust: the emit verb; the --emit-rust flag dies",
+      "gist": "A verb and a global flag both print the generated Rust; keep the verb.",
+      "lesson": "Jet compiles to Rust internally (I2 hides it; experts sometimes want to see it). Two surfaces expose it today. `jet emit --rust <file>` is a verb whose whole job is emitting generated output. The global flag `--emit-rust` additionally prints the generated Rust during another command, like `jet check`.\n\nS14 says one canonical spelling per construct. D-CLI-SURFACE1 put `emit` in the ratified daily ring. The flag predates the ring and now duplicates it.",
+      "explainer": "",
+      "story": "Peggy suspects a codegen bug. One teammate tells her `jet emit --rust tool.jet`; another says `jet check tool.jet --emit-rust`. She runs both, gets the same Rust twice, and files the mental note every duplicate spelling costs: which one is the real one, and is the other subtly different?",
+      "inWild": "$ jet emit --rust tool.jet          # the verb (ratified ring member)\n$ jet check tool.jet --emit-rust    # the flag — same bytes, second spelling",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Verb only — `--emit-rust` becomes a teaching error",
+          "detail": "`jet emit --rust <file>` is the one spelling. The global flag leaves the table; using it names the verb. Scripts pipe the verb's stdout, which is already its contract. One place to document, one behavior to pin in CLI transcripts.",
+          "code": "$ jet emit --rust tool.jet > tool.rs\n\n$ jet check tool.jet --emit-rust\nerror[E2102]: unknown flag `--emit-rust`\n  the generated Rust comes from `jet emit --rust tool.jet`"
+        },
+        {
+          "key": "B",
+          "name": "Flag only — fold the verb's job into every command",
+          "detail": "Kill the `emit` verb instead; any command accepts `--emit-rust`. This inverts the ratified ring (D-CLI-SURFACE1 lists `emit` as a daily verb) and couples an output mode into every command's contract — each verb's transcript now has a with-flag variant to pin.",
+          "code": "$ jet check tool.jet --emit-rust\n$ jet build tool.jet --emit-rust   # every verb grows the mode"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "Go exposes compiler internals through dedicated tool verbs, not flags scattered across commands — one place to look.",
+          "code": "go tool compile -S main.go   # the one spelling for assembly output"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The verb is already ratified ring surface with the right contract (emit to stdout); the flag is the stray duplicate. Removing it costs nothing but the S14 violation.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It deletes a ratified ring verb to keep the stray, and multiplies every command's transcript surface by the output mode."
+          }
+        ],
+        "tradeoff": "Anyone using the flag in a script retypes it once as the verb, guided by the teaching error."
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "B's convenience — seeing the Rust for exactly what you just checked — survives under A as two commands in a row, or a shell pipeline; no flag needed.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "one verb owns the output",
+            "use": "adopted"
+          },
+          {
+            "key": "B",
+            "aspect": "inspect-during-check convenience",
+            "use": "run `jet emit --rust` beside `jet check`; same bytes, one spelling"
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T06:45:21.617Z"
+    },
+    {
+      "id": "D-CORE-NUMERIC1",
+      "cardId": "c0mqffhd",
+      "group": "stdlib",
+      "title": "One math home: fold core.numeric (BigInt, Decimal) into core.math",
+      "gist": "Numbers live in two modules — functions in core.math, arbitrary-precision types in core.numeric; fold them into one home.",
+      "lesson": "`core.math` is the canonical callable math surface (D-MATHLIB2): libm functions plus the checked/saturating/wrapping integer families, already width-generic (D-FLOATW1).\n\n`core.numeric` holds exactly two types: `BigInt`, the arbitrary-precision integer (D-BIGINT1), and `Decimal`, the exact base-10 number for money (D-DECIMAL1). Nothing else lives there and nothing else is planned there.\n\nA user who needs big or exact numbers is doing math; the split makes them learn a second module name for two types. Go put arbitrary precision inside math (`math/big`) and the placement never confused anyone.",
+      "explainer": "",
+      "story": "Cora computes compound interest. She imports `core.math` for `pow`, then discovers `Decimal` lives somewhere else and goes hunting. Completion offers `core.numeric` — a name she has to guess means \"the other half of math\". Two imports, one domain.",
+      "inWild": "use core.math\nuse core.numeric          // the other half of math\n\nprincipal: Decimal :: Decimal(\"10000.00\")\nrate :: math.pow(1.05, years.to_float())",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Fold — `BigInt` and `Decimal` move into core.math",
+          "detail": "`core.math` becomes the one numbers home: functions and the two arbitrary-precision types together. `core.numeric` leaves the registry (ordinary unknown-module error, clean break). Construction spellings are untouched — `BigInt(…)`, `Decimal(\"…\")`, the no-auto-promotion law (E0130–E0133), and the L0504 money lint all survive verbatim.",
+          "code": "use core.math\n\nprincipal :: Decimal(\"10000.00\")\nbig :: BigInt(\"9999999999999999999999\")\nrate :: math.pow(1.05, years.to_float())\n\n$ jet check ledger.jet   # after the break\nerror[E0606]: unknown core module `core.numeric`\n  BigInt and Decimal live in `core.math`"
+        },
+        {
+          "key": "B",
+          "name": "Keep the split — functions versus types",
+          "detail": "The boundary is at least statable: math holds functions, numeric holds types. But it is not a boundary users need — nobody benefits from filing `Decimal` away from `pow` — and it costs a guessed module name plus a second import in every financial file.",
+          "code": "use core.math       // functions\nuse core.numeric    // types\n// the rule exists; nobody is helped by it"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "Go nests arbitrary precision inside math as math/big; fifteen years, zero placement confusion.",
+          "code": "import \"math\"\nimport \"math/big\""
+        },
+        {
+          "lang": "Python",
+          "note": "Python splits decimal, fractions, and math as flat top-level modules — the sprawl users memorize rather than derive.",
+          "code": "import math\nimport decimal   # a placement you just have to know"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "One domain, one home, and the freed top-level slot serves the D-CORENS2 admission law. The types keep every ratified behavior; only their address changes, while the language is still greenfield.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "The functions-versus-types boundary is real but useless — it optimizes the registry's tidiness over the user's import list."
+          }
+        ],
+        "tradeoff": "One clean import break for files using core.numeric today."
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "A keeps B's only virtue — a statable rule — by upgrading it: the rule becomes \"numbers live in math\", which is both statable and useful.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "one math home",
+            "use": "adopted"
+          },
+          {
+            "key": "B",
+            "aspect": "explicit placement rule",
+            "use": "survives as the simpler rule: numbers live in math"
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T06:45:21.721Z"
     }
   ],
   "questions": [
@@ -30740,6 +31110,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-12T06:45:21.721Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-CORE-NUMERIC1",
+      "note": "One math home: fold core.numeric (BigInt, Decimal) into core.math"
+    },
+    {
+      "at": "2026-07-12T06:45:21.617Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-CLI-EMIT1",
+      "note": "One spelling for the generated Rust: the emit verb; the --emit-rust flag dies"
+    },
+    {
+      "at": "2026-07-12T06:45:21.517Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-DROP-WORD1",
+      "note": "One meaning for `drop`: rename the linear consume to `consume(x)`"
+    },
+    {
+      "at": "2026-07-12T06:45:21.417Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-POLICY-WORD1",
+      "note": "One meaning for `policy`: respell the in-source module floor as #Policy(…)"
+    },
+    {
+      "at": "2026-07-12T06:45:21.316Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-BLOCKPLANE1",
+      "note": "Expert regions are # blocks: fold region, live, and assume_deterministic into the marker family"
+    },
+    {
+      "at": "2026-07-12T06:42:23.735Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c00ukytt",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-12T06:42:23.634Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0mqffhd",
+      "note": "Go-simplicity pass: block-plane law, policy/drop word collisions, emit spelling, one math home"
+    },
     {
       "at": "2026-07-12T06:39:33.091Z",
       "by": "terra-499-builder",
@@ -34190,55 +34609,6 @@
       "action": "card.update",
       "ref": "c0z3l25j",
       "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-11T17:20:08.071Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c01lj8gw",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-11T17:20:07.991Z",
-      "by": "sol-451-builder",
-      "action": "card.claim",
-      "ref": "c01lj8gw",
-      "note": ""
-    },
-    {
-      "at": "2026-07-11T17:18:17.195Z",
-      "by": "sol-286-builder",
-      "action": "card.update",
-      "ref": "c0fiunwy",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-11T17:18:03.613Z",
-      "by": "sol-286-builder",
-      "action": "card.release",
-      "ref": "c0fiunwy",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-11T17:17:53.950Z",
-      "by": "sol-286-builder",
-      "action": "decision.add",
-      "ref": "D-EVENT2",
-      "note": "Complete event dispatch, failure, and hook policy surface"
-    },
-    {
-      "at": "2026-07-11T17:14:12.848Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0fiunwy",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-11T17:14:12.761Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0fiunwy",
-      "note": "#6 Focused runtime/codegen/Core/Canvas/UI/golden tests cover po"
     }
   ],
   "nextNum": 368,
