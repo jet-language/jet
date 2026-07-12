@@ -749,6 +749,60 @@ struct TemplateInfo {
     def: GenericModuleDef,
     non_fn_kinds: Vec<&'static str>,
     params: Vec<ResolvedModuleParam>,
+    source_module: usize,
+}
+
+impl Clone for TemplateInfo {
+    fn clone(&self) -> Self {
+        let mut non_fn_kinds = Vec::new();
+        Self {
+            def: clone_generic_module_def(&self.def, &mut non_fn_kinds),
+            non_fn_kinds: self.non_fn_kinds.clone(),
+            params: self.params.clone(),
+            source_module: self.source_module,
+        }
+    }
+}
+
+fn clone_generic_module_def(
+    gm: &GenericModuleDef,
+    non_fn_kinds: &mut Vec<&'static str>,
+) -> GenericModuleDef {
+    let body = gm
+        .body
+        .iter()
+        .filter_map(|item| match item {
+            Item::Func(f) => Some(Item::Func(f.clone())),
+            Item::Struct(s) => Some(Item::Struct(clone_struct(s))),
+            Item::Enum(e) => Some(Item::Enum(clone_enum(e))),
+            Item::Const(c) => Some(Item::Const(crate::AST::ConstDef {
+                span: c.span,
+                name: c.name.clone(),
+                name_span: c.name_span,
+                value: c.value.clone(),
+                meta: c.meta.clone(),
+                attrs: c.attrs.clone(),
+                rust_kind: c.rust_kind,
+                is_comptime: c.is_comptime,
+                ct: c.ct.clone(),
+                is_persist: c.is_persist,
+                persist_span: c.persist_span,
+            })),
+            _ => {
+                non_fn_kinds.push("item");
+                None
+            }
+        })
+        .collect();
+    GenericModuleDef {
+        name: gm.name.clone(),
+        name_span: gm.name_span,
+        is_pub: gm.is_pub,
+        is_package_pub: gm.is_package_pub,
+        params: gm.params.clone(),
+        body,
+        span: gm.span,
+    }
 }
 
 struct AliasExpansion {
