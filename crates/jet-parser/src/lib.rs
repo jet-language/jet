@@ -10,7 +10,7 @@ pub mod Parser;
 
 #[cfg(test)]
 mod generic_module_tests {
-    use super::{AST::{GenericModuleParam, Item, ModuleArg}, Lexer, Parser};
+    use super::{AST::{GenericModuleParam, Item, ModuleArg, Type}, Lexer, Parser};
 
     #[test]
     fn generic_module_slots_remain_unresolved_until_sema_without_casing_heuristics() {
@@ -33,5 +33,17 @@ mod generic_module_tests {
             let Item::ModuleAlias(alias) = item else { panic!("alias") };
             assert!(matches!(&alias.args[0], ModuleArg::Value(..)));
         }
+    }
+
+    #[test]
+    fn generic_module_retains_symbolic_fixed_length_and_nested_modules() {
+        let src = "module Buffer<T, capacity: Int> { struct Data { items: [T#capacity] } module stats { fn size() -> Int { return capacity } } }";
+        let (tokens, lex) = Lexer::lex(src);
+        assert!(lex.is_empty(), "{lex:?}");
+        let program = Parser::parse(&tokens).unwrap();
+        let Item::GenericModule(def) = &program.items[0] else { panic!("template") };
+        let Item::Struct(data) = &def.body[0] else { panic!("struct") };
+        assert!(matches!(&data.fields[0].ty, Type::FixedList { len_symbol: Some((name, _)), .. } if name == "capacity"));
+        assert!(matches!(&def.body[1], Item::CodeModule(module) if module.name == "stats"));
     }
 }

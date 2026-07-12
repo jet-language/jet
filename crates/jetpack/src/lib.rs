@@ -40,6 +40,7 @@ pub mod Image;
 pub mod JetOS;
 pub mod JetPin;
 pub mod ManifestTOML;
+pub mod MemberSelect;
 pub mod Merge;
 pub mod MigrationImport;
 pub mod ModuleEval;

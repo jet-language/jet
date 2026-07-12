@@ -4,7 +4,8 @@ use crate::Generics;
 use crate::Syntax;
 use crate::AST::FfiLink;
 use crate::AST::{
-    AccessConvention, EnumDef, Func, Item, Program, ProgramBundle, StructDef, Type, VariantPayload,
+    AccessConvention, CtValue, EnumDef, Func, Item, Program, ProgramBundle, StructDef, Type,
+    VariantPayload,
 };
 use std::collections::{HashMap, HashSet};
 pub(crate) struct Cx {
@@ -525,9 +526,10 @@ impl Cx {
                 marker: marker.clone(),
                 inner: Box::new(self.expand_type_aliases(inner)),
             },
-            Type::FixedList { elem, len } => Type::FixedList {
+            Type::FixedList { elem, len, .. } => Type::FixedList {
                 elem: Box::new(self.expand_type_aliases(elem)),
                 len: *len,
+                len_symbol: None,
             },
             other => other.clone(),
         }
@@ -1055,7 +1057,7 @@ impl Cx {
             Type::Tuple(fields) => tuple_struct_name(&tuple_fields_plain(fields)),
             // D-FIXARR1 (ratified 2026-06-22): [T#N] lowers to a real Rust stack array [T; N].
             // All size/bounds checks live in sema (I3). The Rust type is [E; N].
-            Type::FixedList { elem, len } => format!("[{}; {}]", self.rust_type(elem), len),
+            Type::FixedList { elem, len, .. } => format!("[{}; {}]", self.rust_type(elem), len),
             // D-QUAL4=A: tagged types are transparent to codegen.
             Type::Tagged { inner, .. } => self.rust_type(inner),
         }
@@ -1361,10 +1363,23 @@ pub(crate) fn build_cx_items(
             Item::Const(c) => {
                 if c.is_comptime {
                     // Inline the evaluated literal at every reference.
-                    let serialized =
-                        c.ct.as_ref()
-                            .map(|v| v.serialize())
-                            .unwrap_or_else(|| "Default::default()".to_string());
+                    // `CtValue::serialize()` renders an empty `List([])` as a bare
+                    // `vec![]` — fine when the splice site supplies a type (a `let`
+                    // binding's annotation, a struct field, a typed param), but a
+                    // comptime const inlines directly at a bare use site (e.g.
+                    // `PATHS.join(sep)`), where nothing pins the element type and
+                    // rustc rejects the untyped `vec![]` as E0282 (I2). `c.ty` (set
+                    // by sema alongside `c.ct` — see `ConstDef::ty`) carries the
+                    // binding's real Jet type even when the value has no elements to
+                    // sample it from, so an empty list renders as a typed
+                    // `Vec::<T>::new()` instead.
+                    let serialized = match (c.ct.as_ref(), c.ty.as_ref()) {
+                        (Some(CtValue::List(xs)), Some(Type::List(inner))) if xs.is_empty() => {
+                            format!("Vec::<{}>::new()", cx.rust_type(inner))
+                        }
+                        (Some(v), _) => v.serialize(),
+                        (None, _) => "Default::default()".to_string(),
+                    };
                     cx.consts.insert(c.name.clone(), serialized);
                 } else {
                     cx.consts

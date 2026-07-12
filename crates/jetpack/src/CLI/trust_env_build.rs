@@ -5,6 +5,7 @@ use super::realize::{
     report_nix_bridge_required, realize_ref_outcome, RefOutcome, RowStyle, RunPlan,
 };
 use super::workspace_sources::{cwd_table, load_workspace};
+use crate::MemberSelect::{self, SelectRequest};
 use crate::ModuleEval;
 use crate::Output::{self, Theme};
 use crate::Provider;
@@ -14,6 +15,7 @@ use crate::Shell::Env;
 use crate::Store::{self, Roots};
 use crate::Syntax;
 use crate::Trust;
+use crate::WorkspaceFile::WorkspaceMember;
 
 /// D-JPK-GRANTCMD1=A: `jet trust grant/list/explain/revoke`. Jetpack owns the
 /// store; top-level `jet trust` dispatches here.
@@ -242,6 +244,88 @@ fn name_column_width(refs: &[RefSpec::RefSpec]) -> usize {
         .max(8)
 }
 
+/// D-JPK-SELECTOR1=C: turn CLI flags into a workspace selection request.
+fn select_request_from_flags(flags: &Flags) -> SelectRequest {
+    SelectRequest {
+        packages: flags.workspace_members.clone(),
+        affected: flags.affected,
+        affected_since: flags.affected_since.clone(),
+    }
+}
+
+fn report_select_error(theme: &Theme, d: &crate::Diagnostics::Diagnostic) -> i32 {
+    theme.error_coded(&d.code, &d.what, &d.why, &d.fix);
+    2
+}
+
+/// Build (or test) each selected workspace member via the core provider.
+fn run_workspace_members(
+    theme: &Theme,
+    parsed: &Parsed,
+    dir: &std::path::Path,
+    plan_members: &[WorkspaceMember],
+    action: &str,
+) -> i32 {
+    let roots = Store::resolve();
+    let mut ok = true;
+    let mut built: Vec<WorkspaceMember> = Vec::new();
+    for (idx, member) in plan_members.iter().enumerate() {
+        let abs = if std::path::Path::new(&member.path).is_absolute() {
+            std::path::PathBuf::from(&member.path)
+        } else {
+            dir.join(&member.path)
+        };
+        theme.status(&format!("{action} workspace member: {}", member.name));
+        let table = RefSpec::SourceTable::from_decls([(
+            member.name.clone(),
+            format!("path:{}", abs.display()),
+            ProviderKind::Core,
+        )]);
+        let raw = format!("{}:{}", member.name, member.name);
+        if plan_members.len() > 1 {
+            theme.progress_chain(
+                action,
+                idx + 1,
+                plan_members.len(),
+                &member.name,
+                "workspace",
+            );
+        }
+        let spec = match RefSpec::classify_in(&raw, &table) {
+            Ok(s) => s,
+            Err(e) => {
+                Output::ref_error(theme, &e);
+                ok = false;
+                continue;
+            }
+        };
+        if realize_ref(
+            theme,
+            &roots,
+            &parsed.flags,
+            &table,
+            &spec,
+            member.name.len().max(8),
+        )
+        .is_none()
+        {
+            ok = false;
+        } else {
+            built.push(member.clone());
+        }
+    }
+    if ok {
+        MemberSelect::record_member_input_hashes(dir, &built);
+        theme.status(&format!(
+            "{action} {} workspace member(s).",
+            plan_members.len()
+        ));
+        0
+    } else {
+        1
+    }
+}
+
 /// `jetpack build [<ref>]` — realize without entering a shell.
 pub(super) fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
     let roots = Store::resolve();
@@ -250,70 +334,23 @@ pub(super) fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
         return code;
     }
 
-    // D-WORKSPACE1=B: if workspace.jet is present, build all workspace members
-    // via the first-party core provider (no Nix required).
+    // D-WORKSPACE1=B: if workspace.jet is present, build selected workspace
+    // members via the first-party core provider (no Nix required).
     if dir.join(Syntax::WORKSPACE_FILE).exists() {
         if let Some(result) = load_workspace(&dir) {
             return match result {
                 Err(code) => code,
                 Ok(plan) => {
-                    let mut ok = true;
-                    for (idx, member) in plan.members.iter().enumerate() {
-                        let abs = if std::path::Path::new(&member.path).is_absolute() {
-                            std::path::PathBuf::from(&member.path)
-                        } else {
-                            dir.join(&member.path)
-                        };
-                        theme.status(&format!("building workspace member: {}", member.name));
-                        // Route the member through the core provider using its
-                        // absolute local path as the upstream (source_repo handles
-                        // "path:<abs>" → PathBuf directly, no Nix needed).
-                        let table = RefSpec::SourceTable::from_decls([(
-                            member.name.clone(),
-                            format!("path:{}", abs.display()),
-                            ProviderKind::Core,
-                        )]);
-                        let raw = format!("{}:{}", member.name, member.name);
-                        if plan.members.len() > 1 {
-                            theme.progress_chain(
-                                "build",
-                                idx + 1,
-                                plan.members.len(),
-                                &member.name,
-                                "workspace",
-                            );
-                        }
-                        let spec = match RefSpec::classify_in(&raw, &table) {
-                            Ok(s) => s,
-                            Err(e) => {
-                                Output::ref_error(theme, &e);
-                                ok = false;
-                                continue;
-                            }
-                        };
-                        if realize_ref(
-                            theme,
-                            &roots,
-                            &parsed.flags,
-                            &table,
-                            &spec,
-                            member.name.len().max(8),
-                        )
-                        .is_none()
-                        {
-                            ok = false;
-                        }
+                    let req = select_request_from_flags(&parsed.flags);
+                    let selected = match MemberSelect::select_members(&dir, &plan, &req) {
+                        Ok(m) => m,
+                        Err(d) => return report_select_error(theme, &d),
+                    };
+                    if selected.is_empty() {
+                        theme.status("no workspace members matched the selection.");
+                        return 0;
                     }
-                    if ok {
-                        theme.status(&format!(
-                            "built {} workspace member(s).",
-                            plan.members.len()
-                        ));
-                        0
-                    } else {
-                        1
-                    }
-                    // (workspace members: state is printed per-package by realize_ref)
+                    run_workspace_members(theme, parsed, &dir, &selected, "building")
                 }
             };
         }
@@ -456,4 +493,37 @@ pub(super) fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
         }
         1
     }
+}
+
+/// `jetpack test` — realize selected workspace members (D-JPK-SELECTOR1=C).
+/// Outside a workspace, falls through to the same project-plan realize path as
+/// `build` (tests ride the package after realize).
+pub(super) fn cmd_test(theme: &Theme, parsed: &Parsed) -> i32 {
+    let dir = std::env::current_dir().unwrap_or_default();
+    if let Err(code) = RuntimePolicy::enforce_sandbox_policy(theme, parsed.flags.json) {
+        return code;
+    }
+    if dir.join(Syntax::WORKSPACE_FILE).exists() {
+        if let Some(result) = load_workspace(&dir) {
+            return match result {
+                Err(code) => code,
+                Ok(plan) => {
+                    let req = select_request_from_flags(&parsed.flags);
+                    let selected = match MemberSelect::select_members(&dir, &plan, &req) {
+                        Ok(m) => m,
+                        Err(d) => return report_select_error(theme, &d),
+                    };
+                    if selected.is_empty() {
+                        theme.status("no workspace members matched the selection.");
+                        return 0;
+                    }
+                    let names: Vec<_> = selected.iter().map(|m| m.name.as_str()).collect();
+                    theme.status(&format!("running {} members: {}", names.len(), names.join(", ")));
+                    run_workspace_members(theme, parsed, &dir, &selected, "testing")
+                }
+            };
+        }
+    }
+    // Non-workspace: identical realize path to build.
+    cmd_build(theme, parsed)
 }

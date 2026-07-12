@@ -6,8 +6,9 @@ use super::services_secrets_config::{
     wait_for_services_ready,
 };
 use super::trust_env_build::compose_env;
-use super::workspace_sources::cwd_table;
+use super::workspace_sources::{cwd_table, load_workspace};
 use crate::EnvFile;
+use crate::MemberSelect::{self, SelectRequest};
 use crate::ModuleEval;
 use crate::Output::Theme;
 use crate::Provider;
@@ -26,6 +27,57 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
             "user-owned hangar: using {}",
             roots.root.display()
         )));
+    }
+
+    let project_dir = std::env::current_dir().unwrap_or_default();
+    let select_req = SelectRequest {
+        packages: parsed.flags.workspace_members.clone(),
+        affected: parsed.flags.affected,
+        affected_since: parsed.flags.affected_since.clone(),
+    };
+    // D-JPK-SELECTOR1=C: workspace + selection flags → realize only those members.
+    if project_dir.join(Syntax::WORKSPACE_FILE).exists() && select_req.is_restricting() {
+        if let Some(result) = load_workspace(&project_dir) {
+            return match result {
+                Err(code) => code,
+                Ok(plan) => match MemberSelect::select_members(&project_dir, &plan, &select_req) {
+                    Ok(selected) if selected.is_empty() => {
+                        theme.status("no workspace members matched the selection.");
+                        0
+                    }
+                    Ok(_) => {
+                        // Realize selected members through the build path.
+                        let code = super::trust_env_build::cmd_build(theme, parsed);
+                        if code != 0 {
+                            return code;
+                        }
+                        match &parsed.command {
+                            Some(cmd) if !cmd.is_empty() => {
+                                if let Ok(mut plan) = load_project_plan(theme) {
+                                    if apply_locked_channels(theme, &project_dir, &mut plan.table)
+                                        .is_ok()
+                                    {
+                                        if let Ok(env) =
+                                            compose_env(theme, &roots, &parsed.flags, &plan)
+                                        {
+                                            return run_visible_command(
+                                                theme, &env, &plan.refs, cmd,
+                                            );
+                                        }
+                                    }
+                                }
+                                0
+                            }
+                            _ => 0,
+                        }
+                    }
+                    Err(d) => {
+                        theme.error_coded(&d.code, &d.what, &d.why, &d.fix);
+                        2
+                    }
+                },
+            };
+        }
     }
 
     // Collect the refs to realize plus the source table that resolves any
@@ -53,7 +105,6 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
             Err(code) => return code,
         },
     };
-    let project_dir = std::env::current_dir().unwrap_or_default();
     if let Err(code) = apply_locked_channels(theme, &project_dir, &mut plan.table) {
         return code;
     }

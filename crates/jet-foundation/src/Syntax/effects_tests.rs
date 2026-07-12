@@ -347,6 +347,7 @@ pub const JETPACK_VERBS: &[&str] = &[
     "run",
     "enter",
     "build",
+    "test",
     "list",
     "hangar",
     "vendor",
@@ -376,7 +377,17 @@ pub const JETPACK_VERBS: &[&str] = &[
 /// U16 (card c9jetpackgates): `jet env -p <pkg>...` — ad-hoc nixpkgs packages
 /// added to the shell without declaring them in any manifest. Repeatable;
 /// realized once and dropped, same lifecycle as a manifest-declared ref.
+///
+/// D-JPK-SELECTOR1=C: on `jetpack build` / `test` / `run`, the same `-p`
+/// spelling selects workspace members by exact name (cargo-style, repeatable).
 pub const ENV_FLAG_PACKAGE: &str = "-p";
+
+/// D-JPK-SELECTOR1=C: compute workspace members whose input hashes differ from
+/// the recorded action-cache baseline, always including dependents.
+pub const WS_FLAG_AFFECTED: &str = "--affected";
+
+/// D-JPK-SELECTOR1=C: compute members changed since a git ref (plus dependents).
+pub const WS_FLAG_AFFECTED_SINCE: &str = "--affected-since";
 
 /// U16: force foreign-flake/devenv detection even when the project's own
 /// manifest already declares `env.*` modules (which otherwise wins).

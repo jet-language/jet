@@ -43,6 +43,74 @@ module Cache<K, capacity: Int> {
 module ForwardCache = IntCache
 module IntCache = Cache<Int, 32>
 
+enum Mode {
+    Fast
+    Safe
+}
+
+module TierZero<flag: Bool, count: Int, letter: Char, label: String, mode: Mode> {
+    pub fn show() {
+        print(flag)
+        print(count)
+        print(letter)
+        print(label)
+        print(mode == Mode.Fast)
+    }
+}
+
+module Values = TierZero<true, 7, 'J', "jet", Mode.Fast>
+
+trait Token {}
+
+struct GoodToken {}
+
+impl GoodToken.Token {}
+
+// Parameter spelling never decides its kind: lowercase `item` is a type slot
+// because its annotation is a trait; uppercase `COUNT` is an Int value slot.
+module AnnotationKinds<item: Token, COUNT: Int> {
+    pub fn count() -> Int {
+        return COUNT
+    }
+}
+
+module Kinds = AnnotationKinds<GoodToken, 8>
+
+module FixedBuffer<T, capacity: Int> {
+    pub struct Buffer {
+        items: [T#capacity]
+    }
+
+    pub fn echo(values: [T#capacity]) -> [T#capacity] {
+        copy: [T#capacity] := values
+        return copy
+    }
+}
+
+module ThreeInts = FixedBuffer<Int, 3>
+
+module LocalLaws<T> {
+    pub trait Reveal {
+        type Output
+        fn reveal(self) -> T
+    }
+
+    pub struct Wrapped {
+        value: T
+    }
+
+    impl Wrapped.Reveal {
+        type Output = T
+        fn reveal(self) -> T { return self.value }
+    }
+
+    pub enum SourceErr { Bad(T) }
+    pub enum TargetErr { Wrapped(SourceErr) }
+    impl SourceErr -> TargetErr { return TargetErr.Wrapped(self) }
+}
+
+module IntLaws = LocalLaws<Int>
+
 fn run() {
     k :: IntCache__key_of(42)
     d :: IntCache__describe()
@@ -62,4 +130,11 @@ fn run() {
         Value(v) -> { print(v) }
         Empty -> { print(0) }
     }
+    Values.show()
+    print(Kinds.count())
+    fixed: [Int#3] := ThreeInts.echo([1, 2, 3])
+    buffer :: ThreeInts__Buffer.{ items: fixed }
+    print(buffer.items[2])
+    wrapped :: IntLaws__Wrapped.{ value: 91 }
+    print(wrapped.reveal())
 }

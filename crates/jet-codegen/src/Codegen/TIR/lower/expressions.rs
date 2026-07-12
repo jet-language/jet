@@ -1835,6 +1835,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 ty: Type::FixedList {
                     elem: Box::new(elem_ty),
                     len,
+                    len_symbol: None,
                 },
                 kind: TExprKind::FanOut { calls },
             }

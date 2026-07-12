@@ -477,16 +477,207 @@ fn specialize_func(
         }
     }
     for param in &mut func.params {
-        param.ty = crate::Generics::substitute_type(&param.ty, &types);
+        param.ty = specialize_module_type(&param.ty, &types, &values);
         if let Some(default) = &mut param.default {
             substitute_expr(default, &types, &values);
         }
     }
     if let Some(ret) = &mut func.return_type {
-        *ret = crate::Generics::substitute_type(ret, &types);
+        *ret = specialize_module_type(ret, &types, &values);
     }
     substitute_stmts(&mut func.body, &types, &values);
     func
+}
+
+fn mapped_definition_name(name: &str, types: &HashMap<String, Type>) -> String {
+    match types.get(name) {
+        Some(Type::Named(mapped)) => mapped.clone(),
+        _ => name.to_string(),
+    }
+}
+
+fn clone_trait(source: &crate::AST::TraitDef) -> crate::AST::TraitDef {
+    crate::AST::TraitDef {
+        span: source.span,
+        is_pub: source.is_pub,
+        is_package_pub: source.is_package_pub,
+        name: source.name.clone(),
+        name_span: source.name_span,
+        assoc_types: source.assoc_types.clone(),
+        methods: source.methods.clone(),
+    }
+}
+
+fn clone_impl(source: &crate::AST::ImplDef) -> crate::AST::ImplDef {
+    crate::AST::ImplDef {
+        span: source.span,
+        type_name: source.type_name.clone(),
+        type_span: source.type_span,
+        trait_name: source.trait_name.clone(),
+        trait_span: source.trait_span,
+        methods: source.methods.clone(),
+        delegation_field: source.delegation_field.clone(),
+        assoc_type_impls: source.assoc_type_impls.clone(),
+        is_generated_serde: source.is_generated_serde,
+        os_target: source.os_target,
+    }
+}
+
+fn clone_error_conv(source: &crate::AST::ErrorConvDef) -> crate::AST::ErrorConvDef {
+    crate::AST::ErrorConvDef {
+        from_ty: source.from_ty.clone(),
+        from_span: source.from_span,
+        to_ty: source.to_ty.clone(),
+        to_span: source.to_span,
+        body: source.body.clone(),
+        body_span: source.body_span,
+    }
+}
+
+fn clone_test(source: &crate::AST::TestDef) -> crate::AST::TestDef {
+    crate::AST::TestDef { span: source.span, name: source.name.clone(), name_span: source.name_span,
+        params: source.params.clone(), fn_keyword_span: source.fn_keyword_span, body: source.body.clone() }
+}
+
+fn clone_bench(source: &crate::AST::BenchDef) -> crate::AST::BenchDef {
+    crate::AST::BenchDef { span: source.span, name: source.name.clone(), name_span: source.name_span,
+        body: source.body.clone() }
+}
+
+fn specialize_test(source: &crate::AST::TestDef, alias: &str,
+    types: &HashMap<String, Type>, values: &HashMap<String, crate::AST::CtValue>) -> crate::AST::TestDef {
+    let mut result = clone_test(source);
+    result.name = format!("{alias}__{}", source.name);
+    for param in &mut result.params {
+        param.ty = specialize_module_type(&param.ty, types, values);
+        if let Some(default) = &mut param.default { substitute_expr(default, types, values); }
+    }
+    substitute_stmts(&mut result.body, types, values);
+    result
+}
+
+fn specialize_bench(source: &crate::AST::BenchDef, alias: &str,
+    types: &HashMap<String, Type>, values: &HashMap<String, crate::AST::CtValue>) -> crate::AST::BenchDef {
+    let mut result = clone_bench(source);
+    result.name = format!("{alias}__{}", source.name);
+    substitute_stmts(&mut result.body, types, values);
+    result
+}
+
+fn specialize_trait(
+    source: &crate::AST::TraitDef,
+    params: &[ResolvedModuleParam],
+    args: &[ResolvedModuleArg],
+    types: &HashMap<String, Type>,
+    values: &HashMap<String, crate::AST::CtValue>,
+) -> crate::AST::TraitDef {
+    let mut result = clone_trait(source);
+    result.name = mapped_definition_name(&source.name, types);
+    for method in &mut result.methods {
+        for param in &mut method.params {
+            param.ty = specialize_module_type(&param.ty, types, values);
+            if let Some(default) = &mut param.default { substitute_expr(default, types, values); }
+        }
+        if let Some(ret) = &mut method.return_type {
+            *ret = specialize_module_type(ret, types, values);
+        }
+        if let Some(body) = &mut method.default_body {
+            substitute_stmts(body, types, values);
+        }
+    }
+    let _ = (params, args);
+    result
+}
+
+fn specialize_impl(
+    source: &crate::AST::ImplDef,
+    params: &[ResolvedModuleParam],
+    args: &[ResolvedModuleArg],
+    types: &HashMap<String, Type>,
+    values: &HashMap<String, crate::AST::CtValue>,
+) -> crate::AST::ImplDef {
+    let mut result = clone_impl(source);
+    result.type_name = mapped_definition_name(&source.type_name, types);
+    result.trait_name = source.trait_name.as_ref().map(|name| mapped_definition_name(name, types));
+    result.methods = source.methods.iter().cloned()
+        .map(|method| specialize_func(method, params, args, types, values)).collect();
+    result.assoc_type_impls = source.assoc_type_impls.iter().map(|(name, span, ty)| {
+        (name.clone(), *span, specialize_module_type(ty, types, values))
+    }).collect();
+    result
+}
+
+fn specialize_error_conv(
+    source: &crate::AST::ErrorConvDef,
+    types: &HashMap<String, Type>,
+    values: &HashMap<String, crate::AST::CtValue>,
+) -> crate::AST::ErrorConvDef {
+    let mut result = clone_error_conv(source);
+    result.from_ty = mapped_definition_name(&source.from_ty, types);
+    result.to_ty = mapped_definition_name(&source.to_ty, types);
+    substitute_stmts(&mut result.body, types, values);
+    result
+}
+
+fn specialize_module_type(
+    ty: &Type,
+    types: &HashMap<String, Type>,
+    values: &HashMap<String, crate::AST::CtValue>,
+) -> Type {
+    let mut resolved = crate::Generics::substitute_type(ty, types);
+    fn lengths(ty: &mut Type, values: &HashMap<String, crate::AST::CtValue>) {
+        match ty {
+            Type::FixedList { elem, len, len_symbol } => {
+                lengths(elem, values);
+                if let Some((name, _)) = len_symbol.take() {
+                    if let Some(crate::AST::CtValue::Int(value)) = values.get(&name) {
+                        if *value >= 0 {
+                            *len = *value as u64;
+                        }
+                    }
+                }
+            }
+            Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => lengths(inner, values),
+            Type::Map { key, value, .. } => { lengths(key, values); lengths(value, values); }
+            Type::Result { ok, err } => { lengths(ok, values); lengths(err, values); }
+            Type::Fn { params, ret, .. } => { for param in params { lengths(param, values); } if let Some(ret) = ret { lengths(ret, values); } }
+            Type::Apply { args, .. } => args.iter_mut().for_each(|arg| lengths(arg, values)),
+            Type::Tuple(fields) => fields.iter_mut().for_each(|(_, ty)| lengths(ty, values)),
+            Type::Tagged { inner, .. } => lengths(inner, values),
+            _ => {}
+        }
+    }
+    lengths(&mut resolved, values);
+    resolved
+}
+
+fn specialize_nested_code_module(
+    module: &CodeModule,
+    params: &[ResolvedModuleParam],
+    args: &[ResolvedModuleArg],
+    types: &HashMap<String, Type>,
+    values: &HashMap<String, crate::AST::CtValue>,
+) -> CodeModule {
+    let body = module.body.as_ref().map(|items| {
+        items.iter().filter_map(|item| match item {
+            Item::Func(def) => Some(Item::Func(specialize_func(def.clone(), params, args, types, values))),
+            Item::Struct(def) => Some(Item::Struct(specialize_struct(def, "", params, args, types, values))),
+            Item::Enum(def) => Some(Item::Enum(specialize_enum(def, "", params, args, types, values))),
+            Item::Const(def) => {
+                let mut value = def.value.clone();
+                substitute_expr(&mut value, types, values);
+                Some(Item::Const(crate::AST::ConstDef { span: def.span, name: def.name.clone(), name_span: def.name_span, value, meta: def.meta.clone(), attrs: def.attrs.clone(), rust_kind: def.rust_kind, is_comptime: def.is_comptime, ct: def.ct.clone(), ty: def.ty.clone(), is_persist: def.is_persist, persist_span: def.persist_span }))
+            }
+            Item::CodeModule(child) => Some(Item::CodeModule(specialize_nested_code_module(child, params, args, types, values))),
+            Item::Trait(def) => Some(Item::Trait(specialize_trait(def, params, args, types, values))),
+            Item::Impl(def) => Some(Item::Impl(specialize_impl(def, params, args, types, values))),
+            Item::ErrorConv(def) => Some(Item::ErrorConv(specialize_error_conv(def, types, values))),
+            Item::Test(def) => Some(Item::Test(specialize_test(def, &module.name, types, values))),
+            Item::Bench(def) => Some(Item::Bench(specialize_bench(def, &module.name, types, values))),
+            _ => None,
+        }).collect()
+    });
+    CodeModule { name: module.name.clone(), name_span: module.name_span, is_pub: module.is_pub, is_package_pub: module.is_package_pub, body, web_target: module.web_target, span: module.span }
 }
 
 fn specialize_struct(
@@ -505,7 +696,7 @@ fn specialize_struct(
     }
     let mut fields = source.fields.clone();
     for field in &mut fields {
-        field.ty = crate::Generics::substitute_type(&field.ty, &types);
+        field.ty = specialize_module_type(&field.ty, &types, definition_values);
         if let Some(computed) = &mut field.computed {
             substitute_expr(computed, &types, definition_values);
         }
@@ -557,7 +748,7 @@ fn specialize_struct(
                     (
                         name.clone(),
                         *span,
-                        crate::Generics::substitute_type(ty, &types),
+                        specialize_module_type(ty, &types, definition_values),
                     )
                 })
                 .collect(),
@@ -623,7 +814,7 @@ fn specialize_enum(
             let payload = match &variant.payload {
                 VariantPayload::Unit => VariantPayload::Unit,
                 VariantPayload::Single(ty, span) => VariantPayload::Single(
-                    crate::Generics::substitute_type(ty, &types),
+                    specialize_module_type(ty, &types, definition_values),
                     *span,
                 ),
                 VariantPayload::Named(fields) => VariantPayload::Named(
@@ -631,7 +822,7 @@ fn specialize_enum(
                         .iter()
                         .cloned()
                         .map(|mut field| {
-                            field.ty = crate::Generics::substitute_type(&field.ty, &types);
+                            field.ty = specialize_module_type(&field.ty, &types, definition_values);
                             field
                         })
                         .collect(),
@@ -775,6 +966,9 @@ fn clone_definition_items(items: &[Item]) -> Vec<Item> {
             Item::Func(def) => Some(Item::Func(def.clone())),
             Item::Struct(def) => Some(Item::Struct(clone_struct(def))),
             Item::Enum(def) => Some(Item::Enum(clone_enum(def))),
+            Item::Trait(def) => Some(Item::Trait(clone_trait(def))),
+            Item::Impl(def) => Some(Item::Impl(clone_impl(def))),
+            Item::ErrorConv(def) => Some(Item::ErrorConv(clone_error_conv(def))),
             Item::Const(def) => Some(Item::Const(crate::AST::ConstDef {
                 span: def.span,
                 name: def.name.clone(),
@@ -785,6 +979,7 @@ fn clone_definition_items(items: &[Item]) -> Vec<Item> {
                 rust_kind: def.rust_kind,
                 is_comptime: def.is_comptime,
                 ct: def.ct.clone(),
+                ty: def.ty.clone(),
                 is_persist: def.is_persist,
                 persist_span: def.persist_span,
             })),
@@ -804,6 +999,9 @@ fn clone_generic_module_def(
             Item::Func(f) => Some(Item::Func(f.clone())),
             Item::Struct(s) => Some(Item::Struct(clone_struct(s))),
             Item::Enum(e) => Some(Item::Enum(clone_enum(e))),
+            Item::Trait(t) => Some(Item::Trait(clone_trait(t))),
+            Item::Impl(i) => Some(Item::Impl(clone_impl(i))),
+            Item::ErrorConv(ec) => Some(Item::ErrorConv(clone_error_conv(ec))),
             Item::Const(c) => Some(Item::Const(crate::AST::ConstDef {
                 span: c.span,
                 name: c.name.clone(),
@@ -814,8 +1012,36 @@ fn clone_generic_module_def(
                 rust_kind: c.rust_kind,
                 is_comptime: c.is_comptime,
                 ct: c.ct.clone(),
+                ty: c.ty.clone(),
                 is_persist: c.is_persist,
                 persist_span: c.persist_span,
+            })),
+            Item::CodeModule(module) => Some(Item::CodeModule(CodeModule {
+                name: module.name.clone(),
+                name_span: module.name_span,
+                is_pub: module.is_pub,
+                is_package_pub: module.is_package_pub,
+                body: module.body.as_ref().map(|body| {
+                    body.iter()
+                        .filter_map(|item| clone_generic_body_item(item, non_fn_kinds))
+                        .collect()
+                }),
+                web_target: module.web_target,
+                span: module.span,
+            })),
+            Item::GenericModule(module) => Some(Item::GenericModule(clone_generic_module_def(
+                module,
+                non_fn_kinds,
+            ))),
+            Item::ModuleAlias(alias) => Some(Item::ModuleAlias(ModuleAliasDef {
+                name: alias.name.clone(),
+                name_span: alias.name_span,
+                is_pub: alias.is_pub,
+                is_package_pub: alias.is_package_pub,
+                target: alias.target.clone(),
+                target_span: alias.target_span,
+                args: alias.args.clone(),
+                span: alias.span,
             })),
             _ => {
                 non_fn_kinds.push("item");
@@ -831,6 +1057,30 @@ fn clone_generic_module_def(
         params: gm.params.clone(),
         body,
         span: gm.span,
+    }
+}
+
+fn clone_generic_body_item(
+    item: &Item,
+    non_fn_kinds: &mut Vec<&'static str>,
+) -> Option<Item> {
+    match item {
+        Item::Func(def) => Some(Item::Func(def.clone())),
+        Item::Struct(def) => Some(Item::Struct(clone_struct(def))),
+        Item::Enum(def) => Some(Item::Enum(clone_enum(def))),
+        Item::Trait(def) => Some(Item::Trait(clone_trait(def))),
+        Item::Impl(def) => Some(Item::Impl(clone_impl(def))),
+        Item::ErrorConv(def) => Some(Item::ErrorConv(clone_error_conv(def))),
+        Item::Const(_) => clone_definition_items(std::slice::from_ref(item)).pop(),
+        Item::CodeModule(module) => Some(Item::CodeModule(CodeModule {
+            name: module.name.clone(), name_span: module.name_span,
+            is_pub: module.is_pub, is_package_pub: module.is_package_pub,
+            body: module.body.as_ref().map(|body| body.iter().filter_map(|item| clone_generic_body_item(item, non_fn_kinds)).collect()),
+            web_target: module.web_target, span: module.span,
+        })),
+        Item::GenericModule(module) => Some(Item::GenericModule(clone_generic_module_def(module, non_fn_kinds))),
+        Item::ModuleAlias(alias) => Some(Item::ModuleAlias(ModuleAliasDef { name: alias.name.clone(), name_span: alias.name_span, is_pub: alias.is_pub, is_package_pub: alias.is_package_pub, target: alias.target.clone(), target_span: alias.target_span, args: alias.args.clone(), span: alias.span })),
+        _ => { non_fn_kinds.push("item"); None }
     }
 }
 
@@ -1098,6 +1348,7 @@ fn expand_alias(
         let name = match item {
             Item::Struct(def) => Some(&def.name),
             Item::Enum(def) => Some(&def.name),
+            Item::Trait(def) => Some(&def.name),
             _ => None,
         };
         if let Some(name) = name {
@@ -1108,6 +1359,7 @@ fn expand_alias(
         let name = match item {
             Item::Struct(def) => Some(&def.name),
             Item::Enum(def) => Some(&def.name),
+            Item::Trait(def) => Some(&def.name),
             _ => None,
         };
         if let Some(name) = name {
@@ -1146,6 +1398,15 @@ fn expand_alias(
                 &definition_types,
                 &definition_values,
             ))),
+            Item::Trait(def) => declarations.push(Item::Trait(specialize_trait(
+                def, &[], &[], &definition_types, &definition_values,
+            ))),
+            Item::Impl(def) => declarations.push(Item::Impl(specialize_impl(
+                def, &[], &[], &definition_types, &definition_values,
+            ))),
+            Item::ErrorConv(def) => declarations.push(Item::ErrorConv(specialize_error_conv(
+                def, &definition_types, &definition_values,
+            ))),
             _ => {}
         }
     }
@@ -1173,6 +1434,7 @@ fn expand_alias(
             rust_kind: source.rust_kind,
             is_comptime: source.is_comptime,
             ct: source.ct.clone(),
+            ty: source.ty.clone(),
             is_persist: source.is_persist,
             persist_span: source.persist_span,
         }));
@@ -1196,6 +1458,21 @@ fn expand_alias(
                 &resolved_args,
                 &definition_types,
                 &definition_values,
+            )));
+        }
+        if let Item::Trait(def) = item {
+            declarations.push(Item::Trait(specialize_trait(
+                def, &info.params, &resolved_args, &definition_types, &definition_values,
+            )));
+        }
+        if let Item::Impl(def) = item {
+            declarations.push(Item::Impl(specialize_impl(
+                def, &info.params, &resolved_args, &definition_types, &definition_values,
+            )));
+        }
+        if let Item::ErrorConv(def) = item {
+            declarations.push(Item::ErrorConv(specialize_error_conv(
+                def, &definition_types, &definition_values,
             )));
         }
     }
@@ -1224,6 +1501,7 @@ fn expand_alias(
                 &definition_types,
                 &definition_values,
             ))),
+            Item::CodeModule(module) => Some(Item::CodeModule(specialize_nested_code_module(module, &info.params, &resolved_args, &definition_types, &definition_values))),
             Item::Const(_) => None,
             _ => None,
         })
@@ -1522,6 +1800,7 @@ pub(crate) fn expand_generic_module_aliases(
         // Parameter declarations were resolved once in the immutable prepass.
         // Reuse that result locally so invalid declarations emit one diagnostic.
         let mut templates = template_snapshots[module_idx].clone();
+        let mut denied_templates = HashSet::new();
 
         for import in &mut module.imports {
             let ImportKind::Unqualified {
@@ -1543,6 +1822,7 @@ pub(crate) fn expand_generic_module_aliases(
                 consumed.insert(original.clone());
                 let local = alias.as_deref().unwrap_or(original);
                 if !source.def.is_pub && !source.def.is_package_pub {
+                    denied_templates.insert(local.to_string());
                     diags.push(Diagnostic::error(
                         "E0609",
                         format!("`{original}` is private in module `{}`", module_aliases[source_idx]),
@@ -1599,6 +1879,10 @@ pub(crate) fn expand_generic_module_aliases(
                     invalid_aliases.insert(alias.name.clone());
                     continue;
                 };
+                if denied_templates.contains(&resolved.target) {
+                    invalid_aliases.insert(alias.name.clone());
+                    continue;
+                }
                 // A valid forward alias is a projection of the already-bound
                 // terminal instance, not a second specialization.
                 if aliases.contains_key(&alias.target) {

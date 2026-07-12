@@ -36,6 +36,9 @@ pub(super) fn usage() -> String {
 {store}
   {bin} doctor [--online]              check hangar, registry, locks, cache, and signing
   {bin} build [<source>:<package>]     realize a package/environment, don't enter
+  {bin} build -p <member>…             (workspace) build only named members
+  {bin} build --affected[-since <ref>] (workspace) build changed members + dependents
+  {bin} test  [-p <member>…]           (workspace) realize/test selected members
   {bin} list                           show realized packages
   {bin} hangar du                      honest per-object hangar disk usage
   {bin} vendor [<dir>]                 write vendored + hash-pinned sources
@@ -102,6 +105,9 @@ pub(super) fn usage() -> String {
   --trust                              skip the trust prompt for this one run
   --scope <user|repo>                  (trust grant) where the grant applies
   -p <pkg>...                          (enter) ad-hoc nixpkgs packages, not declared anywhere
+  -p <member>                          (build/test/run) exact workspace member; repeatable
+  --affected                           (build/test/run) members with changed input hashes + dependents
+  --affected-since <ref>               (build/test/run) members changed since git ref + dependents
   --flake                              (enter) force the foreign flake.nix/devenv.nix fallback
   --pure                               (enter) isolate the shell from the host environment
   --push <ref>                         (image) push after building — gated on TLS, E1268
@@ -126,7 +132,7 @@ pub(super) fn usage() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::super::parse::parse_args;
+    use super::super::parse::{parse_args, parse_args_for};
     use super::super::run_enter_dev::{foreign_flake_path, project_declares_env};
     use super::*;
     use crate::RuntimePolicy;
@@ -220,6 +226,41 @@ mod tests {
         let p = parse_args(&args);
         assert!(p.flags.flake);
         assert!(p.flags.pure);
+    }
+
+    // ── D-JPK-SELECTOR1: -p / --affected on build/test/run ──
+
+    #[test]
+    fn build_dash_p_is_exact_repeatable_member() {
+        let args: Vec<String> = ["-p", "billing", "-p", "shared", "--affected"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let p = parse_args_for("build", &args);
+        assert_eq!(p.flags.workspace_members, vec!["billing", "shared"]);
+        assert!(p.flags.packages.is_empty());
+        assert!(p.flags.affected);
+    }
+
+    #[test]
+    fn build_affected_since_takes_ref() {
+        let args: Vec<String> = ["--affected-since", "main"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let p = parse_args_for("test", &args);
+        assert_eq!(p.flags.affected_since.as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn enter_dash_p_still_collects_nixpkgs_packages() {
+        let args: Vec<String> = ["-p", "nodejs", "ripgrep"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let p = parse_args_for("enter", &args);
+        assert_eq!(p.flags.packages, vec!["nodejs", "ripgrep"]);
+        assert!(p.flags.workspace_members.is_empty());
     }
 
     // ── U16: foreign-flake detection ordering ──

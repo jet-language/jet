@@ -4,7 +4,7 @@ use super::cmd_doctor;
 use super::package_hangar_vendor::{cmd_audit, cmd_clean, cmd_hangar, cmd_list, cmd_vendor};
 use super::run_enter_dev::{cmd_dev, cmd_enter, cmd_run};
 use super::services_secrets_config::{cmd_config, cmd_secrets, cmd_services};
-use super::trust_env_build::{cmd_build, cmd_trust};
+use super::trust_env_build::{cmd_build, cmd_test, cmd_trust};
 use super::update_search_info::{
     cmd_explain, cmd_info, cmd_logs, cmd_outdated, cmd_override, cmd_search, cmd_update,
 };
@@ -26,8 +26,16 @@ pub(super) struct Flags {
     pub(super) trust: bool,
     /// U16: ad-hoc nixpkgs packages from `-p <pkg>...`, added to the shell
     /// without being declared in any manifest. Repeatable across multiple
-    /// `-p` groups.
+    /// `-p` groups. On `build`/`test`/`run`, the same flag means workspace
+    /// member names (D-JPK-SELECTOR1=C) — see `workspace_members`.
     pub(super) packages: Vec<String>,
+    /// D-JPK-SELECTOR1=C: exact workspace member names from `-p` on
+    /// build/test/run (cargo-style, repeatable).
+    pub(super) workspace_members: Vec<String>,
+    /// D-JPK-SELECTOR1=C: `--affected`.
+    pub(super) affected: bool,
+    /// D-JPK-SELECTOR1=C: `--affected-since <ref>`.
+    pub(super) affected_since: Option<String>,
     /// U16: `--flake` forces foreign-flake/devenv detection even when the
     /// project's own manifest already declares `env.*` modules.
     pub(super) flake: bool,
@@ -73,7 +81,18 @@ pub(super) struct Parsed {
     pub(super) command: Option<Vec<String>>,
 }
 
+// Verb-agnostic wrapper kept for usage_tests while the D-JPK-SELECTOR1
+// dispatch migration to `parse_args_for` is in flight; only test code calls
+// it today.
+#[allow(dead_code)]
 pub(super) fn parse_args(args: &[String]) -> Parsed {
+    parse_args_for("", args)
+}
+
+/// Verb-aware parse so `-p` means ad-hoc nixpkgs on `enter` and workspace
+/// members on `build`/`test`/`run` (D-JPK-SELECTOR1=C).
+pub(super) fn parse_args_for(verb: &str, args: &[String]) -> Parsed {
+    let workspace_select = matches!(verb, "build" | "test" | "run");
     let mut flags = Flags {
         no_color: false,
         fixtures: None,
@@ -81,6 +100,9 @@ pub(super) fn parse_args(args: &[String]) -> Parsed {
         online: false,
         trust: false,
         packages: Vec::new(),
+        workspace_members: Vec::new(),
+        affected: false,
+        affected_since: None,
         flake: false,
         pure: false,
         push: None,
@@ -169,11 +191,32 @@ pub(super) fn parse_args(args: &[String]) -> Parsed {
                     flags.fixtures = Some(PathBuf::from(dir));
                 }
             }
-            a if a == Syntax::ENV_FLAG_PACKAGE => {
-                // U16: `-p <pkg>...` greedily consumes bare tokens until the
-                // next flag/`--`/end, so `-p nodejs ripgrep -- cmd` and
-                // `-p nodejs -p ripgrep -- cmd` both work.
+            a if a == Syntax::WS_FLAG_AFFECTED => flags.affected = true,
+            a if a == Syntax::WS_FLAG_AFFECTED_SINCE => {
                 i += 1;
+                if let Some(r) = args.get(i) {
+                    flags.affected_since = Some(r.clone());
+                } else {
+                    flags.affected_since = Some(String::new());
+                }
+            }
+            a if a.starts_with(&format!("{}=", Syntax::WS_FLAG_AFFECTED_SINCE)) => {
+                if let Some(v) = a.split_once('=').map(|(_, v)| v.to_string()) {
+                    flags.affected_since = Some(v);
+                }
+            }
+            a if a == Syntax::ENV_FLAG_PACKAGE => {
+                // U16 enter: `-p <pkg>...` greedily consumes bare tokens.
+                // D-JPK-SELECTOR1 build/test/run: each `-p` takes exactly one
+                // member name (cargo-style, repeatable).
+                i += 1;
+                if workspace_select {
+                    if let Some(next) = args.get(i).filter(|s| *s != "--" && !s.starts_with('-')) {
+                        flags.workspace_members.push(next.clone());
+                        i += 1;
+                    }
+                    continue;
+                }
                 while let Some(next) = args.get(i) {
                     if next == "--" || next.starts_with('-') {
                         break;
@@ -200,7 +243,12 @@ pub fn main(args: Vec<String>) -> i32 {
         eprintln!("{}", usage());
         return 2;
     };
-    let parsed = parse_args(rest);
+    if let Some(diag) = crate::MemberSelect::reject_filter_dsl(rest) {
+        let theme = Theme::resolve(false);
+        theme.error_coded(&diag.code, &diag.what, &diag.why, &diag.fix);
+        return 2;
+    }
+    let parsed = parse_args_for(verb, rest);
     let theme = Theme::resolve(parsed.flags.no_color);
     // Doctor must observe state without repairing or migrating it.
     if verb != "doctor" {
@@ -231,6 +279,7 @@ pub fn main(args: Vec<String>) -> i32 {
         v if v == Syntax::CONFIG_SUBCOMMAND => cmd_config(&theme, &parsed),
         v if v == Syntax::TRUST_SUBCOMMAND => cmd_trust(&theme, &parsed),
         "build" => cmd_build(&theme, &parsed),
+        "test" => cmd_test(&theme, &parsed),
         "list" => cmd_list(&theme),
         "hangar" => cmd_hangar(&theme, &parsed),
         "vendor" => cmd_vendor(&theme, &parsed),

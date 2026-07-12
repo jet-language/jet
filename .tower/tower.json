@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 521,
-    "rev": 4740,
+    "rev": 4763,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -1107,11 +1107,11 @@
         {
           "n": 2,
           "text": "Generic module slot kind comes from resolved annotations, not identifier casing; bounds and every D-GENMOD-VALUE1 Tier-0 value kind normalize/type-check with exact E0852/E0853 failures.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-11T23:44:25.040Z"
+          "status": "verified",
+          "metBy": "terra-91-generic-modules",
+          "verifiedBy": "codex-orchestrator",
+          "evidence": "Parent independently reran jet-sema check, all 10 jet-parser tests, generic-module runtime golden, and full genmod UI snapshots; all green, covering every Tier-0 kind and hostile bound/type/closure cases.",
+          "at": "2026-07-12T20:07:19.097Z"
         },
         {
           "n": 3,
@@ -1125,11 +1125,11 @@
         {
           "n": 4,
           "text": "Imported templates and forward alias graphs expand deterministically; direct/indirect cycles emit E0855 with complete chains and no codegen/rustc escape.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-11T23:44:25.276Z"
+          "status": "verified",
+          "metBy": "terra-91-generic-modules",
+          "verifiedBy": "codex-orchestrator",
+          "evidence": "Parent independently reran cargo check jet-sema, imported definition-site conflict golden, private-import snapshot, local generic golden, forward/cycle snapshots, and full genmod UI; all green with no alias leakage or duplicate diagnostics.",
+          "at": "2026-07-12T20:03:20.155Z"
         },
         {
           "n": 5,
@@ -7465,6 +7465,11 @@
       "log": [
         {
           "at": "2026-07-12",
+          "by": "cursor-e4-burn",
+          "text": "[handoff] criteria 1-4 verified; needsAcceptance=true → owner accept ballot. Impl @ bde33487 Shell PTY live-branch fix on grok/card-359."
+        },
+        {
+          "at": "2026-07-12",
           "by": "grok-359-verify2",
           "text": "close after criteria verified"
         },
@@ -13219,6 +13224,16 @@
       "log": [
         {
           "at": "2026-07-12",
+          "by": "grok-476-verify",
+          "text": "VERIFY FAIL (grok-476-verify): I4 clash E1294 dual-claim. #476@77621f8b E1294=unknown task (jetpack run / jet --task, D-JPK-TASKRUN1). #477@58118c1a E1294=JPK-TOOL-COLLIDE tool install vs #Task (D-JPK-TOOLRUN1). Different meanings, same code. NO criteria verify until one builder renumbers. #477 also claims E1295 (provider); #476 also claims E0928 (reserved lifecycle) — those OK."
+        },
+        {
+          "at": "2026-07-12",
+          "by": "grok-476-builder",
+          "text": "impl done on grok/card-476: E0928, jetpack run <task>, jet --task, E1294, tests green"
+        },
+        {
+          "at": "2026-07-12",
           "by": "grok-476-builder",
           "text": "worktree /tmp/jet-card-476; start D-JPK-TASKRUN1 #Task fn"
         },
@@ -13232,38 +13247,65 @@
         {
           "n": 1,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "grok-476-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-10T21:19:39.731Z"
+          "evidence": "KW_TASK + TASK_RESERVED_LIFECYCLE in Syntax/math_layout.rs (D-JPK-TASKRUN1)",
+          "at": "2026-07-12T20:05:41.495Z"
         },
         {
           "n": 2,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "grok-476-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-10T21:19:39.731Z"
+          "evidence": "syntax-decisions.md D-JPK-TASKRUN1 shipped note for card #476",
+          "at": "2026-07-12T20:05:41.588Z"
         },
         {
           "n": 3,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "grok-476-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-10T21:19:39.731Z"
+          "evidence": "jet devtools grammars regenerated (KW_TASK already present from #505)",
+          "at": "2026-07-12T20:05:41.674Z"
         },
         {
           "n": 4,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "grok-476-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-10T21:19:39.731Z"
+          "evidence": "tests/ui/task_reserved_lifecycle.stderr (E0928)",
+          "at": "2026-07-12T20:05:41.766Z"
+        },
+        {
+          "n": 5,
+          "text": "E0928 reserved lifecycle #Task names + ui snapshot",
+          "status": "met",
+          "metBy": "grok-476-builder",
+          "verifiedBy": null,
+          "evidence": "CheckerSchedule E0928 + tests/ui/task_reserved_lifecycle",
+          "at": "2026-07-12T20:05:41.857Z"
+        },
+        {
+          "n": 6,
+          "text": "jetpack run <task> + jet run --task dispatch; E1294 unknown lists declared",
+          "status": "met",
+          "metBy": "grok-476-builder",
+          "verifiedBy": null,
+          "evidence": "jetpack cmd_run + jet run --task; tests/jetpack_tasks.rs 4 ok",
+          "at": "2026-07-12T20:05:41.946Z"
+        },
+        {
+          "n": 7,
+          "text": "example+golden task_runner; jetpack_tasks focused tests",
+          "status": "met",
+          "metBy": "grok-476-builder",
+          "verifiedBy": null,
+          "evidence": "examples/features/jetpack/task_runner.jet + expected; jetpack_tasks ok",
+          "at": "2026-07-12T20:05:42.039Z"
         }
       ],
       "refs": [],
@@ -13287,6 +13329,11 @@
       "blockedBy": [],
       "assignee": "grok-477-builder",
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "grok-476-verify",
+          "text": "VERIFY FAIL (grok-476-verify): I4 clash E1294 dual-claim. #476@77621f8b E1294=unknown task (jetpack run / jet --task, D-JPK-TASKRUN1). #477@58118c1a E1294=JPK-TOOL-COLLIDE tool install vs #Task (D-JPK-TOOLRUN1). Different meanings, same code. NO criteria verify until one builder renumbers. #477 also claims E1295 (provider); #476 also claims E0928 (reserved lifecycle) — those OK."
+        },
         {
           "at": "2026-07-12",
           "by": "grok-477-builder",
@@ -13351,12 +13398,17 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
-      "assignee": "grok-478-builder",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "grok-478-verify2",
+          "text": "verified 1-3 focused MemberSelect+I4; Canvas full-suite red unrelated"
+        },
         {
           "at": "2026-07-10",
           "by": "claude-main",
@@ -13367,36 +13419,35 @@
         {
           "n": 1,
           "text": "jet build/test/run accept repeatable -p <member>; unknown member emits E1231-class diagnostic with did-you-mean; only named members run.",
-          "status": "met",
+          "status": "verified",
           "metBy": "grok-478-builder",
-          "verifiedBy": null,
-          "evidence": "MemberSelect+CLI: -p exact/repeatable; unknown→E1231; dfd1cf43+I4 749b02eb; MemberSelect 7/7",
-          "at": "2026-07-12T19:52:39.435Z"
+          "verifiedBy": "grok-478-verify2",
+          "evidence": "Focused: MemberSelect 7/7; fixtures E1231/E1292/E1293.stderr present; --filter rejected; dependents closed. Tip 749b02eb. Full-suite Canvas fail unrelated to card.",
+          "at": "2026-07-12T20:07:06.302Z"
         },
         {
           "n": 2,
           "text": "jet build/test/run accept --affected and --affected-since <ref>; selects changed members plus dependents via action-cache/input hashes; bad ref errors with suggestion.",
-          "status": "met",
+          "status": "verified",
           "metBy": "grok-478-builder",
-          "verifiedBy": null,
-          "evidence": true,
-          "at": "2026-07-12T19:52:39.623Z"
+          "verifiedBy": "grok-478-verify2",
+          "evidence": "Focused: MemberSelect 7/7; fixtures E1231/E1292/E1293.stderr present; --filter rejected; dependents closed. Tip 749b02eb. Full-suite Canvas fail unrelated to card.",
+          "at": "2026-07-12T20:07:06.394Z"
         },
         {
           "n": 3,
           "text": "Focused workspace tests prove -p isolation, --affected-since includes dependents, and bare command still runs all members; no pattern-DSL filter flag.",
-          "status": "met",
+          "status": "verified",
           "metBy": "grok-478-builder",
-          "verifiedBy": null,
-          "evidence": "focused MemberSelect tests: isolation, dependents, bare=all, --filter→E1293",
-          "at": "2026-07-12T19:52:39.761Z"
+          "verifiedBy": "grok-478-verify2",
+          "evidence": "Focused: MemberSelect 7/7; fixtures E1231/E1292/E1293.stderr present; --filter rejected; dependents closed. Tip 749b02eb. Full-suite Canvas fail unrelated to card.",
+          "at": "2026-07-12T20:07:06.481Z"
         }
       ],
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-10T21:04:39.991Z",
-      "updated": "2026-07-12",
-      "claimedAt": "2026-07-12T11:45:33.499Z"
+      "updated": "2026-07-12"
     },
     {
       "id": "c0f7jily",
@@ -33570,6 +33621,167 @@
   ],
   "events": [
     {
+      "at": "2026-07-12T20:08:17.500Z",
+      "by": "grok-476-verify",
+      "action": "card.update",
+      "ref": "c0fchu51",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-12T20:08:17.394Z",
+      "by": "grok-476-verify",
+      "action": "card.update",
+      "ref": "c0qwckht",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-12T20:07:19.097Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c1jixkit",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-12T20:07:18.813Z",
+      "by": "terra-91-generic-modules",
+      "action": "card.criteria-meet",
+      "ref": "c1jixkit",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-12T20:07:06.797Z",
+      "by": "cursor-e4-burn",
+      "action": "card.update",
+      "ref": "c0iyfhaf",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-12T20:07:06.682Z",
+      "by": "grok-478-builder",
+      "action": "card.release",
+      "ref": "c0rfeel3",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-12T20:07:06.597Z",
+      "by": "grok-478-verify2",
+      "action": "card.update",
+      "ref": "c0rfeel3",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T20:07:06.481Z",
+      "by": "grok-478-verify2",
+      "action": "card.criteria-verify",
+      "ref": "c0rfeel3",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-12T20:07:06.394Z",
+      "by": "grok-478-verify2",
+      "action": "card.criteria-verify",
+      "ref": "c0rfeel3",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-12T20:07:06.303Z",
+      "by": "grok-478-verify2",
+      "action": "card.criteria-verify",
+      "ref": "c0rfeel3",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-12T20:05:42.154Z",
+      "by": "grok-476-builder",
+      "action": "card.update",
+      "ref": "c0qwckht",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-12T20:05:42.040Z",
+      "by": "grok-476-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0qwckht",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-12T20:05:41.946Z",
+      "by": "grok-476-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0qwckht",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-12T20:05:41.857Z",
+      "by": "grok-476-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0qwckht",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-12T20:05:41.767Z",
+      "by": "grok-476-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0qwckht",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-12T20:05:41.675Z",
+      "by": "grok-476-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0qwckht",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-12T20:05:41.588Z",
+      "by": "grok-476-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0qwckht",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-12T20:05:41.495Z",
+      "by": "grok-476-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0qwckht",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-12T20:05:41.401Z",
+      "by": "grok-476-builder",
+      "action": "card.criteria-add",
+      "ref": "c0qwckht",
+      "note": "#7 example+golden task_runner; jetpack_tasks focused tests"
+    },
+    {
+      "at": "2026-07-12T20:05:41.314Z",
+      "by": "grok-476-builder",
+      "action": "card.criteria-add",
+      "ref": "c0qwckht",
+      "note": "#6 jetpack run <task> + jet run --task dispatch; E1294 unknown "
+    },
+    {
+      "at": "2026-07-12T20:05:41.228Z",
+      "by": "grok-476-builder",
+      "action": "card.criteria-add",
+      "ref": "c0qwckht",
+      "note": "#5 E0928 reserved lifecycle #Task names + ui snapshot"
+    },
+    {
+      "at": "2026-07-12T20:03:20.156Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c1jixkit",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-12T20:03:19.865Z",
+      "by": "terra-91-generic-modules",
+      "action": "card.criteria-meet",
+      "ref": "c1jixkit",
+      "note": "#4"
+    },
+    {
       "at": "2026-07-12T20:00:48.525Z",
       "by": "claude-main",
       "action": "card.add",
@@ -36907,167 +37119,6 @@
       "action": "card.criteria-verify",
       "ref": "c0ewbiud",
       "note": "#7"
-    },
-    {
-      "at": "2026-07-12T07:39:58.773Z",
-      "by": "terra-native-ledger",
-      "action": "card.criteria-meet",
-      "ref": "c0ewbiud",
-      "note": "#7"
-    },
-    {
-      "at": "2026-07-12T07:29:02.277Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0gv4b2r",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-12T07:15:49.356Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0ewbiud",
-      "note": "phase,assignee,logEntry"
-    },
-    {
-      "at": "2026-07-12T07:15:49.020Z",
-      "by": "codex-main",
-      "action": "card.criteria-add",
-      "ref": "c0ewbiud",
-      "note": "#7 Capability-ledger native-language proof is non-vacuous under"
-    },
-    {
-      "at": "2026-07-12T07:15:27.530Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0llk894",
-      "note": "criteria,logEntry"
-    },
-    {
-      "at": "2026-07-12T07:12:14.165Z",
-      "by": "terra-500-builder",
-      "action": "card.update",
-      "ref": "c0llk894",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T07:12:13.839Z",
-      "by": "terra-500-builder",
-      "action": "card.claim",
-      "ref": "c0llk894",
-      "note": ""
-    },
-    {
-      "at": "2026-07-12T07:07:37.192Z",
-      "by": "card296-audit",
-      "action": "card.criteria-verify",
-      "ref": "c0llk894",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-12T07:07:36.854Z",
-      "by": "codex-main",
-      "action": "card.criteria-meet",
-      "ref": "c0llk894",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-12T07:07:36.526Z",
-      "by": "codex-main",
-      "action": "card.criteria-add",
-      "ref": "c0llk894",
-      "note": "#3 CLI surface drift is not implemented twice: #497 exclusively"
-    },
-    {
-      "at": "2026-07-12T07:07:36.190Z",
-      "by": "codex-main",
-      "action": "card.criteria-add",
-      "ref": "c0llk894",
-      "note": "#2 Experimental, Tested, and Hardened maturity markers live onl"
-    },
-    {
-      "at": "2026-07-12T07:07:35.865Z",
-      "by": "codex-main",
-      "action": "card.criteria-add",
-      "ref": "c0llk894",
-      "note": "#1 Every current public and normative surface uses DataTree for"
-    },
-    {
-      "at": "2026-07-12T07:05:42.341Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0k0v4gj",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T07:05:42.019Z",
-      "by": "card451-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c0k0v4gj",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-12T07:05:41.679Z",
-      "by": "card451-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c0k0v4gj",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-12T07:05:41.345Z",
-      "by": "card451-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c0k0v4gj",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-12T07:05:41.019Z",
-      "by": "card451-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c0k0v4gj",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-12T07:05:40.678Z",
-      "by": "card451-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c0k0v4gj",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-12T07:05:40.353Z",
-      "by": "terra-499-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0k0v4gj",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-12T07:05:40.023Z",
-      "by": "terra-499-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0k0v4gj",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-12T07:05:39.690Z",
-      "by": "terra-499-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0k0v4gj",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-12T07:05:39.354Z",
-      "by": "terra-499-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0k0v4gj",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-12T07:05:39.016Z",
-      "by": "terra-499-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0k0v4gj",
-      "note": "#1"
     }
   ],
   "nextNum": 368,

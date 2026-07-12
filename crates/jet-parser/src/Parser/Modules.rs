@@ -653,6 +653,7 @@ impl<'a> Parser<'a> {
                 _ => self.func().map(Item::Func),
             },
             TokKind::KwPub => match self.peek2().kind {
+                TokKind::KwModule => self.code_module(true),
                 TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
                 TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
                 TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
@@ -674,6 +675,7 @@ impl<'a> Parser<'a> {
             TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
             TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
             TokKind::KwTag => self.tag_def(false).map(Item::Tag),
+            TokKind::KwModule => self.code_module(false),
             // D-OSTARGET1=A: `#Target(Os.X) impl …` inside a module body.
             TokKind::Hash if self.at_web_target() => match self.parse_web_target_marker()? {
                 super::Items::TargetMarker::Os(os) => self.os_gated_impl(os),

@@ -245,6 +245,15 @@ pub struct ConstDef {
     /// Filled by sema for comptime bindings: the evaluated constant value,
     /// serialized to a Rust literal at use sites by codegen.
     pub ct: Option<CtValue>,
+    /// Filled by sema for comptime bindings alongside `ct`: the binding's Jet
+    /// type. Normally redundant with `ct.jet_type()`, but for a comptime
+    /// builtin with a fixed, non-polymorphic return type (e.g. `find(glob)`
+    /// always returns `[String]`), this carries that static type even when
+    /// the runtime value is an empty collection and `CtValue::jet_type()`
+    /// alone can't recover the element type from zero elements. Codegen reads
+    /// this to render a correctly-typed empty Rust collection (`Vec::<T>::new()`)
+    /// instead of a bare `vec![]`, which rustc rejects as E0282 (I2).
+    pub ty: Option<Type>,
     /// D-PERSIST1: `@Persist` was present before this module-level binding —
     /// its value survives a `jet dev` hot reload instead of resetting
     /// (identity = module path + binding name). Inert in release builds.

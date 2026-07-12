@@ -623,7 +623,7 @@ impl<'a> Checker<'a> {
                     let (elem_ty, fixed_len) = match &it {
                         Type::List(inner) => ((**inner).clone(), None),
                         // S76: [T#N] can be destructured; E0963 if count doesn't match.
-                        Type::FixedList { elem, len } => ((**elem).clone(), Some(*len)),
+                        Type::FixedList { elem, len, .. } => ((**elem).clone(), Some(*len)),
                         _ => {
                             self.diags.push(Diagnostic::error(
                                 "E0313",

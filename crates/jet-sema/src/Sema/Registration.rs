@@ -1915,7 +1915,7 @@ fn serde_type_source(ty: &Type) -> String {
         Type::Apply { name, args } => format!("{}<{}>", name, args.iter().map(serde_type_source).collect::<Vec<_>>().join(", ")),
         Type::IntN { signed, bits } => format!("{}{}", if *signed { "I" } else { "U" }, bits),
         Type::Float32 => "F32".to_string(),
-        Type::FixedList { elem, len } => format!("[{}#{}]", serde_type_source(elem), len),
+        Type::FixedList { elem, len, .. } => format!("[{}#{}]", serde_type_source(elem), len),
         Type::Shared(t) => format!("shared {}", serde_type_source(t)),
         Type::Tagged { marker, inner } => format!("#{} {}", marker, serde_type_source(inner)),
         Type::Tuple(fields) => format!("({})", fields.iter().map(|(n,t)| format!("{}: {}", n, serde_type_source(t))).collect::<Vec<_>>().join(", ")),
@@ -2336,7 +2336,17 @@ pub(crate) fn eval_comptime_items(
                         0,
                     ) {
                         Ok((v, inputs)) => {
-                            consts.insert(c.name.clone(), v.jet_type());
+                            // `v.jet_type()` reads the element type off the value's
+                            // first element (D-BIGINT1-adjacent `CtValue::jet_type`
+                            // convention). For a fixed-return-type comptime builtin
+                            // (e.g. `find(glob)`, always `[String]`) whose result is
+                            // an EMPTY collection, that read has nothing to sample and
+                            // falls back to a placeholder — wrong, and (via codegen)
+                            // an unannotated `vec![]` rustc rejects as E0282 (I2). Prefer
+                            // the builtin's known static return type when one applies.
+                            let ty =
+                                comptime_builtin_fixed_return_type(&c.value).unwrap_or_else(|| v.jet_type());
+                            consts.insert(c.name.clone(), ty);
                             globals.insert(c.name.clone(), v.clone());
                             results.push((c.name.clone(), v));
                             if let Some(out) = embed_inputs_out.as_deref_mut() {
@@ -2352,11 +2362,28 @@ pub(crate) fn eval_comptime_items(
     for item in items.iter_mut() {
         if let Item::Const(c) = item {
             if c.is_comptime {
+                c.ty = consts.get(&c.name).cloned();
                 if let Some(pos) = results.iter().position(|(n, _)| n == &c.name) {
                     c.ct = Some(results.remove(pos).1);
                 }
             }
         }
+    }
+}
+
+/// A handful of comptime builtins have a fixed, non-polymorphic return type
+/// regardless of arguments or result size — `find(glob)` always returns
+/// `[String]` (D-CTFIND1/2), even when the glob matches nothing. Naming that
+/// type here (rather than trusting `CtValue::jet_type()`, which samples the
+/// first element and has nothing to sample when the result is empty) is what
+/// lets codegen render a correctly-typed empty Rust collection instead of an
+/// ambiguous `vec![]` (see `ConstDef::ty`).
+fn comptime_builtin_fixed_return_type(value: &Expr) -> Option<Type> {
+    match value {
+        Expr::Call(call) if call.name == Syntax::BUILTIN_FIND => {
+            Some(Type::List(Box::new(Type::String)))
+        }
+        _ => None,
     }
 }
 

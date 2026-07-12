@@ -1093,6 +1093,7 @@ impl<'a> Checker<'a> {
         if let Some(Type::FixedList {
             elem: expected_inner,
             len,
+            ..
         }) = self.expected_type.clone()
         {
             if elems.iter().any(|e| matches!(e, Expr::Spread(..))) {
@@ -1137,6 +1138,7 @@ impl<'a> Checker<'a> {
             return Some(Type::FixedList {
                 elem: expected_inner,
                 len,
+                len_symbol: None,
             });
         }
         if let Some(Type::List(expected_inner)) = self.expected_type.clone() {
@@ -1385,6 +1387,7 @@ impl<'a> Checker<'a> {
             Some(Type::FixedList {
                 elem: Box::new(elem),
                 len,
+                len_symbol: None,
             })
         }
     }
@@ -1517,7 +1520,7 @@ impl<'a> Checker<'a> {
                 Some((**inner).clone())
             }
             // S76: [T#N] supports indexing; E0965 if the index is a literal >= N.
-            Type::FixedList { elem, len } => {
+            Type::FixedList { elem, len, .. } => {
                 *kind = IndexKind::List;
                 if idx_ty != Type::Int {
                     if let Type::Named(name) = &idx_ty {

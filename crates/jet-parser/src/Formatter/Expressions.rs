@@ -166,10 +166,10 @@ impl<'a> Fmt<'a> {
                 }
                 self.write(")");
             }
-            Type::FixedList { elem, len } => {
+            Type::FixedList { elem, len, len_symbol } => {
                 self.write("[");
                 self.fmt_type(elem);
-                self.write(&format!("#{}", len));
+                self.write(&format!("#{}", len_symbol.as_ref().map(|v| v.0.as_str()).map_or_else(|| len.to_string(), str::to_string)));
                 self.write("]");
             }
             // D-QUAL4=A: `#Marker Type` — prefix value-tag.

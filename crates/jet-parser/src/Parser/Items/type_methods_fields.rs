@@ -253,6 +253,7 @@ impl<'a> Parser<'a> {
                 rust_kind: crate::AST::RustConstKind::Const,
                 is_comptime: false,
                 ct: None,
+                ty: None,
                 is_persist,
                 persist_span,
             })
@@ -285,6 +286,7 @@ impl<'a> Parser<'a> {
                 rust_kind: crate::AST::RustConstKind::Const,
                 is_comptime: true,
                 ct: None,
+                ty: None,
                 is_persist: false,
                 persist_span: None,
             })

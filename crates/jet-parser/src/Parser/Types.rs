@@ -437,11 +437,17 @@ impl<'a> Parser<'a> {
                 } else if matches!(self.peek().kind, TokKind::Hash) {
                     // S76 (2026-06-16): `[T#N]` fixed-size list.
                     self.bump(); // consume `#`
-                    let len = match &self.peek().kind {
+                    let (len, len_symbol) = match &self.peek().kind {
                         TokKind::Int(n) => {
                             let n = *n;
                             self.bump();
-                            n as u64
+                            (n as u64, None)
+                        }
+                        TokKind::Ident(name) => {
+                            let name = name.clone();
+                            let span = self.peek().span;
+                            self.bump();
+                            (0, Some((name, span)))
                         }
                         _ => {
                             let sp = self.peek().span;
@@ -452,13 +458,14 @@ impl<'a> Parser<'a> {
                                 "write `[T#4]` for a fixed-size list of 4 elements".to_string(),
                                 Some(sp),
                             ));
-                            0
+                            (0, None)
                         }
                     };
                     self.expect(TokKind::RBracket, "after the size in `[T#N]`")?;
                     Type::FixedList {
                         elem: Box::new(first),
                         len,
+                        len_symbol,
                     }
                 } else {
                     self.expect(TokKind::RBracket, "after the element type in `[T]`")?;

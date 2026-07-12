@@ -111,6 +111,8 @@ pub enum Type {
     FixedList {
         elem: Box<Type>,
         len: u64,
+        /// Generic-module value parameter retained until specialization.
+        len_symbol: Option<(String, Span)>,
     },
     /// D-SG9/S42: explicit fixed-width integer. The default 64-bit *signed*
     /// integer is spelled `Int` (and equivalently `I64`) and lives in
@@ -183,8 +185,8 @@ impl PartialEq for Type {
             (Apply { name: n1, args: a1 }, Apply { name: n2, args: a2 }) => n1 == n2 && a1 == a2,
             (TraitObject(a), TraitObject(b)) => a == b,
             (Tuple(a), Tuple(b)) => a == b,
-            (FixedList { elem: e1, len: l1 }, FixedList { elem: e2, len: l2 }) => {
-                e1 == e2 && l1 == l2
+            (FixedList { elem: e1, len: l1, len_symbol: s1 }, FixedList { elem: e2, len: l2, len_symbol: s2 }) => {
+                e1 == e2 && l1 == l2 && s1 == s2
             }
             (
                 IntN {
@@ -299,7 +301,7 @@ impl Type {
                     .join(", ");
                 format!("({parts})")
             }
-            Type::FixedList { elem, len } => format!("[{}#{}]", elem.name(), len),
+            Type::FixedList { elem, len, len_symbol } => format!("[{}#{}]", elem.name(), len_symbol.as_ref().map(|v| v.0.as_str()).map_or_else(|| len.to_string(), str::to_string)),
             Type::IntN { signed, bits } => {
                 let (lo, hi) = int_range(*signed, *bits);
                 let article = if *bits == 8 { "an" } else { "a" };
@@ -359,7 +361,7 @@ impl Type {
                     .join(", ");
                 format!("({parts})")
             }
-            Type::FixedList { elem, len } => format!("[{}#{}]", elem.name(), len),
+            Type::FixedList { elem, len, len_symbol } => format!("[{}#{}]", elem.name(), len_symbol.as_ref().map(|v| v.0.as_str()).map_or_else(|| len.to_string(), str::to_string)),
             Type::IntN { signed, bits } => int_spelling(*signed, *bits),
             Type::Float32 => "F32".to_string(),
             Type::Tagged { marker, inner } => format!("#{} {}", marker, inner.name()),
