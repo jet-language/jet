@@ -37,6 +37,9 @@ pub(crate) struct JitRuntime {
     senders: Vec<JetSchedulerSender<i64>>,
     tasks: Vec<Option<JetSchedulerJoin<i64>>>,
     task_controls: Vec<std::sync::Arc<JetTaskControl>>,
+    /// General `Result<T, E>` ABI arena. Handles are one-based indices; payload
+    /// bits are interpreted from checked TIR types, never dynamically guessed.
+    results: Vec<JitResultValue>,
     /// Set by a host shim when the user program hits a runtime panic (overflow,
     /// list index/slice OOB, a couple of concurrency panics). Non-`None` makes
     /// JIT-generated code branch to its epilogue on the next `emit_trap_check`,
@@ -61,6 +64,7 @@ struct ResidentModule {
     module: JITModule,
     host: HostFns,
     main_id: FuncId,
+    main_returns_result: bool,
 }
 
 fn with_runtime_mut<F: FnOnce(&mut JitRuntime)>(f: F) {
@@ -367,6 +371,90 @@ extern "C" fn jet_jit_struct_set_str(h: i64, idx: i64, v: i64) {
     });
 }
 
+const JIT_PERF_DEFAULT_FIDELITY_BITS: u32 = 1.0f32.to_bits();
+static JIT_PERF_FIDELITY: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(JIT_PERF_DEFAULT_FIDELITY_BITS);
+
+fn alloc_jit_result(rt: &mut JitRuntime, ok: bool, bits: u64) -> i64 {
+    rt.results.push(JitResultValue { ok, bits });
+    rt.results.len() as i64
+}
+
+fn jit_result(rt: &JitRuntime, handle: i64) -> Option<JitResultValue> {
+    usize::try_from(handle)
+        .ok()
+        .and_then(|index| index.checked_sub(1))
+        .and_then(|index| rt.results.get(index).copied())
+}
+
+extern "C" fn jet_jit_result_new_i64(ok: i8, value: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| alloc_jit_result(rt, ok != 0, value as u64))
+}
+
+extern "C" fn jet_jit_result_new_f64(ok: i8, value: f64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| alloc_jit_result(rt, ok != 0, value.to_bits()))
+}
+
+extern "C" fn jet_jit_result_new_i8(ok: i8, value: i8) -> i64 {
+    Concurrency::with_runtime_mut(|rt| alloc_jit_result(rt, ok != 0, value as u8 as u64))
+}
+
+extern "C" fn jet_jit_result_new_i32(ok: i8, value: i32) -> i64 {
+    Concurrency::with_runtime_mut(|rt| alloc_jit_result(rt, ok != 0, value as u32 as u64))
+}
+
+extern "C" fn jet_jit_result_is_ok(handle: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| i8::from(jit_result(rt, handle).is_some_and(|r| r.ok)))
+}
+
+extern "C" fn jet_jit_result_get_i64(handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| jit_result(rt, handle).map_or(0, |r| r.bits as i64))
+}
+
+extern "C" fn jet_jit_result_get_f64(handle: i64) -> f64 {
+    Concurrency::with_runtime_mut(|rt| {
+        f64::from_bits(jit_result(rt, handle).map_or(0, |r| r.bits))
+    })
+}
+
+extern "C" fn jet_jit_result_get_i8(handle: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| jit_result(rt, handle).map_or(0, |r| r.bits as i8))
+}
+
+extern "C" fn jet_jit_result_get_i32(handle: i64) -> i32 {
+    Concurrency::with_runtime_mut(|rt| jit_result(rt, handle).map_or(0, |r| r.bits as i32))
+}
+
+extern "C" fn jet_jit_perf_fidelity() -> f64 {
+    f32::from_bits(JIT_PERF_FIDELITY.load(std::sync::atomic::Ordering::SeqCst)) as f64
+}
+
+extern "C" fn jet_jit_perf_default_fidelity() -> f64 {
+    f32::from_bits(JIT_PERF_DEFAULT_FIDELITY_BITS) as f64
+}
+
+extern "C" fn jet_jit_perf_override_fidelity(value: f64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+            let message = format!(
+                "core.perf.Perf.override_fidelity needs 0.0 through 1.0, got {}",
+                value
+            );
+            let string = rt.heap.alloc_string(message);
+            return alloc_jit_result(rt, false, string as u64);
+        }
+        JIT_PERF_FIDELITY.store((value as f32).to_bits(), std::sync::atomic::Ordering::SeqCst);
+        alloc_jit_result(rt, true, 0)
+    })
+}
+
+extern "C" fn jet_jit_perf_reset_fidelity() {
+    JIT_PERF_FIDELITY.store(
+        JIT_PERF_DEFAULT_FIDELITY_BITS,
+        std::sync::atomic::Ordering::SeqCst,
+    );
+}
+
 struct HostFns {
     add_i64: FuncId,
     sub_i64: FuncId,
@@ -401,6 +489,19 @@ struct HostFns {
     struct_set_bool: FuncId,
     struct_set_char: FuncId,
     struct_set_str: FuncId,
+    result_new_i64: FuncId,
+    result_new_f64: FuncId,
+    result_new_i8: FuncId,
+    result_new_i32: FuncId,
+    result_is_ok: FuncId,
+    result_get_i64: FuncId,
+    result_get_f64: FuncId,
+    result_get_i8: FuncId,
+    result_get_i32: FuncId,
+    perf_fidelity: FuncId,
+    perf_default_fidelity: FuncId,
+    perf_override_fidelity: FuncId,
+    perf_reset_fidelity: FuncId,
     is_trapped: FuncId,
     coll: Collections::CollectionsHostFns,
     conc: Concurrency::ConcurrencyHostFns,
@@ -472,6 +573,28 @@ fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol(
         "jet_jit_struct_set_str",
         jet_jit_struct_set_str as *const u8,
+    );
+    builder.symbol("jet_jit_result_new_i64", jet_jit_result_new_i64 as *const u8);
+    builder.symbol("jet_jit_result_new_f64", jet_jit_result_new_f64 as *const u8);
+    builder.symbol("jet_jit_result_new_i8", jet_jit_result_new_i8 as *const u8);
+    builder.symbol("jet_jit_result_new_i32", jet_jit_result_new_i32 as *const u8);
+    builder.symbol("jet_jit_result_is_ok", jet_jit_result_is_ok as *const u8);
+    builder.symbol("jet_jit_result_get_i64", jet_jit_result_get_i64 as *const u8);
+    builder.symbol("jet_jit_result_get_f64", jet_jit_result_get_f64 as *const u8);
+    builder.symbol("jet_jit_result_get_i8", jet_jit_result_get_i8 as *const u8);
+    builder.symbol("jet_jit_result_get_i32", jet_jit_result_get_i32 as *const u8);
+    builder.symbol("jet_jit_perf_fidelity", jet_jit_perf_fidelity as *const u8);
+    builder.symbol(
+        "jet_jit_perf_default_fidelity",
+        jet_jit_perf_default_fidelity as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_perf_override_fidelity",
+        jet_jit_perf_override_fidelity as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_perf_reset_fidelity",
+        jet_jit_perf_reset_fidelity as *const u8,
     );
     builder.symbol("jet_jit_is_trapped", jet_jit_is_trapped as *const u8);
     Collections::register_collections_symbols(&mut builder);
@@ -572,6 +695,40 @@ fn declare_host_fns(
     sig_struct_set_i32.params.push(AbiParam::new(types::I32));
     let mut sig_is_trapped = Signature::new(cc);
     sig_is_trapped.returns.push(AbiParam::new(types::I64));
+    let mut sig_result_new_i64 = Signature::new(cc);
+    sig_result_new_i64.params.push(AbiParam::new(types::I8));
+    sig_result_new_i64.params.push(AbiParam::new(types::I64));
+    sig_result_new_i64.returns.push(AbiParam::new(types::I64));
+    let mut sig_result_new_f64 = Signature::new(cc);
+    sig_result_new_f64.params.push(AbiParam::new(types::I8));
+    sig_result_new_f64.params.push(AbiParam::new(types::F64));
+    sig_result_new_f64.returns.push(AbiParam::new(types::I64));
+    let mut sig_result_new_i8 = Signature::new(cc);
+    sig_result_new_i8.params.push(AbiParam::new(types::I8));
+    sig_result_new_i8.params.push(AbiParam::new(types::I8));
+    sig_result_new_i8.returns.push(AbiParam::new(types::I64));
+    let mut sig_result_new_i32 = Signature::new(cc);
+    sig_result_new_i32.params.push(AbiParam::new(types::I8));
+    sig_result_new_i32.params.push(AbiParam::new(types::I32));
+    sig_result_new_i32.returns.push(AbiParam::new(types::I64));
+    let mut sig_result_query_i8 = Signature::new(cc);
+    sig_result_query_i8.params.push(AbiParam::new(types::I64));
+    sig_result_query_i8.returns.push(AbiParam::new(types::I8));
+    let mut sig_result_query_i64 = Signature::new(cc);
+    sig_result_query_i64.params.push(AbiParam::new(types::I64));
+    sig_result_query_i64.returns.push(AbiParam::new(types::I64));
+    let mut sig_result_query_f64 = Signature::new(cc);
+    sig_result_query_f64.params.push(AbiParam::new(types::I64));
+    sig_result_query_f64.returns.push(AbiParam::new(types::F64));
+    let mut sig_result_query_i32 = Signature::new(cc);
+    sig_result_query_i32.params.push(AbiParam::new(types::I64));
+    sig_result_query_i32.returns.push(AbiParam::new(types::I32));
+    let mut sig_noarg_f64 = Signature::new(cc);
+    sig_noarg_f64.returns.push(AbiParam::new(types::F64));
+    let mut sig_perf_override = Signature::new(cc);
+    sig_perf_override.params.push(AbiParam::new(types::F64));
+    sig_perf_override.returns.push(AbiParam::new(types::I64));
+    let sig_noarg = Signature::new(cc);
 
     let mut import = |name: &str, sig: &Signature| -> Result<FuncId, String> {
         module
@@ -613,6 +770,19 @@ fn declare_host_fns(
         struct_set_bool: import("jet_jit_struct_set_bool", &sig_struct_set_i8)?,
         struct_set_char: import("jet_jit_struct_set_char", &sig_struct_set_i32)?,
         struct_set_str: import("jet_jit_struct_set_str", &sig_struct_set_i64)?,
+        result_new_i64: import("jet_jit_result_new_i64", &sig_result_new_i64)?,
+        result_new_f64: import("jet_jit_result_new_f64", &sig_result_new_f64)?,
+        result_new_i8: import("jet_jit_result_new_i8", &sig_result_new_i8)?,
+        result_new_i32: import("jet_jit_result_new_i32", &sig_result_new_i32)?,
+        result_is_ok: import("jet_jit_result_is_ok", &sig_result_query_i8)?,
+        result_get_i64: import("jet_jit_result_get_i64", &sig_result_query_i64)?,
+        result_get_f64: import("jet_jit_result_get_f64", &sig_result_query_f64)?,
+        result_get_i8: import("jet_jit_result_get_i8", &sig_result_query_i8)?,
+        result_get_i32: import("jet_jit_result_get_i32", &sig_result_query_i32)?,
+        perf_fidelity: import("jet_jit_perf_fidelity", &sig_noarg_f64)?,
+        perf_default_fidelity: import("jet_jit_perf_default_fidelity", &sig_noarg_f64)?,
+        perf_override_fidelity: import("jet_jit_perf_override_fidelity", &sig_perf_override)?,
+        perf_reset_fidelity: import("jet_jit_perf_reset_fidelity", &sig_noarg)?,
         is_trapped: import("jet_jit_is_trapped", &sig_is_trapped)?,
         coll,
         conc,

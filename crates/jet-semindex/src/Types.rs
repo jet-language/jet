@@ -4,7 +4,7 @@ use jet_foundation::Diagnostics::Span;
 
 /// Schema version for JSON snapshots and API consumers. Bump when the exported
 /// fact shape changes incompatibly.
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 
 /// Byte span in a source file (same coordinates as diagnostics).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -101,6 +101,21 @@ pub struct SymbolDef {
     pub kind: SymbolKind,
 }
 
+/// Content-addressed, rename-safe definition identity for structural tools.
+/// `stable_id` addresses compiler-owned semantic shape; `content_id` addresses
+/// normalized source content. Human spelling remains separate so reports stay
+/// readable without making names the machine identity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DefinitionFact {
+    pub stable_id: String,
+    pub content_id: String,
+    pub human_identity: String,
+    pub name: String,
+    pub kind: String,
+    pub module_path: String,
+    pub span: SourceSpan,
+}
+
 /// Immutable compiler definition anchor used by semantic refactors. Names are
 /// intentionally absent: spelling can change, while module, kind, and defining
 /// source span identify the declaration selected by name resolution.
@@ -178,6 +193,7 @@ pub struct SemIndex {
     effects: Vec<EffectFact>,
     members: Vec<MemberFact>,
     nodes: Vec<StructuralNode>,
+    definition_facts: Vec<DefinitionFact>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -195,6 +211,7 @@ impl SemIndex {
         effects: Vec<EffectFact>,
         members: Vec<MemberFact>,
         nodes: Vec<StructuralNode>,
+        definition_facts: Vec<DefinitionFact>,
     ) -> Self {
         SemIndex {
             schema_version: SCHEMA_VERSION,
@@ -204,6 +221,7 @@ impl SemIndex {
             effects,
             members,
             nodes,
+            definition_facts,
         }
     }
 
@@ -241,6 +259,10 @@ impl SemIndex {
 
     pub fn structural_nodes(&self) -> &[StructuralNode] {
         &self.nodes
+    }
+
+    pub fn definition_facts(&self) -> &[DefinitionFact] {
+        &self.definition_facts
     }
 
     pub fn members_of(&self, owner: &str) -> Vec<&MemberFact> {

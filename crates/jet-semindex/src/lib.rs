@@ -13,7 +13,7 @@ pub use Build::{
     SymKind, SymRef, SymbolDB,
 };
 pub use Types::{
-    CallEdge, DefinitionAnchor, EffectFact, MemberFact, MemberKind, MemberOrigin, SemIndex, SourceSpan,
+    CallEdge, DefinitionAnchor, DefinitionFact, EffectFact, MemberFact, MemberKind, MemberOrigin, SemIndex, SourceSpan,
     StructuralAudit, StructuralNode, StructuralSlotKind, SymbolDef, SymbolKind, SymbolRef, TypeDossier,
     SCHEMA_VERSION,
 };

@@ -156,6 +156,16 @@ pub const COMMANDS: &[CommandSpec] = &[
     CommandSpec { name: "inspect", summary: "semantic, build, schema, supply, and binding inspection", headline: false },
     CommandSpec { name: "self", summary: "Jet installation, diagnostics, completions, and machine tooling", headline: false },
     CommandSpec {
+        name: "diff",
+        summary: "compare checked Jet programs by semantic structure",
+        headline: false,
+    },
+    CommandSpec {
+        name: "merge",
+        summary: "three-way merge checked Jet programs by semantic identity",
+        headline: false,
+    },
+    CommandSpec {
         name: "run",
         summary: "build, then run a program (or a project)",
         headline: true,
@@ -615,6 +625,8 @@ pub fn owns_flag_vocabulary(name: &str) -> bool {
             | "impact"
             | "codemod"
             | "expand"
+            | "diff"
+            | "merge"
     )
 }
 

@@ -20,7 +20,7 @@ fn temp_fixture(name: &str, src: &str) -> PathBuf {
 
 #[test]
 fn semindex_schema_version() {
-    assert_eq!(SCHEMA_VERSION, 3);
+    assert_eq!(SCHEMA_VERSION, 4);
 }
 
 #[test]
@@ -28,7 +28,8 @@ fn semindex_hello_json_shape() {
     let idx = open(&fixture("basics/hello.jet")).expect("hello indexes");
     let json = idx.to_json();
     assert!(json.starts_with('{'));
-    assert!(json.contains("\"schema_version\":3"));
+    assert!(json.contains("\"schema_version\":4"));
+    assert!(json.contains("\"definition_facts\""));
     assert!(json.contains("\"definitions\""));
     assert!(json.contains("\"identity\""));
     assert!(json.contains("\"scope_identity\""));
@@ -301,7 +302,7 @@ fn jet_semindex_cli_json_smoke() {
         String::from_utf8_lossy(&out.stderr)
     );
     let text = String::from_utf8_lossy(&out.stdout);
-    assert!(text.contains("\"schema_version\":3"));
+    assert!(text.contains("\"schema_version\":4"));
 }
 
 #[test]

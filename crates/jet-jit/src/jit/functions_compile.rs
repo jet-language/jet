@@ -215,11 +215,26 @@ fn lower_function(
         lctx.lower_stmts(&tir.body)?;
         if !stmt_has_return(&tir.body) {
             if let Some(ret) = &tir.ret {
-                if clif_ty(ret).is_some() {
+                if tir.name == "run"
+                    && matches!(ret, Type::Result { ok, .. }
+                        if matches!(ok.as_ref(), Type::Named(n) if n == "Void" || n == "Unit"))
+                {
+                    let tag = lctx.b.ins().iconst(types::I8, 1);
+                    let unit = lctx.b.ins().iconst(types::I64, 0);
+                    let host_ref = lctx
+                        .module
+                        .declare_func_in_func(lctx.host.result_new_i64, lctx.b.func);
+                    let call = lctx.b.ins().call(host_ref, &[tag, unit]);
+                    let result = lctx.b.inst_results(call)[0];
+                    lctx.b.ins().return_(&[result]);
+                } else if clif_ty(ret).is_some() {
                     return Err("jit function missing return".to_string());
+                } else {
+                    lctx.b.ins().return_(&[]);
                 }
+            } else {
+                lctx.b.ins().return_(&[]);
             }
-            b.ins().return_(&[]);
         }
         b.finalize();
     }

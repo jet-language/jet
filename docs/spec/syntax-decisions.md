@@ -1991,6 +1991,10 @@ v4/v7 (D-UUIDENC1).
 
 **D-ARTIFACT-EXT1=A — one artifact-extension family** *(ratified by owner 2026-07-12, card #514)*: every Jet tool artifact is `.jet<kind>`: `.jetmap`, `.jetnb`, `.jetproof` (was .jproof), `.jettrace` (was .jtrace), `.jetreplay` (game input replays), `.jetproof-replay` (proof replays — the .jreplay collision between D-GAME-REPLAY1 and D-JREPLAY1 is resolved). Closed family; new artifact kinds need a ballot. Amends D-JPROOF1/D-JREPLAY1/D-PERFSESSION1/D-GAME-REPLAY1 spellings.
 
+**D-API-STORE1=A — one storage verb: add / add_new** *(ratified 2026-07-12, card #513; shape set by owner question q2zvcuql)*: `insert` and `put` die. Keyed containers: `add(key, value) -> T?` upserts and returns the displaced old value (`None` = fresh key); `add_new(key, value) -> Bool` stores only if absent — `false` means the key existed and the value is untouched (the race-safe claim). Element containers: `add(value) -> Bool` (`Set`/`SortedSet`: true if newly added; `Bag`: always true). `m[k] = v` index-write stays the literal upsert (S39). Enters Law 1; amends the map/`Lru`/D-COLLBREADTH1 method lists.
+
+**D-VALIDATE1=A — validation in the struct definition** *(ratified 2026-07-12, cards #506/#513; shape set by owner direction)*: a `validate { … }` section in the struct body (S82 in-body grammar) declares rules as dot-chains on bare field names (D-FIELDPOL1 sibling access); cross-field rules use `check(cond, at: field, "msg")` in the same block. All rules ACCUMULATE into `[FieldError]` (the DecodeError path shape). `decode<T>()` runs the block automatically; `Type.validate(value)` runs it standalone. `Validate.over(s)` is the sole use-site escape, same rule vocabulary and engine (I8), only for rules needing context the definition cannot see. Type-level constraints (D-RANGETYPE1, D-REFINE1) remain layer zero. `@Pre`/`@Post` stay call-site contracts, outside the validation story.
+
 **D-CORE-SECRETS1=A — one secrets home** *(ratified by owner
 2026-07-12, card #509)*: `core.vault` owns secret storage AND lifecycle
 (rotation schedules, expiry, audit facts); `core.secrets` leaves the

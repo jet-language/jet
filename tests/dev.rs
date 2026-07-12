@@ -1354,6 +1354,125 @@ fn assert_cranelift_matches_interpreter(src: &str, tag: &str) {
     );
 }
 
+fn run_cranelift_outcome(src: &str, tag: &str) -> ProgramOutput {
+    let p = std::env::temp_dir().join(format!("jet_jit_result_{tag}.jet"));
+    fs::write(&p, src).unwrap();
+    let shown = p.to_string_lossy().to_string();
+    let bundle = checked_bundle_from_path(&shown);
+    assert!(
+        jet_jit::resident_jit_safe_bundle(&bundle),
+        "`{tag}` must use resident JIT, not fallback: {}",
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+    );
+    jet_jit::try_compile_bundle(&bundle)
+        .unwrap_or_else(|e| panic!("`{tag}` JIT compile failed: {e}"));
+    let mut backend = CraneliftBackend::new(InterpreterBackend::new());
+    match backend.run(&bundle, false) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(ds) => panic!("`{tag}` JIT returned diagnostics: {ds:?}"),
+    }
+}
+
+#[test]
+fn resident_jit_result_abi_covers_calls_ok_err_try_and_entry() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let success = r#"
+fn choose(okay: Bool) -> Float ? String {
+    if okay { return ok(0.25) }
+    return err("typed boom")
+}
+
+fn forward(okay: Bool) -> Float ? String {
+    value :: choose(okay)?
+    return ok(value + 0.25)
+}
+
+fn run() -> Void ? {
+    print(forward(true)?)
+}
+"#;
+    let success_jit = run_cranelift_outcome(success, "result_success");
+    assert_eq!(success_jit, ProgramOutput::ran("0.5\n".into(), "".into(), 0));
+
+    let failure = success.replace("forward(true)", "forward(false)");
+    let failure_jit = run_cranelift_outcome(&failure, "result_failure");
+    assert_eq!(
+        failure_jit,
+        ProgramOutput::ran("".into(), "typed boom\n".into(), 1)
+    );
+
+    for (src, tag, expected) in [
+        (success, "result_success_interp", success_jit),
+        (&failure, "result_failure_interp", failure_jit),
+    ] {
+        let p = std::env::temp_dir().join(format!("jet_jit_result_{tag}.jet"));
+        fs::write(&p, src).unwrap();
+        let shown = p.to_string_lossy().to_string();
+        let interpreted = match dev_iteration(&shown, false, true) {
+            RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => ProgramOutput::ran(stdout, stderr, exit_code),
+            RunOutcome::Problems(ds) => panic!("`{tag}` interpreter failed: {ds:?}"),
+        };
+        assert_eq!(interpreted, expected, "JIT/interpreter Result drift for `{tag}`");
+    }
+}
+
+#[test]
+fn resident_jit_fidelity_matches_runtime_contract() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let valid = r#"
+use core.perf as Perf
+
+fn run() -> Void ? {
+    Perf.reset_fidelity()
+    print(Perf.default_fidelity())
+    Perf.override_fidelity(0.25)?
+    print(Perf.fidelity())
+    Perf.reset_fidelity()
+    print(Perf.fidelity())
+}
+"#;
+    assert_eq!(
+        run_cranelift_outcome(valid, "fidelity_valid"),
+        ProgramOutput::ran("1.0\n0.25\n1.0\n".into(), "".into(), 0)
+    );
+
+    for (value, tag) in [
+        ("-0.01", "negative"),
+        ("1.01", "above_one"),
+        ("Float.Infinity", "infinite"),
+        ("Float.NaN", "nan"),
+    ] {
+        let src = format!(
+            r#"use core.perf as Perf
+fn run() -> Void ? {{
+    Perf.reset_fidelity()
+    Perf.override_fidelity(0.375)?
+    Perf.override_fidelity({value})?
+}}"#
+        );
+        let got = run_cranelift_outcome(&src, tag);
+        assert_eq!(got.exit_code, 1, "{tag} must fail");
+        assert!(
+            got.stderr
+                .contains("core.perf.Perf.override_fidelity needs 0.0 through 1.0"),
+            "{tag}: {:?}",
+            got.stderr
+        );
+    }
+}
+
 fn golden_stdout(stem: &str) -> String {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     fs::read_to_string(root.join(format!("examples/features/expected/{stem}.out")))

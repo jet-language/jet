@@ -40,6 +40,68 @@ struct LowerCtx<'a, 'b> {
 }
 
 impl LowerCtx<'_, '_> {
+    fn result_new(&mut self, ok: bool, inner: &TExpr) -> Result<Value, String> {
+        let tag = self.b.ins().iconst(types::I8, i64::from(ok));
+        let (host_id, payload) = if matches!(&inner.ty, Type::Named(n) if n == "Unit" || n == "Void") {
+            (self.host.result_new_i64, self.b.ins().iconst(types::I64, 0))
+        } else {
+            let value = self.lower_expr(inner)?;
+            let host = match clif_ty(&inner.ty) {
+                Some(ty) if ty == types::F64 => self.host.result_new_f64,
+                Some(ty) if ty == types::I8 => self.host.result_new_i8,
+                Some(ty) if ty == types::I32 => self.host.result_new_i32,
+                Some(ty) if ty == types::I64 => self.host.result_new_i64,
+                _ => return Err(format!("jit Result payload unsupported: {:?}", inner.ty)),
+            };
+            (host, value)
+        };
+        let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+        let call = self.b.ins().call(host_ref, &[tag, payload]);
+        Ok(self.b.inst_results(call)[0])
+    }
+
+    fn result_payload(&mut self, handle: Value, ty: &Type) -> Result<Value, String> {
+        if matches!(ty, Type::Named(n) if n == "Unit" || n == "Void") {
+            return Ok(self.b.ins().iconst(types::I8, 0));
+        }
+        let host_id = match clif_ty(ty) {
+            Some(clif) if clif == types::F64 => self.host.result_get_f64,
+            Some(clif) if clif == types::I8 => self.host.result_get_i8,
+            Some(clif) if clif == types::I32 => self.host.result_get_i32,
+            Some(clif) if clif == types::I64 => self.host.result_get_i64,
+            _ => return Err(format!("jit Result payload unsupported: {ty:?}")),
+        };
+        let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+        let call = self.b.ins().call(host_ref, &[handle]);
+        Ok(self.b.inst_results(call)[0])
+    }
+
+    fn lower_try(&mut self, inner: &TExpr, convert: &TIR::TTryConvert) -> Result<Value, String> {
+        if !matches!(convert, TIR::TTryConvert::None) {
+            return Err("jit typed Result conversion unsupported".to_string());
+        }
+        let handle = self.lower_expr(inner)?;
+        let status_ref = self
+            .module
+            .declare_func_in_func(self.host.result_is_ok, self.b.func);
+        let status_call = self.b.ins().call(status_ref, &[handle]);
+        let is_ok = self.b.inst_results(status_call)[0];
+        let ok_block = self.b.create_block();
+        let err_block = self.b.create_block();
+        self.b.ins().brif(is_ok, ok_block, &[], err_block, &[]);
+        self.b.switch_to_block(err_block);
+        self.b.seal_block(err_block);
+        self.b.ins().return_(&[handle]);
+        self.b.switch_to_block(ok_block);
+        self.b.seal_block(ok_block);
+        let ok_ty = inner
+            .ty
+            .unwrap_result()
+            .map(|(ok, _)| ok)
+            .ok_or("jit try operand is not Result")?;
+        self.result_payload(handle, ok_ty)
+    }
+
     fn loop_targets(&self, label: Option<&str>, kind: &str) -> Result<LoopTargets, String> {
         match label {
             Some(name) => self
@@ -1073,6 +1135,26 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host_ref, &[]);
                     return Ok(self.b.inst_results(call)[0]);
                 }
+                if module == "core.perf" {
+                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                        "fidelity" if args.is_empty() => (self.host.perf_fidelity, Vec::new()),
+                        "default_fidelity" if args.is_empty() => {
+                            (self.host.perf_default_fidelity, Vec::new())
+                        }
+                        "override_fidelity" if args.len() == 1 => {
+                            (self.host.perf_override_fidelity, vec![self.lower_expr(&args[0])?])
+                        }
+                        "reset_fidelity" if args.is_empty() => {
+                            (self.host.perf_reset_fidelity, Vec::new())
+                        }
+                        _ => return Err(format!("jit core.perf call unsupported: {method}")),
+                    };
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host_ref, &arg_vals);
+                    return Ok(clif_ty(&expr.ty)
+                        .map(|_| self.b.inst_results(call)[0])
+                        .unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)));
+                }
                 Err("jit core call unsupported".to_string())
             }
             TExprKind::CoreClosureCall { kind } => match kind {
@@ -1419,9 +1501,9 @@ impl LowerCtx<'_, '_> {
             TExprKind::FnFieldCall { .. } => Err("jit fn-field call unsupported".to_string()),
             TExprKind::Todo { .. } => Err("jit todo expression unsupported".to_string()),
             TExprKind::DistinctRaw(_) => Err("jit distinct raw unsupported".to_string()),
-            TExprKind::Ok(_) => Err("jit result ok value unsupported".to_string()),
-            TExprKind::Err(_) => Err("jit result err value unsupported".to_string()),
-            TExprKind::Try { .. } => Err("jit try propagation unsupported".to_string()),
+            TExprKind::Ok(inner) => self.result_new(true, inner),
+            TExprKind::Err(inner) => self.result_new(false, inner),
+            TExprKind::Try { inner, convert, .. } => self.lower_try(inner, convert),
             TExprKind::OptField { .. } => Err("jit optional field chain unsupported".to_string()),
             TExprKind::Lambda(_) => Err("jit lambda unsupported".to_string()),
             TExprKind::PatternMatches { .. } => {

@@ -8,7 +8,7 @@ use jet_sema::{effect_key, SemIndexEffectFacts};
 use std::collections::HashMap;
 
 use crate::Json::{convert_defs, convert_effects, convert_refs};
-use crate::Types::{CallEdge, DefinitionAnchor, MemberFact, MemberKind, MemberOrigin, SemIndex, StructuralNode, StructuralSlotKind};
+use crate::Types::{CallEdge, DefinitionAnchor, DefinitionFact, MemberFact, MemberKind, MemberOrigin, SemIndex, StructuralNode, StructuralSlotKind, SymbolDef, SymbolKind};
 
 /// The semantic kind of a defined symbol (LSP-facing; uses AST types internally).
 #[derive(Debug, Clone)]
@@ -112,7 +112,7 @@ impl SymbolDB {
     pub fn new() -> Self {
         SymbolDB {
             index: SemIndex::new(
-                Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(),
+                Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(),
             ),
             defs: Vec::new(),
             refs: Vec::new(),
@@ -124,10 +124,11 @@ impl SymbolDB {
         }
     }
 
-    fn finalize_index(&mut self, facts: &SemIndexEffectFacts) {
+    fn finalize_index(&mut self, facts: &SemIndexEffectFacts, bundle: &ProgramBundle) {
         let defs = convert_defs(&self.defs);
         let refs = convert_refs(&self.refs);
         let effects = convert_effects(facts);
+        let definition_facts = build_definition_facts(&defs, &self.nodes, bundle);
         self.index = SemIndex::new(
             defs,
             refs,
@@ -135,6 +136,7 @@ impl SymbolDB {
             effects,
             self.members.clone(),
             self.nodes.clone(),
+            definition_facts,
         );
     }
 
@@ -440,8 +442,98 @@ pub fn build_symbol_db(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> S
         }
     }
     add_breadcrumb_hints(&mut db);
-    db.finalize_index(facts);
+    db.finalize_index(facts, bundle);
     db
+}
+
+fn build_definition_facts(
+    defs: &[SymbolDef],
+    nodes: &[StructuralNode],
+    bundle: &ProgramBundle,
+) -> Vec<DefinitionFact> {
+    let mut out = Vec::new();
+    for node in nodes.iter().filter(|node| node.parent.is_none() && node.class == "item") {
+        let Some(module) = bundle.modules.iter().find(|module| module.display == node.module_path) else { continue };
+        let Some(def) = defs.iter().filter(|def| {
+            def.module_path == node.module_path
+                && node.span.start <= def.def_span.start
+                && def.def_span.end <= node.span.end
+                && !matches!(def.kind, SymbolKind::Local { .. } | SymbolKind::Param { .. } | SymbolKind::Field { .. } | SymbolKind::EnumVariant { .. })
+        }).min_by_key(|def| def.def_span.start) else { continue };
+        let descendants = nodes.iter().filter(|candidate| {
+            candidate.module_path == node.module_path
+                && node.span.start <= candidate.span.start
+                && candidate.span.end <= node.span.end
+        });
+        let mut structural = format!("{}|{}", definition_kind(&def.kind), definition_signature(&def.kind));
+        for descendant in descendants {
+            structural.push('|');
+            structural.push_str(&descendant.slot);
+            structural.push(':');
+            structural.push_str(&descendant.class);
+            structural.push(':');
+            structural.push_str(&descendant.shape);
+        }
+        let source = module.source.get(node.span.start..node.span.end).unwrap_or("");
+        out.push(DefinitionFact {
+            stable_id: format!("def:{}", &jet_foundation::SHA256::sha256_hex(structural.as_bytes())[..16]),
+            content_id: format!("sha256:{}", jet_foundation::SHA256::sha256_hex(normalize_definition(source).as_bytes())),
+            human_identity: def.identity.clone(),
+            name: def.name.clone(),
+            kind: definition_kind(&def.kind).to_string(),
+            module_path: def.module_path.clone(),
+            span: node.span,
+        });
+    }
+    out.sort_by(|a, b| a.stable_id.cmp(&b.stable_id).then(a.human_identity.cmp(&b.human_identity)));
+    out
+}
+
+fn definition_kind(kind: &SymbolKind) -> &'static str {
+    match kind {
+        SymbolKind::Module => "module",
+        SymbolKind::Function { .. } => "function",
+        SymbolKind::Struct { .. } => "struct",
+        SymbolKind::Enum { .. } => "enum",
+        SymbolKind::Trait => "trait",
+        SymbolKind::Tag => "tag",
+        SymbolKind::Const => "const",
+        SymbolKind::EnumVariant { .. } => "variant",
+        SymbolKind::Field { .. } => "field",
+        SymbolKind::Local { .. } => "local",
+        SymbolKind::Param { .. } => "param",
+    }
+}
+
+fn definition_signature(kind: &SymbolKind) -> String {
+    match kind {
+        SymbolKind::Function { params, ret } => format!("({})->{}", params.iter().map(|(_, ty)| ty.as_str()).collect::<Vec<_>>().join(","), ret.as_deref().unwrap_or("Void")),
+        SymbolKind::Struct { fields } => format!("{{{}}}", fields.iter().map(|(_, ty)| ty.as_str()).collect::<Vec<_>>().join(",")),
+        SymbolKind::Enum { variants } => format!("variants:{}", variants.len()),
+        _ => definition_kind(kind).to_string(),
+    }
+}
+
+fn normalize_definition(source: &str) -> String {
+    let mut out = String::new();
+    let mut chars = source.chars().peekable();
+    let mut string = false;
+    while let Some(ch) = chars.next() {
+        if string {
+            out.push(ch);
+            if ch == '\\' { if let Some(next) = chars.next() { out.push(next); } }
+            else if ch == '"' { string = false; }
+        } else if ch == '"' {
+            string = true;
+            out.push(ch);
+        } else if ch == '/' && chars.peek() == Some(&'/') {
+            chars.next();
+            for next in chars.by_ref() { if next == '\n' { break; } }
+        } else if !ch.is_whitespace() {
+            out.push(ch);
+        }
+    }
+    out
 }
 
 /// Compiler-owned typed AST boundaries for an already parsed module. Codemod

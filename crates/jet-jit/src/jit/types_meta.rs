@@ -29,6 +29,11 @@ fn clif_ty(ty: &Type) -> Option<types::Type> {
     if jit_optional_scalar_type(ty) {
         return Some(types::I64);
     }
+    if matches!(ty, Type::Result { ok, err }
+        if jit_result_payload_type(ok.as_ref()) && jit_result_payload_type(err.as_ref()))
+    {
+        return Some(types::I64);
+    }
     match ty {
         Type::Int | Type::String => Some(types::I64),
         Type::Float => Some(types::F64),

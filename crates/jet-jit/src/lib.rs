@@ -52,6 +52,15 @@ thread_local! {
 
 static TRY_COMPILE_PANIC_HOOK_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// Runtime-neutral Result carrier used by native JIT code. Cranelift functions
+/// pass one i64 handle for every `Result<T, E>`; payload bits stay exact and
+/// are decoded using the statically checked TIR payload type.
+#[derive(Clone, Copy)]
+struct JitResultValue {
+    ok: bool,
+    bits: u64,
+}
+
 include!("jit/runtime_host.rs");
 include!("jit/safety.rs");
 include!("jit/types_meta.rs");

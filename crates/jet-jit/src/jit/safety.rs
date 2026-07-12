@@ -107,10 +107,18 @@ fn jit_value_type(ty: &Type) -> bool {
     match ty {
         Type::Named(n) if n == "Unit" => true,
         Type::Int | Type::Float | Type::Bool | Type::String | Type::Char => true,
+        Type::Result { ok, err } => {
+            jit_result_payload_type(ok.as_ref()) && jit_result_payload_type(err.as_ref())
+        }
         other if jit_concurrency_type(other) => true,
         other if jit_compound_type(other) => true,
         _ => false,
     }
+}
+
+fn jit_result_payload_type(ty: &Type) -> bool {
+    matches!(ty, Type::Named(n) if n == "Unit" || n == "Void" || n == "Error")
+        || jit_value_type(ty)
 }
 
 fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> bool {
@@ -215,6 +223,9 @@ fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> bool {
         }
         TExprKind::Present(inner) | TExprKind::Ok(inner) | TExprKind::Err(inner) => {
             resident_safe_expr(inner, callees)
+        }
+        TExprKind::Try { inner, convert, .. } => {
+            matches!(convert, TIR::TTryConvert::None) && resident_safe_expr(inner, callees)
         }
         TExprKind::Absent => true,
         _ if !jit_value_type(&expr.ty) => false,
