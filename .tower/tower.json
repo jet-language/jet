@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 515,
-    "rev": 4317,
+    "rev": 4322,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -2332,11 +2332,16 @@
       "kind": "idea",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P3",
       "plan": "Durable plan: docs/plans/epoch-3/adaptive-runtime.md",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "codex-orchestrator",
+          "text": "[start] Sol tranche: implement general JIT Result ABI and exact core.perf AOT/interpreter/dev/JIT parity; no fidelity-specific status facade. Builder sol-136-builder; targeted tests only."
+        },
         {
           "at": "2026-07-11",
           "by": "terra-136-builder",
@@ -2540,11 +2545,16 @@
       "kind": "idea",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P3",
       "plan": "Durable plan: docs/plans/epoch-3/structural-merge.md",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "codex-orchestrator",
+          "text": "[start] Sol tranche: implement semantic-index-backed structural diff/three-way merge, typed reports, and opt-in Git driver; parser+sema validate every output. Builder sol-143-builder; targeted tests only."
+        },
         {
           "at": "2026-07-10",
           "by": "codex-orchestrator",
@@ -4312,6 +4322,11 @@
       "blockedBy": [],
       "assignee": "sol-292-builder",
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "codex-orchestrator",
+          "text": "[start] Sol tranche: implement raw-preserving env overlay, atomic child inheritance, and bounded native interrupt proof. Builder sol-292-builder; targeted tests only; parent review/full verification."
+        },
         {
           "at": "2026-07-11",
           "by": "codex-orchestrator",
@@ -14442,6 +14457,11 @@
       "workOrder": 27,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "claude-main",
+          "text": "D-VALIDATE1 reshaped per owner direction (2026-07-12 chat): rules live IN the struct definition — a validate { } section beside the fields (S82 in-body grammar, bare-name field access per the D-FIELDPOL1 sibling rule), decode runs it automatically; Validate.over(s) survives only as the escape for rules needing context the definition cannot see (db lookups etc.), same vocabulary, one engine. Options: A in-body block (rec), B inline-on-field chains, C per-field markers."
+        },
         {
           "at": "2026-07-12",
           "by": "claude-main",
@@ -29782,78 +29802,78 @@
       "id": "D-VALIDATE1",
       "cardId": "c0n6vj96",
       "group": "stdlib",
-      "title": "Validation ergonomics: chainable Validate value + type-level constraints; @Pre stays out of it",
-      "gist": "Best-of-all-worlds validation: constraints that fit the type system live in types, everything else is a chainable Validate value that accumulates every field error.",
-      "lesson": "Forms and API payloads need whole-value validation: check every rule, collect every failure with its field path, return them as data to render beside form fields.\n\nJet already has two ratified pieces. Type-level constraints — `distinct Int(13..120)` ranged types (D-RANGETYPE1) and `#Invariant` refinements (D-REFINE1) — are compile-checked where static and fallible at construction. And decode gives `DecodeError { path, reason }` per shape mismatch.\n\nYour direction: dot-method chaining reads right; `@Pre`-style declarations feel clunky for this job. `@Pre` remains what it is — a call-site contract (D-PREPOST1) — and stays out of the validation story entirely.",
+      "title": "Validation lives in the struct definition: a validate block on fields, with a use-site chain only for what the definition cannot know",
+      "gist": "Rules are declared inside the struct body as chains on the field names; a use-site escape exists only for context the definition cannot see.",
+      "lesson": "Your direction: the validator belongs in the struct definition, not at use sites. Use-site chaining survives only as the escape for rules the definition cannot express — rules needing outside context like a database or config.\n\nThe struct body already hosts more than fields: computed fields read siblings by bare name (D-FIELDPOL1), `state` blocks declare typestates (D-STATE1), and in-body sections are ratified grammar (S82). A validation section fits that family.\n\nLayer zero stays free: constraints that fit the type system — `distinct Int(13..120)` (D-RANGETYPE1), `#Invariant` refinements (D-REFINE1) — are compile-checked and need no rule at all.",
       "explainer": "",
-      "story": "Wanda ships a signup form. Age bounds fit the type system; \"email looks like an email\" and \"password has a digit\" do not. She wants one readable chain that runs every rule, and one error list she can map onto the form — not marker soup above the struct and not a second schema language beside it.",
-      "inWild": "struct Signup {\n    email: String\n    age: Age                      // Age :: distinct Int(13..120) — type-level, free\n    password: String\n}\n\nfn validate(s: Signup) -> Signup ? [FieldError] {\n    v :: Validate.over(s)\n    v.field(\"email\", s.email).email().max_len(254)\n    v.field(\"password\", s.password).min_len(12).has_digit()\n    v.check(s.password != s.email, at: \"password\", \"password can't be the email\")\n    return v.finish()\n}\n\nsignup :: req.decode<Signup>().validate() ?? (errs) => {\n    return Response.unprocessable(errs)    // [{path: \"email\", reason: \"…\"}, …]\n}",
+      "story": "Wanda declares Signup once. She wants the email, age, and password rules readable in the same place the fields are declared — the struct IS the schema, rules included. Her one context-dependent rule — username not already taken — cannot live there, because the definition has no database. That rule, and only that rule, belongs at the use site.",
+      "inWild": "struct Signup {\n    email: String\n    age: Age                    // Age :: distinct Int(13..120) — layer 0, free\n    password: String\n\n    validate {\n        email.email().max_len(254)\n        password.min_len(12).has_digit()\n        check(password != email, at: password, \"password can't be the email\")\n    }\n}\n\n// use site: decode runs the struct's rules automatically\nsignup :: req.decode<Signup>() ?? (errs) => return Response.unprocessable(errs)\n\n// the escape — only for what the definition cannot know:\ndb_errs :: Validate.over(signup)\n    .check(!db.has_key(signup.email), at: \"email\", \"already registered\")\n    .finish()",
       "detail": "",
       "options": [
         {
           "key": "A",
-          "name": "Three layers, one chain — types, Validate value, decode integration",
-          "detail": "Layer 1: constraints that fit the type system stay in types — ranged ints, refinements — checked at construction, zero ceremony, already law. Layer 2: `Validate.over(s)` (the view idiom) gives the chain you want: `v.field(\"email\", s.email).email().max_len(254)`; built-in rules are ordinary methods, custom rules are `.check(cond, at:, \"msg\")`, and everything ACCUMULATES. `v.finish()` returns `T ? [FieldError]` (the DecodeError shape, reused).\n\nLayer 3: `req.decode<T>().validate()` calls the type's `fn validate` when one is defined — decode errors and rule errors arrive in the same list. No markers, no second schema; the struct plus one plain function IS the schema.",
-          "code": "v :: Validate.over(s)\nv.field(\"age\", s.age).range(13..120)      // for types that stayed plain\nv.field(\"email\", s.email).email()\nv.check(s.end > s.start, at: \"end\", \"end before start\")\nreturn v.finish()\n\n$ jet run signup.jet    # all failures at once, paths attached\nunprocessable: [\n  { path: \"email\",    reason: \"not an email address\" },\n  { path: \"password\", reason: \"needs at least 12 characters\" },\n]"
+          "name": "validate block in the struct body; Validate.over stays as the context escape",
+          "detail": "A `validate { … }` section inside the struct body — the declaration plane, beside fields, like `state` blocks. Rules are dot-chains on bare field names (the D-FIELDPOL1 sibling-access rule, reused); cross-field rules use `check(cond, at: field, \"msg\")` in the same block. All rules ACCUMULATE into `[FieldError]` (the DecodeError path shape).\n\n`decode<T>()` runs the block automatically — one call, shape errors and rule errors in one list. `Signup.validate(value)` runs it standalone. `Validate.over(s)` remains, same rule vocabulary, one engine (I8), only for rules needing context the definition cannot see.",
+          "code": "struct Signup {\n    email: String\n    password: String\n\n    validate {\n        email.email().max_len(254)\n        password.min_len(12).has_digit()\n    }\n}\n\nsignup :: req.decode<Signup>() ?? (errs) => return Response.unprocessable(errs)\n// errs: [{path: \"email\", reason: \"not an email address\"},\n//        {path: \"password\", reason: \"needs at least 12 characters\"}]"
         },
         {
           "key": "B",
-          "name": "Fail-fast only — first error returns",
-          "detail": "Extend decode with per-field predicates that stop at the first failure. Cheapest surface, but the form use case is precisely \"show ALL the errors\"; fail-fast sends users through submit-fix-submit loops, one field at a time.",
-          "code": "signup :: req.decode<Signup>()?   // first bad field aborts\n// user fixes email, resubmits, THEN learns the password is short"
+          "name": "Rules chained inline on each field's type",
+          "detail": "Rules attach on the field line itself: `email: String .email().max_len(254)`. Maximally local — the rule is ON the field. Costs: wide structs turn into long lines, cross-field rules still need a block somewhere anyway, and the field line now mixes type grammar with rule grammar.",
+          "code": "struct Signup {\n    email: String .email().max_len(254)\n    password: String .min_len(12).has_digit()\n    // password != email … still needs a block\n}"
         },
         {
           "key": "C",
-          "name": "Schema-combinator library — Zod-style validator objects",
-          "detail": "A separate schema value describes the shape and rules: `signup_schema :: v.object(email: v.string().email(), …)`. Chainable and familiar, but the schema duplicates the struct field-for-field — two sources of truth that drift, which is the second-schema-language trap I8 exists to block.",
-          "code": "signup_schema :: v.object(\n    email: v.string().email(),\n    age: v.int().range(13..120),\n)   // Signup already declares all of this"
+          "name": "Field markers — #[Check(…)] per field",
+          "detail": "Rules as `#`-plane field markers, like the serde wire markers: `#[Check(email, max_len(254))]`. Consistent with an existing family, but it is exactly the marker soup you called clunky, and cross-field rules do not fit a per-field marker at all.",
+          "code": "struct Signup {\n    #[Check(email, max_len(254))]\n    email: String\n    #[Check(min_len(12), has_digit)]\n    password: String\n}"
         }
       ],
       "comparisons": [
         {
-          "lang": "Zod (TS)",
-          "note": "Zod proved chainable rules and accumulated errors are the winning ergonomics — but its schema IS the type, which TypeScript allows and Jet's nominal structs make redundant.",
-          "code": "z.object({ email: z.string().email() }).safeParse(data)\n// .error.issues = every failure, with paths"
+          "lang": "Pydantic (Python)",
+          "note": "Pydantic v2 declares rules in the class body (Field constraints + model_validator) — the in-definition shape; its success is why forms code reads well in Python.",
+          "code": "class Signup(BaseModel):\n    email: EmailStr\n    password: str = Field(min_length=12)\n    @model_validator(mode=\"after\")\n    def cross(self): ..."
         },
         {
           "lang": "Ecto (Elixir)",
-          "note": "Ecto changesets pipe rules over the struct and accumulate — option A's shape, minus the types layer Jet already has.",
-          "code": "cast(user, params, [:email])\n|> validate_format(:email, ~r/@/)\n|> validate_length(:password, min: 12)"
+          "note": "Ecto keeps rules in a changeset function beside the schema — in the module, not at call sites; call sites just pipe data through.",
+          "code": "def changeset(user, params) do\n  cast(user, params, [:email])\n  |> validate_length(:password, min: 12)\nend"
         }
       ],
       "rec": "A",
       "recommendation": {
-        "why": "It puts each rule where it is cheapest: static bounds in types (free, already ratified), dynamic rules in a chain that reads like the requirement, and one integration point so beginners get a single `.validate()` call. No markers, no drift-prone second schema.",
+        "why": "It is your stated shape with the chain ergonomics kept: rules live where the fields live, decode runs them with zero call-site ceremony, and the use-site escape is scoped to exactly the rules a definition cannot know. One rule vocabulary, one engine, two homes with a bright line between them.",
         "whyNot": [
           {
             "key": "B",
-            "reason": "Fail-fast fails the form use case the feature exists for — users need every error at once."
+            "reason": "Inline chains bloat field lines and still need a block for cross-field rules — so the block exists anyway and the inline form becomes a second spelling."
           },
           {
             "key": "C",
-            "reason": "The combinator schema restates the struct field-for-field; two sources of truth drift, and the struct was already the schema."
+            "reason": "Per-field markers are the clunky shape you rejected, and cross-field rules have no home in them."
           }
         ],
-        "tradeoff": "Two places to read a type's full rule set (its field types and its validate fn) — the chain's readability is what pays for the split."
+        "tradeoff": "The struct body gains a section kind; the validate block's rule vocabulary is a Core API surface that grows under the stdlib rubric."
       },
       "hybrid": {
         "result": "A",
-        "synthesis": "A is the synthesis: C's chainable rule vocabulary attached to the existing struct instead of a parallel schema, B's decode integration kept as the entry point, and the ratified type-level constraints doing the static share for free.",
+        "synthesis": "A already carries B's locality (rules name their field on their own line inside the block) and C's family consistency (an in-body section is ratified S82 grammar). The use-site chain survives only as the context escape, with the same vocabulary — no second engine.",
         "harvest": [
           {
             "key": "A",
-            "aspect": "Validate.over chain + finish, accumulated FieldErrors",
+            "aspect": "validate block in the definition + scoped use-site escape",
             "use": "adopted"
           },
           {
             "key": "B",
-            "aspect": "decode as the one entry point",
-            "use": "kept — decode<T>().validate() is the beginner path"
+            "aspect": "rule-next-to-field locality",
+            "use": "kept — one line per field inside the block, bare-name access"
           },
           {
             "key": "C",
-            "aspect": "rich chainable rule vocabulary (email, min_len, range, …)",
-            "use": "adopted as methods on the field handle, no schema object"
+            "aspect": "family consistency with existing in-body grammar",
+            "use": "kept via the S82 section shape instead of per-field markers"
           }
         ]
       },
@@ -32122,6 +32142,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-12T10:36:41.039Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0n6vj96",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-12T10:36:40.941Z",
+      "by": "claude-main",
+      "action": "decision.update",
+      "ref": "D-VALIDATE1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T10:35:46.528Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c2zj0p7p",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T10:35:46.168Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c2sj0bd9",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T10:35:45.814Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0qi7dc2",
+      "note": "phase,logEntry"
+    },
     {
       "at": "2026-07-12T10:34:20.862Z",
       "by": "codex-orchestrator",
@@ -35586,41 +35641,6 @@
       "action": "card.criteria-meet",
       "ref": "c0by6tvm",
       "note": "#3"
-    },
-    {
-      "at": "2026-07-11T22:12:35.119Z",
-      "by": "codex-main",
-      "action": "card.criteria-meet",
-      "ref": "c0by6tvm",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-11T22:12:34.937Z",
-      "by": "codex-main",
-      "action": "card.criteria-meet",
-      "ref": "c0by6tvm",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-11T22:12:34.760Z",
-      "by": "codex-main",
-      "action": "card.criteria-meet",
-      "ref": "c0ai04g0",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-11T22:12:34.570Z",
-      "by": "codex-main",
-      "action": "card.criteria-meet",
-      "ref": "c0ai04g0",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-11T22:12:34.388Z",
-      "by": "codex-main",
-      "action": "card.criteria-meet",
-      "ref": "c0ai04g0",
-      "note": "#2"
     }
   ],
   "nextNum": 368,
