@@ -1,3 +1,17 @@
+use super::parse::Flags;
+use super::update_search_info::shell_on_failed_build;
+use super::workspace_sources::{cwd_table, cwd_workspace_index, fixtures_for, load_toml_sources};
+use crate::EnvFile;
+use crate::Lock;
+use crate::ModuleEval;
+use crate::Output::{self, Theme};
+use crate::Provider::{self, ProviderError};
+use crate::RefSpec::{self, RefError};
+use crate::Services;
+use crate::Store::{self, Roots};
+use crate::Syntax;
+use std::path::Path;
+
 /// Classify an explicit CLI ref, accepting any named source declared in the
 /// current project's env file so `jetpack run stable:ripgrep` works there, and
 /// any workspace member so `jetpack run logging` / `jetpack run packages/logging`
@@ -11,7 +25,7 @@ fn classify_or_report(theme: &Theme, raw: &str) -> Result<RefSpec::RefSpec, RefE
 
 /// Realize one ref, recording it in the store and printing progress. `table`
 /// resolves named sources (D-JPK17); it is empty for direct CLI refs.
-fn realize_ref(
+pub(super) fn realize_ref(
     theme: &Theme,
     roots: &Roots,
     flags: &Flags,
@@ -35,7 +49,7 @@ fn realize_ref(
 /// so a tier-2 live region (`Theme::live_region`) can promote it in place of
 /// a plain `eprintln!`.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum RowStyle {
+pub(super) enum RowStyle {
     /// The state-column ledger row (`✓ name version state`) — D-JPK-CACHE1.
     Ledger,
     /// The tier-1 trivial-op row (`✓ name version`, no state/detail).
@@ -45,7 +59,7 @@ enum RowStyle {
     Silent,
 }
 
-enum RefOutcome {
+pub(super) enum RefOutcome {
     /// The realized entry, its source state, and the row text `Ledger`
     /// style would print (computed regardless of style, since it's cheap
     /// and `Silent` callers need it).
@@ -59,7 +73,7 @@ enum RefOutcome {
     Failed,
 }
 
-fn realize_ref_outcome(
+pub(super) fn realize_ref_outcome(
     theme: &Theme,
     roots: &Roots,
     flags: &Flags,
@@ -259,7 +273,7 @@ fn package_fixture_available(flags: &Flags, spec: &RefSpec::RefSpec) -> bool {
     }
 }
 
-fn report_nix_bridge_required(
+pub(super) fn report_nix_bridge_required(
     theme: &Theme,
     flags: &Flags,
     holes: &[Provider::NixBridgeNeed],
@@ -303,7 +317,7 @@ fn report_nix_bridge_required(
     );
 }
 
-fn realize_adapter(
+pub(super) fn realize_adapter(
     theme: &Theme,
     roots: &Roots,
     flags: &Flags,
@@ -386,7 +400,7 @@ fn version_from_out(name: &str, out: &str) -> Option<String> {
     }
 }
 
-pub(super) fn report_provider_error(theme: &Theme, err: &ProviderError) {
+pub(crate) fn report_provider_error(theme: &Theme, err: &ProviderError) {
     match err {
         ProviderError::NixMissing => theme.error(
             "couldn't run `nix`",
@@ -464,27 +478,27 @@ pub(super) fn report_provider_error(theme: &Theme, err: &ProviderError) {
 
 /// The refs to realize, the table that resolves their named sources, and the
 /// prompt label for the resulting shell.
-struct RunPlan {
-    refs: Vec<RefSpec::RefSpec>,
-    adapters: Vec<ModuleEval::AdapterPlan>,
-    table: RefSpec::SourceTable,
-    label: String,
-    prompt_path: ModuleEval::PromptPathMode,
-    prompt_strip: ModuleEval::PromptStripMode,
+pub(super) struct RunPlan {
+    pub(super) refs: Vec<RefSpec::RefSpec>,
+    pub(super) adapters: Vec<ModuleEval::AdapterPlan>,
+    pub(super) table: RefSpec::SourceTable,
+    pub(super) label: String,
+    pub(super) prompt_path: ModuleEval::PromptPathMode,
+    pub(super) prompt_strip: ModuleEval::PromptStripMode,
     /// U12: dev-supervised `services:` entries the typed env surface
     /// declared, empty for the Phase-1 directive surface (which predates
     /// U12). `jetpack services <verb>` and `jet dev`'s health gate are the
     /// only readers.
-    dev_services: Vec<ModuleEval::DevServicePlan>,
+    pub(super) dev_services: Vec<ModuleEval::DevServicePlan>,
     /// U13: every declared `secrets: ["name", …]` entry from the typed env
     /// surface. `jet env`/`jet dev` trust-gate on this and validate the names
     /// exist before entering the environment.
-    secrets: Vec<String>,
+    pub(super) secrets: Vec<String>,
 }
 
 /// Build a plan from the project `env.jet` (the no-explicit-ref path). `Err`
 /// carries the exit code to return.
-fn load_project_plan(theme: &Theme) -> Result<RunPlan, i32> {
+pub(super) fn load_project_plan(theme: &Theme) -> Result<RunPlan, i32> {
     let dir = std::env::current_dir().unwrap_or_default();
 
     // Load jetpack.toml [sources] first so they are available as defaults.
@@ -598,13 +612,13 @@ fn classify_all<'a>(
     Ok(refs)
 }
 
-struct ChannelSource {
-    name: String,
+pub(super) struct ChannelSource {
+    pub(super) name: String,
     base: String,
-    channel: RefSpec::ChannelRef,
+    pub(super) channel: RefSpec::ChannelRef,
 }
 
-fn channel_sources(table: &RefSpec::SourceTable) -> Vec<ChannelSource> {
+pub(super) fn channel_sources(table: &RefSpec::SourceTable) -> Vec<ChannelSource> {
     table
         .declarations()
         .into_iter()
@@ -621,7 +635,7 @@ fn channel_sources(table: &RefSpec::SourceTable) -> Vec<ChannelSource> {
 
 /// D-JPK-CHANNEL1=A: realize-class commands use only exact lock entries.
 /// Update-class commands are the only place a channel may move.
-fn apply_locked_channels(
+pub(super) fn apply_locked_channels(
     theme: &Theme,
     project_dir: &Path,
     table: &mut RefSpec::SourceTable,
@@ -655,7 +669,7 @@ fn report_unlocked_channel(theme: &Theme, name: &str, channel: &str) {
     );
 }
 
-fn resolve_source_channel(source: &ChannelSource, flags: &Flags) -> Result<String, ProviderError> {
+pub(super) fn resolve_source_channel(source: &ChannelSource, flags: &Flags) -> Result<String, ProviderError> {
     if let Some(exact) = resolve_channel_from_fixture(source, flags) {
         return Ok(exact);
     }
@@ -685,7 +699,7 @@ fn resolve_channel_from_fixture(source: &ChannelSource, flags: &Flags) -> Option
     None
 }
 
-fn channel_download_size_from_fixture(source: &ChannelSource, flags: &Flags) -> Option<u64> {
+pub(super) fn channel_download_size_from_fixture(source: &ChannelSource, flags: &Flags) -> Option<u64> {
     let dir = fixtures_for(flags)?;
     let raw = std::fs::read_to_string(dir.join("channels.txt")).ok()?;
     raw.lines().find_map(|line| {
@@ -773,7 +787,7 @@ fn git_ls_remote(url: &str, pattern: &str) -> Result<String, ProviderError> {
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
-fn offline_refusal(theme: &Theme, command: &str) -> i32 {
+pub(super) fn offline_refusal(theme: &Theme, command: &str) -> i32 {
     report_provider_error(
         theme,
         &ProviderError::Offline(format!(

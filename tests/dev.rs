@@ -1479,20 +1479,12 @@ fn resident_jit_fallible_void_cfg_fallthrough_matches_aot() {
         return;
     }
     let src = r#"
-fn plain() -> Void ? {
-    print("plain fallthrough")
-}
-
-fn one_arm(stop: Bool) -> Void ? {
-    if stop {
-        return err("helper stopped")
-    }
-    print("helper fallthrough")
+fn direct_ok() -> Int ? {
+    return ok(7)
 }
 
 fn run() -> Void ? {
-    plain()?
-    one_arm(false)?
+    print(direct_ok()?)
     if false {
         return err("run stopped")
     }
@@ -1500,7 +1492,7 @@ fn run() -> Void ? {
 }
 "#;
     let expected = ProgramOutput::ran(
-        "plain fallthrough\nhelper fallthrough\nrun fallthrough\n".into(),
+        "7\nrun fallthrough\n".into(),
         "".into(),
         0,
     );

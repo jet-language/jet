@@ -1,4 +1,6 @@
-use super::*;
+use crate::AST::Type;
+use super::alloc_ptrs::result_ty;
+
 /// D-DEP-WASM1=A: the resolved return type of a covered `Plugin` method, read
 /// from `check_plugin_method`'s authoritative match — a pure lookup for
 /// codegen's TIR totality bookkeeping (mirrors `db_connection_method_return_ty`).

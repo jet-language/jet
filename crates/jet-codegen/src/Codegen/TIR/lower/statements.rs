@@ -1,5 +1,3 @@
-use super::*;
-
 pub(crate) fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TStmt> {
     if !cx.debug_linemap {
         return stmts.iter().map(|s| lower_stmt(s, cx, env)).collect();

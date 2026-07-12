@@ -1,8 +1,22 @@
+use super::parse::Parsed;
+use super::realize::load_project_plan;
+use super::trust_env_build::compose_env;
+use crate::ModuleEval;
+use crate::Output::Theme;
+use crate::RuntimePolicy;
+use crate::Secrets;
+use crate::Services;
+use crate::Shell::Env;
+use crate::Store;
+use crate::Syntax;
+use crate::Trust;
+use std::path::{Path, PathBuf};
+
 /// U13: before `jet env`/`jet dev` enters a trusted project environment, every
 /// declared `secrets: ["name", …]` entry must exist in `.jet/secrets.age`.
 /// Values stay inside `Secrets::get` and are dropped immediately; this is a
 /// presence check, not env-var injection.
-fn validate_declared_secrets(
+pub(super) fn validate_declared_secrets(
     theme: &Theme,
     project_dir: &Path,
     names: &[String],
@@ -33,7 +47,7 @@ fn validate_declared_secrets(
 /// `fn dev()`/`fn run()`. Takes the composed `Env` so a catalog binary (e.g.
 /// `redis-server`, realized alongside the project's own packages) resolves
 /// on PATH the same way the project's own command does.
-fn wait_for_services_ready(
+pub(super) fn wait_for_services_ready(
     theme: &Theme,
     project_dir: &Path,
     env: &Env,
@@ -104,7 +118,7 @@ fn service_health_timeout() -> std::time::Duration {
 
 /// `jetpack services up|down|health|logs [<name>]` (U12). With no `<name>`,
 /// every declared dev service is targeted; `logs` requires exactly one name.
-fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
+pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
     let Some(verb) = parsed.positional.first().cloned() else {
         theme.error(
             "`jetpack services` needs a verb",
@@ -213,7 +227,7 @@ fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
 }
 
 /// `jetpack secrets keygen|set|get|recipients` (U13, D-JPK-SECRETCRYPTO1).
-fn cmd_secrets(theme: &Theme, parsed: &Parsed) -> i32 {
+pub(super) fn cmd_secrets(theme: &Theme, parsed: &Parsed) -> i32 {
     let Some(verb) = parsed.positional.first().cloned() else {
         theme.error(
             "`jetpack secrets` needs a verb",
@@ -356,7 +370,7 @@ fn cmd_secrets(theme: &Theme, parsed: &Parsed) -> i32 {
 /// same-directory-then-PATH search in the other direction; jetpack never
 /// links the compiler in-process (D-JPK-DISPATCH1), so this is the one place
 /// it hands off to it.
-fn find_jet_binary() -> String {
+pub(super) fn find_jet_binary() -> String {
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             let name = if cfg!(windows) { "jet.exe" } else { "jet" };
@@ -375,7 +389,7 @@ fn find_jet_binary() -> String {
 /// hand rather than shared: jetpack and jet are separate binaries by design
 /// (D-JPK-DISPATCH1), so deleting either still leaves the other's own commands
 /// working.
-fn find_project_entry(project_dir: &Path) -> PathBuf {
+pub(super) fn find_project_entry(project_dir: &Path) -> PathBuf {
     let dot_jet = project_dir
         .join(Syntax::SOURCE_ROOT_DIR)
         .join(format!("main.{}", Syntax::FILE_EXT));
@@ -389,7 +403,7 @@ fn find_project_entry(project_dir: &Path) -> PathBuf {
 /// dev-with-fallback rule, E1254 otherwise). A parse failure just means "no"
 /// here — the real diagnostics surface a moment later when the compiler
 /// actually loads the file.
-fn has_dev_or_run_entry(file: &Path) -> bool {
+pub(super) fn has_dev_or_run_entry(file: &Path) -> bool {
     let Ok(src) = std::fs::read_to_string(file) else {
         return false;
     };
@@ -407,7 +421,7 @@ fn has_dev_or_run_entry(file: &Path) -> bool {
 
 /// `jetpack config trust add/list/remove` (U19) — durable glob/prefix patterns
 /// that pre-authorize matching projects with no per-hash prompt at all.
-fn cmd_config(theme: &Theme, parsed: &Parsed) -> i32 {
+pub(super) fn cmd_config(theme: &Theme, parsed: &Parsed) -> i32 {
     let group = parsed.positional.first().map(String::as_str);
     if group != Some(Syntax::CONFIG_VERB_TRUST) && group != Some(Syntax::CONFIG_VERB_SANDBOX) {
         theme.error(

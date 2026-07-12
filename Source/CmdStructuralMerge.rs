@@ -106,6 +106,14 @@ pub(crate) fn run_merge(args: &[String]) {
     else { println!("{{\"schema_version\":1,\"kind\":\"structural_merge\",\"status\":\"merged\",\"output\":{}}}", json_string(&output_path.display().to_string())); }
 }
 
+pub(crate) fn structural_help(command: &str) -> Option<&'static str> {
+    match command {
+        "diff" => Some(diff_help()),
+        "merge" => Some(merge_help()),
+        _ => None,
+    }
+}
+
 fn load(path: &Path) -> Document {
     let source = fs::read_to_string(path).unwrap_or_else(|err| fail(&format!("could not read `{}`: {err}", path.display()), "pass a readable Jet source file"));
     let index = open(path).unwrap_or_else(|err| render_index_error(&format!("`{}` did not pass parser and sema", path.display()), err));
@@ -249,15 +257,43 @@ fn merge_units(base: &Document, ours: &Document, theirs: &Document) -> (String, 
     }
     let ours_added: Vec<&Unit> = ours.units.iter().enumerate().filter(|(i, _)| !ours_used.contains(i)).map(|(_, u)| u).collect();
     let theirs_added: Vec<&Unit> = theirs.units.iter().enumerate().filter(|(i, _)| !theirs_used.contains(i)).map(|(_, u)| u).collect();
-    let mut added_names = BTreeMap::new();
-    for unit in ours_added.iter().chain(theirs_added.iter()) {
-        let key = (&unit.fact.kind, &unit.fact.name);
-        if let Some(previous) = added_names.get(&key) {
-            let previous: &&Unit = previous;
-            if previous.fact.content_id != unit.fact.content_id { conflicts.push(conflict("competing_add", unit, previous, unit)); }
-        } else {
-            added_names.insert(key, unit);
-            push_unit(&mut merged, &unit.leading, &unit.source);
+    let mut theirs_paired = BTreeSet::new();
+    for ours_unit in ours_added {
+        let candidates: Vec<usize> = theirs_added.iter().enumerate()
+            .filter(|(index, theirs_unit)| !theirs_paired.contains(index) && exact_key(theirs_unit) == exact_key(ours_unit))
+            .map(|(index, _)| index)
+            .collect();
+        match candidates.as_slice() {
+            [] => push_unit(&mut merged, &ours_unit.leading, &ours_unit.source),
+            [index] => {
+                theirs_paired.insert(*index);
+                let theirs_unit = theirs_added[*index];
+                if ours_unit.fact.content_id != theirs_unit.fact.content_id {
+                    conflicts.push(conflict("competing_add", ours_unit, ours_unit, theirs_unit));
+                } else {
+                    let leading = merge_text(
+                        "inter_item_trivia",
+                        ours_unit,
+                        "",
+                        &ours_unit.leading,
+                        &theirs_unit.leading,
+                        &mut conflicts,
+                    );
+                    push_unit(&mut merged, &leading, &ours_unit.source);
+                }
+            }
+            _ => conflicts.push(Conflict {
+                kind: "ambiguous_identity",
+                stable_id: ours_unit.fact.stable_id.clone(),
+                human_identity: ours_unit.fact.human_identity.clone(),
+                ours: ours_unit.fact.content_id.clone(),
+                theirs: "ambiguous additions".to_string(),
+            }),
+        }
+    }
+    for (index, theirs_unit) in theirs_added.into_iter().enumerate() {
+        if !theirs_paired.contains(&index) {
+            push_unit(&mut merged, &theirs_unit.leading, &theirs_unit.source);
         }
     }
     let suffix = merge_shell("suffix", &base.suffix, &ours.suffix, &theirs.suffix, &mut conflicts);
@@ -355,17 +391,12 @@ fn install_driver(args: &[String]) {
 }
 
 fn git_config_path(repo: &Path) -> PathBuf {
-    let dot_git = repo.join(".git");
-    let git_dir = if dot_git.is_dir() {
-        dot_git
-    } else if dot_git.is_file() {
-        let pointer = fs::read_to_string(&dot_git).unwrap_or_else(|err| fail(&format!("could not read `{}`: {err}", dot_git.display()), "fix repository permissions"));
-        let Some(path) = pointer.trim().strip_prefix("gitdir:") else { fail(&format!("`{}` is not a Git worktree", repo.display()), "repair the .git indirection file"); };
-        absolute_from(repo, Path::new(path.trim()))
-    } else {
-        fail(&format!("`{}` is not a Git worktree", repo.display()), "run inside a Git repository or pass --repo <path>");
-    };
-    let config = git_dir.join("config");
+    let output = Command::new("git").arg("-C").arg(repo).args(["rev-parse", "--git-path", "config"]).output()
+        .unwrap_or_else(|err| fail(&format!("could not run Git: {err}"), "install Git before enabling its merge driver"));
+    if !output.status.success() { fail(&format!("`{}` is not a Git worktree", repo.display()), "run inside a Git repository or pass --repo <path>"); }
+    let raw = String::from_utf8(output.stdout).unwrap_or_else(|_| fail("Git returned a non-UTF-8 config path", "repair the Git worktree metadata"));
+    let reported = Path::new(raw.trim());
+    let config = if reported.is_absolute() { normalize_path(reported) } else { normalize_path(&repo.join(reported)) };
     if !config.is_file() { fail(&format!("`{}` has no Git config", repo.display()), "repair the Git worktree metadata"); }
     config
 }
@@ -400,7 +431,6 @@ fn wants_help(args: &[String]) -> bool { args.iter().any(|arg| matches!(arg.as_s
 fn diff_help() -> &'static str { "usage: jet diff --structural <before.jet> <after.jet> [--report text|json|editor]\n\nCompares checked Jet definitions by semantic identity.\n" }
 fn merge_help() -> &'static str { "usage:\n  jet merge --structural <base.jet> <ours.jet> <theirs.jet> [--out <file.jet>] [--report text|json|editor]\n  jet merge install-driver [--repo <path>]\n\nPerforms a checked three-way structural merge or installs the opt-in Git driver.\n" }
 fn same_module(path: &Path, module: &str) -> bool { absolute_normalized(path) == absolute_normalized(Path::new(module)) }
-fn absolute_from(base: &Path, path: &Path) -> PathBuf { if path.is_absolute() { normalize_path(path) } else { normalize_path(&base.join(path)) } }
 fn absolute_normalized(path: &Path) -> PathBuf {
     if path.is_absolute() { normalize_path(path) }
     else { normalize_path(&std::env::current_dir().unwrap_or_else(|err| fail(&format!("could not read current directory: {err}"), "run from a readable directory")).join(path)) }

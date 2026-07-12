@@ -1,5 +1,10 @@
+use super::parse::Parsed;
+use crate::Output::{self, Theme};
+use crate::Store::{self, Roots};
+use std::path::PathBuf;
+
 /// `jetpack list` — show realized store entries.
-fn cmd_list(theme: &Theme) -> i32 {
+pub(super) fn cmd_list(theme: &Theme) -> i32 {
     let roots = Store::resolve();
     let entries = Store::list(&roots);
     if entries.is_empty() {
@@ -42,7 +47,7 @@ fn cmd_list(theme: &Theme) -> i32 {
 
 /// `jetpack hangar du` — honest per-object disk usage (U22 / D-JPK-GC1).
 /// Source-built objects are counted like any other, so `du` never hides them.
-fn cmd_hangar(theme: &Theme, parsed: &Parsed) -> i32 {
+pub(super) fn cmd_hangar(theme: &Theme, parsed: &Parsed) -> i32 {
     let sub = parsed.positional.first().map(String::as_str);
     match sub {
         Some("du") | None => {
@@ -106,7 +111,7 @@ fn human_bytes(n: u64) -> String {
 /// source-built hangar object (D-BFS1 / T4). Each object's realized tree is
 /// copied into `<dir>/<name>/` and a `<dir>/<name>.sha256` records the A4 output
 /// hash, so a later build is reproducible offline from pinned sources.
-fn cmd_vendor(theme: &Theme, parsed: &Parsed) -> i32 {
+pub(super) fn cmd_vendor(theme: &Theme, parsed: &Parsed) -> i32 {
     let roots = Store::resolve();
     let cwd = std::env::current_dir().unwrap_or_default();
     let vendor_dir = match parsed.positional.first() {
@@ -168,7 +173,7 @@ fn cmd_vendor(theme: &Theme, parsed: &Parsed) -> i32 {
 /// (D-BUILDSCOPE1 audit contract, T4): source ref + recipe id, output hash,
 /// platform, and locked source hash. **Executes nothing** — a pure read of the
 /// hangar records, so it is safe to run against untrusted builds.
-fn cmd_audit(theme: &Theme) -> i32 {
+pub(super) fn cmd_audit(theme: &Theme) -> i32 {
     let roots = Store::resolve();
     let entries = Store::list(&roots);
     if entries.is_empty() {
@@ -224,7 +229,7 @@ fn copy_dir(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()>
 }
 
 /// `jetpack clean` — collect stale hangar objects and optimize owned bytes.
-fn cmd_clean(theme: &Theme, parsed: &Parsed) -> i32 {
+pub(super) fn cmd_clean(theme: &Theme, parsed: &Parsed) -> i32 {
     let roots = Store::resolve();
     match Store::clean_plan(&roots) {
         Ok(plan) if plan.is_empty() => {
@@ -308,7 +313,7 @@ fn cmd_clean(theme: &Theme, parsed: &Parsed) -> i32 {
     }
 }
 
-fn auto_clean_after_success(theme: &Theme, roots: &Roots) {
+pub(super) fn auto_clean_after_success(theme: &Theme, roots: &Roots) {
     match Store::maybe_auto_clean(roots) {
         Ok(Some(report)) if !report.is_empty() => theme.detail(&format!(
             "auto-cleaned hangar: removed {} stale object(s), swept {} scratch item(s), optimized {} file(s)",

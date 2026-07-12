@@ -1,5 +1,3 @@
-use super::*;
-
 /// D-SHIFT1 (c7shift): lower `cursor.take_pattern("…")`. Builds the
 /// `(name, type)` canonical hole list the SAME way sema did when it set this
 /// call's `resolved_ret` (untyped hole binds `String`), so the
@@ -9,7 +7,7 @@ use super::*;
 /// input, same name, both computed independently rather than threaded
 /// through, matching how `handle_method_return_ty` independently re-derives
 /// sema's tables elsewhere in this file per the project's I3 design).
-fn lower_cursor_take_pattern(
+pub(super) fn lower_cursor_take_pattern(
     receiver: &Expr,
     parts: &[crate::AST::StrMatchPart],
     cx: &Cx,
@@ -54,7 +52,7 @@ fn lower_cursor_take_pattern(
 /// D-PARSESTR1: the bool test for a str-match arm head — whether the scan
 /// closure succeeds. Always refutable (E0148 requires an `else` whenever this
 /// pattern appears in an if-table with no fallback).
-fn str_match_pattern_cond_expr(pattern: &Pattern, cx: &Cx) -> TExpr {
+pub(super) fn str_match_pattern_cond_expr(pattern: &Pattern, cx: &Cx) -> TExpr {
     let (closure, _) = str_match_scan_closure(pattern, cx);
     TExpr {
         ty: Type::Bool,
@@ -67,7 +65,7 @@ fn str_match_pattern_cond_expr(pattern: &Pattern, cx: &Cx) -> TExpr {
 /// `.parse()` — matching how struct-pattern value tests and bind fields are
 /// independently re-derived rather than shared), binds the whole result tuple
 /// to one temp, then projects each hole out of it by field index.
-fn lower_str_match_pattern_bindings(pattern: &Pattern, cx: &Cx, env: &mut LowerEnv) -> Vec<TStmt> {
+pub(super) fn lower_str_match_pattern_bindings(pattern: &Pattern, cx: &Cx, env: &mut LowerEnv) -> Vec<TStmt> {
     let (closure, holes) = str_match_scan_closure(pattern, cx);
     if holes.is_empty() {
         return Vec::new();
@@ -116,7 +114,7 @@ fn lower_str_match_pattern_bindings(pattern: &Pattern, cx: &Cx, env: &mut LowerE
     out
 }
 
-fn struct_pattern_field_type(cx: &Cx, subject_ty: &Type, field: &str) -> Option<Type> {
+pub(super) fn struct_pattern_field_type(cx: &Cx, subject_ty: &Type, field: &str) -> Option<Type> {
     match subject_ty {
         Type::Apply { name, .. } => cx
             .struct_fields
@@ -128,13 +126,13 @@ fn struct_pattern_field_type(cx: &Cx, subject_ty: &Type, field: &str) -> Option<
     }
 }
 
-fn struct_pattern_subject_field_expr(cx: &Cx, subject_ty: &Type, field: &str) -> String {
+pub(super) fn struct_pattern_subject_field_expr(cx: &Cx, subject_ty: &Type, field: &str) -> String {
     let field_rust =
         core_struct_field_rust_name(cx, subject_ty, field).unwrap_or_else(|| mangle(field));
     format!("((*_jet_switch_subject).{})", field_rust)
 }
 
-fn bool_and_chain(mut tests: Vec<TExpr>) -> TExpr {
+pub(super) fn bool_and_chain(mut tests: Vec<TExpr>) -> TExpr {
     let Some(mut acc) = tests.pop() else {
         return TExpr {
             ty: Type::Bool,

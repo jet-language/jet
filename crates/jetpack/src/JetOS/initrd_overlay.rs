@@ -1,4 +1,4 @@
-fn append_installer_initrd_overlay(
+pub(super) fn append_installer_initrd_overlay(
     initrd: &Path,
     system: &SystemPlan,
     gen: &Generation,
@@ -516,7 +516,7 @@ fn add_cpio_parent_dirs(dirs: &mut BTreeSet<String>, name: &str) {
     }
 }
 
-fn ldd_dependency_paths(path: &Path) -> std::io::Result<Vec<PathBuf>> {
+pub(super) fn ldd_dependency_paths(path: &Path) -> std::io::Result<Vec<PathBuf>> {
     if fs::read(path)
         .map(|bytes| bytes.starts_with(b"#!"))
         .unwrap_or(false)
@@ -547,7 +547,7 @@ fn ldd_dependency_paths(path: &Path) -> std::io::Result<Vec<PathBuf>> {
     Ok(deps)
 }
 
-fn first_zstd_frame_offset(bytes: &[u8]) -> Option<usize> {
+pub(super) fn first_zstd_frame_offset(bytes: &[u8]) -> Option<usize> {
     bytes
         .windows(4)
         .enumerate()
@@ -563,7 +563,7 @@ fn first_zstd_frame_offset(bytes: &[u8]) -> Option<usize> {
         })
 }
 
-fn zstd_decode_file(zstd: &Path, input: &Path) -> std::io::Result<Vec<u8>> {
+pub(super) fn zstd_decode_file(zstd: &Path, input: &Path) -> std::io::Result<Vec<u8>> {
     let output = Command::new(zstd)
         .args(["-d", "-q", "-c"])
         .arg(input)
@@ -578,7 +578,7 @@ fn zstd_decode_file(zstd: &Path, input: &Path) -> std::io::Result<Vec<u8>> {
     }
 }
 
-fn zstd_encode_file(zstd: &Path, input: &Path) -> std::io::Result<Vec<u8>> {
+pub(super) fn zstd_encode_file(zstd: &Path, input: &Path) -> std::io::Result<Vec<u8>> {
     let output = Command::new(zstd).args(["-q", "-c"]).arg(input).output()?;
     if output.status.success() {
         Ok(output.stdout)
@@ -590,7 +590,7 @@ fn zstd_encode_file(zstd: &Path, input: &Path) -> std::io::Result<Vec<u8>> {
     }
 }
 
-fn unique_initrd_temp_path(initrd: &Path, label: &str) -> PathBuf {
+pub(super) fn unique_initrd_temp_path(initrd: &Path, label: &str) -> PathBuf {
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos())

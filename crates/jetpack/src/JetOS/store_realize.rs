@@ -1,4 +1,4 @@
-struct RealizedPackage {
+pub(super) struct RealizedPackage {
     entry: Store::StoreEntry,
     lease: Store::CacheLease,
     original_out: PathBuf,
@@ -51,7 +51,7 @@ impl RealizedPackage {
     }
 }
 
-fn first_party_package_ref(table: &RefSpec::SourceTable, package: &str) -> Option<String> {
+pub(super) fn first_party_package_ref(table: &RefSpec::SourceTable, package: &str) -> Option<String> {
     table
         .declarations()
         .into_iter()
@@ -59,7 +59,7 @@ fn first_party_package_ref(table: &RefSpec::SourceTable, package: &str) -> Optio
         .map(|(name, _, _)| format!("{name}:{package}"))
 }
 
-fn jetos_runtime_package_ref(
+pub(super) fn jetos_runtime_package_ref(
     table: &RefSpec::SourceTable,
     package: &str,
     offline: bool,
@@ -71,7 +71,7 @@ fn jetos_runtime_package_ref(
     }
 }
 
-fn desktop_default_required_packages(system: &SystemPlan) -> &'static [&'static str] {
+pub(super) fn desktop_default_required_packages(system: &SystemPlan) -> &'static [&'static str] {
     let requested = option_value(
         system,
         &["services.desktop.profile", "services.desktop.session"],
@@ -94,7 +94,7 @@ fn desktop_default_required_packages(system: &SystemPlan) -> &'static [&'static 
     }
 }
 
-fn realize_ref(
+pub(super) fn realize_ref(
     theme: &Theme,
     roots: &Store::Roots,
     flags: &OsFlags,
@@ -168,7 +168,7 @@ fn realize_ref(
     }
 }
 
-fn try_realize_ref(
+pub(super) fn try_realize_ref(
     theme: &Theme,
     roots: &Store::Roots,
     flags: &OsFlags,

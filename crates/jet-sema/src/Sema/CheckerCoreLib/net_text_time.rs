@@ -1,4 +1,8 @@
-use super::*;
+use crate::AST::Type;
+use crate::Diagnostics::{Diagnostic, Span};
+use super::alloc_ptrs::result_ty;
+use super::core_types::{u8_ty, unit_ty};
+
 /// E2-M10: type-check a method call on a networking opaque type.
 /// Returns `Some(return_type)` when the method is valid.
 pub fn net_method_return(

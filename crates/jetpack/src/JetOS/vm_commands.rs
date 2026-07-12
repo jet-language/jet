@@ -1,4 +1,4 @@
-fn cmd_vm(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
+pub(super) fn cmd_vm(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
     let Some((action, rest)) = args.split_first().map(|(a, r)| (a.as_str(), r)) else {
         theme.error(
             "vm needs an action",

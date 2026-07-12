@@ -1,4 +1,13 @@
-use super::*;
+use crate::AST::Type;
+use crate::Collections::is_map_key_type;
+use crate::Diagnostics::{Diagnostic, Span};
+use crate::Generics::{e0905, e0909, generic_depth_exceeded, substitute_type, COMPARABLE};
+use crate::Sema::CheckerCoreLib::{core_type_known, data_renamed_to_datatree};
+use crate::Sema::Checker;
+use crate::Sema::Diagnostics::{
+    option_used_where_plain_expected, result_used_where_plain_expected, type_fix_hint,
+};
+use crate::Syntax;
 use super::helpers::no_any_type;
 impl<'a> Checker<'a> {
         pub(crate) fn check_declared_type(&mut self, ty: &Type, span: Span) {

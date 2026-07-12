@@ -1,3 +1,14 @@
+use super::parse::Parsed;
+use super::realize::{
+    channel_sources, load_project_plan, offline_refusal, realize_ref_outcome,
+    report_nix_bridge_required, resolve_source_channel, RefOutcome, RowStyle,
+};
+use super::workspace_sources::cwd_table;
+use crate::Output::{self, Theme};
+use crate::RefSpec;
+use crate::Store;
+use crate::{Components, EnvFile, Image, Lock, ModuleEval, Syntax};
+
 /// `jetpack add <ref>` — edit the project env file. `jetpack add <Component>`
 /// (an exact, case-sensitive match against the starter component catalog —
 /// Button/Label/Input/Container) is a distinct behavior checked first: it
@@ -6,7 +17,7 @@
 /// collide because Jetpack source names are always lowercase
 /// (`nixpkgs`/`github`/`path`/user-declared names), so an exact-case
 /// `Button`-style name can only ever mean a component.
-fn cmd_add(theme: &Theme, parsed: &Parsed) -> i32 {
+pub(super) fn cmd_add(theme: &Theme, parsed: &Parsed) -> i32 {
     if parsed.flags.offline {
         return offline_refusal(theme, "add");
     }
@@ -188,7 +199,7 @@ fn cmd_add_component(theme: &Theme, component: &Components::StarterComponent) ->
 }
 
 /// `jetpack remove <ref>` — edit the project env file.
-fn cmd_remove(theme: &Theme, parsed: &Parsed) -> i32 {
+pub(super) fn cmd_remove(theme: &Theme, parsed: &Parsed) -> i32 {
     let Some(raw) = parsed.positional.first() else {
         theme.error(
             "remove what?",
@@ -252,7 +263,7 @@ fn cmd_remove(theme: &Theme, parsed: &Parsed) -> i32 {
 /// cross-checks the fleet now (each host references a known `System`, E1242);
 /// the ssh/closure rollout is gated on single-host jetos realization (Phase D),
 /// so a valid fleet gets an honest E1243 gated notice rather than a fake deploy.
-fn cmd_push(theme: &Theme, parsed: &Parsed) -> i32 {
+pub(super) fn cmd_push(theme: &Theme, parsed: &Parsed) -> i32 {
     let dir = std::env::current_dir().unwrap_or_default();
     let Ok(src) = std::fs::read_to_string(EnvFile::path_in(&dir)) else {
         theme.error(
@@ -332,7 +343,7 @@ fn cmd_push(theme: &Theme, parsed: &Parsed) -> i32 {
 /// OCI layout (`Jetpack::Image`). `.Iso` images ride the jetos installer tier
 /// (Phase D, owner-gated — untouched here); `--push` is honestly gated on TLS
 /// (E1268), never a fake push.
-fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
+pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
     let dir = std::env::current_dir().unwrap_or_default();
     let Ok(src) = std::fs::read_to_string(EnvFile::path_in(&dir)) else {
         theme.error(

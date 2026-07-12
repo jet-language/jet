@@ -1,4 +1,4 @@
-fn write_etc_tree(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+pub(super) fn write_etc_tree(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     let etc = dir.join("etc");
     fs::create_dir_all(&etc)?;
     let host = option_value(system, &["network.hostName", "network.hostname"])
@@ -98,7 +98,7 @@ fn write_pam_files(etc: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-fn write_boot_facts(
+pub(super) fn write_boot_facts(
     dir: &Path,
     system: &SystemPlan,
     realized: &[RealizedPackage],
@@ -176,13 +176,13 @@ fn write_boot_facts(
     )
 }
 
-fn cachyos_kernel_entry(realized: &[RealizedPackage]) -> Option<&RealizedPackage> {
+pub(super) fn cachyos_kernel_entry(realized: &[RealizedPackage]) -> Option<&RealizedPackage> {
     realized
         .iter()
         .find(|entry| entry.name == CACHYOS_KERNEL_PACKAGE)
 }
 
-fn boot_artifact(entry: &RealizedPackage, candidates: &[&str]) -> Option<PathBuf> {
+pub(super) fn boot_artifact(entry: &RealizedPackage, candidates: &[&str]) -> Option<PathBuf> {
     let out = entry.consumption_path(&entry.out).ok()?;
     candidates
         .iter()
@@ -190,7 +190,7 @@ fn boot_artifact(entry: &RealizedPackage, candidates: &[&str]) -> Option<PathBuf
         .find(|path| path.is_file())
 }
 
-fn is_linux_kernel_image(path: &Path) -> bool {
+pub(super) fn is_linux_kernel_image(path: &Path) -> bool {
     let Ok(bytes) = fs::read(path) else {
         return false;
     };
@@ -198,14 +198,14 @@ fn is_linux_kernel_image(path: &Path) -> bool {
         || (bytes.starts_with(b"MZ") && bytes.windows(4).any(|w| w == b"HdrS"))
 }
 
-fn is_initrd_image(path: &Path) -> bool {
+pub(super) fn is_initrd_image(path: &Path) -> bool {
     let Ok(bytes) = fs::read(path) else {
         return false;
     };
     bytes.starts_with(&[0x1f, 0x8b]) || bytes.starts_with(b"070701") || bytes.starts_with(b"070702")
 }
 
-fn missing_kernel_source_files(entry: &RealizedPackage) -> Option<&'static str> {
+pub(super) fn missing_kernel_source_files(entry: &RealizedPackage) -> Option<&'static str> {
     let out = entry.consumption_path(&entry.out).ok()?;
     [
         "source/recipe.jet",
@@ -239,7 +239,7 @@ fn render_boot_facts(system: &SystemPlan, realized: &[RealizedPackage]) -> Strin
     )
 }
 
-fn kernel_package_json(entry: &RealizedPackage) -> String {
+pub(super) fn kernel_package_json(entry: &RealizedPackage) -> String {
     let source = kernel_source_json(entry);
     format!(
         "{{\"name\":{},\"reference\":{},\"out\":{},\"output_hash\":{},\"provenance\":{},\"bootstrap\":\"source-built\",\"source_recipe\":{}}}",

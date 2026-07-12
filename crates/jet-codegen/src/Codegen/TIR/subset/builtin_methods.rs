@@ -1,5 +1,3 @@
-use super::*;
-
 /// c109 Phase 9: is `method` (with `nargs` arguments) a built-in collection/string
 /// method the TIR lowers? This is the NON-closure, non-numeric, non-handle slice of
 /// `emit_builtin_method` (Source/Codegen/Expression.rs), restricted to the list/map/

@@ -180,25 +180,6 @@ fn score(name: String) -> Int {
     return 1
 }
 
-#[test]
-fn definition_ancestry_identity_ignores_signature_and_body_shape() {
-    let path = temp_fixture(
-        "ancestry_identity.jet",
-        "fn score(n: Int) -> Int { return n + 1 }\nfn run() { print(score(1)) }\n",
-    );
-    let before = open(&path).expect("first fixture indexes");
-    fs::write(
-        &path,
-        "fn score(n: Float, bonus: Float) -> Float { return n * bonus }\nfn run() { print(score(1.0, 2.0)) }\n",
-    ).unwrap();
-    let after = open(&path).expect("changed fixture indexes");
-    let before_score = before.definition_facts().iter().find(|f| f.name == "score").unwrap();
-    let after_score = after.definition_facts().iter().find(|f| f.name == "score").unwrap();
-    assert_eq!(before_score.stable_id, after_score.stable_id);
-    assert_ne!(before_score.signature_id, after_score.signature_id);
-    assert_ne!(before_score.content_id, after_score.content_id);
-}
-
 fn run() {}
 "#;
     let b = r#"
@@ -234,6 +215,34 @@ fn run() {}
         .changed
         .iter()
         .any(|id| id.starts_with("fn:") && id.ends_with("::score")));
+}
+
+#[test]
+fn definition_ancestry_identity_ignores_signature_and_body_shape() {
+    let path = temp_fixture(
+        "ancestry_identity.jet",
+        "fn score(n: Int) -> Int { return n + 1 }\nfn run() { print(score(1)) }\n",
+    );
+    let before = open(&path).expect("first fixture indexes");
+    fs::write(
+        &path,
+        "fn score(n: Float, bonus: Float) -> Float { return n * bonus }\nfn run() { print(score(1.0, 2.0)) }\n",
+    )
+    .unwrap();
+    let after = open(&path).expect("changed fixture indexes");
+    let before_score = before
+        .definition_facts()
+        .iter()
+        .find(|f| f.name == "score")
+        .unwrap();
+    let after_score = after
+        .definition_facts()
+        .iter()
+        .find(|f| f.name == "score")
+        .unwrap();
+    assert_eq!(before_score.stable_id, after_score.stable_id);
+    assert_ne!(before_score.signature_id, after_score.signature_id);
+    assert_ne!(before_score.content_id, after_score.content_id);
 }
 
 #[test]

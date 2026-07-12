@@ -1,5 +1,19 @@
-use super::*;
-use super::core_types::game_run_label_error;
+use crate::AST::{AccessConvention, Type};
+use crate::Diagnostics::{Diagnostic, Span};
+use crate::Sema::Checker;
+use crate::Sema::Diagnostics::{is_displayable, is_printable, type_fix_hint, types_comparable};
+use crate::Sema::Effects::{core_effect, e0746, is_irreversible_effect};
+use crate::Sema::FFI::e3301;
+use crate::Sema::Purity::{e3401, e3403, is_impure_core, is_nondeterministic_core};
+use crate::Sema::SendCrossing;
+use crate::Syntax;
+use super::alloc_ptrs::{e3101, io_error_ty, ptr_elem, result_ty};
+use super::core_types::{game_run_label_error, decode_error_ty, unit_ty};
+use super::fixed_sigs::core_fixed_sig;
+use super::serde_diags::{
+    freestanding_hint, is_freestanding_forbidden, module_short_name, reactive_derived_unit,
+    reactive_lambda_arity, reactive_not_lambda, unknown_core_item, wrong_core_arity,
+};
 impl<'a> Checker<'a> {
         pub(crate) fn infer_core_call(
             &mut self,

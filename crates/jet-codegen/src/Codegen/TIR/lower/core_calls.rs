@@ -1,12 +1,10 @@
-use super::*;
-
 /// c109 Phase 13: lower a closure-taking core call (`tasks.spawn`/`http.serve`/
 /// `scope.guard`) into a bespoke `CoreClosureCall` node, reproducing `emit_core_call`
 /// (Source/Codegen/Expression.rs) byte-for-byte. Returns `None` when `(module,
 /// method)` isn't one of the three (so the caller falls through to the plain
 /// `CoreCall`). The gate (`core_closure_call_in_subset`) already proved a literal
 /// in-subset lambda in the closure-arg position.
-fn core_module_path_from_receiver(
+pub(super) fn core_module_path_from_receiver(
     receiver: &Expr,
     imports: &HashMap<String, String>,
     env: &LowerEnv,

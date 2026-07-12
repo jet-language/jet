@@ -1,4 +1,4 @@
-fn build_generation(
+pub(super) fn build_generation(
     theme: &Theme,
     plan: &EnvPlan,
     system: &SystemPlan,

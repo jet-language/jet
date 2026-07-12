@@ -218,39 +218,165 @@ fn run() {
 #[test]
 fn concurrent_mutation_and_real_child_spawns_take_untorn_snapshots() {
     let (dir, out) = compile("atomic_spawn", "fn run() {}\n");
+    let pair_probe_rs = dir.join("pair_probe.rs");
+    fs::write(
+        &pair_probe_rs,
+        r#"
+use std::os::unix::ffi::OsStrExt;
+
+fn main() {
+    let left_name = [b'J', b'E', b'T', b'_', b'P', b'A', b'I', b'R', b'_', 0x81];
+    let right_name = [b'J', b'E', b'T', b'_', b'P', b'A', b'I', b'R', b'_', 0x82];
+    let mut left = None;
+    let mut right = None;
+    for (name, value) in std::env::vars_os() {
+        if name.as_os_str().as_bytes() == left_name {
+            left = Some(value);
+        } else if name.as_os_str().as_bytes() == right_name {
+            right = Some(value);
+        }
+    }
+    let state = match (left, right) {
+        (Some(left), Some(right))
+            if left.as_os_str().as_bytes() == [b'A', 0x91]
+                && right.as_os_str().as_bytes() == [b'A', 0x91] => "A",
+        (Some(left), Some(right))
+            if left.as_os_str().as_bytes() == [b'B', 0x92]
+                && right.as_os_str().as_bytes() == [b'B', 0x92] => "B",
+        (Some(_), Some(_)) => "MIXED",
+        _ => "MISSING",
+    };
+    println!("{state}");
+}
+"#,
+    )
+    .unwrap();
+    let pair_probe_build = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&pair_probe_rs)
+        .arg("-o")
+        .arg(dir.join("pair_probe"))
+        .output()
+        .unwrap();
+    assert!(
+        pair_probe_build.status.success(),
+        "{}",
+        String::from_utf8_lossy(&pair_probe_build.stderr)
+    );
+
+    // Test-only hook pauses the first child exactly as it enters the logical
+    // snapshot, forcing the writer to commit a new pair during that launch.
+    // No hook or synchronization state ships in generated production code.
+    let hooked_snapshot = out.rust.replacen(
+        "fn jet_std_env_snapshot_raw() -> JetEnvEntries {\n    jet_env_read().clone()\n}",
+        r#"fn jet_std_env_snapshot_raw() -> JetEnvEntries {
+    jet_test_snapshot_entry();
+    jet_env_read().clone()
+}
+
+static JET_TEST_SNAPSHOT_ENTERED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+static JET_TEST_FIRST_COMMIT_DONE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+static JET_TEST_SNAPSHOT_HOOK_USED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+fn jet_test_snapshot_entry() {
+    use std::sync::atomic::Ordering;
+    if JET_TEST_SNAPSHOT_HOOK_USED
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
+    {
+        JET_TEST_SNAPSHOT_ENTERED.store(true, Ordering::Release);
+        while !JET_TEST_FIRST_COMMIT_DONE.load(Ordering::Acquire) {
+            std::thread::yield_now();
+        }
+    }
+}"#,
+        1,
+    );
+    assert_ne!(
+        hooked_snapshot, out.rust,
+        "snapshot-entry test hook did not attach"
+    );
+
     let probe = r#"    jet_std_env_init();
-    let key = "JET_ATOMIC_SNAPSHOT".to_string();
-    let a = "A".repeat(4096);
-    let b = "B".repeat(4096);
-    jet_std_env_set(&key, &a).unwrap();
-    let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
-    let writer_barrier = barrier.clone();
-    let writer_key = key.clone();
-    let writer_a = a.clone();
-    let writer_b = b.clone();
+    use std::os::unix::ffi::OsStringExt;
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    let left_name = std::ffi::OsString::from_vec(vec![b'J', b'E', b'T', b'_', b'P', b'A', b'I', b'R', b'_', 0x81]);
+    let right_name = std::ffi::OsString::from_vec(vec![b'J', b'E', b'T', b'_', b'P', b'A', b'I', b'R', b'_', 0x82]);
+    {
+        let mut entries = jet_env_write();
+        entries.retain(|(name, _)| {
+            !jet_env_key_eq(name.as_os_str(), left_name.as_os_str())
+                && !jet_env_key_eq(name.as_os_str(), right_name.as_os_str())
+        });
+        entries.push((left_name.clone(), std::ffi::OsString::from_vec(vec![b'A', 0x91])));
+        entries.push((right_name.clone(), std::ffi::OsString::from_vec(vec![b'A', 0x91])));
+    }
+    let stop = std::sync::Arc::new(AtomicBool::new(false));
+    let generation = std::sync::Arc::new(AtomicU64::new(0));
+    let writer_stop = stop.clone();
+    let writer_generation = generation.clone();
+    let writer_left = left_name.clone();
+    let writer_right = right_name.clone();
     let writer = std::thread::spawn(move || {
-        writer_barrier.wait();
-        for i in 0..4000 {
-            let value = if i % 2 == 0 { &writer_b } else { &writer_a };
-            jet_std_env_set(&writer_key, value).unwrap();
+        while !JET_TEST_SNAPSHOT_ENTERED.load(Ordering::Acquire) {
+            std::thread::yield_now();
+        }
+        let mut use_b = true;
+        while !writer_stop.load(Ordering::Acquire) {
+            let value = if use_b {
+                std::ffi::OsString::from_vec(vec![b'B', 0x92])
+            } else {
+                std::ffi::OsString::from_vec(vec![b'A', 0x91])
+            };
+            {
+                let mut entries = jet_env_write();
+                entries.retain(|(name, _)| {
+                    !jet_env_key_eq(name.as_os_str(), writer_left.as_os_str())
+                        && !jet_env_key_eq(name.as_os_str(), writer_right.as_os_str())
+                });
+                entries.push((writer_left.clone(), value.clone()));
+                entries.push((writer_right.clone(), value));
+            }
+            writer_generation.fetch_add(1, Ordering::AcqRel);
+            JET_TEST_FIRST_COMMIT_DONE.store(true, Ordering::Release);
+            use_b = !use_b;
+            std::thread::yield_now();
         }
     });
-    barrier.wait();
-    for _ in 0..12 {
-        let result = jet_std_process_run(&vec!["/usr/bin/env".to_string()]).unwrap();
-        let value = result.output.lines()
-            .find_map(|line| line.strip_prefix("JET_ATOMIC_SNAPSHOT="))
-            .expect("child lost snapshot key");
-        assert!(value == a || value == b, "child observed torn environment value");
+    let mut advanced_during_launch = false;
+    let mut observations = Vec::new();
+    let mut launch_error = None;
+    for _ in 0..16 {
+        let before = generation.load(Ordering::Acquire);
+        let result = match jet_std_process_run(&vec!["./pair_probe".to_string()]) {
+            Ok(result) => result,
+            Err(error) => {
+                launch_error = Some(format!("{error:?}"));
+                break;
+            }
+        };
+        let after = generation.load(Ordering::Acquire);
+        advanced_during_launch |= after > before;
+        observations.push(result.output.trim().to_string());
     }
+    stop.store(true, Ordering::Release);
     writer.join().unwrap();
+    assert!(launch_error.is_none(), "child launch failed: {launch_error:?}");
+    assert_eq!(observations.len(), 16, "not every real child probe completed");
+    for state in observations {
+        assert!(state == "A" || state == "B", "child observed {state} raw pair");
+    }
+    assert!(advanced_during_launch, "writer generation never advanced across a child launch");
     user_run();"#;
-    let rust = out.rust.replacen(
+    let rust = hooked_snapshot.replacen(
         "    jet_std_env_init();\n    user_run();",
         probe,
         1,
     );
-    assert_ne!(rust, out.rust, "atomicity probe did not attach");
+    assert_ne!(rust, hooked_snapshot, "atomicity probe did not attach");
     let bin = build_rust(&dir, "atomic_spawn", &rust);
     let run = Command::new(bin).current_dir(&dir).output().unwrap();
     assert_eq!(run.status.code(), Some(0), "{}", String::from_utf8_lossy(&run.stderr));

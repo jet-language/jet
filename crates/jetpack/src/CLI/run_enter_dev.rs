@@ -1,5 +1,25 @@
+use super::package_hangar_vendor::auto_clean_after_success;
+use super::parse::Parsed;
+use super::realize::{apply_locked_channels, classify_or_report, load_project_plan, RunPlan};
+use super::services_secrets_config::{
+    find_jet_binary, find_project_entry, has_dev_or_run_entry, validate_declared_secrets,
+    wait_for_services_ready,
+};
+use super::trust_env_build::compose_env;
+use super::workspace_sources::cwd_table;
+use crate::EnvFile;
+use crate::ModuleEval;
+use crate::Output::Theme;
+use crate::Provider;
+use crate::RefSpec;
+use crate::Shell::{self, Env, ShellKind};
+use crate::Store;
+use crate::Syntax;
+use crate::Trust;
+use std::path::{Path, PathBuf};
+
 /// `jetpack run [<ref>] [-- cmd…]`
-fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
+pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
     let roots = Store::resolve();
     if roots.dev_mode {
         theme.detail(&theme.gray(&format!(
@@ -87,7 +107,7 @@ fn run_visible_command(theme: &Theme, env: &Env, refs: &[RefSpec::RefSpec], cmd:
 /// (and the absence of any declared `env.*` module otherwise triggers) a
 /// foreign `flake.nix`/`devenv.nix` fallback that shells straight to `nix
 /// develop` instead of composing jetpack's own env.
-fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
+pub(super) fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
     let project_dir = std::env::current_dir().unwrap_or_default();
 
     // U16: a project's own `env.*` always wins; the foreign-flake fallback
@@ -203,7 +223,7 @@ fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
 /// The foreign flake/devenv file in `dir`, if either exists. `flake.nix` wins
 /// when both are present (Nix's own name for the concept jetpack is bridging
 /// from; `devenv.nix` is devenv's flake-backed variant of the same file).
-fn foreign_flake_path(dir: &Path) -> Option<PathBuf> {
+pub(super) fn foreign_flake_path(dir: &Path) -> Option<PathBuf> {
     let flake = dir.join(Syntax::FOREIGN_FLAKE_FILE);
     if flake.is_file() {
         return Some(flake);
@@ -221,7 +241,7 @@ fn foreign_flake_path(dir: &Path) -> Option<PathBuf> {
 /// false; a malformed typed surface still counts as "has env" (its author
 /// clearly meant to declare one, so this never masks that error by silently
 /// falling through to a foreign flake instead).
-fn project_declares_env(dir: &Path) -> bool {
+pub(super) fn project_declares_env(dir: &Path) -> bool {
     let Ok(src) = std::fs::read_to_string(EnvFile::path_in(dir)) else {
         return false;
     };
@@ -345,7 +365,7 @@ fn enter_foreign_flake(
 /// inside the composed env. Running Jet source is the compiler's job, never
 /// jetpack's (D-JPK-DISPATCH1) — this shells out to the sibling `jet` binary
 /// exactly the way `-- cmd` already shells out to an arbitrary command.
-fn cmd_dev(theme: &Theme, parsed: &Parsed) -> i32 {
+pub(super) fn cmd_dev(theme: &Theme, parsed: &Parsed) -> i32 {
     let roots = Store::resolve();
     if roots.dev_mode {
         theme.detail(&theme.gray(&format!(

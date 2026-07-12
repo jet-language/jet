@@ -1,4 +1,9 @@
-use super::*;
+use crate::AST::{AccessConvention, Expr, Type};
+use crate::Diagnostics::{Diagnostic, Span};
+use crate::Sema::Checker;
+use crate::Sema::Diagnostics::{private_item, type_fix_hint};
+use crate::Sema::FFI::e3211;
+use crate::Syntax;
 impl<'a> Checker<'a> {
         /// D-MOD2: check a call `alias.method(args)` where `alias` is an inline code module.
         /// The function was registered as `{alias}__{method}` in `self.funcs`.

@@ -1,9 +1,3 @@
-use super::*;
-use crate::Diagnostics::{Diagnostic, Span};
-use crate::Sema::Effects::Effect;
-use crate::Syntax;
-use crate::AST::{AccessConvention, Expr, Type};
-
 mod imports;
 mod fields_ptrs;
 mod serde;
@@ -31,7 +25,6 @@ pub use fixed_sigs::*;
 mod process_ui;
 pub(crate) use process_ui::*;
 mod module_items;
-pub(crate) use module_items::*;
 mod serde_diags;
 pub(crate) use serde_diags::*;
 mod data_reflect;

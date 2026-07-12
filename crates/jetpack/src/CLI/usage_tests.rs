@@ -1,4 +1,7 @@
-fn usage() -> String {
+use crate::Syntax;
+use std::io::IsTerminal;
+
+pub(super) fn usage() -> String {
     let bin = Syntax::JETPACK_BINARY_NAME;
     let pack = Syntax::ENV_FILE;
     // Bold section headers on a TTY only; the text is identical when piped.
@@ -123,7 +126,11 @@ fn usage() -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::super::parse::parse_args;
+    use super::super::run_enter_dev::{foreign_flake_path, project_declares_env};
     use super::*;
+    use crate::RuntimePolicy;
+    use std::path::PathBuf;
 
     #[test]
     fn doctor_is_in_canonical_route_registry_and_help() {

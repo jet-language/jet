@@ -1,5 +1,3 @@
-use super::*;
-
 /// c109 Phase 13: resolve a handle method `(handle, method, nargs)` into a total
 /// `THandleOp`, reproducing the handle arms of `emit_builtin_method`
 /// (Source/Codegen/Expression.rs). Returns `None` for anything not covered (so the

@@ -1,4 +1,5 @@
-use super::*;
+use crate::AST::Type;
+
 /// D-SIMD2 / D-LINALG1: is `name` a built-in math value type (lane or linalg)?
 pub fn is_math_type(name: &str) -> bool {
     is_simd_lane_type(name) || is_linalg_type(name)

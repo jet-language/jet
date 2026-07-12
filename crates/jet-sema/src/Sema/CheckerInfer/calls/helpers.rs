@@ -1,4 +1,5 @@
-use super::*;
+use crate::Diagnostics::{Diagnostic, Span};
+
 /// D-ANY-JAI1/D-VARARGBOUND1 (c7jaiany): E1313 — a trait-bounded variadic
 /// call-site argument doesn't implement one of the bound trait(s).
 pub(super) fn e1313(

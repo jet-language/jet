@@ -1,20 +1,30 @@
-struct StudioContext {
-    config: PathBuf,
-    host: String,
-    offline: bool,
-    source_write: std::sync::Mutex<()>,
-    sessions: std::sync::Mutex<std::collections::BTreeSet<String>>,
-    changeset: std::sync::Mutex<Option<StudioChangeSet>>,
-    last_applied: std::sync::Mutex<Option<StudioAppliedChange>>,
-    live_projection: std::sync::Mutex<Option<String>>,
-    proved_source: std::sync::Mutex<Option<StudioProvedSource>>,
+use super::parse::Parsed;
+use super::studio_transactions::{
+    handle_studio_run, handle_studio_transaction, studio_live_projection, StudioAppliedChange,
+    StudioChangeSet, StudioProvedSource,
+};
+use crate::Output::Theme;
+use crate::Provider;
+use crate::Syntax;
+use std::path::{Path, PathBuf};
+
+pub(super) struct StudioContext {
+    pub(super) config: PathBuf,
+    pub(super) host: String,
+    pub(super) offline: bool,
+    pub(super) source_write: std::sync::Mutex<()>,
+    pub(super) sessions: std::sync::Mutex<std::collections::BTreeSet<String>>,
+    pub(super) changeset: std::sync::Mutex<Option<StudioChangeSet>>,
+    pub(super) last_applied: std::sync::Mutex<Option<StudioAppliedChange>>,
+    pub(super) live_projection: std::sync::Mutex<Option<String>>,
+    pub(super) proved_source: std::sync::Mutex<Option<StudioProvedSource>>,
 }
 
-fn studio_host(parsed: &Parsed) -> Option<String> {
+pub(super) fn studio_host(parsed: &Parsed) -> Option<String> {
     parsed.flags.studio_host.clone()
 }
 
-fn studio_context(parsed: &Parsed) -> Option<StudioContext> {
+pub(super) fn studio_context(parsed: &Parsed) -> Option<StudioContext> {
     let project = parsed
         .positional
         .iter()
@@ -41,7 +51,7 @@ fn studio_context(parsed: &Parsed) -> Option<StudioContext> {
     })
 }
 
-fn serve_studio(
+pub(super) fn serve_studio(
     theme: &Theme,
     addr: &str,
     app: &Path,

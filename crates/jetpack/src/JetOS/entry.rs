@@ -191,7 +191,7 @@ pub fn resolve_config_path(prefix: Option<&str>) -> PathBuf {
     }
 }
 
-fn default_config_path() -> PathBuf {
+pub(super) fn default_config_path() -> PathBuf {
     std::env::current_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
         .join(Syntax::CONFIG_FILE)

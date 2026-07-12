@@ -1,4 +1,11 @@
-use super::*;
+use crate::AST::{Expr, Type};
+use crate::Collections;
+use crate::Diagnostics::{Diagnostic, Span};
+use crate::Sema::Bundle::fn_types_compatible;
+use crate::Sema::Checker;
+use crate::Sema::CheckerCoreLib::wrong_core_arity;
+use crate::Sema::Diagnostics::{collection_changed_in_loop, expr_root_ident, type_fix_hint};
+use crate::Syntax;
 impl<'a> Checker<'a> {
         pub(crate) fn finish_builtin_method(
             &mut self,

@@ -1,4 +1,4 @@
-fn write_theme_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+pub(super) fn write_theme_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     let theme_dir = dir.join("theme");
     let gtk_dir = dir.join("share/themes/jetos/gtk-4.0");
     let qt_dir = dir.join("share/qt6ct/colors");
@@ -74,7 +74,7 @@ fn write_theme_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     )
 }
 
-fn write_fleet_deploy_facts(
+pub(super) fn write_fleet_deploy_facts(
     dir: &Path,
     system: &SystemPlan,
     plan: &EnvPlan,
@@ -208,7 +208,7 @@ fn render_fleet_host_script(
     )
 }
 
-fn write_options_reference(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+pub(super) fn write_options_reference(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     let options_dir = dir.join("options");
     fs::create_dir_all(&options_dir)?;
     let mut keys = system
@@ -255,7 +255,7 @@ fn write_options_reference(dir: &Path, system: &SystemPlan) -> std::io::Result<(
     make_executable(&search_path)
 }
 
-fn write_image_variant_facts(
+pub(super) fn write_image_variant_facts(
     dir: &Path,
     system: &SystemPlan,
     plan: &EnvPlan,
@@ -316,7 +316,7 @@ fn write_image_variant_facts(
     )
 }
 
-fn write_lifecycle_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+pub(super) fn write_lifecycle_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     let lifecycle_dir = dir.join("lifecycle");
     let bin_dir = dir.join("sw/bin");
     let unit_dir = dir.join("etc/systemd/system");
@@ -395,7 +395,7 @@ fn write_lifecycle_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()>
     Ok(())
 }
 
-fn write_service_manager_depth(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+pub(super) fn write_service_manager_depth(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     let service_dir = dir.join("service-manager");
     let bin_dir = dir.join("sw/bin");
     fs::create_dir_all(&service_dir)?;
@@ -452,7 +452,7 @@ fn write_service_manager_depth(dir: &Path, system: &SystemPlan) -> std::io::Resu
     make_executable(&logs_path)
 }
 
-fn write_app_module_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+pub(super) fn write_app_module_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     let apps_dir = dir.join("apps");
     let programs_dir = apps_dir.join("programs");
     let bin_dir = dir.join("sw/bin");

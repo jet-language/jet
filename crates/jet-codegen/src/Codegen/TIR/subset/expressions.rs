@@ -1,5 +1,3 @@
-use super::*;
-
 pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
     match e {
         Expr::Int(..) | Expr::Float(..) | Expr::Bool(..) | Expr::Char(..) => true,

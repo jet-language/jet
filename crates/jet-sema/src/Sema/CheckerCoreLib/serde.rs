@@ -1,5 +1,8 @@
-use super::*;
-use super::serde_diags::apply_serde_ok;
+use crate::AST::Type;
+use crate::Diagnostics::Span;
+use crate::Sema::Checker;
+use super::core_types::is_json_type_name;
+use super::serde_diags::{apply_serde_ok, e2411};
 impl<'a> Checker<'a> {
         fn serde_trait_impl(&self, name: &str, trait_name: &str) -> bool {
             if self.trait_reg.implements_trait(name, trait_name) {

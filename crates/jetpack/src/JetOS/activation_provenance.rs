@@ -1,4 +1,4 @@
-fn write_activation_diff(
+pub(super) fn write_activation_diff(
     dir: &Path,
     system: &SystemPlan,
     realized: &[RealizedPackage],
@@ -26,7 +26,7 @@ fn write_activation_diff(
     fs::write(dir.join("activation-diff.txt"), diff)
 }
 
-fn write_health_checks(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+pub(super) fn write_health_checks(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     let mut out = String::new();
     out.push_str("jetos health checks\n");
     for svc in system.services.iter().filter(|s| s.enable) {
@@ -45,7 +45,7 @@ fn write_health_checks(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     fs::write(dir.join("health-checks.txt"), out)
 }
 
-fn write_provenance(
+pub(super) fn write_provenance(
     dir: &Path,
     system: &SystemPlan,
     realized: &[RealizedPackage],
@@ -78,7 +78,7 @@ fn write_provenance(
     fs::write(dir.join("provenance.json"), text)
 }
 
-fn compat_hatches_json(system: &SystemPlan) -> String {
+pub(super) fn compat_hatches_json(system: &SystemPlan) -> String {
     let mut hatches = Vec::new();
     for option in &system.options {
         if option.key.starts_with("packages.overlay.")
@@ -98,7 +98,7 @@ fn compat_hatches_json(system: &SystemPlan) -> String {
     hatches.join(",")
 }
 
-fn write_systemd_units(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+pub(super) fn write_systemd_units(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     let unit_dir = dir.join("etc/systemd/system");
     fs::create_dir_all(&unit_dir)?;
     for svc in &system.services {
@@ -127,7 +127,7 @@ fn write_systemd_units(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     Ok(())
 }
 
-fn write_terminal_environment(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+pub(super) fn write_terminal_environment(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     let terminal_dir = dir.join("terminal");
     let etc = dir.join("etc");
     let unit_dir = etc.join("systemd/system");

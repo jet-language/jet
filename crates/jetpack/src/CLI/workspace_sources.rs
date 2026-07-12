@@ -1,6 +1,16 @@
+use super::parse::Flags;
+use crate::EnvFile;
+use crate::ManifestTOML;
+use crate::Provider;
+use crate::RefSpec::{self, ProviderKind};
+use crate::Syntax;
+use crate::WorkspaceFile;
+use crate::WorkspaceLock;
+use std::path::{Path, PathBuf};
+
 /// Resolve the fixtures dir (explicit flag, env, or none). `--offline` only
 /// requires fixtures for Nix-backed refs; core refs use the source cache.
-fn fixtures_for(flags: &Flags) -> Option<PathBuf> {
+pub(super) fn fixtures_for(flags: &Flags) -> Option<PathBuf> {
     Provider::fixtures_from_env(flags.fixtures.clone())
 }
 
@@ -35,7 +45,7 @@ pub fn load_workspace(dir: &Path) -> Option<Result<WorkspaceFile::WorkspacePlan,
 /// absent (not an error). Prints E1214/E1215 to stderr and returns `Err(2)` if
 /// the file exists but has errors; the non-error entries are still returned so
 /// the caller can decide whether to hard-exit or soft-degrade.
-fn load_toml_sources(dir: &Path) -> Result<RefSpec::SourceTable, (RefSpec::SourceTable, i32)> {
+pub(super) fn load_toml_sources(dir: &Path) -> Result<RefSpec::SourceTable, (RefSpec::SourceTable, i32)> {
     let Some((manifest, errors)) = ManifestTOML::load(dir) else {
         return Ok(RefSpec::SourceTable::empty());
     };
@@ -67,7 +77,7 @@ fn load_toml_sources(dir: &Path) -> Result<RefSpec::SourceTable, (RefSpec::Sourc
 /// when there is none). Used so explicit CLI refs are project-aware.
 /// Also merges any `[sources]` declared in `jetpack.toml` (additive — env.jet
 /// inline declarations win on conflict).
-fn cwd_table() -> RefSpec::SourceTable {
+pub(super) fn cwd_table() -> RefSpec::SourceTable {
     let dir = std::env::current_dir().unwrap_or_default();
     let mut table = EnvFile::load(&dir)
         .map(|ef| ef.source_table())
@@ -86,7 +96,7 @@ fn cwd_table() -> RefSpec::SourceTable {
 /// from `workspace.jet` when present (discovery-by-declaration), else read from
 /// the `.jet/lock` mirror, else empty. Lets bare (`logging`) and path-form
 /// (`packages/logging`) refs resolve against workspace members.
-fn cwd_workspace_index() -> RefSpec::WorkspaceIndex {
+pub(super) fn cwd_workspace_index() -> RefSpec::WorkspaceIndex {
     let dir = std::env::current_dir().unwrap_or_default();
     let plan = match WorkspaceFile::load(&dir) {
         Some(Ok(plan)) => Some(plan),

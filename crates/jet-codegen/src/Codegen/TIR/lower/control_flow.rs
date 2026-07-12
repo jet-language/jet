@@ -1,6 +1,4 @@
-use super::*;
-
-fn tracked_float_origin(b: &crate::AST::Binding, ty: &Type, cx: &Cx) -> Option<String> {
+pub(super) fn tracked_float_origin(b: &crate::AST::Binding, ty: &Type, cx: &Cx) -> Option<String> {
     if !b.track || !matches!(ty, Type::Float) {
         return None;
     }
@@ -17,7 +15,7 @@ fn tracked_float_origin(b: &crate::AST::Binding, ty: &Type, cx: &Cx) -> Option<S
     ))
 }
 
-fn static_call_type_name_lower(receiver: &Expr, env: &LowerEnv) -> Option<String> {
+pub(super) fn static_call_type_name_lower(receiver: &Expr, env: &LowerEnv) -> Option<String> {
     let name = static_call_type_name_unchecked(receiver)?;
     match receiver {
         Expr::Ident(n, _) if env.locals.contains_key(n) => None,
@@ -117,7 +115,7 @@ pub(crate) fn lower_forin_collection(
 ///    `Option`/`Result` (mirroring `add_pattern_bindings`);
 ///  - binding-free user enum variant/group tests (`d == .Fire`) → `Matches`;
 ///  - anything else → `Plain`.
-fn is_binding_free_user_variant_pattern_test(pattern: &Pattern, cx: &Cx) -> bool {
+pub(super) fn is_binding_free_user_variant_pattern_test(pattern: &Pattern, cx: &Cx) -> bool {
     match pattern {
         Pattern::Variant {
             variant, bindings, ..
@@ -131,7 +129,7 @@ fn is_binding_free_user_variant_pattern_test(pattern: &Pattern, cx: &Cx) -> bool
     }
 }
 
-fn lower_binding_free_variant_pattern_test(
+pub(super) fn lower_binding_free_variant_pattern_test(
     subject: &Expr,
     pattern: &Pattern,
     cx: &Cx,
@@ -577,7 +575,7 @@ fn lower_struct_pattern_bindings(
 /// exists between/after every hole, so the scan never backtracks — each step
 /// is `starts_with`/`find` from the current cursor. Thin wrapper over
 /// `str_match_scan_closure_ex` in full-match mode (the `if == {}` shape).
-fn str_match_scan_closure(pattern: &Pattern, cx: &Cx) -> (String, Vec<(String, Type)>) {
+pub(super) fn str_match_scan_closure(pattern: &Pattern, cx: &Cx) -> (String, Vec<(String, Type)>) {
     let Pattern::StrMatch { parts, .. } = pattern else {
         return ("(|| -> Option<()> { Some(()) })()".to_string(), Vec::new());
     };

@@ -1,4 +1,4 @@
-fn generation_dir(system: &SystemPlan, explicit: Option<&str>) -> PathBuf {
+pub(super) fn generation_dir(system: &SystemPlan, explicit: Option<&str>) -> PathBuf {
     let name = explicit
         .filter(|s| !s.is_empty())
         .map(str::to_string)
@@ -6,15 +6,15 @@ fn generation_dir(system: &SystemPlan, explicit: Option<&str>) -> PathBuf {
     systems_dir().join("generations").join(name)
 }
 
-fn systems_dir() -> PathBuf {
+pub(super) fn systems_dir() -> PathBuf {
     Store::resolve().root.join("systems")
 }
 
-fn generations_log() -> PathBuf {
+pub(super) fn generations_log() -> PathBuf {
     systems_dir().join("generations.log")
 }
 
-fn write_generation_files(
+pub(super) fn write_generation_files(
     dir: &Path,
     system: &SystemPlan,
     realized: &[RealizedPackage],
@@ -94,7 +94,7 @@ fn write_generation_files(
     Ok(())
 }
 
-fn write_generation_source_proof(dir: &Path, target: &Target) -> std::io::Result<()> {
+pub(super) fn write_generation_source_proof(dir: &Path, target: &Target) -> std::io::Result<()> {
     let source = fs::read(&target.config)?;
     let plan = fs::read(dir.join("plan.json"))?;
     let input_plan = std::env::var("JETOS_STUDIO_INPUT_PLAN_SHA256").unwrap_or_default();
@@ -107,7 +107,7 @@ fn write_generation_source_proof(dir: &Path, target: &Target) -> std::io::Result
     fs::write(dir.join("source-proof.json"), proof)
 }
 
-fn render_plan_json(
+pub(super) fn render_plan_json(
     system: &SystemPlan,
     realized: &[RealizedPackage],
     prebuilt: Option<(&str, &str, &str)>,
@@ -189,7 +189,7 @@ struct PackageSnapshot {
 /// `plan.json`. Missing/unreadable/malformed files read as no packages
 /// (the diff then reads as "everything added", which is honest for a
 /// first-ever generation).
-fn read_generation_packages(dir: &Path) -> Vec<PackageSnapshot> {
+pub(super) fn read_generation_packages(dir: &Path) -> Vec<PackageSnapshot> {
     let Ok(text) = fs::read_to_string(dir.join("plan.json")) else {
         return Vec::new();
     };
@@ -236,7 +236,7 @@ struct PackageDiff {
 
 /// Diff two generations' package snapshots by name. Sorted by name so the
 /// plan reads as a stable table run to run.
-fn diff_packages(old: &[PackageSnapshot], new: &[PackageSnapshot]) -> Vec<PackageDiff> {
+pub(super) fn diff_packages(old: &[PackageSnapshot], new: &[PackageSnapshot]) -> Vec<PackageDiff> {
     let mut rows = Vec::new();
     for pkg in new {
         match old.iter().find(|o| o.name == pkg.name) {
@@ -277,7 +277,7 @@ fn diff_packages(old: &[PackageSnapshot], new: &[PackageSnapshot]) -> Vec<Packag
 /// from the generation ledger, not a fabricated number; call before the new
 /// generation is built/recorded so it reads as the outgoing generation's
 /// ordinal.
-fn generation_ordinal(host: &str) -> usize {
+pub(super) fn generation_ordinal(host: &str) -> usize {
     read_generations()
         .into_iter()
         .filter(|g| g.host == host)
@@ -287,7 +287,7 @@ fn generation_ordinal(host: &str) -> usize {
 /// Recursive on-disk size of a store path, in bytes. Pure std (I6): no
 /// external `du`. Symlinks (a package's `out` is often one) are followed by
 /// re-measuring their target; ordinary files are summed directly.
-fn dir_size_bytes(path: &Path) -> u64 {
+pub(super) fn dir_size_bytes(path: &Path) -> u64 {
     let Ok(meta) = fs::symlink_metadata(path) else {
         return 0;
     };
@@ -356,7 +356,7 @@ fn project_profile_dirs(dir: &Path, pkg: &RealizedPackage) -> std::io::Result<()
     Ok(())
 }
 
-fn copy_profile_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
+pub(super) fn copy_profile_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
     if skip_runtime_payload(src) {
         return Ok(());
     }
@@ -506,7 +506,7 @@ fn copy_nix_closure_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-fn copy_runtime_file_filtered(src: &Path, dst: &Path) -> std::io::Result<()> {
+pub(super) fn copy_runtime_file_filtered(src: &Path, dst: &Path) -> std::io::Result<()> {
     let bytes = fs::read(src)?;
     if let Ok(text) = std::str::from_utf8(&bytes) {
         if has_foreign_os_bytes(text.as_bytes()) && text.contains("nix-snowflake") {
@@ -597,7 +597,7 @@ fn relative_path(from: &Path, to: &Path) -> std::io::Result<PathBuf> {
     Ok(path)
 }
 
-fn sanitize_runtime_branding_file(path: &Path) -> std::io::Result<()> {
+pub(super) fn sanitize_runtime_branding_file(path: &Path) -> std::io::Result<()> {
     if fs::symlink_metadata(path)
         .map(|meta| meta.file_type().is_symlink())
         .unwrap_or(false)
@@ -611,7 +611,7 @@ fn sanitize_runtime_branding_file(path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-fn sanitize_runtime_branding_bytes(bytes: &[u8]) -> Option<Vec<u8>> {
+pub(super) fn sanitize_runtime_branding_bytes(bytes: &[u8]) -> Option<Vec<u8>> {
     let mut out = bytes.to_vec();
     let mut changed = false;
     for (from, to) in [
@@ -657,7 +657,7 @@ fn skip_runtime_payload(path: &Path) -> bool {
 }
 
 #[cfg(unix)]
-fn copy_runtime_symlink(src: &Path, dst: &Path) -> std::io::Result<()> {
+pub(super) fn copy_runtime_symlink(src: &Path, dst: &Path) -> std::io::Result<()> {
     if let Some(parent) = dst.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -667,7 +667,7 @@ fn copy_runtime_symlink(src: &Path, dst: &Path) -> std::io::Result<()> {
 }
 
 #[cfg(not(unix))]
-fn copy_runtime_symlink(src: &Path, dst: &Path) -> std::io::Result<()> {
+pub(super) fn copy_runtime_symlink(src: &Path, dst: &Path) -> std::io::Result<()> {
     copy_file_replace(src, dst)
 }
 

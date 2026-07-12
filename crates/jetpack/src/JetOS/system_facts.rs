@@ -1,4 +1,4 @@
-fn write_init_facts(
+pub(super) fn write_init_facts(
     dir: &Path,
     system: &SystemPlan,
     realized: &[RealizedPackage],
@@ -119,7 +119,7 @@ fn link_or_copy_unit(src: &Path, dst: &Path) -> std::io::Result<()> {
     fs::copy(src, dst).map(|_| ())
 }
 
-fn write_secret_manifest(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+pub(super) fn write_secret_manifest(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     let mut manifest = String::new();
     manifest.push_str("repo ciphertext + host key; activation decrypts into tmpfs only\n");
     for name in collect_names(system, "secrets") {
@@ -130,7 +130,7 @@ fn write_secret_manifest(dir: &Path, system: &SystemPlan) -> std::io::Result<()>
     fs::write(dir.join("secrets.tmpfs.manifest"), manifest)
 }
 
-fn write_network_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+pub(super) fn write_network_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     let network_dir = dir.join("etc/systemd/network");
     fs::create_dir_all(&network_dir)?;
     let interface =
@@ -198,7 +198,7 @@ fn write_network_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     )
 }
 
-fn write_systemd_timer_socket_units(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+pub(super) fn write_systemd_timer_socket_units(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     let unit_dir = dir.join("etc/systemd/system");
     fs::create_dir_all(&unit_dir)?;
     for svc in system.services.iter().filter(|s| s.enable) {
@@ -226,7 +226,7 @@ fn write_systemd_timer_socket_units(dir: &Path, system: &SystemPlan) -> std::io:
     Ok(())
 }
 
-fn write_hardware_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+pub(super) fn write_hardware_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     let hw_dir = dir.join("hardware");
     let bin_dir = dir.join("sw/bin");
     let boot_spec_dir = dir.join("boot/specialisations");

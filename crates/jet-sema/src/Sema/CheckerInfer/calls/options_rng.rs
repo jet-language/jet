@@ -1,4 +1,9 @@
-use super::*;
+use crate::AST::{AccessConvention, Expr, Type};
+use crate::Collections;
+use crate::Diagnostics::{Diagnostic, Span};
+use crate::Sema::Checker;
+use crate::Sema::Diagnostics::{expr_root_ident, type_fix_hint};
+use crate::Syntax;
 impl<'a> Checker<'a> {
         /// D-DET-CAPAPI: the generic `Rng` draws — `rng.pick(list) -> T?` (uniform
         /// choice; null on empty) and `rng.shuffle(&list)` (in-place Fisher–Yates).

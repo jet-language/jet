@@ -1,4 +1,4 @@
-fn shell_single_quote(s: &str) -> String {
+pub(super) fn shell_single_quote(s: &str) -> String {
     let mut quoted = String::from("'");
     for ch in s.chars() {
         if ch == '\'' {
@@ -11,7 +11,7 @@ fn shell_single_quote(s: &str) -> String {
     quoted
 }
 
-fn option_value(system: &SystemPlan, keys: &[&str]) -> Option<String> {
+pub(super) fn option_value(system: &SystemPlan, keys: &[&str]) -> Option<String> {
     keys.iter()
         .find_map(|key| resolved_option_value(system, key))
 }
@@ -24,7 +24,7 @@ fn raw_option_value(system: &SystemPlan, key: &str) -> Option<String> {
         .map(|o| clean_value(&o.value))
 }
 
-fn resolved_option_value(system: &SystemPlan, key: &str) -> Option<String> {
+pub(super) fn resolved_option_value(system: &SystemPlan, key: &str) -> Option<String> {
     resolved_option(system, key).map(|r| r.value)
 }
 
@@ -72,7 +72,7 @@ impl ResolvedOption {
     }
 }
 
-fn resolved_option(system: &SystemPlan, key: &str) -> Option<ResolvedOption> {
+pub(super) fn resolved_option(system: &SystemPlan, key: &str) -> Option<ResolvedOption> {
     let tier = raw_option_value(system, &format!("{key}.tier"))
         .map(|s| clean_symbol(&s))
         .unwrap_or_else(|| "Normal".to_string());
@@ -119,14 +119,14 @@ fn tier_priority(tier: &str) -> i64 {
     }
 }
 
-fn is_option_priority_metadata(key: &str) -> bool {
+pub(super) fn is_option_priority_metadata(key: &str) -> bool {
     key.ends_with(".tier")
         || key.ends_with(".priority")
         || key.ends_with(".override")
         || key.ends_with(".disabled")
 }
 
-fn option_type(value: &str) -> String {
+pub(super) fn option_type(value: &str) -> String {
     let trimmed = value.trim();
     if trimmed.starts_with('[') {
         "List".to_string()
@@ -141,7 +141,7 @@ fn option_type(value: &str) -> String {
     }
 }
 
-fn option_default(namespace: &str) -> String {
+pub(super) fn option_default(namespace: &str) -> String {
     match namespace {
         "network" => "dhcp-and-closed-firewall",
         "services" => "disabled",
@@ -156,7 +156,7 @@ fn option_default(namespace: &str) -> String {
     .to_string()
 }
 
-fn option_doc(key: &str) -> String {
+pub(super) fn option_doc(key: &str) -> String {
     let namespace = key.split('.').next().unwrap_or("");
     match namespace {
         "network" => "Network identity, DNS, wireless, and firewall policy.",
@@ -176,7 +176,7 @@ fn option_doc(key: &str) -> String {
     .to_string()
 }
 
-fn prefixed_options(system: &SystemPlan, prefix: &str) -> Vec<(String, String)> {
+pub(super) fn prefixed_options(system: &SystemPlan, prefix: &str) -> Vec<(String, String)> {
     system
         .options
         .iter()
@@ -188,14 +188,14 @@ fn prefixed_options(system: &SystemPlan, prefix: &str) -> Vec<(String, String)> 
         .collect()
 }
 
-fn option_rows_json(rows: &[(String, String)]) -> String {
+pub(super) fn option_rows_json(rows: &[(String, String)]) -> String {
     rows.iter()
         .map(|(key, value)| JSON::object_of(&[("key", key), ("value", value)]))
         .collect::<Vec<_>>()
         .join(",")
 }
 
-fn strings_json(values: &[String]) -> String {
+pub(super) fn strings_json(values: &[String]) -> String {
     values
         .iter()
         .map(|value| JSON::quote(value))
@@ -203,7 +203,7 @@ fn strings_json(values: &[String]) -> String {
         .join(",")
 }
 
-fn boot_profile(system: &SystemPlan) -> BootProfile {
+pub(super) fn boot_profile(system: &SystemPlan) -> BootProfile {
     let loader = option_value(system, &["boot.loader"])
         .map(|s| clean_symbol(&s))
         .unwrap_or_else(|| "Limine".to_string());
@@ -223,7 +223,7 @@ fn boot_profile(system: &SystemPlan) -> BootProfile {
     }
 }
 
-fn collect_names(system: &SystemPlan, namespace: &str) -> Vec<String> {
+pub(super) fn collect_names(system: &SystemPlan, namespace: &str) -> Vec<String> {
     let prefix = format!("{namespace}.");
     let mut names = Vec::new();
     for option in &system.options {
@@ -241,7 +241,7 @@ fn collect_names(system: &SystemPlan, namespace: &str) -> Vec<String> {
     names
 }
 
-fn user_names(system: &SystemPlan) -> Vec<String> {
+pub(super) fn user_names(system: &SystemPlan) -> Vec<String> {
     let mut names = collect_names(system, "users");
     for name in collect_names(system, "user") {
         if !names.iter().any(|n| n == &name) {
@@ -252,7 +252,7 @@ fn user_names(system: &SystemPlan) -> Vec<String> {
     names
 }
 
-fn render_user_profile_json(system: &SystemPlan, user: &str) -> String {
+pub(super) fn render_user_profile_json(system: &SystemPlan, user: &str) -> String {
     let home = option_value(
         system,
         &[&format!("user.{user}.home"), &format!("users.{user}.home")],
@@ -311,7 +311,7 @@ fn render_user_profile_json(system: &SystemPlan, user: &str) -> String {
     )
 }
 
-fn render_user_profile_json_parts(
+pub(super) fn render_user_profile_json_parts(
     user: &str,
     home: &str,
     shell: &str,
@@ -330,7 +330,7 @@ fn render_user_profile_json_parts(
     )
 }
 
-fn parse_list_items(value: &str) -> Vec<String> {
+pub(super) fn parse_list_items(value: &str) -> Vec<String> {
     let inner = value
         .trim()
         .strip_prefix('[')
@@ -361,7 +361,7 @@ fn parse_list_items(value: &str) -> Vec<String> {
         .collect()
 }
 
-fn package_path_or_literal(value: &str) -> String {
+pub(super) fn package_path_or_literal(value: &str) -> String {
     if let Some(name) = value.strip_prefix("packages.") {
         format!("/run/current-system/sw/bin/{name}")
     } else {
@@ -369,7 +369,7 @@ fn package_path_or_literal(value: &str) -> String {
     }
 }
 
-fn service_extra(service: &ServicePlan, keys: &[&str]) -> Option<String> {
+pub(super) fn service_extra(service: &ServicePlan, keys: &[&str]) -> Option<String> {
     service
         .extra
         .iter()
@@ -377,7 +377,7 @@ fn service_extra(service: &ServicePlan, keys: &[&str]) -> Option<String> {
         .map(|(_, v)| clean_value(v))
 }
 
-fn clean_value(value: &str) -> String {
+pub(super) fn clean_value(value: &str) -> String {
     let trimmed = value.trim();
     if let Some(inner) = trimmed.strip_prefix('"').and_then(|s| s.strip_suffix('"')) {
         inner.to_string()
@@ -386,7 +386,7 @@ fn clean_value(value: &str) -> String {
     }
 }
 
-fn clean_symbol(value: &str) -> String {
+pub(super) fn clean_symbol(value: &str) -> String {
     let cleaned = clean_value(value);
     let trimmed = cleaned.trim().trim_start_matches('.');
     trimmed
@@ -395,7 +395,7 @@ fn clean_symbol(value: &str) -> String {
         .to_string()
 }
 
-fn safe_filename(value: &str) -> String {
+pub(super) fn safe_filename(value: &str) -> String {
     value
         .chars()
         .map(|ch| {
@@ -408,7 +408,7 @@ fn safe_filename(value: &str) -> String {
         .collect()
 }
 
-fn safe_identifier(value: &str) -> String {
+pub(super) fn safe_identifier(value: &str) -> String {
     let mut out = String::new();
     for ch in value.chars() {
         if ch.is_ascii_alphanumeric() || ch == '_' {
@@ -428,7 +428,7 @@ fn safe_identifier(value: &str) -> String {
     out
 }
 
-fn clean_bool_json(value: &str) -> &'static str {
+pub(super) fn clean_bool_json(value: &str) -> &'static str {
     if clean_symbol(value).eq_ignore_ascii_case("true") {
         "true"
     } else {
@@ -436,7 +436,7 @@ fn clean_bool_json(value: &str) -> &'static str {
     }
 }
 
-fn render_proof(system: &SystemPlan, realized: &[RealizedPackage], plan: &EnvPlan) -> String {
+pub(super) fn render_proof(system: &SystemPlan, realized: &[RealizedPackage], plan: &EnvPlan) -> String {
     let mut out = String::new();
     out.push_str(&format!("jetos proof for {}\n", system.name));
     out.push_str(&format!("target: {}\n", system.target));
@@ -471,7 +471,7 @@ fn render_proof(system: &SystemPlan, realized: &[RealizedPackage], plan: &EnvPla
     out
 }
 
-fn risk_classes(system: &SystemPlan) -> Vec<String> {
+pub(super) fn risk_classes(system: &SystemPlan) -> Vec<String> {
     let mut risks = Vec::new();
     for option in &system.options {
         let key = option.key.as_str();

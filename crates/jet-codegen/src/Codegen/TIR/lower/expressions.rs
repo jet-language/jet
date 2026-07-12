@@ -1,5 +1,3 @@
-use super::*;
-
 /// D-MEM1 S6: lower `e` for use as a MUTATING method's receiver (`.push()`,
 /// `.insert()`, …). Ordinarily identical to `lower_expr`; the one exception is
 /// a place rooted in a `Pool` index (`pool[id]`, or `pool[id].field`) — the

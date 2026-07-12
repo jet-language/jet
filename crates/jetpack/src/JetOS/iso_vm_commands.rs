@@ -1,4 +1,4 @@
-fn build_hybrid_iso(staging: &Path, iso: &Path) -> Result<bool, String> {
+pub(super) fn build_hybrid_iso(staging: &Path, iso: &Path) -> Result<bool, String> {
     if find_path_tool("xorriso").is_none() || find_path_tool("limine").is_none() {
         return Ok(false);
     }

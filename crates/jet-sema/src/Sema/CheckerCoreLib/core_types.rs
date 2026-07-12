@@ -1,4 +1,10 @@
-use super::*;
+use crate::AST::{Expr, Type};
+use crate::Diagnostics::{Diagnostic, Span};
+use crate::Sema::Checker;
+use crate::Sema::Diagnostics::expr_root_ident;
+use crate::Syntax;
+use super::alloc_ptrs::{io_error_ty, result_ty};
+
 /// D-MUSTUSE1 (c18iwxqx): built-in handle types whose bare statement result must
 /// not be silently ignored (E0419). `scope.guard` returns `ScopeGuard` — bind it
 /// or cleanup runs at end of the statement, not scope exit. `TransactionGuard` is

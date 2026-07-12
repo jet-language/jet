@@ -1,4 +1,8 @@
-use super::*;
+use crate::AST::{AccessConvention, Type};
+use crate::Diagnostics::{Diagnostic, Span};
+use crate::Sema::Registration::already_defined;
+use crate::Sema::{Checker, LocalInfo};
+use std::collections::{HashMap, HashSet};
 impl<'a> Checker<'a> {
         pub(crate) fn push_scope(&mut self) {
             self.scopes.push(HashMap::new());

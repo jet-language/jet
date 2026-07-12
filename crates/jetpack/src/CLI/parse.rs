@@ -1,63 +1,79 @@
+use super::add_remove_push_image::{cmd_add, cmd_image, cmd_push, cmd_remove};
+use super::bridge_os_studio::{cmd_bridge, cmd_os, cmd_studio, cmd_user};
+use super::cmd_doctor;
+use super::package_hangar_vendor::{cmd_audit, cmd_clean, cmd_hangar, cmd_list, cmd_vendor};
+use super::run_enter_dev::{cmd_dev, cmd_enter, cmd_run};
+use super::services_secrets_config::{cmd_config, cmd_secrets, cmd_services};
+use super::trust_env_build::{cmd_build, cmd_trust};
+use super::update_search_info::{
+    cmd_explain, cmd_info, cmd_logs, cmd_outdated, cmd_override, cmd_search, cmd_update,
+};
+use super::usage_tests::usage;
+use crate::Output::Theme;
+use crate::Store;
+use crate::Syntax;
+use std::path::PathBuf;
+
 /// Parsed global flags shared by every command.
 #[derive(Clone)]
-struct Flags {
-    no_color: bool,
-    fixtures: Option<PathBuf>,
-    offline: bool,
-    online: bool,
+pub(super) struct Flags {
+    pub(super) no_color: bool,
+    pub(super) fixtures: Option<PathBuf>,
+    pub(super) offline: bool,
+    pub(super) online: bool,
     /// U19: one-shot bypass of the env/dev trust gate (`--trust`). Never
     /// persists a grant — unlike accepting the interactive prompt.
-    trust: bool,
+    pub(super) trust: bool,
     /// U16: ad-hoc nixpkgs packages from `-p <pkg>...`, added to the shell
     /// without being declared in any manifest. Repeatable across multiple
     /// `-p` groups.
-    packages: Vec<String>,
+    pub(super) packages: Vec<String>,
     /// U16: `--flake` forces foreign-flake/devenv detection even when the
     /// project's own manifest already declares `env.*` modules.
-    flake: bool,
+    pub(super) flake: bool,
     /// U16: `--pure` — isolate the shell from the host environment. Threaded
     /// straight through to the underlying `nix` invocation for the
     /// foreign-flake fallback; jetpack's own composed shells are already
     /// PATH-only, so this is a no-op there today.
-    pure: bool,
+    pub(super) pure: bool,
     /// D-JPK-IMAGE1: `jet image <name> --push <ref>` — the registry ref to
     /// push to. Always honestly gated (E1268): pushing needs TLS support that
     /// doesn't exist yet, so this is only ever read to report that gate.
-    push: Option<String>,
+    pub(super) push: Option<String>,
     /// D-JPK-OSGEN1=C: optional generation name for `jet os switch`.
-    os_name: Option<String>,
+    pub(super) os_name: Option<String>,
     /// D-JPK-OSDISK1=C: optional manual disk/device path for `jet os init|image`.
-    os_manual: Option<String>,
+    pub(super) os_manual: Option<String>,
     /// D-JOS-VMCOMMAND1=A: optional VM proof disk image path.
-    os_disk: Option<String>,
+    pub(super) os_disk: Option<String>,
     /// D-JOS-STUDIO-HOST1=A: local Studio projection service address.
-    studio_serve: Option<String>,
+    pub(super) studio_serve: Option<String>,
     /// D-JOS-STUDIO-HOST1=A: selected jetos host for Studio.
-    studio_host: Option<String>,
+    pub(super) studio_host: Option<String>,
     /// U20: `jetpack add <ref> --adapt` drafts an adapter declaration instead
     /// of editing `env.jet` with a plain package ref.
-    adapt: bool,
+    pub(super) adapt: bool,
     /// Emit machine-readable output for diagnostics that have structured
     /// payloads (currently U23 no-Nix package holes).
-    json: bool,
+    pub(super) json: bool,
     /// U27: open a shell in preserved failed build scratch.
-    shell_on_fail: bool,
+    pub(super) shell_on_fail: bool,
     /// D-JPK-GRANTCMD1=A: `jet trust grant <selector> --scope repo|user`.
-    trust_scope: Option<String>,
+    pub(super) trust_scope: Option<String>,
     /// D-FE-CLI1: bypass mutation confirmation gates (`-y` / `--yes`).
-    assume_yes: bool,
+    pub(super) assume_yes: bool,
 }
 
 /// Result of separating flags, positional args, and a trailing `-- cmd`.
 #[derive(Clone)]
-struct Parsed {
-    flags: Flags,
-    positional: Vec<String>,
+pub(super) struct Parsed {
+    pub(super) flags: Flags,
+    pub(super) positional: Vec<String>,
     /// Everything after a `--`, if present.
-    command: Option<Vec<String>>,
+    pub(super) command: Option<Vec<String>>,
 }
 
-fn parse_args(args: &[String]) -> Parsed {
+pub(super) fn parse_args(args: &[String]) -> Parsed {
     let mut flags = Flags {
         no_color: false,
         fixtures: None,

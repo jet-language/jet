@@ -1,4 +1,22 @@
-use super::*;
+use crate::AST::{AccessConvention, BinOp, Call, Expr, StrPart, Type};
+use crate::Diagnostics::{Diagnostic, Span};
+use crate::Generics::e0904;
+use crate::Sema::Bundle::fn_types_compatible;
+use crate::Sema::Checker;
+use crate::Sema::CheckerCoreLib::{
+    io_error_ty, is_simd_lane_type, math_constructor_arg_types, overflow_opt_in_error, result_ty,
+    wrong_core_arity,
+};
+use crate::Sema::CheckerOwnership::{e0142_aliased, e0143_drop_unaudited};
+use crate::Sema::Diagnostics::{
+    aliasing_mut_after_read, aliasing_while_mut, edit_distance, is_cloneable, is_printable,
+    type_fix_hint, typed_text_mismatch,
+};
+use crate::Sema::Effects::builtin_effect;
+use crate::Sema::FFI::e3211;
+use crate::Sema::substitute_param_refs;
+use crate::Syntax;
+use std::collections::{HashMap, HashSet};
 impl<'a> Checker<'a> {
         /// Check a call. Returns:
         ///   None             — problem already reported
@@ -823,7 +841,7 @@ impl<'a> Checker<'a> {
                             let earlier_names: Vec<String> =
                                 all_param_names.iter().take(i).cloned().collect();
                             // Substitute any earlier-param idents with the supplied arg.
-                            let resolved = super::substitute_param_refs(
+                            let resolved = substitute_param_refs(
                                 default_expr.clone(),
                                 &earlier_names,
                                 &call.args,

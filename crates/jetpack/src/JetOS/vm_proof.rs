@@ -1,4 +1,4 @@
-fn write_vm_install_plan(
+pub(super) fn write_vm_install_plan(
     gen: &Generation,
     system: &SystemPlan,
     disk: &str,
@@ -39,7 +39,7 @@ fn write_vm_install_plan(
     Ok(proof)
 }
 
-fn prove_vm_guest(
+pub(super) fn prove_vm_guest(
     gen: &Generation,
     system: &SystemPlan,
     disk: &str,
@@ -157,7 +157,7 @@ fn run_vm_command(command: &VmCommand, log_dir: &Path) -> Result<String, String>
     Ok(format!("{stdout}\n{stderr}"))
 }
 
-fn run_interactive_vm_command(command: &VmCommand) -> Result<i32, String> {
+pub(super) fn run_interactive_vm_command(command: &VmCommand) -> Result<i32, String> {
     let Some(program) = command.argv.first() else {
         return Err(format!("VM phase `{}` has no executable", command.phase));
     };
@@ -192,7 +192,7 @@ fn vm_proof_timeout() -> Duration {
         .unwrap_or_else(|| Duration::from_millis(VM_PROOF_TIMEOUT_MS))
 }
 
-fn extract_guest_proof_report(output: &str) -> Option<String> {
+pub(super) fn extract_guest_proof_report(output: &str) -> Option<String> {
     output.lines().find_map(|line| {
         line.split_once(VM_GUEST_PROOF_MARKER)
             .map(|(_, rest)| rest.trim().to_string())
@@ -306,7 +306,7 @@ fn validate_cached_guest_proof(
     require_guest_assertions(text)
 }
 
-fn require_vm_run_proof(
+pub(super) fn require_vm_run_proof(
     gen: &Generation,
     system: &SystemPlan,
     disk: &str,
@@ -326,7 +326,7 @@ fn require_vm_run_proof(
     Ok(())
 }
 
-fn file_sha256(path: &Path) -> Result<String, String> {
+pub(super) fn file_sha256(path: &Path) -> Result<String, String> {
     fs::read(path)
         .map(|bytes| crate::SHA256::sha256_hex(&bytes))
         .map_err(|e| format!("hashing `{}` failed: {e}", path.display()))
@@ -379,7 +379,7 @@ fn require_guest_assertions(text: &str) -> Result<(), String> {
     }
 }
 
-fn require_real_vm_tools() -> Result<(), String> {
+pub(super) fn require_real_vm_tools() -> Result<(), String> {
     let mut rejected = Vec::new();
     // The real tier realizes the disk through the hidden system backend and
     // boots it directly, so only QEMU and `nix` must be real. The installer
@@ -427,7 +427,7 @@ const GUEST_ASSERTIONS: [&str; 9] = [
     "desktop-launchers-run",
 ];
 
-struct VmCommand {
+pub(super) struct VmCommand {
     phase: &'static str,
     argv: Vec<String>,
 }
@@ -560,7 +560,7 @@ fn qemu_proof_commands(
     ]
 }
 
-fn qemu_interactive_run_command(
+pub(super) fn qemu_interactive_run_command(
     boot_dir: &Path,
     disk: &str,
     host: &str,
@@ -630,11 +630,11 @@ fn qemu_vnc_display() -> &'static str {
     "vnc=127.0.0.1:0"
 }
 
-fn qemu_vnc_endpoint() -> &'static str {
+pub(super) fn qemu_vnc_endpoint() -> &'static str {
     "127.0.0.1:5900"
 }
 
-fn qemu_has_local_display() -> bool {
+pub(super) fn qemu_has_local_display() -> bool {
     if std::env::var_os("JETOS_QEMU_VNC").is_some() {
         return false;
     }
@@ -667,7 +667,7 @@ fn qemu_proof_commands_json(
         .join(",")
 }
 
-fn run_vmtest(
+pub(super) fn run_vmtest(
     theme: &Theme,
     plan: &EnvPlan,
     vmtest: &VmTestPlan,
@@ -772,7 +772,7 @@ fn guest_assertions_json() -> String {
         .join(",")
 }
 
-fn vm_tools_json() -> String {
+pub(super) fn vm_tools_json() -> String {
     vm_tool_facts()
         .into_iter()
         .map(|(name, path, sha)| {

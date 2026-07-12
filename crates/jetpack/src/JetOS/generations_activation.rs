@@ -1,4 +1,4 @@
-fn prove_activation(theme: &Theme, gen: &Generation, system: &SystemPlan) -> bool {
+pub(super) fn prove_activation(theme: &Theme, gen: &Generation, system: &SystemPlan) -> bool {
     let risks = risk_classes(system);
     let plan = gen.path.join("plan.json");
     let proof = gen.path.join("proof.txt");
@@ -130,7 +130,7 @@ fn rollback_proof_for(host: &str, current: &Path) -> String {
     }
 }
 
-fn append_generation(gen: &Generation) -> std::io::Result<()> {
+pub(super) fn append_generation(gen: &Generation) -> std::io::Result<()> {
     if let Some(parent) = generations_log().parent() {
         fs::create_dir_all(parent)?;
     }
@@ -149,7 +149,7 @@ fn append_generation(gen: &Generation) -> std::io::Result<()> {
         .write_all(line.as_bytes())
 }
 
-fn read_generations() -> Vec<Generation> {
+pub(super) fn read_generations() -> Vec<Generation> {
     let Ok(text) = fs::read_to_string(generations_log()) else {
         return Vec::new();
     };
@@ -172,7 +172,7 @@ fn read_generations() -> Vec<Generation> {
     out
 }
 
-fn latest_generation_for(host: &str) -> Option<Generation> {
+pub(super) fn latest_generation_for(host: &str) -> Option<Generation> {
     let mut gens = read_generations()
         .into_iter()
         .filter(|g| g.host == host)
@@ -186,7 +186,7 @@ fn latest_generation_for(host: &str) -> Option<Generation> {
     gens.into_iter().next()
 }
 
-fn generation_named(host: &str, name: &str) -> Option<Generation> {
+pub(super) fn generation_named(host: &str, name: &str) -> Option<Generation> {
     read_generations()
         .into_iter()
         .find(|generation| {
@@ -194,7 +194,7 @@ fn generation_named(host: &str, name: &str) -> Option<Generation> {
         })
 }
 
-fn render_generation_proof_json(gen: &Generation) -> std::io::Result<String> {
+pub(super) fn render_generation_proof_json(gen: &Generation) -> std::io::Result<String> {
     let plan = fs::read_to_string(gen.path.join("plan.json"))?;
     let proof = fs::read_to_string(gen.path.join("proof.txt"))?;
     let activation_diff = fs::read_to_string(gen.path.join("activation-diff.txt"))?;
@@ -224,7 +224,7 @@ fn render_generation_proof_json(gen: &Generation) -> std::io::Result<String> {
     ))
 }
 
-fn find_rollback_generation(host: &str, requested: Option<&str>) -> Option<Generation> {
+pub(super) fn find_rollback_generation(host: &str, requested: Option<&str>) -> Option<Generation> {
     let current = current_generation_path();
     let mut gens = read_generations()
         .into_iter()
@@ -244,7 +244,7 @@ fn find_rollback_generation(host: &str, requested: Option<&str>) -> Option<Gener
     gens.into_iter().next()
 }
 
-fn activate_generation(gen: &Generation) -> std::io::Result<()> {
+pub(super) fn activate_generation(gen: &Generation) -> std::io::Result<()> {
     let dir = systems_dir();
     fs::create_dir_all(&dir)?;
     write_pointer(&dir.join("current"), &gen.path)?;
@@ -267,7 +267,7 @@ fn write_pointer(link: &Path, target: &Path) -> std::io::Result<()> {
     fs::rename(tmp, link)
 }
 
-fn current_generation_path() -> Option<PathBuf> {
+pub(super) fn current_generation_path() -> Option<PathBuf> {
     let link = systems_dir().join("current");
     #[cfg(unix)]
     {
@@ -283,13 +283,13 @@ fn current_generation_path() -> Option<PathBuf> {
     }
 }
 
-fn now_secs() -> u64 {
+pub(super) fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
 }
 
-fn print_help() {
+pub(super) fn print_help() {
     println!("jet os check|init|plan|proof|build|switch|rollback|generations|lift|import|image|vm <host>|path@host");
 }

@@ -1,5 +1,3 @@
-use super::*;
-
 /// c109 Phase 6: is this `Expr::MethodCall` inside the subset? Two shapes only:
 /// the synthetic `.clone()`, or a user-defined instance method on a covered type.
 pub(crate) fn method_call_in_subset(
@@ -796,7 +794,7 @@ pub(crate) fn method_call_in_subset(
         .all(|(a, (_, _pty))| expr_in_subset(&a.expr, cx, locals))
 }
 
-fn core_module_path_from_receiver(
+pub(super) fn core_module_path_from_receiver(
     receiver: &Expr,
     imports: &std::collections::HashMap<String, String>,
     locals: &std::collections::HashSet<String>,

@@ -1,4 +1,13 @@
-fn cmd_bridge(theme: &Theme, parsed: &Parsed) -> i32 {
+use super::parse::Parsed;
+use super::studio_server::{serve_studio, studio_context, studio_host};
+use super::workspace_sources::fixtures_for;
+use crate::Output::Theme;
+use crate::Provider;
+use crate::Syntax;
+use crate::{Bridge, JSON};
+use std::path::PathBuf;
+
+pub(super) fn cmd_bridge(theme: &Theme, parsed: &Parsed) -> i32 {
     match parsed.positional.first().map(String::as_str) {
         Some(v) if v == Syntax::BRIDGE_VERB_FLAKE => {
             if !Provider::nix_on_path() {
@@ -36,10 +45,10 @@ fn cmd_bridge(theme: &Theme, parsed: &Parsed) -> i32 {
 /// `jetpack os <verb> [<config-path>]@<host>` (U15/U16) — the jetos tier: whole
 /// machine management as a subcommand group, not a separate binary. `<verb>` is
 /// the first positional (`switch`/`build`); the target is the second.
-fn cmd_os(theme: &Theme, parsed: &Parsed) -> i32 {
+pub(super) fn cmd_os(theme: &Theme, parsed: &Parsed) -> i32 {
     let verb = parsed.positional.first().map(String::as_str);
     let args = parsed.positional.get(1..).unwrap_or(&[]);
-    let flags = super::JetOS::OsFlags {
+    let flags = crate::JetOS::OsFlags {
         fixtures: parsed.flags.fixtures.clone(),
         offline: parsed.flags.offline,
         name: parsed.flags.os_name.clone(),
@@ -53,7 +62,7 @@ fn cmd_os(theme: &Theme, parsed: &Parsed) -> i32 {
     if verb == Some(Syntax::USER_SUBCOMMAND) {
         let user_verb = args.first().map(String::as_str);
         let user_args = args.get(1..).unwrap_or(&[]);
-        return super::JetOS::user_main(theme, user_verb, user_args, &flags);
+        return crate::JetOS::user_main(theme, user_verb, user_args, &flags);
     }
     if verb == Some(Syntax::STUDIO_SUBCOMMAND) {
         let nested = Parsed {
@@ -63,15 +72,15 @@ fn cmd_os(theme: &Theme, parsed: &Parsed) -> i32 {
         };
         return cmd_studio(theme, &nested);
     }
-    super::JetOS::main(theme, verb, args, &flags)
+    crate::JetOS::main(theme, verb, args, &flags)
 }
 
 /// `jetos user <plan|build|switch|rollback|prove> <name>` — standalone user
 /// generations over the same profile engine used by `jet os switch`.
-fn cmd_user(theme: &Theme, parsed: &Parsed) -> i32 {
+pub(super) fn cmd_user(theme: &Theme, parsed: &Parsed) -> i32 {
     let verb = parsed.positional.first().map(String::as_str);
     let args = parsed.positional.get(1..).unwrap_or(&[]);
-    let flags = super::JetOS::OsFlags {
+    let flags = crate::JetOS::OsFlags {
         fixtures: parsed.flags.fixtures.clone(),
         offline: parsed.flags.offline,
         name: parsed.flags.os_name.clone(),
@@ -82,12 +91,12 @@ fn cmd_user(theme: &Theme, parsed: &Parsed) -> i32 {
         real_tier: false,
         host: parsed.flags.studio_host.clone(),
     };
-    super::JetOS::user_main(theme, verb, args, &flags)
+    crate::JetOS::user_main(theme, verb, args, &flags)
 }
 
 /// `jetos studio` — launch the installed first-party Studio app, with a
 /// browser/headless fallback over the same generated projection.
-fn cmd_studio(theme: &Theme, parsed: &Parsed) -> i32 {
+pub(super) fn cmd_studio(theme: &Theme, parsed: &Parsed) -> i32 {
     let headless = parsed
         .positional
         .iter()

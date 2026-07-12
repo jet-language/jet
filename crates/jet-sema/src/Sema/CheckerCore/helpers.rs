@@ -1,4 +1,6 @@
-use super::*;
+use crate::AST::{Expr, Type};
+use crate::Diagnostics::{Diagnostic, Span};
+
 /// D-UNINIT1 engine (reused by D-UNINIT-SENTINEL1): a `:= uninit` binding is
 /// restricted to plain-data ("POD") types — no heap ownership, no Drop glue —
 /// so an uninitialized value can never expose freed/owned state. v1 allows

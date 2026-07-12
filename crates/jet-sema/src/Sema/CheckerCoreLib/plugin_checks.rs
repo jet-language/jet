@@ -1,4 +1,9 @@
-use super::*;
+use crate::AST::Type;
+use crate::Diagnostics::Span;
+use crate::Sema::Checker;
+use crate::Sema::Effects::Effect;
+use super::alloc_ptrs::result_ty;
+use super::serde_diags::wrong_core_arity;
 impl<'a> Checker<'a> {
         /// D-DEP-WASM1=A / D-PLUGIN1=B (c81): `(name: String, args: [T]) -> T ?
         /// String` argument elaboration shared by `.call`/`.call_int` — a plugin

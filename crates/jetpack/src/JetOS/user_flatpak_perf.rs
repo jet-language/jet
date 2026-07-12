@@ -1,4 +1,4 @@
-fn write_user_environment_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+pub(super) fn write_user_environment_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     let users_dir = dir.join("users");
     let unit_dir = dir.join("etc/systemd/user");
     fs::create_dir_all(&users_dir)?;
@@ -126,7 +126,7 @@ fn user_file_target(key: &str, source: &str) -> String {
     format!(".config/{key}")
 }
 
-fn manifest_lines(items: &[String]) -> String {
+pub(super) fn manifest_lines(items: &[String]) -> String {
     if items.is_empty() {
         String::new()
     } else {
@@ -134,7 +134,7 @@ fn manifest_lines(items: &[String]) -> String {
     }
 }
 
-fn write_flatpak_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+pub(super) fn write_flatpak_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     let flatpak_dir = dir.join("flatpak");
     let appimage_dir = dir.join("appimage");
     let bin_dir = dir.join("sw/bin");
@@ -266,7 +266,7 @@ fn write_flatpak_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     make_executable(&appimage_path)
 }
 
-fn write_performance_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+pub(super) fn write_performance_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     let perf_dir = dir.join("performance");
     let bin_dir = dir.join("sw/bin");
     let unit_dir = dir.join("etc/systemd/system");

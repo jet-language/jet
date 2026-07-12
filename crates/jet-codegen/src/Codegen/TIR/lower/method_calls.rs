@@ -1,5 +1,3 @@
-use super::*;
-
 /// c109 Phase 6: lower a method call. The gate proved it is the synthetic `.clone()`
 /// or a user instance method on a covered type; resolve every dispatch fact here.
 pub(crate) fn lower_method_call(

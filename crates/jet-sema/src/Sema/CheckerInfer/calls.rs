@@ -2,17 +2,6 @@
 //!
 //! Split out of the original `CheckerInfer.rs`; behavior unchanged.
 
-use super::*;
-use crate::Collections;
-use crate::Diagnostics::{Diagnostic, Span};
-use crate::Generics::{e0901, e0904};
-use crate::Sema::CheckerOwnership::{e0142_aliased, e0143_drop_unaudited};
-use crate::Syntax;
-use crate::AST::{
-    AccessConvention, BinOp, Call, EnumLitArg, Expr, Lambda, LambdaBody, Stmt, StrPart, Type,
-};
-use std::collections::{HashMap, HashSet};
-
 mod helpers_call_values;
 mod lambdas;
 mod builtin_methods;

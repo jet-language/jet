@@ -63,7 +63,7 @@ const NIXOS_LIVE_EXTRACTOR: &str = r#"c: {
 /// flake root, so the caller falls back to the audited scan draft. Eval
 /// failures are hard errors (surfaced as E1289) — a broken flake must not
 /// silently degrade into a scan.
-fn live_import_plan(args: &NixosImportArgs) -> Result<Option<NixosImportPlan>, String> {
+pub(super) fn live_import_plan(args: &NixosImportArgs) -> Result<Option<NixosImportPlan>, String> {
     if !args.source.is_dir() || !args.source.join("flake.nix").is_file() {
         return Ok(None);
     }

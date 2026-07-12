@@ -1,4 +1,8 @@
-use super::*;
+use crate::AST::{AccessConvention, Type};
+use crate::Syntax;
+use super::alloc_ptrs::{db_error_ty, db_row_ty, io_error_ty, result_ty};
+use super::core_types::{json_error_ty, json_ty, u8_ty, unit_ty};
+
 /// c109 Phase 20: the polymorphic core specials whose return type is resolved by
 /// `infer_core_call`'s bespoke arg-type logic (NOT the fixed `core_fixed_sig`
 /// table). Sema writes the resolved return back onto the `Expr::MethodCall`

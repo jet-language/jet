@@ -27,19 +27,24 @@ use crate::{Lock, Syntax};
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
-include!("CLI/parse.rs");
-include!("CLI/workspace_sources.rs");
-include!("CLI/realize.rs");
-include!("CLI/run_enter_dev.rs");
-include!("CLI/services_secrets_config.rs");
-include!("CLI/trust_env_build.rs");
-include!("CLI/package_hangar_vendor.rs");
-include!("CLI/update_search_info.rs");
-include!("CLI/add_remove_push_image.rs");
-include!("CLI/bridge_os_studio.rs");
-include!("CLI/studio_server.rs");
-include!("CLI/studio_transactions.rs");
-include!("CLI/usage_tests.rs");
+mod parse;
+mod workspace_sources;
+mod realize;
+mod run_enter_dev;
+mod services_secrets_config;
+mod trust_env_build;
+mod package_hangar_vendor;
+mod update_search_info;
+mod add_remove_push_image;
+mod bridge_os_studio;
+mod studio_server;
+mod studio_transactions;
+mod usage_tests;
+
+use parse::Parsed;
+
+pub use parse::main;
+pub(crate) use realize::report_provider_error;
 
 fn cmd_doctor(_theme: &Theme, parsed: &Parsed) -> i32 {
     if !parsed.positional.is_empty() || parsed.command.is_some() {

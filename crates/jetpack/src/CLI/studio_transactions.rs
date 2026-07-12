@@ -1,4 +1,8 @@
-struct StudioChangeSet {
+use super::studio_server::StudioContext;
+use crate::JSON;
+use std::path::{Path, PathBuf};
+
+pub(super) struct StudioChangeSet {
     session_id: String,
     token: String,
     base_revision: String,
@@ -13,13 +17,13 @@ struct StudioChange {
     value: String,
 }
 
-struct StudioAppliedChange {
+pub(super) struct StudioAppliedChange {
     before_source: String,
     after_source: String,
 }
 
 #[derive(Clone)]
-struct StudioProvedSource {
+pub(super) struct StudioProvedSource {
     source: String,
     revision: String,
     plan_revision: String,
@@ -78,7 +82,7 @@ struct StudioSnapshotIdentity {
     length: u64,
 }
 
-fn handle_studio_transaction(
+pub(super) fn handle_studio_transaction(
     body: &str,
     context: Option<&StudioContext>,
 ) -> (&'static str, String) {
@@ -612,7 +616,7 @@ fn atomic_write_studio_source_if_revision(
     result
 }
 
-fn handle_studio_run(body: &str, context: Option<&StudioContext>) -> (&'static str, String) {
+pub(super) fn handle_studio_run(body: &str, context: Option<&StudioContext>) -> (&'static str, String) {
     let Some(context) = context else {
         return (
             "400 Bad Request",
@@ -1174,7 +1178,7 @@ fn studio_command_json(context: &StudioContext, result: &StudioCommandResult) ->
     )
 }
 
-fn studio_live_projection(context: &StudioContext, generation_data: &Path) -> Result<String, String> {
+pub(super) fn studio_live_projection(context: &StudioContext, generation_data: &Path) -> Result<String, String> {
     if !context.config.is_file() {
         return std::fs::read_to_string(generation_data)
             .map_err(|e| format!("reading installed Studio projection failed: {e}"));
@@ -1220,7 +1224,7 @@ fn rebuild_studio_projection_from(
     let projection = format!(
         "{{\"kind\":\"jetos-studio-projection\",\"source_truth\":\"live-checked-plan\",\"host\":{},\"page_registry\":[{}],\"system_plan\":{},\"proof_state\":{{\"state\":{},\"source_revision\":{}}},\"generations\":{},\"generation_projection\":{}}}",
         JSON::quote(&context.host),
-        super::JetOS::studio_pages_json(),
+        crate::JetOS::studio_pages_json(),
         plan.stdout.trim(),
         JSON::quote(if proof_revision.is_some() { "proved" } else { "unproved" }),
         proof_revision

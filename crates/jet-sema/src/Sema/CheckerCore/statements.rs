@@ -1,4 +1,17 @@
-use super::*;
+use crate::AST::{AccessConvention, Expr, ForKind, IndexKind, LValue, Stmt, StrPart, Type};
+use crate::Diagnostics::Diagnostic;
+use crate::Sema::CheckerCoreLib::{is_swizzleable_math_type, parse_swizzle_member, swizzle_write_overlaps, SwizzleParse};
+use crate::Sema::CheckerTaskGroup::TaskGroupCtx;
+use crate::Sema::Diagnostics::{
+    aliasing_while_mut, collection_changed_in_loop, collection_root_name,
+    computed_field_not_settable, expr_root_ident, is_task_type, loop_control_outside,
+    type_fix_hint, undefined_loop_label,
+};
+use crate::Sema::Effects::{grant_handle_escape, unknown_effect};
+use crate::Sema::Registration::already_defined;
+use crate::Sema::{Checker, LocalInfo};
+use crate::Syntax;
+use std::collections::HashSet;
 use super::helpers::layout_constraint_fingerprint;
 impl<'a> Checker<'a> {
         /// Check two alternative branches with independent move states, then

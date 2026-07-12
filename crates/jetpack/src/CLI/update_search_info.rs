@@ -1,6 +1,16 @@
+use super::parse::Parsed;
+use super::realize::{
+    channel_download_size_from_fixture, channel_sources, load_project_plan, offline_refusal,
+    report_provider_error, resolve_source_channel,
+};
+use super::workspace_sources::fixtures_for;
+use crate::Output::{self, Theme};
+use crate::Store::{self, Roots};
+use crate::{BuildDebug, Discovery, EnvFile, Lock, Overlay, SemanticLock, Syntax, WorkspaceFile};
+
 /// `jetpack update [<source>]` — resolve channel source refs and move only
 /// their lock entries. Does not realize packages.
-fn cmd_update(theme: &Theme, parsed: &Parsed) -> i32 {
+pub(super) fn cmd_update(theme: &Theme, parsed: &Parsed) -> i32 {
     if parsed.flags.offline {
         return offline_refusal(theme, "update");
     }
@@ -89,7 +99,7 @@ fn cmd_update(theme: &Theme, parsed: &Parsed) -> i32 {
 
 /// `jetpack outdated` — read-only channel freshness report. It may query
 /// metadata, but never writes `.jet/lock`.
-fn cmd_outdated(theme: &Theme, parsed: &Parsed) -> i32 {
+pub(super) fn cmd_outdated(theme: &Theme, parsed: &Parsed) -> i32 {
     if parsed.flags.offline {
         return offline_refusal(theme, "outdated");
     }
@@ -146,7 +156,7 @@ fn cmd_outdated(theme: &Theme, parsed: &Parsed) -> i32 {
 }
 
 /// `jetpack search <query>` — local/offline package discovery (U26).
-fn cmd_search(theme: &Theme, parsed: &Parsed) -> i32 {
+pub(super) fn cmd_search(theme: &Theme, parsed: &Parsed) -> i32 {
     let Some(query) = parsed.positional.first() else {
         theme.error(
             "search needs a query",
@@ -183,7 +193,7 @@ fn cmd_search(theme: &Theme, parsed: &Parsed) -> i32 {
 }
 
 /// `jetpack info <ref>` — local/offline package metadata (U26).
-fn cmd_info(theme: &Theme, parsed: &Parsed) -> i32 {
+pub(super) fn cmd_info(theme: &Theme, parsed: &Parsed) -> i32 {
     let Some(query) = parsed.positional.first() else {
         theme.error(
             "info needs a package ref",
@@ -232,7 +242,7 @@ fn cmd_info(theme: &Theme, parsed: &Parsed) -> i32 {
     0
 }
 
-fn cmd_explain(theme: &Theme, parsed: &Parsed) -> i32 {
+pub(super) fn cmd_explain(theme: &Theme, parsed: &Parsed) -> i32 {
     let Some(query) = parsed.positional.first() else {
         theme.error(
             "explain needs a package ref",
@@ -324,7 +334,7 @@ fn cmd_explain_overlay(theme: &Theme, query: &str) -> i32 {
     0
 }
 
-fn cmd_override(theme: &Theme, parsed: &Parsed) -> i32 {
+pub(super) fn cmd_override(theme: &Theme, parsed: &Parsed) -> i32 {
     let Some(action) = parsed.positional.first().map(String::as_str) else {
         theme.error(
             "override needs an action",
@@ -426,7 +436,7 @@ fn cmd_override(theme: &Theme, parsed: &Parsed) -> i32 {
     0
 }
 
-fn cmd_logs(theme: &Theme, parsed: &Parsed) -> i32 {
+pub(super) fn cmd_logs(theme: &Theme, parsed: &Parsed) -> i32 {
     let Some(package) = parsed.positional.first() else {
         theme.error(
             "logs needs a package name",
@@ -477,7 +487,7 @@ fn read_logs_error(theme: &Theme, reason: &str) -> i32 {
     2
 }
 
-fn shell_on_failed_build(theme: &Theme, roots: &Roots, package: &str) {
+pub(super) fn shell_on_failed_build(theme: &Theme, roots: &Roots, package: &str) {
     let Ok(Some(attempt)) = BuildDebug::latest(&roots.hangar_dir(), package) else {
         return;
     };

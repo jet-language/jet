@@ -14,6 +14,7 @@ fn dir(name: &str) -> PathBuf {
 fn write(dir: &Path, name: &str, source: &str) -> PathBuf { let path = dir.join(name); fs::write(&path, source).unwrap(); path }
 fn run(args: &[&str]) -> Output { Command::new(jet()).args(args).output().unwrap() }
 fn run_in(dir: &Path, args: &[&str]) -> Output { Command::new(jet()).current_dir(dir).args(args).output().unwrap() }
+fn git(dir: &Path, args: &[&str]) -> Output { Command::new("git").current_dir(dir).args(args).output().unwrap() }
 
 const BASE: &str = "fn left() -> Int {\n    return 1\n}\n\nfn right() -> Int {\n    return 2\n}\n\nfn run() {\n    print(left() + right())\n}\n";
 
@@ -126,8 +127,8 @@ fn malformed_input_fails_before_output() {
 #[test]
 fn git_driver_install_is_idempotent_and_preserves_config() {
     let root = dir("driver");
-    fs::create_dir(root.join(".git")).unwrap();
-    fs::write(root.join(".git/config"), "[core]\n\tbare = false\n").unwrap();
+    assert!(git(&root, &["init"]).status.success());
+    assert!(git(&root, &["config", "merge.jetstruct.name", "stale"]).status.success());
     for _ in 0..2 {
         let output = run(&["merge", "install-driver", "--repo", root.to_str().unwrap()]);
         assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
@@ -137,6 +138,34 @@ fn git_driver_install_is_idempotent_and_preserves_config() {
     assert_eq!(config.matches("[merge \"jetstruct\"]").count(), 1);
     let attrs = fs::read_to_string(root.join(".gitattributes")).unwrap();
     assert_eq!(attrs.matches("*.jet merge=jetstruct").count(), 1);
+}
+
+#[test]
+fn identical_bilateral_additions_merge_trivia_once() {
+    let root = dir("bilateral_additions");
+    let base = write(&root, "base.jet", "fn run() {}\n");
+    let ours = write(&root, "ours.jet", "// ours note\nfn helper() -> Int { return 1 }\nfn run() {}\n");
+    let theirs = write(&root, "theirs.jet", "fn helper() -> Int { return 1 }\nfn run() {}\n");
+    let merged = root.join("merged.jet");
+    let output = run(&[
+        "merge", "--structural", base.to_str().unwrap(), ours.to_str().unwrap(),
+        theirs.to_str().unwrap(), "--out", merged.to_str().unwrap(),
+    ]);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let source = fs::read_to_string(&merged).unwrap();
+    assert_eq!(source.matches("fn helper").count(), 1, "{source}");
+    assert_eq!(source.matches("ours note").count(), 1, "{source}");
+
+    let ours = write(&root, "ours_distinct.jet", "// ours note\nfn helper() -> Int { return 1 }\nfn run() {}\n");
+    let theirs = write(&root, "theirs_distinct.jet", "// theirs note\nfn helper() -> Int { return 1 }\nfn run() {}\n");
+    let conflict_out = root.join("must-not-exist.jet");
+    let conflict = run(&[
+        "merge", "--structural", base.to_str().unwrap(), ours.to_str().unwrap(),
+        theirs.to_str().unwrap(), "--out", conflict_out.to_str().unwrap(), "--report", "json",
+    ]);
+    assert_eq!(conflict.status.code(), Some(1));
+    assert!(!conflict_out.exists());
+    assert!(String::from_utf8_lossy(&conflict.stderr).contains("inter_item_trivia"));
 }
 
 #[test]
@@ -245,22 +274,32 @@ fn ambiguous_same_shape_and_cross_delete_rename_edit_never_guess() {
 #[test]
 fn git_driver_repairs_exact_keys_and_supports_gitdir_indirection() {
     let root = dir("driver_gitdir");
-    let worktree = root.join("worktree");
-    let gitdir = root.join("actual.git");
-    fs::create_dir_all(&worktree).unwrap();
-    fs::create_dir_all(&gitdir).unwrap();
-    fs::write(worktree.join(".git"), "gitdir: ../actual.git\n").unwrap();
-    fs::write(
-        gitdir.join("config"),
-        "[core]\n\tbare = false\n[merge \"jetstruct\"]\n\tname = stale\n[merge \"other\"]\n\tdriver = keep-me\n",
-    ).unwrap();
+    let repo = root.join("repo");
+    let worktree = root.join("linked");
+    fs::create_dir_all(&repo).unwrap();
+    assert!(git(&repo, &["init"]).status.success());
+    assert!(git(&repo, &["config", "user.email", "jet-test@example.invalid"]).status.success());
+    assert!(git(&repo, &["config", "user.name", "Jet Test"]).status.success());
+    assert!(git(&repo, &["config", "merge.jetstruct.name", "stale"]).status.success());
+    assert!(git(&repo, &["config", "merge.other.driver", "keep-me"]).status.success());
+    fs::write(repo.join("seed"), "seed\n").unwrap();
+    assert!(git(&repo, &["add", "seed"]).status.success());
+    assert!(git(&repo, &["commit", "-m", "seed"]).status.success());
+    let added = git(&repo, &["worktree", "add", "-b", "linked-test", worktree.to_str().unwrap()]);
+    assert!(added.status.success(), "{}", String::from_utf8_lossy(&added.stderr));
+
     let output = run(&["merge", "install-driver", "--repo", worktree.to_str().unwrap()]);
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-    let config = fs::read_to_string(gitdir.join("config")).unwrap();
-    assert!(config.contains("name = Jet structural merge"), "{config}");
-    assert!(config.contains("driver = jet merge --structural %O %A %B --out %A"), "{config}");
-    assert!(config.contains("driver = keep-me"), "{config}");
-    assert_eq!(config.matches("[merge \"jetstruct\"]").count(), 1, "{config}");
+    for (key, expected) in [
+        ("merge.jetstruct.name", "Jet structural merge"),
+        ("merge.jetstruct.driver", "jet merge --structural %O %A %B --out %A"),
+        ("merge.other.driver", "keep-me"),
+    ] {
+        let readback = git(&worktree, &["config", "--local", "--get", key]);
+        assert!(readback.status.success(), "{}", String::from_utf8_lossy(&readback.stderr));
+        assert_eq!(String::from_utf8_lossy(&readback.stdout).trim(), expected);
+    }
+    assert!(worktree.join(".git").is_file(), "test must exercise real linked-worktree indirection");
 }
 
 #[test]
@@ -269,9 +308,11 @@ fn structural_commands_have_specific_help() {
         ("diff", &["--structural", "--report"] as &[&str]),
         ("merge", &["--structural", "--out", "install-driver", "--repo"] as &[&str]),
     ] {
-        let output = run(&[command, "--help"]);
-        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-        let help = String::from_utf8_lossy(&output.stdout);
-        for needle in needles { assert!(help.contains(needle), "{command} help missing {needle}: {help}"); }
+        for args in [[command, "--help"], ["help", command]] {
+            let output = run(&args);
+            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+            let help = String::from_utf8_lossy(&output.stdout);
+            for needle in needles { assert!(help.contains(needle), "{command} help missing {needle}: {help}"); }
+        }
     }
 }

@@ -1,4 +1,4 @@
-fn cmd_check(theme: &Theme, args: &[String]) -> i32 {
+pub(super) fn cmd_check(theme: &Theme, args: &[String]) -> i32 {
     let Some(target) = parse_target_or_report(theme, args.first().map(String::as_str)) else {
         return 2;
     };
@@ -15,7 +15,7 @@ fn cmd_check(theme: &Theme, args: &[String]) -> i32 {
     }
 }
 
-fn cmd_plan(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
+pub(super) fn cmd_plan(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
     let Some(target) = parse_target_or_report(theme, args.first().map(String::as_str)) else {
         return 2;
     };
@@ -32,7 +32,7 @@ fn cmd_plan(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
     0
 }
 
-fn cmd_proof(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
+pub(super) fn cmd_proof(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
     let Some(target) = parse_target_or_report(theme, args.first().map(String::as_str)) else {
         return 2;
     };
@@ -88,7 +88,7 @@ fn cmd_proof(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
     }
 }
 
-fn cmd_build(theme: &Theme, args: &[String], flags: &OsFlags, activate: bool) -> i32 {
+pub(super) fn cmd_build(theme: &Theme, args: &[String], flags: &OsFlags, activate: bool) -> i32 {
     let Some(target) = parse_target_or_report(theme, args.first().map(String::as_str)) else {
         return 2;
     };
@@ -206,7 +206,7 @@ fn cmd_build(theme: &Theme, args: &[String], flags: &OsFlags, activate: bool) ->
     }
 }
 
-fn cmd_rollback(theme: &Theme, args: &[String]) -> i32 {
+pub(super) fn cmd_rollback(theme: &Theme, args: &[String]) -> i32 {
     let host = args.first().map_or("", String::as_str);
     if host.is_empty() {
         theme.error(
@@ -245,7 +245,7 @@ fn cmd_rollback(theme: &Theme, args: &[String]) -> i32 {
     }
 }
 
-fn cmd_generations(args: &[String]) -> i32 {
+pub(super) fn cmd_generations(args: &[String]) -> i32 {
     let host = args.first().map(String::as_str);
     let mut gens = read_generations();
     if let Some(host) = host {
@@ -268,7 +268,7 @@ fn cmd_generations(args: &[String]) -> i32 {
     0
 }
 
-fn cmd_init(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
+pub(super) fn cmd_init(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
     let host = args.first().map_or("host", String::as_str);
     let path = default_config_path();
     if path.exists() {
@@ -319,7 +319,7 @@ fn cmd_init(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
     }
 }
 
-fn cmd_lift(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
+pub(super) fn cmd_lift(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
     let host = args.first().map_or("host", String::as_str);
     let root = args.get(1).map_or("/", String::as_str);
     let import_args = vec![
@@ -331,7 +331,7 @@ fn cmd_lift(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
     cmd_import(theme, &import_args, flags)
 }
 
-fn cmd_image(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
+pub(super) fn cmd_image(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
     let Some(target) = parse_target_or_report(theme, args.first().map(String::as_str)) else {
         return 2;
     };

@@ -1,4 +1,11 @@
-use super::*;
+use crate::AST::{AccessConvention, Lambda, LambdaBody, Stmt, Type};
+use crate::Diagnostics::Diagnostic;
+use crate::Sema::Captures::{lambda_body_refs_name, lambda_collect_captures};
+use crate::Sema::CheckerInfer::is_reactive_handle_ty;
+use crate::Sema::Diagnostics::{is_cloneable, type_fix_hint};
+use crate::Sema::{Checker, LocalInfo, SendCrossing, SendProblemKind, SendabilityProblem};
+use crate::Syntax;
+use std::collections::HashSet;
 impl<'a> Checker<'a> {
         pub(crate) fn check_lambda(
             &mut self,

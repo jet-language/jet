@@ -1,4 +1,4 @@
-fn write_bootable_root_projection(dir: &Path) -> std::io::Result<()> {
+pub(super) fn write_bootable_root_projection(dir: &Path) -> std::io::Result<()> {
     let root = dir.join("root");
     if root.exists() {
         fs::remove_dir_all(&root)?;
@@ -86,7 +86,7 @@ fn link_or_copy_file(src: &Path, dst: &Path) -> std::io::Result<()> {
     fs::copy(src, dst).map(|_| ())
 }
 
-fn copy_file_replace(src: &Path, dst: &Path) -> std::io::Result<()> {
+pub(super) fn copy_file_replace(src: &Path, dst: &Path) -> std::io::Result<()> {
     let _ = fs::remove_file(dst);
     fs::copy(src, dst)?;
     let mut perms = fs::metadata(dst)?.permissions();
@@ -112,7 +112,7 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-fn copy_dir_recursive_deref(src: &Path, dst: &Path) -> std::io::Result<()> {
+pub(super) fn copy_dir_recursive_deref(src: &Path, dst: &Path) -> std::io::Result<()> {
     fs::create_dir_all(dst)?;
     let mut entries = fs::read_dir(src)?
         .filter_map(Result::ok)
@@ -179,7 +179,7 @@ fn should_preserve_staged_symlink(target: &Path) -> bool {
     target.starts_with("/nix/store") || !target.is_absolute()
 }
 
-fn enable_unit(unit_dir: &Path, target: &str, unit_name: &str) -> std::io::Result<()> {
+pub(super) fn enable_unit(unit_dir: &Path, target: &str, unit_name: &str) -> std::io::Result<()> {
     let wants = unit_dir.join(format!("{target}.wants"));
     fs::create_dir_all(&wants)?;
     let dst = wants.join(unit_name);

@@ -1,7 +1,10 @@
-const CACHYOS_KERNEL_PACKAGE: &str = "cachyos-kernel";
-const SYSTEMD_INIT_PACKAGE: &str = "systemd";
-const GNOME_DESKTOP_PACKAGES: [&str; 3] = ["gdm", "gnome-session", "gnome-shell"];
-const VM_TOOLS: [&str; 11] = [
+use crate::JSON;
+use std::path::PathBuf;
+
+pub(super) const CACHYOS_KERNEL_PACKAGE: &str = "cachyos-kernel";
+pub(super) const SYSTEMD_INIT_PACKAGE: &str = "systemd";
+pub(super) const GNOME_DESKTOP_PACKAGES: [&str; 3] = ["gdm", "gnome-session", "gnome-shell"];
+pub(super) const VM_TOOLS: [&str; 11] = [
     "qemu-system-x86_64",
     "qemu-img",
     "xorriso",
@@ -14,8 +17,8 @@ const VM_TOOLS: [&str; 11] = [
     "mcopy",
     "zstd",
 ];
-const VM_GUEST_PROOF_MARKER: &str = "JETOS_GUEST_PROOF:";
-const VM_PROOF_TIMEOUT_MS: u64 = 300_000;
+pub(super) const VM_GUEST_PROOF_MARKER: &str = "JETOS_GUEST_PROOF:";
+pub(super) const VM_PROOF_TIMEOUT_MS: u64 = 300_000;
 
 #[derive(Clone)]
 pub struct OsFlags {
@@ -35,27 +38,27 @@ pub struct OsFlags {
     pub real_tier: bool,
 }
 
-struct Target {
-    config: PathBuf,
-    host: String,
+pub(super) struct Target {
+    pub(super) config: PathBuf,
+    pub(super) host: String,
 }
 
-struct Generation {
-    name: String,
-    host: String,
-    path: PathBuf,
-    created_at: u64,
+pub(super) struct Generation {
+    pub(super) name: String,
+    pub(super) host: String,
+    pub(super) path: PathBuf,
+    pub(super) created_at: u64,
 }
 
-struct BootProfile {
-    loader: String,
-    kernel: String,
-    init: String,
-    initrd_modules: Vec<String>,
+pub(super) struct BootProfile {
+    pub(super) loader: String,
+    pub(super) kernel: String,
+    pub(super) init: String,
+    pub(super) initrd_modules: Vec<String>,
 }
 
 impl BootProfile {
-    fn to_json(&self) -> String {
+    pub(super) fn to_json(&self) -> String {
         let modules = self
             .initrd_modules
             .iter()

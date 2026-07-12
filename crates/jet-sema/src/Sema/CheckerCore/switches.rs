@@ -1,4 +1,9 @@
-use super::*;
+use crate::AST::{BinOp, Expr, Pattern, Stmt, Type};
+use crate::Diagnostics::{Diagnostic, Span, TextEdit};
+use crate::Sema::Diagnostics::{missing_arms_text, missing_pattern_coverage, pattern_variant_name};
+use crate::Sema::{Checker, LocalInfo};
+use crate::Syntax;
+use std::collections::{HashMap, HashSet};
 impl<'a> Checker<'a> {
         pub(crate) fn check_condition_with_bindings(
             &mut self,

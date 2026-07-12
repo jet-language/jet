@@ -1,4 +1,8 @@
-use super::*;
+use crate::AST::{ElseBranch, IfStmt, Stmt, Type};
+use crate::Diagnostics::{Diagnostic, Span};
+use crate::Sema::CheckerOwnership::e0141_unconsumed_branch;
+use crate::Sema::{Checker, LocalInfo};
+use std::collections::HashMap;
 impl<'a> Checker<'a> {
         pub(crate) fn check_if(&mut self, ifs: &mut IfStmt) {
             let before = self.moved.clone();

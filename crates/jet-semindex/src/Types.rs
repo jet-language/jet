@@ -101,10 +101,13 @@ pub struct SymbolDef {
     pub kind: SymbolKind,
 }
 
-/// Content-addressed, rename-safe definition identity for structural tools.
-/// `stable_id` addresses compiler-owned semantic shape; `content_id` addresses
-/// normalized source content. Human spelling remains separate so reports stay
-/// readable without making names the machine identity.
+/// Compiler-owned definition facts for conservative structural tools.
+/// `stable_id` is an ancestry-class ID: it hashes semantic ancestry and kind,
+/// not name, file, signature, or body. Same-kind siblings may intentionally
+/// collide, so consumers must require a unique remaining candidate before
+/// treating it as identity. `signature_id` classifies typed signature changes;
+/// `content_id` addresses normalized source. Human spelling remains separate
+/// so reports stay readable without making names the machine identity.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DefinitionFact {
     pub stable_id: String,

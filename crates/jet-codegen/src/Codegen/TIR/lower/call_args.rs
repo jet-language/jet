@@ -1,9 +1,7 @@
-use super::*;
-
 /// Last expression-producing statement in a lambda block (mirrors sema tail rules).
 /// Only the **final** statement may be a tail; an earlier `send()`/`call()` followed
 /// by a loop is not a tail expression.
-fn lambda_block_tail<'a>(stmts: &'a [Stmt]) -> Option<(&'a [Stmt], &'a Stmt)> {
+pub(super) fn lambda_block_tail<'a>(stmts: &'a [Stmt]) -> Option<(&'a [Stmt], &'a Stmt)> {
     let last_idx = stmts.len().checked_sub(1)?;
     let last = &stmts[last_idx];
     match last {

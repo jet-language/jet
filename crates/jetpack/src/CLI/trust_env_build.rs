@@ -1,6 +1,23 @@
+use super::package_hangar_vendor::auto_clean_after_success;
+use super::parse::{Flags, Parsed};
+use super::realize::{
+    apply_locked_channels, classify_or_report, load_project_plan, realize_adapter, realize_ref,
+    report_nix_bridge_required, realize_ref_outcome, RefOutcome, RowStyle, RunPlan,
+};
+use super::workspace_sources::{cwd_table, load_workspace};
+use crate::ModuleEval;
+use crate::Output::{self, Theme};
+use crate::Provider;
+use crate::RefSpec::{self, ProviderKind};
+use crate::RuntimePolicy;
+use crate::Shell::Env;
+use crate::Store::{self, Roots};
+use crate::Syntax;
+use crate::Trust;
+
 /// D-JPK-GRANTCMD1=A: `jet trust grant/list/explain/revoke`. Jetpack owns the
 /// store; top-level `jet trust` dispatches here.
-fn cmd_trust(theme: &Theme, parsed: &Parsed) -> i32 {
+pub(super) fn cmd_trust(theme: &Theme, parsed: &Parsed) -> i32 {
     let store = Trust::store_path();
     match parsed.positional.first().map(String::as_str) {
         Some(v) if v == Syntax::TRUST_VERB_GRANT => {
@@ -147,7 +164,7 @@ fn trust_record_matches(record: &Trust::TrustRecord, selector: &str) -> bool {
 
 /// Realize every ref in `plan` and compose the shell env (PATH dirs + prompt
 /// label). Returns an exit code after reporting if any ref fails to realize.
-fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &RunPlan) -> Result<Env, i32> {
+pub(super) fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &RunPlan) -> Result<Env, i32> {
     RuntimePolicy::enforce_sandbox_policy(theme, flags.json)?;
     let mut bin_dirs = Vec::new();
     let mut realized_refs = Vec::new();
@@ -226,7 +243,7 @@ fn name_column_width(refs: &[RefSpec::RefSpec]) -> usize {
 }
 
 /// `jetpack build [<ref>]` — realize without entering a shell.
-fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
+pub(super) fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
     let roots = Store::resolve();
     let dir = std::env::current_dir().unwrap_or_default();
     if let Err(code) = RuntimePolicy::enforce_sandbox_policy(theme, parsed.flags.json) {

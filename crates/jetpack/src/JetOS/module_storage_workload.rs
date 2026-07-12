@@ -1,4 +1,4 @@
-fn write_module_priority_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+pub(super) fn write_module_priority_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     let module_dir = dir.join("module-system");
     fs::create_dir_all(&module_dir)?;
     let mut keys = system
@@ -32,7 +32,7 @@ fn write_module_priority_facts(dir: &Path, system: &SystemPlan) -> std::io::Resu
     )
 }
 
-fn write_storage_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+pub(super) fn write_storage_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     let storage_dir = dir.join("storage");
     let bin_dir = dir.join("sw/bin");
     fs::create_dir_all(&storage_dir)?;
@@ -111,7 +111,7 @@ fn write_storage_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     make_executable(&persist_path)
 }
 
-fn write_workload_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+pub(super) fn write_workload_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     let workloads_dir = dir.join("workloads");
     let unit_dir = dir.join("etc/systemd/system");
     fs::create_dir_all(&workloads_dir)?;

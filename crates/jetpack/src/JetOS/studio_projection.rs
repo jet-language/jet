@@ -1,4 +1,4 @@
-fn write_studio_app_projection(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+pub(super) fn write_studio_app_projection(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     let studio_dir = dir.join("studio");
     let bin_dir = dir.join("sw/bin");
     let desktop_dir = dir.join("share/applications");
@@ -743,7 +743,7 @@ fn html_escape(value: &str) -> String {
 }
 
 #[cfg(unix)]
-fn make_executable(path: &Path) -> std::io::Result<()> {
+pub(super) fn make_executable(path: &Path) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     let mut perms = fs::metadata(path)?.permissions();
     perms.set_mode(perms.mode() | 0o111);
@@ -751,6 +751,6 @@ fn make_executable(path: &Path) -> std::io::Result<()> {
 }
 
 #[cfg(not(unix))]
-fn make_executable(_path: &Path) -> std::io::Result<()> {
+pub(super) fn make_executable(_path: &Path) -> std::io::Result<()> {
     Ok(())
 }

@@ -1,5 +1,3 @@
-use super::*;
-
 /// c109 Phase 10: is a core/stdlib call `(module, method)` one the TIR lowers? The
 /// covered set is exactly the **type-monomorphic** core calls — those whose full
 /// signature (param conventions + return type) is fixed by `Sema::core_fixed_sig`.
@@ -153,7 +151,7 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     crate::Sema::core_fixed_sig(module, method).is_some()
 }
 
-fn core_call_args_in_subset(
+pub(super) fn core_call_args_in_subset(
     module: &str,
     method: &str,
     args: &[crate::AST::CallArg],

@@ -1,4 +1,7 @@
-use super::*;
+use crate::AST::{Call, Expr, Type};
+use crate::Diagnostics::{Diagnostic, Span};
+use crate::Sema::Checker;
+use crate::Sema::Diagnostics::type_fix_hint;
 use super::helpers::e1313;
 impl<'a> Checker<'a> {
         /// D-ANY-JAI1/D-VARARGBOUND1 (c7jaiany): check each trait-bounded variadic

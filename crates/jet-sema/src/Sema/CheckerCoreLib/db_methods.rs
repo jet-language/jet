@@ -1,4 +1,10 @@
-use super::*;
+use crate::AST::Type;
+use crate::Diagnostics::Span;
+use crate::Sema::Checker;
+use crate::Sema::Effects::Effect;
+use crate::Syntax;
+use super::alloc_ptrs::{db_error_ty, db_row_ty, result_ty};
+use super::serde_diags::wrong_core_arity;
 impl<'a> Checker<'a> {
         /// D-DBDRIVER1: `(sql: String, params: [DbValue])` argument elaboration shared
         /// by `.query`/`.query_one`/`.execute` — SQL text plus a separate bind list,

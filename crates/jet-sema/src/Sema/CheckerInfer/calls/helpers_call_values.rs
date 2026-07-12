@@ -1,4 +1,7 @@
-use super::*;
+use crate::AST::{AccessConvention, Expr, StrPart, Type};
+use crate::Diagnostics::{Diagnostic, Span};
+use crate::Sema::Checker;
+use crate::Sema::Diagnostics::type_fix_hint;
 impl<'a> Checker<'a> {
         pub(super) fn synthesized_string_arg(value: String, span: Span) -> crate::AST::CallArg {
             crate::AST::CallArg {

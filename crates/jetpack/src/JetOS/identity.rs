@@ -3,7 +3,7 @@ const JETOS_RELEASE_CODENAME: &str = "Apex";
 const JETOS_RELEASE_CODENAME_ID: &str = "apex";
 const JETOS_WALLPAPER_SVG: &str = include_str!("assets/apex-wallpaper.svg");
 
-fn jetos_release_label(prerelease: bool) -> String {
+pub(super) fn jetos_release_label(prerelease: bool) -> String {
     let suffix = if prerelease { "-pre" } else { "" };
     format!(
         "jetos {}{} ({})",
@@ -11,7 +11,7 @@ fn jetos_release_label(prerelease: bool) -> String {
     )
 }
 
-fn render_jetos_os_release(prerelease: bool) -> String {
+pub(super) fn render_jetos_os_release(prerelease: bool) -> String {
     let suffix = if prerelease { "-pre" } else { "" };
     format!(
         "NAME=jetos\nID=jetos\nVERSION=\"{}{} ({})\"\nVERSION_ID={}{}\nVERSION_CODENAME={}\nPRETTY_NAME=\"{}\"\nHOME_URL=\"https://jet.dev/jetos\"\n",
@@ -25,7 +25,7 @@ fn render_jetos_os_release(prerelease: bool) -> String {
     )
 }
 
-fn write_jetos_identity_assets(dir: &Path) -> std::io::Result<()> {
+pub(super) fn write_jetos_identity_assets(dir: &Path) -> std::io::Result<()> {
     let backgrounds = dir.join("share/backgrounds/jetos");
     fs::create_dir_all(&backgrounds)?;
     fs::write(backgrounds.join("apex.svg"), JETOS_WALLPAPER_SVG)

@@ -1,4 +1,7 @@
-use super::*;
+use crate::AST::Type;
+use crate::Diagnostics::Span;
+use crate::Sema::Checker;
+use super::serde_diags::reactive_bad_value_type;
 impl<'a> Checker<'a> {
         /// D-REACT1=B: a reactive `Signal<T>`/`Derived<T>` holds ordinary data that can
         /// be cloned to its dependents. Reject a function-typed value (E2913); everything

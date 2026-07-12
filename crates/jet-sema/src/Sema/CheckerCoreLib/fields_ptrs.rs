@@ -1,4 +1,9 @@
-use super::*;
+use crate::AST::{Expr, Type};
+use crate::Diagnostics::{Diagnostic, Span};
+use crate::Sema::Checker;
+use crate::Syntax;
+use super::alloc_ptrs::{e3101, ptr_type};
+use super::serde_diags::unknown_core_item;
 impl<'a> Checker<'a> {
         pub(crate) fn infer_core_field(
             &mut self,

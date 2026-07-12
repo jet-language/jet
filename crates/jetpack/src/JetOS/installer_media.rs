@@ -1,4 +1,4 @@
-fn write_installer_media(
+pub(super) fn write_installer_media(
     gen: &Generation,
     system: &SystemPlan,
     disk: &str,
@@ -115,7 +115,7 @@ fn write_installer_media(
     Ok(proof)
 }
 
-fn copy_generation_payload_deref(src: &Path, dst: &Path) -> std::io::Result<()> {
+pub(super) fn copy_generation_payload_deref(src: &Path, dst: &Path) -> std::io::Result<()> {
     fs::create_dir_all(dst)?;
     let mut entries = fs::read_dir(src)?
         .filter_map(Result::ok)
@@ -184,7 +184,7 @@ fn copy_initrd_runtime_filtered(src: &Path, dst: &Path) -> std::io::Result<()> {
     copy_runtime_file_filtered(src, dst)
 }
 
-fn write_image_variant_artifacts(
+pub(super) fn write_image_variant_artifacts(
     gen: &Generation,
     system: &SystemPlan,
 ) -> std::io::Result<PathBuf> {
@@ -349,7 +349,7 @@ fn sha256_file_or_marker(path: &Path) -> String {
         .unwrap_or_else(|_| "<unreadable>".to_string())
 }
 
-fn render_installer_script(system: &SystemPlan, gen: &Generation) -> String {
+pub(super) fn render_installer_script(system: &SystemPlan, gen: &Generation) -> String {
     format!(
         r#"#!/bin/sh
 set -eu
@@ -468,7 +468,7 @@ poweroff -f 2>/dev/null || halt -f 2>/dev/null || exit 0
     )
 }
 
-fn render_installed_limine_conf(system: &SystemPlan, gen: &Generation) -> String {
+pub(super) fn render_installed_limine_conf(system: &SystemPlan, gen: &Generation) -> String {
     format!(
         "timeout: 1\nserial: yes\ngraphics: no\nverbose: yes\n/{release} — {host} verify\n    protocol: linux\n    kernel_path: boot():/boot/kernel\n    module_path: boot():/boot/initrd\n    textmode: yes\n    cmdline: console=ttyS0 rdinit=/jetos/init init=/jetos/init jetos.mode=verify jetos.host={host} jetos.generation={generation} root=LABEL=jetos-root rw\n",
         release = jetos_release_label(false),
@@ -477,7 +477,7 @@ fn render_installed_limine_conf(system: &SystemPlan, gen: &Generation) -> String
     )
 }
 
-fn render_installer_limine_conf(system: &SystemPlan, gen: &Generation, disk: &str) -> String {
+pub(super) fn render_installer_limine_conf(system: &SystemPlan, gen: &Generation, disk: &str) -> String {
     let disk = if disk.starts_with("/dev/") {
         disk.to_string()
     } else {
@@ -491,7 +491,7 @@ fn render_installer_limine_conf(system: &SystemPlan, gen: &Generation, disk: &st
     )
 }
 
-fn render_guest_verify_script(system: &SystemPlan, gen: &Generation) -> String {
+pub(super) fn render_guest_verify_script(system: &SystemPlan, gen: &Generation) -> String {
     let services = system
         .services
         .iter()

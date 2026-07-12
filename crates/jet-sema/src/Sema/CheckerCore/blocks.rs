@@ -1,4 +1,6 @@
-use super::*;
+use crate::AST::Stmt;
+use crate::Sema::Captures::stmt_refs_name;
+use crate::Sema::Checker;
 impl<'a> Checker<'a> {
         // --- statements -----------------------------------------------------
     

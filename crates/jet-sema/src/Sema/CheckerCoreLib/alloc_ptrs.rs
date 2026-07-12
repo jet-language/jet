@@ -1,4 +1,8 @@
-use super::*;
+use crate::AST::Type;
+use crate::Diagnostics::{Diagnostic, Span};
+use crate::Syntax;
+use super::core_types::unit_ty;
+
 /// D-ALLOC1/D-ALLOC-C/D-ALLOC-D (ratified 2026-06-19): method calls on the four
 /// allocator opaque types (Arena, Bump, Pool, Fixed).
 /// Returns `Some(Some(T))` for a valid method with return type T, `Some(None)` for

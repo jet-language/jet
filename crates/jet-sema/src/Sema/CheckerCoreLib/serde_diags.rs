@@ -1,4 +1,11 @@
-use super::*;
+use crate::AST::{Expr, Type};
+use crate::Diagnostics::{Diagnostic, Span};
+use crate::Sema::Diagnostics::suggest_field;
+use crate::Syntax;
+use crate::Traits::TraitRegistry;
+use super::core_types::is_json_type_name;
+use super::module_items::core_module_items;
+
 /// E2-M15: modules that require an OS and are forbidden in `--freestanding` builds.
 pub(crate) fn is_freestanding_forbidden(module: &str) -> bool {
     matches!(

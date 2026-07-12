@@ -1,5 +1,3 @@
-use super::*;
-
 /// Per-function lowering environment: a local name -> (Rust place string, type).
 /// Built from params, extended by `let` bindings. The "place" already accounts
 /// for parameter deref, so `Local` emission needs no further resolution.
@@ -15,18 +13,18 @@ use super::*;
 /// partiality where it is load-bearing" lesson, again).
 
 pub(crate) struct LowerEnv {
-    locals: HashMap<String, (String, Option<Type>)>,
+    pub(super) locals: HashMap<String, (String, Option<Type>)>,
     /// c109 Phase 8: the enclosing function's unmangled Jet name, used by a `?`
     /// (`TExprKind::Try`) to embed the trace-frame function name — exactly the value
     /// the AST path reads from `cx.current_fn` at emit time (set to `f.name`).
-    fn_name: String,
+    pub(super) fn_name: String,
     /// D-FIELDPOL1: the owning struct name when lowering an inherent/trait
     /// method (`None` for a free function). `self`'s own env type is
     /// deliberately `None` (see `bind` above), so a `self.field` read can't
     /// resolve its receiver struct through `recv.ty` the way `x.field` does —
     /// this is the one place that struct name is available, used only to
     /// check `cx.computed_fields` (whether `self.field` needs a getter call).
-    self_owner: Option<String>,
+    pub(super) self_owner: Option<String>,
     /// D-MEM1 stage S5: names bound by a `Binding.string_view` init — the Rust
     /// place is a plain `&str` (not the `String` its `Type::String` would
     /// ordinarily lower to). Consulted only by `Expr::Copy` lowering, which
@@ -34,12 +32,12 @@ pub(crate) struct LowerEnv {
     /// the ordinary `.clone()` (which on a `&str` would just hand back
     /// another `&str` — the wrong Rust type for a `copy` result that needs to
     /// escape the view's scope).
-    string_view_locals: HashSet<String>,
+    pub(super) string_view_locals: HashSet<String>,
 }
 
 impl LowerEnv {
     /// A fresh root env for a function/method body.
-    fn new(fn_name: String) -> LowerEnv {
+    pub(super) fn new(fn_name: String) -> LowerEnv {
         LowerEnv {
             locals: HashMap::new(),
             fn_name,
@@ -48,38 +46,38 @@ impl LowerEnv {
         }
     }
     /// D-MEM1 stage S5: mark `name` as a string-view local (see `string_view_locals`).
-    fn mark_string_view(&mut self, name: &str) {
+    pub(super) fn mark_string_view(&mut self, name: &str) {
         self.string_view_locals.insert(name.to_string());
     }
     /// D-MEM1 stage S5: true if `name` is a live string-view local.
-    fn is_string_view_local(&self, name: &str) -> bool {
+    pub(super) fn is_string_view_local(&self, name: &str) -> bool {
         self.string_view_locals.contains(name)
     }
     /// Bind `name` to its resolved Rust place + type. The same lexical map drives
     /// expression resolution and rich-panic locals, so an out-of-scope branch binding
     /// can never be captured in generated Rust.
-    fn bind(&mut self, name: &str, place: String, ty: Option<Type>) {
+    pub(super) fn bind(&mut self, name: &str, place: String, ty: Option<Type>) {
         self.locals.insert(name.to_string(), (place, ty));
     }
-    fn place_of(&self, name: &str) -> String {
+    pub(super) fn place_of(&self, name: &str) -> String {
         match self.locals.get(name) {
             Some((place, _)) => place.clone(),
             None => mangle(name),
         }
     }
-    fn ty_of(&self, name: &str) -> Option<Type> {
+    pub(super) fn ty_of(&self, name: &str) -> Option<Type> {
         self.locals.get(name).and_then(|(_, t)| t.clone())
     }
     /// c109 Phase 4: a name reads as a borrow when its resolved place is a deref
     /// (`(*name)`) — a by-reference parameter slot. The match lowering clones such
     /// a subject so the `match` owns the value, mirroring `emit_pattern_match_switch`.
-    fn is_borrowed(&self, name: &str) -> bool {
+    pub(super) fn is_borrowed(&self, name: &str) -> bool {
         matches!(self.locals.get(name), Some((place, _)) if place.starts_with("(*"))
     }
     /// The bare Rust binding name (without the deref wrapper), e.g. `user_light`
     /// for a slot whose place is `(*user_light)`. Used by the match-subject clone,
     /// which clones the borrow itself (`(user_light).clone()`), not `(*user_light)`.
-    fn rust_name_of(&self, name: &str) -> String {
+    pub(super) fn rust_name_of(&self, name: &str) -> String {
         match self.locals.get(name) {
             Some((place, _)) if place.starts_with("(*") && place.ends_with(')') => {
                 place[2..place.len() - 1].to_string()
@@ -92,7 +90,7 @@ impl LowerEnv {
 
 /// D-DOTSCOPE1: fold a `.timeout(<dur>)` argument (a bare unit literal, sema-
 /// validated) to a nanosecond budget. Falls back to 0 on the impossible shape.
-fn timeout_nanos(args: &[Expr]) -> u64 {
+pub(super) fn timeout_nanos(args: &[Expr]) -> u64 {
     if let Some(Expr::UnitLit {
         int, float, suffix, ..
     }) = args.first()
@@ -123,7 +121,7 @@ fn timeout_nanos(args: &[Expr]) -> u64 {
 /// `&self` method call (no assignment) or a deep alias is the documented deferred
 /// corner (D-TXN-ROLLBACK). This is a syntactic over-approximation filtered by the
 /// caller to roots in scope at block entry.
-fn collect_txn_mut_roots(body: &[Stmt], out: &mut Vec<String>) {
+pub(super) fn collect_txn_mut_roots(body: &[Stmt], out: &mut Vec<String>) {
     fn push(out: &mut Vec<String>, name: &str) {
         if !out.iter().any(|n| n == name) {
             out.push(name.to_string());

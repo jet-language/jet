@@ -1,5 +1,3 @@
-use super::*;
-
 /// Conservative structural test: `true` only if `f` is a top-level plain
 /// function whose entire body is inside the Phase-1 subset. The rule is
 /// **exclude on any doubt** — a false negative just keeps the function on the

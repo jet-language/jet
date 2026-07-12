@@ -1,4 +1,8 @@
-use super::*;
+use crate::AST::{Expr, IncDecOp, LValue, Type};
+use crate::Diagnostics::{Diagnostic, Span};
+use crate::Sema::Diagnostics::{computed_field_not_settable, edit_distance, expr_root_ident, is_task_type};
+use crate::Sema::{Checker, LocalInfo};
+use crate::Syntax;
 impl<'a> Checker<'a> {
         /// Declare one name bound by a destructuring pattern (S74).
         pub(crate) fn declare_bound(&mut self, name: &str, span: Span, ty: Type, mutable: bool) {

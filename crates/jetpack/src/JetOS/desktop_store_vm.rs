@@ -1,4 +1,4 @@
-fn write_acceptance_fixture(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+pub(super) fn write_acceptance_fixture(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     let acceptance_dir = dir.join("acceptance");
     let bin_dir = dir.join("sw/bin");
     fs::create_dir_all(&acceptance_dir)?;
@@ -148,7 +148,7 @@ fn write_acceptance_fixture(dir: &Path, system: &SystemPlan) -> std::io::Result<
     make_executable(&prove_path)
 }
 
-fn write_desktop_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+pub(super) fn write_desktop_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     let desktop_dir = dir.join("desktop");
     let bin_dir = dir.join("sw/bin");
     let session_dir = dir.join("share/wayland-sessions");
@@ -386,7 +386,7 @@ fn write_desktop_breadth(dir: &Path, system: &SystemPlan) -> std::io::Result<()>
     )
 }
 
-fn write_store_cache_facts(dir: &Path, realized: &[RealizedPackage]) -> std::io::Result<()> {
+pub(super) fn write_store_cache_facts(dir: &Path, realized: &[RealizedPackage]) -> std::io::Result<()> {
     let store_dir = dir.join("store");
     fs::create_dir_all(&store_dir)?;
     let entries = realized
@@ -410,7 +410,7 @@ fn write_store_cache_facts(dir: &Path, realized: &[RealizedPackage]) -> std::io:
     )
 }
 
-fn write_compat_escape_hatches(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+pub(super) fn write_compat_escape_hatches(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     let compat_dir = dir.join("compat");
     fs::create_dir_all(&compat_dir)?;
     fs::write(
@@ -419,7 +419,7 @@ fn write_compat_escape_hatches(dir: &Path, system: &SystemPlan) -> std::io::Resu
     )
 }
 
-fn write_vm_proof(dir: &Path, system: &SystemPlan, plan_text: &str) -> std::io::Result<()> {
+pub(super) fn write_vm_proof(dir: &Path, system: &SystemPlan, plan_text: &str) -> std::io::Result<()> {
     let risks = risk_classes(system);
     if risks.is_empty() {
         let _ = fs::remove_file(dir.join("vm-proof.txt"));
@@ -447,7 +447,7 @@ fn write_vm_proof(dir: &Path, system: &SystemPlan, plan_text: &str) -> std::io::
     fs::write(dir.join("vm-proof.txt"), proof)
 }
 
-fn missing_vm_tools() -> Vec<String> {
+pub(super) fn missing_vm_tools() -> Vec<String> {
     VM_TOOLS
         .iter()
         .filter(|tool| find_path_tool_in_path(tool).is_none())
@@ -468,7 +468,7 @@ fn find_path_tool_in_path(name: &str) -> Option<PathBuf> {
     None
 }
 
-fn find_path_tool(name: &str) -> Option<PathBuf> {
+pub(super) fn find_path_tool(name: &str) -> Option<PathBuf> {
     if let Some(found) = find_path_tool_in_path(name) {
         return Some(found);
     }

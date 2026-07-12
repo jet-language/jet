@@ -1,5 +1,3 @@
-use super::*;
-
 fn tuple_fields(ty: Option<&Type>) -> Option<Vec<(String, Type)>> {
     match ty {
         Some(Type::Tuple(fields)) => Some(
@@ -58,7 +56,7 @@ pub(crate) fn pool_field_ty_hint(e: &Expr, cx: &Cx, env: &LowerEnv) -> Option<Ty
 /// somewhere the result isn't scope-tracked. `ty` stays `Type::String` (Jet
 /// has one string type end to end — D-MEM1 gallery); only the generated Rust
 /// text is a borrow, not the Jet-level type.
-fn lower_string_view_init(init: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
+pub(super) fn lower_string_view_init(init: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
     let Expr::MethodCall {
         receiver,
         method,

@@ -1,4 +1,4 @@
-struct NixosImportArgs {
+pub(super) struct NixosImportArgs {
     source: PathBuf,
     host: Option<String>,
     users: Vec<String>,
@@ -7,7 +7,7 @@ struct NixosImportArgs {
     facts_only: bool,
 }
 
-struct NixosImportPlan {
+pub(super) struct NixosImportPlan {
     source: PathBuf,
     mode: &'static str,
     host: String,
@@ -29,7 +29,7 @@ struct NixosImportPlan {
     omissions: Vec<String>,
 }
 
-struct NixosImportUser {
+pub(super) struct NixosImportUser {
     name: String,
     home: Option<String>,
     groups: Vec<String>,
@@ -40,7 +40,7 @@ struct NixosImportUser {
     home_manager: bool,
 }
 
-fn cmd_import(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
+pub(super) fn cmd_import(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
     let Some(mut import_args) = parse_nixos_import_args(theme, args) else {
         return 2;
     };
@@ -344,7 +344,7 @@ fn import_plan_from_scan(args: &NixosImportArgs) -> Result<NixosImportPlan, Stri
     })
 }
 
-fn import_json_string(
+pub(super) fn import_json_string(
     root: &std::collections::BTreeMap<String, JSON::Json>,
     key: &str,
 ) -> Option<String> {
@@ -353,7 +353,7 @@ fn import_json_string(
         .map(str::to_string)
 }
 
-fn import_json_string_array(
+pub(super) fn import_json_string_array(
     root: &std::collections::BTreeMap<String, JSON::Json>,
     key: &str,
 ) -> Vec<String> {
@@ -368,7 +368,7 @@ fn import_json_string_array(
         .unwrap_or_default()
 }
 
-fn import_package_list(
+pub(super) fn import_package_list(
     root: &std::collections::BTreeMap<String, JSON::Json>,
     key: &str,
 ) -> (Vec<String>, Vec<String>) {
@@ -441,7 +441,7 @@ fn import_json_users(
     Ok(users)
 }
 
-fn scan_first_nixos_host(text: &str) -> Option<String> {
+pub(super) fn scan_first_nixos_host(text: &str) -> Option<String> {
     for marker in ["nixosConfigurations.", "nixosConfigurations = {"] {
         if let Some(pos) = text.find(marker) {
             let rest = &text[pos + marker.len()..];
@@ -673,11 +673,11 @@ fn import_render_json_for_audit(value: &JSON::Json) -> String {
     }
 }
 
-fn import_render_string(value: &str) -> String {
+pub(super) fn import_render_string(value: &str) -> String {
     JSON::quote(value)
 }
 
-fn import_json_array(values: &[String]) -> String {
+pub(super) fn import_json_array(values: &[String]) -> String {
     let parts = values
         .iter()
         .map(|value| JSON::quote(value))
@@ -686,7 +686,7 @@ fn import_json_array(values: &[String]) -> String {
     format!("[{parts}]")
 }
 
-fn import_is_ident(value: &str) -> bool {
+pub(super) fn import_is_ident(value: &str) -> bool {
     let mut chars = value.chars();
     matches!(chars.next(), Some(c) if c == '_' || c.is_ascii_alphabetic())
         && chars.all(|c| c == '_' || c.is_ascii_alphanumeric())

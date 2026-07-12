@@ -52,7 +52,7 @@ use CmdSemIndex::run_semindex;
 use CmdSupply::{
     run_audit, run_key_backup, run_keygen, run_publish, run_sbom, run_vendor, run_yank,
 };
-use CmdStructuralMerge::{run_diff, run_merge};
+use CmdStructuralMerge::{run_diff, run_merge, structural_help};
 
 /// How diagnostics should be presented this run, resolved once from flags +
 /// environment and threaded through the diagnostic-printing helpers.
@@ -945,6 +945,10 @@ fn main() {
         "diff" => { run_diff(&raw); return; }
         "merge" => { run_merge(&raw); return; }
         "help" => {
+            if let Some(help) = raw.get(1).and_then(|command| structural_help(command)) {
+                print!("{help}");
+                exit(ExitCodes::OK);
+            }
             print!("{}", usage());
             exit(ExitCodes::OK);
         }

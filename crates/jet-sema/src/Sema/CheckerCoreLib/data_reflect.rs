@@ -1,4 +1,5 @@
-use super::*;
+use crate::AST::Type;
+
 /// D-SERDE-ACCESS=B + D-SERDE14=A: accessor methods on `DataTree`. Every read
 /// yields `T ? DecodeError` (was `? String`) so a `?` chain composes with no
 /// mapping ceremony inside a hand `decode`; the accessor auto-fills

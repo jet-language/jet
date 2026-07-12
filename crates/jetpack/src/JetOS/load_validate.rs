@@ -1,4 +1,4 @@
-fn parse_target_or_report(theme: &Theme, raw: Option<&str>) -> Option<Target> {
+pub(super) fn parse_target_or_report(theme: &Theme, raw: Option<&str>) -> Option<Target> {
     let raw = raw.unwrap_or("");
     if raw.trim().is_empty() {
         theme.error_coded(
@@ -40,7 +40,7 @@ fn parse_target_or_report(theme: &Theme, raw: Option<&str>) -> Option<Target> {
     })
 }
 
-fn load_target(theme: &Theme, target: &Target) -> Option<(EnvPlan, SystemPlan)> {
+pub(super) fn load_target(theme: &Theme, target: &Target) -> Option<(EnvPlan, SystemPlan)> {
     let plan = load_plan(theme, target)?;
     let Some(system) = plan.systems.iter().find(|s| s.name == target.host).cloned() else {
         let mut systems: Vec<String> = plan.systems.iter().map(|s| s.name.clone()).collect();
@@ -64,7 +64,7 @@ fn load_target(theme: &Theme, target: &Target) -> Option<(EnvPlan, SystemPlan)> 
     Some((plan, system))
 }
 
-fn load_user_profile_target(
+pub(super) fn load_user_profile_target(
     theme: &Theme,
     target: &Target,
     user: &str,
@@ -97,7 +97,7 @@ fn load_user_profile_target(
     Some((plan, system))
 }
 
-fn load_plan(theme: &Theme, target: &Target) -> Option<EnvPlan> {
+pub(super) fn load_plan(theme: &Theme, target: &Target) -> Option<EnvPlan> {
     let src = match fs::read_to_string(&target.config) {
         Ok(src) => src,
         Err(_) => {
@@ -135,7 +135,7 @@ fn load_plan(theme: &Theme, target: &Target) -> Option<EnvPlan> {
     Some(plan)
 }
 
-fn validate_system_options(theme: &Theme, system: &SystemPlan) -> bool {
+pub(super) fn validate_system_options(theme: &Theme, system: &SystemPlan) -> bool {
     if let Some(bad) = system.options.iter().find(|o| {
         let ns = o.key.split('.').next().unwrap_or("");
         !Syntax::OS_OPTION_NAMESPACES.contains(&ns)

@@ -1,4 +1,9 @@
-use super::*;
+use crate::Diagnostics::{Diagnostic, Span};
+use crate::Sema::Checker;
+use crate::Sema::Diagnostics::suggest_field;
+use crate::Syntax;
+use crate::AST::Type;
+use super::core_types::json_ty;
 impl<'a> Checker<'a> {
         pub(crate) fn check_core_json_lit(
             &mut self,

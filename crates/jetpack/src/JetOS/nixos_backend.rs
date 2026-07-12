@@ -29,7 +29,7 @@ struct NixosMapping {
     desktop_shell_process: String,
 }
 
-fn nixos_backend_dir(host: &str) -> PathBuf {
+pub(super) fn nixos_backend_dir(host: &str) -> PathBuf {
     systems_dir().join("backend").join(host)
 }
 
@@ -109,7 +109,7 @@ fn nixpkgs_pin(table: &RefSpec::SourceTable) -> Option<(String, String, String)>
         .find_map(|(_, upstream, _)| nixpkgs_owner_repo_rev(&upstream))
 }
 
-fn is_nixpkgs_source(source: &RefSpec::Source, table: &RefSpec::SourceTable) -> bool {
+pub(super) fn is_nixpkgs_source(source: &RefSpec::Source, table: &RefSpec::SourceTable) -> bool {
     match source {
         RefSpec::Source::Nixpkgs => true,
         RefSpec::Source::Named(name) => table
@@ -909,7 +909,7 @@ fn qemu_interactive_real_run_command(disk: &str, ovmf_code: &Path, ovmf_vars: &P
 /// Running a VM is never gated on a proof (owner decree, card #363,
 /// 2026-07-09): a disk that doesn't boot is its own answer. `prove` remains
 /// the formal acceptance gate.
-fn cmd_vm_run_or_build(
+pub(super) fn cmd_vm_run_or_build(
     theme: &Theme,
     table: &RefSpec::SourceTable,
     system: &SystemPlan,
@@ -1076,7 +1076,7 @@ fn write_real_tier_plan(
     Ok(path)
 }
 
-fn real_tier_proof_marker_path(disk: &str) -> PathBuf {
+pub(super) fn real_tier_proof_marker_path(disk: &str) -> PathBuf {
     PathBuf::from(format!("{disk}.jetos-real-proof.json"))
 }
 
@@ -1085,7 +1085,7 @@ fn real_tier_proof_marker_path(disk: &str) -> PathBuf {
 /// caller). Never exercised end-to-end by the test suite (no test may invoke
 /// real `nix build`/`qemu`) — codegen + planning above this point is what
 /// tests snapshot.
-fn cmd_vm_prove_real(
+pub(super) fn cmd_vm_prove_real(
     theme: &Theme,
     gen: &Generation,
     table: &RefSpec::SourceTable,

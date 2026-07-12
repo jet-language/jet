@@ -1,4 +1,4 @@
-fn run_kernel_bootstrap_builder(
+pub(super) fn run_kernel_bootstrap_builder(
     theme: &Theme,
     boot: &BootProfile,
     realized: &mut [RealizedPackage],
@@ -160,7 +160,7 @@ fn first_existing_path(paths: &[&str]) -> Option<PathBuf> {
         .find(|path| path.exists())
 }
 
-fn validate_boot_payloads(
+pub(super) fn validate_boot_payloads(
     theme: &Theme,
     boot: &BootProfile,
     realized: &[RealizedPackage],

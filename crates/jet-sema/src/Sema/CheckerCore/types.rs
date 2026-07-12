@@ -1,4 +1,7 @@
-use super::*;
+use crate::AST::Type;
+use crate::Generics::substitute_type;
+use crate::Sema::Checker;
+use std::collections::HashMap;
 impl<'a> Checker<'a> {
         pub(crate) fn resolve_type(&self, ty: Type) -> Type {
             match ty {

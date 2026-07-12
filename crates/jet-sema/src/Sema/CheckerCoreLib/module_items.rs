@@ -1,4 +1,5 @@
-use super::*;
+use crate::Syntax;
+
 pub(crate) fn core_module_items(module: &str) -> Vec<String> {
     let normalized_module =
         Syntax::normalize_core_module(module).unwrap_or_else(|| module.to_string());

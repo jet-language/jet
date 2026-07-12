@@ -1,4 +1,8 @@
-use super::*;
+use crate::AST::{AccessConvention, BindPattern, Binding, CallArg, Expr, MetaAttr, MetaField, StrPart, Type};
+use crate::Diagnostics::Diagnostic;
+use crate::Sema::Diagnostics::{edit_distance, is_cloneable, is_task_type, type_fix_hint};
+use crate::Sema::{Checker, LocalInfo};
+use crate::Syntax;
 use super::helpers::is_pod_uninit_type;
 pub(crate) fn check_meta_attr_fields(meta: &MetaAttr) -> Vec<Diagnostic> {
     let mut diags = Vec::new();

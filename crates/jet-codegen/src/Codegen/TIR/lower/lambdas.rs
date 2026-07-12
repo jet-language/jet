@@ -1,5 +1,3 @@
-use super::*;
-
 /// c109 Phase 11: lower a lambda/closure literal (`Expr::Lambda`) to a `TLambda`,
 /// reproducing `emit_lambda` (Source/Codegen/Expression.rs) byte-for-byte. Every
 /// capture/escape/Fn-vs-FnMut decision is the TOTAL `Lambda.meta` fact — no capture
@@ -225,7 +223,7 @@ pub(crate) fn render_spawn_lambda(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Stri
 /// Render a `#Reactive { … }` block as a `move || { … }` closure for
 /// `jet_reactive_effect`. Outer locals read inside the block are cloned into
 /// `_jet_cap_*` bindings (byte-for-byte the stored-lambda capture prelude).
-fn render_reactive_block_closure(stmts: &[Stmt], cx: &Cx, outer_env: &LowerEnv) -> String {
+pub(super) fn render_reactive_block_closure(stmts: &[Stmt], cx: &Cx, outer_env: &LowerEnv) -> String {
     let reads = crate::Sema::block_free_var_reads(stmts);
     let mut caps: Vec<String> = reads
         .into_iter()

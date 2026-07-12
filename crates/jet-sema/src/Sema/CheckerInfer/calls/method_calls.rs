@@ -1,4 +1,31 @@
-use super::*;
+use crate::AST::{AccessConvention, EnumLitArg, Expr, Type};
+use crate::Collections;
+use crate::Diagnostics::{Diagnostic, Span};
+use crate::Generics::e0901;
+use crate::Sema::Checker;
+use crate::Sema::CheckerCoreLib::{
+    alloc_method_return, args_spec_method_return, binary_reader_method_return,
+    civil_time_method_return, data_renamed_to_datatree, datatree_method_return,
+    devserver_method_return, db_value_method_return, e3104, expiring_method_return,
+    file_handle_method_return, gc_method_return, http_type_method_return, is_db_value_type_name,
+    is_gc_type, is_json_type_name, is_layout_axis_type, is_layout_type, is_math_type,
+    is_polymorphic_core_special, is_reflect_type_name, is_simd_lane_type, json_ty,
+    layout_method_arg_ty, layout_method_return, loadable_method_return, math_method_arg_ty,
+    math_method_return, math_scalar_ty, math_static_arg_ty, math_static_return,
+    net_method_return, parsed_args_method_return, path_method_return,
+    process_child_method_return, process_spec_method_return, process_stdin_method_return,
+    process_stream_method_return, reflect_method_return, regex_method_return, result_ty,
+    rotting_method_return, simd_reduce_markers, sketch_method_return, sketch_type_name,
+    text_cursor_method_return, u8_ty, ui_backend_method_return, unit_ty, url_mime_method_return,
+    wrong_core_arity,
+};
+use crate::Sema::CheckerInfer::contains_tuple_type;
+use crate::Sema::Diagnostics::{
+    aliasing_while_mut, builtin_type_from_ident, collection_changed_in_loop, expr_root_ident,
+    type_is_copy,
+};
+use crate::Sema::Effects::Effect;
+use crate::Syntax;
 impl<'a> Checker<'a> {
         pub(crate) fn infer_method_call(
             &mut self,
