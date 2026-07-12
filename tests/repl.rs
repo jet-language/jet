@@ -308,6 +308,33 @@ fn repl_raw_multiline_redraw_keeps_second_line_editable() {
     assert!(out.contains("12 : Int"), "edited multiline input was wrong: {out:?}");
 }
 
+#[cfg(unix)]
+#[test]
+fn repl_raw_narrow_soft_wrap_keeps_cursor_delete_and_redraw_aligned() {
+    use std::process::Command;
+    let shell = r#"
+{
+  sleep 0.2
+  printf '10 + 20 + 30 + 49'
+  sleep 0.15
+  printf '\033[D\033[3~\r'
+  sleep 0.2
+  printf ':quit\r'
+} | timeout 8s script -qec 'stty cols 20; "$JET_REPL_BIN" repl' /dev/null
+"#;
+    let output = Command::new("sh")
+        .args(["-c", shell])
+        .env("JET_REPL_BIN", env!("CARGO_BIN_EXE_jet"))
+        .env("JET_REPL_HISTORY", "off")
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run narrow raw REPL under PTY");
+    let out = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "PTY status: {:?}\n{out}", output.status);
+    assert!(out.contains("\x1b[1A"), "soft-wrap redraw never moved to prior physical row: {out:?}");
+    assert!(out.contains("64 : Int"), "cursor/delete changed wrapped input incorrectly: {out:?}");
+}
+
 #[test]
 fn repl_cooked_keeps_bracket_balance_continuation() {
     use std::io::Write as _;

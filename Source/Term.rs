@@ -229,6 +229,7 @@ impl<R: Read> KeyReader<R> {
 pub fn terminal_width() -> usize {
     Command::new("stty")
         .arg("size")
+        .stdin(Stdio::inherit())
         .output()
         .ok()
         .filter(|o| o.status.success())

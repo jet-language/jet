@@ -495,11 +495,12 @@ fn line_col(src: &str, offset: usize) -> (usize, usize) {
 
 /// Terminal display width of a string (std-only, invariant I6): combining
 /// marks take no column; East Asian wide/fullwidth chars and emoji take two.
-fn display_width(s: &str) -> usize {
-    s.chars().map(char_width).sum()
+pub fn display_width(s: &str) -> usize {
+    s.chars().map(display_char_width).sum()
 }
 
-fn char_width(c: char) -> usize {
+/// Terminal display width of one Unicode scalar.
+pub fn display_char_width(c: char) -> usize {
     let cp = c as u32;
     // Combining marks and zero-width characters.
     if matches!(
