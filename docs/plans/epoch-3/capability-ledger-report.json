@@ -78,31 +78,71 @@
     },
     {
       "id": "claim.native-language",
-      "class": "partial",
-      "disposition": "open",
+      "class": "proven",
+      "disposition": "shipped",
       "owner": {
         "cardId": "c0ewbiud",
         "num": 353,
-        "phase": "ready"
+        "phase": "done"
       },
       "lanes": [
         {
-          "id": "adversarial-sema",
+          "id": "invalid-front-end-boundary",
           "command": [
             "cargo",
             "test",
             "--test",
-            "capability_acceptance",
-            "native_language_adversarial",
+            "sema_soundness",
+            "exact_invalid_corpus_rejects_in_jet",
             "--",
             "--exact"
           ],
           "artifacts": [
             {
-              "role": "gap",
-              "locator": "docs/plans/epoch-3/universal-language-core.md",
-              "anchorDigest": "3920a46814e5a45dceac799dd2324ab1aa3a8182625f1910964c98b3eae05edb",
-              "contentDigest": "39f4eddace5085150954a8b3c895c11cf0eab2fc8c261a3b84098a3acf0a4fc0"
+              "role": "proof",
+              "locator": "tests/sema_soundness.rs",
+              "anchorDigest": "89f31a2d0edff9f202727c7a4792e923bf3c6b617d05774fdabb48774ac21f6d",
+              "contentDigest": "7fc7f6a8a8109aecf1f13150c782f998076cfd43c3156996889787f67c481197"
+            }
+          ]
+        },
+        {
+          "id": "accepted-native-semantics",
+          "command": [
+            "cargo",
+            "test",
+            "--test",
+            "sema_soundness",
+            "executable_corpus_matches_aot_and_default_dev",
+            "--",
+            "--exact"
+          ],
+          "artifacts": [
+            {
+              "role": "proof",
+              "locator": "tests/sema_soundness.rs",
+              "anchorDigest": "1f3da603e00180905cacb1f59bb0a015a331fcf633cde4b8fb14bb888453397f",
+              "contentDigest": "7fc7f6a8a8109aecf1f13150c782f998076cfd43c3156996889787f67c481197"
+            }
+          ]
+        },
+        {
+          "id": "safe-codegen-boundary",
+          "command": [
+            "cargo",
+            "test",
+            "--test",
+            "sema_soundness",
+            "generated_rust_has_no_unaudited_unsafe",
+            "--",
+            "--exact"
+          ],
+          "artifacts": [
+            {
+              "role": "proof",
+              "locator": "tests/sema_soundness.rs",
+              "anchorDigest": "2ff713301182452ea20e8795c3e2537cd329b89235c67681680662c54bb2b97c",
+              "contentDigest": "7fc7f6a8a8109aecf1f13150c782f998076cfd43c3156996889787f67c481197"
             }
           ]
         }
