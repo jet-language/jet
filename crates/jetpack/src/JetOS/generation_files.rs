@@ -36,7 +36,6 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(super) fn generation_dir(system: &SystemPlan, explicit: Option<&str>) -> PathBuf {
     let name = explicit
@@ -219,7 +218,7 @@ pub(super) fn render_plan_json(
 /// for generations written before the field existed; those packages never
 /// produce a `~` change row (there is nothing honest to compare against),
 /// only `+`/`-` if the name itself appears or disappears.
-struct PackageSnapshot {
+pub(super) struct PackageSnapshot {
     name: String,
     version: String,
     out: String,
@@ -264,14 +263,14 @@ pub(super) fn read_generation_packages(dir: &Path) -> Vec<PackageSnapshot> {
 
 /// One row of a `jetos switch` plan: a package added, changed (version
 /// bump), or removed between the outgoing and incoming generation.
-struct PackageDiff {
-    name: String,
-    mark: super::Output::PlanMark,
-    from: String,
-    to: String,
+pub(super) struct PackageDiff {
+    pub(super) name: String,
+    pub(super) mark: crate::Output::PlanMark,
+    pub(super) from: String,
+    pub(super) to: String,
     /// The incoming store path, for `Download` size accounting. `None` for
     /// removed packages (freeing space downloads nothing).
-    out: Option<String>,
+    pub(super) out: Option<String>,
 }
 
 /// Diff two generations' package snapshots by name. Sorted by name so the
@@ -282,14 +281,14 @@ pub(super) fn diff_packages(old: &[PackageSnapshot], new: &[PackageSnapshot]) ->
         match old.iter().find(|o| o.name == pkg.name) {
             None => rows.push(PackageDiff {
                 name: pkg.name.clone(),
-                mark: super::Output::PlanMark::Add,
+                mark: crate::Output::PlanMark::Add,
                 from: "—".to_string(),
                 to: pkg.version.clone(),
                 out: Some(pkg.out.clone()),
             }),
             Some(old_pkg) if old_pkg.version != pkg.version => rows.push(PackageDiff {
                 name: pkg.name.clone(),
-                mark: super::Output::PlanMark::Change,
+                mark: crate::Output::PlanMark::Change,
                 from: old_pkg.version.clone(),
                 to: pkg.version.clone(),
                 out: Some(pkg.out.clone()),
@@ -301,7 +300,7 @@ pub(super) fn diff_packages(old: &[PackageSnapshot], new: &[PackageSnapshot]) ->
         if !new.iter().any(|n| n.name == pkg.name) {
             rows.push(PackageDiff {
                 name: pkg.name.clone(),
-                mark: super::Output::PlanMark::Remove,
+                mark: crate::Output::PlanMark::Remove,
                 from: pkg.version.clone(),
                 to: "—".to_string(),
                 out: None,
@@ -823,6 +822,7 @@ fn copy_absolute_runtime_file(dir: &Path, src: &Path) -> std::io::Result<()> {
 mod generation_closure_tests {
     use super::*;
     use std::os::unix::fs::{symlink, PermissionsExt as _};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     struct Scratch(PathBuf);
 

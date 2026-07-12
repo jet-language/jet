@@ -50,7 +50,7 @@ struct OptionContender {
 }
 
 impl ResolvedOption {
-    fn to_json(&self) -> String {
+    pub(super) fn to_json(&self) -> String {
         let contenders = self
             .contenders
             .iter()

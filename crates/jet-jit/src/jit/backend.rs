@@ -1,3 +1,11 @@
+use jet_foundation::{
+    Diagnostics::Diagnostic,
+    JitBackend::{JitBackend, RunOutcome},
+    AST::ProgramBundle,
+};
+
+use super::api_debug::{try_resident, try_resident_hot_swap, try_resident_restart};
+
 /// c139 tier-1 JIT backend over the `JitBackend` seam.
 ///
 /// `F` is the tier-0 fallback (always `InterpreterBackend` in practice).

@@ -1,4 +1,16 @@
-fn init_clif_ty(init: &TExpr) -> Result<types::Type, String> {
+use cranelift_codegen::ir::{types, AbiParam, Signature};
+use cranelift_jit::JITModule;
+use cranelift_module::Module;
+use jet_codegen::Codegen::TIR::{JitProgram, TExpr, TFunc, TFuncKind};
+use jet_foundation::AST::Type;
+use std::collections::HashMap;
+
+use super::safety::{
+    jit_concurrency_type, jit_enum_type, jit_list_int_type, jit_list_task_int_type,
+    jit_optional_scalar_type, jit_result_payload_type, jit_struct_type, jit_tuple_type,
+};
+
+pub(crate) fn init_clif_ty(init: &TExpr) -> Result<types::Type, String> {
     if let Some(t) = clif_ty(&init.ty) {
         return Ok(t);
     }
@@ -11,7 +23,7 @@ fn init_clif_ty(init: &TExpr) -> Result<types::Type, String> {
     Err(format!("jit let type unsupported: {:?}", init.ty))
 }
 
-fn clif_ty(ty: &Type) -> Option<types::Type> {
+pub(crate) fn clif_ty(ty: &Type) -> Option<types::Type> {
     if matches!(ty, Type::Named(n) if n == "Unit") {
         return None;
     }
@@ -43,7 +55,7 @@ fn clif_ty(ty: &Type) -> Option<types::Type> {
     }
 }
 
-fn func_signature(module: &JITModule, tir: &TFunc) -> Result<Signature, String> {
+pub(crate) fn func_signature(module: &JITModule, tir: &TFunc) -> Result<Signature, String> {
     let cc = module.target_config().default_call_conv;
     let mut sig = Signature::new(cc);
     if matches!(tir.kind, TFuncKind::Method { self_conv: Some(_) }) {
@@ -62,7 +74,7 @@ fn func_signature(module: &JITModule, tir: &TFunc) -> Result<Signature, String> 
     Ok(sig)
 }
 
-fn jit_fn_name(name: &str) -> String {
+pub(crate) fn jit_fn_name(name: &str) -> String {
     if name == "run" {
         "jet_jit_main".to_string()
     } else {
@@ -70,14 +82,14 @@ fn jit_fn_name(name: &str) -> String {
     }
 }
 
-struct JitMeta<'a> {
+pub(crate) struct JitMeta<'a> {
     struct_fields: &'a HashMap<String, Vec<String>>,
     struct_field_types: &'a HashMap<String, Vec<Type>>,
     enum_variants: &'a HashMap<String, Vec<String>>,
 }
 
 impl<'a> JitMeta<'a> {
-    fn from_program(program: &'a JitProgram) -> Self {
+    pub(crate) fn from_program(program: &'a JitProgram) -> Self {
         JitMeta {
             struct_fields: &program.struct_fields,
             struct_field_types: &program.struct_field_types,
@@ -85,19 +97,19 @@ impl<'a> JitMeta<'a> {
         }
     }
 
-    fn struct_field_index(&self, type_name: &str, field_rust: &str) -> Option<usize> {
+    pub(crate) fn struct_field_index(&self, type_name: &str, field_rust: &str) -> Option<usize> {
         self.struct_fields
             .get(type_name)?
             .iter()
             .position(|f| f == field_rust)
     }
 
-    fn struct_field_type(&self, type_name: &str, field_rust: &str) -> Option<Type> {
+    pub(crate) fn struct_field_type(&self, type_name: &str, field_rust: &str) -> Option<Type> {
         let idx = self.struct_field_index(type_name, field_rust)?;
         self.struct_field_types.get(type_name)?.get(idx).cloned()
     }
 
-    fn enum_variant_disc(&self, prefix: &str) -> Option<i64> {
+    pub(crate) fn enum_variant_disc(&self, prefix: &str) -> Option<i64> {
         let (enum_part, variant) = prefix.rsplit_once("::")?;
         let enum_name = enum_part.strip_prefix("user_").unwrap_or(enum_part);
         let variants = self.enum_variants.get(enum_name)?;

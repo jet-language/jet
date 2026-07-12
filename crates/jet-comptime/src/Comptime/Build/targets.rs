@@ -1,3 +1,10 @@
+use super::errors_keys::BuildError;
+use super::handles::{
+    ActionHandle, PluginHandle, ProbeHandle, SigningIdentityHandle, TargetId, TargetRef,
+    ToolchainHandle,
+};
+use std::collections::BTreeMap;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TargetKind {
     Executable,
@@ -12,7 +19,7 @@ pub enum TargetKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct BuildPath(String);
+pub struct BuildPath(pub(super) String);
 
 impl BuildPath {
     pub fn new(path: impl Into<String>) -> Result<Self, BuildError> {

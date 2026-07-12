@@ -14,27 +14,6 @@ use hkdf::Hkdf;
 use sha2::{Digest, Sha512};
 use subtle::ConstantTimeEq;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum CryptoError {
-    EntropyUnavailable,
-}
-
-impl std::fmt::Display for CryptoError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::EntropyUnavailable => {
-                f.write_str("the operating system could not provide cryptographic randomness")
-            }
-        }
-    }
-}
-
-impl From<JetCryptoEntropyError> for CryptoError {
-    fn from(_: JetCryptoEntropyError) -> Self {
-        Self::EntropyUnavailable
-    }
-}
-
 const MAGIC: &[u8; 4] = b"JETC";
 const VERSION: u8 = 1;
 const ALGO_CHACHA20: u8 = 1;
@@ -123,10 +102,8 @@ fn open_envelope(key: &[u8], envelope: &[u8]) -> Result<Vec<u8>, String> {
     }
 }
 
-fn jet_fill_random(out: &mut [u8]) -> Result<(), CryptoError> {
-    let bytes = jet_crypto_entropy_bytes(out.len() as i64).map_err(CryptoError::from)?;
-    out.copy_from_slice(&bytes);
-    Ok(())
+fn jet_fill_random(out: &mut [u8]) -> Result<(), JetCryptoEntropyError> {
+    jet_crypto_entropy_fill(out)
 }
 
 /// Default seal — ChaCha20-Poly1305 (D-CRYPTOENV1 misuse-resistant envelope).
@@ -171,12 +148,14 @@ pub fn jet_crypto_sign_impl(
 /// is the 32-byte secret seed and `public_key` is the 32-byte verifying key.
 /// Randomness comes from the shared D-CRYPTO-RNG1 OS provider. Used by the
 /// package-signing helper (c146); failure returns before any key artifact.
-pub fn jet_crypto_keygen_impl() -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
+pub fn jet_crypto_keygen_impl() -> Result<(Vec<u8>, Vec<u8>), String> {
     let mut seed = [0u8; 32];
-    jet_fill_random(&mut seed)?;
+    jet_fill_random(&mut seed).map_err(|error| error.to_string())?;
+    let returned_seed = seed.to_vec();
     let signing_key = SigningKey::from_bytes(&seed);
     let public = signing_key.verifying_key().to_bytes().to_vec();
-    Ok((seed.to_vec(), public))
+    jet_crypto_entropy_zeroize(&mut seed);
+    Ok((returned_seed, public))
 }
 
 /// Verify an Ed25519 signature (32-byte public key, 64-byte signature).

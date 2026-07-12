@@ -1,3 +1,8 @@
+use super::errors_keys::BuildError;
+use super::handles::{ActionId, PluginHandle, ProbeHandle, SigningIdentityHandle, ToolchainHandle};
+use super::targets::BuildPath;
+use std::collections::{BTreeMap, BTreeSet};
+
 pub type BuildCapability = crate::BuildEffect;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -255,7 +260,7 @@ impl PolicyExplanation {
         }
     }
 
-    fn denied(
+    pub(super) fn denied(
         subject: impl Into<String>,
         reason: impl Into<String>,
         caps: Vec<BuildCapability>,

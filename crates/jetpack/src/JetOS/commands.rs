@@ -199,7 +199,7 @@ pub(super) fn cmd_build(theme: &Theme, args: &[String], flags: &OsFlags, activat
                     }
                     theme.applied_header(incoming_ordinal);
                     for row in &diff {
-                        if !matches!(row.mark, super::Output::PlanMark::Remove) {
+                        if !matches!(row.mark, crate::Output::PlanMark::Remove) {
                             theme.ready_row(&row.name, name_w, &row.to);
                         }
                     }

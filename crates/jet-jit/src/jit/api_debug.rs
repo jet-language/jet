@@ -1,10 +1,26 @@
+use jet_codegen::Codegen::TIR::{self, TEnumPayload, TExpr, TExprKind, TIfCond, TStmt, TStrPart};
+use jet_foundation::{JitBackend::RunOutcome, AST::{ProgramBundle, Type}};
+use std::collections::HashSet;
+
+use super::resident::{
+    ensure_resident_module, fresh_runtime, resident_hot_swap, resident_run_fresh,
+    resident_teardown,
+};
+use super::runtime_host::catch_jit_panic;
+use super::safety::{
+    collect_select_arms_jit, count_spawn_sites, jit_list_task_int_type, resident_safe_expr,
+    resident_safe_func, resident_safe_func_detail, resident_safe_program,
+    resident_safe_spawn_lambda, resident_safe_stmt,
+};
+use super::RESIDENT_RUNTIME;
+
 pub fn cranelift_host_supported() -> bool {
     // cranelift-jit 0.112's PLT path panics on non-x86_64 hosts. Keep the
     // default dev path safe by delegating to the tier-0 backend there.
     cfg!(target_arch = "x86_64")
 }
 
-fn try_resident(bundle: &ProgramBundle) -> Option<Result<RunOutcome, String>> {
+pub(crate) fn try_resident(bundle: &ProgramBundle) -> Option<Result<RunOutcome, String>> {
     if !cranelift_host_supported() {
         return None;
     }
@@ -14,7 +30,7 @@ fn try_resident(bundle: &ProgramBundle) -> Option<Result<RunOutcome, String>> {
     }))
 }
 
-fn try_resident_hot_swap(bundle: &ProgramBundle) -> Option<Result<RunOutcome, String>> {
+pub(crate) fn try_resident_hot_swap(bundle: &ProgramBundle) -> Option<Result<RunOutcome, String>> {
     if !cranelift_host_supported() {
         return None;
     }
@@ -25,7 +41,7 @@ fn try_resident_hot_swap(bundle: &ProgramBundle) -> Option<Result<RunOutcome, St
     Some(resident_hot_swap(&program))
 }
 
-fn try_resident_restart(bundle: &ProgramBundle) -> Option<Result<RunOutcome, String>> {
+pub(crate) fn try_resident_restart(bundle: &ProgramBundle) -> Option<Result<RunOutcome, String>> {
     if !cranelift_host_supported() {
         return None;
     }

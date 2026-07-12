@@ -1,3 +1,24 @@
+use super::actions_policy::{ActionCache, BuildAction, BuildCapability, BuildResourcePoolSpec};
+use super::cache_cas::{ActionCacheStatus, ActionInputSnapshot, ActionKey, ActionOutcome, ContentDigest};
+use super::errors_keys::{BuildError, canonical_action_key, canonical_effective_action_key};
+use super::execution_helpers::{
+    action_pools, cache_status_reason, collect_target_actions, default_resource_pools,
+    execution_metrics, execution_stages,
+};
+use super::execution_runtime::{BuildProbeFact, read_last_rebuild_record};
+use super::handles::{ActionHandle, ActionId, ProbeHandle, ProbeId, SigningIdentityHandle, TargetId, TargetRef, ToolchainHandle};
+use super::plan_graph::{
+    BuildExecutionEvent, BuildExecutionModel, BuildExecutionNode, BuildExecutionReport,
+    BuildExplanation, BuildGraph, BuildGraphAction, BuildGraphFile, BuildGraphSubject,
+    BuildGraphTarget, BuildPlan, FileOwnership, RebuildExplanation,
+};
+use super::plugins_modules::{BuildGeneratedModule, BuildPlugin};
+use super::provenance_toolchains::{BuildProbe, BuildSigningIdentity, BuildToolchain};
+use super::targets::{BuildPath, BuildTarget, TargetKind};
+use std::collections::{BTreeMap, BTreeSet};
+use std::io;
+use std::path::Path;
+
 impl BuildPlan {
     pub fn default_target(&self) -> Option<TargetRef> {
         self.default
@@ -520,7 +541,7 @@ impl BuildPlan {
         Ok(BuildExecutionReport { events, metrics })
     }
 
-    fn action_targets(&self) -> BTreeMap<ActionId, TargetId> {
+    pub(super) fn action_targets(&self) -> BTreeMap<ActionId, TargetId> {
         let mut out = BTreeMap::new();
         for target in &self.targets {
             for action in &target.actions {

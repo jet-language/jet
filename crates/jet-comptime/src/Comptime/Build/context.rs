@@ -1,6 +1,34 @@
+use super::NEXT_CONTEXT;
+use super::actions_policy::{ActionSpec, BuildAction, BuildPolicy, PolicyExplanation, PolicySetting};
+use super::cache_cas::ContentDigest;
+use super::errors_keys::{BuildError, NameKind};
+use super::handles::{
+    ActionHandle, ActionId, AssetBundleTarget, BenchTarget, DocTarget, ExecutableTarget,
+    GeneratedModuleHandle, GeneratedModuleId, InstallTarget, LibraryTarget, PackageTarget,
+    PluginHandle, PluginId, ProbeHandle, ProbeId, PublishTarget, SigningIdentityHandle,
+    SigningIdentityId, TargetId, TargetRef, TestTarget, ToolchainHandle, ToolchainId,
+};
+use super::plan_graph::BuildPlan;
+use super::plugins_modules::{
+    BUILD_PLUGIN_API_VERSION, BuildGeneratedModule, BuildPlugin, GeneratedModuleSpec,
+    PluginApplication, PluginContribution, WasmComponentPluginSpec,
+};
+use super::provenance_toolchains::{
+    BuildProbe, BuildProvenance, BuildSigningIdentity, BuildToolchain, ProbeSpec,
+    SigningIdentitySpec, ToolchainRole, ToolchainSpec,
+};
+use super::targets::{BuildTarget, TargetKind, TargetSpec};
+use super::validation::{
+    cap_name, check_name, validate_action, validate_action_output_owners,
+    validate_generated_module, validate_identity, validate_paths, validate_plugin_spec,
+    validate_probe, validate_toolchain,
+};
+use std::collections::HashSet;
+use std::sync::atomic::Ordering;
+
 #[derive(Debug, Clone)]
 pub struct BuildContext {
-    context: u64,
+    pub(super) context: u64,
     targets: Vec<BuildTarget>,
     actions: Vec<BuildAction>,
     toolchains: Vec<BuildToolchain>,

@@ -428,7 +428,7 @@ fn run() {
 | `sha256(text)` / `sha256_bytes(bytes)` | `String` | SHA-256 hex digest |
 | `sha512_bytes(bytes)` | `String` | SHA-512 hex digest |
 | `blake3_bytes(bytes)` | `String` | BLAKE3 hex digest |
-| `random.bytes(n)` | `[U8]` (legacy edition) | One fail-closed OS CSPRNG request, capped at 1,048,576 bytes; legacy editions report E3001/exit 70 when the typed provider rejects the length or is unavailable |
+| `random.bytes(n)` | `[U8]` (edition 2026) | One fail-closed OS CSPRNG request, capped at 1,048,576 bytes; edition 2026 reports E3001/exit 70 when the internal provider rejects the length or is unavailable. The ratified fallible `RandomError` surface waits for the next major edition. |
 | `seal(key, bytes)` / `open(key, box)` | `[U8] ? String` | Authenticated encryption envelope; default is ChaCha20-Poly1305 with internal nonce |
 | `file_seal(key, bytes)` / `file_open(key, box)` | `[U8] ? String` | Same envelope for file payloads; kept separate for docs and future metadata |
 | `sign(seed, bytes)` / `verify(public, bytes, sig)` | mixed | Ed25519 signatures (`verify` returns `() ? String`) |

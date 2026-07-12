@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 515,
-    "rev": 4391,
+    "rev": 4398,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -5022,12 +5022,31 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "building",
+      "phase": "deciding",
       "priority": "P0",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-CRYPTO-SUITE1=A: Hybrid: safe envelopes with audited expert primitives. Beginner APIs are seal/open, sign/verify, password_hash/verify, key agreement, file envelope, and Secret/Key types that refuse accidental display. Expert primitives live under crypto.expert with explicit algorithm selection, audit docs, and unsafe/effect gates where needed. Algorithm agility and key encoding are part of the envelope.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: corelib audit: core.crypto — misuse-resistant suite (AEAD, signatures, KDF, password hashing)\n\nCurrent law: Existing linked decisions: D-PWHASH1=ratified/A. D-CORENS1 keeps all first-party modules under core.*; I6 forbids compiler deps; D-STDRUBRIC1 requires mechanical core API laws.\n\nBuild order: Audit current Core/API/prelude/docs/tests first; write failing UI/golden/unit fixtures; implement std-only or approved bridge code; update docs/reference and syntax-decisions when law changes; run targeted tests, then full nix develop -c cargo test before close.\n\nAcceptance: Examples/goldens or UI snapshots prove each shipped behavior; stdlib map records shipped/carded/declined rows; no rustc/user-hostile errors; no compiler external deps.\n\nDependencies/collisions: Respect neighboring core cards: io/args/process separate; text before regex; net/url before http; encoding before data/db; random never owns secrets.",
-      "blockedBy": [],
-      "assignee": "terra-302-builder",
+      "blockedBy": [
+        "#306",
+        "D-CRYPTO-WASI-ALLOC2",
+        "D-CRYPTO-KEYGEN-DIAG1"
+      ],
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "codex-orchestrator",
+          "text": "[handoff] Ungated entropy repair complete and tested 11/11. Owner decisions now gate WASI allocation identity and package-keygen entropy projection. #306 gates task-cancellation context. Typed RandomError remains timed to the next major edition; current compiler exposes only edition 2026. Live macOS/Windows/WASI and full-suite proof remain open. No false close."
+        },
+        {
+          "at": "2026-07-12",
+          "by": "terra-302-builder",
+          "text": "[handoff] Ungated entropy repair implemented: shared tier-1 OS provider, no predictable fallback, volatile failure/success temp zeroization, vetted unsafe boundary, cfg(test)-only injection, exact legacy E3001 path, bridge consumers, 11/11 isolated provider+bridge tests, release hook scan clean. Independent review left owner gates D-CRYPTO-WASI-ALLOC2 and D-CRYPTO-KEYGEN-DIAG1; typed RandomError waits for next-edition plumbing, cancellation waits for #306 task context, live macOS/Windows/WASI matrix and full suite remain required. Do not close."
+        },
+        {
+          "at": "2026-07-12",
+          "by": "codex-orchestrator",
+          "text": "[review] Terra review blocked close: unsafe runtime inclusion breaks I1 golden boundary; typed RandomError edition surface absent; partial public CryptoError is a facade; cancellation/WASI allocation-retry law, temporary-buffer zeroization, exact keygen failure projection, bridge/unsupported/cross-platform proofs remain incomplete. Builder fixing sequentially; no Sol."
+        },
         {
           "at": "2026-07-12",
           "by": "codex-orchestrator",
@@ -5080,11 +5099,11 @@
         {
           "n": 1,
           "text": "D-CRYPTO-RNG1 uses tier-1 OS entropy on Linux, macOS, and Windows with no clock, counter, constant-state, or deterministic fallback in any production path.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "terra-302-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-12T11:46:09.144Z"
+          "evidence": "Shared std-only provider uses getrandom(buf,len,0) on Linux glibc x86_64/aarch64, SecRandomCopyBytes on macOS x86_64/arm64, and BCryptGenRandom(NULL,...,BCRYPT_USE_SYSTEM_PREFERRED_RNG) on Windows MSVC x86_64/arm64. Production-source scan rejects /dev/urandom, SplitMix, xorshift, time, UUID, and deterministic fallbacks; isolated suite green 11/11 on Linux.",
+          "at": "2026-07-12T12:21:40.066Z"
         },
         {
           "n": 2,
@@ -5133,8 +5152,7 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
-      "claimedAt": "2026-07-12T11:45:53.657Z"
+      "refs": []
     },
     {
       "id": "c05o0105",
@@ -31526,6 +31544,174 @@
       "created": "2026-07-12T10:13:23.490Z",
       "outcome": "A",
       "ratifiedAt": "2026-07-12"
+    },
+    {
+      "id": "D-CRYPTO-WASI-ALLOC2",
+      "cardId": "c0184j6s",
+      "group": "safety",
+      "title": "WASI entropy retry allocation identity",
+      "gist": "Resolve a contradiction in D-CRYPTO-RNG1: a general allocator may reuse an address after a zeroized buffer is dropped, so Jet cannot guarantee both one live attempt buffer and a never-reused pointer.",
+      "lesson": "An allocation has two identities. Its logical identity is the ownership lifetime: a new Vec is a new allocation request even when the allocator later returns the same numeric address. Its physical identity is that address. Once an old buffer is zeroized and freed, a normal allocator may legally reuse its address.\n\nPreventing address reuse requires retaining old storage, padding buffers, or owning a custom arena. Those choices contradict D-CRYPTO-RNG1's other requirements that each WASI attempt use exactly one full-size buffer and that at most one attempt buffer exist at a time. Address reuse after complete volatile zeroization does not reuse entropy state; it only reuses memory.",
+      "explainer": "D-CRYPTO-RNG1 requires each WASI EINTR retry to allocate a distinct fresh full-size buffer, forbids allocation or pointer reuse, and also permits at most one attempt buffer at a time. Those statements cannot all hold under Rust's allocator: after zeroization and drop, the next exact-size Vec may receive the same address. The current attempted workaround allocates count plus padding and passes a shifted slice, which makes pointer values differ but violates the exact full-size allocation rule and proves no security property. Every option preserves the security law: exactly count zero-initialized bytes reach random_get; any non-success volatile-zeroizes the whole attempt; only success returns bytes; at most seventeen calls; no fallback.",
+      "story": "A WASI host interrupts random_get twice before succeeding. Jet must throw away every tainted attempt and begin again without exposing partial bytes. The implementation must also be mechanically testable without pretending that a shifted slice pointer is a fresh allocation.",
+      "inWild": "// Attempt 1: Vec(count), random_get -> EINTR\n// volatile-zeroize every byte, fence, drop\n// Attempt 2: Vec(count), random_get again\n// The allocator may return the same address. The buffer is still a new\n// ownership lifetime with no surviving bytes or state from attempt 1.",
+      "detail": "This decision amends only WASI allocation identity language in D-CRYPTO-RNG1. It does not change providers, retry count, error type, cap, cancellation, supported targets, or zeroization. Tests use an injected provider and allocation-generation counters owned by the test seam; they never treat numeric address inequality as evidence of fresh entropy.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Fresh lifetime, address reuse allowed",
+          "detail": "Recommended. Each retry constructs a new exact-count zeroed Vec after the prior Vec has been fully volatile-zeroized and dropped. Numeric address reuse is allowed because allocators own addresses; no bytes, capacity object, provider state, or reference crosses lifetimes. Tests prove generation count, one live attempt, exact length, full taint zeroization, seventeen-call cap, and no output on failure.",
+          "code": "for generation in 0..17 {\n    attempt := new_zeroed_vec(count)\n    status := random_get(attempt)\n    if status == success { return attempt }\n    volatile_zeroize(attempt); drop(attempt)\n    if status != interrupted { return Unavailable }\n}"
+        },
+        {
+          "key": "B",
+          "name": "Reserve old allocations",
+          "detail": "Keep each zeroized failed Vec allocated until the request ends, forcing the allocator to choose a different live address for the next Vec. This preserves physical pointer inequality but amends the one-live-buffer rule and can retain up to seventeen MiB for a maximum-size request.",
+          "code": "retired := []\nfor attempt in 0..17 {\n    buffer := new_zeroed_vec(count)\n    status := random_get(buffer)\n    if status == success { return buffer }\n    volatile_zeroize(buffer); retired.push(buffer)\n}"
+        },
+        {
+          "key": "C",
+          "name": "One monotonic retry arena",
+          "detail": "Allocate one bounded arena and give each retry a distinct exact-count slice. This preserves distinct provider pointers and one provider-visible attempt at a time, but amends the rule that every retry owns a separate allocation and reserves up to seventeen times the requested memory.",
+          "code": "arena := new_zeroed_vec(count * 17)\nfor attempt in 0..17 {\n    buffer := arena.slice(attempt * count, count)\n    status := random_get(buffer)\n    if status != success { volatile_zeroize(buffer) }\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust Vec",
+          "note": "Dropping a Vec ends its ownership lifetime but does not reserve its address. A later Vec may legally reuse that address, so address inequality cannot define freshness.",
+          "code": "drop(old); let next = vec![0u8; count]; // next.as_ptr() may equal old_ptr"
+        },
+        {
+          "lang": "WASI random_get",
+          "note": "The host fills the caller's slice or returns an errno. Security comes from discarding and zeroizing failed attempts, not from comparing allocator addresses.",
+          "code": "random_get(buffer_ptr, buffer_len) -> errno"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A preserves every security property with exact-size bounded memory and states the allocator contract honestly. Freshness means a new cleared ownership lifetime and a new provider call, not a numeric address promise the allocator cannot make.",
+        "tradeoff": "Tests cannot assert pointer inequality. They instead assert exact length, generation count, one live attempt, complete zeroization, retry bounds, and absence of escaped bytes.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B makes address inequality true by retaining up to seventeen failed allocations, contradicting the one-live-buffer bound without improving entropy safety."
+          },
+          {
+            "key": "C",
+            "reason": "C replaces distinct allocations with slices of one large arena and multiplies reserved memory, again changing a useful bound for no security gain."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "Use A's exact-size fresh ownership lifetime. Borrow B's explicit proof that prior bytes remain zeroized until release, and C's generation-indexed tests, without retaining their extra storage.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "Exact-size sequential ownership",
+            "use": "Adopt as the runtime contract and primary proof."
+          },
+          {
+            "key": "B",
+            "aspect": "Visible zeroized retirement",
+            "use": "Keep its zeroization evidence, but drop storage immediately instead of retaining it."
+          },
+          {
+            "key": "C",
+            "aspect": "Generation-indexed observation",
+            "use": "Use generation counters in the test-only provider seam, not a production arena."
+          }
+        ]
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-07-12T12:16:28.921Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-12"
+    },
+    {
+      "id": "D-CRYPTO-KEYGEN-DIAG1",
+      "cardId": "c0184j6s",
+      "group": "safety",
+      "title": "Package key generation entropy failure",
+      "gist": "Choose the exact fail-closed behavior when package-signing key generation cannot obtain operating-system entropy.",
+      "lesson": "Package key generation crosses two ratified laws. D-PKGSIGN1 requires `jet registry keygen` and automatic key creation on first publish. D-CRYPTO-RNG1 forbids key generation until its entropy failure has an exact command diagnostic, cleanup, exit, and no-artifact rule. D-CRYPTO-DIAG1 deliberately did not invent that command row.\n\nWithout a row, the helper exits silently and the caller currently misreports a generic helper-build error with cargo-install advice. That is neither safe product behavior nor an honest explanation. The command must either own a precise Jet diagnostic or remain unavailable.",
+      "explainer": "This ballot owns only entropy failure for package-signing key creation through `jet registry keygen` and automatic first-publish keygen. It does not change Ed25519, key paths, overwrite protection E1248, signing policy, RandomError, runtime CryptoError, or other crypto commands. All options forbid fallback bytes and partial key files. A new diagnostic code is required for a command-specific row because E3001 is the unhandled Jet runtime-value boundary, while E0704 is a helper-build failure with unrelated recovery.",
+      "story": "Mina publishes her first package on a supported host, but the operating system refuses the entropy request. Jet must not create a predictable signing key, leave half a keypair, modify the registry, or tell her that Cargo is missing. She needs one accurate recovery action.",
+      "inWild": "$ jet registry keygen\nError [E1275]: signing key generation needs cryptographic randomness\n What: Jet could not create the package-signing key\n Why: the operating system could not provide cryptographic randomness\n Fix: retry as a new operation on a supported host; no key files were created",
+      "detail": "Under A, E1275 is class tool and exits 1. Terminal output is the exact four-line frame shown above, with normal color policy and no raw OS status, path, helper stderr, dependency name, generated Rust, or key bytes. Stdout is empty. `jet registry keygen` creates neither secret nor public file. Automatic keygen aborts publish before package upload, index mutation, signature publication, or key-file rename. Temporary files are absent or removed; secret buffers are volatile-zeroized before return. An existing valid key bypasses entropy and is never changed. JSON remains unavailable until a separate command-JSON owner ratifies its schema.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Add exact E1275 command row",
+          "detail": "Recommended. Preserve explicit keygen and beginner auto-keygen. Launder provider failure into one command-owned E1275 frame, exit 1, publish nothing, remove temporary files, zeroize secret buffers, and allow only a new deliberate retry. The helper returns a closed internal status; only the Jet command renders copy.",
+          "code": "if keygen() == entropy_unavailable {\n    cleanup_and_zeroize()\n    emit E1275 class tool\n    exit 1\n}"
+        },
+        {
+          "key": "B",
+          "name": "Disable package key generation",
+          "detail": "Keep `jet registry keygen` and first-publish auto-keygen unavailable until another future command-diagnostic design. Publishing with an existing valid key still works. This follows the strict block in D-CRYPTO-DIAG1 but suspends D-PKGSIGN1's beginner auto-keygen promise.",
+          "code": "$ jet registry keygen\nError: package key generation is not available\n// first publish without an existing key is also refused"
+        },
+        {
+          "key": "C",
+          "name": "Project through E3001",
+          "detail": "Treat helper entropy failure like an unhandled Jet runtime RandomError: emit E3001 and exit 70. This reuses an existing code but gives a first-party command the wrong error class and lifecycle, contrary to D-CRYPTO-DIAG1's command boundary.",
+          "code": "Error [E3001]: panic: package keygen: the operating system could not provide cryptographic randomness\n// exit 70"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "OpenSSH",
+          "note": "Key generation stops when secure randomness fails and does not substitute a deterministic key. Jet adds its own stable diagnostic and artifact cleanup contract.",
+          "code": "ssh-keygen: PRNG is not seeded"
+        },
+        {
+          "lang": "Jet runtime",
+          "note": "E3001 owns an unhandled program error. A first-party package command instead needs a command-specific class, exit, cleanup, and recovery row.",
+          "code": "fn run() -> T ? CryptoError // unhandled value boundary, not CLI keygen"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A reconciles both ratified promises: beginners keep automatic signing-key setup, while entropy failure remains fail-closed, accurate, recoverable, and artifact-free.",
+        "tradeoff": "It allocates one new stable diagnostic code and requires terminal snapshots plus command cleanup tests. Runtime JSON remains intentionally unavailable.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B avoids a diagnostic row by removing the already-ratified beginner path and leaves first publish needlessly blocked."
+          },
+          {
+            "key": "C",
+            "reason": "C misclassifies a tool operation as a program panic and gives it the wrong exit and recovery contract."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "Use A's exact E1275 projection. Keep B's rule that no command ships before its terminal lifecycle is tested, and C's reuse of the provider's redacted Display sentence only as the Why line, not as E3001.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "Exact command lifecycle",
+            "use": "Adopt the diagnostic, cleanup, exit, and retry contract."
+          },
+          {
+            "key": "B",
+            "aspect": "No unowned command behavior",
+            "use": "Require snapshots and artifact tests before enabling the entropy-failure path."
+          },
+          {
+            "key": "C",
+            "aspect": "Stable provider wording",
+            "use": "Reuse only the redacted provider sentence inside E1275 Why."
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T12:17:29.195Z"
     }
   ],
   "questions": [
@@ -32353,6 +32539,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-12T12:24:42.696Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CRYPTO-WASI-ALLOC2",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-12T12:23:35.272Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0184j6s",
+      "note": "phase,logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-12T12:22:17.737Z",
+      "by": "terra-302-builder",
+      "action": "card.release",
+      "ref": "c0184j6s",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-12T12:21:40.066Z",
+      "by": "terra-302-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0184j6s",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-12T12:17:29.195Z",
+      "by": "codex-orchestrator",
+      "action": "decision.add",
+      "ref": "D-CRYPTO-KEYGEN-DIAG1",
+      "note": "Package key generation entropy failure"
+    },
+    {
+      "at": "2026-07-12T12:16:28.922Z",
+      "by": "codex-orchestrator",
+      "action": "decision.add",
+      "ref": "D-CRYPTO-WASI-ALLOC2",
+      "note": "WASI entropy retry allocation identity"
+    },
+    {
+      "at": "2026-07-12T12:02:56.174Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0184j6s",
+      "note": "logEntry"
+    },
     {
       "at": "2026-07-12T11:57:17.690Z",
       "by": "grok-361-builder",
@@ -35803,55 +36038,6 @@
       "action": "card.criteria-add",
       "ref": "cbq06v8j",
       "note": "#5 Dev-TIR/AOT capture and replay reproduce exit/stdout/stderr/"
-    },
-    {
-      "at": "2026-07-11T23:40:23.405Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "cbq06v8j",
-      "note": "#4 .jreplay capture/replay implements preflight-before-effects,"
-    },
-    {
-      "at": "2026-07-11T23:40:23.284Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "cbq06v8j",
-      "note": "#3 .jproof canonical artifacts bind full loader closure, report"
-    },
-    {
-      "at": "2026-07-11T23:40:23.168Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "cbq06v8j",
-      "note": "#2 jet prove implements target resolution, isolated producers, "
-    },
-    {
-      "at": "2026-07-11T23:37:03.051Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0ai04g0",
-      "note": "#11 Independent reviewer verifies parser/sema/codegen exhaustive"
-    },
-    {
-      "at": "2026-07-11T23:37:02.937Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0ai04g0",
-      "note": "#10 Required non-skipping native C ABI matrix passes on Ubuntu, "
-    },
-    {
-      "at": "2026-07-11T23:37:02.823Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0ai04g0",
-      "note": "#9 Sema-accepted C ABI types mechanically cover total codegen w"
-    },
-    {
-      "at": "2026-07-11T23:37:02.701Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0ai04g0",
-      "note": "#8 Per-function #Abi parses, formats, lowers, preserves bindgen"
     }
   ],
   "nextNum": 368,

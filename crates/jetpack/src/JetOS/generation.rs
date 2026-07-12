@@ -12,7 +12,6 @@ use crate::ModuleEval::{EnvPlan, SystemPlan};
 use crate::Output::Theme;
 use crate::RefSpec;
 use crate::Store;
-use std::collections::BTreeSet;
 use std::fs;
 
 pub(super) fn build_generation(
@@ -101,7 +100,7 @@ pub(super) fn build_generation(
         let spec = match RefSpec::classify_in(&raw, &plan.table) {
             Ok(spec) => spec,
             Err(err) => {
-                super::Output::ref_error(theme, &err);
+                crate::Output::ref_error(theme, &err);
                 return None;
             }
         };
@@ -166,7 +165,7 @@ pub(super) fn build_generation(
         let spec = match RefSpec::classify_in(&raw, &plan.table) {
             Ok(spec) => spec,
             Err(err) => {
-                super::Output::ref_error(theme, &err);
+                crate::Output::ref_error(theme, &err);
                 return None;
             }
         };
@@ -213,7 +212,7 @@ pub(super) fn build_generation(
         let spec = match RefSpec::classify_in(&raw, &plan.table) {
             Ok(spec) => spec,
             Err(err) => {
-                super::Output::ref_error(theme, &err);
+                crate::Output::ref_error(theme, &err);
                 return None;
             }
         };
@@ -260,7 +259,7 @@ pub(super) fn build_generation(
             let spec = match RefSpec::classify_in(&raw, &plan.table) {
                 Ok(spec) => spec,
                 Err(err) => {
-                    super::Output::ref_error(theme, &err);
+                    crate::Output::ref_error(theme, &err);
                     return None;
                 }
             };

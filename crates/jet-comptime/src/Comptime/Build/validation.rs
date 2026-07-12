@@ -1,4 +1,15 @@
-fn resolve_under(base: &Path, rel: &str) -> io::Result<PathBuf> {
+use super::actions_policy::{ActionCache, ActionSpec, BuildAction, BuildCapability};
+use super::errors_keys::{BuildError, NameKind};
+use super::plugins_modules::{GeneratedModuleSpec, WasmComponentPluginSpec};
+use super::provenance_toolchains::{
+    BuildProvenance, ProbeKind, ProbeSpec, ProvenanceSource, ToolchainSpec,
+};
+use super::targets::BuildPath;
+use std::collections::{BTreeMap, HashSet};
+use std::io;
+use std::path::{Component, Path, PathBuf};
+
+pub(super) fn resolve_under(base: &Path, rel: &str) -> io::Result<PathBuf> {
     let path = Path::new(rel);
     let mut out = PathBuf::from(base);
     for component in path.components() {
@@ -16,11 +27,11 @@ fn resolve_under(base: &Path, rel: &str) -> io::Result<PathBuf> {
     Ok(out)
 }
 
-fn cap_name(cap: &BuildCapability) -> String {
+pub(super) fn cap_name(cap: &BuildCapability) -> String {
     cap.name().to_string()
 }
 
-fn check_name(name: String, kind: NameKind) -> Result<String, BuildError> {
+pub(super) fn check_name(name: String, kind: NameKind) -> Result<String, BuildError> {
     if name.trim().is_empty() {
         return match kind {
             NameKind::Target => Err(BuildError::EmptyTargetName),
@@ -33,7 +44,7 @@ fn check_name(name: String, kind: NameKind) -> Result<String, BuildError> {
     Ok(name)
 }
 
-fn validate_plugin_spec(spec: &WasmComponentPluginSpec) -> Result<(), BuildError> {
+pub(super) fn validate_plugin_spec(spec: &WasmComponentPluginSpec) -> Result<(), BuildError> {
     if spec.name.trim().is_empty() {
         return Err(BuildError::EmptyPluginField("name".to_string()));
     }
@@ -49,7 +60,7 @@ fn validate_plugin_spec(spec: &WasmComponentPluginSpec) -> Result<(), BuildError
     Ok(())
 }
 
-fn validate_generated_module(module: &GeneratedModuleSpec) -> Result<(), BuildError> {
+pub(super) fn validate_generated_module(module: &GeneratedModuleSpec) -> Result<(), BuildError> {
     if module.name.trim().is_empty()
         || module.path.as_str().trim().is_empty()
         || module.source.trim().is_empty()
@@ -59,7 +70,7 @@ fn validate_generated_module(module: &GeneratedModuleSpec) -> Result<(), BuildEr
     Ok(())
 }
 
-fn validate_toolchain(name: &str, spec: &ToolchainSpec) -> Result<(), BuildError> {
+pub(super) fn validate_toolchain(name: &str, spec: &ToolchainSpec) -> Result<(), BuildError> {
     if spec.host_triple.trim().is_empty() || spec.target_triple.trim().is_empty() {
         return Err(BuildError::EmptyToolchainTriple(name.to_string()));
     }
@@ -73,7 +84,7 @@ fn validate_toolchain(name: &str, spec: &ToolchainSpec) -> Result<(), BuildError
     validate_provenance(name, &spec.provenance)
 }
 
-fn validate_identity(
+pub(super) fn validate_identity(
     name: &str,
     field: &str,
     provenance: &BuildProvenance,
@@ -84,7 +95,7 @@ fn validate_identity(
     validate_provenance(name, provenance)
 }
 
-fn validate_probe(name: &str, spec: &ProbeSpec) -> Result<(), BuildError> {
+pub(super) fn validate_probe(name: &str, spec: &ProbeSpec) -> Result<(), BuildError> {
     match &spec.kind {
         ProbeKind::FindProgram { program } if program.trim().is_empty() => {
             return Err(BuildError::EmptyProbeField(name.to_string()));
@@ -110,7 +121,7 @@ fn validate_probe(name: &str, spec: &ProbeSpec) -> Result<(), BuildError> {
     validate_provenance(name, &spec.provenance)
 }
 
-fn validate_provenance(name: &str, provenance: &BuildProvenance) -> Result<(), BuildError> {
+pub(super) fn validate_provenance(name: &str, provenance: &BuildProvenance) -> Result<(), BuildError> {
     match &provenance.source {
         ProvenanceSource::JetpackDependency(dep)
         | ProvenanceSource::AmbientRecord(dep)
@@ -129,7 +140,7 @@ fn validate_provenance(name: &str, provenance: &BuildProvenance) -> Result<(), B
     Ok(())
 }
 
-fn validate_action(name: &str, spec: &ActionSpec) -> Result<(), BuildError> {
+pub(super) fn validate_action(name: &str, spec: &ActionSpec) -> Result<(), BuildError> {
     if spec.argv.is_empty() || spec.argv.iter().any(|arg| arg.trim().is_empty()) {
         return Err(BuildError::EmptyActionArgv(name.to_string()));
     }
@@ -165,7 +176,7 @@ fn validate_action(name: &str, spec: &ActionSpec) -> Result<(), BuildError> {
     Ok(())
 }
 
-fn validate_action_output_owners(actions: &[BuildAction]) -> Result<(), BuildError> {
+pub(super) fn validate_action_output_owners(actions: &[BuildAction]) -> Result<(), BuildError> {
     let mut owners: BTreeMap<&str, &str> = BTreeMap::new();
     for action in actions {
         for output in &action.outputs {
@@ -181,7 +192,7 @@ fn validate_action_output_owners(actions: &[BuildAction]) -> Result<(), BuildErr
     Ok(())
 }
 
-fn validate_paths(paths: &[BuildPath]) -> Result<(), BuildError> {
+pub(super) fn validate_paths(paths: &[BuildPath]) -> Result<(), BuildError> {
     for path in paths {
         if path.as_str().trim().is_empty() {
             return Err(BuildError::EmptyPath);

@@ -1,5 +1,15 @@
+use super::actions_policy::BuildAction;
+#[cfg(not(unix))]
+use super::execution_runtime::prepare_output_destination;
+use super::targets::BuildPath;
+use super::validation::resolve_under;
+use crate::SHA256;
+use std::fs;
+use std::io;
+use std::path::{Component, Path, PathBuf};
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ActionKey(String);
+pub struct ActionKey(pub(super) String);
 
 impl ActionKey {
     pub fn as_str(&self) -> &str {
@@ -342,6 +352,7 @@ pub(super) fn secure_read_file(base: &Path, path: &Path) -> io::Result<Vec<u8>> 
 #[cfg(all(test, unix))]
 mod hostile_tests {
     use super::*;
+    use super::super::execution_runtime::read_action_record;
     use std::os::unix::fs::symlink;
     use std::sync::atomic::{AtomicU64, Ordering};
     static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -410,7 +421,7 @@ mod hostile_tests {
 }
 
 #[cfg(unix)]
-fn atomic_restore_file(base: &Path, path: &Path, bytes: &[u8]) -> io::Result<()> {
+pub(super) fn atomic_restore_file(base: &Path, path: &Path, bytes: &[u8]) -> io::Result<()> {
     use std::ffi::CString;
     use std::io::Write;
     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
@@ -480,7 +491,7 @@ fn atomic_restore_file(base: &Path, path: &Path, bytes: &[u8]) -> io::Result<()>
 }
 
 #[cfg(not(unix))]
-fn atomic_restore_file(base: &Path, path: &Path, bytes: &[u8]) -> io::Result<()> {
+pub(super) fn atomic_restore_file(base: &Path, path: &Path, bytes: &[u8]) -> io::Result<()> {
     prepare_output_destination(base, path)?;
     let mut random = [0u8; 16];
     std::io::Read::read_exact(&mut fs::File::open("/dev/urandom")?, &mut random)?;

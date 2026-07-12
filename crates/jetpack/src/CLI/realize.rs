@@ -16,7 +16,7 @@ use std::path::Path;
 /// current project's env file so `jetpack run stable:ripgrep` works there, and
 /// any workspace member so `jetpack run logging` / `jetpack run packages/logging`
 /// resolve in a monorepo (Slice B, D-MONOREF1=A). Prints the diagnostic on failure.
-fn classify_or_report(theme: &Theme, raw: &str) -> Result<RefSpec::RefSpec, RefError> {
+pub(super) fn classify_or_report(theme: &Theme, raw: &str) -> Result<RefSpec::RefSpec, RefError> {
     RefSpec::classify_with_workspace(raw, &cwd_table(), &cwd_workspace_index()).map_err(|e| {
         Output::ref_error(theme, &e);
         e
@@ -282,12 +282,12 @@ pub(super) fn report_nix_bridge_required(
     if flags.json {
         let holes_json = holes
             .iter()
-            .map(|h| super::JSON::quote(&h.reference))
+            .map(|h| crate::JSON::quote(&h.reference))
             .collect::<Vec<_>>()
             .join(", ");
         let realized_json = realized_refs
             .iter()
-            .map(|r| super::JSON::quote(r))
+            .map(|r| crate::JSON::quote(r))
             .collect::<Vec<_>>()
             .join(", ");
         println!("{{\"code\":\"E1272\",\"realized\":[{realized_json}],\"holes\":[{holes_json}]}}");

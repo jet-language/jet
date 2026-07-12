@@ -11,19 +11,16 @@
 // in ONE diagnostic (E1291) before `nix` ever runs — no silent omissions,
 // mirroring the import-direction discipline in D-JOS-NIXIMPORT1=C.
 
-use super::generation::build_generation;
 use super::generation_files::systems_dir;
 use super::options_rendering::{
     clean_bool_json, clean_symbol, clean_value, collect_names, is_option_priority_metadata,
     parse_list_items, resolved_option_value, service_extra,
 };
 use super::types::{Generation, OsFlags, VM_GUEST_PROOF_MARKER};
-use super::vm_commands::cmd_vm;
 use super::vm_proof::{
-    extract_guest_proof_report, file_sha256, require_real_vm_tools, run_interactive_vm_command,
-    VmCommand,
+    extract_guest_proof_report, file_sha256, run_interactive_vm_command, VmCommand,
 };
-use crate::ModuleEval::{self, ServicePlan, SystemPlan};
+use crate::ModuleEval::SystemPlan;
 use crate::Output::Theme;
 use crate::RefSpec;
 use crate::JSON;
@@ -1501,6 +1498,7 @@ fn write_real_tier_proof(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ModuleEval::{self, ServicePlan};
 
     fn table_with_nixpkgs() -> RefSpec::SourceTable {
         RefSpec::SourceTable::from_decls([(

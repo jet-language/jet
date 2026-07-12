@@ -1,3 +1,5 @@
+use super::handles::{ProbeId, SigningIdentityId, ToolchainHandle, ToolchainId};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LockRecord {
     pub key: String,

@@ -1,4 +1,11 @@
-fn default_resource_pools() -> Vec<BuildResourcePoolSpec> {
+use super::actions_policy::{ActionCache, BuildAction, BuildResourcePool, BuildResourcePoolSpec};
+use super::cache_cas::{ActionCacheStatus, CacheHitReason, CacheMissReason};
+use super::errors_keys::BuildError;
+use super::handles::{ActionId, TargetId};
+use super::plan_graph::{BuildExecutionMetrics, BuildExecutionStage, BuildPlan};
+use std::collections::{BTreeMap, BTreeSet};
+
+pub(super) fn default_resource_pools() -> Vec<BuildResourcePoolSpec> {
     vec![
         BuildResourcePoolSpec::new(BuildResourcePool::Cpu, 0),
         BuildResourcePoolSpec::new(BuildResourcePool::Memory, 0),
@@ -8,7 +15,7 @@ fn default_resource_pools() -> Vec<BuildResourcePoolSpec> {
     ]
 }
 
-fn action_pools(action: &BuildAction) -> Vec<BuildResourcePool> {
+pub(super) fn action_pools(action: &BuildAction) -> Vec<BuildResourcePool> {
     if action.resource_pools.is_empty() {
         vec![BuildResourcePool::Cpu]
     } else {
@@ -16,7 +23,7 @@ fn action_pools(action: &BuildAction) -> Vec<BuildResourcePool> {
     }
 }
 
-fn cache_status_reason(status: ActionCacheStatus) -> &'static str {
+pub(super) fn cache_status_reason(status: ActionCacheStatus) -> &'static str {
     match status {
         ActionCacheStatus::Hit(CacheHitReason::LocalActionRecordMatched) => {
             "local action record matched"
@@ -40,7 +47,7 @@ fn cache_status_reason(status: ActionCacheStatus) -> &'static str {
     }
 }
 
-fn execution_stages(
+pub(super) fn execution_stages(
     prereqs: &BTreeMap<ActionId, Vec<ActionId>>,
 ) -> Result<Vec<BuildExecutionStage>, BuildError> {
     let mut remaining = prereqs.keys().copied().collect::<BTreeSet<_>>();
@@ -73,7 +80,7 @@ fn execution_stages(
     Ok(stages)
 }
 
-fn execution_metrics(
+pub(super) fn execution_metrics(
     actions: &[BuildAction],
     stages: &[BuildExecutionStage],
 ) -> BuildExecutionMetrics {
@@ -97,7 +104,7 @@ fn execution_metrics(
     }
 }
 
-fn collect_target_actions(
+pub(super) fn collect_target_actions(
     plan: &BuildPlan,
     target: TargetId,
     visiting: &mut BTreeSet<TargetId>,

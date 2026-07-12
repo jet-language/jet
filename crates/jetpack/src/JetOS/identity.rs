@@ -1,13 +1,5 @@
-use super::etc_boot_facts::write_etc_tree;
-use super::installer_media::{
-    copy_generation_payload_deref, render_installed_limine_conf, render_installer_limine_conf,
-};
-use super::system_facts::write_hardware_facts;
-use super::types::Generation;
-use crate::ModuleEval::{self, SystemPlan};
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::path::Path;
 
 const JETOS_RELEASE_VERSION: &str = "26.10";
 const JETOS_RELEASE_CODENAME: &str = "Apex";
@@ -44,7 +36,16 @@ pub(super) fn write_jetos_identity_assets(dir: &Path) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod identity_tests {
+    use super::super::etc_boot_facts::write_etc_tree;
+    use super::super::installer_media::{
+        copy_generation_payload_deref, render_installed_limine_conf, render_installer_limine_conf,
+    };
+    use super::super::system_facts::write_hardware_facts;
+    use super::super::types::Generation;
     use super::*;
+    use crate::ModuleEval::{self, SystemPlan};
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn identity_test_dir() -> PathBuf {
         std::env::temp_dir().join(format!(

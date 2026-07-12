@@ -1,4 +1,12 @@
-fn flatten_string(parts: &[TStrPart]) -> Option<String> {
+use jet_codegen::Codegen::TIR::{
+    self, JitProgram, JitSpawnCapture, TBuiltinOp, TCallArg, TCoreClosureKind, TEnumPayload, TExpr,
+    TExprKind, TFunc, TFuncKind, THandleOp, TIfCond, TJitSpawnBody, TJitSpawnLambda, TOrFallback,
+    TStmt, TStrPart,
+};
+use jet_foundation::AST::{BinOp, Type, UnOp};
+use std::collections::HashSet;
+
+pub(crate) fn flatten_string(parts: &[TStrPart]) -> Option<String> {
     let mut out = String::new();
     for p in parts {
         match p {
@@ -20,11 +28,11 @@ fn jit_scalar_type(ty: &Type) -> bool {
     jit_value_type(ty)
 }
 
-fn jit_list_int_type(ty: &Type) -> bool {
+pub(crate) fn jit_list_int_type(ty: &Type) -> bool {
     matches!(ty, Type::List(inner) if matches!(inner.as_ref(), Type::Int))
 }
 
-fn jit_list_float_type(ty: &Type) -> bool {
+pub(crate) fn jit_list_float_type(ty: &Type) -> bool {
     matches!(ty, Type::List(inner) if matches!(inner.as_ref(), Type::Float))
 }
 
@@ -32,7 +40,7 @@ fn jit_list_native_type(ty: &Type) -> bool {
     jit_list_int_type(ty) || jit_list_float_type(ty)
 }
 
-fn jit_list_iter_elem_type(ty: &Type) -> Option<Type> {
+pub(crate) fn jit_list_iter_elem_type(ty: &Type) -> Option<Type> {
     match ty {
         Type::List(inner) if matches!(inner.as_ref(), Type::Int | Type::Float) => {
             Some(inner.as_ref().clone())
@@ -41,7 +49,7 @@ fn jit_list_iter_elem_type(ty: &Type) -> Option<Type> {
     }
 }
 
-fn jit_list_task_int_type(ty: &Type) -> bool {
+pub(crate) fn jit_list_task_int_type(ty: &Type) -> bool {
     if let Type::List(inner) = ty {
         if let Type::Apply { name, args } = inner.as_ref() {
             return name == "Task" && args.len() == 1 && matches!(&args[0], Type::Int);
@@ -50,11 +58,11 @@ fn jit_list_task_int_type(ty: &Type) -> bool {
     false
 }
 
-fn jit_optional_scalar_type(ty: &Type) -> bool {
+pub(crate) fn jit_optional_scalar_type(ty: &Type) -> bool {
     matches!(ty, Type::Option(inner) if jit_scalar_type(inner))
 }
 
-fn user_type_name(ty: &Type) -> Option<&str> {
+pub(crate) fn user_type_name(ty: &Type) -> Option<&str> {
     match ty {
         Type::Named(n) if n != "Unit" => Some(n.as_str()),
         Type::Apply { name, .. } => Some(name.as_str()),
@@ -62,22 +70,22 @@ fn user_type_name(ty: &Type) -> Option<&str> {
     }
 }
 
-fn record_type_key(ty: &Type) -> Option<String> {
+pub(crate) fn record_type_key(ty: &Type) -> Option<String> {
     match ty {
         Type::Tuple(_) => Some(ty.name()),
         _ => user_type_name(ty).map(str::to_string),
     }
 }
 
-fn jit_struct_type(ty: &Type) -> bool {
+pub(crate) fn jit_struct_type(ty: &Type) -> bool {
     user_type_name(ty).is_some()
 }
 
-fn jit_tuple_type(ty: &Type) -> bool {
+pub(crate) fn jit_tuple_type(ty: &Type) -> bool {
     matches!(ty, Type::Tuple(fields) if fields.iter().all(|(_, t)| matches!(t.as_ref(), Type::Int | Type::Float)))
 }
 
-fn jit_enum_type(ty: &Type) -> bool {
+pub(crate) fn jit_enum_type(ty: &Type) -> bool {
     user_type_name(ty).is_some()
 }
 
@@ -94,7 +102,7 @@ fn jit_concurrency_elem(ty: &Type) -> bool {
     matches!(ty, Type::Named(n) if n == "Unit") || jit_scalar_type(ty)
 }
 
-fn jit_concurrency_type(ty: &Type) -> bool {
+pub(crate) fn jit_concurrency_type(ty: &Type) -> bool {
     let Type::Apply { name, args } = ty else {
         return false;
     };
@@ -103,7 +111,7 @@ fn jit_concurrency_type(ty: &Type) -> bool {
         && jit_concurrency_elem(&args[0])
 }
 
-fn jit_value_type(ty: &Type) -> bool {
+pub(crate) fn jit_value_type(ty: &Type) -> bool {
     match ty {
         Type::Named(n) if n == "Unit" => true,
         Type::Int | Type::Float | Type::Bool | Type::String | Type::Char => true,
@@ -116,12 +124,12 @@ fn jit_value_type(ty: &Type) -> bool {
     }
 }
 
-fn jit_result_payload_type(ty: &Type) -> bool {
+pub(crate) fn jit_result_payload_type(ty: &Type) -> bool {
     matches!(ty, Type::Named(n) if n == "Unit" || n == "Void" || n == "Error")
         || jit_value_type(ty)
 }
 
-fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> bool {
+pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> bool {
     match &expr.kind {
         TExprKind::Print(inner) => resident_safe_expr(inner, callees),
         TExprKind::Call { name, args } => {
@@ -395,7 +403,7 @@ fn resident_safe_builtin_op(
     }
 }
 
-fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> bool {
+pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> bool {
     match stmt {
         TStmt::Let { init, .. } => resident_safe_expr(init, callees),
         // D-TUPLE-DESTRUCT1: `(tx, rx) := tasks.channel<T>()` — the one
@@ -527,11 +535,11 @@ fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> bool {
     }
 }
 
-fn resident_safe_func(tir: &TFunc, callees: &HashSet<String>) -> bool {
+pub(crate) fn resident_safe_func(tir: &TFunc, callees: &HashSet<String>) -> bool {
     resident_safe_func_detail(tir, callees).is_none()
 }
 
-fn resident_safe_func_detail(tir: &TFunc, callees: &HashSet<String>) -> Option<String> {
+pub(crate) fn resident_safe_func_detail(tir: &TFunc, callees: &HashSet<String>) -> Option<String> {
     if !matches!(tir.kind, TFuncKind::TopLevel | TFuncKind::Method { .. }) {
         return Some("not top-level".into());
     }
@@ -554,7 +562,7 @@ fn resident_safe_func_detail(tir: &TFunc, callees: &HashSet<String>) -> Option<S
     None
 }
 
-fn resident_safe_program(program: &JitProgram) -> bool {
+pub(crate) fn resident_safe_program(program: &JitProgram) -> bool {
     let names: HashSet<String> = program.funcs.iter().map(|f| f.name.clone()).collect();
     let main_ok = program.funcs.iter().any(|f| {
         f.name == "run"
@@ -581,7 +589,7 @@ fn resident_safe_program(program: &JitProgram) -> bool {
         .all(|lam| resident_safe_spawn_lambda(lam, &names))
 }
 
-fn count_spawn_sites(program: &JitProgram) -> usize {
+pub(crate) fn count_spawn_sites(program: &JitProgram) -> usize {
     let mut n = 0usize;
     for f in &program.funcs {
         count_spawn_sites_stmts(&f.body, &mut n);
@@ -712,7 +720,7 @@ fn resident_safe_select_wait(builder: &TExpr, callees: &HashSet<String>) -> bool
         })
 }
 
-fn collect_select_arms_jit<'a>(
+pub(crate) fn collect_select_arms_jit<'a>(
     builder: &'a TExpr,
 ) -> (Vec<&'a TExpr>, Vec<(&'a TExpr, Option<&'a TExpr>)>) {
     let mut recvs = Vec::new();
@@ -745,7 +753,7 @@ fn collect_select_arms_jit<'a>(
     (recvs, afters)
 }
 
-fn resident_safe_spawn_lambda(lam: &TJitSpawnLambda, callees: &HashSet<String>) -> bool {
+pub(crate) fn resident_safe_spawn_lambda(lam: &TJitSpawnLambda, callees: &HashSet<String>) -> bool {
     if lam.captures.len() > 4 {
         return false;
     }

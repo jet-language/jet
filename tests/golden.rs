@@ -469,6 +469,9 @@ fn strip_vetted_prelude_modules(rust_code: &str) -> String {
     let s = strip_mod(&s, "jet_term_windows");
     let s = strip_mod(&s, "jet_os_unix");
     let s = strip_mod(&s, "jet_atomic_windows");
+    // D-CRYPTO-RNG1=A: direct OS entropy calls and volatile zeroization live in
+    // one std-only vetted module shared byte-for-byte by AOT and the FFI bridge.
+    let s = strip_mod(&s, "jet_crypto_entropy");
     let s = strip_mod(&s, "jet_gtk");
     // Tower #126 / I1: the emitted scheduler ships raw epoll/kqueue syscalls, the
     // only `unsafe` in it. They live in the `jet:scheduler-native` vetted region

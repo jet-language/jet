@@ -1,4 +1,15 @@
-fn catch_jit_panic<R>(context: &str, f: impl FnOnce() -> Result<R, String>) -> Result<R, String> {
+use cranelift_codegen::ir::{types, AbiParam, Signature};
+use cranelift_jit::{JITBuilder, JITModule};
+use cranelift_module::{FuncId, Linkage, Module};
+use jet_codegen::scheduler::{
+    JetSchedulerChannel, JetSchedulerJoin, JetSchedulerSender, JetTaskControl,
+};
+use std::panic::{catch_unwind, AssertUnwindSafe};
+
+use super::resident::resident_teardown;
+use super::{Collections, Concurrency, JitResultValue, Numeric, TRY_COMPILE_PANIC_HOOK_LOCK};
+
+pub(crate) fn catch_jit_panic<R>(context: &str, f: impl FnOnce() -> Result<R, String>) -> Result<R, String> {
     let result = {
         let _guard = TRY_COMPILE_PANIC_HOOK_LOCK
             .lock()
@@ -28,18 +39,18 @@ fn catch_jit_panic<R>(context: &str, f: impl FnOnce() -> Result<R, String>) -> R
 /// how many times `main` ran without a clean restart — preserved on swap,
 /// reset on restart.
 pub(crate) struct JitRuntime {
-    source_file: String,
-    stdout: String,
-    stderr: String,
-    heap: jet_rt::JetArena,
-    invocations: u64,
-    channels: Vec<JetSchedulerChannel<i64>>,
-    senders: Vec<JetSchedulerSender<i64>>,
-    tasks: Vec<Option<JetSchedulerJoin<i64>>>,
-    task_controls: Vec<std::sync::Arc<JetTaskControl>>,
+    pub(crate) source_file: String,
+    pub(crate) stdout: String,
+    pub(crate) stderr: String,
+    pub(crate) heap: jet_rt::JetArena,
+    pub(crate) invocations: u64,
+    pub(crate) channels: Vec<JetSchedulerChannel<i64>>,
+    pub(crate) senders: Vec<JetSchedulerSender<i64>>,
+    pub(crate) tasks: Vec<Option<JetSchedulerJoin<i64>>>,
+    pub(crate) task_controls: Vec<std::sync::Arc<JetTaskControl>>,
     /// General `Result<T, E>` ABI arena. Handles are one-based indices; payload
     /// bits are interpreted from checked TIR types, never dynamically guessed.
-    results: Vec<JitResultValue>,
+    pub(crate) results: Vec<JitResultValue>,
     /// Set by a host shim when the user program hits a runtime panic (overflow,
     /// list index/slice OOB, a couple of concurrency panics). Non-`None` makes
     /// JIT-generated code branch to its epilogue on the next `emit_trap_check`,
@@ -47,24 +58,24 @@ pub(crate) struct JitRuntime {
     /// panic through a JIT frame — I1). `resident_invoke` turns it into an
     /// `E0953` diagnostic, exactly as the tier-0 interpreter reports the same
     /// panic. Keeps the FIRST message; later traps on the unwind path are noise.
-    trapped: Option<String>,
+    pub(crate) trapped: Option<String>,
 }
 
 impl JitRuntime {
     /// Record a runtime panic. Keeps the first message (the unwind branch may
     /// re-enter trap sites with dummy values before the epilogue is reached).
-    fn set_trap(&mut self, msg: &str) {
+    pub(crate) fn set_trap(&mut self, msg: &str) {
         if self.trapped.is_none() {
             self.trapped = Some(msg.to_string());
         }
     }
 }
 
-struct ResidentModule {
-    module: JITModule,
-    host: HostFns,
-    main_id: FuncId,
-    main_returns_result: bool,
+pub(crate) struct ResidentModule {
+    pub(crate) module: JITModule,
+    pub(crate) host: HostFns,
+    pub(crate) main_id: FuncId,
+    pub(crate) main_returns_result: bool,
 }
 
 fn with_runtime_mut<F: FnOnce(&mut JitRuntime)>(f: F) {
@@ -380,7 +391,7 @@ fn alloc_jit_result(rt: &mut JitRuntime, ok: bool, bits: u64) -> i64 {
     rt.results.len() as i64
 }
 
-fn jit_result(rt: &JitRuntime, handle: i64) -> Option<JitResultValue> {
+pub(crate) fn jit_result(rt: &JitRuntime, handle: i64) -> Option<JitResultValue> {
     usize::try_from(handle)
         .ok()
         .and_then(|index| index.checked_sub(1))
@@ -455,60 +466,60 @@ extern "C" fn jet_jit_perf_reset_fidelity() {
     );
 }
 
-struct HostFns {
-    add_i64: FuncId,
-    sub_i64: FuncId,
-    mul_i64: FuncId,
-    div_i64: FuncId,
-    print_i64: FuncId,
-    print_f64: FuncId,
-    print_bool: FuncId,
-    print_char: FuncId,
-    print_str: FuncId,
-    str_begin: FuncId,
-    str_push_lit: FuncId,
-    str_push_i64: FuncId,
-    str_push_f64: FuncId,
-    str_push_bool: FuncId,
-    str_push_char: FuncId,
-    str_push_str: FuncId,
-    str_eq: FuncId,
-    str_len: FuncId,
-    str_trim: FuncId,
-    str_to_upper: FuncId,
-    str_to_lower: FuncId,
-    str_replace: FuncId,
-    struct_new: FuncId,
-    struct_get_i64: FuncId,
-    struct_get_f64: FuncId,
-    struct_get_bool: FuncId,
-    struct_get_char: FuncId,
-    struct_get_str: FuncId,
-    struct_set_i64: FuncId,
-    struct_set_f64: FuncId,
-    struct_set_bool: FuncId,
-    struct_set_char: FuncId,
-    struct_set_str: FuncId,
-    result_new_i64: FuncId,
-    result_new_f64: FuncId,
-    result_new_i8: FuncId,
-    result_new_i32: FuncId,
-    result_is_ok: FuncId,
-    result_get_i64: FuncId,
-    result_get_f64: FuncId,
-    result_get_i8: FuncId,
-    result_get_i32: FuncId,
-    perf_fidelity: FuncId,
-    perf_default_fidelity: FuncId,
-    perf_override_fidelity: FuncId,
-    perf_reset_fidelity: FuncId,
-    is_trapped: FuncId,
-    coll: Collections::CollectionsHostFns,
-    conc: Concurrency::ConcurrencyHostFns,
-    num: Numeric::NumericHostFns,
+pub(crate) struct HostFns {
+    pub(crate) add_i64: FuncId,
+    pub(crate) sub_i64: FuncId,
+    pub(crate) mul_i64: FuncId,
+    pub(crate) div_i64: FuncId,
+    pub(crate) print_i64: FuncId,
+    pub(crate) print_f64: FuncId,
+    pub(crate) print_bool: FuncId,
+    pub(crate) print_char: FuncId,
+    pub(crate) print_str: FuncId,
+    pub(crate) str_begin: FuncId,
+    pub(crate) str_push_lit: FuncId,
+    pub(crate) str_push_i64: FuncId,
+    pub(crate) str_push_f64: FuncId,
+    pub(crate) str_push_bool: FuncId,
+    pub(crate) str_push_char: FuncId,
+    pub(crate) str_push_str: FuncId,
+    pub(crate) str_eq: FuncId,
+    pub(crate) str_len: FuncId,
+    pub(crate) str_trim: FuncId,
+    pub(crate) str_to_upper: FuncId,
+    pub(crate) str_to_lower: FuncId,
+    pub(crate) str_replace: FuncId,
+    pub(crate) struct_new: FuncId,
+    pub(crate) struct_get_i64: FuncId,
+    pub(crate) struct_get_f64: FuncId,
+    pub(crate) struct_get_bool: FuncId,
+    pub(crate) struct_get_char: FuncId,
+    pub(crate) struct_get_str: FuncId,
+    pub(crate) struct_set_i64: FuncId,
+    pub(crate) struct_set_f64: FuncId,
+    pub(crate) struct_set_bool: FuncId,
+    pub(crate) struct_set_char: FuncId,
+    pub(crate) struct_set_str: FuncId,
+    pub(crate) result_new_i64: FuncId,
+    pub(crate) result_new_f64: FuncId,
+    pub(crate) result_new_i8: FuncId,
+    pub(crate) result_new_i32: FuncId,
+    pub(crate) result_is_ok: FuncId,
+    pub(crate) result_get_i64: FuncId,
+    pub(crate) result_get_f64: FuncId,
+    pub(crate) result_get_i8: FuncId,
+    pub(crate) result_get_i32: FuncId,
+    pub(crate) perf_fidelity: FuncId,
+    pub(crate) perf_default_fidelity: FuncId,
+    pub(crate) perf_override_fidelity: FuncId,
+    pub(crate) perf_reset_fidelity: FuncId,
+    pub(crate) is_trapped: FuncId,
+    pub(crate) coll: Collections::CollectionsHostFns,
+    pub(crate) conc: Concurrency::ConcurrencyHostFns,
+    pub(crate) num: Numeric::NumericHostFns,
 }
 
-fn new_jit_module() -> Result<(JITModule, HostFns), String> {
+pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     let mut builder =
         JITBuilder::new(cranelift_module::default_libcall_names()).map_err(|e| e.to_string())?;
     builder.symbol("jet_jit_add_i64", jet_jit_add_i64 as *const u8);

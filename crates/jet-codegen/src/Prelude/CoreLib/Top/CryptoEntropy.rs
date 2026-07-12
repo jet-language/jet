@@ -2,6 +2,8 @@
 // Keep this file std-only: codegen embeds it in native programs and jetpack
 // embeds the exact same source in the generated crypto bridge.
 
+mod jet_crypto_entropy {
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum JetCryptoEntropyError {
     NegativeLength,
@@ -40,6 +42,9 @@ thread_local! {
     static JET_CRYPTO_ENTROPY_TEST_PROVIDER: std::cell::RefCell<
         Option<Box<dyn FnMut(&mut [u8]) -> JetCryptoEntropyStep>>
     > = std::cell::RefCell::new(None);
+    static JET_CRYPTO_ZEROIZE_TEST_OBSERVER: std::cell::RefCell<
+        Option<Box<dyn FnMut(&[u8])>>
+    > = std::cell::RefCell::new(None);
 }
 
 #[cfg(test)]
@@ -58,12 +63,42 @@ pub fn jet_crypto_entropy_clear_test_provider() {
     });
 }
 
-fn jet_crypto_entropy_zeroize(bytes: &mut [u8]) {
-    for byte in bytes {
+#[cfg(test)]
+pub fn jet_crypto_entropy_set_zeroize_test_observer(
+    observer: impl FnMut(&[u8]) + 'static,
+) {
+    JET_CRYPTO_ZEROIZE_TEST_OBSERVER.with(|slot| {
+        *slot.borrow_mut() = Some(Box::new(observer));
+    });
+}
+
+#[cfg(test)]
+pub fn jet_crypto_entropy_clear_zeroize_test_observer() {
+    JET_CRYPTO_ZEROIZE_TEST_OBSERVER.with(|slot| {
+        *slot.borrow_mut() = None;
+    });
+}
+
+pub(crate) fn jet_crypto_entropy_zeroize(bytes: &mut [u8]) {
+    for byte in &mut *bytes {
         // D-CRYPTO-RNG1 requires a write the optimizer cannot elide.
         unsafe { std::ptr::write_volatile(byte, 0) };
     }
     std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
+    #[cfg(test)]
+    JET_CRYPTO_ZEROIZE_TEST_OBSERVER.with(|slot| {
+        if let Some(observer) = slot.borrow_mut().as_mut() {
+            observer(bytes);
+        }
+    });
+}
+
+#[cfg(test)]
+pub fn jet_crypto_entropy_unsupported_for_test(
+    out: &mut [u8],
+) -> Result<(), JetCryptoEntropyError> {
+    jet_crypto_entropy_zeroize(out);
+    Err(JetCryptoEntropyError::Unavailable)
 }
 
 fn jet_crypto_entropy_fill_loop(
@@ -171,6 +206,40 @@ fn jet_crypto_entropy_wasi_attempt(out: &mut [u8]) -> Result<(), u16> {
     if errno == 0 { Ok(()) } else { Err(errno) }
 }
 
+#[cfg(any(test, all(target_os = "wasi", target_arch = "wasm32")))]
+fn jet_crypto_entropy_wasi_with(
+    count: usize,
+    mut provider: impl FnMut(&mut [u8]) -> u16,
+) -> Result<Vec<u8>, JetCryptoEntropyError> {
+    const ERRNO_INTR: u16 = 27;
+    for attempt in 0..17usize {
+        let mut allocation = vec![0u8; count];
+        let errno = provider(&mut allocation);
+        if errno == 0 {
+            return Ok(allocation);
+        }
+        jet_crypto_entropy_zeroize(&mut allocation);
+        if errno != ERRNO_INTR || attempt == 16 {
+            return Err(JetCryptoEntropyError::Unavailable);
+        }
+    }
+    // TODO(D-CRYPTO-RNG1 owner reconciliation): Rust's global allocator may
+    // reuse an address immediately after this exact-count buffer is dropped.
+    // "At most one attempt allocation" and "physical pointer never reused"
+    // cannot both be guaranteed without a separately ratified allocator seam.
+    // This implementation claims fresh allocations and zeroization, not
+    // physical-address uniqueness.
+    unreachable!()
+}
+
+#[cfg(test)]
+pub fn jet_crypto_entropy_wasi_with_for_test(
+    count: usize,
+    provider: impl FnMut(&mut [u8]) -> u16,
+) -> Result<Vec<u8>, JetCryptoEntropyError> {
+    jet_crypto_entropy_wasi_with(count, provider)
+}
+
 #[cfg(not(any(
     all(
         target_os = "linux",
@@ -222,20 +291,12 @@ pub fn jet_crypto_entropy_bytes(count: i64) -> Result<Vec<u8>, JetCryptoEntropyE
 
     #[cfg(all(target_os = "wasi", target_arch = "wasm32"))]
     {
-        const ERRNO_INTR: u16 = 27;
-        for attempt in 0..17 {
-            let mut out = vec![0u8; count as usize];
-            match jet_crypto_entropy_wasi_attempt(&mut out) {
-                Ok(()) => return Ok(out),
-                Err(errno) => {
-                    jet_crypto_entropy_zeroize(&mut out);
-                    if errno != ERRNO_INTR || attempt == 16 {
-                        return Err(JetCryptoEntropyError::Unavailable);
-                    }
-                }
+        return jet_crypto_entropy_wasi_with(count as usize, |out| {
+            match jet_crypto_entropy_wasi_attempt(out) {
+                Ok(()) => 0,
+                Err(errno) => errno,
             }
-        }
-        unreachable!()
+        });
     }
 
     #[cfg(not(all(target_os = "wasi", target_arch = "wasm32")))]
@@ -245,3 +306,25 @@ pub fn jet_crypto_entropy_bytes(count: i64) -> Result<Vec<u8>, JetCryptoEntropyE
         Ok(out)
     }
 }
+
+pub fn jet_crypto_entropy_fill(out: &mut [u8]) -> Result<(), JetCryptoEntropyError> {
+    let mut fresh = jet_crypto_entropy_bytes(out.len() as i64)?;
+    out.copy_from_slice(&fresh);
+    jet_crypto_entropy_zeroize(&mut fresh);
+    Ok(())
+}
+}
+
+pub use jet_crypto_entropy::{
+    jet_crypto_entropy_bytes, jet_crypto_entropy_fill, JetCryptoEntropyError,
+};
+#[allow(unused_imports)]
+pub(crate) use jet_crypto_entropy::jet_crypto_entropy_zeroize;
+
+#[cfg(test)]
+pub use jet_crypto_entropy::{
+    jet_crypto_entropy_clear_test_provider, jet_crypto_entropy_fill_with,
+    jet_crypto_entropy_clear_zeroize_test_observer, jet_crypto_entropy_set_test_provider,
+    jet_crypto_entropy_set_zeroize_test_observer, jet_crypto_entropy_unsupported_for_test,
+    jet_crypto_entropy_wasi_with_for_test, JetCryptoEntropyStep,
+};

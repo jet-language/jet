@@ -1,14 +1,21 @@
+use super::actions_policy::{BuildAction, BuildCapability, BuildResourcePool, BuildResourcePoolSpec, LegacyWrapperKind};
+use super::cache_cas::{ActionCacheStatus, ActionOutcome};
+use super::handles::{ActionId, PluginId, TargetId, TargetRef};
+use super::plugins_modules::{BuildGeneratedModule, BuildPlugin};
+use super::provenance_toolchains::{BuildProbe, BuildSigningIdentity, BuildToolchain};
+use super::targets::{BuildTarget, TargetKind};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuildPlan {
-    context: u64,
-    targets: Vec<BuildTarget>,
-    actions: Vec<BuildAction>,
-    toolchains: Vec<BuildToolchain>,
-    signing_identities: Vec<BuildSigningIdentity>,
-    probes: Vec<BuildProbe>,
-    plugins: Vec<BuildPlugin>,
-    generated_modules: Vec<BuildGeneratedModule>,
-    default: Option<TargetRef>,
+    pub(super) context: u64,
+    pub(super) targets: Vec<BuildTarget>,
+    pub(super) actions: Vec<BuildAction>,
+    pub(super) toolchains: Vec<BuildToolchain>,
+    pub(super) signing_identities: Vec<BuildSigningIdentity>,
+    pub(super) probes: Vec<BuildProbe>,
+    pub(super) plugins: Vec<BuildPlugin>,
+    pub(super) generated_modules: Vec<BuildGeneratedModule>,
+    pub(super) default: Option<TargetRef>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

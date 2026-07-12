@@ -419,7 +419,7 @@ fn jet_std_random_split(seed: i64) -> jet_std::Rng {
     jet_std::Rng { state: mixed }
 }
 // D-CRYPTO-RNG1=A: cryptographic bytes use the shared fail-closed OS provider.
-// Older editions keep this infallible Rust shim; failure takes the ratified
+// Edition 2026 keeps this infallible Rust shim; failure takes the ratified
 // E3001/exit-70 compatibility path and never returns weak or partial bytes.
 fn jet_std_crypto_random_bytes(n: i64) -> Vec<u8> {
     match jet_crypto_entropy_bytes(n) {

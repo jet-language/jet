@@ -775,9 +775,10 @@ fn main() {{
     let cmd = parts.next().unwrap_or("");
     match cmd {{
         "keygen" => {{
-            let (seed, public) = {crate_name}::jet_crypto_keygen_impl()
-                .unwrap_or_else(|e| fail(&e.to_string()));
-            println!("{{}} {{}}", hex_encode(&seed), hex_encode(&public));
+            match {crate_name}::jet_crypto_keygen_impl() {{
+                Ok((seed, public)) => println!("{{}} {{}}", hex_encode(&seed), hex_encode(&public)),
+                Err(_) => exit(1),
+            }}
         }}
         "sign" => {{
             let seed = parts.next().unwrap_or_else(|| fail("sign: missing key"));

@@ -1,3 +1,16 @@
+use cranelift_codegen::ir::{types, AbiParam, InstBuilder, Signature};
+use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
+use cranelift_jit::JITModule;
+use cranelift_module::{FuncId, Linkage, Module};
+use jet_codegen::Codegen::TIR::{self, JitProgram, TFunc, TFuncKind, TJitSpawnBody, TJitSpawnLambda};
+use jet_foundation::AST::Type;
+use std::collections::HashMap;
+
+use super::lower_ctx::LowerCtx;
+use super::runtime_host::HostFns;
+use super::types_meta::{clif_ty, func_signature, jit_fn_name, JitMeta};
+use super::JitRuntime;
+
 fn spawn_lambda_signature(module: &JITModule, lam: &TJitSpawnLambda) -> Signature {
     let cc = module.target_config().default_call_conv;
     let mut sig = Signature::new(cc);
@@ -212,7 +225,7 @@ fn lower_function(
     Ok(())
 }
 
-fn compile_program(
+pub(crate) fn compile_program(
     module: &mut JITModule,
     host: &HostFns,
     program: &JitProgram,

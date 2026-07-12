@@ -379,7 +379,7 @@ pub fn core_fixed_sig(
             Some((vec![(read, Type::Int)], Some(Type::List(Box::new(u8_ty())))))
         }
         // D-CRYPTO-RNG1=A: fail-closed bytes from the target's tier-1 OS CSPRNG.
-        // Older editions keep the infallible source shape and take E3001/exit 70
+        // Edition 2026 keeps the infallible source shape and takes E3001/exit 70
         // on invalid length or provider failure; no weak fallback exists.
         ("core.crypto.random", "bytes") => {
             Some((vec![(read, Type::Int)], Some(Type::List(Box::new(u8_ty())))))

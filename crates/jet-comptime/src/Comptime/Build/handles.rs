@@ -23,8 +23,8 @@ macro_rules! target_handle {
     ($name:ident) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
         pub struct $name {
-            id: TargetId,
-            context: u64,
+            pub(super) id: TargetId,
+            pub(super) context: u64,
         }
 
         impl $name {
@@ -56,8 +56,8 @@ target_handle!(PublishTarget);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TargetRef {
-    id: TargetId,
-    context: u64,
+    pub(super) id: TargetId,
+    pub(super) context: u64,
 }
 
 impl TargetRef {
@@ -68,8 +68,8 @@ impl TargetRef {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ActionHandle {
-    id: ActionId,
-    context: u64,
+    pub(super) id: ActionId,
+    pub(super) context: u64,
 }
 
 impl ActionHandle {
@@ -80,8 +80,8 @@ impl ActionHandle {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ToolchainHandle {
-    id: ToolchainId,
-    context: u64,
+    pub(super) id: ToolchainId,
+    pub(super) context: u64,
 }
 
 impl ToolchainHandle {
@@ -92,8 +92,8 @@ impl ToolchainHandle {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SigningIdentityHandle {
-    id: SigningIdentityId,
-    context: u64,
+    pub(super) id: SigningIdentityId,
+    pub(super) context: u64,
 }
 
 impl SigningIdentityHandle {
@@ -104,8 +104,8 @@ impl SigningIdentityHandle {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ProbeHandle {
-    id: ProbeId,
-    context: u64,
+    pub(super) id: ProbeId,
+    pub(super) context: u64,
 }
 
 impl ProbeHandle {
@@ -116,8 +116,8 @@ impl ProbeHandle {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PluginHandle {
-    id: PluginId,
-    context: u64,
+    pub(super) id: PluginId,
+    pub(super) context: u64,
 }
 
 impl PluginHandle {
@@ -128,8 +128,8 @@ impl PluginHandle {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct GeneratedModuleHandle {
-    id: GeneratedModuleId,
-    context: u64,
+    pub(super) id: GeneratedModuleId,
+    pub(super) context: u64,
 }
 
 impl GeneratedModuleHandle {

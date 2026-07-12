@@ -12,7 +12,6 @@ use super::nixos_import::{
     import_package_list, import_render_string, scan_first_nixos_host, NixosImportArgs,
     NixosImportPlan, NixosImportUser,
 };
-use super::theme_fleet_lifecycle::write_app_module_facts;
 use crate::JSON;
 use std::collections::BTreeSet;
 use std::fs;

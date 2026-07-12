@@ -1,5 +1,25 @@
+use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
+use cranelift_codegen::ir::{types, Block, InstBuilder, TrapCode, Value};
+use cranelift_frontend::{FunctionBuilder, Variable};
+use cranelift_jit::JITModule;
+use cranelift_module::{FuncId, Module};
+use jet_codegen::Codegen::TIR::{
+    self, TBuiltinOp, TCallArg, TCoreClosureKind, TEnumPayload, TExpr, TExprKind, THandleOp,
+    TIfCond, TJitSpawnLambda, TOrFallback, TStmt, TStrPart,
+};
+use jet_foundation::AST::{BinOp, IncDecOp, Type, UnOp};
+use std::collections::HashMap;
+
+use super::runtime_host::HostFns;
+use super::safety::{
+    collect_select_arms_jit, flatten_string, jit_list_float_type, jit_list_iter_elem_type,
+    jit_value_type, record_type_key, user_type_name,
+};
+use super::types_meta::{clif_ty, init_clif_ty, JitMeta};
+use super::JitRuntime;
+
 #[derive(Clone)]
-struct LoopTargets {
+pub(crate) struct LoopTargets {
     label: Option<String>,
     continue_block: Block,
     break_block: Block,
@@ -17,26 +37,26 @@ struct LoopTargets {
 /// `AotFallbackBackend`/`InterpreterBackend` (`Source/JitBackend.rs`) retry the
 /// same program through the AOT path and then the tier-0 interpreter, so an
 /// `Err` from this file only costs JIT speed, never correctness (D-JIT1).
-struct LowerCtx<'a, 'b> {
-    b: &'a mut FunctionBuilder<'b>,
-    module: &'a mut JITModule,
-    host: &'a HostFns,
-    runtime: &'a mut JitRuntime,
-    meta: &'a JitMeta<'a>,
-    vars: &'a mut HashMap<String, Variable>,
-    var_tys: &'a mut HashMap<String, Type>,
-    func_ids: &'a HashMap<String, FuncId>,
-    spawn_site: &'a mut usize,
-    spawn_func_ids: &'a [FuncId],
-    spawn_lambdas: &'a [TJitSpawnLambda],
-    loop_stack: Vec<LoopTargets>,
-    dead: bool,
-    next_var: u32,
+pub(crate) struct LowerCtx<'a, 'b> {
+    pub(crate) b: &'a mut FunctionBuilder<'b>,
+    pub(crate) module: &'a mut JITModule,
+    pub(crate) host: &'a HostFns,
+    pub(crate) runtime: &'a mut JitRuntime,
+    pub(crate) meta: &'a JitMeta<'a>,
+    pub(crate) vars: &'a mut HashMap<String, Variable>,
+    pub(crate) var_tys: &'a mut HashMap<String, Type>,
+    pub(crate) func_ids: &'a HashMap<String, FuncId>,
+    pub(crate) spawn_site: &'a mut usize,
+    pub(crate) spawn_func_ids: &'a [FuncId],
+    pub(crate) spawn_lambdas: &'a [TJitSpawnLambda],
+    pub(crate) loop_stack: Vec<LoopTargets>,
+    pub(crate) dead: bool,
+    pub(crate) next_var: u32,
     /// Owning struct for inherent methods (`Point::dist_sq` → `Point`).
-    method_struct: Option<String>,
+    pub(crate) method_struct: Option<String>,
     /// CLIF return type of the function being lowered (`None` = returns void).
     /// Drives the dummy value `emit_trap_check` returns on the trap-unwind path.
-    ret_clif: Option<types::Type>,
+    pub(crate) ret_clif: Option<types::Type>,
 }
 
 impl LowerCtx<'_, '_> {
@@ -119,7 +139,7 @@ impl LowerCtx<'_, '_> {
         }
     }
 
-    fn fresh_var(&mut self, ty: cranelift_codegen::ir::Type) -> Variable {
+    pub(crate) fn fresh_var(&mut self, ty: cranelift_codegen::ir::Type) -> Variable {
         let var = Variable::from_u32(self.next_var);
         self.next_var += 1;
         self.b.declare_var(var, ty);
@@ -131,7 +151,7 @@ impl LowerCtx<'_, '_> {
     /// after an unconditional jump are skipped rather than emitted into an
     /// already-terminated Cranelift block (Cranelift rejects instructions
     /// after a block terminator).
-    fn lower_stmts(&mut self, stmts: &[TStmt]) -> Result<(), String> {
+    pub(crate) fn lower_stmts(&mut self, stmts: &[TStmt]) -> Result<(), String> {
         for stmt in stmts {
             self.lower_stmt(stmt)?;
         }
@@ -1027,7 +1047,7 @@ impl LowerCtx<'_, '_> {
     /// a user-facing failure: `AotFallbackBackend`/`InterpreterBackend`
     /// (`Source/JitBackend.rs`) retry through AOT compilation and then the
     /// tier-0 interpreter, so unsupported-here only costs `jet dev` JIT speed.
-    fn lower_expr(&mut self, expr: &TExpr) -> Result<Value, String> {
+    pub(crate) fn lower_expr(&mut self, expr: &TExpr) -> Result<Value, String> {
         match &expr.kind {
             TExprKind::IntLit(v, _) => Ok(self.b.ins().iconst(types::I64, *v)),
             TExprKind::FloatLit(v) => Ok(self.b.ins().f64const(*v)),

@@ -1,4 +1,11 @@
-fn fresh_runtime() -> JitRuntime {
+use jet_codegen::Codegen::TIR::JitProgram;
+use jet_foundation::{Diagnostics::Diagnostic, JitBackend::RunOutcome, AST::Type};
+
+use super::functions_compile::compile_program;
+use super::runtime_host::{jit_result, new_jit_module, ResidentModule};
+use super::{Concurrency, JitRuntime, RESIDENT_MODULE, RESIDENT_RUNTIME};
+
+pub(crate) fn fresh_runtime() -> JitRuntime {
     JitRuntime {
         source_file: String::new(),
         stdout: String::new(),
@@ -44,13 +51,13 @@ fn reset_run_heap(rt: &mut JitRuntime) {
     rt.results.clear();
 }
 
-fn resident_teardown() {
+pub(crate) fn resident_teardown() {
     RESIDENT_MODULE.with(|slot| *slot.borrow_mut() = None);
     RESIDENT_RUNTIME.with(|slot| *slot.borrow_mut() = None);
     Concurrency::set_active_runtime(None);
 }
 
-fn ensure_resident_module(program: &JitProgram) -> Result<(), String> {
+pub(crate) fn ensure_resident_module(program: &JitProgram) -> Result<(), String> {
     let main_returns_result = program.funcs.iter().any(|func| {
         func.name == "run" && matches!(func.ret, Some(Type::Result { .. }))
     });
@@ -159,14 +166,14 @@ fn resident_invoke() -> Result<RunOutcome, String> {
     })
 }
 
-fn resident_run_fresh(program: &JitProgram) -> Result<RunOutcome, String> {
+pub(crate) fn resident_run_fresh(program: &JitProgram) -> Result<RunOutcome, String> {
     resident_teardown();
     RESIDENT_RUNTIME.with(|slot| *slot.borrow_mut() = Some(fresh_runtime()));
     ensure_resident_module(program)?;
     resident_invoke()
 }
 
-fn resident_hot_swap(program: &JitProgram) -> Result<RunOutcome, String> {
+pub(crate) fn resident_hot_swap(program: &JitProgram) -> Result<RunOutcome, String> {
     // Rebuild the module (Cranelift rejects redefining `jet_jit_main`) but keep
     // the live runtime heap — the M2 contract.
     let mut runtime =

@@ -1,4 +1,20 @@
+use super::actions_policy::{ActionCache, BuildAction, BuildCapability, BuildResourcePool};
+use super::cache_cas::{
+    ActionCacheProvenance, ActionCacheStatus, ActionKey, ActionOutcome, ActionOutputRecord,
+    ActionResultRecord, CacheHitReason, CacheMissReason, ContentDigest, LocalCas,
+    atomic_restore_file, secure_read_file,
+};
+use super::errors_keys::BuildError;
+use super::execution_helpers::action_pools;
+use super::handles::{ActionHandle, ActionId, ProbeId};
+use super::plan_graph::{BuildExecutionReport, BuildPlan};
+use super::provenance_toolchains::{ProbeKind, ReproducibilityClass};
+use super::targets::BuildPath;
+use super::validation::resolve_under;
+use std::collections::BTreeSet;
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
+use std::{fs, io};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuildProbeFact {
@@ -252,10 +268,10 @@ fn execute_one_action(
     Ok(outcome)
 }
 
-struct LastRebuildRecord {
-    key: ActionKey,
-    status: ActionCacheStatus,
-    failed_exit_code: Option<i32>,
+pub(super) struct LastRebuildRecord {
+    pub(super) key: ActionKey,
+    pub(super) status: ActionCacheStatus,
+    pub(super) failed_exit_code: Option<i32>,
 }
 
 fn rebuild_record_path(project_root: &Path, action: ActionId) -> PathBuf {
@@ -293,7 +309,7 @@ fn parse_rebuild_status(code: &str) -> Option<ActionCacheStatus> {
     })
 }
 
-fn read_last_rebuild_record(
+pub(super) fn read_last_rebuild_record(
     project_root: &Path,
     action: ActionId,
     action_name: &str,
@@ -346,7 +362,7 @@ fn write_last_rebuild_record(
     })
 }
 
-fn prepare_output_destination(root: &Path, output: &Path) -> io::Result<()> {
+pub(super) fn prepare_output_destination(root: &Path, output: &Path) -> io::Result<()> {
     let parent = output.parent().unwrap_or(root);
     let relative = parent.strip_prefix(root).map_err(|_| io::Error::new(
         io::ErrorKind::InvalidInput,
@@ -434,7 +450,7 @@ fn cache_restore_miss_reason(error: &io::Error) -> CacheMissReason {
     }
 }
 
-fn read_action_record(
+pub(super) fn read_action_record(
     root: &Path,
     path: &Path,
     key: ActionKey,

@@ -1,5 +1,23 @@
+use super::actions_policy::{
+    ActionCache, BuildAction, BuildCapability, BuildResourcePool, LegacyWrapperKind,
+    PolicyExplanation,
+};
+use super::cache_cas::{ActionInputSnapshot, ActionKey, ContentDigest};
+use super::execution_helpers::action_pools;
+use super::execution_runtime::BuildProbeFact;
+use super::handles::{ActionId, ProbeId, SigningIdentityId, TargetId, ToolchainId};
+use super::plan_graph::BuildPlan;
+use super::provenance_toolchains::{
+    BuildProbe, BuildProvenance, BuildSigningIdentity, BuildToolchain, ProbeKind,
+    ProvenanceSource, ReproducibilityClass, ToolchainRole,
+};
+use super::targets::BuildPath;
+use crate::SHA256;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum NameKind {
+pub(super) enum NameKind {
     Target,
     Action,
     Toolchain,
@@ -59,7 +77,7 @@ pub enum BuildError {
     ActionDependencyCycle,
 }
 
-fn canonical_action_key(
+pub(super) fn canonical_action_key(
     plan: &BuildPlan,
     action: &BuildAction,
     inputs: &[ActionInputSnapshot],
@@ -157,7 +175,7 @@ fn canonical_action_key(
     ActionKey(format!("act-sha256:{}", SHA256::sha256_hex(&w.bytes)))
 }
 
-fn canonical_effective_action_key(
+pub(super) fn canonical_effective_action_key(
     plan: &BuildPlan,
     action: &BuildAction,
     inputs: &[ActionInputSnapshot],

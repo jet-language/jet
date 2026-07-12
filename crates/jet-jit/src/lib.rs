@@ -14,34 +14,13 @@ mod Collections;
 mod Concurrency;
 mod Numeric;
 
-use jet_codegen::scheduler::{
-    JetSchedulerChannel, JetSchedulerJoin, JetSchedulerSender, JetTaskControl,
-};
 // I6: Cranelift crates live here, not in the compiler `jet` crate (`Source/`).
 // The root package depends on jet-jit; jet-jit depends on cranelift-*.
 // D-JITDEP1 approved this as a scoped runtime-side exception.
 
-use jet_foundation::{
-    Diagnostics::Diagnostic,
-    JitBackend::{JitBackend, RunOutcome},
-    AST::{BinOp, IncDecOp, ProgramBundle, Type, UnOp},
-};
-
-use cranelift_codegen::ir::{
-    condcodes::{FloatCC, IntCC},
-    types, AbiParam, Block, InstBuilder, Signature, TrapCode, Value,
-};
-use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
-use cranelift_jit::{JITBuilder, JITModule};
-use cranelift_module::{FuncId, Linkage, Module};
-use jet_codegen::Codegen::TIR::{
-    self, JitProgram, JitSpawnCapture, TBuiltinOp, TCallArg, TCoreClosureKind, TEnumPayload, TExpr,
-    TExprKind, TFunc, TFuncKind, THandleOp, TIfCond, TJitSpawnBody, TJitSpawnLambda, TOrFallback,
-    TStmt, TStrPart,
-};
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
-use std::panic::{catch_unwind, AssertUnwindSafe};
+
+use runtime_host::ResidentModule;
 
 thread_local! {
     /// Compiled module + entry symbol; re-linked on hot_swap.
@@ -61,11 +40,32 @@ struct JitResultValue {
     bits: u64,
 }
 
-include!("jit/runtime_host.rs");
-include!("jit/safety.rs");
-include!("jit/types_meta.rs");
-include!("jit/lower_ctx.rs");
-include!("jit/functions_compile.rs");
-include!("jit/resident.rs");
-include!("jit/api_debug.rs");
-include!("jit/backend.rs");
+#[path = "jit/runtime_host.rs"]
+mod runtime_host;
+#[path = "jit/safety.rs"]
+mod safety;
+#[path = "jit/types_meta.rs"]
+mod types_meta;
+#[path = "jit/lower_ctx.rs"]
+mod lower_ctx;
+#[path = "jit/functions_compile.rs"]
+mod functions_compile;
+#[path = "jit/resident.rs"]
+mod resident;
+#[path = "jit/api_debug.rs"]
+mod api_debug;
+#[path = "jit/backend.rs"]
+mod backend;
+
+// `Concurrency.rs` (a real sibling module, not an include! fragment) reaches
+// `JitRuntime` via `super::JitRuntime` — keep that path alive at crate root.
+pub(crate) use runtime_host::JitRuntime;
+
+pub use api_debug::{
+    cranelift_host_supported, jit_dump_main_ops, jit_dump_main_stmts, jit_dump_mixed_switch_conds,
+    jit_expr_tag, jit_main_uncovered_detail, jit_program_func_names, jit_select_arm_counts,
+    jit_spawn_stats, jit_stmt_tag, resident_invocations_for_test, resident_jit_func_safety_detail,
+    resident_jit_safe_bundle, resident_jit_safe_bundle_detail, tir_lower_fail_reason,
+    tir_lowers_bundle, try_compile_bundle,
+};
+pub use backend::CraneliftBackend;

@@ -1,5 +1,5 @@
 use super::options_rendering::{clean_symbol, option_value};
-use super::types::{GNOME_DESKTOP_PACKAGES, OsFlags, Target};
+use super::types::{GNOME_DESKTOP_PACKAGES, OsFlags};
 use crate::ModuleEval::SystemPlan;
 use crate::Output::Theme;
 use crate::Provider;
@@ -110,7 +110,7 @@ pub(super) fn realize_ref(
     table: &RefSpec::SourceTable,
     spec: &RefSpec::RefSpec,
     name_w: usize,
-    mut progress: Option<(&mut super::Output::LiveRegion<'_>, usize, usize)>,
+    mut progress: Option<(&mut crate::Output::LiveRegion<'_>, usize, usize)>,
 ) -> Option<RealizedPackage> {
     if let Some((live, step, total)) = progress.as_mut() {
         live.set_dependency_status(
@@ -184,7 +184,7 @@ pub(super) fn try_realize_ref(
     table: &RefSpec::SourceTable,
     spec: &RefSpec::RefSpec,
     name_w: usize,
-    mut progress: Option<(&mut super::Output::LiveRegion<'_>, usize, usize)>,
+    mut progress: Option<(&mut crate::Output::LiveRegion<'_>, usize, usize)>,
 ) -> Result<RealizedPackage, String> {
     if let Some((live, step, total)) = progress.as_mut() {
         live.set_dependency_status(

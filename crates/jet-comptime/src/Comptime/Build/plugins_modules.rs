@@ -1,3 +1,11 @@
+use super::actions_policy::{ActionSpec, BuildCapability};
+use super::cache_cas::ContentDigest;
+use super::handles::{
+    ActionHandle, GeneratedModuleHandle, GeneratedModuleId, PluginHandle, PluginId, TargetRef,
+};
+use super::targets::{BuildPath, TargetKind, TargetSpec};
+use std::collections::BTreeSet;
+
 pub const BUILD_PLUGIN_API_VERSION: &str = "jet.build.plugin.v1";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
