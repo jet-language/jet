@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 520,
-    "rev": 4724,
+    "rev": 4736,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -13257,23 +13257,70 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
         {
+          "at": "2026-07-12",
+          "by": "grok-477-builder",
+          "text": "clash fix: tool collide E1294→E1297, provider E1295→E1298 (E1295/E1296 stay #478 selectors). commit on grok/card-477."
+        },
+        {
+          "at": "2026-07-12",
+          "by": "grok-477-builder",
+          "text": "impl done (58118c1a). criteria 1-4 met with test evidence. leave verify for other agent — targeted tests only: cargo test --test jetpack tool_ (6 ok) + jetpack --lib tool:: (2 ok)."
+        },
+        {
           "at": "2026-07-10",
           "by": "claude-main",
           "text": "D-JPK-TOOLRUN1=A ratified and recorded in docs/spec/syntax-decisions.md. Ready to implement: unified jetpack tool run|install|list|uninstall over the D-JPK-PROFILE1 engine."
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "jetpack tool run|install|list|uninstall verb surface exists and is documented in help",
+          "status": "met",
+          "metBy": "grok-477-builder",
+          "verifiedBy": null,
+          "evidence": "help lists tool run|install|list|uninstall; Syntax::TOOL_* + JETPACK_VERBS; commit 58118c1a; tests tool_help + tool_is_in_canonical ok",
+          "at": "2026-07-12T20:06:26.165Z"
+        },
+        {
+          "n": 2,
+          "text": "tool run realizes+execs refs across built-in providers (nixpkgs/github/path); unavailable external providers emit clear diagnostic (not silent skip)",
+          "status": "met",
+          "metBy": "grok-477-builder",
+          "verifiedBy": null,
+          "evidence": "tool_run_unavailable_provider_is_e1298_not_silent ok (npm→E1298 snapshot); E1295 reserved for #478 --affected-since",
+          "at": "2026-07-12T21:05:22.720Z"
+        },
+        {
+          "n": 3,
+          "text": "tool install projects bins onto ~/.jet/bin with generation metadata (real PATH projection)",
+          "status": "met",
+          "metBy": "grok-477-builder",
+          "verifiedBy": null,
+          "evidence": "tool_install_projects_real_bin_symlink_with_generation ok: real symlink ~/.jet/bin + generations/1/meta.json",
+          "at": "2026-07-12T20:06:26.344Z"
+        },
+        {
+          "n": 4,
+          "text": "JPK-TOOL-COLLIDE fires when install bin name collides with project #Task fn; I4 snapshot + diagnostics.md",
+          "status": "met",
+          "metBy": "grok-477-builder",
+          "verifiedBy": null,
+          "evidence": "tool_install_task_collision_is_e1297_snapshot ok; diagnostics.md E1297/E1298; tool_task_collide.stderr; E1294 left for #476",
+          "at": "2026-07-12T21:05:22.809Z"
+        }
+      ],
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-10T21:04:30.553Z",
-      "updated": "2026-07-10"
+      "updated": "2026-07-12"
     },
     {
       "id": "c0rfeel3",
@@ -33444,6 +33491,90 @@
   ],
   "events": [
     {
+      "at": "2026-07-12T21:05:22.809Z",
+      "by": "grok-477-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0fchu51",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-12T21:05:22.720Z",
+      "by": "grok-477-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0fchu51",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-12T21:05:22.627Z",
+      "by": "grok-477-builder",
+      "action": "card.update",
+      "ref": "c0fchu51",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-12T20:06:26.439Z",
+      "by": "grok-477-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0fchu51",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-12T20:06:26.344Z",
+      "by": "grok-477-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0fchu51",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-12T20:06:26.255Z",
+      "by": "grok-477-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0fchu51",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-12T20:06:26.165Z",
+      "by": "grok-477-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0fchu51",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-12T20:06:26.074Z",
+      "by": "grok-477-builder",
+      "action": "card.criteria-add",
+      "ref": "c0fchu51",
+      "note": "#4 JPK-TOOL-COLLIDE fires when install bin name collides with p"
+    },
+    {
+      "at": "2026-07-12T20:06:25.980Z",
+      "by": "grok-477-builder",
+      "action": "card.criteria-add",
+      "ref": "c0fchu51",
+      "note": "#3 tool install projects bins onto ~/.jet/bin with generation m"
+    },
+    {
+      "at": "2026-07-12T20:06:25.891Z",
+      "by": "grok-477-builder",
+      "action": "card.criteria-add",
+      "ref": "c0fchu51",
+      "note": "#2 tool run realizes+execs refs across built-in providers (nixp"
+    },
+    {
+      "at": "2026-07-12T20:06:25.798Z",
+      "by": "grok-477-builder",
+      "action": "card.criteria-add",
+      "ref": "c0fchu51",
+      "note": "#1 jetpack tool run|install|list|uninstall verb surface exists "
+    },
+    {
+      "at": "2026-07-12T20:06:17.206Z",
+      "by": "grok-477-builder",
+      "action": "card.update",
+      "ref": "c0fchu51",
+      "note": "phase,logEntry"
+    },
+    {
       "at": "2026-07-12T19:42:07.018Z",
       "by": "codex-orchestrator",
       "action": "card.update",
@@ -36858,90 +36989,6 @@
       "action": "card.criteria-add",
       "ref": "c0y0m8yx",
       "note": "#1 rename watcher handle.active() + Subscription.active() -> is"
-    },
-    {
-      "at": "2026-07-12T07:00:47.945Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-API-CONTAINS1",
-      "note": "One membership word: contains for elements, contains_key for keys; Bag's has dies"
-    },
-    {
-      "at": "2026-07-12T06:59:32.736Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0gk8k3t",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-12T06:59:32.398Z",
-      "by": "codex-main",
-      "action": "card.criteria-add",
-      "ref": "c0gk8k3t",
-      "note": "#8 Automated terminal matrix proves raw and cooked behavior ove"
-    },
-    {
-      "at": "2026-07-12T06:59:32.078Z",
-      "by": "codex-main",
-      "action": "card.criteria-add",
-      "ref": "c0gk8k3t",
-      "note": "#7 Hybrid UI provides addressable arbitrary-turn pin/fold/unfol"
-    },
-    {
-      "at": "2026-07-12T06:59:31.747Z",
-      "by": "codex-main",
-      "action": "card.criteria-add",
-      "ref": "c0gk8k3t",
-      "note": "#6 D-FE-REPL-RERUN1=A supports selecting/editing any prior turn"
-    },
-    {
-      "at": "2026-07-12T06:59:31.418Z",
-      "by": "codex-main",
-      "action": "card.criteria-add",
-      "ref": "c0gk8k3t",
-      "note": "#5 REPL docs and completion consume one shared semantic symbol "
-    },
-    {
-      "at": "2026-07-12T06:59:31.082Z",
-      "by": "codex-main",
-      "action": "card.criteria-add",
-      "ref": "c0gk8k3t",
-      "note": "#4 D-FE-REPL-INTERRUPT1=A cancels active interpreter/runtime wo"
-    },
-    {
-      "at": "2026-07-12T06:59:30.750Z",
-      "by": "codex-main",
-      "action": "card.criteria-add",
-      "ref": "c0gk8k3t",
-      "note": "#3 D-FE-REPL-MULTILINE1=A provides parser-completeness-driven r"
-    },
-    {
-      "at": "2026-07-12T06:59:30.418Z",
-      "by": "codex-main",
-      "action": "card.criteria-add",
-      "ref": "c0gk8k3t",
-      "note": "#2 D-FE-REPL-HISTORY1=A persists only successful turns in the p"
-    },
-    {
-      "at": "2026-07-12T06:58:41.691Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0y0m8yx",
-      "note": "Core API coherence: naming-law reconciliation + verb unification"
-    },
-    {
-      "at": "2026-07-12T06:47:37.205Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0s8u85x",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T06:47:37.108Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0qlbeaf",
-      "note": "phase,logEntry"
     }
   ],
   "nextNum": 368,
