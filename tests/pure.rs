@@ -179,6 +179,7 @@ fn run() {
                     param_variadic: f.params.iter().map(|p| p.variadic).collect(),
                     variadic_bounds: f.params.last().and_then(|p| p.variadic_bound_list.clone()),
                     is_must_use: f.is_must_use,
+                    is_foreign_thread_safe: false,
                 },
             );
             ast_funcs_owned.push((f.name.clone(), f.clone()));
@@ -256,6 +257,7 @@ fn run() {
                     param_variadic: f.params.iter().map(|p| p.variadic).collect(),
                     variadic_bounds: f.params.last().and_then(|p| p.variadic_bound_list.clone()),
                     is_must_use: f.is_must_use,
+                    is_foreign_thread_safe: false,
                 },
             );
             ast_funcs_owned.push((f.name.clone(), f.clone()));
@@ -325,6 +327,7 @@ fn run() {
                     param_variadic: f.params.iter().map(|p| p.variadic).collect(),
                     variadic_bounds: f.params.last().and_then(|p| p.variadic_bound_list.clone()),
                     is_must_use: f.is_must_use,
+                    is_foreign_thread_safe: false,
                 },
             );
             ast_funcs_owned.push((f.name.clone(), f.clone()));
