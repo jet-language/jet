@@ -7095,7 +7095,7 @@ fn tool_run_ephemeral_execs_builtin_provider_fixture() {
 }
 
 #[test]
-fn tool_run_unavailable_provider_is_e1295_not_silent() {
+fn tool_run_unavailable_provider_is_e1298_not_silent() {
     let root = Scratch::new("tool-prov-root");
     let proj = Scratch::new("tool-prov-proj");
     let home = Scratch::new("tool-prov-home");
@@ -7109,7 +7109,7 @@ fn tool_run_unavailable_provider_is_e1295_not_silent() {
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&output.stderr);
     let diagnostic = stderr
-        .find("\n  error[E1295]")
+        .find("\n  error[E1298]")
         .map(|idx| &stderr[idx..])
         .unwrap_or(&stderr);
     assert_jetos_stderr_snapshot("tool_provider_unavailable", diagnostic);
@@ -7198,7 +7198,7 @@ fn tool_install_projects_real_bin_symlink_with_generation() {
 }
 
 #[test]
-fn tool_install_task_collision_is_e1294_snapshot() {
+fn tool_install_task_collision_is_e1297_snapshot() {
     let root = Scratch::new("tool-collide-root");
     let proj = Scratch::new("tool-collide-proj");
     let fixtures = Scratch::new("tool-collide-fx");
@@ -7239,7 +7239,7 @@ fn tool_install_task_collision_is_e1294_snapshot() {
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     let diagnostic = stderr
-        .find("\n  error[E1294]")
+        .find("\n  error[E1297]")
         .map(|idx| &stderr[idx..])
         .unwrap_or(&stderr);
     assert_jetos_stderr_snapshot("tool_task_collide", diagnostic);

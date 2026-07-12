@@ -5,7 +5,7 @@
 //! projects bins into `~/.jet/bin` with per-install generation metadata under
 //! `~/.jet/tools/` — a minimal isolated install until the shared
 //! D-JPK-PROFILE1 `jet profile` surface is the front door. A bin name that
-//! collides with a project `#Task fn` is E1294 (JPK-TOOL-COLLIDE).
+//! collides with a project `#Task fn` is E1297 (JPK-TOOL-COLLIDE).
 
 use super::parse::Parsed;
 use super::realize::{classify_or_report, RunPlan};

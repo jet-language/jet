@@ -439,7 +439,7 @@ pub const TOOL_VERBS: &[&str] = &[
     TOOL_VERB_LIST,
     TOOL_VERB_UNINSTALL,
 ];
-/// Install under a different on-PATH bin name (avoids JPK-TOOL-COLLIDE / E1294).
+/// Install under a different on-PATH bin name (avoids JPK-TOOL-COLLIDE / E1297).
 pub const TOOL_FLAG_AS: &str = "--as";
 /// Default profile name for `jetpack tool install` PATH projections.
 pub const TOOL_PROFILE_NAME: &str = "tools";
@@ -448,13 +448,13 @@ pub const TOOL_BIN_DIR: &str = "bin";
 /// Generation + metadata root under `~/.jet/` (`tools/`).
 pub const TOOL_STATE_DIR: &str = "tools";
 /// External tool-provider prefixes recognized but not yet realizable as
-/// hangar providers — emit E1295 instead of silently skipping.
+/// hangar providers — emit E1298 instead of silently skipping.
 pub const TOOL_EXTERNAL_PROVIDERS: &[&str] =
     &["npm", "pypi", "cargo", "crates", "brew", "go", "gem"];
-/// Diagnostic class JPK-TOOL-COLLIDE (E1294): install bin shadows a `#Task fn`.
-pub const TOOL_DIAG_COLLIDE: &str = "E1294";
-/// Diagnostic class JPK-TOOL-PROVIDER (E1295): external provider not available.
-pub const TOOL_DIAG_PROVIDER: &str = "E1295";
+/// Diagnostic class JPK-TOOL-COLLIDE (E1297): install bin shadows a `#Task fn`.
+pub const TOOL_DIAG_COLLIDE: &str = "E1297";
+/// Diagnostic class JPK-TOOL-PROVIDER (E1298): external provider not available.
+pub const TOOL_DIAG_PROVIDER: &str = "E1298";
 
 /// D-JPK-GRANTCMD1=A: `jet trust <verb>` is the public grant graph command
 /// family. The top-level `jet` binary dispatches it to Jetpack, which owns the
