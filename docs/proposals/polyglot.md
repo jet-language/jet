@@ -139,6 +139,26 @@ payroll/ → jet/payroll/            37 programs, 214 copybooks
   12 TODO diagnostics (JT01xx): GO TO fan-in at PR-DIST-030, …
 ```
 
+### Phase 5 — long-tail & enterprise estates
+
+The estates that keep whole industries on dead platforms. Each is one
+binder ballot on the ratified D-FFI-UNIFY1 structure; host models follow
+the proven precedents (embed when the runtime was built for it, sidecar
+when its global state is hostile, C-ABI when a native compiler exists).
+
+| Lang | Root | Host model | Ballot |
+|---|---|---|---|
+| VBA / Office COM | `com.*` | Windows COM automation (IDispatch) — Excel/Word/Outlook estates scriptable + migratable; typed stubs from type libraries | D-FFI-COM1 |
+| PowerShell | `pwsh.*` | sidecar pwsh worker; objects cross as `DataTree`; Windows-ops estate | D-FFI-PWSH1 |
+| Dart | `dart.*` | dart FFI both directions; Flutter embedding for mobile UI interop | D-FFI-DART1 |
+| Tcl | `tcl.*` | in-process interp (built to embed; EDA tooling estate) | D-FFI-TCL1 |
+| Ada | `ada.*` | GNAT C-ABI binder (defense/avionics estate; pairs with jet prove for the SPARK-shaped audience) | D-FFI-ADA1 |
+| Delphi/Object Pascal | `pascal.*` | FreePascal C-ABI binder (long-lived business apps) | D-FFI-PASCAL1 |
+
+ABAP (SAP), RPG (IBM i), PL/I, JCL: callable only through their vendors'
+gateways (RFC, XMI); a root ships when a real engagement demands it —
+the D-MIGRATE-SRC1 importer framework is the story we lead with there.
+
 Erlang/Elixir, Haskell, OCaml, Zig, D: reachable through the C ABI tier
 already shipped; each gets a root only when a real project demands more
 than the C surface (no speculative binders — D-STDLIBLEDGER1 spirit).

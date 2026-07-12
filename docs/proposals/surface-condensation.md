@@ -100,5 +100,37 @@ work. Expert pass: explicit file/`-p member` always wins.
   spelling + teaching error. Implementation card (gated on A7 for the
   unassigned verbs).
 
+## E. v2 census wave (2026-07-11, second pass — card #509)
+
+Full census: 63 markers (24 `@` / 39 `#`), 111 keyword entries, ~70 core
+modules, 587 diagnostic codes. Three ballots fall out; drift fixes are
+cards (see `architecture-infra.md`).
+
+### E1. Marker growth law + maturity trio — D-MARK-META1
+
+Doc-only metadata now spans three surfaces: the maturity trio
+(`@Experimental`/`@Tested`/`@Hardened`, D-MATURITY1), `#Meta(category,
+tunable)` (D-CANVASMETA1), and `@Doc` (D-CLIFLAG1). Each was ratified
+alone; together they are three ways to attach tool-facing metadata.
+Ballot: a growth law — every future doc-only annotation is a `#Meta`
+field (one ballot per field), and whether the shipped trio folds in or
+stays.
+
+### E2. Three secret-adjacent modules — D-CORE-SECRETS1
+
+`core.vault` (encrypted secret store), `core.secrets`
+(rotating/expiring secrets), `core.crypto` (primitives + envelopes).
+The vault/secrets boundary is not teachable; TTL wrapping already lives
+in `core.time.expiring`. Ballot: merge `core.secrets` into `core.vault`
+(one secrets home: store + rotation), crypto stays primitives.
+
+### E3. Core namespace admission law — D-CORENS2
+
+47 top-level `core.*` entries and growing. A new top-level name should
+require a *domain*, not a feature. Ballot: the admission rule plus the
+two moves the rule implies today — `core.devserver` →
+`core.web.devserver`, `core.async.loadable` → `core.reactive.loadable`
+(the `async` prefix names a namespace that doesn't otherwise exist).
+
 Analysis of the polyglot/replace-every-language track lives in
 [`polyglot.md`](polyglot.md).
