@@ -18433,6 +18433,55 @@
       "ratifiedAt": "2026-07-09",
       "draft": false,
       "retiredAt": "2026-07-12T00:03:29.805Z"
+    },
+    {
+      "id": "D-METADERIVE1",
+      "cardId": "c2nizvzp",
+      "title": "Derive output: emit Jet source via $ splice, re-parsed and sema-checked?",
+      "gist": "User-authored derives need a way to emit code. D-CTCODEGEN1 already ratifies that output must re-enter lexer/parser/sema (never bypass it). This decision fixes the surface: the `$` splice inside `comptime { }` is the output mechanism. Opens only if D-USERDERIVE1 passes.",
+      "explainer": "D-CTCODEGEN1 forbids derives from emitting Rust directly or manipulating the AST in-place — all output must be Jet source that re-enters the front end. The `$` splice already exists for comptime value injection. The question is whether derive output is the same `$` splice mechanism (extended to emit function/impl blocks) or a separate API (typed AST builder). A typed AST builder is a second mechanism for emitting code — I8 violation. The `$` splice path means all derive errors appear in Jet source terms, not in opaque AST operations (I2/I3 compliant). The main risk is that splicing multi-line impl blocks requires the splice to carry statement-level fragments, not just expressions — a small extension to the existing mechanic.",
+      "story": "My derive_Serialize function builds up a String of Jet source for the encode/decode methods, then splices it in with `${ ... }`. The parser re-reads it; sema checks the types; if I made a mistake, the error points at the generated Jet, not at rustc output.",
+      "inWild": "comptime fn derive_Serialize(T: Type) {\n    loop field in T.fields() {\n        name :: field.name()\n        // emit an encode arm for this field:\n        ${ \"{name}\": \" + self.{name}.encode() + \",\" }\n    }\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "$ splice emits Jet source fragments, re-parsed and sema-checked",
+          "detail": "Extend the existing `$` splice to carry statement- and item-level Jet source (not just expressions). The emitted text re-enters the lexer and parser exactly as user-written Jet would. Sema sees the expanded code; errors appear in Jet source terms. One mechanism for comptime output; I8 satisfied; I2/I3 satisfied.",
+          "code": "comptime fn derive_Serialize(T: Type) {\n    field_arms :: T.fields().map(fn(f) {\n        \"\\\"{f.name()}\\\": \" + \"\\\"\" + encode_expr(f) + \"\\\"\"\n    }).join(\", \")\n    // splice the full impl block:\n    ${\n        impl Serialize for {T} {\n            fn encode(self) -> String {\n                \"{\" + {field_arms} + \"}\"\n            }\n        }\n    }\n}"
+        },
+        {
+          "key": "B",
+          "name": "Typed AST builder API",
+          "detail": "Derives call a builder API (`ImplBlock.new()`, `.add_method()`, etc.) that constructs a typed AST node directly. No string parsing; type-safe at the builder call sites. A second mechanism for emitting code alongside the `$` splice — I8 tension. Builder API surface must be designed, stabilized, and versioned separately.",
+          "code": "comptime fn derive_Serialize(T: Type) {\n    blk :: ImplBlock.new(T, Serialize)\n    loop f in T.fields() {\n        blk.add_method(Method.new(\"encode\", ...))\n    }\n    blk.emit()\n}"
+        },
+        {
+          "key": "C",
+          "name": "Defer derive output mechanism",
+          "detail": "Approve D-USERDERIVE1 and D-METAREFLECT1 but leave the output mechanism open. Reflection ships; derives cannot emit code yet. Partial; blocks the actual derive use cases; not a useful intermediate state.",
+          "code": "// reflection works:\nfields :: T.fields()  // ok\n// but no way to emit the impl — derive is read-only\n// print what you'd emit:\nprint(\"would emit Serialize for {T}\")"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust (proc-macro)",
+          "note": "Rust proc-macros receive and emit `TokenStream` — effectively source text in token form, re-parsed by the compiler. The `quote!` macro is the ergonomic surface. Jet's `$` splice is the same concept with Jet syntax.",
+          "code": "use quote::quote;\npub fn derive_serialize(input: TokenStream) -> TokenStream {\n    quote! {\n        impl Serialize for #name {\n            fn encode(&self) -> String { ... }\n        }\n    }.into()\n}"
+        },
+        {
+          "lang": "Zig (comptime codegen)",
+          "note": "Zig comptime functions return types directly — a typed approach closer to option B. No string emission; the comptime function is the mechanism. Works because Zig's type system is the API surface.",
+          "code": "fn SerializableMixin(comptime T: type) type {\n    return struct {\n        pub fn encode(self: T) []const u8 { ... }\n    };\n}"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "outcome": "A",
+      "comment": "Reconciled 2026-06-27 from docs/spec/syntax-decisions.md and decision-ballots.md: derive Trait for T + Jet source-fragment re-entry via $ splice.",
+      "ratifiedAt": "2026-06-25",
+      "draft": false,
+      "retiredAt": "2026-07-12T00:08:25.733Z"
     }
   ],
   "cards": [
@@ -55624,6 +55673,13 @@
       "action": "card.release",
       "ref": "c083j754",
       "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-11T10:54:52.901Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CRYPTO-RNG1",
+      "note": "A"
     }
   ]
 }
