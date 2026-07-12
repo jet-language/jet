@@ -430,6 +430,8 @@ mod tests {
             layout_span: None,
             serde_markers: Vec::new(),
             type_markers: Vec::new(),
+            validate_block: Vec::new(),
+            validate_span: None,
         };
         let info = build_struct_type_info(&s);
         let CtValue::Struct { fields, .. } = info else {

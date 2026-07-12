@@ -597,6 +597,10 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
     // D-FIELDPOL1: computed-field cycle check (E0338) + `self.field` rewrite +
     // synthesized getter methods, before anything else sees the struct.
     process_computed_fields(&mut prog.items, &mut diags);
+    // D-VALIDATE1 (card #506): `validate { … }` block shape check (E0353/
+    // E0354) + synthesized `Type.validate(value)` — same pre-registration
+    // timing so the generated `impl` flows through ordinary registration.
+    process_validate_blocks(&mut prog.items, &mut diags);
     // D-PATCH1: synthetic `T.Patch` structs before the registration pass.
     inject_patchable_types(&mut prog.items, &mut diags);
 

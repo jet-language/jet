@@ -49,6 +49,18 @@
         }
     }
 
+    // D-VALIDATE1 (ratified 2026-07-12, card #506): the accumulated-validation
+    // error — same shape as `DecodeError` (a field path plus a plain reason),
+    // named separately because a `validate { }` block's failures are always
+    // reported as a LIST (every failing rule at once), never a single
+    // fail-fast error. `Type.validate(value)`, `Validate.over(s).finish()`,
+    // and the `decode<T>()` auto-run all build this type.
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct FieldError {
+        pub path: String,
+        pub reason: String,
+    }
+
     // D-MIGRATE3=A / D-MIGRATE4=A: decode-time migration transparency plus the
     // runtime engine. `decode_traced<T>` sits beside `decode<T>` on every codec
     // that shares this decode machinery. Decoding a `@PublishedSchema` type

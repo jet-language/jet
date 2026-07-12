@@ -284,6 +284,8 @@ duplicate this — it is the one surface for lint walls (I8).
 | E0350 | sema  | `Any` type requested, but Jet has no general top type (D-DYNAMIC-TYPE1) |
 | E0351 | sema  | retired `Data` value-tree name; use `DataTree` (D-SERDE13) |
 | E0352 | sema  | invalid `#Meta` maturity value (D-MARK-META1) |
+| E0353 | sema  | a `validate { … }` rule statement isn't `check(cond, at: field, "msg")` (D-VALIDATE1) |
+| E0354 | sema  | `check(…, at: field, …)`'s `at:` doesn't name a field on the struct (D-VALIDATE1) |
 | L0301 | sema  | unreachable dispatch pattern arm (lint)   |
 | E0401 | sema  | fallible value used where plain `T` expected |
 | E0402 | sema  | fallible call ignored as a statement      |

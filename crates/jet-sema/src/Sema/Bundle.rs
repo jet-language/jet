@@ -802,6 +802,8 @@ fn specialize_struct(
         layout_span: source.layout_span,
         serde_markers: source.serde_markers.clone(),
         type_markers: source.type_markers.clone(),
+        validate_block: source.validate_block.clone(),
+        validate_span: source.validate_span,
     }
 }
 
@@ -2559,6 +2561,9 @@ pub(crate) fn check_bundle_opts(
         // D-FIELDPOL1: computed-field cycle check (E0338) + `self.field`
         // rewrite + synthesized getter methods, before anything else.
         process_computed_fields(&mut module.items, &mut diags);
+        // D-VALIDATE1 (card #506): `validate { … }` block shape check +
+        // synthesized `Type.validate(value)`, same pre-registration timing.
+        process_validate_blocks(&mut module.items, &mut diags);
         // D-PATCH1: synthetic `T.Patch` before struct registration.
         inject_patchable_types(&mut module.items, &mut diags);
         // Card #436: `CFFI::assemble` (jetpack crate) drains every
@@ -3672,6 +3677,17 @@ pub(crate) fn check_bundle_opts(
             || m.source.contains("Id<")
     }) {
         used_core.insert("core.mem::pool_shared".to_string());
+    }
+    // D-VALIDATE1 (card #506): a `validate { … }` block synthesizes
+    // `Type.validate(value)`, which returns `jet_std::FieldError` — same
+    // forced-insert shape as D-CLIFLAG1/D-MEM1 S6 above, since declaring the
+    // block needs no `use core.X` import to reach `CORELIB_PRELUDE`.
+    if bundle.modules.iter().any(|m| {
+        m.items
+            .iter()
+            .any(|i| matches!(i, Item::Struct(s) if !s.validate_block.is_empty()))
+    }) {
+        used_core.insert("core.validate::field_error".to_string());
     }
     bundle.used_core = used_core;
     apply_helper_layer_inference(bundle, &states, &usage_spans, &mut diags);

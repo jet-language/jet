@@ -80,6 +80,8 @@ fn clone_struct(s: &StructDef) -> StructDef {
         layout_span: s.layout_span,
         serde_markers: s.serde_markers.clone(),
         type_markers: s.type_markers.clone(),
+        validate_block: s.validate_block.clone(),
+        validate_span: s.validate_span,
     }
 }
 

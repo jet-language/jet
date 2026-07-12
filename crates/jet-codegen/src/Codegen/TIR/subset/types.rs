@@ -313,7 +313,7 @@ pub(crate) fn is_prelude_struct_name(name: &str) -> bool {
     // on `type_name == "TextWidth"` in `lower_expr`'s StructLit arm.
     matches!(
         name,
-        "HttpRequest" | "HttpResponse" | "TextWidth" | "DecodeError"
+        "HttpRequest" | "HttpResponse" | "TextWidth" | "DecodeError" | "FieldError"
     )
 }
 

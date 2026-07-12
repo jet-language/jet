@@ -69,6 +69,8 @@ pub(crate) fn inject_patchable_types(items: &mut Vec<Item>, diags: &mut Vec<Diag
             layout_span: None,
             serde_markers: Vec::new(),
             type_markers: Vec::new(),
+            validate_block: Vec::new(),
+            validate_span: None,
         }));
     }
     items.extend(to_add);

@@ -456,6 +456,20 @@ impl Circle {
   run those fragments through the normal parser, sema, TIR, and codegen pipeline.
   A user-defined derive may expand only when its provider or target type is
   entry-local; otherwise E2711 points at the derive marker.
+- **Accumulated validation (D-VALIDATE1, card #506):** a `validate { … }`
+  section in a struct body declares rules as `check(cond, at: field, "msg")`
+  statements; `field` is a bare sibling-field reference (D-FIELDPOL1). Every
+  failing `check` accumulates into `[FieldError]` (`{ path, reason }`, the
+  `DecodeError` shape) instead of failing fast. Sema requires each rule
+  statement be exactly this shape (E0353), `at:` to name a real field
+  (E0354), and purity-checks the whole synthesized function (S60/E3401) —
+  a rule may reference only sibling fields and pure calls. `Type.validate(value)`
+  runs the block standalone, returning `value ? [FieldError]`. Shipped this
+  slice: the in-body block + `Type.validate(value)`. Not yet wired:
+  `decode<T>()` auto-run and the `Validate.over(s)` use-site escape for rules
+  needing outside context — both need a design call on how `[FieldError]`
+  composes with the existing single-`DecodeError` `Decode` trait contract
+  before they can land without a breaking change.
 - **Tags (D-QUAL2):** `tag Name;` or `tag Name { }` — a marker qualifier with
   no methods that erases at runtime (codegen emits nothing). Tags are the second
   and only other qualifier kind beside traits; the beginner rule is one

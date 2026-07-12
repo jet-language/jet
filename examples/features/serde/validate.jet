@@ -1,0 +1,35 @@
+// Accumulated validation (D-VALIDATE1, card #506): a `validate { }` section
+// declares rules beside the fields it checks — the struct stays the one
+// schema (I8). Every failing `check` accumulates into `[FieldError]` instead
+// of stopping at the first one, so a form can show every problem at once.
+
+struct Signup {
+    email: String
+    password: String
+
+    validate {
+        check(email.len() > 0, at: email, "email required")
+        check(password.len() >= 12, at: password, "needs at least 12 characters")
+        check(password != email, at: password, "password can't be the email")
+    }
+}
+
+fn report(label: String, signup: Signup) {
+    if Signup.validate(signup) == {
+        ok(v) -> {
+            print("{label}: ok ({v.email})")
+        }
+        err(errs) -> {
+            print("{label}: {errs.len()} problem(s)")
+            loop e in errs {
+                print("  {e.path}: {e.reason}")
+            }
+        }
+    }
+}
+
+fn run() {
+    report("bad", Signup.{ email: "", password: "short" })
+    report("same", Signup.{ email: "a@b.com", password: "a@b.com" })
+    report("good", Signup.{ email: "a@b.com", password: "supersecretpw" })
+}

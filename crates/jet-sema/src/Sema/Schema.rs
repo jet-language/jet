@@ -353,6 +353,8 @@ mod tests {
             layout_span: None,
             serde_markers: Vec::new(),
             type_markers: Vec::new(),
+            validate_block: Vec::new(),
+            validate_span: None,
         };
         let snap = snapshot_from_struct(&s, "2.0.0");
         let text = snap.write();

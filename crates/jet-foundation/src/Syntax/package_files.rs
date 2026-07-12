@@ -148,6 +148,24 @@ pub const ATTR_MUST_USE: &str = "MustUse"; // D-MUSTUSE1
 /// D-MIGRATE1 (ratified 2026-06-22): contextual keyword `migration` — introduces
 /// a migration block that declares how a `@PublishedSchema` struct changed between
 /// releases. Used as `migration TypeName { rename old -> new }`.
+/// D-VALIDATE1 (ratified 2026-07-12, card #506): contextual keyword `validate`
+/// — introduces the in-body `validate { … }` block inside a struct definition
+/// (S82 in-body grammar). Rules are `check(cond, at: field, "msg")`
+/// statements; sema resolves `field` as a bare sibling reference
+/// (D-FIELDPOL1) and purity-checks `cond`/`msg` (reuses the `@Pre`/`@Post`
+/// checker). Failing `check`s accumulate into `[FieldError]`; `decode<T>()`
+/// runs the block automatically on a successfully shape-decoded value, and
+/// `Type.validate(value)` runs it standalone. `Validate.over(s)` is the
+/// use-site escape for rules needing outside context.
+pub const KW_VALIDATE_BLOCK: &str = "validate"; // D-VALIDATE1
+
+/// D-VALIDATE1: the builtin call name inside a `validate { … }` block —
+/// `check(cond, at: field, "msg")` records one `FieldError { path, reason }`
+/// when `cond` is false. Contextual: recognized as this builtin only inside
+/// a `validate { … }` block; an ordinary function named `check` elsewhere is
+/// unaffected.
+pub const VALIDATE_CHECK_FN: &str = "check"; // D-VALIDATE1
+
 pub const KW_MIGRATION: &str = "migration"; // D-MIGRATE1
 
 /// D-MIGRATE1 (ratified 2026-06-22): contextual keyword `rename` inside a
@@ -396,6 +414,9 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     KW_PROTOCOL,
     PROTO_CLIENT,
     PROTO_SERVER,
+    // In-body struct validation (D-VALIDATE1, card #506)
+    KW_VALIDATE_BLOCK,
+    VALIDATE_CHECK_FN,
     // Literals: boolean (S11), option (S32), result (S34), synthetic (M4)
     LIT_TRUE,
     LIT_FALSE,

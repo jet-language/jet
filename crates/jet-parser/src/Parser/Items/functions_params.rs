@@ -415,6 +415,8 @@ impl<'a> Parser<'a> {
             let mut methods = Vec::new();
             let mut trait_impls = Vec::new();
             let mut derives = Vec::new();
+            let mut validate_block = Vec::new();
+            let mut validate_span = None;
             while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
                 if matches!(self.peek().kind, TokKind::Semi) {
                     self.bump();
@@ -447,6 +449,10 @@ impl<'a> Parser<'a> {
                     derives.push(self.derive_line()?);
                 } else if matches!(self.peek().kind, TokKind::KwImpl) {
                     trait_impls.push(self.trait_impl_block()?);
+                } else if self.at_validate_block() {
+                    let (stmts, span) = self.validate_block()?;
+                    validate_block = stmts;
+                    validate_span = Some(span);
                 } else {
                     let is_method = matches!(self.peek().kind, TokKind::KwFn)
                         || (matches!(self.peek().kind, TokKind::KwPub)
@@ -488,6 +494,8 @@ impl<'a> Parser<'a> {
                 layout_span: None,
                 serde_markers: Vec::new(),
                 type_markers: Vec::new(),
+                validate_block,
+                validate_span,
             })
         }
     

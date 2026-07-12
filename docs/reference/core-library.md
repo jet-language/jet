@@ -1550,6 +1550,37 @@ ordinary decode error. `.migrated` is `false` and `.from`/`.steps` are empty
 for a plain type and for fresh (current-shape) data, and types without
 migration blocks pay nothing.
 
+**Accumulated validation — `validate { }`** (D-VALIDATE1, card #506): a
+struct declares its own validation rules in the body, beside its fields —
+the struct stays the one schema (I8). Rules are `check(condition, at: field,
+"message")` statements; `field` is a bare sibling-field reference
+(D-FIELDPOL1). Every failing `check` accumulates — a rule set with three
+violations reports all three, not just the first:
+
+```jet
+struct Signup {
+    email: String
+    password: String
+
+    validate {
+        check(email.len() > 0, at: email, "email required")
+        check(password.len() >= 12, at: password, "needs at least 12 characters")
+        check(password != email, at: password, "password can't be the email")
+    }
+}
+
+errs :: Signup.validate(bad_signup) // Signup ? [FieldError]
+```
+
+`Type.validate(value)` runs the block standalone, returning `value ?
+[FieldError]` — `FieldError` carries `.path`/`.reason`, the same shape as
+`DecodeError`. Rule expressions are purity-checked (S60/E3401): a `check`'s
+condition and message may reference only the struct's own fields and pure
+calls, never Net/Db/Io. Card #506 slice 1 ships the block and
+`Type.validate(value)`; `decode<T>()` auto-run and the `Validate.over(s)`
+use-site escape (for rules needing outside context, like a database lookup)
+are follow-on work — see docs/spec/syntax-decisions.md's D-VALIDATE1 entry.
+
 **Field attributes** (D-SERDE5):
 
 | Attribute | Effect |

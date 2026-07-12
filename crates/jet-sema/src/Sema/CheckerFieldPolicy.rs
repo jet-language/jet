@@ -175,14 +175,14 @@ fn rewrite_computed_field_bodies(s: &mut StructDef) {
     let names: HashSet<String> = s.fields.iter().map(|f| f.name.clone()).collect();
     for f in &mut s.fields {
         if let Some(expr) = &mut f.computed {
-            rewrite_self_field_refs(expr, &names);
+            rewrite_field_refs(expr, &names, Syntax::KW_SELF);
         }
     }
 }
 
-fn self_field(name: &str, span: Span) -> Expr {
+fn self_field(receiver: &str, name: &str, span: Span) -> Expr {
     Expr::Field(
-        Box::new(Expr::Ident(Syntax::KW_SELF.to_string(), span)),
+        Box::new(Expr::Ident(receiver.to_string(), span)),
         name.to_string(),
         span,
     )
@@ -190,109 +190,112 @@ fn self_field(name: &str, span: Span) -> Expr {
 
 /// Mirrors `Captures::expr_refs_name`'s coverage exactly (same Lambda/
 /// if-block boundary) — see the module doc for why that boundary is safe.
-fn rewrite_self_field_refs(expr: &mut Expr, names: &HashSet<String>) {
+/// `receiver` is the ident every sibling-field `Ident` gets rewritten onto
+/// (`self` for a computed-field getter; D-VALIDATE1 reuses this with
+/// `value` for a synthesized `validate` function's rule expressions).
+pub(crate) fn rewrite_field_refs(expr: &mut Expr, names: &HashSet<String>, receiver: &str) {
     match expr {
         Expr::Ident(n, span) => {
             if names.contains(n.as_str()) {
-                *expr = self_field(n, *span);
+                *expr = self_field(receiver, n, *span);
             }
         }
-        Expr::PtrFromAddr { addr, .. } => rewrite_self_field_refs(addr, names),
+        Expr::PtrFromAddr { addr, .. } => rewrite_field_refs(addr, names, receiver),
         Expr::Unary(_, inner, _)
         | Expr::IncDec { operand: inner, .. }
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)
-        | Expr::Copy(inner, _) => rewrite_self_field_refs(inner, names),
+        | Expr::Copy(inner, _) => rewrite_field_refs(inner, names, receiver),
         Expr::Binary(_, l, r, _) => {
-            rewrite_self_field_refs(l, names);
-            rewrite_self_field_refs(r, names);
+            rewrite_field_refs(l, names, receiver);
+            rewrite_field_refs(r, names, receiver);
         }
         Expr::CompareChain { operands, .. } => {
             for e in operands {
-                rewrite_self_field_refs(e, names);
+                rewrite_field_refs(e, names, receiver);
             }
         }
         Expr::Call(c) => {
             for a in &mut c.args {
-                rewrite_self_field_refs(&mut a.expr, names);
+                rewrite_field_refs(&mut a.expr, names, receiver);
             }
         }
         Expr::CallValue { callee, args, .. } => {
-            rewrite_self_field_refs(callee, names);
+            rewrite_field_refs(callee, names, receiver);
             for a in args {
-                rewrite_self_field_refs(&mut a.expr, names);
+                rewrite_field_refs(&mut a.expr, names, receiver);
             }
         }
         Expr::Field(inner, _, _)
         | Expr::Tainted(inner, _)
         | Expr::Present(inner, _)
-        | Expr::Try(inner, _, _) => rewrite_self_field_refs(inner, names),
-        Expr::OptField { base, .. } => rewrite_self_field_refs(base, names),
-        Expr::MethodCall { receiver, args, .. } => {
-            rewrite_self_field_refs(receiver, names);
+        | Expr::Try(inner, _, _) => rewrite_field_refs(inner, names, receiver),
+        Expr::OptField { base, .. } => rewrite_field_refs(base, names, receiver),
+        Expr::MethodCall { receiver: recv, args, .. } => {
+            rewrite_field_refs(recv, names, receiver);
             for a in args {
-                rewrite_self_field_refs(&mut a.expr, names);
+                rewrite_field_refs(&mut a.expr, names, receiver);
             }
         }
         Expr::Index { base, index, .. } => {
-            rewrite_self_field_refs(base, names);
-            rewrite_self_field_refs(index, names);
+            rewrite_field_refs(base, names, receiver);
+            rewrite_field_refs(index, names, receiver);
         }
         Expr::Slice {
             base, start, end, ..
         } => {
-            rewrite_self_field_refs(base, names);
-            rewrite_self_field_refs(start, names);
-            rewrite_self_field_refs(end, names);
+            rewrite_field_refs(base, names, receiver);
+            rewrite_field_refs(start, names, receiver);
+            rewrite_field_refs(end, names, receiver);
         }
         Expr::ListLit(elems, _) => {
             for e in elems {
-                rewrite_self_field_refs(e, names);
+                rewrite_field_refs(e, names, receiver);
             }
         }
         Expr::TupleLit(fields, _, _) => {
             for (_, e) in fields {
-                rewrite_self_field_refs(e, names);
+                rewrite_field_refs(e, names, receiver);
             }
         }
         Expr::MapLit(entries, _) => {
             for (k, v) in entries {
-                rewrite_self_field_refs(k, names);
-                rewrite_self_field_refs(v, names);
+                rewrite_field_refs(k, names, receiver);
+                rewrite_field_refs(v, names, receiver);
             }
         }
         Expr::StructLit { fields, .. } => {
             for (_, _, e) in fields {
-                rewrite_self_field_refs(e, names);
+                rewrite_field_refs(e, names, receiver);
             }
         }
         Expr::EnumLit { args, .. } => {
             for a in args {
                 match a {
-                    EnumLitArg::Positional(e) => rewrite_self_field_refs(e, names),
-                    EnumLitArg::Named { expr, .. } => rewrite_self_field_refs(expr, names),
+                    EnumLitArg::Positional(e) => rewrite_field_refs(e, names, receiver),
+                    EnumLitArg::Named { expr, .. } => rewrite_field_refs(expr, names, receiver),
                 }
             }
         }
-        Expr::Ok(inner, _) | Expr::Err(inner, _) => rewrite_self_field_refs(inner, names),
+        Expr::Ok(inner, _) | Expr::Err(inner, _) => rewrite_field_refs(inner, names, receiver),
         Expr::OrFallback {
             value, fallback, ..
         } => {
-            rewrite_self_field_refs(value, names);
+            rewrite_field_refs(value, names, receiver);
             match fallback {
-                OrFallback::Value(e) => rewrite_self_field_refs(e, names),
-                OrFallback::Return(Some(e), _) => rewrite_self_field_refs(e, names),
+                OrFallback::Value(e) => rewrite_field_refs(e, names, receiver),
+                OrFallback::Return(Some(e), _) => rewrite_field_refs(e, names, receiver),
                 _ => {}
             }
         }
         Expr::PatternTest {
             subject, pattern, ..
         } => {
-            rewrite_self_field_refs(subject, names);
+            rewrite_field_refs(subject, names, receiver);
             if let Pattern::Struct { fields, .. } = pattern {
                 for field in fields {
                     if let StructPatField::Value { value, .. } = field {
-                        rewrite_self_field_refs(value, names);
+                        rewrite_field_refs(value, names, receiver);
                     }
                 }
             }
@@ -300,7 +303,7 @@ fn rewrite_self_field_refs(expr: &mut Expr, names: &HashSet<String>) {
         Expr::Str(parts, _) => {
             for p in parts {
                 if let StrPart::Interp(e, _) = p {
-                    rewrite_self_field_refs(e, names);
+                    rewrite_field_refs(e, names, receiver);
                 }
             }
         }
@@ -313,18 +316,18 @@ fn rewrite_self_field_refs(expr: &mut Expr, names: &HashSet<String>) {
             // Known v1 gap (see module doc): `then_body`/`else_body` are not
             // walked — a sibling-field reference in a `let` there surfaces as
             // an ordinary unknown-name sema error, not a miscompile.
-            rewrite_self_field_refs(cond, names);
-            rewrite_self_field_refs(then_value, names);
-            rewrite_self_field_refs(else_value, names);
+            rewrite_field_refs(cond, names, receiver);
+            rewrite_field_refs(then_value, names, receiver);
+            rewrite_field_refs(else_value, names, receiver);
         }
         Expr::FanOut { callee, items, .. } => {
-            rewrite_self_field_refs(callee, names);
+            rewrite_field_refs(callee, names, receiver);
             for e in items {
-                rewrite_self_field_refs(e, names);
+                rewrite_field_refs(e, names, receiver);
             }
         }
-        Expr::Paren(inner, _) => rewrite_self_field_refs(inner, names),
-        Expr::Spread(inner, _) => rewrite_self_field_refs(inner, names),
+        Expr::Paren(inner, _) => rewrite_field_refs(inner, names, receiver),
+        Expr::Spread(inner, _) => rewrite_field_refs(inner, names, receiver),
         // Leaves, and `Lambda` (a separate scope — not walked, matching
         // `expr_refs_name`'s own boundary).
         _ => {}

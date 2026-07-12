@@ -60,6 +60,13 @@ pub(crate) fn decode_error_ty() -> Type {
     Type::Named("DecodeError".to_string())
 }
 
+/// D-VALIDATE1: the accumulated validation error (`{ path, reason }`, same
+/// shape as `DecodeError`). `validate { }` blocks / `Type.validate(value)` /
+/// `Validate.over(s)` always report failures as `[FieldError]`.
+pub(crate) fn field_error_ty() -> Type {
+    Type::Named("FieldError".to_string())
+}
+
 /// D-SERDE13=B: the value tree's one user-facing name is `DataTree`. The old
 /// `Data` spelling is retired (no alias, I8) — point at the new name wherever a
 /// user still writes `Data` as a type or a construction receiver.
@@ -140,6 +147,10 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "Key"
         // D-SERDE2: the format-agnostic value tree + typed-decode error.
         | "DataTree" | "DecodeError"
+        // D-VALIDATE1 (ratified 2026-07-12, card #506): the accumulated
+        // validation error a `validate { }` block / `Type.validate(value)` /
+        // `Validate.over(s)` build up.
+        | "FieldError"
         // D-ENCSTREAM-SURFACE1=A: shared encoding values and codec-native
         // opaque stream handles.  Handles are intentionally non-Codable and
         // acquire values only from their format module constructors.
@@ -290,6 +301,13 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     }
     // D-SERDE2: DecodeError exposes the field path and a plain reason.
     if type_name == "DecodeError" {
+        return match field {
+            "path" | "reason" => Some(Type::String),
+            _ => None,
+        };
+    }
+    // D-VALIDATE1: FieldError mirrors DecodeError's shape exactly.
+    if type_name == "FieldError" {
         return match field {
             "path" | "reason" => Some(Type::String),
             _ => None,
@@ -738,6 +756,12 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
         // whole-value reject, `"email"` for a field). Registering it here is what
         // makes the dot-ctor legal (it was E0119 before this decision).
         "DecodeError" => Some(vec![
+            ("path".to_string(), str_ty.clone()),
+            ("reason".to_string(), str_ty.clone()),
+        ]),
+        // D-VALIDATE1: `FieldError.{ path: …, reason: … }` — registering it
+        // here is what makes the dot-ctor legal, same as `DecodeError` above.
+        "FieldError" => Some(vec![
             ("path".to_string(), str_ty.clone()),
             ("reason".to_string(), str_ty),
         ]),

@@ -1023,6 +1023,23 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     },
                 };
             }
+            // D-VALIDATE1: `FieldError.{ path: …, reason: … }` — same shape,
+            // separate jet_std Rust head.
+            if type_name == "FieldError" {
+                let tfields = fields
+                    .iter()
+                    .map(|(name, _, value)| (name.clone(), lower_expr(value, cx, env), false))
+                    .collect();
+                return TExpr {
+                    ty: Type::Named(type_name.clone()),
+                    kind: TExprKind::StructLit {
+                        rust_type: format!("{}jet_std::FieldError", cx.root_prefix),
+                        fields: tfields,
+                        extra: None,
+                        as_trait: None,
+                    },
+                };
+            }
             // c109 Phase 19: a GENERIC struct literal carries `type_args` (`Pair<T> {…}`).
             // The Rust head is the turbofish `user_<Name>::<args>` (`user_type_apply_rust`),
             // resolved at lowering; fields mangle. A non-generic literal renders `user_<Name>`.

@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 522,
-    "rev": 4793,
+    "rev": 4804,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -13244,6 +13244,11 @@
       "log": [
         {
           "at": "2026-07-12",
+          "by": "cursor-e4-burn",
+          "text": "VERIFY FAIL grok-476-verify2: swap_entry_point renames leaf #Task→run so jetpack run greet E0102 when seed calls greet. Builder fixing."
+        },
+        {
+          "at": "2026-07-12",
           "by": "grok-476-verify",
           "text": "VERIFY FAIL (grok-476-verify): I4 clash E1294 dual-claim. #476@77621f8b E1294=unknown task (jetpack run / jet --task, D-JPK-TASKRUN1). #477@58118c1a E1294=JPK-TOOL-COLLIDE tool install vs #Task (D-JPK-TOOLRUN1). Different meanings, same code. NO criteria verify until one builder renumbers. #477 also claims E1295 (provider); #476 also claims E0928 (reserved lifecycle) — those OK."
         },
@@ -13351,6 +13356,11 @@
       "log": [
         {
           "at": "2026-07-12",
+          "by": "cursor-e4-burn",
+          "text": "E1294 clash fixed: collide→E1297 provider→E1298 (d7f21193). Ready re-verify."
+        },
+        {
+          "at": "2026-07-12",
           "by": "grok-476-verify",
           "text": "VERIFY FAIL (grok-476-verify): I4 clash E1294 dual-claim. #476@77621f8b E1294=unknown task (jetpack run / jet --task, D-JPK-TASKRUN1). #477@58118c1a E1294=JPK-TOOL-COLLIDE tool install vs #Task (D-JPK-TOOLRUN1). Different meanings, same code. NO criteria verify until one builder renumbers. #477 also claims E1295 (provider); #476 also claims E0928 (reserved lifecycle) — those OK."
         },
@@ -13369,38 +13379,38 @@
         {
           "n": 1,
           "text": "jetpack tool run|install|list|uninstall verb surface exists and is documented in help",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "grok-477-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-12T19:54:39.892Z"
+          "evidence": "tool run|install|list|uninstall real; CLI/tool.rs; 58118c1a+d7f21193",
+          "at": "2026-07-12T21:58:17.438Z"
         },
         {
           "n": 2,
           "text": "tool run realizes+execs refs across built-in providers (nixpkgs/github/path); unavailable external providers emit clear diagnostic (not silent skip)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "grok-477-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-12T19:54:39.987Z"
+          "evidence": "install projects ~/.jet/bin + generations meta",
+          "at": "2026-07-12T21:58:17.530Z"
         },
         {
           "n": 3,
           "text": "tool install projects bins onto ~/.jet/bin with generation metadata (real PATH projection)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "grok-477-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-12T19:54:40.075Z"
+          "evidence": "E1297 collide + E1298 provider I4 fixtures",
+          "at": "2026-07-12T21:58:17.613Z"
         },
         {
           "n": 4,
           "text": "JPK-TOOL-COLLIDE fires when install bin name collides with project #Task fn; I4 snapshot + diagnostics.md",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "grok-477-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-12T19:54:40.166Z"
+          "evidence": "focused tool_ tests 6+ lib tool 2 green",
+          "at": "2026-07-12T21:58:17.709Z"
         }
       ],
       "refs": [],
@@ -15311,6 +15321,11 @@
       "log": [
         {
           "at": "2026-07-12",
+          "by": "terra-506v-builder",
+          "text": "[handoff] D-VALIDATE1 slice 1 shipped: validate{} in-body block (S82-style, contextual kw validate + check builtin), sema (E0353 bad rule shape, E0354 unknown at: field, purity via is_pure:true reuse of S60/E3401 — no separate purity pass), codegen synthesizes Type.validate(value) -> value ? [FieldError] (FieldError mirrors DecodeError, registered in jet_std prelude + core_types.rs + TIR). Fixed 2 real bugs hit along the way: (1) formatter was silently DROPPING validate{} blocks (fmt data-loss) — fixed in Formatter/Items.rs::fmt_struct; (2) FieldError/DecodeError direct construction needs used_core marked non-empty or CORELIB_PRELUDE (mod jet_std) never gets emitted — added a forced-insert in Bundle.rs (D-CLIFLAG1-style) keyed on any struct having a non-empty validate_block. Golden example examples/features/serde/validate.jet + expected/serde/validate.out. 3 new ui snapshots (E0353/E0354/E3401 reuse). Grammars regenerated. NOT shipped this slice (named gate, not effort): decode<T>() auto-run and Validate.over(s) escape — both need an owner-facing call on how [FieldError] (list) composes with the Decode trait's existing single-DecodeError Result contract without a breaking signature change; implementing either by guessing risks inventing an unratified type-signature shape. Also NOT shipped: any named rule-method vocabulary (.email()/.max_len()/.min_len()/.has_digit() from the ballot's illustrative code) — only check(cond, at: field, msg) is wired, since the vocabulary+canned-message-text would be new stdlib surface without its own ballot. Confirmed via HEAD worktree diff: 13 pre-existing ui_snapshots failures, 1 fmt_lossless failure, 2 corelib failures, 1 devtools failure, 3 diagnostics_coverage code-drift failures are ALL pre-existing on committed HEAD (concurrent churn), not introduced by this slice."
+        },
+        {
+          "at": "2026-07-12",
           "by": "claude-main",
           "text": "All 8 decisions confirmed ratified=A; card is implementation work. Slice order: D-VALIDATE1 (self-contained decode/validate path) first, builder launched. D-BINPAT1/D-STM1 next (pattern engine / Shared<T> atomics). D-SYNC1 gated on D-EFFDBREAD1 + live-query substrate (#505 chain). D-DBPOLICY1/D-AUTH1 ride db/app substrate. D-ENVHOOK1/D-OBSERVE-LIVE1 tooling-side."
         },
@@ -15334,38 +15349,38 @@
         {
           "n": 1,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "terra-506v-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-12T06:22:19.674Z"
+          "evidence": "crates/jet-foundation/src/Syntax/package_files.rs: KW_VALIDATE_BLOCK+VALIDATE_CHECK_FN consts (D-VALIDATE1), added to JET_KEYWORD_LIST + highlights.rs",
+          "at": "2026-07-12T22:44:24.050Z"
         },
         {
           "n": 2,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "terra-506v-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-12T06:22:19.674Z"
+          "evidence": "docs/spec/syntax-decisions.md D-VALIDATE1 entry (already ratified) now matches shipped spelling; docs/spec/spec.md + docs/reference/core-library.md gained validate{} sections",
+          "at": "2026-07-12T22:44:46.377Z"
         },
         {
           "n": 3,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "terra-506v-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-12T06:22:19.674Z"
+          "evidence": "jet self devtools grammars run; editors/tree-sitter/grammar.js, editors/vscode/syntaxes/jet.tmLanguage.json, editors/zed/languages/jet/highlights.scm regenerated (validate+check added), tests/grammar.rs green",
+          "at": "2026-07-12T22:45:00.734Z"
         },
         {
           "n": 4,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "terra-506v-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-12T06:22:19.674Z"
+          "evidence": "3 new tests/ui/*.stderr snapshots (E0353/E0354/E3401) blessed+green; examples/features/serde/validate.jet + expected/serde/validate.out golden pair blessed+green; jet fmt round-trip stable",
+          "at": "2026-07-12T22:45:15.005Z"
         }
       ],
       "refs": [
@@ -33766,6 +33781,83 @@
   ],
   "events": [
     {
+      "at": "2026-07-12T22:45:42.518Z",
+      "by": "terra-506v-builder",
+      "action": "card.update",
+      "ref": "c0n6vj96",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-12T22:45:15.005Z",
+      "by": "terra-506v-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0n6vj96",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-12T22:45:00.734Z",
+      "by": "terra-506v-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0n6vj96",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-12T22:44:46.377Z",
+      "by": "terra-506v-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0n6vj96",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-12T22:44:24.050Z",
+      "by": "terra-506v-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0n6vj96",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-12T21:58:17.709Z",
+      "by": "grok-477-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0fchu51",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-12T21:58:17.613Z",
+      "by": "grok-477-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0fchu51",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-12T21:58:17.530Z",
+      "by": "grok-477-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0fchu51",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-12T21:58:17.438Z",
+      "by": "grok-477-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0fchu51",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-12T21:58:17.347Z",
+      "by": "cursor-e4-burn",
+      "action": "card.update",
+      "ref": "c0fchu51",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-12T21:58:17.230Z",
+      "by": "cursor-e4-burn",
+      "action": "card.update",
+      "ref": "c0qwckht",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-07-12T21:47:19.659Z",
       "by": "claude-main",
       "action": "card.update",
@@ -37187,83 +37279,6 @@
       "action": "decision.ratify",
       "ref": "D-PRELUDE-LAW1",
       "note": "A"
-    },
-    {
-      "at": "2026-07-12T10:20:11.918Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c019rl6u",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-07-12T10:20:11.918Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c019rl6u",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-07-12T10:20:11.918Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c019rl6u",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-07-12T10:20:11.918Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c019rl6u",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-07-12T10:18:19.767Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "q3lhm9fa",
-      "note": ""
-    },
-    {
-      "at": "2026-07-12T10:18:11.507Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0y0m8yx",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-12T10:18:11.411Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0mqffhd",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T10:17:04.152Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-API-CTOR1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-12T10:14:36.428Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "q2zvcuql",
-      "note": ""
-    },
-    {
-      "at": "2026-07-12T10:13:23.490Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-ARTIFACT-EXT1",
-      "note": "One artifact-extension law — and .jreplay is two different formats today"
-    },
-    {
-      "at": "2026-07-12T10:12:40.266Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-PRELUDE-LAW1",
-      "note": "Ambient-surface admission law: one closed registry for every no-prefix name"
     }
   ],
   "nextNum": 368,

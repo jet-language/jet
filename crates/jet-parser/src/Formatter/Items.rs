@@ -770,6 +770,21 @@ impl<'a> Fmt<'a> {
                 f.emit_leading(m.name_span.start);
                 f.fmt_func(m, false);
             }
+            // D-VALIDATE1 (card #506): `validate { … }` in-body block — last
+            // in the struct body, same spacing rule as the sections above.
+            if !s.validate_block.is_empty() {
+                if !s.fields.is_empty()
+                    || !body_derives.is_empty()
+                    || !s.trait_impls.is_empty()
+                    || !s.methods.is_empty()
+                {
+                    f.newline();
+                    f.newline();
+                }
+                f.write(Syntax::KW_VALIDATE_BLOCK);
+                f.write(" {");
+                f.fmt_body(&s.validate_block);
+            }
         });
         self.end_block();
     }

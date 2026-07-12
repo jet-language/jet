@@ -174,6 +174,29 @@ impl<'a> Parser<'a> {
         }
     
         /// D-STATE-DECL: true when `state <TypeName> {` is at the cursor (contextual).
+        /// D-VALIDATE1 (ratified 2026-07-12, card #506): true when the cursor is
+        /// at `validate {` — a struct's in-body validation block. Token stream:
+        /// `validate {`.
+        pub(super) fn at_validate_block(&self) -> bool {
+            matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_VALIDATE_BLOCK)
+                && matches!(self.peek2().kind, TokKind::LBrace)
+        }
+
+        /// D-VALIDATE1: parse `validate { … }` inside a struct body. Reuses the
+        /// ordinary statement parser (`block_stmts`) — grammar-wise a rule
+        /// statement is just an expression statement; sema restricts what a rule
+        /// statement may legally be (`check(cond, at: field, "msg")`,
+        /// purity-checked, `field` resolved as a bare sibling reference per
+        /// D-FIELDPOL1) and rejects anything else with a teaching diagnostic.
+        pub(super) fn validate_block(&mut self) -> Result<(Vec<crate::AST::Stmt>, Span), Diagnostic> {
+            let start = self.peek().span;
+            self.bump(); // `validate`
+            self.expect(TokKind::LBrace, "to open the `validate` block")?;
+            let stmts = self.block_stmts();
+            let end = self.toks[self.pos - 1].span.end;
+            Ok((stmts, Span::new(start.start, end)))
+        }
+
         pub(super) fn at_state_block(&self) -> bool {
             if !matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_STATE_DECL) {
                 return false;

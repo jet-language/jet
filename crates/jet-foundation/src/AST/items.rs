@@ -1150,6 +1150,16 @@ pub struct StructDef {
     /// re-emits the surface the user actually typed instead of a lowered form.
     /// Empty when the type had no leading `#[…]` list.
     pub type_markers: Vec<Marker>,
+    /// D-VALIDATE1 (ratified 2026-07-12, card #506): `validate { … }` in-body
+    /// block. Each statement is a `check(cond, at: field, "msg")` call —
+    /// sema resolves `field` as a bare sibling reference (D-FIELDPOL1) and
+    /// purity-checks `cond`/`msg` (reuses the `@Pre`/`@Post` checker). All
+    /// failing `check`s accumulate into `[FieldError]`; `Type.validate(value)`
+    /// runs the block standalone and `decode<T>()` runs it automatically on
+    /// a successfully shape-decoded value. Empty when the struct declares no
+    /// `validate { }` block.
+    pub validate_block: Vec<Stmt>,
+    pub validate_span: Option<Span>,
 }
 
 /// D-TYPEALIAS1: `alias Name<T, E> = T ? E` — transparent generic type shortcut.

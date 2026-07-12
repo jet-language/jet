@@ -245,6 +245,8 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // D-SERDE2: the format-agnostic value tree + typed-decode error live in jet_std.
         "DataTree" => Some("DataTree"),
         "DecodeError" => Some("DecodeError"),
+        // D-VALIDATE1: the accumulated validation error lives in jet_std too.
+        "FieldError" => Some("FieldError"),
         "EncodingLimits" => Some("EncodingLimits"),
         "EncodingError" => Some("EncodingError"),
         "EncodingCause" => Some("EncodingCause"),
