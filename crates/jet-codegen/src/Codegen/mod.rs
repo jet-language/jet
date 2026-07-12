@@ -1120,7 +1120,7 @@ fn emit_test_main(tests: &[&TestDef], out: &mut String) {
 /// output is deterministic regardless of which thread finishes first.
 fn emit_test_main_cov(tests: &[&TestDef], out: &mut String, coverage: bool) {
     out.push_str("#[derive(Clone, Copy)]\n");
-    out.push_str("struct JetTestSlot { name: &'static str, skip: bool, run: fn() -> Result<(), String> }\n");
+    out.push_str("struct JetTestSlot { name: &'static str, skip: bool, property: bool, run: fn() -> Result<(), String> }\n");
     out.push_str("fn main() {\n");
     out.push_str("    jet_std_env_init();\n");
     out.push_str("    if let Ok(path) = std::env::var(\"JET_TEST_PROOF_REPORT\") { if let Ok(mut file) = std::fs::File::create(path) { use std::io::Write as _; let _ = file.write_all(b\"JETTEST2\"); } }\n");
@@ -1129,8 +1129,8 @@ fn emit_test_main_cov(tests: &[&TestDef], out: &mut String, coverage: bool) {
         let name = escape_rust_str(&test.name);
         let skip = whole_test_skip(test);
         out.push_str(&format!(
-            "        JetTestSlot {{ name: {}, skip: {}, run: jet_test_{} }},\n",
-            name, skip, i
+            "        JetTestSlot {{ name: {}, skip: {}, property: {}, run: jet_test_{} }},\n",
+            name, skip, !test.params.is_empty(), i
         ));
     }
     out.push_str("    ];\n");
@@ -1152,34 +1152,35 @@ fn emit_test_main_cov(tests: &[&TestDef], out: &mut String, coverage: bool) {
     // most one test (no isolation benefit, and keeps single-test runs allocation-
     // free of the thread machinery).
     out.push_str("    let serial = std::env::var(\"JET_TEST_SERIAL\").is_ok();\n");
-    out.push_str("    let results: Vec<(String, bool, Option<Result<(), String>>, String)> = if serial || slots.len() <= 1 {\n");
+    out.push_str("    let results: Vec<(String, bool, bool, Option<Result<(), String>>, String)> = if serial || slots.len() <= 1 {\n");
     out.push_str("        slots.iter().map(|s| {\n");
     out.push_str("            let res = if s.skip { None } else { Some((s.run)()) };\n");
     out.push_str("            let output = jet_test_take_output();\n");
-    out.push_str("            (s.name.to_string(), s.skip, res, output)\n");
+    out.push_str("            (s.name.to_string(), s.skip, s.property, res, output)\n");
     out.push_str("        }).collect()\n");
     out.push_str("    } else {\n");
     out.push_str("        let handles: Vec<_> = slots.iter().map(|s| {\n");
     out.push_str("            let name = s.name.to_string();\n");
     out.push_str("            let skip = s.skip;\n");
+    out.push_str("            let property = s.property;\n");
     out.push_str("            let run = s.run;\n");
     out.push_str("            std::thread::spawn(move || {\n");
     out.push_str("                let res = if skip { None } else { Some(run()) };\n");
     out.push_str("                let output = jet_test_take_output();\n");
-    out.push_str("                (name, skip, res, output)\n");
+    out.push_str("                (name, skip, property, res, output)\n");
     out.push_str("            })\n");
     out.push_str("        }).collect();\n");
-    out.push_str("        handles.into_iter().map(|h| h.join().unwrap_or_else(|_| (\"<thread panicked>\".to_string(), false, Some(Err(\"test thread panicked\".to_string())), String::new()))).collect()\n");
+    out.push_str("        handles.into_iter().map(|h| h.join().unwrap_or_else(|_| (\"<thread panicked>\".to_string(), false, false, Some(Err(\"test thread panicked\".to_string())), String::new()))).collect()\n");
     out.push_str("    };\n");
     out.push_str("    let mut passed = 0usize;\n");
     out.push_str("    let mut failed = 0usize;\n");
     out.push_str("    let mut skipped = 0usize;\n");
-    out.push_str("    for (name, skip, res, output) in results {\n");
+    out.push_str("    for (name, skip, property, res, output) in results {\n");
     out.push_str("        if !output.is_empty() { print!(\"{}\", output); }\n");
     out.push_str("        match (skip, res) {\n");
     out.push_str("            (true, _) => { println!(\"{}: skip\", name); jet_proof_record(0, 2, &name, \"\", \"\", 0); skipped += 1; }\n");
-    out.push_str("            (false, Some(Ok(()))) => { println!(\"{}: pass\", name); jet_proof_record(0, 0, &name, \"\", \"\", 0); passed += 1; }\n");
-    out.push_str("            (false, Some(Err(msg))) => { println!(\"{}: FAIL\", name); eprintln!(\"  {}\", msg); jet_proof_record(0, 1, &name, &msg, \"\", 0); failed += 1; }\n");
+    out.push_str("            (false, Some(Ok(()))) => { println!(\"{}: pass\", name); if !property { jet_proof_record(0, 0, &name, \"\", \"\", 0); } passed += 1; }\n");
+    out.push_str("            (false, Some(Err(msg))) => { println!(\"{}: FAIL\", name); eprintln!(\"  {}\", msg); if !property { jet_proof_record(0, 1, &name, &msg, \"\", 0); } failed += 1; }\n");
     out.push_str("            (false, None) => unreachable!(),\n");
     out.push_str("        }\n");
     out.push_str("    }\n");
@@ -1257,7 +1258,8 @@ fn emit_test_fns(cx: &Cx, tests: &[&TestDef], out: &mut String) {
         let types: Vec<String> = test.params.iter().map(|p| cx.rust_type(&p.ty)).collect();
         let tuple_ty = format!("({},)", types.join(", "));
         out.push_str(&format!("fn jet_test_{}() -> Result<(), String> {{\n", i));
-        out.push_str("    let mut rng = JetRng::new(jet_prop_seed());\n");
+        out.push_str("    let seed = jet_prop_seed();\n");
+        out.push_str("    let mut rng = JetRng::new(seed);\n");
         // call helper that takes the tuple, returns Result
         let call_args: Vec<String> = (0..n).map(|k| format!("input.{}.clone()", k)).collect();
         out.push_str(&format!(
@@ -1266,7 +1268,7 @@ fn emit_test_fns(cx: &Cx, tests: &[&TestDef], out: &mut String) {
             i,
             call_args.join(", ")
         ));
-        out.push_str(&format!("    for _ in 0..{} {{\n", CASES));
+        out.push_str(&format!("    for case_index in 0..{} {{\n", CASES));
         let gen_components: Vec<String> = types
             .iter()
             .map(|t| format!("<{} as JetGen>::generate(&mut rng)", t))
@@ -1312,9 +1314,17 @@ fn emit_test_fns(cx: &Cx, tests: &[&TestDef], out: &mut String) {
             "            let args = vec![{}];\n",
             renders.join(", ")
         ));
+        out.push_str(&format!(
+            "            jet_proof_record(3, 1, {}, &args.join(\", \"), &seed.to_string(), (case_index + 1) as u32);\n",
+            escape_rust_str(&test.name)
+        ));
         out.push_str("            return Err(format!(\"property failed for {}\\n  {}\", args.join(\", \"), msg));\n");
         out.push_str("        }\n");
         out.push_str("    }\n");
+        out.push_str(&format!(
+            "    jet_proof_record(3, 0, {}, \"\", &seed.to_string(), {});\n",
+            escape_rust_str(&test.name), CASES
+        ));
         out.push_str("    Ok(())\n");
         out.push_str("}\n\n");
     }
