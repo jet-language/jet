@@ -449,6 +449,18 @@ impl<'a> Parser<'a> {
         }
     
         pub(super) fn extern_fn(&mut self) -> Result<crate::AST::ExternFn, Diagnostic> {
+            let abi = if matches!(self.peek().kind, TokKind::Hash) {
+                self.bump();
+                let (marker, marker_span) = self.expect_ident("after `#`")?;
+                if marker != Syntax::ATTR_ABI {
+                    return Err(Diagnostic::error("E3212", format!("unknown C ABI marker `#{marker}`"), "C declarations only accept the per-function `#Abi(name)` marker".to_string(), "use `#Abi(system)` or remove the marker for the default C ABI".to_string(), Some(marker_span)));
+                }
+                self.expect(TokKind::LParen, "after `#Abi`")?;
+                let (name, span) = self.expect_ident("for the ABI name")?;
+                self.expect(TokKind::RParen, "after the ABI name")?;
+                while matches!(self.peek().kind, TokKind::Semi) { self.bump(); }
+                Some((name, span))
+            } else { None };
             let fn_span = self.peek().span;
             self.expect_kw(TokKind::KwFn, "to declare a foreign function")?;
             let fn_start = fn_span.start;
@@ -485,6 +497,7 @@ impl<'a> Parser<'a> {
             self.expect(TokKind::Semi, "after the foreign path")?;
             let end = self.toks[self.pos - 1].span.end;
             Ok(crate::AST::ExternFn {
+                abi,
                 name,
                 name_span,
                 params,

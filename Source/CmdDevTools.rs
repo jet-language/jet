@@ -1492,8 +1492,10 @@ pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
                         return_type: f.return_type.clone(),
                         is_extern: false,
                         is_c_abi: false,
+                        c_abi_name: None,
                         is_unsafe: f.is_unsafe,
                         is_pure: f.is_pure,
+                        is_foreign_thread_safe: false,
                         is_sanitizer: f.is_sanitizer,
                         is_must_use: f.is_must_use,
                         param_info: f

@@ -158,22 +158,25 @@ impl<'a> Checker<'a> {
                             }
                         }
                     }
-                    if sig.is_c_abi && matches!(pty, Type::Fn { .. }) {
-                        if let Expr::Ident(callback, span) = &arg.expr {
-                            if self.funcs.get(callback).is_some_and(|f| !f.is_extern && f.is_foreign_thread_safe) {
-                                arg.flags.c_callback_symbol = true;
-                            } else {
-                                self.diags.push(crate::Sema::FFI::e3203(pty, *span));
-                            }
-                        } else {
-                            self.diags.push(crate::Sema::FFI::e3203(pty, arg.expr.span()));
-                        }
-                    }
                     // D-SG9: a fixed-width literal argument adopts the parameter's width.
                     let saved = self.expected_type.clone();
                     self.expected_type = Some(pty.clone());
                     let aty = self.infer(&mut arg.expr);
                     self.expected_type = saved;
+                    if sig.is_c_abi && matches!(pty, Type::Fn { .. }) {
+                        let safe = match &arg.expr {
+                            Expr::Ident(callback, _) => self.funcs.get(callback).is_some_and(|f| {
+                                !f.is_extern && f.is_foreign_thread_safe
+                            }),
+                            Expr::Lambda(lam) => crate::Sema::foreign_thread_safe_lambda(lam),
+                            _ => false,
+                        };
+                        if safe {
+                            arg.flags.c_callback_symbol = true;
+                        } else {
+                            self.diags.push(crate::Sema::FFI::e3203(pty, arg.expr.span()));
+                        }
+                    }
                     if let Some(aty) = aty {
                         let span = arg.expr.span();
                         let reported = self.check_type_assignable(pty, &aty, span);

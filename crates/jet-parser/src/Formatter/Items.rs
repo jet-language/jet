@@ -46,7 +46,25 @@ impl<'a> Fmt<'a> {
             Item::Func(f) => self.fmt_func(f, true),
             Item::Struct(s) => self.fmt_struct(s, true),
             Item::Enum(e) => self.fmt_enum(e, true),
-            Item::Impl(i) => self.fmt_impl(i),
+            Item::Impl(i) => {
+                // External-method sugar (`@Pure fn Type.method(…)`) is
+                // normalized to an ImplDef by the parser. Its AST deliberately
+                // no longer carries enough ordering information to reconstruct
+                // markers before `fn`, so preserve that source form verbatim.
+                // Written `impl Type { … }` blocks still use canonical fmt.
+                let line_start = self.src[..i.span.start]
+                    .rfind('\n')
+                    .map_or(0, |pos| pos + 1);
+                let text = &self.src[line_start..i.span.end];
+                let external_head = format!("fn {}.", i.type_name);
+                if text.contains(&external_head) {
+                    self.write(text);
+                    self.newline();
+                    self.skip_verbatim_comments(i.span.end);
+                } else {
+                    self.fmt_impl(i);
+                }
+            }
             Item::Const(c) => self.fmt_const(c),
             Item::Test(t) => self.fmt_test(t),
             Item::Bench(b) => self.fmt_bench(b),
@@ -235,6 +253,9 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_extern_fn(&mut self, ef: &ExternFn) {
+        if let Some((abi, _)) = &ef.abi {
+            self.write(&format!("#{}({}) ", Syntax::ATTR_ABI, abi));
+        }
         self.write("fn ");
         self.write(&ef.name);
         self.write("(");

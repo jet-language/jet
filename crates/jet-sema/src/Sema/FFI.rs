@@ -28,6 +28,10 @@ pub(crate) fn check_extern_block(
         ok = false;
     }
     for ef in &block.functions {
+        if let Some((_, span)) = &ef.abi {
+            diags.push(Diagnostic::error("E3212", "`#Abi` only applies to C declarations".to_string(), "Rust FFI uses its declared Rust ABI and cannot select a C calling convention".to_string(), "remove `#Abi` from the `extern rust` function".to_string(), Some(*span)));
+            ok = false;
+        }
         if !check_extern_fn(ef, registry, diags) {
             ok = false;
         }
@@ -253,6 +257,31 @@ pub(crate) fn check_c_module(
 ) -> bool {
     let mut ok = true;
     for ef in &cm.functions {
+        if let Some((abi, span)) = &ef.abi {
+            let known = matches!(abi.as_str(), "system" | "cdecl" | "stdcall" | "fastcall" | "win64" | "sysv64");
+            if !known {
+                diags.push(Diagnostic::error("E3212", format!("`{abi}` is not a known C calling convention"), "`#Abi` accepts only the ratified native ABI names".to_string(), "use `system`, `cdecl`, `stdcall`, `fastcall`, `win64`, or `sysv64`".to_string(), Some(*span)));
+                ok = false;
+            } else {
+                let available = match abi.as_str() {
+                    "system" => true,
+                    "cdecl" | "stdcall" | "fastcall" => cfg!(all(target_os = "windows", target_arch = "x86")),
+                    "win64" => cfg!(all(target_os = "windows", target_arch = "x86_64")),
+                    "sysv64" => cfg!(all(not(target_os = "windows"), target_arch = "x86_64")),
+                    _ => false,
+                };
+                if !available {
+                    diags.push(Diagnostic::error("E3213", format!("`{abi}` is not available on this target"), "native calling conventions are restricted by operating system and architecture".to_string(), "use the default C ABI or `system` for portable declarations".to_string(), Some(*span)));
+                    ok = false;
+                }
+                if ef.params.iter().any(|p| p.variadic)
+                    && !(abi == "cdecl" && cfg!(all(target_os = "windows", target_arch = "x86")))
+                {
+                    diags.push(Diagnostic::error("E3214", format!("variadic C function `{}` cannot use `{abi}`", ef.name), "variadics allow only the default C ABI, or cdecl on Windows x86".to_string(), "remove `#Abi`, or use `#Abi(cdecl)` on Windows x86".to_string(), Some(*span)));
+                    ok = false;
+                }
+            }
+        }
         for p in &ef.params {
             // D-MEM1: unmarked (`Read`) is by-value; only explicit markers reject.
             if !matches!(p.convention, AccessConvention::Read) {
@@ -268,9 +297,19 @@ pub(crate) fn check_c_module(
                 ));
                 ok = false;
             }
-            if matches!(&p.ty, Type::Apply { name, .. } if name == Syntax::TYPE_PTR) {
-                diags.push(e3202(&p.ty.name(), p.ty_span));
-                ok = false;
+            if let Type::Apply { name, args } = &p.ty {
+                if name == Syntax::TYPE_PTR {
+                // D-CABI-RESULT1=C: raw, non-null out pointers preserve the C
+                // header exactly. The call is marked unsafe by `extern_to_sig`;
+                // only a single C-safe pointee is admitted.
+                if args.len() != 1 || !is_c_abi_type(&args[0], registry) {
+                    diags.push(e3203(&p.ty, p.ty_span));
+                    ok = false;
+                }
+                } else if !is_c_abi_type(&p.ty, registry) {
+                    diags.push(e3203(&p.ty, p.ty_span));
+                    ok = false;
+                }
             } else if !is_c_abi_type(&p.ty, registry) {
                 diags.push(e3203(&p.ty, p.ty_span));
                 ok = false;

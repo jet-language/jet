@@ -810,15 +810,25 @@ incompatible re-declaration → **E3205**), and materializes one synthetic modul
 so calls resolve like any namespaced module call. Codegen emits an `extern "C"`
 block plus small per-function wrappers (the only place compiler-vetted `unsafe`
 is emitted, S58); `String`↔`*const c_char` and `Char`↔`u32` convert at the edge.
+For a C function declared to return `String`, the pointer is borrowed from C:
+it must be non-null, NUL-terminated, and valid UTF-8. Jet copies it immediately
+into an owned `String` and never frees the C pointer. Null and invalid UTF-8 are
+runtime boundary failures; neither becomes an empty or lossy string. APIs with
+owned buffers, nullable strings, another encoding, or a library-specific free
+function stay raw and need an audited wrapper.
 
 Link key = last segment `<lib>`: a declared `<lib>: c@…` dep in the `deps:`
 block of `pkg.jet` (`c@system` → pkg-config with a bare `-l <lib>` fallback;
 `c@"path"` → local `-L`/`-I`/`-l`) → else `pkg-config <lib>` → **E3201**. Link flags (`-L native=…`,
 `-l <lib>`) are resolved at **build time** (not during front-end checking, I3) and
 threaded into the `rustc` link line. By-value scalars/`String`/C-layout
-structs+enums at the edge; aggregates (`[T]`, maps, `T?`, tuples, …) → **E3203**;
-pointers require `use core.mem` + `#Unsafe` (E2-M13) → **E3202** (registered;
-unreachable until the pointer tier lands). `#Bindgen` is legal only inside a
+structs+enums at the edge; aggregates (`[T]`, maps, `T?`, tuples, …) → **E3203**.
+D-CABI-RESULT1 keeps status-plus-out APIs raw: a parameter may be `*T` only
+when `T` is C-safe, and every call is an unsafe-function call requiring an
+audited `#Unsafe("reason")` region. The caller creates the non-null pointer
+through `core.mem`, initializes its slot, checks the raw status, and reads the
+slot only on a status the wrapper knows initialized it. Pointer returns remain
+**E3202**; direct `Result` declarations remain **E3203**. `#Bindgen` is legal only inside a
 generated cache file (**E3207**); users may not name the reserved `__bindgen__`
 segment (**E3206**); two `use` forms for one lib in one file → **E3204**.
 

@@ -1014,17 +1014,6 @@ impl<'a> Checker<'a> {
                 let saved_exp = self.expected_type.clone();
                 let saved_esc = self.lambda_escapes;
                 if let Some((param_conv, param_ty)) = effective_params.get(i) {
-                    if sig.is_c_abi && matches!(param_ty, Type::Fn { .. }) {
-                        if let Expr::Ident(callback, span) = &arg.expr {
-                            if self.funcs.get(callback).is_some_and(|f| !f.is_extern && f.is_foreign_thread_safe) {
-                                arg.flags.c_callback_symbol = true;
-                            } else {
-                                self.diags.push(crate::Sema::FFI::e3203(param_ty, *span));
-                            }
-                        } else {
-                            self.diags.push(crate::Sema::FFI::e3203(param_ty, arg.expr.span()));
-                        }
-                    }
                     if matches!(param_ty, Type::Fn { .. }) {
                         self.expected_type = Some(param_ty.clone());
                         self.lambda_escapes = matches!(param_conv, AccessConvention::Move);
@@ -1064,6 +1053,20 @@ impl<'a> Checker<'a> {
                 } else {
                     self.infer(&mut arg.expr)
                 };
+                if sig.is_c_abi && matches!(effective_params.get(i), Some((_, Type::Fn { .. }))) {
+                    let safe = match &arg.expr {
+                        Expr::Ident(callback, _) => self.funcs.get(callback).is_some_and(|f| {
+                            !f.is_extern && f.is_foreign_thread_safe
+                        }),
+                        Expr::Lambda(lam) => crate::Sema::foreign_thread_safe_lambda(lam),
+                        _ => false,
+                    };
+                    if safe {
+                        arg.flags.c_callback_symbol = true;
+                    } else if let Some((_, param_ty)) = effective_params.get(i) {
+                        self.diags.push(crate::Sema::FFI::e3203(param_ty, arg.expr.span()));
+                    }
+                }
                 self.expected_type = saved_exp;
                 self.lambda_escapes = saved_esc;
                 let Some((param_conv, param_ty)) = effective_params.get(i) else {

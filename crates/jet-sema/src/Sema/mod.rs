@@ -9,7 +9,7 @@
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Traits::TraitRegistry;
-use crate::AST::{AccessConvention, ExternFn, Func, Type, VariantPayload};
+use crate::AST::{AccessConvention, Expr, ExternFn, Func, Stmt, Type, VariantPayload};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 
@@ -365,6 +365,7 @@ fn func_to_sig(f: &Func) -> FuncSig {
         return_type: f.return_type.clone(),
         is_extern: false,
         is_c_abi: false,
+        c_abi_name: None,
         is_unsafe: f.is_unsafe,
         is_pure: f.is_pure,
         is_foreign_thread_safe: foreign_thread_safe_func(f),
@@ -394,7 +395,14 @@ fn extern_to_sig(ef: &ExternFn, is_c_abi: bool) -> FuncSig {
         return_type: ef.return_type.clone(),
         is_extern: true,
         is_c_abi,
-        is_unsafe: false,
+        c_abi_name: ef.abi.as_ref().map(|(name, _)| name.clone()),
+        // D-CABI-RESULT1=C: any raw out-pointer declaration is callable only
+        // from an audited `#Unsafe` region. The declaration remains the exact
+        // C status/out shape; no Result adapter is invented.
+        is_unsafe: is_c_abi
+            && ef.params.iter().any(|p| {
+                matches!(&p.ty, Type::Apply { name, .. } if name == crate::Syntax::TYPE_PTR)
+            }),
         is_pure: false,      // extern functions are always considered impure
         is_foreign_thread_safe: false,
         is_sanitizer: false, // extern functions can't be sanitizers
@@ -402,26 +410,38 @@ fn extern_to_sig(ef: &ExternFn, is_c_abi: bool) -> FuncSig {
     }
 }
 
-fn foreign_thread_safe_func(f: &Func) -> bool {
-    fn expr(e: &Expr) -> bool {
+fn foreign_thread_safe_expr(e: &Expr) -> bool {
         match e {
             Expr::Int(..) | Expr::Float(..) | Expr::Bool(..) | Expr::Char(..) | Expr::Ident(..) => true,
-            Expr::Unary(_, a, _) | Expr::Copy(a, _) => expr(a),
-            Expr::Binary(_, a, b, _) => expr(a) && expr(b),
-            Expr::CompareChain { operands, .. } => operands.iter().all(expr),
+            Expr::Unary(_, a, _) | Expr::Copy(a, _) => foreign_thread_safe_expr(a),
+            Expr::Binary(_, a, b, _) => foreign_thread_safe_expr(a) && foreign_thread_safe_expr(b),
+            Expr::CompareChain { operands, .. } => operands.iter().all(foreign_thread_safe_expr),
             _ => false,
         }
-    }
-    fn stmt(s: &Stmt) -> bool {
+}
+
+fn foreign_thread_safe_stmt(s: &Stmt) -> bool {
         match s {
-            Stmt::Return(v, _) => v.as_ref().is_none_or(expr),
-            Stmt::Expr(e) => expr(e),
-            Stmt::Val(b) => expr(&b.init),
+            Stmt::Return(v, _) => v.as_ref().is_none_or(foreign_thread_safe_expr),
+            Stmt::Expr(e) => foreign_thread_safe_expr(e),
+            Stmt::Val(b) => foreign_thread_safe_expr(&b.init),
             _ => false,
         }
-    }
+}
+
+fn foreign_thread_safe_func(f: &Func) -> bool {
     f.is_pure && f.type_params.is_empty() && f.pre.is_empty() && f.post.is_empty()
-        && f.body.iter().all(stmt)
+        && f.body.iter().all(foreign_thread_safe_stmt)
+}
+
+pub(crate) fn foreign_thread_safe_lambda(lam: &crate::AST::Lambda) -> bool {
+    lam.take_names.is_empty()
+        && lam.meta.mut_captures.is_empty()
+        && lam.meta.cloned_captures.is_empty()
+        && match &lam.body {
+            crate::AST::LambdaBody::Expr(e) => foreign_thread_safe_expr(e),
+            crate::AST::LambdaBody::Block(stmts) => stmts.iter().all(foreign_thread_safe_stmt),
+        }
 }
 
 /// D-NARG-D2: Walk a default expression and substitute any `Ident` that names

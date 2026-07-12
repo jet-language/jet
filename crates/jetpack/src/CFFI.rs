@@ -89,6 +89,9 @@ fn is_generated_cache_file(display: &str) -> bool {
 
 /// Two `ExternFn`s have the same boundary signature (params by type + return).
 fn same_signature(a: &ExternFn, b: &ExternFn) -> bool {
+    if a.abi.as_ref().map(|(name, _)| name) != b.abi.as_ref().map(|(name, _)| name) {
+        return false;
+    }
     if a.params.len() != b.params.len() {
         return false;
     }

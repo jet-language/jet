@@ -2160,3 +2160,11 @@ fn run() {
 ";
     assert_fmt_stable(src, "#Task/#Every schedule markers (D-SCHEDULE1)");
 }
+
+#[test]
+fn fmt_preserves_per_function_c_abi() {
+    let src = "use c.demo as c\n#Extern module c.demo {\n    #Abi(system) fn portable(x: I32) -> I32 = \"portable\"\n    #Abi(sysv64) fn native(x: I32) -> I32 = \"native\"\n}\nfn run() {}\n";
+    let once = jet::format_source(src).expect("#Abi C module should format");
+    assert!(once.contains("#Abi(system)") && once.contains("#Abi(sysv64)"), "fmt dropped #Abi: {once}");
+    assert_eq!(once, jet::format_source(&once).expect("re-fmt"));
+}

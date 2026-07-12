@@ -1807,6 +1807,19 @@ impl<'a> Checker<'a> {
             if let Some(module) = self.core_imports.get(alias).cloned() {
                 return self.infer_core_field(&module, member, *alias_span, span);
             }
+            if let (Some(modules), Some(module_idx)) = (self.modules, self.imports.get(alias)) {
+                if let Some(sig) = modules[*module_idx].funcs.get(member) {
+                    if sig.c_abi_name.is_some() {
+                        let ty = Type::Fn {
+                            params: sig.params.iter().map(|(_, ty)| ty.clone()).collect(),
+                            ret: sig.return_type.clone().map(Box::new),
+                            effect_bound: None,
+                        };
+                        self.diags.push(crate::Sema::FFI::e3203(&ty, span));
+                        return Some(ty);
+                    }
+                }
+            }
         }
         if let Expr::Ident(type_name, type_span) = &**inner {
             // D-SERDE13=B: `Data.Null` etc. — retired spelling, point at `DataTree`.

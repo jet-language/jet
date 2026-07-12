@@ -112,6 +112,32 @@ pub(crate) fn lower_one_call_arg(
             ty: conv.as_ref().map(|(_, t)| t.clone()).unwrap(),
             kind: TExprKind::ConstInline(cx.mangle_name(name)),
         },
+        (Expr::Lambda(lam), Some((_, Type::Fn { params, ret, .. })))
+            if a.flags.c_callback_symbol =>
+        {
+            let tl = lower_lambda_expecting(lam, cx, env, Some(params.as_slice()));
+            let name = format!("__jet_c_callback_{}_{}", lam.span.start, lam.span.end);
+            let ret = ret
+                .as_deref()
+                .map(|ty| format!(" -> {}", cx.rust_type(ty)))
+                .unwrap_or_default();
+            let body = if tl.body.starts_with('{') {
+                tl.body
+            } else {
+                format!("{{ {} }}", tl.body)
+            };
+            TExpr {
+                ty: conv.as_ref().map(|(_, t)| t.clone()).unwrap(),
+                kind: TExprKind::ConstInline(format!(
+                    "{{ extern \"C\" fn {}({}){} {} {} }}",
+                    name,
+                    tl.params.join(", "),
+                    ret,
+                    body,
+                    name
+                )),
+            }
+        }
         (Expr::Lambda(lam), Some((_, Type::Fn { params, .. }))) => {
             let tl = lower_lambda_expecting(lam, cx, env, Some(params.as_slice()));
             TExpr {

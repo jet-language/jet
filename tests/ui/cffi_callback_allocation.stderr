@@ -1,0 +1,7 @@
+Error [E3203]: `fn(I32) -> I32` is not a C-compatible type for a foreign function parameter or return.
+  --> tests/ui/cffi_callback_allocation.jet:12:25
+    |
+ 12 | fn run() { print(c.call(allocates, 1)) }
+    |                         ^^^^^^^^^
+ Why: `#Extern` / `#Bindgen` functions must use types with a stable C ABI at the edge.
+ Fix: Use scalars, `String`, or a struct with C layout; pointers only through the gated tier.

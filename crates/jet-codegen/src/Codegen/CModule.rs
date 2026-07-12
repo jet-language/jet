@@ -13,6 +13,10 @@ use crate::AST::Type;
 /// docs/spec/diagnostics.md (E3211) and docs/spec/spec.md (C FFI section).
 const NUL_PANIC: &str =
     "a String with an embedded NUL byte can't cross into a C function (C strings are NUL-terminated, not length-prefixed)";
+const NULL_RETURN_PANIC: &str =
+    "a C function declared to return String returned a null pointer";
+const UTF8_RETURN_PANIC: &str =
+    "a C function declared to return String returned bytes that are not valid UTF-8";
 
 /// Card #436: `CModule` functions are always emitted in a synthetic per-lib
 /// Rust module (`CFFI::assemble` in the jetpack crate folds every
@@ -41,7 +45,6 @@ pub(crate) fn emit_c_module(cx: &Cx, cm: &crate::AST::CModule, out: &mut String)
     if cm.functions.is_empty() {
         return;
     }
-    out.push_str("#[allow(non_snake_case)]\nextern \"C\" {\n");
     for ef in &cm.functions {
         let params: Vec<String> = ef
             .params
@@ -54,14 +57,16 @@ pub(crate) fn emit_c_module(cx: &Cx, cm: &crate::AST::CModule, out: &mut String)
             .as_ref()
             .map(|t| format!(" -> {}", c_abi_rust_type(t, cx)))
             .unwrap_or_default();
+        let abi = ef.abi.as_ref().map(|(a, _)| a.as_str()).unwrap_or("C");
         out.push_str(&format!(
-            "    fn {}({}){};\n",
+            "#[allow(non_snake_case)]\nextern \"{}\" {{\n    fn {}({}){};\n}}\n",
+            abi,
             ef.rust_path,
             params.join(", "),
             ret
         ));
     }
-    out.push_str("}\n\n");
+    out.push('\n');
 
     for ef in &cm.functions {
         let mut sig_params = Vec::new();
@@ -100,7 +105,7 @@ pub(crate) fn emit_c_module(cx: &Cx, cm: &crate::AST::CModule, out: &mut String)
         let call_body = match &ef.return_type {
             None => format!("    unsafe {{ {}; }}", call),
             Some(Type::String) => format!(
-                "    let p = unsafe {{ {} }};\n    if p.is_null() {{ return String::new(); }}\n    unsafe {{ std::ffi::CStr::from_ptr(p) }}.to_string_lossy().into_owned()",
+                "    let p = unsafe {{ {} }};\n    if p.is_null() {{ jet_panic(file!(), line!(), \"{NULL_RETURN_PANIC}\"); }}\n    let bytes = unsafe {{ std::ffi::CStr::from_ptr(p) }};\n    bytes.to_str().unwrap_or_else(|_| jet_panic(file!(), line!(), \"{UTF8_RETURN_PANIC}\")).to_owned()",
                 call
             ),
             Some(Type::Char) => format!(
@@ -150,9 +155,13 @@ fn c_abi_rust_type(ty: &Type, cx: &Cx) -> String {
             let r = ret.as_deref().map(|t| format!(" -> {}", c_abi_rust_type(t, cx))).unwrap_or_default();
             format!("extern \"C\" fn({ps}){r}")
         }
+        Type::Apply { name, args } if name == Syntax::TYPE_PTR && args.len() == 1 => {
+            format!("*mut {}", qualify_named_rust_type(cx, &args[0]))
+        }
         Type::Tagged { inner, .. } => c_abi_rust_type(inner, cx),
-        // Sema (E3203) rejects anything else at the C boundary.
-        other => format!("/* unsupported: {} */ ()", other.name()),
+        // Sema owns this closed set (I3). Reaching here is a compiler invariant
+        // violation, never generated placeholder Rust.
+        other => panic!("I3: sema admitted unsupported C ABI type {}", other.name()),
     }
 }
 
@@ -173,8 +182,11 @@ fn c_wrapper_param_type(ty: &Type, cx: &Cx) -> String {
         // the real `extern "C"` call).
         Type::Named(_) => format!("&{}", qualify_named_rust_type(cx, ty)),
         Type::Fn { .. } => c_abi_rust_type(ty, cx),
+        Type::Apply { name, args } if name == Syntax::TYPE_PTR && args.len() == 1 => {
+            format!("*mut {}", qualify_named_rust_type(cx, &args[0]))
+        }
         Type::Tagged { inner, .. } => c_wrapper_param_type(inner, cx),
-        other => format!("/* unsupported: {} */ ()", other.name()),
+        other => panic!("I3: sema admitted unsupported C ABI parameter {}", other.name()),
     }
 }
 
@@ -189,6 +201,6 @@ fn c_wrapper_ret_type(ty: &Type, cx: &Cx) -> String {
         Type::Named(_) => qualify_named_rust_type(cx, ty),
         Type::Fn { .. } => c_abi_rust_type(ty, cx),
         Type::Tagged { inner, .. } => c_wrapper_ret_type(inner, cx),
-        other => format!("/* unsupported: {} */ ()", other.name()),
+        other => panic!("I3: sema admitted unsupported C ABI return {}", other.name()),
     }
 }

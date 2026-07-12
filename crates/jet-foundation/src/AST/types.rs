@@ -379,6 +379,8 @@ impl Type {
     pub fn is_scalar(&self) -> bool {
         match self {
             Type::Tagged { inner, .. } => inner.is_scalar(),
+            Type::Apply { name, args }
+                if name == crate::Syntax::TYPE_PTR && args.len() == 1 => true,
             _ => matches!(
                 self,
                 Type::Int | Type::Float | Type::Bool | Type::IntN { .. } | Type::Float32

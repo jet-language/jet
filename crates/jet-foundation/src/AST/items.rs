@@ -653,6 +653,8 @@ pub struct ExternRustBlock {
 /// S50: foreign function — Jet signature plus `= "rust::path"`, no body.
 #[derive(Debug, Clone)]
 pub struct ExternFn {
+    /// D-CABI-PLATFORM1=A: explicit per-function native ABI. `None` means C.
+    pub abi: Option<(String, Span)>,
     pub name: String,
     pub name_span: Span,
     pub params: Vec<Param>,

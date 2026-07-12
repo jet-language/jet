@@ -30,6 +30,8 @@ pub struct FuncSig {
     /// `CString::new` in codegen — which fails on an embedded NUL byte — so
     /// call-site checking (E3211, `direct_calls.rs`) only applies here.
     pub is_c_abi: bool,
+    /// D-CABI-PLATFORM1: explicit alternate ABI; such functions are direct-call-only.
+    pub c_abi_name: Option<String>,
     /// S61: parameter names and default-value presence, parallel to `params`.
     /// Empty for extern/built-in functions.
     pub param_info: Vec<(String, bool)>,

@@ -643,11 +643,74 @@ fn cffi_named_pure_callback_has_stable_c_symbol() {
     let cc=["cc","gcc","clang"].iter().find(|x|Command::new(x).arg("--version").output().is_ok()).unwrap();
     assert!(Command::new(cc).args(["-c"]).arg(root.join("cb.c")).arg("-o").arg(root.join("cb.o")).status().unwrap().success());
     assert!(Command::new("ar").arg("rcs").arg(root.join("libcb.a")).arg(root.join("cb.o")).status().unwrap().success());
-    let main=root.join("main.jet"); fs::write(&main,"use c.cb as c\n@Pure fn increment(x: I32) -> I32 { return x + 1 }\n#Extern module c.cb { fn call_twice(cb: @Pure fn(I32) -> I32, x: I32) -> I32 = \"call_twice\"; fn call_parallel(cb: @Pure fn(I32) -> I32) -> I32 = \"call_parallel\"; }\nfn run() { print(c.call_twice(increment, 40)); print(c.call_parallel(increment)) }\n").unwrap();
+    let main=root.join("main.jet"); fs::write(&main,"use c.cb as c\n@Pure fn increment(x: I32) -> I32 { return x + 1 }\n#Extern module c.cb { fn call_twice(cb: @Pure fn(I32) -> I32, x: I32) -> I32 = \"call_twice\"; fn call_parallel(cb: @Pure fn(I32) -> I32) -> I32 = \"call_parallel\"; }\nfn run() { print(c.call_twice(increment, 40)); print(c.call_parallel(increment)); print(c.call_twice((x) => x + x, 10)) }\n").unwrap();
     let src=fs::read_to_string(&main).unwrap(); let out=jet::compile_with_path(&src,main.to_str().unwrap()).unwrap_or_else(|d|panic!("{}",jet::render_diagnostics(main.to_str().unwrap(),&src,&d)));
-    assert!(out.rust.contains("extern \"C\" fn user_increment")); assert!(out.rust.contains("extern \"C\" fn(i32) -> i32"));
+    assert!(out.rust.contains("extern \"C\" fn user_increment")); assert!(out.rust.contains("extern \"C\" fn(i32) -> i32")); assert!(out.rust.contains("extern \"C\" fn __jet_c_callback_"));
     fs::write(root.join("main.rs"),out.rust).unwrap(); let built=Command::new("rustc").args(["--edition","2021"]).arg(root.join("main.rs")).arg("-o").arg(root.join("main_bin")).arg("-L").arg(format!("native={}",root.display())).arg("-lcb").arg("-lpthread").output().unwrap();
-    assert!(built.status.success(),"I2: {}",String::from_utf8_lossy(&built.stderr)); let run=Command::new(root.join("main_bin")).output().unwrap(); assert_eq!(String::from_utf8_lossy(&run.stdout),"42\n10\n"); let _=fs::remove_dir_all(root);
+    assert!(built.status.success(),"I2: {}",String::from_utf8_lossy(&built.stderr)); let run=Command::new(root.join("main_bin")).output().unwrap(); assert_eq!(String::from_utf8_lossy(&run.stdout),"42\n10\n40\n"); let _=fs::remove_dir_all(root);
+}
+
+#[test]
+fn cffi_raw_status_out_pointer_reads_only_on_success() {
+    if !have_rustc() { return; }
+    let root=std::env::temp_dir().join(format!("jet_cffi_out_{}",std::process::id())); let _=fs::remove_dir_all(&root); fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("store.c"),"#include <stdint.h>\n#include <string.h>\ntypedef struct { uint64_t id; uint32_t flags; } Record;\nint32_t store_load(uint64_t id, Record* out){ if(id==7){out->id=70;out->flags=3;return 0;} memset(out,0xA5,sizeof(*out)); return 9; }\n").unwrap();
+    let cc=["cc","gcc","clang"].iter().find(|x|Command::new(x).arg("--version").output().is_ok()).unwrap();
+    assert!(Command::new(cc).args(["-c"]).arg(root.join("store.c")).arg("-o").arg(root.join("store.o")).status().unwrap().success());
+    assert!(Command::new("ar").arg("rcs").arg(root.join("libstore.a")).arg(root.join("store.o")).status().unwrap().success());
+    let main=root.join("main.jet"); let src=r#"use core.mem
+use c.store as store
+#Layout(c)
+struct Record { id: U64; flags: U32 }
+#Extern module c.store { fn store_load(id: U64, out: *Record) -> I32 = "store_load"; }
+fn load(id: U64) -> Record ? String {
+    slot: Record := Record.{id: 0, flags: 0}
+    status: I32 := 1
+    #Unsafe("store_load receives a live non-null slot; bytes are read only after status zero") {
+        p :: mem.Ptr<Record>.from_addr(mem.address_of(slot))
+        status = store.store_load(id, p)
+        if status.to_int() == 0 { slot = copy p.* }
+    }
+    if status.to_int() != 0 { return err("status {status}") }
+    return ok(slot)
+}
+
+fn run() {
+    print((load(7) ?? panic("success expected")).id)
+    if load(8) == {
+        ok(v) -> { print("unexpected {v.id}") }
+        err(e) -> { print(e) }
+    }
+}
+"#; fs::write(&main,src).unwrap();
+    let out=jet::compile_with_path(src,main.to_str().unwrap()).unwrap_or_else(|d|panic!("{}",jet::render_diagnostics(main.to_str().unwrap(),src,&d)));
+    assert!(out.rust.contains("*mut super::user_Record")); assert!(!out.rust.contains("Result<super::user_Record"));
+    fs::write(root.join("main.rs"),out.rust).unwrap(); let built=Command::new("rustc").args(["--edition","2021"]).arg(root.join("main.rs")).arg("-o").arg(root.join("main_bin")).arg("-L").arg(format!("native={}",root.display())).arg("-lstore").output().unwrap();
+    assert!(built.status.success(),"I2: {}",String::from_utf8_lossy(&built.stderr)); let run=Command::new(root.join("main_bin")).output().unwrap(); assert_eq!(String::from_utf8_lossy(&run.stdout),"70\nstatus 9\n"); let _=fs::remove_dir_all(root);
+}
+
+#[test]
+#[cfg(all(target_arch = "x86_64", not(target_os = "windows")))]
+fn cffi_sysv64_abi_executes_native_symbol() {
+    if !have_rustc() { return; }
+    let root=std::env::temp_dir().join(format!("jet_cffi_sysv_{}",std::process::id())); let _=fs::remove_dir_all(&root); fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("abi.c"),"#include <stdint.h>\nint32_t abi_add(int32_t a,int32_t b){return a+b;}\n").unwrap();
+    let cc=["cc","gcc","clang"].iter().find(|x|Command::new(x).arg("--version").output().is_ok()).unwrap(); assert!(Command::new(cc).args(["-c"]).arg(root.join("abi.c")).arg("-o").arg(root.join("abi.o")).status().unwrap().success()); assert!(Command::new("ar").arg("rcs").arg(root.join("libabi.a")).arg(root.join("abi.o")).status().unwrap().success());
+    let src="use c.abi as c\n#Extern module c.abi { #Abi(sysv64) fn add(a: I32, b: I32) -> I32 = \"abi_add\"; }\nfn run() { print(c.add(20, 22)) }\n"; let main=root.join("main.jet"); fs::write(&main,src).unwrap(); let out=jet::compile_with_path(src,main.to_str().unwrap()).unwrap_or_else(|d|panic!("{}",jet::render_diagnostics(main.to_str().unwrap(),src,&d))); assert!(out.rust.contains("extern \"sysv64\""));
+    fs::write(root.join("main.rs"),out.rust).unwrap(); let built=Command::new("rustc").args(["--edition","2021"]).arg(root.join("main.rs")).arg("-o").arg(root.join("main_bin")).arg("-L").arg(format!("native={}",root.display())).arg("-labi").output().unwrap(); assert!(built.status.success(),"I2: {}",String::from_utf8_lossy(&built.stderr)); let run=Command::new(root.join("main_bin")).output().unwrap(); assert_eq!(String::from_utf8_lossy(&run.stdout),"42\n"); let _=fs::remove_dir_all(root);
+}
+
+#[test]
+fn cffi_string_returns_are_borrowed_non_null_utf8_and_copied() {
+    if !have_rustc() { return; }
+    let root=std::env::temp_dir().join(format!("jet_cffi_cstr_{}",std::process::id())); let _=fs::remove_dir_all(&root); fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("strret.c"),"const char* good(void){return \"caf\\xC3\\xA9\";} const char* null_s(void){return 0;} const char* bad(void){static const char s[]={ (char)0xff,0 };return s;}\n").unwrap();
+    let cc=["cc","gcc","clang"].iter().find(|x|Command::new(x).arg("--version").output().is_ok()).unwrap(); assert!(Command::new(cc).args(["-c"]).arg(root.join("strret.c")).arg("-o").arg(root.join("strret.o")).status().unwrap().success()); assert!(Command::new("ar").arg("rcs").arg(root.join("libstrret.a")).arg(root.join("strret.o")).status().unwrap().success());
+    for (name, expected, success) in [("good","café\n",true),("null_s","returned a null pointer",false),("bad","not valid UTF-8",false)] {
+        let src=format!("use c.strret as c\n#Extern module c.strret {{ fn get() -> String = \"{name}\"; }}\nfn run() {{ print(c.get()) }}\n"); let main=root.join(format!("{name}.jet")); fs::write(&main,&src).unwrap(); let out=jet::compile_with_path(&src,main.to_str().unwrap()).unwrap_or_else(|d|panic!("{}",jet::render_diagnostics(main.to_str().unwrap(),&src,&d))); assert!(!out.rust.contains("to_string_lossy")); assert!(!out.rust.contains("/* unsupported:"));
+        let rs=root.join(format!("{name}.rs")); let bin=root.join(format!("{name}_bin")); fs::write(&rs,out.rust).unwrap(); let built=Command::new("rustc").args(["--edition","2021"]).arg(&rs).arg("-o").arg(&bin).arg("-L").arg(format!("native={}",root.display())).arg("-lstrret").output().unwrap(); assert!(built.status.success(),"I2: {}",String::from_utf8_lossy(&built.stderr)); let run=Command::new(bin).output().unwrap(); assert_eq!(run.status.success(),success); let text=format!("{}{}",String::from_utf8_lossy(&run.stdout),String::from_utf8_lossy(&run.stderr)); assert!(text.contains(expected),"{name}: {text}");
+    }
+    let _=fs::remove_dir_all(root);
 }
 
 /// Card #436: a runtime-built `String` (not a literal — so sema's E3211
@@ -1216,9 +1279,10 @@ fn ffi_example_compiles_and_runs() {
         );
     });
     assert!(out.ffi.is_some(), "expected an FFI bridge for 22_ffi.jet");
+    let user_rust = common::strip_vetted_prelude_modules(&out.rust);
     assert!(
-        !out.rust.contains("unsafe"),
-        "I1: FFI output must not use unsafe"
+        !user_rust.contains("unsafe"),
+        "I1: FFI output outside vetted runtime internals must not use unsafe"
     );
 
     let dir = std::env::temp_dir();
