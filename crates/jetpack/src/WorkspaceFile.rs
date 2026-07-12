@@ -409,7 +409,7 @@ fn read_package_name(dir: &Path) -> Option<String> {
     for line in src.lines() {
         let trimmed = line.trim();
         if let Some(rest) = trimmed.strip_prefix("name:") {
-            let val = rest.trim().trim_matches('"').trim_matches(',');
+            let val = rest.trim().trim_end_matches(',').trim().trim_matches('"');
             if !val.is_empty() && !val.contains('{') {
                 return Some(val.to_string());
             }

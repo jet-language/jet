@@ -1,0 +1,19 @@
+// E0927 (card #518): `#[allow(lint_name)]` is a legal directive-plane
+// marker (D-LINTPOLICY1=A / D-DECIMAL1) — the closed marker vocabulary must
+// never flag it. `@Bogus` on the second struct proves the vocabulary check
+// still fires for a genuinely unregistered name: this fixture's .stderr
+// must show exactly one E0927, for `@Bogus`, and nothing for `#[allow(...)]`.
+
+struct Invoice {
+    #[allow(float_money)]
+    price: Float,
+}
+
+@Bogus
+struct Widget {
+    label: String,
+}
+
+fn run() {
+    print("ok")
+}

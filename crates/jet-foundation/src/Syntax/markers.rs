@@ -58,6 +58,16 @@ pub const CONTRACT_DOC: &str = "Doc"; // D-CLIFLAG1
 /// declarations. C remains the implicit default; alternate ABIs never inherit.
 pub const ATTR_ABI: &str = "Abi"; // D-CABI-PLATFORM1
 
+/// D-LINTPOLICY1=A / D-DECIMAL1: per-site lint-suppression marker —
+/// `#[allow(lint_name)]` on a struct or field (e.g. `#[allow(float_money)]`
+/// silences the default-on money lint L0504). Deliberately lowercase: it
+/// names a lint code, not a declaration-shaped feature, so it does not
+/// follow the PascalCase marker convention. Struct/field site collection:
+/// `collect_allow_markers` in `crates/jet-semindex/src/Build.rs`; the
+/// float-money check itself: `allows_float_money` in
+/// `crates/jet-foundation/src/Numeric.rs`.
+pub const ATTR_ALLOW: &str = "allow"; // D-LINTPOLICY1
+
 /// D-MARKER-FAMILY1 / D-MARKERMOVE1 / D-MARKERMOVE3 (I7/R3 chokepoint): every
 /// name that lives on the `@` contract plane. Union of the D-MARKERMOVE1
 /// move list (§2a), the D-CONTRACTCASE1 recase set (§2b), D-MARKERMOVE3's
@@ -166,9 +176,12 @@ pub const DIRECTIVE_MARKERS: &[&str] = &[
     ATTR_DENY_UNKNOWN_FIELDS,
     ATTR_TAG,
     ATTR_UNTAGGED,
+    // D-LINTPOLICY1=A / D-DECIMAL1 — `#[allow(lint_name)]` per-site suppression.
+    ATTR_ALLOW,
 ];
 use super::{
-    ATTR_BINDGEN, ATTR_CODABLE, ATTR_COMPARABLE, ATTR_DEBUG_ONLY, ATTR_DECODE, ATTR_DEFAULT,
+    ATTR_BINDGEN, ATTR_CODABLE, ATTR_COMPARABLE, ATTR_DEBUG_ONLY,
+    ATTR_DECODE, ATTR_DEFAULT,
     ATTR_DENY_UNKNOWN_FIELDS, ATTR_ENCODE, ATTR_EXTERN_MODULE, ATTR_FLATTEN, ATTR_HTML,
     ATTR_INVARIANT, ATTR_LAYOUT, ATTR_META, ATTR_MUST_USE,
     ATTR_NUMERIC, ATTR_OFF, ATTR_PUBLISHED_SCHEMA, ATTR_REDACT, ATTR_RENAME, ATTR_RENAME_ALL,

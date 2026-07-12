@@ -10,6 +10,7 @@ pub mod generated;
 pub mod JitBackend;
 pub mod Numeric;
 pub mod OsTarget;
+pub mod PerformanceBudget;
 pub mod RingLayer;
 pub mod SHA256;
 pub mod Syntax;

@@ -1994,12 +1994,12 @@ pub(crate) fn resolve_source_path(raw: &str) -> String {
         // names the missing `main.jet`.
         if !path.join(jet::Syntax::PAYLOAD_FILE).is_file() {
             eprintln!(
-                "error: no `main.{ext}` or `.jet/main.{ext}` entry in `{dir}`",
+                "error: no `src/main.{ext}` entry in `{dir}`",
                 ext = jet::Syntax::FILE_EXT,
                 dir = raw,
             );
             eprintln!(
-                " fix: add a `main.{}` to that directory, or point at a `.jet` file directly",
+                " fix: add a `src/main.{}` to that directory, or point at a `.jet` file directly",
                 jet::Syntax::FILE_EXT
             );
             exit(ExitCodes::USER_ERROR);
@@ -2016,15 +2016,30 @@ pub(crate) fn resolve_source_path(raw: &str) -> String {
     raw.to_string()
 }
 
-/// Find the entry .jet file for a project (`.jet/main.jet` if exists, else `main.jet`).
+/// Find the entry `.jet` file for a project rooted at `root` (D-ILE1): bare
+/// `executable` resolution searches `src/main.jet` first, then `<package>.jet`
+/// — `<package>` is the `payload.name` field read from `root`'s `pkg.jet`, so
+/// e.g. package `hello` resolves to `hello.jet` at the project root. Falls
+/// back to the `src/main.jet` candidate path when neither exists, so callers
+/// can name it in a clean "missing entry" error.
 pub(crate) fn find_project_entry(root: &Path) -> PathBuf {
-    let dot_jet = root
-        .join(".jet")
+    let src_main = root
+        .join("src")
         .join(format!("main.{}", jet::Syntax::FILE_EXT));
-    if dot_jet.is_file() {
-        return dot_jet;
+    if src_main.is_file() {
+        return src_main;
     }
-    root.join(format!("main.{}", jet::Syntax::FILE_EXT))
+    if let Some(Ok(manifest)) = jet::Jetpack::PackageManifest::PackManifest::load(root) {
+        let named = root.join(format!(
+            "{}.{}",
+            manifest.package.name,
+            jet::Syntax::FILE_EXT
+        ));
+        if named.is_file() {
+            return named;
+        }
+    }
+    src_main
 }
 
 /// D-CLI-BARE1=A: shared bare-entry resolver for `run`/`dev`/`debug`/`bench`/
