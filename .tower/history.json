@@ -18482,6 +18482,56 @@
       "ratifiedAt": "2026-06-25",
       "draft": false,
       "retiredAt": "2026-07-12T00:08:25.733Z"
+    },
+    {
+      "id": "D-WEBTIR1",
+      "cardId": "c008rjua",
+      "group": "web-ui",
+      "title": "Web backend TIR boundary",
+      "gist": "Whether browser builds must use the same executable TIR as every other target.",
+      "explainer": "",
+      "story": "Mara ports a Jet UI from native dev mode to the browser. A branch works in one target and not the other because the web emitter read older AST shapes instead of the checked TIR. That breaks the promise that rustc and target backends never become alternate semantic judges.",
+      "inWild": "fn view(todo: Todo) -> View {\n    button.{ on_click: fn() { todo.done = !todo.done } }\n}\n\n$ jet run app.jet\n$ jet build --target web app.jet\n# Both must execute the same checked meaning.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "TIR-only web execution",
+          "detail": "All executable web bodies lower through sema/TIR first. Unsupported web features produce Jet diagnostics before emission. This keeps one semantic pipeline and one source of truth across dev, JIT, AOT, and web.",
+          "code": "$ jet build --target web app.jet\nError [E-WEB001]: this effect is not available in the browser target\nFix: move file IO behind a server boundary or choose a native target."
+        },
+        {
+          "key": "B",
+          "name": "Explicit web carve-out",
+          "detail": "Allow the web backend to keep a separate AST emitter for a documented subset. The docs must say web is a distinct semantic path with its own conformance suite. This is a real exception to R7/R12.",
+          "code": "// web subset path\nfn view() -> View { ... }\n// Non-view logic must still compile through normal TIR elsewhere."
+        },
+        {
+          "key": "C",
+          "name": "Freeze web target until TIR-ready",
+          "detail": "Stop growing the web backend until all executable emission can come from TIR. This avoids split semantics, but browser examples remain frozen while the backend catches up.",
+          "code": "$ jet build --target web app.jet\nError: web target is frozen until TIR lowering is complete."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Elm",
+          "note": "One typed core feeds JavaScript output; JS is not a second checker.",
+          "code": "Elm source -> typed core -> JS"
+        },
+        {
+          "lang": "TypeScript",
+          "note": "The compiler can emit JS even with type errors unless configured; Jet should not copy that split.",
+          "code": "tsc --noEmitOnError"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "created": "2026-07-06T19:40:23.314Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-06",
+      "draft": false,
+      "retiredAt": "2026-07-12T06:33:57.970Z"
     }
   ],
   "cards": [
@@ -57115,6 +57165,321 @@
       "action": "card.criteria-verify",
       "ref": "c021gh90",
       "note": "#2"
+    },
+    {
+      "at": "2026-07-11T16:23:38.926Z",
+      "by": "sol-494-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c021gh90",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-11T16:23:39.012Z",
+      "by": "sol-494-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c021gh90",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-11T16:23:41.328Z",
+      "by": "terra-417-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0lh5jgy",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-11T16:23:44.719Z",
+      "by": "terra-417-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0lh5jgy",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-11T16:23:48.395Z",
+      "by": "terra-417-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0lh5jgy",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-11T16:23:52.959Z",
+      "by": "terra-417-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0lh5jgy",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-11T16:23:56.001Z",
+      "by": "sol-494-reviewer",
+      "action": "card.update",
+      "ref": "c021gh90",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T16:24:09.253Z",
+      "by": "terra-417-builder",
+      "action": "card.update",
+      "ref": "c0lh5jgy",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T16:25:22.753Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c021gh90",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T16:26:31.624Z",
+      "by": "terra-417-builder",
+      "action": "card.update",
+      "ref": "c0lh5jgy",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T16:30:49.881Z",
+      "by": "terra-417-builder",
+      "action": "card.update",
+      "ref": "c0lh5jgy",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T16:32:12.691Z",
+      "by": "sol-417-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0lh5jgy",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-11T16:32:12.778Z",
+      "by": "sol-417-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0lh5jgy",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-11T16:32:12.861Z",
+      "by": "sol-417-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0lh5jgy",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-11T16:32:12.946Z",
+      "by": "sol-417-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0lh5jgy",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-11T16:32:13.037Z",
+      "by": "sol-417-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0lh5jgy",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-11T16:32:13.118Z",
+      "by": "sol-417-reviewer",
+      "action": "card.update",
+      "ref": "c0lh5jgy",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T16:33:54.227Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0lh5jgy",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T16:39:08.193Z",
+      "by": "terra-495-builder",
+      "action": "card.claim",
+      "ref": "c0hwv6b6",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T16:39:18.109Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0hwv6b6",
+      "note": "#1 A borrowed bare/read binding field passed to a consuming Cor"
+    },
+    {
+      "at": "2026-07-11T16:39:18.201Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0hwv6b6",
+      "note": "#2 Nested field-path ownership detection uses the real root bin"
+    },
+    {
+      "at": "2026-07-11T16:39:18.289Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0hwv6b6",
+      "note": "#3 An explicit copy of the field compiles and runs, while exist"
+    },
+    {
+      "at": "2026-07-11T16:39:18.382Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0hwv6b6",
+      "note": "#4 Focused UI snapshot, sema/corelib, and rustc-agreement or re"
+    },
+    {
+      "at": "2026-07-11T16:39:18.473Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0hwv6b6",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T16:46:48.801Z",
+      "by": "terra-495-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0hwv6b6",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-11T16:46:48.977Z",
+      "by": "terra-495-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0hwv6b6",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-11T16:46:49.145Z",
+      "by": "terra-495-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0hwv6b6",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-11T16:46:49.312Z",
+      "by": "terra-495-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0hwv6b6",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-11T16:46:49.482Z",
+      "by": "terra-495-builder",
+      "action": "card.update",
+      "ref": "c0hwv6b6",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T16:52:39.502Z",
+      "by": "terra-495-builder",
+      "action": "card.update",
+      "ref": "c0hwv6b6",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T17:00:29.361Z",
+      "by": "terra-495-builder",
+      "action": "card.update",
+      "ref": "c0hwv6b6",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T17:04:36.045Z",
+      "by": "terra-495-builder",
+      "action": "card.update",
+      "ref": "c0hwv6b6",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T17:08:52.176Z",
+      "by": "terra-495-builder",
+      "action": "card.update",
+      "ref": "c0hwv6b6",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T17:10:34.501Z",
+      "by": "sol-495-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0hwv6b6",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-11T17:10:34.585Z",
+      "by": "sol-495-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0hwv6b6",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-11T17:10:34.667Z",
+      "by": "sol-495-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0hwv6b6",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-11T17:10:34.751Z",
+      "by": "sol-495-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0hwv6b6",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-11T17:10:34.836Z",
+      "by": "sol-495-reviewer",
+      "action": "card.update",
+      "ref": "c0hwv6b6",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T17:11:44.634Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0hwv6b6",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-11T17:13:14.216Z",
+      "by": "sol-300-builder",
+      "action": "card.claim",
+      "ref": "c0z3l25j",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T17:13:14.305Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0z3l25j",
+      "note": "#1 Ordinary DNS uses the host/platform resolver configuration o"
+    },
+    {
+      "at": "2026-07-11T17:13:14.399Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0z3l25j",
+      "note": "#2 DNS queries use unpredictable transaction IDs and strictly v"
+    },
+    {
+      "at": "2026-07-11T17:13:14.492Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0z3l25j",
+      "note": "#3 A, AAAA, TXT, and SRV resolution handles CNAME/additional re"
+    },
+    {
+      "at": "2026-07-11T17:13:14.579Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0z3l25j",
+      "note": "#4 Ratified D-NETIO1, D-NETERROR1, D-NETTASK1, and D-NETTLSSTRE"
+    },
+    {
+      "at": "2026-07-11T17:13:14.671Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0z3l25j",
+      "note": "#5 Typed address/socket APIs, socket echo golden, DNS hostile f"
     }
   ]
 }
