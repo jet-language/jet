@@ -15,7 +15,7 @@ fn run() {
     // Start the server in a background task (handles one request for golden-test determinism).
     tasks.spawn(take(sender) () => {
         listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")
-        addr :: listener.local_addr()
+        addr :: listener.local_addr() ?? panic("address failed")
         sender.send(copy addr)
         stream :: listener.accept() ?? panic("accept failed")
         _req_raw :: stream.read_text(8192) ?? panic("read failed")

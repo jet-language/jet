@@ -10,7 +10,7 @@ fn run() {
     // Mini one-shot server: bind, send address back, handle one request.
     tasks.spawn(take(sender) () => {
         listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")
-        sender.send(listener.local_addr())
+        sender.send(listener.local_addr() ?? panic("address failed"))
         stream :: listener.accept() ?? panic("accept failed")
         _req :: stream.read_text(8192) ?? panic("read failed")
         net.tcp_reply(stream, "200 OK", "hello, world!") ?? panic("tcp reply")
