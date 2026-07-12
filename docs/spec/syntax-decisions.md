@@ -2269,9 +2269,10 @@ error when the operating system cannot provide cryptographic randomness.
 Stdout stays empty; no provider/helper/dependency text escapes; no key,
 package, index, or temporary artifact is created; secret temporaries are
 volatile-zeroized; an existing valid key bypasses key generation. The selected
-E1275 spelling conflicts with D-JPK-NODAEMON1's existing E1275 assignment, so
-the command projection remains gated on D-CRYPTO-KEYGEN-CODE2. No divergent
-diagnostic may ship while that code decision is open.
+E1275 spelling conflicted with D-JPK-NODAEMON1's existing sandbox assignment.
+D-CRYPTO-KEYGEN-CODE2=A therefore assigns this command failure E1292 and leaves
+E1275 unchanged. E1292 exits 1 and renders the exact headline plus What/Why/Fix
+frame; `jet explain E1292` is generated from the same diagnostics ledger.
 
 **Build system** *(D-BUILDENTRY1, D-BUILDPOLICY1, D-BUILDSCOPE1, D-BUILDGEN1,
 D-BUILDPROFILE1, D-BUILDNORM1, D-BUILDTARGET1, D-BUILDACTION1,

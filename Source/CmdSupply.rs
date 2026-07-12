@@ -37,6 +37,17 @@ fn git_dirty_files(root: &std::path::Path) -> Option<Vec<String>> {
     }
 }
 
+fn render_signing_diagnostic(diagnostic: &jet::Diagnostics::Diagnostic) {
+    if diagnostic.code == "E1292" {
+        eprint!("{}", jet::Publish::Sign::render_e1292());
+    } else {
+        eprint!(
+            "{}",
+            jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", std::slice::from_ref(diagnostic))
+        );
+    }
+}
+
 /// `jet registry publish [--force]` — pre-publish gate + SemVer API diff.
 ///
 /// D-PKGS4 (amended): must run `jet build` + `jet test` locally first.
@@ -108,6 +119,22 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
             exit(ExitCodes::USER_ERROR);
         }
     }
+
+    // D-CRYPTO-KEYGEN-DIAG1/E1292: discover first-publish entropy failure
+    // before progress output, snapshots, registry cloning, or index mutation.
+    // Existing keys and --no-sign never enter key generation.
+    let registry = jet::Publish::resolve_publish_registry();
+    let generated_key = if !no_sign && !jet::Publish::Sign::key_exists(&registry.name) {
+        match jet::Publish::Sign::keygen(&registry.name, false) {
+            Ok(generated) => Some(generated),
+            Err(diagnostic) => {
+                render_signing_diagnostic(&diagnostic);
+                exit(ExitCodes::USER_ERROR);
+            }
+        }
+    } else {
+        None
+    };
 
     println!("publishing `{}` v{} ...", name, version);
 
@@ -268,7 +295,6 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
     // c56 (D-JPK-CACHE1=A / D-VERSION1=A): push the index entry to the git
     // registry. The registry is a git repo — publishing is: clone/pull the
     // sparse index, append the version line, commit, push.
-    let registry = jet::Publish::resolve_publish_registry();
     println!("publishing to registry index `{}` ...", registry.url);
 
     let repo = match jet::Publish::ensure_index_clone(&registry) {
@@ -310,24 +336,13 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
         (String::new(), String::new())
     } else {
         let reg = &registry.name;
-        if !jet::Publish::Sign::key_exists(reg) {
-            match jet::Publish::Sign::keygen(reg, false) {
-                Ok((seed_path, _pub_path, pub_hex)) => {
-                    println!("  signing: generated a new key for registry `{}`.", reg);
-                    println!("    public key: {}", pub_hex);
-                    println!(
-                        "    `jet registry key backup` writes this to {} — losing it means losing your ability to publish signed updates.",
-                        seed_path.display()
-                    );
-                }
-                Err(d) => {
-                    eprint!(
-                        "{}",
-                        jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[d])
-                    );
-                    exit(ExitCodes::USER_ERROR);
-                }
-            }
+        if let Some((seed_path, _pub_path, pub_hex)) = generated_key {
+            println!("  signing: generated a new key for registry `{}`.", reg);
+            println!("    public key: {}", pub_hex);
+            println!(
+                "    `jet registry key backup` writes this to {} — losing it means losing your ability to publish signed updates.",
+                seed_path.display()
+            );
         }
         let (seed_path, _pub_path) = jet::Publish::Sign::key_paths(reg);
         let sig = match jet::Publish::Sign::sign(&seed_path, &content_hash) {
@@ -420,10 +435,7 @@ pub(crate) fn run_keygen(registry: Option<&str>, force: bool) {
             );
         }
         Err(d) => {
-            eprint!(
-                "{}",
-                jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[d])
-            );
+            render_signing_diagnostic(&d);
             exit(ExitCodes::USER_ERROR);
         }
     }

@@ -86,9 +86,10 @@ axis, just consistency):
   helper, dependency, path, generated-code, or key text; exits 1; leaves no
   key/package/index/temporary artifact; and volatile-zeroizes secret
   temporaries. Auto-keygen aborts before upload or index mutation. An existing
-  valid key bypasses entropy and is unchanged. The ballot selected E1275, but
-  that code is already assigned to D-JPK-NODAEMON1's sandbox diagnostic;
-  D-CRYPTO-KEYGEN-CODE2 must reconcile the code before this projection ships.
+  valid key bypasses entropy and is unchanged. D-CRYPTO-KEYGEN-CODE2=A assigns
+  this failure E1292 and leaves D-JPK-NODAEMON1's existing E1275 sandbox
+  diagnostic unchanged. The helper communicates entropy failure only through
+  a closed internal status; the `jet` command owns every displayed byte.
 - `jet registry key backup [<dest>]`: copies the seed file to `<dest>` (default
   `./jet-signing-key.backup`, printed with a warning to store it somewhere
   safe, e.g. a password manager). No encryption of the backup file itself —

@@ -733,8 +733,24 @@ fn emit_crypto_helper_bin(crate_name: &str) -> String {
     format!(
         r#"// Auto-generated Ed25519 signing helper (card c146) — do not edit.
 #![allow(warnings)]
-use std::io::Read;
+use std::io::{{Read, Write}};
 use std::process::exit;
+
+const ENTROPY_UNAVAILABLE: i32 = 75;
+
+fn volatile_zeroize(bytes: &mut [u8]) {{
+    for byte in bytes {{
+        unsafe {{ std::ptr::write_volatile(byte, 0) }};
+    }}
+    std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
+}}
+
+fn write_hex(out: &mut impl Write, bytes: &[u8]) -> std::io::Result<()> {{
+    for byte in bytes {{
+        write!(out, "{{:02x}}", byte)?;
+    }}
+    Ok(())
+}}
 
 fn hex_encode(bytes: &[u8]) -> String {{
     let mut s = String::with_capacity(bytes.len() * 2);
@@ -776,8 +792,20 @@ fn main() {{
     match cmd {{
         "keygen" => {{
             match {crate_name}::jet_crypto_keygen_impl() {{
-                Ok((seed, public)) => println!("{{}} {{}}", hex_encode(&seed), hex_encode(&public)),
-                Err(_) => exit(1),
+                Ok((mut seed, public)) => {{
+                    let result = (|| -> std::io::Result<()> {{
+                        let stdout = std::io::stdout();
+                        let mut out = stdout.lock();
+                        write_hex(&mut out, &seed)?;
+                        out.write_all(b" ")?;
+                        write_hex(&mut out, &public)?;
+                        out.write_all(b"\n")?;
+                        out.flush()
+                    }})();
+                    volatile_zeroize(&mut seed);
+                    if result.is_err() {{ exit(1); }}
+                }}
+                Err(_) => exit(ENTROPY_UNAVAILABLE),
             }}
         }}
         "sign" => {{
@@ -1020,6 +1048,9 @@ fn cache_key_full(
         needs_crypto.hash(&mut h);
         CRYPTO_RUNTIME.hash(&mut h);
         CRYPTO_ENTROPY_RUNTIME.hash(&mut h);
+        // The helper is a separately cached binary. Its closed status protocol
+        // and cleanup behavior must invalidate old cache entries too.
+        emit_crypto_helper_bin("jet_ffi_cache_key").hash(&mut h);
     }
     if needs_compress {
         needs_compress.hash(&mut h);

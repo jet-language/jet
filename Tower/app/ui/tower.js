@@ -211,7 +211,6 @@ function jumpTo(it) {
 const VIEWS = [
   { id: 'now', name: 'Now', count: () => duties().length, alert: true },
   { id: 'board', name: 'Board', count: () => S.cards.filter(c => c.phase !== 'done' && c.phase !== 'frozen').length },
-  { id: 'radar', name: 'Radar', count: () => S.cards.filter(c => c.phase !== 'done' && c.phase !== 'frozen').length },
 ];
 function renderChrome() {
   document.title = `Tower · ${S.meta.project || 'project'}`;
@@ -429,7 +428,7 @@ function collapsible(key, def, headHTML, extraClass, buildBody) {
   return sec;
 }
 
-// #461: archived count per epoch, fetched lazily (once the done subgroup is
+// #461: archived count per epoch, fetched lazily (once an epoch section is
 // opened) and cached in memory — cheap, no localStorage, refetches on reload.
 const archivedCountCache = {};
 async function archivedCountFor(epochId) {
@@ -441,43 +440,32 @@ async function archivedCountFor(epochId) {
   return archivedCountCache[epochId];
 }
 
-function subgroup(key, name, n, buildBody) {
-  const open = isOpen(key, false);
-  const sec = el(`<div class="subgroup">
-      <button class="subgroup__head"><span class="epoch__chev" style="${open ? 'transform:rotate(90deg)' : ''}">▸</span> ${esc(name)} <span class="subgroup__n">${n}</span></button>
-      <div ${open ? '' : 'hidden'}></div></div>`);
-  $('.subgroup__head', sec).addEventListener('click', () => api('ui/toggle', { key }));
-  if (open) buildBody(sec.lastElementChild);
-  return sec;
-}
+// #464/#merge: Board = Radar's body (roadmap ledger × ops table: per-epoch
+// burndown, milestone stalls, sortable/inline-editable/filterable card
+// table) fused with the old Board tab's idea-capture + new-card UI. See
+// Tower/README.md.
+let radarFilterText = '';
+const radarSort = {}; // table key -> { col, dir }
 
-function milestoneStrip(ms) {
-  const wrap = el(`<div class="miles"><div class="miles__h">${esc(TERM('milestones', 'Milestones'))}</div></div>`);
-  for (const m of ms) {
-    const p = m.progress || { done: 0, total: 0 };
-    const pct = p.total ? Math.round(p.done / p.total * 100) : 0;
-    const met = m.status === 'met';
-    const row = el(`<div class="mile ${met ? 'mile--met' : ''}" title="${esc(m.goal || '')}">
-        <span class="mile__dot">${met ? '✓' : '◇'}</span>
-        <span class="mile__t">${esc(m.title)}</span>
-        <span class="mile__goal">${esc(m.goal || '')}</span>
-        <span class="mile__bar"><i style="width:${met ? 100 : pct}%"></i></span>
-        <span class="mile__n">${met ? 'met' : `${p.done}/${p.total}`}</span>
-        ${met ? '' : `<button class="btn btn--ghost btn--sm" data-met>Met</button>`}
-      </div>`);
-    $('[data-met]', row)?.addEventListener('click', () => api('milestone/update', { id: m.id, status: 'met', by: 'owner' }));
-    wrap.appendChild(row);
-  }
-  return wrap;
+function radarMatches(c, needle) {
+  if (!needle) return true;
+  return ('#' + c.num).includes(needle) || c.title.toLowerCase().includes(needle) || (c.assignee || '').toLowerCase().includes(needle);
 }
 
 function viewBoard() {
   const v = $('#view');
+  const cardsMode = isOpen('radar-cards', false);
   v.innerHTML = `<div class="viewhead"><h1 class="h1">Board</h1>
-      <span class="viewhead__sub">${esc(TERM('epochs', 'epochs'))} → ${esc(TERM('milestones', 'milestones').toLowerCase())} → cards</span>
-      <div class="viewhead__actions"><button class="btn btn--red" id="new-card">+ New card</button></div></div>
+      <span class="viewhead__sub">roadmap ledger × ops table</span>
+      <div class="viewhead__actions">
+        <button class="btn btn--ghost" id="radar-mode" title="Switch between table rows and card tiles">${cardsMode ? '☰ Table view' : '⊞ Card view'}</button>
+        <button class="btn btn--red" id="new-card">+ New card</button>
+      </div></div>
     <div class="capture"><input id="idea-input" placeholder="Capture an idea — it waits in Ideas until you make it a card…">
-      <button class="btn" id="idea-btn">Capture</button></div>`;
+      <button class="btn" id="idea-btn">Capture</button></div>
+    <div class="capture"><input id="radar-filter" placeholder="Filter by #, title, assignee…" value="${esc(radarFilterText)}"></div>
+    <div id="radar-body"></div>`;
+
   $('#new-card').addEventListener('click', async () => {
     const c = await api('card/add', { title: 'New card', phase: 'triage', epoch: S.meta.currentEpoch, by: 'owner' });
     if (c) showDetail(c.id);
@@ -488,11 +476,14 @@ function viewBoard() {
   };
   $('#idea-btn').addEventListener('click', fire);
   $('#idea-input').addEventListener('keydown', e => { if (e.key === 'Enter') fire(); });
+  $('#radar-mode').addEventListener('click', () => api('ui/toggle', { key: 'radar-cards' }));
+  $('#radar-filter').addEventListener('input', (e) => { radarFilterText = e.target.value; renderRadarBody(); });
 
-  // Ideas bay
+  // Ideas bay — the triage half of idea-capture, kept from Board so a
+  // captured idea has somewhere to be promoted or dismissed.
   const ideas = S.ideas.filter(b => b.status !== 'tagged');
   if (ideas.length) {
-    v.appendChild(collapsible('board-ideas', true,
+    const ideasSec = collapsible('board-ideas', true,
       `<span class="epoch__tag" style="color:var(--amber)">Ideas</span><span class="epoch__name">to triage</span><span class="epoch__count">${ideas.length}</span>`,
       'epoch--off', (body) => {
         const wrap = el('<div class="ideas"></div>');
@@ -505,82 +496,10 @@ function viewBoard() {
           wrap.appendChild(row);
         }
         body.appendChild(wrap);
-      }));
+      });
+    v.insertBefore(ideasSec, $('#radar-body', v));
   }
 
-  // Sidequests
-  const sqActive = S.cards.filter(c => c.track === 'sidequest' && !['done', 'frozen'].includes(c.phase)).sort(bySched);
-  const sqDone = S.cards.filter(c => c.track === 'sidequest' && c.phase === 'done').sort(byPrio);
-  if (sqActive.length || sqDone.length) {
-    v.appendChild(collapsible('board-sidequests', true,
-      `<span class="epoch__tag" style="color:var(--frost)">${esc(TERM('sidequest', 'Sidequests'))}</span><span class="epoch__name">off-plan work</span><span class="epoch__count">${sqActive.length} active</span>`,
-      'epoch--off', (body) => {
-        if (sqActive.length) body.appendChild(grid(sqActive));
-        else body.appendChild(el(`<p class="epoch__goal">none active</p>`));
-        if (sqDone.length) body.appendChild(subgroup('sq-done', 'Done', sqDone.length, (b) => b.appendChild(grid(sqDone))));
-      }));
-  }
-
-  // Epochs
-  const sorted = [...S.epochs].sort((a, b) => (a.order ?? a.num ?? 999) - (b.order ?? b.num ?? 999));
-  for (const e of sorted) {
-    if (['arrived', 'done'].includes(e.status)) continue;
-    const all = S.cards.filter(c => c.epoch === e.id && c.track !== 'sidequest');
-    const active = all.filter(c => !['done', 'frozen'].includes(c.phase)).sort(bySched);
-    const doneCards = all.filter(c => c.phase === 'done').sort(bySched);
-    const pct = all.length ? Math.round(doneCards.length / all.length * 100) : 0;
-    const ms = S.milestones.filter(m => m.epochId === e.id);
-    v.appendChild(collapsible('epoch:' + e.id, true,
-      `<span class="epoch__tag">${esc(epochTag(e))}</span><span class="epoch__name">${esc(e.name)}</span>
-       ${e.status && e.status !== 'open' ? `<span class="epoch__status">${esc(e.status)}</span>` : ''}
-       <span class="epoch__count">${doneCards.length}/${all.length} done · ${pct}%</span>`,
-      '', (body) => {
-        if (e.goal) body.appendChild(el(`<p class="epoch__goal">${esc(e.goal)}</p>`));
-        body.appendChild(el(`<div class="epoch__prog"><div class="epoch__bar"><i style="width:${pct}%"></i></div><span class="epoch__pct">${active.length} active</span></div>`));
-        if (ms.length) body.appendChild(milestoneStrip(ms));
-        if (active.length) body.appendChild(grid(active));
-        else body.appendChild(el(`<p class="epoch__goal">no active cards</p>`));
-        if (doneCards.length) body.appendChild(subgroup('done:' + e.id, 'Done', doneCards.length, (b) => {
-          b.appendChild(grid(doneCards));
-          const archLine = el(`<p class="epoch__goal" style="opacity:.6"></p>`);
-          b.appendChild(archLine);
-          archivedCountFor(e.id).then(n => { if (n) archLine.textContent = `${n} archived`; });
-        }));
-      }));
-  }
-
-  // Frozen
-  const frozen = S.cards.filter(c => c.phase === 'frozen').sort(byPrio);
-  if (frozen.length) {
-    v.appendChild(collapsible('board-frozen', false,
-      `<span class="epoch__tag" style="color:var(--frost)">Frozen</span><span class="epoch__name">parked on purpose</span><span class="epoch__count">${frozen.length}</span>`,
-      'epoch--frozen', (body) => body.appendChild(grid(frozen))));
-  }
-}
-
-// ---- RADAR (#464, D-TWR-BOARD1=A) ------------------------------------------------
-// Prototype — NEW page only, zero behavior change to Board/Now. Roadmap
-// ledger (per-epoch burndown + milestone stalls) fused with an ops table of
-// active cards, sortable + inline-editable + filterable. Owner-acceptance
-// pending; see Tower/README.md.
-let radarFilterText = '';
-const radarSort = {}; // table key -> { col, dir }
-
-function radarMatches(c, needle) {
-  if (!needle) return true;
-  return ('#' + c.num).includes(needle) || c.title.toLowerCase().includes(needle) || (c.assignee || '').toLowerCase().includes(needle);
-}
-
-function viewRadar() {
-  const v = $('#view');
-  const cardsMode = isOpen('radar-cards', false);
-  v.innerHTML = `<div class="viewhead"><h1 class="h1">Radar</h1>
-      <span class="viewhead__sub">roadmap ledger × ops table — prototype, owner-acceptance pending</span>
-      <div class="viewhead__actions"><button class="btn btn--ghost" id="radar-mode" title="Switch between table rows and card tiles">${cardsMode ? '☰ Table view' : '⊞ Card view'}</button></div></div>
-    <div class="capture"><input id="radar-filter" placeholder="Filter by #, title, assignee…" value="${esc(radarFilterText)}"></div>
-    <div id="radar-body"></div>`;
-  $('#radar-mode').addEventListener('click', () => api('ui/toggle', { key: 'radar-cards' }));
-  $('#radar-filter').addEventListener('input', (e) => { radarFilterText = e.target.value; renderRadarBody(); });
   renderRadarBody();
 }
 
@@ -1026,7 +945,7 @@ async function recordBatch() {
 }
 
 // ---- render + routing -----------------------------------------------------------
-const RENDER = { now: viewNow, board: viewBoard, radar: viewRadar };
+const RENDER = { now: viewNow, board: viewBoard };
 function render() {
   if (!S) return;
   renderBeacon();
@@ -1065,7 +984,7 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'k' || e.key === 'ArrowUp') { e.preventDefault(); return nowMove(-1); }
     if (e.key === 'Enter' && nowSel >= 0) { e.preventDefault(); return nowActivate(); }
   }
-  const i = ['1', '2', '3'].indexOf(e.key);
+  const i = ['1', '2'].indexOf(e.key);
   if (i >= 0) go(VIEWS[i].id);
 });
 

@@ -18,6 +18,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+const HELPER_ENTROPY_UNAVAILABLE_EXIT: i32 = 75;
+
 /// Default registry name a key belongs to when none is given.
 pub const DEFAULT_REGISTRY: &str = "jet";
 
@@ -86,25 +88,40 @@ pub fn keygen(registry: &str, force: bool) -> Result<(PathBuf, PathBuf, String),
         return Err(e1248(&seed_path));
     }
     let helper = ensure_bridge_helper()?;
-    let out = run_helper(&helper, "keygen")?;
-    let mut it = out.split_whitespace();
-    let seed_hex = it
-        .next()
-        .ok_or_else(|| bridge_error("keygen produced no seed"))?;
-    let pub_hex = it
-        .next()
-        .ok_or_else(|| bridge_error("keygen produced no public key"))?;
-    let seed = hex_decode(seed_hex).map_err(|e| bridge_error(&e))?;
+    let mut out = run_keygen_helper(&helper)?;
+    let parsed = (|| {
+        let mut it = out.split(|byte| byte.is_ascii_whitespace());
+        let seed_hex = it
+            .find(|field| !field.is_empty())
+            .ok_or_else(|| bridge_error("keygen produced no seed"))?;
+        let pub_hex = it
+            .find(|field| !field.is_empty())
+            .ok_or_else(|| bridge_error("keygen produced no public key"))?;
+        let seed_hex = std::str::from_utf8(seed_hex)
+            .map_err(|_| bridge_error("keygen produced a malformed seed"))?;
+        let pub_hex = std::str::from_utf8(pub_hex)
+            .map_err(|_| bridge_error("keygen produced a malformed public key"))?;
+        let seed = hex_decode(seed_hex).map_err(|e| bridge_error(&e))?;
+        Ok::<_, Diagnostic>((seed, pub_hex.to_string()))
+    })();
+    volatile_zeroize(&mut out);
+    let (mut seed, pub_hex) = parsed?;
 
-    if let Some(parent) = seed_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| io_error("keys directory", e))?;
-    }
-    std::fs::write(&seed_path, &seed).map_err(|e| io_error("signing key", e))?;
-    set_mode(&seed_path, 0o600);
-    std::fs::write(&pub_path, pub_hex.as_bytes()).map_err(|e| io_error("public key", e))?;
-    set_mode(&pub_path, 0o644);
+    let write_result = (|| {
+        if let Some(parent) = seed_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| io_error("keys directory", e))?;
+        }
+        std::fs::write(&seed_path, &seed).map_err(|e| io_error("signing key", e))?;
+        set_mode(&seed_path, 0o600);
+        std::fs::write(&pub_path, pub_hex.as_bytes())
+            .map_err(|e| io_error("public key", e))?;
+        set_mode(&pub_path, 0o644);
+        Ok::<_, Diagnostic>(())
+    })();
+    volatile_zeroize(&mut seed);
+    write_result?;
 
-    Ok((seed_path, pub_path, pub_hex.to_string()))
+    Ok((seed_path, pub_path, pub_hex))
 }
 
 /// Sign `content_hash` (its raw string bytes) with the seed at `seed_path`.
@@ -163,6 +180,21 @@ fn run_helper(helper: &Path, command: &str) -> Result<String, Diagnostic> {
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
+/// Key generation's entropy failure is a closed helper status. Provider and
+/// helper text never cross this boundary; the command owns E1292's copy.
+fn run_keygen_helper(helper: &Path) -> Result<Vec<u8>, Diagnostic> {
+    let mut out = spawn_helper(helper, "keygen")?;
+    if out.status.code() == Some(HELPER_ENTROPY_UNAVAILABLE_EXIT) {
+        volatile_zeroize(&mut out.stdout);
+        return Err(e1292());
+    }
+    if !out.status.success() {
+        volatile_zeroize(&mut out.stdout);
+        return Err(bridge_error("the crypto helper could not generate a signing key"));
+    }
+    Ok(out.stdout)
+}
+
 /// Run the helper and return its exit code (used by verify, which distinguishes
 /// valid / invalid / error by exit status).
 fn run_helper_status(helper: &Path, command: &str) -> Result<i32, Diagnostic> {
@@ -209,6 +241,26 @@ pub fn e1248(path: &Path) -> Diagnostic {
     )
 }
 
+/// E1292 — package-signing key generation could not obtain OS entropy.
+pub fn e1292() -> Diagnostic {
+    Diagnostic::error(
+        "E1292",
+        "signing key generation needs cryptographic randomness".to_string(),
+        "the operating system could not provide cryptographic randomness".to_string(),
+        "retry as a new operation on a supported host; no key files were created".to_string(),
+        None,
+    )
+}
+
+/// D-CRYPTO-KEYGEN-DIAG1's command frame has a separate headline and What
+/// line, so it is rendered here instead of through the source-span renderer.
+pub fn render_e1292() -> &'static str {
+    "Error [E1292]: signing key generation needs cryptographic randomness\n\
+ What: Jet could not create the package-signing key\n\
+ Why: the operating system could not provide cryptographic randomness\n\
+ Fix: retry as a new operation on a supported host; no key files were created\n"
+}
+
 /// Internal helper/bridge failure. Reuses E0704 (foreign-crate bridge build
 /// failure) — the crypto helper *is* a bridge target, so the code is apt and no
 /// new diagnostic is minted.
@@ -230,6 +282,13 @@ fn io_error(what: &str, e: std::io::Error) -> Diagnostic {
         "check disk permissions and try again".to_string(),
         None,
     )
+}
+
+fn volatile_zeroize(bytes: &mut [u8]) {
+    for byte in bytes {
+        unsafe { std::ptr::write_volatile(byte, 0) };
+    }
+    std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
 }
 
 // ──────────────────────────────────────────────
