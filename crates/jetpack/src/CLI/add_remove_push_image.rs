@@ -7,7 +7,8 @@ use super::workspace_sources::cwd_table;
 use crate::Output::{self, Theme};
 use crate::RefSpec;
 use crate::Store;
-use crate::{Components, EnvFile, Image, Lock, ModuleEval, Syntax};
+use crate::{Components, EnvFile, Image, Lock, Syntax};
+use jet_env_model::ModuleEval;
 
 /// `jetpack add <ref>` — edit the project env file. `jetpack add <Component>`
 /// (an exact, case-sensitive match against the starter component catalog —

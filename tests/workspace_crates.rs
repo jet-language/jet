@@ -105,15 +105,26 @@ fn workspace_crates_keep_declared_dependency_direction() {
     );
     // Card #367 / D-PRODUCT-SPLIT1=C: the shared read-only package/config
     // data model (manifest/lock/store-listing/ref/FFI-binding/script-dep
-    // parsing). Depends only inward toward the compiler's own checker
+    // parsing), now also §6 structural `Merge` and the `BuildRecipe` data
+    // shape (slice 4). Depends only inward toward the compiler's own checker
     // (jet-sema, transitively jet-comptime/jet-parser/jet-lexer/jet-
     // foundation) — never toward `jetpack`'s provider/network/shell engine.
     assert_deps("crates/jet-pkg-model/Cargo.toml", &["jet-sema"]);
+    // Card #367 / D-PRODUCT-SPLIT1=C slice 4: the shared pure plan model
+    // (`ModuleEval` + plan `Types`) — L2 between `jet-pkg-model` (L1 data)
+    // and the two realizers (jetpack env-runtime + JetOS realization, L3).
+    // No provider/store/network/shell dep; both realizers depend down on
+    // this crate instead of sharing it by living in one engine crate.
+    assert_deps(
+        "crates/jet-env-model/Cargo.toml",
+        &["jet-codegen", "jet-pkg-model"],
+    );
     assert_deps(
         "crates/jetpack/Cargo.toml",
         &[
             "jet-codegen",
             "jet-comptime",
+            "jet-env-model",
             "jet-foundation",
             "jet-lexer",
             "jet-parser",
@@ -144,6 +155,7 @@ fn workspace_crates_keep_declared_dependency_direction() {
         "Cargo.toml",
         &[
             "jet-driver",
+            "jet-env-model",
             "jet-foundation",
             "jet-impact",
             "jet-jit",
@@ -165,10 +177,13 @@ fn jetpack_dependency_debt_is_explicit_until_product_split() {
     // `jetpack` too, onto the same `jet-pkg-model` seam via `jet-driver`'s
     // re-export — but the root package still bundles `jetpack` itself for
     // its remaining genuine engine calls (`Overlay`, `WorkspaceFile`,
-    // `ModuleEval`, `JetPin`, `ScriptLock`, `Discovery`) and `jetpack help`/
-    // CLI dispatch, so this row isn't debt to shrink to zero — only to keep
-    // narrow. `jetos` (slice 2) is expected to depend on `jetpack` until
-    // slice 4 splits the JetOS engine out of it.
+    // `JetPin`, `ScriptLock`, `Discovery`) and `jetpack help`/CLI dispatch,
+    // so this row isn't debt to shrink to zero — only to keep narrow.
+    // `ModuleEval` left this list in slice 4: it now lives in `jet-env-model`
+    // (a direct root-package dep), not reached through `jetpack`. `jetos`
+    // (slice 2) is expected to depend on `jetpack` until a later card
+    // physically relocates the JetOS realization engine out of it (open
+    // scope gate, not this slice — see docs/plans/epoch-3/product-split-slice4.md).
     let allowed = ["Cargo.toml", "crates/jetos/Cargo.toml"];
     let mut actual = Vec::new();
     for manifest in repo_files_with_suffix("crates", "Cargo.toml")

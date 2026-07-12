@@ -29,7 +29,7 @@ use super::types::Target;
 use super::user_flatpak_perf::{
     write_flatpak_facts, write_performance_facts, write_user_environment_facts,
 };
-use crate::ModuleEval::{EnvPlan, SystemPlan};
+use jet_env_model::ModuleEval::{EnvPlan, SystemPlan};
 use crate::Store;
 use crate::JSON;
 use std::collections::BTreeSet;

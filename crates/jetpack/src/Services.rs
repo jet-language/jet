@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use super::ModuleEval::DevServicePlan;
+use jet_env_model::ModuleEval::DevServicePlan;
 use super::Shell::Env as ShellEnv;
 use crate::Syntax;
 
@@ -380,7 +380,7 @@ pub fn logs(project_dir: &Path, name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use crate::ModuleEval::{PromptPathMode, PromptStripMode};
+    use jet_env_model::ModuleEval::{PromptPathMode, PromptStripMode};
 
     use super::*;
 

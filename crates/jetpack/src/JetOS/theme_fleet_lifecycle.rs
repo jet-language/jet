@@ -5,7 +5,7 @@ use super::options_rendering::{
 };
 use super::root_projection::enable_unit;
 use super::studio_projection::make_executable;
-use crate::ModuleEval::{EnvPlan, ImageKind, SystemPlan};
+use jet_env_model::ModuleEval::{EnvPlan, ImageKind, SystemPlan};
 use crate::JSON;
 use std::fs;
 use std::path::Path;

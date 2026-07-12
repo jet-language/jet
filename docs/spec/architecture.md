@@ -52,9 +52,10 @@ D-COMPILERSEAMS1/2 split the compiler into workspace seam crates. The root
 | `jet-comptime` | comptime values and interpreter support | no user-facing surface by itself |
 | `jet-sema` | all semantic checks, collects all front-end diagnostics | yes (E01xx+) |
 | `jet-codegen` | checked program to Rust text; TIR is internal here | **never** |
-| `jet-pkg-model` | shared read-only package/config data model: `pkg.jet` manifest parsing, lock, hangar store listing, ref classification, FFI bridge construction, inline script deps, plus the pure effect-budget/lint-policy computation over that data (no network/provider/shell) | package/FFI diagnostics |
-| `jetpack` | package manager engine: provider/network/shell realization, JetOS, CLI — depends on `jet-pkg-model` for the data it reads/writes | package/JetOS diagnostics |
-| `jetos` | `jetos` binary front door for OS workflows; still dispatches into `jetpack`'s `os` verb (JetOS realization hasn't split out of `jetpack::JetOS` yet — card #367 slice 4) | package/JetOS diagnostics (via `jetpack`) |
+| `jet-pkg-model` | **L1**, shared read-only package/config data model: `pkg.jet` manifest parsing, lock, hangar store listing, ref classification, FFI bridge construction, inline script deps, §6 structural `Merge`, the `BuildRecipe` data shape, plus the pure effect-budget/lint-policy computation over that data (no network/provider/shell) | package/FFI diagnostics |
+| `jet-env-model` | **L2**, the shared pure plan model (card #367 slice 4): `ModuleEval` (the computed-modules evaluator) and its typed plan outputs (`EnvPlan`/`SystemPlan`/`ImagePlan`/`FleetPlan`/…). Depends on `jet-pkg-model` (L1) + `jet-codegen`; no provider/store/network/shell | plan-evaluation diagnostics |
+| `jetpack` | **L3**, package manager engine: provider/network/shell realization, JetOS, CLI — depends on `jet-pkg-model` (L1) for read-only data and `jet-env-model` (L2) for the plan model it realizes | package/JetOS diagnostics |
+| `jetos` | `jetos` binary front door for OS workflows; still dispatches into `jetpack`'s `os` verb (JetOS realization hasn't physically relocated out of `jetpack::JetOS` — that's a distinct, still-open scope gate, not part of slice 4) | package/JetOS diagnostics (via `jetpack`) |
 | `jet-driver` | front-end orchestration and compile outputs; depends on `jet-pkg-model` (never `jetpack`'s engine) for manifest/lock/FFI preparation | front-end diagnostics only |
 | `jet-queries` | std-only demand cache for incremental inputs and derived query values | no |
 | `jet-semindex` | stable semantic index over checked programs for tooling | no new diagnostics |
@@ -89,15 +90,19 @@ model needs (`PackageManifest`, `Manifest`, `ScriptDeps`, `Lock`, `CBind`,
 `CFFI`, `FFI`, `EffectBudget`, `LintPolicy`, and the hangar-listing half of
 `Store` as `PkgStore`) come from `jet-driver`'s `jet-pkg-model` re-export, the
 same seam the compiler itself uses. Genuine `jetpack`-engine calls that
-haven't split out yet (`Overlay`, `WorkspaceFile`, `ModuleEval`,
-`WorkspaceLock`, `Discovery`, `JetPin`, `ScriptLock`) stay direct `jetpack::…`
-references in a small, explicit set of files
+haven't split out yet (`Overlay`, `WorkspaceFile`, `WorkspaceLock`,
+`Discovery`, `JetPin`, `ScriptLock`) stay direct `jetpack::…` references in a
+small, explicit set of files
 (`tests/workspace_crates.rs::direct_jetpack_imports_stay_behind_known_boundaries`
-pins exactly which). `Source/Canvas`'s package-manifest scans route through
-the shared model the same way; its workspace/env-plan scans
-(`WorkspaceFile`/`ModuleEval`) stay on the `jetpack` engine until card #367
-slice 4 splits ModuleEval's plan model out of env-runtime/JetOS realization.
-The root binary still owns native build execution: `Source/CmdCompile.rs`
+pins exactly which). `ModuleEval` is no longer one of them: card #367 slice 4
+sank it into `jet-env-model` (L2, pure eval — three acyclic layers now: L1
+`jet-pkg-model` data, L2 `jet-env-model` plan model, L3 `jetpack` env-runtime
++ JetOS realization, both depending down on L2 rather than sharing it by
+living in one engine crate). `Source/Canvas`'s package-manifest scans
+(`WorkspaceFile`) still route through the `jetpack` engine directly; its
+env-plan scans (`jet_env_model::ModuleEval::evaluate_env`) go straight to
+`jet-env-model`, the same crate both realizers depend on. The root binary
+still owns native build execution: `Source/CmdCompile.rs`
 invokes rustc, classifies linker/tool failures, renders the I2 ICE banner, and
 links any prepared FFI artifact. Do not move that responsibility into a seam
 crate in documentation until the code moves with it.

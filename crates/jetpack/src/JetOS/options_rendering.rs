@@ -1,6 +1,6 @@
 use super::store_realize::RealizedPackage;
 use super::types::BootProfile;
-use crate::ModuleEval::{EnvPlan, ImageKind, ServicePlan, SystemPlan};
+use jet_env_model::ModuleEval::{EnvPlan, ImageKind, ServicePlan, SystemPlan};
 use crate::JSON;
 
 pub(super) fn shell_single_quote(s: &str) -> String {

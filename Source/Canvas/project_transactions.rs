@@ -384,7 +384,7 @@ pub(super) fn apply_project_add_env_service(
     } else {
         format!("module env.dev {{\n    services: {{ {service} }}\n}}\n")
     };
-    jetpack::ModuleEval::evaluate_env(&after, &ctx.project_root)
+    jet_env_model::ModuleEval::evaluate_env(&after, &ctx.project_root)
         .map_err(|d| project_edit_error("diagnostic", &d.what))?;
     finish_project_changes(
         ctx,
@@ -801,7 +801,7 @@ fn normalize_and_validate_project_changes(
         } else if change.rel.ends_with(&format!("/{}", crate::Syntax::ENV_FILE))
             || change.rel == crate::Syntax::ENV_FILE
         {
-            jetpack::ModuleEval::evaluate_env(&change.after, &ctx.project_root)
+            jet_env_model::ModuleEval::evaluate_env(&change.after, &ctx.project_root)
                 .map_err(|d| project_edit_error("diagnostic", &d.what))?;
         } else if change
             .path

@@ -9,7 +9,7 @@ use super::trust_env_build::compose_env;
 use super::workspace_sources::{cwd_table, load_workspace};
 use crate::EnvFile;
 use crate::MemberSelect::{self, SelectRequest};
-use crate::ModuleEval;
+use jet_env_model::ModuleEval;
 use crate::Output::Theme;
 use crate::Provider;
 use crate::RefSpec;

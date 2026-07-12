@@ -372,7 +372,7 @@ pub(super) fn env_project_json(project_root: &Path) -> EnvProjectJson {
             diagnostics: String::new(),
         };
     };
-    match jetpack::ModuleEval::evaluate_env(&src, project_root) {
+    match jet_env_model::ModuleEval::evaluate_env(&src, project_root) {
         Ok(plan) => {
             let packages = plan
                 .package_refs
@@ -412,7 +412,7 @@ pub(super) fn env_project_json(project_root: &Path) -> EnvProjectJson {
     }
 }
 
-fn dev_service_project_json(service: &jetpack::ModuleEval::DevServicePlan) -> String {
+fn dev_service_project_json(service: &jet_env_model::ModuleEval::DevServicePlan) -> String {
     let ports = service
         .ports
         .iter()

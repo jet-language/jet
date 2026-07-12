@@ -8,7 +8,7 @@ use super::store_realize::{
     realize_ref, try_realize_ref,
 };
 use super::types::{CACHYOS_KERNEL_PACKAGE, Generation, OsFlags, SYSTEMD_INIT_PACKAGE};
-use crate::ModuleEval::{EnvPlan, SystemPlan};
+use jet_env_model::ModuleEval::{EnvPlan, SystemPlan};
 use crate::Output::Theme;
 use crate::RefSpec;
 use crate::Store;

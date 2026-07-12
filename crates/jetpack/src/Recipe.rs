@@ -27,68 +27,11 @@ use crate::SHA256;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-/// One step of a build recipe. Names are internal; the user-facing spellings are
-/// D-JPK-ADAPTNAME1 (card #176).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum BuildStep {
-    /// A locked network fetch. `sha256` must be present; an empty hash is
-    /// ungranted ambient network (`E1236`).
-    Fetch { url: String, sha256: String },
-    /// Run a build tool. `tool` must be the name of a realized `Pkg` dep in the
-    /// `BuildContext.tools` map — never resolved from host PATH (`E1238`).
-    Exec { tool: String, args: Vec<String> },
-    /// Copy `src` (relative to the source dir) to `dest` under the output root.
-    /// `dest` must resolve inside the output root (`E1237`).
-    Install { src: String, dest: String },
-    /// Copy a whole directory tree relative to the source dir into `dest`
-    /// under the output root. Used by `Recipe.copy()`.
-    InstallTree { src: String, dest: String },
-}
-
-/// A build recipe over a staged source tree.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct BuildRecipe {
-    pub steps: Vec<BuildStep>,
-}
-
-impl BuildRecipe {
-    /// A stable content hash of the recipe, used by the trust gate.
-    pub fn recipe_hash(&self) -> String {
-        let mut data = Vec::new();
-        for step in &self.steps {
-            match step {
-                BuildStep::Fetch { url, sha256 } => {
-                    data.extend_from_slice(b"fetch\0");
-                    data.extend_from_slice(url.as_bytes());
-                    data.push(0);
-                    data.extend_from_slice(sha256.as_bytes());
-                }
-                BuildStep::Exec { tool, args } => {
-                    data.extend_from_slice(b"exec\0");
-                    data.extend_from_slice(tool.as_bytes());
-                    for a in args {
-                        data.push(0);
-                        data.extend_from_slice(a.as_bytes());
-                    }
-                }
-                BuildStep::Install { src, dest } => {
-                    data.extend_from_slice(b"install\0");
-                    data.extend_from_slice(src.as_bytes());
-                    data.push(0);
-                    data.extend_from_slice(dest.as_bytes());
-                }
-                BuildStep::InstallTree { src, dest } => {
-                    data.extend_from_slice(b"install-tree\0");
-                    data.extend_from_slice(src.as_bytes());
-                    data.push(0);
-                    data.extend_from_slice(dest.as_bytes());
-                }
-            }
-            data.push(b'\n');
-        }
-        format!("sha256-{}", SHA256::sha256_hex(&data))
-    }
-}
+// Card #367 slice 4: the `BuildStep`/`BuildRecipe` *data* shape sunk into
+// `jet-pkg-model` (data-down / engine-up) — re-exported under the historical
+// `crate::Recipe::{BuildStep,BuildRecipe}` path so every call site here and
+// in `Provider.rs`/`ModuleEval::Types` is unchanged.
+pub use jet_pkg_model::Recipe::{BuildRecipe, BuildStep};
 
 /// A locked source fetch recorded for `.jet/lock` provenance.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -7,7 +7,7 @@ use super::root_projection::enable_unit;
 use super::store_realize::RealizedPackage;
 use super::studio_projection::make_executable;
 use super::types::VM_TOOLS;
-use crate::ModuleEval::SystemPlan;
+use jet_env_model::ModuleEval::SystemPlan;
 use crate::JSON;
 use std::fs;
 use std::path::{Path, PathBuf};

@@ -35,17 +35,17 @@ identity.
 
 ## Current implementation
 
-The parser and AST carry templates, type/value parameters, applications, and
-spans. The sema pre-pass expands same-file aliases whose bodies contain only
-functions, substitutes type parameters in function signatures, and erases the
-template before codegen. E0850, E0851, the generic-module example, and the
-existing UI fixtures cover that floor.
+Parser, sema, and codegen specialize full bodies, including nominal types,
+traits and impls, constants, tests/benches, and nested modules/templates. Values
+are evaluated and normalized, bounds and cycles are checked, definition-site
+scope is retained, imported templates work, and equivalent applications share
+one applicative instance. Instance identity reaches TIR/codegen, build-cache
+inputs, semindex, and LSP symbols; digest/full-key collisions stop as E0859/ICE
+before codegen.
 
-This is not the ratified completion state. Value arguments are not evaluated or
-substituted, type bounds and cycles are not checked, function bodies are not
-specialized, non-function items still hit E0854, repeated applications clone
-aliases instead of sharing one applicative instance, and cross-file templates
-are not complete.
+The card remains open for its final executable acceptance matrix and remaining
+documentation/example closure. Later cache/toolchain criteria must be verified
+before claiming the entire card complete.
 
 ## Remaining build plan
 

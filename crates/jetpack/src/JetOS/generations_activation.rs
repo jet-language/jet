@@ -1,7 +1,7 @@
 use super::generation_files::{generations_log, systems_dir};
 use super::options_rendering::risk_classes;
 use super::types::Generation;
-use crate::ModuleEval::SystemPlan;
+use jet_env_model::ModuleEval::SystemPlan;
 use crate::Output::Theme;
 use crate::JSON;
 use std::fs;

@@ -2,7 +2,7 @@ use super::desktop_store_vm::find_path_tool;
 use super::generation_files::sanitize_runtime_branding_bytes;
 use super::installer_media::{render_guest_verify_script, render_installer_script};
 use super::types::Generation;
-use crate::ModuleEval::SystemPlan;
+use jet_env_model::ModuleEval::SystemPlan;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};

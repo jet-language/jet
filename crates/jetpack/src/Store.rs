@@ -84,7 +84,7 @@ pub enum RealizeRequest<'a> {
         spec: &'a super::RefSpec::RefSpec,
         table: &'a super::RefSpec::SourceTable,
     },
-    Adapter(&'a super::ModuleEval::AdapterPlan),
+    Adapter(&'a jet_env_model::ModuleEval::AdapterPlan),
 }
 
 pub struct VerifiedRealization {

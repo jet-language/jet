@@ -229,7 +229,7 @@ pub enum ConstAttr {
     ForceInline,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ConstDef {
     pub span: Span,
     pub name: String,

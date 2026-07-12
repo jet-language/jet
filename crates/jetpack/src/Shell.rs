@@ -6,7 +6,7 @@
 //! never mutated. bash, fish, and zsh are supported.
 
 use super::Output::Theme;
-use super::ModuleEval::{PromptPathMode, PromptStripMode};
+use jet_env_model::ModuleEval::{PromptPathMode, PromptStripMode};
 use crate::Syntax;
 use std::path::PathBuf;
 use std::process::Command;

@@ -76,7 +76,7 @@ pub struct JitProgram {
     pub source_file: String,
     /// #91: canonical generic-instance fingerprints consumed by JIT caches,
     /// diagnostics, and parity tooling.
-    pub instance_provenance: Vec<String>,
+    pub instance_provenance: Vec<InstanceProvenance>,
     /// All top-level `tir_covers` functions in the entry module, including `run`.
     pub funcs: Vec<TFunc>,
     /// c139 M4: spawn lambda bodies in program traversal order (parallel to spawn sites in TIR).
@@ -87,6 +87,25 @@ pub struct JitProgram {
     pub struct_field_types: std::collections::HashMap<String, Vec<Type>>,
     /// M5: mangled variant names per enum type (discriminant order).
     pub enum_variants: std::collections::HashMap<String, Vec<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstanceProvenance {
+    pub canonical_module: String,
+    pub fingerprint: String,
+    pub full_key_hex: String,
+}
+
+pub fn instance_provenance(bundle: &ProgramBundle) -> Vec<InstanceProvenance> {
+    bundle.modules.iter().flat_map(|module| module.items.iter().filter_map(|item| {
+        let Item::CodeModule(instance) = item else { return None };
+        let identity = instance.instance_identity.as_ref()?;
+        Some(InstanceProvenance {
+            canonical_module: instance.name.clone(),
+            fingerprint: identity.fingerprint.clone(),
+            full_key_hex: identity.full_key.iter().map(|byte| format!("{byte:02x}")).collect(),
+        })
+    })).collect()
 }
 
 /// c139 M3: every lowered function the JIT may compile from the entry module.
@@ -205,10 +224,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
         );
     }
     Some(JitProgram {
-        instance_provenance: bundle.modules.iter().flat_map(|module| module.items.iter().filter_map(|item| {
-            let Item::CodeModule(cm) = item else { return None };
-            cm.instance_identity.as_ref().map(|identity| identity.fingerprint.clone())
-        })).collect(),
+        instance_provenance: instance_provenance(bundle),
         source_file: module.display.clone(),
         funcs,
         spawn_lambdas,

@@ -1,7 +1,7 @@
 use super::parse::Parsed;
 use super::realize::load_project_plan;
 use super::trust_env_build::compose_env;
-use crate::ModuleEval;
+use jet_env_model::ModuleEval;
 use crate::Output::Theme;
 use crate::RuntimePolicy;
 use crate::Secrets;

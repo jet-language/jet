@@ -6,7 +6,7 @@ use super::options_rendering::{
 use super::root_projection::enable_unit;
 use super::studio_projection::make_executable;
 use super::user_flatpak_perf::manifest_lines;
-use crate::ModuleEval::SystemPlan;
+use jet_env_model::ModuleEval::SystemPlan;
 use crate::JSON;
 use std::fs;
 use std::path::Path;

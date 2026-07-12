@@ -6,7 +6,7 @@
 //! fetches; missing data stays missing until a normal resolver/update path
 //! records it.
 
-use super::ModuleEval::AdapterPlan;
+use jet_env_model::ModuleEval::AdapterPlan;
 use super::Provider;
 use super::RefSpec::RefSpec;
 use super::Store::StoreEntry;

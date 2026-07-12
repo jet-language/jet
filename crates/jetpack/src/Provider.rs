@@ -9,7 +9,7 @@
 //! path, or `JETPACK_FIXTURES`), we read a canned `nix build --json` file
 //! instead of shelling out — exactly the Forge fixture pattern.
 
-use super::ModuleEval::{AdapterPlan, AdapterRecipe};
+use jet_env_model::ModuleEval::{AdapterPlan, AdapterRecipe};
 use super::PackageManifest;
 use super::Recipe::{self, BuildContext, BuildRecipe, BuildStep};
 use super::RefSpec::{ProviderKind, RefSpec, Source, SourceTable};

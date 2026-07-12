@@ -3,7 +3,7 @@ use super::update_search_info::shell_on_failed_build;
 use super::workspace_sources::{cwd_table, cwd_workspace_index, fixtures_for, load_toml_sources};
 use crate::EnvFile;
 use crate::Lock;
-use crate::ModuleEval;
+use jet_env_model::ModuleEval;
 use crate::Output::{self, Theme};
 use crate::Provider::{self, ProviderError};
 use crate::RefSpec::{self, RefError};

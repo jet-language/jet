@@ -4,7 +4,7 @@ use super::generation_files::systems_dir;
 use super::installer_media::write_installer_media;
 use super::load_validate::validate_system_options;
 use super::types::{Generation, OsFlags, VM_GUEST_PROOF_MARKER, VM_PROOF_TIMEOUT_MS, VM_TOOLS};
-use crate::ModuleEval::{EnvPlan, SystemPlan, VmTestPlan};
+use jet_env_model::ModuleEval::{EnvPlan, SystemPlan, VmTestPlan};
 use crate::Output::Theme;
 use crate::JSON;
 use std::fs;

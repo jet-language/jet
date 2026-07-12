@@ -43,7 +43,11 @@ pub mod ManifestTOML;
 pub mod MemberSelect;
 pub mod Merge;
 pub mod MigrationImport;
-pub mod ModuleEval;
+// Card #367 slice 4: `ModuleEval` (the computed-modules evaluator + plan
+// types) now lives in `jet-env-model` (L2, pure eval) — both realizers,
+// jetpack's env-runtime and JetOS realization, name it directly
+// (`jet_env_model::ModuleEval`) instead of sharing it by living in the same
+// crate. No re-export here; that was the step-2 shim, now dropped.
 pub mod Output;
 pub mod Overlay;
 pub mod PackageGraph;

@@ -1718,7 +1718,7 @@ fn native_cache_key(file: &str, profile_tag: &str, mode_tag: &str) -> Option<Str
     {
         return None;
     }
-    let mut instances: Vec<String> = bundle.modules.iter().flat_map(|module| module.items.iter().filter_map(|item| {
+    let instances: Vec<String> = bundle.modules.iter().flat_map(|module| module.items.iter().filter_map(|item| {
         let jet::AST::Item::CodeModule(cm) = item else { return None };
         cm.instance_identity.as_ref().map(|identity| identity.fingerprint.clone())
     })).collect();

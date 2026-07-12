@@ -3,7 +3,7 @@ use super::{
 };
 use crate::Diagnostics::Span;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Item {
     Func(Func),
     Struct(StructDef),
@@ -75,7 +75,7 @@ pub enum Item {
 }
 
 /// D-MOD1/2: code module — `module math;` or `module math { pub fn … }`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CodeModule {
     pub name: String,
     pub name_span: Span,
@@ -146,7 +146,7 @@ pub enum ModuleArg {
 /// D-GENMOD2=A: `module Name<params> { body }` — a parameterized module template.
 /// Stores the body as a template. Sema expands `ModuleAlias` referencing this into
 /// a `CodeModule` before the main checking pass. Never reaches codegen directly.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct GenericModuleDef {
     pub name: String,
     pub name_span: Span,
@@ -159,7 +159,7 @@ pub struct GenericModuleDef {
 
 /// D-GENMOD2=A: `module Alias = Module<args>` — module instantiation alias.
 /// Expanded to a `CodeModule` by sema before registration and codegen.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ModuleAliasDef {
     pub name: String,
     pub name_span: Span,
@@ -196,7 +196,7 @@ pub struct CModule {
 
 /// U3 (unified-ecosystem §4): `module name { contributions… }`. Many modules
 /// may share a file; a leading-`_` name disables one (not discovered/merged).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ModuleDecl {
     pub name: String,
     pub name_span: Span,
@@ -221,7 +221,7 @@ pub struct ModuleDecl {
 /// is not a single token (it contains `@`, `/`, `-`, `.`), so the parser records
 /// its source span; modeval slices the source and validates it via
 /// `classify_provider_ref`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SourceDecl {
     pub name: String,
     pub name_span: Span,
@@ -233,7 +233,7 @@ pub struct SourceDecl {
 /// U3 (unified-ecosystem §5): one typed namespace contribution inside a module,
 /// e.g. `env.dev: Env { … }`. The value reuses the struct-literal expression
 /// parser; the namespace and path locate it in the merged whole.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Contribution {
     pub namespace: Namespace,
     pub path: String,
@@ -248,7 +248,7 @@ pub struct Contribution {
 /// (`network.hostName: laptop`), the U13 typed `target` value (`linux.x64`), the U12
 /// `Service` map, and U18 bare-`{ … }` records all have a home — none of which fit
 /// the ordinary expression grammar.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ContribValue {
     /// `env.<name>:` — any expression, typically `Env { … }` (or a bare `{ … }`,
     /// U18). modeval field-checks it. Only the legacy contribution form
@@ -289,7 +289,7 @@ impl ContribValue {
 
 /// One performance-policy role. The parser owns the declaration boundary and
 /// exact source spans; sema elaborates the captured list into BudgetSpec facts.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PerfLit {
     pub budgets: Expr,
     pub budgets_span: Span,
@@ -302,7 +302,7 @@ pub struct PerfLit {
 /// same `ServiceEntry` grammar `System.services` uses (U12's `Service` stays
 /// one open record either way — only the downstream capture/interpretation
 /// differs between the jetos and dev planes, never the grammar).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct EnvLit {
     pub fields: Vec<(String, Span, Expr)>,
     pub services: Vec<ServiceEntry>,
@@ -314,7 +314,7 @@ pub struct EnvLit {
 /// `Some(span)` when the author wrote `System { … }`, `None` for a bare `{ … }`.
 /// Field-checking (which fields are known, that `target` is a known platform, etc.)
 /// lives in modeval, not the parser.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SystemLit {
     pub explicit_type: Option<Span>,
     pub fields: Vec<SystemField>,
@@ -323,7 +323,7 @@ pub struct SystemLit {
 
 /// One `name: value` field inside a `System { … }` record. The value's shape
 /// depends on the field; modeval validates it against U11.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SystemField {
     pub name: String,
     pub name_span: Span,
@@ -332,7 +332,7 @@ pub struct SystemField {
 }
 
 /// The parsed value of one `System` field (U11/U12/U13).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum SystemFieldValue {
     /// `target: linux.x64` — a dotted typed platform value (U13). Stores the two
     /// dotted segments (`os`, `arch`) and the whole value's span.
@@ -356,7 +356,7 @@ pub enum SystemFieldValue {
 /// U12: one `name: { … }` entry in a `services:` map. The record is an inferred
 /// `Service` (U18); `explicit_type` is `Some(span)` if the author wrote
 /// `Service { … }`. Fields are arbitrary (open record); modeval requires `enable`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ServiceEntry {
     pub name: String,
     pub name_span: Span,
@@ -368,7 +368,7 @@ pub struct ServiceEntry {
 /// U13: one `dotted.key: value` entry in an `options:` list. `key` is the dotted
 /// path text (`network.hostName`); `value` is any expression (bare identifier, dotted
 /// typed value, list, or quoted free-form string).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct OptionEntry {
     pub key: String,
     pub key_span: Span,
@@ -384,7 +384,7 @@ pub struct OptionEntry {
 /// mirrors `SystemLit`. `from`/`format`/`target` and any stray field are captured;
 /// modeval validates them (U14: `from` required and references a known `System`;
 /// `format` ∈ {iso, qcow, raw}; only `target:` may be restated, for cross-compile).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ImageLit {
     pub explicit_type: Option<Span>,
     pub fields: Vec<ImageField>,
@@ -392,7 +392,7 @@ pub struct ImageLit {
 }
 
 /// One `name: value` field inside an `Image { … }` record.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ImageField {
     pub name: String,
     pub name_span: Span,
@@ -412,7 +412,7 @@ pub enum ImageFromRef {
 }
 
 /// The parsed value of one `Image` field (U14/D-JPK-IMAGE1).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ImageFieldValue {
     /// `from: system.<name>` or `from: packages.<name>` — stores which one and
     /// the whole value span.
@@ -435,7 +435,7 @@ pub enum ImageFieldValue {
 /// U15: a `Fleet { hosts: { <host>: system.<name>.{ … } } }` record. Mirrors
 /// `SystemLit`/`ImageLit`. Field-checking (the one field is `hosts`; every host
 /// value references a known `System`) lives in modeval.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FleetLit {
     pub explicit_type: Option<Span>,
     pub fields: Vec<FleetField>,
@@ -443,7 +443,7 @@ pub struct FleetLit {
 }
 
 /// One `name: value` field inside a `Fleet { … }` record.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FleetField {
     pub name: String,
     pub name_span: Span,
@@ -452,7 +452,7 @@ pub struct FleetField {
 }
 
 /// The parsed value of one `Fleet` field (U15).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum FleetFieldValue {
     /// `hosts: { web1: system.<name>.{ … }, … }` — a keyed map of host
     /// definitions, each referencing a `System` with optional copy-with-update
@@ -466,7 +466,7 @@ pub enum FleetFieldValue {
 /// U15: one `<host>: system.<name>.{ overrides }` entry in a `hosts:` map.
 /// `overrides` is the raw source text of the `.{ … }` copy-with-update tail
 /// (captured, not semantically parsed, until fleet realization in Phase D).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HostEntry {
     pub name: String,
     pub name_span: Span,
@@ -483,14 +483,14 @@ pub struct HostEntry {
 /// D-JOS-VMTEST1: a `VmTest { hosts, run }` record. The `hosts:` map uses the
 /// same host-to-system reference grammar as `Fleet`; `run:` captures the typed
 /// test body span so the jetos VM-test runner can validate/replay proof facts.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct VmTestLit {
     pub explicit_type: Option<Span>,
     pub fields: Vec<VmTestField>,
     pub span: Span,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct VmTestField {
     pub name: String,
     pub name_span: Span,
@@ -498,7 +498,7 @@ pub struct VmTestField {
     pub span: Span,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum VmTestFieldValue {
     Hosts(Vec<HostEntry>),
     Run { span: Span },
@@ -532,7 +532,7 @@ pub struct TypeParam {
 }
 
 /// S28 (M9): trait declaration — signatures only in v1.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TraitDef {
     pub span: Span,
     pub is_pub: bool,
@@ -549,7 +549,7 @@ pub struct TraitDef {
 /// rule (methods → trait, no methods → tag) a tag carries no methods; any method
 /// found in its body is reported as E0732. The body is parsed permissively (so a
 /// stray method doesn't derail the parser) and validated in sema.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TagDef {
     pub is_pub: bool,
     /// D-PUBPKG1=A: true for `pub(package) tag …`.
@@ -597,7 +597,7 @@ pub struct ProtocolDecl {
 /// a bounded compile-time state-set declaration. Each string in `states` is a valid
 /// state label; `#State(X)` / `#Transition(A -> B)` markers on `TypeName::*` methods
 /// must reference labels from this set. Erases in codegen (I3, no runtime discriminant).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StateDecl {
     pub is_pub: bool,
     /// D-PUBPKG1=A: true for `pub(package) state …`.
@@ -642,7 +642,7 @@ pub struct TraitMethodSig {
 }
 
 /// S28: `impl Trait { … }` inside a struct or enum body.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TraitImplBlock {
     pub trait_name: String,
     pub trait_span: Span,
@@ -676,7 +676,7 @@ pub struct ExternFn {
     pub span: Span,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TestDef {
     pub span: Span,
     pub name: String,
@@ -695,7 +695,7 @@ pub struct TestDef {
 
 /// D-BENCH1/D-BENCH-MARKER1=A: `#Bench("name") { … }` — identical structure to `TestDef`. The
 /// body is a bare statement list timed by the generated bench harness.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BenchDef {
     pub span: Span,
     pub name: String,
@@ -1106,7 +1106,7 @@ pub struct Marker {
     pub ct: Option<CtValue>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StructDef {
     pub span: Span,
     pub is_pub: bool,
@@ -1153,7 +1153,7 @@ pub struct StructDef {
 }
 
 /// D-TYPEALIAS1: `alias Name<T, E> = T ? E` — transparent generic type shortcut.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TypeAliasDef {
     pub is_pub: bool,
     /// D-PUBPKG1=A: true for `pub(package) alias …`.
@@ -1167,7 +1167,7 @@ pub struct TypeAliasDef {
 }
 
 /// D-DIST1/D-DIST3: distinct type declaration — `[@Numeric] Name :: distinct Base`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DistinctDef {
     pub is_pub: bool,
     /// D-PUBPKG1=A: true for `pub(package) Name :: distinct Base`.
@@ -1204,7 +1204,7 @@ pub struct DistinctDef {
 /// `@Numeric` type erasing to `Float`. `members` carries each member's source
 /// spelling (lowercase, e.g. `usd`) and span; the minted type name is the
 /// PascalCase form (`Usd`).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct UnitFamilyDef {
     pub is_pub: bool,
     /// D-PUBPKG1=A: true for `pub(package) #UnitFamily(…) { … }`.
@@ -1263,7 +1263,7 @@ impl UnitFamilyDef {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct EnumDef {
     pub span: Span,
     pub is_pub: bool,
@@ -1308,7 +1308,7 @@ pub struct EnumGroup {
     pub name_span: Span,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Variant {
     /// The variant's full dotted path from the enum root. A flat variant is a
     /// bare name (`Cold`); a leaf inside D-TAG1 groups is dotted (`Fire.Burn`).
@@ -1341,7 +1341,7 @@ pub struct VariantField {
     pub ty_span: Span,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ImplDef {
     pub span: Span,
     pub type_name: String,

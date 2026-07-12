@@ -43,7 +43,7 @@ mod identity_tests {
     use super::super::system_facts::write_hardware_facts;
     use super::super::types::Generation;
     use super::*;
-    use crate::ModuleEval::{self, SystemPlan};
+    use jet_env_model::ModuleEval::{self, SystemPlan};
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 

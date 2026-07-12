@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 522,
-    "rev": 4788,
+    "rev": 4789,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -32851,6 +32851,82 @@
       "draft": false,
       "status": "open",
       "created": "2026-07-12T19:50:22.046Z"
+    },
+    {
+      "id": "D-JOS-ENGINEHOME1",
+      "cardId": "c_audit_367_q80zrm",
+      "group": "tooling",
+      "title": "JetOS realization engine: which crate owns it",
+      "gist": "Where the code that actually runs OS workflows (activate, boot, VM, desktop) should physically live: inside jetpack's crate, moved wholesale into jetos's crate, or split between the two.",
+      "lesson": "Jet ships three separate programs you run from a terminal. `jet` is the compiler and dev loop. `jetpack` handles packages, environments, and builds. `jetos` is a full JetOS operating system. Each program is backed by a 'crate' — a folder of Rust source code compiled into that program's logic.\n\nToday jetos's crate is nearly empty. Its `main.rs` is four lines: it takes whatever command you typed, adds 'os' in front, and hands the whole thing to jetpack's `run` function. All the real work — activating a new OS generation, building a boot image, testing a VM, applying a desktop theme — lives in 28 files inside `crates/jetpack/src/JetOS/`.\n\nThe owner already ratified who owns what, in plain words (D-PRODUCT-SPLIT1=C): `jet` owns the language, `jetpack` owns packages and build substrate, `jetos` owns OS workflows. That rule names an owner. It does not yet say whether the named owner's code must physically sit inside that owner's own crate.\n\nA separate, already-settled slice of work pulls out the shared 'plan' step. It reads an `env.jet`/`config.jet` file and turns it into a typed value, like `SystemPlan` or `ImagePlan`. That step now lives in its own crate, `jet-env-model`, and both jetpack and jetos read from it. That part is not part of this decision.\n\nWhat is still open is the 'engine.' That is the code that turns a typed plan into real work. It writes files to disk, activates a generation, boots a VM, and renders the desktop. This decision only settles where that engine code physically lives.",
+      "explainer": "",
+      "story": "Priya is new to the repo and is chasing a bug: `jetos switch webhost` picks the wrong generation on rollback. She runs the failing command, the crash names a function called `activate_generation`, and she greps for it. The only match is in `crates/jetpack/src/JetOS/generations_activation.rs` — nothing under `crates/jetos` at all. She spends twenty minutes convinced jetos doesn't really own generation activation, before a teammate explains the engine just happens to live inside jetpack's crate for now.",
+      "inWild": "$ jetos switch webhost\nRealizing generation 42 for host webhost...\n  built:      /jet/store/host-webhost-gen42\n  provenance: written by crates/jetpack/src/JetOS/activation_provenance.rs\n  activated:  webhost -> generation 42\n\nEverything after 'jetos switch' ran through code inside jetpack's crate. The jetos binary itself only forwarded the arguments (crates/jetos/src/main.rs, 4 lines):\n\nfn main() {\n    let mut args: Vec<String> = std::env::args().skip(1).collect();\n    args.insert(0, \"os\".to_string());\n    std::process::exit(jetpack::run(args));\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Engine stays in jetpack; jetos stays a thin caller",
+          "detail": "The 28 JetOS/*.rs files stay exactly where they are, inside crates/jetpack/src/JetOS/. crates/jetos/src/main.rs keeps forwarding every command to jetpack::run([\"os\", ...]) and never grows into a real source tree of its own. This makes today's arrangement permanent and documented, instead of a leftover step nobody finished.",
+          "technical": "crates/jetos/Cargo.toml keeps its single dependency on jetpack. No file moves. docs/spec/architecture.md gains a line: jetos is jetpack's OS-workflow front door; the realization engine ships inside jetpack's crate under the JetOS:: module namespace.",
+          "code": "$ jetos switch webhost\nRealizing generation 42 for host webhost...\n  activated: webhost -> generation 42\n\n# crates/jetos/src/main.rs (unchanged)\nfn main() {\n    let mut args: Vec<String> = std::env::args().skip(1).collect();\n    args.insert(0, \"os\".to_string());\n    std::process::exit(jetpack::run(args));\n}\n\n# crates/jetos/Cargo.toml (unchanged)\n[dependencies]\njetpack = { path = \"../jetpack\" }\n\n# A contributor fixing generation activation greps:\n$ rg activate_generation crates/jetpack/src/JetOS/"
+        },
+        {
+          "key": "B",
+          "name": "Whole engine relocates to jetos",
+          "detail": "All 28 JetOS/*.rs files move, verbatim, into crates/jetos's own source tree. jetpack keeps only the Provider/Store/network primitives that D-PRODUCT-SPLIT1=C already names as its job — packages and build substrate. jetos's engine calls those primitives as a plain library, the same way it already will call jet-env-model for plans.",
+          "technical": "crates/jetos grows a real src/Realize/ tree (or a new crates/jetos-engine lib the jetos binary depends on). jetos's Cargo.toml adds jet-env-model and keeps jetpack only for Store/Provider calls. jetpack's public surface shrinks to package/build-substrate APIs.",
+          "code": "$ jetos switch webhost\nRealizing generation 42 for host webhost...\n  activated: webhost -> generation 42\n\n# crates/jetos/src/Realize/generations_activation.rs (moved from jetpack)\nuse jetpack::Store;          // jetos depends on jetpack only for store primitives\nuse jet_env_model::SystemPlan;\n\n# crates/jetos/Cargo.toml\n[dependencies]\njet-env-model = { path = \"../jet-env-model\" }\njetpack = { path = \"../jetpack\" }\n\n# A contributor fixing generation activation greps:\n$ rg activate_generation crates/jetos/src/Realize/"
+        },
+        {
+          "key": "C",
+          "name": "Engine splits at the plan boundary",
+          "detail": "Code that turns a typed plan into a running system — generation activation, boot facts, VM commands/proof, installer media, desktop/theme/Studio projection — moves to crates/jetos. Code that writes to the content-addressed store and manages the generation/store file tree stays in jetpack, beside jetpack's other package/build-substrate code. The seam is the same typed plan objects (SystemPlan, ImagePlan, HostPlan, VmTestPlan) jet-env-model already produces for both realizers.",
+          "technical": "Roughly: activation_provenance.rs, generations_activation.rs, vm_commands.rs, vm_proof.rs, iso_vm_commands.rs, kernel_bootstrap.rs, etc_boot_facts.rs, installer_media.rs, options_rendering.rs, theme_fleet_lifecycle.rs, studio_projection.rs, user_flatpak_perf.rs, system_facts.rs, commands.rs, entry.rs, desktop_store_vm.rs move to crates/jetos/src/Realize/. store_realize.rs, module_storage_workload.rs, generation_files.rs, generation.rs, root_projection.rs, nixos_import.rs, nixos_import_live.rs, nixos_backend.rs, load_validate.rs, identity.rs, types.rs stay in crates/jetpack/src/JetOS/, callable by jetos as a library.",
+          "code": "$ jetos switch webhost\nRealizing generation 42 for host webhost...\n  store write: crates/jetpack/src/JetOS/store_realize.rs   (jetpack)\n  activation:  crates/jetos/src/Realize/generations_activation.rs (jetos)\n  provenance:  crates/jetos/src/Realize/activation_provenance.rs  (jetos)\n\n# crates/jetos/src/Realize/generations_activation.rs\nuse jetpack::store_realize;  // store write stays a jetpack call\nuse jet_env_model::SystemPlan;\n\nfn switch(plan: SystemPlan) {\n    let built = jetpack::store_realize::write(&plan)?;\n    activate(built)?;        // activation itself is jetos-owned\n}\n\n# A VM-boot bug: rg vm_proof crates/jetos/src/Realize/\n# A store-corruption bug: rg store_realize crates/jetpack/src/JetOS/"
+        }
+      ],
+      "comparisons": [],
+      "rec": "C",
+      "recommendation": {
+        "why": "Option C is the most literal match for D-PRODUCT-SPLIT1=C's own wording: jetpack owns packages and build substrate, jetos owns OS workflows. Store writes and the generation file tree are build substrate; activation, boot, VM proof, and desktop rendering are OS workflows. Splitting the engine there makes the crate boundary enforce the ratified split instead of just describing it.",
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "Codifying today's arrangement leaves jetos a permanent alias. No crate boundary enforces the ratified split, so nothing stops new OS-workflow code from landing in jetpack by default and drifting further from D-PRODUCT-SPLIT1=C over time."
+          },
+          {
+            "key": "B",
+            "reason": "Moving every JetOS file into jetos also drags in generation/store-tree plumbing that D-PRODUCT-SPLIT1=C already assigns to jetpack as build substrate. jetos would then either reimplement store logic or reach back into jetpack's engine internals, reopening the same two-homes problem this decision exists to close."
+          }
+        ],
+        "tradeoff": "A single jetos switch call now runs through two crates instead of one. That coupling is acceptable because the seam is the same typed plan objects jet-env-model already hands to both realizers — an existing boundary, not a new one."
+      },
+      "hybrid": {
+        "result": "C",
+        "synthesis": "C already is the harvested design. It keeps jetos's crate as the real home for OS-workflow logic, the way B intends. It leaves jetpack's already-ratified store/build-substrate ownership untouched, the way A preserves. Both halves join at the plan boundary jet-env-model already built.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "Store and generation-tree plumbing stays reachable through jetpack without duplicating it.",
+            "use": "C keeps that same plumbing in jetpack; only OS-workflow realization moves out."
+          },
+          {
+            "key": "B",
+            "aspect": "Crate name matches product name for OS-workflow code, so a grep for activation/boot/VM logic lands under crates/jetos.",
+            "use": "C moves exactly that code — activation, boot, VM, desktop, Studio — into crates/jetos, without dragging store plumbing along with it."
+          },
+          {
+            "key": "C",
+            "aspect": "Splitting at the plan boundary matches D-PRODUCT-SPLIT1=C's own wording, term for term.",
+            "use": "C is the option itself; the split it proposes is the harvest of A and B, not a separate idea to fold in."
+          }
+        ]
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T21:15:56.518Z"
     }
   ],
   "questions": [
@@ -33678,6 +33754,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-12T21:15:56.519Z",
+      "by": "terra-367-ballot",
+      "action": "decision.add",
+      "ref": "D-JOS-ENGINEHOME1",
+      "note": "JetOS realization engine: which crate owns it"
+    },
     {
       "at": "2026-07-12T21:10:03.497Z",
       "by": "sol-367-planner",
@@ -37170,13 +37253,6 @@
       "action": "card.add",
       "ref": "c019rl6u",
       "note": "Naming-system laws: artifact-extension family + ambient prelude admission"
-    },
-    {
-      "at": "2026-07-12T10:08:34.078Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-API-LEN1",
-      "note": "A"
     }
   ],
   "nextNum": 368,

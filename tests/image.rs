@@ -22,7 +22,7 @@ use std::process::Command;
 
 mod common;
 use common::jetpack_bin;
-use jetpack::ModuleEval::evaluate_env;
+use jet_env_model::ModuleEval::evaluate_env;
 
 fn jetpack() -> Command {
     Command::new(jetpack_bin())

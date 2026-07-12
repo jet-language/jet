@@ -1072,7 +1072,9 @@ Examples: `examples/features/modules/inline_module`, `43_module_file`,
 `47_module_reexport`, `48_module_file_use`, `49_module_inline_sibling`,
 `170_generic_modules`. UI
 fixtures: `tests/ui/module_{missing,private,unknown_namespace,wildcard,
-inline_private,inline_type_error}`, `genmod_{unknown_target,wrong_arg_count,non_fn_item}`.
+inline_private,inline_type_error}`, `genmod_{unknown_target,wrong_arg_count,
+value_wrong_type,value_not_comptime,disallowed_value_type,trait_bound_unsatisfied,
+cycle_direct,cycle_indirect}`.
 
 ### Generic modules (D-GENMOD1, D-GENMOD2, D-GENMOD-VALUE1,
 D-GENMOD-BODY1, D-GENMOD-IDENTITY1)
@@ -1116,17 +1118,15 @@ the same application shares nominal member types and one checked/code-generated
 specialization; different arguments or a different template definition produce
 a different instance.
 
-**Implementation status:** the parser and AST represent templates and aliases,
-and sema currently expands same-file aliases containing `fn` items. It
-substitutes type parameters in function signatures. Value evaluation and body
-substitution, bounds, cycles, full ordinary-module bodies, applicative identity,
-cross-file templates, and the corresponding complete acceptance proof remain
-open. E0854 is the current implementation boundary for non-`fn` items, not the
-ratified language law. E0850 and E0851 are implemented. E0852 (unsatisfied
-bound), E0853 (value type mismatch), E0855 (instantiation cycle), E0856
-(disallowed value-parameter type), E0857 (argument is not a compile-time
-value), and E0859 (identity fingerprint collision, ICE 101) remain staged until
-their semantics, What/Why/Fix copy, and UI snapshots ship.
+**Implementation status:** parser, sema, and codegen specialize full module
+bodies across same-file and imported templates. Type/value substitution,
+definition-site capture, bounds, cycles, applicative identity, stable instance
+fingerprints, semindex/LSP identity, and fail-closed E0859 collision handling
+are implemented. E0850–E0853 and E0855–E0857 reject invalid targets, arity,
+bounds, value kinds/types, scope, and cycles in sema before codegen. Remaining
+card work is the final executable acceptance matrix and documentation/example
+closure; package-cache and cross-toolchain proof is tracked separately by the
+card's later criteria.
 
 ## M6 phase 4 — `--small` + LSP v0 (done)
 

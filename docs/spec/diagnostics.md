@@ -439,7 +439,6 @@ duplicate this — it is the one surface for lint walls (I8).
 | E0851 | sema  | D-GENMOD2=A: wrong number of type/value arguments to module alias |
 | E0852 | sema  | D-GENMOD2=A: type argument does not satisfy bound |
 | E0853 | sema  | D-GENMOD2=A: value argument has wrong type |
-| E0854 | sema  | D-GENMOD2=A: generic module body contains non-fn item (MVP restriction) |
 | E0855 | sema  | D-GENMOD2=A: circular module alias instantiation |
 | E0856 | sema  | D-GENMOD-VALUE1=A: generic-module value parameter uses a non-Tier-0 type |
 | E0857 | sema  | D-GENMOD-VALUE1=A: generic-module value argument is not a closed compile-time value |

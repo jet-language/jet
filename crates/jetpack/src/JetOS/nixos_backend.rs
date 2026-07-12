@@ -20,7 +20,7 @@ use super::types::{Generation, OsFlags, VM_GUEST_PROOF_MARKER};
 use super::vm_proof::{
     extract_guest_proof_report, file_sha256, run_interactive_vm_command, VmCommand,
 };
-use crate::ModuleEval::SystemPlan;
+use jet_env_model::ModuleEval::SystemPlan;
 use crate::Output::Theme;
 use crate::RefSpec;
 use crate::JSON;
@@ -1498,7 +1498,7 @@ fn write_real_tier_proof(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ModuleEval::{self, ServicePlan};
+    use jet_env_model::ModuleEval::{self, ServicePlan};
 
     fn table_with_nixpkgs() -> RefSpec::SourceTable {
         RefSpec::SourceTable::from_decls([(

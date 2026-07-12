@@ -289,7 +289,7 @@ pub enum TryConvert {
 
 /// D-ERR-CONV (ratified 2026-06-19): `impl Source -> Target { body }` — declares
 /// how a `Source` error becomes a `Target` error; `?` applies it automatically.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ErrorConvDef {
     pub from_ty: String,
     pub from_span: Span,

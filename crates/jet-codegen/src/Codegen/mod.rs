@@ -805,7 +805,7 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
     for item in &prog.items {
         if let Item::CodeModule(module) = item {
             if let Some(identity) = &module.instance_identity {
-                out.push_str(&format!("// jet:generic-instance name={} fingerprint={}\n", module.name, identity.fingerprint));
+                out.push_str(&format!("// jet:generic-instance module={} fingerprint={} full-key={}\n", module.name, identity.fingerprint, identity.full_key.iter().map(|byte| format!("{byte:02x}")).collect::<String>()));
             }
         }
     }
@@ -947,15 +947,27 @@ mod tests {
             _ => None,
         }).expect("instance identity");
         let tir = crate::Codegen::TIR::lower_jit_program(&bundle).expect("JIT TIR");
-        assert_eq!(tir.instance_provenance, vec![fingerprint.clone()]);
+        let expected = crate::Codegen::TIR::instance_provenance(&bundle);
+        assert_eq!(tir.instance_provenance, expected);
+        assert_eq!(expected.len(), 1);
+        assert_eq!(expected[0].fingerprint, fingerprint);
+        assert!(!expected[0].full_key_hex.is_empty());
         let rust = emit_bundle(&bundle, CompileMode::Run, None);
         assert_eq!(rust.matches("// jet:generic-instance").count(), 1);
         assert!(rust.contains(&format!("fingerprint={fingerprint}")));
+        assert!(rust.contains(&format!("module={} fingerprint={} full-key={}", expected[0].canonical_module, expected[0].fingerprint, expected[0].full_key_hex)));
 
         let semantic_edit = checked_generic_bundle(
             "module Boxed<T, n: Int> { fn value() -> Int { return n + 1 } }\nmodule A = Boxed<Int, 3>\nfn run() {}", "pkg-a");
         let edited_rust = emit_bundle(&semantic_edit, CompileMode::Run, None);
         assert!(!edited_rust.contains(&format!("fingerprint={fingerprint}")));
+
+        let distinct = checked_generic_bundle(
+            "module Boxed<T, n: Int> { fn value() -> Int { return n } }\nmodule A = Boxed<Int, 3>\nmodule B = Boxed<Int, 4>\nfn run() {}", "pkg-a");
+        let distinct_tir = crate::Codegen::TIR::lower_jit_program(&distinct).expect("distinct JIT TIR");
+        assert_eq!(distinct_tir.instance_provenance, crate::Codegen::TIR::instance_provenance(&distinct));
+        assert_eq!(distinct_tir.instance_provenance.len(), 2);
+        assert_ne!(distinct_tir.instance_provenance[0].full_key_hex, distinct_tir.instance_provenance[1].full_key_hex);
     }
 
     #[test]
@@ -1439,14 +1451,8 @@ pub fn emit_bundle_dbg(
     ));
     // E2-M12 D-OBS1: source-map marker for tooling and debuggers.
     out.push_str(&format!("// jet:source-map source={}\n", entry.display));
-    for module in &bundle.modules {
-        for item in &module.items {
-            if let Item::CodeModule(instance) = item {
-                if let Some(identity) = &instance.instance_identity {
-                    out.push_str(&format!("// jet:generic-instance name={} fingerprint={}\n", instance.name, identity.fingerprint));
-                }
-            }
-        }
+    for provenance in TIR::instance_provenance(bundle) {
+        out.push_str(&format!("// jet:generic-instance module={} fingerprint={} full-key={}\n", provenance.canonical_module, provenance.fingerprint, provenance.full_key_hex));
     }
     out.push_str("#![allow(warnings)]\n\n");
     if let Some(ffi) = link {

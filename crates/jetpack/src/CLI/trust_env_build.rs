@@ -6,7 +6,7 @@ use super::realize::{
 };
 use super::workspace_sources::{cwd_table, load_workspace};
 use crate::MemberSelect::{self, SelectRequest};
-use crate::ModuleEval;
+use jet_env_model::ModuleEval;
 use crate::Output::{self, Theme};
 use crate::Provider;
 use crate::RefSpec::{self, ProviderKind};

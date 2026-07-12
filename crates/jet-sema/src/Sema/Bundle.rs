@@ -956,13 +956,10 @@ enum ResolvedModuleParam {
     Invalid,
 }
 
-/// A cloned-and-filtered view of a generic module template.
-/// `non_fn_kinds` records item kinds that were dropped (non-Func),
-/// so E0854 can fire at alias-expansion time.
+/// A cloned view of a generic module template.
 struct TemplateInfo {
     def: GenericModuleDef,
     definition_id: String,
-    non_fn_kinds: Vec<&'static str>,
     params: Vec<ResolvedModuleParam>,
     source_module: usize,
     source_items: Vec<Item>,
@@ -971,11 +968,9 @@ struct TemplateInfo {
 
 impl Clone for TemplateInfo {
     fn clone(&self) -> Self {
-        let mut non_fn_kinds = Vec::new();
         Self {
-            def: clone_generic_module_def(&self.def, &mut non_fn_kinds),
+            def: clone_generic_module_def(&self.def),
             definition_id: self.definition_id.clone(),
-            non_fn_kinds: self.non_fn_kinds.clone(),
             params: self.params.clone(),
             source_module: self.source_module,
             source_items: clone_definition_items(&self.source_items),
@@ -1016,107 +1011,8 @@ fn clone_definition_items(items: &[Item]) -> Vec<Item> {
         .collect()
 }
 
-fn clone_generic_module_def(
-    gm: &GenericModuleDef,
-    non_fn_kinds: &mut Vec<&'static str>,
-) -> GenericModuleDef {
-    let body = gm
-        .body
-        .iter()
-        .filter_map(|item| match item {
-            Item::Func(f) => Some(Item::Func(f.clone())),
-            Item::Struct(s) => Some(Item::Struct(clone_struct(s))),
-            Item::Enum(e) => Some(Item::Enum(clone_enum(e))),
-            Item::Trait(t) => Some(Item::Trait(clone_trait(t))),
-            Item::Tag(t) => Some(Item::Tag(clone_tag(t))),
-            Item::Impl(i) => Some(Item::Impl(clone_impl(i))),
-            Item::ErrorConv(ec) => Some(Item::ErrorConv(clone_error_conv(ec))),
-            Item::Test(test) => Some(Item::Test(clone_test(test))),
-            Item::Bench(bench) => Some(Item::Bench(clone_bench(bench))),
-            Item::Const(c) => Some(Item::Const(crate::AST::ConstDef {
-                span: c.span,
-                name: c.name.clone(),
-                name_span: c.name_span,
-                value: c.value.clone(),
-                meta: c.meta.clone(),
-                attrs: c.attrs.clone(),
-                rust_kind: c.rust_kind,
-                is_comptime: c.is_comptime,
-                ct: c.ct.clone(),
-                ty: c.ty.clone(),
-                is_persist: c.is_persist,
-                persist_span: c.persist_span,
-            })),
-            Item::CodeModule(module) => Some(Item::CodeModule(CodeModule {
-                name: module.name.clone(),
-                name_span: module.name_span,
-                is_pub: module.is_pub,
-                is_package_pub: module.is_package_pub,
-                body: module.body.as_ref().map(|body| {
-                    body.iter()
-                        .filter_map(|item| clone_generic_body_item(item, non_fn_kinds))
-                        .collect()
-                }),
-                web_target: module.web_target,
-                instance_identity: module.instance_identity.clone(),
-                span: module.span,
-            })),
-            Item::GenericModule(module) => Some(Item::GenericModule(clone_generic_module_def(
-                module,
-                non_fn_kinds,
-            ))),
-            Item::ModuleAlias(alias) => Some(Item::ModuleAlias(ModuleAliasDef {
-                name: alias.name.clone(),
-                name_span: alias.name_span,
-                is_pub: alias.is_pub,
-                is_package_pub: alias.is_package_pub,
-                target: alias.target.clone(),
-                target_span: alias.target_span,
-                args: alias.args.clone(),
-                span: alias.span,
-            })),
-            _ => {
-                non_fn_kinds.push("item");
-                None
-            }
-        })
-        .collect();
-    GenericModuleDef {
-        name: gm.name.clone(),
-        name_span: gm.name_span,
-        is_pub: gm.is_pub,
-        is_package_pub: gm.is_package_pub,
-        params: gm.params.clone(),
-        body,
-        span: gm.span,
-    }
-}
-
-fn clone_generic_body_item(
-    item: &Item,
-    non_fn_kinds: &mut Vec<&'static str>,
-) -> Option<Item> {
-    match item {
-        Item::Func(def) => Some(Item::Func(def.clone())),
-        Item::Struct(def) => Some(Item::Struct(clone_struct(def))),
-        Item::Enum(def) => Some(Item::Enum(clone_enum(def))),
-        Item::Trait(def) => Some(Item::Trait(clone_trait(def))),
-        Item::Tag(def) => Some(Item::Tag(clone_tag(def))),
-        Item::Impl(def) => Some(Item::Impl(clone_impl(def))),
-        Item::ErrorConv(def) => Some(Item::ErrorConv(clone_error_conv(def))),
-        Item::Test(def) => Some(Item::Test(clone_test(def))),
-        Item::Bench(def) => Some(Item::Bench(clone_bench(def))),
-        Item::Const(_) => clone_definition_items(std::slice::from_ref(item)).pop(),
-        Item::CodeModule(module) => Some(Item::CodeModule(CodeModule {
-            name: module.name.clone(), name_span: module.name_span,
-            is_pub: module.is_pub, is_package_pub: module.is_package_pub,
-            body: module.body.as_ref().map(|body| body.iter().filter_map(|item| clone_generic_body_item(item, non_fn_kinds)).collect()),
-            web_target: module.web_target, instance_identity: module.instance_identity.clone(), span: module.span,
-        })),
-        Item::GenericModule(module) => Some(Item::GenericModule(clone_generic_module_def(module, non_fn_kinds))),
-        Item::ModuleAlias(alias) => Some(Item::ModuleAlias(ModuleAliasDef { name: alias.name.clone(), name_span: alias.name_span, is_pub: alias.is_pub, is_package_pub: alias.is_package_pub, target: alias.target.clone(), target_span: alias.target_span, args: alias.args.clone(), span: alias.span })),
-        _ => { non_fn_kinds.push("item"); None }
-    }
+fn clone_generic_module_def(gm: &GenericModuleDef) -> GenericModuleDef {
+    gm.clone()
 }
 
 struct AliasExpansion {
@@ -1129,8 +1025,7 @@ fn specialize_nested_template_outer(
     types: &HashMap<String, Type>,
     values: &HashMap<String, crate::AST::CtValue>,
 ) -> GenericModuleDef {
-    let mut dropped = Vec::new();
-    let mut result = clone_generic_module_def(source, &mut dropped);
+    let mut result = clone_generic_module_def(source);
     result.body = result.body.into_iter().map(|item| match item {
         Item::Func(func) => Item::Func(specialize_func(func, &[], &[], types, values)),
         Item::Struct(def) => Item::Struct(specialize_struct(&def, "", &[], &[], types, values)),
@@ -1197,6 +1092,27 @@ fn instance_identity(key: &ModuleInstanceKey, template: &TemplateInfo) -> crate:
     crate::AST::ModuleInstanceIdentity {
         full_key,
         fingerprint: crate::SHA256::sha256_hex(&input),
+    }
+}
+
+fn register_instance_fingerprint(
+    registry: &mut HashMap<String, Vec<u8>>,
+    identity: &crate::AST::ModuleInstanceIdentity,
+    span: Span,
+) {
+    if let Some(previous) = registry.get(&identity.fingerprint) {
+        if previous != &identity.full_key {
+            let hex = |bytes: &[u8]| bytes.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+            jet_foundation::ice!(
+                Some(span),
+                "E0859 generic module instance fingerprint collision: digest={} first-full-key={} second-full-key={}; compilation stopped before codegen",
+                identity.fingerprint,
+                hex(previous),
+                hex(&identity.full_key),
+            );
+        }
+    } else {
+        registry.insert(identity.fingerprint.clone(), identity.full_key.clone());
     }
 }
 
@@ -1461,23 +1377,6 @@ fn expand_alias(
         ));
         return None;
     }
-    // Emit E0854 for each non-Func item kind that was in the original template.
-    for kind in &info.non_fn_kinds {
-        diags.push(Diagnostic::error(
-            "E0854",
-            format!(
-                "generic module `{}` contains a `{}` item, which cannot be instantiated yet",
-                template.name, kind
-            ),
-            "generic module bodies currently support only `fn` items".to_string(),
-            "move structs/enums outside the generic module and pass them as type params"
-                .to_string(),
-            Some(alias.span),
-        ));
-    }
-    if !info.non_fn_kinds.is_empty() {
-        return None;
-    }
     let resolved_args = match resolved_args {
         Some(args) => args,
         None => resolve_args(alias, info, traits, funcs, globals, enums, diags)?,
@@ -1696,9 +1595,8 @@ fn expand_alias(
             let Item::Func(def) = item else { return None }; Some((def.name.clone(), def))
         }).collect();
         let nested_templates: HashMap<String, TemplateInfo> = nested_defs.iter().map(|def| {
-            let mut dropped = Vec::new();
-            (def.name.clone(), TemplateInfo { def: clone_generic_module_def(def, &mut dropped), definition_id: format!("{}::{}", alias.name, def.name),
-                non_fn_kinds: dropped, params: resolve_params(def, &nested_traits, &nested_enums, diags),
+            (def.name.clone(), TemplateInfo { def: clone_generic_module_def(def), definition_id: format!("{}::{}", alias.name, def.name),
+                params: resolve_params(def, &nested_traits, &nested_enums, diags),
                 source_module: consumer_module, source_items: Vec::new(), source_values: definition_values.clone() })
         }).collect();
         let nested_alias_defs: Vec<ModuleAliasDef> = template.body.iter().filter_map(|item| {
@@ -1958,13 +1856,11 @@ pub(crate) fn expand_generic_module_aliases(
                 .iter()
                 .filter_map(|item| match item {
                     Item::GenericModule(gm) => {
-                        let mut non_fn_kinds = Vec::new();
                         Some((
                             gm.name.clone(),
                             TemplateInfo {
-                                def: clone_generic_module_def(gm, &mut non_fn_kinds),
+                                def: clone_generic_module_def(gm),
                                 definition_id: format!("{}::{}::{}", package_identity, module.path.to_string_lossy().replace('\\', "/"), gm.name),
-                                non_fn_kinds,
                                 params: resolve_params(gm, &traits, &enums, diags),
                                 source_module,
                                 source_items: clone_definition_items(&source_items),
@@ -2127,21 +2023,7 @@ pub(crate) fn expand_generic_module_aliases(
                 }
                 if let Some(mut cm) = expand_alias(&resolved, module_idx, &templates, diags,&traits,&funcs,&globals,&enums, Some(args)) {
                     let identity = instance_identity(&key, info);
-                    if let Some(previous) = fingerprint_keys.get(&identity.fingerprint) {
-                        if previous != &identity.full_key {
-                            diags.push(Diagnostic::error(
-                                "E0859",
-                                "generic module instance fingerprint collision".to_string(),
-                                "two different full instance keys produced the same digest; continuing could reuse the wrong nominal type".to_string(),
-                                "report this internal compiler error; Jet stops instead of choosing either instance".to_string(),
-                                Some(alias.span),
-                            ));
-                            invalid_aliases.insert(alias.name.clone());
-                            continue;
-                        }
-                    } else {
-                        fingerprint_keys.insert(identity.fingerprint.clone(), identity.full_key.clone());
-                    }
+                    register_instance_fingerprint(&mut fingerprint_keys, &identity, alias.span);
                     cm.module.instance_identity = Some(identity);
                     bundle_instance_nominals.insert(alias.name.clone(), cm.declarations.iter().filter_map(|item| match item {
                         Item::Struct(def) => Some(def.name.clone()),
@@ -5086,4 +4968,53 @@ fn property_param_unsupported(ty: &Type, span: Span) -> Option<Diagnostic> {
         "use a generatable type (Int, Float, Bool, String, Char, a sized integer, or a list/optional of those), or write a plain `#Test \"name\" { … }` block and construct the value yourself".to_string(),
         Some(span),
     ))
+}
+
+#[cfg(test)]
+mod instance_collision_tests {
+    use super::*;
+
+    #[test]
+    #[should_panic(expected = "internal compiler error: E0859 generic module instance fingerprint collision")]
+    fn different_full_keys_with_same_digest_fail_closed_before_codegen() {
+        let mut registry = HashMap::new();
+        let first = crate::AST::ModuleInstanceIdentity { full_key: vec![1], fingerprint: "forced-digest".into() };
+        let second = crate::AST::ModuleInstanceIdentity { full_key: vec![2], fingerprint: "forced-digest".into() };
+        register_instance_fingerprint(&mut registry, &first, Span::new(1, 2));
+        register_instance_fingerprint(&mut registry, &second, Span::new(3, 4));
+    }
+
+    #[test]
+    fn generic_template_snapshot_never_filters_parser_admitted_items() {
+        let source = r#"
+module Everything<T> {
+    const answer = 42
+    tag Marked;
+    trait Show { fn show(self) -> T }
+    struct Boxed { value: T }
+    enum Maybe { Empty Value(T) }
+    impl Boxed.Show { fn show(self) -> T { return self.value } }
+    fn id(value: T) -> T { return copy value }
+    module Nested { fn nested() {} }
+    module Inner<U> { fn inner(value: U) -> U { return copy value } }
+    module IntInner = Inner<Int>
+    #Test("smoke") { expect(answer == 42) }
+    #Bench("work") { expect(answer == 42) }
+}
+fn run() {}
+"#;
+        let (tokens, lex) = crate::Lexer::lex(source);
+        assert!(lex.is_empty(), "{lex:?}");
+        let program = crate::Parser::parse(&tokens).expect("parser-admitted generic body");
+        let template = program.items.iter().find_map(|item| match item {
+            Item::GenericModule(template) => Some(template),
+            _ => None,
+        }).expect("generic template");
+        let snapshot = clone_generic_module_def(template);
+        assert_eq!(snapshot.body.len(), template.body.len());
+        assert_eq!(
+            crate::CanonicalAST::canonical_fragment(&snapshot.body),
+            crate::CanonicalAST::canonical_fragment(&template.body),
+        );
+    }
 }

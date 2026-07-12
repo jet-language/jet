@@ -42,8 +42,17 @@ pub mod JSON;
 pub mod LintPolicy;
 pub mod Lock;
 pub mod Manifest;
+// Card #367 slice 4: `Merge` (§6 structural merge, pure/std-only) sunk from
+// `jetpack` — `ModuleEval` (jet-env-model, L2) and both realizers need it, so
+// it belongs at the plan-model's foundation, not inside one engine crate.
+pub mod Merge;
 pub mod PackageManifest;
 pub mod Platform;
+// Card #367 slice 4: the `BuildRecipe`/`BuildStep` *data* shape only — the
+// build engine (validate/run/fetch/exec/sandbox) stays in `jetpack`'s
+// `Recipe.rs`, which imports these types from here (data-down / engine-up,
+// same pattern as `EffectBudget`/`LintPolicy`).
+pub mod Recipe;
 pub mod RefSpec;
 pub mod ScriptDeps;
 pub mod Store;

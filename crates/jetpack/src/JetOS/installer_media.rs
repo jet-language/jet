@@ -9,7 +9,7 @@ use super::iso_vm_commands::build_hybrid_iso;
 use super::root_projection::copy_dir_recursive_deref;
 use super::types::Generation;
 use super::vm_proof::vm_tools_json;
-use crate::ModuleEval::SystemPlan;
+use jet_env_model::ModuleEval::SystemPlan;
 use crate::JSON;
 use std::fs;
 use std::path::{Path, PathBuf};

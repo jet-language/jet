@@ -1,6 +1,6 @@
 use super::options_rendering::{clean_symbol, option_value};
 use super::types::{GNOME_DESKTOP_PACKAGES, OsFlags};
-use crate::ModuleEval::SystemPlan;
+use jet_env_model::ModuleEval::SystemPlan;
 use crate::Output::Theme;
 use crate::Provider;
 use crate::RefSpec;

@@ -6,7 +6,7 @@ use super::options_rendering::{
 use super::root_projection::copy_file_replace;
 use super::store_realize::RealizedPackage;
 use super::types::CACHYOS_KERNEL_PACKAGE;
-use crate::ModuleEval::SystemPlan;
+use jet_env_model::ModuleEval::SystemPlan;
 use crate::JSON;
 use std::fs;
 use std::path::{Path, PathBuf};

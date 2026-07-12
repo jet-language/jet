@@ -13,7 +13,7 @@ use super::vm_proof::{
     require_real_vm_tools, require_vm_run_proof, run_interactive_vm_command, run_vmtest,
     write_vm_install_plan,
 };
-use crate::ModuleEval::{EnvPlan, SystemPlan};
+use jet_env_model::ModuleEval::{EnvPlan, SystemPlan};
 use crate::Output::Theme;
 use crate::Syntax;
 use std::path::Path;

@@ -1,7 +1,7 @@
 use super::entry::default_config_path;
 use super::options_rendering::user_names;
 use super::types::Target;
-use crate::ModuleEval::{self, EnvPlan, SystemPlan};
+use jet_env_model::ModuleEval::{self, EnvPlan, SystemPlan};
 use crate::Output::Theme;
 use crate::Syntax;
 use std::fs;

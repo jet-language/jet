@@ -8,7 +8,7 @@ use super::root_projection::{copy_file_replace, enable_unit};
 use super::store_realize::RealizedPackage;
 use super::studio_projection::make_executable;
 use super::types::SYSTEMD_INIT_PACKAGE;
-use crate::ModuleEval::SystemPlan;
+use jet_env_model::ModuleEval::SystemPlan;
 use crate::JSON;
 use std::fs;
 use std::path::{Path, PathBuf};
