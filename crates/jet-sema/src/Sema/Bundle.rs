@@ -1333,7 +1333,49 @@ pub(crate) fn expand_generic_module_aliases(
     bundle: &mut ProgramBundle,
     diags: &mut Vec<Diagnostic>,
 ) {
-    for module in bundle.modules.iter_mut() {
+    let template_snapshots: Vec<HashMap<String, TemplateInfo>> = bundle
+        .modules
+        .iter()
+        .enumerate()
+        .map(|(source_module, module)| {
+            let mut traits = TraitRegistry::default();
+            traits.register_items(&module.items, diags);
+            let enums: HashMap<String, bool> = module
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    Item::Enum(def) => Some((
+                        def.name.clone(),
+                        def.variants
+                            .iter()
+                            .all(|variant| matches!(variant.payload, VariantPayload::Unit)),
+                    )),
+                    _ => None,
+                })
+                .collect();
+            module
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    Item::GenericModule(gm) => {
+                        let mut non_fn_kinds = Vec::new();
+                        Some((
+                            gm.name.clone(),
+                            TemplateInfo {
+                                def: clone_generic_module_def(gm, &mut non_fn_kinds),
+                                non_fn_kinds,
+                                params: resolve_params(gm, &traits, &enums, diags),
+                                source_module,
+                            },
+                        ))
+                    }
+                    _ => None,
+                })
+                .collect()
+        })
+        .collect();
+
+    for (module_idx, module) in bundle.modules.iter_mut().enumerate() {
         if report_generic_module_cycles(&module.items, diags) {
             continue;
         }
@@ -1342,7 +1384,7 @@ pub(crate) fn expand_generic_module_aliases(
         let funcs:HashMap<String,&Func>=module.items.iter().filter_map(|item|if let Item::Func(f)=item{Some((f.name.clone(),f))}else{None}).collect();
         let mut globals:HashMap<String,crate::AST::CtValue>=HashMap::new();for item in &module.items{if let Item::Const(c)=item{if let Ok(value)=crate::Comptime::evaluate(&c.value,&funcs,&HashSet::new(),Path::new("."),&globals){globals.insert(c.name.clone(),value);}}}
         // Collect templates by name, recording non-Func item kinds for E0854.
-        let templates: std::collections::HashMap<String, TemplateInfo> = module
+        let mut templates: std::collections::HashMap<String, TemplateInfo> = module
             .items
             .iter()
             .filter_map(|i| {
@@ -1388,6 +1430,7 @@ pub(crate) fn expand_generic_module_aliases(
                             },
                             non_fn_kinds,
                             params: resolve_params(gm, &traits, &enums, diags),
+                            source_module: module_idx,
                         },
                     ))
                 } else {
@@ -1395,6 +1438,33 @@ pub(crate) fn expand_generic_module_aliases(
                 }
             })
             .collect();
+
+        for import in &module.imports {
+            let ImportKind::Unqualified { items, .. } = &import.kind else {
+                continue;
+            };
+            let Some(source_idx) = bundle.import_targets.get(&(module_idx, import.span)).copied()
+            else {
+                continue;
+            };
+            for (original, alias) in items {
+                let Some(source) = template_snapshots[source_idx].get(original) else {
+                    continue;
+                };
+                let local = alias.as_deref().unwrap_or(original);
+                if !source.def.is_pub && !source.def.is_package_pub {
+                    diags.push(Diagnostic::error(
+                        "E0609",
+                        format!("`{original}` is private in module `{}`", bundle.modules[source_idx].alias),
+                        "only `pub` items can be brought into scope with `use`".to_string(),
+                        format!("add `pub` before `module {original}` in the defining file"),
+                        Some(import.span),
+                    ));
+                    continue;
+                }
+                templates.insert(local.to_string(), source.clone());
+            }
+        }
 
         let aliases: HashMap<String, &ModuleAliasDef> = module
             .items
