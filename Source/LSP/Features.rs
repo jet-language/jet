@@ -6,37 +6,24 @@ use crate::Lexer::{TokKind, Token};
 
 use super::Completion::{JET_KEYWORDS, JET_TYPES};
 use super::Position::byte_offset_to_lsp;
-use super::SymbolDB::{InlayHint, SymKind, SymbolDB};
+use super::SymbolDB::{InlayHint, SymbolDB};
 use super::JSON::json_escape;
 
 // ── Hover ─────────────────────────────────────────────────────────────────────
 
-/// B7 (D-LSP6): Collect adjacent `///` doc-comment lines immediately preceding
-/// `def_start` in the raw token stream (which includes LineComment tokens).
-fn collect_doc_comment(tokens: &[Token], def_start: usize) -> Option<String> {
-    // Find the first token at or after def_start.
-    let idx = tokens.partition_point(|t| t.span.end <= def_start);
-    let mut lines: Vec<String> = Vec::new();
-    let mut j = idx;
-    loop {
-        if j == 0 {
-            break;
-        }
-        j -= 1;
-        match &tokens[j].kind {
-            TokKind::LineComment(text) if text.starts_with("///") => {
-                let doc = text.trim_start_matches('/').trim().to_string();
-                lines.push(doc);
-            }
-            // A regular `//` comment or any non-comment token stops the search.
-            _ => break,
-        }
+fn semantic_hover(symbol: &jet_semindex::SemanticSymbol) -> String {
+    let mut out = String::new();
+    if !symbol.summary.is_empty() {
+        out.push_str(&symbol.summary);
+        out.push_str("\n\n---\n\n");
     }
-    if lines.is_empty() {
-        return None;
+    out.push_str(&symbol.signature);
+    for example in &symbol.examples {
+        out.push_str("\n\nExample: `");
+        out.push_str(example);
+        out.push('`');
     }
-    lines.reverse();
-    Some(lines.join("\n"))
+    out
 }
 
 pub(crate) fn compute_hover(
@@ -46,78 +33,29 @@ pub(crate) fn compute_hover(
     path: &str,
     offset: usize,
 ) -> Option<String> {
-    // Collect the base hover text (type signature / ownership annotation).
-    let base = if let Some(text) = db.hover_at(path, offset) {
-        text.to_string()
-    } else {
-        // Fall back: find the token at offset and look up the name.
-        let name = find_ident_at(tokens, offset)?;
-        if let Some(def) = db.defs.iter().find(|d| d.name == name) {
-            match &def.kind {
-                SymKind::Module => format!("module `{}`", name),
-                SymKind::Function { params, ret } => {
-                    let ps: Vec<String> = params
-                        .iter()
-                        .map(|(n, t)| format!("{}: {}", n, t.name()))
-                        .collect();
-                    let r = match ret {
-                        Some(t) => format!(" -> {}", t.name()),
-                        None => String::new(),
-                    };
-                    format!("fn {}({}){}", name, ps.join(", "), r)
-                }
-                SymKind::Struct { fields } => {
-                    format!(
-                        "struct `{}`\n\nFields: {}",
-                        name,
-                        fields
-                            .iter()
-                            .map(|(n, t)| format!("{}: {}", n, t.name()))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    )
-                }
-                SymKind::Enum { variants } => {
-                    format!("enum `{}`\n\nVariants: {}", name, variants.join(", "))
-                }
-                SymKind::Trait => format!("trait `{}`", name),
-                SymKind::Tag => format!("tag `{}`", name),
-                SymKind::Const => format!("const `{}`", name),
-                SymKind::EnumVariant { parent } => format!("`{}` — variant of `{}`", name, parent),
-                SymKind::Field { ty, parent } => {
-                    format!("`{}`: {} (field of `{}`)", name, ty.name(), parent)
-                }
-                SymKind::Local { mutable, ty } => match ty {
-                    Some(t) if *mutable => {
-                        format!("`{}`: {} (mutable)", name, t.name())
-                    }
-                    Some(t) => format!("`{}`: {} (immutable)", name, t.name()),
-                    None => {
-                        let kw = if *mutable { "mutable" } else { "immutable" };
-                        format!("`{}` ({})", name, kw)
-                    }
-                },
-                SymKind::Param { ty } => format!("`{}`: {} (parameter)", name, ty.name()),
-            }
-        } else {
-            return None;
-        }
-    };
-
-    // B7: prepend any `///` doc comment lines found before the definition.
-    let name = find_ident_at(tokens, offset);
-    if let Some(name) = name {
-        if let Some(def) = db
-            .defs
-            .iter()
-            .find(|d| d.name == name && d.module_path == path)
-        {
-            if let Some(doc) = collect_doc_comment(tokens, def.def_span.start) {
-                return Some(format!("{}\n\n---\n\n{}", doc, base));
+    if let Some(symbol) = db.symbols.at(path, offset) {
+        return Some(semantic_hover(symbol));
+    }
+    if let Some(reference) = db.refs.iter().find(|reference| {
+        reference.module_path == path
+            && reference.span.start <= offset
+            && offset <= reference.span.end
+    }) {
+        if let Some(target) = &reference.target {
+            if let Some(symbol) = db.symbols.symbols().iter().find(|symbol| {
+                symbol.module_path == target.module_path
+                    && symbol.span == Some(target.def_span)
+            }) {
+                return Some(semantic_hover(symbol));
             }
         }
     }
-    Some(base)
+    let name = find_ident_at(tokens, offset)?;
+    let symbols = db.symbols.lookup(name);
+    if symbols.len() == 1 {
+        return Some(semantic_hover(symbols[0]));
+    }
+    db.hover_at(path, offset).map(str::to_string)
 }
 
 fn find_ident_at<'a>(tokens: &'a [Token], offset: usize) -> Option<&'a str> {

@@ -1,6 +1,6 @@
 //! D-SEMINDEX1 integration tests for the stable semantic-index API.
 
-use jet_semindex::{open, SCHEMA_VERSION};
+use jet_semindex::{open, open_symbols, SemanticProvenance, SemanticSymbolKind, SCHEMA_VERSION};
 use std::fs;
 use std::path::PathBuf;
 
@@ -21,6 +21,98 @@ fn temp_fixture(name: &str, src: &str) -> PathBuf {
 #[test]
 fn semindex_schema_version() {
     assert_eq!(SCHEMA_VERSION, 3);
+}
+
+#[test]
+fn semantic_symbols_carry_shared_docs_and_provenance() {
+    let src = r#"
+/// Scores one name.
+/// Example: score("Ada")
+fn score(name: String) -> Int {
+    return 1
+}
+
+fn run() {
+    local_total :: score("Ada")
+    print(local_total)
+}
+"#;
+    let path = temp_fixture("semantic_docs.jet", src);
+    let symbols = open_symbols(&path).expect("semantic symbols");
+    let score = symbols
+        .lookup_identity(&format!("fn:module:{}::score", path.display()))
+        .expect("score identity");
+    assert_eq!(score.signature, "fn score(name: String) -> Int");
+    assert_eq!(score.summary, "Scores one name.");
+    assert_eq!(score.examples, vec!["score(\"Ada\")"]);
+    assert!(matches!(score.provenance, SemanticProvenance::Source { .. }));
+
+    let local = symbols.lookup("local_total");
+    assert_eq!(local.len(), 1);
+    assert_eq!(local[0].kind, SemanticSymbolKind::Local);
+}
+
+#[test]
+fn semantic_symbols_keep_module_and_member_collisions_distinct() {
+    let src = r#"
+module first {
+    struct Item {
+        value: Int
+    }
+}
+
+module second {
+    struct Item {
+        value: String
+    }
+}
+
+fn run() {}
+"#;
+    let path = temp_fixture("semantic_collisions.jet", src);
+    let symbols = open_symbols(&path).expect("semantic symbols");
+    let items = symbols.lookup("Item");
+    assert_eq!(items.len(), 2, "same spelling must retain module identity");
+    assert_ne!(items[0].identity, items[1].identity);
+    let values = symbols.lookup_member("Item", "value");
+    assert_eq!(values.len(), 2, "same member spelling must retain owner identity");
+    assert_ne!(values[0].identity, values[1].identity);
+}
+
+#[test]
+fn semantic_symbols_include_language_builtins() {
+    let path = temp_fixture("semantic_builtins.jet", "fn run() {}\n");
+    let symbols = open_symbols(&path).expect("semantic symbols");
+    let filter = symbols.lookup_qualified("List.filter").expect("List.filter");
+    assert_eq!(filter.signature, "List.filter(f: fn(T) -> Bool) -> List<T>");
+    assert_eq!(filter.summary, "Keeps items where f(item) is true.");
+    assert!(matches!(filter.provenance, SemanticProvenance::Builtin { .. }));
+    assert!(symbols.complete("fil", Some("List")).iter().any(|s| s.name == "filter"));
+}
+
+#[test]
+fn semantic_symbols_include_module_and_selected_imports() {
+    let root = std::env::temp_dir().join(format!("jet_semantic_imports_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    fs::write(
+        root.join("library.jet"),
+        "pub fn score(name: String) -> Int { return 1 }\n",
+    )
+    .unwrap();
+    let main = root.join("main.jet");
+    fs::write(
+        &main,
+        "use \"./library\" as api\nuse api.{score as imported_score}\nfn run() { print(imported_score(\"Ada\")) }\n",
+    )
+    .unwrap();
+    let symbols = open_symbols(&main).expect("import symbols");
+    assert_eq!(symbols.lookup("api").len(), 1);
+    let imported = symbols.lookup("imported_score");
+    assert_eq!(imported.len(), 1);
+    assert!(imported[0].identity.starts_with("import:"));
+    assert!(imported[0].signature.contains("score(name: String) -> Int"));
+    fs::remove_dir_all(root).ok();
 }
 
 #[test]

@@ -40,7 +40,7 @@ mod ck {
 pub(crate) struct CompletionItem {
     pub(crate) label: String,
     kind: u8,
-    detail: Option<String>,
+    pub(crate) detail: Option<String>,
     insert_text: Option<String>,
     insert_text_format: u8, // 1=plain, 2=snippet
     /// D-LSP5: import statement to insert at top of file (auto-import).
@@ -182,20 +182,29 @@ fn context_allows_keyword(src: &str, offset: usize, kw: &str) -> bool {
     )
 }
 
-fn function_detail(name: &str, params: &[(String, AST::Type)], ret: &Option<AST::Type>) -> String {
-    let mut out = format!(
-        "fn {}({})",
-        name,
-        params
-            .iter()
-            .map(|(n, t)| format!("{}: {}", n, t.name()))
-            .collect::<Vec<_>>()
-            .join(", ")
-    );
-    if let Some(ret) = ret {
-        out.push_str(&format!(" -> {}", ret.name()));
+fn semantic_owner(ty: &AST::Type) -> Option<String> {
+    match ty {
+        AST::Type::Named(name) => Some(name.clone()),
+        AST::Type::List(_) | AST::Type::FixedList { .. } => Some("List".to_string()),
+        AST::Type::Map { .. } => Some("Map".to_string()),
+        AST::Type::String => Some("String".to_string()),
+        _ => None,
     }
-    out
+}
+
+fn semantic_completion_kind(symbol: &jet_semindex::SemanticSymbol) -> u8 {
+    use jet_semindex::SemanticSymbolKind;
+    match symbol.kind {
+        SemanticSymbolKind::Module => ck::MODULE,
+        SemanticSymbolKind::Function if symbol.owner.is_some() => ck::METHOD,
+        SemanticSymbolKind::Function => ck::FUNCTION,
+        SemanticSymbolKind::Type => ck::CLASS,
+        SemanticSymbolKind::Member => ck::FIELD,
+        SemanticSymbolKind::Constant => ck::CONSTANT,
+        SemanticSymbolKind::Local | SemanticSymbolKind::Parameter => ck::VARIABLE,
+        SemanticSymbolKind::Keyword => ck::KEYWORD,
+        SemanticSymbolKind::Command => ck::VALUE,
+    }
 }
 
 pub(crate) fn compute_completions(
@@ -252,76 +261,26 @@ pub(crate) fn compute_completions(
 
     // Member completion: `expr.`
     if let Some(receiver_name) = context_is_member_access(src, offset) {
-        // Find the type of receiver_name from DB
-        for def in &db.defs {
-            if def.name == receiver_name {
-                match &def.kind {
-                    SymKind::Struct { fields } => {
-                        for (fname, fty) in fields {
-                            if seen.insert(fname.clone()) {
-                                items.push(CompletionItem {
-                                    label: fname.clone(),
-                                    kind: ck::FIELD,
-                                    detail: Some(fty.name()),
-                                    insert_text: None,
-                                    insert_text_format: 1,
-                                    auto_import: None,
-                                });
-                            }
-                        }
-                    }
-                    SymKind::Local {
-                        ty: Some(AST::Type::Named(tn)),
-                        ..
-                    }
-                    | SymKind::Param {
-                        ty: AST::Type::Named(tn),
-                    } => {
-                        // look up tn's fields/methods
-                        let tn = tn.clone();
-                        for td in &db.defs {
-                            if td.name == tn {
-                                if let SymKind::Struct { fields } = &td.kind {
-                                    for (fname, fty) in fields {
-                                        if seen.insert(fname.clone()) {
-                                            items.push(CompletionItem {
-                                                label: fname.clone(),
-                                                kind: ck::FIELD,
-                                                detail: Some(fty.name()),
-                                                insert_text: None,
-                                                insert_text_format: 1,
-                                                auto_import: None,
-                                            });
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    _ => {}
+        let owner = db.defs.iter().find(|def| def.name == receiver_name).and_then(|def| {
+            match &def.kind {
+                SymKind::Struct { .. } => Some(def.name.clone()),
+                SymKind::Local { ty: Some(ty), .. } | SymKind::Param { ty } => semantic_owner(ty),
+                _ => None,
+            }
+        });
+        if let Some(owner) = owner {
+            let prefix = current_identifier_prefix(src, offset);
+            for symbol in db.symbols.complete(&prefix, Some(&owner)) {
+                if seen.insert(symbol.identity.clone()) {
+                    items.push(CompletionItem {
+                        label: symbol.name.clone(),
+                        kind: semantic_completion_kind(symbol),
+                        detail: Some(symbol.signature.clone()),
+                        insert_text: None,
+                        insert_text_format: 1,
+                        auto_import: None,
+                    });
                 }
-                // Also add methods
-                for md in &db.defs {
-                    if let SymKind::Function { params, ret } = &md.kind {
-                        if params.first().map(|(n, _)| n.as_str()) == Some("self")
-                            || md.module_path == def.module_path
-                        {
-                            // heuristic: include all methods in same module
-                            if seen.insert(format!("m:{}", md.name)) {
-                                let detail = function_detail(&md.name, params, ret);
-                                items.push(CompletionItem {
-                                    label: md.name.clone(),
-                                    kind: ck::METHOD,
-                                    detail: Some(detail),
-                                    insert_text: None,
-                                    insert_text_format: 1,
-                                    auto_import: None,
-                                });
-                            }
-                        }
-                    }
-                }
-                return items;
             }
         }
         return items;
@@ -368,142 +327,32 @@ pub(crate) fn compute_completions(
         Some(statement)
     };
 
-    // All top-level definitions
-    for def in &db.defs {
-        match &def.kind {
-            SymKind::Function { params, ret } => {
-                if seen.insert(def.name.clone()) {
-                    let detail = function_detail(&def.name, params, ret);
-                    items.push(CompletionItem {
-                        label: def.name.clone(),
-                        kind: ck::FUNCTION,
-                        detail: Some(detail),
-                        insert_text: None,
-                        insert_text_format: 1,
-                        auto_import: auto_import_for(&def.module_path),
-                    });
-                }
-            }
-            SymKind::Struct { .. } => {
-                if seen.insert(def.name.clone()) {
-                    items.push(CompletionItem {
-                        label: def.name.clone(),
-                        kind: ck::STRUCT,
-                        detail: Some(format!("struct {}", def.name)),
-                        insert_text: None,
-                        insert_text_format: 1,
-                        auto_import: auto_import_for(&def.module_path),
-                    });
-                }
-            }
-            SymKind::Enum { variants } => {
-                if seen.insert(def.name.clone()) {
-                    items.push(CompletionItem {
-                        label: def.name.clone(),
-                        kind: ck::ENUM,
-                        detail: Some(format!(
-                            "enum {} — variants: {}",
-                            def.name,
-                            variants.join(", ")
-                        )),
-                        insert_text: None,
-                        insert_text_format: 1,
-                        auto_import: auto_import_for(&def.module_path),
-                    });
-                }
-            }
-            SymKind::Const => {
-                if seen.insert(def.name.clone()) {
-                    items.push(CompletionItem {
-                        label: def.name.clone(),
-                        kind: ck::CONSTANT,
-                        detail: None,
-                        insert_text: None,
-                        insert_text_format: 1,
-                        auto_import: auto_import_for(&def.module_path),
-                    });
-                }
-            }
-            SymKind::Trait => {
-                if seen.insert(def.name.clone()) {
-                    items.push(CompletionItem {
-                        label: def.name.clone(),
-                        kind: ck::INTERFACE,
-                        detail: Some(format!("trait {}", def.name)),
-                        insert_text: None,
-                        insert_text_format: 1,
-                        auto_import: auto_import_for(&def.module_path),
-                    });
-                }
-            }
-            SymKind::Tag => {
-                if seen.insert(def.name.clone()) {
-                    items.push(CompletionItem {
-                        label: def.name.clone(),
-                        kind: ck::INTERFACE,
-                        detail: Some(format!("tag {}", def.name)),
-                        insert_text: None,
-                        insert_text_format: 1,
-                        auto_import: auto_import_for(&def.module_path),
-                    });
-                }
-            }
-            SymKind::Local { mutable: _, ty } => {
-                if seen.insert(def.name.clone()) {
-                    let detail = ty.as_ref().map(|t| t.name());
-                    items.push(CompletionItem {
-                        label: def.name.clone(),
-                        kind: ck::VARIABLE,
-                        detail,
-                        insert_text: None,
-                        insert_text_format: 1,
-                        auto_import: None,
-                    });
-                }
-            }
-            SymKind::Param { ty } => {
-                if seen.insert(def.name.clone()) {
-                    items.push(CompletionItem {
-                        label: def.name.clone(),
-                        kind: ck::VARIABLE,
-                        detail: Some(ty.name()),
-                        insert_text: None,
-                        insert_text_format: 1,
-                        auto_import: None,
-                    });
-                }
-            }
-            _ => {}
-        }
-    }
-
-    // Keywords
-    for kw in JET_KEYWORDS {
-        if !context_allows_keyword(src, offset, kw) {
+    for symbol in db.symbols.symbols().iter().filter(|symbol| symbol.owner.is_none()) {
+        if symbol.kind == jet_semindex::SemanticSymbolKind::Keyword
+            && (!context_allows_keyword(src, offset, &symbol.name)
+                || db.symbols.symbols().iter().any(|candidate| {
+                    candidate.owner.is_none()
+                        && candidate.name == symbol.name
+                        && candidate.kind != jet_semindex::SemanticSymbolKind::Keyword
+                }))
+        {
             continue;
         }
-        if seen.insert(format!("kw:{}", kw)) {
+        if seen.insert(symbol.identity.clone()) {
             items.push(CompletionItem {
-                label: kw.to_string(),
-                kind: ck::KEYWORD,
-                detail: None,
+                label: symbol.name.clone(),
+                kind: semantic_completion_kind(symbol),
+                detail: Some(symbol.signature.clone()),
                 insert_text: None,
                 insert_text_format: 1,
-                auto_import: None,
-            });
-        }
-    }
-
-    // Built-in types
-    for ty in JET_TYPES {
-        if seen.insert(format!("ty:{}", ty)) {
-            items.push(CompletionItem {
-                label: ty.to_string(),
-                kind: ck::CLASS,
-                detail: Some("built-in type".to_string()),
-                insert_text: None,
-                insert_text_format: 1,
-                auto_import: None,
+                auto_import: match symbol.provenance {
+                    jet_semindex::SemanticProvenance::Source { .. }
+                        if !matches!(symbol.kind, jet_semindex::SemanticSymbolKind::Local | jet_semindex::SemanticSymbolKind::Parameter) =>
+                    {
+                        auto_import_for(&symbol.module_path)
+                    }
+                    _ => None,
+                },
             });
         }
     }

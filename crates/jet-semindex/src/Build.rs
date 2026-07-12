@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 use crate::Json::{convert_defs, convert_effects, convert_refs};
 use crate::Types::{CallEdge, DefinitionAnchor, MemberFact, MemberKind, MemberOrigin, SemIndex, StructuralNode, StructuralSlotKind};
+use crate::Symbols::{build_semantic_symbol_index, SemanticSymbolIndex};
 
 /// The semantic kind of a defined symbol (LSP-facing; uses AST types internally).
 #[derive(Debug, Clone)]
@@ -90,6 +91,7 @@ pub struct SymbolDB {
     pub hover: Vec<HoverEntry>,
     pub inlay: Vec<InlayHint>,
     pub nodes: Vec<StructuralNode>,
+    pub symbols: SemanticSymbolIndex,
 }
 
 struct CallerFrame {
@@ -121,6 +123,7 @@ impl SymbolDB {
             hover: Vec::new(),
             inlay: Vec::new(),
             nodes: Vec::new(),
+            symbols: SemanticSymbolIndex::language(),
         }
     }
 
@@ -441,6 +444,7 @@ pub fn build_symbol_db(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> S
     }
     add_breadcrumb_hints(&mut db);
     db.finalize_index(facts);
+    db.symbols = build_semantic_symbol_index(&db, bundle);
     db
 }
 

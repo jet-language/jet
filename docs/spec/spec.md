@@ -1937,6 +1937,24 @@ Ctrl-C received while that turn is still stopping exits the REPL. Outside
 evaluation, Ctrl-C keeps its editor behavior: clear nonempty input first;
 exit from an empty prompt.
 
+## Semantic assistance
+
+REPL documentation and completion, LSP hover and completion, and `jet ?` help
+project their facts from `jet-semindex`'s shared semantic symbol index. A
+symbol fact carries stable module/member identity, kind, signature, summary,
+examples, provenance, and source span where one exists. Checked definitions,
+members, parameters, locals, imports, and aliases retain their semantic
+identity; equal spellings in different modules or on different owners remain
+distinct. Language builtins live in the same index rather than consumer-local
+tables. `jet ?` command facts use the same model, with search categories,
+flags, and cross-links kept as presentation metadata.
+
+Raw-terminal REPL completion inserts a unique match immediately. Multiple
+matches open a selectable list: Up and Down change selection, Tab advances,
+Enter inserts, and Escape closes the list. Cooked terminals and `NO_COLOR`
+use the same candidates with a textual selection marker; ANSI styling is not
+required to discover or choose an item.
+
 ## REPL history
 
 The REPL keeps the latest 2,000 successful submissions between sessions

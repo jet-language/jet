@@ -417,7 +417,7 @@ fn read_line<R: Read>(
                 }
             }
             Key::Tab => {
-                if apply_completion(&mut buf, &mut cursor, session, color) {
+                if apply_completion(reader, &mut buf, &mut cursor, session, color) {
                     display = EditorDisplay::default();
                 }
             }
@@ -749,13 +749,33 @@ mod display_tests {
         assert_eq!(geometry.cursor.row, 1);
         assert_eq!(geometry.cursor.column, 1);
     }
+
+    #[test]
+    fn completion_menu_has_textual_no_color_selection() {
+        let candidates = vec![jet_semindex::SemanticSymbol {
+            identity: "session:binding:alpha".to_string(),
+            name: "alpha".to_string(),
+            qualified_name: "alpha".to_string(),
+            owner: None,
+            module_path: "this session".to_string(),
+            kind: jet_semindex::SemanticSymbolKind::Local,
+            signature: "alpha :: <Int>".to_string(),
+            summary: String::new(),
+            examples: Vec::new(),
+            provenance: jet_semindex::SemanticProvenance::Session,
+            span: None,
+        }];
+        let menu = completion_menu(&candidates, 0, false);
+        assert!(menu.contains("> alpha"));
+        assert!(!menu.contains("\x1b[7m"));
+    }
 }
 
-/// Tab completion: bare-identifier prefix over session bindings/functions,
-/// or (after a `.`) builtin member names for the receiver's live type —
-/// sourced from `Docs::BUILTIN_DOCS`, the same table `?name` reads, so the
-/// completion menu and its docs never drift apart (I8).
-fn apply_completion(
+/// Tab completion over the same semantic facts as `?name`, LSP, and help.
+/// Multiple matches open a selectable raw list; NO_COLOR keeps textual `>`
+/// selection markers. Single matches insert immediately.
+fn apply_completion<R: Read>(
+    reader: &mut KeyReader<R>,
     buf: &mut Vec<char>,
     cursor: &mut usize,
     session: &Session,
@@ -771,7 +791,9 @@ fn apply_completion(
             session
                 .scope
                 .get(receiver)
-                .map(|v| Docs::method_candidates(super::type_name(v), partial))
+                .map(|v| {
+                    Docs::completion_candidates(session, partial, Some(super::type_name(v)))
+                })
                 .unwrap_or_default()
         } else {
             Vec::new()
@@ -786,16 +808,7 @@ fn apply_completion(
         if partial.is_empty() {
             (start, Vec::new())
         } else {
-            let mut names: Vec<String> = session
-                .scope
-                .keys()
-                .chain(session.func_defs.keys())
-                .filter(|n| n.starts_with(partial))
-                .cloned()
-                .collect();
-            names.sort();
-            names.dedup();
-            (start, names)
+            (start, Docs::completion_candidates(session, partial, None))
         }
     };
 
@@ -803,18 +816,57 @@ fn apply_completion(
         return false;
     }
     if candidates.len() == 1 {
-        insert_completion(buf, cursor, replace_start, &candidates[0]);
+        insert_completion(buf, cursor, replace_start, &candidates[0].name);
         return false;
     }
-    // Shell-style: complete to the longest common prefix, then list matches
-    // once beneath the line (redrawn away on the next keystroke).
-    let common = longest_common_prefix(&candidates);
+    let names = candidates.iter().map(|symbol| symbol.name.clone()).collect::<Vec<_>>();
+    let common = longest_common_prefix(&names);
     let already: String = buf[replace_start..*cursor].iter().collect();
     if common.len() > already.len() {
         insert_completion(buf, cursor, replace_start, &common);
     }
-    print!("\r\n{}\r\n", dim(&candidates.join("   "), color));
+    print!("\r\n");
+    if let Some(selected) = select_completion(reader, &candidates, color) {
+        insert_completion(buf, cursor, replace_start, &selected.name);
+    }
     true
+}
+
+fn completion_menu(candidates: &[jet_semindex::SemanticSymbol], selected: usize, color: bool) -> String {
+    let mut out = String::from("completion — ↑↓ move · Tab next · Enter insert · Esc close\r\n");
+    for (index, symbol) in candidates.iter().enumerate() {
+        let marker = if index == selected { ">" } else { " " };
+        let line = format!("{marker} {:<20} {}", symbol.qualified_name, symbol.signature);
+        if index == selected && color {
+            out.push_str(&format!("\x1b[7m{line}\x1b[0m\r\n"));
+        } else {
+            out.push_str(&line);
+            out.push_str("\r\n");
+        }
+    }
+    out
+}
+
+fn select_completion<R: Read>(
+    reader: &mut KeyReader<R>,
+    candidates: &[jet_semindex::SemanticSymbol],
+    color: bool,
+) -> Option<jet_semindex::SemanticSymbol> {
+    let mut selected = 0usize;
+    let rows = candidates.len() + 1;
+    loop {
+        print!("{}", completion_menu(candidates, selected, color));
+        io::stdout().flush().ok();
+        match reader.read_key() {
+            Key::Up => selected = (selected + candidates.len() - 1) % candidates.len(),
+            Key::Down | Key::Tab => selected = (selected + 1) % candidates.len(),
+            Key::Enter => return Some(candidates[selected].clone()),
+            Key::Escape | Key::CtrlC | Key::Eof => return None,
+            Key::Idle => continue,
+            _ => {}
+        }
+        print!("\x1b[{rows}A\r\x1b[J");
+    }
 }
 
 fn insert_completion(buf: &mut Vec<char>, cursor: &mut usize, replace_start: usize, completion: &str) {

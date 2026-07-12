@@ -1383,6 +1383,38 @@ fn repl_tty_second_ctrl_c_during_turn_exits_session() {
     assert!(!transcript.contains("42 : Int"), "REPL accepted input after double interrupt: {transcript}");
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn repl_raw_completion_menu_selects_shared_symbol() {
+    use std::process::Command;
+
+    let shell = r#"
+{
+  sleep 0.2
+  printf 'alpha :: 1\r'
+  sleep 0.1
+  printf 'alpine :: 2\r'
+  sleep 0.1
+  printf 'al\t\033[B\r\r'
+  sleep 0.2
+  printf ':quit\r'
+} | timeout 5s script -qec '"$JET_REPL_BIN" repl' /dev/null
+"#;
+    let output = Command::new("sh")
+        .args(["-c", shell])
+        .env("JET_REPL_BIN", env!("CARGO_BIN_EXE_jet"))
+        .env("JET_REPL_HISTORY", "off")
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let transcript = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "completion PTY failed: {transcript}");
+    assert!(transcript.contains("completion —"), "selection menu missing: {transcript}");
+    assert!(transcript.contains("> alpha") && transcript.contains("> alpine"), "selection did not move: {transcript}");
+    assert!(transcript.contains("2 : Int"), "selected symbol was not inserted: {transcript}");
+    assert!(!transcript.contains("\x1b[7m"), "NO_COLOR completion used color: {transcript:?}");
+}
+
 #[test]
 fn repl_non_tty_denies_ungranted_files_before_execution() {
     let root = std::env::temp_dir().join(format!("jet_repl_deny_{}", std::process::id()));
@@ -1658,10 +1690,11 @@ fn docs_lookup_local_binding_shows_live_value() {
     let mut session = Session::new();
     session.scope.insert("answer".to_string(), jet::AST::CtValue::Int(42));
     let doc = Docs::lookup(&session, "answer").expect("bound name should resolve");
-    assert_eq!(doc, "answer: Int :: 42\n");
+    assert!(doc.starts_with("answer: Int :: 42\n"));
+    assert!(doc.contains("Source: this session"));
     session.mutable_names.insert("answer".to_string());
     let doc = Docs::lookup(&session, "answer").expect("bound name should resolve");
-    assert_eq!(doc, "answer: Int := 42\n");
+    assert!(doc.starts_with("answer: Int := 42\n"));
 }
 
 #[test]
