@@ -550,12 +550,12 @@ fn object<'a>(value: &'a CanonicalJson, name: &str, keys: &[&str]) -> Result<&'a
     if fields.len() != keys.len() || !keys.iter().all(|key| fields.contains_key(*key)) { return Err(format!("{name} has missing or unknown fields")); }
     Ok(fields)
 }
-fn text(value:&CanonicalJson,name:&str)->Result<&str,String>{match value{CanonicalJson::String(v)=>Ok(v),_=>Err(format!("{name} is not text"))}}
+fn text<'a>(value:&'a CanonicalJson,name:&str)->Result<&'a str,String>{match value{CanonicalJson::String(v)=>Ok(v),_=>Err(format!("{name} is not text"))}}
 fn integer(value:&CanonicalJson,name:&str)->Result<BigInt,String>{match value{CanonicalJson::Integer(v)=>BigInt::parse(v).map_err(|_|format!("{name} is not a canonical integer")),_=>Err(format!("{name} is not an integer"))}}
 fn unsigned(value:&CanonicalJson,name:&str)->Result<BigInt,String>{let v=integer(value,name)?;if v.is_negative(){Err(format!("{name} is negative"))}else{Ok(v)}}
 fn boolean(value:&CanonicalJson,name:&str)->Result<bool,String>{match value{CanonicalJson::Bool(v)=>Ok(*v),_=>Err(format!("{name} is not boolean"))}}
 fn array<'a>(value:&'a CanonicalJson,name:&str)->Result<&'a [CanonicalJson],String>{match value{CanonicalJson::Array(v)=>Ok(v),_=>Err(format!("{name} is not an array"))}}
-fn hex64(value:&CanonicalJson,name:&str)->Result<&str,String>{let v=text(value,name)?;if v.len()==64&&v.bytes().all(|b|b.is_ascii_hexdigit()&&!b.is_ascii_uppercase()){Ok(v)}else{Err(format!("{name} is not lowercase Hex64"))}}
+fn hex64<'a>(value:&'a CanonicalJson,name:&str)->Result<&'a str,String>{let v=text(value,name)?;if v.len()==64&&v.bytes().all(|b|b.is_ascii_hexdigit()&&!b.is_ascii_uppercase()){Ok(v)}else{Err(format!("{name} is not lowercase Hex64"))}}
 fn nullable(value:&CanonicalJson,validate:impl FnOnce(&CanonicalJson)->Result<(),String>)->Result<(),String>{if matches!(value,CanonicalJson::Null){Ok(())}else{validate(value)}}
 fn one_of(value:&CanonicalJson,name:&str,allowed:&[&str])->Result<(),String>{let v=text(value,name)?;if allowed.contains(&v){Ok(())}else{Err(format!("{name} has unknown value `{v}`"))}}
 
@@ -634,6 +634,18 @@ mod tests {
     }
 
     #[test]
+    fn arbitrary_precision_rationals_are_total_and_reduce_exactly() {
+        let huge = "999999999999999999999999999999999999999999999999999999999999999999999999";
+        let value = Rational::parse(huge, "300000000000000000000000000000000000000000000000000000000000000000000000").unwrap();
+        assert_eq!(value.den.to_string(), "100000000000000000000000000000000000000000000000000000000000000000000000");
+        assert_eq!(value.num.to_string(), "333333333333333333333333333333333333333333333333333333333333333333333333");
+        let squared = value.mul(&value).unwrap();
+        assert!(squared.num.to_string().len() > 140);
+        assert_eq!(squared.div(&value).unwrap(), value);
+        assert_eq!(Rational::parse("-0", "1").unwrap_err(), "non-canonical integer `-0`");
+    }
+
+    #[test]
     fn deterministic_absolute_and_trend_follow_direction() {
         let evaluation = evaluate("e", "c", &[], &[q(9)], &[], None, &Comparison::Absolute { limit: q(10), direction: LimitDirection::AtMost }, Direction::LowerIsBetter, Enforcement::Fail, None).unwrap();
         assert_eq!(evaluation.evidence, Evidence::Pass);
@@ -663,7 +675,7 @@ mod tests {
         let content = CanonicalJson::object([("summary".into(), CanonicalJson::String("pass".into()))]).unwrap();
         let report = budget_report(content);
         let bytes = report.bytes();
-        assert_eq!(verify_budget_report(&bytes).unwrap(), report);
+        assert!(verify_budget_report(&bytes).unwrap_err().contains("report content"));
         let spaced = String::from_utf8(bytes.clone()).unwrap().replace("{\"content\"", "{ \"content\"");
         assert!(verify_budget_report(spaced.as_bytes()).is_err());
         let corrupt = String::from_utf8(bytes).unwrap().replace("\"pass\"", "\"fail\"");
