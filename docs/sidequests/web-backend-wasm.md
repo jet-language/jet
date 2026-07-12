@@ -1,6 +1,10 @@
 # c2fizfx3 — Web backend: JS DOM ops for views + WASM for logic
 
 **Status:** READY — all architecture decisions ratified (D-WEBBACKEND1/WASM1/JSBIND1/WEBKIND1/DOMGEN1=A).
+Amended by D-MARK-TARGET1=A (ratified 2026-07-11, card #498): the bare
+per-function `#Wasm`/`#Js` overrides below are retired — `#Target(Wasm)` /
+`#Target(Js)` is the one spelling for both the ceiling and the per-function
+override. `#WasmExport` is untouched.
 
 ## Goal
 

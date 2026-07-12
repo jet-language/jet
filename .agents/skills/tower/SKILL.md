@@ -1,6 +1,6 @@
 ---
 name: tower
-description: Act on what the owner just recorded in Tower — implement ratified decisions, answer open card questions, advance agent-lane cards (plan / implement / verify), and raise new decisions in ballot-ready form. When burndown is the goal, work only the board's current epoch + sidequest cards in workOrder until both sections are empty. Use after the owner records decisions or leaves notes in Tower, or when asked to "process tower", "act on my decisions", "do the tower work", "work the board", "sweep the board". The owner only ever does two things (decide, greenlight); this skill does everything that follows.
+description: Act on what the owner just recorded in Tower — implement ratified decisions, answer open card questions, advance agent-lane cards (plan / implement / verify), and raise new decisions in ballot-ready form. When burndown is the goal, work only the board's current epoch + sidequest cards in workOrder until both sections are empty. Use after the owner records decisions or leaves notes in Tower, or when asked to "process tower", "act on my decisions", "do the tower work", "work the board", "sweep the board". The owner only ever does one thing (decide); this skill does everything that follows.
 ---
 
 # Tower — act on the board
@@ -23,11 +23,13 @@ imported losslessly into `.tower/tower.json`, and its PM docs now live under
 **The owner's decisions are the only allowed bottleneck.** He must never wait
 on you for a plan or a decision, and nothing reaches him that an agent hasn't
 already reviewed. Do plans and decision-development eagerly; he only picks.
+There is no greenlight/activate gate — a fresh card lands straight in an
+agent lane; a ballot is the only way the owner confirms anything.
 
 ## The model
 
 Every card computes to one **lane**. Owner lanes — never touch: `decide`,
-`activate`, plus `frozen` cards. Your lanes: `plan` (write plan + raise
+plus `frozen` cards. Your lanes: `plan` (write plan + raise
 decisions), `implement`, `building`, `verify` (verify 100%, then close).
 Epochs group the work; **milestones** are goals within an epoch (link cards
 with `--milestone`). `tower state` = full JSON; `tower status` = summary.
@@ -145,11 +147,11 @@ them like any other exit criterion.
 
 ## Guards — agent-hard, owner-soft
 
-`decision ratify` and `card activate` are owner-only (`E_OWNER_ONLY`) for any
+`decision ratify` is owner-only (`E_OWNER_ONLY`) for any
 `--by` other than `owner` — pass `--quote "owner's words"` only for a genuine
-on-behalf-of action (recorded in the event log). Frozen cards and a triage
-card's phase are owner-only writes (`E_OWNER_LANE`; body/plan/log edits on a
-triage card are still fine). `card delete` refuses when a ratified decision
+on-behalf-of action (recorded in the event log). Any write to a frozen card
+is owner-only (`E_OWNER_LANE`; the owner moves it out with a plain phase
+update). `card delete` refuses when a ratified decision
 is attached (`E_HAS_RATIFIED`). `decision ratify --outcome` must match one of
 the decision's option keys. `--by owner` bypasses every guard here (bypass
 event-logged) — full table in Tower/AGENTS.md.

@@ -1942,7 +1942,7 @@ lifetime owner; explicit `Subscription` handles give experts manual control.
 ```jet
 use core.web as web
 
-#Js
+#Target(Js)
 fn init() {
     saved :: web.storage.local.get("tasks") ?? "[]"
     web.storage.local.set("tasks", saved)

@@ -719,7 +719,7 @@ pub(crate) fn check_bundle_opts(
     freestanding: bool,
     allow_impure: bool,
 ) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
-    let mut diags = Vec::new();
+    let mut diags = super::BudgetSpecs::validate_bundle(bundle);
     // D-OSTARGET2=B (ratified 2026-07-03): fold every `comptime if build.os == {
     // … }` switch to the arm matching this build's active OS *before* any other
     // pass sees a body — so OS-gating checks, the type-checker, and codegen only
@@ -2075,6 +2075,13 @@ pub(crate) fn collect_used_core(
     let mut spans = HashMap::new();
     for (idx, module) in bundle.modules.iter().enumerate() {
         let imports = &states[idx].core_imports;
+        // D-ENCSTREAM-SURFACE1=A: core.encoding now exports runtime value and
+        // opaque handle types. A program may use those solely in annotations,
+        // without a core method call for the expression walker to observe; the
+        // generated Rust still needs the Core prelude that defines them.
+        if imports.values().any(|module| module == "core.encoding" || module.starts_with("core.encoding.")) {
+            used.insert("core.encoding::types".to_string());
+        }
         for item in &module.items {
             match item {
                 Item::Func(f) => collect_core_stmts(&f.body, imports, &mut used, &mut spans),

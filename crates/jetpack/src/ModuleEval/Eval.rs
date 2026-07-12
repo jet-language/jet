@@ -145,6 +145,7 @@ fn namespace_type(ns: Namespace) -> &'static str {
         Namespace::Image => Syntax::TYPE_IMAGE,
         Namespace::Fleet => Syntax::TYPE_FLEET,
         Namespace::VmTest => Syntax::TYPE_VMTEST,
+        Namespace::Perf => Syntax::TYPE_BUDGET,
     }
 }
 

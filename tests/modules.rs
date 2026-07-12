@@ -12,6 +12,66 @@ fn parse_items(src: &str) -> Vec<Item> {
 }
 
 #[test]
+fn perf_role_captures_budget_expression_and_spans() {
+    let src = r#"module perf.release {
+    budgets: [Budget.{
+        name: "binary",
+        scope: .Target("cli"),
+        metric: .BinarySize,
+        limit: .AtMost(2MiB),
+    }]
+}
+
+"#;
+    let items = parse_items(src);
+    let Item::Module(module) = &items[0] else {
+        panic!("expected perf role module");
+    };
+    assert_eq!(module.name, "perf.release");
+    assert_eq!(&src[module.name_span.start..module.name_span.end], "perf.release");
+    let contribution = &module.contributions[0];
+    assert_eq!(contribution.namespace, Namespace::Perf);
+    assert_eq!(contribution.path, "release");
+    let jet::AST::ContribValue::Perf(perf) = &contribution.value else {
+        panic!("expected typed perf role AST");
+    };
+    assert_eq!(&src[perf.budgets_span.start..perf.budgets_span.end], "budgets");
+    assert!(matches!(perf.budgets, Expr::ListLit(_, _)));
+    assert_eq!(
+        &src[perf.span.start..perf.span.end],
+        src[src.find("budgets").unwrap()..].trim_end()
+    );
+}
+
+#[test]
+fn perf_budget_sema_elaborates_defaults_and_field_spans() {
+    let src = r#"module perf.release {
+    budgets: [Budget.{
+        name: "binary",
+        metric: .BinarySize,
+        limit: .AtMost(2MiB),
+    }]
+}
+"#;
+    let (tokens, lex_diags) = jet::Lexer::lex(src);
+    assert!(lex_diags.is_empty(), "lex diagnostics: {lex_diags:?}");
+    let program = jet::Parser::parse(&tokens).expect("parse");
+    let specs = jet::Sema::collect_budget_specs(&program).expect("valid performance budget");
+    assert_eq!(specs.len(), 1);
+    let spec = &specs[0];
+    assert_eq!(spec.role, "release");
+    assert_eq!(spec.name, "binary");
+    assert_eq!(spec.metric, "BinarySize");
+    assert_eq!(spec.comparison, "Absolute");
+    assert_eq!(spec.limit, "AtMost");
+    assert_eq!(&src[spec.span.start..spec.span.end], "Budget.{\n        name: \"binary\",\n        metric: .BinarySize,\n        limit: .AtMost(2MiB),\n    }");
+    for field in ["name", "metric", "limit"] {
+        let span = spec.field_spans.get(field).expect("field span");
+        assert_eq!(&src[span.start..span.end], field);
+    }
+}
+
+#[test]
 fn parses_module_shell_with_contribution() {
     let src = r#"
 module dev {

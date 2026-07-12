@@ -25,7 +25,7 @@ test('done-gate: refuses close while a criterion is unverified (E_CRITERIA)', ()
   assert.throws(
     () => st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'builder' }, cfg)),
     (e) => e instanceof TowerError && e.code === 'E_CRITERIA' && /2 of 2 criteria unverified \(1,2\)/.test(e.message));
-  assert.equal(st.load().cards[0].phase, 'triage', 'refused write must not change phase');
+  assert.equal(st.load().cards[0].phase, 'planning', 'refused write must not change phase');
 });
 
 test('verify rejects the builder as its own verifier (E_CRITERIA_SELF)', () => {

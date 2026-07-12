@@ -26,7 +26,7 @@ test('cli end-to-end: init → epoch → milestone → card → decision → nex
   const m = JSON.parse(run(cwd, ['milestone', 'add', '--epoch', 'e1', '--title', 'MVP', '--json']).out);
   const c = JSON.parse(run(cwd, ['card', 'add', '--title', 'Build it', '--priority', 'P1', '--milestone', m.id, '--json']).out);
   assert.equal(c.num, 1);
-  run(cwd, ['card', 'activate', '#1', '--work-order', '1', '--by', 'owner']);
+  run(cwd, ['card', 'update', '#1', '--work-order', '1', '--by', 'owner']);
 
   // decision via stdin-less file
   const ballot = JSON.stringify({ cardId: '#1', id: 'D-CLI1', title: 'Choose',

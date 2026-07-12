@@ -139,7 +139,7 @@
 ] @type.builtin
 
 ; builtin: input print
-; marker.directive: Abi Bench Bindgen Caller Caps DebugOnly Default DenyUnknownFields Extern Flatten Grant Html Impure Invariant Js Layout Meta Off Reactive Rename RenameAll Replayable Sanitizer SingleUse Skip Sql State Suppress Tag Tainted Target Test Todo Track Transact Transition UnitFamily Unsafe Untagged Wasm WasmExport
+; marker.directive: Abi Bench Bindgen Caller Caps DebugOnly Default DenyUnknownFields Extern Flatten Grant Html Impure Invariant Layout Meta Off Reactive Rename RenameAll Replayable Sanitizer SingleUse Skip Sql State Tag Tainted Target Test Todo Track Transact Transition UnitFamily Unsafe Untagged WasmExport
 ; marker.contract: Cli Codable CodableAsBase Comparable Debug Decode Doc Encode Inline InlineAlways MustUse Numeric Patchable Persist Post Pre Printable PublishedSchema Pure Redact Summarize
 ; sigil: # & ... :: := @ ^
 ; operator: ! != % %= && &= * *= + ++ += - -- -= -> .. .[ .{ / /= < << <<= <= == => > >= >> >>= ? ?. ?? ^= | |= ||

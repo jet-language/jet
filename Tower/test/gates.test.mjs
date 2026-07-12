@@ -112,7 +112,7 @@ test('acceptance ballots (mintAcceptance) are exempt from the narrative ballot s
   assert.ok(st.load().decisions.find(d => d.id === 'D-ACCEPT-1'));
 });
 
-// ---- 2. owner-only ratify/activate ------------------------------------------
+// ---- 2. owner-only ratify ----------------------------------------------------
 
 test('ratify refuses a non-owner without --quote (E_OWNER_ONLY)', () => {
   const st = fresh();
@@ -142,24 +142,7 @@ test('ratify by owner needs no quote', () => {
   assert.equal(st.load().decisions[0].status, 'ratified');
 });
 
-test('activate refuses a non-owner without --quote (E_OWNER_ONLY)', () => {
-  const st = fresh();
-  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
-  assert.throws(
-    () => st.mutate((s, cfg) => db.activate(s, '#1', { by: 'some-agent' }, cfg)),
-    (e) => e.code === 'E_OWNER_ONLY');
-});
-
-test('activate allows a non-owner with --quote', () => {
-  const st = fresh();
-  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
-  const { result } = st.mutate((s, cfg) => db.activate(s, '#1', { by: 'some-agent', quote: 'start it' }, cfg));
-  assert.equal(result.phase, 'planning');
-  const ev = st.load().events.find(e => e.action === 'card.activate');
-  assert.match(ev.note, /quoting owner: "start it"/);
-});
-
-// ---- 3. frozen / triage guard -----------------------------------------------
+// ---- 3. frozen guard ----------------------------------------------------------
 
 test('agent update refused on a frozen card (E_OWNER_LANE)', () => {
   const st = fresh();
@@ -183,18 +166,18 @@ test('owner update/claim on a frozen card is fine', () => {
   assert.equal(st.load().cards[0].assignee, 'owner');
 });
 
-test('agent cannot change phase of a triage card (E_OWNER_LANE) but body/log edits are fine', () => {
+// #516: no greenlight/activate gate — a fresh card lands straight in an
+// agent lane (planning), so an agent may change its phase immediately, no
+// owner step first.
+test('a fresh card lands in planning; an agent can change its phase with no owner step first', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
-  assert.throws(
-    () => st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'building', by: 'agent-1' }, cfg)),
-    (e) => e.code === 'E_OWNER_LANE');
-  const { result } = st.mutate((s, cfg) => db.updateCard(s, '#1', { body: 'prepped', logEntry: 'notes', by: 'agent-1' }, cfg));
-  assert.equal(result.body, 'prepped');
-  assert.equal(result.phase, 'triage', 'phase must be unchanged');
+  assert.equal(st.load().cards[0].phase, 'planning');
+  const { result } = st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'building', by: 'agent-1' }, cfg));
+  assert.equal(result.phase, 'building');
 });
 
-test('triage-to-done stays open to agents (owned by the done-gate, not this guard)', () => {
+test('a fresh card also closes freely for an agent (done-gate, not an owner lane, governs done)', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
   const { result } = st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'agent-1' }, cfg));
@@ -296,7 +279,7 @@ test('releaseCard on a building card logs [handoff] and clears assignee', () => 
 
 test('releaseCard on a non-building card needs no handoff', () => {
   const st = fresh();
-  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg)); // triage
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg)); // planning
   st.mutate((s) => db.claimCard(s, '#1', 'agent-1'));
   st.mutate((s) => db.releaseCard(s, '#1', 'agent-1'));
   assert.equal(st.load().cards[0].assignee, null);

@@ -1,6 +1,6 @@
 ---
 name: tower
-description: Work the Tower project board — pick up agent-lane cards (plan / implement / verify), act on ratified decisions, answer the owner's questions, and keep the board honest. Use when asked to "process tower", "work the board", "act on my decisions", "sweep the board", or when a task says to track work in Tower. The owner only ever does two things (decide, greenlight); this skill does everything that follows.
+description: Work the Tower project board — pick up agent-lane cards (plan / implement / verify), act on ratified decisions, answer the owner's questions, and keep the board honest. Use when asked to "process tower", "work the board", "act on my decisions", "sweep the board", or when a task says to track work in Tower. The owner only ever does one thing (decide); this skill does everything that follows.
 ---
 
 # Tower — work the board
@@ -24,12 +24,14 @@ No `.tower/` in the project yet → use the **tower-setup** skill.
 **The owner's decisions are the only allowed bottleneck.** The owner must
 never wait on you for a plan or a decision writeup, and must never receive a
 plan or ballot no agent has reviewed. Do plans and decision development
-eagerly; the owner only picks.
+eagerly; the owner only picks. There is no greenlight/activate gate — a
+fresh card lands straight in an agent lane; a ballot is the only way the
+owner confirms anything.
 
 ## The model
 
 Every card computes to exactly one **lane** — who owns the next move. Owner
-lanes, **never touch**: `decide`, `activate`, plus `frozen` cards. Your lanes:
+lanes, **never touch**: `decide`, plus `frozen` cards. Your lanes:
 
 - `plan` — write a thorough plan + raise the decisions it needs (use the
   **tower-ballot** skill for the ballot standard)
@@ -103,10 +105,10 @@ everything (bypass event-logged). Full table in Tower/AGENTS.md; headlines:
   the strongest compatible idea from every option
   or `E_BALLOT` — save unfinished work with `--draft`, finish later with
   `decision update <id> --ready`.
-- `decision ratify` / `card activate` are owner-only (`E_OWNER_ONLY`) unless
+- `decision ratify` is owner-only (`E_OWNER_ONLY`) unless
   you pass `--quote "owner's words"` for an on-behalf-of action.
-- Frozen and triage-phase-change writes are owner-only (`E_OWNER_LANE`);
-  body/plan/log edits on a triage card are still fine.
+- Any write to a frozen card is owner-only (`E_OWNER_LANE`); the owner moves
+  it out with a plain phase update.
 - `card delete` refuses when a ratified decision is attached (`E_HAS_RATIFIED`)
   — it's a live decision, not a stub; let it retire (below) or restore+detach.
 - `decision ratify --outcome` must match one of the decision's option keys.
@@ -130,7 +132,7 @@ automatically once something isn't live any more.
   version, back up, and log; hand edits do none of that.
 - Always pass `--by <me>` on writes.
 - "Implemented" = fully functional end-to-end slice, never a stub.
-- Owner lanes (`decide`, `activate`) and `frozen` are read-only to you.
+- Owner lane (`decide`) and `frozen` are read-only to you.
 - Concurrency: writes are lock-safe; for read-modify-write races pass
   `--expect-rev N` (exit 2 = conflict → re-read, retry).
 - If board and reality disagree, fix the board — it's the handoff source of

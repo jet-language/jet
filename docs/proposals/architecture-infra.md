@@ -18,12 +18,13 @@ already right.
 - **Tests**: 101 integration files, 1,637 `#[test]`s; largest
   tests/jetpack.rs 7.0k LOC. verify-full.sh already tiers (parallel,
   repo-local TMPDIR, Canvas gate, D-CI3 red-flag CI).
-- **Surface census**: 62 registered markers (21 `@` / 41 `#`), derived from
+- **Surface census**: 59 registered markers (21 `@` / 38 `#`), derived from
   `Syntax::CONTRACT_MARKERS` and `Syntax::DIRECTIVE_MARKERS`; 111 KW_ entries,
   ~70 core modules, 587 diagnostic codes.
 - **Census/law drift in Syntax.rs**: `view` listed as a keyword
   (D-MEM1 retired it), `it`/`Clock`/`taskgroup` entries of unclear
-  status, `#Wasm`/`#Js`/`#Suppress` pending removal (ratified), maturity
+  status; `#Wasm`/`#Js`/`#Suppress` removed (D-MARK-TARGET1=A /
+  D-MARK-DISCARD1=A, card #498), maturity
   trio previously occupied standalone marker arrays but now lives only in
   `#Meta(maturity: ...)` (D-MARK-META1=B).
 - **Docs**: 72 files / 8 subdirs; `docs/design/` is empty; `reviews/`

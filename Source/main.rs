@@ -1494,13 +1494,9 @@ fn main() {
                 Some(f) => f.to_string(),
                 None => {
                     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-                    match jet::Loader::find_manifest_root(&cwd) {
-                        Some(root) => {
-                            let member_flag = flag_value(&raw, "-p");
-                            resolve_bare_entry("debug", &root, member_flag)
-                                .to_string_lossy()
-                                .into_owned()
-                        }
+                    let member_flag = flag_value(&raw, "-p");
+                    match resolve_bare_entry("debug", &cwd, member_flag) {
+                        Some(entry) => entry.to_string_lossy().into_owned(),
                         None => {
                             eprintln!(
                                 "error: `jet debug` needs a file to debug: {} debug <file.{}>",
@@ -1634,8 +1630,7 @@ fn main() {
             match cmd {
                 "run" | "build" | "test" | "check" | "bench" => {
                     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-                    if let Some(root) = jet::Loader::find_manifest_root(&cwd) {
-                        let entry = resolve_bare_entry(cmd, &root, bare_member_flag);
+                    if let Some(entry) = resolve_bare_entry(cmd, &cwd, bare_member_flag) {
                         let entry_str = entry.to_string_lossy().to_string();
                         match cmd {
                             "test" => {
@@ -2036,19 +2031,29 @@ pub(crate) fn find_project_entry(root: &Path) -> PathBuf {
 /// plain project (no workspace, or a workspace with exactly zero or one
 /// runnable member) resolves exactly like `find_project_entry` always has —
 /// no behavior change for the overwhelmingly common single-package case.
-fn resolve_bare_entry(cmd: &str, root: &Path, member_flag: Option<&str>) -> PathBuf {
-    if let Some(Ok(plan)) = jet::Jetpack::WorkspaceFile::load(root) {
+///
+/// A `workspace.jet` (D-JPK-WORKSPACE2) is checked at `cwd` directly first —
+/// `crate::Jetpack::WorkspaceFile::load` never walks upward, matching every
+/// other workspace-aware call site — because a monorepo workspace root often
+/// carries no `pkg.jet` of its own (payloads live entirely in member
+/// directories). Only when there's no workspace, or it has zero/one runnable
+/// member, does resolution fall back to the ordinary `find_manifest_root` +
+/// `find_project_entry` single-package convention (unchanged from before
+/// D-CLI-BARE1). Returns `None` outside any package or workspace — the
+/// caller keeps today's "no file given" usage error verbatim.
+fn resolve_bare_entry(cmd: &str, cwd: &Path, member_flag: Option<&str>) -> Option<PathBuf> {
+    if let Some(Ok(plan)) = jet::Jetpack::WorkspaceFile::load(cwd) {
         let runnable: Vec<(String, PathBuf)> = plan
             .members
             .iter()
             .filter_map(|m| {
-                let entry = find_project_entry(&root.join(&m.path));
+                let entry = find_project_entry(&cwd.join(&m.path));
                 entry.is_file().then(|| (m.name.clone(), entry))
             })
             .collect();
         if let Some(want) = member_flag {
             return match runnable.iter().find(|(name, _)| name == want) {
-                Some((_, entry)) => entry.clone(),
+                Some((_, entry)) => Some(entry.clone()),
                 None => {
                     let names: Vec<&str> = plan.members.iter().map(|m| m.name.as_str()).collect();
                     eprintln!("error: no workspace member named `{want}`");
@@ -2058,7 +2063,7 @@ fn resolve_bare_entry(cmd: &str, root: &Path, member_flag: Option<&str>) -> Path
             };
         }
         match runnable.len() {
-            1 => return runnable.into_iter().next().unwrap().1,
+            1 => return Some(runnable.into_iter().next().unwrap().1),
             n if n >= 2 => {
                 let names: Vec<&str> = runnable.iter().map(|(n, _)| n.as_str()).collect();
                 eprintln!(
@@ -2075,7 +2080,7 @@ fn resolve_bare_entry(cmd: &str, root: &Path, member_flag: Option<&str>) -> Path
             _ => {} // no runnable member — fall through to the single-project convention
         }
     }
-    find_project_entry(root)
+    jet::Loader::find_manifest_root(cwd).map(|root| find_project_entry(&root))
 }
 
 fn run_version() {

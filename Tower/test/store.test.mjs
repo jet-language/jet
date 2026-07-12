@@ -14,18 +14,22 @@ const fresh = () => {
 
 import * as db from '../app/store.mjs';
 
-test('card add defaults: #1, triage, activate lane', () => {
+test('card add defaults: #1, planning, plan lane — no greenlight step', () => {
   const st = fresh();
   const { result: c } = st.mutate((s, cfg) => db.addCard(s, { title: 'Do the thing' }, cfg));
   assert.equal(c.num, 1);
-  assert.equal(c.phase, 'triage');
-  assert.equal(laneOf(c, [], [c]).lane, 'activate');
+  assert.equal(c.phase, 'planning');
+  assert.equal(laneOf(c, [], [c]).lane, 'plan');
+});
+
+test('a legacy triage-phase card (pre-#516 data) is treated as planning by lane derivation, no data rewrite needed', () => {
+  const c = { id: 'c1', phase: 'triage', blockedBy: [] };
+  assert.equal(laneOf(c, [], [c]).lane, 'plan');
 });
 
 test('lane derivation follows phases and decisions', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
-  st.mutate((s, cfg) => db.activate(s, '#1', { by: 'owner' }, cfg));
   let s = st.load();
   assert.equal(db.laneOf(db.findCard(s, '#1'), s.decisions, s.cards).lane, 'plan');
 
@@ -132,12 +136,12 @@ test('blockedBy gates the lane until blocker closes', () => {
   assert.equal(db.laneOf(db.findCard(s, '#2'), s.decisions, s.cards).lane, 'implement');
 });
 
-test('idea promote → triage card, idea tagged', () => {
+test('idea promote → planning card (agent-ready, no greenlight step), idea tagged', () => {
   const st = fresh();
   st.mutate((s) => db.addIdea(s, { text: 'shiny: make it glow', by: 'owner' }));
   const id = st.load().ideas[0].id;
   const { result: card } = st.mutate((s, cfg) => db.promoteIdea(s, id, {}, cfg));
-  assert.equal(card.phase, 'triage');
+  assert.equal(card.phase, 'planning');
   assert.equal(st.load().ideas[0].status, 'tagged');
 });
 

@@ -138,6 +138,9 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         // D-MIGRATE3=A: `MigrationStatus` — `.migrated`/`.from`/`.steps`.
         "MigrationStatus" => matches!(member, "migrated" | "from" | "steps"),
         "DecodeError" => matches!(member, "path" | "reason"),
+        "EncodingLimits" => matches!(member, "buffer_bytes" | "max_depth" | "max_item_bytes" | "max_total_bytes" | "max_expansion_depth" | "max_expansion_bytes"),
+        "EncodingCause" => matches!(member, "kind" | "os_code" | "message"),
+        "EncodingError" => matches!(member, "format" | "kind" | "byte_offset" | "line" | "column" | "path" | "reason" | "cause"),
         _ => false,
     };
     if known {

@@ -79,7 +79,7 @@ function cmdStatus(store, { flags }) {
     const n = s.counts.byPhase[ph.id];
     if (n) console.log(`  ${ph.label.padEnd(9)} ${bar(n)} ${n}`);
   }
-  console.log(`\n  BLOCKED ON OWNER  ${s.counts.decide} decisions · ${s.counts.activate} to activate`);
+  console.log(`\n  BLOCKED ON OWNER  ${s.counts.decide} decisions`);
   console.log(`  AGENT-READY       ${s.counts.agentReady}  (plan / implement / build / verify)`);
   console.log(`  open questions    ${s.counts.openQuestions}   sidequests ${s.counts.sidequests}   ideas ${s.counts.ideas}\n`);
   const show = (label, lane) => {
@@ -88,7 +88,7 @@ function cmdStatus(store, { flags }) {
     console.log(`  ${label}:`);
     for (const c of cs.slice(0, 12)) console.log(`   · ${cardLine(c)}`);
   };
-  show('OWNER — decide', 'decide'); show('OWNER — activate', 'activate');
+  show('OWNER — decide', 'decide');
   show('AGENT — plan', 'plan'); show('AGENT — implement', 'implement');
   show('AGENT — building', 'building'); show('AGENT — verify', 'verify');
   console.log('');
@@ -164,13 +164,6 @@ function cmdCard(store, { pos, flags }) {
       if (!(found.criteria || []).length) console.log('(no criteria)');
       return;
     }
-    case 'activate': {
-      const { result } = store.mutate((s, cfg) => db.activate(s, ref, {
-        track: flags.track, epoch: flags.epoch, milestoneId: flags.milestone,
-        phase: flags.phase, workOrder: flags.workOrder, by, quote: flags.quote,
-      }, cfg));
-      return out(flags, `activated card #${result.num} → ${result.phase}`, result);
-    }
     case 'claim': {
       const { result } = store.mutate((s) => db.claimCard(s, ref, by));
       return out(flags, `card #${result.num} claimed by ${by}`, result);
@@ -183,7 +176,7 @@ function cmdCard(store, { pos, flags }) {
       const { result } = store.mutate((s) => db.deleteCard(s, ref, { by }));
       return out(flags, `deleted card ${result.id}`, result);
     }
-    default: throw new TowerError('E_USAGE', `unknown card verb "${verb}" — list/show/add/update/activate/claim/release/delete/criteria`);
+    default: throw new TowerError('E_USAGE', `unknown card verb "${verb}" — list/show/add/update/claim/release/delete/criteria`);
   }
 }
 
@@ -618,14 +611,13 @@ const HELP = `tower — file-backed project board for an owner + AI agents
                                             card via next's picker. --agent claims it
                                             unless --no-claim; no --agent → read-only.
 
-  tower card     list|show|add|update|activate|claim|release|delete
+  tower card     list|show|add|update|claim|release|delete
   tower card update <ref> --needs-acceptance true|false   flag for owner accept ballot on close
   tower card update <ref> --refs "docs/a.md,examples/b.jet"   explicit doc-path pointers
   tower card criteria <ref> --add "text" --by X           add an exit criterion
                             --meet n --evidence "…" --by X    builder: mark met
                             --verify n --evidence "…" --by Y  verifier ≠ builder: mark verified
                             --list                            show the checklist
-  tower card activate <ref> [--quote "owner's words"]     agents need --quote; owner needs nothing
   tower card release <ref> --by X [--handoff "…"]         --handoff required if the card is building
   tower decision list|show|add|update|ratify|reopen|delete
   tower decision add --draft                              save a work-in-progress ballot, skip validation
@@ -653,8 +645,8 @@ const HELP = `tower — file-backed project board for an owner + AI agents
   Phases: ${PHASE_IDS.join(' ')}
 
   Guards (agent-hard, owner-soft — --by owner bypasses; see Tower/AGENTS.md):
-    ballot validation (lesson included; E_BALLOT), owner-only ratify/activate (E_OWNER_ONLY),
-    frozen/triage write guard (E_OWNER_LANE), ratified-decision delete guard
+    ballot validation (lesson included; E_BALLOT), owner-only ratify (E_OWNER_ONLY),
+    frozen write guard (E_OWNER_LANE), ratified-decision delete guard
     (E_HAS_RATIFIED), building-release handoff (E_HANDOFF).
 `;
 

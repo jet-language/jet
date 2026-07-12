@@ -36,6 +36,24 @@ fn fmt_is_idempotent_on_examples() {
 }
 
 #[test]
+fn fmt_preserves_typed_performance_budget_role() {
+    let src = r#"module perf.release{budgets:[Budget.{name:"binary",scope:.Target("cli"),metric:.BinarySize,limit:.AtMost(2MiB)}]}"#;
+    let once = jet::format_source(src).expect("perf budget role should format");
+    for token in [
+        "module perf.release",
+        "budgets:",
+        "Budget.{",
+        ".Target(\"cli\")",
+        ".BinarySize",
+        ".AtMost(2MiB)",
+    ] {
+        assert!(once.contains(token), "formatter dropped `{token}`:\n{once}");
+    }
+    let twice = jet::format_source(&once).expect("formatted perf role should parse");
+    assert_eq!(once, twice, "perf budget formatting must be stable");
+}
+
+#[test]
 fn fmt_preserves_s61_call_labels() {
     // S61: call-site argument labels (`name:`) must survive fmt — previously
     // `fmt_call_args` dropped them, so `area(width: 3, height: 4)` round-tripped

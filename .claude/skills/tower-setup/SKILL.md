@@ -65,8 +65,8 @@ Migrating an older board: `tower import <old-tower.json> --name "<Project>"`
 
 1. Create the structure: `tower epoch add e1 --name "…" --goal "…"`,
    `tower epoch current e1`, `tower milestone add --epoch e1 --title "…"`.
-2. Seed cards: `tower card add --title "…" --priority P1 …` (they start in
-   `triage`; the owner greenlights from the board's Now view).
+2. Seed cards: `tower card add --title "…" --priority P1 …` — they land
+   straight in `planning`, agent-ready; no owner greenlight step.
 3. Add a line to the host repo's CLAUDE.md / AGENTS.md pointing agents at
    the **tower** skill (or `Tower/AGENTS.md` for non-Claude agents) so every
    session knows the board is the source of truth.

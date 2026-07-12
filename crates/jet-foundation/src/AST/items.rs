@@ -258,6 +258,8 @@ pub enum ContribValue {
     Fleet(FleetLit),
     /// `vmtest.<name>:` — a VM scenario record (D-JOS-VMTEST1).
     VmTest(VmTestLit),
+    /// D-PERFBUDGET-GRAMMAR1=A: `module perf.<role> { budgets: [...] }`.
+    Perf(PerfLit),
 }
 
 impl ContribValue {
@@ -269,8 +271,18 @@ impl ContribValue {
             ContribValue::Image(i) => i.span,
             ContribValue::Fleet(f) => f.span,
             ContribValue::VmTest(v) => v.span,
+            ContribValue::Perf(p) => p.span,
         }
     }
+}
+
+/// One performance-policy role. The parser owns the declaration boundary and
+/// exact source spans; sema elaborates the captured list into BudgetSpec facts.
+#[derive(Debug)]
+pub struct PerfLit {
+    pub budgets: Expr,
+    pub budgets_span: Span,
+    pub span: Span,
 }
 
 /// U12/D-JPK-MODBODY1=A: an `env.<name>: { … }` role-module body — bare
@@ -496,6 +508,8 @@ pub enum Namespace {
     Fleet,
     /// `vmtest` → `VmTest`: a VM scenario over `System` refs (D-JOS-VMTEST1).
     VmTest,
+    /// `perf` → typed performance-policy declarations.
+    Perf,
 }
 
 /// S45 (M9): type parameter with optional trait bounds.

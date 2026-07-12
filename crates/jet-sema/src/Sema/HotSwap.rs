@@ -1,4 +1,5 @@
-//! c77 (D-HOTSWAP1=B) — type-surface stability check for `jet dev`/`jet serve`.
+//! c77 (D-HOTSWAP1=B) — type-surface stability check for `jet dev` (incl.
+//! `jet dev --swap`, D-CLI-DEVSERVE1=A: was `jet serve`).
 //!
 //! The hot-reload unit is a MODULE. When a resident program's file changes,
 //! the watch loop asks this pass whether the edit is *type-stable*: a change
@@ -16,8 +17,8 @@ use crate::AST::{
     EnumDef, Func, Item, LoadedModule, ProgramBundle, StructDef, Type, VariantPayload,
 };
 
-/// E2210: a hot-swap edit changed a type surface, so `jet dev`/`jet serve`
-/// must restart rather than swap. `what_changed` is the human summary the
+/// E2210: a hot-swap edit changed a type surface, so `jet dev` must restart
+/// rather than swap. `what_changed` is the human summary the
 /// caller also prints on the `[restart]` line.
 pub fn e2210(what_changed: &str) -> Diagnostic {
     Diagnostic::error(

@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 517,
-    "rev": 4477,
+    "rev": 4501,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -3722,13 +3722,18 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "building",
       "priority": "P2",
       "plan": "Plan seed from D-WD14:\n1. Re-read the ratified ballot and current spec/Tower plans for overlap.\n2. Split into vertical slices if the feature spans compiler, Core, Jetpack, GUI, and OS surfaces.\n3. Queue exact-syntax/subsurface ballots before parser, manifest, CLI, or API surface changes.\n4. Implement the first ungated vertical slice end to end with executable examples and diagnostics.\n5. Prove beginner default UX and expert audit/control UX with tests or transcripts.",
       "blockedBy": [],
       "workOrder": 46,
-      "assignee": null,
+      "assignee": "terra-241-builder",
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "terra-241-builder",
+          "text": "Criterion 5 parser/formatter sub-slice landed, not complete. Real `module perf.<role> { budgets: [...] }` now has Namespace::Perf + PerfLit AST capturing module/path/body/budgets field/value spans; legacy contribution spelling rejects E2903. Parser enforces exactly one budgets field and list shape; unknown/missing/duplicate/non-list reject E2903. Formatter preserves perf role, Budget literal, enum constructors, and 2MiB unit byte-for-byte across stable second pass. Focused proof: modules perf_role... 1 pass; fmt perf role 1 pass; E2903 UI snapshot reviewed/blessed/re-run 1 pass; scoped diff-check clean. Remaining criterion 5: typed BudgetSpec field AST and per-field spans, role snake_case law, full units, defaults, scopes/applicability/provider/direction/comparison resolution, overlaps, E2904/E2905."
+        },
         {
           "at": "2026-07-11",
           "by": "codex-main",
@@ -3760,7 +3765,7 @@
         }
       ],
       "created": "2026-07-06T19:15:48.960Z",
-      "updated": "2026-07-11",
+      "updated": "2026-07-12",
       "criteria": [
         {
           "n": 1,
@@ -3872,7 +3877,8 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-12T13:34:07.370Z"
     },
     {
       "id": "c008rjua",
@@ -4539,8 +4545,23 @@
       "priority": "P1",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-ENCSTREAM1=A: Hybrid: same codec modules, tree and stream modes. Every codec module keeps one adapter identity: parse/to_string/decode<T> for whole values and reader/writer event streams for large inputs. XML, JSONL, canonical JSON, and CBOR all flow through Data/DataTree and Codable, so streaming is a mode of the same codec, not a second library.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: corelib audit: core.encoding — format breadth (XML, binary interchange, streaming)\n\nCurrent law: Existing linked decisions: D-ENCBIN1=ratified/A. D-CORENS1 keeps all first-party modules under core.*; I6 forbids compiler deps; D-STDRUBRIC1 requires mechanical core API laws.\n\nBuild order: Audit current Core/API/prelude/docs/tests first; write failing UI/golden/unit fixtures; implement std-only or approved bridge code; update docs/reference and syntax-decisions when law changes; run targeted tests, then full nix develop -c cargo test before close.\n\nAcceptance: Examples/goldens or UI snapshots prove each shipped behavior; stdlib map records shipped/carded/declined rows; no rustc/user-hostile errors; no compiler external deps.\n\nDependencies/collisions: Respect neighboring core cards: io/args/process separate; text before regex; net/url before http; encoding before data/db; random never owns secrets.",
       "blockedBy": [],
-      "assignee": "terra-296-builder",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "terra-296-builder",
+          "text": "[handoff] Typed foundation green. Real JSON streaming requires the logged coherent tokenizer/writer/sema/TIR slice; no read-to-end facade accepted."
+        },
+        {
+          "at": "2026-07-12",
+          "by": "terra-296-builder",
+          "text": "[handoff] Real JSON streaming decomposition established; no facade added. Current JSON is whole-string and file handles are line helpers. Required coherent slice: consumed non-Clone reader/writer state; bounded incremental UTF-8/token machine preserving escapes/surrogates/numbers across byte splits; structural/trailing/terminal-error state; event writer flush/finish/Drop plus bounded canonical object buffering; sema/TIR operations and exact EncodingError mapping; real chunk-at-every-byte Jet proof. Foundation test remains green."
+        },
+        {
+          "at": "2026-07-12",
+          "by": "codex-orchestrator",
+          "text": "[checkpoint] Parent independently reran encoding_stream_foundation_types_are_real_jet_values: 1/1 green. Real Jet reaches shared EncodingLimits/Error/Cause/Format/Kind/DataEvent and ten move-only opaque codec identities through sema, TIR, rustc; exact safe defaults execute. Criterion 2 remains open until real constructors and stream methods land; continuing into behavior, no facade."
+        },
         {
           "at": "2026-07-12",
           "by": "terra-296-builder",
@@ -4673,8 +4694,7 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
-      "claimedAt": "2026-07-12T13:25:40.410Z"
+      "refs": []
     },
     {
       "id": "c0wx96s2",
@@ -15362,23 +15382,79 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "verify",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "terra-516-builder",
       "log": [
+        {
+          "at": "2026-07-12",
+          "text": "Requested acceptance — minted D-ACCEPT-516."
+        },
+        {
+          "at": "2026-07-12",
+          "by": "terra-516-builder",
+          "text": "Card #516 implemented + criteria met (unverified by design — parent verifies). Ready for owner acceptance."
+        },
         {
           "at": "2026-07-12",
           "by": "claude-main",
           "text": "Activated into sidequest track (by claude-main, quoting owner: \"No more green lights, remove that aspect. It should be a ballot if I need to confirm, the green lighting is duplicative and blocks work more than it helps\")"
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "CLI: card activate command + triage/activate E_OWNER_LANE guards removed; card add lands directly in agent lane (default phase planning, no triage)",
+          "status": "verified",
+          "metBy": "terra-516-builder",
+          "verifiedBy": "claude-main",
+          "evidence": "Independent verify by claude-main: 148/148 Tower tests green; zero activate references in cli.mjs/server.mjs; skills+docs updated (decide-only model live); acceptance queue intact.",
+          "at": "2026-07-12T13:54:27.703Z"
+        },
+        {
+          "n": 2,
+          "text": "Server/UI: card/activate route removed; Now page Greenlights section + dutyActivate gone; verification queue (#515) untouched",
+          "status": "verified",
+          "metBy": "terra-516-builder",
+          "verifiedBy": "claude-main",
+          "evidence": "Independent verify by claude-main: 148/148 Tower tests green; zero activate references in cli.mjs/server.mjs; skills+docs updated (decide-only model live); acceptance queue intact.",
+          "at": "2026-07-12T13:54:27.807Z"
+        },
+        {
+          "n": 3,
+          "text": "status/HELP/lint text: no activate counters or activate guard mentions remain",
+          "status": "verified",
+          "metBy": "terra-516-builder",
+          "verifiedBy": "claude-main",
+          "evidence": "Independent verify by claude-main: 148/148 Tower tests green; zero activate references in cli.mjs/server.mjs; skills+docs updated (decide-only model live); acceptance queue intact.",
+          "at": "2026-07-12T13:54:27.908Z"
+        },
+        {
+          "n": 4,
+          "text": "Docs: Tower/AGENTS.md, Tower/README.md, .agents+.claude+Tower skills (tower, tower-setup) updated off the two-owner-actions model",
+          "status": "verified",
+          "metBy": "terra-516-builder",
+          "verifiedBy": "claude-main",
+          "evidence": "Independent verify by claude-main: 148/148 Tower tests green; zero activate references in cli.mjs/server.mjs; skills+docs updated (decide-only model live); acceptance queue intact.",
+          "at": "2026-07-12T13:54:28.013Z"
+        },
+        {
+          "n": 5,
+          "text": "Tests: Tower suite green (148/148) incl. all 8 acceptance-queue tests; activate-gate tests replaced with no-gate coverage; temp-server (port 7996) + CLI round-trip proved no-activation flow, server killed after",
+          "status": "verified",
+          "metBy": "terra-516-builder",
+          "verifiedBy": "claude-main",
+          "evidence": "Independent verify by claude-main: 148/148 Tower tests green; zero activate references in cli.mjs/server.mjs; skills+docs updated (decide-only model live); acceptance queue intact.",
+          "at": "2026-07-12T13:54:28.114Z"
+        }
+      ],
       "refs": [],
-      "needsAcceptance": false,
+      "needsAcceptance": true,
       "created": "2026-07-12T13:04:21.583Z",
-      "updated": "2026-07-12"
+      "updated": "2026-07-12",
+      "claimedAt": "2026-07-12T13:48:40.977Z"
     }
   ],
   "decisions": [
@@ -32103,6 +32179,51 @@
       "draft": false,
       "status": "open",
       "created": "2026-07-12T13:28:27.601Z"
+    },
+    {
+      "id": "D-ACCEPT-516",
+      "cardId": "c0zpoz3m",
+      "group": "acceptance",
+      "title": "Accept #516 — Tower: remove greenlight/activate gate — ballots are the only owner confirmation",
+      "gist": "Close #516, or bounce it back to building.",
+      "lesson": "",
+      "explainer": "",
+      "story": "",
+      "inWild": "",
+      "detail": "1. CLI: card activate command + triage/activate E_OWNER_LANE guards removed; card add lands directly in agent lane (default phase planning, no triage) — verified (Independent verify by claude-main: 148/148 Tower tests green; zero activate references in cli.mjs/server.mjs; skills+docs updated (decide-only model live); acceptance queue intact.) [verified by claude-main]\n2. Server/UI: card/activate route removed; Now page Greenlights section + dutyActivate gone; verification queue (#515) untouched — verified (Independent verify by claude-main: 148/148 Tower tests green; zero activate references in cli.mjs/server.mjs; skills+docs updated (decide-only model live); acceptance queue intact.) [verified by claude-main]\n3. status/HELP/lint text: no activate counters or activate guard mentions remain — verified (Independent verify by claude-main: 148/148 Tower tests green; zero activate references in cli.mjs/server.mjs; skills+docs updated (decide-only model live); acceptance queue intact.) [verified by claude-main]\n4. Docs: Tower/AGENTS.md, Tower/README.md, .agents+.claude+Tower skills (tower, tower-setup) updated off the two-owner-actions model — verified (Independent verify by claude-main: 148/148 Tower tests green; zero activate references in cli.mjs/server.mjs; skills+docs updated (decide-only model live); acceptance queue intact.) [verified by claude-main]\n5. Tests: Tower suite green (148/148) incl. all 8 acceptance-queue tests; activate-gate tests replaced with no-gate coverage; temp-server (port 7996) + CLI round-trip proved no-activation flow, server killed after — verified (Independent verify by claude-main: 148/148 Tower tests green; zero activate references in cli.mjs/server.mjs; skills+docs updated (decide-only model live); acceptance queue intact.) [verified by claude-main]",
+      "options": [
+        {
+          "key": "accept",
+          "name": "Accept — close the card"
+        },
+        {
+          "key": "bounce",
+          "name": "Bounce — back to building (comment why)"
+        }
+      ],
+      "comparisons": [],
+      "rec": null,
+      "recommendation": null,
+      "hybrid": null,
+      "checkInstructions": {
+        "toCheck": [
+          "CLI: card activate command + triage/activate E_OWNER_LANE guards removed; card add lands directly in agent lane (default phase planning, no triage)",
+          "Server/UI: card/activate route removed; Now page Greenlights section + dutyActivate gone; verification queue (#515) untouched",
+          "status/HELP/lint text: no activate counters or activate guard mentions remain",
+          "Docs: Tower/AGENTS.md, Tower/README.md, .agents+.claude+Tower skills (tower, tower-setup) updated off the two-owner-actions model",
+          "Tests: Tower suite green (148/148) incl. all 8 acceptance-queue tests; activate-gate tests replaced with no-gate coverage; temp-server (port 7996) + CLI round-trip proved no-activation flow, server killed after"
+        ],
+        "confirms": [
+          "CLI: card activate command + triage/activate E_OWNER_LANE guards removed; card add lands directly in agent lane (default phase planning, no triage) — Independent verify by claude-main: 148/148 Tower tests green; zero activate references in cli.mjs/server.mjs; skills+docs updated (decide-only model live); acceptance queue intact. (verified by claude-main)",
+          "Server/UI: card/activate route removed; Now page Greenlights section + dutyActivate gone; verification queue (#515) untouched — Independent verify by claude-main: 148/148 Tower tests green; zero activate references in cli.mjs/server.mjs; skills+docs updated (decide-only model live); acceptance queue intact. (verified by claude-main)",
+          "status/HELP/lint text: no activate counters or activate guard mentions remain — Independent verify by claude-main: 148/148 Tower tests green; zero activate references in cli.mjs/server.mjs; skills+docs updated (decide-only model live); acceptance queue intact. (verified by claude-main)",
+          "Docs: Tower/AGENTS.md, Tower/README.md, .agents+.claude+Tower skills (tower, tower-setup) updated off the two-owner-actions model — Independent verify by claude-main: 148/148 Tower tests green; zero activate references in cli.mjs/server.mjs; skills+docs updated (decide-only model live); acceptance queue intact. (verified by claude-main)",
+          "Tests: Tower suite green (148/148) incl. all 8 acceptance-queue tests; activate-gate tests replaced with no-gate coverage; temp-server (port 7996) + CLI round-trip proved no-activation flow, server killed after — Independent verify by claude-main: 148/148 Tower tests green; zero activate references in cli.mjs/server.mjs; skills+docs updated (decide-only model live); acceptance queue intact. (verified by claude-main)"
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T13:54:28.211Z"
     }
   ],
   "questions": [
@@ -32930,6 +33051,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-12T13:54:28.212Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0zpoz3m",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-12T13:54:28.212Z",
+      "by": "agent",
+      "action": "decision.add",
+      "ref": "D-ACCEPT-516",
+      "note": "Accept #516 — Tower: remove greenlight/activate gate — ballots are the only owner confirmation"
+    },
+    {
+      "at": "2026-07-12T13:54:28.114Z",
+      "by": "claude-main",
+      "action": "card.criteria-verify",
+      "ref": "c0zpoz3m",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-12T13:54:28.014Z",
+      "by": "claude-main",
+      "action": "card.criteria-verify",
+      "ref": "c0zpoz3m",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-12T13:54:27.908Z",
+      "by": "claude-main",
+      "action": "card.criteria-verify",
+      "ref": "c0zpoz3m",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-12T13:54:27.807Z",
+      "by": "claude-main",
+      "action": "card.criteria-verify",
+      "ref": "c0zpoz3m",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-12T13:54:27.704Z",
+      "by": "claude-main",
+      "action": "card.criteria-verify",
+      "ref": "c0zpoz3m",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-12T13:52:19.898Z",
+      "by": "terra-516-builder",
+      "action": "card.update",
+      "ref": "c0zpoz3m",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T13:52:05.242Z",
+      "by": "terra-516-builder",
+      "action": "card.update",
+      "ref": "c0zpoz3m",
+      "note": "needsAcceptance"
+    },
+    {
+      "at": "2026-07-12T13:51:33.855Z",
+      "by": "terra-516-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0zpoz3m",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-12T13:51:19.003Z",
+      "by": "terra-516-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0zpoz3m",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-12T13:51:04.382Z",
+      "by": "terra-516-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0zpoz3m",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-12T13:50:49.880Z",
+      "by": "terra-516-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0zpoz3m",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-12T13:50:35.367Z",
+      "by": "terra-516-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0zpoz3m",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-12T13:49:59.770Z",
+      "by": "terra-516-builder",
+      "action": "card.criteria-add",
+      "ref": "c0zpoz3m",
+      "note": "#5 Tests: Tower suite green (148/148) incl. all 8 acceptance-qu"
+    },
+    {
+      "at": "2026-07-12T13:49:44.915Z",
+      "by": "terra-516-builder",
+      "action": "card.criteria-add",
+      "ref": "c0zpoz3m",
+      "note": "#4 Docs: Tower/AGENTS.md, Tower/README.md, .agents+.claude+Towe"
+    },
+    {
+      "at": "2026-07-12T13:49:29.620Z",
+      "by": "terra-516-builder",
+      "action": "card.criteria-add",
+      "ref": "c0zpoz3m",
+      "note": "#3 status/HELP/lint text: no activate counters or activate guar"
+    },
+    {
+      "at": "2026-07-12T13:49:10.067Z",
+      "by": "terra-516-builder",
+      "action": "card.criteria-add",
+      "ref": "c0zpoz3m",
+      "note": "#2 Server/UI: card/activate route removed; Now page Greenlights"
+    },
+    {
+      "at": "2026-07-12T13:48:55.555Z",
+      "by": "terra-516-builder",
+      "action": "card.criteria-add",
+      "ref": "c0zpoz3m",
+      "note": "#1 CLI: card activate command + triage/activate E_OWNER_LANE gu"
+    },
+    {
+      "at": "2026-07-12T13:48:40.978Z",
+      "by": "terra-516-builder",
+      "action": "card.claim",
+      "ref": "c0zpoz3m",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T13:43:22.866Z",
+      "by": "terra-241-builder",
+      "action": "card.update",
+      "ref": "ccq07pav",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T13:34:07.371Z",
+      "by": "terra-241-builder",
+      "action": "card.claim",
+      "ref": "ccq07pav",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T13:34:03.702Z",
+      "by": "terra-296-builder",
+      "action": "card.release",
+      "ref": "c0uxsyns",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-12T13:34:03.616Z",
+      "by": "terra-296-builder",
+      "action": "card.update",
+      "ref": "c0uxsyns",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-12T13:32:52.883Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0uxsyns",
+      "note": "logEntry"
+    },
     {
       "at": "2026-07-12T13:28:27.601Z",
       "by": "claude-main",
@@ -36254,181 +36550,6 @@
       "action": "decision.add",
       "ref": "D-FFI-INLINE1",
       "note": "Inline foreign code: a fourth FFI tier with the Jet signature as the checked contract"
-    },
-    {
-      "at": "2026-07-12T00:59:34.264Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-CORE-COMPRESS1",
-      "note": "core.archive vs core.compress: split stream codecs from container formats, or merge"
-    },
-    {
-      "at": "2026-07-12T00:59:34.164Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-MARK-DEBUG1",
-      "note": "Debug derivation: auto-derive like Printable/Equatable, or opt-in @Debug marker"
-    },
-    {
-      "at": "2026-07-12T00:59:34.068Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-MARK-DISCARD1",
-      "note": "One spelling for discarding a fallible or must-use result: .drop(reason) vs #Suppress region"
-    },
-    {
-      "at": "2026-07-12T00:59:33.973Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-CLI-BARE1",
-      "note": "Bare project verbs: run/dev/debug/bench/check/build with no file argument"
-    },
-    {
-      "at": "2026-07-12T00:57:34.580Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-FFI-CPP1",
-      "note": "C++ binder depth: `cpp.*` — opaque classes, laundered exceptions, on-demand templates"
-    },
-    {
-      "at": "2026-07-12T00:54:48.527Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0xede68",
-      "note": "Polyglot Phase 4: legacy replacement — COBOL, Octave, source importers"
-    },
-    {
-      "at": "2026-07-12T00:54:48.431Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0vt1qwz",
-      "note": "Polyglot Phase 3: scripting and shell — Lua, Ruby, Perl, PHP, R, Sh typed text"
-    },
-    {
-      "at": "2026-07-12T00:54:48.333Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0u6kwwb",
-      "note": "Polyglot Phase 2: managed runtimes — Go, JVM, .NET, Fortran binders"
-    },
-    {
-      "at": "2026-07-12T00:54:48.236Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0skyr40",
-      "note": "Polyglot Phase 1: systems floor — inline tier, inline asm, C++ binder"
-    },
-    {
-      "at": "2026-07-12T00:51:08.564Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CLI-SURFACE3",
-      "note": "B"
-    },
-    {
-      "at": "2026-07-12T00:50:45.771Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CLI-STORE2",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-12T00:50:22.112Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CLI-DEVSERVE1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-12T00:49:38.299Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-MARK-TARGET1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-12T00:49:38.299Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0iftbrr",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-07-12T00:49:38.299Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0iftbrr",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-07-12T00:49:38.299Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0iftbrr",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-07-12T00:49:38.299Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0iftbrr",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-07-12T00:49:06.977Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-CLI-SURFACE3",
-      "note": "Complete the CLI verb map: 18 verbs still outside the ratified ring and groups"
-    },
-    {
-      "at": "2026-07-12T00:49:06.879Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-CLI-STORE2",
-      "note": "One noun for the package store: hangar, store, or both?"
-    },
-    {
-      "at": "2026-07-12T00:48:31.782Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-MARK-TARGET1",
-      "note": "`#Wasm` / `#Js` duplicate `#Target(Wasm)` / `#Target(Js)` — merge into one marker family?"
-    },
-    {
-      "at": "2026-07-12T00:48:31.639Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-CLI-DEVSERVE1",
-      "note": "`jet serve` is a literal alias of `jet dev --swap` — delete or respecialize?"
-    },
-    {
-      "at": "2026-07-12T00:42:29.884Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0llk894",
-      "note": "Consistency sweep: DataTree naming, maturity-marker plane, D-CLI-SURFACE1 drift"
-    },
-    {
-      "at": "2026-07-12T00:42:29.789Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0k0v4gj",
-      "note": "Surface condensation: core.archive vs core.compress overlap"
-    },
-    {
-      "at": "2026-07-12T00:42:29.693Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0iftbrr",
-      "note": "Surface condensation: marker dedup (#Wasm/#Js vs #Target, #Suppress vs .drop, Debug derive law)"
-    },
-    {
-      "at": "2026-07-12T00:42:29.598Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0gv4b2r",
-      "note": "Surface condensation: CLI verb law (store noun, serve/dev, ring completion, bare project verbs)"
     }
   ],
   "nextNum": 368,

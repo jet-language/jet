@@ -444,7 +444,9 @@ impl Circle {
   A trait name in type position (`[Shape]`, `fn f(s: Shape)`) means
   dynamic dispatch with invisible boxing. Generic params: `fn f<T: Bound>(…)`
   and `struct Pair<T> { … }`. Built-in traits follow S55: auto
-  `Printable`/`Equatable`; explicit `@[Comparable]`, `@[Codable]`,
+  `Printable`/`Equatable`/`Debug` (D-MARK-DEBUG1=A: `Debug` auto-derives
+  whenever every field qualifies — no `@Debug` needed; a hand-written impl
+  overrides); explicit `@[Comparable]`, `@[Codable]`,
   `@[Encode]`, `@[Decode]`.
 - **Encoding traits (D-SERDE2/D-SERDE16):** `Encode.encode(self) -> DataTree`
   and `Decode.decode(tree: DataTree) -> Self ? DecodeError` are ordinary Jet
@@ -641,8 +643,9 @@ Unchecked fallible values (**E0401**), ignored fallible calls (**E0402**),
 ignored **`@MustUse`** results (**E0419**), bad propagation (**E0403**),
 `ok`/`err` outside a result context (**E0404**), and fallback type mismatches
 (**E0405**) are compile errors with fixes that name **`?`**, **`??`**, pattern
-tests, binding, and **`.drop("reason")`** / **`#Suppress(MustUse)`** for
-intentional discard (D-IGNORERET2).
+tests, binding, and **`.drop("reason")`** — the sole intentional-discard
+spelling (D-IGNORERET2, amended by D-MARK-DISCARD1=A: the `#Suppress(MustUse)
+{ … }` lexical-scope form is retired).
 
 ## M6 phase 1 — `jet fmt` (done)
 

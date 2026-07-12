@@ -101,7 +101,7 @@ work. Expert pass: explicit file/`-p member` always wins.
 
 ## E. v2 census wave (2026-07-11, second pass — card #509)
 
-Full census: 62 registered markers (21 `@` / 41 `#`), derived from
+Full census: 59 registered markers (21 `@` / 38 `#`), derived from
 `Syntax::CONTRACT_MARKERS` and `Syntax::DIRECTIVE_MARKERS`; 111 keyword
 entries, ~70 core modules, 587 diagnostic codes. Three ballots fall out;
 drift fixes are cards (see `architecture-infra.md`).

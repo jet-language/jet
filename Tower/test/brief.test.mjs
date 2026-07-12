@@ -74,7 +74,7 @@ test('blockers resolve a card ref (done/not-done) and a decision ref (ratified/n
   const c1id = st.load().cards.find(c => c.num === 1).id;
   st.mutate((s, cfg) => db.updateCard(s, '#2', { blockedBy: [c1id] }, cfg));
   p = buildBrief(st.load(), '#2');
-  assert.deepEqual(p.blockers[0], { id: c1id, kind: 'card', num: 1, title: 'Blocker card', phase: 'triage', done: false });
+  assert.deepEqual(p.blockers[0], { id: c1id, kind: 'card', num: 1, title: 'Blocker card', phase: 'planning', done: false });
   st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'owner' }, cfg));
   p = buildBrief(st.load(), '#2');
   assert.equal(p.blockers[0].done, true);
@@ -231,7 +231,6 @@ test('cli: tower brief --agent claims the card', () => {
   const cwd = mkdtempSync(join(tmpdir(), 'tower-brief-cli-'));
   run(cwd, ['init', '--name', 'CLI']);
   run(cwd, ['card', 'add', '--title', 'Do it', '--json']);
-  run(cwd, ['card', 'activate', '#1', '--by', 'owner']);
   const p = JSON.parse(run(cwd, ['brief', '#1', '--agent', 'agent-x', '--json']).out);
   assert.equal(p.card.assignee, 'agent-x');
 });
@@ -240,7 +239,6 @@ test('cli: tower brief --agent respects an existing claim by someone else (E_CLA
   const cwd = mkdtempSync(join(tmpdir(), 'tower-brief-cli-'));
   run(cwd, ['init', '--name', 'CLI']);
   run(cwd, ['card', 'add', '--title', 'Do it', '--json']);
-  run(cwd, ['card', 'activate', '#1', '--by', 'owner']);
   run(cwd, ['card', 'claim', '#1', '--by', 'agent-x']);
   const r = run(cwd, ['brief', '#1', '--agent', 'agent-y'], false);
   assert.equal(r.code, 1);
@@ -251,7 +249,6 @@ test('cli: tower brief --agent is a no-op when the same agent already holds the 
   const cwd = mkdtempSync(join(tmpdir(), 'tower-brief-cli-'));
   run(cwd, ['init', '--name', 'CLI']);
   run(cwd, ['card', 'add', '--title', 'Do it', '--json']);
-  run(cwd, ['card', 'activate', '#1', '--by', 'owner']);
   run(cwd, ['card', 'claim', '#1', '--by', 'agent-x']);
   const p = JSON.parse(run(cwd, ['brief', '#1', '--agent', 'agent-x', '--json']).out);
   assert.equal(p.card.assignee, 'agent-x');
@@ -261,7 +258,6 @@ test('cli: --no-claim never assigns, and no --agent is read-only', () => {
   const cwd = mkdtempSync(join(tmpdir(), 'tower-brief-cli-'));
   run(cwd, ['init', '--name', 'CLI']);
   run(cwd, ['card', 'add', '--title', 'Do it', '--json']);
-  run(cwd, ['card', 'activate', '#1', '--by', 'owner']);
   run(cwd, ['brief', '#1', '--agent', 'agent-x', '--no-claim', '--json']);
   let s = JSON.parse(run(cwd, ['card', 'show', '#1', '--json']).out);
   assert.equal(s.assignee, null);
@@ -274,9 +270,9 @@ test('cli: no ref picks the top card via next\'s picker (workOrder respected)', 
   const cwd = mkdtempSync(join(tmpdir(), 'tower-brief-cli-'));
   run(cwd, ['init', '--name', 'CLI']);
   run(cwd, ['card', 'add', '--title', 'Second', '--json']);
-  run(cwd, ['card', 'activate', '#1', '--work-order', '2', '--by', 'owner']);
+  run(cwd, ['card', 'update', '#1', '--work-order', '2', '--by', 'owner']);
   run(cwd, ['card', 'add', '--title', 'First', '--json']);
-  run(cwd, ['card', 'activate', '#2', '--work-order', '1', '--by', 'owner']);
+  run(cwd, ['card', 'update', '#2', '--work-order', '1', '--by', 'owner']);
   const p = JSON.parse(run(cwd, ['brief', '--json']).out);
   assert.equal(p.card.num, 2, 'lowest workOrder wins');
 });
@@ -285,7 +281,6 @@ test('cli: --json shape is {card, blockers, criteria, decisions, questions, refs
   const cwd = mkdtempSync(join(tmpdir(), 'tower-brief-cli-'));
   run(cwd, ['init', '--name', 'CLI']);
   run(cwd, ['card', 'add', '--title', 'Do it', '--json']);
-  run(cwd, ['card', 'activate', '#1', '--by', 'owner']);
   const p = JSON.parse(run(cwd, ['brief', '#1', '--json']).out);
   assert.deepEqual(new Set(Object.keys(p)), new Set(['card', 'blockers', 'criteria', 'decisions', 'questions', 'refs', 'log', 'rules']));
 });
@@ -294,7 +289,6 @@ test('cli: human render is non-empty and includes the rules footer', () => {
   const cwd = mkdtempSync(join(tmpdir(), 'tower-brief-cli-'));
   run(cwd, ['init', '--name', 'CLI']);
   run(cwd, ['card', 'add', '--title', 'Render me', '--body', 'the body text', '--json']);
-  run(cwd, ['card', 'activate', '#1', '--by', 'owner']);
   const out = run(cwd, ['brief', '#1']).out;
   assert.match(out, /#1 Render me/);
   assert.match(out, /the body text/);

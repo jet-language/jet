@@ -23,12 +23,13 @@ node <tower-dir>/tower.mjs help        # full command surface
 
 ## The contract
 
-- The owner does exactly two things: **decide** (ratify decision ballots) and
-  **greenlight** (activate triaged cards). Everything else is agent work.
+- The owner does exactly one thing: **decide** (ratify decision ballots).
+  There is no greenlight/activate gate — a fresh card lands straight in an
+  agent lane. Everything else is agent work.
 - The owner's decisions are the only allowed bottleneck: never make the owner
   write a plan, and never send the owner a plan or ballot no agent reviewed.
-- Owner-only surfaces — read-only for agents: cards in lanes `decide` /
-  `activate`, and `frozen` cards.
+- Owner-only surfaces — read-only for agents: cards in the `decide` lane, and
+  `frozen` cards.
 
 ## Reading the board
 
@@ -68,8 +69,8 @@ side channel.
 Auth note: localhost is exempt. Remote access reads `auth.token` from the
 untracked `.tower/secrets.json`; never put credentials in `config.json`.
 
-Each card has a computed `lane`: `decide`/`activate` (owner), `plan`/
-`implement`/`building`/`verify` (agent), `blocked`/`frozen`/`done` (inert).
+Each card has a computed `lane`: `decide` (owner), `plan`/`implement`/
+`building`/`verify` (agent), `blocked`/`frozen`/`done` (inert).
 `tower next` sorts by `workOrder` ascending, then building > verify >
 implement > plan. **Epochs** group the work; **milestones** are goals inside
 an epoch — link cards with `--milestone <id>` and progress computes itself.
@@ -198,9 +199,7 @@ always bypasses (bypass event-logged). D-TWRGUARD1=C.
 |---|---|---|---|
 | Ballot-ready | missing required fields, last-pass hybrid, complete recommendation rationale, or plain-language density limits | `E_BALLOT` | `--draft`, rewrite, then `decision update <id> --ready` |
 | Owner-only ratify | `decision ratify` by a non-owner | `E_OWNER_ONLY` | `--quote "owner's words"` |
-| Owner-only activate | `card activate` by a non-owner | `E_OWNER_ONLY` | `--quote "owner's words"` |
-| Frozen lane | any write to a `frozen` card | `E_OWNER_LANE` | none — `tower card activate` first |
-| Triage phase-lock | `card update --phase <x>` on a `triage` card (`x != done`) | `E_OWNER_LANE` | `tower card activate` (body/plan/log edits stay open) |
+| Frozen lane | any write to a `frozen` card | `E_OWNER_LANE` | none — owner moves it out with `tower card update --phase ... --by owner` |
 | Ratified-decision delete | `card delete` on a card with a ratified decision | `E_HAS_RATIFIED` | let it retire (`tower archive status`) or `tower archive restore` then re-detach — applies to owner too |
 | Outcome/option match | `decision ratify --outcome K` not one of the decision's option keys | `E_INVALID` | pass a real option key |
 | Building-release handoff | `card release` on a `building` card | `E_HANDOFF` | `--handoff "what's done, what's left, gotchas"` |
@@ -237,7 +236,7 @@ GET  /api/brief?card=&agent=&claim=0|1   one-shot work packet (#462); no
                                      picker; claims only when agent= AND
                                      claim=1 are both given
 GET  /api/events?limit=50           audit trail
-POST /api/card/add|update|activate|claim|release|delete   (release: {handoff}; activate: {quote})
+POST /api/card/add|update|claim|release|delete   (release: {handoff})
 POST /api/card/criteria-add {id,text}  criteria-meet {id,n,evidence}  criteria-verify {id,n,evidence}
 POST /api/decision/add|update|delete   (add: {draft}; update: {ready})
 POST /api/clearance {decisionId,outcome,comment,quote}  (owner ratify; quote = on-behalf-of)

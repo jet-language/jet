@@ -20,7 +20,8 @@ pub(crate) enum WatchPolicy {
     Auto,
     /// `--restart`: always rerun from scratch (force run-to-completion).
     Restart,
-    /// `--swap`/`jet serve`: always take the swap-or-announced-restart path.
+    /// `--swap` (D-CLI-DEVSERVE1=A: was `jet serve`): always take the
+    /// swap-or-announced-restart path.
     Swap,
     /// `--watch=off`: run once and exit, no loop.
     Once,

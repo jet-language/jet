@@ -83,7 +83,6 @@ async function pushOwner(store, reason) {
 const routes = {
   'card/add':        (s, p, cfg) => db.addCard(s, p, cfg),
   'card/update':     (s, p, cfg) => db.updateCard(s, p.id, p, cfg),
-  'card/activate':   (s, p, cfg) => db.activate(s, p.id, p, cfg),
   'card/claim':      (s, p) => db.claimCard(s, p.id, p.by),
   'card/release':    (s, p) => db.releaseCard(s, p.id, p.by, p.handoff),
   'card/delete':     (s, p) => db.deleteCard(s, p.id, p),

@@ -48,7 +48,7 @@ function toast(text, err = false) {
 // Undoable actions surface a toast with an Undo button; expectRev pins the
 // undo to the state the action produced, so it can never revert someone
 // else's interleaved write.
-const UNDOABLE = { 'card/delete': 'Card deleted', 'clearance': 'Decision recorded', 'clearance/batch': 'Decisions recorded', 'card/activate': 'Greenlit', 'idea/delete': 'Idea dismissed', 'milestone/delete': 'Milestone deleted' };
+const UNDOABLE = { 'card/delete': 'Card deleted', 'clearance': 'Decision recorded', 'clearance/batch': 'Decisions recorded', 'idea/delete': 'Idea dismissed', 'milestone/delete': 'Milestone deleted' };
 
 const api = async (route, payload) => {
   let r;
@@ -169,7 +169,6 @@ const CFG = () => S.config || {};
 const TERM = (k, fb) => ((CFG().terms || {})[k] || fb);
 const epochTag = (e) => e ? (e.num != null ? `${TERM('epoch', 'Epoch')} ${e.num}` : e.id) : '';
 const openDecisions = () => S.decisions.filter(d => d.status !== 'ratified');
-const toActivate = () => S.cards.filter(c => c.lane.lane === 'activate');
 
 // waiting-time chip: shown once something has sat for 6+ hours
 function ageChip(iso) {
@@ -200,7 +199,6 @@ function duties() {
   const out = [];
   for (const v of verifyQueue()) out.push({ type: 'verify', id: v.card.id, card: v.card, ballot: v.ballot });
   for (const d of openDecisions()) if (d.group !== 'acceptance') out.push({ type: 'decision', id: d.id, decision: d });
-  for (const c of toActivate()) out.push({ type: 'activate', id: c.id, card: c });
   return out;
 }
 
@@ -212,7 +210,7 @@ function renderBeacon() {
   b.classList.toggle('beacon--clear', !items.length);
   for (const it of items.slice(0, 40)) {
     const h = (Date.now() - new Date(ageOf(it) || Date.now()).getTime()) / 3.6e6;
-    const title = it.type === 'decision' ? it.decision.title : it.type === 'verify' ? 'verify: ' + it.card.title : 'greenlight: ' + it.card.title;
+    const title = it.type === 'decision' ? it.decision.title : 'verify: ' + it.card.title;
     const seg = el(`<button class="beacon__seg" style="opacity:${Math.min(1, .55 + h / 96).toFixed(2)}" title="${esc(title)}"></button>`);
     seg.addEventListener('click', () => jumpTo(it));
     b.appendChild(seg);
@@ -281,7 +279,7 @@ function viewNow() {
     v.appendChild(el(`<div class="nowclear">
       <div class="nowclear__mark">▲</div>
       <div class="nowclear__t">Tower clear — nothing is blocked on you.</div>
-      <div class="nowclear__sub">${S.counts.agentReady} cards agent-ready · new ballots and greenlights land here</div>
+      <div class="nowclear__sub">${S.counts.agentReady} cards agent-ready · new ballots land here</div>
     </div>`));
     return;
   }
@@ -289,7 +287,7 @@ function viewNow() {
   const section = (title) => v.appendChild(el(`<div class="nowsection"><span class="nowsection__t">${title}</span><span class="nowsection__rule"></span></div>`));
 
   // #515: top priority placement — cards done building and waiting on the
-  // owner's own eyes go first, above the ballot deck and the greenlights.
+  // owner's own eyes go first, above the ballot deck.
   const verifies = items.filter(i => i.type === 'verify');
   if (verifies.length) section('Needs your verification');
   for (const it of verifies) v.appendChild(dutyVerify(it.card, it.ballot));
@@ -297,10 +295,6 @@ function viewNow() {
   const decs = items.filter(i => i.type === 'decision');
   if (decs.length) section('Decisions');
   for (const it of decs) v.appendChild(dutyDecision(it.decision));
-
-  const acts = items.filter(i => i.type === 'activate');
-  if (acts.length) section('Greenlights');
-  for (const it of acts) v.appendChild(dutyActivate(it.card));
   updateNowSel();
 }
 
@@ -389,24 +383,6 @@ function dutyDecision(d) {
     </button>`);
   node.addEventListener('click', () => focusAll(d.id));
   node.__primary = () => focusAll(d.id);
-  return node;
-}
-
-function dutyActivate(c) {
-  const node = el(`<div class="duty">
-      <div class="duty__top"><span class="duty__kind">Greenlight</span>
-        <span class="num">${ticket(c)}</span><span class="prio prio-${c.priority}">${c.priority}</span>
-        <span class="duty__meta">${esc(c.kind)}${c.phase === 'frozen' ? ' · frozen' : ''}</span>${ageChip(c.created)}</div>
-      <h2 class="duty__title">${esc(c.title)}</h2>
-      ${c.body ? `<p class="duty__gist">${esc(c.body.slice(0, 180))}${c.body.length > 180 ? '…' : ''}</p>` : ''}
-      <div class="duty__actions">
-        <button class="btn btn--red btn--sm" data-go>Greenlight — start work</button>
-        <button class="btn btn--ghost btn--sm" data-open>Open card</button>
-      </div>
-    </div>`);
-  $('[data-go]', node).addEventListener('click', () => api('card/activate', { id: c.id, by: 'owner' }));
-  $('[data-open]', node).addEventListener('click', () => showDetail(c.id));
-  node.__primary = () => api('card/activate', { id: c.id, by: 'owner' });
   return node;
 }
 
@@ -548,7 +524,7 @@ function viewBoard() {
     <div id="radar-body"></div>`;
 
   $('#new-card').addEventListener('click', async () => {
-    const c = await api('card/add', { title: 'New card', phase: 'triage', epoch: S.meta.currentEpoch, by: 'owner' });
+    const c = await api('card/add', { title: 'New card', epoch: S.meta.currentEpoch, by: 'owner' });
     if (c) showDetail(c.id);
   });
   const fire = async () => {
@@ -768,8 +744,7 @@ function showDetail(id) {
   const m = $('#detail');
   const phaseLabel = (S.phases.find(p => p.id === c.phase) || {}).label || c.phase;
   const sel = (k, opts, cur) => `<select data-fld="${k}">${opts.map(o => `<option value="${esc(o)}" ${o === cur ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
-  const cta = c.phase === 'triage' ? `<button class="btn btn--red" id="cta-activate">Greenlight — start work</button>`
-    : c.phase === 'frozen' ? `<button class="btn btn--red" id="cta-activate">Unfreeze — start work</button>`
+  const cta = c.phase === 'frozen' ? `<button class="btn btn--red" id="cta-unfreeze">Unfreeze — start work</button>`
     : c.phase === 'verify' ? `<button class="btn btn--red" id="cta-done">Mark verified — close</button>` : '';
   m.innerHTML = `<div class="modal__panel">
     <div class="modal__bar">
@@ -860,7 +835,7 @@ function showDetail(id) {
   });
   $('.modal__x', m).addEventListener('click', closeDetail);
   $('#del-card', m).addEventListener('click', async () => { await api('card/delete', { id, by: 'owner' }); closeDetail(); });
-  $('#cta-activate', m)?.addEventListener('click', () => api('card/activate', { id, by: 'owner' }));
+  $('#cta-unfreeze', m)?.addEventListener('click', () => api('card/update', { id, phase: 'planning', logEntry: 'Unfrozen.', by: 'owner' }));
   $('#cta-done', m)?.addEventListener('click', () => api('card/update', { id, phase: 'done', logEntry: 'Verified — closed.', by: 'owner' }));
   m.onclick = (e) => { if (e.target === m) closeDetail(); };
   m.hidden = false; $('#scrim').hidden = false;

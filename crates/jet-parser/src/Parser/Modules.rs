@@ -94,17 +94,18 @@ impl<'a> Parser<'a> {
             _ if ns_word == Syntax::NS_IMAGE => Namespace::Image,
             _ if ns_word == Syntax::NS_FLEET => Namespace::Fleet,
             _ if ns_word == Syntax::NS_VMTEST => Namespace::VmTest,
+            _ if ns_word == Syntax::NS_PERF => Namespace::Perf,
             _ => {
                 return Err(Diagnostic::error(
                     "E0960",
                     format!("`{}` is not a module namespace", ns_word),
                     format!(
-                        "a role module declares one of the reserved namespaces in its name: `{}` (a dev environment), `{}` (a whole machine), `{}` (a disk image), `{}` (a host fleet), or `{}` (a VM test)",
-                        Syntax::NS_ENV, Syntax::NS_SYSTEM, Syntax::NS_IMAGE, Syntax::NS_FLEET, Syntax::NS_VMTEST
+                        "a role module declares one of the reserved namespaces in its name: `{}` (a dev environment), `{}` (a whole machine), `{}` (a disk image), `{}` (a host fleet), `{}` (a VM test), or `{}` (performance policy)",
+                        Syntax::NS_ENV, Syntax::NS_SYSTEM, Syntax::NS_IMAGE, Syntax::NS_FLEET, Syntax::NS_VMTEST, Syntax::NS_PERF
                     ),
                     format!(
-                        "write `module {}.<name> {{ … }}`, `module {}.<name> {{ … }}`, `module {}.<name> {{ … }}`, `module {}.<name> {{ … }}`, or `module {}.<name> {{ … }}`",
-                        Syntax::NS_ENV, Syntax::NS_SYSTEM, Syntax::NS_IMAGE, Syntax::NS_FLEET, Syntax::NS_VMTEST
+                        "write `module {}.<name> {{ … }}`, `module {}.<name> {{ … }}`, `module {}.<name> {{ … }}`, `module {}.<name> {{ … }}`, `module {}.<name> {{ … }}`, or `module {}.<name> {{ … }}`",
+                        Syntax::NS_ENV, Syntax::NS_SYSTEM, Syntax::NS_IMAGE, Syntax::NS_FLEET, Syntax::NS_VMTEST, Syntax::NS_PERF
                     ),
                     Some(ns_span),
                 ));
@@ -129,6 +130,7 @@ impl<'a> Parser<'a> {
         let mut image_fields: Vec<crate::AST::ImageField> = Vec::new();
         let mut fleet_fields: Vec<crate::AST::FleetField> = Vec::new();
         let mut vmtest_fields: Vec<crate::AST::VmTestField> = Vec::new();
+        let mut perf_budgets: Option<(Span, Expr)> = None;
         let body_start = self.peek().span.start;
 
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
@@ -190,6 +192,23 @@ impl<'a> Parser<'a> {
                             self.bump();
                         }
                     }
+                    Namespace::Perf => {
+                        let (field, field_span) = self.expect_ident("for a performance policy field")?;
+                        self.expect(TokKind::Colon, "after a performance policy field")?;
+                        if field != Syntax::PERF_FIELD_BUDGETS || perf_budgets.is_some() {
+                            return Err(Diagnostic::error(
+                                "E2903",
+                                format!("performance budget role `{path}` is not valid"),
+                                "a performance role contains exactly one `budgets` list".to_string(),
+                                "write `budgets: [Budget.{ ... }]` once".to_string(),
+                                Some(field_span),
+                            ));
+                        }
+                        perf_budgets = Some((field_span, self.expr()?));
+                        if matches!(self.peek().kind, TokKind::Comma) {
+                            self.bump();
+                        }
+                    }
                 },
             }
         }
@@ -223,6 +242,31 @@ impl<'a> Parser<'a> {
                 fields: vmtest_fields,
                 span: body_span,
             }),
+            Namespace::Perf => {
+                let Some((budgets_span, budgets)) = perf_budgets else {
+                    return Err(Diagnostic::error(
+                        "E2903",
+                        format!("performance budget role `{path}` is not valid"),
+                        "a performance role requires one `budgets` list".to_string(),
+                        "add `budgets: [Budget.{ ... }]`".to_string(),
+                        Some(path_span),
+                    ));
+                };
+                if !matches!(budgets, Expr::ListLit(_, _)) {
+                    return Err(Diagnostic::error(
+                        "E2903",
+                        format!("performance budget role `{path}` is not valid"),
+                        "`budgets` must be a list of typed `Budget` values".to_string(),
+                        "write `budgets: [Budget.{ ... }]`".to_string(),
+                        Some(budgets.span()),
+                    ));
+                }
+                crate::AST::ContribValue::Perf(crate::AST::PerfLit {
+                    budgets,
+                    budgets_span,
+                    span: body_span,
+                })
+            }
         };
         let contribution = Contribution {
             namespace,
@@ -767,6 +811,7 @@ impl<'a> Parser<'a> {
             Syntax::NS_IMAGE => Namespace::Image,
             Syntax::NS_FLEET => Namespace::Fleet,
             Syntax::NS_VMTEST => Namespace::VmTest,
+            Syntax::NS_PERF => Namespace::Perf,
             _ => {
                 return Err(Diagnostic::error(
                     "E0960",
@@ -798,6 +843,16 @@ impl<'a> Parser<'a> {
             Namespace::Image => crate::AST::ContribValue::Image(self.image_lit()?),
             Namespace::Fleet => crate::AST::ContribValue::Fleet(self.fleet_lit()?),
             Namespace::VmTest => crate::AST::ContribValue::VmTest(self.vmtest_lit()?),
+            Namespace::Perf => {
+                return Err(Diagnostic::error(
+                    "E2903",
+                    format!("performance budget role `{path}` is not valid"),
+                    "performance budgets use the dedicated `module perf.<role>` declaration"
+                        .to_string(),
+                    format!("write `module {}.{path} {{ budgets: [...] }}`", Syntax::NS_PERF),
+                    Some(ns_span),
+                ));
+            }
         };
         let end = value.span().end;
         if matches!(self.peek().kind, TokKind::Comma) {

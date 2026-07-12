@@ -2,7 +2,7 @@
 //!
 //! A manifest-less `.jet` script may open with `use pkg#version;` instead of
 //! shipping a `pkg.jet`. These tests drive the real `jet` binary end to end:
-//! `jet run` resolves + locks by file-content hash, `jet store lock` writes a
+//! `jet run` resolves + locks by file-content hash, `jet fetch --lock` writes a
 //! `<script>.lock` sidecar, and `jet init <script>` lifts the inline refs into
 //! a generated `pkg.jet`. Resolution is offline-only today (no external
 //! network/registry fetch — see `crates/jet-driver/src/Jetpack/ScriptDeps.rs`):
@@ -60,7 +60,7 @@ fn jet_cmd(args: &[&str], cwd: &Path) -> std::process::Output {
 }
 
 /// Committed offline fixture: a tiny `textkit` "library" at 1.4.2, staged the
-/// same way a `jet store lock`-populated local cache would look.
+/// same way a `jet fetch --lock`-populated local cache would look.
 fn write_textkit_fixture(project: &Path) {
     write(
         project,
@@ -165,10 +165,10 @@ fn jet_lock_writes_sidecar() {
         "use textkit#1.4;\n\nfn run() {\n    print(textkit.shout(\"hi\"))\n}\n",
     );
 
-    let out = jet_cmd(&["store", "lock", "stats.jet"], &dir);
+    let out = jet_cmd(&["fetch", "--lock", "stats.jet"], &dir);
     assert!(
         out.status.success(),
-        "jet store lock should succeed\nstdout: {}\nstderr: {}",
+        "jet fetch --lock should succeed\nstdout: {}\nstderr: {}",
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
@@ -185,7 +185,7 @@ fn jet_lock_writes_sidecar() {
     assert!(contents.contains("content_hash = \"sha256-"));
 
     // Locking again is stable (same script, same resolved shape).
-    let out2 = jet_cmd(&["store", "lock", "stats.jet"], &dir);
+    let out2 = jet_cmd(&["fetch", "--lock", "stats.jet"], &dir);
     assert!(out2.status.success());
     let contents2 = fs::read_to_string(&sidecar).unwrap();
     assert_eq!(contents, contents2);
@@ -202,7 +202,7 @@ fn jet_lock_unresolved_dep_is_e1253() {
         "stats.jet",
         "use ghostpkg#1.0.0;\n\nfn run() {\n    print(\"never\")\n}\n",
     );
-    let out = jet_cmd(&["store", "lock", "stats.jet"], &dir);
+    let out = jet_cmd(&["fetch", "--lock", "stats.jet"], &dir);
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("E1253"));
     assert!(!dir.join("stats.jet.lock").exists());

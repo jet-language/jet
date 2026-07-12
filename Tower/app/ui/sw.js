@@ -29,7 +29,6 @@ self.addEventListener('push', (e) => {
       const c = s.counts;
       const bits = [];
       if (c.decide) bits.push(`${c.decide} decision${c.decide > 1 ? 's' : ''}`);
-      if (c.activate) bits.push(`${c.activate} to greenlight`);
       if (c.unreadForOwner) bits.push(`${c.unreadForOwner} message${c.unreadForOwner > 1 ? 's' : ''}`);
       title = `Tower · ${s.meta.project}`;
       body = bits.length ? bits.join(' · ') + ' waiting on you' : 'All clear — an agent reported in.';

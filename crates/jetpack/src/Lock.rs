@@ -990,7 +990,7 @@ pub fn e1217(dep_name: &str) -> Diagnostic {
             "a `--locked` build (and `jet registry publish`) requires every dependency to be pinned in {} to a resolved version, so the build is reproducible. `{}` is declared but not pinned.",
             Syntax::UNIFIED_LOCK_FILE, dep_name
         ),
-        format!("run `jet store fetch` to resolve and pin `{}`, then commit {}.", dep_name, Syntax::UNIFIED_LOCK_FILE),
+        format!("run `jet fetch` to resolve and pin `{}`, then commit {}.", dep_name, Syntax::UNIFIED_LOCK_FILE),
         None,
     )
 }
@@ -1036,7 +1036,7 @@ pub fn verify_store_fingerprint(
             "E1204",
             format!("the store entry for `{}` is missing", pkg_name),
             "a package source tree must be in the store before it can be used".to_string(),
-            "run `jet store fetch` to re-download the package".to_string(),
+            "run `jet fetch` to re-download the package".to_string(),
             None,
         ));
     }
@@ -1092,7 +1092,7 @@ pub fn e1202(_lock_path: &str) -> Diagnostic {
             Syntax::PAYLOAD_FILE,
             Syntax::UNIFIED_LOCK_FILE
         ),
-        format!("run `jet store fetch` to update `{}`", Syntax::UNIFIED_LOCK_FILE),
+        format!("run `jet fetch` to update `{}`", Syntax::UNIFIED_LOCK_FILE),
         None,
     )
 }

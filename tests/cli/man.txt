@@ -27,7 +27,7 @@ manage the package signing key
 copy all dependencies into vendor/
 .TP
 .B inspect
-semantic, build, schema, supply, and binding inspection
+semantic, build, schema, supply, discovery, and binding inspection
 .TP
 .B inspect graph
 print the typed programmable-build graph
@@ -64,6 +64,54 @@ emit a software bill of materials
 .TP
 .B inspect bind
 generate a C binding cache from a header
+.TP
+.B inspect logs
+show latest Jetpack build logs
+.TP
+.B inspect search
+search the local offline Jetpack package index
+.TP
+.B inspect info
+show local offline Jetpack package metadata
+.TP
+.B inspect outdated
+report Jetpack channel refs with newer locks available
+.TP
+.B hangar
+physical package-store integrity and lifecycle
+.TP
+.B hangar verify
+verify store objects and references
+.TP
+.B hangar repair
+repair a corrupted store object (not yet built)
+.TP
+.B hangar copy
+copy a store object to or from another store (not yet built)
+.TP
+.B hangar import
+import a store object from an archive (not yet built)
+.TP
+.B hangar export
+export a store object to an archive (not yet built)
+.TP
+.B hangar dump
+dump a store object to a portable archive (not yet built)
+.TP
+.B hangar restore
+restore a store object from a dump (not yet built)
+.TP
+.B hangar sign
+sign a store object (not yet built)
+.TP
+.B hangar rollback
+roll back a store generation
+.TP
+.B hangar generations
+list store generations
+.TP
+.B hangar du
+honest per-object hangar disk usage
 .TP
 .B self
 Jet installation, diagnostics, completions, and machine tooling
@@ -110,9 +158,6 @@ compile to a native binary in ./build/
 .B dev
 watch a file and re-run it on every save
 .TP
-.B serve
-watch a resident program and hot-swap type-stable edits
-.TP
 .B debug
 step through a program at the Jet source level (D-DBG3)
 .TP
@@ -137,17 +182,8 @@ print the offline essay for a diagnostic code
 .B env
 enter the project dev shell
 .TP
-.B push
-deploy a fleet through Jetpack
-.TP
 .B trust
 list, explain, grant, and revoke Jet trust authority (D-JPK-GRANTCMD1)
-.TP
-.B bridge
-translate a foreign environment description into Jetpack form
-.TP
-.B services
-manage project-local dev services
 .TP
 .B image
 build a declared OCI image
@@ -155,53 +191,32 @@ build a declared OCI image
 .B os
 check, build, switch, rollback, list, lift, init, or image a jetos host
 .TP
+.B os push
+deploy a fleet through Jetpack
+.TP
+.B os bridge
+translate a foreign environment description into Jetpack form
+.TP
+.B os services
+manage project-local dev services
+.TP
+.B os config
+manage jet configuration (`config trust add/list/remove`, U19)
+.TP
 .B add
 add a dependency and fetch it
 .TP
 .B remove
 remove a dependency
 .TP
+.B fetch
+download and link all dependencies
+.TP
 .B update
 refresh moving dependency selectors (`update jet` moves the toolchain pin)
 .TP
 .B init
 create a pkg.jet here, pinning the running jet's channel (add <script.jet> to lift its inline deps)
-.TP
-.B store
-inspect or verify the package store
-.TP
-.B store verify
-verify store objects and references
-.TP
-.B store rollback
-roll back a store generation
-.TP
-.B store generations
-list store generations
-.TP
-.B store gc
-remove unreferenced store entries
-.TP
-.B store fetch
-download and link all dependencies
-.TP
-.B store lock
-lock a script's inline dependencies
-.TP
-.B config
-manage jet configuration (`config trust add/list/remove`, U19)
-.TP
-.B outdated
-report Jetpack channel refs with newer locks available
-.TP
-.B search
-search the local offline Jetpack package index
-.TP
-.B info
-show local offline Jetpack package metadata
-.TP
-.B logs
-show latest Jetpack build logs
 .TP
 .B clean
 optimize and collect stale Jetpack hangar entries
@@ -267,6 +282,12 @@ with build/run: smallest binary (S15)
 .B --locked
 with fetch: verify only, refuse network
 .TP
+.B --lock
+with fetch: lock a manifest-less script's inline deps instead of fetching a project
+.TP
+.B -p
+with run/dev/debug/bench/check/build: pick a workspace member by name
+.TP
 .B --annotated
 with new: include commented example deps
 .TP
@@ -310,13 +331,13 @@ with fix: show changes without writing
 with dev: interpret past unsupported features (no guarantees)
 .TP
 .B --restart
-with dev/serve: always rerun from scratch on save (c77)
+with dev: always rerun from scratch on save (c77)
 .TP
 .B --swap
-with dev/serve: hot-swap type-stable edits, restart on type change (c77)
+with dev: hot-swap type-stable edits, restart on type change (c77; D-CLI-DEVSERVE1=A: was `jet serve`)
 .TP
 .B --watch
-with dev/serve: --watch=off runs once and exits (c77)
+with dev: --watch=off runs once and exits (c77)
 .TP
 .B --project
 with repl: load pkg.jet from this directory for import context (D-REPL10)

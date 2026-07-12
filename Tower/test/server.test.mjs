@@ -35,7 +35,7 @@ test('server round-trip: add, state, validation, conflict, next', async () => {
 
   const state = await (await fetch(url('/api/state'))).json();
   assert.equal(state.meta.project, 'Srv');
-  assert.equal(state.cards[0].lane.lane, 'activate');
+  assert.equal(state.cards[0].lane.lane, 'plan', 'no greenlight gate — a fresh card lands agent-ready');
 
   const bad = await post('card/update', { id: '#1', phase: 'nope' });
   assert.equal(bad.status, 400);
@@ -48,7 +48,6 @@ test('server round-trip: add, state, validation, conflict, next', async () => {
   assert.equal(stale.status, 409);
   assert.equal(stale.json.error, 'E_CONFLICT');
 
-  await post('card/activate', { id: '#1', by: 'owner' });
   const next = await (await fetch(url('/api/next?limit=3'))).json();
   assert.equal(next.length, 1);
 

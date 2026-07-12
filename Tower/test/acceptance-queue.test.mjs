@@ -70,7 +70,6 @@ test('mintAcceptance stamps checkInstructions onto D-ACCEPT and re-mint refreshe
 test('a verify-phase card with no needsAcceptance flag carries no D-ACCEPT ballot — the client renders it as a bare row', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'Manually parked in verify' }, cfg));
-  st.mutate((s, cfg) => db.activate(s, '#1', { by: 'owner' }, cfg));
   // no criteria, no flag — an agent (or a stray CLI call) parked it in verify
   // directly, never going through the done-gate at all.
   st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'verify', by: 'some-agent' }, cfg));
@@ -137,7 +136,6 @@ test('Bounce via POST /api/clearance returns the card to building with the comme
 
 test('a card parked in verify without the flag has no D-ACCEPT ballot but is still in state.cards for the Now page to list', async () => {
   await post('card/add', { title: 'Unflagged in verify', by: 'owner' });
-  await post('card/activate', { id: '#3', by: 'owner' });
   const upd = await post('card/update', { id: '#3', phase: 'verify', by: 'some-agent' });
   assert.equal(upd.status, 200);
   const state = await (await fetch(url('/api/state'))).json();

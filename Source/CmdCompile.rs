@@ -384,7 +384,7 @@ pub(crate) fn run_compile_cmd(
                         exit(ExitCodes::USER_ERROR);
                     }
                     // Record per-dependency effect provenance + grants in the
-                    // lockfile, when one already exists (`jet store fetch` owns
+                    // lockfile, when one already exists (`jet fetch` owns
                     // creating it).
                     if let Some(mut lock) = jet::Lock::load(&root) {
                         jet::Jetpack::EffectBudget::update_lock_provenance(

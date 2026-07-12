@@ -307,7 +307,7 @@ impl<'a> Resolver<'a> {
                 let (store_path, content_hash) =
                     Store::ensure_path_dep(dep_name, &dep_version, &fp, &abs_path)
                         .map_err(|d| vec![d])?;
-                let _ = content_hash; // recorded in lock on next `jet store fetch` pass
+                let _ = content_hash; // recorded in lock on next `jet fetch` pass
 
                 // Integrity floor (D-PKGSIGN1): the store entry must match its
                 // recorded content hash before it is linked into the build.
@@ -562,7 +562,7 @@ fn build_dep_dirs_from_lock(
             DepSpec::Registry(_) => {
                 return Err(vec![Diagnostic::error(
                     "E1207",
-                    "registry dependencies require `jet store fetch` (not --locked)".to_string(),
+                    "registry dependencies require `jet fetch` (not --locked)".to_string(),
                     "registry support is planned for M12.2".to_string(),
                     "use path or git dependencies".to_string(),
                     None,

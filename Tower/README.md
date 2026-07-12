@@ -3,12 +3,13 @@
 A file-backed project board for one human **owner** + any number of AI
 **agents**, for any project. Node ≥ 18, zero dependencies, no build step.
 
-The owner does two things: **decide** (ratify decision ballots in a focused,
-keyboard-driven UI) and **greenlight** (activate new cards). Agents do
-everything else through a CLI/HTTP API — plan, implement, verify, answer
-questions, raise new decisions — and every card always computes to exactly
-one **lane** that says who owns the next move. Decision state is derived on
-every read, so a card and its ballots can never desync.
+The owner does one thing: **decide** (ratify decision ballots in a focused,
+keyboard-driven UI). There is no greenlight/activate gate — a new card lands
+straight in an agent lane. Agents do everything else through a CLI/HTTP API —
+plan, implement, verify, answer questions, raise new decisions — and every
+card always computes to exactly one **lane** that says who owns the next
+move. Decision state is derived on every read, so a card and its ballots can
+never desync.
 
 ## Install into a project
 
@@ -38,8 +39,9 @@ Migrating from a v3-era board: `node Tower/tower.mjs import old-tower.json --nam
 - **Epochs** — the major groupings of work (`epoch add/update/current`).
 - **Milestones** — goals within an epoch; cards link to one and milestone
   progress is computed from their done-ratio (`milestone add/update`).
-- **Cards** — the work. Stages: triage → deciding → planning → ready →
-  building → verify → done (+ frozen). Fields include `workOrder` (canonical
+- **Cards** — the work. Stages: deciding → planning → ready → building →
+  verify → done (+ frozen). A fresh card lands in `planning` — no owner
+  greenlight step. Fields include `workOrder` (canonical
   pick order), `blockedBy`, `assignee` (claims), `plan`, `log`, `refs`
   (explicit doc-path pointers, merged with auto-harvested ones in `tower brief`).
 - **Exit criteria** — a card's `criteria[]` checklist (open → met → verified)
@@ -66,7 +68,7 @@ Migrating from a v3-era board: `node Tower/tower.mjs import old-tower.json --nam
 ```
 tower status | state | next | events
 tower brief [ref] [--agent me] [--json] [--no-claim]
-tower card      list|show|add|update|activate|claim|release|delete
+tower card      list|show|add|update|claim|release|delete
 tower decision  list|show|add|update|ratify|reopen|delete
 tower question  list|ask|answer|delete
 tower idea      list|add|promote|delete
@@ -157,9 +159,9 @@ Black & red, pure dark, phone-friendly. Red is reserved for what needs the
 **beacon** on the left edge carries one lit segment per owner-blocking item
 and goes dark as you clear them. Two views:
 
-- **Now** — everything blocked on you in one queue: decisions (opens focus
-  mode: ←/→ move, 1–9 pick, Enter record) and greenlights. Empty state =
-  tower clear.
+- **Now** — everything blocked on you in one queue: cards needing your
+  verification, and decisions (opens focus mode: ←/→ move, 1–9 pick, Enter
+  record). Empty state = tower clear.
 - **Board** — idea capture, sidequests, epochs → milestones → cards, frozen
   bay; card modal for editing, decisions, questions, log.
 - **Radar** *(prototype, owner-acceptance pending)* — roadmap ledger ×

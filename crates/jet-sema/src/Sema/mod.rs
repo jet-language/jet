@@ -865,6 +865,8 @@ pub mod Schema;
 mod SchemaMigration;
 mod ScopeMembers;
 mod PolicyFacts;
+mod BudgetSpecs;
+pub use BudgetSpecs::{collect_budget_specs, BudgetSpec};
 mod CheckerReferences;
 mod State;
 mod Taint;

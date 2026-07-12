@@ -397,7 +397,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
 /// Source hash + plan fingerprint for the index entry. Reuses the lock's
 /// recorded values (the exact `LockedPackage` fields) when a lock exists; falls
 /// back to hashing the source tree so `jet registry publish` works before a first
-/// `jet store fetch`.
+/// `jet fetch`.
 fn publish_index_hashes(root: &std::path::Path, name: &str) -> (String, String) {
     if let Some(lock) = jet::Lock::load(root) {
         if let Some(pkg) = lock
@@ -545,7 +545,7 @@ pub(crate) fn run_vendor(vendor_dir: Option<&str>) {
                 }
                 println!("ok: {} dependencies copied to {}/", copied.len(), shown);
                 println!(
-                    "tip: commit {}/ and use `jet store fetch --locked` for reproducible offline builds.",
+                    "tip: commit {}/ and use `jet fetch --locked` for reproducible offline builds.",
                     shown
                 );
             }
@@ -571,7 +571,7 @@ pub(crate) fn run_audit(db_path: Option<&str>) {
     let lock = match jet::Lock::load(&root) {
         Some(l) => l,
         None => {
-            println!("audit: no lockfile found — run `jet store fetch` first");
+            println!("audit: no lockfile found — run `jet fetch` first");
             exit(ExitCodes::OK);
         }
     };
@@ -664,7 +664,7 @@ pub(crate) fn run_sbom(cyclonedx: bool) {
     let lock = match jet::Lock::load(&root) {
         Some(l) => l,
         None => {
-            eprintln!("error: no lockfile found — run `jet store fetch` first");
+            eprintln!("error: no lockfile found — run `jet fetch` first");
             exit(ExitCodes::USER_ERROR);
         }
     };

@@ -517,7 +517,7 @@ pub fn check(prog: &mut Program) -> Vec<Diagnostic> {
 }
 
 pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic> {
-    let mut diags = Vec::new();
+    let mut diags = super::BudgetSpecs::validate_program(prog);
     let mut funcs: HashMap<String, FuncSig> = HashMap::new();
     let mut tests: HashMap<String, Span> = HashMap::new();
     let mut registry = TypeRegistry {

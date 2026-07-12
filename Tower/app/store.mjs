@@ -10,8 +10,10 @@
 //   events      — append-only audit trail of every mutation
 //
 // Lane state is DERIVED on every read (never stored), so a card and its
-// decisions can never desync. Only two lanes ever block the owner: `decide`
-// and `activate`. Everything else is an agent's, inert, or done.
+// decisions can never desync. Only one lane ever blocks the owner: `decide`.
+// Everything else is an agent's, inert, or done. #516: there is no
+// greenlight/activate gate — a fresh card lands straight in an agent lane;
+// the owner's only confirmation mechanism is ratifying a decision ballot.
 import { dataFile, historyFile, readJSON, writeJSON, backup, newId, today, now } from './paths.mjs';
 import { withLock } from './lock.mjs';
 import { loadConfig, publicConfig } from './config.mjs';
@@ -19,28 +21,26 @@ import { loadConfig, publicConfig } from './config.mjs';
 export const VERSION = 4;
 
 export const PHASES = [
-  { id: 'triage',   label: 'Triage',   seq: 0, who: 'owner', blurb: 'Captured — give it the go-ahead to start' },
-  { id: 'deciding', label: 'Deciding', seq: 1, who: 'owner', blurb: 'Blocked on a decision' },
-  { id: 'planning', label: 'Planning', seq: 2, who: 'agent', blurb: 'Build a plan + raise the decisions it needs' },
-  { id: 'ready',    label: 'Ready',    seq: 3, who: 'agent', blurb: 'Plan vetted, decisions cleared — implement it' },
-  { id: 'building', label: 'Building', seq: 4, who: 'agent', blurb: 'Implementation in progress' },
-  { id: 'verify',   label: 'Verify',   seq: 5, who: 'agent', blurb: 'Claimed done — verify 100%, then close' },
-  { id: 'done',     label: 'Done',     seq: 6, who: null,    blurb: 'Verified — hidden' },
-  { id: 'frozen',   label: 'Frozen',   seq: -1, who: 'owner', blurb: 'Owner-only — untouched until activated' },
+  { id: 'deciding', label: 'Deciding', seq: 0, who: 'owner', blurb: 'Blocked on a decision' },
+  { id: 'planning', label: 'Planning', seq: 1, who: 'agent', blurb: 'Build a plan + raise the decisions it needs' },
+  { id: 'ready',    label: 'Ready',    seq: 2, who: 'agent', blurb: 'Plan vetted, decisions cleared — implement it' },
+  { id: 'building', label: 'Building', seq: 3, who: 'agent', blurb: 'Implementation in progress' },
+  { id: 'verify',   label: 'Verify',   seq: 4, who: 'agent', blurb: 'Claimed done — verify 100%, then close' },
+  { id: 'done',     label: 'Done',     seq: 5, who: null,    blurb: 'Verified — hidden' },
+  { id: 'frozen',   label: 'Frozen',   seq: -1, who: 'owner', blurb: 'Owner-only — paused; the owner unpauses with a phase update' },
 ];
 export const PHASE_IDS = PHASES.map(p => p.id);
-export const ACTIVE = ['triage', 'deciding', 'planning', 'ready', 'building', 'verify'];
+export const ACTIVE = ['deciding', 'planning', 'ready', 'building', 'verify'];
 
 export const LANES = {
   decide:    { who: 'owner', label: 'Decide',    rank: 0 },
-  activate:  { who: 'owner', label: 'Activate',  rank: 1 },
-  plan:      { who: 'agent', label: 'Plan',      rank: 2 },
-  implement: { who: 'agent', label: 'Implement', rank: 3 },
-  building:  { who: 'agent', label: 'Building',  rank: 4 },
-  verify:    { who: 'agent', label: 'Verify',    rank: 5 },
-  blocked:   { who: null,    label: 'Blocked',   rank: 6 },
-  frozen:    { who: 'owner', label: 'Frozen',    rank: 7 },
-  done:      { who: null,    label: 'Done',      rank: 8 },
+  plan:      { who: 'agent', label: 'Plan',      rank: 1 },
+  implement: { who: 'agent', label: 'Implement', rank: 2 },
+  building:  { who: 'agent', label: 'Building',  rank: 3 },
+  verify:    { who: 'agent', label: 'Verify',    rank: 4 },
+  blocked:   { who: null,    label: 'Blocked',   rank: 5 },
+  frozen:    { who: 'owner', label: 'Frozen',    rank: 6 },
+  done:      { who: null,    label: 'Done',      rank: 7 },
 };
 
 export class TowerError extends Error {
@@ -277,10 +277,9 @@ export function clearanceOf(card, decisions) {
 
 export function laneOf(card, decisions, cards) {
   if (card.phase === 'done')   return { lane: 'done', who: null, label: 'Done' };
-  if (card.phase === 'frozen') return { lane: 'frozen', who: 'owner', label: 'Frozen — activate to work it' };
+  if (card.phase === 'frozen') return { lane: 'frozen', who: 'owner', label: 'Frozen — owner reactivates it' };
   const open = decisions.filter(d => d.cardId === card.id && isBlocking(d));
   if (open.length) return { lane: 'decide', who: 'owner', label: `${open.length} decision${open.length > 1 ? 's' : ''} to make`, decisions: open.map(d => d.id) };
-  if (card.phase === 'triage') return { lane: 'activate', who: 'owner', label: 'Greenlight to start' };
   const blockers = (card.blockedBy || []).filter(id => {
     const b = cards.find(c => c.id === id);
     if (b) return b.phase !== 'done';
@@ -292,7 +291,10 @@ export function laneOf(card, decisions, cards) {
   if (card.phase === 'deciding') return card.plan
     ? { lane: 'implement', who: 'agent', label: 'Ready to implement' }
     : { lane: 'plan', who: 'agent', label: 'Build a plan + raise decisions' };
-  if (card.phase === 'planning') return { lane: 'plan', who: 'agent', label: card.plan ? 'Vet the plan + raise decisions' : 'Build a plan + raise decisions' };
+  // #516: legacy 'triage' cards (phase predates the greenlight-gate removal)
+  // land in the same lane a fresh card now does — treated here, never
+  // rewritten in stored data.
+  if (card.phase === 'planning' || card.phase === 'triage') return { lane: 'plan', who: 'agent', label: card.plan ? 'Vet the plan + raise decisions' : 'Build a plan + raise decisions' };
   if (card.phase === 'ready')    return { lane: 'implement', who: 'agent', label: 'Ready to implement' };
   if (card.phase === 'building') return { lane: 'building', who: 'agent', label: 'Continue building' };
   if (card.phase === 'verify')   return { lane: 'verify', who: 'agent', label: 'Verify 100%, then close' };
@@ -401,9 +403,8 @@ export function project(s, config = null) {
     .sort((a, b) => (b.ratifiedAt || '').localeCompare(a.ratifiedAt || ''));
   const counts = {
     byPhase: Object.fromEntries(PHASE_IDS.map(p => [p, cards.filter(c => c.phase === p).length])),
-    forYou: openDecisions.length + inLane('activate').length,
+    forYou: openDecisions.length,
     decide: openDecisions.length,
-    activate: inLane('activate').length,
     agentReady: inLane('plan').length + inLane('implement').length + inLane('building').length + inLane('verify').length,
     sidequests: cards.filter(c => c.track === 'sidequest' && ACTIVE.includes(c.phase)).length,
     frozen: cards.filter(c => c.phase === 'frozen').length,
@@ -478,7 +479,7 @@ export function addCard(s, p, config) {
     track: p.track || config.tracks[0],
     epoch: p.epoch ?? s.meta.currentEpoch ?? null,
     milestoneId: p.milestoneId || null,
-    phase: p.phase || 'triage',
+    phase: p.phase || 'planning',
     priority: p.priority || config.priorities[2] || config.priorities.at(-1),
     plan: p.plan || null,
     blockedBy: p.blockedBy || [],
@@ -567,17 +568,15 @@ function mintAcceptance(s, c) {
   c.log.unshift({ at: today(), text: `Requested acceptance — minted ${id}.` });
 }
 
-// D-TWRGUARD1=C (#458): frozen cards are owner-only for any write; triage
-// cards are owner-only for a phase change (greenlight is `activate`'s job) —
-// except the phase-'done' exit, which the done-gate above already governs.
-// Body/plan/log edits on a triage card stay open to agents (normal prep).
-// Agent-hard, owner-soft: by === 'owner' bypasses both checks outright.
+// D-TWRGUARD1=C (#458): frozen cards are owner-only for any write — the
+// owner unpauses one with a plain phase update (`--by owner` bypasses this
+// guard). #516 removed the separate triage/activation gate: a fresh card
+// lands straight in an agent lane, no owner greenlight step.
+// Agent-hard, owner-soft: by === 'owner' bypasses this check outright.
 function assertOwnerLane(c, patch, by) {
   if (by === 'owner') return;
   if (c.phase === 'frozen')
-    fail('E_OWNER_LANE', `card #${c.num} is frozen — owner-only until it's activated (\`tower card activate\`)`);
-  if (c.phase === 'triage' && 'phase' in patch && patch.phase !== 'done')
-    fail('E_OWNER_LANE', `card #${c.num} is in triage — only the owner greenlights it out of triage (\`tower card activate\`); body/plan/log edits are fine`);
+    fail('E_OWNER_LANE', `card #${c.num} is frozen — owner-only until the owner moves it out (\`tower card update --phase ... --by owner\`)`);
 }
 
 export function updateCard(s, ref, patch, config) {
@@ -681,34 +680,13 @@ export function deleteCard(s, ref, p = {}) {
   return { ok: true, id: c.id };
 }
 
-// Owner-only gate shared by activate/ratify (D-TWRGUARD1=C #458). An agent
-// may act "on behalf of" the owner by quoting his words verbatim — recorded
-// in the event log note — otherwise refused.
+// Owner-only gate used by ratify (D-TWRGUARD1=C #458). An agent may act "on
+// behalf of" the owner by quoting his words verbatim — recorded in the event
+// log note — otherwise refused.
 function assertOwnerOr(by, quote, code, what) {
   if (by === 'owner') return null;
   if (!quote || !String(quote).trim()) fail(code, `${what} is owner-only — pass --quote "owner's words" if this is on his behalf`);
   return `by ${by}, quoting owner: "${quote}"`;
-}
-
-// Activate a triaged/frozen card into a working track. Owner-only (greenlight).
-export function activate(s, ref, { track, epoch, milestoneId, phase, workOrder, by, quote } = {}, config) {
-  const c = mustCard(s, ref);
-  const quoteNote = assertOwnerOr(by, quote, 'E_OWNER_ONLY', 'activate');
-  checkEnum(track, config.tracks, 'track');
-  checkEnum(phase, PHASE_IDS, 'phase');
-  if (epoch !== undefined) checkEpoch(s, epoch);
-  if (milestoneId !== undefined) checkMilestone(s, milestoneId);
-  if (track) c.track = track;
-  if (epoch !== undefined) c.epoch = epoch;
-  if (milestoneId !== undefined) c.milestoneId = milestoneId;
-  if (workOrder != null) c.workOrder = Number(workOrder);
-  const hasOpen = s.decisions.some(d => d.cardId === c.id && isBlocking(d));
-  const requestedPhase = phase || (hasOpen ? 'deciding' : 'planning');
-  c.phase = applyDoneGate(s, c, requestedPhase, by) || requestedPhase;
-  c.updated = today();
-  c.log.unshift({ at: today(), by: by || 'owner', text: `Activated into ${c.track === 'epoch' ? 'epoch ' + (c.epoch || '?') : c.track} track${quoteNote ? ` (${quoteNote})` : ''}` });
-  logEvent(s, { by, action: 'card.activate', ref: c.id, note: quoteNote || '' });
-  return c;
 }
 
 // Claim/release: soft assignment so parallel agents don't double-work a card.
@@ -716,7 +694,7 @@ export function claimCard(s, ref, by) {
   const c = mustCard(s, ref);
   if (!by) fail('E_INVALID', 'claim needs --by <agent>');
   if (by !== 'owner' && c.phase === 'frozen')
-    fail('E_OWNER_LANE', `card #${c.num} is frozen — owner-only until it's activated (\`tower card activate\`)`);
+    fail('E_OWNER_LANE', `card #${c.num} is frozen — owner-only until the owner moves it out (\`tower card update --phase ... --by owner\`)`);
   if (c.assignee && c.assignee !== by) fail('E_CLAIMED', `card #${c.num} already claimed by ${c.assignee} — pick another or release it first`);
   c.assignee = by; c.claimedAt = now(); c.updated = today();
   logEvent(s, { by, action: 'card.claim', ref: c.id });
@@ -1012,7 +990,7 @@ export function promoteIdea(s, ideaId, extra = {}, config) {
     body: extra.body || (b.note ? `${b.text}\n\n${b.note}` : b.text),
     kind: extra.kind || (config.kinds.includes('idea') ? 'idea' : config.kinds[0]),
     track: extra.track || config.tracks.at(-1),
-    phase: 'triage',
+    phase: 'planning',
     priority: extra.priority || config.priorities.at(-1),
     by: extra.by,
   }, config);

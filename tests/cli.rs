@@ -132,7 +132,7 @@ fn frequency_ring_groups_execute_real_handlers() {
     assert_ne!(out.status.code(), Some(2), "group must reach semindex handler");
     assert!(String::from_utf8_lossy(&out.stderr).contains("needs an entry file"));
 
-    let out = Command::new(jet()).args(["store", "generations"]).output().unwrap();
+    let out = Command::new(jet()).args(["hangar", "generations"]).output().unwrap();
     assert_ne!(out.status.code(), Some(2), "existing grouped handler must remain live");
 }
 
@@ -141,9 +141,9 @@ fn moved_bare_commands_are_teaching_errors_not_aliases() {
     for (verb, replacement) in [
         ("publish", "jet registry publish"),
         ("semindex", "jet inspect semindex"),
-        ("gc", "jet store gc"),
         ("doctor", "jet self doctor"),
         ("lsp", "jet self lsp"),
+        ("push", "jet os push"),
     ] {
         let out = Command::new(jet()).arg(verb).arg("sentinel").output().unwrap();
         assert_eq!(out.status.code(), Some(2), "{verb} must be rejected");
@@ -158,6 +158,28 @@ fn moved_bare_commands_are_teaching_errors_not_aliases() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("\"code\":\"E2101\""));
     assert!(stdout.contains("jet self lsp --json"));
+}
+
+/// D-CLI-STORE2=A / D-CLI-DEVSERVE1=A / D-CLI-SURFACE3=B: words retired with
+/// **no** `jet <group> <same-word>` rename — `teach_retired`'s bespoke path
+/// (`RETIRED_BARE` in `Source/CLI.rs`), not the generic `moved_command` one.
+#[test]
+fn retired_bespoke_words_teach_real_spelling() {
+    for (argv, replacement) in [
+        (vec!["gc"], "jet clean"),
+        (vec!["store", "verify"], "jet hangar verify"),
+        (vec!["store", "generations"], "jet hangar generations"),
+        (vec!["store", "gc"], "jet clean"),
+        (vec!["store", "fetch"], "jet fetch"),
+        (vec!["serve", "main.jet"], "jet dev main.jet --swap"),
+        (vec!["lock", "stats.jet"], "jet fetch --lock stats.jet"),
+    ] {
+        let out = Command::new(jet()).args(&argv).output().unwrap();
+        assert_eq!(out.status.code(), Some(2), "{argv:?} must be rejected");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains("E2101"), "{argv:?}: {stderr}");
+        assert!(stderr.contains(replacement), "{argv:?}: {stderr}");
+    }
 }
 
 #[test]
@@ -183,7 +205,11 @@ fn every_moved_bare_action_is_e2101_in_human_and_json_modes() {
 #[test]
 fn invalid_nested_action_is_e2101_and_json_escaped() {
     let bad = "bad\\\"action";
-    for group in jet::CLI::COMMAND_GROUPS {
+    // D-CLI-SURFACE3=B: `os` is not exhaustive (see `CommandGroup::exhaustive`)
+    // — an unmodeled subword falls through to the real `jet os` dispatcher,
+    // which teaches its own (non-E2101) "not a jetos verb" error, not this
+    // registry's generic invalid-action path.
+    for group in jet::CLI::COMMAND_GROUPS.iter().filter(|g| g.exhaustive) {
         let out = Command::new(jet()).args([group.name, bad]).output().unwrap();
         assert_eq!(out.status.code(), Some(2));
         let stderr = String::from_utf8_lossy(&out.stderr);
@@ -227,12 +253,21 @@ fn group_help_and_man_inventory_every_nested_description() {
     assert_eq!(man.status.code(), Some(0));
     let man = String::from_utf8_lossy(&man.stdout);
     for group in jet::CLI::COMMAND_GROUPS {
-        let out = Command::new(jet()).args([group.name, "help"]).output().unwrap();
-        assert_eq!(out.status.code(), Some(0));
-        let help = String::from_utf8_lossy(&out.stdout);
-        assert!(help.contains(group.summary), "{} help missing summary", group.name);
+        // D-CLI-SURFACE3=B: a non-exhaustive group (`os`) doesn't own its bare
+        // `help` output — that stays the real `jet os` dispatcher's, which
+        // this registry can't predict — so only the *static* man-page
+        // inventory is checked for it. An exhaustive group's `help` is
+        // CLI-owned and must list every action.
+        if group.exhaustive {
+            let out = Command::new(jet()).args([group.name, "help"]).output().unwrap();
+            assert_eq!(out.status.code(), Some(0));
+            let help = String::from_utf8_lossy(&out.stdout);
+            assert!(help.contains(group.summary), "{} help missing summary", group.name);
+            for action in group.actions {
+                assert!(help.contains(action.name) && help.contains(action.summary), "{} help missing {}", group.name, action.name);
+            }
+        }
         for action in group.actions {
-            assert!(help.contains(action.name) && help.contains(action.summary), "{} help missing {}", group.name, action.name);
             assert!(man.contains(&format!(".B {} {}", group.name, action.name)), "man missing {} {}", group.name, action.name);
             assert!(man.contains(action.summary), "man missing summary for {} {}", group.name, action.name);
         }
@@ -255,7 +290,7 @@ fn palette_uses_canonical_nested_routes() {
 
 #[test]
 fn jet_install_teaches_jet_fetch() {
-    // `jet install` is not a Jet command; the compiler emits E0043 pointing to `jet store fetch`.
+    // `jet install` is not a Jet command; the compiler emits E0043 pointing to `jet fetch`.
     let out = Command::new(jet()).arg("install").output().unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
@@ -263,8 +298,8 @@ fn jet_install_teaches_jet_fetch() {
         "`jet install` should emit E0043 teaching error:\n{stderr}"
     );
     assert!(
-        stderr.contains("jet store fetch"),
-        "`jet install` error should mention `jet store fetch`:\n{stderr}"
+        stderr.contains("jet fetch"),
+        "`jet install` error should mention `jet fetch`:\n{stderr}"
     );
 }
 
@@ -453,7 +488,7 @@ fn jetpack_missing_build_log_golden() {
     let cwd = isolated_cwd(&line!().to_string());
     let root = cwd.join("jetpack-root");
     let out = Command::new(jet())
-        .args(["logs", "definitely_missing", "--no-color"])
+        .args(["inspect", "logs", "definitely_missing", "--no-color"])
         .current_dir(&cwd)
         .env("JETPACK_ROOT", &root)
         .output()
@@ -682,7 +717,7 @@ fn fetch_without_git_is_e1203_snapshot() {
     )
     .unwrap();
     let out = Command::new(jet())
-        .args(["store", "fetch"])
+        .args(["fetch"])
         .current_dir(&dir)
         .env("PATH", "")
         .env("HOME", &dir)
