@@ -1,7 +1,7 @@
 //! D-FE-REPL1=D interactive TTY event loop.
 //!
 //! Reads raw key events from `Terminal::KeyReader` and drives a small
-//! single-line editor (ghost autosuggest from session history, prefix/member
+//! multiline editor (ghost autosuggest from session history, prefix/member
 //! completion on Tab) plus the notebook/workspace layers: a dim turn-number
 //! gutter on every prompt, a `📌` pin rail redrawn above the prompt each
 //! cycle, auto-folding long `List` echoes, and a `^B` bindings panel.
@@ -292,8 +292,9 @@ fn read_line<R: Read>(
     let mut buf: Vec<char> = prefill.chars().collect();
     let mut cursor = buf.len();
     let history: Vec<String> = session.history.entries().iter().rev().cloned().collect();
+    let mut display = EditorDisplay::default();
 
-    redraw(prompt, &buf, cursor, ghost_for(&buf, &history), color);
+    display.redraw(prompt, &buf, cursor, ghost_for(&buf, &history), color);
 
     loop {
         match reader.read_key() {
@@ -309,22 +310,22 @@ fn read_line<R: Read>(
                 // text mid-line the first ^C clears it so a typo never
                 // forces an exit; ^C at an empty prompt quits.
                 if buf.is_empty() {
+                    display.finish();
                     print!("^C\r\n");
                     io::stdout().flush().ok();
                     return LineOutcome::Eof;
                 }
                 buf.clear();
                 cursor = 0;
+                display.finish();
                 print!("^C\r\n");
-                redraw(prompt, &buf, cursor, None, color);
+                display.redraw(prompt, &buf, cursor, None, color);
             }
             Key::CtrlB if buf.is_empty() => return LineOutcome::CtrlB,
             Key::CtrlP if buf.is_empty() => return LineOutcome::CtrlP,
             Key::CtrlF if buf.is_empty() => return LineOutcome::CtrlF,
             Key::CtrlR if buf.is_empty() => return LineOutcome::CtrlR,
             Key::Enter => {
-                print!("\r\n");
-                io::stdout().flush().ok();
                 if buf.is_empty() {
                     // D-FE-REPL1=D: "unfold ⏎" — Enter at an empty prompt
                     // right after a fold marker unfolds it in place instead
@@ -332,15 +333,31 @@ fn read_line<R: Read>(
                     if let Some(last) = session.turns.last() {
                         if last.folded && last.pending_unfold.is_some() {
                             let id = last.id;
+                            display.finish();
                             if let Ok(Some(full)) = unfold_turn(session, id) {
                                 println!("{}", full);
                             }
-                            redraw(prompt, &buf, cursor, None, color);
+                            display.redraw(prompt, &buf, cursor, None, color);
                             continue;
                         }
                     }
                 }
+                let blank_continuation = cursor == buf.len()
+                    && buf.contains(&'\n')
+                    && buf.last().is_some_and(|c| *c == '\n');
+                let text: String = buf.iter().collect();
+                if !blank_continuation && !super::raw_input_is_complete(&text) {
+                    buf.insert(cursor, '\n');
+                    cursor += 1;
+                    display.redraw(prompt, &buf, cursor, None, color);
+                    continue;
+                }
+                display.finish();
                 return LineOutcome::Submitted(buf.iter().collect());
+            }
+            Key::EscapeEnter => {
+                buf.insert(cursor, '\n');
+                cursor += 1;
             }
             Key::Backspace => {
                 if cursor > 0 {
@@ -361,34 +378,47 @@ fn read_line<R: Read>(
                         // Accept the ghost suggestion in full.
                         buf.extend(g.chars());
                         cursor = buf.len();
-                        redraw(prompt, &buf, cursor, None, color);
+                        display.redraw(prompt, &buf, cursor, None, color);
                         continue;
                     }
                 }
                 cursor = (cursor + 1).min(buf.len());
             }
             Key::End => {
-                if let Some(g) = ghost_for(&buf, &history) {
-                    buf.extend(g.chars());
+                let end = line_end(&buf, cursor);
+                if end == buf.len() {
+                    if let Some(g) = ghost_for(&buf, &history) {
+                        buf.extend(g.chars());
+                    }
+                    cursor = buf.len();
+                } else {
+                    cursor = end;
                 }
-                cursor = buf.len();
             }
-            Key::Home => cursor = 0,
+            Key::Home => cursor = line_start(&buf, cursor),
             Key::Up => {
-                if let Some(h) = history.first() {
+                if buf.contains(&'\n') {
+                    cursor = vertical_cursor(&buf, cursor, false);
+                } else if let Some(h) = history.first() {
                     buf = h.chars().collect();
                     cursor = buf.len();
                 }
             }
             Key::Down => {
-                buf.clear();
-                cursor = 0;
+                if buf.contains(&'\n') {
+                    cursor = vertical_cursor(&buf, cursor, true);
+                } else {
+                    buf.clear();
+                    cursor = 0;
+                }
             }
             Key::Tab => {
-                apply_completion(&mut buf, &mut cursor, session, color);
+                if apply_completion(&mut buf, &mut cursor, session, color) {
+                    display = EditorDisplay::default();
+                }
             }
             Key::F3 => {
-                print!("\r\n");
+                display.finish();
                 if let Some(found) = read_history_search(reader, session, color) {
                     buf = found.chars().collect();
                     cursor = buf.len();
@@ -405,7 +435,7 @@ fn read_line<R: Read>(
                 cursor += 1;
             }
         }
-        redraw(prompt, &buf, cursor, ghost_for(&buf, &history), color);
+        display.redraw(prompt, &buf, cursor, ghost_for(&buf, &history), color);
     }
 }
 
@@ -416,15 +446,16 @@ fn read_history_search<R: Read>(
 ) -> Option<String> {
     let prompt = "history search> ";
     let mut query = Vec::new();
+    let mut display = EditorDisplay::default();
     loop {
-        redraw(prompt, &query, query.len(), None, color);
+        display.redraw(prompt, &query, query.len(), None, color);
         match reader.read_key() {
             Key::Char(c) => query.push(c),
             Key::Backspace => {
                 query.pop();
             }
             Key::Enter => {
-                print!("\r\n");
+                display.finish();
                 let needle: String = query.into_iter().collect();
                 let found = session
                     .history
@@ -438,7 +469,7 @@ fn read_history_search<R: Read>(
                 return found;
             }
             Key::Escape | Key::CtrlC => {
-                print!("\r\n");
+                display.finish();
                 return None;
             }
             Key::Idle => continue,
@@ -450,45 +481,160 @@ fn read_history_search<R: Read>(
 /// Longest suffix from the most recent matching history entry — the ghost
 /// autosuggest text shown dim after the cursor.
 fn ghost_for(buf: &[char], history: &[String]) -> Option<String> {
-    if buf.is_empty() {
+    if buf.is_empty() || buf.contains(&'\n') {
         return None;
     }
     let prefix: String = buf.iter().collect();
     history
         .iter()
-        .find(|h| h.len() > prefix.len() && h.starts_with(&prefix))
+        .find(|h| !h.contains('\n') && h.len() > prefix.len() && h.starts_with(&prefix))
         .map(|h| h[prefix.len()..].to_string())
 }
 
-/// Redraw the current line in place: `\r` + clear-to-EOL, prompt, typed
-/// text, dim ghost suggestion (only when the cursor is at the end), cursor
-/// repositioned back to `cursor`.
-fn redraw(prompt: &str, buf: &[char], cursor: usize, ghost: Option<String>, color: bool) {
-    print!("\r\x1b[K{}", prompt);
-    let typed: String = buf.iter().collect();
-    print!("{}", typed);
-    let ghost_len = if cursor == buf.len() {
-        if let Some(g) = &ghost {
-            print!("{}", dim(g, color));
-            g.chars().count()
-        } else {
-            0
+fn line_start(buf: &[char], cursor: usize) -> usize {
+    buf[..cursor]
+        .iter()
+        .rposition(|c| *c == '\n')
+        .map(|i| i + 1)
+        .unwrap_or(0)
+}
+
+fn line_end(buf: &[char], cursor: usize) -> usize {
+    buf[cursor..]
+        .iter()
+        .position(|c| *c == '\n')
+        .map(|i| cursor + i)
+        .unwrap_or(buf.len())
+}
+
+fn vertical_cursor(buf: &[char], cursor: usize, down: bool) -> usize {
+    let start = line_start(buf, cursor);
+    let column = cursor - start;
+    if down {
+        let end = line_end(buf, cursor);
+        if end == buf.len() {
+            return cursor;
         }
+        let next_start = end + 1;
+        let next_end = line_end(buf, next_start);
+        next_start + column.min(next_end - next_start)
     } else {
-        0
-    };
-    let back = (buf.len() - cursor) + ghost_len;
-    if back > 0 {
-        print!("\x1b[{}D", back);
+        if start == 0 {
+            return cursor;
+        }
+        let previous_end = start - 1;
+        let previous_start = line_start(buf, previous_end);
+        previous_start + column.min(previous_end - previous_start)
     }
-    io::stdout().flush().ok();
+}
+
+/// Whole-buffer raw editor display. Repaints every logical row, then restores
+/// cursor to its source position. This keeps insert/delete correct across
+/// continuation lines without letting stale text survive a shorter redraw.
+#[derive(Default)]
+struct EditorDisplay {
+    rows: usize,
+    cursor_row: usize,
+}
+
+impl EditorDisplay {
+    fn redraw(
+        &mut self,
+        prompt: &str,
+        buf: &[char],
+        cursor: usize,
+        ghost: Option<String>,
+        color: bool,
+    ) {
+        if self.rows > 0 {
+            print!("\r");
+            if self.cursor_row > 0 {
+                print!("\x1b[{}A", self.cursor_row);
+            }
+            print!("\x1b[J");
+        }
+
+        let typed: String = buf.iter().collect();
+        let continuation = dim("· ", color);
+        for (row, line) in typed.split('\n').enumerate() {
+            if row > 0 {
+                print!("\r\n{}", continuation);
+            } else {
+                print!("{}", prompt);
+            }
+            print!("{}", line);
+        }
+        if cursor == buf.len() {
+            if let Some(g) = ghost {
+                print!("{}", dim(&g, color));
+            }
+        }
+
+        let cursor_row = buf[..cursor].iter().filter(|c| **c == '\n').count();
+        let end_row = buf.iter().filter(|c| **c == '\n').count();
+        if end_row > cursor_row {
+            print!("\x1b[{}A", end_row - cursor_row);
+        }
+        print!("\r");
+        let line_start = buf[..cursor]
+            .iter()
+            .rposition(|c| *c == '\n')
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        let prompt_width = if cursor_row == 0 {
+            visible_width(prompt)
+        } else {
+            visible_width(&continuation)
+        };
+        let column = prompt_width + cursor - line_start;
+        if column > 0 {
+            print!("\x1b[{}C", column);
+        }
+        io::stdout().flush().ok();
+        self.rows = end_row + 1;
+        self.cursor_row = cursor_row;
+    }
+
+    fn finish(&mut self) {
+        if self.rows > 0 {
+            let below = self.rows - 1 - self.cursor_row;
+            if below > 0 {
+                print!("\x1b[{}B", below);
+            }
+            print!("\r\n");
+            io::stdout().flush().ok();
+        }
+        *self = Self::default();
+    }
+}
+
+fn visible_width(text: &str) -> usize {
+    let mut width = 0;
+    let mut escape = false;
+    for ch in text.chars() {
+        if escape {
+            if ch.is_ascii_alphabetic() {
+                escape = false;
+            }
+        } else if ch == '\x1b' {
+            escape = true;
+        } else {
+            width += 1;
+        }
+    }
+    width
 }
 
 /// Tab completion: bare-identifier prefix over session bindings/functions,
 /// or (after a `.`) builtin member names for the receiver's live type —
 /// sourced from `Docs::BUILTIN_DOCS`, the same table `?name` reads, so the
 /// completion menu and its docs never drift apart (I8).
-fn apply_completion(buf: &mut Vec<char>, cursor: &mut usize, session: &Session, color: bool) {
+fn apply_completion(
+    buf: &mut Vec<char>,
+    cursor: &mut usize,
+    session: &Session,
+    color: bool,
+) -> bool {
     let text: String = buf[..*cursor].iter().collect();
     let (replace_start, candidates) = if let Some(dot) = text.rfind('.') {
         let receiver = &text[..dot];
@@ -528,11 +674,11 @@ fn apply_completion(buf: &mut Vec<char>, cursor: &mut usize, session: &Session, 
     };
 
     if candidates.is_empty() {
-        return;
+        return false;
     }
     if candidates.len() == 1 {
         insert_completion(buf, cursor, replace_start, &candidates[0]);
-        return;
+        return false;
     }
     // Shell-style: complete to the longest common prefix, then list matches
     // once beneath the line (redrawn away on the next keystroke).
@@ -542,6 +688,7 @@ fn apply_completion(buf: &mut Vec<char>, cursor: &mut usize, session: &Session, 
         insert_completion(buf, cursor, replace_start, &common);
     }
     print!("\r\n{}\r\n", dim(&candidates.join("   "), color));
+    true
 }
 
 fn insert_completion(buf: &mut Vec<char>, cursor: &mut usize, replace_start: usize, completion: &str) {

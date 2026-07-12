@@ -5,7 +5,8 @@
 //!   D-REPL5=A   expressions + top-level statements; no FFI/tasks
 //!   D-REPL7=C   one accumulating module (default)
 //!   D-REPL8=A   real move semantics across inputs
-//!   D-REPL9=A   brace/paren/bracket balance → `...` secondary prompt
+//!   D-REPL9=A   cooked-mode brace/paren/bracket balance → `...` prompt
+//!   D-FE-REPL-MULTILINE1=A raw-mode parser-aware multiline editing
 //!   D-REPL11=A  std-only; no external line-editing crate (I6)
 //!   D-REPL15=B  meta-commands: `:quit`, `:reset`, `:load`, `:type`, `:help`
 //!   D-REPL16=B  `x : T = v` echo for last expression; `;` suppresses
@@ -1308,6 +1309,52 @@ fn starts_with_stmt_keyword(t: &str) -> bool {
         || t.starts_with("continue")
         || t.starts_with("print(")
         || t.starts_with("eprint(")
+}
+
+/// D-FE-REPL-MULTILINE1=A: raw-mode Enter follows parser completeness.
+/// Each probe uses the same item/statement/expression shape as `classify`.
+/// A diagnostic on synthetic wrapper text means the user's prefix can still
+/// become valid with more source; a diagnostic inside their text is complete
+/// (and should submit now so the normal owned diagnostic can explain it).
+pub(crate) fn raw_input_is_complete(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty()
+        || trimmed.starts_with(':')
+        || trimmed.starts_with('?')
+        || reject_feature(trimmed).is_some()
+    {
+        return true;
+    }
+
+    fn probe(prefix: &str, input: &str, suffix: &str) -> bool {
+        let cutoff = prefix.len() + input.len();
+        let source = format!("{prefix}{input}{suffix}");
+        let (tokens, lex_diags) = crate::Lexer::lex(&source);
+        if !lex_diags.is_empty() {
+            // E0002 at the user's current end is an unfinished lexical
+            // construct (quote/comment/interpolation). If the error ends
+            // earlier, another line cannot repair it and Enter must submit.
+            return !lex_diags.iter().any(|diag| {
+                diag.code == "E0002"
+                    && diag.span.is_some_and(|span| span.end >= cutoff)
+            });
+        }
+        match crate::Parser::parse_for_check(&tokens) {
+            Ok(_) => true,
+            Err(diags) => !diags
+                .iter()
+                .any(|diag| diag.span.is_some_and(|span| span.start >= cutoff)),
+        }
+    }
+
+    if looks_like_item(trimmed) || looks_like_import(trimmed) {
+        return probe("", trimmed, "");
+    }
+    if starts_with_stmt_keyword(trimmed) || trimmed.ends_with(';') {
+        probe("fn __repl__() {\n", trimmed, "\n}\n")
+    } else {
+        probe("fn __repl__() {\n__repl_echo__ :: ", trimmed, "\n}\n")
+    }
 }
 
 /// Classify the raw input text.
@@ -2829,5 +2876,18 @@ mod tests {
         };
         assert_eq!(check_src, "s: String :: \"\";");
         assert!(matches!(stmts.as_slice(), [Stmt::Val(_)]));
+    }
+
+    #[test]
+    fn raw_multiline_completeness_comes_from_repl_parser_shapes() {
+        assert!(raw_input_is_complete("40 + 2"));
+        assert!(raw_input_is_complete("answer :: = 42"));
+        assert!(!raw_input_is_complete("40 +"));
+        assert!(!raw_input_is_complete("answer ::"));
+        assert!(!raw_input_is_complete("fn total(xs: [Int]) -> Int {"));
+        assert!(!raw_input_is_complete("if true {\n    1"));
+        assert!(!raw_input_is_complete("/* unfinished"));
+        assert!(!raw_input_is_complete("\"\"\"\nunfinished"));
+        assert!(raw_input_is_complete("\"single-line text\ncan't continue"));
     }
 }

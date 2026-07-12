@@ -91,6 +91,8 @@ pub enum Key {
     Delete,
     Tab,
     Escape,
+    /// D-FE-REPL-MULTILINE1=A portable Alt-Enter encoding: Escape then Enter.
+    EscapeEnter,
     Left,
     Right,
     Up,
@@ -166,6 +168,9 @@ impl<R: Read> KeyReader<R> {
         let Some(b1) = self.read_byte() else {
             return Key::Escape;
         };
+        if matches!(b1, b'\r' | b'\n') {
+            return Key::EscapeEnter;
+        }
         if b1 != b'[' && b1 != b'O' {
             return Key::Unknown;
         }
@@ -246,6 +251,14 @@ mod tests {
         let mut r = KeyReader::new(Cursor::new(b"a\r".to_vec()));
         assert_eq!(r.read_key(), Key::Char('a'));
         assert_eq!(r.read_key(), Key::Enter);
+    }
+
+    #[test]
+    fn decodes_escape_enter_as_forced_newline() {
+        let mut cr = KeyReader::new(Cursor::new(vec![0x1b, b'\r']));
+        assert_eq!(cr.read_key(), Key::EscapeEnter);
+        let mut lf = KeyReader::new(Cursor::new(vec![0x1b, b'\n']));
+        assert_eq!(lf.read_key(), Key::EscapeEnter);
     }
 
     #[test]

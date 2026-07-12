@@ -1567,6 +1567,12 @@ owner-only. Corrupt tails are discarded with a visible warning; unavailable
 private storage visibly falls back to session-only history. Inputs are not
 secret-filtered because Jet cannot reliably identify every secret.
 
+**D-FE-REPL-MULTILINE1=A (ratified 2026-07-11)**: raw-terminal Enter submits
+parser-complete input and inserts a newline when parsing needs more source.
+Escape then Enter always inserts a newline. Enter on an empty continuation
+line force-submits. One-line Enter stays unchanged. Cooked and non-TTY input
+keeps bracket-balance continuation.
+
 ### Core library
 
 **S9 — Print**: `print` (adds newline).

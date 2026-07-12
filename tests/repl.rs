@@ -245,6 +245,95 @@ fn repl_raw_f3_search_recalls_and_submits_persistent_history() {
     std::fs::remove_dir_all(state).ok();
 }
 
+#[cfg(unix)]
+fn run_raw_multiline_pty(writer: &str) -> std::process::Output {
+    use std::process::Command;
+    let shell = format!(
+        "{{ sleep 0.2; {writer}; sleep 0.2; printf ':quit\\r'; }} | \
+         timeout 8s script -qec '\"$JET_REPL_BIN\" repl' /dev/null"
+    );
+    Command::new("sh")
+        .args(["-c", &shell])
+        .env("JET_REPL_BIN", env!("CARGO_BIN_EXE_jet"))
+        .env("JET_REPL_HISTORY", "off")
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run raw multiline REPL under PTY")
+}
+
+#[cfg(unix)]
+#[test]
+fn repl_raw_enter_uses_parser_completeness_not_bracket_balance() {
+    let output = run_raw_multiline_pty(
+        "printf '40 +\\r'; sleep 0.15; printf '2\\r'",
+    );
+    let out = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "PTY status: {:?}\n{out}", output.status);
+    assert!(out.contains("· "), "continuation prompt missing: {out:?}");
+    assert!(out.contains("42 : Int"), "parser-complete input did not submit: {out:?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn repl_raw_escape_enter_forces_newline_then_blank_submits() {
+    let output = run_raw_multiline_pty(
+        "printf '40 + 2\\033\\r'; sleep 0.15; printf '\\r'",
+    );
+    let out = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "PTY status: {:?}\n{out}", output.status);
+    assert!(out.contains("· "), "forced newline did not redraw continuation: {out:?}");
+    assert!(out.contains("42 : Int"), "blank continuation did not submit: {out:?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn repl_raw_blank_continuation_force_submits_incomplete_input() {
+    let output = run_raw_multiline_pty(
+        "printf '1 +\\r'; sleep 0.15; printf '\\r'",
+    );
+    let out = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "PTY status: {:?}\n{out}", output.status);
+    assert!(out.contains("E0003"), "blank continuation kept waiting: {out:?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn repl_raw_multiline_redraw_keeps_second_line_editable() {
+    let output = run_raw_multiline_pty(
+        "printf '10 +\\r'; sleep 0.15; printf '3\\1772\\r'",
+    );
+    let out = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "PTY status: {:?}\n{out}", output.status);
+    assert!(out.contains("· 2"), "continuation redraw lost edited line: {out:?}");
+    assert!(out.contains("12 : Int"), "edited multiline input was wrong: {out:?}");
+}
+
+#[test]
+fn repl_cooked_keeps_bracket_balance_continuation() {
+    use std::io::Write as _;
+    use std::process::{Command, Stdio};
+    let mut child = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .arg("repl")
+        .env("JET_REPL_HISTORY", "off")
+        .env("NO_COLOR", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"[1,\n2]\n:quit\n")
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    let out = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "cooked status: {:?}\n{out}", output.status);
+    assert!(out.contains("...  "), "cooked continuation prompt missing: {out:?}");
+    assert!(out.contains("[1, 2]"), "balanced cooked input failed: {out:?}");
+}
+
 /// Parse a transcript file: return `(inputs, expected_outputs)`.
 /// Lines `> input` become inputs; non-comment, non-`>` lines become expected.
 /// Lines starting with `# ` are comments. Blank expected-output lines are
