@@ -337,8 +337,10 @@ const GC_PRELUDE: &str = include_str!("../Prelude/Gc.rs");
 /// `layout {}` block isn't limited to UI code.
 const LAYOUT_PRELUDE: &str = include_str!("../Prelude/Layout.rs");
 
-/// Tower #126: emitted AOT programs ship AND select the native readiness backend
-/// (epoll on Linux, kqueue on the BSD/Apple family), not just the portable poll.
+/// Tower #126: emitted AOT programs that use tasks/networking ship AND select the
+/// native readiness backend (epoll on Linux, kqueue on the BSD/Apple family), not
+/// just the portable poll. Other Core users retain the safe portable scheduler
+/// compatibility surface without inheriting unrelated native FFI (I1).
 ///
 /// The prelude gates its native syscall paths behind `feature = "jet_native_io"`
 /// for the in-crate JIT copy (`jet_codegen::scheduler`, whose Cargo manifest turns
@@ -352,9 +354,46 @@ const LAYOUT_PRELUDE: &str = include_str!("../Prelude/Layout.rs");
 /// vetted region — the only `unsafe` in the emitted scheduler. `tests/golden.rs`
 /// ignores exactly that region in its I1 unsafe scan, matching the vetted-internal
 /// pattern used by `jet_os_unix`/`jet_term_unix`.
-fn scheduler_prelude_for_emit() -> &'static str {
-    static EMIT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    EMIT.get_or_init(|| SCHEDULER_PRELUDE_RAW.replace("feature = \"jet_native_io\"", "all()"))
+fn strip_scheduler_region(mut source: String, name: &str) -> String {
+    let begin = format!("// jet:scheduler-native-{name}-begin");
+    let end = format!("// jet:scheduler-native-{name}-end");
+    let Some(start) = source.find(&begin) else {
+        return source;
+    };
+    let Some(relative_end) = source[start..].find(&end) else {
+        return source;
+    };
+    let end_offset = start + relative_end + end.len();
+    source.replace_range(start..end_offset, "");
+    source
+}
+
+fn scheduler_prelude_for_emit(native_io: bool) -> &'static str {
+    static NATIVE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    static PORTABLE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    if native_io {
+        NATIVE.get_or_init(|| {
+            SCHEDULER_PRELUDE_RAW.replace("feature = \"jet_native_io\"", "all()")
+        })
+    } else {
+        PORTABLE.get_or_init(|| {
+            ["notify", "epoll", "kqueue", "iocp"]
+                .into_iter()
+                .fold(SCHEDULER_PRELUDE_RAW.to_string(), strip_scheduler_region)
+        })
+    }
+}
+
+fn uses_native_scheduler(bundle: &ProgramBundle) -> bool {
+    bundle.used_core.iter().any(|usage| {
+        ["core.tasks", "core.net", "core.http"]
+            .iter()
+            .any(|module| {
+                usage.strip_prefix(module).is_some_and(|suffix| {
+                    suffix.is_empty() || suffix.starts_with("::") || suffix.starts_with('.')
+                })
+            })
+    })
 }
 
 /// D-ALLOC2: the `jet_mem` arena helper carries the one vetted lifetime-extension
@@ -1342,7 +1381,7 @@ pub fn emit_bundle_dbg(
     out.push_str(LAYOUT_PRELUDE);
     if !bundle.used_core.is_empty() {
         push_corelib_prelude(&mut out);
-        out.push_str(scheduler_prelude_for_emit());
+        out.push_str(scheduler_prelude_for_emit(uses_native_scheduler(bundle)));
         out.push_str(UI_PRELUDE);
         if uses_gtk_backend(bundle) {
             out.push_str(UI_GTK_PRELUDE);
@@ -1470,7 +1509,7 @@ pub fn emit_bundle_tests_cov(
     }
     if !bundle.used_core.is_empty() {
         push_corelib_prelude(&mut out);
-        out.push_str(scheduler_prelude_for_emit());
+        out.push_str(scheduler_prelude_for_emit(uses_native_scheduler(bundle)));
         out.push_str(UI_PRELUDE);
         if uses_gtk_backend(bundle) {
             out.push_str(UI_GTK_PRELUDE);
@@ -1651,7 +1690,7 @@ pub fn emit_bundle_fuzz(
     out.push_str(PROP_PRELUDE);
     if !bundle.used_core.is_empty() {
         push_corelib_prelude(&mut out);
-        out.push_str(scheduler_prelude_for_emit());
+        out.push_str(scheduler_prelude_for_emit(uses_native_scheduler(bundle)));
         out.push_str(UI_PRELUDE);
         if uses_gtk_backend(bundle) {
             out.push_str(UI_GTK_PRELUDE);
@@ -1891,7 +1930,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
     }
     if !bundle.used_core.is_empty() {
         push_corelib_prelude(&mut out);
-        out.push_str(scheduler_prelude_for_emit());
+        out.push_str(scheduler_prelude_for_emit(uses_native_scheduler(bundle)));
         out.push_str(UI_PRELUDE);
         if uses_gtk_backend(bundle) {
             out.push_str(UI_GTK_PRELUDE);

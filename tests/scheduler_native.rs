@@ -13,6 +13,19 @@ fn run() {
 }
 "#;
 
+const SAFE_CORE_PROGRAMS: &[&str] = &[
+    r#"use core.text as text
+
+fn run() {
+    print(text.trim(" safe "))
+}
+"#,
+    r#"fn run() {
+    print((BigInt(100) - BigInt(1)).to_string())
+}
+"#,
+];
+
 /// Drop the inclusive span between two markers — mirrors golden.rs's I1 scan.
 fn strip_region(src: &str, begin: &str, end: &str) -> String {
     match (src.find(begin), src.find(end)) {
@@ -139,4 +152,26 @@ fn emitted_scheduler_native_region_is_the_only_unsafe() {
         !scanned.contains("unsafe"),
         "I1: all emitted `unsafe` must live inside the vetted jet:scheduler-native region"
     );
+}
+
+#[test]
+fn safe_core_calls_do_not_inherit_native_scheduler_unsafe() {
+    for source in SAFE_CORE_PROGRAMS {
+        let out = jet::compile(source).expect("safe Core program should compile");
+        let scanned = strip_mod(&out.rust, "jet_atomic_windows");
+        assert!(
+            !scanned.contains("unsafe"),
+            "safe Core use inherited generated unsafe outside vetted std internals"
+        );
+        assert!(
+            !out.rust.contains("epoll_create1")
+                && !out.rust.contains("fn kqueue()")
+                && !out.rust.contains("CreateIoCompletionPort"),
+            "safe Core use inherited an unrelated native scheduler backend"
+        );
+        assert!(
+            out.rust.contains("run_portable_poll"),
+            "safe Core use still needs the scheduler compatibility surface"
+        );
+    }
 }
