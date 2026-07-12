@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 496,
-    "rev": 3969,
+    "nextNum": 497,
+    "rev": 3978,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -14,7 +14,6 @@
         "epoch:e9",
         "epoch:e7",
         "epoch:e6",
-        "board-sidequests",
         "epoch:e4",
         "epoch:e5",
         "radar:e9",
@@ -243,12 +242,17 @@
       "body": "D-DBG3 step 2 (the in-session command surface shipped in c52 over the interpreter). Remaining: a native backend that steps the FULL feature set the interpreter declines (E2203: FFI, tasks, #Unsafe, native std), the D-DBG2 --raw-frames expert view, and editor DAP wiring (VS Code/Zed). The ratified command vocabulary (step/next/continue/finish/break/print/locals/backtrace) is fixed and reused; only the native backend + protocol transport remain.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": "e3",
+      "epoch": "e8",
       "phase": "ready",
       "priority": "P1",
       "plan": "dap-debugger",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "owner",
+          "text": "Owner moved remaining editor/platform debugger interoperability and native cross-platform CI proof to E8 CI & Documentation; shipped debugger core stays credited."
+        },
         {
           "at": "2026-07-09",
           "by": "codex-main",
@@ -288,7 +292,7 @@
         }
       ],
       "created": "2026-06-25",
-      "updated": "2026-07-11",
+      "updated": "2026-07-12",
       "workOrder": 56,
       "criteria": [],
       "needsAcceptance": false,
@@ -3972,7 +3976,7 @@
       "body": "Best-in-class bar: Python pathlib ergonomics, Go os robustness, Rust std::fs safety. Card #58 (path objects, atomic write, dir-walk) is done — first verify what actually shipped vs docs/reference/core-library.md (the doc shows no walk/glob/metadata), then close the residual gaps so core.files is a strict superset of the bar.\n\nGaps to audit and close: file metadata (size, mtime, created, permissions, file type) as a typed Stat value; create_dir_all / remove_dir / remove_all; glob patterns and recursive walk with entry filtering; symlink create/read/detect and hardlinks; temp files and temp dirs with RAII cleanup; atomic write (verify #58); advisory file locking; canonicalize/absolute; copy_dir tree; seek/offset reads and byte-stream (non-line) buffered readers/writers; fsync/flush-to-disk; filesystem watch (notify events) — watch may deserve its own module name (ballot).\n\nDone means: every gap either ships with example + golden test, or is recorded as an owner-declined non-goal in the stdlib map. Ballot gates: any new user-facing module name, function surface, or syntax is an owner decision (queue ballots before code); any external dep stays behind the FFI bridge pattern (I6).",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e3",
+      "epoch": "e8",
       "milestoneId": "e3-universal-product-parity",
       "phase": "building",
       "priority": "P1",
@@ -3980,6 +3984,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "owner",
+          "text": "Native Windows proof is deferred by owner to E8 CI & Documentation; shipped cross-platform filesystem work stays credited. Earlier epochs no longer wait on Windows CI."
+        },
         {
           "at": "2026-07-11",
           "by": "codex-orchestrator",
@@ -4036,7 +4045,7 @@
         }
       ],
       "created": "2026-07-07T17:23:32.437Z",
-      "updated": "2026-07-11",
+      "updated": "2026-07-12",
       "workOrder": 25,
       "criteria": [
         {
@@ -8393,7 +8402,7 @@
       "body": "Replace sandbox-status facade with enforced OS isolation. Linux namespaces/private proc-dev/read-only inputs; macOS sandbox policy; Windows restricted token/Job Object/ACL projection; network only for fixed-output fetch. Hostile corpus is binding.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e4",
+      "epoch": "e8",
       "milestoneId": "e4-jetpack-world-class",
       "phase": "ready",
       "priority": "P0",
@@ -8405,6 +8414,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-07-12",
+          "by": "owner",
+          "text": "Owner moved Linux/macOS/Windows package sandbox interoperability to E8 CI & Documentation so E4 can finish package-manager product behavior first."
+        },
+        {
           "at": "2026-07-10",
           "text": "All decisions ratified; advanced out of deciding."
         },
@@ -8415,7 +8429,7 @@
         }
       ],
       "created": "2026-07-09T18:16:39.573Z",
-      "updated": "2026-07-10",
+      "updated": "2026-07-12",
       "criteria": [],
       "needsAcceptance": false,
       "refs": []
@@ -11824,7 +11838,7 @@
       "body": "Found during #465 burndown (jetpack-jail cluster). crates/jetpack/src/Store.rs:931-939: the #[cfg(not(target_os = \"linux\"))] create_exec_wrappers unconditionally returns Err whenever a lease contains executables, so snapshot_lease — mandatory for every consumer since #418 — fails at runtime on macOS/Windows for any package with a bin/. Distinct from the platform-lane COMPILE failures already tracked on #465 (deny(warnings) unused imports + E0277 in Store.rs:605): this is a runtime gap that survives the compile fix. Needs a real non-Linux exec-wrapper strategy (or explicitly documented platform contract), plus platform-lane test coverage. Also note tests/jetpack.rs parent_env_unchanged_after_run now asserts the Linux /proc/self/fd wrapper head — gate or branch that assertion when non-Linux wrappers land.",
       "kind": "bug",
       "track": "sidequest",
-      "epoch": "e3",
+      "epoch": "e8",
       "milestoneId": null,
       "phase": "building",
       "priority": "P1",
@@ -11832,6 +11846,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "owner",
+          "text": "Owner moved macOS/Windows executable-wrapper compatibility to E8 CI & Documentation; earlier epochs focus Linux product completion and polish."
+        },
         {
           "at": "2026-07-11",
           "by": "card467-builder",
@@ -11903,7 +11922,7 @@
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-10T18:57:34.825Z",
-      "updated": "2026-07-11"
+      "updated": "2026-07-12"
     },
     {
       "id": "c0vntq8c",
@@ -13288,6 +13307,32 @@
       "created": "2026-07-11T12:52:06.086Z",
       "updated": "2026-07-11",
       "claimedAt": "2026-07-11T16:39:08.192Z"
+    },
+    {
+      "id": "c11pkkov",
+      "num": 496,
+      "title": "Allow user definition of operators for classes/structs - even python does this",
+      "body": "Allow user definition of operators for classes/structs - even python does this. We should have excellent, convenient, and intuitive default behavior but allow full access to “internal” apis, like operator definitions for structs/types. Need to design and choose a consistent syntax. Python uses double underscore prefix (and postfix?) to indicate some of these.",
+      "kind": "idea",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "deciding",
+      "priority": "P3",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-12",
+          "text": "Promoted from Ideas"
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "needsAcceptance": false,
+      "created": "2026-07-12T00:09:36.517Z",
+      "updated": "2026-07-12"
     }
   ],
   "decisions": [
@@ -26375,11 +26420,68 @@
       "note": "",
       "level": null,
       "tags": [],
-      "status": "open",
-      "created": "2026-07-10T23:46:57.224Z"
+      "status": "tagged",
+      "created": "2026-07-10T23:46:57.224Z",
+      "cardId": "c11pkkov"
     }
   ],
   "events": [
+    {
+      "at": "2026-07-12T00:15:10.770Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c144",
+      "note": "epoch,logEntry"
+    },
+    {
+      "at": "2026-07-12T00:14:51.269Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0t4root",
+      "note": "epoch,logEntry"
+    },
+    {
+      "at": "2026-07-12T00:14:29.117Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0zqnb18",
+      "note": "epoch,logEntry"
+    },
+    {
+      "at": "2026-07-12T00:14:10.038Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0m9tjqj",
+      "note": "epoch,logEntry"
+    },
+    {
+      "at": "2026-07-12T00:11:30.776Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c11pkkov",
+      "note": "body"
+    },
+    {
+      "at": "2026-07-12T00:10:48.633Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c11pkkov",
+      "note": "body"
+    },
+    {
+      "at": "2026-07-12T00:09:45.273Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c11pkkov",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-12T00:09:36.517Z",
+      "by": "owner",
+      "action": "card.add",
+      "ref": "c11pkkov",
+      "note": "Allow user definition of operators for classes/structs - even python does this"
+    },
     {
       "at": "2026-07-12T00:08:25.721Z",
       "by": "codex-orchestrator",
@@ -29822,62 +29924,6 @@
       "by": "owner",
       "action": "decision.ratify",
       "ref": "D-HTTP-CLIENT2",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-11T10:58:33.919Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-HTTP-CORE2",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-11T10:57:48.572Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CRYPTO-DIAG1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-11T10:57:13.953Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CRYPTO-KEYWRAP1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-11T10:57:01.492Z",
-      "by": "terra-456-generation-symlink",
-      "action": "card.claim",
-      "ref": "c083j754",
-      "note": ""
-    },
-    {
-      "at": "2026-07-11T10:56:41.922Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CRYPTO-VAULT1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-11T10:56:25.089Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CRYPTO-ENVELOPE2",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-11T10:55:24.014Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CRYPTO-API1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-11T10:55:17.439Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-PWHASH-POLICY1",
       "note": "A"
     }
   ],
