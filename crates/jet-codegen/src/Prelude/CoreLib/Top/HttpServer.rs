@@ -65,10 +65,10 @@ impl JetHttpServerOptions {
 
 #[derive(Debug, Default, Clone, Copy)]
 struct JetHttpShutdownReport {
-    accepted: usize,
-    overloaded: usize,
-    completed: usize,
-    cancelled: usize,
+    user_accepted: i64,
+    user_overloaded: i64,
+    user_completed: i64,
+    user_cancelled: i64,
 }
 
 #[derive(Clone)]
@@ -239,10 +239,10 @@ fn jet_http_server_run_listener(
     while !shutdown.load(Ordering::Acquire) {
         match listener.accept() {
             Ok((mut stream, _)) => match tx.try_send(stream) {
-                Ok(()) => report.accepted += 1,
+                Ok(()) => report.user_accepted += 1,
                 Err(TrySendError::Full(returned)) => {
                     stream = returned;
-                    report.overloaded += 1;
+                    report.user_overloaded += 1;
                     let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(10)));
                     let mut discard = [0u8; 8192];
                     let _ = stream.read(&mut discard);
@@ -261,12 +261,16 @@ fn jet_http_server_run_listener(
         .map(|value| std::time::Duration::from_millis(value.load(Ordering::Acquire)))
         .unwrap_or(options.shutdown_grace);
     let deadline = std::time::Instant::now() + grace;
-    while completed.load(Ordering::Acquire) < report.accepted && std::time::Instant::now() < deadline {
+    while completed.load(Ordering::Acquire) < report.user_accepted as usize
+        && std::time::Instant::now() < deadline
+    {
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
-    report.completed = completed.load(Ordering::Acquire).min(report.accepted);
-    report.cancelled = report.accepted.saturating_sub(report.completed);
-    if report.cancelled > 0 {
+    report.user_completed = completed
+        .load(Ordering::Acquire)
+        .min(report.user_accepted as usize) as i64;
+    report.user_cancelled = report.user_accepted.saturating_sub(report.user_completed);
+    if report.user_cancelled > 0 {
         force_cancel.store(true, Ordering::Release);
         for stream in active.lock().unwrap().iter() { let _ = stream.shutdown(std::net::Shutdown::Both); }
     }

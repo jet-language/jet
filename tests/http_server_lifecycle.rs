@@ -60,10 +60,10 @@ fn bounded_admission_returns_503_and_shutdown_drains_accepted_work() {
     assert!(slow.join().unwrap().contains("slow done"));
     assert!(queued.join().unwrap().contains("queued done"));
     let report = server.join().expect("server join");
-    assert_eq!(report.accepted, 2);
-    assert_eq!(report.overloaded, 1);
-    assert_eq!(report.completed, 2);
-    assert_eq!(report.cancelled, 0);
+    assert_eq!(report.user_accepted, 2);
+    assert_eq!(report.user_overloaded, 1);
+    assert_eq!(report.user_completed, 2);
+    assert_eq!(report.user_cancelled, 0);
 }
 
 fn timeout_for(partial: &'static [u8]) -> JetHttpReadError {
@@ -125,9 +125,9 @@ fn shutdown_grace_cancels_straggler_socket_and_returns_bounded_report() {
     shutdown.store(true, std::sync::atomic::Ordering::Release);
     let report = server.join().expect("server join");
     assert!(started.elapsed() < std::time::Duration::from_millis(150));
-    assert_eq!(report.accepted, 1);
-    assert_eq!(report.completed, 0);
-    assert_eq!(report.cancelled, 1);
+    assert_eq!(report.user_accepted, 1);
+    assert_eq!(report.user_completed, 0);
+    assert_eq!(report.user_cancelled, 1);
     let mut response = String::new();
     let _ = client.read_to_string(&mut response);
     assert!(!response.contains("200 OK"), "straggler published after cancellation: {response}");
@@ -148,7 +148,7 @@ fn server_handle_binds_serves_and_rejects_second_shutdown() {
     client.read_to_string(&mut response).expect("read");
     assert!(response.contains("handle"));
     let report = jet_http_server_shutdown(&server, &jet_std::Duration { ms: 100 }).expect("shutdown");
-    assert_eq!(report.completed, 1);
+    assert_eq!(report.user_completed, 1);
     assert!(jet_http_server_shutdown(&server, &jet_std::Duration { ms: 100 }).unwrap_err().contains("already requested"));
     assert_eq!(serve_thread.join().expect("serve join").completed, 1);
 }
