@@ -509,6 +509,7 @@ pub struct TypeParam {
 /// S28 (M9): trait declaration — signatures only in v1.
 #[derive(Debug)]
 pub struct TraitDef {
+    pub span: Span,
     pub is_pub: bool,
     /// D-PUBPKG1=A: true for `pub(package) trait …`.
     pub is_package_pub: bool,
@@ -649,6 +650,7 @@ pub struct ExternFn {
 
 #[derive(Debug)]
 pub struct TestDef {
+    pub span: Span,
     pub name: String,
     pub name_span: Span,
     /// D-TEST1 (ratified 2026-06-22, option B): a property test is an `#Test fn`
@@ -667,6 +669,7 @@ pub struct TestDef {
 /// body is a bare statement list timed by the generated bench harness.
 #[derive(Debug)]
 pub struct BenchDef {
+    pub span: Span,
     pub name: String,
     pub name_span: Span,
     pub body: Vec<Stmt>,
@@ -693,6 +696,8 @@ impl MaturityTag {
 
 #[derive(Debug, Clone)]
 pub struct Func {
+    /// Exact parser-owned declaration boundary, including `fn` through body.
+    pub span: Span,
     pub is_pub: bool,
     /// D-PUBPKG1=A: true for `pub(package) fn …`.
     pub is_package_pub: bool,
@@ -709,6 +714,7 @@ pub struct Func {
     pub type_params: Vec<TypeParam>,
     pub params: Vec<Param>,
     pub return_type: Option<Type>,
+    pub return_type_span: Option<Span>,
     /// S58 (E2-M13): `#Unsafe` on the line before `fn` — a whole-function
     /// contract. Calling such a function requires an enclosing `#Unsafe`
     /// block (else E3103). D-UNSAFE-REASON1=B: the reason is optional but
@@ -893,6 +899,7 @@ pub struct Marker {
 
 #[derive(Debug)]
 pub struct StructDef {
+    pub span: Span,
     pub is_pub: bool,
     /// D-PUBPKG1=A: true for `pub(package) struct …`.
     pub is_package_pub: bool,
@@ -1049,6 +1056,7 @@ impl UnitFamilyDef {
 
 #[derive(Debug)]
 pub struct EnumDef {
+    pub span: Span,
     pub is_pub: bool,
     /// D-PUBPKG1=A: true for `pub(package) enum …`.
     pub is_package_pub: bool,
@@ -1123,6 +1131,7 @@ pub struct VariantField {
 
 #[derive(Debug)]
 pub struct ImplDef {
+    pub span: Span,
     pub type_name: String,
     pub type_span: Span,
     /// S28: `impl Type: Trait` — `None` means plain `impl Type { fn … }`.

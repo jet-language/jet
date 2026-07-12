@@ -129,10 +129,24 @@ pub struct SymbolRef {
 /// as a stmt/item/type merely because its bytes happen to parse there.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StructuralNode {
+    /// Stable within one module walk. Child edges refer to this ID directly;
+    /// consumers never reconstruct AST ownership from overlapping spans.
+    pub id: usize,
+    pub parent: Option<usize>,
+    /// Parser/AST field name (`callee`, `args`, `lhs`, `body`, ...).
+    pub slot: String,
+    pub slot_kind: StructuralSlotKind,
+    pub ordinal: usize,
     pub class: String,
     pub shape: String,
     pub module_path: String,
     pub span: SourceSpan,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StructuralSlotKind {
+    Scalar,
+    List,
 }
 
 /// A direct call from one function to another (or an unresolved callee name).

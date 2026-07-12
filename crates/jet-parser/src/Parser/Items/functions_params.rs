@@ -24,6 +24,7 @@ impl<'a> Parser<'a> {
             is_replayable: bool,
             replayable_span: Option<Span>,
         ) -> Result<Func, Diagnostic> {
+            let declaration_start = self.toks[self.pos.saturating_sub(1)].span.start;
             let (mut name, mut name_span) = self.expect_ident("after `fn`")?;
             let external_type = if (matches!(self.peek().kind, TokKind::Dot)
                 || matches!(self.peek().kind, TokKind::TildeTilde))
@@ -77,10 +78,12 @@ impl<'a> Parser<'a> {
             let (declared_effects, effect_via) = self.parse_opt_func_effects()?;
     
             let mut return_type = None;
+            let mut return_type_span = None;
             if matches!(self.peek().kind, TokKind::Arrow) {
                 self.bump();
-                let (ty, _) = self.return_type()?;
+                let (ty, span) = self.return_type()?;
                 return_type = Some(ty);
+                return_type_span = Some(span);
             }
     
             // Single-expression body: `fn name(...) -> T = expr;`
@@ -98,6 +101,7 @@ impl<'a> Parser<'a> {
                 let ret_span = Span::new(start, end);
                 let body = vec![crate::AST::Stmt::Return(Some(expr), ret_span)];
                 return Ok(Func {
+                    span: Span::new(declaration_start, end),
                     is_pub,
                     is_package_pub,
                     external_type,
@@ -107,6 +111,7 @@ impl<'a> Parser<'a> {
                     type_params,
                     params,
                     return_type,
+                    return_type_span,
                     is_unsafe,
                     unsafe_reason,
                     unsafe_span,
@@ -134,7 +139,9 @@ impl<'a> Parser<'a> {
             }
             self.expect(TokKind::LBrace, "to open the function body")?;
             let body = self.block_stmts();
+            let declaration_end = self.toks[self.pos.saturating_sub(1)].span.end;
             Ok(Func {
+                span: Span::new(declaration_start, declaration_end),
                 is_pub,
                 is_package_pub,
                 external_type,
@@ -144,6 +151,7 @@ impl<'a> Parser<'a> {
                 type_params,
                 params,
                 return_type,
+                return_type_span,
                 is_unsafe,
                 unsafe_reason,
                 unsafe_span,
@@ -385,6 +393,7 @@ impl<'a> Parser<'a> {
             } else {
                 self.parse_item_visibility()
             };
+            let item_start = self.peek().span.start;
             self.expect_kw(TokKind::KwStruct, "to start a struct definition")?;
             let (name, name_span) = self.parse_dotted_type_name("after `struct`")?;
             let type_params = self.parse_opt_type_params()?;
@@ -444,8 +453,9 @@ impl<'a> Parser<'a> {
                     }
                 }
             }
-            self.bump(); // }
+            let item_end = self.bump().span.end; // }
             Ok(StructDef {
+                span: Span::new(item_start, item_end),
                 is_pub,
                 is_package_pub,
                 name,

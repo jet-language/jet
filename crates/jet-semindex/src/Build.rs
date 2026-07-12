@@ -8,7 +8,7 @@ use jet_sema::{effect_key, SemIndexEffectFacts};
 use std::collections::HashMap;
 
 use crate::Json::{convert_defs, convert_effects, convert_refs};
-use crate::Types::{CallEdge, DefinitionAnchor, MemberFact, MemberKind, MemberOrigin, SemIndex, StructuralNode};
+use crate::Types::{CallEdge, DefinitionAnchor, MemberFact, MemberKind, MemberOrigin, SemIndex, StructuralNode, StructuralSlotKind};
 
 /// The semantic kind of a defined symbol (LSP-facing; uses AST types internally).
 #[derive(Debug, Clone)]
@@ -102,8 +102,10 @@ struct WalkCtx<'a> {
     db: &'a mut SymbolDB,
     caller: Option<CallerFrame>,
     scope_identity: String,
-    bindings: Vec<HashMap<String, DefinitionAnchor>>,
-    globals: HashMap<String, Option<DefinitionAnchor>>,
+    reference_anchors: &'a HashMap<(String, usize, usize), jet_sema::DefinitionAnchorFact>,
+    structural_parents: Vec<usize>,
+    structural_slot: String,
+    structural_slot_kind: StructuralSlotKind,
 }
 
 impl SymbolDB {
@@ -257,12 +259,13 @@ fn scoped_local_identity(ctx: &WalkCtx<'_>, kind: &str, name: &str) -> String {
 }
 
 fn scoped_ref(name: String, span: Span, mp: &str, ctx: &WalkCtx<'_>) -> SymRef {
-    let target = ctx
-        .bindings
-        .iter()
-        .rev()
-        .find_map(|scope| scope.get(&name).cloned())
-        .or_else(|| ctx.globals.get(&name).and_then(Clone::clone));
+    let target = ctx.reference_anchors
+        .get(&(mp.to_string(), span.start, span.end))
+        .map(|fact| DefinitionAnchor {
+            module_path: fact.module_path.clone(),
+            kind: fact.kind.clone(),
+            def_span: fact.def_span.into(),
+        });
     SymRef {
         name,
         span,
@@ -272,30 +275,42 @@ fn scoped_ref(name: String, span: Span, mp: &str, ctx: &WalkCtx<'_>) -> SymRef {
     }
 }
 
-fn anchor(module_path: &str, kind: &str, span: Span) -> DefinitionAnchor {
-    DefinitionAnchor {
-        module_path: module_path.to_string(),
-        kind: kind.to_string(),
-        def_span: span.into(),
-    }
-}
-
-fn declare(ctx: &mut WalkCtx<'_>, name: &str, definition: DefinitionAnchor) {
-    ctx.bindings
-        .last_mut()
-        .expect("semantic index always has a lexical scope")
-        .insert(name.to_string(), definition);
-}
-
-fn record_node(ctx: &mut WalkCtx<'_>, class: &str, shape: &str, mp: &str, span: Span) {
+fn record_node(ctx: &mut WalkCtx<'_>, class: &str, shape: &str, mp: &str, span: Span) -> Option<usize> {
     if span.end >= span.start {
+        let id = ctx.db.nodes.len();
+        let parent = ctx.structural_parents.last().copied();
+        let ordinal = ctx.db.nodes.iter().filter(|node| {
+            node.parent == parent && node.slot == ctx.structural_slot
+        }).count();
         ctx.db.nodes.push(StructuralNode {
+            id,
+            parent,
+            slot: ctx.structural_slot.clone(),
+            slot_kind: ctx.structural_slot_kind,
+            ordinal,
             class: class.to_string(),
             shape: shape.to_string(),
             module_path: mp.to_string(),
             span: span.into(),
         });
+        Some(id)
+    } else {
+        None
     }
+}
+
+fn structural_slot<T>(
+    ctx: &mut WalkCtx<'_>,
+    name: &str,
+    kind: StructuralSlotKind,
+    f: impl FnOnce(&mut WalkCtx<'_>) -> T,
+) -> T {
+    let old_name = std::mem::replace(&mut ctx.structural_slot, name.to_string());
+    let old_kind = std::mem::replace(&mut ctx.structural_slot_kind, kind);
+    let value = f(ctx);
+    ctx.structural_slot = old_name;
+    ctx.structural_slot_kind = old_kind;
+    value
 }
 
 fn expr_shape(expr: &AST::Expr) -> String {
@@ -336,20 +351,20 @@ fn item_shape(item: &AST::Item) -> String {
     format!("{:?}", std::mem::discriminant(item))
 }
 
-fn item_anchor(item: &AST::Item) -> Span {
+fn item_span(item: &AST::Item) -> Span {
     match item {
-        AST::Item::Func(x) => x.name_span,
-        AST::Item::Struct(x) => x.name_span,
-        AST::Item::Enum(x) => x.name_span,
+        AST::Item::Func(x) => x.span,
+        AST::Item::Struct(x) => x.span,
+        AST::Item::Enum(x) => x.span,
         AST::Item::Distinct(x) => x.span,
         AST::Item::TypeAlias(x) => x.span,
         AST::Item::UnitFamily(x) => x.span,
-        AST::Item::Trait(x) => x.name_span,
+        AST::Item::Trait(x) => x.span,
         AST::Item::Tag(x) => x.span,
-        AST::Item::Impl(x) => x.type_span,
-        AST::Item::Const(x) => x.name_span,
-        AST::Item::Test(x) => x.name_span,
-        AST::Item::Bench(x) => x.name_span,
+        AST::Item::Impl(x) => x.span,
+        AST::Item::Const(x) => x.span,
+        AST::Item::Test(x) => x.span,
+        AST::Item::Bench(x) => x.span,
         AST::Item::ExternRust(x) => x.span,
         AST::Item::Module(x) => x.span,
         AST::Item::CModule(x) => x.span,
@@ -364,82 +379,14 @@ fn item_anchor(item: &AST::Item) -> Span {
     }
 }
 
-fn source_item_span(item: &AST::Item, source: &str) -> Span {
-    let anchor = item_anchor(item);
-    let mut start = source[..anchor.start.min(source.len())]
-        .rfind('\n')
-        .map_or(0, |p| p + 1);
-    while start > 0 {
-        let prior_end = start - 1;
-        let prior_start = source[..prior_end].rfind('\n').map_or(0, |p| p + 1);
-        let prior = source[prior_start..prior_end].trim_start();
-        if prior.starts_with('#') || prior.starts_with('@') {
-            start = prior_start;
-        } else {
-            break;
-        }
-    }
-    let (tokens, _) = jet_lexer::Lexer::lex(&source[start..]);
-    let mut round = 0usize;
-    let mut square = 0usize;
-    let mut curly = 0usize;
-    let mut saw_curly = false;
-    for token in tokens {
-        let absolute_start = start + token.span.start;
-        let absolute_end = start + token.span.end;
-        let text = &source[absolute_start..absolute_end];
-        match text {
-            "(" => round += 1,
-            ")" => round = round.saturating_sub(1),
-            "[" => square += 1,
-            "]" => square = square.saturating_sub(1),
-            "{" => {
-                curly += 1;
-                saw_curly = true;
-            }
-            "}" => {
-                curly = curly.saturating_sub(1);
-                if saw_curly && round == 0 && square == 0 && curly == 0 {
-                    return Span::new(start, absolute_end);
-                }
-            }
-            ";" if round == 0 && square == 0 && curly == 0 => {
-                return Span::new(start, absolute_end);
-            }
-            _ => {}
-        }
-    }
-    Span::new(start, item_anchor(item).end)
-}
-
-fn record_func_type_nodes(f: &AST::Func, mp: &str, source: &str, ctx: &mut WalkCtx<'_>) {
-    for param in &f.params {
-        record_node(ctx, "type", "type", mp, param.ty_span);
-    }
-    if f.return_type.is_some() {
-        let search_start = f
-            .params
-            .last()
-            .map_or(f.name_span.end, |param| param.ty_span.end)
-            .min(source.len());
-        let tail = &source[search_start..];
-        if let (Some(arrow), Some(body)) = (tail.find("->"), tail.find('{')) {
-            if arrow < body {
-                let raw_start = search_start + arrow + 2;
-                let raw_end = search_start + body;
-                let leading = source[raw_start..raw_end]
-                    .len()
-                    - source[raw_start..raw_end].trim_start().len();
-                let trailing = source[raw_start..raw_end]
-                    .len()
-                    - source[raw_start..raw_end].trim_end().len();
-                let start = raw_start + leading;
-                let end = raw_end.saturating_sub(trailing);
-                if start < end {
-                    record_node(ctx, "type", "type", mp, Span::new(start, end));
-                }
-            }
-        }
+fn record_func_type_nodes(f: &AST::Func, mp: &str, ctx: &mut WalkCtx<'_>) {
+    structural_slot(ctx, "params", StructuralSlotKind::List, |ctx| {
+        for param in &f.params { record_node(ctx, "type", "type", mp, param.ty_span); }
+    });
+    if let Some(span) = f.return_type_span {
+        structural_slot(ctx, "return_type", StructuralSlotKind::Scalar, |ctx| {
+            record_node(ctx, "type", "type", mp, span);
+        });
     }
 }
 
@@ -465,12 +412,8 @@ where
     F: FnOnce(&mut WalkCtx<'_>),
 {
     let prev = ctx.caller.replace(frame);
-    ctx.bindings.push(HashMap::new());
-    for param in params.iter().filter(|param| param.name != Syntax::KW_SELF) {
-        declare(ctx, &param.name, anchor(mp, "param", param.name_span));
-    }
+    let _ = (params, mp);
     f(ctx);
-    ctx.bindings.pop();
     ctx.caller = prev;
 }
 
@@ -483,8 +426,10 @@ pub fn build_symbol_db(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> S
             db: &mut db,
             caller: None,
             scope_identity: root_identity(&mp),
-            bindings: vec![HashMap::new()],
-            globals: module_globals(&module.items, &mp),
+            reference_anchors: &facts.reference_anchors,
+            structural_parents: Vec::new(),
+            structural_slot: "root".to_string(),
+            structural_slot_kind: StructuralSlotKind::List,
         };
         for item in &module.items {
             collect_item(item, &mp, module, &mut ctx);
@@ -501,45 +446,20 @@ pub fn build_symbol_db(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> S
 pub fn structural_nodes_from_parsed(module: &LoadedModule) -> Vec<StructuralNode> {
     let mp = module.display.clone();
     let mut db = SymbolDB::new();
+    let reference_anchors = HashMap::new();
     let mut ctx = WalkCtx {
         db: &mut db,
         caller: None,
         scope_identity: root_identity(&mp),
-        bindings: vec![HashMap::new()],
-        globals: module_globals(&module.items, &mp),
+        reference_anchors: &reference_anchors,
+        structural_parents: Vec::new(),
+        structural_slot: "root".to_string(),
+        structural_slot_kind: StructuralSlotKind::List,
     };
     for item in &module.items {
         collect_item(item, &mp, module, &mut ctx);
     }
     db.nodes
-}
-
-fn module_globals(items: &[Item], mp: &str) -> HashMap<String, Option<DefinitionAnchor>> {
-    let mut globals = HashMap::new();
-    for item in items {
-        let named = match item {
-            Item::Func(value) => Some((&value.name, "function", value.name_span)),
-            Item::Struct(value) => Some((&value.name, "struct", value.name_span)),
-            Item::Enum(value) => Some((&value.name, "enum", value.name_span)),
-            Item::Distinct(value) => Some((&value.name, "distinct", value.name_span)),
-            Item::TypeAlias(value) => Some((&value.name, "type_alias", value.name_span)),
-            Item::Trait(value) => Some((&value.name, "trait", value.name_span)),
-            Item::Tag(value) => Some((&value.name, "tag", value.name_span)),
-            Item::Const(value) => Some((&value.name, "const", value.name_span)),
-            Item::CodeModule(value) => Some((&value.name, "module", value.name_span)),
-            Item::GenericModule(value) => Some((&value.name, "module", value.name_span)),
-            Item::ModuleAlias(value) => Some((&value.name, "module", value.name_span)),
-            _ => None,
-        };
-        if let Some((name, kind, span)) = named {
-            let value = anchor(mp, kind, span);
-            globals
-                .entry(name.clone())
-                .and_modify(|slot| *slot = None)
-                .or_insert(Some(value));
-        }
-    }
-    globals
 }
 
 fn add_breadcrumb_hints(db: &mut SymbolDB) {
@@ -597,16 +517,17 @@ pub fn build_index(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> SemIn
 }
 
 fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<'_>) {
-    record_node(
+    let structural_id = record_node(
         ctx,
         "item",
         &item_shape(item),
         mp,
-        source_item_span(item, &module.source),
+        item_span(item),
     );
+    if let Some(id) = structural_id { ctx.structural_parents.push(id); }
     match item {
         Item::Func(f) => {
-            record_func_type_nodes(f, mp, &module.source, ctx);
+            record_func_type_nodes(f, mp, ctx);
             let fn_identity = callable_identity(&ctx.scope_identity, None, &f.name, f);
             let params: Vec<(String, AST::Type)> = method_params(f);
             let sym = SymDef {
@@ -712,7 +633,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 });
             }
             for meth in &s.methods {
-                record_func_type_nodes(meth, mp, &module.source, ctx);
+                record_func_type_nodes(meth, mp, ctx);
                 let method_identity =
                     callable_identity(&ctx.scope_identity, Some(&s.name), &meth.name, meth);
                 let hover_text = hover_for_fn(meth);
@@ -771,7 +692,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
             }
             for tb in &s.trait_impls {
                 for meth in &tb.methods {
-                    record_func_type_nodes(meth, mp, &module.source, ctx);
+                    record_func_type_nodes(meth, mp, ctx);
                     let method_identity =
                         callable_identity(&ctx.scope_identity, Some(&s.name), &meth.name, meth);
                     ctx.db.members.push(method_fact(
@@ -864,7 +785,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 });
             }
             for meth in &e.methods {
-                record_func_type_nodes(meth, mp, &module.source, ctx);
+                record_func_type_nodes(meth, mp, ctx);
                 let method_identity =
                     callable_identity(&ctx.scope_identity, Some(&e.name), &meth.name, meth);
                 ctx.db.members.push(method_fact(
@@ -903,7 +824,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
             }
             for tb in &e.trait_impls {
                 for meth in &tb.methods {
-                    record_func_type_nodes(meth, mp, &module.source, ctx);
+                    record_func_type_nodes(meth, mp, ctx);
                     let method_identity =
                         callable_identity(&ctx.scope_identity, Some(&e.name), &meth.name, meth);
                     ctx.db.members.push(method_fact(
@@ -999,7 +920,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
         }
         Item::Impl(i) => {
             for meth in &i.methods {
-                record_func_type_nodes(meth, mp, &module.source, ctx);
+                record_func_type_nodes(meth, mp, ctx);
                 let method_identity =
                     callable_identity(&ctx.scope_identity, Some(&i.type_name), &meth.name, meth);
                 let origin = match &i.trait_name {
@@ -1110,22 +1031,9 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
         }
         // D-TYPEALIAS1: type aliases aren't yet indexed for symbols/hover.
         Item::TypeAlias(value) => {
-            let line_start = module.source[..value.name_span.start.min(module.source.len())]
-                .rfind('\n')
-                .map_or(0, |position| position + 1);
-            let line_end = module.source[value.name_span.end.min(module.source.len())..]
-                .find('\n')
-                .map_or(module.source.len(), |position| value.name_span.end + position);
-            let source = &module.source[line_start..line_end];
-            let span = source.find('=').map_or(value.target_span, |equals| {
-                let raw_start = line_start + equals + 1;
-                let raw_end = line_end;
-                let raw = &module.source[raw_start..raw_end];
-                let leading = raw.len() - raw.trim_start().len();
-                let trimmed = raw.trim_end_matches([';', '\n', '\r', ' ', '\t']);
-                Span::new(raw_start + leading, raw_start + trimmed.len())
+            structural_slot(ctx, "target", StructuralSlotKind::Scalar, |ctx| {
+                record_node(ctx, "type", "type", mp, value.target_span);
             });
-            record_node(ctx, "type", "type", mp, span);
         }
         // D-QUAL3: unit families aren't yet indexed for symbols/hover.
         Item::UnitFamily(_) => {}
@@ -1141,6 +1049,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
         // D-GENMOD2=A: templates/aliases aren't indexed (erased).
         Item::GenericModule(_) | Item::ModuleAlias(_) => {}
     }
+    if structural_id.is_some() { ctx.structural_parents.pop(); }
 }
 
 fn hover_for_fn(f: &AST::Func) -> String {
@@ -1158,35 +1067,36 @@ fn hover_for_fn(f: &AST::Func) -> String {
 }
 
 fn collect_stmts(stmts: &[AST::Stmt], mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<'_>) {
-    ctx.bindings.push(HashMap::new());
     for stmt in stmts {
         collect_stmt(stmt, mp, module, ctx);
     }
-    ctx.bindings.pop();
 }
 
 fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<'_>) {
-    record_node(ctx, "stmt", &stmt_shape(stmt), mp, stmt.span());
+    let structural_id = record_node(ctx, "stmt", &stmt_shape(stmt), mp, stmt.span());
+    if let Some(id) = structural_id { ctx.structural_parents.push(id); }
     match stmt {
         AST::Stmt::Val(b) => {
             collect_binding(b, mp, ctx);
         }
-        AST::Stmt::Expr(e) | AST::Stmt::Yield(e, _) => collect_expr(e, mp, ctx),
+        AST::Stmt::Expr(e) | AST::Stmt::Yield(e, _) => {
+            structural_slot(ctx, "value", StructuralSlotKind::Scalar, |ctx| collect_expr(e, mp, ctx));
+        }
         AST::Stmt::Assign { target, value, .. } => {
             collect_lvalue(target, mp, ctx);
-            collect_expr(value, mp, ctx);
+            structural_slot(ctx, "value", StructuralSlotKind::Scalar, |ctx| collect_expr(value, mp, ctx));
         }
         AST::Stmt::Return(e, _) => {
             if let Some(e) = e {
-                collect_expr(e, mp, ctx);
+                structural_slot(ctx, "value", StructuralSlotKind::Scalar, |ctx| collect_expr(e, mp, ctx));
             }
         }
         AST::Stmt::If(if_stmt) => {
             collect_if(if_stmt, mp, module, ctx);
         }
         AST::Stmt::While { cond, body, .. } => {
-            collect_expr(cond, mp, ctx);
-            collect_stmts(body, mp, module, ctx);
+            structural_slot(ctx, "condition", StructuralSlotKind::Scalar, |ctx| collect_expr(cond, mp, ctx));
+            structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx));
         }
         AST::Stmt::For {
             var,
@@ -1196,7 +1106,6 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
             body,
             ..
         } => {
-            ctx.bindings.push(HashMap::new());
             ctx.db.defs.push(SymDef {
                 identity: scoped_local_identity(ctx, "local", var),
                 name: var.clone(),
@@ -1231,12 +1140,7 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
                     collect_expr(collection, mp, ctx);
                 }
             }
-            declare(ctx, var, anchor(mp, "local", *var_span));
-            if let Some((v2, s2)) = var2 {
-                declare(ctx, v2, anchor(mp, "local", *s2));
-            }
             collect_stmts(body, mp, module, ctx);
-            ctx.bindings.pop();
         }
         AST::Stmt::Switch {
             subject,
@@ -1264,7 +1168,6 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
         AST::Stmt::CountedLoop {
             cond, body, init, ..
         } => {
-            ctx.bindings.push(HashMap::new());
             ctx.db.defs.push(SymDef {
                 identity: scoped_local_identity(ctx, "local", &init.name),
                 name: init.name.clone(),
@@ -1276,10 +1179,8 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
                 },
             });
             collect_expr(&init.init, mp, ctx);
-            declare(ctx, &init.name, anchor(mp, "local", init.name_span));
             collect_expr(cond, mp, ctx);
             collect_stmts(body, mp, module, ctx);
-            ctx.bindings.pop();
         }
         AST::Stmt::Loop { body, .. }
         | AST::Stmt::Unsafe { body, .. }
@@ -1334,6 +1235,7 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
             collect_stmts(body, mp, module, ctx);
         }
     }
+    if structural_id.is_some() { ctx.structural_parents.pop(); }
 }
 
 fn collect_if(if_stmt: &AST::IfStmt, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<'_>) {
@@ -1381,7 +1283,6 @@ fn collect_binding(b: &AST::Binding, mp: &str, ctx: &mut WalkCtx<'_>) {
                     ty: None,
                 },
             });
-            declare(ctx, &n.name, anchor(mp, "local", n.span));
         }
         return;
     }
@@ -1420,13 +1321,15 @@ fn collect_binding(b: &AST::Binding, mp: &str, ctx: &mut WalkCtx<'_>) {
         }
     }
     collect_expr(&b.init, mp, ctx);
-    declare(ctx, &b.name, anchor(mp, "local", b.name_span));
 }
 
 fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
-    record_node(ctx, "expr", &expr_shape(e), mp, structural_expr_span(e));
+    let structural_id = record_node(ctx, "expr", &expr_shape(e), mp, structural_expr_span(e));
+    if let Some(id) = structural_id { ctx.structural_parents.push(id); }
     match e {
-        AST::Expr::PtrFromAddr { addr, .. } => collect_expr(addr, mp, ctx),
+        AST::Expr::PtrFromAddr { addr, .. } => {
+            structural_slot(ctx, "address", StructuralSlotKind::Scalar, |ctx| collect_expr(addr, mp, ctx));
+        }
         AST::Expr::Ident(name, span) => {
             ctx.db.refs.push(scoped_ref(name.clone(), *span, mp, ctx));
         }
@@ -1435,9 +1338,9 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
             ctx.db
                 .refs
                 .push(scoped_ref(call.name.clone(), call.name_span, mp, ctx));
-            for arg in &call.args {
-                collect_expr(&arg.expr, mp, ctx);
-            }
+            structural_slot(ctx, "args", StructuralSlotKind::List, |ctx| {
+                for arg in &call.args { collect_expr(&arg.expr, mp, ctx); }
+            });
         }
         AST::Expr::MethodCall {
             receiver,
@@ -1446,17 +1349,17 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
             args,
             ..
         } => {
-            collect_expr(receiver, mp, ctx);
+            structural_slot(ctx, "receiver", StructuralSlotKind::Scalar, |ctx| collect_expr(receiver, mp, ctx));
             record_call(ctx, mp, method, *method_span);
             ctx.db
                 .refs
                 .push(scoped_ref(method.clone(), *method_span, mp, ctx));
-            for arg in args {
-                collect_expr(&arg.expr, mp, ctx);
-            }
+            structural_slot(ctx, "args", StructuralSlotKind::List, |ctx| {
+                for arg in args { collect_expr(&arg.expr, mp, ctx); }
+            });
         }
         AST::Expr::Field(base, field, span) => {
-            collect_expr(base, mp, ctx);
+            structural_slot(ctx, "base", StructuralSlotKind::Scalar, |ctx| collect_expr(base, mp, ctx));
             ctx.db.refs.push(scoped_ref(field.clone(), *span, mp, ctx));
         }
         AST::Expr::OptField {
@@ -1465,14 +1368,14 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
             member_span,
             ..
         } => {
-            collect_expr(base, mp, ctx);
+            structural_slot(ctx, "base", StructuralSlotKind::Scalar, |ctx| collect_expr(base, mp, ctx));
             ctx.db
                 .refs
                 .push(scoped_ref(member.clone(), *member_span, mp, ctx));
         }
         AST::Expr::Binary(_, l, r, _) => {
-            collect_expr(l, mp, ctx);
-            collect_expr(r, mp, ctx);
+            structural_slot(ctx, "lhs", StructuralSlotKind::Scalar, |ctx| collect_expr(l, mp, ctx));
+            structural_slot(ctx, "rhs", StructuralSlotKind::Scalar, |ctx| collect_expr(r, mp, ctx));
         }
         AST::Expr::CompareChain { operands, .. } => {
             for e in operands {
@@ -1504,9 +1407,9 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
             }
         }
         AST::Expr::ListLit(items, _) => {
-            for i in items {
-                collect_expr(i, mp, ctx);
-            }
+            structural_slot(ctx, "items", StructuralSlotKind::List, |ctx| {
+                for i in items { collect_expr(i, mp, ctx); }
+            });
         }
         AST::Expr::Spread(inner, _) => collect_expr(inner, mp, ctx),
         AST::Expr::MapLit(pairs, _) => {
@@ -1559,7 +1462,6 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
         }
         AST::Expr::PatternTest { subject, .. } => collect_expr(subject, mp, ctx),
         AST::Expr::Lambda(l) => {
-            ctx.bindings.push(HashMap::new());
             for p in &l.params {
                 ctx.db.defs.push(SymDef {
                     identity: scoped_local_identity(ctx, "param", &p.name),
@@ -1570,7 +1472,6 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
                         ty: p.ty.clone().unwrap_or(AST::Type::Int),
                     },
                 });
-                declare(ctx, &p.name, anchor(mp, "param", p.name_span));
             }
             match &l.body {
                 AST::LambdaBody::Expr(e) => collect_expr(e, mp, ctx),
@@ -1584,7 +1485,6 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
                     }
                 }
             }
-            ctx.bindings.pop();
         }
         AST::Expr::CallValue { callee, args, .. } => {
             collect_expr(callee, mp, ctx);
@@ -1630,6 +1530,7 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
         | AST::Expr::StrMatchLit(_, _) => {}
         AST::Expr::Paren(inner, _) => collect_expr(inner, mp, ctx),
     }
+    if structural_id.is_some() { ctx.structural_parents.pop(); }
 }
 
 fn collect_expr_stmt(stmt: &AST::Stmt, mp: &str, ctx: &mut WalkCtx<'_>) {

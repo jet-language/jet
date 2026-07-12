@@ -341,6 +341,7 @@ impl<'a> Parser<'a> {
     
         /// S28: top-level `trait Name { fn sig(self) -> T; … }`.
         pub(super) fn trait_def(&mut self, nested: bool) -> Result<TraitDef, Diagnostic> {
+            let item_start = self.peek().span.start;
             let (is_pub, is_package_pub) = if nested {
                 (false, false)
             } else {
@@ -377,8 +378,9 @@ impl<'a> Parser<'a> {
                 };
                 methods.push(self.trait_method_sig(is_pure)?);
             }
-            self.bump();
+            let item_end = self.bump().span.end;
             Ok(TraitDef {
+                span: Span::new(item_start, item_end),
                 is_pub,
                 is_package_pub,
                 name,

@@ -20,6 +20,8 @@ impl Drop for Lock {
             const LOCK_UN: i32 = 8;
             let _ = unsafe { flock(self._file.as_raw_fd(), LOCK_UN) };
         }
+        #[cfg(windows)]
+        let _ = fs::remove_file(&self._path);
         #[cfg(all(not(unix), not(windows)))]
         let _ = fs::remove_file(&self._path);
     }
@@ -35,7 +37,6 @@ pub struct Change {
 pub fn validate_destinations(project: &Path, paths: &[PathBuf]) {
     let project = canonical_project(project);
     let mut names = BTreeSet::new();
-    #[cfg(unix)]
     let mut identities = BTreeSet::new();
     for path in paths {
         let canonical = validate_destination(&project, path, true)
@@ -43,16 +44,63 @@ pub fn validate_destinations(project: &Path, paths: &[PathBuf]) {
         if !names.insert(canonical.clone()) {
             fail(&format!("duplicate codemod destination `{}`", path.display()))
         }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::MetadataExt;
-            let metadata = fs::metadata(&canonical)
-                .unwrap_or_else(|e| fail(&format!("could not inspect `{}`: {e}", canonical.display())));
-            if !identities.insert((metadata.dev(), metadata.ino())) {
-                fail(&format!("codemod destinations alias the same file at `{}`", path.display()))
-            }
+        let identity = path_identity(&canonical)
+            .unwrap_or_else(|e| fail(&format!("could not inspect `{}`: {e}", canonical.display())));
+        if !identities.insert(identity) {
+            fail(&format!("codemod destinations alias the same file at `{}`", path.display()))
         }
     }
+}
+
+pub fn validate_replay_aliases(project: &Path, log: &Path, paths: &[PathBuf]) {
+    let project = canonical_project(project);
+    let mut identities = BTreeSet::new();
+    identities.insert(path_identity(log).unwrap_or_else(|e| fail(&format!("could not inspect replay log: {e}"))));
+    for path in paths {
+        let path = validate_destination(&project, path, true)
+            .unwrap_or_else(|e| fail(&format!("unsafe replay destination `{}`: {e}", path.display())));
+        if !identities.insert(path_identity(&path).unwrap_or_else(|e| fail(&format!("could not inspect replay destination: {e}")))) {
+            fail("replay log and destinations contain a file-ID alias")
+        }
+    }
+}
+
+#[cfg(unix)]
+fn path_identity(path: &Path) -> std::io::Result<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = fs::metadata(path)?;
+    if !metadata.is_file() || metadata.nlink() != 1 {
+        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "file is not regular or has multiple hard links"));
+    }
+    Ok((metadata.dev(), metadata.ino()))
+}
+
+#[cfg(windows)]
+fn path_identity(path: &Path) -> std::io::Result<(u64, u64)> {
+    use std::ffi::c_void;
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::os::windows::io::AsRawHandle;
+    #[repr(C)]
+    struct ByHandleFileInformation {
+        attributes: u32, creation_low: u32, creation_high: u32, access_low: u32,
+        access_high: u32, write_low: u32, write_high: u32, volume: u32,
+        size_high: u32, size_low: u32, links: u32, index_high: u32, index_low: u32,
+    }
+    extern "system" { fn GetFileInformationByHandle(file: *mut c_void, info: *mut ByHandleFileInformation) -> i32; }
+    let file = OpenOptions::new().read(true).custom_flags(0x0020_0000).open(path)?;
+    let mut info = ByHandleFileInformation { attributes: 0, creation_low: 0, creation_high: 0, access_low: 0, access_high: 0, write_low: 0, write_high: 0, volume: 0, size_high: 0, size_low: 0, links: 0, index_high: 0, index_low: 0 };
+    if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 { return Err(std::io::Error::last_os_error()); }
+    if info.links != 1 { return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "file has multiple hard links")); }
+    Ok((info.volume as u64, ((info.index_high as u64) << 32) | info.index_low as u64))
+}
+
+#[cfg(all(not(unix), not(windows)))]
+fn path_identity(path: &Path) -> std::io::Result<(u64, u64)> {
+    let canonical = fs::canonicalize(path)?;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    canonical.hash(&mut hasher);
+    Ok((0, hasher.finish()))
 }
 
 pub fn read_destination(project: &Path, path: &Path) -> std::io::Result<Vec<u8>> {
@@ -313,6 +361,7 @@ pub fn lock(project: &Path) -> Lock {
         .unwrap_or_else(|e| fail(&format!("could not securely open codemod directory: {e}")));
     let path = dir.join("codemod.lock");
     #[cfg(unix)]
+    #[allow(unused_mut)]
     let mut file = {
         use std::os::fd::AsRawFd;
         use std::os::unix::fs::OpenOptionsExt;
@@ -322,19 +371,19 @@ pub fn lock(project: &Path) -> Lock {
         const LOCK_EX: i32 = 2;
         const LOCK_NB: i32 = 4;
         const O_CLOEXEC: i32 = 0o2000000;
+        const O_DIRECTORY: i32 = 0o200000;
         const O_NOFOLLOW: i32 = 0o400000;
+        // Lock opened codemods directory, not a mutable pathname. An attacker
+        // cannot pre-place/hardlink a lock inode that we later truncate, and
+        // directory handle remains authority even if its name is swapped.
         let file = OpenOptions::new()
             .read(true)
-            .write(true)
-            .create(true)
-            .custom_flags(O_CLOEXEC | O_NOFOLLOW)
-            .open(&path)
-            .unwrap_or_else(|e| fail(&format!("could not open codemod lock: {e}")));
+            .custom_flags(O_CLOEXEC | O_NOFOLLOW | O_DIRECTORY)
+            .open(&dir)
+            .unwrap_or_else(|e| fail(&format!("could not open codemod directory lock: {e}")));
         if unsafe { flock(file.as_raw_fd(), LOCK_EX | LOCK_NB) } != 0 {
-            fail(&format!("another codemod holds `{}`", path.display()));
+            fail(&format!("another codemod holds `{}`", dir.display()));
         }
-        file.set_len(0)
-            .unwrap_or_else(|e| fail(&format!("could not reset codemod lock: {e}")));
         file
     };
     #[cfg(windows)]
@@ -360,12 +409,15 @@ pub fn lock(project: &Path) -> Lock {
         .create_new(true)
         .open(&path)
         .unwrap_or_else(|_| fail(&format!("another codemod holds `{}`", path.display())));
-    writeln!(file, "pid={}", std::process::id())
-        .unwrap_or_else(|e| fail(&format!("could not write codemod lock: {e}")));
-    file.sync_all()
-        .unwrap_or_else(|e| fail(&format!("could not sync codemod lock: {e}")));
-    if !file.metadata().is_ok_and(|metadata| metadata.is_file()) {
-        fail("codemod lock is not a regular file")
+    #[cfg(not(unix))]
+    {
+        writeln!(file, "pid={}", std::process::id())
+            .unwrap_or_else(|e| fail(&format!("could not write codemod lock: {e}")));
+        file.sync_all()
+            .unwrap_or_else(|e| fail(&format!("could not sync codemod lock: {e}")));
+        if !file.metadata().is_ok_and(|metadata| metadata.is_file()) {
+            fail("codemod lock is not a regular file")
+        }
     }
     Lock { _path: path, _file: file }
 }
@@ -477,12 +529,21 @@ fn validate_journal_paths(project: &Path, parsed: &Journal, journal: &Path) {
         validate_destination(&project, &record.path, true).unwrap_or_else(|e| {
             fail(&format!("unsafe recovery destination `{}`: {e}; journal preserved", record.path.display()))
         });
+        let current_destination_id = path_identity(&record.path).unwrap_or_else(|e| {
+            fail(&format!("could not identify recovery destination: {e}; journal preserved"))
+        });
+        if current_destination_id != record.destination_id && current_destination_id != record.temp_id {
+            fail("recovery destination file identity changed; journal preserved")
+        }
         if record.temp.exists() {
             let temp_meta = fs::symlink_metadata(&record.temp).unwrap_or_else(|e| {
                 fail(&format!("could not inspect recovery temp `{}`: {e}; journal preserved", record.temp.display()))
             });
             if temp_meta.file_type().is_symlink() || !temp_meta.is_file() {
                 fail("recovery temp is not a regular non-link file; journal preserved")
+            }
+            if path_identity(&record.temp).unwrap_or_else(|e| fail(&format!("could not identify recovery temp: {e}"))) != record.temp_id {
+                fail("recovery temp file identity changed; journal preserved")
             }
             #[cfg(unix)]
             {
@@ -553,18 +614,38 @@ pub fn commit(project: &Path, changes: &[Change], log_path: &Path, log: &[u8]) {
     for (i, c) in changes.iter().enumerate() {
         let parent = c.path.parent().unwrap_or(&project);
         let temp = parent.join(format!(".jet-codemod-{tx}-{i}.tmp"));
-        write_new_sync(&temp, &c.after);
-        records.push(Record {
+        let mut record = Record {
             path: c.path.clone(),
             temp,
             before: c.before.clone(),
             after: c.after.clone(),
-        });
+            destination_id: path_identity(&c.path)
+                .unwrap_or_else(|e| fail(&format!("could not identify destination: {e}"))),
+            temp_id: (0, 0),
+            #[cfg(unix)]
+            handles: None,
+        };
+        #[cfg(unix)]
+        {
+            record.handles = Some(prepare_unix_record(&project, &record.path, &record.temp, &record.after)
+                .unwrap_or_else(|e| fail(&format!("could not securely stage `{}`: {e}", record.path.display()))));
+            record.temp_id = record.handles.as_ref().unwrap().temp_id;
+        }
+        #[cfg(not(unix))]
+        {
+            write_new_sync(&record.temp, &record.after);
+            record.temp_id = path_identity(&record.temp)
+                .unwrap_or_else(|e| fail(&format!("could not identify temp: {e}")));
+        }
+        records.push(record);
     }
     let journal_text = render_journal(&tx, 0, &records, log_path, log);
     replace_journal_generation(&project, &dir, &journal, &tx, 0, journal_text.as_bytes());
+    if std::env::var("JET_CODEMOD_CRASH_AFTER_JOURNAL").ok().as_deref() == Some("1") {
+        std::process::exit(87);
+    }
     for (i, record) in records.iter().enumerate() {
-        secure_replace(&project, &record.temp, &record.path, &record.before).unwrap_or_else(|e| {
+        secure_replace_record(&project, record, &record.before).unwrap_or_else(|e| {
             rollback(&project, &records, &journal);
             fail(&format!(
                 "codemod rename failed for `{}`: {e}",
@@ -595,6 +676,158 @@ pub fn commit(project: &Path, changes: &[Change], log_path: &Path, log: &[u8]) {
     sync_dir(&dir);
 }
 
+#[cfg(unix)]
+fn prepare_unix_record(
+    project: &Path,
+    path: &Path,
+    temp: &Path,
+    bytes: &[u8],
+) -> std::io::Result<UnixRecordHandles> {
+    use std::ffi::{CString, OsStr};
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+
+    const O_RDONLY: i32 = 0;
+    const O_WRONLY: i32 = 1;
+    const O_CREAT: i32 = 0o100;
+    const O_EXCL: i32 = 0o200;
+    const O_CLOEXEC: i32 = 0o2000000;
+    const O_DIRECTORY: i32 = 0o200000;
+    const O_NOFOLLOW: i32 = 0o400000;
+    extern "C" {
+        fn openat(dirfd: i32, pathname: *const i8, flags: i32, mode: u32) -> i32;
+    }
+    fn name(value: &OsStr) -> std::io::Result<CString> {
+        CString::new(value.as_bytes())
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "NUL in codemod path"))
+    }
+
+    if temp.parent() != path.parent() {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "temp is not beside destination"));
+    }
+    let relative = path.strip_prefix(project)
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::PermissionDenied, "destination escapes project"))?;
+    let project_file = OpenOptions::new().read(true)
+        .custom_flags(O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC).open(project)?;
+    let mut held = Vec::<OwnedFd>::new();
+    let mut dirfd = project_file.as_raw_fd();
+    for component in relative.parent().into_iter().flat_map(Path::components) {
+        let std::path::Component::Normal(part) = component else {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "non-normal codemod path"));
+        };
+        let part = name(part)?;
+        let fd = unsafe { openat(dirfd, part.as_ptr(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC, 0) };
+        if fd < 0 { return Err(std::io::Error::last_os_error()); }
+        held.push(unsafe { OwnedFd::from_raw_fd(fd) });
+        dirfd = held.last().unwrap().as_raw_fd();
+    }
+    let parent_owned = if let Some(last) = held.pop() {
+        last
+    } else {
+        let dot = CString::new(".").unwrap();
+        let fd = unsafe { openat(project_file.as_raw_fd(), dot.as_ptr(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC, 0) };
+        if fd < 0 { return Err(std::io::Error::last_os_error()); }
+        unsafe { OwnedFd::from_raw_fd(fd) }
+    };
+    let parent = File::from(parent_owned);
+    let destination_name = name(path.file_name().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "destination has no name"))?)?;
+    let destination_fd = unsafe { openat(parent.as_raw_fd(), destination_name.as_ptr(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC, 0) };
+    if destination_fd < 0 { return Err(std::io::Error::last_os_error()); }
+    let destination = unsafe { File::from_raw_fd(destination_fd) };
+    let destination_meta = destination.metadata()?;
+    if !destination_meta.is_file() || destination_meta.nlink() != 1 {
+        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "destination is linked or not regular"));
+    }
+    let temp_name = name(temp.file_name().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "temp has no name"))?)?;
+    let temp_fd = unsafe { openat(parent.as_raw_fd(), temp_name.as_ptr(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600) };
+    if temp_fd < 0 { return Err(std::io::Error::last_os_error()); }
+    let mut temp_file = unsafe { File::from_raw_fd(temp_fd) };
+    temp_file.write_all(bytes)?;
+    temp_file.sync_all()?;
+    let temp_meta = temp_file.metadata()?;
+    if !temp_meta.is_file() || temp_meta.nlink() != 1 {
+        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "temp is linked or not regular"));
+    }
+    Ok(UnixRecordHandles {
+        _project: project_file,
+        parent,
+        destination,
+        temp: temp_file,
+        destination_id: (destination_meta.dev(), destination_meta.ino()),
+        temp_id: (temp_meta.dev(), temp_meta.ino()),
+    })
+}
+
+fn secure_replace_record(project: &Path, record: &Record, expected: &[u8]) -> std::io::Result<()> {
+    #[cfg(unix)]
+    if let Some(handles) = &record.handles {
+        return secure_replace_held(handles, &record.temp, &record.path, expected);
+    }
+    secure_replace(project, &record.temp, &record.path, expected)
+}
+
+#[cfg(unix)]
+fn secure_replace_held(
+    handles: &UnixRecordHandles,
+    temp: &Path,
+    path: &Path,
+    expected: &[u8],
+) -> std::io::Result<()> {
+    use std::ffi::{CString, OsStr};
+    use std::io::Read;
+    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::MetadataExt;
+    const O_RDONLY: i32 = 0;
+    const O_CLOEXEC: i32 = 0o2000000;
+    const O_NOFOLLOW: i32 = 0o400000;
+    extern "C" {
+        fn openat(dirfd: i32, pathname: *const i8, flags: i32, mode: u32) -> i32;
+        fn renameat(olddirfd: i32, oldpath: *const i8, newdirfd: i32, newpath: *const i8) -> i32;
+    }
+    fn name(value: &OsStr) -> std::io::Result<CString> {
+        CString::new(value.as_bytes())
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "NUL in codemod path"))
+    }
+    let dest_name = name(path.file_name().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "destination has no name"))?)?;
+    let temp_name = name(temp.file_name().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "temp has no name"))?)?;
+    let reopen = |name: &CString| -> std::io::Result<File> {
+        let fd = unsafe { openat(handles.parent.as_raw_fd(), name.as_ptr(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC, 0) };
+        if fd < 0 { return Err(std::io::Error::last_os_error()); }
+        Ok(unsafe { File::from_raw_fd(fd) })
+    };
+    let mut current = reopen(&dest_name)?;
+    let current_meta = current.metadata()?;
+    if (current_meta.dev(), current_meta.ino()) != handles.destination_id
+        || current_meta.nlink() != 1
+    {
+        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "destination name identity changed before rename"));
+    }
+    let temp_current = reopen(&temp_name)?;
+    let temp_meta = temp_current.metadata()?;
+    if (temp_meta.dev(), temp_meta.ino()) != handles.temp_id || temp_meta.nlink() != 1 {
+        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "temp name identity changed before rename"));
+    }
+    let held_dest = handles.destination.metadata()?;
+    let held_temp = handles.temp.metadata()?;
+    if (held_dest.dev(), held_dest.ino()) != handles.destination_id
+        || (held_temp.dev(), held_temp.ino()) != handles.temp_id
+    {
+        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "held codemod file identity changed"));
+    }
+    let mut bytes = Vec::new();
+    current.read_to_end(&mut bytes)?;
+    if bytes != expected {
+        return Err(std::io::Error::new(std::io::ErrorKind::Other, "destination drifted before handle-relative rename"));
+    }
+    if unsafe { renameat(handles.parent.as_raw_fd(), temp_name.as_ptr(), handles.parent.as_raw_fd(), dest_name.as_ptr()) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    handles.parent.sync_all()?;
+    Ok(())
+}
+
 fn rollback(project: &Path, records: &[Record], journal: &Path) {
     let mut conflict = false;
     for r in records {
@@ -611,12 +844,25 @@ fn rollback(project: &Path, records: &[Record], journal: &Path) {
     }
 }
 
-#[derive(Clone)]
 struct Record {
     path: PathBuf,
     temp: PathBuf,
     before: Vec<u8>,
     after: Vec<u8>,
+    destination_id: (u64, u64),
+    temp_id: (u64, u64),
+    #[cfg(unix)]
+    handles: Option<UnixRecordHandles>,
+}
+
+#[cfg(unix)]
+struct UnixRecordHandles {
+    _project: File,
+    parent: File,
+    destination: File,
+    temp: File,
+    destination_id: (u64, u64),
+    temp_id: (u64, u64),
 }
 fn render_journal(
     tx: &str,
@@ -629,11 +875,11 @@ fn render_journal(
         .iter()
         .map(|r| {
             format!(
-                "{{\"path\":\"{}\",\"temp\":\"{}\",\"before\":\"{}\",\"after\":\"{}\"}}",
+                "{{\"path\":\"{}\",\"temp\":\"{}\",\"before\":\"{}\",\"after\":\"{}\",\"destination_id\":[{},{}],\"temp_id\":[{},{}]}}",
                 json_escape(&r.path.display().to_string()),
                 json_escape(&r.temp.display().to_string()),
                 hex(&r.before),
-                hex(&r.after)
+                hex(&r.after), r.destination_id.0, r.destination_id.1, r.temp_id.0, r.temp_id.1
             )
         })
         .collect::<Vec<_>>()
@@ -675,11 +921,25 @@ fn parse_journal(raw: &str) -> Journal {
                 Some(super::Json::Value::String(s)) => s.clone(),
                 _ => fail(&format!("recovery journal missing `{k}`")),
             };
+            let identity = |key| match o.get(key) {
+                Some(super::Json::Value::Array(values)) if values.len() == 2 => {
+                    let number = |value: &super::Json::Value| match value {
+                        super::Json::Value::Number(value) => *value,
+                        _ => fail(&format!("recovery journal `{key}` identity is invalid")),
+                    };
+                    (number(&values[0]), number(&values[1]))
+                }
+                _ => fail(&format!("recovery journal missing `{key}` identity")),
+            };
             Record {
                 path: PathBuf::from(s("path")),
                 temp: PathBuf::from(s("temp")),
                 before: unhex(&s("before")),
                 after: unhex(&s("after")),
+                destination_id: identity("destination_id"),
+                temp_id: identity("temp_id"),
+                #[cfg(unix)]
+                handles: None,
             }
         })
         .collect();
@@ -713,10 +973,62 @@ fn replace_journal_generation(
         secure_replace(project, &staged, journal, &current)
             .unwrap_or_else(|e| fail(&format!("could not publish recovery journal generation: {e}")));
     } else {
-        fs::rename(&staged, journal)
+        publish_new(dir, &staged, journal)
             .unwrap_or_else(|e| fail(&format!("could not publish first recovery journal: {e}")));
     }
     sync_dir(dir);
+}
+
+#[cfg(unix)]
+fn publish_new(dir: &Path, staged: &Path, destination: &Path) -> std::io::Result<()> {
+    use std::ffi::{CString, OsStr};
+    use std::os::fd::AsRawFd;
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::OpenOptionsExt;
+    const O_CLOEXEC: i32 = 0o2000000;
+    const O_DIRECTORY: i32 = 0o200000;
+    const O_NOFOLLOW: i32 = 0o400000;
+    extern "C" {
+        fn linkat(olddirfd: i32, oldpath: *const i8, newdirfd: i32, newpath: *const i8, flags: i32) -> i32;
+        fn unlinkat(dirfd: i32, pathname: *const i8, flags: i32) -> i32;
+    }
+    fn name(value: &OsStr) -> std::io::Result<CString> {
+        CString::new(value.as_bytes()).map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "NUL in codemod path"))
+    }
+    if staged.parent() != Some(dir) || destination.parent() != Some(dir) {
+        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "publication path leaves opened directory"));
+    }
+    let directory = OpenOptions::new().read(true).custom_flags(O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC).open(dir)?;
+    let staged_name = name(staged.file_name().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "staged file has no name"))?)?;
+    let destination_name = name(destination.file_name().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "destination has no name"))?)?;
+    if unsafe { linkat(directory.as_raw_fd(), staged_name.as_ptr(), directory.as_raw_fd(), destination_name.as_ptr(), 0) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    if unsafe { unlinkat(directory.as_raw_fd(), staged_name.as_ptr(), 0) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    directory.sync_all()?;
+    Ok(())
+}
+
+#[cfg(windows)]
+fn publish_new(dir: &Path, staged: &Path, destination: &Path) -> std::io::Result<()> {
+    // `create_new` reserves destination name before bytes are copied. This
+    // fails closed on hostile pre-placement; source identity was already
+    // checked when staged file was opened.
+    let bytes = read_nofollow(staged)?;
+    let mut out = OpenOptions::new().write(true).create_new(true).open(destination)?;
+    out.write_all(&bytes)?;
+    out.sync_all()?;
+    fs::remove_file(staged)?;
+    sync_dir(dir);
+    Ok(())
+}
+
+#[cfg(all(not(unix), not(windows)))]
+fn publish_new(_dir: &Path, staged: &Path, destination: &Path) -> std::io::Result<()> {
+    fs::hard_link(staged, destination)?;
+    fs::remove_file(staged)
 }
 fn atomic_restore(project: &Path, path: &Path, bytes: &[u8]) {
     let tmp = path.with_extension(format!("recover-{}.tmp", std::process::id()));
@@ -747,6 +1059,12 @@ fn secure_replace(project: &Path, temp: &Path, path: &Path, expected: &[u8]) -> 
     fn name(value: &OsStr) -> std::io::Result<CString> {
         CString::new(value.as_bytes())
             .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "NUL in codemod path"))
+    }
+
+    let destination_identity = path_identity(path)?;
+    let temp_identity = path_identity(temp)?;
+    if destination_identity == temp_identity {
+        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "temp aliases destination"));
     }
 
     if temp.parent() != path.parent() {
@@ -791,7 +1109,8 @@ fn secure_replace(project: &Path, temp: &Path, path: &Path, expected: &[u8]) -> 
         return Err(std::io::Error::last_os_error());
     }
     let mut destination = unsafe { File::from_raw_fd(fd) };
-    if !destination.metadata()?.is_file() {
+    use std::os::unix::fs::MetadataExt;
+    if !destination.metadata()?.is_file() || destination.metadata()?.nlink() != 1 {
         return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "destination is not regular file"));
     }
     let mut current = Vec::new();
@@ -802,6 +1121,12 @@ fn secure_replace(project: &Path, temp: &Path, path: &Path, expected: &[u8]) -> 
     let temp_name = name(temp.file_name().ok_or_else(|| {
         std::io::Error::new(std::io::ErrorKind::InvalidInput, "temp has no name")
     })?)?;
+    let temp_check = unsafe { openat(dirfd, temp_name.as_ptr(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC, 0) };
+    if temp_check < 0 { return Err(std::io::Error::last_os_error()); }
+    let temp_check = unsafe { File::from_raw_fd(temp_check) };
+    if temp_check.metadata()?.nlink() != 1 {
+        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "temp has multiple links"));
+    }
     if unsafe { renameat(dirfd, temp_name.as_ptr(), dirfd, final_name.as_ptr()) } != 0 {
         return Err(std::io::Error::last_os_error());
     }
@@ -816,6 +1141,9 @@ fn secure_replace(project: &Path, temp: &Path, path: &Path, expected: &[u8]) -> 
     use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 
     type Handle = *mut c_void;
+    if path_identity(path)? == path_identity(temp)? {
+        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "temp aliases destination"));
+    }
     const GENERIC_READ: u32 = 0x8000_0000;
     const GENERIC_WRITE: u32 = 0x4000_0000;
     const DELETE: u32 = 0x0001_0000;

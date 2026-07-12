@@ -7,6 +7,7 @@ impl<'a> Parser<'a> {
             is_pub: bool,
             is_package_pub: bool,
         ) -> Result<EnumDef, Diagnostic> {
+            let item_start = self.peek().span.start;
             self.expect_kw(TokKind::KwEnum, "to start an enum definition")?;
             let (name, name_span) = self.expect_ident("after `enum`")?;
             let type_params = self.parse_opt_type_params()?;
@@ -43,8 +44,9 @@ impl<'a> Parser<'a> {
                     }
                 }
             }
-            self.bump();
+            let item_end = self.bump().span.end;
             Ok(EnumDef {
+                span: Span::new(item_start, item_end),
                 is_pub,
                 is_package_pub,
                 name,
@@ -188,6 +190,7 @@ impl<'a> Parser<'a> {
         /// D-ERR-CONV (ratified 2026-06-19): dispatch `impl …` to either the normal
         /// `ImplDef` path or the `impl Source -> Target { body }` error-conversion path.
         pub(super) fn impl_or_error_conv(&mut self) -> Result<Item, Diagnostic> {
+            let item_start = self.peek().span.start;
             self.expect_kw(TokKind::KwImpl, "to start an `impl` block")?;
             // D-IMPLDOT1=A: trait impl is `impl Type.Trait { … }`. D-PROTO1/D-PROTO2 add
             // inherent impl on protocol handles `impl Payment.Client { … }` / `.Server`.
@@ -261,6 +264,7 @@ impl<'a> Parser<'a> {
                     let (field, _) = self.expect_ident("after `using` for the delegation field")?;
                     self.finish_stmt()?;
                     return Ok(Item::Impl(ImplDef {
+                        span: Span::new(item_start, self.toks[self.pos.saturating_sub(1)].span.end),
                         type_name,
                         type_span,
                         trait_name,
@@ -297,8 +301,9 @@ impl<'a> Parser<'a> {
                 }
                 methods.push(self.method_in_type()?);
             }
-            self.bump();
+            let item_end = self.bump().span.end;
             Ok(Item::Impl(ImplDef {
+                span: Span::new(item_start, item_end),
                 type_name,
                 type_span,
                 trait_name,

@@ -47,6 +47,13 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn return_type(&mut self) -> Result<(Type, Span), Diagnostic> {
+        let start = self.peek().span.start;
+        let (ty, _) = self.return_type_inner()?;
+        let end = self.toks[self.pos.saturating_sub(1)].span.end;
+        Ok((ty, Span::new(start, end)))
+    }
+
+    fn return_type_inner(&mut self) -> Result<(Type, Span), Diagnostic> {
         if matches!(self.peek().kind, TokKind::LParen) {
             let start = self.bump().span;
             if self.looks_like_named_tuple(true) {
@@ -348,8 +355,10 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn type_(&mut self) -> Result<(Type, Span), Diagnostic> {
-        let span = self.peek().span;
-        self.with_nesting(span, |p| p.type_inner())
+        let first = self.peek().span;
+        let (ty, _) = self.with_nesting(first, |p| p.type_inner())?;
+        let end = self.toks[self.pos.saturating_sub(1)].span.end;
+        Ok((ty, Span::new(first.start, end)))
     }
 
     fn type_inner(&mut self) -> Result<(Type, Span), Diagnostic> {

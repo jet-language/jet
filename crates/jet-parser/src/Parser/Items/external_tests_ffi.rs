@@ -3,7 +3,9 @@ impl<'a> Parser<'a> {
             match item {
                 Item::Func(mut f) => {
                     if let Some((type_name, type_span)) = f.external_type.take() {
+                        let span = f.span;
                         Item::Impl(ImplDef {
+                            span,
                             type_name,
                             type_span,
                             trait_name: None,
@@ -48,6 +50,7 @@ impl<'a> Parser<'a> {
         }
     
         fn test_def_after_kw(&mut self) -> Result<crate::AST::TestDef, Diagnostic> {
+            let item_start = self.toks[self.pos.saturating_sub(1)].span.start;
             // D-TEST1 (ratified 2026-06-22, option B): the property-test form is
             // `#Test fn name(params) { … }`. A parameter list means inputs are
             // generated from the param types and shrunk on failure; the bare
@@ -71,6 +74,7 @@ impl<'a> Parser<'a> {
                 self.expect(TokKind::LBrace, "to open the property test body")?;
                 let body = self.block_stmts();
                 return Ok(crate::AST::TestDef {
+                    span: Span::new(item_start, self.toks[self.pos.saturating_sub(1)].span.end),
                     name,
                     name_span,
                     params,
@@ -82,6 +86,7 @@ impl<'a> Parser<'a> {
             self.expect(TokKind::LBrace, "to open the test body")?;
             let body = self.block_stmts();
             Ok(crate::AST::TestDef {
+                span: Span::new(item_start, self.toks[self.pos.saturating_sub(1)].span.end),
                 name,
                 name_span,
                 params: Vec::new(),
@@ -99,6 +104,7 @@ impl<'a> Parser<'a> {
         /// Parse `#Bench("name") { … }` (D-BENCH1/D-BENCH-MARKER1=A). Structurally identical to
         /// `test_def`; there is no retired lowercase spelling for benches.
         pub(super) fn bench_def(&mut self) -> Result<crate::AST::BenchDef, Diagnostic> {
+            let item_start = self.peek().span.start;
             self.expect(TokKind::Hash, "before `Bench`")?;
             self.bump(); // the `Bench` marker ident (guaranteed by at_bench_def)
             self.expect(TokKind::LParen, "after `#Bench`")?;
@@ -107,6 +113,7 @@ impl<'a> Parser<'a> {
             self.expect(TokKind::LBrace, "to open the benchmark body")?;
             let body = self.block_stmts();
             Ok(crate::AST::BenchDef {
+                span: Span::new(item_start, self.toks[self.pos.saturating_sub(1)].span.end),
                 name,
                 name_span,
                 body,

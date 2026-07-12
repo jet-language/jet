@@ -567,6 +567,108 @@ fn typed_ast_variadic_capture_consumes_one_compiler_list_slot() {
     assert!(fs::read_to_string(source).unwrap().contains("[1, 2, 3, 4]"));
 }
 
+#[test]
+fn typed_ast_variadic_capture_is_rejected_in_binary_scalar_slot() {
+    let project = temp_dir("batch_variadic_scalar");
+    let source = project.join("examples/a.jet");
+    fs::create_dir_all(source.parent().unwrap()).unwrap();
+    let before = "fn run() { print(1 + 2) }\n";
+    fs::write(&source, before).unwrap();
+    let object = project.join("variadic.codemod.json");
+    fs::write(&object, "{\"version\":2,\"name\":\"ScalarVariadic\",\"project\":\".\",\"roots\":[{\"path\":\"examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"scalar\",\"kind\":\"ast_rewrite\",\"node\":\"expr\",\"match\":\"$values... + 2\",\"replace\":\"$values... + 3\",\"matches\":1}]}\n").unwrap();
+    let output = Command::new(jet())
+        .args(["inspect", "codemod", "dry-run", object.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("not a valid Jet expr template") || stderr.contains("matched 0, expected 1"),
+        "{stderr}"
+    );
+    assert_eq!(fs::read_to_string(source).unwrap(), before);
+}
+
+#[cfg(unix)]
+#[test]
+fn transaction_rejects_swapped_temp_inode_before_destination_rename() {
+    let project = temp_dir("batch_temp_swap");
+    let object = simple_batch(&project, 2);
+    let source = project.join("examples/a.jet");
+    let before = fs::read(&source).unwrap();
+    let crashed = Command::new(jet())
+        .env("JET_CODEMOD_CRASH_AFTER_JOURNAL", "1")
+        .args(["inspect", "codemod", "apply", object.to_str().unwrap(), "--yes"])
+        .output()
+        .unwrap();
+    assert_eq!(crashed.status.code(), Some(87));
+    let temp = fs::read_dir(source.parent().unwrap())
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| path.file_name().unwrap().to_string_lossy().starts_with(".jet-codemod-"))
+        .expect("staged temp must remain after simulated crash");
+    fs::remove_file(&temp).unwrap();
+    fs::write(&temp, b"hostile replacement\n").unwrap();
+
+    let recovered = Command::new(jet())
+        .args(["inspect", "codemod", "dry-run", object.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(!recovered.status.success());
+    assert!(String::from_utf8_lossy(&recovered.stderr).contains("identity changed"));
+    assert_eq!(fs::read(&source).unwrap(), before);
+    assert!(project.join(".jet/codemods/transaction.journal").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn transaction_rejects_destination_parent_directory_swap() {
+    let project = temp_dir("batch_directory_swap");
+    let object = simple_batch(&project, 2);
+    let source = project.join("examples/a.jet");
+    let before = fs::read(&source).unwrap();
+    let crashed = Command::new(jet())
+        .env("JET_CODEMOD_CRASH_AFTER_JOURNAL", "1")
+        .args(["inspect", "codemod", "apply", object.to_str().unwrap(), "--yes"])
+        .output()
+        .unwrap();
+    assert_eq!(crashed.status.code(), Some(87));
+    let held = project.join("examples-held");
+    fs::rename(project.join("examples"), &held).unwrap();
+    fs::create_dir(project.join("examples")).unwrap();
+    let hostile = project.join("examples/a.jet");
+    fs::write(&hostile, b"fn hostile() {}\n").unwrap();
+
+    let recovered = Command::new(jet())
+        .args(["inspect", "codemod", "dry-run", object.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(!recovered.status.success());
+    assert!(String::from_utf8_lossy(&recovered.stderr).contains("identity changed"));
+    assert_eq!(fs::read(held.join("a.jet")).unwrap(), before);
+    assert_eq!(fs::read(&hostile).unwrap(), b"fn hostile() {}\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn directory_lock_ignores_hostile_hardlinked_lock_filename() {
+    use std::fs::hard_link;
+    let project = temp_dir("batch_lock_hardlink");
+    let object = simple_batch(&project, 2);
+    let codemods = project.join(".jet/codemods");
+    fs::create_dir_all(&codemods).unwrap();
+    let sentinel = project.join("sentinel");
+    fs::write(&sentinel, b"must remain unchanged\n").unwrap();
+    hard_link(&sentinel, codemods.join("codemod.lock")).unwrap();
+
+    let output = Command::new(jet())
+        .args(["inspect", "codemod", "apply", object.to_str().unwrap(), "--yes"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(fs::read(&sentinel).unwrap(), b"must remain unchanged\n");
+}
+
 #[cfg(unix)]
 #[test]
 fn undo_rejects_log_symlinks_and_destination_hardlink_aliases_before_reading() {
@@ -598,7 +700,13 @@ fn undo_rejects_log_symlinks_and_destination_hardlink_aliases_before_reading() {
         .output()
         .unwrap();
     assert!(!duplicated.status.success());
-    assert!(String::from_utf8_lossy(&duplicated.stderr).contains("alias the same file"));
+    let stderr = String::from_utf8_lossy(&duplicated.stderr);
+    assert!(
+        stderr.contains("alias the same file")
+            || stderr.contains("regular file with one link")
+            || stderr.contains("multiple hard links"),
+        "{stderr}"
+    );
 }
 
 #[test]
@@ -625,7 +733,7 @@ fn recovery_rejects_hostile_journal_paths_without_touching_outside_file() {
     let hex = |bytes: &[u8]| bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
     let log = dir.join("Hostile.log.json");
     let journal = format!(
-        "{{\"schema\":2,\"tx\":\"hostile\",\"completed\":0,\"log_path\":\"{}\",\"log\":\"\",\"files\":[{{\"path\":\"{}\",\"temp\":\"{}\",\"before\":\"{}\",\"after\":\"{}\"}}]}}\n",
+        "{{\"schema\":2,\"tx\":\"hostile\",\"completed\":0,\"log_path\":\"{}\",\"log\":\"\",\"files\":[{{\"path\":\"{}\",\"temp\":\"{}\",\"destination_id\":[1,1],\"temp_id\":[2,2],\"before\":\"{}\",\"after\":\"{}\"}}]}}\n",
         log.display(),
         outside.display(),
         outside.with_extension("tmp").display(),

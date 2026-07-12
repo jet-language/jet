@@ -1090,6 +1090,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
             }
             Item::Test(t) => {
                 let mut synthetic = crate::AST::Func {
+                    span: t.name_span,
                     is_pub: false,
                     is_package_pub: false,
                     external_type: None,
@@ -1099,6 +1100,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     type_params: Vec::new(),
                     params: Vec::new(),
                     return_type: None,
+                    return_type_span: None,
                     is_unsafe: false,
                     unsafe_reason: None,
                     unsafe_span: None,
@@ -2338,6 +2340,7 @@ pub(crate) fn check_error_conv_body(
 ) -> Vec<Diagnostic> {
     // Synthesise a pseudo-function to reuse check_func_body.
     let mut synthetic = Func {
+        span: ec.body_span,
         is_pub: false,
         is_package_pub: false,
         external_type: None,
@@ -2360,6 +2363,7 @@ pub(crate) fn check_error_conv_body(
             variadic_bound_list: None,
         }],
         return_type: Some(Type::Named(ec.to_ty.clone())),
+        return_type_span: Some(ec.to_span),
         is_unsafe: false,
         unsafe_reason: None,
         unsafe_span: None,
@@ -2681,6 +2685,7 @@ pub(crate) fn synthesize_delegation_method(
     );
 
     Func {
+        span: sig.name_span,
         is_pub: false,
         is_package_pub: false,
         external_type: None,
@@ -2690,6 +2695,7 @@ pub(crate) fn synthesize_delegation_method(
                     type_params: vec![],
         params,
         return_type: sig.return_type.clone(),
+        return_type_span: None,
         is_unsafe: false,
         unsafe_reason: None,
         unsafe_span: None,
@@ -2744,6 +2750,7 @@ pub(crate) fn synthesize_default_method(
     );
 
     Func {
+        span: sig.name_span,
         is_pub: false,
         is_package_pub: false,
         external_type: None,
@@ -2753,6 +2760,7 @@ pub(crate) fn synthesize_default_method(
                     type_params: vec![],
         params,
         return_type: sig.return_type.clone(),
+        return_type_span: None,
         is_unsafe: false,
         unsafe_reason: None,
         unsafe_span: None,

@@ -60,6 +60,7 @@ fn collect_abi_types(items: &[Item], out: &mut AbiTypeIndex) {
 
 fn clone_struct(s: &StructDef) -> StructDef {
     StructDef {
+        span: s.span,
         is_pub: s.is_pub,
         is_package_pub: s.is_package_pub,
         name: s.name.clone(),
@@ -93,6 +94,7 @@ fn clone_variant(v: &crate::AST::Variant) -> crate::AST::Variant {
 
 fn clone_enum(e: &crate::AST::EnumDef) -> EnumDef {
     EnumDef {
+        span: e.span,
         is_pub: e.is_pub,
         is_package_pub: e.is_package_pub,
         name: e.name.clone(),
