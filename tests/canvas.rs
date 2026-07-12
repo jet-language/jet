@@ -297,6 +297,13 @@ fn run() -> Void ? {
 }
 "#;
 
+const CANVAS_SHIELD_FIXTURE: &str = r#"fn run() {
+    #Shield {
+        print("before")
+    }
+}
+"#;
+
 const CANVAS_TASK_RAIL_FIXTURE: &str = r#"fn worker() -> Int {
     return 1
 }
@@ -2716,6 +2723,40 @@ fn canvas_projects_control_data_fallible_effect_proof_debug_rails() {
             "rails graph missing {field}: {graph}"
         );
     }
+}
+
+#[test]
+fn canvas_projects_and_source_edits_shield_region() {
+    let path = write_fixture("shield_region", CANVAS_SHIELD_FIXTURE);
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("shield graph");
+    for field in [
+        "\"kind\":\"shield\"",
+        "\"title\":\"#Shield\"",
+        "\"source_span\":{\"start\":",
+        "\"title\":\"print\"",
+        "\"title\":\"\\\"before\\\"\"",
+    ] {
+        assert!(graph.contains(field), "shield graph missing {field}: {graph}");
+    }
+    assert!(
+        !graph.contains("\"kind\":\"source\""),
+        "Shield must project from its AST region, not an opaque source fallback: {graph}"
+    );
+
+    let before = fs::read_to_string(&path).unwrap();
+    let revision = jet::Canvas::source_revision(&before);
+    let edit = format!(
+        "{{\"schema_version\":1,\"op\":\"replace_source\",\"revision\":\"{}\",\"source\":\"fn run() {{\\n    #Shield {{\\n        print(\\\"after\\\")\\n    }}\\n}}\\n\",\"source_edit\":true}}",
+        revision
+    );
+    let out = jet::Canvas::apply_transaction_json(&path, &edit).expect("edit Shield source");
+    assert!(out.contains("\"changed\":true"), "{out}");
+    let after = fs::read_to_string(&path).unwrap();
+    assert!(after.contains("#Shield {"), "{after}");
+    assert!(after.contains("print(\"after\")"), "{after}");
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("shield graph after edit");
+    assert!(graph.contains("\"kind\":\"shield\""), "{graph}");
+    assert!(graph.contains("\"title\":\"\\\"after\\\"\""), "{graph}");
 }
 
 #[test]
