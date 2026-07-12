@@ -42,8 +42,111 @@ fn check(src: &str) -> (ProgramBundle, Vec<Diagnostic>) {
     (bundle, diagnostics)
 }
 
+fn check_modules(sources: &[(&str, &str, &[(&str, usize)])]) -> (ProgramBundle, Vec<Diagnostic>) {
+    let mut modules = Vec::new();
+    let mut import_targets = HashMap::new();
+    for (module_idx, (path, src, targets)) in sources.iter().enumerate() {
+        let (tokens, lex) = Lexer::lex(src);
+        assert!(lex.is_empty(), "lexer diagnostics: {lex:?}");
+        let mut program = Parser::parse(&tokens).expect("source parses");
+        for (alias, target) in *targets {
+            let import = program.imports.iter().find(|import| import.import_alias() == *alias && !matches!(import.kind, jet_sema::AST::ImportKind::Unqualified { .. })).unwrap();
+            import_targets.insert((module_idx, import.span), *target);
+        }
+        modules.push(LoadedModule {
+            path: PathBuf::from(path), display: (*path).into(), alias: path.trim_end_matches(".jet").into(),
+            imports: std::mem::take(&mut program.imports), items: std::mem::take(&mut program.items), source: (*src).into(),
+            web_target_ceiling: program.web_target_ceiling, pub_file: program.pub_file, no_prelude: program.no_prelude,
+            html_path: program.html_path, no_alloc_policy: program.no_alloc_policy,
+        });
+    }
+    let mut bundle = ProgramBundle {
+        entry: sources.len() - 1, project_root: PathBuf::from("pkg-a"), modules,
+        parse_teaching: Vec::new(), used_core: HashSet::new(), cffi: CFfi::default(), comptime_inputs: Vec::new(),
+        import_targets, layer_ceiling: None, inferred_layer: Syntax::RuntimeLayer::Core,
+        web_partitions: HashMap::new(), web_partition_enforced: false, web_partition_report: None,
+        dep_roots: HashMap::new(), active_os: Syntax::OsTarget::host(),
+    };
+    let diagnostics = check_bundle(&mut bundle, CompileMode::Eval);
+    (bundle, diagnostics)
+}
+
 fn error_codes(diags: &[Diagnostic]) -> Vec<&str> {
     diags.iter().filter(|d| d.severity == Severity::Error).map(|d| d.code.as_ref()).collect()
+}
+
+#[test]
+fn equivalent_instances_are_interned_and_project_one_nominal_identity() {
+    let src = r#"
+module Boxed<T, size: Int> {
+    struct Box { value: T }
+    fn identity(value: Box) -> Box { return copy value }
+}
+
+module Other<T, size: Int> { struct Box { value: T } }
+module First = Boxed<Int, 3>
+module Equivalent = Boxed<Int, 3>
+module Forward = Equivalent
+module DifferentType = Boxed<String, 3>
+module DifferentValue = Boxed<Int, 4>
+module DifferentTemplate = Other<Int, 3>
+fn accepts_first(value: First__Box) -> First__Box { return copy value }
+fn accepts_projection(value: Equivalent__Box) -> First__Box { return copy value }
+fn accepts_chain(value: Forward__Box) -> First__Box { return copy value }
+fn run() {}
+"#;
+    let (bundle, diagnostics) = check(src);
+    assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
+    let items = &bundle.modules[0].items;
+    let modules: Vec<&str> = items.iter().filter_map(|item| match item {
+        Item::CodeModule(module) => Some(module.name.as_str()),
+        _ => None,
+    }).collect();
+    assert_eq!(modules.iter().filter(|name| **name == "First").count(), 1);
+    assert!(!modules.contains(&"Equivalent"));
+    assert!(!modules.contains(&"Forward"));
+    assert!(modules.contains(&"DifferentType"));
+    assert!(modules.contains(&"DifferentValue"));
+    assert!(modules.contains(&"DifferentTemplate"));
+    assert_eq!(items.iter().filter(|item| matches!(item, Item::Struct(def) if def.name == "First__Box")).count(), 1);
+    for name in ["accepts_projection", "accepts_chain"] {
+        let Item::Func(func) = items.iter().find(|item| matches!(item, Item::Func(func) if func.name == name)).unwrap() else { unreachable!() };
+        assert_eq!(func.params[0].ty, Type::Named("First__Box".into()));
+        assert_eq!(func.return_type, Some(Type::Named("First__Box".into())));
+    }
+}
+
+#[test]
+fn imported_template_is_interned_once_across_consumers() {
+    let template = r#"
+pub module Boxed<T, size: Int> { pub struct Box { value: T } }
+pub module Other<T, size: Int> { pub struct Box { value: T } }
+"#;
+    let first = r#"
+use "./templates" as templates
+use templates.{Boxed}
+pub module First = Boxed<Int, 3>
+fn run() {}
+"#;
+    let second = r#"
+use "./templates" as templates
+use templates.{Boxed, Other}
+module Second = Boxed<Int, 3>
+module DifferentArg = Boxed<Int, 4>
+module DifferentTemplate = Other<Int, 3>
+fn accepts_projection(value: Second__Box) -> First__Box { return copy value }
+fn run() {}
+"#;
+    let (bundle, diagnostics) = check_modules(&[
+        ("templates.jet", template, &[]),
+        ("first.jet", first, &[("templates", 0)]),
+        ("second.jet", second, &[("templates", 0)]),
+    ]);
+    assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
+    assert_eq!(bundle.modules.iter().flat_map(|module| &module.items).filter(|item| matches!(item, Item::Struct(def) if def.name == "First__Box")).count(), 1);
+    assert!(!bundle.modules[2].items.iter().any(|item| matches!(item, Item::CodeModule(module) if module.name == "Second")));
+    assert!(bundle.modules[2].items.iter().any(|item| matches!(item, Item::CodeModule(module) if module.name == "DifferentArg")));
+    assert!(bundle.modules[2].items.iter().any(|item| matches!(item, Item::CodeModule(module) if module.name == "DifferentTemplate")));
 }
 
 #[test]

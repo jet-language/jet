@@ -350,7 +350,7 @@ fn substitute_stmts(
             Stmt::Expr(value) | Stmt::Yield(value, _) => substitute_expr(value, types, values),
             Stmt::Val(binding) => {
                 if let Some(ty) = &mut binding.ty {
-                    *ty = crate::Generics::substitute_type(ty, types);
+                    *ty = specialize_module_type(ty, types, values);
                 }
                 substitute_expr(&mut binding.init, types, values);
             }
@@ -409,7 +409,7 @@ fn substitute_stmts(
                 ..
             } => {
                 if let Some(ty) = &mut init.ty {
-                    *ty = crate::Generics::substitute_type(ty, types);
+                    *ty = specialize_module_type(ty, types, values);
                 }
                 substitute_expr(&mut init.init, types, values);
                 substitute_expr(cond, types, values);
@@ -646,10 +646,11 @@ fn specialize_module_type(
         match ty {
             Type::FixedList { elem, len, len_symbol } => {
                 lengths(elem, types, values);
-                if let Some((name, _)) = len_symbol.take() {
-                    if let Some(crate::AST::CtValue::Int(value)) = values.get(&name) {
+                if let Some((name, _)) = len_symbol.as_ref() {
+                    if let Some(crate::AST::CtValue::Int(value)) = values.get(name) {
                         if *value >= 0 {
                             *len = *value as u64;
+                            *len_symbol = None;
                         }
                     }
                 }
@@ -699,7 +700,7 @@ fn specialize_nested_code_module(
             _ => None,
         }).collect()
     });
-    CodeModule { name: module.name.clone(), name_span: module.name_span, is_pub: module.is_pub, is_package_pub: module.is_package_pub, body, web_target: module.web_target, span: module.span }
+    CodeModule { name: module.name.clone(), name_span: module.name_span, is_pub: module.is_pub, is_package_pub: module.is_package_pub, body, web_target: module.web_target, instance_identity: module.instance_identity.clone(), span: module.span }
 }
 
 fn specialize_struct(
@@ -960,6 +961,7 @@ enum ResolvedModuleParam {
 /// so E0854 can fire at alias-expansion time.
 struct TemplateInfo {
     def: GenericModuleDef,
+    definition_id: String,
     non_fn_kinds: Vec<&'static str>,
     params: Vec<ResolvedModuleParam>,
     source_module: usize,
@@ -972,6 +974,7 @@ impl Clone for TemplateInfo {
         let mut non_fn_kinds = Vec::new();
         Self {
             def: clone_generic_module_def(&self.def, &mut non_fn_kinds),
+            definition_id: self.definition_id.clone(),
             non_fn_kinds: self.non_fn_kinds.clone(),
             params: self.params.clone(),
             source_module: self.source_module,
@@ -1055,6 +1058,7 @@ fn clone_generic_module_def(
                         .collect()
                 }),
                 web_target: module.web_target,
+                instance_identity: module.instance_identity.clone(),
                 span: module.span,
             })),
             Item::GenericModule(module) => Some(Item::GenericModule(clone_generic_module_def(
@@ -1107,7 +1111,7 @@ fn clone_generic_body_item(
             name: module.name.clone(), name_span: module.name_span,
             is_pub: module.is_pub, is_package_pub: module.is_package_pub,
             body: module.body.as_ref().map(|body| body.iter().filter_map(|item| clone_generic_body_item(item, non_fn_kinds)).collect()),
-            web_target: module.web_target, span: module.span,
+            web_target: module.web_target, instance_identity: module.instance_identity.clone(), span: module.span,
         })),
         Item::GenericModule(module) => Some(Item::GenericModule(clone_generic_module_def(module, non_fn_kinds))),
         Item::ModuleAlias(alias) => Some(Item::ModuleAlias(ModuleAliasDef { name: alias.name.clone(), name_span: alias.name_span, is_pub: alias.is_pub, is_package_pub: alias.is_package_pub, target: alias.target.clone(), target_span: alias.target_span, args: alias.args.clone(), span: alias.span })),
@@ -1162,6 +1166,82 @@ fn specialize_nested_alias_outer(
 
 #[derive(Clone)]
 enum ResolvedModuleArg { Type(Type), Value(crate::AST::CtValue, Vec<u8>) }
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct ModuleInstanceKey {
+    definition_id: String,
+    args: Vec<Vec<u8>>,
+}
+
+impl ModuleInstanceKey {
+    fn bytes(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(&(self.definition_id.len() as u64).to_be_bytes());
+        out.extend_from_slice(self.definition_id.as_bytes());
+        out.extend_from_slice(&(self.args.len() as u64).to_be_bytes());
+        for arg in &self.args {
+            out.extend_from_slice(&(arg.len() as u64).to_be_bytes());
+            out.extend_from_slice(arg);
+        }
+        out
+    }
+}
+
+fn instance_identity(key: &ModuleInstanceKey, template: &TemplateInfo) -> crate::AST::ModuleInstanceIdentity {
+    let full_key = key.bytes();
+    let mut input = full_key.clone();
+    // Template/dependency semantics, excluding consumer alias spelling. The
+    // resolved definition snapshot includes captured dependency declarations.
+    input.extend_from_slice(format!("{:?}{:?}", template.def.body, template.source_items).as_bytes());
+    for salt in [env!("CARGO_PKG_VERSION"), option_env!("PROFILE").unwrap_or("unknown"), std::env::consts::OS, std::env::consts::ARCH] {
+        input.extend_from_slice(&(salt.len() as u64).to_be_bytes());
+        input.extend_from_slice(salt.as_bytes());
+    }
+    crate::AST::ModuleInstanceIdentity {
+        full_key,
+        fingerprint: crate::SHA256::sha256_hex(&input),
+    }
+}
+
+fn normalized_instance_type(ty: &Type, aliases: &HashMap<String, Type>) -> Type {
+    fn go(ty: &Type, aliases: &HashMap<String, Type>, seen: &mut HashSet<String>) -> Type {
+        if let Type::Named(name) = ty {
+            if seen.insert(name.clone()) {
+                if let Some(target) = aliases.get(name) {
+                    let result = go(target, aliases, seen);
+                    seen.remove(name);
+                    return result;
+                }
+                seen.remove(name);
+            }
+        }
+        crate::Generics::substitute_type(ty, &aliases.iter().map(|(name, target)| (name.clone(), target.clone())).collect())
+    }
+    go(ty, aliases, &mut HashSet::new())
+}
+
+fn instance_key(
+    info: &TemplateInfo,
+    args: &[ResolvedModuleArg],
+    type_aliases: &HashMap<String, Type>,
+) -> ModuleInstanceKey {
+    let args = args.iter().map(|arg| match arg {
+        ResolvedModuleArg::Type(ty) => {
+            let name = normalized_instance_type(ty, type_aliases).name();
+            let mut bytes = vec![0];
+            bytes.extend_from_slice(&(name.len() as u64).to_be_bytes());
+            bytes.extend_from_slice(name.as_bytes());
+            bytes
+        }
+        ResolvedModuleArg::Value(_, normalized) => {
+            let mut bytes = vec![1];
+            bytes.extend_from_slice(&(normalized.len() as u64).to_be_bytes());
+            bytes.extend_from_slice(normalized);
+            bytes
+        }
+    }).collect();
+    ModuleInstanceKey { definition_id: info.definition_id.clone(), args }
+}
 
 fn resolve_params(
     def: &GenericModuleDef,
@@ -1335,6 +1415,7 @@ fn expand_alias(
     funcs:&HashMap<String,&Func>,
     globals:&HashMap<String,crate::AST::CtValue>,
     enums:&HashMap<String,bool>,
+    resolved_args: Option<Vec<ResolvedModuleArg>>,
 ) -> Option<AliasExpansion> {
     let info = match templates.get(&alias.target) {
         Some(t) => t,
@@ -1400,7 +1481,10 @@ fn expand_alias(
     if !info.non_fn_kinds.is_empty() {
         return None;
     }
-    let resolved_args = resolve_args(alias, info, traits, funcs, globals, enums, diags)?;
+    let resolved_args = match resolved_args {
+        Some(args) => args,
+        None => resolve_args(alias, info, traits, funcs, globals, enums, diags)?,
+    };
     let mut type_args = HashMap::new();
     let mut value_args = HashMap::new();
     for (param, arg) in info.params.iter().zip(&resolved_args) {
@@ -1616,7 +1700,7 @@ fn expand_alias(
         }).collect();
         let nested_templates: HashMap<String, TemplateInfo> = nested_defs.iter().map(|def| {
             let mut dropped = Vec::new();
-            (def.name.clone(), TemplateInfo { def: clone_generic_module_def(def, &mut dropped),
+            (def.name.clone(), TemplateInfo { def: clone_generic_module_def(def, &mut dropped), definition_id: format!("{}::{}", alias.name, def.name),
                 non_fn_kinds: dropped, params: resolve_params(def, &nested_traits, &nested_enums, diags),
                 source_module: consumer_module, source_items: Vec::new(), source_values: definition_values.clone() })
         }).collect();
@@ -1632,7 +1716,7 @@ fn expand_alias(
             let Some(mut resolved_alias) = resolve_local_alias(nested_alias, &nested_aliases, &nested_templates, diags) else { continue };
             resolved_alias.name = format!("{}__{}", alias.name, nested_alias.name);
             if let Some(expansion) = expand_alias(&resolved_alias, consumer_module, &nested_templates,
-                diags, &nested_traits, &nested_funcs, &definition_values, &nested_enums) {
+                diags, &nested_traits, &nested_funcs, &definition_values, &nested_enums, None) {
                 body.push(Item::CodeModule(expansion.module));
                 declarations.extend(expansion.declarations);
             }
@@ -1646,6 +1730,7 @@ fn expand_alias(
             is_package_pub: alias.is_package_pub,
             body: Some(body),
             web_target: None,
+            instance_identity: None,
             span: alias.span,
         },
         declarations,
@@ -1827,6 +1912,7 @@ pub(crate) fn expand_generic_module_aliases(
     bundle: &mut ProgramBundle,
     diags: &mut Vec<Diagnostic>,
 ) {
+    let package_identity = bundle.project_root.to_string_lossy().replace('\\', "/");
     let template_snapshots: Vec<HashMap<String, TemplateInfo>> = bundle
         .modules
         .iter()
@@ -1880,6 +1966,7 @@ pub(crate) fn expand_generic_module_aliases(
                             gm.name.clone(),
                             TemplateInfo {
                                 def: clone_generic_module_def(gm, &mut non_fn_kinds),
+                                definition_id: format!("{}::{}::{}", package_identity, module.path.to_string_lossy().replace('\\', "/"), gm.name),
                                 non_fn_kinds,
                                 params: resolve_params(gm, &traits, &enums, diags),
                                 source_module,
@@ -1920,6 +2007,10 @@ pub(crate) fn expand_generic_module_aliases(
                 .collect()
         })
         .collect();
+
+    let mut bundle_instances: HashMap<ModuleInstanceKey, String> = HashMap::new();
+    let mut bundle_instance_nominals: HashMap<String, Vec<String>> = HashMap::new();
+    let mut fingerprint_keys: HashMap<String, Vec<u8>> = HashMap::new();
 
     for (module_idx, module) in bundle.modules.iter_mut().enumerate() {
         if report_generic_module_cycles(&module.items, diags) {
@@ -1979,6 +2070,10 @@ pub(crate) fn expand_generic_module_aliases(
                 _ => None,
             })
             .collect();
+        let type_aliases: HashMap<String, Type> = module.items.iter().filter_map(|item| {
+            let Item::TypeAlias(alias) = item else { return None };
+            Some((alias.name.clone(), alias.target.clone()))
+        }).collect();
         let mut projections = HashMap::new();
         for alias in aliases.values().copied() {
             if aliases.contains_key(&alias.target) {
@@ -2020,7 +2115,43 @@ pub(crate) fn expand_generic_module_aliases(
                 if aliases.contains_key(&alias.target) {
                     continue;
                 }
-                if let Some(cm) = expand_alias(&resolved, module_idx, &templates, diags,&traits,&funcs,&globals,&enums) {
+                let Some(info) = templates.get(&resolved.target) else {
+                    invalid_aliases.insert(alias.name.clone());
+                    continue;
+                };
+                let Some(args) = resolve_args(&resolved, info, &traits, &funcs, &globals, &enums, diags) else {
+                    invalid_aliases.insert(alias.name.clone());
+                    continue;
+                };
+                let key = instance_key(info, &args, &type_aliases);
+                if let Some(canonical) = bundle_instances.get(&key) {
+                    projections.insert(alias.name.clone(), canonical.clone());
+                    continue;
+                }
+                if let Some(mut cm) = expand_alias(&resolved, module_idx, &templates, diags,&traits,&funcs,&globals,&enums, Some(args)) {
+                    let identity = instance_identity(&key, info);
+                    if let Some(previous) = fingerprint_keys.get(&identity.fingerprint) {
+                        if previous != &identity.full_key {
+                            diags.push(Diagnostic::error(
+                                "E0859",
+                                "generic module instance fingerprint collision".to_string(),
+                                "two different full instance keys produced the same digest; continuing could reuse the wrong nominal type".to_string(),
+                                "report this internal compiler error; Jet stops instead of choosing either instance".to_string(),
+                                Some(alias.span),
+                            ));
+                            invalid_aliases.insert(alias.name.clone());
+                            continue;
+                        }
+                    } else {
+                        fingerprint_keys.insert(identity.fingerprint.clone(), identity.full_key.clone());
+                    }
+                    cm.module.instance_identity = Some(identity);
+                    bundle_instance_nominals.insert(alias.name.clone(), cm.declarations.iter().filter_map(|item| match item {
+                        Item::Struct(def) => Some(def.name.clone()),
+                        Item::Enum(def) => Some(def.name.clone()),
+                        _ => None,
+                    }).collect());
+                    bundle_instances.insert(key, alias.name.clone());
                     expansions.push((idx, cm));
                 } else {
                     invalid_aliases.insert(alias.name.clone());
@@ -2038,12 +2169,44 @@ pub(crate) fn expand_generic_module_aliases(
             module.items[idx] = Item::CodeModule(expansion.module);
             declarations.extend(expansion.declarations);
         }
+        // Collapse forward-alias chains through the applicative canonical
+        // instance selected above.
+        for alias in projections.clone().keys() {
+            let mut canonical = projections[alias].clone();
+            let mut seen = HashSet::new();
+            while seen.insert(canonical.clone()) {
+                let Some(next) = projections.get(&canonical) else { break };
+                canonical = next.clone();
+            }
+            projections.insert(alias.clone(), canonical);
+        }
+        // Resolve projected nominal spellings before registration/codegen. No
+        // duplicate declaration or zero-parameter surface alias leaks out.
+        let projection_types: HashMap<String, Type> = projections.iter().flat_map(|(alias, canonical)| {
+            let prefix = format!("{canonical}__");
+            bundle_instance_nominals.get(canonical).into_iter().flatten().filter_map(move |canonical_name| {
+                canonical_name.strip_prefix(&prefix).map(|suffix| {
+                    (format!("{alias}__{suffix}"), Type::Named(canonical_name.clone()))
+                })
+            })
+        }).collect();
         for (alias, canonical) in &projections {
             let names = HashSet::from([alias.clone()]);
             for item in &mut module.items {
                 if let Item::Func(func) = item {
                     rewrite_inline_calls_stmts(&mut func.body, &names, canonical);
                 }
+            }
+        }
+        for item in &mut module.items {
+            if let Item::Func(func) = item {
+                for param in &mut func.params {
+                    param.ty = crate::Generics::substitute_type(&param.ty, &projection_types);
+                }
+                if let Some(ret) = &mut func.return_type {
+                    *ret = crate::Generics::substitute_type(ret, &projection_types);
+                }
+                substitute_stmts(&mut func.body, &projection_types, &HashMap::new());
             }
         }
         module
@@ -2432,6 +2595,39 @@ pub(crate) fn check_bundle_opts(
             reexports: HashMap::new(),
         })
         .collect();
+
+    // Generic-instance declarations have one AST/codegen owner, while every
+    // consumer registry receives the same nominal metadata. This is not a
+    // declaration clone: generated Rust/TIR still sees the owner item once.
+    let shared_instance_nominals: Vec<(usize, Item)> = bundle.modules.iter().enumerate().flat_map(|(owner, module)| {
+        let prefixes: Vec<String> = module.items.iter().filter_map(|item| match item {
+            Item::CodeModule(cm) => Some(format!("{}__", cm.name)),
+            _ => None,
+        }).collect();
+        module.items.iter().filter_map(move |item| match item {
+            Item::Struct(def) if prefixes.iter().any(|prefix| def.name.starts_with(prefix)) => Some((owner, Item::Struct(clone_struct(def)))),
+            Item::Enum(def) if prefixes.iter().any(|prefix| def.name.starts_with(prefix)) => Some((owner, Item::Enum(clone_enum(def)))),
+            _ => None,
+        })
+    }).collect();
+    for (owner, item) in &shared_instance_nominals {
+        for (consumer, st) in states.iter_mut().enumerate() {
+            if consumer == *owner { continue; }
+            match item {
+                Item::Struct(def) => {
+                    register_struct(def, &mut st.registry, &mut st.structs, &mut diags, &st.funcs, &st.consts);
+                    st.type_pub.insert(def.name.clone(), def.is_pub && !def.is_package_pub);
+                    st.type_pkg_pub.insert(def.name.clone(), def.is_package_pub);
+                }
+                Item::Enum(def) => {
+                    register_enum(def, &mut st.registry, &mut diags, &st.funcs, &st.consts);
+                    st.type_pub.insert(def.name.clone(), def.is_pub && !def.is_package_pub);
+                    st.type_pkg_pub.insert(def.name.clone(), def.is_package_pub);
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
 
     // D-METADERIVE1=A orphan law needs a bundle-wide provider view: a derive
     // may be supplied by the entry module for an imported type, or imported

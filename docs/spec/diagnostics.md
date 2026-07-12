@@ -1365,8 +1365,8 @@ error[E0997]: `find` can't read the directory `./no-such-packages`
 R9). Malformed input is surfaced as E1214/E1215 before any resolution runs.
 These diagnostics have no source span (the file is not a Jet source file) and
 follow the same spanless voice as CLI diagnostics. Pinned as rendered-output
-snapshots in `tests/jetpack.rs` (the `tests/ui/` harness only renders front-end
-`.jet` diagnostics).
+snapshots in `tests/jetpack_engine.rs` (the `tests/ui/` harness only renders
+front-end `.jet` diagnostics).
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|

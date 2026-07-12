@@ -86,7 +86,17 @@ pub struct CodeModule {
     pub body: Option<Vec<Item>>,
     /// D-WASM1: `module name js { … }` / `module name wasm { … }` ceiling override.
     pub web_target: Option<crate::WebPartition::WebBucket>,
+    /// #91: applicative generic-module identity. Ordinary code modules carry
+    /// `None`; instantiated modules carry the collision-checkable full key and
+    /// its stable content fingerprint through lowering and tooling.
+    pub instance_identity: Option<ModuleInstanceIdentity>,
     pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModuleInstanceIdentity {
+    pub full_key: Vec<u8>,
+    pub fingerprint: String,
 }
 
 /// D-GENMOD2=A: one parameter of a generic module — `module Lru<K: Hash, capacity: Int>`.

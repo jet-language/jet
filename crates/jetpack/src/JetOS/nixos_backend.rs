@@ -1494,7 +1494,7 @@ fn write_real_tier_proof(
 // `mkfs.vfat`) happen to contain that 4-byte sequence somewhere in their
 // compiled data, so no environment observed so far can drive this path
 // through the CLI. `map_system_to_nixos`/rendering/planning are pure and
-// deterministic, so they are tested here instead of via `tests/jetpack.rs`.
+// deterministic, so they are tested here instead of via `tests/jetpack_jetos.rs`.
 #[cfg(test)]
 mod tests {
     use super::*;

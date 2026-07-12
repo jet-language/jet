@@ -67,6 +67,11 @@ pub fn substitute_type(ty: &Type, subst: &HashMap<String, Type>) -> Type {
             args: args.iter().map(|a| substitute_type(a, subst)).collect(),
         },
         Type::List(inner) => Type::List(Box::new(substitute_type(inner, subst))),
+        Type::FixedList { elem, len, len_symbol } => Type::FixedList {
+            elem: Box::new(substitute_type(elem, subst)),
+            len: *len,
+            len_symbol: len_symbol.clone(),
+        },
         Type::Map {
             key,
             key_span,
@@ -100,6 +105,10 @@ pub fn substitute_type(ty: &Type, subst: &HashMap<String, Type>) -> Type {
                 .collect(),
         ),
         Type::TraitObject(t) => Type::TraitObject(t.clone()),
+        Type::Tagged { marker, inner } => Type::Tagged {
+            marker: match subst.get(marker) { Some(Type::Named(name)) => name.clone(), _ => marker.clone() },
+            inner: Box::new(substitute_type(inner, subst)),
+        },
         other => other.clone(),
     }
 }

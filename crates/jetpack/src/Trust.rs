@@ -187,7 +187,7 @@ fn unescape_component(s: &str) -> String {
 }
 
 /// `~/.jet/trust`. `HOME` is test-overridable (existing convention, see
-/// `JetOS::resolve_config_path` and `tests/jetpack.rs`'s `os_build_default_
+/// `JetOS::resolve_config_path` and `tests/jetpack_jetos.rs`'s `os_build_default_
 /// config_path_uses_home_dot_jet`).
 pub fn store_path() -> PathBuf {
     let home = std::env::var_os("HOME")

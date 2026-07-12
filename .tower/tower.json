@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 522,
-    "rev": 4772,
+    "rev": 4787,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -27,7 +27,7 @@
         "radar:e5"
       ]
     },
-    "digestCursor": "2026-07-12T12:59:52.783Z"
+    "digestCursor": "2026-07-12T20:54:46.659Z"
   },
   "epochs": [
     {
@@ -1116,11 +1116,11 @@
         {
           "n": 3,
           "text": "Specialization deep-substitutes function bodies, local annotations, structs, enums, constants, tags, nested declarations, array lengths, and cross-item references under definition-site scope.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-11T23:44:25.156Z"
+          "status": "verified",
+          "metBy": "terra-91-generic-modules",
+          "verifiedBy": "codex-orchestrator",
+          "evidence": "Parent independently reran local/imported runtime goldens, 7/7 focused BODY1 sema tests including tag/coherence/orphan/nested/test-bench cases, and full genmod UI snapshots; all green after fixing fixed-list clone loss and recursive substitution.",
+          "at": "2026-07-12T20:41:46.223Z"
         },
         {
           "n": 4,
@@ -1134,11 +1134,11 @@
         {
           "n": 5,
           "text": "Canonical instance identity uses resolved template identity plus normalized type/value arguments; equivalent aliases deduplicate while packages/arguments remain collision-free.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-11T23:44:25.400Z"
+          "status": "verified",
+          "metBy": "terra-91-generic-modules",
+          "verifiedBy": "codex-orchestrator",
+          "evidence": "Parent independently reran jet-sema check and 9/9 generic_module_body tests, including same-module and three-module multi-consumer nominal interoperability, one canonical AST/codegen owner, transparent consumer projections, and distinct-key collision separation.",
+          "at": "2026-07-12T20:57:13.248Z"
         },
         {
           "n": 6,
@@ -7470,6 +7470,11 @@
         },
         {
           "at": "2026-07-12",
+          "by": "cursor-e4-burn",
+          "text": "[handoff] criteria 1-4 verified; needsAcceptance=true → owner accept ballot. Impl @ bde33487 Shell PTY live-branch fix on grok/card-359."
+        },
+        {
+          "at": "2026-07-12",
           "by": "grok-359-verify2",
           "text": "close after criteria verified"
         },
@@ -8378,11 +8383,11 @@
         {
           "n": 6,
           "text": "Slice 6: tests/jetpack.rs splits into package engine, dispatch, JetOS generation/proof, Studio, and fixture-helper files",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "terra-367c-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-12T18:10:25.830Z"
+          "evidence": "tests/jetpack.rs (7036 lines, 111 #[test] fns incl. common:: bonus / 111 real jetpack tests, 40 helper fns) split via a Rust-aware tokenizer (string/char/raw-string/comment-state + brace-depth machine, not naive brace/line counting) into byte-verified top-level item ranges. Full-file reconstruction check (concat of all 161 item ranges == original bytes) passed. New targets: tests/jetpack_engine.rs (66 tests, package engine), tests/jetpack_dispatch.rs (4, jet->jetpack CLI dispatch), tests/jetpack_jetos.rs (38, JetOS generation/VM proof), tests/jetpack_studio.rs (3, Studio) = 111 tests, sum matches. Shared 41-item fixture-helper set (40 fns + Scratch/StudioTestOwner structs + 1 const) moved to tests/support/jetpack_fixtures.rs, pub-qualified, included per-binary via #[path=\"support/jetpack_fixtures.rs\"] mod (mirrors tests/support/fmt_lossless.rs and tests/common/mod.rs per-binary-copy convention); each target keeps its own mod common; use jetpack_fixtures::*;. Test-body bytes were never transformed (zero edits beyond mod/use header plumbing + pub on helper signatures/fields). Baseline captured on old tests/jetpack.rs BEFORE delete: 111 real tests, 110 pass + 1 pre-existing fail (top_level_jet_outdated_dispatches_to_jetpack, E2101 'outdated moved under jet inspect' drift, unrelated to split). After split (--no-fail-fast across all 4 targets): identical 110 pass + 1 fail (same test, same file:line-relative panic), 0 other deltas — diff of baseline vs after pass/fail-by-name is empty except the expected 1x->4x duplication of the common:: bonus test that every mod-common binary carries (existing repo pattern). cargo check --test jetpack_engine --test jetpack_dispatch --test jetpack_jetos --test jetpack_studio compiles clean, 0 warnings. Old tests/jetpack.rs deleted. Updated 2 stale doc-comment file-pointers (crates/jetpack/src/Trust.rs, crates/jetpack/src/JetOS/nixos_backend.rs) and docs/spec/diagnostics.md's E1214/E1215/E1225 snapshot-location pointer to the new file names.",
+          "at": "2026-07-12T21:00:29.515Z"
         },
         {
           "n": 7,
@@ -13415,6 +13420,11 @@
           "text": "verified 1-3 focused MemberSelect+I4; Canvas full-suite red unrelated"
         },
         {
+          "at": "2026-07-12",
+          "by": "grok-478-verify2",
+          "text": "verified 1-3 focused MemberSelect+I4; Canvas full-suite red unrelated"
+        },
+        {
           "at": "2026-07-10",
           "by": "claude-main",
           "text": "D-JPK-SELECTOR1=C ratified and recorded in docs/spec/syntax-decisions.md. Ready to implement: -p <member> + --affected[-since <ref>], no pattern DSL."
@@ -13428,7 +13438,7 @@
           "metBy": "grok-478-builder",
           "verifiedBy": "grok-478-verify2",
           "evidence": "Focused: MemberSelect 7/7; fixtures E1231/E1292/E1293.stderr present; --filter rejected; dependents closed. Tip 749b02eb. Full-suite Canvas fail unrelated to card.",
-          "at": "2026-07-12T20:07:06.302Z"
+          "at": "2026-07-12T20:47:10.751Z"
         },
         {
           "n": 2,
@@ -13437,7 +13447,7 @@
           "metBy": "grok-478-builder",
           "verifiedBy": "grok-478-verify2",
           "evidence": "Focused: MemberSelect 7/7; fixtures E1231/E1292/E1293.stderr present; --filter rejected; dependents closed. Tip 749b02eb. Full-suite Canvas fail unrelated to card.",
-          "at": "2026-07-12T20:07:06.394Z"
+          "at": "2026-07-12T20:47:10.839Z"
         },
         {
           "n": 3,
@@ -13446,7 +13456,7 @@
           "metBy": "grok-478-builder",
           "verifiedBy": "grok-478-verify2",
           "evidence": "Focused: MemberSelect 7/7; fixtures E1231/E1292/E1293.stderr present; --filter rejected; dependents closed. Tip 749b02eb. Full-suite Canvas fail unrelated to card.",
-          "at": "2026-07-12T20:07:06.481Z"
+          "at": "2026-07-12T20:47:10.933Z"
         }
       ],
       "refs": [],
@@ -32616,8 +32626,10 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-07-12T16:49:51.701Z"
+      "status": "ratified",
+      "created": "2026-07-12T16:49:51.701Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-12"
     },
     {
       "id": "D-FFI-RAWBODY1",
@@ -32703,8 +32715,10 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-07-12T19:03:14.842Z"
+      "status": "ratified",
+      "created": "2026-07-12T19:03:14.842Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-12"
     },
     {
       "id": "D-FFI-ASMOPS1",
@@ -32790,8 +32804,10 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-07-12T19:04:03.460Z"
+      "status": "ratified",
+      "created": "2026-07-12T19:04:03.460Z",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-12"
     },
     {
       "id": "D-ACCEPT-359",
@@ -33657,6 +33673,104 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-12T21:00:29.515Z",
+      "by": "terra-367c-builder",
+      "action": "card.criteria-meet",
+      "ref": "c_audit_367_q80zrm",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-12T20:58:16.655Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-EFFDBREAD1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-12T20:57:41.676Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-FFI-ASMOPS1",
+      "note": "C"
+    },
+    {
+      "at": "2026-07-12T20:57:20.977Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-FFI-RAWBODY1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-12T20:57:13.248Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c1jixkit",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-12T20:57:12.964Z",
+      "by": "terra-91-generic-modules",
+      "action": "card.criteria-meet",
+      "ref": "c1jixkit",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-12T20:47:11.250Z",
+      "by": "cursor-e4-burn",
+      "action": "card.update",
+      "ref": "c0iyfhaf",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-12T20:47:11.137Z",
+      "by": "grok-478-builder",
+      "action": "card.release",
+      "ref": "c0rfeel3",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-12T20:47:11.048Z",
+      "by": "grok-478-verify2",
+      "action": "card.update",
+      "ref": "c0rfeel3",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T20:47:10.933Z",
+      "by": "grok-478-verify2",
+      "action": "card.criteria-verify",
+      "ref": "c0rfeel3",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-12T20:47:10.839Z",
+      "by": "grok-478-verify2",
+      "action": "card.criteria-verify",
+      "ref": "c0rfeel3",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-12T20:47:10.751Z",
+      "by": "grok-478-verify2",
+      "action": "card.criteria-verify",
+      "ref": "c0rfeel3",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-12T20:41:46.223Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c1jixkit",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-12T20:41:45.937Z",
+      "by": "terra-91-generic-modules",
+      "action": "card.criteria-meet",
+      "ref": "c1jixkit",
+      "note": "#3"
+    },
     {
       "at": "2026-07-12T20:36:47.928Z",
       "by": "terra-520-verify",
@@ -37058,104 +37172,6 @@
       "action": "decision.ratify",
       "ref": "D-API-CONTAINS1",
       "note": "B"
-    },
-    {
-      "at": "2026-07-12T10:05:56.545Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CORE-NUMERIC1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-12T10:05:31.036Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CLI-EMIT1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-12T10:04:10.332Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-DROP-WORD1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-12T10:03:13.873Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-POLICY-WORD1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-12T10:02:47.631Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-BLOCKPLANE1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-12T10:02:47.631Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0mqffhd",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-07-12T10:02:47.631Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0mqffhd",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-07-12T10:02:47.631Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0mqffhd",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-07-12T10:02:47.631Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0mqffhd",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-07-12T09:56:23.678Z",
-      "by": "card296-audit",
-      "action": "card.criteria-verify",
-      "ref": "c0gk8k3t",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-12T09:56:23.490Z",
-      "by": "terra-358-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0gk8k3t",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-12T09:20:09.319Z",
-      "by": "card296-audit",
-      "action": "card.criteria-verify",
-      "ref": "c0gk8k3t",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-12T09:20:09.142Z",
-      "by": "terra-358-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0gk8k3t",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-12T08:45:33.095Z",
-      "by": "card296-audit",
-      "action": "card.criteria-verify",
-      "ref": "c0gk8k3t",
-      "note": "#2"
     }
   ],
   "nextNum": 368,

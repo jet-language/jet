@@ -430,6 +430,7 @@ impl<'a> Parser<'a> {
                     is_package_pub,
                     body: None,
                     web_target,
+                    instance_identity: None,
                     span: Span::new(start.start, end),
                 }))
             }
@@ -458,6 +459,7 @@ impl<'a> Parser<'a> {
                     is_package_pub,
                     body: Some(items),
                     web_target,
+                    instance_identity: None,
                     span: Span::new(start.start, end),
                 }))
             }
