@@ -99,6 +99,8 @@ pub enum Key {
     End,
     /// F1 (SS3 form, `ESC O P` — the common raw/xterm encoding).
     F1,
+    /// F3 (SS3 `ESC O R`; opens REPL history search).
+    F3,
     CtrlB,
     CtrlP,
     CtrlF,
@@ -178,6 +180,7 @@ impl<R: Read> KeyReader<R> {
             b'H' => Key::Home,
             b'F' => Key::End,
             b'P' if b1 == b'O' => Key::F1,
+            b'R' if b1 == b'O' => Key::F3,
             b'1' | b'7' => {
                 self.read_byte(); // trailing `~`
                 Key::Home
@@ -267,6 +270,8 @@ mod tests {
     fn decodes_f1_ss3_escape() {
         let mut r = KeyReader::new(Cursor::new(b"\x1bOP".to_vec()));
         assert_eq!(r.read_key(), Key::F1);
+        let mut r = KeyReader::new(Cursor::new(b"\x1bOR".to_vec()));
+        assert_eq!(r.read_key(), Key::F3);
     }
 
     #[test]

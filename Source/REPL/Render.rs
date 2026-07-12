@@ -38,9 +38,10 @@ pub fn render_banner(version: &str, color: bool) -> String {
 pub fn render_discovery_hint(raw_mode: bool, color: bool) -> String {
     if raw_mode {
         format!(
-            "Try: {} complete · {} docs · {} pin · {} fold · {} rerun · {} bindings",
+            "Try: {} complete · {} docs · {} history · {} pin · {} fold · {} rerun · {} bindings",
             bold("Tab", color),
             bold("?name", color),
+            bold("F3", color),
             bold("^P", color),
             bold("^F", color),
             bold("^R", color),

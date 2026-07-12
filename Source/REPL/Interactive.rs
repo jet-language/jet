@@ -34,6 +34,7 @@ pub(crate) fn run_interactive(project_dir: Option<&str>, color: bool, mut guard:
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
 
     let mut session = Session::new();
+    session.enable_persistent_history();
     let mut policy = ReplPolicy::new(flags, &base_dir);
     if let Some(dir) = project_dir {
         let mut stdout = io::stdout();
@@ -290,7 +291,7 @@ fn read_line<R: Read>(
 ) -> LineOutcome {
     let mut buf: Vec<char> = prefill.chars().collect();
     let mut cursor = buf.len();
-    let history: Vec<String> = session.turns.iter().rev().map(|t| t.input.clone()).collect();
+    let history: Vec<String> = session.history.entries().iter().rev().cloned().collect();
 
     redraw(prompt, &buf, cursor, ghost_for(&buf, &history), color);
 
@@ -386,6 +387,13 @@ fn read_line<R: Read>(
             Key::Tab => {
                 apply_completion(&mut buf, &mut cursor, session, color);
             }
+            Key::F3 => {
+                print!("\r\n");
+                if let Some(found) = read_history_search(reader, session, color) {
+                    buf = found.chars().collect();
+                    cursor = buf.len();
+                }
+            }
             Key::Escape | Key::Unknown | Key::F1 | Key::CtrlB | Key::CtrlP | Key::CtrlF
             | Key::CtrlR => {
                 // Mid-edit control keys are reserved (see module docs); a
@@ -398,6 +406,44 @@ fn read_line<R: Read>(
             }
         }
         redraw(prompt, &buf, cursor, ghost_for(&buf, &history), color);
+    }
+}
+
+fn read_history_search<R: Read>(
+    reader: &mut KeyReader<R>,
+    session: &Session,
+    color: bool,
+) -> Option<String> {
+    let prompt = "history search> ";
+    let mut query = Vec::new();
+    loop {
+        redraw(prompt, &query, query.len(), None, color);
+        match reader.read_key() {
+            Key::Char(c) => query.push(c),
+            Key::Backspace => {
+                query.pop();
+            }
+            Key::Enter => {
+                print!("\r\n");
+                let needle: String = query.into_iter().collect();
+                let found = session
+                    .history
+                    .search(&needle)
+                    .into_iter()
+                    .next()
+                    .map(str::to_string);
+                if found.is_none() {
+                    println!("No history matches.");
+                }
+                return found;
+            }
+            Key::Escape | Key::CtrlC => {
+                print!("\r\n");
+                return None;
+            }
+            Key::Idle => continue,
+            _ => {}
+        }
     }
 }
 

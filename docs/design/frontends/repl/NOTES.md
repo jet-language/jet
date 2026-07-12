@@ -152,6 +152,13 @@ The line REPL is the ground floor; nothing above changes the mental model of
 "type, read, continue." Each layer is reachable by one key and invisible until
 asked for.
 
+Successful submissions persist privately across sessions
+(D-FE-REPL-HISTORY1=A). F3 searches them in raw mode;
+`:history search <text>` works everywhere and `:history clear` erases them.
+The default 2,000-entry bound is controlled by `JET_REPL_HISTORY_LIMIT`; set
+`JET_REPL_HISTORY=off` for session-only history. Storage failures and recovered
+corrupt tails are visible warnings because history must never fail silently.
+
 | Source option | Transplanted aspect |
 |---------------|--------------------|
 | line | Foundation: plain-text scrollback, `user>`, ghost autosuggest, completion menu, inline `?name` docs, live highlight on the editing line. |
