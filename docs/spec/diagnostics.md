@@ -513,6 +513,11 @@ duplicate this — it is the one surface for lint walls (I8).
 | E1004 | sema  | unknown item in core module |
 | E1005 | sema  | overflow opt-in not wrapping a single integer op |
 | E1006 | sema  | `use core.*` import or emitted helper exceeds package `runtime:` ceiling (D-RINGLAYER1) |
+| E1007 | parse | malformed bit width in a `b"…"` binary pattern hole — not `U<1..64>[be\|le]` or `...` (D-BINPAT1) |
+| E1008 | parse | binary pattern read needs/misuses an endian suffix — multi-byte read without `be`/`le`, or `le`/`be` on a single-byte or non-byte-multiple read (D-BINPAT1) |
+| E1009 | parse | a `{name:...}` rest capture isn't the last part of a binary pattern (D-BINPAT1) |
+| E1010 | sema  | a `b"…"` binary pattern matched against a subject that isn't `[U8]` (D-BINPAT1) |
+| E1011 | sema  | fixed bytes or a rest capture in a binary pattern don't start on a byte boundary (D-BINPAT1) |
 | E1301 | sema  | `ArgsSpec.flag` or `ParsedArgs.flag` called with wrong arity (D-ARGS1) |
 | E1302 | sema  | `ArgsSpec.option` or `ParsedArgs.option` called with wrong arity (D-ARGS1) |
 | E1303 | sema  | `ArgsSpec.positional` or `ParsedArgs.positional` called with wrong arity (D-ARGS1) |

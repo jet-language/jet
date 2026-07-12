@@ -388,7 +388,10 @@ pub(crate) fn pattern_variant_name(pattern: &Pattern) -> Option<String> {
         Pattern::Or(alts, _) => alts.first().and_then(pattern_variant_name),
         // D-PATR/D-DESTRUCT1/D-PARSESTR1: range, struct, and str-match patterns
         // don't cover a single variant name.
-        Pattern::Range { .. } | Pattern::Struct { .. } | Pattern::StrMatch { .. } => None,
+        Pattern::Range { .. }
+        | Pattern::Struct { .. }
+        | Pattern::StrMatch { .. }
+        | Pattern::BinMatch { .. } => None,
     }
 }
 

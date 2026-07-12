@@ -38,6 +38,19 @@ pub(crate) fn arm_str_match_pattern(cx: &Cx, cond: &Expr, subject: &Expr) -> Opt
     }
 }
 
+/// D-BINPAT1 (card #506): a binary-pattern arm head over the switch subject —
+/// a `b"…"` literal in pattern position (`subject == b"{v:U4}…"`).
+pub(crate) fn arm_bin_match_pattern(cx: &Cx, cond: &Expr, subject: &Expr) -> Option<Pattern> {
+    match cond {
+        Expr::PatternTest {
+            subject: s,
+            pattern: pattern @ Pattern::BinMatch { .. },
+            ..
+        } if pattern_subjects_match(cx, s, subject) => Some(pattern.clone()),
+        _ => None,
+    }
+}
+
 /// D-DESTRUCT1: a struct-shaped arm head over the switch subject.
 pub(crate) fn arm_struct_pattern(cx: &Cx, cond: &Expr, subject: &Expr) -> Option<Pattern> {
     match cond {
@@ -239,6 +252,17 @@ pub(crate) fn add_str_match_pattern_binding_names(pattern: &Pattern, locals: &mu
     if let Pattern::StrMatch { parts, .. } = pattern {
         for part in parts {
             if let crate::AST::StrMatchPart::Hole { name, .. } = part {
+                locals.insert(name.clone());
+            }
+        }
+    }
+}
+
+/// D-BINPAT1: record names bound by a binary-pattern arm head's holes.
+pub(crate) fn add_bin_match_pattern_binding_names(pattern: &Pattern, locals: &mut HashSet<String>) {
+    if let Pattern::BinMatch { parts, .. } = pattern {
+        for part in parts {
+            if let crate::AST::BinMatchPart::Hole { name, .. } = part {
                 locals.insert(name.clone());
             }
         }

@@ -73,6 +73,52 @@ pub enum Pattern {
         parts: Vec<StrMatchPart>,
         span: Span,
     },
+    /// D-BINPAT1 (ratified 2026-07-12, card #506): the byte-mode sibling of
+    /// `StrMatch`. A `b"…"` literal in pattern position matches a `[U8]`
+    /// subject bit-by-bit — each `{name:U4}` reads a fixed-width bit field,
+    /// `be`/`le` picks endianness on a multi-byte read, and a final
+    /// `{name:...}` captures the remaining bytes as `[U8]`. Always refutable
+    /// (the fixed bytes might not match, and the subject might be too short),
+    /// so an `if == {}` table needs an `else` (E0148).
+    BinMatch {
+        parts: Vec<BinMatchPart>,
+        span: Span,
+    },
+}
+
+/// D-BINPAT1: one piece of a binary pattern literal — fixed bytes to match, or
+/// a bit-typed hole to bind.
+#[derive(Debug, Clone)]
+pub enum BinMatchPart {
+    /// Fixed literal bytes that must appear verbatim (byte-aligned).
+    Lit(Vec<u8>),
+    Hole {
+        name: String,
+        spec: BinSpec,
+        span: Span,
+    },
+}
+
+/// D-BINPAT1: the shape a binary hole reads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BinSpec {
+    /// `U4`, `U16be`, `U16le` — a fixed-width unsigned bit field. `width` is
+    /// in bits, 1..=64. `endian` is `Big`/`Little` for a multi-byte read
+    /// (width > 8) and `None` for a single-byte-or-smaller read (width <= 8),
+    /// where byte order is irrelevant.
+    Bits { width: u8, endian: BinEndian },
+    /// `...` — the trailing rest capture, binding the remaining bytes as
+    /// `[U8]`. Must be the final part of the pattern (E0968).
+    Rest,
+}
+
+/// D-BINPAT1: byte order of a multi-byte bit read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinEndian {
+    /// No suffix — only valid for a single-byte-or-smaller read (width <= 8).
+    None,
+    Big,
+    Little,
 }
 
 /// D-PARSESTR1: one piece of a string-interpolation-literal used as a
@@ -213,6 +259,7 @@ impl Pattern {
             Pattern::Or(_, span) => *span,
             Pattern::Struct { span, .. } => *span,
             Pattern::StrMatch { span, .. } => *span,
+            Pattern::BinMatch { span, .. } => *span,
         }
     }
 }

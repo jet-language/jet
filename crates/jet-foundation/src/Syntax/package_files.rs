@@ -97,6 +97,18 @@ pub const METHOD_VIEW: &str = "view";
 /// argument shape, no second call-argument grammar.
 pub const METHOD_TAKE_PATTERN: &str = "take_pattern";
 
+/// D-BINPAT1 (ratified 2026-07-12, card #506): a `b"…"` binary pattern
+/// literal — the byte-mode sibling of the D-PARSESTR1 string pattern. The `b`
+/// prefix on a string literal switches the ONE pattern engine into byte mode:
+/// each `{name:U4}` hole reads a fixed-width bit field, an endian suffix
+/// (`be`/`le`) picks byte order on a multi-byte read, and a final `{name:...}`
+/// captures the remaining bytes as `[U8]`.
+pub const BINPAT_PREFIX: char = 'b';
+/// D-BINPAT1: multi-byte big-endian read suffix — `{len:U16be}`.
+pub const BINPAT_ENDIAN_BIG: &str = "be";
+/// D-BINPAT1: multi-byte little-endian read suffix — `{len:U16le}`.
+pub const BINPAT_ENDIAN_LITTLE: &str = "le";
+
 /// D-DIST3 / D-CAPBUNDLE1 / D-MARKERMOVE1 (ratified): `@Numeric` marker
 /// enables same-type arithmetic on a distinct type. Written `@Numeric` on
 /// the same line before the distinct-type name (contract-plane prefix,

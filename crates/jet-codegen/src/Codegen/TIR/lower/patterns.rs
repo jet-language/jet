@@ -143,6 +143,69 @@ pub(super) fn lower_str_match_pattern_bindings(pattern: &Pattern, cx: &Cx, env: 
     out
 }
 
+/// D-BINPAT1 (card #506): the bool test for a binary-pattern arm head —
+/// whether the bit-scan closure succeeds. Always refutable (E0148).
+pub(super) fn bin_match_pattern_cond_expr(pattern: &Pattern, cx: &Cx) -> TExpr {
+    let (closure, _) = crate::Codegen::TIR::lower::bin_match_scan_closure(pattern, cx);
+    TExpr {
+        ty: Type::Bool,
+        kind: TExprKind::ConstInline(format!("({}).is_some()", closure)),
+    }
+}
+
+/// D-BINPAT1: bind each hole locally before the arm body runs — re-invokes the
+/// bit-scan closure (pure/cheap), binds the whole result tuple to one temp,
+/// then projects each hole out by index. Mirrors `lower_str_match_pattern_bindings`.
+pub(super) fn lower_bin_match_pattern_bindings(
+    pattern: &Pattern,
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> Vec<TStmt> {
+    let (closure, holes) = crate::Codegen::TIR::lower::bin_match_scan_closure(pattern, cx);
+    if holes.is_empty() {
+        return Vec::new();
+    }
+    let tuple_ty_str = tuple_join(
+        &holes
+            .iter()
+            .map(|(_, t)| cx.rust_type(t))
+            .collect::<Vec<_>>(),
+    );
+    let tuple_local = "__jet_bm_tuple";
+    let tuple_rust = mangle(tuple_local);
+    let mut out = vec![TStmt::Let {
+        name: tuple_local.to_string(),
+        kw: "let",
+        ty_clause: format!(": ({})", tuple_ty_str),
+        init: TExpr {
+            ty: Type::Bool,
+            kind: TExprKind::ConstInline(format!("({}).unwrap()", closure)),
+        },
+        track_origin: None,
+    }];
+    let single = holes.len() == 1;
+    for (i, (name, ty)) in holes.iter().enumerate() {
+        let local_rust = mangle(name);
+        env.bind(name, local_rust, Some(ty.clone()));
+        let project = if single {
+            format!("{}.0", tuple_rust)
+        } else {
+            format!("{}.{}", tuple_rust, i)
+        };
+        out.push(TStmt::Let {
+            name: name.clone(),
+            kw: "let",
+            ty_clause: format!(": {}", cx.rust_type(ty)),
+            init: TExpr {
+                ty: ty.clone(),
+                kind: TExprKind::ConstInline(project),
+            },
+            track_origin: None,
+        });
+    }
+    out
+}
+
 pub(super) fn struct_pattern_field_type(cx: &Cx, subject_ty: &Type, field: &str) -> Option<Type> {
     match subject_ty {
         Type::Apply { name, .. } => cx

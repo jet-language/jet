@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 522,
-    "rev": 4808,
+    "nextNum": 523,
+    "rev": 4816,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -13379,38 +13379,38 @@
         {
           "n": 1,
           "text": "jetpack tool run|install|list|uninstall verb surface exists and is documented in help",
-          "status": "met",
+          "status": "verified",
           "metBy": "grok-477-builder",
-          "verifiedBy": null,
-          "evidence": "tool run|install|list|uninstall real; CLI/tool.rs; 58118c1a+d7f21193",
-          "at": "2026-07-12T21:58:17.438Z"
+          "verifiedBy": "grok-477-verify",
+          "evidence": "verify: tip d7f21193+; cargo build -p jetpack; cargo test --test jetpack tool_ 6 ok (tool_help)",
+          "at": "2026-07-12T23:36:56.491Z"
         },
         {
           "n": 2,
           "text": "tool run realizes+execs refs across built-in providers (nixpkgs/github/path); unavailable external providers emit clear diagnostic (not silent skip)",
-          "status": "met",
+          "status": "verified",
           "metBy": "grok-477-builder",
-          "verifiedBy": null,
-          "evidence": "install projects ~/.jet/bin + generations meta",
-          "at": "2026-07-12T21:58:17.530Z"
+          "verifiedBy": "grok-477-verify",
+          "evidence": "verify: tool_run_unavailable_provider_is_e1298 ok; E1298 fixture; E1295/E1296 stay selectors",
+          "at": "2026-07-12T23:36:56.576Z"
         },
         {
           "n": 3,
           "text": "tool install projects bins onto ~/.jet/bin with generation metadata (real PATH projection)",
-          "status": "met",
+          "status": "verified",
           "metBy": "grok-477-builder",
-          "verifiedBy": null,
-          "evidence": "E1297 collide + E1298 provider I4 fixtures",
-          "at": "2026-07-12T21:58:17.613Z"
+          "verifiedBy": "grok-477-verify",
+          "evidence": "verify: tool_install_projects_real_bin_symlink_with_generation ok; tool.rs real symlink+gen meta",
+          "at": "2026-07-12T23:36:56.663Z"
         },
         {
           "n": 4,
           "text": "JPK-TOOL-COLLIDE fires when install bin name collides with project #Task fn; I4 snapshot + diagnostics.md",
-          "status": "met",
+          "status": "verified",
           "metBy": "grok-477-builder",
-          "verifiedBy": null,
-          "evidence": "focused tool_ tests 6+ lib tool 2 green",
-          "at": "2026-07-12T21:58:17.709Z"
+          "verifiedBy": "grok-477-verify",
+          "evidence": "verify: tool_install_task_collision_is_e1297 ok; no E1294 tool; codes E1297/E1298",
+          "at": "2026-07-12T23:36:56.757Z"
         }
       ],
       "refs": [],
@@ -16206,6 +16206,27 @@
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-12T20:30:54.058Z",
+      "updated": "2026-07-12"
+    },
+    {
+      "id": "c0wf4bxf",
+      "num": 522,
+      "title": "Tower: server restarts on code change (or version-mismatch banner) — stale-process trap",
+      "body": "2026-07-12: owner Accept clicks failed for hours because the live server process (started Jul 10) predated the acceptance endpoints; UI files are served fresh from disk so the page looked current while the process routes were stale. Every agent fix verified green on fresh temp servers. Fix the class: tower serve should watch its own source files and restart (or at minimum stamp a build/version marker into served JS and show a visible stale-server banner when the served UI is newer than the process). Include a test.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "needsAcceptance": false,
+      "created": "2026-07-12T23:39:41.196Z",
       "updated": "2026-07-12"
     }
   ],
@@ -33045,8 +33066,10 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-07-12T22:54:40.600Z"
+      "status": "ratified",
+      "created": "2026-07-12T22:54:40.600Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-07-12"
     },
     {
       "id": "D-VALIDATE3",
@@ -33132,8 +33155,10 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-07-12T22:58:34.888Z"
+      "status": "ratified",
+      "created": "2026-07-12T22:58:34.888Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-12"
     }
   ],
   "questions": [
@@ -33961,6 +33986,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-12T23:39:41.196Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0wf4bxf",
+      "note": "Tower: server restarts on code change (or version-mismatch banner) — stale-process trap"
+    },
+    {
+      "at": "2026-07-12T23:37:15.548Z",
+      "by": "owner-ui-rejected",
+      "action": "acceptance.reject",
+      "ref": "unknown",
+      "note": "acceptance/challenge: missing owner verification UI interaction marker"
+    },
+    {
+      "at": "2026-07-12T23:36:56.757Z",
+      "by": "grok-477-verify",
+      "action": "card.criteria-verify",
+      "ref": "c0fchu51",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-12T23:36:56.664Z",
+      "by": "grok-477-verify",
+      "action": "card.criteria-verify",
+      "ref": "c0fchu51",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-12T23:36:56.576Z",
+      "by": "grok-477-verify",
+      "action": "card.criteria-verify",
+      "ref": "c0fchu51",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-12T23:36:56.491Z",
+      "by": "grok-477-verify",
+      "action": "card.criteria-verify",
+      "ref": "c0fchu51",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-12T23:04:46.276Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-VALIDATE3",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-12T23:03:44.959Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-VALIDATE2",
+      "note": "B"
+    },
     {
       "at": "2026-07-12T22:58:34.888Z",
       "by": "terra-506b-ballot",
@@ -37404,62 +37485,6 @@
       "action": "decision.ratify",
       "ref": "D-API-STORE1",
       "note": "A"
-    },
-    {
-      "at": "2026-07-12T10:27:09.195Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c019rl6u",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T10:27:09.092Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0y0m8yx",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-12T10:25:20.658Z",
-      "by": "claude-main",
-      "action": "card.criteria-add",
-      "ref": "c00ukytt",
-      "note": "#1 rename crates/jet-foundation/src/Syntax/effects_tests.rs — a"
-    },
-    {
-      "at": "2026-07-12T10:25:20.553Z",
-      "by": "claude-main",
-      "action": "card.criteria-add",
-      "ref": "c0llk894",
-      "note": "#8 release-policy.md stale paths: enforcement section reference"
-    },
-    {
-      "at": "2026-07-12T10:25:20.444Z",
-      "by": "claude-main",
-      "action": "card.criteria-add",
-      "ref": "c0llk894",
-      "note": "#7 roadmap.md epoch drift: text says Self-hosting -> Epoch 8 (B"
-    },
-    {
-      "at": "2026-07-12T10:24:19.256Z",
-      "by": "claude-main",
-      "action": "question.answer",
-      "ref": "q3lhm9fa",
-      "note": ""
-    },
-    {
-      "at": "2026-07-12T10:24:19.152Z",
-      "by": "claude-main",
-      "action": "question.answer",
-      "ref": "q2zvcuql",
-      "note": ""
-    },
-    {
-      "at": "2026-07-12T10:24:19.050Z",
-      "by": "claude-main",
-      "action": "decision.update",
-      "ref": "D-VALIDATE1",
-      "note": ""
     }
   ],
   "nextNum": 368,

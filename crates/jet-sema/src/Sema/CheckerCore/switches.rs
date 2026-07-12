@@ -263,7 +263,33 @@ impl<'a> Checker<'a> {
                         }
                     )
                 });
-                if has_str_match_arm {
+                // D-BINPAT1: a binary pattern arm is refutable the same way.
+                let has_bin_match_arm = arms.iter().any(|a| {
+                    matches!(
+                        &a.cond,
+                        Expr::PatternTest {
+                            pattern: Pattern::BinMatch { .. },
+                            ..
+                        }
+                    )
+                });
+                if has_bin_match_arm && !has_str_match_arm {
+                    self.diags.push(Diagnostic::error(
+                        "E0148",
+                        format!(
+                            "this `{}` matches bytes but has no `{}` arm",
+                            Syntax::KW_IF,
+                            Syntax::KW_ELSE
+                        ),
+                        "a binary pattern can always fail to match — the fixed bytes might differ, or the subject might be too short".to_string(),
+                        format!(
+                            "add `{} {} {{ ... }}` to handle bytes that don't match",
+                            Syntax::KW_ELSE,
+                            Syntax::OP_ARM_ARROW
+                        ),
+                        Some(span),
+                    ));
+                } else if has_str_match_arm {
                     self.diags.push(Diagnostic::error(
                         "E0148",
                         format!(

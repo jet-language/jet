@@ -3,11 +3,13 @@ use crate::Codegen::Cx;
 use crate::Codegen::is_json_variant;
 use crate::Codegen::is_key_variant;
 use crate::Codegen::TIR::add_pattern_binding_names;
+use crate::Codegen::TIR::add_bin_match_pattern_binding_names;
 use crate::Codegen::TIR::add_str_match_pattern_binding_names;
 use crate::Codegen::TIR::add_struct_pattern_binding_names;
 use crate::Codegen::TIR::arm_fallible_pattern;
 use crate::Codegen::TIR::arm_head_range;
 use crate::Codegen::TIR::arm_is_plain_cond;
+use crate::Codegen::TIR::arm_bin_match_pattern;
 use crate::Codegen::TIR::arm_str_match_pattern;
 use crate::Codegen::TIR::arm_struct_pattern;
 use crate::Codegen::TIR::arm_variant_pattern;
@@ -709,6 +711,7 @@ pub(crate) fn switch_in_subset(
             || arm_head_range(cx, &a.cond, subject).is_some()
             || arm_struct_pattern(cx, &a.cond, subject).is_some()
             || arm_str_match_pattern(cx, &a.cond, subject).is_some()
+            || arm_bin_match_pattern(cx, &a.cond, subject).is_some()
     }) && (!has_range || subject_is_scalar_ident)
     {
         // D-PARSESTR1: sema already proved a str-match arm's subject is
@@ -720,6 +723,7 @@ pub(crate) fn switch_in_subset(
             if arm_head_range(cx, &a.cond, subject).is_none()
                 && arm_struct_pattern(cx, &a.cond, subject).is_none()
                 && arm_str_match_pattern(cx, &a.cond, subject).is_none()
+                && arm_bin_match_pattern(cx, &a.cond, subject).is_none()
                 && !expr_in_subset(&a.cond, cx, locals)
             {
                 return false;
@@ -733,6 +737,9 @@ pub(crate) fn switch_in_subset(
             }
             if let Some(pat) = arm_str_match_pattern(cx, &a.cond, subject) {
                 add_str_match_pattern_binding_names(&pat, &mut body_locals);
+            }
+            if let Some(pat) = arm_bin_match_pattern(cx, &a.cond, subject) {
+                add_bin_match_pattern_binding_names(&pat, &mut body_locals);
             }
             if !a
                 .body

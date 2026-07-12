@@ -9,6 +9,7 @@ use crate::Codegen::mangle;
 use crate::Codegen::TIR::arm_fallible_pattern;
 use crate::Codegen::TIR::arm_head_range;
 use crate::Codegen::TIR::arm_is_plain_cond;
+use crate::Codegen::TIR::arm_bin_match_pattern;
 use crate::Codegen::TIR::arm_str_match_pattern;
 use crate::Codegen::TIR::arm_struct_pattern;
 use crate::Codegen::TIR::clone_env;
@@ -20,9 +21,11 @@ use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::lower_fallible_match;
 use crate::Codegen::TIR::lower::lower_str_match_pattern_bindings;
+use crate::Codegen::TIR::lower::lower_bin_match_pattern_bindings;
 use crate::Codegen::TIR::lower_range_switch;
 use crate::Codegen::TIR::lower_stmts;
 use crate::Codegen::TIR::lower::str_match_pattern_cond_expr;
+use crate::Codegen::TIR::lower::bin_match_pattern_cond_expr;
 use crate::Codegen::TIR::lower::struct_pattern_field_type;
 use crate::Codegen::TIR::lower::struct_pattern_subject_field_expr;
 use crate::Codegen::TIR::static_call_type_name_unchecked;
@@ -430,6 +433,7 @@ pub(crate) fn lower_switch(
             || arm_head_range(cx, &a.cond, subject).is_some()
             || arm_struct_pattern(cx, &a.cond, subject).is_some()
             || arm_str_match_pattern(cx, &a.cond, subject).is_some()
+            || arm_bin_match_pattern(cx, &a.cond, subject).is_some()
     }) {
         return lower_mixed_switch(subject, arms, else_body, cx, env);
     }
@@ -500,12 +504,15 @@ pub(crate) fn lower_mixed_switch(
     for arm in arms {
         let struct_pat = arm_struct_pattern(cx, &arm.cond, subject);
         let str_match_pat = arm_str_match_pattern(cx, &arm.cond, subject);
+        let bin_match_pat = arm_bin_match_pattern(cx, &arm.cond, subject);
         let cond_expr = if let Some((lo, hi)) = arm_head_range(cx, &arm.cond, subject) {
             range_inclusive_cond(subject, lo, hi, cx, env)
         } else if let Some(pattern) = struct_pat.as_ref() {
             struct_pattern_cond_expr(pattern, &subject_ty, cx, env)
         } else if let Some(pattern) = str_match_pat.as_ref() {
             str_match_pattern_cond_expr(pattern, cx)
+        } else if let Some(pattern) = bin_match_pat.as_ref() {
+            bin_match_pattern_cond_expr(pattern, cx)
         } else {
             lower_expr(&arm.cond, cx, env)
         };
@@ -515,6 +522,8 @@ pub(crate) fn lower_mixed_switch(
             lower_struct_pattern_bindings(pattern, &subject_ty, cx, &mut branch)
         } else if let Some(pattern) = str_match_pat.as_ref() {
             lower_str_match_pattern_bindings(pattern, cx, &mut branch)
+        } else if let Some(pattern) = bin_match_pat.as_ref() {
+            lower_bin_match_pattern_bindings(pattern, cx, &mut branch)
         } else {
             Vec::new()
         };
@@ -746,6 +755,102 @@ pub(crate) fn str_match_scan_closure_ex(
         body
     );
     (closure, holes)
+}
+
+/// D-BINPAT1 (card #506): build the Rust closure that scans a `[U8]` subject
+/// against a binary pattern with a sequential MSB-first bit cursor, returning
+/// `Option<(T1, T2, …)>` (`None` on any short read, byte mismatch, or a
+/// pattern with no trailing rest that doesn't consume the whole subject). This
+/// is the byte-mode sibling of `str_match_scan_closure_ex` — one matcher
+/// engine (I8) — and must read bit-for-bit identically to the tier-0
+/// interpreter's `Pattern::BinMatch` arm (R12 parity). `subject_src` is a raw
+/// Rust expression yielding the bytes (a `&Vec<u8>`/`Vec<u8>`); the closure
+/// takes it as a slice.
+pub(crate) fn bin_match_scan_closure(pattern: &Pattern, cx: &Cx) -> (String, Vec<(String, Type)>) {
+    let Pattern::BinMatch { parts, .. } = pattern else {
+        return ("(|| -> Option<()> { Some(()) })()".to_string(), Vec::new());
+    };
+    use crate::AST::{BinEndian, BinMatchPart, BinSpec};
+    let mut holes: Vec<(String, Type)> = Vec::new();
+    let mut body = String::new();
+    body.push_str("let __jet_bm: &[u8] = (_jet_switch_subject).as_slice();\n");
+    body.push_str("let __jet_total: usize = __jet_bm.len().saturating_mul(8);\n");
+    body.push_str("let mut __jet_pos: usize = 0;\n");
+    let ends_in_rest = matches!(
+        parts.last(),
+        Some(BinMatchPart::Hole { spec: BinSpec::Rest, .. })
+    );
+    for part in parts {
+        match part {
+            BinMatchPart::Lit(bytes) => {
+                let arr = bytes
+                    .iter()
+                    .map(|b| format!("{}u8", b))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                body.push_str("if __jet_pos % 8 != 0 { return None; }\n");
+                body.push_str(&format!(
+                    "{{ let __s = __jet_pos / 8; let __lit: &[u8] = &[{arr}]; if __s + __lit.len() > __jet_bm.len() || &__jet_bm[__s..__s + __lit.len()] != __lit {{ return None; }} __jet_pos += __lit.len() * 8; }}\n",
+                ));
+            }
+            BinMatchPart::Hole { name, spec, .. } => match spec {
+                BinSpec::Rest => {
+                    let var = format!("__jet_bm_{}", mangle(name));
+                    body.push_str("if __jet_pos % 8 != 0 { return None; }\n");
+                    body.push_str(&format!(
+                        "let {var}: Vec<u8> = __jet_bm[__jet_pos / 8..].to_vec(); __jet_pos = __jet_total;\n"
+                    ));
+                    holes.push((
+                        name.clone(),
+                        Type::List(Box::new(Type::IntN { signed: false, bits: 8 })),
+                    ));
+                }
+                BinSpec::Bits { width, endian } => {
+                    let var = format!("__jet_bm_{}", mangle(name));
+                    let ty = cx.rust_type(&bin_bits_type(*width));
+                    let w = *width as usize;
+                    body.push_str(&format!("if __jet_pos + {w} > __jet_total {{ return None; }}\n"));
+                    body.push_str(&format!(
+                        "let {var}: {ty} = {{ let mut __v: u64 = 0; let mut __k = 0usize; while __k < {w} {{ let __p = __jet_pos + __k; __v = (__v << 1) | ((__jet_bm[__p / 8] >> (7 - (__p % 8))) & 1) as u64; __k += 1; }} __jet_pos += {w}; "
+                    ));
+                    if matches!(endian, BinEndian::Little) {
+                        let nb = w / 8;
+                        body.push_str(&format!(
+                            "{{ let mut __sw: u64 = 0; let mut __i = 0usize; while __i < {nb} {{ __sw |= ((__v >> (8 * __i)) & 0xff) << (8 * ({nb} - 1 - __i)); __i += 1; }} __v = __sw; }} "
+                        ));
+                    }
+                    body.push_str(&format!("__v as {ty} }};\n"));
+                    holes.push((name.clone(), bin_bits_type(*width)));
+                }
+            },
+        }
+    }
+    if !ends_in_rest {
+        body.push_str("if __jet_pos != __jet_total { return None; }\n");
+    }
+    let tuple_vars: Vec<String> = holes
+        .iter()
+        .map(|(n, _)| format!("__jet_bm_{}", mangle(n)))
+        .collect();
+    let tuple_tys: Vec<String> = holes.iter().map(|(_, t)| cx.rust_type(t)).collect();
+    body.push_str(&format!("Some(({}))\n", tuple_join(&tuple_vars)));
+    let closure = format!("(|| -> Option<({})> {{\n{}}})()", tuple_join(&tuple_tys), body);
+    (closure, holes)
+}
+
+/// D-BINPAT1: the unsigned Rust integer type a fixed-width bit hole reads into
+/// — matches sema's `bin_bits_type`.
+fn bin_bits_type(width: u8) -> Type {
+    let bits = if width <= 8 {
+        8
+    } else if width <= 16 {
+        16
+    } else if width <= 32 {
+        32
+    } else {
+        64
+    };
+    Type::IntN { signed: false, bits }
 }
 
 /// A single-element Rust tuple needs a trailing comma (`(x,)`); zero or 2+

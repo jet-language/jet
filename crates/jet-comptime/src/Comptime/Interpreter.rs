@@ -1515,6 +1515,113 @@ impl<'a> Interp<'a> {
                     *span,
                 )),
             },
+            // D-BINPAT1 (card #506): a `b"…"` binary pattern — the byte-mode
+            // sibling of `StrMatch`. Reads the `[U8]` subject with a sequential
+            // MSB-first bit cursor; each fixed-width hole binds an unsigned
+            // integer, a `{rest:...}` hole binds the remaining bytes as `[U8]`.
+            // Any short read, byte mismatch, or misaligned literal/rest is a
+            // non-match (not an error — E0148 requires an `else`). Tier-0 must
+            // read bit-for-bit the same as the AOT `bin_match_scan_closure_ex`
+            // (R12 parity).
+            Pattern::BinMatch { parts, span } => {
+                let bytes: Vec<u8> = match v {
+                    CtValue::Bytes(b) => b.clone(),
+                    CtValue::List(items) => {
+                        let mut out = Vec::with_capacity(items.len());
+                        for it in items {
+                            match it {
+                                CtValue::Int(n) if (0..=255).contains(n) => out.push(*n as u8),
+                                _ => {
+                                    return Err(unsupported(
+                                        "matching a binary pattern against a list whose elements aren't bytes",
+                                        *span,
+                                    ))
+                                }
+                            }
+                        }
+                        out
+                    }
+                    other => {
+                        return Err(unsupported(
+                            &format!(
+                                "matching a binary pattern against a value that isn't `[U8]` (got {})",
+                                other.jet_show()
+                            ),
+                            *span,
+                        ))
+                    }
+                };
+                let total_bits = bytes.len() * 8;
+                let mut bit_pos = 0usize;
+                let mut pending: Vec<(String, CtValue)> = Vec::new();
+                for part in parts {
+                    match part {
+                        crate::AST::BinMatchPart::Lit(lit) => {
+                            if bit_pos % 8 != 0 {
+                                return Ok(false);
+                            }
+                            let start = bit_pos / 8;
+                            if start + lit.len() > bytes.len()
+                                || &bytes[start..start + lit.len()] != lit.as_slice()
+                            {
+                                return Ok(false);
+                            }
+                            bit_pos += lit.len() * 8;
+                        }
+                        crate::AST::BinMatchPart::Hole { name, spec, .. } => match spec {
+                            crate::AST::BinSpec::Rest => {
+                                if bit_pos % 8 != 0 {
+                                    return Ok(false);
+                                }
+                                let start = bit_pos / 8;
+                                let rest: Vec<CtValue> =
+                                    bytes[start..].iter().map(|b| CtValue::Int(*b as i64)).collect();
+                                pending.push((name.clone(), CtValue::List(rest)));
+                                bit_pos = total_bits;
+                            }
+                            crate::AST::BinSpec::Bits { width, endian } => {
+                                let w = *width as usize;
+                                if bit_pos + w > total_bits {
+                                    return Ok(false);
+                                }
+                                let mut val: u64 = 0;
+                                for k in 0..w {
+                                    let p = bit_pos + k;
+                                    let bit = (bytes[p / 8] >> (7 - (p % 8))) & 1;
+                                    val = (val << 1) | bit as u64;
+                                }
+                                bit_pos += w;
+                                if matches!(endian, crate::AST::BinEndian::Little) {
+                                    // width is a multiple of 8 (sema guarantees).
+                                    let nbytes = w / 8;
+                                    let mut swapped: u64 = 0;
+                                    for i in 0..nbytes {
+                                        let b = (val >> (8 * i)) & 0xff;
+                                        swapped |= b << (8 * (nbytes - 1 - i));
+                                    }
+                                    val = swapped;
+                                }
+                                pending.push((name.clone(), CtValue::Int(val as i64)));
+                            }
+                        },
+                    }
+                }
+                // A pattern with no trailing rest must consume the whole subject.
+                let ends_in_rest = matches!(
+                    parts.last(),
+                    Some(crate::AST::BinMatchPart::Hole {
+                        spec: crate::AST::BinSpec::Rest,
+                        ..
+                    })
+                );
+                if !ends_in_rest && bit_pos != total_bits {
+                    return Ok(false);
+                }
+                for (name, val) in pending {
+                    scope.insert(name, val);
+                }
+                Ok(true)
+            }
         }
     }
 }

@@ -35,6 +35,7 @@ mod patterns;
 pub use patterns::{
     PatSlot, Pattern, StrMatchPart, StructPatField, BindName, BindPattern, OrFallback,
     EnumLitArg, ConstAttr, ConstDef, RustConstKind,
+    BinMatchPart, BinSpec, BinEndian,
 };
 
 #[path = "AST/statements.rs"]

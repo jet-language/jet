@@ -7,6 +7,21 @@ use crate::AST::{
 };
 use std::collections::{HashMap, HashSet};
 
+/// D-BINPAT1: the unsigned integer type a fixed-width bit hole binds — the
+/// smallest standard width (`U8`/`U16`/`U32`/`U64`) that holds `width` bits.
+pub(crate) fn bin_bits_type(width: u8) -> Type {
+    let bits = if width <= 8 {
+        8
+    } else if width <= 16 {
+        16
+    } else if width <= 32 {
+        32
+    } else {
+        64
+    };
+    Type::IntN { signed: false, bits }
+}
+
 impl<'a> Checker<'a> {
     pub(crate) fn check_static_method(
         &mut self,
@@ -1101,12 +1116,13 @@ impl<'a> Checker<'a> {
         subj_ty: &Type,
     ) -> Option<Pattern> {
         match cond {
-            // D-PARSESTR1: a str-match pattern is never provably exhaustive
-            // (literal text might not match; a typed hole's parse can fail),
-            // so it must never join the `all_pattern` provable-coverage path —
-            // it always needs its own E0148 (missing `else`) check instead.
+            // D-PARSESTR1 / D-BINPAT1: a str-match or binary pattern is never
+            // provably exhaustive (fixed text/bytes might not match; a subject
+            // might be too short), so it must never join the `all_pattern`
+            // provable-coverage path — it always needs its own E0148 (missing
+            // `else`) check instead.
             Expr::PatternTest {
-                pattern: Pattern::StrMatch { .. },
+                pattern: Pattern::StrMatch { .. } | Pattern::BinMatch { .. },
                 ..
             } => None,
             Expr::PatternTest {
@@ -1247,6 +1263,19 @@ impl<'a> Checker<'a> {
                 Type::String
             }
         }
+    }
+
+    /// D-BINPAT1: a fixed byte literal or a rest capture must start on a byte
+    /// boundary — the preceding bit-typed holes must sum to a multiple of 8.
+    fn bin_align_diag(&self, span: Span) -> Diagnostic {
+        Diagnostic::error(
+            "E1011",
+            "this part of the binary pattern doesn't start on a byte boundary".to_string(),
+            "fixed bytes and a `{rest:...}` capture are read whole-byte, so every bit-field before them must add up to a multiple of 8 bits"
+                .to_string(),
+            "pad the preceding holes to a byte boundary (e.g. add a reserved `{_:U4}`)".to_string(),
+            Some(span),
+        )
     }
 
     pub(crate) fn validate_pattern(
@@ -1715,6 +1744,73 @@ impl<'a> Checker<'a> {
                     };
                     let bound_ty = self.str_match_hole_type(name, ty, *hole_span);
                     result.insert(name.clone(), bound_ty);
+                }
+                result
+            }
+            // D-BINPAT1 (card #506): a `b"…"` binary pattern matches a `[U8]`
+            // subject. Each fixed-width hole binds an unsigned integer; a
+            // `{rest:...}` hole binds `[U8]`. Always refutable; E0148 (missing
+            // `else`) is enforced in `check_switch`.
+            (_, Pattern::BinMatch { parts, .. }) => {
+                let is_bytes = matches!(subject_ty, Type::List(elem)
+                    if matches!(elem.as_ref(), Type::IntN { signed: false, bits: 8 }));
+                if !is_bytes {
+                    self.diags.push(Diagnostic::error(
+                        "E1010",
+                        format!(
+                            "this pattern matches raw bytes, but the subject is {}",
+                            subject_ty.show()
+                        ),
+                        "a `b\"…\"` binary pattern only matches a `[U8]` byte buffer".to_string(),
+                        "match a `[U8]` subject, or use a pattern for this type instead".to_string(),
+                        Some(span),
+                    ));
+                    return HashMap::new();
+                }
+                // Static bit-offset fold: literals and the rest capture must be
+                // byte-aligned, and a little-endian read must be byte-multiple.
+                let mut off: usize = 0;
+                let mut result = HashMap::new();
+                for part in parts {
+                    match part {
+                        crate::AST::BinMatchPart::Lit(bytes) => {
+                            if off % 8 != 0 {
+                                self.diags.push(self.bin_align_diag(span));
+                            }
+                            off += bytes.len() * 8;
+                        }
+                        crate::AST::BinMatchPart::Hole { name, spec, span: hole_span } => {
+                            match spec {
+                                crate::AST::BinSpec::Rest => {
+                                    if off % 8 != 0 {
+                                        self.diags.push(self.bin_align_diag(*hole_span));
+                                    }
+                                    result.insert(
+                                        name.clone(),
+                                        Type::List(Box::new(Type::IntN { signed: false, bits: 8 })),
+                                    );
+                                }
+                                crate::AST::BinSpec::Bits { width, endian } => {
+                                    if matches!(endian, crate::AST::BinEndian::Little)
+                                        && *width % 8 != 0
+                                    {
+                                        self.diags.push(Diagnostic::error(
+                                            "E1008",
+                                            format!(
+                                                "a little-endian read `U{width}le` must be a whole number of bytes"
+                                            ),
+                                            "byte order only reorders whole bytes, so a `le` read's width must be a multiple of 8"
+                                                .to_string(),
+                                            "use a multiple-of-8 width (`U16le`, `U32le`) or big-endian `be`".to_string(),
+                                            Some(*hole_span),
+                                        ));
+                                    }
+                                    result.insert(name.clone(), bin_bits_type(*width));
+                                    off += *width as usize;
+                                }
+                            }
+                        }
+                    }
                 }
                 result
             }

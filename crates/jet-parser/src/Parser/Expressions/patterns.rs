@@ -219,6 +219,201 @@ impl<'a> Parser<'a> {
             Ok(Expr::StrMatchLit(match_parts, span))
         }
     
+        /// D-BINPAT1 (card #506): read the `b"…"` token at the cursor as a
+        /// binary pattern — the byte-mode sibling of `try_str_match_pattern`.
+        /// Every hole must be `{name:U<width>[be|le]}` or `{name:...}`; the
+        /// `b"…"` token has no alternate legal meaning (there is no byte-value
+        /// literal), so a malformed hole is a hard error here rather than a
+        /// fall-through.
+        pub(super) fn try_bin_match_pattern(&mut self) -> Result<Option<Pattern>, Diagnostic> {
+            let TokKind::BinStr(parts) = &self.peek().kind else {
+                return Ok(None);
+            };
+            let parts = parts.clone();
+            let span = self.bump().span;
+            let match_parts = self.build_bin_match_parts(parts, span)?;
+            Ok(Some(Pattern::BinMatch {
+                parts: match_parts,
+                span,
+            }))
+        }
+
+        /// D-BINPAT1: turn a `b"…"` token's lexed `StrTokPart`s into
+        /// `BinMatchPart`s — fixed literal bytes, or bit-typed holes — checking
+        /// the bit-spec grammar (E1007), endianness rules (E1008), and the
+        /// rest-must-be-final law (E1009, the byte-mode analog of E0147).
+        fn build_bin_match_parts(
+            &mut self,
+            parts: Vec<StrTokPart>,
+            lit_span: Span,
+        ) -> Result<Vec<crate::AST::BinMatchPart>, Diagnostic> {
+            use crate::AST::{BinEndian, BinMatchPart, BinSpec};
+            let mut out: Vec<BinMatchPart> = Vec::new();
+            for part in parts {
+                match part {
+                    StrTokPart::Lit(s) => {
+                        if !s.is_empty() {
+                            out.push(BinMatchPart::Lit(s.into_bytes()));
+                        }
+                    }
+                    StrTokPart::Interp(toks) => {
+                        // Hole shape: `name : U<width>[be|le]` or `name : ...`.
+                        // Malformed holes are PUSHED (not returned) with a
+                        // recovery placeholder, so the rest of the arm table and
+                        // file still parse (M1 recovery, matching E0147).
+                        let (name, name_span) = match toks.first() {
+                            Some(Token {
+                                kind: TokKind::Ident(n),
+                                span,
+                            }) => (n.clone(), *span),
+                            _ => {
+                                self.diags.push(self.bin_bad_hole(lit_span));
+                                continue;
+                            }
+                        };
+                        if !matches!(toks.get(1).map(|t| &t.kind), Some(TokKind::Colon)) {
+                            self.diags.push(self.bin_bad_hole(name_span));
+                            continue;
+                        }
+                        let spec_span = toks.get(2).map(|t| t.span).unwrap_or(name_span);
+                        let trailing = toks
+                            .get(3)
+                            .is_some_and(|t| !matches!(t.kind, TokKind::Eof));
+                        let spec = match toks.get(2).map(|t| &t.kind) {
+                            Some(TokKind::DotDotDot) if !trailing => BinSpec::Rest,
+                            Some(TokKind::Ident(spec)) if !trailing => {
+                                self.parse_bin_bits(spec, spec_span)
+                            }
+                            _ => {
+                                self.diags.push(self.bin_bad_hole(spec_span));
+                                BinSpec::Bits {
+                                    width: 8,
+                                    endian: BinEndian::None,
+                                }
+                            }
+                        };
+                        let hole_span = Span::new(name_span.start, spec_span.end);
+                        out.push(BinMatchPart::Hole {
+                            name,
+                            spec,
+                            span: hole_span,
+                        });
+                    }
+                }
+            }
+            // E1009 (byte-mode E0147 analog): a `...` rest capture must be the
+            // final part — nothing can follow a greedy tail. Pushed, not
+            // returned, so the rest of the file still parses (M1 recovery).
+            for i in 0..out.len() {
+                let is_rest = matches!(
+                    &out[i],
+                    BinMatchPart::Hole {
+                        spec: BinSpec::Rest,
+                        ..
+                    }
+                );
+                if is_rest && i + 1 < out.len() {
+                    let sp = match &out[i] {
+                        BinMatchPart::Hole { span, .. } => *span,
+                        BinMatchPart::Lit(_) => lit_span,
+                    };
+                    self.diags.push(Diagnostic::error(
+                        "E1009",
+                        "a `{...}` rest capture must be the last part of a binary pattern".to_string(),
+                        "the rest capture takes every remaining byte, so nothing can come after it"
+                            .to_string(),
+                        "move the `{name:...}` hole to the end, or give it a fixed width".to_string(),
+                        Some(sp),
+                    ));
+                    break;
+                }
+            }
+            let _ = BinEndian::None;
+            Ok(out)
+        }
+
+        /// D-BINPAT1: parse a bit-width spec ident — `U4`, `U16be`, `U16le`.
+        /// Width is 1..=64 bits; a multi-byte read (width > 8) requires an
+        /// endian suffix (E1008), a single-byte-or-smaller read forbids one.
+        fn parse_bin_bits(&mut self, spec: &str, span: Span) -> crate::AST::BinSpec {
+            use crate::AST::{BinEndian, BinSpec};
+            let fallback = BinSpec::Bits {
+                width: 8,
+                endian: BinEndian::None,
+            };
+            let Some(rest) = spec.strip_prefix('U') else {
+                self.diags.push(self.bin_bad_spec(spec, span));
+                return fallback;
+            };
+            let (digits, endian) = if let Some(d) = rest.strip_suffix(Syntax::BINPAT_ENDIAN_BIG) {
+                (d, BinEndian::Big)
+            } else if let Some(d) = rest.strip_suffix(Syntax::BINPAT_ENDIAN_LITTLE) {
+                (d, BinEndian::Little)
+            } else {
+                (rest, BinEndian::None)
+            };
+            let width: Option<u32> = if digits.is_empty()
+                || !digits.chars().all(|c| c.is_ascii_digit())
+            {
+                None
+            } else {
+                digits.parse().ok().filter(|w| *w >= 1 && *w <= 64)
+            };
+            let Some(width) = width else {
+                self.diags.push(self.bin_bad_spec(spec, span));
+                return fallback;
+            };
+            let width = width as u8;
+            match (width > 8, endian) {
+                // Multi-byte read must say which byte order.
+                (true, BinEndian::None) => {
+                    self.diags.push(Diagnostic::error(
+                        "E1008",
+                        format!("`{{…:U{width}}}` reads more than one byte, so it needs a byte order"),
+                        "a read wider than 8 bits spans multiple bytes; Jet won't guess big- vs little-endian"
+                            .to_string(),
+                        format!("write `U{width}be` (big-endian / network order) or `U{width}le` (little-endian)"),
+                        Some(span),
+                    ));
+                    BinSpec::Bits { width, endian: BinEndian::Big }
+                }
+                // Single-byte read: an endian suffix is meaningless.
+                (false, BinEndian::Big | BinEndian::Little) => {
+                    self.diags.push(Diagnostic::error(
+                        "E1008",
+                        format!("`U{width}` reads a single byte, so a `be`/`le` suffix has no meaning"),
+                        "byte order only matters when a read spans more than one byte".to_string(),
+                        format!("drop the suffix — write `U{width}`"),
+                        Some(span),
+                    ));
+                    BinSpec::Bits { width, endian: BinEndian::None }
+                }
+                _ => BinSpec::Bits { width, endian },
+            }
+        }
+
+        fn bin_bad_hole(&self, span: Span) -> Diagnostic {
+            Diagnostic::error(
+                "E1007",
+                "a binary pattern hole must be `{name:U<width>}` or `{name:...}`".to_string(),
+                "each hole binds a name to a fixed-width bit field (`{v:U4}`, `{len:U16be}`) or the trailing bytes (`{rest:...}`)"
+                    .to_string(),
+                "write `{name:U8}`, `{name:U16be}`, or `{name:...}`".to_string(),
+                Some(span),
+            )
+        }
+
+        fn bin_bad_spec(&self, spec: &str, span: Span) -> Diagnostic {
+            Diagnostic::error(
+                "E1007",
+                format!("`{spec}` isn't a valid bit width in a binary pattern"),
+                "a bit field is `U` followed by a width of 1 to 64 bits, optionally with a `be`/`le` byte order"
+                    .to_string(),
+                "write e.g. `U4`, `U8`, `U16be`, or `U32le`".to_string(),
+                Some(span),
+            )
+        }
+
         pub(super) fn struct_pattern_rhs(&mut self) -> Result<Pattern, Diagnostic> {
             let dot_span = self.bump().span;
             self.expect(TokKind::LBrace, "after `.` in a struct pattern")?;

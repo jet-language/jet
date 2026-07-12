@@ -148,7 +148,9 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
         }
         // D-PARSESTR1: str-match patterns are lowered as their own scan/split/parse
         // control flow (TIR/lower.rs), never as a single Rust match pattern.
-        Pattern::Struct { .. } | Pattern::StrMatch { .. } => "_".to_string(),
+        Pattern::Struct { .. } | Pattern::StrMatch { .. } | Pattern::BinMatch { .. } => {
+            "_".to_string()
+        }
     }
 }
 
@@ -267,9 +269,10 @@ pub(crate) fn emit_if_let_pattern(cx: &Cx, pattern: &Pattern) -> String {
             .unwrap_or_default(),
         // D-PARSESTR1: str-match, like struct patterns, isn't reachable here —
         // it has its own dedicated lowering (TIR/lower.rs).
-        Pattern::Range { .. } | Pattern::Struct { .. } | Pattern::StrMatch { .. } => {
-            "_".to_string()
-        }
+        Pattern::Range { .. }
+        | Pattern::Struct { .. }
+        | Pattern::StrMatch { .. }
+        | Pattern::BinMatch { .. } => "_".to_string(),
     }
 }
 

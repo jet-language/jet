@@ -47,6 +47,21 @@ fn fmt_is_idempotent_on_examples() {
 }
 
 #[test]
+fn fmt_preserves_binary_pattern_holes() {
+    // D-BINPAT1 (card #506): a `b"…"` binary pattern must survive fmt with
+    // every hole intact — the bit widths, endian suffixes, and rest capture.
+    // Idempotence alone can miss a dropped token, so assert the exact spelling.
+    let src = "fn run() {\n    packet: [U8] :: [0x45]\n    if packet == {\n        b\"{version:U4}{ihl:U4}{tos:U8}{len:U16be}{rest:...}\" -> { print(\"ok\") }\n        else -> { print(\"no\") }\n    }\n}\n";
+    let once = jet::format_source(src).expect("binary pattern should format");
+    assert!(
+        once.contains("b\"{version:U4}{ihl:U4}{tos:U8}{len:U16be}{rest:...}\""),
+        "formatter dropped or garbled the binary pattern:\n{once}"
+    );
+    let twice = jet::format_source(&once).expect("formatted binary pattern should parse");
+    assert_eq!(once, twice, "binary pattern formatting must be stable");
+}
+
+#[test]
 fn fmt_preserves_typed_performance_budget_role() {
     let src = r#"module perf.release{budgets:[Budget.{name:"binary",scope:.Target("cli"),metric:.BinarySize,limit:.AtMost(2MiB)}]}"#;
     let once = jet::format_source(src).expect("perf budget role should format");

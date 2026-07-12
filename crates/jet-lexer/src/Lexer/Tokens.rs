@@ -58,6 +58,11 @@ pub enum TokKind {
     // they are `#`-markers recognized as `#` + ident in the parser.
     Ident(String),
     Str(Vec<StrTokPart>),
+    /// D-BINPAT1 (card #506): a `b"…"` binary pattern literal. Lexed exactly
+    /// like `Str` (same interpolation-hole sub-token streams), but the parser
+    /// reads the holes as bit specs (`{name:U4}`, `{name:U16be}`, `{name:...}`)
+    /// and builds a `Pattern::BinMatch` instead of a string pattern.
+    BinStr(Vec<StrTokPart>),
     Int(i64),
     Float(f64),
     /// D-UNITLIT1: a numeric literal immediately followed by an identifier
@@ -225,6 +230,7 @@ pub fn describe(kind: &TokKind) -> String {
         TokKind::KwModule => format!("the keyword `{}`", Syntax::KW_MODULE),
         TokKind::Ident(name) => format!("the name `{}`", name),
         TokKind::Str(_) => "a piece of quoted text".to_string(),
+        TokKind::BinStr(_) => "a `b\"…\"` binary pattern".to_string(),
         TokKind::Int(_) => "a number".to_string(),
         TokKind::Float(_) => "a decimal number".to_string(),
         TokKind::UnitNumber { .. } => "a number with a unit suffix".to_string(),

@@ -213,6 +213,11 @@ impl<'a> Parser<'a> {
                 TokKind::Str(_) => {
                     return self.try_str_match_pattern();
                 }
+                // D-BINPAT1 (card #506): `subject == b"{v:U4}…"` — a binary
+                // pattern in byte mode of the same engine.
+                TokKind::BinStr(_) => {
+                    return self.try_bin_match_pattern();
+                }
                 TokKind::KwNull => {
                     let span = self.bump().span;
                     return Ok(Some(Pattern::Absent(span)));

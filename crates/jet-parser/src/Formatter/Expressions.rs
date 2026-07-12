@@ -817,7 +817,43 @@ impl<'a> Fmt<'a> {
             Pattern::StrMatch { parts, .. } => {
                 self.fmt_str_match_parts(parts);
             }
+            // D-BINPAT1 (card #506): a `b"…"` binary pattern.
+            Pattern::BinMatch { parts, .. } => {
+                self.fmt_bin_match_parts(parts);
+            }
         }
+    }
+
+    /// D-BINPAT1: render a `BinMatchPart` list as a `b"…"` literal —
+    /// fixed bytes as text, holes as `{name:U<width>[be|le]}` / `{name:...}`.
+    pub(super) fn fmt_bin_match_parts(&mut self, parts: &[crate::AST::BinMatchPart]) {
+        use crate::AST::{BinEndian, BinMatchPart, BinSpec};
+        self.write("b\"");
+        for part in parts {
+            match part {
+                BinMatchPart::Lit(bytes) => {
+                    self.write(&String::from_utf8_lossy(bytes));
+                }
+                BinMatchPart::Hole { name, spec, .. } => {
+                    self.write("{");
+                    self.write(name);
+                    self.write(":");
+                    match spec {
+                        BinSpec::Rest => self.write("..."),
+                        BinSpec::Bits { width, endian } => {
+                            self.write(&format!("U{}", width));
+                            match endian {
+                                BinEndian::Big => self.write(Syntax::BINPAT_ENDIAN_BIG),
+                                BinEndian::Little => self.write(Syntax::BINPAT_ENDIAN_LITTLE),
+                                BinEndian::None => {}
+                            }
+                        }
+                    }
+                    self.write("}");
+                }
+            }
+        }
+        self.write("\"");
     }
 
     /// D-PARSESTR1 (shared with `Expr::StrMatchLit` — D-SHIFT1's

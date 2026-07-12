@@ -829,6 +829,14 @@ pub(crate) fn stmt_collect_captures(
                                 }
                             }
                         }
+                        // D-BINPAT1: every binary-pattern hole binds a name too.
+                        Pattern::BinMatch { parts, .. } => {
+                            for part in parts {
+                                if let crate::AST::BinMatchPart::Hole { name, .. } = part {
+                                    arm_bound.insert(name.clone());
+                                }
+                            }
+                        }
                     }
                 }
                 block_collect_captures(&a.body, &mut arm_bound, read, mut_cap);
