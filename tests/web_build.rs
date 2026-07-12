@@ -811,6 +811,24 @@ fn web_compute_wasm_bridge_roundtrip() {
 }
 
 #[test]
+fn codable_struct_wasm_bridge_reconstructs_typed_argument() {
+    let src = include_str!("ui/web_abi_codable.jet");
+    let dir = build_web_fixture("codable_struct", src, "tests/ui/web_abi_codable.jet");
+    let wasm_rust = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
+    let signature = "fn jet_export_sum_point(user_p_x: i64, user_p_y: i64) -> i64";
+    let reconstruction = "let user_p = user_Point { user_x: user_p_x, user_y: user_p_y };";
+    let field_read = "((user_p).user_x + (user_p).user_y)";
+    assert!(wasm_rust.contains(signature), "flattened ABI drifted:\n{wasm_rust}");
+    assert!(
+        wasm_rust.find(reconstruction) < wasm_rust.find(field_read),
+        "typed Point must be reconstructed before its fields are read:\n{wasm_rust}"
+    );
+    let stdout = run_web_app(&dir);
+    assert_eq!(stdout, "7\n", "flattened Point arguments changed behavior");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn web_showcase_dashboard_roundtrip() {
     // 197_ui_showcase.jet (Tower c134 Phase 8 flagship): proves, end to end
     // under the fake-DOM harness, that (1) `initApp`/`initFuel` mount FOUR
