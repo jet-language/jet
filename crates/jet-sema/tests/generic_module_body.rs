@@ -69,7 +69,7 @@ fn run() {}
     assert!(items.iter().any(|item| matches!(item, Item::Tag(t) if t.name == "IntLaws__Audited")));
     let Item::CodeModule(instance) = items.iter().find(|item| matches!(item, Item::CodeModule(m) if m.name == "IntLaws")).unwrap() else { unreachable!() };
     let tagged = instance.body.as_ref().unwrap().iter().find_map(|item| match item { Item::Func(f) if f.name == "audited" => Some(&f.params[0].ty), _ => None }).unwrap();
-    assert!(matches!(tagged, Type::Tagged { marker, inner } if marker == "IntLaws__Audited" && **inner == Type::Int));
+    assert!(matches!(tagged, Type::Tagged { marker, inner } if marker == "IntLaws__Audited" && **inner == Type::Int), "{tagged:?}");
     assert!(items.iter().any(|item| matches!(item, Item::Impl(i) if i.type_name == "IntLaws__Wrapped" && i.trait_name.as_deref() == Some("IntLaws__Reveal") && i.assoc_type_impls[0].2 == Type::Int)));
     assert!(items.iter().any(|item| matches!(item, Item::ErrorConv(ec) if ec.from_ty == "IntLaws__SourceErr" && ec.to_ty == "IntLaws__TargetErr")));
 }
