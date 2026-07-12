@@ -4,8 +4,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod common;
+use common::jetpack_bin;
+
 fn jetpack() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_jetpack"))
+    Command::new(jetpack_bin())
 }
 
 struct Scratch {

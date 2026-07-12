@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 520,
-    "rev": 4717,
+    "rev": 4721,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -1007,6 +1007,16 @@
       "plan": "Plan: docs/sidequests/generic-modules.md. D-GENMOD1=A + D-GENMOD2=A shipped: parser/sema expansion, E0850–E0854, example 170_generic_modules.jet, ui snapshots.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "codex-orchestrator",
+          "text": "[progress] Struct specialization completed and parent-green with full genmod snapshots: alias-mangled nominal type, deep field/default/method/associated substitution, constructor/signature identity, runtime 42/32 proof. E0854 now remains only for unsupported families. Same Terra continuing enum."
+        },
+        {
+          "at": "2026-07-12",
+          "by": "codex-orchestrator",
+          "text": "[progress] Const declaration specialization completed and parent-verified: definition-order template constants deep-substitute value args, feed later consts/functions, emit alias-mangled declarations, and filtered golden runs exact 33/33 output. Struct/enum/tag still honestly E0854; same Terra continues."
+        },
         {
           "at": "2026-07-12",
           "by": "codex-orchestrator",
@@ -32417,6 +32427,180 @@
       "draft": false,
       "status": "open",
       "created": "2026-07-12T16:49:51.701Z"
+    },
+    {
+      "id": "D-FFI-RAWBODY1",
+      "cardId": "c0skyr40",
+      "group": "syntax",
+      "title": "Raw foreign body spelling for `#FFI(<lang>) fn`",
+      "gist": "Pick how a foreign function's body text skips Jet's own string interpolation, so real foreign source code pastes in unchanged.",
+      "lesson": "Every Jet string, `\"...\"` and `\"\"\"...\"\"\"` alike, does two things at once. A `{expr}` inside the quotes drops a Jet value into the text (interpolation). A literal brace must be written doubled, `{{` or `}}`, so the lexer doesn't mistake it for the start of a hole. These are S8 and S20, and today they apply to every triple-quoted string with no exception.\n\nD-FFI-INLINE1 lets `#FFI(<lang>) fn` carry a real foreign function as its body, written as one triple-quoted string. That text is not Jet code. It is C, Python, assembly, or another language's actual source, meant to be pasted in verbatim. Most languages use `{` and `}` constantly for function bodies, loops, and blocks — a single opening brace with no doubled partner on the same line.\n\nBecause the lexer can't tell 'this string holds foreign code' from 'this string holds Jet text', it treats every one of those braces as an interpolation attempt. This decision picks the spelling that tells the lexer 'don't interpolate this one.'",
+      "explainer": "",
+      "story": "Walter wants to port a 12-line C reference implementation of crc32 into a `#FFI(c) fn`, exactly as D-FFI-INLINE1's own ratified example shows. He pastes the C function body between the triple quotes and runs `jet check`.",
+      "inWild": "#Unsafe(\"vetted reference implementation\")\n#FFI(c) fn crc32(data: [U8], seed: U32) -> U32 {\n    \"\"\"\n    uint32_t crc32(const uint8_t* data, size_t data_len, uint32_t seed) {\n        uint32_t c = ~seed;\n        for (size_t i = 0; i < data_len; i++) { c = step(c, data[i]); }\n        return ~c;\n    }\n    \"\"\"\n}\n\n$ jet check crc.jet\nError [E0064]: an `#FFI(c)` function body must be one string of c source\n  --> crc.jet:3:5\n    |\n  3 |     \"\"\"\n    |     ^^^\n Why: the inline foreign tier carries the foreign source as a single `\"\"\"…\"\"\"` string; the Jet signature above is the checked contract (D-FFI-INLINE1)\n Fix: write the body as `{ \"\"\"<c source>\"\"\" }` — one string literal, no other statements or interpolation\n\n1 problem found\nrun `jet explain E0064` to learn more\n\n// Every C function has at least one brace pair for its body, so this\n// fires on the simplest possible case too — not just brace-heavy ones:\n#FFI(c) fn add(a: U32, b: U32) -> U32 {\n    \"\"\"\n    uint32_t add(uint32_t a, uint32_t b) { return a + b; }\n    \"\"\"\n}\n// same E0064 — no `#FFI(c)` function can be written today, full stop.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Implicit raw — `#FFI` bodies never interpolate, zero new syntax",
+          "detail": "The body of a `#FFI(<lang>) fn` keeps the exact `\"\"\"...\"\"\"` spelling it already has. Inside that specific position only — the body of an `#FFI` function — `{expr}` interpolation and `{{`/`}}` escaping simply don't run. The text between the quotes reaches the language's binder byte for byte, because it was never Jet text to begin with.\n\nEvery other triple-quoted string in Jet is unaffected. This changes meaning only inside a position D-FFI-INLINE1 already defined as 'one string of foreign source'. There's nothing to interpolate against in the first place.",
+          "technical": "Sema, not the lexer, recognizes the `#FFI(<lang>) fn { \"\"\"...\"\"\" }` shape. It reads the string's raw source span directly, ignoring any `StrTokPart::Interp` parts the lexer produced. A body containing `{`/`}` never reaches the lexer's interpolation path, because the parser hands sema the untouched span between the opening and closing `\"\"\"`.",
+          "code": "#Unsafe(\"vetted reference implementation\")\n#FFI(c) fn crc32(data: [U8], seed: U32) -> U32 {\n    \"\"\"\n    uint32_t crc32(const uint8_t* data, size_t data_len, uint32_t seed) {\n        uint32_t c = ~seed;\n        for (size_t i = 0; i < data_len; i++) { c = step(c, data[i]); }\n        return ~c;\n    }\n    \"\"\"\n}\n\n$ jet check crc.jet\n(no error — the body is pasted C, unmodified, and the binder reads it as-is)"
+        },
+        {
+          "key": "B",
+          "name": "General raw string literal — `raw\"\"\"...\"\"\"`, usable anywhere",
+          "detail": "Add a raw string form to Jet's string family, following the same prefix pattern D-TYPEDTEXT2 already ratified for `sql\"...\"` and `html\"...\"`: a keyword directly before the opening quote. `raw\"\"\"...\"\"\"` never interpolates and never needs brace doubling, anywhere it appears — not just inside `#FFI` bodies.\n\nThis solves the foreign-body problem and also helps ordinary Jet code that fights `{`/`}` doubling today: JSON templates, regex patterns, Windows paths. The cost is a second string form every Jet user now has to learn and recognize, for a need that — outside `#FFI` bodies — hasn't come up yet.",
+          "technical": "Lexer gains a `raw` prefix keyword recognized immediately before `\"` or `\"\"\"`. Scanning skips the `{`/`}`/`\\` special-case branches entirely and stores the span as a single `StrTokPart::Lit`. This matches how `sql\"...\"`/`html\"...\"` already attach a prefix token ahead of ordinary string scanning (D-TYPEDTEXT2).",
+          "code": "#Unsafe(\"vetted reference implementation\")\n#FFI(c) fn crc32(data: [U8], seed: U32) -> U32 {\n    raw\"\"\"\n    uint32_t crc32(const uint8_t* data, size_t data_len, uint32_t seed) {\n        uint32_t c = ~seed;\n        for (size_t i = 0; i < data_len; i++) { c = step(c, data[i]); }\n        return ~c;\n    }\n    \"\"\"\n}\n\n// also usable outside FFI, e.g. a literal JSON template:\ntemplate :: raw\"\"\"{\"name\": \"value\"}\"\"\"\nprint(template)   // {\"name\": \"value\"} — no {{ }} doubling needed"
+        },
+        {
+          "key": "C",
+          "name": "Keep interpolating — escape every brace as `{{`/`}}`",
+          "detail": "No new syntax at all. `#FFI` bodies stay ordinary triple-quoted strings: every literal `{` and `}` in the pasted foreign source must be doubled by hand before `jet check` accepts it. This already works today; E0064 stops firing once every brace is doubled. But it means hand-editing every foreign snippet on the way in, then un-doubling it again to test the snippet in its native toolchain.",
+          "technical": "No lexer or sema change; S8/S20 keep applying uniformly to every triple-quoted string, `#FFI` bodies included.",
+          "code": "#Unsafe(\"trivial add\")\n#FFI(c) fn add(a: U32, b: U32) -> U32 {\n    \"\"\"\n    uint32_t add(uint32_t a, uint32_t b) {{ return a + b; }}\n    \"\"\"\n}\n\n$ jet check add.jet\nError [E3221]: `#FFI(c)` inline foreign body can't be compiled yet\n  --> add.jet:2:1\n    |\n  2 | #FFI(c) fn add(a: U32, b: U32) -> U32 {\n    | ^^^^^^^\n Why: the inline foreign tier is parsed, contract-checked, and #Unsafe-gated, but body lowering for this language is still pending\n Fix: track card #501 for when the inline binder for this language lands\n\n// (E0064 is gone — but every `{`/`}` in the real C file had to be\n// hand-edited to get here, then hand-edited back to test it as plain C.)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust has no string interpolation at all, so `r\"...\"` raw strings exist only to skip backslash-escaping, not brace-escaping. Jet's problem is sharper: Jet strings interpolate by default, so foreign brace-heavy code needs an explicit opt-out Rust never had to invent.",
+          "code": "let query = r\"SELECT * FROM t WHERE id = \\d+\";"
+        },
+        {
+          "lang": "Python",
+          "note": "Python's f-strings are opt-in (`f\"...\"`); a plain `\"...\"` never interpolates, so pasting brace-heavy code into an ordinary string just works. Jet inverts this default for beginner ergonomics (S8), which is what makes this decision necessary.",
+          "code": "body = \"uint32_t add(uint32_t a, uint32_t b) { return a + b; }\""
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "D-FFI-INLINE1 already defines an `#FFI` body as one string of foreign source, not Jet text, so interpolation was never meaningful there in the first place. Option A just makes the lexer's behavior match that ratified meaning, with zero new syntax anyone has to learn.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A general raw-string type is a real feature, but it solves a problem beginners haven't hit yet outside `#FFI` bodies. Shipping it now adds a second, rarer string form to learn before the actual gate — the `#FFI` body — is closed."
+          },
+          {
+            "key": "C",
+            "reason": "It forces every pasted foreign function through manual brace-doubling. A beginner's very first `#FFI(c) fn` still won't compile until every brace is found and doubled by hand."
+          }
+        ],
+        "tradeoff": "The same `\"\"\"...\"\"\"` spelling now means two different things depending on where it appears: plain Jet text everywhere else, raw foreign text inside an `#FFI` body. That's acceptable because the body position is already a distinct, narrowly gated context. It only exists inside `#FFI(<lang>) fn`, already requires `#Unsafe` for unsafe languages, and was never valid as ordinary Jet text to start with."
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "A ships as the fix for the actual gate: every `#FFI` body becomes raw automatically. B's real strength, a general-purpose raw string usable anywhere in Jet, stays open as its own future decision. Nothing about A forecloses adding `raw\"...\"` later if a concrete non-FFI need shows up.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "zero new syntax, matches D-FFI-INLINE1's existing meaning of an `#FFI` body",
+            "use": "adopted as the mechanism"
+          },
+          {
+            "key": "B",
+            "aspect": "a general raw-string form usable outside `#FFI` too",
+            "use": "not needed to close this gate; kept as a separate future ballot instead of bundling an unproven general feature into this fix"
+          },
+          {
+            "key": "C",
+            "aspect": "today's actual working escape hatch, `{{`/`}}` doubling",
+            "use": "stays available for the rare case a foreign body genuinely needs a literal `\"\"\"` sequence the raw form can't represent; not the default path"
+          }
+        ]
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T19:03:14.842Z"
+    },
+    {
+      "id": "D-FFI-ASMOPS1",
+      "cardId": "c0skyr40",
+      "group": "syntax",
+      "title": "Inline asm operand and clobber spelling",
+      "gist": "Pick how an `#FFI(asm) fn` body says which register holds an input parameter, and which registers it destroys as a side effect.",
+      "lesson": "An assembly instruction reads and writes CPU registers directly, not Jet variables. Two ideas matter here. An 'operand' is a register the instruction reads (an input) or writes (an output) — `add rax, rbx` operates on the registers named `rax` and `rbx`. A 'clobber' is a register the instruction overwrites as a side effect, without that register being a declared input or output. Its old value is gone, and nothing may rely on it afterward.\n\nRust's `asm!` macro, which Jet's asm bodies compile down to, requires every register the instruction touches to be declared: as an input, an output, or a clobber. Skip one and the compiler may reuse that register for something else at the exact moment the instruction is still using it, corrupting a value silently.\n\nD-FFI-ASM1 already ratified that a Jet function's parameters are inputs and its return value is an output, ending in a `; -> return` comment in the body. What's still open is how the body names the register holding a given input, and how it declares a clobber. Those are the two facts `asm!` needs that today have no spelling at all.",
+      "explainer": "",
+      "story": "Priya writes `#FFI(asm) fn add_with_carry(a: U64, b: U64) -> U64`, adding two 64-bit halves of a bignum. She needs to say 'parameter `a` is in this register, parameter `b` is in that one' inside the body — there's no way to write that today.\n\nHer rdtsc-style cycle counter has the same gap from the other side. It writes to `rdx` as scratch space on the way to computing the return value. Nothing today tells the compiler that `rdx`'s final value must be thrown away, not treated as a second output.",
+      "inWild": "use core.mem\n\n#Unsafe(\"cycle counter — no Core surface\")\n#FFI(asm) fn rdtsc() -> U64 {\n    \"\"\"\n    rdtsc\n    shl rdx, 32\n    or  rax, rdx        ; -> return\n    \"\"\"\n}\n// this already compiles today — nothing forces rdx to be declared\n// destroyed, even though the function overwrites it and never returns it.\n\n$ jet check rdtsc.jet\nError [E3221]: `#FFI(asm)` inline foreign body can't be compiled yet\n  --> rdtsc.jet:4:1\n    |\n  4 | #FFI(asm) fn rdtsc() -> U64 {\n    | ^^^^^^^^^\n Why: the inline foreign tier is parsed, contract-checked, and #Unsafe-gated, but body lowering for this language is still pending\n Fix: track card #501 for when the inline binder for this language lands\n// (E3221 is the honest 'not wired up yet' gate — nothing here catches\n// the missing clobber, because no clobber spelling exists to check.)",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Comment-anchor convention extended — `; in a -> rax`, `; clobbers rdx`",
+          "detail": "Extends the already-ratified `; -> return` anchor family. An input line names the parameter and the register holding it; a clobber line lists every register the instruction destroys that isn't already an input or the output. Both are ordinary trailing or standalone comments inside the asm text, read by the binder, not by rustc.\n\nNo new grammar, and the body stays plain, readable assembly a person could paste into any assembler. The cost: register facts live in free-form comment text — the exact same shape as ordinary human comments everywhere else in Jet, which never carry meaning. A typo in a comment (`; in a-> rax`, missing the space) is easy to miss and has to be caught by string-parsing the comment itself, not by the language's real grammar.",
+          "technical": "Binder scans the raw asm text for lines matching `; in <param> -> <reg>` and `; clobbers <reg>[, <reg>...]`. Each becomes an `in(\"<reg>\") <param>` / `out(\"<reg>\") _` entry passed to Rust's `asm!` macro, alongside the already-ratified `; -> return` anchor's `lateout(\"<reg>\") <return>`.",
+          "code": "#Unsafe(\"carry add — no Core surface\")\n#FFI(asm) fn add_with_carry(a: U64, b: U64) -> U64 {\n    \"\"\"\n    ; in a -> rax\n    ; in b -> rbx\n    add rax, rbx        ; -> return\n    \"\"\"\n}\n\n#Unsafe(\"cycle counter — no Core surface\")\n#FFI(asm) fn rdtsc() -> U64 {\n    \"\"\"\n    rdtsc\n    shl rdx, 32\n    or  rax, rdx        ; -> return\n    ; clobbers rdx\n    \"\"\"\n}"
+        },
+        {
+          "key": "B",
+          "name": "Marker arguments — register and clobber facts on the `#FFI(asm, ...)` line",
+          "detail": "The operand contract moves out of the body entirely and onto the `#FFI` marker itself: `#FFI(asm, a: \"rax\", b: \"rbx\", clobbers: \"rdx\")`. The body underneath becomes pure, untouched assembly with no Jet-specific comments mixed in. It can be copied straight from an assembler reference and pasted, unchanged.\n\nEvery register fact is visible on one line without opening the body, which helps scanning many small asm functions at once. It also duplicates information. For a function with many operands, the marker line grows into a long, body-disconnected list a reader has to match up against the assembly by eye. It's a second place a register name can drift out of sync with the body that actually uses it.",
+          "technical": "The `#FFI(asm, ...)` marker's argument list extends past the language name to accept `<param>: \"<reg>\"` pairs and a `clobbers: \"<reg>\", ...` entry. Each lowers to an `in(\"<reg>\") <param>` / `out(\"<reg>\") _` entry passed to `asm!`, the same runtime effect as option A declared in a different place. Today the marker parser closes right after the language name. `#FFI(asm, clobbers(\"rdx\"))` currently fails with `E0003: expected ')' after the foreign language name, found ','`, so this option needs new marker grammar.",
+          "code": "#Unsafe(\"carry add — no Core surface\")\n#FFI(asm, a: \"rax\", b: \"rbx\")\nfn add_with_carry(a: U64, b: U64) -> U64 {\n    \"\"\"\n    add rax, rbx\n    \"\"\"\n}\n\n#Unsafe(\"cycle counter — no Core surface\")\n#FFI(asm, clobbers: \"rdx\")\nfn rdtsc() -> U64 {\n    \"\"\"\n    rdtsc\n    shl rdx, 32\n    or  rax, rdx\n    \"\"\"\n}"
+        },
+        {
+          "key": "C",
+          "name": "Named template placeholders — `{a}`, `{b}` in the body, plus a clobber line",
+          "detail": "An input parameter appears in the body as `{name}`, a placeholder the binder fills with whatever register Rust's `asm!` allocator picks. This is the same generic-register model `asm!` itself recommends over hardcoding a register, since the allocator can then avoid an unnecessary spill. Where an instruction mandates one exact register (`rdtsc` always writes `rax`/`rdx`), the body just names that register literally, no placeholder needed. A `; clobbers` line, reused from option A, declares any register touched but never bound to a name.\n\nThis mirrors `asm!` most directly: named operands map one-to-one onto `asm!`'s own `in(reg) name` / `out(reg) name` entries. It only works once a `#FFI(asm)` body is non-interpolating (D-FFI-RAWBODY1). Today, `{a}`/`{b}` inside a triple-quoted string is Jet's own interpolation syntax and collides with it.",
+          "technical": "`{name}` maps to `in(reg) name` for a parameter, or `out(reg) name` for the return, alongside the ratified `; -> return` anchor that still marks which line produces it. An unbound but written register on a `; clobbers` line maps to `out(\"<reg>\") _`. This requires D-FFI-RAWBODY1's body text to be raw, not interpolated. Verified today: this exact `add_with_carry` body currently fails with `E0064: an #FFI(asm) function body must be one string of asm source`, because `{a}`/`{b}` triggers ordinary Jet interpolation first.",
+          "code": "#Unsafe(\"carry add — no Core surface\")\n#FFI(asm) fn add_with_carry(a: U64, b: U64) -> U64 {\n    \"\"\"\n    add {a}, {b}        ; -> return\n    \"\"\"\n}\n\n#Unsafe(\"cycle counter — no Core surface\")\n#FFI(asm) fn rdtsc() -> U64 {\n    \"\"\"\n    rdtsc\n    shl rdx, 32\n    or  rax, rdx        ; -> return\n    ; clobbers rdx\n    \"\"\"\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "`asm!` requires every touched register declared as `in`, `out`, `lateout`, or a discarded clobber (`out(\"reg\") _`). The register class can be a specific name (`in(\"rax\")`) or a generic class (`in(reg)`) the allocator assigns, referenced in the template by position or name.",
+          "code": "let ticks: u64;\nlet scratch: u64;\nasm!(\n    \"rdtsc\", \"shl {1}, 32\", \"or {0}, {1}\",\n    out(reg) ticks, out(\"rdx\") scratch,\n);"
+        },
+        {
+          "lang": "Zig",
+          "note": "Zig's asm syntax names operands with `[tag] \"constraint\" (value)`, closer to option C's named-placeholder spirit than to free-form comments, and requires clobbers listed explicitly in a trailing `:::` clause.",
+          "code": "asm volatile (\"rdtsc\"\n    : [lo] \"={eax}\" (-> u32), [hi] \"={edx}\" (-> u32)\n);"
+        }
+      ],
+      "rec": "C",
+      "recommendation": {
+        "why": "C maps directly onto what `asm!` actually needs: a named placeholder per operand, generic-register by default so the allocator can avoid needless spills. A hardcoded register appears only where the instruction itself mandates one, like `rdtsc`. It reuses the ratified `; -> return` anchor and A's clobber-line spelling unchanged.",
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "Register facts live entirely in prose-shaped comments the binder has to string-parse. It is the only place in Jet where a comment carries real semantic weight, so a small typo like a missing space is invisible to the language's actual grammar."
+          },
+          {
+            "key": "B",
+            "reason": "The operand contract exists in two places at once, the marker and the body, for what is usually a one-to-one mapping. A real SIMD function with many operands turns the marker line into a long list disconnected from the assembly that uses each register, and the two can drift out of sync."
+          }
+        ],
+        "tradeoff": "`{name}` now has three different meanings depending on where it's written. Outside `#FFI` it's ordinary Jet interpolation; inside a raw `#FFI(c)`/`#FFI(py)` body it's nothing at all; inside `#FFI(asm)` specifically it's a register placeholder. That's acceptable because it only appears inside the already-gated, `#Unsafe`-only `asm` body. It's the one place where matching Rust's and Zig's own inline-asm convention matters more than reusing Jet's general string rules."
+      },
+      "hybrid": {
+        "result": "C",
+        "synthesis": "C keeps A's clobber-line spelling unchanged — `; clobbers rdx` is still a plain comment, since a clobber has no placeholder to bind and a comment line is enough. It keeps the ratified `; -> return` output anchor untouched. Only the input side moves from prose comments (A) or a marker-level list (B) to `{name}` placeholders resolved directly against the body that uses them.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "the `; clobbers rdx` comment-line spelling",
+            "use": "kept as-is inside C for declaring destroyed registers, since a clobber has no value to name a placeholder after"
+          },
+          {
+            "key": "B",
+            "aspect": "an explicit, auditable register fact separate from ordinary assembly text",
+            "use": "C keeps this for instruction-mandated registers (`rdtsc`'s literal `rax`/`rdx`), which stay visible in the body exactly where they're used, instead of duplicated on the marker line"
+          },
+          {
+            "key": "C",
+            "aspect": "named placeholders mapping one-to-one onto `asm!`'s own operand list",
+            "use": "adopted as the mechanism for every input and output that isn't instruction-mandated"
+          }
+        ]
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T19:04:03.460Z"
     }
   ],
   "questions": [
@@ -33244,6 +33428,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-12T19:08:53.045Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c1jixkit",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T19:05:23.730Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c1jixkit",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T19:04:03.461Z",
+      "by": "terra-501-ballot",
+      "action": "decision.add",
+      "ref": "D-FFI-ASMOPS1",
+      "note": "Inline asm operand and clobber spelling"
+    },
+    {
+      "at": "2026-07-12T19:03:14.842Z",
+      "by": "terra-501-ballot",
+      "action": "decision.add",
+      "ref": "D-FFI-RAWBODY1",
+      "note": "Raw foreign body spelling for `#FFI(<lang>) fn`"
+    },
     {
       "at": "2026-07-12T19:02:01.025Z",
       "by": "codex-orchestrator",
@@ -36715,34 +36927,6 @@
       "action": "decision.add",
       "ref": "D-CORE-NUMERIC1",
       "note": "One math home: fold core.numeric (BigInt, Decimal) into core.math"
-    },
-    {
-      "at": "2026-07-12T06:45:21.617Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-CLI-EMIT1",
-      "note": "One spelling for the generated Rust: the emit verb; the --emit-rust flag dies"
-    },
-    {
-      "at": "2026-07-12T06:45:21.517Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-DROP-WORD1",
-      "note": "One meaning for `drop`: rename the linear consume to `consume(x)`"
-    },
-    {
-      "at": "2026-07-12T06:45:21.417Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-POLICY-WORD1",
-      "note": "One meaning for `policy`: respell the in-source module floor as #Policy(…)"
-    },
-    {
-      "at": "2026-07-12T06:45:21.316Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-BLOCKPLANE1",
-      "note": "Expert regions are # blocks: fold region, live, and assume_deterministic into the marker family"
     }
   ],
   "nextNum": 368,

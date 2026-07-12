@@ -7,34 +7,12 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::OnceLock;
+
+mod common;
+use common::jetpack_bin;
 
 fn jetpack() -> Command {
     Command::new(jetpack_bin())
-}
-
-fn jetpack_bin() -> &'static PathBuf {
-    static BIN: OnceLock<PathBuf> = OnceLock::new();
-    BIN.get_or_init(|| {
-        if let Some(path) = option_env!("CARGO_BIN_EXE_jetpack") {
-            return PathBuf::from(path);
-        }
-        let target_dir = std::env::var_os("CARGO_TARGET_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target"));
-        let bin = target_dir
-            .join("debug")
-            .join(format!("jetpack{}", std::env::consts::EXE_SUFFIX));
-        if !bin.is_file() {
-            let status = Command::new(env!("CARGO"))
-                .args(["build", "-p", "jetpack", "--bin", "jetpack"])
-                .current_dir(env!("CARGO_MANIFEST_DIR"))
-                .status()
-                .unwrap();
-            assert!(status.success(), "building jetpack test binary failed");
-        }
-        bin
-    })
 }
 
 fn jet() -> Command {
@@ -156,14 +134,44 @@ fn info_json_is_stable_and_includes_service_options() {
     assert!(stdout.contains("\"name\":\"ready\""), "{stdout}");
 }
 
+/// D-CLI-SURFACE3=B: `search` moved under `jet inspect` — bare `jet search`
+/// is now a teaching error (E2101) naming the new spelling.
 #[test]
-fn top_level_jet_search_dispatches_to_jetpack() {
+fn bare_jet_search_is_a_teaching_error_naming_jet_inspect_search() {
     let project = Scratch::new("project");
     let root = Scratch::new("root");
     copy_project(&project.path);
 
     let out = jet()
         .args([
+            "search",
+            "jq",
+            "--no-color",
+            "--offline",
+            "--fixtures",
+            "fixtures",
+        ])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2), "bare `jet search` must be rejected");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("E2101"), "stderr: {stderr}");
+    assert!(stderr.contains("jet inspect search"), "stderr: {stderr}");
+}
+
+/// `jet inspect search` is the canonical top-level spelling and still
+/// dispatches through to the jetpack discovery engine.
+#[test]
+fn jet_inspect_search_dispatches_to_jetpack() {
+    let project = Scratch::new("project");
+    let root = Scratch::new("root");
+    copy_project(&project.path);
+
+    let out = jet()
+        .args([
+            "inspect",
             "search",
             "jq",
             "--no-color",

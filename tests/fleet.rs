@@ -12,6 +12,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
+mod common;
+use common::jetpack_bin;
 use jetpack::ModuleEval::evaluate_env;
 
 fn render(src: &str) -> (String, String) {
@@ -132,7 +134,7 @@ fn write_fleet_project(dir: &std::path::Path) {
 }
 
 fn jetpack() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_jetpack"))
+    Command::new(jetpack_bin())
 }
 
 /// `jetpack push <fleet>` on a valid fleet emits the honest E1243 gated notice

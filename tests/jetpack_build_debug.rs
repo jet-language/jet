@@ -4,8 +4,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod common;
+use common::jetpack_bin;
+
 fn jetpack() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_jetpack"))
+    Command::new(jetpack_bin())
 }
 
 fn jet() -> Command {
@@ -132,7 +135,13 @@ fn top_level_explain_and_logs_dispatch_to_jetpack() {
         .env("JETPACK_ROOT", &root.path)
         .output()
         .unwrap();
-    assert!(logs.status.success());
+    assert!(
+        logs.status.success(),
+        "code: {:?} stderr: {} stdout: {}",
+        logs.status.code(),
+        String::from_utf8_lossy(&logs.stderr),
+        String::from_utf8_lossy(&logs.stdout)
+    );
     assert!(String::from_utf8_lossy(&logs.stdout).contains("\"steps\""));
 }
 

@@ -9,6 +9,7 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::OnceLock;
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
 
@@ -43,6 +44,46 @@ pub fn test_worker_count(cap: usize) -> usize {
         .map(|n| n.get())
         .unwrap_or(2);
     requested.unwrap_or(available).clamp(1, cap.max(1))
+}
+
+/// Locate the `jetpack` binary for integration tests.
+///
+/// `jetpack` moved to its own workspace package (`crates/jetpack`, card
+/// #367 / D-PRODUCT-SPLIT1=C), so Cargo no longer sets
+/// `CARGO_BIN_EXE_jetpack` for tests compiled under the root `jet` package.
+/// Fall back to the freshly built debug binary next to `target/debug/jet`,
+/// building it on demand if it isn't there yet.
+pub fn jetpack_bin() -> &'static PathBuf {
+    static BIN: OnceLock<PathBuf> = OnceLock::new();
+    BIN.get_or_init(|| resolve_or_build_bin("jetpack", "jetpack", "jetpack"))
+}
+
+/// Locate the `jetos` binary for integration tests. Same story as
+/// [`jetpack_bin`]: `jetos` is its own workspace package now.
+pub fn jetos_bin() -> &'static PathBuf {
+    static BIN: OnceLock<PathBuf> = OnceLock::new();
+    BIN.get_or_init(|| resolve_or_build_bin("jetos", "jetos", "jetos"))
+}
+
+fn resolve_or_build_bin(env_suffix: &str, package: &str, bin_name: &str) -> PathBuf {
+    if let Some(path) = std::env::var_os(format!("CARGO_BIN_EXE_{env_suffix}")) {
+        return PathBuf::from(path);
+    }
+    let target_dir = std::env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target"));
+    let bin = target_dir
+        .join("debug")
+        .join(format!("{bin_name}{}", std::env::consts::EXE_SUFFIX));
+    if !bin.is_file() {
+        let status = Command::new(env!("CARGO"))
+            .args(["build", "-p", package, "--bin", bin_name])
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .status()
+            .unwrap();
+        assert!(status.success(), "building {bin_name} test binary failed");
+    }
+    bin
 }
 
 pub fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {

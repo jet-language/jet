@@ -13,10 +13,12 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::OnceLock;
+
+mod common;
+use common::{jetos_bin, jetpack_bin};
 
 fn jetpack() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_jetpack"))
+    Command::new(jetpack_bin())
 }
 
 fn jet() -> Command {
@@ -25,30 +27,6 @@ fn jet() -> Command {
 
 fn jetos() -> Command {
     Command::new(jetos_bin())
-}
-
-fn jetos_bin() -> &'static PathBuf {
-    static BIN: OnceLock<PathBuf> = OnceLock::new();
-    BIN.get_or_init(|| {
-        if let Some(path) = option_env!("CARGO_BIN_EXE_jetos") {
-            return PathBuf::from(path);
-        }
-        let target_dir = std::env::var_os("CARGO_TARGET_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target"));
-        let bin = target_dir
-            .join("debug")
-            .join(format!("jetos{}", std::env::consts::EXE_SUFFIX));
-        if !bin.is_file() {
-            let status = Command::new(env!("CARGO"))
-                .args(["build", "-p", "jet-driver", "--bin", "jetos"])
-                .current_dir(env!("CARGO_MANIFEST_DIR"))
-                .status()
-                .unwrap();
-            assert!(status.success(), "building jetos test binary failed");
-        }
-        bin
-    })
 }
 
 fn copy_dir_recursive(src: &Path, dst: &Path) {

@@ -193,6 +193,11 @@ fn substitute_expr(
             resolved_ret,
             ..
         } => {
+            if let Expr::Ident(name, _) = receiver.as_mut() {
+                if let Some(Type::Named(resolved)) = types.get(name) {
+                    *name = resolved.clone();
+                }
+            }
             substitute_expr(receiver, types, values);
             for ty in type_args {
                 *ty = crate::Generics::substitute_type(ty, types);
@@ -204,8 +209,14 @@ fn substitute_expr(
                 .for_each(|arg| substitute_expr(&mut arg.expr, types, values));
         }
         Expr::StructLit {
-            type_args, fields, ..
+            type_name,
+            type_args,
+            fields,
+            ..
         } => {
+            if let Some(Type::Named(resolved)) = types.get(type_name) {
+                *type_name = resolved.clone();
+            }
             for ty in type_args {
                 *ty = crate::Generics::substitute_type(ty, types);
             }
@@ -213,11 +224,18 @@ fn substitute_expr(
                 .iter_mut()
                 .for_each(|(_, _, value)| substitute_expr(value, types, values));
         }
-        Expr::EnumLit { args, .. } => args.iter_mut().for_each(|arg| match arg {
-            EnumLitArg::Positional(value) | EnumLitArg::Named { expr: value, .. } => {
-                substitute_expr(value, types, values)
+        Expr::EnumLit {
+            type_name, args, ..
+        } => {
+            if let Some(Type::Named(resolved)) = types.get(type_name) {
+                *type_name = resolved.clone();
             }
-        }),
+            args.iter_mut().for_each(|arg| match arg {
+                EnumLitArg::Positional(value) | EnumLitArg::Named { expr: value, .. } => {
+                    substitute_expr(value, types, values)
+                }
+            });
+        }
         Expr::OrFallback {
             value, fallback, ..
         } => {
@@ -441,9 +459,11 @@ fn specialize_func(
     mut func: Func,
     params: &[ResolvedModuleParam],
     args: &[ResolvedModuleArg],
+    definition_types: &HashMap<String, Type>,
+    definition_values: &HashMap<String, crate::AST::CtValue>,
 ) -> Func {
-    let mut types = HashMap::new();
-    let mut values = HashMap::new();
+    let mut types = definition_types.clone();
+    let mut values = definition_values.clone();
     for (param, arg) in params.iter().zip(args) {
         match (param, arg) {
             (ResolvedModuleParam::Type { name, .. }, ResolvedModuleArg::Type(ty)) => {
@@ -469,6 +489,252 @@ fn specialize_func(
     func
 }
 
+fn specialize_struct(
+    source: &crate::AST::StructDef,
+    alias: &str,
+    params: &[ResolvedModuleParam],
+    args: &[ResolvedModuleArg],
+    definition_types: &HashMap<String, Type>,
+    definition_values: &HashMap<String, crate::AST::CtValue>,
+) -> crate::AST::StructDef {
+    let mut types = definition_types.clone();
+    for (param, arg) in params.iter().zip(args) {
+        if let (ResolvedModuleParam::Type { name, .. }, ResolvedModuleArg::Type(ty)) = (param, arg) {
+            types.insert(name.clone(), ty.clone());
+        }
+    }
+    let mut fields = source.fields.clone();
+    for field in &mut fields {
+        field.ty = crate::Generics::substitute_type(&field.ty, &types);
+        if let Some(computed) = &mut field.computed {
+            substitute_expr(computed, &types, definition_values);
+        }
+        for marker in &mut field.serde_markers {
+            marker
+                .args
+                .iter_mut()
+                .for_each(|arg| substitute_expr(arg, &types, definition_values));
+        }
+    }
+    let methods = source
+        .methods
+        .iter()
+        .cloned()
+        .map(|method| {
+            specialize_func(
+                method,
+                params,
+                args,
+                definition_types,
+                definition_values,
+            )
+        })
+        .collect();
+    let trait_impls = source
+        .trait_impls
+        .iter()
+        .map(|block| crate::AST::TraitImplBlock {
+            trait_name: block.trait_name.clone(),
+            trait_span: block.trait_span,
+            methods: block
+                .methods
+                .iter()
+                .cloned()
+                .map(|method| {
+                    specialize_func(
+                        method,
+                        params,
+                        args,
+                        definition_types,
+                        definition_values,
+                    )
+                })
+                .collect(),
+            assoc_type_impls: block
+                .assoc_type_impls
+                .iter()
+                .map(|(name, span, ty)| {
+                    (
+                        name.clone(),
+                        *span,
+                        crate::Generics::substitute_type(ty, &types),
+                    )
+                })
+                .collect(),
+        })
+        .collect();
+    crate::AST::StructDef {
+        span: source.span,
+        is_pub: source.is_pub,
+        is_package_pub: source.is_package_pub,
+        name: if alias.is_empty() {
+            source.name.clone()
+        } else {
+            format!("{alias}__{}", source.name)
+        },
+        name_span: source.name_span,
+        type_params: source.type_params.clone(),
+        fields,
+        methods,
+        trait_impls,
+        derives: source.derives.clone(),
+        is_published_schema: source.is_published_schema,
+        published_schema_span: source.published_schema_span,
+        is_single_use: source.is_single_use,
+        single_use_span: source.single_use_span,
+        is_must_use: source.is_must_use,
+        must_use_span: source.must_use_span,
+        layout: source.layout.clone(),
+        layout_span: source.layout_span,
+        serde_markers: source.serde_markers.clone(),
+        type_markers: source.type_markers.clone(),
+    }
+}
+
+fn clone_struct(source: &crate::AST::StructDef) -> crate::AST::StructDef {
+    specialize_struct(
+        source,
+        "",
+        &[],
+        &[],
+        &HashMap::new(),
+        &HashMap::new(),
+    )
+}
+
+fn specialize_enum(
+    source: &crate::AST::EnumDef,
+    alias: &str,
+    params: &[ResolvedModuleParam],
+    args: &[ResolvedModuleArg],
+    definition_types: &HashMap<String, Type>,
+    definition_values: &HashMap<String, crate::AST::CtValue>,
+) -> crate::AST::EnumDef {
+    let mut types = definition_types.clone();
+    for (param, arg) in params.iter().zip(args) {
+        if let (ResolvedModuleParam::Type { name, .. }, ResolvedModuleArg::Type(ty)) = (param, arg) {
+            types.insert(name.clone(), ty.clone());
+        }
+    }
+    let variants = source
+        .variants
+        .iter()
+        .map(|variant| {
+            let payload = match &variant.payload {
+                VariantPayload::Unit => VariantPayload::Unit,
+                VariantPayload::Single(ty, span) => VariantPayload::Single(
+                    crate::Generics::substitute_type(ty, &types),
+                    *span,
+                ),
+                VariantPayload::Named(fields) => VariantPayload::Named(
+                    fields
+                        .iter()
+                        .cloned()
+                        .map(|mut field| {
+                            field.ty = crate::Generics::substitute_type(&field.ty, &types);
+                            field
+                        })
+                        .collect(),
+                ),
+            };
+            let mut serde_markers = variant.serde_markers.clone();
+            for marker in &mut serde_markers {
+                marker.args.iter_mut().for_each(|arg| {
+                    substitute_expr(arg, &types, definition_values);
+                });
+            }
+            crate::AST::Variant {
+                name: variant.name.clone(),
+                name_span: variant.name_span,
+                payload,
+                discriminant: variant.discriminant,
+                serde_markers,
+            }
+        })
+        .collect();
+    let methods = source
+        .methods
+        .iter()
+        .cloned()
+        .map(|method| {
+            specialize_func(
+                method,
+                params,
+                args,
+                definition_types,
+                definition_values,
+            )
+        })
+        .collect();
+    let trait_impls = source
+        .trait_impls
+        .iter()
+        .map(|block| crate::AST::TraitImplBlock {
+            trait_name: block.trait_name.clone(),
+            trait_span: block.trait_span,
+            methods: block
+                .methods
+                .iter()
+                .cloned()
+                .map(|method| {
+                    specialize_func(
+                        method,
+                        params,
+                        args,
+                        definition_types,
+                        definition_values,
+                    )
+                })
+                .collect(),
+            assoc_type_impls: block
+                .assoc_type_impls
+                .iter()
+                .map(|(name, span, ty)| {
+                    (
+                        name.clone(),
+                        *span,
+                        crate::Generics::substitute_type(ty, &types),
+                    )
+                })
+                .collect(),
+        })
+        .collect();
+    crate::AST::EnumDef {
+        span: source.span,
+        is_pub: source.is_pub,
+        is_package_pub: source.is_package_pub,
+        name: if alias.is_empty() {
+            source.name.clone()
+        } else {
+            format!("{alias}__{}", source.name)
+        },
+        name_span: source.name_span,
+        type_params: source.type_params.clone(),
+        variants,
+        methods,
+        trait_impls,
+        derives: source.derives.clone(),
+        is_single_use: source.is_single_use,
+        single_use_span: source.single_use_span,
+        is_must_use: source.is_must_use,
+        must_use_span: source.must_use_span,
+        serde_markers: source.serde_markers.clone(),
+        type_markers: source.type_markers.clone(),
+        groups: source.groups.clone(),
+    }
+}
+
+fn clone_enum(source: &crate::AST::EnumDef) -> crate::AST::EnumDef {
+    specialize_enum(
+        source,
+        "",
+        &[],
+        &[],
+        &HashMap::new(),
+        &HashMap::new(),
+    )
+}
+
 #[derive(Clone)]
 enum ResolvedModuleParam {
     Type { name: String, bound: Option<String> },
@@ -483,6 +749,11 @@ struct TemplateInfo {
     def: GenericModuleDef,
     non_fn_kinds: Vec<&'static str>,
     params: Vec<ResolvedModuleParam>,
+}
+
+struct AliasExpansion {
+    module: CodeModule,
+    declarations: Vec<Item>,
 }
 
 #[derive(Clone)]
@@ -659,7 +930,7 @@ fn expand_alias(
     funcs:&HashMap<String,&Func>,
     globals:&HashMap<String,crate::AST::CtValue>,
     enums:&HashMap<String,bool>,
-) -> Option<CodeModule> {
+) -> Option<AliasExpansion> {
     let info = match templates.get(&alias.target) {
         Some(t) => t,
         None => {
@@ -719,28 +990,117 @@ fn expand_alias(
     if !info.non_fn_kinds.is_empty() {
         return None;
     }
-    let resolved_args=resolve_args(alias,info,traits,funcs,globals,enums,diags)?;
-    // Substitute type args into each function signature in the template body.
-    let body: Vec<Item> = template
+    let resolved_args = resolve_args(alias, info, traits, funcs, globals, enums, diags)?;
+    let mut type_args = HashMap::new();
+    let mut value_args = HashMap::new();
+    for (param, arg) in info.params.iter().zip(&resolved_args) {
+        match (param, arg) {
+            (ResolvedModuleParam::Type { name, .. }, ResolvedModuleArg::Type(ty)) => {
+                type_args.insert(name.clone(), ty.clone());
+            }
+            (ResolvedModuleParam::Value { name, .. }, ResolvedModuleArg::Value(value, _)) => {
+                value_args.insert(name.clone(), value.clone());
+            }
+            _ => {}
+        }
+    }
+    let mut definition_types = HashMap::new();
+    for item in &template.body {
+        let name = match item {
+            Item::Struct(def) => Some(&def.name),
+            Item::Enum(def) => Some(&def.name),
+            _ => None,
+        };
+        if let Some(name) = name {
+            definition_types.insert(
+                name.clone(),
+                Type::Named(format!("{}__{}", alias.name, name)),
+            );
+        }
+    }
+    definition_types.extend(type_args.clone());
+
+    // Constants specialize in declaration order. Their evaluated definition-site
+    // values are then available to later constants and every template function.
+    let mut definition_values = value_args;
+    let mut declarations = Vec::new();
+    for item in &template.body {
+        let Item::Const(source) = item else { continue };
+        let mut value = source.value.clone();
+        substitute_expr(&mut value, &type_args, &definition_values);
+        let evaluated = crate::Comptime::evaluate(
+            &value,
+            funcs,
+            &HashSet::new(),
+            Path::new("."),
+            &definition_values,
+        );
+        if let Ok(evaluated) = evaluated {
+            definition_values.insert(source.name.clone(), evaluated);
+        }
+        declarations.push(Item::Const(crate::AST::ConstDef {
+            span: source.span,
+            name: format!("{}__{}", alias.name, source.name),
+            name_span: source.name_span,
+            value,
+            meta: source.meta.clone(),
+            attrs: source.attrs.clone(),
+            rust_kind: source.rust_kind,
+            is_comptime: source.is_comptime,
+            ct: source.ct.clone(),
+            is_persist: source.is_persist,
+            persist_span: source.persist_span,
+        }));
+    }
+    for item in &template.body {
+        if let Item::Struct(def) = item {
+            declarations.push(Item::Struct(specialize_struct(
+                def,
+                &alias.name,
+                &info.params,
+                &resolved_args,
+                &definition_types,
+                &definition_values,
+            )));
+        }
+        if let Item::Enum(def) = item {
+            declarations.push(Item::Enum(specialize_enum(
+                def,
+                &alias.name,
+                &info.params,
+                &resolved_args,
+                &definition_types,
+                &definition_values,
+            )));
+        }
+    }
+
+    let body = template
         .body
         .iter()
-        .filter_map(|item| {
-            if let Item::Func(f) = item {
-                let expanded = specialize_func(f.clone(), &info.params, &resolved_args);
-                Some(Item::Func(expanded))
-            } else {
-                None // already reported above
-            }
+        .filter_map(|item| match item {
+            Item::Func(func) => Some(Item::Func(specialize_func(
+                func.clone(),
+                &info.params,
+                &resolved_args,
+                &definition_types,
+                &definition_values,
+            ))),
+            Item::Const(_) => None,
+            _ => None,
         })
         .collect();
-    Some(CodeModule {
-        name: alias.name.clone(),
-        name_span: alias.name_span,
-        is_pub: alias.is_pub,
-        is_package_pub: alias.is_package_pub,
-        body: Some(body),
-        web_target: None,
-        span: alias.span,
+    Some(AliasExpansion {
+        module: CodeModule {
+            name: alias.name.clone(),
+            name_span: alias.name_span,
+            is_pub: alias.is_pub,
+            is_package_pub: alias.is_package_pub,
+            body: Some(body),
+            web_target: None,
+            span: alias.span,
+        },
+        declarations,
     })
 }
 
@@ -768,18 +1128,21 @@ pub(crate) fn expand_generic_module_aliases(
                         .iter()
                         .filter_map(|item| match item {
                             Item::Func(f) => Some(Item::Func(f.clone())),
-                            Item::Struct(_) => {
-                                non_fn_kinds.push("struct");
-                                None
-                            }
-                            Item::Enum(_) => {
-                                non_fn_kinds.push("enum");
-                                None
-                            }
-                            Item::Const(_) => {
-                                non_fn_kinds.push("const");
-                                None
-                            }
+                            Item::Struct(s) => Some(Item::Struct(clone_struct(s))),
+                            Item::Enum(e) => Some(Item::Enum(clone_enum(e))),
+                            Item::Const(c) => Some(Item::Const(crate::AST::ConstDef {
+                                span: c.span,
+                                name: c.name.clone(),
+                                name_span: c.name_span,
+                                value: c.value.clone(),
+                                meta: c.meta.clone(),
+                                attrs: c.attrs.clone(),
+                                rust_kind: c.rust_kind,
+                                is_comptime: c.is_comptime,
+                                ct: c.ct.clone(),
+                                is_persist: c.is_persist,
+                                persist_span: c.persist_span,
+                            })),
                             _ => {
                                 non_fn_kinds.push("item");
                                 None
@@ -809,7 +1172,7 @@ pub(crate) fn expand_generic_module_aliases(
             .collect();
 
         // Expand aliases into CodeModules, collect separately.
-        let mut expansions: Vec<(usize, CodeModule)> = Vec::new();
+        let mut expansions: Vec<(usize, AliasExpansion)> = Vec::new();
         for (idx, item) in module.items.iter().enumerate() {
             if let Item::ModuleAlias(alias) = item {
                 if let Some(cm) = expand_alias(alias, &templates, diags,&traits,&funcs,&globals,&enums) {
@@ -824,12 +1187,15 @@ pub(crate) fn expand_generic_module_aliases(
         // We need to:
         // 1. Replace each ModuleAlias with its CodeModule expansion (collected above)
         // 2. Remove all GenericModule items
-        for (idx, cm) in expansions {
-            module.items[idx] = Item::CodeModule(cm);
+        let mut declarations = Vec::new();
+        for (idx, expansion) in expansions {
+            module.items[idx] = Item::CodeModule(expansion.module);
+            declarations.extend(expansion.declarations);
         }
         module
             .items
             .retain(|i| !matches!(i, Item::GenericModule(_)));
+        module.items.extend(declarations);
     }
 }
 

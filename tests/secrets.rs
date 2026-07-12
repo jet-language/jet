@@ -12,6 +12,9 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
+mod common;
+use common::jetpack_bin;
+
 struct Scratch {
     path: PathBuf,
 }
@@ -38,7 +41,7 @@ impl Drop for Scratch {
 }
 
 fn jetpack() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_jetpack"))
+    Command::new(jetpack_bin())
 }
 
 fn strip_ansi(s: &str) -> String {

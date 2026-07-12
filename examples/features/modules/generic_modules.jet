@@ -4,6 +4,27 @@
 // `module Cache<K>` defines the template; `module IntCache = Cache<Int>`
 // instantiates it, producing a concrete module with all type params resolved.
 module Cache<K, capacity: Int> {
+    comptime BASE = capacity
+    comptime SIZE = BASE + 1
+
+    pub struct Entry {
+        key: K
+        limit: Int => capacity
+    }
+
+    pub enum Slot {
+        Empty
+        Value(K)
+    }
+
+    pub fn entry(k: K) -> Entry {
+        return Entry.{ key: k }
+    }
+
+    pub fn slot(k: K) -> Slot {
+        return Slot.Value(k)
+    }
+
     pub fn key_of(k: K) -> String {
         value: K := k
         return "key"
@@ -14,7 +35,7 @@ module Cache<K, capacity: Int> {
     }
 
     pub fn size() -> Int {
-        return capacity
+        return SIZE
     }
 }
 
@@ -24,7 +45,16 @@ fn run() {
     k :: IntCache__key_of(42)
     d :: IntCache__describe()
     n :: IntCache__size()
+    e :: IntCache__entry(42)
+    s :: IntCache__slot(7)
     print(k)
     print(d)
     print(n)
+    print(IntCache__SIZE)
+    print(e.key)
+    print(e.limit)
+    if s == {
+        Value(v) -> { print(v) }
+        Empty -> { print(0) }
+    }
 }
