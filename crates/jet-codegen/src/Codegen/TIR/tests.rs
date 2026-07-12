@@ -1448,19 +1448,20 @@ fn consume(ch: Receiver<Int>) -> Int {
 
     #[test]
     fn covers_json_construction_and_collection() {
-        // D-ENC-DYN1=A+: dynamic `Data` construction (`Data.Text`/`Data.Bool`/`Data.Array`/
-        // `Data.Null`) + a `[Data]` list value type. A fn that builds `Data` values and
-        // returns a `Data` routes (the dynamic value type is a covered foreign value type;
+        // D-ENC-DYN1=A+: dynamic `DataTree` construction (`DataTree.Text`/
+        // `DataTree.Bool`/`DataTree.Array`/`DataTree.Null`) + a `[DataTree]` list value
+        // type. A fn that builds and returns `DataTree` values routes (the dynamic value
+        // type is a covered foreign value type;
         // construction is the `JsonLit` shape). The if-let MATCHING + index-assign need
-        // full sema (the `Data` pattern / `IndexKind`), proven by `tests/tir.rs` + the
+        // full sema (the `DataTree` pattern / `IndexKind`), proven by `tests/tir.rs` + the
         // whole-suite byte-parity diff; here we gate the sema-independent construction.
         let src = "\
-fn build() -> Data {
-    items: [Data] := []
-    items.push(Data.Text(\"jet\"))
-    items.push(Data.Bool(true))
-    items.push(Data.Null)
-    return Data.Array(items)
+fn build() -> DataTree {
+    items: [DataTree] := []
+    items.push(DataTree.Text(\"jet\"))
+    items.push(DataTree.Bool(true))
+    items.push(DataTree.Null)
+    return DataTree.Array(items)
 }
 ";
         assert!(covers(src, "build"));
@@ -1468,12 +1469,12 @@ fn build() -> Data {
 
     #[test]
     fn covers_json_value_param_and_array() {
-        // A `Data`-typed param + a `[Data]` list value type + `Data.Array` construction.
+        // A `DataTree` param + list value type + `DataTree.Array` construction.
         let src = "\
-fn wrap(x: Data) -> Data {
-    items: [Data] := []
+fn wrap(x: DataTree) -> DataTree {
+    items: [DataTree] := []
     items.push(x)
-    return Data.Array(items)
+    return DataTree.Array(items)
 }
 ";
         assert!(covers(src, "wrap"));
