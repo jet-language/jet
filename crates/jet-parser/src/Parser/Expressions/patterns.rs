@@ -85,6 +85,7 @@ impl<'a> Parser<'a> {
                             arm_head_term: false,
                             pub_file_default: false,
                             in_layout_body: self.in_layout_body,
+                            block_spans: Vec::new(),
                         };
                         let (name, name_span) = sub.expect_ident("in a pattern hole")?;
                         let ty = if matches!(sub.peek().kind, TokKind::Colon) {

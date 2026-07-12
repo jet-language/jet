@@ -686,12 +686,14 @@ impl<'a> Parser<'a> {
     /// Parse statements until the closing `}` (consumed). Recovers at
     /// statement boundaries so several problems surface in one run.
     pub(super) fn block_stmts(&mut self) -> Vec<Stmt> {
+        let body_start = self.toks[self.pos.saturating_sub(1)].span.end;
         let mut body = Vec::new();
-        loop {
+        let body_end = loop {
             match &self.peek().kind {
                 TokKind::RBrace => {
+                    let end = self.peek().span.start;
                     self.bump();
-                    break;
+                    break end;
                 }
                 // S6-R: a block statement (`if`/`loop`/`#Unsafe`/nested `{}`)
                 // ends with `}`, after which the lexer inserts a synthetic
@@ -701,6 +703,7 @@ impl<'a> Parser<'a> {
                     self.bump();
                 }
                 TokKind::Eof => {
+                    let end = self.peek().span.start;
                     self.diags.push(Diagnostic::error(
                         "E0003",
                         "expected `}` to close this block, found the end of the file".to_string(),
@@ -708,7 +711,7 @@ impl<'a> Parser<'a> {
                         "add a closing `}`".to_string(),
                         Some(self.peek().span),
                     ));
-                    break;
+                    break end;
                 }
                 _ => match self.stmt() {
                     Ok(s) => body.push(s),
@@ -718,7 +721,8 @@ impl<'a> Parser<'a> {
                     }
                 },
             }
-        }
+        };
+        self.block_spans.push(Span::new(body_start, body_end));
         body
     }
 

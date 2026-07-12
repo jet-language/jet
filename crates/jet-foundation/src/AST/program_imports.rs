@@ -6,6 +6,9 @@ pub struct Program {
     /// S16 (M6): `import` declarations at the top of this file.
     pub imports: Vec<ImportDecl>,
     pub items: Vec<Item>,
+    /// Parser-owned inner boundaries for statement blocks. Each span starts
+    /// immediately after `{` and ends immediately before `}`.
+    pub block_spans: Vec<Span>,
     /// D-WASM1 (c123): optional file-level web bucket ceiling (`js target;` / `wasm target;`).
     pub web_target_ceiling: Option<crate::WebPartition::WebBucket>,
     /// D-VISDEFAULT1=C / D-VISDEFAULT2=A: `#PubFile` flips default top-level export visibility.
@@ -262,6 +265,8 @@ pub struct LoadedModule {
     pub alias: String,
     pub imports: Vec<ImportDecl>,
     pub items: Vec<Item>,
+    /// Checked parser-owned inner boundaries for statement blocks.
+    pub block_spans: Vec<Span>,
     /// D-WASM1: optional file-level web bucket ceiling.
     pub web_target_ceiling: Option<crate::WebPartition::WebBucket>,
     /// D-VISDEFAULT1=C / D-VISDEFAULT2=A: `#PubFile` flips default top-level export visibility.

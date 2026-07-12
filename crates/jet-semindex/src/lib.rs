@@ -15,7 +15,7 @@ pub use Build::{
 };
 pub use Types::{
     CallEdge, DefinitionAnchor, EffectFact, MemberFact, MemberKind, MemberOrigin, SemIndex, SourceSpan,
-    StructuralAudit, StructuralNode, StructuralSlotKind, SymbolDef, SymbolKind, SymbolRef, TypeDossier,
+    StructuralAudit, StructuralNode, StructuralSlotBoundary, StructuralSlotKind, SymbolDef, SymbolKind, SymbolRef, TypeDossier,
     SCHEMA_VERSION,
 };
 pub use Symbols::{

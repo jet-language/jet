@@ -1218,6 +1218,7 @@ impl<'a> Parser<'a> {
             Program {
                 imports,
                 items,
+                block_spans: std::mem::take(&mut self.block_spans),
                 web_target_ceiling,
                 pub_file,
                 no_prelude,
