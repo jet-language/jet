@@ -811,6 +811,10 @@ fn run_test_file(path: &Path, opts: &TestRunOpts, mode: OutputMode) -> bool {
             return false;
         }
     };
+    // Test harnesses are one-shot process-private executables. Concurrent
+    // `jet test` invocations may target the same file; sharing
+    // `build/test_<stem>` lets one process replace an executable while another
+    // is launching it (ETXTBSY on Linux, sharing violations on Windows).
     let bin = test_bin_path(path);
     build(
         &shown,
@@ -872,7 +876,9 @@ fn run_test_file(path: &Path, opts: &TestRunOpts, mode: OutputMode) -> bool {
     }
     if let Some(co) = &cov_out {
         report_coverage(&shown, co);
+        let _ = fs::remove_file(co);
     }
+    let _ = fs::remove_file(&bin);
     out.status.success() && doctests_ok
 }
 
@@ -901,7 +907,12 @@ fn run_doctests(
         // Write the synthetic program to a temp file next to the build dir so the
         // normal compile+build pipeline can consume it.
         let _ = fs::create_dir_all("build");
-        let tmp = PathBuf::from("build").join(format!("{}__doctest_{}.jet", stem(shown), n));
+        let tmp = PathBuf::from("build").join(format!(
+            "{}__doctest_{}.{}.jet",
+            stem(shown),
+            n,
+            std::process::id()
+        ));
         if fs::write(&tmp, &program).is_err() {
             eprintln!("error: couldn't stage doctest from `{}`", shown);
             all_ok = false;
@@ -943,10 +954,12 @@ fn run_doctests(
                 eprintln!("error: couldn't run {}: {}", label, e);
                 all_ok = false;
                 let _ = fs::remove_file(&tmp);
+                let _ = fs::remove_file(&bin);
                 continue;
             }
         };
         let _ = fs::remove_file(&tmp);
+        let _ = fs::remove_file(&bin);
         if !out.status.success() {
             println!("{}: FAIL (runtime error)", label);
             eprint!("{}", String::from_utf8_lossy(&out.stderr));
@@ -1476,15 +1489,20 @@ fn bin_path(file: &str) -> PathBuf {
 }
 
 fn test_bin_path(path: &Path) -> PathBuf {
-    PathBuf::from("build").join(format!("test_{}", stem(&path.to_string_lossy())))
+    PathBuf::from("build").join(format!(
+        ".test_{}.{}",
+        stem(&path.to_string_lossy()),
+        std::process::id()
+    ))
 }
 
 fn fuzz_bin_path(path: &Path, test_name: Option<&str>) -> PathBuf {
     let suffix = test_name.map(|n| format!("_{}", stem(n))).unwrap_or_default();
     PathBuf::from("build").join(format!(
-        "fuzz_{}{}",
+        ".fuzz_{}{}.{}",
         stem(&path.to_string_lossy()),
-        suffix
+        suffix,
+        std::process::id()
     ))
 }
 
@@ -1573,6 +1591,7 @@ pub(crate) fn run_fuzz(file: &str, test_name: Option<&str>, opts: FuzzRunOpts, m
         eprintln!("error: couldn't run the fuzz harness for `{}`: {}", file, e);
         exit(ExitCodes::USER_ERROR);
     });
+    let _ = fs::remove_file(&bin);
     exit(status.code().unwrap_or(ExitCodes::USER_ERROR));
 }
 

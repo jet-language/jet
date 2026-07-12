@@ -2,7 +2,7 @@
 
 use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 mod common;
 use common::have_rustc;
@@ -38,6 +38,40 @@ fn jet_test_example_output() {
         fs::read_to_string(root.join("examples/features/expected/tooling/tests.test.out"))
             .expect("examples/features/expected/tooling/tests.test.out");
     assert_eq!(String::from_utf8_lossy(&out.stdout), expected);
+}
+
+#[test]
+fn concurrent_jet_test_same_file_is_process_isolated() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let jet = jet_bin();
+    if !have_rustc() || !jet.exists() {
+        return;
+    }
+    let example = root.join("examples/features/tooling/tests.jet");
+    let mut children = Vec::new();
+    for _ in 0..4 {
+        children.push(
+            Command::new(&jet)
+                .arg("test")
+                .arg(&example)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("spawn concurrent jet test"),
+        );
+    }
+    for child in children {
+        let out = child
+            .wait_with_output()
+            .expect("wait for concurrent jet test");
+        assert!(
+            out.status.success(),
+            "concurrent jet test failed: {}\nstdout: {}\nstderr: {}",
+            out.status,
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
 }
 
 #[test]
