@@ -1439,6 +1439,15 @@ pub fn emit_bundle_dbg(
     ));
     // E2-M12 D-OBS1: source-map marker for tooling and debuggers.
     out.push_str(&format!("// jet:source-map source={}\n", entry.display));
+    for module in &bundle.modules {
+        for item in &module.items {
+            if let Item::CodeModule(instance) = item {
+                if let Some(identity) = &instance.instance_identity {
+                    out.push_str(&format!("// jet:generic-instance name={} fingerprint={}\n", instance.name, identity.fingerprint));
+                }
+            }
+        }
+    }
     out.push_str("#![allow(warnings)]\n\n");
     if let Some(ffi) = link {
         out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
