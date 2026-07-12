@@ -1985,6 +1985,12 @@ v4/v7 (D-UUIDENC1).
 
 **D-API-CONTAINS1=B — membership is `has`** *(ratified by owner 2026-07-12, card #513; owner picked B over the rec)*: the membership word is `has` everywhere — `Set`/`SortedSet`/`BitSet` `contains` respells to `has(value)`, map/`Lru` `contains_key` respells to `has_key(key)`, `Bag.has` is already law. `contains`/`contains_key` leave the surface as ordinary no-such-method errors. Amends the D-COLLBREADTH1/D-ITER method lists.
 
+**D-API-CTOR1=A — constructor-idiom law** *(ratified by owner 2026-07-12, card #513)*: the four shipped idioms become written rubric law — bare `Type(…)` when the arguments ARE the value's components (fallible where narrowing); `.new(…)` for fresh stateful containers; `.over(…)` for non-owning views over existing data; `.from_*(…)` for conversions. `Type.{ }` stays the literal for plain data records. Nothing shipped changes; new construction shapes need a ballot.
+
+**D-PRELUDE-LAW1=A — ambient-surface registry** *(ratified by owner 2026-07-12, card #514)*: the no-prefix surface is one closed list — always ambient: `print`, `input`, `panic`, `require`; comptime-gated ambient: `embed_file`, `embed_bytes`, `find`, `fetch`. User shadowing wins; libraries never inject (D-PRELUDEX1). Any addition or removal is a ballot.
+
+**D-ARTIFACT-EXT1=A — one artifact-extension family** *(ratified by owner 2026-07-12, card #514)*: every Jet tool artifact is `.jet<kind>`: `.jetmap`, `.jetnb`, `.jetproof` (was .jproof), `.jettrace` (was .jtrace), `.jetreplay` (game input replays), `.jetproof-replay` (proof replays — the .jreplay collision between D-GAME-REPLAY1 and D-JREPLAY1 is resolved). Closed family; new artifact kinds need a ballot. Amends D-JPROOF1/D-JREPLAY1/D-PERFSESSION1/D-GAME-REPLAY1 spellings.
+
 **D-CORE-SECRETS1=A — one secrets home** *(ratified by owner
 2026-07-12, card #509)*: `core.vault` owns secret storage AND lifecycle
 (rotation schedules, expiry, audit facts); `core.secrets` leaves the

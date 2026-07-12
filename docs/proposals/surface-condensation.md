@@ -286,5 +286,25 @@ grammar (range arms with their three porting-hazard teaching errors),
 label grammar, destructure grammar. The M1 core is coherent; its only
 defects were documentation drift (H3).
 
+## I. Sixth pass (2026-07-12) — release policy, error reference, cross-doc drift
+
+Layers swept: release-policy.md (first full read), docs/reference/errors/
+(per-code explain sources — healthy), roadmap↔board epoch numbering,
+Syntax module naming. **Zero decision-bearing defects found** — the
+convergence point. Drift recorded as criteria:
+
+- roadmap.md still numbers Bootstrapping as Epoch 8; the board has
+  e8 = CI & Documentation, e9 = Bootstrapping (#500).
+- release-policy.md's enforcement section cites pre-seam paths
+  (`Source/Jetpack/…`, `Source/Syntax.rs`, `Source/Loader.rs`) (#500).
+- `Syntax/effects_tests.rs` holds keyword constants under a *_tests
+  name (#511).
+
+Owner-question revisions the same day: D-API-STORE1 rewritten to the
+add/add_new collision pair (upsert returning displaced `T?`; race-safe
+`add_new -> Bool`); D-VALIDATE1 rewritten to the three-layer chain
+(type-level constraints + `Validate.over` accumulation chain +
+`decode().validate()` entry, `@Pre` out of the story).
+
 Analysis of the polyglot/replace-every-language track lives in
 [`polyglot.md`](polyglot.md).

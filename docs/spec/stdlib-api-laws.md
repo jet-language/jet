@@ -14,7 +14,10 @@ existing drift found during review.
 - Membership predicates are `has(value)` / `has_key(key)` (D-API-CONTAINS1=B).
 - Boolean predicates are verb-prefixed: `is_empty`, `has_prefix`, `contains`.
 - Fallible variants add no suffix; the `?` return type signals fallibility.
-- Constructor sugar uses `Type.{ }` (D-DOTCTOR1); factory functions use `Type.from_*(...)`.
+- Constructor idioms (D-API-CTOR1=A): bare `Type(args)` when the args are the value's
+  components; `Type.new(…)` for fresh stateful containers; `Type.over(x)` for non-owning
+  views over existing data; `Type.from_*(x)` for conversions. `Type.{ }` stays the
+  literal for plain data records (D-DOTCTOR1). New construction shapes need a ballot.
 - Standard acronyms stay fully capitalized per S66 (`JSONDecoder`, `HTTPClient`,
   `IOError`, `UTF8Error`). Do not add PascalCase aliases.
 
