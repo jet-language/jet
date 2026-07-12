@@ -1918,6 +1918,25 @@ or cursor movement, then restores the cursor to its source position. Cooked
 and non-TTY sessions keep D-REPL9's bracket-balance continuation and `...  `
 prompt; they do not claim parser-aware raw editing.
 
+## REPL evaluation interruption
+
+In a raw interactive REPL, Ctrl-C during interpreter execution cancels the
+current turn and restores the prompt within 100 ms for Jet-controlled work
+(D-FE-REPL-INTERRUPT1=A). The interpreter polls before every instruction and
+before and after each runtime call. A blocking external call follows that
+call's cancellation behavior; while it remains active the REPL prints
+`warning: interrupt requested; waiting for active external I/O to stop`.
+
+Cancellation is transactional for session state. Bindings, moves, and
+statement history from the interrupted turn do not commit; earlier session
+state remains. Host effects completed before cancellation cannot be undone,
+so the REPL prints `Interrupted. External effects already performed were not
+rolled back.` The interrupted turn remains visible as `interrupted` in
+`:turns` and can be replayed with the ordinary rerun mechanism. A second
+Ctrl-C received while that turn is still stopping exits the REPL. Outside
+evaluation, Ctrl-C keeps its editor behavior: clear nonempty input first;
+exit from an empty prompt.
+
 ## REPL history
 
 The REPL keeps the latest 2,000 successful submissions between sessions

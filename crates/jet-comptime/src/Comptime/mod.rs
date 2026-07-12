@@ -33,6 +33,7 @@ mod Value;
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use crate::Diagnostics::Diagnostic;
 use crate::AST::{EnumDef, Expr, Func, StructDef};
@@ -41,6 +42,91 @@ pub use Interpreter::{DebugHook, DevSink, ReplAuthorizer, ReplEffectRequest, REP
 pub use Purity::walk_calls;
 pub use Reflect::{build_program_info, build_struct_type_info, ProgramSemanticFacts};
 pub use Value::CtValue;
+
+static REPL_INTERRUPT_COUNT: AtomicUsize = AtomicUsize::new(0);
+static REPL_RUNTIME_CALL_ACTIVE: AtomicBool = AtomicBool::new(false);
+static REPL_INTERRUPTIBLE_TURN_ACTIVE: AtomicBool = AtomicBool::new(false);
+static REPL_INTERRUPT_WARNING_EMITTED: AtomicBool = AtomicBool::new(false);
+
+#[cfg(unix)]
+unsafe extern "C" {
+    fn write(fd: i32, bytes: *const u8, len: usize) -> isize;
+}
+
+/// Reset per-turn interrupt state immediately before raw REPL evaluation.
+pub fn begin_repl_interruptible_turn() {
+    REPL_INTERRUPTIBLE_TURN_ACTIVE.store(true, Ordering::SeqCst);
+    REPL_RUNTIME_CALL_ACTIVE.store(false, Ordering::SeqCst);
+    REPL_INTERRUPT_WARNING_EMITTED.store(false, Ordering::SeqCst);
+    REPL_INTERRUPT_COUNT.store(0, Ordering::SeqCst);
+}
+
+pub fn end_repl_interruptible_turn() {
+    REPL_INTERRUPTIBLE_TURN_ACTIVE.store(false, Ordering::SeqCst);
+    REPL_RUNTIME_CALL_ACTIVE.store(false, Ordering::SeqCst);
+}
+
+pub fn repl_interruptible_turn_active() -> bool {
+    REPL_INTERRUPTIBLE_TURN_ACTIVE.load(Ordering::SeqCst)
+}
+
+/// Async-signal-safe Ctrl-C note used by the raw REPL signal handlers.
+pub fn note_repl_interrupt() {
+    REPL_INTERRUPT_COUNT.fetch_add(1, Ordering::SeqCst);
+}
+
+pub fn repl_interrupt_count() -> usize {
+    REPL_INTERRUPT_COUNT.load(Ordering::SeqCst)
+}
+
+pub fn repl_runtime_call_active() -> bool {
+    REPL_RUNTIME_CALL_ACTIVE.load(Ordering::SeqCst)
+}
+
+/// Async-signal-safe notice for a Ctrl-C received inside a host runtime call.
+pub fn warn_repl_runtime_call_stopping() {
+    if !repl_runtime_call_active() || REPL_INTERRUPT_WARNING_EMITTED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    #[cfg(unix)]
+    {
+        const MESSAGE: &[u8] = b"\r\nwarning: interrupt requested; waiting for active external I/O to stop\r\n";
+        unsafe {
+            write(2, MESSAGE.as_ptr(), MESSAGE.len());
+        }
+    }
+}
+
+struct ReplRuntimeCallGuard(bool);
+
+impl ReplRuntimeCallGuard {
+    fn new(active: bool) -> Self {
+        if active {
+            REPL_RUNTIME_CALL_ACTIVE.store(true, Ordering::SeqCst);
+        }
+        Self(active)
+    }
+}
+
+impl Drop for ReplRuntimeCallGuard {
+    fn drop(&mut self) {
+        if self.0 {
+            REPL_RUNTIME_CALL_ACTIVE.store(false, Ordering::SeqCst);
+            if !std::thread::panicking() && repl_interrupt_count() > 0 {
+                std::panic::resume_unwind(Box::new(ReplInterrupted));
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+struct ReplInterrupted;
+
+#[derive(Debug)]
+pub enum ReplStepError {
+    Diagnostic(Diagnostic),
+    Interrupted,
+}
 
 use Interpreter::{Interp, DEV_FUEL_BUDGET, FUEL_BUDGET};
 use Purity::check_purity;
@@ -79,6 +165,7 @@ pub fn run_build_entry(
         repl_mode: false,
         repl_grants: Vec::new(),
         repl_authorizer: None,
+        repl_interruptible: false,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
         globals: &program.globals,
@@ -237,6 +324,7 @@ pub fn evaluate_with_imports_opts(
         repl_mode: false,
         repl_grants: Vec::new(),
         repl_authorizer: None,
+        repl_interruptible: false,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
         globals,
@@ -280,6 +368,7 @@ pub fn evaluate_with_imports_opts_collecting(
         repl_mode: false,
         repl_grants: Vec::new(),
         repl_authorizer: None,
+        repl_interruptible: false,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
         globals,
@@ -359,6 +448,7 @@ pub fn run_main(
         repl_mode: false,
         repl_grants: Vec::new(),
         repl_authorizer: None,
+        repl_interruptible: false,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
         globals: &program.globals,
@@ -401,6 +491,7 @@ pub fn run_main_debug(
         repl_mode: false,
         repl_grants: Vec::new(),
         repl_authorizer: None,
+        repl_interruptible: false,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
         globals: empty_globals(),
@@ -439,6 +530,7 @@ pub fn run_main_value(
         repl_mode: false,
         repl_grants: Vec::new(),
         repl_authorizer: None,
+        repl_interruptible: false,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
         globals: empty_globals(),
@@ -480,6 +572,7 @@ pub fn run_main_with_fuel(
         repl_mode: false,
         repl_grants: Vec::new(),
         repl_authorizer: None,
+        repl_interruptible: false,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
         globals: empty_globals(),
@@ -519,6 +612,7 @@ pub fn run_repl_main_with_fuel(
         repl_mode: true,
         repl_grants: Vec::new(),
         repl_authorizer: None,
+        repl_interruptible: false,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
         globals: empty_globals(),
@@ -561,6 +655,52 @@ pub fn run_repl_step(
     core_imports: &HashMap<String, String>,
     authorizer: &mut dyn ReplAuthorizer,
 ) -> Result<Option<CtValue>, Diagnostic> {
+    match run_repl_step_inner(
+        stmts, funcs, base_dir, sink, scope, fuel, suppress, core_imports, authorizer, false,
+    ) {
+        Ok(value) => Ok(value),
+        Err(ReplStepError::Diagnostic(d)) => Err(d),
+        Err(ReplStepError::Interrupted) => unreachable!("non-interruptible REPL step interrupted"),
+    }
+}
+
+/// Raw interactive variant. Ctrl-C is polled at every interpreter burn and
+/// returned as control flow, not rendered as a compiler diagnostic.
+pub fn run_repl_step_interruptible(
+    stmts: &[crate::AST::Stmt],
+    funcs: &HashMap<String, &Func>,
+    base_dir: &Path,
+    sink: &mut DevSink,
+    scope: &mut HashMap<String, CtValue>,
+    fuel: u64,
+    suppress: bool,
+    core_imports: &HashMap<String, String>,
+    authorizer: &mut dyn ReplAuthorizer,
+) -> Result<Option<CtValue>, ReplStepError> {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        run_repl_step_inner(
+            stmts, funcs, base_dir, sink, scope, fuel, suppress, core_imports, authorizer, true,
+        )
+    }));
+    match result {
+        Ok(result) => result,
+        Err(payload) if payload.is::<ReplInterrupted>() => Err(ReplStepError::Interrupted),
+        Err(payload) => std::panic::resume_unwind(payload),
+    }
+}
+
+fn run_repl_step_inner(
+    stmts: &[crate::AST::Stmt],
+    funcs: &HashMap<String, &Func>,
+    base_dir: &Path,
+    sink: &mut DevSink,
+    scope: &mut HashMap<String, CtValue>,
+    fuel: u64,
+    suppress: bool,
+    core_imports: &HashMap<String, String>,
+    authorizer: &mut dyn ReplAuthorizer,
+    interruptible: bool,
+) -> Result<Option<CtValue>, ReplStepError> {
     let mut interp = Interp {
         funcs,
         base_dir,
@@ -576,6 +716,7 @@ pub fn run_repl_step(
         repl_mode: true,
         repl_grants: Vec::new(),
         repl_authorizer: Some(authorizer),
+        repl_interruptible: interruptible,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
         globals: empty_globals(),
@@ -591,7 +732,7 @@ pub fn run_repl_step(
         Some(pair) => pair,
         None => return Ok(None),
     };
-    interp.exec_block(head, scope)?;
+    interp.exec_block(head, scope).map_err(ReplStepError::Diagnostic)?;
     // Determine if the last statement should produce an echo value.
     // Case 1: `Stmt::Val` named `__repl_echo__` — the sentinel that `classify`
     //   injects for bare-expression inputs (e.g. `1 + 2` → `__repl_echo__ :: 1 + 2`).
@@ -600,24 +741,24 @@ pub fn run_repl_step(
     let echo_bare = !suppress && matches!(last, crate::AST::Stmt::Expr(_));
     match last {
         crate::AST::Stmt::Val(b) if !suppress && b.name == "__repl_echo__" => {
-            let v = interp.eval(&b.init, scope)?;
+            let v = interp.eval(&b.init, scope).map_err(ReplStepError::Diagnostic)?;
             Ok(Some(v))
         }
         crate::AST::Stmt::Val(b) => {
-            let v = interp.eval(&b.init, scope)?;
+            let v = interp.eval(&b.init, scope).map_err(ReplStepError::Diagnostic)?;
             if let Some(pat) = &b.pattern {
-                interp.bind_pattern(pat, v, scope)?;
+                interp.bind_pattern(pat, v, scope).map_err(ReplStepError::Diagnostic)?;
             } else {
                 scope.insert(b.name.clone(), v);
             }
             Ok(None)
         }
         crate::AST::Stmt::Expr(e) if echo_bare => {
-            let v = interp.eval(e, scope)?;
+            let v = interp.eval(e, scope).map_err(ReplStepError::Diagnostic)?;
             Ok(Some(v))
         }
         other => {
-            interp.exec_stmt(other, scope)?;
+            interp.exec_stmt(other, scope).map_err(ReplStepError::Diagnostic)?;
             Ok(None)
         }
     }
@@ -653,6 +794,7 @@ pub fn run_block_with_imports(
         repl_mode: false,
         repl_grants: Vec::new(),
         repl_authorizer: None,
+        repl_interruptible: false,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
         globals,
@@ -784,6 +926,7 @@ pub fn evaluate_derive_body(
         repl_mode: false,
         repl_grants: Vec::new(),
         repl_authorizer: None,
+        repl_interruptible: false,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
         globals: empty_globals(),

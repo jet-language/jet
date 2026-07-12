@@ -1188,6 +1188,168 @@ fn repl_tty_ctrl_c_reaches_child_group_and_restores_input() {
     std::fs::remove_dir_all(root).ok();
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn repl_tty_ctrl_c_cancels_compute_atomically_and_records_turn() {
+    use std::process::Command;
+
+    let shell = r#"
+{
+  sleep 0.2
+  printf 'kept :: 42\r'
+  sleep 0.15
+  printf 'partial :: 1\033\rloop { }\033\r\r'
+  sleep 0.3
+  printf '\003'
+  sleep 0.15
+  printf 'kept\rpartial\r:turns\r:quit\r'
+} | timeout 6s script -qec '"$JET_REPL_BIN" repl' /dev/null
+"#;
+    let started = std::time::Instant::now();
+    let output = Command::new("sh")
+        .args(["-c", shell])
+        .env("JET_REPL_BIN", env!("CARGO_BIN_EXE_jet"))
+        .env("JET_REPL_HISTORY", "off")
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let transcript = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "PTY compute interrupt failed: {transcript}");
+    assert!(started.elapsed() < std::time::Duration::from_secs(3), "interrupt missed 100ms recovery path");
+    assert!(transcript.contains("Interrupted. External effects already performed were not rolled back."), "interrupt notice missing: {transcript}");
+    assert!(transcript.contains("42 : Int"), "prior binding lost: {transcript}");
+    assert!(transcript.contains("E0107") && transcript.contains("partial"), "partial binding committed: {transcript}");
+    assert!(transcript.contains("#2 interrupted"), "interrupted turn not addressable: {transcript}");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn repl_tty_compute_interrupt_returns_within_100ms() {
+    use std::io::{Read as _, Write as _};
+    use std::process::{Command, Stdio};
+    use std::sync::mpsc;
+
+    let mut child = Command::new("script")
+        .args(["-qec", "\"$JET_REPL_BIN\" repl", "/dev/null"])
+        .env("JET_REPL_BIN", env!("CARGO_BIN_EXE_jet"))
+        .env("JET_REPL_HISTORY", "off")
+        .env("NO_COLOR", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("spawn timed raw REPL");
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = child.stdout.take().unwrap();
+    let (tx, rx) = mpsc::channel();
+    let reader = std::thread::spawn(move || {
+        let mut bytes = [0; 4096];
+        while let Ok(count) = stdout.read(&mut bytes) {
+            if count == 0 {
+                break;
+            }
+            if tx.send(bytes[..count].to_vec()).is_err() {
+                break;
+            }
+        }
+    });
+
+    let mut transcript = String::new();
+    let startup_deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    while !transcript.contains("1 user>") && std::time::Instant::now() < startup_deadline {
+        if let Ok(chunk) = rx.recv_timeout(std::time::Duration::from_millis(50)) {
+            transcript.push_str(&String::from_utf8_lossy(&chunk));
+        }
+    }
+    stdin.write_all(b"loop { }\r").unwrap();
+    stdin.flush().unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    let interrupted_at = std::time::Instant::now();
+    stdin.write_all(b"\x03").unwrap();
+    stdin.flush().unwrap();
+    let mut latency = None;
+    while interrupted_at.elapsed() <= std::time::Duration::from_millis(100) {
+        if let Ok(chunk) = rx.recv_timeout(std::time::Duration::from_millis(5)) {
+            transcript.push_str(&String::from_utf8_lossy(&chunk));
+            if transcript.contains("Interrupted. External effects already performed were not rolled back.") {
+                latency = Some(interrupted_at.elapsed());
+                break;
+            }
+        }
+    }
+    if latency.is_some() {
+        let _ = stdin.write_all(b":quit\r");
+        let _ = child.wait();
+    } else {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    drop(rx);
+    reader.join().ok();
+    assert!(latency.is_some(), "prompt missed 100ms interrupt bound: {transcript}");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn repl_tty_ctrl_c_warns_while_blocking_child_stops() {
+    use std::process::Command;
+
+    let root = std::env::temp_dir().join(format!("jet_repl_interrupt_warning_{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    let shell = r#"
+{
+  sleep 0.2
+  printf 'use core.process as process\r'
+  sleep 0.15
+  printf '#Grant(Exec) { caps -> process.run(["sh", "-c", "trap '\''sleep 0.4; exit 130'\'' INT; while :; do :; done"]) ?? panic("run failed") }\r'
+  sleep 0.6
+  printf '\003'
+  sleep 0.8
+  printf ':quit\r'
+} | timeout 6s script -qec '"$JET_REPL_BIN" repl --project "$JET_REPL_ROOT" --allow-exec' /dev/null
+"#;
+    let output = Command::new("sh")
+        .args(["-c", shell])
+        .env("JET_REPL_BIN", env!("CARGO_BIN_EXE_jet"))
+        .env("JET_REPL_ROOT", &root)
+        .env("JET_REPL_HISTORY", "off")
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let transcript = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "PTY blocking interrupt failed: {transcript}");
+    assert!(transcript.contains("waiting for active external I/O to stop"), "blocking warning missing: {transcript}");
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn repl_tty_second_ctrl_c_during_turn_exits_session() {
+    use std::process::Command;
+
+    let shell = r#"
+{
+  sleep 0.2
+  printf 'loop { }\r'
+  sleep 0.3
+  printf '\003'
+  sleep 0.03
+  printf '\003'
+  sleep 0.3
+  printf '40 + 2\r'
+} | timeout 4s script -qec '"$JET_REPL_BIN" repl' /dev/null
+"#;
+    let output = Command::new("sh")
+        .args(["-c", shell])
+        .env("JET_REPL_BIN", env!("CARGO_BIN_EXE_jet"))
+        .env("JET_REPL_HISTORY", "off")
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let transcript = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "second Ctrl-C did not exit: {transcript}");
+    assert!(!transcript.contains("42 : Int"), "REPL accepted input after double interrupt: {transcript}");
+}
+
 #[test]
 fn repl_non_tty_denies_ungranted_files_before_execution() {
     let root = std::env::temp_dir().join(format!("jet_repl_deny_{}", std::process::id()));
@@ -1532,6 +1694,15 @@ fn rerun_plan_gates_effectful_turns_and_lets_pure_turns_auto_replay() {
         p
     });
     assert!(!RerunPlan::plan_needs_confirmation(&pure_only.unwrap()));
+}
+
+#[test]
+fn rerun_plan_keeps_interrupted_turn_addressable() {
+    let mut interrupted = fixture_turn(1, "loop { }", false, None);
+    interrupted.status = ReplTurnStatus::Interrupted;
+    let plan = RerunPlan::build_replay_plan(&[interrupted], 1, None).expect("interrupted turn reruns");
+    assert_eq!(plan.steps.len(), 1);
+    assert_eq!(plan.steps[0].input, "loop { }");
 }
 
 #[test]

@@ -195,6 +195,9 @@ pub(super) struct Interp<'a> {
     /// Host invocation policy callback. Called after concrete arguments are
     /// known and before any ambient operation executes.
     pub(super) repl_authorizer: Option<&'a mut dyn ReplAuthorizer>,
+    /// True only for a live raw-REPL turn. Cancellation uses an internal
+    /// unwind caught at the REPL boundary, never a user diagnostic.
+    pub(super) repl_interruptible: bool,
     /// D-CTEFFECT1 Tier-1: embed_file/embed_bytes inputs accumulated during
     /// this evaluation. Each entry records the relative path and the sha256
     /// of the bytes read, for recording in `.jet/lock`. Drained by the
@@ -242,7 +245,14 @@ pub(super) struct Interp<'a> {
 }
 
 impl<'a> Interp<'a> {
+    pub(super) fn poll_repl_interrupt(&self) {
+        if self.repl_interruptible && super::repl_interrupt_count() > 0 {
+            std::panic::resume_unwind(Box::new(super::ReplInterrupted));
+        }
+    }
+
     pub(super) fn burn(&mut self, span: Span) -> Result<(), Diagnostic> {
+        self.poll_repl_interrupt();
         if self.fuel == 0 {
             // E2202 in whole-program dev mode (E2-M4): the interpreter ran out
             // of fuel, which almost always means an unbounded loop. E0952 in

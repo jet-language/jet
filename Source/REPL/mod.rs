@@ -594,6 +594,7 @@ pub struct ReplTurn {
 pub enum ReplTurnStatus {
     Ok,
     Error,
+    Interrupted,
 }
 
 impl Default for Session {
@@ -748,6 +749,7 @@ fn status_word(status: ReplTurnStatus) -> &'static str {
     match status {
         ReplTurnStatus::Ok => "ok",
         ReplTurnStatus::Error => "error",
+        ReplTurnStatus::Interrupted => "interrupted",
     }
 }
 
@@ -2051,18 +2053,38 @@ pub(crate) fn execute_line(
                 .map(|(k, v)| (k.clone(), v))
                 .collect();
             let mut sink = DevSink::new();
-            match crate::Comptime::run_repl_step(
-                &stmts,
-                &funcs,
-                base_dir,
-                &mut sink,
-                &mut session.scope,
-                REPL_FUEL_BUDGET,
-                suppress,
-                &session.core_imports,
-                authorizer,
-            ) {
+            // A turn commits as one transaction. Interpreter writes land in
+            // this private scope and become session-visible only on success.
+            let mut trial_scope = session.scope.clone();
+            let result = if crate::Comptime::repl_interruptible_turn_active() {
+                crate::Comptime::run_repl_step_interruptible(
+                    &stmts,
+                    &funcs,
+                    base_dir,
+                    &mut sink,
+                    &mut trial_scope,
+                    REPL_FUEL_BUDGET,
+                    suppress,
+                    &session.core_imports,
+                    authorizer,
+                )
+            } else {
+                crate::Comptime::run_repl_step(
+                    &stmts,
+                    &funcs,
+                    base_dir,
+                    &mut sink,
+                    &mut trial_scope,
+                    REPL_FUEL_BUDGET,
+                    suppress,
+                    &session.core_imports,
+                    authorizer,
+                )
+                .map_err(crate::Comptime::ReplStepError::Diagnostic)
+            };
+            match result {
                 Ok(echo_val) => {
+                    session.scope = trial_scope;
                     let mut summary = String::new();
                     // Track moves: bindings consumed in this input are gone.
                     session.moved_names.extend(newly_moved);
@@ -2126,7 +2148,17 @@ pub(crate) fn execute_line(
                         }
                     }
                 }
-                Err(d) => {
+                Err(crate::Comptime::ReplStepError::Interrupted) => {
+                    qprintln!("Interrupted. External effects already performed were not rolled back.");
+                    session.record_turn_ex(
+                        trimmed,
+                        ReplTurnStatus::Interrupted,
+                        "Interrupted".to_string(),
+                        looks_effectful(trimmed) || !sink.stdout.is_empty() || !sink.stderr.is_empty(),
+                        None,
+                    );
+                }
+                Err(crate::Comptime::ReplStepError::Diagnostic(d)) => {
                     let d = if d.code == "E2202" { e1801(REPL_FUEL_BUDGET) } else { d };
                     if !quiet {
                         render_diags(&step_src, trimmed, std::slice::from_ref(&d), color);
