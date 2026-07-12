@@ -487,12 +487,12 @@ fn build_definition_facts(
                 && def.def_span.end <= node.span.end
                 && !matches!(def.kind, SymbolKind::Local { .. } | SymbolKind::Param { .. } | SymbolKind::Field { .. } | SymbolKind::EnumVariant { .. })
         }).min_by_key(|def| def.def_span.start) else { continue };
-        // This is an ancestry identity, not a body fingerprint. Top-level
-        // siblings of the same semantic kind intentionally collide; merge may
-        // use it only when the candidate is unique. Names, file paths,
-        // signatures, and descendant/body shapes all remain independently
-        // classifiable and cannot silently turn a collision into identity.
-        let structural = format!("root|{}|{}", node.slot, definition_kind(&def.kind));
+        // Definition IDs identify a checked declaration, never merely its
+        // ancestry class. `def.identity` is the compiler's semantic identity
+        // (module scope + declared name), so same-kind siblings cannot collapse
+        // onto one ID. Rename/move pairing remains a separate, explicit merge
+        // operation; it must not be smuggled into the identity hash.
+        let structural = format!("{}|{}", definition_kind(&def.kind), def.identity);
         let source = module.source.get(node.span.start..node.span.end).unwrap_or("");
         out.push(DefinitionFact {
             stable_id: format!("def:{}", &jet_foundation::SHA256::sha256_hex(structural.as_bytes())[..16]),

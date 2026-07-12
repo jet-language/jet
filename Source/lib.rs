@@ -47,6 +47,7 @@ pub use jet_driver::{
 pub use jetpack as Jetpack;
 pub use jet_queries as Queries;
 pub mod BuildCache;
+pub mod BudgetProviders;
 pub mod CLI;
 pub mod Canvas;
 pub mod Compiler;

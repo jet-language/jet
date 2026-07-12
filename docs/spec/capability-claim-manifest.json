@@ -905,7 +905,7 @@
             {
               "role": "gap",
               "kind": "file",
-              "path": "crates/jetpack/src/Prelude/Crypto.rs",
+              "path": "crates/jet-pkg-model/src/Prelude/Crypto.rs",
               "anchor": "let mut state: u64 = 0x4d595df4d0f33173",
               "why": "Deterministic fallback is decisive security evidence.",
               "contentDigest": "e52d138ae4425e295ded87ed1dbc8e21396281d3fb6cb12991a2ca87ec2c1a01"
@@ -1272,7 +1272,7 @@
       },
       "class": "facade",
       "disposition": "open",
-      "reviewerRationale": "Ratchets exist, but root still owns jetpack/jetos binaries and driver imports the Jetpack engine.",
+      "reviewerRationale": "Card #367 slice 1+2 landed: jet-driver depends on jet-pkg-model (not jetpack), and jetpack/jetos binary ownership moved into crates/jetpack + crates/jetos (root no longer declares their [[bin]] targets). Root still directly depends on the jetpack crate/engine (Source/lib.rs's `Jetpack` alias, CmdCompile.rs, Canvas, LSP, main.rs) — that decoupling is card #367 slice 3, still open.",
       "acceptanceLanes": [
         {
           "id": "canonical-product-split",
@@ -1291,9 +1291,9 @@
               "role": "gap",
               "kind": "file",
               "path": "Cargo.toml",
-              "anchor": "name = \"jetos\"",
-              "why": "Root package still declares the JetOS binary.",
-              "contentDigest": "82b106775834b5a590529a0b2b5f1ddb98dff7577117a797e177c0082411c0ea"
+              "anchor": "jetpack = { path = \"crates/jetpack\" }",
+              "why": "Root package still directly depends on the jetpack crate/engine (slice 3 of card #367 is not done).",
+              "contentDigest": "bf3808bedbe49066905977a46b5d940db7fd851caec3093c00d0f087f34854e5"
             }
           ]
         }

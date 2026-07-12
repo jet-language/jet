@@ -1170,6 +1170,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
             is_inline: false,
             is_inline_always: false,
             inline_span: None,
+                    inline_foreign: None,
                     body: std::mem::take(&mut t.body),
                 };
                 diags.extend(check_func_body(
@@ -3023,6 +3024,7 @@ pub(crate) fn check_error_conv_body(
         web_marker: None,
         pre: Vec::new(),
         post: Vec::new(),
+        inline_foreign: None,
         body: std::mem::take(&mut ec.body),
     };
     let d = check_func_body(
@@ -3358,6 +3360,7 @@ pub(crate) fn synthesize_delegation_method(
         web_marker: None,
         pre: Vec::new(),
         post: Vec::new(),
+        inline_foreign: None,
         body: vec![body_stmt],
     }
 }
@@ -3426,6 +3429,7 @@ pub(crate) fn synthesize_default_method(
         web_marker: None,
         pre: Vec::new(),
         post: Vec::new(),
+        inline_foreign: None,
         body: body.to_vec(),
     }
 }

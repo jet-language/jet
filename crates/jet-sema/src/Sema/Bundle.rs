@@ -201,12 +201,20 @@ fn substitute_type_in_func(mut f: Func, param_name: &str, replacement: &Type) ->
     f
 }
 
-fn apply_type_args_to_func(f: Func, params: &[GenericModuleParam], args: &[ModuleArg]) -> Func {
+#[derive(Clone)]
+enum ResolvedModuleParam { Type { name:String, bound:Option<String> }, Value { name:String, ty:Type } }
+
+fn apply_type_args_to_func(f: Func, params: &[ResolvedModuleParam], args: &[ResolvedModuleArg]) -> Func {
     let mut out = f;
     for (param, arg) in params.iter().zip(args.iter()) {
         match (param, arg) {
-            (GenericModuleParam::TypeParam { name, .. }, ModuleArg::Type(ty, _)) => {
+            (ResolvedModuleParam::Type { name, .. }, ResolvedModuleArg::Type(ty)) => {
                 out = substitute_type_in_func(out, name, ty);
+            }
+            (ResolvedModuleParam::Value { .. }, ResolvedModuleArg::Value(value, bytes)) => {
+                // Value arguments affect template identity/caching, not function
+                // signature substitution. Keep both checked representations live.
+                let _ = (value, bytes);
             }
             _ => {} // value params are left as-is for now (would need const-eval)
         }
@@ -220,12 +228,32 @@ fn apply_type_args_to_func(f: Func, params: &[GenericModuleParam], args: &[Modul
 struct TemplateInfo {
     def: GenericModuleDef,
     non_fn_kinds: Vec<&'static str>,
+    params: Vec<ResolvedModuleParam>,
 }
+
+#[derive(Clone)]
+enum ResolvedModuleArg { Type(Type), Value(crate::AST::CtValue, Vec<u8>) }
+
+fn resolve_params(def:&GenericModuleDef,traits:&TraitRegistry)->Vec<ResolvedModuleParam>{def.params.iter().map(|p|match p{GenericModuleParam::Bare{name,..}=>ResolvedModuleParam::Type{name:name.clone(),bound:None},GenericModuleParam::Annotated{name,annotation,..}=>{if let Type::Named(bound)=annotation{if traits.traits.contains_key(bound){return ResolvedModuleParam::Type{name:name.clone(),bound:Some(bound.clone())};}}ResolvedModuleParam::Value{name:name.clone(),ty:annotation.clone()}}}).collect()}
+
+fn type_name(ty:&Type)->String{match ty{Type::Int=>"Int".into(),Type::Bool=>"Bool".into(),Type::Char=>"Char".into(),Type::String=>"String".into(),Type::Named(n)=>n.clone(),Type::Apply{name,..}=>name.clone(),other=>format!("{other:?}")}}
+fn value_type(value:&crate::AST::CtValue)->Option<Type>{match value{crate::AST::CtValue::Bool(_)=>Some(Type::Bool),crate::AST::CtValue::Int(_)=>Some(Type::Int),crate::AST::CtValue::Char(_)=>Some(Type::Char),crate::AST::CtValue::Str(_)=>Some(Type::String),crate::AST::CtValue::Enum{type_name,args,..}if args.is_empty()=>Some(Type::Named(type_name.clone())),_=>None}}
+fn normalized_value(value:&crate::AST::CtValue)->Option<Vec<u8>>{let mut out=Vec::new();match value{crate::AST::CtValue::Bool(v)=>{out.extend_from_slice(&[1,u8::from(*v)]);},crate::AST::CtValue::Int(v)=>{out.push(2);out.extend_from_slice(&v.to_be_bytes());},crate::AST::CtValue::Char(v)=>{out.push(3);out.extend_from_slice(&(*v as u32).to_be_bytes());},crate::AST::CtValue::Str(v)=>{out.push(4);out.extend_from_slice(&(v.len() as u64).to_be_bytes());out.extend_from_slice(v.as_bytes());},crate::AST::CtValue::Enum{type_name,variant,args}if args.is_empty()=>{out.push(5);for text in [type_name,variant]{out.extend_from_slice(&(text.len() as u64).to_be_bytes());out.extend_from_slice(text.as_bytes());}},_=>return None}Some(out)}
+
+fn module_arg_expr(arg:&ModuleArg)->Option<Expr>{match arg{ModuleArg::Value(expr,_)=>Some(expr.clone()),ModuleArg::Type(Type::Named(name),span)=>Some(Expr::Ident(name.clone(),*span)),_=>None}}
+
+fn resolve_args(alias:&ModuleAliasDef,template:&TemplateInfo,traits:&TraitRegistry,funcs:&HashMap<String,&Func>,globals:&HashMap<String,crate::AST::CtValue>,enums:&HashMap<String,bool>,diags:&mut Vec<Diagnostic>)->Option<Vec<ResolvedModuleArg>>{let mut out=Vec::new();for(param,arg)in template.params.iter().zip(&alias.args){match param{ResolvedModuleParam::Type{name,bound}=>{let ty=match arg{ModuleArg::Type(ty,_)=>ty.clone(),ModuleArg::Value(Expr::Ident(n,_),_)=>Type::Named(n.clone()),_=>{diags.push(Diagnostic::error("E0852",format!("type argument for `{name}` does not satisfy its module bound"),"this slot resolves to a type parameter, but the argument is a value expression".into(),"pass a type that satisfies the declared bound".into(),Some(arg.span())));return None;}};if let Some(bound)=bound{let identity=type_name(&ty);if !traits.implements_trait(&identity,bound){diags.push(Diagnostic::error("E0852",format!("type argument `{identity}` does not satisfy `{bound}`"),format!("generic module parameter `{name}` requires the `{bound}` bound"),format!("pass a type that implements `{bound}`"),Some(arg.span())));return None;}}out.push(ResolvedModuleArg::Type(ty));},ResolvedModuleParam::Value{name,ty}=>{let Some(expr)=module_arg_expr(arg)else{diags.push(Diagnostic::error("E0853",format!("value argument for `{name}` has the wrong type"),format!("this slot requires an exact `{}` Tier-0 value",type_name(ty)),format!("pass a compile-time `{}` value without conversion",type_name(ty)),Some(arg.span())));return None;};let value=match crate::Comptime::evaluate(&expr,funcs,&HashSet::new(),Path::new("."),globals){Ok(v)=>v,Err(_)=>{diags.push(Diagnostic::error("E0853",format!("value argument for `{name}` has the wrong type"),format!("the argument did not evaluate to an exact `{}` Tier-0 value",type_name(ty)),format!("pass a pure compile-time `{}` value",type_name(ty)),Some(arg.span())));return None;}};let actual=value_type(&value);let allowed=match ty{Type::Bool|Type::Int|Type::Char|Type::String=>true,Type::Named(n)=>enums.get(n).copied()==Some(true),_=>false};if !allowed||actual.as_ref()!=Some(ty){diags.push(Diagnostic::error("E0853",format!("value argument for `{name}` has the wrong type"),format!("expected exact `{}`, found `{}`",type_name(ty),actual.as_ref().map(type_name).unwrap_or_else(||"non-Tier-0 value".into())),format!("pass a compile-time `{}` value without conversion",type_name(ty)),Some(arg.span())));return None;}let bytes=normalized_value(&value).expect("allowed Tier-0 value normalizes");out.push(ResolvedModuleArg::Value(value,bytes));}}}Some(out)}
+
+trait ModuleArgSpan{fn span(&self)->crate::Diagnostics::Span;}impl ModuleArgSpan for ModuleArg{fn span(&self)->crate::Diagnostics::Span{match self{ModuleArg::Type(_,s)|ModuleArg::Value(_,s)=>*s}}}
 
 fn expand_alias(
     alias: &ModuleAliasDef,
     templates: &std::collections::HashMap<String, TemplateInfo>,
     diags: &mut Vec<Diagnostic>,
+    traits:&TraitRegistry,
+    funcs:&HashMap<String,&Func>,
+    globals:&HashMap<String,crate::AST::CtValue>,
+    enums:&HashMap<String,bool>,
 ) -> Option<CodeModule> {
     let info = match templates.get(&alias.target) {
         Some(t) => t,
@@ -260,10 +288,7 @@ fn expand_alias(
                 template
                     .params
                     .iter()
-                    .map(|p| match p {
-                        GenericModuleParam::TypeParam { name, .. } => name.as_str(),
-                        GenericModuleParam::ValueParam { name, .. } => name.as_str(),
-                    })
+                    .map(GenericModuleParam::name)
                     .collect::<Vec<_>>()
                     .join(", "),
                 template.params.len(),
@@ -289,13 +314,14 @@ fn expand_alias(
     if !info.non_fn_kinds.is_empty() {
         return None;
     }
+    let resolved_args=resolve_args(alias,info,traits,funcs,globals,enums,diags)?;
     // Substitute type args into each function signature in the template body.
     let body: Vec<Item> = template
         .body
         .iter()
         .filter_map(|item| {
             if let Item::Func(f) = item {
-                let expanded = apply_type_args_to_func(f.clone(), &template.params, &alias.args);
+                let expanded = apply_type_args_to_func(f.clone(), &info.params, &resolved_args);
                 Some(Item::Func(expanded))
             } else {
                 None // already reported above
@@ -321,6 +347,10 @@ pub(crate) fn expand_generic_module_aliases(
     diags: &mut Vec<Diagnostic>,
 ) {
     for module in bundle.modules.iter_mut() {
+        let mut traits=TraitRegistry::default();traits.register_items(&module.items,diags);
+        let enums:HashMap<String,bool>=module.items.iter().filter_map(|item|if let Item::Enum(def)=item{Some((def.name.clone(),def.variants.iter().all(|v|matches!(v.payload,VariantPayload::Unit))))}else{None}).collect();
+        let funcs:HashMap<String,&Func>=module.items.iter().filter_map(|item|if let Item::Func(f)=item{Some((f.name.clone(),f))}else{None}).collect();
+        let mut globals:HashMap<String,crate::AST::CtValue>=HashMap::new();for item in &module.items{if let Item::Const(c)=item{if let Ok(value)=crate::Comptime::evaluate(&c.value,&funcs,&HashSet::new(),Path::new("."),&globals){globals.insert(c.name.clone(),value);}}}
         // Collect templates by name, recording non-Func item kinds for E0854.
         let templates: std::collections::HashMap<String, TemplateInfo> = module
             .items
@@ -364,6 +394,7 @@ pub(crate) fn expand_generic_module_aliases(
                                 span: gm.span,
                             },
                             non_fn_kinds,
+                            params: resolve_params(gm,&traits),
                         },
                     ))
                 } else {
@@ -376,7 +407,7 @@ pub(crate) fn expand_generic_module_aliases(
         let mut expansions: Vec<(usize, CodeModule)> = Vec::new();
         for (idx, item) in module.items.iter().enumerate() {
             if let Item::ModuleAlias(alias) = item {
-                if let Some(cm) = expand_alias(alias, &templates, diags) {
+                if let Some(cm) = expand_alias(alias, &templates, diags,&traits,&funcs,&globals,&enums) {
                     expansions.push((idx, cm));
                 }
             }
@@ -2868,6 +2899,7 @@ pub(crate) fn check_module_bodies(
                     web_marker: None,
                     pre: Vec::new(),
                     post: Vec::new(),
+                    inline_foreign: None,
                     body: std::mem::take(&mut t.body),
                 };
                 diags.extend(check_func_body_bundle(
@@ -2931,6 +2963,7 @@ pub(crate) fn check_module_bodies(
                     web_marker: None,
                     pre: Vec::new(),
                     post: Vec::new(),
+                    inline_foreign: None,
                     body: std::mem::take(&mut b.body),
                 };
                 diags.extend(check_func_body_bundle(

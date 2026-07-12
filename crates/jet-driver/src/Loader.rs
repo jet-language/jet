@@ -57,14 +57,14 @@ impl PkgResolution {
 /// "run `jetpack build`" (E0983), never a silent network fetch.
 fn collect_pkg_resolution(raw: &str) -> PkgResolution {
     let mut declared_deps = HashSet::new();
-    if let Ok(pm) = crate::Jetpack::PackageManifest::parse(raw) {
+    if let Ok(pm) = crate::PackageManifest::parse(raw) {
         for dep in &pm.deps {
             // S59/D-CFFI2: a `c@…` native-library dep is a link dep, not a Jet
             // package — it must not shadow `use <pkg>` resolution (e.g. a dep
             // named `c`). Skip it here; CFFI.rs reads it for link flags.
             if matches!(
                 dep.source,
-                crate::Jetpack::PackageManifest::DepSource::CLib { .. }
+                crate::PackageManifest::DepSource::CLib { .. }
             ) {
                 continue;
             }
@@ -74,8 +74,8 @@ fn collect_pkg_resolution(raw: &str) -> PkgResolution {
 
     let mut realized_libs = HashMap::new();
     let mut realized_exes = HashSet::new();
-    let roots = crate::Jetpack::Store::resolve();
-    for entry in crate::Jetpack::Store::list(&roots) {
+    let roots = crate::Store::resolve();
+    for entry in crate::Store::list(&roots) {
         if entry.bin.is_empty() {
             // A realized `library` stages source with an empty `bin` (U10).
             let out = PathBuf::from(&entry.out);
@@ -119,6 +119,27 @@ pub fn load_entry_with_overlays(
     entry_path: &str,
     overlays: &[(&Path, &str)],
     for_check: bool,
+) -> Result<ProgramBundle, Vec<Diagnostic>> {
+    load_entry_with_overlays_mode(entry_path, overlays, for_check, false)
+}
+
+/// Structural tooling loads adjacent modules named by `use alias.Item` from
+/// the candidate file's real directory. Normal compilation keeps D-MOD3's
+/// explicit already-loaded-alias rule; this mode supplies the project context
+/// an editor/merge operation has without rewriting the candidate source.
+pub fn load_entry_with_overlays_and_import_root(
+    entry_path: &str,
+    overlays: &[(&Path, &str)],
+    for_check: bool,
+) -> Result<ProgramBundle, Vec<Diagnostic>> {
+    load_entry_with_overlays_mode(entry_path, overlays, for_check, true)
+}
+
+fn load_entry_with_overlays_mode(
+    entry_path: &str,
+    overlays: &[(&Path, &str)],
+    for_check: bool,
+    load_adjacent_unqualified: bool,
 ) -> Result<ProgramBundle, Vec<Diagnostic>> {
     let entry = PathBuf::from(entry_path);
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -191,14 +212,14 @@ pub fn load_entry_with_overlays(
 
                 // E1212/E1213: each packages: entry must have exactly one
                 // module declaration in the source tree (U10 Chunk 3).
-                if let Ok(pm) = crate::Jetpack::PackageManifest::parse(&raw) {
+                if let Ok(pm) = crate::PackageManifest::parse(&raw) {
                     for pkg in &pm.packages {
-                        match crate::Jetpack::PackageManifest::discover_module_in(
+                        match crate::PackageManifest::discover_module_in(
                             &manifest_dir,
                             &pkg.name,
                         ) {
                             Ok(_) => {}
-                            Err(crate::Jetpack::PackageManifest::DiscoveryError::NotFound {
+                            Err(crate::PackageManifest::DiscoveryError::NotFound {
                                 name,
                             }) => {
                                 return Err(vec![Manifest::e1212(
@@ -206,7 +227,7 @@ pub fn load_entry_with_overlays(
                                     &name,
                                 )]);
                             }
-                            Err(crate::Jetpack::PackageManifest::DiscoveryError::Ambiguous {
+                            Err(crate::PackageManifest::DiscoveryError::Ambiguous {
                                 name,
                                 paths,
                             }) => {
@@ -242,11 +263,11 @@ pub fn load_entry_with_overlays(
         let (toks, lex_diags) = crate::Lexer::lex(&raw);
         if lex_diags.is_empty() {
             if let Ok(prog) = crate::Parser::parse(&toks) {
-                for dep in crate::Jetpack::ScriptDeps::collect(&prog) {
-                    if !crate::Jetpack::ScriptDeps::is_pinned(&dep.selector) {
-                        inline_dep_lints.push(crate::Jetpack::ScriptDeps::l0203_unpinned(&dep));
+                for dep in crate::ScriptDeps::collect(&prog) {
+                    if !crate::ScriptDeps::is_pinned(&dep.selector) {
+                        inline_dep_lints.push(crate::ScriptDeps::l0203_unpinned(&dep));
                     }
-                    match crate::Jetpack::ScriptDeps::resolve(&dep, &entry_dir) {
+                    match crate::ScriptDeps::resolve(&dep, &entry_dir) {
                         Ok(resolved) => {
                             resolution
                                 .realized_libs
@@ -254,7 +275,7 @@ pub fn load_entry_with_overlays(
                                 .or_insert(resolved.dir);
                         }
                         Err(reason) => {
-                            return Err(vec![crate::Jetpack::ScriptDeps::e1253(&dep, &reason)]);
+                            return Err(vec![crate::ScriptDeps::e1253(&dep, &reason)]);
                         }
                     }
                 }
@@ -281,6 +302,45 @@ pub fn load_entry_with_overlays(
         for_check,
         &mut parse_teaching,
     )?;
+
+    if load_adjacent_unqualified {
+        let aliases: Vec<String> = modules[0]
+            .imports
+            .iter()
+            .filter_map(|import| match &import.kind {
+                ImportKind::Unqualified { module_alias, .. } => Some(module_alias.clone()),
+                _ => None,
+            })
+            .collect();
+        for alias in aliases {
+            if modules.iter().any(|module| module.alias == alias) {
+                continue;
+            }
+            let target = entry_abs
+                .parent()
+                .unwrap_or(Path::new("."))
+                .join(&alias)
+                .with_extension(Syntax::FILE_EXT);
+            let norm = normalize_path(&target);
+            let staged = overlays.iter().any(|(path, _)| normalize_path(path) == norm);
+            if target.is_file() || staged {
+                let display = relative_display(&project_root, &target);
+                load_file(
+                    &target,
+                    &display,
+                    &project_root,
+                    &pkg_dep_dirs,
+                    &pkg_resolution,
+                    &mut modules,
+                    &mut path_to_idx,
+                    &mut stack,
+                    overlays,
+                    for_check,
+                    &mut parse_teaching,
+                )?;
+            }
+        }
+    }
 
     let entry_idx = *path_to_idx.get(&entry_abs).ok_or_else(|| {
         vec![Diagnostic::error(

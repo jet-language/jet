@@ -177,6 +177,7 @@ fn build_default_func(name: &str, ty: &Type, default: &Expr, span: Span) -> Func
         web_marker: None,
         pre: Vec::new(),
         post: Vec::new(),
+        inline_foreign: None,
         body: vec![Stmt::Return(Some(default.clone()), span)],
     }
 }
@@ -260,6 +261,7 @@ fn build_converter_func(name: &str, old_ty: &Type, new_ty: &Type, conv: &Expr, s
         web_marker: None,
         pre: Vec::new(),
         post: Vec::new(),
+        inline_foreign: None,
         body,
     }
 }

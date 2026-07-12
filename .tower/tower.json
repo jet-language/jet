@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 520,
-    "rev": 4641,
+    "rev": 4678,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -1047,7 +1047,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-07-11",
+      "updated": "2026-07-12",
       "workOrder": 47,
       "criteria": [
         {
@@ -2478,7 +2478,7 @@
     },
     {
       "milestoneId": null,
-      "assignee": null,
+      "assignee": "codex-orchestrator",
       "id": "c2yj0nk5",
       "num": 142,
       "title": "Full logic-programming subset (multi-answer / failure-driven)",
@@ -2486,7 +2486,7 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "Durable plan: docs/plans/epoch-3/logic-programming-subset.md",
       "blockedBy": [],
@@ -2543,16 +2543,44 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-07-10",
+      "updated": "2026-07-12",
       "workOrder": 106,
-      "claimedAt": "2026-07-06T20:26:15.440Z",
-      "criteria": [],
+      "claimedAt": "2026-07-12T18:10:00.474Z",
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Ratified D-SOLVER-LIB1 finite explicit Solver API is sema-checked and executes identically in AOT, default dev/JIT, and comptime where applicable; no THandleOp::Solver* unsupported path remains.",
+          "status": "verified",
+          "metBy": "terra-142-jit",
+          "verifiedBy": "codex-orchestrator",
+          "evidence": "Parent reran jet-jit compile and resident JIT vs AOT parity test 1/1 green.",
+          "at": "2026-07-12T18:16:04.252Z"
+        },
+        {
+          "n": 2,
+          "text": "Deterministic seed/insertion order, require/failure_count/status behavior, ownership, invalid calls, reserved-name protection, and no hidden backtracking/unification are covered by focused positive and hostile tests.",
+          "status": "verified",
+          "metBy": "codex-main",
+          "verifiedBy": "codex-orchestrator",
+          "evidence": "Parent reran four focused corelib solver state/hostile tests 4/4 and ring allocation classification 1/1 green.",
+          "at": "2026-07-12T18:18:50.131Z"
+        },
+        {
+          "n": 3,
+          "text": "Syntax law, Core surface/ring classification, docs, executable solve_puzzle example/golden, formatter, and AOT/JIT parity are independently verified.",
+          "status": "verified",
+          "metBy": "terra-142-jit",
+          "verifiedBy": "codex-orchestrator",
+          "evidence": "Parent cargo build green; direct jet run solve_puzzle produced key pairs, wins=2, status=failed, failures=7; AOT/JIT differential and ring tests green. Full golden has unrelated trait/HTTP/terminal failures, none solver-related.",
+          "at": "2026-07-12T18:18:50.417Z"
+        }
+      ],
       "needsAcceptance": false,
       "refs": []
     },
     {
       "milestoneId": null,
-      "assignee": null,
+      "assignee": "codex-orchestrator",
       "id": "c2zj0p7p",
       "num": 143,
       "title": "Structural merge (merge by semantic identity, not text)",
@@ -2722,7 +2750,8 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-12T18:20:01.652Z"
     },
     {
       "milestoneId": "e3-universal-product-parity",
@@ -3788,8 +3817,13 @@
       "plan": "Plan seed from D-WD14:\n1. Re-read the ratified ballot and current spec/Tower plans for overlap.\n2. Split into vertical slices if the feature spans compiler, Core, Jetpack, GUI, and OS surfaces.\n3. Queue exact-syntax/subsurface ballots before parser, manifest, CLI, or API surface changes.\n4. Implement the first ungated vertical slice end to end with executable examples and diagnostics.\n5. Prove beginner default UX and expert audit/control UX with tests or transcripts.",
       "blockedBy": [],
       "workOrder": 46,
-      "assignee": "codex-orchestrator",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "codex-orchestrator",
+          "text": "[handoff] Criteria 6 met+verified (foundation 8/8 parent green). Criterion 7 implemented/met; parent rerun twice blocked before provider code by concurrent Jetpack missing modules/type drift (37 errors), so remains unverified. Resume verification when shared Jetpack compiles, then implement criteria 8-11. #240 evaluator dependency is now materially present but full integration criterion 10 remains."
+        },
         {
           "at": "2026-07-12",
           "by": "terra-241-builder",
@@ -3896,20 +3930,20 @@
         {
           "n": 6,
           "text": "One shared deterministic/statistical evaluator produces canonical BudgetSpec/report JSON, rational statistics/confidence/history outcomes, stable IDs/hashes, and independently recomputes all evidence.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-11T23:48:33.207Z"
+          "status": "verified",
+          "metBy": "terra-241-bigint",
+          "verifiedBy": "codex-orchestrator",
+          "evidence": "Parent reran jet-foundation PerformanceBudget suite 8/8 green, including huge rationals and forged schema/stat/decision/confidence/outcome/history rejection.",
+          "at": "2026-07-12T17:45:39.870Z"
         },
         {
           "n": 7,
           "text": "Provider registry and in-process/subprocess/file protocol resolve deterministically, enforce stream/size/time limits, and distinguish unavailable, malformed, panic, timeout, and incompatible evidence through E2906-E2908.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "terra-241-bigint",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-11T23:48:33.329Z"
+          "evidence": "Implemented deterministic provider registry with in-process/exact-path subprocess/file transports, one bounded JETBUDGET1 protocol and shared evaluator conversion; E2906-E2908 taxonomy, timeout kill+wait, panic containment, malformed/incompatible/unavailable/regression cases. Builder tests 3/3 + public integration 1/1 green; parent verification currently blocked before provider code by unrelated missing Jetpack modules/type errors.",
+          "at": "2026-07-12T17:57:12.443Z"
         },
         {
           "n": 8,
@@ -3958,8 +3992,7 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
-      "claimedAt": "2026-07-12T17:22:49.471Z"
+      "refs": []
     },
     {
       "id": "c008rjua",
@@ -7471,38 +7504,38 @@
         {
           "n": 1,
           "text": "One shared generated bash/zsh/fish RC implements every hybrid mock and ratified option-D row: env label, compact path, live git facts, command lifecycle, Ctrl-G glance, optional strip, and no second prompt engine.",
-          "status": "met",
+          "status": "verified",
           "metBy": "terra-359-builder",
-          "verifiedBy": null,
-          "evidence": "Commits fe985d6c, 56de3925, 32cefaf generate one bash/zsh/fish prompt/status surface covering env/path/git/lifecycle/Ctrl-G/strip/NO_COLOR.",
-          "at": "2026-07-11T23:53:34.283Z"
+          "verifiedBy": "grok-359-verify2",
+          "evidence": "worktree /tmp/jet-card-359 @ bde33487: Shell.rs generates one bash/zsh/fish RC (label/path/git/lifecycle/Ctrl-G/strip/NO_COLOR). PTY assert uses git rev-parse --abbrev-ref HEAD (not hardcoded master).",
+          "at": "2026-07-12T18:01:53.373Z"
         },
         {
           "n": 2,
           "text": "Real command hooks report actual running/success/failure state, exit and elapsed time, visible slow-command spinner, deterministic receipt, and runnable failure action without literal unknown/fake data.",
-          "status": "met",
+          "status": "verified",
           "metBy": "terra-359-builder",
-          "verifiedBy": null,
-          "evidence": "Real hooks classify actual build/test commands, measure exit+elapsed, show slow spinner, success/failure receipt and runnable next action; no unknown placeholder remains.",
-          "at": "2026-07-11T23:53:34.412Z"
+          "verifiedBy": "grok-359-verify2",
+          "evidence": "bash_prompt_pty + fish_prompt_pty green: build ok, test failed (1), receipt \"-> test failed. Rerun: jet test\"; no unknown; real hooks not stubs.",
+          "at": "2026-07-12T18:01:53.484Z"
         },
         {
           "n": 3,
           "text": "Bounded native bash/zsh/fish PTYs prove success/failure transitions, Ctrl-G, strip on/off, live git/env/path facts, exit restoration, and NO_COLOR output with zero ANSI after capture.",
-          "status": "met",
+          "status": "verified",
           "metBy": "terra-359-builder",
-          "verifiedBy": null,
-          "evidence": "Builder reports bounded native bash/fish/zsh PTY matrix for success/failure/spinner/Ctrl-G/git/env/path/strip/NO_COLOR/restoration; unavailable zsh fails test.",
-          "at": "2026-07-11T23:53:34.532Z"
+          "verifiedBy": "grok-359-verify2",
+          "evidence": "CARGO_TARGET_DIR=/tmp/jet-card-359-target nix develop -c cargo test -p jetpack Shell @ bde33487: 10 passed. bash PTY matches live branch via rev-parse; fish PTY receipts; zsh_prompt_has_native_hook_matrix; NO_COLOR zero ANSI.",
+          "at": "2026-07-12T18:01:53.575Z"
         },
         {
           "n": 4,
           "text": "Focused Shell and env_dev_trust tests pass; independent reviewer checks full mock/decision/owner-comment matrix and rejects static-string or unavailable-shell skips.",
-          "status": "met",
+          "status": "verified",
           "metBy": "terra-359-builder",
-          "verifiedBy": null,
-          "evidence": "Focused jetpack Shell 11/11 and env_dev_trust 13/13 green through 32cefaf; independent review pending.",
-          "at": "2026-07-11T23:53:34.643Z"
+          "verifiedBy": "grok-359-verify2",
+          "evidence": "Focused Shell: 10 passed; 0 failed @ /tmp/jet-card-359 bde33487. Live-branch assert fixed; independent verify by grok-359-verify2 ≠ builder.",
+          "at": "2026-07-12T18:01:53.660Z"
         }
       ],
       "needsAcceptance": true,
@@ -7678,12 +7711,17 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": "# Plan: jetpack/jetos hybrid CLI output\n\nRatified inputs:\n- D-FE-CLI1 outcome D with owner modifications: keep colored + - ~; both -y and --yes; add nh-style dependency chain/graph visualization for long builds/downloads.\n\nScope:\n- crates/jetpack/src/Output.rs, crates/jetpack/src/CLI/*.rs command call sites, crates/jetpack/src/JetOS/commands.rs and generation/proof call sites that already share Theme/Output.\n- tests/jetpack.rs, CLI usage tests, fixture stderr/stdout snapshots where output is pinned.\n\nImplementation steps:\n1. Extend the shared Theme/Output layer with consequence-scaled rendering: quiet ledger, pinned live region for long work, plan gate for mutations, deterministic plain fallback.\n2. Preserve colored +, -, ~ for plan diffs; NO_COLOR replaces color with stable text markers while keeping symbols readable.\n3. Normalize confirmation bypass so -y and --yes are accepted everywhere the mutation confirmation gate appears. Non-TTY mutation without yes prints plan and exits without applying.\n4. Add dependency-chain progress model for long realization/build phases: downloads, builds, cached/reused nodes, current edge, counts, size/elapsed where known. Render as a pinned graph/chain in TTY; append ledger lines in non-TTY.\n5. Wire jetpack add/build/env/gc and jetos plan/build/switch/proof through the same output primitives where they already share command execution paths.\n6. Erase live regions before diagnostics; diagnostics remain verbatim.\n7. Keep JSON output schemas untouched unless a separate schema version decision is raised.\n\nAcceptance:\n- Trivial commands stay quiet.\n- Long build/download commands show useful dependency-chain progress in TTY.\n- Mutations show a plan with + - ~ and require confirmation unless -y/--yes.\n- Non-TTY output is deterministic and non-interactive.\n\nVerification:\n- nix develop -c cargo test --test jetpack <focused CLI output tests>\n- nix develop -c cargo test --test jetpack\n- Add transcript/snapshot coverage for + - ~, -y, --yes, non-TTY no-hang, NO_COLOR, and dependency-chain fallback.\n- Full nix develop -c cargo test before done.",
       "blockedBy": [],
-      "assignee": "grok-361-builder",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "grok-361-verify",
+          "text": "verified criteria 1-4; Output+CLI focused green at 4b75f97e"
+        },
         {
           "at": "2026-07-12",
           "by": "grok-361-builder",
@@ -7766,43 +7804,42 @@
         {
           "n": 1,
           "text": "Trivial ops (add/realize short path) emit quiet ledger rows with colored or NO_COLOR +/-/~ marks; focused tests prove both TTY and NO_COLOR.",
-          "status": "met",
+          "status": "verified",
           "metBy": "grok-361-builder",
-          "verifiedBy": null,
-          "evidence": "Quiet ledger: ready_row (✓ name version) for add/env; plan +/-/~ keep symbols under NO_COLOR and paint ANSI when colored. Proof: nix develop -c cargo test -p jetpack --lib Output:: → 19/19 incl plan_rows_keep_symbols_without_color, plan_rows_paint_symbols_when_colored, theme_resolve_honors_no_color_flag, ready_row_*; integration add_then_remove_edits_env_file prints ✓ hello 0.1.0. Commit 4b75f97e atop dee54f45 on grok/card-361 (/tmp/jet-card-361).",
-          "at": "2026-07-12T11:57:17.343Z"
+          "verifiedBy": "grok-361-verify",
+          "evidence": "Independent review: Output.rs hybrid ledger/live/plan real; PlanMark +/-/~; -y/--yes wired; live.clear on fail. Focused: Output:: 19/19, parses_ yes flags, jetpack remove_/clean_without_yes/failed_first_dependency green at 4b75f97e (isolated CARGO_TARGET_DIR).",
+          "at": "2026-07-12T18:00:10.212Z"
         },
         {
           "n": 2,
           "text": "Long realize/build path pins live region, promotes finished rows into ledger, collapses to summary; non-TTY degrades to appended ledger lines.",
-          "status": "met",
+          "status": "verified",
           "metBy": "grok-361-builder",
-          "verifiedBy": null,
-          "evidence": "Long build pins live region (set_dependency_status + finish promote + collapse). Non-TTY/NO_COLOR appends dependency ledger lines. Proof: committed_example_builds_offline_end_to_end asserts building completed K/3 · current: source -> pkg · resolving; live_header/progress_bar/live_region_is_non_tty_when_color_off; jetpack build collapses to build ready ✓; JetOS generation collapses to generation ready. Commit 4b75f97e.",
-          "at": "2026-07-12T11:57:17.430Z"
+          "verifiedBy": "grok-361-verify",
+          "evidence": "Independent review: Output.rs hybrid ledger/live/plan real; PlanMark +/-/~; -y/--yes wired; live.clear on fail. Focused: Output:: 19/19, parses_ yes flags, jetpack remove_/clean_without_yes/failed_first_dependency green at 4b75f97e (isolated CARGO_TARGET_DIR).",
+          "at": "2026-07-12T18:00:10.303Z"
         },
         {
           "n": 3,
           "text": "Mutation commands (switch/gc class) print plan with +/~/- marks, gate on confirm unless -y or --yes; both flags bypass identically; non-TTY prints plan and exits without apply.",
-          "status": "met",
+          "status": "verified",
           "metBy": "grok-361-builder",
-          "verifiedBy": null,
-          "evidence": "Mutation plan gate on remove/clean/update/jetos switch: plan_row +/~/- then confirm_apply. -y and --yes both set assume_yes (CLI_FLAG_YES_SHORT/LONG; parses_flags + parses_long_yes_flag). Non-TTY without yes prints plan and exits (confirm_apply_non_tty_without_yes_is_plan_only; remove_without_yes_*; clean_without_yes_*). -y apply parity: remove_with_short_yes_applies_identically_to_long_yes. Commit 4b75f97e.",
-          "at": "2026-07-12T11:57:17.515Z"
+          "verifiedBy": "grok-361-verify",
+          "evidence": "Independent review: Output.rs hybrid ledger/live/plan real; PlanMark +/-/~; -y/--yes wired; live.clear on fail. Focused: Output:: 19/19, parses_ yes flags, jetpack remove_/clean_without_yes/failed_first_dependency green at 4b75f97e (isolated CARGO_TARGET_DIR).",
+          "at": "2026-07-12T18:00:10.387Z"
         },
         {
           "n": 4,
           "text": "Long download/build progress shows nh-style dependency/current-edge counts in live region; failure erases region and prints verbatim diagnostic; focused Output+CLI tests pass.",
-          "status": "met",
+          "status": "verified",
           "metBy": "grok-361-builder",
-          "verifiedBy": null,
-          "evidence": "nh-style edge counts via render_dependency_status / set_dependency_status (completed N/M · current: source -> node · state). Failure clears region then diagnostic: realize_ref_outcome clears live before prints; cmd_build clears on fail/holes; store_realize clears before errors; failed_first_dependency_reports_zero_completed_nodes asserts completed 0/2 + diagnostic. Output:: 19/19 + focused jetpack remove_/add_then_remove/failed_first/committed_example/clean_without_yes all ok. Commit 4b75f97e.",
-          "at": "2026-07-12T11:57:17.600Z"
+          "verifiedBy": "grok-361-verify",
+          "evidence": "Independent review: Output.rs hybrid ledger/live/plan real; PlanMark +/-/~; -y/--yes wired; live.clear on fail. Focused: Output:: 19/19, parses_ yes flags, jetpack remove_/clean_without_yes/failed_first_dependency green at 4b75f97e (isolated CARGO_TARGET_DIR).",
+          "at": "2026-07-12T18:00:10.479Z"
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
-      "claimedAt": "2026-07-12T11:45:33.390Z"
+      "refs": []
     },
     {
       "id": "c0prf2ws",
@@ -8204,7 +8241,71 @@
       "created": "2026-07-08T23:05:17.490Z",
       "updated": "2026-07-12",
       "workOrder": 124,
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Slice 1: shared read-only package/config model crate exists; jet-driver depends on it, not on jetpack engine (cargo tree proof)",
+          "status": "met",
+          "metBy": "terra-367-builder",
+          "verifiedBy": null,
+          "evidence": "New seam crate crates/jet-pkg-model (path-only dep on jet-sema) holds PackageManifest/Manifest/Lock/CFFI/FFI/CBind/RefSpec/ScriptDeps/Store(read-only listing)/JSON/Envelope/Platform/Prelude. jetpack re-exports them under legacy paths (crates/jetpack/src/lib.rs); jet-driver Cargo.toml dropped 'jetpack', added 'jet-pkg-model'; Loader.rs/lib.rs/Compile.rs updated. Proof: cargo tree -p jet-driver -i jetpack -> 'did not match any packages'; cargo tree -p jet-driver shows jet-pkg-model, no jetpack. cargo check -p jet-pkg-model and -p jetpack (lib) both compile clean in isolation. Full workspace check currently blocked by an UNRELATED concurrent WIP break in jet-sema (crates/jet-sema/src/Sema/Bundle.rs dead_code on ResolvedModuleArg, tracing to the concurrent #501 FFI-tier collision in jet-parser) -- confirmed by 'cargo check -p jet-sema' failing in total isolation with zero files I touched in its dep chain.",
+          "at": "2026-07-12T18:12:28.883Z"
+        },
+        {
+          "n": 2,
+          "text": "Slice 2: jetpack/jetos binary ownership moves into crates/jetpack and crates/jetos (root package no longer declares their [[bin]] targets)",
+          "status": "met",
+          "metBy": "terra-367-builder",
+          "verifiedBy": null,
+          "evidence": "crates/jetpack/src/bin/jetpack.rs (auto-discovered bin target 'jetpack' in the jetpack package) replaces Source/Bin/Jetpack.rs; new crate crates/jetos (Cargo.toml [[bin]] jetos, path dep on jetpack) replaces Source/Bin/JetOS.rs. Root Cargo.toml [[bin]] jetpack/jetos sections removed, Source/Bin/ deleted. Root default-members extended to [., crates/jet-driver, crates/jetpack, crates/jetos] so a bare 'cargo build' still produces all 3 binaries (jetpack binary lookup is by target/debug/<name> filename per Source/EngineDispatch.rs, unaffected by which crate owns the [[bin]]). JetOS engine itself (crates/jetpack/src/JetOS/*) is NOT split out yet -- jetos crate still calls jetpack::run(['os',...]); that is slice 4, deferred.",
+          "at": "2026-07-12T18:12:50.205Z"
+        },
+        {
+          "n": 3,
+          "text": "Slice 3: jet root package no longer references jetpack directly outside Bin shims/CLI dispatch; compatibility forms route with teaching/provenance messages",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T18:09:41.720Z"
+        },
+        {
+          "n": 4,
+          "text": "Slice 4: ModuleEval plan model split from env runtime and JetOS realization",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T18:09:56.912Z"
+        },
+        {
+          "n": 5,
+          "text": "Slice 5: Canvas package/workspace scans move behind the shared model API",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T18:10:11.624Z"
+        },
+        {
+          "n": 6,
+          "text": "Slice 6: tests/jetpack.rs splits into package engine, dispatch, JetOS generation/proof, Studio, and fixture-helper files",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T18:10:25.830Z"
+        },
+        {
+          "n": 7,
+          "text": "Slice 7: workspace dependency guard tests (tests/workspace_crates.rs) and docs paths (architecture.md etc.) match the new crate boundaries",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T18:10:40.935Z"
+        }
+      ],
       "needsAcceptance": false,
       "refs": [],
       "claimedAt": "2026-07-12T17:44:23.090Z"
@@ -16303,53 +16404,6 @@
       "draft": false
     },
     {
-      "id": "D-LOGICPROG1",
-      "cardId": "c2yj0nk5",
-      "title": "Add a full logic-programming subset (backtracking, multi-answer relations) to Jet?",
-      "gist": "Research notes caution against a full logic-programming subset. The gentler slice — failure-aware iterators and comprehensions — is already on the roadmap. The question is whether to add true multi-answer relations and backtracking on top of that, or hold the line.",
-      "explainer": "Full LP (Prolog-style) requires unification, a choice-point stack, and a non-deterministic execution model that cuts across Jet's deterministic ownership semantics. It would introduce a second execution model with different rules for variable binding, mutation, and resource cleanup — directly conflicting with I8 and with the safety-by-default guarantee. The failure-aware-comprehension card covers the practical 90% case (generators that can fail or produce multiple results) without a separate execution model. A full LP subsystem would also complicate the JIT tier and codegen.",
-      "story": "I want to write a solver that enumerates valid configurations of a constraint system — like a puzzle solver or a type-inference engine — without shelling out to Prolog.",
-      "inWild": "// What today's failure-aware comprehension covers:\nlet solutions = [x for x in candidates if satisfies(x, constraints)];\n\n// Full LP would add unification and backtracking:\n// relation edge(1, 2). edge(2, 3).\n// path(X, Z) :- edge(X, Y), path(Y, Z).  ← not proposed",
-      "detail": "",
-      "options": [
-        {
-          "key": "A",
-          "name": "Reject full LP — keep failure-aware iterators only",
-          "detail": "The failure-aware-comprehension card already targets the practical use cases. Full backtracking introduces a second execution model (choice points, unification) incompatible with deterministic ownership. Recommend keeping the door closed.",
-          "code": "// Jet today — constraint enumeration without LP:\nfn solve(constraints: [Constraint]) -> [Config] {\n    candidates()\n        .filter(|c| constraints.all(|k| k.satisfied_by(c)))\n        .collect()\n}\n// No backtracking runtime; ownership is deterministic throughout."
-        },
-        {
-          "key": "B",
-          "name": "Adopt a scoped LP subset (relations block)",
-          "detail": "A `@logic { }` block opts in to a Datalog-style subset: finite relations, no function symbols, stratified negation. Bounded and terminating, so no infinite search trees. Still a second execution model — variables inside the block bind differently — which violates I8.",
-          "code": "// hypothetical scoped LP:\n@logic {\n    edge(1, 2). edge(2, 3).\n    path(X, Z) :- edge(X, Y), path(Y, Z).\n}\nlet reachable = path.query(1);  // returns [2, 3]"
-        },
-        {
-          "key": "C",
-          "name": "Far-horizon: post-v1 constraint/solver research",
-          "detail": "Park LP as a research item. A future constraint-programming library (not a language feature) could implement backtracking via a continuation monad or explicit search stack, keeping the language surface clean. No language change needed.",
-          "code": "// Future library pattern (no language change):\nuse jet::solve::{Solver, Var};\nlet mut s = Solver::new();\nlet x = s.var::<u32>();\ns.constrain(x > 0 && x < 10);\nfor sol in s.solutions() { println(\"{sol}\"); }"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Prolog / SWI-Prolog",
-          "note": "Full LP with backtracking and unification. Powerful for combinatorial search but the non-deterministic execution model is notoriously hard to reason about for programmers from imperative backgrounds.",
-          "code": "path(X, Z) :- edge(X, Y), path(Y, Z).\n?- path(1, Z).\nZ = 2 ;\nZ = 3."
-        },
-        {
-          "lang": "miniKanren (Racket)",
-          "note": "A minimal logic DSL embedded in a host language. It works but requires the programmer to think in a completely different evaluation model — the very friction Jet wants to avoid.",
-          "code": "(run* (q)\n  (fresh (x y)\n    (== q (list x y))\n    (membero x '(1 2))\n    (membero y '(a b))))"
-        }
-      ],
-      "rec": "A",
-      "status": "ratified",
-      "outcome": "C",
-      "ratifiedAt": "2026-06-27",
-      "draft": false
-    },
-    {
       "id": "D-STRUCTMERGE1",
       "cardId": "c2zj0p7p",
       "title": "Commit to a structural (AST/semantic) merge tool for Jet version control?",
@@ -17599,50 +17653,6 @@
       "rec": "A",
       "status": "ratified",
       "created": "2026-07-06T20:50:01.383Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-07-06",
-      "draft": false
-    },
-    {
-      "id": "D-SOLVER-LIB1",
-      "cardId": "c2yj0nk5",
-      "group": "stdlib",
-      "title": "Explicit solver library",
-      "gist": "Choose whether Core gets a finite constraint solver API in Epoch 3.",
-      "explainer": "",
-      "story": "Iris writes a level generator with keys, doors, and enemies under constraints. She wants deterministic search with normal Jet ownership, not hidden backtracking.",
-      "inWild": "use core.solve.{Solver}\nsolver.require(path_exists(start_room(), key))",
-      "detail": "",
-      "options": [
-        {
-          "key": "A",
-          "name": "Core finite solver library",
-          "detail": "Add `core.solve` with explicit solver state, deterministic order, ordinary values, and iterator output. No syntax.",
-          "code": "solver :: Solver.new(42)\nsolver.require(x + y == 10)"
-        },
-        {
-          "key": "B",
-          "name": "Experimental package first",
-          "detail": "Explore API evidence without making Core law.",
-          "code": "use core.experimental.solve.{Solver}"
-        },
-        {
-          "key": "C",
-          "name": "Defer solver API",
-          "detail": "Keep logic work out of Epoch 3 Core. Use normal iterator adapters and keep examples research-only.",
-          "code": "rooms().filter((r) => path_exists(start, r))"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Z3",
-          "note": "Explicit solver objects keep search visible to host code.",
-          "code": "solver.add(x + y == 10)"
-        }
-      ],
-      "rec": "C",
-      "status": "ratified",
-      "created": "2026-07-06T20:50:01.438Z",
       "outcome": "A",
       "ratifiedAt": "2026-07-06",
       "draft": false
@@ -20268,67 +20278,6 @@
       "created": "2026-07-08T13:10:17.169Z",
       "outcome": "D",
       "comment": "Hybrid help, but default is categorized command palette; no separate task search/home. Task phrases become fuzzy keywords on command entries.",
-      "ratifiedAt": "2026-07-08",
-      "draft": false
-    },
-    {
-      "id": "D-FE-CLI1",
-      "cardId": "c0nhjxh4",
-      "group": "tooling",
-      "title": "jetpack / jetos CLI output — pick the UX archetype",
-      "gist": "How command progress and results are experienced: a scrolling ledger, a pinned live region, or plan→confirm→apply.",
-      "explainer": "Hybrid — one output model whose depth is decided by consequence, not by command: quiet where the stakes are low, a live region where the wait is long, a plan gate where the machine changes. The tier rule must be stated policy, not a guess.",
-      "story": "Leo runs `jetpack add`, `jet env`, `jetos switch`, and the occasional `jetpack gc`. The flows are identical in all three options — what differs is the experience of progress and consequence: read a quiet ledger top to bottom, watch one live region while clean scrollback accumulates above it, or review a complete plan and answer once before anything mutates (the nh/terraform model you named). One shared theme; diagnostics verbatim (E0102). Browse: file:///home/nate/Projects/Github/jet/docs/design/frontends/index.html#cli (←/→ switches, c compares).",
-      "inWild": "$ jetos switch\n# 42 → 43: kernel bump, one add, one remove.\n# The archetype decides what Leo sees between typing this\n# and the new generation being live — and when he gets to say no.",
-      "detail": "Owner modification (2026-07-08): ratify hybrid CLI. Keep colored + / - / ~ plan symbols. Both -y and --yes must bypass the confirmation gate consistently. Add nh-style dependency chain/graph visualization where appropriate during long download/build/realization phases: show downloads, builds, dependencies, and current edge/progress in the pinned live region/apply progress. Scrollback remains the ledger; non-TTY/NO_COLOR degrades to deterministic plain text.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Ledger — quiet scrolling record",
-          "detail": "Core loop: read top to bottom once; the active line spins, done lines freeze, scrollback is the permanent record. Refines what jetpack already ships (gutter, ✓ rows, threshold rule, spinner) — zero learning cost, perfect log fidelity, identical on TTY and CI. Cost: a long op is a wall of lines and there's no single \"where am I now\"; the spinner line is the only live signal.\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/cli/ledger.html",
-          "code": "  jetpack  add ripgrep fd\n           ▸ resolving from nixpkgs\n           ✓ ripgrep  14.1.0  built 6s\n           ✓ fd       9.0.0   cached\n  jetpack  2 packages ready  ✓\n\n  jetpack  env\n           ✓ node     22.3.0  cached\n           ✓ postgres 16.3.0  cached\n\n  ── myproj ─ dev shell · exit to leave ──────────────\n\n  (build failure: diagnostic prints inline, verbatim,\n   no spinner left hanging)"
-        },
-        {
-          "key": "B",
-          "name": "Live region — one place to watch",
-          "detail": "Core loop: watch one pinned bottom region (progress bar, counts, elapsed, size); finished items promote up into clean scrollback; the region collapses to a one-line summary. The uv/bun/pnpm model — best \"where am I now\" for long builds: one aggregate 31/42 beats 42 log lines. Cost: cursor-up region redraw (std ANSI, noted in NOTES), must erase cleanly before any diagnostic prints, and non-TTY degrades to appended lines (= option A).\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/cli/live.html",
-          "code": "  jetpack  add ripgrep fd\n           ✓ ripgrep  14.1.0  built 6s\n  ── live region · redraws in place ──────────────────\n  realizing 1/2 · fd            00:06 · 42 MB\n  ████████████████░░░░░░░░  unpacking\n  ────────────────────────────────────────────────────\n        │ finished items promote UP, region stays pinned\n        ▼\n  jetpack  2 packages ready in 6s  ✓   (region replaced)"
-        },
-        {
-          "key": "C",
-          "name": "Plan — decide first, apply quietly",
-          "detail": "Core loop: every mutation prints a full plan (add/change/remove, download size, closure and generation delta), asks once [y/N], then applies tersely with each done line tied to a plan line. The nh/terraform model — safest for consequential ops (switch, gc): you decide from the diff and nothing mutates unseen. Cost: an extra step on trivial adds — needs sensible --yes and CI behavior (non-TTY prints the plan and exits without applying, never hangs).\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/cli/plan.html",
-          "code": "  jetos  switch\n\n  Plan  generation 42 → 43 · 1 add, 1 change, 1 remove\n\n    + firefox       —      → 129.0\n    ~ linux         6.9.7  → 6.10.1\n    - obsolete-lib  1.2.0  → —\n\n  Download 240 MB · closure +18 MB · rebuild boot + current\n\n  Apply? [y/N] ▏\n     y → quiet apply, one ✓ per planned line\n     Enter/N → nothing touched"
-        },
-        {
-          "key": "D",
-          "name": "Hybrid — consequence-scaled output",
-          "detail": "Core loop: output scales with consequence — trivial ops print a quiet ledger, long builds pin a live region that promotes finished lines into that ledger, and mutations gate on a plan first; the scrollback is always the record. Takes: ledger as the spine under everything + live's region for genuinely long work (finished items promote up as permanent ledger lines, region collapses to a summary) + plan's gate for mutations only (jetos switch, gc), whose apply reuses the same region-into-ledger flow with each ✓ tied to a plan line. Left out: plan's gate on trivial adds (prompt fatigue; --yes still available) and a region for short ops. One progress experience at three depths, chosen by what the command does (I8). Non-TTY: no region, mutation prints plan and exits.\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/cli/hybrid.html",
-          "code": "tier 1 (trivial)          tier 2 (long build)         tier 3 (mutation)\n  jetpack add ripgrep fd    jetpack build               jetos switch\n    ✓ ripgrep 14.1.0          ✓ ripgrep 14.1.0          Plan  gen 42 → 43\n    ✓ fd      9.0.0         ── live region ──────         + firefox  → 129.0\n  2 packages ready ✓         building 31/42 · linux       ~ linux 6.9.7→6.10.1\n                             ██████████░░░  compiling      - obsolete-lib → —\n  jet env                       │ finished rows          Download 240 MB\n    ✓ node     22.3.0            ▼ promote UP             Apply? [y/N] _\n    ✓ postgres 16.3.0        jetpack  build ready ✓        y → region+ledger\n  ── myproj ─ dev shell ──     (region → ledger line)      N → nothing touched\n\nfailure (any tier): region erased → verbatim E0102 → stop.\nNO_COLOR/CI: no region, no gate — mutation prints plan + exits."
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "nh (nix helper)",
-          "note": "The owner-named benchmark. Its os-switch generation diff is C's plan block; the improvement is making the plan the gate for every mutation, not just switch.",
-          "code": "nh os switch → diff of added/removed/upgraded + closure delta"
-        },
-        {
-          "lang": "uv / pnpm",
-          "note": "B's pinned progress area with counters; finished work scrolls up clean.",
-          "code": "Progress: resolved 42, reused 40, added 2   ████████░░"
-        },
-        {
-          "lang": "terraform",
-          "note": "C's contract: complete plan, explicit confirmation, apply reported against the plan.",
-          "code": "Plan: 1 to add, 1 to change, 1 to destroy.  Enter a value:"
-        }
-      ],
-      "rec": "D",
-      "status": "ratified",
-      "created": "2026-07-08T13:10:17.309Z",
-      "outcome": "D",
-      "comment": "Hybrid CLI; keep colored + - ~; support both -y and --yes; add nh-style dependency chain/graph visualization for long downloads/builds where it fits.",
       "ratifiedAt": "2026-07-08",
       "draft": false
     },
@@ -33609,6 +33558,265 @@
   ],
   "events": [
     {
+      "at": "2026-07-12T18:20:01.653Z",
+      "by": "codex-orchestrator",
+      "action": "card.claim",
+      "ref": "c2zj0p7p",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T18:18:50.577Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c2yj0nk5",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-12T18:18:50.417Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c2yj0nk5",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-12T18:18:50.273Z",
+      "by": "terra-142-jit",
+      "action": "card.criteria-meet",
+      "ref": "c2yj0nk5",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-12T18:18:50.131Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c2yj0nk5",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-12T18:18:49.990Z",
+      "by": "codex-main",
+      "action": "card.criteria-meet",
+      "ref": "c2yj0nk5",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-12T18:16:04.252Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c2yj0nk5",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-12T18:16:04.107Z",
+      "by": "terra-142-jit",
+      "action": "card.criteria-meet",
+      "ref": "c2yj0nk5",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-12T18:12:50.205Z",
+      "by": "terra-367-builder",
+      "action": "card.criteria-meet",
+      "ref": "c_audit_367_q80zrm",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-12T18:12:28.884Z",
+      "by": "terra-367-builder",
+      "action": "card.criteria-meet",
+      "ref": "c_audit_367_q80zrm",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-12T18:11:01.550Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c2yj0nk5",
+      "note": "#3 Syntax law, Core surface/ring classification, docs, executab"
+    },
+    {
+      "at": "2026-07-12T18:11:01.405Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c2yj0nk5",
+      "note": "#2 Deterministic seed/insertion order, require/failure_count/st"
+    },
+    {
+      "at": "2026-07-12T18:11:01.266Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c2yj0nk5",
+      "note": "#1 Ratified D-SOLVER-LIB1 finite explicit Solver API is sema-ch"
+    },
+    {
+      "at": "2026-07-12T18:10:40.936Z",
+      "by": "terra-367-builder",
+      "action": "card.criteria-add",
+      "ref": "c_audit_367_q80zrm",
+      "note": "#7 Slice 7: workspace dependency guard tests (tests/workspace_c"
+    },
+    {
+      "at": "2026-07-12T18:10:25.830Z",
+      "by": "terra-367-builder",
+      "action": "card.criteria-add",
+      "ref": "c_audit_367_q80zrm",
+      "note": "#6 Slice 6: tests/jetpack.rs splits into package engine, dispat"
+    },
+    {
+      "at": "2026-07-12T18:10:11.624Z",
+      "by": "terra-367-builder",
+      "action": "card.criteria-add",
+      "ref": "c_audit_367_q80zrm",
+      "note": "#5 Slice 5: Canvas package/workspace scans move behind the shar"
+    },
+    {
+      "at": "2026-07-12T18:10:00.474Z",
+      "by": "codex-orchestrator",
+      "action": "card.claim",
+      "ref": "c2yj0nk5",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T18:10:00.338Z",
+      "by": "codex-orchestrator",
+      "action": "card.release",
+      "ref": "c1jixkit",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-12T18:09:56.912Z",
+      "by": "terra-367-builder",
+      "action": "card.criteria-add",
+      "ref": "c_audit_367_q80zrm",
+      "note": "#4 Slice 4: ModuleEval plan model split from env runtime and Je"
+    },
+    {
+      "at": "2026-07-12T18:09:41.720Z",
+      "by": "terra-367-builder",
+      "action": "card.criteria-add",
+      "ref": "c_audit_367_q80zrm",
+      "note": "#3 Slice 3: jet root package no longer references jetpack direc"
+    },
+    {
+      "at": "2026-07-12T18:09:27.554Z",
+      "by": "terra-367-builder",
+      "action": "card.criteria-add",
+      "ref": "c_audit_367_q80zrm",
+      "note": "#2 Slice 2: jetpack/jetos binary ownership moves into crates/je"
+    },
+    {
+      "at": "2026-07-12T18:09:04.778Z",
+      "by": "terra-367-builder",
+      "action": "card.criteria-add",
+      "ref": "c_audit_367_q80zrm",
+      "note": "#1 Slice 1: shared read-only package/config model crate exists;"
+    },
+    {
+      "at": "2026-07-12T18:01:53.661Z",
+      "by": "grok-359-verify2",
+      "action": "card.criteria-verify",
+      "ref": "c0iyfhaf",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-12T18:01:53.575Z",
+      "by": "grok-359-verify2",
+      "action": "card.criteria-verify",
+      "ref": "c0iyfhaf",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-12T18:01:53.484Z",
+      "by": "grok-359-verify2",
+      "action": "card.criteria-verify",
+      "ref": "c0iyfhaf",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-12T18:01:53.373Z",
+      "by": "grok-359-verify2",
+      "action": "card.criteria-verify",
+      "ref": "c0iyfhaf",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-12T18:00:10.680Z",
+      "by": "grok-361-builder",
+      "action": "card.release",
+      "ref": "c0nhjxh4",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-12T18:00:10.592Z",
+      "by": "grok-361-verify",
+      "action": "card.update",
+      "ref": "c0nhjxh4",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T18:00:10.479Z",
+      "by": "grok-361-verify",
+      "action": "card.criteria-verify",
+      "ref": "c0nhjxh4",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-12T18:00:10.387Z",
+      "by": "grok-361-verify",
+      "action": "card.criteria-verify",
+      "ref": "c0nhjxh4",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-12T18:00:10.303Z",
+      "by": "grok-361-verify",
+      "action": "card.criteria-verify",
+      "ref": "c0nhjxh4",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-12T18:00:10.212Z",
+      "by": "grok-361-verify",
+      "action": "card.criteria-verify",
+      "ref": "c0nhjxh4",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-12T17:57:43.203Z",
+      "by": "codex-orchestrator",
+      "action": "card.claim",
+      "ref": "c1jixkit",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T17:57:12.583Z",
+      "by": "codex-orchestrator",
+      "action": "card.release",
+      "ref": "ccq07pav",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-12T17:57:12.443Z",
+      "by": "terra-241-bigint",
+      "action": "card.criteria-meet",
+      "ref": "ccq07pav",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-12T17:45:39.871Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "ccq07pav",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-12T17:45:39.731Z",
+      "by": "terra-241-bigint",
+      "action": "card.criteria-meet",
+      "ref": "ccq07pav",
+      "note": "#6"
+    },
+    {
       "at": "2026-07-12T17:44:23.442Z",
       "by": "claude-main",
       "action": "card.update",
@@ -36848,265 +37056,6 @@
       "action": "card.criteria-meet",
       "ref": "c02kdm7a",
       "note": "#2"
-    },
-    {
-      "at": "2026-07-12T06:29:14.944Z",
-      "by": "codex-main",
-      "action": "card.criteria-meet",
-      "ref": "c02kdm7a",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-12T06:26:09.830Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-SYNC1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-12T06:25:02.752Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-AUTH1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-12T06:24:04.903Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-STM1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-12T06:22:19.674Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-BINPAT1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-12T06:22:19.674Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0n6vj96",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-07-12T06:22:19.674Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0n6vj96",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-07-12T06:22:19.674Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0n6vj96",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-07-12T06:22:19.674Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0n6vj96",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-07-12T06:20:38.259Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CORENS2",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-12T06:19:32.878Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CORE-SECRETS1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-12T06:18:30.217Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-MARK-META1",
-      "note": "B"
-    },
-    {
-      "at": "2026-07-12T06:18:30.217Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0s8u85x",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-07-12T06:18:30.217Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0s8u85x",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-07-12T06:18:30.217Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0s8u85x",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-07-12T06:18:30.217Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0s8u85x",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-07-12T06:14:47.011Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-ARCH-SOURCE1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-12T02:57:33.797Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-FFI-PASCAL1",
-      "note": "Delphi / Object Pascal binder (the long-lived business-app estate)"
-    },
-    {
-      "at": "2026-07-12T02:57:33.696Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-FFI-ADA1",
-      "note": "Ada binder with constraint facts (the certified-code estate)"
-    },
-    {
-      "at": "2026-07-12T02:57:33.591Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-FFI-TCL1",
-      "note": "Tcl binder host model (the EDA tooling estate)"
-    },
-    {
-      "at": "2026-07-12T02:57:33.499Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-FFI-DART1",
-      "note": "Dart binder and Flutter embedding direction"
-    },
-    {
-      "at": "2026-07-12T02:57:33.403Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-FFI-PWSH1",
-      "note": "PowerShell binder and object pipeline"
-    },
-    {
-      "at": "2026-07-12T02:57:33.304Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-FFI-COM1",
-      "note": "Windows COM automation binder (the Office / VBA estate)"
-    },
-    {
-      "at": "2026-07-12T02:57:33.205Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-OBSERVE-LIVE1",
-      "note": "Live runtime inspector"
-    },
-    {
-      "at": "2026-07-12T02:57:33.102Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-ENVHOOK1",
-      "note": "Shell auto-activation for jet env"
-    },
-    {
-      "at": "2026-07-12T02:57:33.006Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-DBPOLICY1",
-      "note": "Typed row-level access policies"
-    },
-    {
-      "at": "2026-07-12T02:57:32.908Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-VALIDATE1",
-      "note": "Accumulated validation over decoded values"
-    },
-    {
-      "at": "2026-07-12T02:57:32.806Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-SYNC1",
-      "note": "CRDT sync value types"
-    },
-    {
-      "at": "2026-07-12T02:57:32.705Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-AUTH1",
-      "note": "core.auth batteries for web apps"
-    },
-    {
-      "at": "2026-07-12T02:57:32.603Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-STM1",
-      "note": "Atomic memory transactions across shared handles"
-    },
-    {
-      "at": "2026-07-12T02:57:32.507Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-BINPAT1",
-      "note": "Binary patterns for byte parsing"
-    },
-    {
-      "at": "2026-07-12T02:52:08.450Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c00ukytt",
-      "note": "Syntax.rs census-drift sweep + docs hygiene"
-    },
-    {
-      "at": "2026-07-12T02:52:08.352Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0z8bodp",
-      "note": "Mechanical splits: nine >2500-LOC modules + giant test files"
-    },
-    {
-      "at": "2026-07-12T02:51:28.868Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-CORENS2",
-      "note": "Core namespace admission law: a top-level core.* name requires a domain, not a feature"
-    },
-    {
-      "at": "2026-07-12T02:51:28.772Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-CORE-SECRETS1",
-      "note": "One secrets home: merge core.secrets into core.vault"
-    },
-    {
-      "at": "2026-07-12T02:51:28.674Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-MARK-META1",
-      "note": "Doc-metadata growth law: future tool-facing annotations are #Meta fields"
-    },
-    {
-      "at": "2026-07-12T02:51:28.574Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-ARCH-SOURCE1",
-      "note": "Dissolve the 45k-line Source/ monolith into seam crates"
     }
   ],
   "nextNum": 368,

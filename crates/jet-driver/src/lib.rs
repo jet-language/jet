@@ -10,6 +10,12 @@ pub mod Driver;
 pub mod Foreign;
 pub mod Loader;
 pub mod PhaseTiming;
-pub use jetpack as Jetpack;
-pub use jetpack::{CBind, CFFI, FFI, Lock, Manifest, PluginExport};
+// Card #367 / D-PRODUCT-SPLIT1=C: the compiler's module loader needs the
+// read-only package/config data model (manifest/lock/store-listing/script-
+// deps/FFI-binding parsing), never the `jetpack` package-manager engine
+// (provider/network/shell). `PluginExport` is driver-only (plugin export
+// API-freeze validation via Sema) and was never used by `jetpack` itself, so
+// it lives directly in this crate instead of the shared model.
+pub mod PluginExport;
+pub use jet_pkg_model::{CBind, CFFI, FFI, Lock, Manifest, PackageManifest, ScriptDeps, Store};
 pub use Compile::{bundle_uses_unsafe, Capabilities, CompileOutput};

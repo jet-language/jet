@@ -8,7 +8,9 @@ members = [
     "crates/jet-sema",
     "crates/jet-codegen",
     "crates/jet-driver",
+    "crates/jet-pkg-model",
     "crates/jetpack",
+    "crates/jetos",
     "crates/jet-queries",
     "crates/jet-semindex",
     "crates/jet-impact",
@@ -16,7 +18,10 @@ members = [
     "crates/jet-rt",
     "crates/jet-net",
 ]
-default-members = [".", "crates/jet-driver"]
+# Card #367 / D-PRODUCT-SPLIT1=C: `jetpack`/`jetos` own their binaries now
+# (were thin root-package shims) — list them so a bare `cargo build` still
+# produces all three binaries, matching the pre-split behavior.
+default-members = [".", "crates/jet-driver", "crates/jetpack", "crates/jetos"]
 exclude = ["corelib/core.archive/pkgs/archive"]
 resolver = "2"
 
@@ -32,14 +37,6 @@ path = "Source/lib.rs"
 [[bin]]
 name = "jet"
 path = "Source/main.rs"
-
-[[bin]]
-name = "jetpack"
-path = "Source/Bin/Jetpack.rs"
-
-[[bin]]
-name = "jetos"
-path = "Source/Bin/JetOS.rs"
 
 [dependencies]
 jet-driver = { path = "crates/jet-driver" }

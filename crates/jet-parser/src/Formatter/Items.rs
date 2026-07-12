@@ -484,6 +484,14 @@ impl<'a> Fmt<'a> {
             }
             self.newline();
         }
+        // D-FFI-INLINE1=A (card #501): the `#FFI(<lang>)` inline foreign tier
+        // marker sits on its own line before `fn`, directly after any `#Unsafe`
+        // gate (matching the ratified rdtsc example: `#Unsafe(…)` then
+        // `#FFI(asm)`).
+        if let Some(inl) = &f.inline_foreign {
+            self.write(&format!("#{}({})", Syntax::ATTR_FFI, inl.lang));
+            self.newline();
+        }
         // D-WASM1: `#Wasm` / `#Js` / `#WasmExport` per-function web partition
         // override, on its own line before `fn`/`pub` (the convention every
         // web example uses; the parser skips the lexer-inserted `;` between
@@ -621,6 +629,24 @@ impl<'a> Fmt<'a> {
         if let Some(ret) = &f.return_type {
             self.write(" -> ");
             self.fmt_return_type(ret);
+        }
+        // D-FFI-INLINE1=A (card #501): an inline foreign fn's body is a single
+        // foreign-source string. Reconstruct the string expression and reuse the
+        // ordinary string formatter so the triple-quoted shape round-trips
+        // exactly (via `self.src` + span), then close the block on its own line.
+        if let Some(inl) = &f.inline_foreign {
+            self.write(" {");
+            self.indent += 1;
+            self.newline();
+            let expr = crate::AST::Expr::Str(
+                vec![crate::AST::StrPart::Lit(inl.source.clone())],
+                inl.source_span,
+            );
+            self.fmt_expr(&expr, Prec::OrFallback);
+            self.indent -= 1;
+            self.newline();
+            self.write("}");
+            return;
         }
         self.write(" {");
         // D-FMT1: a one-line `fn` body the author wrote inline survives.

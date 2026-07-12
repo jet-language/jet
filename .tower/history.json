@@ -18532,6 +18532,161 @@
       "ratifiedAt": "2026-07-06",
       "draft": false,
       "retiredAt": "2026-07-12T06:33:57.970Z"
+    },
+    {
+      "id": "D-FE-CLI1",
+      "cardId": "c0nhjxh4",
+      "group": "tooling",
+      "title": "jetpack / jetos CLI output — pick the UX archetype",
+      "gist": "How command progress and results are experienced: a scrolling ledger, a pinned live region, or plan→confirm→apply.",
+      "explainer": "Hybrid — one output model whose depth is decided by consequence, not by command: quiet where the stakes are low, a live region where the wait is long, a plan gate where the machine changes. The tier rule must be stated policy, not a guess.",
+      "story": "Leo runs `jetpack add`, `jet env`, `jetos switch`, and the occasional `jetpack gc`. The flows are identical in all three options — what differs is the experience of progress and consequence: read a quiet ledger top to bottom, watch one live region while clean scrollback accumulates above it, or review a complete plan and answer once before anything mutates (the nh/terraform model you named). One shared theme; diagnostics verbatim (E0102). Browse: file:///home/nate/Projects/Github/jet/docs/design/frontends/index.html#cli (←/→ switches, c compares).",
+      "inWild": "$ jetos switch\n# 42 → 43: kernel bump, one add, one remove.\n# The archetype decides what Leo sees between typing this\n# and the new generation being live — and when he gets to say no.",
+      "detail": "Owner modification (2026-07-08): ratify hybrid CLI. Keep colored + / - / ~ plan symbols. Both -y and --yes must bypass the confirmation gate consistently. Add nh-style dependency chain/graph visualization where appropriate during long download/build/realization phases: show downloads, builds, dependencies, and current edge/progress in the pinned live region/apply progress. Scrollback remains the ledger; non-TTY/NO_COLOR degrades to deterministic plain text.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Ledger — quiet scrolling record",
+          "detail": "Core loop: read top to bottom once; the active line spins, done lines freeze, scrollback is the permanent record. Refines what jetpack already ships (gutter, ✓ rows, threshold rule, spinner) — zero learning cost, perfect log fidelity, identical on TTY and CI. Cost: a long op is a wall of lines and there's no single \"where am I now\"; the spinner line is the only live signal.\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/cli/ledger.html",
+          "code": "  jetpack  add ripgrep fd\n           ▸ resolving from nixpkgs\n           ✓ ripgrep  14.1.0  built 6s\n           ✓ fd       9.0.0   cached\n  jetpack  2 packages ready  ✓\n\n  jetpack  env\n           ✓ node     22.3.0  cached\n           ✓ postgres 16.3.0  cached\n\n  ── myproj ─ dev shell · exit to leave ──────────────\n\n  (build failure: diagnostic prints inline, verbatim,\n   no spinner left hanging)"
+        },
+        {
+          "key": "B",
+          "name": "Live region — one place to watch",
+          "detail": "Core loop: watch one pinned bottom region (progress bar, counts, elapsed, size); finished items promote up into clean scrollback; the region collapses to a one-line summary. The uv/bun/pnpm model — best \"where am I now\" for long builds: one aggregate 31/42 beats 42 log lines. Cost: cursor-up region redraw (std ANSI, noted in NOTES), must erase cleanly before any diagnostic prints, and non-TTY degrades to appended lines (= option A).\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/cli/live.html",
+          "code": "  jetpack  add ripgrep fd\n           ✓ ripgrep  14.1.0  built 6s\n  ── live region · redraws in place ──────────────────\n  realizing 1/2 · fd            00:06 · 42 MB\n  ████████████████░░░░░░░░  unpacking\n  ────────────────────────────────────────────────────\n        │ finished items promote UP, region stays pinned\n        ▼\n  jetpack  2 packages ready in 6s  ✓   (region replaced)"
+        },
+        {
+          "key": "C",
+          "name": "Plan — decide first, apply quietly",
+          "detail": "Core loop: every mutation prints a full plan (add/change/remove, download size, closure and generation delta), asks once [y/N], then applies tersely with each done line tied to a plan line. The nh/terraform model — safest for consequential ops (switch, gc): you decide from the diff and nothing mutates unseen. Cost: an extra step on trivial adds — needs sensible --yes and CI behavior (non-TTY prints the plan and exits without applying, never hangs).\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/cli/plan.html",
+          "code": "  jetos  switch\n\n  Plan  generation 42 → 43 · 1 add, 1 change, 1 remove\n\n    + firefox       —      → 129.0\n    ~ linux         6.9.7  → 6.10.1\n    - obsolete-lib  1.2.0  → —\n\n  Download 240 MB · closure +18 MB · rebuild boot + current\n\n  Apply? [y/N] ▏\n     y → quiet apply, one ✓ per planned line\n     Enter/N → nothing touched"
+        },
+        {
+          "key": "D",
+          "name": "Hybrid — consequence-scaled output",
+          "detail": "Core loop: output scales with consequence — trivial ops print a quiet ledger, long builds pin a live region that promotes finished lines into that ledger, and mutations gate on a plan first; the scrollback is always the record. Takes: ledger as the spine under everything + live's region for genuinely long work (finished items promote up as permanent ledger lines, region collapses to a summary) + plan's gate for mutations only (jetos switch, gc), whose apply reuses the same region-into-ledger flow with each ✓ tied to a plan line. Left out: plan's gate on trivial adds (prompt fatigue; --yes still available) and a region for short ops. One progress experience at three depths, chosen by what the command does (I8). Non-TTY: no region, mutation prints plan and exits.\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/cli/hybrid.html",
+          "code": "tier 1 (trivial)          tier 2 (long build)         tier 3 (mutation)\n  jetpack add ripgrep fd    jetpack build               jetos switch\n    ✓ ripgrep 14.1.0          ✓ ripgrep 14.1.0          Plan  gen 42 → 43\n    ✓ fd      9.0.0         ── live region ──────         + firefox  → 129.0\n  2 packages ready ✓         building 31/42 · linux       ~ linux 6.9.7→6.10.1\n                             ██████████░░░  compiling      - obsolete-lib → —\n  jet env                       │ finished rows          Download 240 MB\n    ✓ node     22.3.0            ▼ promote UP             Apply? [y/N] _\n    ✓ postgres 16.3.0        jetpack  build ready ✓        y → region+ledger\n  ── myproj ─ dev shell ──     (region → ledger line)      N → nothing touched\n\nfailure (any tier): region erased → verbatim E0102 → stop.\nNO_COLOR/CI: no region, no gate — mutation prints plan + exits."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "nh (nix helper)",
+          "note": "The owner-named benchmark. Its os-switch generation diff is C's plan block; the improvement is making the plan the gate for every mutation, not just switch.",
+          "code": "nh os switch → diff of added/removed/upgraded + closure delta"
+        },
+        {
+          "lang": "uv / pnpm",
+          "note": "B's pinned progress area with counters; finished work scrolls up clean.",
+          "code": "Progress: resolved 42, reused 40, added 2   ████████░░"
+        },
+        {
+          "lang": "terraform",
+          "note": "C's contract: complete plan, explicit confirmation, apply reported against the plan.",
+          "code": "Plan: 1 to add, 1 to change, 1 to destroy.  Enter a value:"
+        }
+      ],
+      "rec": "D",
+      "status": "ratified",
+      "created": "2026-07-08T13:10:17.309Z",
+      "outcome": "D",
+      "comment": "Hybrid CLI; keep colored + - ~; support both -y and --yes; add nh-style dependency chain/graph visualization for long downloads/builds where it fits.",
+      "ratifiedAt": "2026-07-08",
+      "draft": false,
+      "retiredAt": "2026-07-12T18:00:10.603Z"
+    },
+    {
+      "id": "D-LOGICPROG1",
+      "cardId": "c2yj0nk5",
+      "title": "Add a full logic-programming subset (backtracking, multi-answer relations) to Jet?",
+      "gist": "Research notes caution against a full logic-programming subset. The gentler slice — failure-aware iterators and comprehensions — is already on the roadmap. The question is whether to add true multi-answer relations and backtracking on top of that, or hold the line.",
+      "explainer": "Full LP (Prolog-style) requires unification, a choice-point stack, and a non-deterministic execution model that cuts across Jet's deterministic ownership semantics. It would introduce a second execution model with different rules for variable binding, mutation, and resource cleanup — directly conflicting with I8 and with the safety-by-default guarantee. The failure-aware-comprehension card covers the practical 90% case (generators that can fail or produce multiple results) without a separate execution model. A full LP subsystem would also complicate the JIT tier and codegen.",
+      "story": "I want to write a solver that enumerates valid configurations of a constraint system — like a puzzle solver or a type-inference engine — without shelling out to Prolog.",
+      "inWild": "// What today's failure-aware comprehension covers:\nlet solutions = [x for x in candidates if satisfies(x, constraints)];\n\n// Full LP would add unification and backtracking:\n// relation edge(1, 2). edge(2, 3).\n// path(X, Z) :- edge(X, Y), path(Y, Z).  ← not proposed",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Reject full LP — keep failure-aware iterators only",
+          "detail": "The failure-aware-comprehension card already targets the practical use cases. Full backtracking introduces a second execution model (choice points, unification) incompatible with deterministic ownership. Recommend keeping the door closed.",
+          "code": "// Jet today — constraint enumeration without LP:\nfn solve(constraints: [Constraint]) -> [Config] {\n    candidates()\n        .filter(|c| constraints.all(|k| k.satisfied_by(c)))\n        .collect()\n}\n// No backtracking runtime; ownership is deterministic throughout."
+        },
+        {
+          "key": "B",
+          "name": "Adopt a scoped LP subset (relations block)",
+          "detail": "A `@logic { }` block opts in to a Datalog-style subset: finite relations, no function symbols, stratified negation. Bounded and terminating, so no infinite search trees. Still a second execution model — variables inside the block bind differently — which violates I8.",
+          "code": "// hypothetical scoped LP:\n@logic {\n    edge(1, 2). edge(2, 3).\n    path(X, Z) :- edge(X, Y), path(Y, Z).\n}\nlet reachable = path.query(1);  // returns [2, 3]"
+        },
+        {
+          "key": "C",
+          "name": "Far-horizon: post-v1 constraint/solver research",
+          "detail": "Park LP as a research item. A future constraint-programming library (not a language feature) could implement backtracking via a continuation monad or explicit search stack, keeping the language surface clean. No language change needed.",
+          "code": "// Future library pattern (no language change):\nuse jet::solve::{Solver, Var};\nlet mut s = Solver::new();\nlet x = s.var::<u32>();\ns.constrain(x > 0 && x < 10);\nfor sol in s.solutions() { println(\"{sol}\"); }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Prolog / SWI-Prolog",
+          "note": "Full LP with backtracking and unification. Powerful for combinatorial search but the non-deterministic execution model is notoriously hard to reason about for programmers from imperative backgrounds.",
+          "code": "path(X, Z) :- edge(X, Y), path(Y, Z).\n?- path(1, Z).\nZ = 2 ;\nZ = 3."
+        },
+        {
+          "lang": "miniKanren (Racket)",
+          "note": "A minimal logic DSL embedded in a host language. It works but requires the programmer to think in a completely different evaluation model — the very friction Jet wants to avoid.",
+          "code": "(run* (q)\n  (fresh (x y)\n    (== q (list x y))\n    (membero x '(1 2))\n    (membero y '(a b))))"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "outcome": "C",
+      "ratifiedAt": "2026-06-27",
+      "draft": false,
+      "retiredAt": "2026-07-12T18:18:50.591Z"
+    },
+    {
+      "id": "D-SOLVER-LIB1",
+      "cardId": "c2yj0nk5",
+      "group": "stdlib",
+      "title": "Explicit solver library",
+      "gist": "Choose whether Core gets a finite constraint solver API in Epoch 3.",
+      "explainer": "",
+      "story": "Iris writes a level generator with keys, doors, and enemies under constraints. She wants deterministic search with normal Jet ownership, not hidden backtracking.",
+      "inWild": "use core.solve.{Solver}\nsolver.require(path_exists(start_room(), key))",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Core finite solver library",
+          "detail": "Add `core.solve` with explicit solver state, deterministic order, ordinary values, and iterator output. No syntax.",
+          "code": "solver :: Solver.new(42)\nsolver.require(x + y == 10)"
+        },
+        {
+          "key": "B",
+          "name": "Experimental package first",
+          "detail": "Explore API evidence without making Core law.",
+          "code": "use core.experimental.solve.{Solver}"
+        },
+        {
+          "key": "C",
+          "name": "Defer solver API",
+          "detail": "Keep logic work out of Epoch 3 Core. Use normal iterator adapters and keep examples research-only.",
+          "code": "rooms().filter((r) => path_exists(start, r))"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Z3",
+          "note": "Explicit solver objects keep search visible to host code.",
+          "code": "solver.add(x + y == 10)"
+        }
+      ],
+      "rec": "C",
+      "status": "ratified",
+      "created": "2026-07-06T20:50:01.438Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-06",
+      "draft": false,
+      "retiredAt": "2026-07-12T18:18:50.591Z"
     }
   ],
   "cards": [
@@ -60525,6 +60680,265 @@
       "action": "card.add",
       "ref": "c0s8u85x",
       "note": "Surface census v2: marker growth law, secrets-module merge, core namespace admission"
+    },
+    {
+      "at": "2026-07-12T02:51:28.574Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-ARCH-SOURCE1",
+      "note": "Dissolve the 45k-line Source/ monolith into seam crates"
+    },
+    {
+      "at": "2026-07-12T02:51:28.674Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-MARK-META1",
+      "note": "Doc-metadata growth law: future tool-facing annotations are #Meta fields"
+    },
+    {
+      "at": "2026-07-12T02:51:28.772Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-CORE-SECRETS1",
+      "note": "One secrets home: merge core.secrets into core.vault"
+    },
+    {
+      "at": "2026-07-12T02:51:28.868Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-CORENS2",
+      "note": "Core namespace admission law: a top-level core.* name requires a domain, not a feature"
+    },
+    {
+      "at": "2026-07-12T02:52:08.352Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0z8bodp",
+      "note": "Mechanical splits: nine >2500-LOC modules + giant test files"
+    },
+    {
+      "at": "2026-07-12T02:52:08.450Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c00ukytt",
+      "note": "Syntax.rs census-drift sweep + docs hygiene"
+    },
+    {
+      "at": "2026-07-12T02:57:32.507Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-BINPAT1",
+      "note": "Binary patterns for byte parsing"
+    },
+    {
+      "at": "2026-07-12T02:57:32.603Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-STM1",
+      "note": "Atomic memory transactions across shared handles"
+    },
+    {
+      "at": "2026-07-12T02:57:32.705Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-AUTH1",
+      "note": "core.auth batteries for web apps"
+    },
+    {
+      "at": "2026-07-12T02:57:32.806Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-SYNC1",
+      "note": "CRDT sync value types"
+    },
+    {
+      "at": "2026-07-12T02:57:32.908Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-VALIDATE1",
+      "note": "Accumulated validation over decoded values"
+    },
+    {
+      "at": "2026-07-12T02:57:33.006Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-DBPOLICY1",
+      "note": "Typed row-level access policies"
+    },
+    {
+      "at": "2026-07-12T02:57:33.102Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-ENVHOOK1",
+      "note": "Shell auto-activation for jet env"
+    },
+    {
+      "at": "2026-07-12T02:57:33.205Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-OBSERVE-LIVE1",
+      "note": "Live runtime inspector"
+    },
+    {
+      "at": "2026-07-12T02:57:33.304Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-FFI-COM1",
+      "note": "Windows COM automation binder (the Office / VBA estate)"
+    },
+    {
+      "at": "2026-07-12T02:57:33.403Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-FFI-PWSH1",
+      "note": "PowerShell binder and object pipeline"
+    },
+    {
+      "at": "2026-07-12T02:57:33.499Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-FFI-DART1",
+      "note": "Dart binder and Flutter embedding direction"
+    },
+    {
+      "at": "2026-07-12T02:57:33.591Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-FFI-TCL1",
+      "note": "Tcl binder host model (the EDA tooling estate)"
+    },
+    {
+      "at": "2026-07-12T02:57:33.696Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-FFI-ADA1",
+      "note": "Ada binder with constraint facts (the certified-code estate)"
+    },
+    {
+      "at": "2026-07-12T02:57:33.797Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-FFI-PASCAL1",
+      "note": "Delphi / Object Pascal binder (the long-lived business-app estate)"
+    },
+    {
+      "at": "2026-07-12T06:14:47.011Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-ARCH-SOURCE1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-12T06:18:30.217Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0s8u85x",
+      "note": "#1 Syntax.rs entry updated"
+    },
+    {
+      "at": "2026-07-12T06:18:30.217Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0s8u85x",
+      "note": "#2 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-07-12T06:18:30.217Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0s8u85x",
+      "note": "#3 jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-07-12T06:18:30.217Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0s8u85x",
+      "note": "#4 snapshots re-blessed"
+    },
+    {
+      "at": "2026-07-12T06:18:30.217Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-MARK-META1",
+      "note": "B"
+    },
+    {
+      "at": "2026-07-12T06:19:32.878Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CORE-SECRETS1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-12T06:20:38.259Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CORENS2",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-12T06:22:19.674Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0n6vj96",
+      "note": "#1 Syntax.rs entry updated"
+    },
+    {
+      "at": "2026-07-12T06:22:19.674Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0n6vj96",
+      "note": "#2 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-07-12T06:22:19.674Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0n6vj96",
+      "note": "#3 jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-07-12T06:22:19.674Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0n6vj96",
+      "note": "#4 snapshots re-blessed"
+    },
+    {
+      "at": "2026-07-12T06:22:19.674Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-BINPAT1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-12T06:24:04.903Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-STM1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-12T06:25:02.752Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-AUTH1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-12T06:26:09.830Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-SYNC1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-12T06:29:14.944Z",
+      "by": "codex-main",
+      "action": "card.criteria-meet",
+      "ref": "c02kdm7a",
+      "note": "#1"
     }
   ]
 }

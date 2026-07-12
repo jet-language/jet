@@ -90,35 +90,36 @@ pub struct CodeModule {
 }
 
 /// D-GENMOD2=A: one parameter of a generic module — `module Lru<K: Hash, capacity: Int>`.
-/// Parse-time heuristic: uppercase-starting name → type param; lowercase-starting → value param.
+/// Sema resolves annotated slot kind in the template definition scope. Casing
+/// never decides semantics (D-GENMOD-VALUE1).
 #[derive(Debug, Clone)]
 pub enum GenericModuleParam {
-    /// `K: Hash` — a type parameter. Bound is the trait/interface name (may be empty = no bound).
-    TypeParam {
+    /// `K` — an unbounded type parameter.
+    Bare {
         name: String,
         name_span: Span,
-        bound: String,
     },
-    /// `capacity: Int` — a value parameter with a concrete type annotation.
-    ValueParam {
+    /// `K: Hash` or `capacity: Int`; sema resolves Hash as a bound and Int as
+    /// a concrete Tier-0 value type.
+    Annotated {
         name: String,
         name_span: Span,
-        ty: Type,
+        annotation: Type,
     },
 }
 
 impl GenericModuleParam {
     pub fn name(&self) -> &str {
         match self {
-            GenericModuleParam::TypeParam { name, .. }
-            | GenericModuleParam::ValueParam { name, .. } => name.as_str(),
+            GenericModuleParam::Bare { name, .. }
+            | GenericModuleParam::Annotated { name, .. } => name.as_str(),
         }
     }
 
     pub fn name_span(&self) -> Span {
         match self {
-            GenericModuleParam::TypeParam { name_span, .. }
-            | GenericModuleParam::ValueParam { name_span, .. } => *name_span,
+            GenericModuleParam::Bare { name_span, .. }
+            | GenericModuleParam::Annotated { name_span, .. } => *name_span,
         }
     }
 }
@@ -816,7 +817,31 @@ pub struct Func {
     /// D-PREPOST1: `@Post(cond, "msg")` clauses — a claim about `result` (the
     /// return value), checked before each return. Repeatable; empty when none.
     pub post: Vec<ContractClause>,
+    /// D-FFI-INLINE1=A (ratified 2026-07-11, card #501): `#FFI(<lang>) fn` inline
+    /// foreign tier. `None` = an ordinary Jet function (`body` holds its
+    /// statements). `Some` = the function's body is one string of foreign source
+    /// the per-language binder compiles; `body` is empty and the Jet signature is
+    /// the checked contract sema enforces at every call site.
+    pub inline_foreign: Option<InlineForeign>,
     pub body: Vec<Stmt>,
+}
+
+/// D-FFI-INLINE1=A (card #501): the inline foreign tier payload on a
+/// `#FFI(<lang>) fn`. `lang` is the raw language name written in `#FFI(<lang>)`
+/// (validated in sema, not the parser — same convention as effect names);
+/// `source` is the single `"""…"""` string body of foreign source.
+#[derive(Debug, Clone)]
+pub struct InlineForeign {
+    /// The language name inside `#FFI(<lang>)`, e.g. `c`, `cpp`, `asm`.
+    pub lang: String,
+    /// Span of the language name, for diagnostics.
+    pub lang_span: Span,
+    /// Span of the `#FFI(...)` marker as a whole.
+    pub marker_span: Span,
+    /// The verbatim foreign source from the `"""…"""` body.
+    pub source: String,
+    /// Span of the foreign-source string literal.
+    pub source_span: Span,
 }
 
 /// D-PREPOST1: one `@Pre`/`@Post` contract clause — a pure condition plus the

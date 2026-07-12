@@ -24,7 +24,7 @@ pub use items::{
     ImageFieldValue, FleetLit, FleetField, FleetFieldValue, HostEntry, VmTestLit, VmTestField,
     VmTestFieldValue, PerfLit, Namespace, TypeParam, TraitDef, TagDef, ProtocolDirection, ProtocolMessage,
     ProtocolDecl, StateDecl, DeriveDef, TraitMethodSig, TraitImplBlock, ExternRustBlock, ExternFn,
-    TestDef, BenchDef, MaturityTag, Func, ContractClause, StateTransition, EveryMarker,
+    TestDef, BenchDef, MaturityTag, Func, InlineForeign, ContractClause, StateTransition, EveryMarker,
     EveryArg, EverySchedule, EveryScheduleError, Param, StructLayout, CEnumTag,
     Marker, StructDef, TypeAliasDef, DistinctDef, UnitFamilyDef, EnumDef, EnumGroup, Variant,
     VariantPayload, VariantField, ImplDef, Field,

@@ -52,8 +52,9 @@ D-COMPILERSEAMS1/2 split the compiler into workspace seam crates. The root
 | `jet-comptime` | comptime values and interpreter support | no user-facing surface by itself |
 | `jet-sema` | all semantic checks, collects all front-end diagnostics | yes (E01xx+) |
 | `jet-codegen` | checked program to Rust text; TIR is internal here | **never** |
-| `jetpack` | package manager, JetOS engine, package manifest/lock, hidden FFI bridge construction | package/JetOS/FFI diagnostics |
-| `jet-driver` | front-end orchestration and compile outputs; calls jetpack FFI preparation | front-end diagnostics only |
+| `jet-pkg-model` | shared read-only package/config data model: `pkg.jet` manifest parsing, lock, hangar store listing, ref classification, FFI bridge construction, inline script deps | package/FFI diagnostics |
+| `jetpack` | package manager engine: provider/network/shell realization, JetOS, CLI — depends on `jet-pkg-model` for the data it reads/writes | package/JetOS diagnostics |
+| `jet-driver` | front-end orchestration and compile outputs; depends on `jet-pkg-model` (never `jetpack`'s engine) for manifest/lock/FFI preparation | front-end diagnostics only |
 | `jet-queries` | std-only demand cache for incremental inputs and derived query values | no |
 | `jet-semindex` | stable semantic index over checked programs for tooling | no new diagnostics |
 | `jet-impact` | blast-radius reports over `jet-semindex` | no |
@@ -70,9 +71,13 @@ to leak into a checked compiler manifest.
 `tests/workspace_crates.rs` pins the current path-dependency direction. Compiler
 front-end crates may not grow back-edges into driver/codegen clients. Tooling and
 runtime crates stay outside the compiler seam unless their dependency row is
-changed here and in the test. Jetpack/JetOS live in `crates/jetpack`; `jet-driver`
-depends on that crate for package manifest/lock and FFI bridge seams, then
-re-exports the legacy module names so existing API callers keep compiling.
+changed here and in the test. Jetpack/JetOS live in `crates/jetpack`; the shared
+manifest/lock/store-listing/FFI-bridge/script-dep data model lives in
+`crates/jet-pkg-model` (card #367, D-PRODUCT-SPLIT1=C), which `jetpack`
+re-exports under the legacy module names so its own internal call sites are
+unchanged. `jet-driver` depends on `jet-pkg-model` directly — never on
+`jetpack` — so the compiler's module loader never needs Jetpack's
+provider/network/shell engine to resolve `use <pkg>` imports.
 The root binary still owns native build execution: `Source/CmdCompile.rs`
 invokes rustc, classifies linker/tool failures, renders the I2 ICE banner, and
 links any prepared FFI artifact. Do not move that responsibility into a seam
@@ -89,7 +94,8 @@ become dependencies of the compiler workspace crates.
    declaration types, unsafe signatures, and invalid boundary conversions need
    Jet diagnostics before codegen (I2/I3/I4). Tool and library availability is
    not a source-level fact; classify it later at bridge build/native link time.
-3. Extend `crates/jetpack/src/FFI.rs` (or `CFFI.rs` for C) to prepare the bridge.
+3. Extend `crates/jet-pkg-model/src/FFI.rs` (or `CFFI.rs` for C) to prepare the
+   bridge (re-exported at `crates/jetpack::FFI`/`::CFFI` and `crates/jet-driver::FFI`).
    The Rust bridge is a generated, content-addressed crate under Jet's cache: its
    generated `Cargo.toml` owns foreign dependencies, `cargo build` produces an
    rlib, and `FfiLink` records the crate name, rlib, and dependency directory.

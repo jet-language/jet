@@ -389,6 +389,7 @@ fn synthesize_computed_field_getter(f: &Field) -> Func {
         web_marker: None,
         pre: Vec::new(),
         post: Vec::new(),
+        inline_foreign: None,
         body: vec![Stmt::Return(Some(body_expr), span)],
     }
 }

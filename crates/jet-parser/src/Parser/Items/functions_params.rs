@@ -142,6 +142,7 @@ impl<'a> Parser<'a> {
                     inline_span,
                     pre: Vec::new(),
                     post: Vec::new(),
+                    inline_foreign: None,
                     body,
                 });
             }
@@ -185,6 +186,7 @@ impl<'a> Parser<'a> {
                 inline_span,
                 pre: Vec::new(),
                 post: Vec::new(),
+                inline_foreign: None,
                 body,
             })
         }

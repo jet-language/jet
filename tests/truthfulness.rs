@@ -412,7 +412,9 @@ fn compiler_seam_crates_have_only_path_dependencies() {
     const EXEMPTIONS: &[(&str, &[&str])] = &[
         ("jet-jit", &["D-JITDEP1", "D-JIT2"]),
         ("jet-net", &["D-NETDEP1", "D-TLS1"]),
-        ("jetpack", &["D-TLS1"]),
+        // Card #367 / D-PRODUCT-SPLIT1=C: FFI.rs (the rustls test-only
+        // loopback peer) moved from `jetpack` to `jet-pkg-model`.
+        ("jet-pkg-model", &["D-TLS1"]),
     ];
 
     let root = root();
@@ -604,10 +606,12 @@ fn codegen_never_constructs_diagnostics() {
 #[test]
 fn compiler_code_has_no_include_splices() {
     // Exact allowlist: dual-use runtime template also include_str!'d and
-    // spliced into generated bridge crates at codegen time. jetpack is a
-    // tool crate (jetpack run/build), not a compiler seam crate, and this
-    // include! is a test-only splice for the template's own unit tests.
-    const ALLOWLIST: &[&str] = &["crates/jetpack/src/FFI.rs"];
+    // spliced into generated bridge crates at codegen time. Card #367 /
+    // D-PRODUCT-SPLIT1=C moved this file into jet-pkg-model (the shared
+    // package/config data model) — still a tool-facing crate, not a
+    // compiler seam crate, and this include! is a test-only splice for the
+    // template's own unit tests.
+    const ALLOWLIST: &[&str] = &["crates/jet-pkg-model/src/FFI.rs"];
 
     let root = root();
     let mut dirs = vec![root.join("Source")];

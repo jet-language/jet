@@ -16,25 +16,29 @@ pub use jet_codegen::{
     Codegen, Comptime, Diagnostics, Lexer, Parser, Sema, Syntax, AST, SHA256,
 };
 
+// Card #367 / D-PRODUCT-SPLIT1=C: the read-only package/config data model
+// (manifest/lock/store-listing/ref/FFI-binding/script-dep parsing) lives in
+// `jet-pkg-model` so `jet-driver` can depend on it without pulling in this
+// crate's provider/network/shell engine. Re-exported under their historical
+// paths so every internal call site in this crate (`crate::PackageManifest`,
+// `super::RefSpec`, etc.) is unchanged.
+pub use jet_pkg_model::{
+    CBind, CFFI, Envelope, FFI, Lock, Manifest, PackageManifest, Platform, RefSpec, ScriptDeps,
+    JSON,
+};
+
 pub mod Bridge;
 pub mod BuildDebug;
-pub mod CBind;
-pub mod CFFI;
 pub mod CLI;
 pub mod Components;
 pub mod Discovery;
 pub mod Doctor;
 pub mod EffectBudget;
 pub mod EnvFile;
-pub mod Envelope;
-pub mod FFI;
 pub mod Image;
-pub mod JSON;
 pub mod JetOS;
 pub mod JetPin;
 pub mod LintPolicy;
-pub mod Lock;
-pub mod Manifest;
 pub mod ManifestTOML;
 pub mod Merge;
 pub mod MigrationImport;
@@ -42,16 +46,11 @@ pub mod ModuleEval;
 pub mod Output;
 pub mod Overlay;
 pub mod PackageGraph;
-pub mod PackageManifest;
-pub mod Platform;
-pub mod PluginExport;
 pub mod Provider;
 pub mod ProviderGraph;
 pub mod Recipe;
-pub mod RefSpec;
 pub mod Replacement;
 pub mod RuntimePolicy;
-pub mod ScriptDeps;
 pub mod ScriptLock;
 pub mod Secrets;
 pub mod SemanticLock;

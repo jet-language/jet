@@ -1918,10 +1918,27 @@ impl LowerCtx<'_, '_> {
             THandleOp::RngWeightedPick => Err("jit handle method unsupported".to_string()),
             THandleOp::RngSample => Err("jit handle method unsupported".to_string()),
             THandleOp::RngShuffle => Err("jit handle method unsupported".to_string()),
-            THandleOp::SolverNew => Err("jit handle method unsupported".to_string()),
-            THandleOp::SolverRequire => Err("jit handle method unsupported".to_string()),
-            THandleOp::SolverFailureCount => Err("jit handle method unsupported".to_string()),
-            THandleOp::SolverStatus => Err("jit handle method unsupported".to_string()),
+            THandleOp::SolverNew => {
+                let host = self.module.declare_func_in_func(self.host.solver.new, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::SolverRequire => {
+                let ok = self.lower_expr(&args[0])?;
+                let host = self.module.declare_func_in_func(self.host.solver.require, self.b.func);
+                self.b.ins().call(host, &[recv_val, ok]);
+                Ok(self.b.ins().iconst(types::I8, 0))
+            }
+            THandleOp::SolverFailureCount => {
+                let host = self.module.declare_func_in_func(self.host.solver.failure_count, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::SolverStatus => {
+                let host = self.module.declare_func_in_func(self.host.solver.status, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
             THandleOp::GameSceneNew => Err("jit handle method unsupported".to_string()),
             THandleOp::GameReplayRecord => Err("jit handle method unsupported".to_string()),
             THandleOp::GameBackendHeadless => Err("jit handle method unsupported".to_string()),

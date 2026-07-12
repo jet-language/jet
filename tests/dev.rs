@@ -1422,6 +1422,48 @@ fn run_cranelift_without_fallback(src: &str, tag: &str) -> ProgramOutput {
 }
 
 #[test]
+fn solver_state_transitions_match_aot_in_resident_jit() {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    let source_path = "examples/features/tooling/solve_puzzle.jet";
+    let src = fs::read_to_string(source_path).expect("read solve_puzzle example");
+    let jit = run_cranelift_without_fallback(&src, "solve_puzzle");
+
+    let compiled = jet::compile_with_path(&src, source_path).expect("compile solve_puzzle");
+    let dir = std::env::temp_dir().join(format!("jet_solver_jit_parity_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let rs = dir.join("solve_puzzle.rs");
+    let bin = dir.join("solve_puzzle");
+    fs::write(&rs, compiled.rust).unwrap();
+    let rustc = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&rs)
+        .arg("-o")
+        .arg(&bin)
+        .output()
+        .expect("run rustc");
+    assert!(
+        rustc.status.success(),
+        "rustc failed: {}",
+        String::from_utf8_lossy(&rustc.stderr)
+    );
+    let output = Command::new(&bin).output().expect("run AOT solve_puzzle");
+    let aot = ProgramOutput::ran(
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+        output.status.code().unwrap_or(1),
+    );
+    assert_eq!(jit, aot, "Solver state drifted between resident JIT and AOT");
+    assert_eq!(
+        jit.stdout,
+        "key=1 door=3\nkey=3 door=1\nwins=2\nstatus=failed\nfailures=7\n"
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn resident_jit_result_abi_covers_calls_ok_err_try_and_entry() {
     if skip_if_cranelift_host_unsupported() {
         return;

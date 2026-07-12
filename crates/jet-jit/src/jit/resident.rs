@@ -17,6 +17,7 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         tasks: Vec::new(),
         task_controls: Vec::new(),
         results: Vec::new(),
+        solvers: Vec::new(),
         trapped: None,
     }
 }
@@ -49,6 +50,7 @@ fn reset_run_heap(rt: &mut JitRuntime) {
     rt.tasks.clear();
     rt.task_controls.clear();
     rt.results.clear();
+    rt.solvers.clear();
 }
 
 pub(crate) fn resident_teardown() {

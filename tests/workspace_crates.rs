@@ -99,10 +99,16 @@ fn workspace_crates_keep_declared_dependency_direction() {
             "jet-foundation",
             "jet-lexer",
             "jet-parser",
+            "jet-pkg-model",
             "jet-sema",
-            "jetpack",
         ],
     );
+    // Card #367 / D-PRODUCT-SPLIT1=C: the shared read-only package/config
+    // data model (manifest/lock/store-listing/ref/FFI-binding/script-dep
+    // parsing). Depends only inward toward the compiler's own checker
+    // (jet-sema, transitively jet-comptime/jet-parser/jet-lexer/jet-
+    // foundation) — never toward `jetpack`'s provider/network/shell engine.
+    assert_deps("crates/jet-pkg-model/Cargo.toml", &["jet-sema"]);
     assert_deps(
         "crates/jetpack/Cargo.toml",
         &[
@@ -111,6 +117,7 @@ fn workspace_crates_keep_declared_dependency_direction() {
             "jet-foundation",
             "jet-lexer",
             "jet-parser",
+            "jet-pkg-model",
             "jet-sema",
         ],
     );
@@ -128,6 +135,11 @@ fn workspace_crates_keep_declared_dependency_direction() {
         "crates/jet-jit/Cargo.toml",
         &["jet-codegen", "jet-foundation", "jet-rt"],
     );
+    // Card #367 / D-PRODUCT-SPLIT1=C slice 2: `jetos` is its own crate/binary
+    // boundary now (was a root-package shim). It still dispatches through
+    // `jetpack`'s `os` verb until the JetOS realization engine splits out of
+    // `jetpack` (slice 4) — that dependency is expected, not debt to shrink.
+    assert_deps("crates/jetos/Cargo.toml", &["jetpack"]);
     assert_deps(
         "Cargo.toml",
         &[
@@ -145,7 +157,13 @@ fn workspace_crates_keep_declared_dependency_direction() {
 #[test]
 fn jetpack_dependency_debt_is_explicit_until_product_split() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let allowed = ["Cargo.toml", "crates/jet-driver/Cargo.toml"];
+    // Card #367 / D-PRODUCT-SPLIT1=C slice 1: `jet-driver` moved off
+    // `jetpack` onto `jet-pkg-model` (the read-only data model), so it left
+    // this debt list. The root package still bundles `jetpack` (the `jet`
+    // binary embeds `jetpack help`/manifest parsing) — that is slice 3.
+    // `jetos` (slice 2) is expected to depend on `jetpack` until slice 4
+    // splits the JetOS engine out of it.
+    let allowed = ["Cargo.toml", "crates/jetos/Cargo.toml"];
     let mut actual = Vec::new();
     for manifest in repo_files_with_suffix("crates", "Cargo.toml")
         .into_iter()
@@ -171,7 +189,7 @@ fn jetpack_dependency_debt_is_explicit_until_product_split() {
 fn direct_jetpack_imports_stay_behind_known_boundaries() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let allowed = [
-        "Source/Bin/JetOS.rs",
+        "crates/jetos/src/main.rs",
         "Source/Canvas/project_scan.rs",
         "Source/Canvas/project_transactions.rs",
         "Source/Canvas/query_actions.rs",
@@ -179,8 +197,6 @@ fn direct_jetpack_imports_stay_behind_known_boundaries() {
         "Source/LSP/Completion.rs",
         "Source/LSP/Server.rs",
         "Source/lib.rs",
-        "crates/jet-driver/src/Loader.rs",
-        "crates/jet-driver/src/lib.rs",
     ]
     .into_iter()
     .map(String::from)

@@ -81,6 +81,228 @@ impl<'a> Parser<'a> {
             )
         }
     
+        /// D-FFI-INLINE1=A (ratified 2026-07-11, card #501): is the cursor at
+        /// `#FFI(<lang>) fn …`, optionally preceded by an `#Unsafe("reason")`
+        /// gate (`#Unsafe("…") #FFI(asm) fn …`)? The unsafe-language gate is
+        /// enforced in sema; the parser only needs to route the item here.
+        pub(super) fn at_ffi_fn(&self) -> bool {
+            if !matches!(self.peek().kind, TokKind::Hash) {
+                return false;
+            }
+            // Direct `#FFI(<lang>)`.
+            if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_FFI)
+                && matches!(self.peek3().kind, TokKind::LParen)
+            {
+                return true;
+            }
+            // `#Unsafe(["reason"]) #FFI(<lang>)` — scan past the unsafe gate.
+            if matches!(self.peek2().kind, TokKind::KwUnsafe) {
+                let mut i = self.pos + 2;
+                if matches!(self.toks.get(i).map(|t| &t.kind), Some(TokKind::LParen)) {
+                    while i < self.toks.len()
+                        && !matches!(self.toks[i].kind, TokKind::RParen | TokKind::Eof)
+                    {
+                        i += 1;
+                    }
+                    i += 1; // past `)`
+                }
+                while matches!(self.toks.get(i).map(|t| &t.kind), Some(TokKind::Semi)) {
+                    i += 1;
+                }
+                return matches!(self.toks.get(i).map(|t| &t.kind), Some(TokKind::Hash))
+                    && matches!(self.toks.get(i + 1).map(|t| &t.kind), Some(TokKind::Ident(n)) if n == Syntax::ATTR_FFI)
+                    && matches!(self.toks.get(i + 2).map(|t| &t.kind), Some(TokKind::LParen));
+            }
+            false
+        }
+
+        /// D-FFI-INLINE1=A (card #501): parse `#FFI(<lang>) fn name(sig) -> T {
+        /// """<foreign source>""" }` (the inline foreign tier), optionally
+        /// preceded by an `#Unsafe("reason")` gate. The Jet signature is parsed
+        /// as an ordinary function signature; the body must be a single
+        /// foreign-source string literal, captured into `Func::inline_foreign`
+        /// (the statement body is left empty). Language validity and the
+        /// unsafe-language gate are checked in sema (Names are validated in
+        /// sema, not the parser).
+        pub(super) fn ffi_fn(&mut self) -> Result<Func, Diagnostic> {
+            let decl_start = self.peek().span.start;
+            // Optional leading `#Unsafe("reason")` gate.
+            let (is_unsafe, unsafe_reason, unsafe_span) = if matches!(self.peek().kind, TokKind::Hash)
+                && matches!(self.peek2().kind, TokKind::KwUnsafe)
+            {
+                let start = self.peek().span;
+                self.bump(); // `#`
+                self.bump(); // `Unsafe`
+                let marker_span = Span::new(start.start, self.toks[self.pos - 1].span.end);
+                let mut reason = None;
+                if matches!(self.peek().kind, TokKind::LParen) {
+                    self.bump(); // `(`
+                    let (value, _) = self.expect_plain_string(
+                        "for the safety reason",
+                        "`#Unsafe` takes one piece of quoted text explaining why the function is safe to call",
+                        "write: #Unsafe(\"caller must ensure …\") #FFI(asm) fn …",
+                    )?;
+                    reason = Some(value);
+                    self.expect(TokKind::RParen, "after the safety reason")?;
+                    if matches!(self.peek().kind, TokKind::Semi) {
+                        self.bump();
+                    }
+                }
+                (true, reason, Some(marker_span))
+            } else {
+                (false, None, None)
+            };
+
+            // `#FFI(<lang>)`
+            let ffi_start = self.peek().span;
+            self.expect(TokKind::Hash, "before `FFI`")?;
+            let ffi_ident_span = self.peek().span;
+            match &self.peek().kind {
+                TokKind::Ident(n) if n == Syntax::ATTR_FFI => {
+                    self.bump();
+                }
+                other => {
+                    return Err(Diagnostic::error(
+                        "E0003",
+                        format!("expected `{}` after `#`, found {}", Syntax::ATTR_FFI, describe(other)),
+                        "the inline foreign tier is written `#FFI(<lang>) fn` — `#FFI(c)`, `#FFI(cpp)`, `#FFI(asm)`".to_string(),
+                        "write: #FFI(c) fn name(...) -> T { \"\"\"<foreign source>\"\"\" }".to_string(),
+                        Some(ffi_ident_span),
+                    ));
+                }
+            }
+            self.expect(TokKind::LParen, "after `#FFI` to name the foreign language")?;
+            let (lang, lang_span) = self.expect_ident("for the foreign language name in `#FFI(<lang>)`")?;
+            self.expect(TokKind::RParen, "after the foreign language name")?;
+            let marker_span = Span::new(ffi_start.start, self.toks[self.pos - 1].span.end);
+            // A synthetic `;` may separate the marker line from `fn`/`pub`.
+            while matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+            }
+            let (is_pub, is_package_pub) = self.parse_item_visibility();
+            self.expect_kw(TokKind::KwFn, "after `#FFI(<lang>)`")?;
+
+            // Ordinary Jet signature: name, type params, parameter list, optional
+            // `#(effects)`, optional `-> T`. Reuses the same sub-parsers as a
+            // normal `fn` so the checked contract is identical.
+            let (name, name_span) = self.expect_ident("after `fn`")?;
+            let type_params = self.parse_opt_type_params()?;
+            self.expect(TokKind::LParen, "after the function name")?;
+            let mut params = Vec::new();
+            if !matches!(self.peek().kind, TokKind::RParen) {
+                loop {
+                    params.push(self.param()?);
+                    if matches!(self.peek().kind, TokKind::RParen) {
+                        break;
+                    }
+                    self.expect(TokKind::Comma, "between parameters")?;
+                }
+            }
+            self.expect(TokKind::RParen, "to close the parameter list")?;
+            self.validate_variadic_params(&params);
+            let (declared_effects, effect_via) = self.parse_opt_func_effects()?;
+            let mut return_type = None;
+            let mut return_type_span = None;
+            if matches!(self.peek().kind, TokKind::Arrow) {
+                self.bump();
+                let (ty, span) = self.return_type()?;
+                return_type = Some(ty);
+                return_type_span = Some(span);
+            }
+
+            // The body is a single foreign-source string literal, not a Jet block.
+            self.expect(TokKind::LBrace, "to open the `#FFI` foreign-source body")?;
+            while matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+            }
+            let (source, source_span) = self.expect_inline_foreign_source(&lang, marker_span)?;
+            // The lexer inserts a synthetic `;` statement terminator after the
+            // string; skip it before the closing brace.
+            while matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+            }
+            self.expect(TokKind::RBrace, "to close the `#FFI` foreign-source body")?;
+            let declaration_end = self.toks[self.pos - 1].span.end;
+
+            Ok(Func {
+                span: Span::new(decl_start, declaration_end),
+                is_pub,
+                is_package_pub,
+                external_type: None,
+                name,
+                name_span,
+                meta: None,
+                type_params,
+                params,
+                return_type,
+                return_type_span,
+                is_unsafe,
+                unsafe_reason,
+                unsafe_span,
+                is_pure: false,
+                is_sanitizer: false,
+                is_reactive: false,
+                is_replayable: false,
+                replayable_span: None,
+                is_task: false,
+                task_span: None,
+                every: None,
+                declared_effects,
+                effect_via,
+                state_requires: None,
+                state_transition: None,
+                web_marker: None,
+                is_must_use: false,
+                must_use_span: None,
+                maturity: None,
+                maturity_span: None,
+                is_inline: false,
+                is_inline_always: false,
+                inline_span: None,
+                pre: Vec::new(),
+                post: Vec::new(),
+                inline_foreign: Some(crate::AST::InlineForeign {
+                    lang,
+                    lang_span,
+                    marker_span,
+                    source,
+                    source_span,
+                }),
+                body: Vec::new(),
+            })
+        }
+
+        /// D-FFI-INLINE1=A (card #501): read the single foreign-source string that
+        /// forms an `#FFI(<lang>) fn` body. Must be exactly one non-interpolated
+        /// string literal (`"""…"""` or `"…"`); anything else — an interpolation,
+        /// a Jet statement, or an empty block — is E0064.
+        fn expect_inline_foreign_source(
+            &mut self,
+            lang: &str,
+            marker_span: Span,
+        ) -> Result<(String, Span), Diagnostic> {
+            let e0064 = |span: Span| {
+                Diagnostic::error(
+                    "E0064",
+                    format!("an `#FFI({lang})` function body must be one string of {lang} source"),
+                    "the inline foreign tier carries the foreign source as a single `\"\"\"…\"\"\"` string; the Jet signature above is the checked contract (D-FFI-INLINE1)".to_string(),
+                    format!("write the body as `{{ \"\"\"<{lang} source>\"\"\" }}` — one string literal, no other statements or interpolation"),
+                    Some(span),
+                )
+            };
+            match &self.peek().kind {
+                TokKind::Str(parts) => {
+                    let parts = parts.clone();
+                    let span = self.bump().span;
+                    match parts.as_slice() {
+                        [StrTokPart::Lit(s)] => Ok((s.clone(), span)),
+                        _ => Err(e0064(span)),
+                    }
+                }
+                _ => Err(e0064(marker_span)),
+            }
+        }
+
         /// D-UNSAFE2: is the cursor at `#Unsafe fn …` or `#Unsafe("…") fn …`?
         pub(super) fn at_unsafe_fn(&self) -> bool {
             if !matches!(self.peek().kind, TokKind::Hash) {

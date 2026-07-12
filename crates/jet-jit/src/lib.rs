@@ -13,6 +13,7 @@
 mod Collections;
 mod Concurrency;
 mod Numeric;
+mod Solver;
 
 // I6: Cranelift crates live here, not in the compiler `jet` crate (`Source/`).
 // The root package depends on jet-jit; jet-jit depends on cranelift-*.

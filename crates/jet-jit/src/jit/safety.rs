@@ -798,6 +798,11 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         THandleOp::SenderSend => {
             args.len() == 1 && matches!(&recv.ty, Type::Apply { name, .. } if name == "Sender")
         }
+        THandleOp::SolverNew => args.is_empty() && recv.ty == Type::Int,
+        THandleOp::SolverRequire => args.len() == 1 && recv.ty == Type::Named("Solver".into()) && args[0].ty == Type::Bool,
+        THandleOp::SolverFailureCount | THandleOp::SolverStatus => {
+            args.is_empty() && recv.ty == Type::Named("Solver".into())
+        }
         _ => false,
     }
 }

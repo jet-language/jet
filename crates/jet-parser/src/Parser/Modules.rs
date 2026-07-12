@@ -493,32 +493,12 @@ impl<'a> Parser<'a> {
                 continue;
             }
             let (pname, pname_span) = self.expect_ident("for a generic module parameter name")?;
-            // Disambiguate type vs value param by whether there's a bound annotation.
-            // Heuristic: uppercase-starting name → type param (D-CASING1), lowercase → value param.
-            // Either way, optional `: Bound/Type` follows.
-            if pname.chars().next().map_or(false, |c| c.is_uppercase()) {
-                // Type param: `K: Hash` or just `K`
-                let bound = if matches!(self.peek().kind, TokKind::Colon) {
-                    self.bump(); // consume `:`
-                    let (b, _) = self.expect_ident("for the type bound")?;
-                    b
-                } else {
-                    String::new()
-                };
-                params.push(GenericModuleParam::TypeParam {
-                    name: pname,
-                    name_span: pname_span,
-                    bound,
-                });
+            if matches!(self.peek().kind, TokKind::Colon) {
+                self.bump();
+                let (annotation, _) = self.type_()?;
+                params.push(GenericModuleParam::Annotated { name:pname, name_span:pname_span, annotation });
             } else {
-                // Value param: `capacity: Int`
-                self.expect(TokKind::Colon, "after a value parameter name")?;
-                let (ty, _) = self.type_()?;
-                params.push(GenericModuleParam::ValueParam {
-                    name: pname,
-                    name_span: pname_span,
-                    ty,
-                });
+                params.push(GenericModuleParam::Bare { name:pname, name_span:pname_span });
             }
         }
         self.expect(TokKind::Gt, "to close the generic module parameter list")?;
@@ -570,9 +550,16 @@ impl<'a> Parser<'a> {
                     continue;
                 }
                 let arg_start = self.peek().span;
-                // Try integer literal first (value arg), then type
+                // Preserve unresolved syntax. Literal-led and enum-case
+                // expressions are values; an identifier can still be
+                // contextualized as either a type or an earlier constant by sema.
                 match &self.peek().kind {
-                    TokKind::Int(_) => {
+                    TokKind::Int(_) | TokKind::KwTrue | TokKind::KwFalse | TokKind::Char(_) | TokKind::Str(_)
+                    | TokKind::LParen | TokKind::Minus | TokKind::Bang => {
+                        let expr = self.expr()?;
+                        args.push(ModuleArg::Value(expr, arg_start));
+                    }
+                    TokKind::Ident(_) if matches!(self.peek2().kind, TokKind::Dot) => {
                         let expr = self.expr()?;
                         args.push(ModuleArg::Value(expr, arg_start));
                     }

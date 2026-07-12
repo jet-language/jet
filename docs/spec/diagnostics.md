@@ -636,6 +636,12 @@ duplicate this — it is the one surface for lint walls (I8).
 | E2701 | runtime | malformed input to a ring library parse function — row/line number and detail (E2-M9) |
 | E2702 | sema  | crypto API misuse at the boundary — reserved for future statically-detectable crypto errors (E2-M9, D-LR3) |
 | L2701 | sema  | advisory: regex pattern may catastrophically backtrack; suggest an anchor (E2-M9) |
+| E2903 | sema  | performance-budget declaration, typed value, unit, direction, comparison, or applicability is invalid (D-PERFBUDGET-OUTPUT1) |
+| E2904 | sema  | two performance budgets overlap on one effective key (D-PERFBUDGET-OUTPUT1) |
+| E2905 | sema  | performance-budget scope, target, profile, or provider cannot resolve uniquely (D-PERFBUDGET-OUTPUT1) |
+| E2906 | jet   | valid performance budget has unavailable, mismatched, stale, or insufficient provider evidence (D-PERFBUDGET-OUTPUT1) |
+| E2907 | jet   | performance budget regressed or statistical evidence is inconclusive (D-PERFBUDGET-OUTPUT1) |
+| E2908 | jet   | performance-budget provider/protocol/storage operation failed before acceptance (D-PERFBUDGET-OUTPUT1) |
 | E2910 | sema  | `reactive.derived`/`effect` argument isn't a lambda (D-REACT1) |
 | E2911 | sema  | `reactive.derived`/`effect` lambda takes parameters (D-REACT1) |
 | E2912 | sema  | `reactive.derived` lambda returns nothing (D-REACT1) |
@@ -917,6 +923,12 @@ Quality workflows: doctests, snapshot testing, `todo` typed holes, `jet bench`, 
 |------|------|-----|-----|
 | E2901 | Doctest output mismatch. Expected: `{expected}` Got: `{actual}` | The example in the doc comment claims a different result from what the code produces. Docs cannot lie (D-TEST4/I5 generalized to user code). | Run `jet test --update-snapshots` to update the golden output, or fix the code to match the claimed output. |
 | E2902 | `#Todo` at `{file}:{line}` — expected `{type}` | A `#Todo` typed hole was reached at runtime. The hole compiles anywhere and type-checks, but panics when executed (D-TOOL2). | Replace `#Todo` with a real implementation. |
+| E2903 | performance budget `{name}` is not valid | One grammar rule, typed value, unit, direction, comparison, or applicability constraint is invalid. | Use the one legal typed budget form named by the diagnostic. |
+| E2904 | performance budgets `{a}` and `{b}` overlap | Both declarations cover the same effective metric, scope, provider, target, profile, and applicability key. | Remove one declaration or make their applicability disjoint. |
+| E2905 | performance budget `{name}` cannot resolve `{attachment}` | The attachment has zero or multiple canonical matches. | Name one qualified scope, target, profile, or provider identity. |
+| E2906 | performance budget `{name}` has no usable evidence | The resolved provider returned unavailable, missing, mismatched, zero, stale, or too little evidence for this valid budget. | Correct the provider evidence, or bootstrap only when absent or stale evidence is eligible. |
+| E2907 | performance budget `{name}` regressed / is inconclusive | The shared evaluator's estimator and confidence bounds do not prove the declared limit. | Improve the measured behavior, inspect the named evidence, or record an explicit exception. |
+| E2908 | performance budget operation failed | Provider protocol/execution, report/container, CAS, permission, or durability validation refused the operation. | Correct the named refusal and retry; there is no force bypass. |
 | E2940 | required proof evidence is unavailable | The `complete_required` policy needs `{producer}`, but `{reason}`. | Perform the producer-specific action named by `jet prove`, then run the same command again. |
 | E2941 | unknown proof lens `{value}` | `jet prove` accepts `all`, `refinements`, `effects`, `taint`, `contracts`, `tests`, `budgets`, `replay`, and `solver`. | Use one exact value, for example `jet prove TARGET --lens tests`. |
 | E2910 | `reactive.{kind}` needs a lambda, not {type}. | `reactive.derived`/`reactive.effect` build a reactive value from a `() => …` body so it can re-run when a signal changes (D-REACT1=B). A non-lambda argument has nothing to re-run. | Write `reactive.derived(() => … )` or `reactive.effect(() => { … })`. |

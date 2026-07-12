@@ -1658,6 +1658,31 @@ pub fn check_file_with_overlays(
     }
 }
 
+/// Structural tools check a staged file in its actual output directory and
+/// load adjacent modules referenced by unqualified imports. This retains the
+/// same parser/sema authority as ordinary checking.
+pub fn check_file_with_overlays_and_import_root(
+    file: &str,
+    overlays: &[(&Path, &str)],
+) -> (
+    Vec<Diagnostic>,
+    Option<crate::AST::ProgramBundle>,
+    crate::Sema::SemIndexEffectFacts,
+) {
+    match crate::Loader::load_entry_with_overlays_and_import_root(file, overlays, false) {
+        Ok(mut bundle) => {
+            let mut diags = std::mem::take(&mut bundle.parse_teaching);
+            let (check_diags, facts) = crate::Sema::check_bundle_with_effect_facts(
+                &mut bundle,
+                crate::Sema::CompileMode::Check,
+            );
+            diags.extend(check_diags);
+            (diags, Some(bundle), facts)
+        }
+        Err(diags) => (diags, None, crate::Sema::SemIndexEffectFacts::default()),
+    }
+}
+
 /// Check-only from source text (eval mode). Returns only error-severity diagnostics.
 pub fn check_eval(src: &str, file: &str) -> Vec<Diagnostic> {
     let (toks, lex_diags) = crate::Lexer::lex(src);

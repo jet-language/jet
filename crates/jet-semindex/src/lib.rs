@@ -79,6 +79,26 @@ pub fn open_with_overlays(
     Err(SemIndexError::Load(diags))
 }
 
+/// Structural diff/merge index: check against the candidate path's real
+/// directory so adjacent semantic module imports resolve before output exists.
+pub fn open_structural_with_overlays(
+    entry: &Path,
+    overlays: &[(&Path, &str)],
+) -> Result<SemIndex, SemIndexError> {
+    let entry_str = entry.to_string_lossy();
+    let (diags, bundle, facts) =
+        jet_driver::Driver::check_file_with_overlays_and_import_root(&entry_str, overlays);
+    if !diags
+        .iter()
+        .any(|d| d.severity == jet_foundation::Diagnostics::Severity::Error)
+    {
+        if let Some(bundle) = bundle {
+            return Ok(build_index(&bundle, &facts));
+        }
+    }
+    Err(SemIndexError::Load(diags))
+}
+
 /// Index a staged fixture even when its deliberately expected diagnostics are
 /// present. The returned facts still come from the real loader/sema pass; this
 /// is not a syntax-only fallback.

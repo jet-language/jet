@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::{exit, Command};
 
-use jet_semindex::{open, open_with_overlays, DefinitionFact, SemIndexError};
+use jet_semindex::{open_structural_with_overlays, DefinitionFact, SemIndexError};
 
 #[derive(Clone)]
 struct Unit {
@@ -100,7 +100,7 @@ pub(crate) fn run_merge(args: &[String]) {
         &flag_value(args, "--out").map(PathBuf::from).unwrap_or_else(|| ours_path.to_path_buf()),
     );
     let overlays = [(output_path.as_path(), formatted.as_str())];
-    if let Err(err) = open_with_overlays(&output_path, &overlays) { render_index_error("merged output did not pass parser and sema", err); }
+    if let Err(err) = open_structural_with_overlays(&output_path, &overlays) { render_index_error("merged output did not pass parser and sema", err); }
     if let Err(err) = fs::write(&output_path, formatted.as_bytes()) { fail(&format!("could not write `{}`: {err}", output_path.display()), "choose a writable --out path"); }
     if report_mode(args) == "text" { println!("merged: {}", output_path.display()); }
     else { println!("{{\"schema_version\":1,\"kind\":\"structural_merge\",\"status\":\"merged\",\"output\":{}}}", json_string(&output_path.display().to_string())); }
@@ -116,7 +116,7 @@ pub(crate) fn structural_help(command: &str) -> Option<&'static str> {
 
 fn load(path: &Path) -> Document {
     let source = fs::read_to_string(path).unwrap_or_else(|err| fail(&format!("could not read `{}`: {err}", path.display()), "pass a readable Jet source file"));
-    let index = open(path).unwrap_or_else(|err| render_index_error(&format!("`{}` did not pass parser and sema", path.display()), err));
+    let index = open_structural_with_overlays(path, &[]).unwrap_or_else(|err| render_index_error(&format!("`{}` did not pass parser and sema", path.display()), err));
     let mut units = Vec::new();
     for fact in index.definition_facts().iter().filter(|fact| same_module(path, &fact.module_path)) {
         let Some(slice) = source.get(fact.span.start..fact.span.end) else { fail("semantic index returned an invalid source span", "run `jet check` and report this compiler bug"); };
@@ -141,10 +141,21 @@ fn structural_diff(before: &[Unit], after: &[Unit]) -> Vec<Change> {
             Some(index) => {
                 used.insert(index);
                 let right = &after[index];
-                if left.fact.name != right.fact.name { changes.push(change(ChangeKind::Renamed, left, Some(right))); }
-                if left.fact.module_path != right.fact.module_path { changes.push(change(ChangeKind::Moved, left, Some(right))); }
-                if left.fact.signature_id != right.fact.signature_id { changes.push(change(ChangeKind::Signature, left, Some(right))); }
-                else if left.fact.content_id != right.fact.content_id { changes.push(change(ChangeKind::Body, left, Some(right))); }
+                let renamed = left.fact.name != right.fact.name;
+                let signature_changed = left.fact.signature_id != right.fact.signature_id;
+                let content_changed = left.fact.content_id != right.fact.content_id;
+                if renamed { changes.push(change(ChangeKind::Renamed, left, Some(right))); }
+                // Comparing two standalone paths is often how editors present
+                // an unsaved/formatted buffer. A path change is a semantic move
+                // only when the declaration also changed; identical checked
+                // definitions do not manufacture move churn.
+                if left.fact.module_path != right.fact.module_path
+                    && (renamed || signature_changed || content_changed)
+                {
+                    changes.push(change(ChangeKind::Moved, left, Some(right)));
+                }
+                if signature_changed { changes.push(change(ChangeKind::Signature, left, Some(right))); }
+                else if content_changed { changes.push(change(ChangeKind::Body, left, Some(right))); }
             }
         }
     }
