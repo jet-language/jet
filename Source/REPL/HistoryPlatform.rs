@@ -7,6 +7,263 @@ use std::io;
 use std::path::PathBuf;
 
 #[cfg(unix)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct UnixOpenFlags {
+    read_only: i32,
+    write_only: i32,
+    directory: i32,
+    nofollow: i32,
+    cloexec: i32,
+    create: i32,
+    excl: i32,
+}
+
+#[cfg(unix)]
+fn flags_for_target(os: &str, arch: &str) -> Option<UnixOpenFlags> {
+    const LINUX_BASE: UnixOpenFlags = UnixOpenFlags {
+        read_only: 0,
+        write_only: 1,
+        directory: 0x1_0000,
+        nofollow: 0x2_0000,
+        cloexec: 0x8_0000,
+        create: 0x40,
+        excl: 0x80,
+    };
+    const LINUX_ASM_GENERIC: UnixOpenFlags = UnixOpenFlags {
+        directory: 0x4000,
+        nofollow: 0x8000,
+        ..LINUX_BASE
+    };
+    const LINUX_MIPS: UnixOpenFlags = UnixOpenFlags {
+        create: 0x100,
+        excl: 0x400,
+        ..LINUX_BASE
+    };
+    const LINUX_SPARC: UnixOpenFlags = UnixOpenFlags {
+        cloexec: 0x40_0000,
+        create: 0x200,
+        excl: 0x800,
+        ..LINUX_BASE
+    };
+    const ANDROID_RISCV64: UnixOpenFlags = UnixOpenFlags {
+        directory: 0x20_0000,
+        nofollow: 0x40_0000,
+        ..LINUX_BASE
+    };
+    const BSD_BASE: UnixOpenFlags = UnixOpenFlags {
+        read_only: 0,
+        write_only: 1,
+        directory: 0,
+        nofollow: 0x100,
+        cloexec: 0,
+        create: 0x200,
+        excl: 0x800,
+    };
+    const APPLE: UnixOpenFlags = UnixOpenFlags {
+        directory: 0x10_0000,
+        cloexec: 0x100_0000,
+        ..BSD_BASE
+    };
+    const FREEBSD: UnixOpenFlags = UnixOpenFlags {
+        directory: 0x2_0000,
+        cloexec: 0x10_0000,
+        ..BSD_BASE
+    };
+    const DRAGONFLY: UnixOpenFlags = UnixOpenFlags {
+        directory: 0x800_0000,
+        cloexec: 0x2_0000,
+        ..BSD_BASE
+    };
+    const NETBSD: UnixOpenFlags = UnixOpenFlags {
+        directory: 0x20_0000,
+        cloexec: 0x40_0000,
+        ..BSD_BASE
+    };
+    const OPENBSD: UnixOpenFlags = UnixOpenFlags {
+        directory: 0x2_0000,
+        cloexec: 0x1_0000,
+        ..BSD_BASE
+    };
+
+    match (os, arch) {
+        (
+            "linux",
+            "x86" | "x86_64" | "s390x" | "riscv32" | "riscv64" | "loongarch64"
+            | "csky" | "hexagon",
+        ) => Some(LINUX_BASE),
+        ("linux", "arm" | "aarch64" | "powerpc" | "powerpc64" | "m68k") => {
+            Some(LINUX_ASM_GENERIC)
+        }
+        ("linux", "mips" | "mips64") => Some(LINUX_MIPS),
+        ("linux", "sparc" | "sparc64") => Some(LINUX_SPARC),
+        ("android", "x86" | "x86_64") => Some(LINUX_BASE),
+        ("android", "arm" | "aarch64") => Some(LINUX_ASM_GENERIC),
+        ("android", "riscv64") => Some(ANDROID_RISCV64),
+        ("macos" | "ios" | "tvos" | "watchos" | "visionos", _) => Some(APPLE),
+        ("freebsd", _) => Some(FREEBSD),
+        ("dragonfly", _) => Some(DRAGONFLY),
+        ("netbsd", _) => Some(NETBSD),
+        ("openbsd", _) => Some(OPENBSD),
+        _ => None,
+    }
+}
+
+#[cfg(unix)]
+fn unix_open_flags() -> io::Result<UnixOpenFlags> {
+    flags_for_target(std::env::consts::OS, std::env::consts::ARCH).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::Unsupported,
+            format!(
+                "secure history storage is unsupported on {} {}",
+                std::env::consts::OS,
+                std::env::consts::ARCH
+            ),
+        )
+    })
+}
+
+#[cfg(all(test, unix))]
+mod unix_flag_tests {
+    use super::{flags_for_target, unix_open_flags, UnixOpenFlags};
+
+    fn flags(os: &str, arch: &str) -> UnixOpenFlags {
+        flags_for_target(os, arch).unwrap_or_else(|| panic!("missing ABI table for {os}/{arch}"))
+    }
+
+    #[test]
+    fn selected_unix_open_flags_match_current_target_table() {
+        assert_eq!(
+            unix_open_flags().unwrap(),
+            flags(std::env::consts::OS, std::env::consts::ARCH)
+        );
+    }
+
+    #[test]
+    fn linux_and_android_open_flag_tables_cover_supported_arches() {
+        let linux_base = UnixOpenFlags {
+            read_only: 0,
+            write_only: 1,
+            directory: 0x1_0000,
+            nofollow: 0x2_0000,
+            cloexec: 0x8_0000,
+            create: 0x40,
+            excl: 0x80,
+        };
+        for arch in [
+            "x86",
+            "x86_64",
+            "s390x",
+            "riscv32",
+            "riscv64",
+            "loongarch64",
+            "csky",
+            "hexagon",
+        ] {
+            assert_eq!(flags("linux", arch), linux_base, "linux/{arch}");
+        }
+        let linux_asm_generic = UnixOpenFlags {
+            directory: 0x4000,
+            nofollow: 0x8000,
+            ..linux_base
+        };
+        for arch in ["arm", "aarch64", "powerpc", "powerpc64", "m68k"] {
+            assert_eq!(flags("linux", arch), linux_asm_generic, "linux/{arch}");
+        }
+        let linux_mips = UnixOpenFlags {
+            create: 0x100,
+            excl: 0x400,
+            ..linux_base
+        };
+        for arch in ["mips", "mips64"] {
+            assert_eq!(flags("linux", arch), linux_mips, "linux/{arch}");
+        }
+        let linux_sparc = UnixOpenFlags {
+            cloexec: 0x40_0000,
+            create: 0x200,
+            excl: 0x800,
+            ..linux_base
+        };
+        for arch in ["sparc", "sparc64"] {
+            assert_eq!(flags("linux", arch), linux_sparc, "linux/{arch}");
+        }
+        for arch in ["x86", "x86_64"] {
+            assert_eq!(flags("android", arch), linux_base, "android/{arch}");
+        }
+        for arch in ["arm", "aarch64"] {
+            assert_eq!(
+                flags("android", arch),
+                linux_asm_generic,
+                "android/{arch}"
+            );
+        }
+        assert_eq!(
+            flags("android", "riscv64"),
+            UnixOpenFlags {
+                directory: 0x20_0000,
+                nofollow: 0x40_0000,
+                ..linux_base
+            }
+        );
+    }
+
+    #[test]
+    fn darwin_and_bsd_open_flag_tables_cover_supported_targets() {
+        let bsd_base = UnixOpenFlags {
+            read_only: 0,
+            write_only: 1,
+            directory: 0,
+            nofollow: 0x100,
+            cloexec: 0,
+            create: 0x200,
+            excl: 0x800,
+        };
+        let apple = UnixOpenFlags {
+            directory: 0x10_0000,
+            cloexec: 0x100_0000,
+            ..bsd_base
+        };
+        for os in ["macos", "ios", "tvos", "watchos", "visionos"] {
+            assert_eq!(flags(os, "aarch64"), apple, "{os}/aarch64");
+            assert_eq!(flags(os, "x86_64"), apple, "{os}/x86_64");
+        }
+        assert_eq!(
+            flags("freebsd", "x86_64"),
+            UnixOpenFlags {
+                directory: 0x2_0000,
+                cloexec: 0x10_0000,
+                ..bsd_base
+            }
+        );
+        assert_eq!(
+            flags("dragonfly", "x86_64"),
+            UnixOpenFlags {
+                directory: 0x800_0000,
+                cloexec: 0x2_0000,
+                ..bsd_base
+            }
+        );
+        assert_eq!(
+            flags("netbsd", "x86_64"),
+            UnixOpenFlags {
+                directory: 0x20_0000,
+                cloexec: 0x40_0000,
+                ..bsd_base
+            }
+        );
+        assert_eq!(
+            flags("openbsd", "x86_64"),
+            UnixOpenFlags {
+                directory: 0x2_0000,
+                cloexec: 0x1_0000,
+                ..bsd_base
+            }
+        );
+        assert!(flags_for_target("solaris", "x86_64").is_none());
+        assert!(flags_for_target("linux", "unsupported-cpu").is_none());
+    }
+}
+
+#[cfg(unix)]
 pub(super) struct Backend {
     dir: std::fs::File,
 }
@@ -37,10 +294,6 @@ impl Backend {
         use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
         use std::path::Component;
 
-        const O_RDONLY: i32 = 0;
-        const O_CLOEXEC: i32 = 0o2000000;
-        const O_DIRECTORY: i32 = 0o200000;
-        const O_NOFOLLOW: i32 = 0o400000;
         unsafe extern "C" {
             fn openat(dirfd: i32, pathname: *const i8, flags: i32, mode: u32) -> i32;
             fn mkdirat(dirfd: i32, pathname: *const i8, mode: u32) -> i32;
@@ -51,7 +304,8 @@ impl Backend {
         }
         fn descend(parent: &std::fs::File, part: &OsStr, create: bool) -> io::Result<std::fs::File> {
             let part = name(part)?;
-            let flags = O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC;
+            let abi = unix_open_flags()?;
+            let flags = abi.read_only | abi.directory | abi.nofollow | abi.cloexec;
             let mut fd = unsafe { openat(parent.as_raw_fd(), part.as_ptr(), flags, 0) };
             if fd < 0 && create && io::Error::last_os_error().kind() == io::ErrorKind::NotFound {
                 if unsafe { mkdirat(parent.as_raw_fd(), part.as_ptr(), 0o700) } != 0 {
@@ -68,6 +322,7 @@ impl Backend {
             Ok(unsafe { std::fs::File::from_raw_fd(fd) })
         }
 
+        let abi = unix_open_flags()?;
         if !root.is_absolute() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -76,7 +331,7 @@ impl Backend {
         }
         let mut current = std::fs::OpenOptions::new()
             .read(true)
-            .custom_flags(O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+            .custom_flags(abi.read_only | abi.directory | abi.nofollow | abi.cloexec)
             .open("/")?;
         for component in root.components() {
             match component {
@@ -124,18 +379,16 @@ impl Backend {
         use std::io::Read;
         use std::os::fd::{AsRawFd, FromRawFd};
         use std::os::unix::fs::{MetadataExt, PermissionsExt};
-        const O_RDONLY: i32 = 0;
-        const O_CLOEXEC: i32 = 0o2000000;
-        const O_NOFOLLOW: i32 = 0o400000;
         unsafe extern "C" {
             fn openat(dirfd: i32, pathname: *const i8, flags: i32, mode: u32) -> i32;
         }
+        let abi = unix_open_flags()?;
         let name = CString::new("repl-history").unwrap();
         let fd = unsafe {
             openat(
                 self.dir.as_raw_fd(),
                 name.as_ptr(),
-                O_RDONLY | O_NOFOLLOW | O_CLOEXEC,
+                abi.read_only | abi.nofollow | abi.cloexec,
                 0,
             )
         };
@@ -166,11 +419,6 @@ impl Backend {
         use std::io::Write;
         use std::os::fd::{AsRawFd, FromRawFd};
         use std::sync::atomic::{AtomicU64, Ordering};
-        const O_WRONLY: i32 = 1;
-        const O_CREAT: i32 = 0o100;
-        const O_EXCL: i32 = 0o200;
-        const O_CLOEXEC: i32 = 0o2000000;
-        const O_NOFOLLOW: i32 = 0o400000;
         static NEXT_TMP: AtomicU64 = AtomicU64::new(0);
         unsafe extern "C" {
             fn openat(dirfd: i32, pathname: *const i8, flags: i32, mode: u32) -> i32;
@@ -178,6 +426,7 @@ impl Backend {
             fn unlinkat(dirfd: i32, pathname: *const i8, flags: i32) -> i32;
             fn fsync(fd: i32) -> i32;
         }
+        let abi = unix_open_flags()?;
         let temp = CString::new(format!(
             ".repl-history.{}.{}.tmp",
             std::process::id(),
@@ -189,7 +438,7 @@ impl Backend {
             openat(
                 self.dir.as_raw_fd(),
                 temp.as_ptr(),
-                O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
+                abi.write_only | abi.create | abi.excl | abi.nofollow | abi.cloexec,
                 0o600,
             )
         };
