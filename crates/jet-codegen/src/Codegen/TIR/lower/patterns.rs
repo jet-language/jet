@@ -197,7 +197,7 @@ pub(crate) fn lower_fallible_match(
             body,
         });
     }
-    // The `else` arm uses the SHARED `&mut env` in `emit_pattern_match_switch` (leaks).
+    // The `else` arm has its own lexical bindings.
     let else_lowered = else_body.as_ref().map(|body| {
         let mut branch = clone_env(env);
         lower_stmts(body, cx, &mut branch)
@@ -291,7 +291,7 @@ pub(crate) fn lower_enum_match(
             body,
         });
     }
-    // The `else` arm uses the SHARED `&mut env` in `emit_pattern_match_switch` (leaks).
+    // The `else` arm has its own lexical bindings.
     let else_lowered = else_body.as_ref().map(|body| {
         let mut branch = clone_env(env);
         lower_stmts(body, cx, &mut branch)

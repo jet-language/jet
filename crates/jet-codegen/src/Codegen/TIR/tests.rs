@@ -822,7 +822,7 @@ fn mk() {
     #[test]
     fn covers_or_fallback_panic_form() {
         // c109 Phase 15: the `panic(…)` fallback form is now covered — the
-        // `safe_locals_expr` snapshot is reproduced from the `panic_locals` replica.
+        // `safe_locals_expr` snapshot is rendered from the lexical lowering env.
         let src = "fn p(x: (Int?)) -> Int {\n return x ?? panic(\"missing\")\n}\n";
         assert!(covers(src, "p"));
     }

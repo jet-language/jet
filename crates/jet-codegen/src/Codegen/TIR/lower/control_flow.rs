@@ -319,12 +319,8 @@ pub(crate) fn lower_if(ifs: &IfStmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
     // `emit_if`'s three head shapes. The if-let form binds its name into the
     // then-branch scope (mirroring `add_pattern_bindings`).
     let (cond, then_binding, then_prefix) = lower_if_cond(&ifs.cond, cx, env);
-    // Each branch gets its own `locals` scope (deep-cloned, so a `let` is not visible
-    // after the `if`). The panic-dump replica leaks for a plain/`is_none` `if` (the AST
-    // `emit_if` passes the SHARED `&mut env` to `emit_stmts` → `clone_env`), but does
-    // NOT leak for an if-let condition (the AST clones the env into a fresh `body_env`
-    // before `add_pattern_bindings` → `fork_panic`, a deep-copied replica), so a `let`
-    // inside an if-let then-body is scoped exactly as the AST's `body_env`.
+    // Each branch gets its own lexical scope, so its bindings are available to panic
+    // context inside the branch but not after the `if`.
     let then_body = {
         let mut branch = if then_binding.is_some() {
             fork_panic(env)
@@ -451,7 +447,7 @@ fn range_inclusive_cond(subject: &Expr, lo: i64, hi: i64, cx: &Cx, env: &mut Low
 /// `TStmt::MixedSwitch`, reproducing `emit_mixed_switch` (Source/Codegen/Statement.rs).
 /// The subject is bound once to `_jet_switch_subject = &(subject)` (emitted for parity);
 /// each arm's PLAIN condition is resolved to a Rust string at lowering (`emit_expr`); the
-/// arm bodies + `else` are lowered on a SHARED env (leaky, like the AST `&mut env`).
+/// arm bodies + `else` are lowered in separate lexical environments.
 pub(crate) fn lower_mixed_switch(
     subject: &Expr,
     arms: &[SwitchArm],
@@ -475,7 +471,7 @@ pub(crate) fn lower_mixed_switch(
         } else {
             lower_expr(&arm.cond, cx, env)
         };
-        // The arm body uses the SHARED `&mut env` in `emit_mixed_switch` (leaks).
+        // Each arm body has its own lexical bindings.
         let mut branch = clone_env(env);
         let mut body = if let Some(pattern) = struct_pat.as_ref() {
             lower_struct_pattern_bindings(pattern, &subject_ty, cx, &mut branch)

@@ -23,8 +23,8 @@ pub(crate) fn lower_lambda_expecting(
     expected_params: Option<&[Type]>,
 ) -> TLambda {
     // `emit_lambda` clones the env (`lam_env = env.clone()`), so a `??` panic inside the
-    // lambda body dumps the lambda's env (outer locals + captures + params) and does NOT
-    // leak into the enclosing fn — a NON-leaky boundary, so fork the panic replica.
+    // lambda body dumps the lambda's lexical env (outer locals + captures + params) and
+    // does not leak its own bindings into the enclosing function.
     let mut lam_env = fork_panic(env);
     // The clone-capture prelude: `let _jet_cap_<n> = (<outer place>).clone();`. The
     // outer place comes from the *outer* env (the capture is an outer local). The cap

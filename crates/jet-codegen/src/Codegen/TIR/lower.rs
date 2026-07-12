@@ -10,9 +10,7 @@ use crate::AST::{
     IndexKind, LValue, Lambda, LambdaBody, OrFallback, Param, PatSlot, Pattern, Stmt, StrPart,
     StructPatField, SwitchArm, TryConvert, Type, UnOp, VariantPayload,
 };
-use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use std::rc::Rc;
 
 include!("lower/env.rs");
 include!("lower/functions.rs");

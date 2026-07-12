@@ -18,18 +18,6 @@ pub(crate) struct LowerEnv {
     /// (`TExprKind::Try`) to embed the trace-frame function name — exactly the value
     /// the AST path reads from `cx.current_fn` at emit time (set to `f.name`).
     fn_name: String,
-    /// c109 Phase 15: the `safe_locals_expr` env replica for the `a ?? panic(…)` form.
-    /// `safe_locals_expr` (Source/Codegen/Statement.rs) dumps the FULL codegen `env`
-    /// (`HashMap<String, Slot>`), filtered to scalar Int/Float/Bool slots, sorted by
-    /// name, at the panic site. The AST codegen `env` LEAKS: a `let` inside a plain
-    /// block / loop / mixed-or-range switch arm / comptime-if branch stays in the
-    /// shared `&mut env` after the block (sema scopes the *name* so it is never read,
-    /// but `safe_locals_expr` dumps the raw env regardless). Only the two
-    /// `emit_pattern_match_switch` arm-body boundaries and lambda bodies clone the env
-    /// (no leak). To reproduce the dump byte-exact this replica is shared (`Rc<RefCell>`)
-    /// across leaky branches via `clone_env`, and DEEP-COPIED via `fork_panic` at the
-    /// non-leaky boundaries. It is updated in lock-step with `locals` through `bind`.
-    panic_locals: Rc<RefCell<HashMap<String, (String, Option<Type>)>>>,
     /// D-FIELDPOL1: the owning struct name when lowering an inherent/trait
     /// method (`None` for a free function). `self`'s own env type is
     /// deliberately `None` (see `bind` above), so a `self.field` read can't
@@ -48,12 +36,11 @@ pub(crate) struct LowerEnv {
 }
 
 impl LowerEnv {
-    /// A fresh root env for a function/method body (an empty `panic_locals` replica).
+    /// A fresh root env for a function/method body.
     fn new(fn_name: String) -> LowerEnv {
         LowerEnv {
             locals: HashMap::new(),
             fn_name,
-            panic_locals: Rc::new(RefCell::new(HashMap::new())),
             self_owner: None,
             string_view_locals: HashSet::new(),
         }
@@ -66,16 +53,11 @@ impl LowerEnv {
     fn is_string_view_local(&self, name: &str) -> bool {
         self.string_view_locals.contains(name)
     }
-    /// Bind `name` to its resolved Rust place + type, updating BOTH `locals` (used for
-    /// place/type resolution) and the `panic_locals` replica (used only for the `??`
-    /// panic locals dump). Every covered binding site routes through here so the two
-    /// stay in lock-step.
+    /// Bind `name` to its resolved Rust place + type. The same lexical map drives
+    /// expression resolution and rich-panic locals, so an out-of-scope branch binding
+    /// can never be captured in generated Rust.
     fn bind(&mut self, name: &str, place: String, ty: Option<Type>) {
-        self.locals
-            .insert(name.to_string(), (place.clone(), ty.clone()));
-        self.panic_locals
-            .borrow_mut()
-            .insert(name.to_string(), (place, ty));
+        self.locals.insert(name.to_string(), (place, ty));
     }
     fn place_of(&self, name: &str) -> String {
         match self.locals.get(name) {

@@ -265,6 +265,45 @@ fn run() {
 }
 
 #[test]
+fn panic_context_excludes_out_of_scope_branch_locals() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        return;
+    }
+
+    let src = r#"
+fn missing() -> (Int?) {
+    return None
+}
+fn capture(live: Int) {
+    if live > 0 {
+        branch_only :: 7
+        print(branch_only)
+    }
+    _value :: missing() ?? panic("missing value")
+}
+fn run() {
+    capture(3)
+}
+"#;
+    let (code, _stdout, stderr) = build_and_run_debug("panic_lexical_locals", src);
+    assert_eq!(code, 70, "expected Jet panic, not a rustc ICE: {stderr}");
+    assert!(
+        stderr.contains("panic: missing value"),
+        "missing Jet panic: {stderr}"
+    );
+    assert!(stderr.contains("live = 3"), "live local missing: {stderr}");
+    assert!(
+        !stderr.contains("branch_only ="),
+        "out-of-scope branch local leaked: {stderr}"
+    );
+    assert!(
+        !stderr.contains("internal compiler error"),
+        "rustc failure escaped I2 handling: {stderr}"
+    );
+}
+
+#[test]
 fn unsafe_block_locals_not_leaked() {
     // D-OBS2: locals inside #Unsafe blocks must never appear in panic reports.
     // This is enforced structurally: safe_locals_expr only includes Copy scalars

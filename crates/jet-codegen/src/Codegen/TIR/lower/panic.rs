@@ -9,31 +9,23 @@ pub(crate) fn expr_ast_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
     }
 }
 
-/// Clone the env for a LEAKY child scope (a plain block / loop / mixed-or-range switch
-/// arm / comptime-if branch / enum-match else). `locals` is deep-cloned (each branch
-/// scopes its own bindings for resolution), but `panic_locals` is SHARED (the Rc is
-/// cloned, not its contents) so a `let` inside the child leaks into the parent's panic
-/// dump — exactly as the AST codegen `&mut env` does (`safe_locals_expr`).
+/// Clone the env for a lexical child scope. Bindings added to the child remain visible
+/// to panic context inside it, but cannot leak into a later panic in the parent.
 pub(crate) fn clone_env(env: &LowerEnv) -> LowerEnv {
     LowerEnv {
         locals: env.locals.clone(),
         fn_name: env.fn_name.clone(),
-        panic_locals: Rc::clone(&env.panic_locals),
         self_owner: env.self_owner.clone(),
         string_view_locals: env.string_view_locals.clone(),
     }
 }
 
-/// Clone the env for a NON-LEAKY child scope — the two `emit_pattern_match_switch` arm
-/// bodies (an enum or fallible/optional match arm; the AST uses `env.clone()` there) and
-/// a lambda body (`emit_lambda` clones the env). Here `panic_locals` is DEEP-COPIED, so
-/// bindings inside the arm/lambda do NOT leak into the enclosing function's panic dump,
-/// matching the AST's cloned `body_env`/`lam_env`.
+/// Clone the env for pattern arms and lambda bodies. Kept as a named boundary because
+/// these scopes also have capture-specific lowering rules.
 pub(crate) fn fork_panic(env: &LowerEnv) -> LowerEnv {
     LowerEnv {
         locals: env.locals.clone(),
         fn_name: env.fn_name.clone(),
-        panic_locals: Rc::new(RefCell::new(env.panic_locals.borrow().clone())),
         self_owner: env.self_owner.clone(),
         string_view_locals: env.string_view_locals.clone(),
     }
@@ -168,15 +160,14 @@ pub(crate) fn tir_src_line_at(src: &str, offset: usize) -> (&str, u32, u32) {
     (&src[line_start..line_end], line as u32, col as u32)
 }
 
-/// c109 Phase 15: reproduce `safe_locals_expr` (Statement.rs) from the `panic_locals`
-/// env replica (which mirrors the AST codegen `env` leak semantics — see `LowerEnv`).
-/// Dumps the FULL replica filtered to scalar Int/Float/Bool slots, sorted by name, as a
+/// c109 Phase 15: render rich-panic locals from the lexical lowering environment at
+/// the panic site. Dumps in-scope scalar Int/Float/Bool slots, sorted by name, as a
 /// `format!("name = {}, …", (place).jet_show(), …)` expression. A deref'd slot uses
 /// `(*name).jet_show()` (the place already carries the `(*…)` wrapper, which is the bare
 /// `(*name)` form, NOT a double-paren). Empty → `String::new()`.
 pub(crate) fn render_safe_locals(env: &LowerEnv) -> String {
-    let replica = env.panic_locals.borrow();
-    let mut parts: Vec<(String, String)> = replica
+    let mut parts: Vec<(String, String)> = env
+        .locals
         .iter()
         .filter_map(|(name, (place, jet_ty))| {
             let safe = jet_ty

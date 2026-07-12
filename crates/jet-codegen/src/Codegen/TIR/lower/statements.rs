@@ -572,23 +572,11 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 let start = lower_expr(start, cx, env);
                 let end = lower_expr(end, cx, env);
                 let step = step.as_ref().map(|s| lower_expr(s, cx, env));
-                // The loop var is an `Int` local for the body's scope only. The AST
-                // (`Statement.rs`) inserts it into the shared env, emits the body, then
-                // RESTORES the prior binding — so a scalar `??` panic dump INSIDE the body
-                // sees the var, but one after the loop does not. Reproduce that exactly:
-                // bind it on the shared `panic_locals`, lower the body, then restore.
+                // The loop var is an `Int` local for the body's scope only. Panic
+                // context inside the body sees it; a panic after the loop does not.
                 let mut branch = clone_env(env);
-                let prev = branch.panic_locals.borrow().get(var).cloned();
                 branch.bind(var, mangle(var), Some(Type::Int));
                 let lowered_body = lower_stmts(body, cx, &mut branch);
-                match prev {
-                    Some(p) => {
-                        branch.panic_locals.borrow_mut().insert(var.clone(), p);
-                    }
-                    None => {
-                        branch.panic_locals.borrow_mut().remove(var);
-                    }
-                }
                 TStmt::Range {
                     label: label_name(label),
                     var: var.clone(),

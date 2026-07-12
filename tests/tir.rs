@@ -1981,8 +1981,8 @@ fn run() {
 }
 
 /// c109 Phase 15: the `a ?? panic(…)` fallback form. The panic message + the sorted
-/// scalar-locals snapshot (`safe_locals_expr`) are reproduced from the `panic_locals`
-/// replica. On the success path the fallback is never taken; the program returns the
+/// scalar-locals snapshot (`safe_locals_expr`) is reproduced from the lexical lowering
+/// environment. On the success path the fallback is never taken; the program returns the
 /// unwrapped value.
 #[test]
 fn or_fallback_panic_form() {

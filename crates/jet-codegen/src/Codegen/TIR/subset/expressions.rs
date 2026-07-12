@@ -604,8 +604,8 @@ pub(crate) fn ident_is_named_fn_value(name: &str, cx: &Cx, locals: &HashSet<Stri
 
 /// c109 Phase 8/15: is a `??` fallback right-hand side in-subset? `Value` and early
 /// `return [expr]` are covered (Phase 8). c109 Phase 15: the `panic(…)` form is now
-/// covered too — `emit_panic_stop`/`safe_locals_expr` is reproduced from a faithful
-/// `panic_locals` env replica resolved at lowering. The panic message expression must
+/// covered too — `emit_panic_stop`/`safe_locals_expr` is resolved from the lexical
+/// lowering environment at the panic site. The panic message expression must
 /// be in-subset (it is lowered into the rendered panic string). `panic(…)` always takes
 /// exactly one message argument (the parser builds `OrFallback::Panic{args}` from it).
 pub(crate) fn orfallback_rhs_in_subset(
