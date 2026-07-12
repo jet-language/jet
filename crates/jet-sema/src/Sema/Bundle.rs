@@ -2714,6 +2714,7 @@ pub(crate) fn check_module_bodies(
                             global_addr_taken,
                             no_alloc,
                             no_prelude,
+                            reference_anchors,
                         ));
                         // Generated serde methods temporarily carry inherited,
                         // inferred bounds solely for sema. Their Rust generics
@@ -2761,6 +2762,7 @@ pub(crate) fn check_module_bodies(
                             m, module_idx, states, Some(&e.name), &ct_funcs, &ct_externs,
                             &ct_base_dir, &ct_globals, freestanding, allow_impure, summaries,
                             embed_inputs_out, global_addr_taken, no_alloc, no_prelude,
+                            reference_anchors,
                         ));
                         m.type_params = if matches!(block.trait_name.as_str(), crate::Generics::ENCODE | crate::Generics::DECODE) { Vec::new() } else { own_params };
                     }

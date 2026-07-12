@@ -95,6 +95,7 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/range_arm_dot_dot_eq.jet",
     "tests/ui/range_arm_step.jet",
     "tests/ui/range_type_empty_range.jet",
+    "tests/ui/repl_effect_denied_e1803.jet",
     "tests/ui/result_old_syntax.jet",
     "tests/ui/return_arrow_split.jet",
     "tests/ui/stacked_type_markers.jet",
