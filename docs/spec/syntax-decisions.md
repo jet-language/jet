@@ -3291,6 +3291,15 @@ bins onto PATH as its own generation; `jetpack tool list`/`uninstall`
 manage them. A name collision with a project-local task (D-JPK-TASKRUN1)
 is a checked error naming both.
 
+*Shipped 2026-07-12 (card #477)*: `jetpack tool run|install|list|uninstall`
+CLI surface. Built-in providers (`nixpkgs`/`github`/`path`) realize through
+the existing hangar path; recognized external prefixes (`npm`/`pypi`/`cargo`/…)
+emit E1295 (JPK-TOOL-PROVIDER) instead of silent skip. `tool install` writes
+real symlinks under `~/.jet/bin` plus generation metadata at
+`~/.jet/tools/generations/<n>/` (profile `"tools"`) — a minimal isolated
+install until the shared D-JPK-PROFILE1 `jet profile` front door is the
+caller. Bin/`#Task fn` collision is E1294 (JPK-TOOL-COLLIDE).
+
 **D-JPK-PKGOVERRIDE1=B — keyed override record inside `overlay`**: a
 package's version/flags/env/patch overrides live under one
 `overrides: { <pkg>: .{ … } }` typed record per overlay (D-JPK-OVERLAY1),

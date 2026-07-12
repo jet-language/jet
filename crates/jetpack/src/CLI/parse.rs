@@ -4,6 +4,7 @@ use super::cmd_doctor;
 use super::package_hangar_vendor::{cmd_audit, cmd_clean, cmd_hangar, cmd_list, cmd_vendor};
 use super::run_enter_dev::{cmd_dev, cmd_enter, cmd_run};
 use super::services_secrets_config::{cmd_config, cmd_secrets, cmd_services};
+use super::tool::cmd_tool;
 use super::trust_env_build::{cmd_build, cmd_trust};
 use super::update_search_info::{
     cmd_explain, cmd_info, cmd_logs, cmd_outdated, cmd_override, cmd_search, cmd_update,
@@ -62,6 +63,8 @@ pub(super) struct Flags {
     pub(super) trust_scope: Option<String>,
     /// D-FE-CLI1: bypass mutation confirmation gates (`-y` / `--yes`).
     pub(super) assume_yes: bool,
+    /// D-JPK-TOOLRUN1: `jetpack tool install <ref> --as <name>` bin rename.
+    pub(super) as_name: Option<String>,
 }
 
 /// Result of separating flags, positional args, and a trailing `-- cmd`.
@@ -89,6 +92,7 @@ pub(super) fn parse_args(args: &[String]) -> Parsed {
         shell_on_fail: false,
         trust_scope: None,
         assume_yes: false,
+        as_name: None,
         os_name: None,
         os_manual: None,
         os_disk: None,
@@ -183,6 +187,12 @@ pub(super) fn parse_args(args: &[String]) -> Parsed {
                 }
                 continue;
             }
+            a if a == Syntax::TOOL_FLAG_AS => {
+                i += 1;
+                if let Some(name) = args.get(i) {
+                    flags.as_name = Some(name.clone());
+                }
+            }
             _ => positional.push(a.clone()),
         }
         i += 1;
@@ -253,6 +263,7 @@ pub fn main(args: Vec<String>) -> i32 {
         v if v == Syntax::USER_SUBCOMMAND => cmd_user(&theme, &parsed),
         v if v == Syntax::SERVICES_SUBCOMMAND => cmd_services(&theme, &parsed),
         v if v == Syntax::SECRETS_SUBCOMMAND => cmd_secrets(&theme, &parsed),
+        v if v == Syntax::TOOL_SUBCOMMAND => cmd_tool(&theme, &parsed),
         "help" | "--help" | "-h" => {
             println!("{}", usage());
             0

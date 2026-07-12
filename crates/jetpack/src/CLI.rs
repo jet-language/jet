@@ -19,6 +19,7 @@ mod add_remove_push_image;
 mod bridge_os_studio;
 mod studio_server;
 mod studio_transactions;
+mod tool;
 mod usage_tests;
 
 use parse::Parsed;

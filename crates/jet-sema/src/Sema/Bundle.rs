@@ -1375,6 +1375,8 @@ pub(crate) fn expand_generic_module_aliases(
         })
         .collect();
 
+    let module_aliases: Vec<String> = bundle.modules.iter().map(|m| m.alias.clone()).collect();
+
     for (module_idx, module) in bundle.modules.iter_mut().enumerate() {
         if report_generic_module_cycles(&module.items, diags) {
             continue;
@@ -1453,9 +1455,10 @@ pub(crate) fn expand_generic_module_aliases(
                 };
                 let local = alias.as_deref().unwrap_or(original);
                 if !source.def.is_pub && !source.def.is_package_pub {
+                    let source_alias = &module_aliases[source_idx];
                     diags.push(Diagnostic::error(
                         "E0609",
-                        format!("`{original}` is private in module `{}`", bundle.modules[source_idx].alias),
+                        format!("`{original}` is private in module `{source_alias}`"),
                         "only `pub` items can be brought into scope with `use`".to_string(),
                         format!("add `pub` before `module {original}` in the defining file"),
                         Some(import.span),
