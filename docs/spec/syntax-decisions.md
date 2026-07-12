@@ -541,9 +541,13 @@ stdlib `.context("msg {var}")` (lazy) for human wording. No new grammar.
 **S36 — Bug stops**: `panic("msg")` (friendly report, exit 70);
 `require(cond[, "msg"])` for invariants/preconditions. Prelude builtins.
 
-**D-IGNORERET1 / D-IGNORERET2**: discarding a fallible/`#MustUse` result
-requires visible intent. Shipped spelling is `.drop("reason")`; sema lints at
-the discard point and examples cover the fallible path.
+**D-IGNORERET1 / D-IGNORERET2** *(as amended by D-MARK-DISCARD1=A,
+2026-07-11, card #498)*: discarding a fallible/`@MustUse` result requires
+visible intent. `.drop("reason")` is the ONLY discard spelling — the
+per-value reason keeps every discard auditable at its site. The
+`#Suppress(MustUse) { … }` region form is removed from the grammar
+(ordinary unknown-marker error): a block that silently swallowed every
+result would also swallow the fallible call someone adds later.
 
 **Teaching & lint law**: `=` in a condition is E0322 with a "did you mean
 `==`?" fix (D-ASSIGNCOND1). Homoglyph confusable names lint L0503 default-on
@@ -713,10 +717,14 @@ means monomorphization. No user-facing `dyn`.
 for one trait to one field; `impl App.Logger using logger` top-level form.
 All-or-nothing in v1.
 
-**S55 — Built-in derive policy** *(D-SERDE-CANON1 vocabulary)*: silent
-auto-derive for `Printable` and `Equatable` whenever every field qualifies; a
-hand-written impl overrides. Explicit opt-in markers for the rest —
-`@Comparable`, `@Debug`, `@Summarize`, and the codability family `@Codable`
+**S55 — Built-in derive policy** *(D-SERDE-CANON1 vocabulary; amended by
+D-MARK-DEBUG1=A, 2026-07-11, card #498)*: silent auto-derive for
+`Printable`, `Equatable`, **and `Debug`** whenever every field qualifies; a
+hand-written impl overrides. `Debug` auto-derivation resolves the S55 ↔
+D-DISPLAYDBG1 contradiction in favor of auto (dev-facing tool, no ceremony;
+`#[Redact]` carries the secrets story); the standalone opt-in `@Debug`
+marker leaves the derive list. Explicit opt-in markers for the rest —
+`@Comparable`, `@Summarize`, and the codability family `@Codable`
 (≡ `@[Encode, Decode]`), `@Encode`, `@Decode` (D-SERDE4, D-MARKERMOVE3).
 `Serialize`/`Deserialize` are not Jet words. Field-level wire markers stay on
 the `#` plane (see Serde under Core library).
@@ -1336,9 +1344,19 @@ and bindgen. Alternate-ABI functions are direct-call-only and are E3203 when
 taken as values. Bindgen records both portable declared `system` and the
 resolved target ABI.
 
-**D-FFI-ASM1=A — inline assembly** *(ratified 2026-07-11, card #501; gated
-on D-FFI-INLINE1, still open — the `asm` instance of the proposed inline
-tier)*: `#Foreign(asm) fn` bodies are per-target assembly with the Jet
+**D-FFI-INLINE1=A — inline foreign tier** *(ratified 2026-07-11, card
+#501)*: the fourth D-FFI-UNIFY1 tier. `#Foreign(<lang>) fn` declares an
+ordinary Jet signature whose body is one multi-line string of foreign
+source. Sema checks every call site against the signature; the language's
+binder compiles the body on cache miss through the same machinery as the
+script tier; a body/signature mismatch is a Jet diagnostic naming both
+sides (I2). Effects declare like any extern; unsafe-language bodies
+(c, cpp, asm) additionally require the enclosing `#Unsafe("reason")` gate
+(S58). One shape for every current and future language.
+
+**D-FFI-ASM1=A — inline assembly** *(ratified 2026-07-11, card #501; the
+`asm` instance of the D-FFI-INLINE1 tier, whose ratification cleared this
+entry's gate)*: `#Foreign(asm) fn` bodies are per-target assembly with the Jet
 signature as the operand contract (parameters map to inputs, the return
 value to outputs, named `; -> return` anchors). Requires `use core.mem`
 plus an enclosing `#Unsafe("reason")` (S58); outside the gate is E0208-class.
@@ -1781,6 +1799,13 @@ primitives require `core.crypto.expert` behind `#Unsafe` (D-CRYPTOENV1,
 E0510/E0511). Versioned `JETC` envelope header gives algorithm agility;
 PQ algorithms later (D-PQCRYPTO1). `core.encoding` hex/base64 + `core.uuid`
 v4/v7 (D-UUIDENC1).
+
+**D-CORE-COMPRESS1=A — compression split by job** *(ratified 2026-07-11,
+card #499)*: `core.compress` owns stream codecs (`gzip`, `zstd`, future
+additions); `core.archive` owns container formats (`zip`, `tar`; `tar.gz`
+composes archive over compress). `core.archive`'s standalone gzip helpers
+move to `core.compress` — clean break, no re-export. Supersedes the
+overlapping gzip rows of D-DEP-ARCHIVE1/D-CODECS1.
 
 **Numerics & data**: `core.linalg` ring package — `Vec2/3/4`, `Mat3/Mat4`,
 `.dot()`/`.cross()`/`.matmul()` as aliases over a generic `Vec<N>`/
