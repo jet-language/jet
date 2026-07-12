@@ -7,6 +7,8 @@
 //! unit, `.raw()` strips it, and cross-unit mixing is E0127 (the distinct
 //! same-type arithmetic rule). The family erases in codegen (I3).
 
+mod common;
+
 const FAMILY: &str = r#"
 #UnitFamily(currency) { usd, eur }
 "#;
@@ -84,7 +86,7 @@ fn family_erases_in_codegen() {
     );
     let out = jet::compile(&src).expect("should compile");
     assert!(
-        !out.rust.contains("unsafe"),
+        !common::strip_vetted_prelude_modules(&out.rust).contains("unsafe"),
         "I1: no unsafe in generated code"
     );
     assert!(

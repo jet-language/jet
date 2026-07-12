@@ -47,7 +47,7 @@ fn build_and_run(name: &str, src: &str) -> Option<String> {
         )
     });
     assert!(
-        !out.rust.contains("unsafe"),
+        !common::strip_vetted_prelude_modules(&out.rust).contains("unsafe"),
         "`unsafe` leaked from the layout solver prelude (I1) — jet_layout must stay plain safe Rust"
     );
     if !have_rustc() {

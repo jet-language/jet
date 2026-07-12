@@ -9,7 +9,7 @@ use std::process::Command;
 use std::sync::{Arc, Mutex};
 
 mod common;
-use common::{have_rustc, panic_message, test_worker_count};
+use common::{have_rustc, panic_message, strip_vetted_prelude_modules, test_worker_count};
 
 const DEFAULT_VARIANTS: usize = 50;
 
@@ -92,7 +92,7 @@ fn load_example_seeds(root: &PathBuf) -> Vec<(String, String)> {
             // false-trip it regardless of the mutation. The mutation only appends a
             // trivial binding/fn, so it never introduces new `unsafe` of its own.
             let baseline_has_unsafe = jet::compile_with_path(&src, &path.to_string_lossy())
-                .map(|out| out.rust.contains("unsafe"))
+                .map(|out| strip_vetted_prelude_modules(&out.rust).contains("unsafe"))
                 .unwrap_or(false);
             if baseline_has_unsafe {
                 continue;
@@ -317,7 +317,7 @@ fn fuzz_sema_i1_unsafe_gate_is_ungated_on_rustc() {
             continue;
         }
         if let Ok(out) = jet::compile_with_path(&mutated, &format!("fuzz_variant_{i}.jet")) {
-            if out.rust.contains("unsafe") {
+            if strip_vetted_prelude_modules(&out.rust).contains("unsafe") {
                 violations.push(format!(
                     "variant {i} from {shown}: source has no #Unsafe but generated code contains `unsafe`"
                 ));
@@ -338,7 +338,7 @@ fn check_fuzz_variant(i: usize, shown: &str, mutated: &str, file_str: &str) {
         Ok(out) => {
             if !mutated.contains("#Unsafe") {
                 assert!(
-                    !out.rust.contains("unsafe"),
+                    !strip_vetted_prelude_modules(&out.rust).contains("unsafe"),
                     "I1 violated in fuzz variant {i} from {shown}: source has no #Unsafe but generated code contains `unsafe`"
                 );
             }

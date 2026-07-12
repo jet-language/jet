@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 520,
-    "rev": 4724,
+    "rev": 4739,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -1007,6 +1007,11 @@
       "plan": "Plan: docs/sidequests/generic-modules.md. D-GENMOD1=A + D-GENMOD2=A shipped: parser/sema expansion, E0850–E0854, example 170_generic_modules.jet, ui snapshots.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "codex-orchestrator",
+          "text": "[progress] Imported public generic templates now parent-green through existing import/use syntax and bundle-wide immutable template snapshot; both local/imported goldens and all genmod UI pass after fixing duplicate E0856. Criterion 4 remains open pending definition-site environment collision and private import proofs."
+        },
         {
           "at": "2026-07-12",
           "by": "codex-orchestrator",
@@ -7452,12 +7457,26 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "verify",
       "priority": "P1",
       "plan": "# Plan: jet env hybrid prompt\n\nRatified inputs:\n- D-FE-PROMPT1 outcome D with owner modification: show env name and partial path by default.\n\nBlocking decision raised by this plan:\n- D-FE-PROMPT-STRIP1 chooses the user-facing config surface for the optional always-on status strip.\n\nScope after decision clears:\n- crates/jetpack/src/Shell.rs for bash/zsh/fish rc generation.\n- crates/jetpack/src/CLI/run_enter_dev.rs and ModuleEval env config types only if prompt config schema changes.\n- tests/jetpack.rs, tests/env_dev_trust.rs, and focused shell rc tests.\n\nImplementation steps:\n1. Make default prompt include environment label and compact current path in bash, zsh, and fish. Keep current dev-shell branding unmistakable.\n2. Add adaptive receipt/status behavior where feasible in shell rc: transient command receipt, running marker for Jet-owned commands, failure next-action line without restating diagnostics.\n3. Implement ^G glance for build/test/env status if supported by the generated shell rc; unsupported shells get a documented no-op fallback rather than broken control sequences.\n4. Implement optional always-on strip exactly as the ratified D-FE-PROMPT-STRIP1 config says.\n5. Respect NO_COLOR/CLICOLOR and non-TTY shell startup. No powerline-only glyph dependency; words carry the state.\n6. Keep env source truth in env.jet/module eval; no hidden prompt database.\n\nAcceptance:\n- Entering jet env in bash/zsh/fish shows env name and partial path by default.\n- NO_COLOR renders readable words without ANSI reliance.\n- Optional strip can be enabled by the ratified config and shows the same status words as ^G.\n- Existing trust/env behavior and foreign flake fallback remain unchanged.\n\nVerification:\n- nix develop -c cargo test --test jetpack <focused env/shell tests>\n- nix develop -c cargo test --test env_dev_trust\n- nix develop -c cargo test --test jetpack\n- Manual spawned-shell smoke for generated bash/zsh/fish rc where available.\n- Full nix develop -c cargo test before done.",
       "blockedBy": [],
-      "assignee": "grok-359-builder",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "grok-359-verify2",
+          "text": "close after criteria verified"
+        },
+        {
+          "at": "2026-07-12",
+          "by": "grok-359-verify2",
+          "text": "VERIFY PASS. bde33487: PTY assert uses live git branch. Shell 10/10. Criteria 1-4 verified."
+        },
+        {
+          "at": "2026-07-12",
+          "text": "Requested acceptance — minted D-ACCEPT-359."
+        },
         {
           "at": "2026-07-12",
           "by": "grok-359-verify",
@@ -7594,8 +7613,7 @@
         }
       ],
       "needsAcceptance": true,
-      "refs": [],
-      "claimedAt": "2026-07-12T11:45:33.282Z"
+      "refs": []
     },
     {
       "id": "c0l5fmyy",
@@ -13193,12 +13211,17 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "grok-476-builder",
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "grok-476-builder",
+          "text": "worktree /tmp/jet-card-476; start D-JPK-TASKRUN1 #Task fn"
+        },
         {
           "at": "2026-07-10",
           "by": "claude-main",
@@ -13246,7 +13269,8 @@
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-10T21:04:24.721Z",
-      "updated": "2026-07-10"
+      "updated": "2026-07-12",
+      "claimedAt": "2026-07-12T19:53:35.885Z"
     },
     {
       "id": "c0fchu51",
@@ -13257,23 +13281,66 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "grok-477-builder",
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "grok-477-builder",
+          "text": "claim+building: implement D-JPK-TOOLRUN1=A jetpack tool run|install|list|uninstall"
+        },
         {
           "at": "2026-07-10",
           "by": "claude-main",
           "text": "D-JPK-TOOLRUN1=A ratified and recorded in docs/spec/syntax-decisions.md. Ready to implement: unified jetpack tool run|install|list|uninstall over the D-JPK-PROFILE1 engine."
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "jetpack tool run|install|list|uninstall verb surface exists and is documented in help",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T19:54:39.892Z"
+        },
+        {
+          "n": 2,
+          "text": "tool run realizes+execs refs across built-in providers (nixpkgs/github/path); unavailable external providers emit clear diagnostic (not silent skip)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T19:54:39.987Z"
+        },
+        {
+          "n": 3,
+          "text": "tool install projects bins onto ~/.jet/bin with generation metadata (real PATH projection)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T19:54:40.075Z"
+        },
+        {
+          "n": 4,
+          "text": "JPK-TOOL-COLLIDE fires when install bin name collides with project #Task fn; I4 snapshot + diagnostics.md",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T19:54:40.166Z"
+        }
+      ],
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-10T21:04:30.553Z",
-      "updated": "2026-07-10"
+      "updated": "2026-07-12",
+      "claimedAt": "2026-07-12T19:53:15.263Z"
     },
     {
       "id": "c0rfeel3",
@@ -13300,29 +13367,29 @@
         {
           "n": 1,
           "text": "jet build/test/run accept repeatable -p <member>; unknown member emits E1231-class diagnostic with did-you-mean; only named members run.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "grok-478-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-12T11:45:34.033Z"
+          "evidence": "MemberSelect+CLI: -p exact/repeatable; unknown→E1231; dfd1cf43+I4 749b02eb; MemberSelect 7/7",
+          "at": "2026-07-12T19:52:39.435Z"
         },
         {
           "n": 2,
           "text": "jet build/test/run accept --affected and --affected-since <ref>; selects changed members plus dependents via action-cache/input hashes; bad ref errors with suggestion.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "grok-478-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-12T11:45:34.125Z"
+          "evidence": true,
+          "at": "2026-07-12T19:52:39.623Z"
         },
         {
           "n": 3,
           "text": "Focused workspace tests prove -p isolation, --affected-since includes dependents, and bare command still runs all members; no pattern-DSL filter flag.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "grok-478-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-12T11:45:34.229Z"
+          "evidence": "focused MemberSelect tests: isolation, dependents, bare=all, --filter→E1293",
+          "at": "2026-07-12T19:52:39.761Z"
         }
       ],
       "refs": [],
@@ -32616,6 +32683,44 @@
       "draft": false,
       "status": "open",
       "created": "2026-07-12T19:04:03.460Z"
+    },
+    {
+      "id": "D-ACCEPT-359",
+      "cardId": "c0iyfhaf",
+      "group": "acceptance",
+      "title": "Accept #359 — jet env shell prompt — implement ratified family",
+      "gist": "Close #359, or bounce it back to building.",
+      "lesson": "",
+      "explainer": "",
+      "story": "",
+      "inWild": "",
+      "detail": "1. One shared generated bash/zsh/fish RC implements every hybrid mock and ratified option-D row: env label, compact path, live git facts, command lifecycle, Ctrl-G glance, optional strip, and no second prompt engine. — verified (worktree /tmp/jet-card-359 @ bde33487: Shell.rs generates one bash/zsh/fish RC (label/path/git/lifecycle/Ctrl-G/strip/NO_COLOR). PTY assert uses git rev-parse --abbrev-ref HEAD (not hardcoded master).) [verified by grok-359-verify2]\n2. Real command hooks report actual running/success/failure state, exit and elapsed time, visible slow-command spinner, deterministic receipt, and runnable failure action without literal unknown/fake data. — verified (bash_prompt_pty + fish_prompt_pty green: build ok, test failed (1), receipt \"-> test failed. Rerun: jet test\"; no unknown; real hooks not stubs.) [verified by grok-359-verify2]\n3. Bounded native bash/zsh/fish PTYs prove success/failure transitions, Ctrl-G, strip on/off, live git/env/path facts, exit restoration, and NO_COLOR output with zero ANSI after capture. — verified (CARGO_TARGET_DIR=/tmp/jet-card-359-target nix develop -c cargo test -p jetpack Shell @ bde33487: 10 passed. bash PTY matches live branch via rev-parse; fish PTY receipts; zsh_prompt_has_native_hook_matrix; NO_COLOR zero ANSI.) [verified by grok-359-verify2]\n4. Focused Shell and env_dev_trust tests pass; independent reviewer checks full mock/decision/owner-comment matrix and rejects static-string or unavailable-shell skips. — verified (Focused Shell: 10 passed; 0 failed @ /tmp/jet-card-359 bde33487. Live-branch assert fixed; independent verify by grok-359-verify2 ≠ builder.) [verified by grok-359-verify2]",
+      "options": [
+        {
+          "key": "accept",
+          "name": "Accept — close the card"
+        },
+        {
+          "key": "bounce",
+          "name": "Bounce — back to building (comment why)"
+        }
+      ],
+      "comparisons": [],
+      "rec": null,
+      "recommendation": null,
+      "hybrid": null,
+      "checkInstructions": {
+        "proof": [
+          "One shared generated bash/zsh/fish RC implements every hybrid mock and ratified option-D row: env l…",
+          "Real command hooks report actual running/success/failure state, exit and elapsed time, visible slow…",
+          "Bounded native bash/zsh/fish PTYs prove success/failure transitions, Ctrl-G, strip on/off, live git…",
+          "Focused Shell and env_dev_trust tests pass; independent reviewer checks full mock/decision/owner-co…"
+        ],
+        "visualCheck": null
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T19:50:22.046Z"
     }
   ],
   "questions": [
@@ -33443,6 +33548,118 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-12T19:57:22.715Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c1jixkit",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T19:54:40.166Z",
+      "by": "grok-477-builder",
+      "action": "card.criteria-add",
+      "ref": "c0fchu51",
+      "note": "#4 JPK-TOOL-COLLIDE fires when install bin name collides with p"
+    },
+    {
+      "at": "2026-07-12T19:54:40.075Z",
+      "by": "grok-477-builder",
+      "action": "card.criteria-add",
+      "ref": "c0fchu51",
+      "note": "#3 tool install projects bins onto ~/.jet/bin with generation m"
+    },
+    {
+      "at": "2026-07-12T19:54:39.987Z",
+      "by": "grok-477-builder",
+      "action": "card.criteria-add",
+      "ref": "c0fchu51",
+      "note": "#2 tool run realizes+execs refs across built-in providers (nixp"
+    },
+    {
+      "at": "2026-07-12T19:54:39.892Z",
+      "by": "grok-477-builder",
+      "action": "card.criteria-add",
+      "ref": "c0fchu51",
+      "note": "#1 jetpack tool run|install|list|uninstall verb surface exists "
+    },
+    {
+      "at": "2026-07-12T19:53:38.240Z",
+      "by": "grok-476-builder",
+      "action": "card.update",
+      "ref": "c0qwckht",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T19:53:35.885Z",
+      "by": "grok-476-builder",
+      "action": "card.claim",
+      "ref": "c0qwckht",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T19:53:18.948Z",
+      "by": "grok-477-builder",
+      "action": "card.update",
+      "ref": "c0fchu51",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T19:53:15.263Z",
+      "by": "grok-477-builder",
+      "action": "card.claim",
+      "ref": "c0fchu51",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T19:52:39.762Z",
+      "by": "grok-478-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0rfeel3",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-12T19:52:39.623Z",
+      "by": "grok-478-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0rfeel3",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-12T19:52:39.436Z",
+      "by": "grok-478-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0rfeel3",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-12T19:52:39.218Z",
+      "by": "grok-359-verify2",
+      "action": "card.update",
+      "ref": "c0iyfhaf",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T19:50:22.134Z",
+      "by": "grok-359-builder",
+      "action": "card.release",
+      "ref": "c0iyfhaf",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-12T19:50:22.046Z",
+      "by": "grok-359-verify2",
+      "action": "card.update",
+      "ref": "c0iyfhaf",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T19:50:22.046Z",
+      "by": "agent",
+      "action": "decision.add",
+      "ref": "D-ACCEPT-359",
+      "note": "Accept #359 — jet env shell prompt — implement ratified family"
+    },
     {
       "at": "2026-07-12T19:42:07.018Z",
       "by": "codex-orchestrator",
@@ -36830,118 +37047,6 @@
       "action": "decision.add",
       "ref": "D-API-CTOR1",
       "note": "Constructor-idiom law: codify when bare Type(…), .new, .over, and .from_* each apply"
-    },
-    {
-      "at": "2026-07-12T07:01:34.272Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-API-STORE1",
-      "note": "One storage-verb law: insert for keyed, add for elements; Lru's put dies"
-    },
-    {
-      "at": "2026-07-12T07:01:34.171Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-API-LEN1",
-      "note": "Law 1 says `length`, the shipped surface says `len()` — reconcile the naming law with ratified law"
-    },
-    {
-      "at": "2026-07-12T07:00:48.183Z",
-      "by": "claude-main",
-      "action": "card.criteria-add",
-      "ref": "c0y0m8yx",
-      "note": "#2 stdlib-api-laws.md drift table: replace orphaned c44-follow-"
-    },
-    {
-      "at": "2026-07-12T07:00:48.087Z",
-      "by": "claude-main",
-      "action": "card.criteria-add",
-      "ref": "c0y0m8yx",
-      "note": "#1 rename watcher handle.active() + Subscription.active() -> is"
-    },
-    {
-      "at": "2026-07-12T07:00:47.945Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-API-CONTAINS1",
-      "note": "One membership word: contains for elements, contains_key for keys; Bag's has dies"
-    },
-    {
-      "at": "2026-07-12T06:59:32.736Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0gk8k3t",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-12T06:59:32.398Z",
-      "by": "codex-main",
-      "action": "card.criteria-add",
-      "ref": "c0gk8k3t",
-      "note": "#8 Automated terminal matrix proves raw and cooked behavior ove"
-    },
-    {
-      "at": "2026-07-12T06:59:32.078Z",
-      "by": "codex-main",
-      "action": "card.criteria-add",
-      "ref": "c0gk8k3t",
-      "note": "#7 Hybrid UI provides addressable arbitrary-turn pin/fold/unfol"
-    },
-    {
-      "at": "2026-07-12T06:59:31.747Z",
-      "by": "codex-main",
-      "action": "card.criteria-add",
-      "ref": "c0gk8k3t",
-      "note": "#6 D-FE-REPL-RERUN1=A supports selecting/editing any prior turn"
-    },
-    {
-      "at": "2026-07-12T06:59:31.418Z",
-      "by": "codex-main",
-      "action": "card.criteria-add",
-      "ref": "c0gk8k3t",
-      "note": "#5 REPL docs and completion consume one shared semantic symbol "
-    },
-    {
-      "at": "2026-07-12T06:59:31.082Z",
-      "by": "codex-main",
-      "action": "card.criteria-add",
-      "ref": "c0gk8k3t",
-      "note": "#4 D-FE-REPL-INTERRUPT1=A cancels active interpreter/runtime wo"
-    },
-    {
-      "at": "2026-07-12T06:59:30.750Z",
-      "by": "codex-main",
-      "action": "card.criteria-add",
-      "ref": "c0gk8k3t",
-      "note": "#3 D-FE-REPL-MULTILINE1=A provides parser-completeness-driven r"
-    },
-    {
-      "at": "2026-07-12T06:59:30.418Z",
-      "by": "codex-main",
-      "action": "card.criteria-add",
-      "ref": "c0gk8k3t",
-      "note": "#2 D-FE-REPL-HISTORY1=A persists only successful turns in the p"
-    },
-    {
-      "at": "2026-07-12T06:58:41.691Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0y0m8yx",
-      "note": "Core API coherence: naming-law reconciliation + verb unification"
-    },
-    {
-      "at": "2026-07-12T06:47:37.205Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0s8u85x",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T06:47:37.108Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0qlbeaf",
-      "note": "phase,logEntry"
     }
   ],
   "nextNum": 368,

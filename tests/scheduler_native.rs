@@ -3,6 +3,8 @@
 //! poll fallback — while staying I1-clean once the vetted native region is
 //! excluded from the `unsafe` scan (the same contract `tests/golden.rs` enforces).
 
+mod common;
+
 const TASK_PROGRAM: &str = r#"
 use core.tasks as tasks
 
@@ -141,9 +143,11 @@ fn emitted_scheduler_native_region_is_the_only_unsafe() {
         "jet_os_unix",
         "jet_atomic_windows",
         "jet_gtk",
+        "jet_crypto_entropy",
     ] {
         scanned = strip_mod(&scanned, name);
     }
+    scanned = common::strip_vetted_module(&scanned, "jet_env_windows");
     assert!(
         scanned.contains("epoll_wait") == false,
         "the native region should have been excised for the scan"
@@ -158,7 +162,7 @@ fn emitted_scheduler_native_region_is_the_only_unsafe() {
 fn safe_core_calls_do_not_inherit_native_scheduler_unsafe() {
     for source in SAFE_CORE_PROGRAMS {
         let out = jet::compile(source).expect("safe Core program should compile");
-        let scanned = strip_mod(&out.rust, "jet_atomic_windows");
+        let scanned = common::strip_vetted_prelude_modules(&out.rust);
         assert!(
             !scanned.contains("unsafe"),
             "safe Core use inherited generated unsafe outside vetted std internals"

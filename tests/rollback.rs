@@ -158,40 +158,9 @@ fn run() {
         "expected trait user_Rollback in generated Rust:\n{rust}"
     );
 
-    // Strip `mod jet_txn { … }` and `mod jet_mem { … }` then verify no `unsafe` remains.
-    fn strip_mod(src: &str, name: &str) -> String {
-        let marker = format!("mod {name}");
-        let Some(start) = src.find(&marker) else {
-            return src.to_string();
-        };
-        let bytes = src.as_bytes();
-        let (mut depth, mut i, mut end, mut seen) = (0usize, start, src.len(), false);
-        while i < bytes.len() {
-            match bytes[i] {
-                b'{' => {
-                    depth += 1;
-                    seen = true;
-                }
-                b'}' => {
-                    if seen {
-                        depth -= 1;
-                    }
-                    if seen && depth == 0 {
-                        end = i + 1;
-                        break;
-                    }
-                }
-                _ => {}
-            }
-            i += 1;
-        }
-        let mut out = src[..start].to_string();
-        out.push_str(&src[end..]);
-        out
-    }
-
-    let user_code = strip_mod(rust, "jet_txn");
-    let user_code = strip_mod(&user_code, "jet_mem");
+    // Strip every vetted prelude region (jet_txn, jet_mem, and the rest of the
+    // canonical list) then verify no `unsafe` remains.
+    let user_code = common::strip_vetted_prelude_modules(rust);
     assert!(
         !user_code.contains("unsafe"),
         "unsafe leaked outside jet_txn/jet_mem:\n{user_code}"

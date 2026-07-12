@@ -8,6 +8,8 @@
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+mod common;
+
 /// Unique temp dir per call. Keying only on PID let parallel tests clobber a
 /// shared `fixture.jet`, so a test compiled another's source — flaky races.
 static SEQ: AtomicU64 = AtomicU64::new(0);
@@ -45,42 +47,9 @@ fn build_and_run(name: &str, src: &str) -> Option<String> {
         )
     });
     // No `unsafe` may leak outside the vetted prelude helpers (I1 / D-LL1).
-    // Strip the vetted `mod jet_mem`, `mod jet_term_unix`, and `mod jet_term_windows`
-    // blocks (brace-matched) before checking for `unsafe` in user code.
-    fn strip_mod_block(src: &str, marker: &str) -> String {
-        let Some(start) = src.find(marker) else {
-            return src.to_string();
-        };
-        let cfg_start = src[..start].rfind('\n').map(|n| n + 1).unwrap_or(start);
-        let bytes = src.as_bytes();
-        let (mut depth, mut seen, mut i) = (0usize, false, start);
-        let mut end = src.len();
-        while i < bytes.len() {
-            match bytes[i] {
-                b'{' => {
-                    depth += 1;
-                    seen = true;
-                }
-                b'}' => {
-                    depth -= 1;
-                    if seen && depth == 0 {
-                        end = i + 1;
-                        break;
-                    }
-                }
-                _ => {}
-            }
-            i += 1;
-        }
-        format!(
-            "{}{}",
-            &src[..cfg_start],
-            &src[end..].trim_start_matches('\n')
-        )
-    }
-    let s = strip_mod_block(&out.rust, "mod jet_mem");
-    let s = strip_mod_block(&s, "mod jet_term_unix {");
-    let user = strip_mod_block(&s, "mod jet_term_windows {");
+    // Strip every canonical vetted region (jet_mem, jet_term_unix/windows, and
+    // the rest of the list) before checking for `unsafe` in user code.
+    let user = common::strip_vetted_prelude_modules(&out.rust);
     assert!(
         !user.contains("unsafe"),
         "`unsafe` leaked outside the vetted prelude helpers"

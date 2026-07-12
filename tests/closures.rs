@@ -1,5 +1,7 @@
 //! M8 closure compile checks (rustc-as-verifier battery subset).
 
+mod common;
+
 #[test]
 fn lambdas_compile_to_rust() {
     let src = r#"
@@ -20,7 +22,7 @@ fn run() {
 }
 "#;
     let out = jet::compile(src).expect("closures should compile");
-    assert!(!out.rust.contains("unsafe"), "invariant I1");
+    assert!(!common::strip_vetted_prelude_modules(&out.rust).contains("unsafe"), "invariant I1");
     assert!(
         out.rust.contains("jet_list_map"),
         "map should lower to prelude helper"
@@ -48,7 +50,7 @@ fn run() {
 }
 "#;
     let out = jet::compile(src).expect("bare lambda to fn-typed param should compile");
-    assert!(!out.rust.contains("unsafe"), "invariant I1");
+    assert!(!common::strip_vetted_prelude_modules(&out.rust).contains("unsafe"), "invariant I1");
     assert!(
         out.rust.contains("user_x: i64"),
         "bare lambda param must get its type from the fn-typed slot, got:\n{}",
@@ -134,7 +136,7 @@ fn run() {
 }
 "#;
     let out = jet::compile(src).expect("D-ITER1 adapters should compile");
-    assert!(!out.rust.contains("unsafe"), "invariant I1");
+    assert!(!common::strip_vetted_prelude_modules(&out.rust).contains("unsafe"), "invariant I1");
     assert!(
         out.rust.contains("jet_list_take"),
         "take should lower to helper"

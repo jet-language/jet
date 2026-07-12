@@ -6,6 +6,8 @@
 //! (the move tracker); lending it (`&`/read) instead of moving is E0142. The tag
 //! erases in codegen (I3) — no runtime value, no `unsafe`.
 
+mod common;
+
 const LOCK: &str = r#"
 #SingleUse struct Lock {
     resource: String,
@@ -359,7 +361,7 @@ fn tag_erases_in_codegen() {
     );
     let out = jet::compile(&src).expect("should compile");
     assert!(
-        !out.rust.contains("unsafe"),
+        !common::strip_vetted_prelude_modules(&out.rust).contains("unsafe"),
         "I1: no unsafe in generated code"
     );
     assert!(

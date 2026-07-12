@@ -2372,32 +2372,10 @@ cell: Int :: 1337
         "reason string must emit nothing:\n{}",
         out.rust
     );
-    // I1 self-check: drop the vetted `jet_mem` prelude, then every remaining `unsafe`
-    // must be a gated form (`unsafe {` or `unsafe fn`).
-    let user = if let Some(s) = out.rust.find("mod jet_mem") {
-        let b = out.rust.as_bytes();
-        let (mut d, mut i, mut end, mut seen) = (0usize, s, out.rust.len(), false);
-        while i < b.len() {
-            match b[i] {
-                b'{' => {
-                    d += 1;
-                    seen = true;
-                }
-                b'}' => {
-                    d -= 1;
-                    if seen && d == 0 {
-                        end = i + 1;
-                        break;
-                    }
-                }
-                _ => {}
-            }
-            i += 1;
-        }
-        format!("{}{}", &out.rust[..s], &out.rust[end..])
-    } else {
-        out.rust.clone()
-    };
+    // I1 self-check: drop every vetted prelude region (jet_mem and the rest of
+    // the canonical list), then every remaining `unsafe` must be a gated form
+    // (`unsafe {` or `unsafe fn`).
+    let user = common::strip_vetted_prelude_modules(&out.rust);
     for line in user.lines() {
         // Skip comment lines (the source-map path comment can contain the word).
         if line.trim_start().starts_with("//") {
@@ -4690,7 +4668,7 @@ fn columnar_lowers_to_struct_of_arrays_no_unsafe() {
     );
     // I1: no `unsafe` anywhere in generated columnar code.
     assert!(
-        !rust.contains("unsafe"),
+        !common::strip_vetted_prelude_modules(&rust).contains("unsafe"),
         "columnar codegen must emit no `unsafe`"
     );
 }

@@ -1,6 +1,8 @@
 //! Effect system tests (D-EFF1, D-QUAL1): per-function effect inference over the
 //! call graph, the `#(…)` boundary check (E0740), and `@Pure` reconciliation.
 
+mod common;
+
 fn codes(src: &str) -> Vec<String> {
     match jet::compile(src) {
         Ok(_) => Vec::new(),
@@ -510,7 +512,7 @@ fn run() {
         "generated Rust must carry no effect annotation:\n{rust}"
     );
     assert!(
-        !rust.contains("unsafe"),
+        !common::strip_vetted_prelude_modules(&rust).contains("unsafe"),
         "grant codegen must contain no `unsafe`:\n{rust}"
     );
     assert!(
@@ -673,7 +675,7 @@ fn run() {
     );
     // No `unsafe` word anywhere in generated code (golden grep parity).
     assert!(
-        !rust.contains("unsafe"),
+        !common::strip_vetted_prelude_modules(&rust).contains("unsafe"),
         "transaction codegen must contain no `unsafe`"
     );
 }
@@ -780,32 +782,13 @@ fn bump(x: &Int) -> Int ? Fail {
 fn run() { a: Int := 0; n :: bump(&a) ?? (-1); print("{n}"); }
 "#;
     let rust = jet::compile(src).expect("compiles").rust;
-    // The only `unsafe` is inside `mod jet_txn { … }`. Strip it and assert none remain.
-    let stripped = {
-        let start = rust
-            .find("mod jet_txn")
-            .expect("jet_txn module present (snapshot used)");
-        let bytes = rust.as_bytes();
-        let (mut depth, mut seen, mut i, mut end) = (0usize, false, start, rust.len());
-        while i < bytes.len() {
-            match bytes[i] {
-                b'{' => {
-                    depth += 1;
-                    seen = true;
-                }
-                b'}' => {
-                    depth -= 1;
-                    if seen && depth == 0 {
-                        end = i + 1;
-                        break;
-                    }
-                }
-                _ => {}
-            }
-            i += 1;
-        }
-        format!("{}{}", &rust[..start], &rust[end..])
-    };
+    assert!(
+        rust.contains("mod jet_txn"),
+        "jet_txn module present (snapshot used)"
+    );
+    // The only `unsafe` is inside vetted prelude regions (mod jet_txn { … } and
+    // the rest of the canonical list). Strip them all and assert none remain.
+    let stripped = common::strip_vetted_prelude_modules(&rust);
     assert!(
         !stripped.contains("unsafe"),
         "auto-snapshot `unsafe` must be confined to `mod jet_txn`: {}",

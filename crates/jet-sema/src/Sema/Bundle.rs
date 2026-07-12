@@ -750,6 +750,8 @@ struct TemplateInfo {
     non_fn_kinds: Vec<&'static str>,
     params: Vec<ResolvedModuleParam>,
     source_module: usize,
+    source_items: Vec<Item>,
+    source_values: HashMap<String, crate::AST::CtValue>,
 }
 
 impl Clone for TemplateInfo {
@@ -760,8 +762,35 @@ impl Clone for TemplateInfo {
             non_fn_kinds: self.non_fn_kinds.clone(),
             params: self.params.clone(),
             source_module: self.source_module,
+            source_items: clone_definition_items(&self.source_items),
+            source_values: self.source_values.clone(),
         }
     }
+}
+
+fn clone_definition_items(items: &[Item]) -> Vec<Item> {
+    items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Func(def) => Some(Item::Func(def.clone())),
+            Item::Struct(def) => Some(Item::Struct(clone_struct(def))),
+            Item::Enum(def) => Some(Item::Enum(clone_enum(def))),
+            Item::Const(def) => Some(Item::Const(crate::AST::ConstDef {
+                span: def.span,
+                name: def.name.clone(),
+                name_span: def.name_span,
+                value: def.value.clone(),
+                meta: def.meta.clone(),
+                attrs: def.attrs.clone(),
+                rust_kind: def.rust_kind,
+                is_comptime: def.is_comptime,
+                ct: def.ct.clone(),
+                is_persist: def.is_persist,
+                persist_span: def.persist_span,
+            })),
+            _ => None,
+        })
+        .collect()
 }
 
 fn clone_generic_module_def(
@@ -978,6 +1007,7 @@ trait ModuleArgSpan{fn span(&self)->crate::Diagnostics::Span;}impl ModuleArgSpan
 
 fn expand_alias(
     alias: &ModuleAliasDef,
+    consumer_module: usize,
     templates: &std::collections::HashMap<String, TemplateInfo>,
     diags: &mut Vec<Diagnostic>,
     traits:&TraitRegistry,
@@ -1000,6 +1030,11 @@ fn expand_alias(
         }
     };
     let template = &info.def;
+    let source_items: &[Item] = if info.source_module == consumer_module {
+        &[]
+    } else {
+        &info.source_items
+    };
     if alias.args.len() != template.params.len() {
         diags.push(Diagnostic::error(
             "E0851",
@@ -1059,6 +1094,16 @@ fn expand_alias(
         }
     }
     let mut definition_types = HashMap::new();
+    for item in source_items {
+        let name = match item {
+            Item::Struct(def) => Some(&def.name),
+            Item::Enum(def) => Some(&def.name),
+            _ => None,
+        };
+        if let Some(name) = name {
+            definition_types.insert(name.clone(), Type::Named(format!("{}__{}", alias.name, name)));
+        }
+    }
     for item in &template.body {
         let name = match item {
             Item::Struct(def) => Some(&def.name),
@@ -1076,8 +1121,34 @@ fn expand_alias(
 
     // Constants specialize in declaration order. Their evaluated definition-site
     // values are then available to later constants and every template function.
-    let mut definition_values = value_args;
+    let mut definition_values = if info.source_module == consumer_module {
+        HashMap::new()
+    } else {
+        info.source_values.clone()
+    };
+    definition_values.extend(value_args);
     let mut declarations = Vec::new();
+    for item in source_items {
+        match item {
+            Item::Struct(def) => declarations.push(Item::Struct(specialize_struct(
+                def,
+                &alias.name,
+                &[],
+                &[],
+                &definition_types,
+                &definition_values,
+            ))),
+            Item::Enum(def) => declarations.push(Item::Enum(specialize_enum(
+                def,
+                &alias.name,
+                &[],
+                &[],
+                &definition_types,
+                &definition_values,
+            ))),
+            _ => {}
+        }
+    }
     for item in &template.body {
         let Item::Const(source) = item else { continue };
         let mut value = source.value.clone();
@@ -1129,7 +1200,20 @@ fn expand_alias(
         }
     }
 
-    let body = template
+    let mut body: Vec<Item> = source_items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Func(func) => Some(Item::Func(specialize_func(
+                func.clone(),
+                &[],
+                &[],
+                &definition_types,
+                &definition_values,
+            ))),
+            _ => None,
+        })
+        .collect();
+    body.extend(template
         .body
         .iter()
         .filter_map(|item| match item {
@@ -1143,7 +1227,7 @@ fn expand_alias(
             Item::Const(_) => None,
             _ => None,
         })
-        .collect();
+        .collect::<Vec<_>>());
     Some(AliasExpansion {
         module: CodeModule {
             name: alias.name.clone(),
@@ -1353,6 +1437,29 @@ pub(crate) fn expand_generic_module_aliases(
                     _ => None,
                 })
                 .collect();
+            let funcs: HashMap<String, &Func> = module
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    Item::Func(def) => Some((def.name.clone(), def)),
+                    _ => None,
+                })
+                .collect();
+            let mut source_values = HashMap::new();
+            for item in &module.items {
+                if let Item::Const(def) = item {
+                    if let Ok(value) = crate::Comptime::evaluate(
+                        &def.value,
+                        &funcs,
+                        &HashSet::new(),
+                        Path::new("."),
+                        &source_values,
+                    ) {
+                        source_values.insert(def.name.clone(), value);
+                    }
+                }
+            }
+            let source_items = clone_definition_items(&module.items);
             module
                 .items
                 .iter()
@@ -1366,10 +1473,39 @@ pub(crate) fn expand_generic_module_aliases(
                                 non_fn_kinds,
                                 params: resolve_params(gm, &traits, &enums, diags),
                                 source_module,
+                                source_items: clone_definition_items(&source_items),
+                                source_values: source_values.clone(),
                             },
                         ))
                     }
                     _ => None,
+                })
+                .collect()
+        })
+        .collect();
+    let module_aliases: Vec<String> = bundle
+        .modules
+        .iter()
+        .map(|module| module.alias.clone())
+        .collect();
+    // `use alias.Item` has its own span and therefore no `import_targets`
+    // entry. Resolve it through the namespace import which established
+    // `alias`, exactly like the later ordinary-import registration pass.
+    let import_bindings: Vec<HashMap<String, usize>> = bundle
+        .modules
+        .iter()
+        .enumerate()
+        .map(|(module_idx, module)| {
+            module
+                .imports
+                .iter()
+                .filter(|import| !matches!(import.kind, ImportKind::Unqualified { .. }))
+                .filter_map(|import| {
+                    bundle
+                        .import_targets
+                        .get(&(module_idx, import.span))
+                        .copied()
+                        .map(|target| (import.import_alias(), target))
                 })
                 .collect()
         })
@@ -1383,79 +1519,33 @@ pub(crate) fn expand_generic_module_aliases(
         let enums:HashMap<String,bool>=module.items.iter().filter_map(|item|if let Item::Enum(def)=item{Some((def.name.clone(),def.variants.iter().all(|v|matches!(v.payload,VariantPayload::Unit))))}else{None}).collect();
         let funcs:HashMap<String,&Func>=module.items.iter().filter_map(|item|if let Item::Func(f)=item{Some((f.name.clone(),f))}else{None}).collect();
         let mut globals:HashMap<String,crate::AST::CtValue>=HashMap::new();for item in &module.items{if let Item::Const(c)=item{if let Ok(value)=crate::Comptime::evaluate(&c.value,&funcs,&HashSet::new(),Path::new("."),&globals){globals.insert(c.name.clone(),value);}}}
-        // Collect templates by name, recording non-Func item kinds for E0854.
-        let mut templates: std::collections::HashMap<String, TemplateInfo> = module
-            .items
-            .iter()
-            .filter_map(|i| {
-                if let Item::GenericModule(gm) = i {
-                    let mut non_fn_kinds: Vec<&'static str> = Vec::new();
-                    let fn_items: Vec<Item> = gm
-                        .body
-                        .iter()
-                        .filter_map(|item| match item {
-                            Item::Func(f) => Some(Item::Func(f.clone())),
-                            Item::Struct(s) => Some(Item::Struct(clone_struct(s))),
-                            Item::Enum(e) => Some(Item::Enum(clone_enum(e))),
-                            Item::Const(c) => Some(Item::Const(crate::AST::ConstDef {
-                                span: c.span,
-                                name: c.name.clone(),
-                                name_span: c.name_span,
-                                value: c.value.clone(),
-                                meta: c.meta.clone(),
-                                attrs: c.attrs.clone(),
-                                rust_kind: c.rust_kind,
-                                is_comptime: c.is_comptime,
-                                ct: c.ct.clone(),
-                                is_persist: c.is_persist,
-                                persist_span: c.persist_span,
-                            })),
-                            _ => {
-                                non_fn_kinds.push("item");
-                                None
-                            }
-                        })
-                        .collect();
-                    Some((
-                        gm.name.clone(),
-                        TemplateInfo {
-                            def: GenericModuleDef {
-                                name: gm.name.clone(),
-                                name_span: gm.name_span,
-                                is_pub: gm.is_pub,
-                                is_package_pub: gm.is_package_pub,
-                                params: gm.params.clone(),
-                                body: fn_items,
-                                span: gm.span,
-                            },
-                            non_fn_kinds,
-                            params: resolve_params(gm, &traits, &enums, diags),
-                            source_module: module_idx,
-                        },
-                    ))
-                } else {
-                    None
-                }
-            })
-            .collect();
+        // Parameter declarations were resolved once in the immutable prepass.
+        // Reuse that result locally so invalid declarations emit one diagnostic.
+        let mut templates = template_snapshots[module_idx].clone();
 
-        for import in &module.imports {
-            let ImportKind::Unqualified { items, .. } = &import.kind else {
-                continue;
-            };
-            let Some(source_idx) = bundle.import_targets.get(&(module_idx, import.span)).copied()
+        for import in &mut module.imports {
+            let ImportKind::Unqualified {
+                module_alias,
+                items,
+                ..
+            } = &mut import.kind
             else {
                 continue;
             };
-            for (original, alias) in items {
+            let Some(source_idx) = import_bindings[module_idx].get(module_alias).copied() else {
+                continue;
+            };
+            let mut consumed = HashSet::new();
+            for (original, alias) in items.iter() {
                 let Some(source) = template_snapshots[source_idx].get(original) else {
                     continue;
                 };
+                consumed.insert(original.clone());
                 let local = alias.as_deref().unwrap_or(original);
                 if !source.def.is_pub && !source.def.is_package_pub {
                     diags.push(Diagnostic::error(
                         "E0609",
-                        format!("`{original}` is private in module `{}`", bundle.modules[source_idx].alias),
+                        format!("`{original}` is private in module `{}`", module_aliases[source_idx]),
                         "only `pub` items can be brought into scope with `use`".to_string(),
                         format!("add `pub` before `module {original}` in the defining file"),
                         Some(import.span),
@@ -1464,6 +1554,9 @@ pub(crate) fn expand_generic_module_aliases(
                 }
                 templates.insert(local.to_string(), source.clone());
             }
+            // Generic templates are compile-time namespace inputs, not runtime
+            // values for the ordinary unqualified-import pass below.
+            items.retain(|(original, _)| !consumed.contains(original));
         }
 
         let aliases: HashMap<String, &ModuleAliasDef> = module
@@ -1511,7 +1604,7 @@ pub(crate) fn expand_generic_module_aliases(
                 if aliases.contains_key(&alias.target) {
                     continue;
                 }
-                if let Some(cm) = expand_alias(&resolved, &templates, diags,&traits,&funcs,&globals,&enums) {
+                if let Some(cm) = expand_alias(&resolved, module_idx, &templates, diags,&traits,&funcs,&globals,&enums) {
                     expansions.push((idx, cm));
                 } else {
                     invalid_aliases.insert(alias.name.clone());
