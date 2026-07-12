@@ -28,7 +28,7 @@ fn run() {
     (sender, ch) :: tasks.channel<String>()
     tasks.spawn(take(sender, router) () => {
         listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")
-        addr :: listener.local_addr()
+        addr :: listener.local_addr() ?? panic("address failed")
         sender.send(copy addr)
         // Serve exactly 4 connections then let the task exit.
         loop i in [0, 1, 2, 3] {

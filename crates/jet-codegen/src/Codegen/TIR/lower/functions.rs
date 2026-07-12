@@ -1,10 +1,29 @@
 /// D-COV1: 1-based line number of a byte offset in the source, for coverage probes.
 pub(crate) fn cov_line(cx: &Cx, offset: usize) -> usize {
-    cx.src[..offset.min(cx.src.len())]
-        .bytes()
-        .filter(|&b| b == b'\n')
+    line_at_byte_offset(&cx.src, offset)
+}
+
+fn line_at_byte_offset(src: &str, offset: usize) -> usize {
+    src.as_bytes()[..offset.min(src.len())]
+        .iter()
+        .filter(|&&b| b == b'\n')
         .count()
         + 1
+}
+
+#[cfg(test)]
+mod tests {
+    use super::line_at_byte_offset;
+
+    #[test]
+    fn coverage_line_accepts_offsets_inside_multibyte_prefixes() {
+        let src = "é🚀—λ\nfn run() {}\n";
+        for offset in 0..="é🚀—λ".len() {
+            assert_eq!(line_at_byte_offset(src, offset), 1, "offset {offset}");
+        }
+        assert_eq!(line_at_byte_offset(src, "é🚀—λ\n".len()), 2);
+        assert_eq!(line_at_byte_offset(src, usize::MAX), 3);
+    }
 }
 
 pub(crate) fn lower_func(f: &Func, cx: &Cx) -> TFunc {

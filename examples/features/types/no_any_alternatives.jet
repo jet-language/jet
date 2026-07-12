@@ -1,6 +1,6 @@
 // D-DYNAMIC-TYPE1=A: Jet has no top type like Any.
 // Pick the precise mechanism: enum for known variants, generics for abstraction,
-// T? for absence, and Data for parsed dynamic input.
+// T? for absence, and DataTree for parsed dynamic input.
 use core.encoding.json as json
 
 enum Payload {
@@ -28,7 +28,7 @@ fn run() {
     if maybe == Val(s) {
         print(s)
     }
-    data: Data :: json.parse("{{\"name\":\"jet\"}}") ?? panic("bad json")
+    data: DataTree :: json.parse("{{\"name\":\"jet\"}}") ?? panic("bad json")
     if data == .Object(entries) {
         if entries["name"] == .Text(name) {
             print(name)

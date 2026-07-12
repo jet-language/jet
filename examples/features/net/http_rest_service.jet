@@ -8,7 +8,7 @@ use core.tasks as tasks
 fn run() {
     files.write("/tmp/jet_http_static.txt", "0123456789") ?? panic("static")
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
-    addr :: listener.local_addr()
+    addr :: listener.local_addr() ?? panic("address")
 
     mux :: Server.mux()
     mux.post("/api/:name/*", (req: HttpSrvReq) =>
