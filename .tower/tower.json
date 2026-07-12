@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 514,
-    "rev": 4226,
+    "rev": 4229,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -14470,7 +14470,26 @@
       "workOrder": 34,
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "rename watcher handle.active() + Subscription.active() -> is_active(), Reader.at_end() -> is_at_end() per Law 1 (exists complies: verb like contains); docs + snapshots re-blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T07:00:48.087Z"
+        },
+        {
+          "n": 2,
+          "text": "stdlib-api-laws.md drift table: replace orphaned c44-follow-1/2/3 refs with real criteria (files short-name row resolved by D-API-LEN1 outcome; core.math snapshot gaps; json golden example)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T07:00:48.183Z"
+        }
+      ],
       "refs": [
         "docs/proposals/surface-condensation.md",
         "docs/spec/stdlib-api-laws.md"
@@ -30426,6 +30445,89 @@
       "draft": false,
       "status": "open",
       "created": "2026-07-12T06:45:21.721Z"
+    },
+    {
+      "id": "D-API-CONTAINS1",
+      "cardId": "c0y0m8yx",
+      "group": "stdlib",
+      "title": "One membership word: contains for elements, contains_key for keys; Bag's has dies",
+      "gist": "Membership is asked three ways — contains, contains_key, and has; unify on the contains pair.",
+      "lesson": "Asking \"is this in the collection?\" is spelled three ways. `Set`, `SortedSet`, and `BitSet` use `contains(value)`. Maps and `Lru` use `contains_key(key)` — precise, because a map could plausibly be asked about keys or values. `Bag` uses `has(item)`, and Bag's method list (`add`, `remove`, `has`, `count`) sits in ratified law (D-TAG1).\n\nThe element/key pair (`contains`/`contains_key`) is one family with a stated reason. `has` is a third word for the element case that already has a word.",
+      "explainer": "",
+      "story": "Ray writes `if tags.contains(\"urgent\")` for a Set, then swaps in a Bag to count duplicates. The compile error tells him Bag spells the same question `has`. Nothing about counted membership changes the question; the word changed anyway.",
+      "inWild": "tags.contains(\"urgent\")        // Set / SortedSet / BitSet\nscores.contains_key(name)       // map / Lru — key membership, precise\ninventory.has(\"arrow\")          // Bag — third word, same question",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Contains pair only — Bag.has renames to contains",
+          "detail": "`contains(value)` is the element-membership word everywhere; `contains_key(key)` stays the keyed question on maps and caches. `Bag.has` renames to `contains` — one clean break on one type. The pair enters stdlib-api-laws.md Law 1 as the membership rule, so future collections cannot mint a fourth word.",
+          "code": "inventory.contains(\"arrow\")     // Bag joins the element rule\nscores.contains_key(name)        // unchanged\n\n$ jet check quiver.jet   # after the break\nerror[E0104]: no method `has` on `Bag<String>`\n  membership is `contains(value)`"
+        },
+        {
+          "key": "B",
+          "name": "Has everywhere — the shorter word wins",
+          "detail": "Rename the whole family: `set.has(v)`, `map.has_key(k)`, `bag.has(v)`. Shorter and JavaScript-familiar, but it respells the larger shipped surface (every set-like plus every map) to spare one Bag method, and `has_key` reads worse than `contains_key`.",
+          "code": "tags.has(\"urgent\")\nscores.has_key(name)\ninventory.has(\"arrow\")"
+        },
+        {
+          "key": "C",
+          "name": "Status quo — three words",
+          "detail": "Keep all three. The Bag outlier stays as precedent, and Law 1's guessability promise keeps one standing exception the docs must explain.",
+          "code": "tags.contains(\"urgent\")\nscores.contains_key(name)\ninventory.has(\"arrow\")"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust ships exactly the contains/contains_key pair across every collection; the consistency is why nobody looks it up twice.",
+          "code": "set.contains(&v);\nmap.contains_key(&k);"
+        },
+        {
+          "lang": "JavaScript",
+          "note": "JS ships has on Map and Set but includes on Array — the living example of what a third word costs.",
+          "code": "set.has(v);\narr.includes(v);   // same question, different word"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The contains pair is the majority shipped surface and carries its own reason (element vs key). One rename on one type buys a zero-exception membership rule.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It respells the majority to match the outlier — maximum churn for a two-letter saving."
+          },
+          {
+            "key": "C",
+            "reason": "The exception survives as precedent, and the next counted collection will cite it."
+          }
+        ],
+        "tradeoff": "One clean break on `Bag.has`, amending the D-TAG1 method list."
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "Nothing of B survives contact with the churn math; C's no-churn instinct is honored everywhere except the single outlier the rule exists to fix.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "contains/contains_key as the closed membership pair",
+            "use": "adopted into Law 1"
+          },
+          {
+            "key": "B",
+            "aspect": "brevity preference",
+            "use": "rejected; two letters do not buy a respell of the majority surface"
+          },
+          {
+            "key": "C",
+            "aspect": "churn minimalism",
+            "use": "kept — exactly one method moves"
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T07:00:47.945Z"
     }
   ],
   "questions": [
@@ -31227,6 +31329,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-12T07:00:48.183Z",
+      "by": "claude-main",
+      "action": "card.criteria-add",
+      "ref": "c0y0m8yx",
+      "note": "#2 stdlib-api-laws.md drift table: replace orphaned c44-follow-"
+    },
+    {
+      "at": "2026-07-12T07:00:48.087Z",
+      "by": "claude-main",
+      "action": "card.criteria-add",
+      "ref": "c0y0m8yx",
+      "note": "#1 rename watcher handle.active() + Subscription.active() -> is"
+    },
+    {
+      "at": "2026-07-12T07:00:47.945Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-API-CONTAINS1",
+      "note": "One membership word: contains for elements, contains_key for keys; Bag's has dies"
+    },
     {
       "at": "2026-07-12T06:59:32.736Z",
       "by": "codex-main",
@@ -34704,27 +34827,6 @@
       "by": "card131-recovery",
       "action": "card.release",
       "ref": "c2nizvzp",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-11T18:02:44.342Z",
-      "by": "card467-builder",
-      "action": "card.release",
-      "ref": "c0ai04g0",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-11T18:02:32.960Z",
-      "by": "card467-builder",
-      "action": "card.update",
-      "ref": "c0ai04g0",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-11T18:01:05.105Z",
-      "by": "card467-builder",
-      "action": "card.release",
-      "ref": "c0t4root",
       "note": "[handoff] logged"
     }
   ],
