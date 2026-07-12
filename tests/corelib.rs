@@ -24,7 +24,7 @@ mod dns_resolver_policy {
 fn encoding_stream_foundation_types_are_real_jet_values() {
     let dir = std::env::temp_dir().join(format!("jet_encoding_foundation_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
-    let (code, stdout, stderr) = build_and_run(&dir, "encoding_foundation.jet",
+    let (code, stdout, stderr) = build_and_run(&dir, "encoding_foundation",
         r#"
 use core.encoding as encoding
 use core.encoding.json as json

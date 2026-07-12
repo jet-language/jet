@@ -1623,7 +1623,9 @@ fn main() {
     let bare_member_flag = flag_value(&raw, "-p");
     // D-CLI-BARE1=A: owns the `String` a bare `bench` resolves to, so `target`
     // (a `&str`) can borrow it — `run_compile_cmd`'s callers return before
-    // `target` is used, but `bench` falls through to the shared variable.
+    // `target` is used, but `bench` falls through to the shared variable. Every
+    // other path either overwrites this or diverges before reading it back.
+    #[allow(unused_assignments)]
     let mut bare_bench_entry = String::new();
     let target = match args.get(1) {
         Some(f) => f.as_str(),
