@@ -1,6 +1,6 @@
 //! Completion: keyword/type tables + completion assembly.
 
-use crate::Jetpack::Discovery::Index as DiscoveryIndex;
+use jetpack::Discovery::Index as DiscoveryIndex;
 use crate::Syntax;
 use crate::AST;
 

@@ -75,7 +75,7 @@ fn install_closed_status_crypto_helper(home: &Path) {
 
     let previous_home = std::env::var_os("HOME");
     std::env::set_var("HOME", home);
-    let helper = jet::Jetpack::FFI::cached_crypto_helper_path();
+    let helper = jetpack::FFI::cached_crypto_helper_path();
     match previous_home {
         Some(value) => std::env::set_var("HOME", value),
         None => std::env::remove_var("HOME"),
@@ -183,8 +183,8 @@ fn manifest_with_deps(name: &str, version: &str, dep_lines: &str) -> String {
 // E4 Jetpack: strict graph, semantic lock, importers, federated providers
 // ─────────────────────────────────────────────
 
-fn graph_with_app() -> jet::Jetpack::PackageGraph::PackageGraph {
-    use jet::Jetpack::PackageGraph::{PackageGraph, PackageNode};
+fn graph_with_app() -> jetpack::PackageGraph::PackageGraph {
+    use jetpack::PackageGraph::{PackageGraph, PackageNode};
     let mut graph = PackageGraph::new();
     graph.add_package(
         PackageNode::new("app")
@@ -200,8 +200,8 @@ fn semantic_record(
     owner: &str,
     key: &str,
     exact: &str,
-) -> jet::Jetpack::SemanticLock::SemanticRecord {
-    use jet::Jetpack::SemanticLock::{LockIdentity, LockRationale, LockRecordKind, SemanticRecord};
+) -> jetpack::SemanticLock::SemanticRecord {
+    use jetpack::SemanticLock::{LockIdentity, LockRationale, LockRecordKind, SemanticRecord};
     SemanticRecord::new(
         LockIdentity {
             kind: LockRecordKind::Package,
@@ -232,7 +232,7 @@ fn semantic_record_with_hash(
     key: &str,
     exact: &str,
     hash: &str,
-) -> jet::Jetpack::SemanticLock::SemanticRecord {
+) -> jetpack::SemanticLock::SemanticRecord {
     let mut record = semantic_record(owner, key, exact);
     record.identity.hash = hash.to_string();
     record
@@ -242,16 +242,16 @@ fn replacement_identity(
     provider: &str,
     name: &str,
     version: &str,
-) -> jet::Jetpack::Replacement::PackageIdentity {
-    jet::Jetpack::Replacement::PackageIdentity::new(provider, name, version)
+) -> jetpack::Replacement::PackageIdentity {
+    jetpack::Replacement::PackageIdentity::new(provider, name, version)
 }
 
 fn replacement_surface(
     provider: &str,
     name: &str,
     version: &str,
-) -> jet::Jetpack::Replacement::CompatibilitySurface {
-    use jet::Jetpack::Replacement::{
+) -> jetpack::Replacement::CompatibilitySurface {
+    use jetpack::Replacement::{
         CompatibilitySurface, GoldenFixture, PackageIdentity, PublicSymbol,
     };
     let mut surface = CompatibilitySurface::new(PackageIdentity::new(provider, name, version));
@@ -267,10 +267,10 @@ fn replacement_surface(
     surface
 }
 
-fn replacement_passed_candidate() -> jet::Jetpack::Replacement::ReplacementCandidate {
+fn replacement_passed_candidate() -> jetpack::Replacement::ReplacementCandidate {
     let foreign = replacement_surface("npm", "left-pad", "1.0.0");
     let native = replacement_surface("core", "core.text.pad", "1.0.0");
-    let report = jet::Jetpack::Replacement::run_proof(&foreign, &native, "x86_64-linux");
+    let report = jetpack::Replacement::run_proof(&foreign, &native, "x86_64-linux");
     report.candidate("MIT", vec!["x86_64-linux".to_string()])
 }
 
@@ -293,13 +293,13 @@ fn strict_graph_accepts_direct_dep() {
     assert_eq!(edge.dependency, "ui");
     assert_eq!(
         edge.kind,
-        jet::Jetpack::PackageGraph::VisibleEdgeKind::DirectDep
+        jetpack::PackageGraph::VisibleEdgeKind::DirectDep
     );
 }
 
 #[test]
 fn catalog_edge_behaves_like_direct_dep_after_selection() {
-    use jet::Jetpack::PackageGraph::{CatalogEntry, VisibleEdgeKind};
+    use jetpack::PackageGraph::{CatalogEntry, VisibleEdgeKind};
     let mut graph = graph_with_app();
     graph.add_catalog(CatalogEntry {
         logical_name: "log".to_string(),
@@ -318,7 +318,7 @@ fn catalog_edge_behaves_like_direct_dep_after_selection() {
 
 #[test]
 fn lock_records_catalog_owner_and_rationale() {
-    use jet::Jetpack::SemanticLock::{parse, write, SemanticLockFile};
+    use jetpack::SemanticLock::{parse, write, SemanticLockFile};
     let lock = SemanticLockFile {
         records: vec![semantic_record("app", "core.log", "1.2.3")],
     };
@@ -331,7 +331,7 @@ fn lock_records_catalog_owner_and_rationale() {
 
 #[test]
 fn catalog_merge_conflict_names_owner_package() {
-    use jet::Jetpack::SemanticLock::{merge, SemanticLockFile};
+    use jetpack::SemanticLock::{merge, SemanticLockFile};
     let left = SemanticLockFile {
         records: vec![semantic_record("app", "core.log", "1.2.3")],
     };
@@ -357,12 +357,12 @@ fn missing_dep_fix_prefers_direct_add_for_single_package() {
 fn missing_dep_fix_does_not_catalog_without_hidden_use_evidence() {
     let mut graph = graph_with_app();
     graph.add_package(
-        jet::Jetpack::PackageGraph::PackageNode::new("direct-only").with_deps(&["shared"]),
+        jetpack::PackageGraph::PackageNode::new("direct-only").with_deps(&["shared"]),
     );
     let err = graph.check_visible("app", "shared").unwrap_err();
     assert!(matches!(
         err.fix,
-        jet::Jetpack::PackageGraph::MissingDependencyFix::DirectAddPath { .. }
+        jetpack::PackageGraph::MissingDependencyFix::DirectAddPath { .. }
     ));
 }
 
@@ -389,7 +389,7 @@ fn lsp_completion_hides_transitive_deps() {
 
 #[test]
 fn lock_record_kinds_roundtrip_unknown_future_fields() {
-    use jet::Jetpack::SemanticLock::{parse, write, LockRecordKind, SemanticLockFile};
+    use jetpack::SemanticLock::{parse, write, LockRecordKind, SemanticLockFile};
     let raw = "semantic-lock-version = 1\n\n[[semantic_record]]\nkind = \"future-kind\"\nkey = \"k\"\nexact = \"e\"\nhash = \"h\"\nplatform = \"p\"\nfuture-key = \"future-value\"\n";
     let parsed = parse(raw);
     assert!(matches!(
@@ -411,7 +411,7 @@ fn lock_record_kinds_roundtrip_unknown_future_fields() {
 
 #[test]
 fn lock_rationale_preserves_exact_identity() {
-    use jet::Jetpack::SemanticLock::SemanticLockFile;
+    use jetpack::SemanticLock::SemanticLockFile;
     let a = SemanticLockFile {
         records: vec![semantic_record("app", "core.log", "1.2.3")],
     };
@@ -425,7 +425,7 @@ fn lock_rationale_preserves_exact_identity() {
 
 #[test]
 fn lock_merge_independent_additions() {
-    use jet::Jetpack::SemanticLock::{merge, SemanticLockFile};
+    use jetpack::SemanticLock::{merge, SemanticLockFile};
     let left = SemanticLockFile {
         records: vec![semantic_record("app", "core.log", "1.2.3")],
     };
@@ -439,7 +439,7 @@ fn lock_merge_independent_additions() {
 
 #[test]
 fn lock_merge_same_identity_two_owners() {
-    use jet::Jetpack::SemanticLock::{merge, SemanticLockFile};
+    use jetpack::SemanticLock::{merge, SemanticLockFile};
     let left = SemanticLockFile {
         records: vec![semantic_record("app", "core.log", "1.2.3")],
     };
@@ -453,7 +453,7 @@ fn lock_merge_same_identity_two_owners() {
 
 #[test]
 fn lock_merge_conflicting_identity_diagnostic() {
-    use jet::Jetpack::SemanticLock::{merge, SemanticLockFile};
+    use jetpack::SemanticLock::{merge, SemanticLockFile};
     let left = SemanticLockFile {
         records: vec![semantic_record("app", "core.log", "1.2.3")],
     };
@@ -467,7 +467,7 @@ fn lock_merge_conflicting_identity_diagnostic() {
 
 #[test]
 fn lock_merge_conflicts_on_same_version_different_hash() {
-    use jet::Jetpack::SemanticLock::{merge, SemanticLockFile};
+    use jetpack::SemanticLock::{merge, SemanticLockFile};
     let left = SemanticLockFile {
         records: vec![semantic_record_with_hash(
             "app",
@@ -490,7 +490,7 @@ fn lock_merge_conflicts_on_same_version_different_hash() {
 
 #[test]
 fn lock_merge_accepts_one_sided_identity_change_from_base() {
-    use jet::Jetpack::SemanticLock::{merge, SemanticLockFile};
+    use jetpack::SemanticLock::{merge, SemanticLockFile};
     let base = SemanticLockFile {
         records: vec![semantic_record("app", "core.log", "1.2.3")],
     };
@@ -505,7 +505,7 @@ fn lock_merge_accepts_one_sided_identity_change_from_base() {
 
 #[test]
 fn lock_merge_platform_specific_records() {
-    use jet::Jetpack::SemanticLock::{merge, SemanticLockFile};
+    use jetpack::SemanticLock::{merge, SemanticLockFile};
     let left = SemanticLockFile {
         records: vec![semantic_record("app", "bin.tool:x86_64-linux", "1")],
     };
@@ -521,7 +521,7 @@ fn lock_merge_platform_specific_records() {
 
 #[test]
 fn lock_explain_names_owner_policy_provider_platform() {
-    use jet::Jetpack::SemanticLock::{explain, SemanticLockFile};
+    use jetpack::SemanticLock::{explain, SemanticLockFile};
     let lock = SemanticLockFile {
         records: vec![semantic_record("app", "core.log", "1.2.3")],
     };
@@ -534,7 +534,7 @@ fn lock_explain_names_owner_policy_provider_platform() {
 
 #[test]
 fn lock_satisfied_offline_verbs_do_not_touch_network() {
-    use jet::Jetpack::ProviderGraph::{
+    use jetpack::ProviderGraph::{
         AuthorityGraph, FetchDecision, ProviderFamily, ProviderObject, ProviderRequest,
     };
     let obj = ProviderObject {
@@ -563,7 +563,7 @@ fn lock_satisfied_offline_verbs_do_not_touch_network() {
 
 #[test]
 fn read_only_verbs_do_not_rewrite_lock() {
-    use jet::Jetpack::SemanticLock::{parse, write, SemanticLockFile};
+    use jetpack::SemanticLock::{parse, write, SemanticLockFile};
     let lock = SemanticLockFile {
         records: vec![semantic_record("app", "core.log", "1.2.3")],
     };
@@ -574,7 +574,7 @@ fn read_only_verbs_do_not_rewrite_lock() {
 
 #[test]
 fn nix_import_emits_role_modules_and_todos() {
-    let plan = jet::Jetpack::MigrationImport::import_nix_facts(
+    let plan = jetpack::MigrationImport::import_nix_facts(
         "flake.nix",
         r#"{"name":"app","packages":["ripgrep"],"shellHook":"echo hi"}"#,
     );
@@ -584,7 +584,7 @@ fn nix_import_emits_role_modules_and_todos() {
 
 #[test]
 fn cargo_import_preserves_locked_versions() {
-    let plan = jet::Jetpack::MigrationImport::import_cargo(
+    let plan = jetpack::MigrationImport::import_cargo(
         "[package]\nname = \"app\"\nversion = \"0.1.0\"\n[dependencies]\nserde = \"1\"\n",
         "[[package]]\nname = \"serde\"\nversion = \"1.0.200\"\n",
     );
@@ -594,7 +594,7 @@ fn cargo_import_preserves_locked_versions() {
 
 #[test]
 fn npm_import_turns_scripts_into_legacy_build_actions() {
-    let plan = jet::Jetpack::MigrationImport::import_npm(
+    let plan = jetpack::MigrationImport::import_npm(
         r#"{"name":"web","version":"1.0.0","dependencies":{"vite":"5"},"scripts":{"build":"vite build"}}"#,
     );
     assert!(plan.deps.iter().any(|d| d.name == "vite"));
@@ -606,21 +606,21 @@ fn npm_import_turns_scripts_into_legacy_build_actions() {
 
 #[test]
 fn python_import_marks_dynamic_metadata_todo() {
-    let plan = jet::Jetpack::MigrationImport::import_python_metadata("pkg", &["version"]);
+    let plan = jetpack::MigrationImport::import_python_metadata("pkg", &["version"]);
     assert!(plan.todos[0].message.contains("dynamic Python metadata"));
-    assert!(jet::Jetpack::MigrationImport::todo_diagnostics_need_ballot());
+    assert!(jetpack::MigrationImport::todo_diagnostics_need_ballot());
 }
 
 #[test]
 fn swiftpm_import_emits_provider_refs() {
-    let plan = jet::Jetpack::MigrationImport::import_swiftpm("swift-log", "abc123");
+    let plan = jetpack::MigrationImport::import_swiftpm("swift-log", "abc123");
     assert_eq!(plan.deps[0].provider_ref, "swiftpm@swift-log");
     assert_eq!(plan.deps[0].locked_version, "abc123");
 }
 
 #[test]
 fn import_idempotent_without_user_edits() {
-    use jet::Jetpack::MigrationImport::{merge_generated_file, GeneratedFile};
+    use jetpack::MigrationImport::{merge_generated_file, GeneratedFile};
     let file = GeneratedFile {
         path: "env.jet".to_string(),
         contents: "module env.dev\n".to_string(),
@@ -632,7 +632,7 @@ fn import_idempotent_without_user_edits() {
 
 #[test]
 fn import_conflict_preserves_user_edit() {
-    use jet::Jetpack::MigrationImport::{merge_generated_file, GeneratedFile, ImportConflict};
+    use jetpack::MigrationImport::{merge_generated_file, GeneratedFile, ImportConflict};
     let file = GeneratedFile {
         path: "env.jet".to_string(),
         contents: "module env.dev\n".to_string(),
@@ -650,7 +650,7 @@ fn import_conflict_preserves_user_edit() {
 
 #[test]
 fn import_conflicts_on_any_generated_file_drift() {
-    use jet::Jetpack::MigrationImport::{merge_generated_file, GeneratedFile};
+    use jetpack::MigrationImport::{merge_generated_file, GeneratedFile};
     let file = GeneratedFile {
         path: "env.jet".to_string(),
         contents: "module env.dev\n".to_string(),
@@ -660,7 +660,7 @@ fn import_conflicts_on_any_generated_file_drift() {
         .expect_err("any drift from generated baseline must conflict");
     assert_eq!(
         err,
-        jet::Jetpack::MigrationImport::ImportConflict::UserEditedGeneratedLine {
+        jetpack::MigrationImport::ImportConflict::UserEditedGeneratedLine {
             path: "env.jet".to_string()
         }
     );
@@ -668,7 +668,7 @@ fn import_conflicts_on_any_generated_file_drift() {
 
 #[test]
 fn migration_status_feeds_lock_explain() {
-    use jet::Jetpack::MigrationImport::MigrationStatus;
+    use jetpack::MigrationImport::MigrationStatus;
     let status = MigrationStatus::AdapterWrapped {
         name: "left-pad".to_string(),
     };
@@ -682,7 +682,7 @@ fn migration_status_feeds_lock_explain() {
 
 #[test]
 fn provider_contract_covers_core_nix_path_github() {
-    use jet::Jetpack::ProviderGraph::{built_in_contracts, ProviderFamily};
+    use jetpack::ProviderGraph::{built_in_contracts, ProviderFamily};
     let families: Vec<ProviderFamily> =
         built_in_contracts().into_iter().map(|c| c.family).collect();
     assert!(families.contains(&ProviderFamily::Core));
@@ -693,7 +693,7 @@ fn provider_contract_covers_core_nix_path_github() {
 
 #[test]
 fn npm_metadata_normalizes_deps_scripts_bins() {
-    let facts = jet::Jetpack::ProviderGraph::normalize_npm(
+    let facts = jetpack::ProviderGraph::normalize_npm(
         r#"{"name":"web","version":"1.0.0","license":"MIT","dependencies":{"vite":"5"},"scripts":{"build":"vite build"},"bin":{"web":"cli.js"}}"#,
     );
     assert_eq!(facts.dependencies, vec!["vite".to_string()]);
@@ -703,7 +703,7 @@ fn npm_metadata_normalizes_deps_scripts_bins() {
 
 #[test]
 fn cargo_metadata_normalizes_features_and_build_script_fact() {
-    let facts = jet::Jetpack::ProviderGraph::normalize_cargo(
+    let facts = jetpack::ProviderGraph::normalize_cargo(
         "[package]\nname = \"lib\"\nversion = \"0.1.0\"\nbuild = \"build.rs\"\n[dependencies]\nserde = \"1\"\n[build-dependencies]\ncc = \"1\"\n",
     );
     assert_eq!(facts.dependencies, vec!["serde".to_string()]);
@@ -713,29 +713,29 @@ fn cargo_metadata_normalizes_features_and_build_script_fact() {
 
 #[test]
 fn pypi_dynamic_metadata_becomes_todo_fact() {
-    let facts = jet::Jetpack::ProviderGraph::normalize_pypi("pkg", "1.0.0", true);
+    let facts = jetpack::ProviderGraph::normalize_pypi("pkg", "1.0.0", true);
     assert!(facts.todos[0].contains("dynamic metadata"));
 }
 
 #[test]
 fn swiftpm_metadata_locks_exact_revision() {
-    let facts = jet::Jetpack::ProviderGraph::normalize_swiftpm("swift-log", "abc123");
+    let facts = jetpack::ProviderGraph::normalize_swiftpm("swift-log", "abc123");
     assert_eq!(facts.integrity_hash, "abc123");
     assert_eq!(facts.source_identity, "swiftpm:swift-log@abc123");
 }
 
 #[test]
 fn binary_provider_requires_hash_and_platform() {
-    assert!(jet::Jetpack::ProviderGraph::binary_object("tool", "", "linux", "").is_err());
-    assert!(jet::Jetpack::ProviderGraph::binary_object("tool", "sha256-aa", "", "").is_err());
-    let obj = jet::Jetpack::ProviderGraph::binary_object("tool", "sha256-aa", "linux", "")
+    assert!(jetpack::ProviderGraph::binary_object("tool", "", "linux", "").is_err());
+    assert!(jetpack::ProviderGraph::binary_object("tool", "sha256-aa", "", "").is_err());
+    let obj = jetpack::ProviderGraph::binary_object("tool", "sha256-aa", "linux", "")
         .expect("hash + platform ok");
     assert_eq!(obj.exact_identity, "binary:tool:linux:sha256-aa");
 }
 
 #[test]
 fn provider_fetch_denied_under_offline_without_lock() {
-    use jet::Jetpack::ProviderGraph::{
+    use jetpack::ProviderGraph::{
         AuthorityGraph, FetchDecision, ProviderFamily, ProviderRequest,
     };
     let decision = AuthorityGraph::default().fetch_allowed(&ProviderRequest {
@@ -751,7 +751,7 @@ fn provider_fetch_denied_under_offline_without_lock() {
 
 #[test]
 fn provider_fetch_allowed_offline_with_satisfied_lock() {
-    use jet::Jetpack::ProviderGraph::{
+    use jetpack::ProviderGraph::{
         AuthorityGraph, FetchDecision, ProviderFamily, ProviderObject, ProviderRequest,
     };
     let mut graph = AuthorityGraph::default();
@@ -779,8 +779,8 @@ fn provider_fetch_allowed_offline_with_satisfied_lock() {
 
 #[test]
 fn replacement_candidate_visible_but_inactive() {
-    use jet::Jetpack::ProviderGraph::{normalize_npm, ReplacementOverlay};
-    use jet::Jetpack::Replacement::{PackageIdentity, ProofStatus};
+    use jetpack::ProviderGraph::{normalize_npm, ReplacementOverlay};
+    use jetpack::Replacement::{PackageIdentity, ProofStatus};
     let mut facts = normalize_npm(r#"{"name":"left-pad","version":"1.0.0"}"#);
     facts.replacement_candidates.push(ReplacementOverlay {
         foreign_identity: PackageIdentity::new("npm", "left-pad", "1.0.0"),
@@ -808,7 +808,7 @@ fn replacement_candidate_visible_but_inactive() {
 
 #[test]
 fn replacement_compat_proof_fails_on_missing_symbol() {
-    use jet::Jetpack::Replacement::{run_proof, ProofFailureKind};
+    use jetpack::Replacement::{run_proof, ProofFailureKind};
     let foreign = replacement_surface("npm", "left-pad", "1.0.0");
     let mut native = replacement_surface("core", "core.text.pad", "1.0.0");
     native.public_symbols.retain(|symbol| symbol.name != "trim");
@@ -821,7 +821,7 @@ fn replacement_compat_proof_fails_on_missing_symbol() {
 
 #[test]
 fn replacement_compat_proof_fails_on_effect_mismatch() {
-    use jet::Jetpack::Replacement::{run_proof, ProofFailureKind};
+    use jetpack::Replacement::{run_proof, ProofFailureKind};
     let foreign = replacement_surface("npm", "left-pad", "1.0.0");
     let mut native = replacement_surface("core", "core.text.pad", "1.0.0");
     native.public_symbols[0].effects = vec!["fs.read".to_string()];
@@ -834,7 +834,7 @@ fn replacement_compat_proof_fails_on_effect_mismatch() {
 
 #[test]
 fn replacement_compat_proof_fails_on_error_shape_mismatch() {
-    use jet::Jetpack::Replacement::{run_proof, ProofFailureKind};
+    use jetpack::Replacement::{run_proof, ProofFailureKind};
     let foreign = replacement_surface("npm", "left-pad", "1.0.0");
     let mut native = replacement_surface("core", "core.text.pad", "1.0.0");
     native.public_symbols[0].errors = vec!["RangeError".to_string()];
@@ -847,7 +847,7 @@ fn replacement_compat_proof_fails_on_error_shape_mismatch() {
 
 #[test]
 fn replacement_compat_proof_fails_on_golden_output_diff() {
-    use jet::Jetpack::Replacement::{run_proof, GoldenFixture, ProofFailureKind};
+    use jetpack::Replacement::{run_proof, GoldenFixture, ProofFailureKind};
     let foreign = replacement_surface("npm", "left-pad", "1.0.0");
     let mut native = replacement_surface("core", "core.text.pad", "1.0.0");
     native.goldens = vec![GoldenFixture::new("pad_left_basic", "hi\n")];
@@ -860,7 +860,7 @@ fn replacement_compat_proof_fails_on_golden_output_diff() {
 
 #[test]
 fn replacement_compat_proof_pass_enables_policy_replacement() {
-    use jet::Jetpack::Replacement::{resolve_replacement, ReplacementDecision, ReplacementPolicy};
+    use jetpack::Replacement::{resolve_replacement, ReplacementDecision, ReplacementPolicy};
     let candidate = replacement_passed_candidate();
     let policy = ReplacementPolicy::allow(
         &candidate.foreign_identity,
@@ -883,7 +883,7 @@ fn replacement_compat_proof_pass_enables_policy_replacement() {
 
 #[test]
 fn replacement_policy_deny_blocks_replacement() {
-    use jet::Jetpack::Replacement::{resolve_replacement, ReplacementDecision, ReplacementPolicy};
+    use jetpack::Replacement::{resolve_replacement, ReplacementDecision, ReplacementPolicy};
     let candidate = replacement_passed_candidate();
     let decision = resolve_replacement(
         &candidate,
@@ -896,7 +896,7 @@ fn replacement_policy_deny_blocks_replacement() {
 
 #[test]
 fn replacement_preserves_foreign_call_site() {
-    use jet::Jetpack::Replacement::{resolve_replacement, ReplacementDecision, ReplacementPolicy};
+    use jetpack::Replacement::{resolve_replacement, ReplacementDecision, ReplacementPolicy};
     let candidate = replacement_passed_candidate();
     let policy = ReplacementPolicy::prefer(
         &candidate.foreign_identity,
@@ -921,7 +921,7 @@ fn replacement_preserves_foreign_call_site() {
 #[test]
 fn replacement_lock_records_foreign_native_proof_and_policy() {
     let candidate = replacement_passed_candidate();
-    let record = jet::Jetpack::Replacement::replacement_lock_record(
+    let record = jetpack::Replacement::replacement_lock_record(
         &candidate,
         "app",
         "x86_64-linux",
@@ -962,10 +962,10 @@ fn replacement_lock_records_foreign_native_proof_and_policy() {
 
 #[test]
 fn replacement_lock_merge_conflict_names_owners() {
-    use jet::Jetpack::Replacement::{
+    use jetpack::Replacement::{
         replacement_lock_record, PackageIdentity, ProofStatus, ReplacementCandidate,
     };
-    use jet::Jetpack::SemanticLock::{merge, SemanticLockFile};
+    use jetpack::SemanticLock::{merge, SemanticLockFile};
     let foreign = replacement_identity("npm", "left-pad", "1.0.0");
     let mk_candidate = |native: &str| ReplacementCandidate {
         foreign_identity: foreign.clone(),
@@ -1006,13 +1006,13 @@ fn replacement_lock_merge_conflict_names_owners() {
 #[test]
 fn replacement_lock_keys_are_platform_specific() {
     let candidate = replacement_passed_candidate();
-    let linux = jet::Jetpack::Replacement::replacement_lock_record(
+    let linux = jetpack::Replacement::replacement_lock_record(
         &candidate,
         "app",
         "x86_64-linux",
         "policy",
     );
-    let macos = jet::Jetpack::Replacement::replacement_lock_record(
+    let macos = jetpack::Replacement::replacement_lock_record(
         &candidate,
         "app",
         "aarch64-apple-darwin",
@@ -1023,7 +1023,7 @@ fn replacement_lock_keys_are_platform_specific() {
 
 #[test]
 fn replacement_importer_reports_replacement_progress() {
-    use jet::Jetpack::Replacement::{ImporterProgressFact, ImporterReplacementStatus};
+    use jetpack::Replacement::{ImporterProgressFact, ImporterReplacementStatus};
     let candidate = replacement_passed_candidate();
     let proof = ImporterProgressFact::from_candidate(&candidate);
     let active = ImporterProgressFact::active(&candidate);
@@ -1111,7 +1111,7 @@ fn manifest_parse_e1209_reserved_nonempty() {
 fn manifest_parse_effects_block() {
     let raw = min_manifest("app", "0.1.0")
         + "\neffects: {\n    allow: [Fs, Time],\n    deny: [Net],\n}\n";
-    let pm = jet::Jetpack::PackageManifest::parse(&raw).expect("effects block should parse");
+    let pm = jetpack::PackageManifest::parse(&raw).expect("effects block should parse");
     assert!(pm.effects_enabled);
     assert_eq!(
         pm.effects_allow,
@@ -1123,7 +1123,7 @@ fn manifest_parse_effects_block() {
 #[test]
 fn manifest_parse_grants_block() {
     let raw = min_manifest("app", "0.1.0") + "\ngrants: {\n    \"pdf-lib\": [Net],\n}\n";
-    let pm = jet::Jetpack::PackageManifest::parse(&raw).expect("grants block should parse");
+    let pm = jetpack::PackageManifest::parse(&raw).expect("grants block should parse");
     assert_eq!(
         pm.grants,
         vec![("pdf-lib".to_string(), vec!["Net".to_string()])]
@@ -1134,21 +1134,21 @@ fn manifest_parse_grants_block() {
 fn manifest_parse_policy_trust_block() {
     let raw = min_manifest("app", "0.1.0")
         + "\npolicy: { trust: { default: prompt, ci: { prompt: deny }, services: { postgres: prompt } } }\n";
-    let pm = jet::Jetpack::PackageManifest::parse(&raw).expect("policy.trust block should parse");
+    let pm = jetpack::PackageManifest::parse(&raw).expect("policy.trust block should parse");
     let policy = pm.trust_policy.expect("trust policy should be stored");
     assert_eq!(
         policy.default,
-        Some(jet::Jetpack::PackageManifest::TrustDecision::Prompt)
+        Some(jetpack::PackageManifest::TrustDecision::Prompt)
     );
     assert_eq!(
         policy.ci_prompt,
-        Some(jet::Jetpack::PackageManifest::TrustDecision::Deny)
+        Some(jetpack::PackageManifest::TrustDecision::Deny)
     );
     assert_eq!(
         policy.services,
         vec![(
             "postgres".to_string(),
-            jet::Jetpack::PackageManifest::TrustDecision::Prompt
+            jetpack::PackageManifest::TrustDecision::Prompt
         )]
     );
 }
@@ -1157,17 +1157,17 @@ fn manifest_parse_policy_trust_block() {
 fn manifest_policy_trust_rejects_unknown_decision() {
     let raw = min_manifest("app", "0.1.0") + "\npolicy: { trust: { default: maybe } }\n";
     let err =
-        jet::Jetpack::PackageManifest::parse(&raw).expect_err("unknown trust decision should fail");
+        jetpack::PackageManifest::parse(&raw).expect_err("unknown trust decision should fail");
     assert!(matches!(
         err,
-        jet::Jetpack::PackageManifest::ManifestError::BadTrustPolicy { .. }
+        jetpack::PackageManifest::ManifestError::BadTrustPolicy { .. }
     ));
 }
 
 #[test]
 fn manifest_no_effects_block_disables_enforcement() {
     let raw = min_manifest("app", "0.1.0");
-    let pm = jet::Jetpack::PackageManifest::parse(&raw).expect("valid manifest should parse");
+    let pm = jetpack::PackageManifest::parse(&raw).expect("valid manifest should parse");
     assert!(!pm.effects_enabled);
     assert_eq!(pm.effects_allow, None);
 }
@@ -1175,14 +1175,14 @@ fn manifest_no_effects_block_disables_enforcement() {
 #[test]
 fn manifest_parse_effects_e1221_unknown_effect() {
     let raw = min_manifest("app", "0.1.0") + "\neffects: {\n    allow: [NotAnEffect],\n}\n";
-    let err = jet::Jetpack::PackageManifest::parse(&raw)
+    let err = jetpack::PackageManifest::parse(&raw)
         .expect_err("unknown effect name should fail E1221");
     let diag = jet::Manifest::parse(&PathBuf::from("pkg.jet"), &raw)
         .expect_err("should surface through Manifest::parse too");
     assert_eq!(diag.code, "E1221");
     assert!(matches!(
         err,
-        jet::Jetpack::PackageManifest::ManifestError::BadEffectsBlock { .. }
+        jetpack::PackageManifest::ManifestError::BadEffectsBlock { .. }
     ));
 }
 

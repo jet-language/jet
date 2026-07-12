@@ -89,7 +89,7 @@ pub(super) fn apply_project_add_dependency(
     let manifest_path = ctx.project_root.join(&manifest_rel);
     let before = fs::read_to_string(&manifest_path).map_err(|e| project_edit_error("io", &e.to_string()))?;
     let after = crate::Manifest::add_dependency(&before, &name, &spec);
-    crate::Jetpack::PackageManifest::parse(&after)
+    crate::PackageManifest::parse(&after)
         .map_err(|e| project_edit_error("diagnostic", &format!("{:?}", e)))?;
     let change = ProjectChange {
         path: manifest_path,
@@ -122,7 +122,7 @@ pub(super) fn apply_project_remove_dependency(
     let manifest_path = ctx.project_root.join(&manifest_rel);
     let before = fs::read_to_string(&manifest_path).map_err(|e| project_edit_error("io", &e.to_string()))?;
     let after = crate::Manifest::remove_dependency(&before, &name);
-    crate::Jetpack::PackageManifest::parse(&after)
+    crate::PackageManifest::parse(&after)
         .map_err(|e| project_edit_error("diagnostic", &format!("{:?}", e)))?;
     let change = ProjectChange {
         path: manifest_path,
@@ -151,7 +151,7 @@ pub(super) fn apply_project_edit_pkg_field(
     let manifest_path = ctx.project_root.join(&manifest_rel);
     let before = fs::read_to_string(&manifest_path).map_err(|e| project_edit_error("io", &e.to_string()))?;
     let after = set_manifest_payload_field(&before, &field, &value)?;
-    crate::Jetpack::PackageManifest::parse(&after)
+    crate::PackageManifest::parse(&after)
         .map_err(|e| project_edit_error("diagnostic", &format!("{:?}", e)))?;
     finish_project_changes(
         ctx,
@@ -186,7 +186,7 @@ pub(super) fn apply_project_add_target(
     let manifest_path = ctx.project_root.join(&manifest_rel);
     let before = fs::read_to_string(&manifest_path).map_err(|e| project_edit_error("io", &e.to_string()))?;
     let after = add_manifest_target(&before, &name, target)?;
-    crate::Jetpack::PackageManifest::parse(&after)
+    crate::PackageManifest::parse(&after)
         .map_err(|e| project_edit_error("diagnostic", &format!("{:?}", e)))?;
     finish_project_changes(
         ctx,
@@ -262,7 +262,7 @@ pub(super) fn apply_project_create_package(
         "payload: {{\n    name: \"{}\",\n    version: \"0.1.0\",\n}}\npackages: {{\n    {}: {},\n}}\n",
         name, name, target
     );
-    crate::Jetpack::PackageManifest::parse(&manifest)
+    crate::PackageManifest::parse(&manifest)
         .map_err(|e| project_edit_error("diagnostic", &format!("{:?}", e)))?;
     let entry = if target == "library" {
         format!("pub fn {}_ready() -> Bool {{\n    return true\n}}\n", name)
@@ -340,7 +340,7 @@ pub(super) fn apply_project_add_workspace_member(
             member_path
         )
     };
-    crate::Jetpack::WorkspaceFile::evaluate(&after, &ctx.project_root)
+    jetpack::WorkspaceFile::evaluate(&after, &ctx.project_root)
         .map_err(|d| project_edit_error("diagnostic", &d.what))?;
     let change = ProjectChange {
         path: workspace_path,
@@ -384,7 +384,7 @@ pub(super) fn apply_project_add_env_service(
     } else {
         format!("module env.dev {{\n    services: {{ {service} }}\n}}\n")
     };
-    crate::Jetpack::ModuleEval::evaluate_env(&after, &ctx.project_root)
+    jetpack::ModuleEval::evaluate_env(&after, &ctx.project_root)
         .map_err(|d| project_edit_error("diagnostic", &d.what))?;
     finish_project_changes(
         ctx,
@@ -791,17 +791,17 @@ fn normalize_and_validate_project_changes(
         if change.rel.ends_with(&format!("/{}", crate::Syntax::PAYLOAD_FILE))
             || change.rel == crate::Syntax::PAYLOAD_FILE
         {
-            crate::Jetpack::PackageManifest::parse(&change.after)
+            crate::PackageManifest::parse(&change.after)
                 .map_err(|e| project_edit_error("diagnostic", &format!("{:?}", e)))?;
         } else if change.rel.ends_with(&format!("/{}", crate::Syntax::WORKSPACE_FILE))
             || change.rel == crate::Syntax::WORKSPACE_FILE
         {
-            crate::Jetpack::WorkspaceFile::evaluate(&change.after, &ctx.project_root)
+            jetpack::WorkspaceFile::evaluate(&change.after, &ctx.project_root)
                 .map_err(|d| project_edit_error("diagnostic", &d.what))?;
         } else if change.rel.ends_with(&format!("/{}", crate::Syntax::ENV_FILE))
             || change.rel == crate::Syntax::ENV_FILE
         {
-            crate::Jetpack::ModuleEval::evaluate_env(&change.after, &ctx.project_root)
+            jetpack::ModuleEval::evaluate_env(&change.after, &ctx.project_root)
                 .map_err(|d| project_edit_error("diagnostic", &d.what))?;
         } else if change
             .path

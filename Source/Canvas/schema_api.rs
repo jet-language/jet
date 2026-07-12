@@ -214,7 +214,7 @@ fn resolve_entry_source_path(entry: &Path, source_id: Option<&str>) -> Result<Pa
 
 fn project_source_roots(ctx: &ProjectContext) -> Vec<PathBuf> {
     if let Some(workspace_root) = &ctx.workspace_root {
-        if let Some(Ok(plan)) = crate::Jetpack::WorkspaceFile::load(workspace_root) {
+        if let Some(Ok(plan)) = jetpack::WorkspaceFile::load(workspace_root) {
             return plan
                 .members
                 .into_iter()

@@ -1310,7 +1310,7 @@ pub(super) fn canvas_authority_context(path: &Path) -> CanvasAuthority {
     if let Some(root) = crate::Loader::find_manifest_root(dir) {
         let manifest_path = root.join(crate::Syntax::PAYLOAD_FILE);
         if let Ok(raw) = fs::read_to_string(&manifest_path) {
-            if let Ok(manifest) = crate::Jetpack::PackageManifest::parse(&raw) {
+            if let Ok(manifest) = crate::PackageManifest::parse(&raw) {
                 return CanvasAuthority {
                     grant: "canvas.source_edit:package".to_string(),
                     package_id: manifest.package.name,

@@ -2306,10 +2306,10 @@ fn normalize_path_buf(path: &std::path::Path) -> String {
         .to_string()
 }
 
-fn load_discovery_index(path: &str) -> Option<crate::Jetpack::Discovery::Index> {
+fn load_discovery_index(path: &str) -> Option<jetpack::Discovery::Index> {
     let mut dir = std::path::Path::new(path).parent()?;
     loop {
-        if let Ok(Some(index)) = crate::Jetpack::Discovery::load(dir) {
+        if let Ok(Some(index)) = jetpack::Discovery::load(dir) {
             return Some(index);
         }
         dir = match dir.parent() {

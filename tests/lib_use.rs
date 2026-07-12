@@ -10,9 +10,9 @@
 //! the way a user would, with `JETPACK_ROOT` pointed at a throwaway hangar so
 //! the compiler's loader finds the staged source.
 
-use jet::Jetpack::Provider::Ctx;
-use jet::Jetpack::RefSpec::{classify_in, ProviderKind, SourceTable};
-use jet::Jetpack::Store::{self, Roots};
+use jetpack::Provider::Ctx;
+use jetpack::RefSpec::{classify_in, ProviderKind, SourceTable};
+use jetpack::Store::{self, Roots};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;

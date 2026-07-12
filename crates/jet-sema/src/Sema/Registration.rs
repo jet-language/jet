@@ -20,6 +20,62 @@ fn is_fallible_void_return(ty: &Type) -> bool {
 }
 
 impl<'a> Checker<'a> {
+    /// D-FFI-INLINE1=A / D-FFI-ASM1=A / D-FFI-CPP1=A (card #501): validate an
+    /// inline foreign tier function (`#FFI(<lang>) fn`). The systems floor ships
+    /// `c`, `cpp`, and `asm`; every one is an unsafe foreign language, so an
+    /// inline body requires the enclosing `#Unsafe("reason")` gate (I1/S58).
+    /// Any other language name has no inline binder yet (E3220).
+    fn check_inline_foreign_fn(&mut self, f: &Func) {
+        let Some(inl) = &f.inline_foreign else {
+            return;
+        };
+        // Systems-floor inline languages (card #501). All three are unsafe.
+        const UNSAFE_INLINE_LANGS: &[&str] = &[
+            Syntax::C_MODULE_ROOT,
+            Syntax::CPP_MODULE_ROOT,
+            Syntax::ASM_LANG,
+        ];
+        if !UNSAFE_INLINE_LANGS.contains(&inl.lang.as_str()) {
+            self.diags.push(Diagnostic::error(
+                "E3220",
+                format!("no inline foreign binder for `{}` yet", inl.lang),
+                "the inline foreign tier ships `c`, `cpp`, and `asm` first (the systems floor, card #501); other languages arrive on later polyglot cards".to_string(),
+                "use `#FFI(c)`, `#FFI(cpp)`, or `#FFI(asm)`".to_string(),
+                Some(inl.lang_span),
+            ));
+            return;
+        }
+        // I1/S58: an unsafe-language inline body must sit behind an `#Unsafe`
+        // gate so the author states why calling it is sound.
+        if !f.is_unsafe {
+            self.diags.push(Diagnostic::error(
+                "E3215",
+                format!("`#FFI({})` needs an `#Unsafe(\"reason\")` gate", inl.lang),
+                format!(
+                    "`{}` is an unsafe foreign language — an inline `{}` body can break memory safety, so Jet requires you to state why it is sound to call (I1/S58)",
+                    inl.lang, inl.lang
+                ),
+                format!("add the gate: `#Unsafe(\"…\") #FFI({}) fn …`", inl.lang),
+                Some(inl.marker_span),
+            ));
+            return;
+        }
+        // D-FFI-INLINE1/ASM1/CPP1 (card #501): the front end (parse, contract
+        // checking, `#Unsafe` gate, formatter, grammars) is live, but body
+        // lowering is not yet wired for any language. Reject at sema so a valid
+        // program never reaches codegen and emits uncompilable Rust (I2). This
+        // gate lifts per language as its binder lands — asm awaits the ratified
+        // operand/clobber model, C awaits a raw (non-interpolating) body form,
+        // cpp awaits the clang shim toolchain.
+        self.diags.push(Diagnostic::error(
+            "E3221",
+            format!("`#FFI({})` inline foreign body can't be compiled yet", inl.lang),
+            "the inline foreign tier is parsed, contract-checked, and `#Unsafe`-gated, but body lowering for this language is still pending (card #501 systems floor)".to_string(),
+            "track card #501 for when the inline binder for this language lands".to_string(),
+            Some(inl.marker_span),
+        ));
+    }
+
     /// Shared tail of `check_func_body` / `check_func_body_bundle`:
     /// declare parameters, check the body, enforce definite return.
     pub(crate) fn check_params_and_body(&mut self, f: &mut Func, owner_type: Option<&str>) {
@@ -97,6 +153,15 @@ impl<'a> Checker<'a> {
                     },
                 );
             }
+        }
+        // D-FFI-INLINE1=A (card #501): an inline foreign tier fn (`#FFI(<lang>)
+        // fn`) has a foreign-source body, not Jet statements. Its parameters are
+        // in scope above (the Jet signature is a real, checked contract at call
+        // sites); validate the tier gate and skip the ordinary body/return
+        // checker (the empty statement body would otherwise be E0114).
+        if f.inline_foreign.is_some() {
+            self.check_inline_foreign_fn(f);
+            return;
         }
         // D-UNSAFE2 / D-LIN1-DROP: an `#Unsafe fn` body is an audited region just
         // like an `#Unsafe { … }` block — its reason is the audit note. Mark the

@@ -1990,7 +1990,7 @@ fn canvas_project_transactions_preview_apply_and_conflict_on_touched_files() {
     let after_apply = fs::read_to_string(app.join("pkg.jet")).unwrap();
     assert!(after_apply.contains("logging: path@../logging"), "{after_apply}");
     assert!(
-        jet::Jetpack::PackageManifest::parse(&after_apply).is_ok(),
+        jetpack::PackageManifest::parse(&after_apply).is_ok(),
         "{after_apply}"
     );
 
@@ -2108,7 +2108,7 @@ fn canvas_project_transactions_remove_dependency() {
     assert!(!manifest.contains("logging"), "{manifest}");
     assert!(manifest.contains("tools: path@../tools"), "{manifest}");
     assert!(
-        jet::Jetpack::PackageManifest::parse(&manifest).is_ok(),
+        jetpack::PackageManifest::parse(&manifest).is_ok(),
         "{manifest}"
     );
 }
@@ -2151,7 +2151,7 @@ fn canvas_project_transactions_edit_pkg_field_and_add_target() {
     let manifest = fs::read_to_string(dir.join("pkg.jet")).unwrap();
     assert!(manifest.contains("app: executable"), "{manifest}");
     assert!(
-        jet::Jetpack::PackageManifest::parse(&manifest).is_ok(),
+        jetpack::PackageManifest::parse(&manifest).is_ok(),
         "{manifest}"
     );
 }
@@ -2231,7 +2231,7 @@ fn canvas_project_transactions_create_package_from_workspace() {
     assert!(manifest.contains("name: \"tools\""), "{manifest}");
     assert!(manifest.contains("tools: executable"), "{manifest}");
     assert!(
-        jet::Jetpack::PackageManifest::parse(&manifest).is_ok(),
+        jetpack::PackageManifest::parse(&manifest).is_ok(),
         "{manifest}"
     );
     let main = fs::read_to_string(dir.join("packages/tools/main.jet")).unwrap();
@@ -2292,7 +2292,7 @@ fn canvas_project_transactions_add_workspace_member() {
     let workspace = fs::read_to_string(dir.join("workspace.jet")).unwrap();
     assert!(workspace.contains("\"./packages/tools\""), "{workspace}");
     assert!(
-        jet::Jetpack::WorkspaceFile::evaluate(&workspace, &dir).is_ok(),
+        jetpack::WorkspaceFile::evaluate(&workspace, &dir).is_ok(),
         "{workspace}"
     );
     let after_project = jet::Canvas::project_json_for_entry(&entry);

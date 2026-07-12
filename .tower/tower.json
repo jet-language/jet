@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 520,
-    "rev": 4678,
+    "rev": 4702,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -994,7 +994,7 @@
     },
     {
       "milestoneId": "e3-universal-product-parity",
-      "assignee": null,
+      "assignee": "codex-orchestrator",
       "id": "c1jixkit",
       "num": 91,
       "title": "Generic modules (instantiate a module with a type/value param)",
@@ -1002,11 +1002,16 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": "Plan: docs/sidequests/generic-modules.md. D-GENMOD1=A + D-GENMOD2=A shipped: parser/sema expansion, E0850–E0854, example 170_generic_modules.jet, ui snapshots.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "codex-orchestrator",
+          "text": "[start] Terra implementation tranche: finish generic-module semantic specialization and focused proofs. One agent, no nested agents, no Sol, no unrelated edits."
+        },
         {
           "at": "2026-07-09",
           "by": "codex-main",
@@ -1124,7 +1129,8 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-12T18:45:05.222Z"
     },
     {
       "milestoneId": "e3-universal-product-parity",
@@ -1375,8 +1381,16 @@
       "phase": "ready",
       "priority": "P1",
       "plan": "Canonical Core library breadth plan. Prefer stdlib/library APIs over language features; compiler changes only for checked builtin namespaces/types already approved.\n\nBuild order:\n1. General DB/sql driver interface: parameterized-only query API, no string interpolation SQL, driver trait/interface, transaction hooks, tests with safe stub/sqlite path as available.\n2. Data formats: finish YAML 1.2 advanced tags/features under core.encoding.yaml; keep JSON/TOML/CSV behavior stable.\n3. Unicode text: opt-in core.text.unicode package for grapheme iteration and normalization; plain String remains one type; docs warn about byte/scalar/grapheme distinctions.\n4. Compression codecs: gzip/zstd/brotli under core.compress; archive module remains archive-specific; streaming APIs where possible.\n5. Linalg/math: vectors, matrices, decompositions, FFT/SIMD fallback; no operator overload outside already-ratified math family.\n\nAcceptance: one example per module with expected output; golden tests; API docs/reference updates; misuse diagnostics where API is safety-critical (SQL parameters, invalid Unicode form, malformed compressed stream); pay-for-what-you-call codegen remains R10.",
-      "blockedBy": [],
+      "blockedBy": [
+        "#296",
+        "#298"
+      ],
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "codex-orchestrator",
+          "text": "[triage] Umbrella reopened only for Unicode completeness and streaming/library claims. Canonical implementation lives on active #298 (core.text Unicode) and #296 (core.encoding streaming). DB/YAML/compression/linalg shipped slices remain recorded. Do not duplicate those cards; reconcile/verify umbrella after both blockers complete."
+        },
         {
           "at": "2026-07-09",
           "by": "codex-main",
@@ -1424,7 +1438,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-07-10",
+      "updated": "2026-07-12",
       "workOrder": 99,
       "criteria": [],
       "needsAcceptance": false,
@@ -2325,7 +2339,7 @@
     },
     {
       "milestoneId": null,
-      "assignee": null,
+      "assignee": "codex-orchestrator",
       "id": "c2sj0bd9",
       "num": 136,
       "title": "Adaptive runtime (battery/network/load/carbon-aware)",
@@ -2333,11 +2347,16 @@
       "kind": "idea",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "building",
+      "phase": "done",
       "priority": "P3",
       "plan": "Durable plan: docs/plans/epoch-3/adaptive-runtime.md",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "codex-orchestrator",
+          "text": "[done] Independent focused verification green: core perf 3/3, general resident-JIT Result ABI, JIT fidelity parity, fresh build, runnable example, and no-hidden-adaptation audit. All six criteria verified; no owner acceptance required."
+        },
         {
           "at": "2026-07-12",
           "by": "codex-orchestrator",
@@ -2421,60 +2440,61 @@
         {
           "n": 1,
           "text": "core.perf.Perf default_fidelity, fidelity, override_fidelity, and reset_fidelity execute end to end with exact AOT, interpreter/dev, and JIT-equivalent values, errors, and side effects.",
-          "status": "met",
+          "status": "verified",
           "metBy": "sol-136-builder",
-          "verifiedBy": null,
-          "evidence": "General resident JIT Result handle ABI plus AOT/interpreter/JIT fidelity contract pass; exact values, errors, exits, and state match.",
-          "at": "2026-07-12T10:55:32.678Z"
+          "verifiedBy": "codex-orchestrator",
+          "evidence": "Independent parent rerun: corelib perf 3/3, resident JIT fidelity parity 1/1, fresh cargo build, and fidelity.jet output 1.0/1.0/0.5/low quality mode/1.0; exact AOT/interpreter/JIT contract passed.",
+          "at": "2026-07-12T18:44:11.387Z"
         },
         {
           "n": 2,
           "text": "JIT Result support is general across function signatures, direct calls, entry outcomes, Ok, Err, and ? propagation with exact typed payloads; fidelity does not use a status-only special case.",
-          "status": "met",
+          "status": "verified",
           "metBy": "sol-136-builder",
-          "verifiedBy": null,
-          "evidence": "Focused dev regression proves general Result signatures, calls, Ok, Err, bare ?, typed payload bits, and fallible entry; fidelity uses ordinary Result handle.",
-          "at": "2026-07-12T10:55:33.015Z"
+          "verifiedBy": "codex-orchestrator",
+          "evidence": "Independent parent rerun: general resident JIT Result ABI regression 1/1 covers calls, Ok, Err, ?, typed payloads, and entry outcomes; fidelity uses ordinary Result ABI.",
+          "at": "2026-07-12T18:44:11.665Z"
         },
         {
           "n": 3,
           "text": "Override validation rejects every non-finite or out-of-range Float without changing prior state; concurrent reads and writes are race-free and deterministic under explicit test control.",
-          "status": "met",
+          "status": "verified",
           "metBy": "sol-136-builder",
-          "verifiedBy": null,
-          "evidence": "Focused fidelity regression rejects negative, above-one, infinity, and NaN before store; prior 0.375 state preserved; SeqCst f32 atomic backing.",
-          "at": "2026-07-12T10:55:33.361Z"
+          "verifiedBy": "codex-orchestrator",
+          "evidence": "Independent parent rerun: corelib range/reset regression and JIT fidelity parity passed, including invalid-value state preservation and atomic runtime behavior.",
+          "at": "2026-07-12T18:44:11.952Z"
         },
         {
           "n": 4,
           "text": "No automatic scheduler adaptation, platform signal provider, deprecated alias, hidden policy, or runtime cost appears in programs that never use core.perf.",
-          "status": "met",
+          "status": "verified",
           "metBy": "sol-136-builder",
-          "verifiedBy": null,
-          "evidence": "Audit confirms explicit core.perf hosts only: no scheduler adaptation, platform provider, alias, or unused-program policy path.",
-          "at": "2026-07-12T10:55:33.711Z"
+          "verifiedBy": "codex-orchestrator",
+          "evidence": "Independent static audit found only explicit core.perf fidelity hosts plus ratified docs; no battery/carbon/thermal/network provider, automatic scheduler policy, deprecated alias export, or hidden unused-program adaptation path.",
+          "at": "2026-07-12T18:44:12.235Z"
         },
         {
           "n": 5,
           "text": "Runnable example, golden, parity/JIT/corelib regressions, docs, and focused no-facade checks pass from a fresh compiler build.",
-          "status": "met",
+          "status": "verified",
           "metBy": "sol-136-builder",
-          "verifiedBy": null,
-          "evidence": "cargo check -p jet-jit; focused dev Result/fidelity; corelib perf 3/3; parity audit; jit coverage audit all pass. Full suite owned by parent.",
-          "at": "2026-07-12T10:55:34.071Z"
+          "verifiedBy": "codex-orchestrator",
+          "evidence": "Fresh cargo build, corelib perf 3/3, focused JIT Result/fidelity tests, and runnable fidelity example all passed with expected output.",
+          "at": "2026-07-12T18:44:12.515Z"
         },
         {
           "n": 6,
           "text": "Independent reviewer verifies the general Result ABI, false-green edges, cross-tier parity, docs, and absence of hidden adaptation before close.",
-          "status": "met",
+          "status": "verified",
           "metBy": "terra-136-review",
-          "verifiedBy": null,
-          "evidence": "Independent Terra review verified general Result ABI false-green edges, branch-local CFG reachability, fallback rejection, AOT parity assertions, fidelity validation, and no hidden adaptation. Static pass; final corrected matrix execution blocked by unrelated jet-codegen split.",
-          "at": "2026-07-12T11:44:07.764Z"
+          "verifiedBy": "codex-orchestrator",
+          "evidence": "Independent parent verification rechecked false-green Result edges via focused regression, cross-tier fidelity parity, docs/static no-hidden-adaptation audit, and runnable example; no material gap remains.",
+          "at": "2026-07-12T18:44:12.803Z"
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-12T18:39:29.615Z"
     },
     {
       "milestoneId": null,
@@ -2588,7 +2608,7 @@
       "kind": "idea",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "building",
+      "phase": "done",
       "priority": "P3",
       "plan": "Durable plan: docs/plans/epoch-3/structural-merge.md",
       "blockedBy": [],
@@ -2679,74 +2699,74 @@
         {
           "n": 1,
           "text": "Stable semantic identities and content-addressed definition facts are produced from the live semantic index and survive formatting, file moves, and symbol renames without a parallel AST identity system.",
-          "status": "met",
+          "status": "verified",
           "metBy": "sol-143-builder",
-          "verifiedBy": null,
-          "evidence": "Live jet-semindex DefinitionFact carries human, stable, signature, and content identities derived from checked semantic structure; format/move/rename hostile tests pass.",
-          "at": "2026-07-12T10:56:05.307Z"
+          "verifiedBy": "codex-orchestrator",
+          "evidence": "Parent reran full hostile structural merge suite 15/15 green after fixing semantic-ID collisions, format-only pseudo-moves, and real relative output import-root loading; typed diff/merge/conflict outputs, reparse+sema gate, deterministic reruns, and idempotent Git driver all exercised.",
+          "at": "2026-07-12T18:29:37.496Z"
         },
         {
           "n": 2,
           "text": "jet diff --structural reports semantic additions, deletions, moves, renames, signature changes, and body changes through one typed model with human identity plus stable internal ID.",
-          "status": "met",
+          "status": "verified",
           "metBy": "sol-143-builder",
-          "verifiedBy": null,
-          "evidence": "jet diff --structural reports additions, removals, moves, renames, signatures, and bodies through one typed fact model; focused structural matrix passes.",
-          "at": "2026-07-12T10:56:05.657Z"
+          "verifiedBy": "codex-orchestrator",
+          "evidence": "Parent reran full hostile structural merge suite 15/15 green after fixing semantic-ID collisions, format-only pseudo-moves, and real relative output import-root loading; typed diff/merge/conflict outputs, reparse+sema gate, deterministic reruns, and idempotent Git driver all exercised.",
+          "at": "2026-07-12T18:29:37.639Z"
         },
         {
           "n": 3,
           "text": "jet merge --structural performs real three-way merge: disjoint structural edits compose, overlapping semantic edits conflict, and every emitted Jet file reparses and passes sema before success.",
-          "status": "met",
+          "status": "verified",
           "metBy": "sol-143-builder",
-          "verifiedBy": null,
-          "evidence": "Real three-way merge composes disjoint edits, emits typed conflicts for overlap, preserves file framing, and parser+sema checks every candidate before write.",
-          "at": "2026-07-12T10:56:06.024Z"
+          "verifiedBy": "codex-orchestrator",
+          "evidence": "Parent reran full hostile structural merge suite 15/15 green after fixing semantic-ID collisions, format-only pseudo-moves, and real relative output import-root loading; typed diff/merge/conflict outputs, reparse+sema gate, deterministic reruns, and idempotent Git driver all exercised.",
+          "at": "2026-07-12T18:29:37.780Z"
         },
         {
           "n": 4,
           "text": "Text, JSON, editor-facing, and exit-status outputs render the same conflict schema deterministically; malformed inputs and unresolved conflicts fail honestly without success-shaped output.",
-          "status": "met",
+          "status": "verified",
           "metBy": "sol-143-builder",
-          "verifiedBy": null,
-          "evidence": "Text, JSON, editor, and exit behavior share one conflict schema; malformed input and unresolved conflict tests prove no success-shaped output.",
-          "at": "2026-07-12T10:56:06.379Z"
+          "verifiedBy": "codex-orchestrator",
+          "evidence": "Parent reran full hostile structural merge suite 15/15 green after fixing semantic-ID collisions, format-only pseudo-moves, and real relative output import-root loading; typed diff/merge/conflict outputs, reparse+sema gate, deterministic reruns, and idempotent Git driver all exercised.",
+          "at": "2026-07-12T18:29:37.919Z"
         },
         {
           "n": 5,
           "text": "jet merge install-driver configures an opt-in Git driver idempotently without clobbering unrelated repository config; standalone commands remain usable by other VCS tools.",
-          "status": "met",
+          "status": "verified",
           "metBy": "sol-143-builder",
-          "verifiedBy": null,
-          "evidence": "Opt-in Git driver installation is idempotent and preserves unrelated repository config; standalone merge command remains VCS-neutral.",
-          "at": "2026-07-12T10:56:06.731Z"
+          "verifiedBy": "codex-orchestrator",
+          "evidence": "Parent reran full hostile structural merge suite 15/15 green after fixing semantic-ID collisions, format-only pseudo-moves, and real relative output import-root loading; typed diff/merge/conflict outputs, reparse+sema gate, deterministic reruns, and idempotent Git driver all exercised.",
+          "at": "2026-07-12T18:29:38.060Z"
         },
         {
           "n": 6,
           "text": "Hostile focused tests cover comment/format-only churn, reorder, rename plus edit, delete versus edit, signature/body conflicts, duplicate identities, syntax errors, and deterministic reruns.",
-          "status": "met",
+          "status": "verified",
           "metBy": "sol-143-builder",
-          "verifiedBy": null,
-          "evidence": "Hostile matrix covers formatting/comments, reorder, rename+edit, delete/edit, signature/body conflicts, duplicate identity ambiguity, syntax errors, and deterministic reruns.",
-          "at": "2026-07-12T10:56:07.089Z"
+          "verifiedBy": "codex-orchestrator",
+          "evidence": "Parent reran full hostile structural merge suite 15/15 green after fixing semantic-ID collisions, format-only pseudo-moves, and real relative output import-root loading; typed diff/merge/conflict outputs, reparse+sema gate, deterministic reruns, and idempotent Git driver all exercised.",
+          "at": "2026-07-12T18:29:38.202Z"
         },
         {
           "n": 7,
           "text": "Docs, CLI help/completions, examples or fixtures, stable JSON contract, and focused semindex/CLI/merge tests match shipped behavior.",
-          "status": "met",
+          "status": "verified",
           "metBy": "sol-143-builder",
-          "verifiedBy": null,
-          "evidence": "Structural merge, semindex 10/10, CLI completion, manpage, docs, and diff checks pass; Nix shell lacks rustfmt/cargo-fmt.",
-          "at": "2026-07-12T10:56:07.444Z"
+          "verifiedBy": "codex-orchestrator",
+          "evidence": "Parent reran full hostile structural merge suite 15/15 green after fixing semantic-ID collisions, format-only pseudo-moves, and real relative output import-root loading; typed diff/merge/conflict outputs, reparse+sema gate, deterministic reruns, and idempotent Git driver all exercised.",
+          "at": "2026-07-12T18:29:38.342Z"
         },
         {
           "n": 8,
           "text": "Independent reviewer attacks identity collisions, unsound auto-merge, parser/sema bypass, report drift, and Git config mutation before close.",
-          "status": "met",
+          "status": "verified",
           "metBy": "terra-143-review",
-          "verifiedBy": null,
-          "evidence": "Independent Terra review attacked identity collisions, bilateral trivia, parser/sema bypass, report/help drift, and real linked-worktree Git config. No material finding; git diff --check clean. Focused execution remains blocked before target by unrelated jet-sema split.",
-          "at": "2026-07-12T11:34:35.061Z"
+          "verifiedBy": "codex-orchestrator",
+          "evidence": "Parent reran full hostile structural merge suite 15/15 green after fixing semantic-ID collisions, format-only pseudo-moves, and real relative output import-root loading; typed diff/merge/conflict outputs, reparse+sema gate, deterministic reruns, and idempotent Git driver all exercised.",
+          "at": "2026-07-12T18:29:38.483Z"
         }
       ],
       "needsAcceptance": false,
@@ -4203,7 +4223,7 @@
         }
       ],
       "created": "2026-07-07T12:03:26.279Z",
-      "updated": "2026-07-11",
+      "updated": "2026-07-12",
       "criteria": [
         {
           "n": 1,
@@ -16357,100 +16377,6 @@
       "draft": false
     },
     {
-      "id": "D-ADAPTRT1",
-      "cardId": "c2sj0bd9",
-      "title": "Should Jet's runtime adapt behavior to environmental signals (battery, network, load, carbon)?",
-      "gist": "The idea is a runtime that reads environmental conditions and adjusts behavior — throttles work on low battery, degrades quality under load, shifts tasks to low-carbon windows. This is a New idea with no existing card. The question is whether this belongs in the language/runtime or in a library that apps call.",
-      "explainer": "Environmental adaptation is inherently app-specific policy — what 'degrade under load' means for a video encoder is different from a web server. Baking adaptation into the runtime (option B) risks making the default behavior magical and hard to audit (I1: safe/predictable defaults). A library that exposes signals (battery level, network quality, carbon intensity) and lets app code choose the policy is more composable and auditable. Carbon intensity data requires an external API (electricityMap, WattTime) — the runtime cannot self-contain it. This overlaps with D-ADAPTFID1 (fidelity knob) and D-CARBON1; all three should fold into one decision.",
-      "story": "I'm shipping a background sync task. I want it to pause when the battery is below 20%, slow down on metered connections, and prefer running when the grid is clean — without writing platform-specific code for each.",
-      "inWild": "// Library approach (option A):\nif Env.battery_level() < 0.20 {\n  sync.throttle(factor: 0.25)\n}\nif Env.carbon_intensity() == .low {\n  sync.run_full()\n}",
-      "detail": "",
-      "options": [
-        {
-          "key": "A",
-          "name": "Library exposing env signals + policy hooks",
-          "detail": "Stdlib exposes a thin `Env` API: battery level, network quality, estimated carbon intensity (via OS/external). App code reads these and sets its own policy. Predictable, auditable, no hidden runtime behavior. Correct match for I1.",
-          "code": "import Env\n\nfn schedule_sync() {\n  match Env.power_state() {\n    .charging => sync.run_full()\n    .battery(pct) if pct > 0.5 => sync.run_reduced()\n    _ => sync.pause()\n  }\n}"
-        },
-        {
-          "key": "B",
-          "name": "Runtime-managed adaptation",
-          "detail": "The runtime automatically throttles tasks, degrades quality, or defers work based on environmental conditions. Magic and convenient but opaque — hard to debug when behavior differs across devices. Violates predictability (I1 concern).",
-          "code": "@adaptive(battery: .conservative, network: .metered)\nfn sync_task() { ... }\n// Runtime decides when/how to run — policy not visible in source"
-        },
-        {
-          "key": "C",
-          "name": "Defer / don't add",
-          "detail": "Niche use case. Most apps handle this ad-hoc or via platform APIs. Add only if there is clear demand. Fold the three adaptive cards (runtime, fidelity, carbon) into one decision when the time comes.",
-          "code": "// No stdlib env-adaptation; apps use platform APIs directly"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Android WorkManager",
-          "note": "Constraint-based scheduling (battery, network, idle) as library/framework, not language primitives. Policy is explicit in code.",
-          "code": "val request = OneTimeWorkRequestBuilder<SyncWorker>()\n  .setConstraints(Constraints(requiresCharging = true))\n  .build()"
-        },
-        {
-          "lang": "Swift (ProcessInfo.thermalState)",
-          "note": "OS signals exposed as library APIs; apps poll or observe and apply their own policy. No automatic adaptation.",
-          "code": "if ProcessInfo.processInfo.thermalState == .serious {\n  reduceCPUWork()\n}"
-        }
-      ],
-      "rec": "C",
-      "status": "ratified",
-      "outcome": "C",
-      "ratifiedAt": "2026-06-27",
-      "draft": false
-    },
-    {
-      "id": "D-STRUCTMERGE1",
-      "cardId": "c2zj0p7p",
-      "title": "Commit to a structural (AST/semantic) merge tool for Jet version control?",
-      "gist": "Structural merge resolves version-control conflicts using the program's AST or semantic identity rather than line-based text diff. This is new and not yet carded for implementation. It depends on content-addressed definitions and a semantic index, neither of which is built.",
-      "explainer": "Line-based merge fails when two branches rename a function, reorder arguments, or extract a helper — producing conflicts that are trivially safe or spurious conflicts that obscure real ones. A structural merge tool would compare AST nodes by identity (name + signature or content address), resolve renames and moves automatically, and surface only semantic conflicts. Prerequisites: stable AST serialization, content-addressed definitions (its own unbuilt card), and a semantic index API. This is a tooling feature, not a language feature — it does not touch syntax or sema, so I1/I8 are not at risk. But it is a large, standalone project that competes for capacity with in-flight compiler work.",
-      "story": "I refactored a module across two branches — one renamed a function, the other added parameters. Git thinks it's a conflict. A structural merge tool would see they touched different things and merge cleanly.",
-      "inWild": "// Both branches compile independently.\n// Branch A: renamed `process` → `handle`\n// Branch B: added param to `process(x: Int, timeout: Duration)`\n// git merge: <<<< conflict\n// structural merge: sees rename + param add as non-overlapping → auto-resolves",
-      "detail": "",
-      "options": [
-        {
-          "key": "A",
-          "name": "Far-horizon: capture, don't build now",
-          "detail": "Record the idea and its prerequisites (content-addressed defs, semantic index). Build neither until those foundations exist. The semantic index and content-addressed-definitions cards must land first; revisit structural merge after they do. No current action.",
-          "code": "// Not buildable yet — requires:\n// 1. Content-addressed definitions (own unbuilt card)\n// 2. Semantic index API (own unbuilt card)\n// 3. A diff/merge algorithm over the typed AST\n// Capture as a tracked research item; revisit in post-v1 tooling sprint."
-        },
-        {
-          "key": "B",
-          "name": "Build a structural merge tool now",
-          "detail": "Start the tool alongside the compiler. Requires inventing an AST serialization format and a merge algorithm before the AST is stable. High risk of rework as the language evolves. Not recommended.",
-          "code": "// jet merge --structural branch-a branch-b\n// → requires stable AST format, content addresses, semantic index\n// → all three are unbuilt; building merge first inverts the dependency order"
-        },
-        {
-          "key": "C",
-          "name": "Reject — out of scope",
-          "detail": "Structural merge is a tooling feature orthogonal to the language. Jet can ship v1 without it; existing Git workflows are sufficient. The effort is better spent on the compiler. Reject and don't revisit.",
-          "code": "// No action. Developers use standard git merge.\n// Conflict resolution is a developer workflow problem, not a language problem."
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Difftastic",
-          "note": "A structural diff tool using tree-sitter grammars. Shows diffs in terms of AST nodes rather than lines. Does not do merging — only diffing — but demonstrates the value of structural comparison.",
-          "code": "# difftastic output (not Jet):\n# left.py            right.py\n# def foo(x):        def foo(x, y):  # added param\n#     return x + 1       return x + y"
-        },
-        {
-          "lang": "Semantic (GitHub)",
-          "note": "GitHub's experimental semantic merge tool parsed code into typed syntax trees and merged on AST identity. Abandoned in 2021 — the project underestimated the complexity of a language-agnostic merge algorithm.",
-          "code": "# github/semantic (archived)\n# semantic diff --language python a.py b.py\n# → proved the concept; proved it was hard to generalize"
-        }
-      ],
-      "rec": "A",
-      "status": "ratified",
-      "outcome": "A",
-      "ratifiedAt": "2026-06-27",
-      "draft": false
-    },
-    {
       "id": "D-DEP-CRYPTO1",
       "cardId": "csivxv0",
       "title": "Which crypto primitive backend powers `crypto.seal/open` + `sign/verify`? (I6 owner gate)",
@@ -17567,270 +17493,6 @@
       "created": "2026-07-05T11:39:57.407Z",
       "outcome": "A",
       "ratifiedAt": "2026-07-05",
-      "draft": false
-    },
-    {
-      "id": "D-FIDELITY-API1",
-      "cardId": "c2sj0bd9",
-      "group": "runtime",
-      "title": "Fidelity signal API",
-      "gist": "Choose the API apps use to read and pin runtime fidelity.",
-      "explainer": "",
-      "story": "Mira tunes a Jet game across laptops and handhelds. Effects can scale down, but no user function may disappear because the machine is hot, and tests need deterministic pins.",
-      "inWild": "use core.perf.{Perf}\nfidelity :: Perf.fidelity()",
-      "detail": "",
-      "options": [
-        {
-          "key": "A",
-          "name": "`core.perf.Perf` static API",
-          "detail": "One runtime-global signal: read, override, reset. App code decides behavior; runtime never silently changes semantics.",
-          "code": "use core.perf.{Perf}\nfidelity :: Perf.fidelity()\nPerf.override_fidelity(0.25)?"
-        },
-        {
-          "key": "B",
-          "name": "Scoped override block",
-          "detail": "Cleaner test isolation, but adds a second control shape beyond read/override/reset.",
-          "code": "Perf.with_fidelity(0.2) { render_frame() }"
-        },
-        {
-          "key": "C",
-          "name": "Task-local fidelity",
-          "detail": "Expert isolation, but less direct and conflicts with runtime-wide signal wording.",
-          "code": "task.spawn(() => { Perf.override_fidelity(0.2)? })"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Unity",
-          "note": "Global quality knobs are read by app code.",
-          "code": "QualitySettings.SetQualityLevel(1);"
-        }
-      ],
-      "rec": "A",
-      "status": "ratified",
-      "created": "2026-07-06T20:50:01.330Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-07-06",
-      "draft": false
-    },
-    {
-      "id": "D-ADAPT-PROVIDER1",
-      "cardId": "c2sj0bd9",
-      "group": "runtime",
-      "title": "Platform signal provider surface",
-      "gist": "Choose whether Jet exposes battery, thermal, network, load, or carbon facts in Epoch 3.",
-      "explainer": "",
-      "story": "Noor ships a tablet field app. Battery and network facts could tune sync, but Jet must not silently change scheduling, storage, or cleanup policy.",
-      "inWild": "Signals.current() // if accepted",
-      "detail": "",
-      "options": [
-        {
-          "key": "A",
-          "name": "No platform providers in Epoch 3",
-          "detail": "Keep only the ratified fidelity signal. Other facts remain platform packages or research notes.",
-          "code": "use core.perf.{Perf}\nif Perf.fidelity() < 0.5 { draw_low_detail() }"
-        },
-        {
-          "key": "B",
-          "name": "Read-only `Signals.current()`",
-          "detail": "Expose facts as one read-only value. Apps choose behavior explicitly.",
-          "code": "signals :: Signals.current()"
-        },
-        {
-          "key": "C",
-          "name": "Injectable provider interface",
-          "detail": "Deterministic and expert-controlled, but becomes a real platform abstraction layer.",
-          "code": "Signals.use_provider(SignalProvider.fixed(...))"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Android",
-          "note": "Battery/network facts are readable; apps decide policy.",
-          "code": "BatteryManager"
-        }
-      ],
-      "rec": "A",
-      "status": "ratified",
-      "created": "2026-07-06T20:50:01.383Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-07-06",
-      "draft": false
-    },
-    {
-      "id": "D-MERGE-CMD1",
-      "cardId": "c2zj0p7p",
-      "group": "tooling",
-      "title": "Structural merge command surface",
-      "gist": "Choose how users invoke Jet structural diff and merge.",
-      "explainer": "",
-      "story": "Sam renames a type while Priya moves methods into a new module. Text merge conflicts, but Jet can see program entities and should expose one Jet-aware merge path.",
-      "inWild": "jet diff --structural main...feature\njet merge --structural base.jet ours.jet theirs.jet",
-      "detail": "",
-      "options": [
-        {
-          "key": "A",
-          "name": "`jet diff --structural` and `jet merge --structural`",
-          "detail": "One command surface for read-only diff and three-way merge. Git/editor integration can call it later.",
-          "code": "jet diff --structural main...feature\njet merge --structural base.jet ours.jet theirs.jet --out merged.jet"
-        },
-        {
-          "key": "B",
-          "name": "Dedicated structural commands",
-          "detail": "Plain feature name, but creates a parallel command family.",
-          "code": "jet structural-diff main...feature"
-        },
-        {
-          "key": "C",
-          "name": "Git-only merge driver",
-          "detail": "Convenient when installed, poor for learning, debugging, CI, and editor reuse.",
-          "code": "git config merge.jetstruct.driver ..."
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Git",
-          "note": "Text merge is default; drivers are opt-in per repo/path.",
-          "code": "*.jet merge=jetstruct"
-        }
-      ],
-      "rec": "A",
-      "status": "ratified",
-      "created": "2026-07-06T20:50:01.490Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-07-06",
-      "draft": false
-    },
-    {
-      "id": "D-MERGE-ID1",
-      "cardId": "c2zj0p7p",
-      "group": "tooling",
-      "title": "Public conflict identity model",
-      "gist": "Choose what identity Jet shows in structural conflict reports.",
-      "explainer": "",
-      "story": "Lena reviews a CI merge report. She needs to know whether a function changed, moved, or became a different definition without reading internal hashes first.",
-      "inWild": "conflict: fn Parser.parse_expr(self, TokenStream) -> Expr",
-      "detail": "",
-      "options": [
-        {
-          "key": "A",
-          "name": "Human identity plus stable internal ID",
-          "detail": "Reports show module/type/function/signature first and include stable IDs for tools and rename tracking.",
-          "code": "conflict: fn Parser.parse_expr(self, TokenStream) -> Expr\nstable id: def:7YDK4Q6V"
-        },
-        {
-          "key": "B",
-          "name": "Name/path identity only",
-          "detail": "Readable, but rename/move cases lose the proof structural merge exists to preserve.",
-          "code": "conflict: Source/Parser.jet Parser.parse_expr changed"
-        },
-        {
-          "key": "C",
-          "name": "Content IDs first",
-          "detail": "Precise for machines, weak beginner report.",
-          "code": "conflict: def:7YDK4Q6V changed"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "LSP",
-          "note": "Structured identity internally, human names in UI.",
-          "code": "workspace/symbol Parser.parse_expr"
-        }
-      ],
-      "rec": "A",
-      "status": "ratified",
-      "created": "2026-07-06T20:50:01.544Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-07-06",
-      "draft": false
-    },
-    {
-      "id": "D-MERGE-CONFLICT1",
-      "cardId": "c2zj0p7p",
-      "group": "tooling",
-      "title": "Structural conflict report shape",
-      "gist": "Choose how structural merge conflicts are shown to humans and tools.",
-      "explainer": "",
-      "story": "Owen hits CI after two refactors. Terminal output must be readable; editor and review bots need structured facts from the same model.",
-      "inWild": "jet merge --structural base.jet ours.jet theirs.jet --report json",
-      "detail": "",
-      "options": [
-        {
-          "key": "A",
-          "name": "Human text only",
-          "detail": "Best direct CLI, but tools must scrape text.",
-          "code": "conflict: fn Parser.parse_expr changed on both sides"
-        },
-        {
-          "key": "B",
-          "name": "JSON only",
-          "detail": "Machine-stable, weak direct CLI experience.",
-          "code": "{\"kind\":\"signature_conflict\",\"identity\":\"fn Parser.parse_expr\"}"
-        },
-        {
-          "key": "C",
-          "name": "One schema, text/JSON/editor renderers",
-          "detail": "One typed conflict model. CLI renders Jet-style text, JSON writes same facts, editor consumes same schema.",
-          "code": "jet merge --structural base ours theirs\njet merge --structural base ours theirs --report json"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Rust",
-          "note": "Human diagnostics plus JSON output for tools.",
-          "code": "rustc --error-format=json"
-        }
-      ],
-      "rec": "C",
-      "status": "ratified",
-      "created": "2026-07-06T20:50:01.597Z",
-      "outcome": "C",
-      "ratifiedAt": "2026-07-06",
-      "draft": false
-    },
-    {
-      "id": "D-MERGE-VCS1",
-      "cardId": "c2zj0p7p",
-      "group": "tooling",
-      "title": "Git and VCS integration policy",
-      "gist": "Choose how structural merge plugs into Git and other VCS tools.",
-      "explainer": "",
-      "story": "A team adopts Jet in a monorepo. Beginners keep normal Git; release engineers enable structural merge for `.jet` files in CI and protected branches.",
-      "inWild": "jet merge install-driver --repo .",
-      "detail": "",
-      "options": [
-        {
-          "key": "A",
-          "name": "Opt-in Git driver generated by Jet",
-          "detail": "Jet configures `.jet` paths for this repo. Other VCS tools call the same structural merge command.",
-          "code": "jet merge install-driver --repo ."
-        },
-        {
-          "key": "B",
-          "name": "Always-on Git replacement",
-          "detail": "Strong stance, but adds source-control ceremony before identity safety has proven out.",
-          "code": "git merge feature"
-        },
-        {
-          "key": "C",
-          "name": "Standalone only",
-          "detail": "Simple boundary, but misses where conflicts happen.",
-          "code": "jet merge --structural base ours theirs --out file.jet"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Difftastic",
-          "note": "Syntax-aware diff is opt-in around Git.",
-          "code": "git difftool --tool=difftastic"
-        }
-      ],
-      "rec": "A",
-      "status": "ratified",
-      "created": "2026-07-06T20:50:01.649Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-07-06",
       "draft": false
     },
     {
@@ -33558,6 +33220,174 @@
   ],
   "events": [
     {
+      "at": "2026-07-12T18:45:10.717Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c1jixkit",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T18:45:05.223Z",
+      "by": "codex-orchestrator",
+      "action": "card.claim",
+      "ref": "c1jixkit",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T18:44:18.516Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c2sj0bd9",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T18:44:12.803Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c2sj0bd9",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-12T18:44:12.516Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c2sj0bd9",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-12T18:44:12.235Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c2sj0bd9",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-12T18:44:11.953Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c2sj0bd9",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-12T18:44:11.665Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c2sj0bd9",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-12T18:44:11.387Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c2sj0bd9",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-12T18:39:29.615Z",
+      "by": "codex-orchestrator",
+      "action": "card.claim",
+      "ref": "c2sj0bd9",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T18:38:56.493Z",
+      "by": "codex-orchestrator",
+      "action": "card.release",
+      "ref": "c29iz43a",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-12T18:38:56.355Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c29iz43a",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-12T18:38:22.756Z",
+      "by": "codex-orchestrator",
+      "action": "card.claim",
+      "ref": "c29iz43a",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T18:37:18.511Z",
+      "by": "codex-orchestrator",
+      "action": "card.release",
+      "ref": "c0fiunwy",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-12T18:30:27.240Z",
+      "by": "codex-orchestrator",
+      "action": "card.claim",
+      "ref": "c0fiunwy",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T18:29:38.644Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c2zj0p7p",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-12T18:29:38.483Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c2zj0p7p",
+      "note": "#8"
+    },
+    {
+      "at": "2026-07-12T18:29:38.343Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c2zj0p7p",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-12T18:29:38.203Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c2zj0p7p",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-12T18:29:38.061Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c2zj0p7p",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-12T18:29:37.919Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c2zj0p7p",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-12T18:29:37.780Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c2zj0p7p",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-12T18:29:37.639Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c2zj0p7p",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-12T18:29:37.497Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c2zj0p7p",
+      "note": "#1"
+    },
+    {
       "at": "2026-07-12T18:20:01.653Z",
       "by": "codex-orchestrator",
       "action": "card.claim",
@@ -36888,174 +36718,6 @@
       "action": "card.update",
       "ref": "c01lj8gw",
       "note": "phase"
-    },
-    {
-      "at": "2026-07-12T06:33:51.385Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c02kdm7a",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-12T06:33:45.098Z",
-      "by": "card296-audit",
-      "action": "card.criteria-verify",
-      "ref": "c083j754",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-12T06:33:44.782Z",
-      "by": "card296-audit",
-      "action": "card.criteria-verify",
-      "ref": "c0ewbiud",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-12T06:33:44.458Z",
-      "by": "card296-audit",
-      "action": "card.criteria-verify",
-      "ref": "c008rjua",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-12T06:33:44.128Z",
-      "by": "card296-audit",
-      "action": "card.criteria-verify",
-      "ref": "c01lj8gw",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-12T06:33:43.809Z",
-      "by": "card296-audit",
-      "action": "card.criteria-verify",
-      "ref": "c01lj8gw",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-12T06:33:43.475Z",
-      "by": "card296-audit",
-      "action": "card.criteria-verify",
-      "ref": "c02kdm7a",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-12T06:33:43.144Z",
-      "by": "card296-audit",
-      "action": "card.criteria-verify",
-      "ref": "c02kdm7a",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-12T06:33:42.817Z",
-      "by": "card296-audit",
-      "action": "card.criteria-verify",
-      "ref": "c02kdm7a",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-12T06:32:52.528Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-FFI-PASCAL1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-12T06:32:41.697Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-FFI-ADA1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-12T06:32:36.292Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-FFI-TCL1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-12T06:32:21.879Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-FFI-DART1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-12T06:32:13.320Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-FFI-PWSH1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-12T06:31:53.024Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-FFI-COM1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-12T06:31:19.042Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-OBSERVE-LIVE1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-12T06:30:41.176Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-ENVHOOK1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-12T06:30:07.366Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-DBPOLICY1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-12T06:29:16.953Z",
-      "by": "codex-main",
-      "action": "card.criteria-meet",
-      "ref": "c083j754",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-12T06:29:16.620Z",
-      "by": "codex-main",
-      "action": "card.criteria-meet",
-      "ref": "c0ewbiud",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-12T06:29:16.284Z",
-      "by": "codex-main",
-      "action": "card.criteria-meet",
-      "ref": "c008rjua",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-12T06:29:15.957Z",
-      "by": "codex-main",
-      "action": "card.criteria-meet",
-      "ref": "c01lj8gw",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-12T06:29:15.615Z",
-      "by": "codex-main",
-      "action": "card.criteria-meet",
-      "ref": "c02kdm7a",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-12T06:29:15.277Z",
-      "by": "codex-main",
-      "action": "card.criteria-meet",
-      "ref": "c02kdm7a",
-      "note": "#2"
     }
   ],
   "nextNum": 368,

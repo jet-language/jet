@@ -1141,7 +1141,7 @@ fn parse_pkg_config_defaults_link_name() {
 fn deps_block_parses_c_lib_refs() {
     // S59/D-CFFI2: native C deps live in the Jet `deps:` block as `c@<target>`
     // refs, parsed by the real PackageManifest parser (not an ad-hoc reader).
-    use jet::Jetpack::PackageManifest::{parse, DepSource};
+    use jetpack::PackageManifest::{parse, DepSource};
     let manifest = r#"
 payload: { name: "p", version: "0.1.0" }
 deps: {

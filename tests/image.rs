@@ -20,7 +20,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use jet::Jetpack::ModuleEval::evaluate_env;
+use jetpack::ModuleEval::evaluate_env;
 
 fn jetpack() -> Command {
     Command::new(env!("CARGO_BIN_EXE_jetpack"))

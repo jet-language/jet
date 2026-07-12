@@ -149,9 +149,9 @@ fn core_provider_compiles_ring_package_to_rlib() {
         return;
     }
 
-    use jet::Jetpack::Provider::Ctx;
-    use jet::Jetpack::RefSpec::{classify_in, ProviderKind, SourceTable};
-    use jet::Jetpack::Store::{self, Roots};
+    use jetpack::Provider::Ctx;
+    use jetpack::RefSpec::{classify_in, ProviderKind, SourceTable};
+    use jetpack::Store::{self, Roots};
 
     // Locate the core.archive ring package from the repo root.
     let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"));

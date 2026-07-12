@@ -17,5 +17,14 @@ pub mod PhaseTiming;
 // API-freeze validation via Sema) and was never used by `jetpack` itself, so
 // it lives directly in this crate instead of the shared model.
 pub mod PluginExport;
-pub use jet_pkg_model::{CBind, CFFI, FFI, Lock, Manifest, PackageManifest, ScriptDeps, Store};
+// Card #367 / D-PRODUCT-SPLIT1=C slice 3: `EffectBudget`/`LintPolicy` are
+// pure policy computation over the manifest/effect-fixpoint data (no
+// network/provider/shell), so they live in the shared read-only model too —
+// the root `jet` package needs them for `build`/`run`'s effect-budget
+// summary and lint-policy enforcement without depending on the full
+// `jetpack` engine for that.
+pub use jet_pkg_model::{
+    CBind, CFFI, EffectBudget, FFI, LintPolicy, Lock, Manifest, PackageManifest, ScriptDeps,
+    Store,
+};
 pub use Compile::{bundle_uses_unsafe, Capabilities, CompileOutput};

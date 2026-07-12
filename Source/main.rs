@@ -123,12 +123,12 @@ impl OptimizeLevel {
 }
 
 /// Convert from the manifest `BuildOptimize` enum to the driver `OptimizeLevel`.
-impl From<jet::Jetpack::PackageManifest::BuildOptimize> for OptimizeLevel {
-    fn from(v: jet::Jetpack::PackageManifest::BuildOptimize) -> Self {
+impl From<jet::PackageManifest::BuildOptimize> for OptimizeLevel {
+    fn from(v: jet::PackageManifest::BuildOptimize) -> Self {
         match v {
-            jet::Jetpack::PackageManifest::BuildOptimize::None => OptimizeLevel::None,
-            jet::Jetpack::PackageManifest::BuildOptimize::Basic => OptimizeLevel::Basic,
-            jet::Jetpack::PackageManifest::BuildOptimize::Full => OptimizeLevel::Full,
+            jet::PackageManifest::BuildOptimize::None => OptimizeLevel::None,
+            jet::PackageManifest::BuildOptimize::Basic => OptimizeLevel::Basic,
+            jet::PackageManifest::BuildOptimize::Full => OptimizeLevel::Full,
         }
     }
 }
@@ -178,8 +178,8 @@ impl ProfileConfig {
         }
     }
 
-    pub(crate) fn from_def(def: &jet::Jetpack::PackageManifest::BuildProfileDef) -> Self {
-        use jet::Jetpack::PackageManifest::BuildPanic;
+    pub(crate) fn from_def(def: &jet::PackageManifest::BuildProfileDef) -> Self {
+        use jet::PackageManifest::BuildPanic;
         Self {
             optimize: OptimizeLevel::from(def.optimize),
             debug_info: def.debug_info,
@@ -1976,7 +1976,7 @@ fn manifest_default_target(file: &str) -> Option<String> {
     let root = jet::Loader::find_manifest_root(start)?;
     let pack_path = root.join(jet::Syntax::PAYLOAD_FILE);
     let raw = fs::read_to_string(&pack_path).ok()?;
-    let manifest = jet::Jetpack::PackageManifest::parse(&raw).ok()?;
+    let manifest = jet::PackageManifest::parse(&raw).ok()?;
     manifest.package.target
 }
 
@@ -2029,7 +2029,7 @@ pub(crate) fn find_project_entry(root: &Path) -> PathBuf {
     if src_main.is_file() {
         return src_main;
     }
-    if let Some(Ok(manifest)) = jet::Jetpack::PackageManifest::PackManifest::load(root) {
+    if let Some(Ok(manifest)) = jet::PackageManifest::PackManifest::load(root) {
         let named = root.join(format!(
             "{}.{}",
             manifest.package.name,
@@ -2046,7 +2046,7 @@ pub(crate) fn find_project_entry(root: &Path) -> PathBuf {
 /// `check`/`build` inside a package — the one rule all six share instead of
 /// each hand-rolling its own "no file given" fallback.
 ///
-/// A `workspace.jet` member list (D-JPK-WORKSPACE, `crate::Jetpack::WorkspaceFile`)
+/// A `workspace.jet` member list (D-JPK-WORKSPACE, `jetpack::WorkspaceFile`)
 /// with more than one runnable member (a member whose own entry resolves to a
 /// real file, D-ILE1) is an ambiguity naming every member; `-p <member>`
 /// picks one explicitly, or the caller can always name a file directly. A
@@ -2055,7 +2055,7 @@ pub(crate) fn find_project_entry(root: &Path) -> PathBuf {
 /// no behavior change for the overwhelmingly common single-package case.
 ///
 /// A `workspace.jet` (D-JPK-WORKSPACE2) is checked at `cwd` directly first —
-/// `crate::Jetpack::WorkspaceFile::load` never walks upward, matching every
+/// `jetpack::WorkspaceFile::load` never walks upward, matching every
 /// other workspace-aware call site — because a monorepo workspace root often
 /// carries no `pkg.jet` of its own (payloads live entirely in member
 /// directories). Only when there's no workspace, or it has zero/one runnable
@@ -2064,7 +2064,7 @@ pub(crate) fn find_project_entry(root: &Path) -> PathBuf {
 /// D-CLI-BARE1). Returns `None` outside any package or workspace — the
 /// caller keeps today's "no file given" usage error verbatim.
 fn resolve_bare_entry(cmd: &str, cwd: &Path, member_flag: Option<&str>) -> Option<PathBuf> {
-    if let Some(Ok(plan)) = jet::Jetpack::WorkspaceFile::load(cwd) {
+    if let Some(Ok(plan)) = jetpack::WorkspaceFile::load(cwd) {
         let runnable: Vec<(String, PathBuf)> = plan
             .members
             .iter()
@@ -2173,7 +2173,7 @@ fn print_toolchain_diag(d: &jet::Diagnostics::Diagnostic) {
 /// running `jet` should run the verb itself (unpinned, in-channel, or already
 /// the exec'd pinned child).
 fn maybe_dispatch_pinned_toolchain(raw: &[String]) {
-    use jet::Jetpack::JetPin::{decide, handoff_line, PinDecision};
+    use jetpack::JetPin::{decide, handoff_line, PinDecision};
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let Some(root) = jet::Loader::find_manifest_root(&cwd) else {
         return;
@@ -2218,7 +2218,7 @@ fn run_toolchain() -> ! {
         &cwd,
         "error: `jet self toolchain` needs a project — no `pkg.jet` found here or above",
     );
-    print!("{}", jet::Jetpack::JetPin::report_pin(&root));
+    print!("{}", jetpack::JetPin::report_pin(&root));
     exit(ExitCodes::OK);
 }
 
@@ -2238,7 +2238,7 @@ fn run_init(script: Option<&str>) -> ! {
         .and_then(|s| s.to_str())
         .unwrap_or("app")
         .to_string();
-    match jet::Jetpack::JetPin::write_init(&cwd, &name, env!("CARGO_PKG_VERSION")) {
+    match jetpack::JetPin::write_init(&cwd, &name, env!("CARGO_PKG_VERSION")) {
         Ok(msg) => {
             if let Some(script) = script {
                 lift_inline_deps_into_manifest(&cwd, script);
@@ -2268,7 +2268,7 @@ fn lift_inline_deps_into_manifest(cwd: &Path, script: &str) {
     let Ok(prog) = jet::Parser::parse(&toks) else {
         return;
     };
-    let deps = jet::Jetpack::ScriptDeps::collect(&prog);
+    let deps = jet::ScriptDeps::collect(&prog);
     if deps.is_empty() {
         return;
     }
@@ -2335,35 +2335,35 @@ fn run_lock(script: Option<&str>, mode: OutputMode) {
         }
     };
 
-    let deps = jet::Jetpack::ScriptDeps::collect(&prog);
+    let deps = jet::ScriptDeps::collect(&prog);
     let mut locked = Vec::new();
     for dep in &deps {
-        match jet::Jetpack::ScriptDeps::resolve(dep, script_dir) {
-            Ok(r) => locked.push(jet::Jetpack::ScriptLock::LockedInlineDep {
+        match jet::ScriptDeps::resolve(dep, script_dir) {
+            Ok(r) => locked.push(jetpack::ScriptLock::LockedInlineDep {
                 name: r.name,
                 selector: r.selector,
                 resolved: r.resolved_version,
                 content_hash: r.content_hash,
             }),
             Err(reason) => {
-                let d = jet::Jetpack::ScriptDeps::e1253(dep, &reason);
+                let d = jet::ScriptDeps::e1253(dep, &reason);
                 report_problems(mode, &file, &src, &[d]);
                 exit(ExitCodes::USER_ERROR);
             }
         }
     }
 
-    let script_hash = jet::Jetpack::ScriptDeps::file_hash(script_path).unwrap_or_default();
-    let lock = jet::Jetpack::ScriptLock::ScriptLockFile {
-        version: jet::Jetpack::ScriptLock::SCRIPT_LOCK_VERSION,
+    let script_hash = jet::ScriptDeps::file_hash(script_path).unwrap_or_default();
+    let lock = jetpack::ScriptLock::ScriptLockFile {
+        version: jetpack::ScriptLock::SCRIPT_LOCK_VERSION,
         script_hash,
         deps: locked,
     };
-    match jet::Jetpack::ScriptLock::write(script_path, &lock) {
+    match jetpack::ScriptLock::write(script_path, &lock) {
         Ok(()) => {
             println!(
                 "wrote {}",
-                jet::Jetpack::ScriptLock::sidecar_path(script_path).display()
+                jetpack::ScriptLock::sidecar_path(script_path).display()
             );
             exit(ExitCodes::OK);
         }
@@ -2382,7 +2382,7 @@ fn run_update_jet(channel: Option<&str>) -> ! {
         &cwd,
         "error: `jet update jet` needs a project — no `pkg.jet` found here or above",
     );
-    match jet::Jetpack::JetPin::move_pin(&root, channel, env!("CARGO_PKG_VERSION")) {
+    match jetpack::JetPin::move_pin(&root, channel, env!("CARGO_PKG_VERSION")) {
         Ok(msg) => {
             println!("{msg}");
             exit(ExitCodes::OK);

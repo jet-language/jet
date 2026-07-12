@@ -5,10 +5,10 @@
 //! - E0996: `members:` evaluated to something other than `[String]`
 //! - E0997: `find("…")` names a missing directory
 //!
-//! These diagnostics fire from `jet::Jetpack::WorkspaceFile::evaluate`, not from
+//! These diagnostics fire from `jetpack::WorkspaceFile::evaluate`, not from
 //! `jet check`, so coverage is via programmatic assertion rather than .stderr snapshots.
 
-use jet::Jetpack::WorkspaceFile;
+use jetpack::WorkspaceFile;
 use std::path::Path;
 
 // ──────────────────────────────────────────────
@@ -103,7 +103,7 @@ fn e0997_find_missing_dir() {
 
 #[test]
 fn dot_form_classified_when_source_is_declared() {
-    use jet::Jetpack::RefSpec::{classify_in, ProviderKind, Source, SourceTable};
+    use jetpack::RefSpec::{classify_in, ProviderKind, Source, SourceTable};
 
     // Build a table with a named source "mono".
     let table = SourceTable::from_decls([(
@@ -124,7 +124,7 @@ fn dot_form_classified_when_source_is_declared() {
 
 #[test]
 fn colon_form_still_works() {
-    use jet::Jetpack::RefSpec::{classify_in, ProviderKind, Source, SourceTable};
+    use jetpack::RefSpec::{classify_in, ProviderKind, Source, SourceTable};
 
     let table = SourceTable::from_decls([(
         "mono".to_string(),
@@ -139,7 +139,7 @@ fn colon_form_still_works() {
 
 #[test]
 fn dot_form_not_classified_when_source_is_unknown() {
-    use jet::Jetpack::RefSpec::{classify_in, RefError, SourceTable};
+    use jetpack::RefSpec::{classify_in, RefError, SourceTable};
 
     let table = SourceTable::empty(); // no sources declared
     let err =
@@ -158,7 +158,7 @@ fn dot_form_not_classified_when_source_is_unknown() {
 
 #[test]
 fn bare_and_path_form_resolve_workspace_members() {
-    use jet::Jetpack::RefSpec::{classify_with_workspace, Source, SourceTable, WorkspaceIndex};
+    use jetpack::RefSpec::{classify_with_workspace, Source, SourceTable, WorkspaceIndex};
     let index = WorkspaceIndex::from_members([
         ("logging".to_string(), "./infra/logging".to_string()),
         ("ranker".to_string(), "packages/ranker".to_string()),
@@ -174,7 +174,7 @@ fn bare_and_path_form_resolve_workspace_members() {
 
 #[test]
 fn unknown_workspace_member_is_e1231() {
-    use jet::Jetpack::RefSpec::{classify_with_workspace, SourceTable, WorkspaceIndex};
+    use jetpack::RefSpec::{classify_with_workspace, SourceTable, WorkspaceIndex};
     let index =
         WorkspaceIndex::from_members([("logging".to_string(), "infra/logging".to_string())]);
     let err = classify_with_workspace("loggger", &SourceTable::empty(), &index)
@@ -184,7 +184,7 @@ fn unknown_workspace_member_is_e1231() {
 
 #[test]
 fn ambiguous_workspace_member_is_e1230() {
-    use jet::Jetpack::RefSpec::{classify_with_workspace, SourceTable, WorkspaceIndex};
+    use jetpack::RefSpec::{classify_with_workspace, SourceTable, WorkspaceIndex};
     let index = WorkspaceIndex::from_members([
         ("logging".to_string(), "infra/logging".to_string()),
         ("logging".to_string(), "apps/logging".to_string()),
@@ -200,7 +200,7 @@ fn ambiguous_workspace_member_is_e1230() {
 
 #[test]
 fn monorepo_fetch_errors_carry_registered_codes() {
-    use jet::Jetpack::Provider::ProviderError;
+    use jetpack::Provider::ProviderError;
     // E1232: sparse subtree checkout + full-clone fallback both failed.
     assert_eq!(
         ProviderError::MonorepoFetch("boom".to_string()).code(),
@@ -257,7 +257,7 @@ fn workspace_find_example_evaluates() {
 
 #[test]
 fn committed_monorepo_example_indexes_and_addresses_members() {
-    use jet::Jetpack::RefSpec::{classify_with_workspace, Source, SourceTable, WorkspaceIndex};
+    use jetpack::RefSpec::{classify_with_workspace, Source, SourceTable, WorkspaceIndex};
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/features/packages/monorepo");
     let src = std::fs::read_to_string(dir.join("workspace.jet"))
         .expect("committed monorepo example must have a workspace.jet");
@@ -329,7 +329,7 @@ fn find_discovers_packages_with_pkg_jet() {
 
 #[test]
 fn e1239_two_discovered_workspace_declarations() {
-    use jet::Jetpack::WorkspaceFile;
+    use jetpack::WorkspaceFile;
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()

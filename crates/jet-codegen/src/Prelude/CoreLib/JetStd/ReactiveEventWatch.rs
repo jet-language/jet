@@ -169,15 +169,26 @@
     #[derive(Clone)]
     pub struct JetEventPolicy {
         async_buffer: Option<usize>,
+        reentrancy: JetEventReentrancy,
+    }
+
+    #[derive(Clone)]
+    enum JetEventReentrancy {
+        // D-EVENT1's synchronous entrypoint dispatches nested emits immediately.
+        AllowDepthFirst,
     }
 
     impl JetEventPolicy {
         pub fn sync() -> Self {
-            JetEventPolicy { async_buffer: None }
+            JetEventPolicy {
+                async_buffer: None,
+                reentrancy: JetEventReentrancy::AllowDepthFirst,
+            }
         }
         pub fn async_buffered(buffer: i64) -> Self {
             JetEventPolicy {
                 async_buffer: Some(buffer.max(0) as usize),
+                reentrancy: JetEventReentrancy::AllowDepthFirst,
             }
         }
     }
@@ -208,16 +219,26 @@
     #[derive(Clone)]
     pub struct JetSubscription {
         active: Rc<Cell<bool>>,
+        cleanup: Rc<RefCell<Option<Rc<dyn Fn()>>>>,
     }
 
     impl JetSubscription {
         fn new() -> Self {
             JetSubscription {
                 active: Rc::new(Cell::new(true)),
+                cleanup: Rc::new(RefCell::new(None)),
             }
         }
+        fn set_cleanup<F: Fn() + 'static>(&self, cleanup: F) {
+            *self.cleanup.borrow_mut() = Some(Rc::new(cleanup));
+        }
         pub fn unsubscribe(&self) {
-            self.active.set(false);
+            if self.active.replace(false) {
+                let cleanup = self.cleanup.borrow().clone();
+                if let Some(cleanup) = cleanup {
+                    cleanup();
+                }
+            }
         }
         pub fn active(&self) -> bool {
             self.active.get()
@@ -328,6 +349,13 @@
                 sub: sub.clone(),
                 handler: Rc::new(handler),
             });
+            let listeners = Rc::downgrade(&self.listeners);
+            let id = self.listeners.borrow().last().expect("event listener").id;
+            sub.set_cleanup(move || {
+                if let Some(listeners) = listeners.upgrade() {
+                    listeners.borrow_mut().retain(|listener| listener.id != id);
+                }
+            });
             scope.track(sub)
         }
         pub fn emit(&self, payload: T) -> JetEventTrace {
@@ -337,6 +365,9 @@
             self.dispatch(payload, true)
         }
         fn dispatch(&self, payload: T, queued: bool) -> JetEventTrace {
+            match self.policy.reentrancy {
+                JetEventReentrancy::AllowDepthFirst => {}
+            }
             let mut queued_count = 0;
             if queued || self.policy.async_buffer.is_some() {
                 queued_count = 1;
@@ -365,11 +396,13 @@
             let mut delivered = 0;
             for (_, _, once, sub, handler) in entries {
                 if sub.active() {
-                    handler(payload.clone());
-                    delivered += 1;
+                    // Consume once before invoking: a nested emit from this
+                    // handler must not deliver it twice.
                     if once {
                         sub.unsubscribe();
                     }
+                    handler(payload.clone());
+                    delivered += 1;
                 }
             }
             self.listeners.borrow_mut().retain(|l| l.sub.active());
@@ -469,6 +502,13 @@
                 sub: sub.clone(),
                 handler: Rc::new(handler),
             });
+            let listeners = Rc::downgrade(&self.listeners);
+            let id = self.listeners.borrow().last().expect("hook listener").id;
+            sub.set_cleanup(move || {
+                if let Some(listeners) = listeners.upgrade() {
+                    listeners.borrow_mut().retain(|listener| listener.id != id);
+                }
+            });
             scope.track(sub)
         }
         pub fn run(&self, payload: T, fallback: R) -> R {
@@ -487,10 +527,10 @@
             };
             for (_, _, once, sub, handler) in entries {
                 if sub.active() {
-                    result = handler(payload.clone());
                     if once {
                         sub.unsubscribe();
                     }
+                    result = handler(payload.clone());
                 }
             }
             self.listeners.borrow_mut().retain(|l| l.sub.active());
@@ -843,4 +883,3 @@
             format!("{:?} \u{00b1} {:?}", self.value, self.uncertainty)
         }
     }
-

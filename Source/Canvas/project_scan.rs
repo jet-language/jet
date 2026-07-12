@@ -84,8 +84,8 @@ pub(super) fn project_context_for_entry(path: &Path) -> ProjectContext {
 fn find_workspace_root(start: &Path) -> Option<PathBuf> {
     let mut dir = start.to_path_buf();
     loop {
-        if crate::Jetpack::WorkspaceFile::load(&dir).is_some()
-            || crate::Jetpack::WorkspaceLock::load(&dir).is_some()
+        if jetpack::WorkspaceFile::load(&dir).is_some()
+            || jetpack::WorkspaceLock::load(&dir).is_some()
         {
             return Some(dir);
         }
@@ -111,7 +111,7 @@ fn collect_project_files(
     if let Some(root) = workspace_root {
         push_existing(&mut paths, &root.join(crate::Syntax::WORKSPACE_FILE));
         push_existing(&mut paths, &root.join(crate::Syntax::UNIFIED_LOCK_FILE));
-        if let Some(Ok(plan)) = crate::Jetpack::WorkspaceFile::load(root) {
+        if let Some(Ok(plan)) = jetpack::WorkspaceFile::load(root) {
             for member in plan.members {
                 let member_dir = root.join(member.path);
                 push_existing(&mut paths, &member_dir.join(crate::Syntax::PAYLOAD_FILE));
@@ -202,7 +202,7 @@ pub(super) fn workspace_project_json(project_root: &Path, workspace_root: Option
     let Some(root) = workspace_root else {
         return "null".to_string();
     };
-    let members = match crate::Jetpack::WorkspaceFile::load(root) {
+    let members = match jetpack::WorkspaceFile::load(root) {
         Some(Ok(plan)) => plan
             .members
             .iter()
@@ -249,7 +249,7 @@ fn package_dirs(manifest_root: Option<&Path>, workspace_root: Option<&Path>) -> 
         dirs.push(root.to_path_buf());
     }
     if let Some(root) = workspace_root {
-        if let Some(Ok(plan)) = crate::Jetpack::WorkspaceFile::load(root) {
+        if let Some(Ok(plan)) = jetpack::WorkspaceFile::load(root) {
             for member in plan.members {
                 dirs.push(root.join(member.path));
             }
@@ -276,7 +276,7 @@ pub(super) fn targets_project_json(
 fn package_targets_project_json(project_root: &Path, dir: &Path) -> Option<Vec<String>> {
     let manifest_path = dir.join(crate::Syntax::PAYLOAD_FILE);
     let raw = fs::read_to_string(&manifest_path).ok()?;
-    let manifest = crate::Jetpack::PackageManifest::parse(&raw).ok()?;
+    let manifest = crate::PackageManifest::parse(&raw).ok()?;
     let package_path = rel_path(project_root, dir);
     let manifest_rel = rel_path(project_root, &manifest_path);
     Some(
@@ -303,7 +303,7 @@ fn package_targets_project_json(project_root: &Path, dir: &Path) -> Option<Vec<S
 fn package_project_json(project_root: &Path, dir: &Path) -> Option<String> {
     let manifest_path = dir.join(crate::Syntax::PAYLOAD_FILE);
     let raw = fs::read_to_string(&manifest_path).ok()?;
-    match crate::Jetpack::PackageManifest::parse(&raw) {
+    match crate::PackageManifest::parse(&raw) {
         Ok(manifest) => {
             let deps = manifest
                 .deps
@@ -372,7 +372,7 @@ pub(super) fn env_project_json(project_root: &Path) -> EnvProjectJson {
             diagnostics: String::new(),
         };
     };
-    match crate::Jetpack::ModuleEval::evaluate_env(&src, project_root) {
+    match jetpack::ModuleEval::evaluate_env(&src, project_root) {
         Ok(plan) => {
             let packages = plan
                 .package_refs
@@ -412,7 +412,7 @@ pub(super) fn env_project_json(project_root: &Path) -> EnvProjectJson {
     }
 }
 
-fn dev_service_project_json(service: &crate::Jetpack::ModuleEval::DevServicePlan) -> String {
+fn dev_service_project_json(service: &jetpack::ModuleEval::DevServicePlan) -> String {
     let ports = service
         .ports
         .iter()
@@ -460,28 +460,28 @@ pub(super) fn lock_project_json(project_root: &Path) -> String {
     )
 }
 
-fn dep_source_label(source: &crate::Jetpack::PackageManifest::DepSource) -> String {
+fn dep_source_label(source: &crate::PackageManifest::DepSource) -> String {
     match source {
-        crate::Jetpack::PackageManifest::DepSource::Version(v) => format!("version:{v}"),
-        crate::Jetpack::PackageManifest::DepSource::Provider { provider, target } => {
+        crate::PackageManifest::DepSource::Version(v) => format!("version:{v}"),
+        crate::PackageManifest::DepSource::Provider { provider, target } => {
             format!("{provider:?}@{target}")
         }
-        crate::Jetpack::PackageManifest::DepSource::Git { url, selector } => {
+        crate::PackageManifest::DepSource::Git { url, selector } => {
             format!("git:{url}@{selector:?}")
         }
-        crate::Jetpack::PackageManifest::DepSource::CLib { target } => {
+        crate::PackageManifest::DepSource::CLib { target } => {
             format!("c:{target}")
         }
     }
 }
 
-fn target_label(target: &crate::Jetpack::PackageManifest::Target) -> String {
+fn target_label(target: &crate::PackageManifest::Target) -> String {
     match target {
-        crate::Jetpack::PackageManifest::Target::Library => "library".to_string(),
-        crate::Jetpack::PackageManifest::Target::Executable => "executable".to_string(),
-        crate::Jetpack::PackageManifest::Target::Test => "test".to_string(),
-        crate::Jetpack::PackageManifest::Target::Example => "example".to_string(),
-        crate::Jetpack::PackageManifest::Target::Benchmark => "benchmark".to_string(),
-        crate::Jetpack::PackageManifest::Target::Plugin { .. } => "plugin".to_string(),
+        crate::PackageManifest::Target::Library => "library".to_string(),
+        crate::PackageManifest::Target::Executable => "executable".to_string(),
+        crate::PackageManifest::Target::Test => "test".to_string(),
+        crate::PackageManifest::Target::Example => "example".to_string(),
+        crate::PackageManifest::Target::Benchmark => "benchmark".to_string(),
+        crate::PackageManifest::Target::Plugin { .. } => "plugin".to_string(),
     }
 }

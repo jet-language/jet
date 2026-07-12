@@ -1221,8 +1221,8 @@ fn lsp_completion_uses_local_discovery_index_for_packages_and_options() {
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).expect("create discovery fixture dir");
 
-    let mut index = jet::Jetpack::Discovery::Index::default();
-    index.add_package(jet::Jetpack::Discovery::PackageRecord {
+    let mut index = jetpack::Discovery::Index::default();
+    index.add_package(jetpack::Discovery::PackageRecord {
         source: "default".to_string(),
         name: "postgres_16".to_string(),
         reference: "default:postgres_16".to_string(),
@@ -1231,19 +1231,19 @@ fn lsp_completion_uses_local_discovery_index_for_packages_and_options() {
         docs: "Postgres fixture from local discovery index".to_string(),
         provenance: "test".to_string(),
         options: vec![
-            jet::Jetpack::Discovery::OptionField {
+            jetpack::Discovery::OptionField {
                 name: "ready".to_string(),
                 default: "process/port probe".to_string(),
                 docs: "Command polled until ready.".to_string(),
             },
-            jet::Jetpack::Discovery::OptionField {
+            jetpack::Discovery::OptionField {
                 name: "data_dir".to_string(),
                 default: ".jet/services/db/data".to_string(),
                 docs: "Persisted state directory.".to_string(),
             },
         ],
     });
-    jet::Jetpack::Discovery::write(&root, &index).expect("write local discovery index");
+    jetpack::Discovery::write(&root, &index).expect("write local discovery index");
 
     let path = root.join("main.jet");
     let uri = format!("file://{}", path.display());

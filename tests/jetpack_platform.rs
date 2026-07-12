@@ -4,7 +4,7 @@
 //! in code and that CI has a native lane scaffold for each tier-1 OS without
 //! pretending this Linux run executed macOS or Windows behavior.
 
-use jet::Jetpack::Platform;
+use jetpack::Platform;
 
 #[test]
 fn platform_tier_audit_contract_names_linux_macos_windows() {

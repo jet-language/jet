@@ -146,6 +146,7 @@ duplicate this — it is the one surface for lint walls (I8).
 | E0060 | parse | teaching: retired C FFI marker spelling → `#Extern` / `#Bindgen` (D-CFFI-SYNTAX-REOPEN, D-CFFI-CANON1) |
 | E0062 | parse | teaching: a contract marker written with `#` → write it with `@` (D-MARKER-FAMILY1, D-MARKERMOVE1/2/3) |
 | E0063 | parse | teaching: a directive marker written with `@` → write it with `#` (D-MARKER-FAMILY1) |
+| E0064 | parse | `#FFI(<lang>) fn` body is not a single foreign-source string literal (D-FFI-INLINE1) |
 | E0984 | parse | *retired by D-S14-PAUSE* (was: `when` teaching) |
 | E0985 | parse | *retired by D-S14-PAUSE* (was: `val`/`var` binding teaching) |
 | E0986 | parse | teaching: `-> Type`/`{` split from the closing `)` (S6-R layout) |
@@ -402,6 +403,9 @@ duplicate this — it is the one surface for lint walls (I8).
 | E3209 | jet   | linker couldn't find a declared C library at link time |
 | E3210 | jet   | C library auto-provision from nixpkgs failed |
 | E3211 | sema  | string literal with a known interior NUL byte passed to a C-boundary function |
+| E3215 | sema  | `#FFI(<lang>)` inline foreign fn in an unsafe language (`c`/`cpp`/`asm`) lacks the enclosing `#Unsafe("reason")` gate (D-FFI-INLINE1/ASM1/CPP1) |
+| E3220 | sema  | `#FFI(<lang>)` names a language with no inline foreign binder yet (systems floor ships `c`/`cpp`/`asm`, card #501) |
+| E3221 | sema  | `#FFI(<lang>)` inline foreign body isn't lowerable yet — front end live, body codegen pending (card #501) |
 | E3301 | sema  | OS-dependent std API called in a `--freestanding` build |
 | E3302 | jet   | target triple unknown or toolchain component missing |
 | E3303 | sema  | freestanding build allocates memory with no global allocator |

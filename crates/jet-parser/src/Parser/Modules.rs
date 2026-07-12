@@ -559,7 +559,29 @@ impl<'a> Parser<'a> {
                         let expr = self.expr()?;
                         args.push(ModuleArg::Value(expr, arg_start));
                     }
-                    TokKind::Ident(_) if matches!(self.peek2().kind, TokKind::Dot) => {
+                    TokKind::Ident(_)
+                        if matches!(
+                            self.peek2().kind,
+                            TokKind::Dot
+                                | TokKind::LParen
+                                | TokKind::Plus
+                                | TokKind::Minus
+                                | TokKind::Star
+                                | TokKind::Slash
+                                | TokKind::Percent
+                                | TokKind::Amp
+                                | TokKind::Pipe
+                                | TokKind::Caret
+                                | TokKind::Shl
+                                | TokKind::Shr
+                                | TokKind::AndAnd
+                                | TokKind::OrOr
+                                | TokKind::EqEq
+                                | TokKind::NotEq
+                                | TokKind::Le
+                                | TokKind::Ge
+                        ) =>
+                    {
                         let expr = self.expr()?;
                         args.push(ModuleArg::Value(expr, arg_start));
                     }

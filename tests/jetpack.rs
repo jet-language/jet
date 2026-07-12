@@ -103,18 +103,18 @@ fn studio_json_string(response: &str, key: &str) -> String {
         .unwrap_or_else(|| panic!("missing Studio JSON string `{key}`: {response}"))
 }
 
-fn studio_json(response: &str) -> jet::Jetpack::JSON::Json {
+fn studio_json(response: &str) -> jetpack::JSON::Json {
     let body = response
         .split_once("\r\n\r\n")
         .map(|(_, body)| body)
         .unwrap_or(response);
-    jet::Jetpack::JSON::parse(body.trim())
+    jetpack::JSON::parse(body.trim())
         .unwrap_or_else(|error| panic!("invalid Studio JSON response: {error}: {response}"))
 }
 
-fn json_string(json: &jet::Jetpack::JSON::Json, key: &str) -> String {
+fn json_string(json: &jetpack::JSON::Json, key: &str) -> String {
     json.get(key)
-        .and_then(jet::Jetpack::JSON::Json::as_str)
+        .and_then(jetpack::JSON::Json::as_str)
         .unwrap_or_else(|error| panic!("invalid JSON string `{key}`: {error}: {json:?}"))
         .to_string()
 }
@@ -141,7 +141,7 @@ fn doctor_checks_real_state_and_is_read_only() {
         }
     });
     let registry_url = format!("http://user:super-secret@{addr}/index");
-    let helper = jet::Jetpack::FFI::cached_crypto_helper_path();
+    let helper = jetpack::FFI::cached_crypto_helper_path();
     let helper_before = fs::metadata(&helper).unwrap();
     let mut helper_parent_before = fs::read_dir(helper.parent().unwrap()).unwrap()
         .map(|e| e.unwrap().file_name()).collect::<Vec<_>>();
@@ -155,7 +155,7 @@ fn doctor_checks_real_state_and_is_read_only() {
         .env("JET_REGISTRY_URL", &registry_url)
         .output().unwrap();
     assert!(healthy.status.success(), "stderr: {}", String::from_utf8_lossy(&healthy.stderr));
-    let healthy_json = jet::Jetpack::JSON::parse(&String::from_utf8_lossy(&healthy.stdout)).unwrap();
+    let healthy_json = jetpack::JSON::parse(&String::from_utf8_lossy(&healthy.stdout)).unwrap();
     assert_eq!(json_string(&healthy_json, "status"), "healthy");
     assert_eq!(fs::metadata(&helper).unwrap().len(), helper_before.len(), "doctor changed signing helper");
     let mut helper_parent_after = fs::read_dir(helper.parent().unwrap()).unwrap()
@@ -198,10 +198,10 @@ fn doctor_checks_real_state_and_is_read_only() {
     let output = root.join("owned-output");
     fs::create_dir_all(&output).unwrap();
     fs::write(output.join("payload"), "trusted bytes").unwrap();
-    let envelope = jet::Jetpack::Envelope::Envelope::for_output(
+    let envelope = jetpack::Envelope::Envelope::for_output(
         &output.to_string_lossy(), "path:demo", "test-recipe");
-    let roots = jet::Jetpack::Store::Roots { root: root.path.clone(), dev_mode: false };
-    let entry = jet::Jetpack::Store::record(&roots, "demo", "1", "path:demo",
+    let roots = jetpack::Store::Roots { root: root.path.clone(), dev_mode: false };
+    let entry = jetpack::Store::record(&roots, "demo", "1", "path:demo",
         &output.to_string_lossy(), "", "", &envelope).unwrap();
     let meta = root.join(&format!("hangar/{}/meta.json", entry.id));
     let old_meta = fs::read_to_string(&meta).unwrap();
@@ -4757,12 +4757,12 @@ fn jetos_studio_transaction_previews_and_writes_source() {
     let proof_response = studio_json(&proof);
     assert_eq!(
         proof_response.get("success").unwrap(),
-        &jet::Jetpack::JSON::Json::Bool(true),
+        &jetpack::JSON::Json::Bool(true),
         "proof: {proof}"
     );
     let proof_revision = json_string(&proof_response, "source_revision");
     let proof_stdout = json_string(&proof_response, "stdout");
-    let proof_artifact = jet::Jetpack::JSON::parse(proof_stdout.trim())
+    let proof_artifact = jetpack::JSON::parse(proof_stdout.trim())
         .unwrap_or_else(|error| panic!("invalid Studio proof artifact: {error}: {proof_stdout}"));
     let proof_generation = json_string(&proof_artifact, "generation");
     let proof_source = proof_artifact
@@ -4796,7 +4796,7 @@ fn jetos_studio_transaction_previews_and_writes_source() {
     assert_eq!(current.file_name().unwrap(), proof_generation.as_str());
     let current_source_proof =
         fs::read_to_string(root.join("systems/current/source-proof.json")).unwrap();
-    let current_source_proof = jet::Jetpack::JSON::parse(&current_source_proof)
+    let current_source_proof = jetpack::JSON::parse(&current_source_proof)
         .unwrap_or_else(|error| panic!("invalid current generation source proof: {error}"));
     assert_eq!(
         json_string(&current_source_proof, "source_sha256"),

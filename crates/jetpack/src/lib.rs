@@ -17,14 +17,16 @@ pub use jet_codegen::{
 };
 
 // Card #367 / D-PRODUCT-SPLIT1=C: the read-only package/config data model
-// (manifest/lock/store-listing/ref/FFI-binding/script-dep parsing) lives in
-// `jet-pkg-model` so `jet-driver` can depend on it without pulling in this
-// crate's provider/network/shell engine. Re-exported under their historical
-// paths so every internal call site in this crate (`crate::PackageManifest`,
-// `super::RefSpec`, etc.) is unchanged.
+// (manifest/lock/store-listing/ref/FFI-binding/script-dep parsing), plus the
+// pure effect-budget/lint-policy computation slice 3 also moved out (neither
+// touches network/provider/shell), lives in `jet-pkg-model` so `jet-driver`
+// (and now `jet` itself) can depend on it without pulling in this crate's
+// provider/network/shell engine. Re-exported under their historical paths so
+// every internal call site in this crate (`crate::PackageManifest`,
+// `super::RefSpec`, `crate::EffectBudget`, etc.) is unchanged.
 pub use jet_pkg_model::{
-    CBind, CFFI, Envelope, FFI, Lock, Manifest, PackageManifest, Platform, RefSpec, ScriptDeps,
-    JSON,
+    CBind, CFFI, EffectBudget, Envelope, FFI, LintPolicy, Lock, Manifest, PackageManifest,
+    Platform, RefSpec, ScriptDeps, JSON,
 };
 
 pub mod Bridge;
@@ -33,12 +35,10 @@ pub mod CLI;
 pub mod Components;
 pub mod Discovery;
 pub mod Doctor;
-pub mod EffectBudget;
 pub mod EnvFile;
 pub mod Image;
 pub mod JetOS;
 pub mod JetPin;
-pub mod LintPolicy;
 pub mod ManifestTOML;
 pub mod Merge;
 pub mod MigrationImport;

@@ -12,7 +12,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-use jet::Jetpack::ModuleEval::evaluate_env;
+use jetpack::ModuleEval::evaluate_env;
 
 fn render(src: &str) -> (String, String) {
     let dir = std::env::temp_dir();

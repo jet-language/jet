@@ -192,11 +192,20 @@ fn direct_jetpack_imports_stay_behind_known_boundaries() {
         "crates/jetos/src/main.rs",
         "Source/Canvas/project_scan.rs",
         "Source/Canvas/project_transactions.rs",
-        "Source/Canvas/query_actions.rs",
         "Source/Canvas/schema_api.rs",
         "Source/LSP/Completion.rs",
         "Source/LSP/Server.rs",
         "Source/lib.rs",
+        // Card #367 / D-PRODUCT-SPLIT1=C slice 3: was always coupled through
+        // `jet::Jetpack::…` (the bin target's path to this crate's `pub use
+        // jetpack as Jetpack` re-export), which this scan's `jetpack::`/
+        // `crate::Jetpack` patterns never matched — a detection blind spot,
+        // not new debt. Now that the alias is gone, main.rs's remaining
+        // genuine-engine calls (`WorkspaceFile`, `JetPin`, `ScriptLock`) are
+        // direct `jetpack::…` and honestly tracked here. `PackageManifest`/
+        // `EffectBudget`/`LintPolicy`/`ScriptDeps`/`Store` usages moved to
+        // the shared model (`jet::…`) and left this file entirely.
+        "Source/main.rs",
     ]
     .into_iter()
     .map(String::from)

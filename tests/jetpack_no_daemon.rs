@@ -1,6 +1,6 @@
 //! U28 (D-JPK-NODAEMON1=A): no daemon / no root runtime policy.
 
-use jet::Jetpack::RuntimePolicy;
+use jetpack::RuntimePolicy;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;

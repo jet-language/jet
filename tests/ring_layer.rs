@@ -19,29 +19,29 @@ payload: {
     runtime: alloc,
 }
 "#;
-    let pm = jet::Jetpack::PackageManifest::parse(raw).unwrap();
+    let pm = jetpack::PackageManifest::parse(raw).unwrap();
     assert_eq!(pm.package.layer, Some(jet::Syntax::RuntimeLayer::Alloc));
-    let mf = jet::Jetpack::PackageManifest::to_manifest(&pm, raw).unwrap();
+    let mf = jetpack::PackageManifest::to_manifest(&pm, raw).unwrap();
     assert_eq!(mf.package.layer, Some(jet::Syntax::RuntimeLayer::Alloc));
 }
 
 #[test]
 fn manifest_rejects_unknown_layer() {
     let raw = "payload: { name: \"x\", version: \"1\", runtime: heap }";
-    let err = jet::Jetpack::PackageManifest::parse(raw).unwrap_err();
+    let err = jetpack::PackageManifest::parse(raw).unwrap_err();
     assert!(matches!(
         err,
-        jet::Jetpack::PackageManifest::ManifestError::BadLayer { .. }
+        jetpack::PackageManifest::ManifestError::BadLayer { .. }
     ));
 }
 
 #[test]
 fn manifest_rejects_retired_std_runtime_name() {
     let raw = "payload: { name: \"x\", version: \"1\", runtime: std }";
-    let err = jet::Jetpack::PackageManifest::parse(raw).unwrap_err();
+    let err = jetpack::PackageManifest::parse(raw).unwrap_err();
     assert!(matches!(
         err,
-        jet::Jetpack::PackageManifest::ManifestError::BadLayer { .. }
+        jetpack::PackageManifest::ManifestError::BadLayer { .. }
     ));
 }
 

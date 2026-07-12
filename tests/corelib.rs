@@ -3575,6 +3575,66 @@ fn run() {
 }
 
 #[test]
+fn event_sync_dispatch_handles_mutation_reentrancy_and_owner_drop() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_corelib_event_hostile_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "event_sync_hostile",
+        r#"
+use core.event as event
+
+fn run() {
+    scope :: event.scope()
+    ev :: event.new<Int>()
+    late :: ev.on(scope, (n) => { print("late {n}") })
+    ev.on_priority(scope, 10, (n) => { print("killer {n}"); late.unsubscribe() })
+    print(ev.emit(1).summary())
+    print("listeners={ev.listener_count()}")
+
+    additions :: event.scope()
+    growing :: event.new<Int>()
+    growing.on(additions, (n) => {
+        print("root {n}")
+        _ :: growing.on(additions, (m: Int) => { print("added {m}") })
+    })
+    print(growing.emit(1).summary())
+    print(growing.emit(2).summary())
+
+    nested_scope :: event.scope()
+    nested :: event.new<Int>()
+    nested.once(nested_scope, (n) => {
+        print("once {n}")
+        if n == 1 { nested.emit(2) }
+    })
+    print(nested.emit(1).summary())
+    print("nested-listeners={nested.listener_count()}")
+
+    owned :: event.new<Int>()
+    if true {
+        owner :: event.scope()
+        owned.on(owner, (n) => { print("leaked {n}") })
+    }
+    print(owned.emit(9).summary())
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "hostile event runtime failed: {stderr}");
+    assert_eq!(
+        stdout,
+        "killer 1\nevent delivered=1 queued=0 dropped=0\nlisteners=1\nroot 1\nevent delivered=1 queued=0 dropped=0\nroot 2\nadded 2\nevent delivered=2 queued=0 dropped=0\nonce 1\nevent delivered=1 queued=0 dropped=0\nnested-listeners=0\nevent delivered=0 queued=0 dropped=0\n"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn solve_solver_records_bool_constraints_in_order() {
     let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
     if !have_rustc {

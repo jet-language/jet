@@ -29,9 +29,17 @@ pub use jet_sema::{Diagnostics, Lexer, Parser, Sema, Syntax, AST, SHA256};
 
 pub mod CBind;
 pub mod CFFI;
+// Card #367 / D-PRODUCT-SPLIT1=C slice 3: pure policy computation over the
+// manifest/effect-fixpoint data (no network/provider/shell engine code, same
+// bar as the rest of this crate) — moved here from `jetpack` so `jet`'s own
+// `build`/`run` effect-budget summary and lint-policy enforcement no longer
+// need the full Jetpack engine, only this read-only-adjacent data/policy
+// layer. `jetpack` re-exports both under their historical paths.
+pub mod EffectBudget;
 pub mod Envelope;
 pub mod FFI;
 pub mod JSON;
+pub mod LintPolicy;
 pub mod Lock;
 pub mod Manifest;
 pub mod PackageManifest;

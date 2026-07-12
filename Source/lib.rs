@@ -26,16 +26,28 @@ pub use jet_driver::{
     Comptime,
     Diagnostics,
     Driver,
+    // Card #367 / D-PRODUCT-SPLIT1=C slice 3: the read-only package/config
+    // model and its pure policy computation (effect budget, lint policy) —
+    // routed through jet-driver's jet-pkg-model re-export, not the full
+    // `jetpack` engine. Renamed `Store` to `PkgStore`: this crate already has
+    // its own `crate::Store` (the compiler's build cache) — `PkgStore` is the
+    // read-only hangar root/listing half (`jetpack::Store` still re-exports
+    // the same `lock_path` etc. for the engine's own genuine store calls).
+    EffectBudget,
     Foreign,
     Formatter,
     Generics,
     Lexer,
+    LintPolicy,
     Loader,
     Lock,
     Manifest,
+    PackageManifest,
     Parser,
     PhaseTiming,
+    ScriptDeps,
     Sema,
+    Store as PkgStore,
     Syntax,
     TargetProfile,
     Traits,
@@ -44,7 +56,6 @@ pub use jet_driver::{
     FFI,
     SHA256,
 };
-pub use jetpack as Jetpack;
 pub use jet_queries as Queries;
 pub mod BuildCache;
 pub mod BudgetProviders;
@@ -178,7 +189,7 @@ fn resolve_build_grants(file: &str, cli: &[String]) -> Result<Vec<String>, Vec<D
     while let Some(dir) = directory {
         let package_path = dir.join(Syntax::PAYLOAD_FILE);
         if let Ok(source) = std::fs::read_to_string(&package_path) {
-            match Jetpack::PackageManifest::parse(&source) {
+            match PackageManifest::parse(&source) {
                 Ok(package) => {
                     for effect in package.build_allow {
                         if let Some(capability) = Comptime::Build::BuildCapability::parse(&effect) {
@@ -187,7 +198,7 @@ fn resolve_build_grants(file: &str, cli: &[String]) -> Result<Vec<String>, Vec<D
                     }
                 }
                 Err(error) => {
-                    let diagnostic = Jetpack::Manifest::parse(&package_path, &source).err()
+                    let diagnostic = Manifest::parse(&package_path, &source).err()
                         .unwrap_or_else(|| Diagnostic::error(
                             "E3503",
                             format!("build policy in `{}` is malformed", package_path.display()),
@@ -201,7 +212,7 @@ fn resolve_build_grants(file: &str, cli: &[String]) -> Result<Vec<String>, Vec<D
         }
         let workspace = dir.join(Syntax::WORKSPACE_FILE);
         if let Ok(source) = std::fs::read_to_string(&workspace) {
-            match Jetpack::Overlay::parse_workspace_policy(&source) {
+            match jetpack::Overlay::parse_workspace_policy(&source) {
                 Ok(policy) => for effect in policy.build_deny {
                     if let Some(capability) = Comptime::Build::BuildCapability::parse(&effect) {
                         workspace_denies.insert(capability.flag().to_string());

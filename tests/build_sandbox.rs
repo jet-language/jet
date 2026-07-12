@@ -1,10 +1,10 @@
 //! T1/T2 (card #99): the build-from-source sandbox contract (D-JPK-ADAPTER1) and
 //! the pinned build toolchain (D-JPK-BUILDTOOL1). Drives the internal
-//! `BuildRecipe` substrate through the public `jet::Jetpack` surface so the
+//! `BuildRecipe` substrate through the public `jetpack` crate surface so the
 //! diagnostic codes are covered by a `tests/` snapshot (invariant I4).
 
-use jet::Jetpack::Recipe::{self, BuildContext, BuildRecipe, BuildStep};
-use jet::Jetpack::Toolchain;
+use jetpack::Recipe::{self, BuildContext, BuildRecipe, BuildStep};
+use jetpack::Toolchain;
 use std::collections::HashMap;
 use std::path::PathBuf;
 

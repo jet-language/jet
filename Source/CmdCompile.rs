@@ -91,13 +91,13 @@ fn json_escape(value: &str) -> String {
 /// D-BUILDPROFILE1: load `pkg.jet` build profiles from the project root of `source_file`.
 fn load_pkg_profiles(
     source_file: &str,
-) -> Option<Vec<jet::Jetpack::PackageManifest::BuildProfileDef>> {
+) -> Option<Vec<jet::PackageManifest::BuildProfileDef>> {
     let src_path = std::path::Path::new(source_file);
     let search_from = src_path.parent().unwrap_or(std::path::Path::new("."));
     let root = jet::Loader::find_manifest_root(search_from)?;
     let pack_path = root.join(jet::Syntax::PAYLOAD_FILE);
     let raw = fs::read_to_string(&pack_path).ok()?;
-    jet::Jetpack::PackageManifest::parse(&raw)
+    jet::PackageManifest::parse(&raw)
         .ok()
         .map(|mf| mf.build_profiles)
 }
@@ -361,7 +361,7 @@ pub(crate) fn run_compile_cmd(
             jet::Driver::check_file_with_effect_facts(file, None, false);
         if let Some(bundle) = &effect_bundle {
             let entries =
-                jet::Jetpack::EffectBudget::compute_package_effects(bundle, &effect_facts.solved);
+                jet::EffectBudget::compute_package_effects(bundle, &effect_facts.solved);
             // D-PLUGIN1=B (c81): a plugin is deny-by-default — the wasmtime
             // host registers zero host imports, so any effect used by the
             // plugin's own code would fail to instantiate at load time. Catch
@@ -378,15 +378,15 @@ pub(crate) fn run_compile_cmd(
             }
             // Program stdout stays the program's (U7 / D-DEVMODE1); tool
             // chatter goes to stderr.
-            eprintln!("{}", jet::Jetpack::EffectBudget::summary_line(&entries));
+            eprintln!("{}", jet::EffectBudget::summary_line(&entries));
             let search_from = Path::new(file).parent().unwrap_or(Path::new("."));
             if let Some(root) = jet::Loader::find_manifest_root(search_from) {
                 let pack_path = root.join(jet::Syntax::PAYLOAD_FILE);
                 if let Some(manifest) = fs::read_to_string(&pack_path)
                     .ok()
-                    .and_then(|raw| jet::Jetpack::PackageManifest::parse(&raw).ok())
+                    .and_then(|raw| jet::PackageManifest::parse(&raw).ok())
                 {
-                    let violations = jet::Jetpack::EffectBudget::enforce(&entries, &manifest);
+                    let violations = jet::EffectBudget::enforce(&entries, &manifest);
                     if !violations.is_empty() {
                         report_problems(mode, file, &src, &violations);
                         exit(ExitCodes::USER_ERROR);
@@ -397,7 +397,7 @@ pub(crate) fn run_compile_cmd(
                     // lint above already printed as a warning and nothing
                     // blocks (I1/D-LINTPOLICY1 default).
                     let lint_violations =
-                        jet::Jetpack::LintPolicy::enforce(&visible_lints, &manifest);
+                        jet::LintPolicy::enforce(&visible_lints, &manifest);
                     if !lint_violations.is_empty() {
                         report_problems(mode, file, &src, &lint_violations);
                         exit(ExitCodes::USER_ERROR);
@@ -406,11 +406,11 @@ pub(crate) fn run_compile_cmd(
                     // lockfile, when one already exists (`jet fetch` owns
                     // creating it).
                     if let Some(mut lock) = jet::Lock::load(&root) {
-                        jet::Jetpack::EffectBudget::update_lock_provenance(
+                        jet::EffectBudget::update_lock_provenance(
                             &mut lock, &entries, &manifest,
                         );
                         let _ = fs::write(
-                            jet::Jetpack::Store::lock_path(&root),
+                            jet::PkgStore::lock_path(&root),
                             jet::Lock::write(&lock),
                         );
                     }

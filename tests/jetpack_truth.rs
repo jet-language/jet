@@ -165,12 +165,12 @@ fn tower_cards(root: &Path) -> BTreeMap<u64, CardState> {
         "Tower projection failed: {}",
         String::from_utf8_lossy(&live.stderr)
     );
-    let live_json = jet::Jetpack::JSON::parse(&String::from_utf8(live.stdout).unwrap()).unwrap();
+    let live_json = jetpack::JSON::parse(&String::from_utf8(live.stdout).unwrap()).unwrap();
     for card in live_json.as_array().unwrap() {
         ingest_tower_card(&mut cards, card, /*prefer_existing=*/ false);
     }
     if let Ok(raw) = std::fs::read_to_string(root.join(".tower/history.json")) {
-        let hist = jet::Jetpack::JSON::parse(&raw).unwrap();
+        let hist = jetpack::JSON::parse(&raw).unwrap();
         if let Ok(arr) = hist.get("cards").and_then(|v| v.as_array()) {
             for card in arr {
                 ingest_tower_card(&mut cards, card, /*prefer_existing=*/ true);
@@ -182,11 +182,11 @@ fn tower_cards(root: &Path) -> BTreeMap<u64, CardState> {
 
 fn ingest_tower_card(
     cards: &mut BTreeMap<u64, CardState>,
-    card: &jet::Jetpack::JSON::Json,
+    card: &jetpack::JSON::Json,
     prefer_existing: bool,
 ) {
     let num = match card.get("num").unwrap() {
-        jet::Jetpack::JSON::Json::Num(num) => *num as u64,
+        jetpack::JSON::Json::Num(num) => *num as u64,
         other => panic!("card num is not numeric: {other:?}"),
     };
     if prefer_existing && cards.contains_key(&num) {
