@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 512,
-    "rev": 4146,
+    "rev": 4160,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -28831,6 +28831,1008 @@
       "draft": false,
       "status": "open",
       "created": "2026-07-12T02:51:28.867Z"
+    },
+    {
+      "id": "D-BINPAT1",
+      "cardId": "c0n6vj96",
+      "group": "syntax",
+      "title": "Binary patterns for byte parsing",
+      "gist": "Whether Jet gets declarative bit-level patterns for parsing raw binary formats.",
+      "lesson": "Binary format means raw bytes with fields packed at the bit level, like a network packet header.\n\nBit syntax is Erlang's notation for slicing those bits by declaring each field's width.\n\nA bit-typed hole is a named slot in a pattern with a fixed width and byte order. Example: {len:U16be} reads a big-endian 16-bit number.\n\nA refutable pattern may fail to match, so it needs a fallback arm.\n\nExhaustiveness means the checker proves every possible input is handled.\n\nNon-greedy anchoring means the {rest:...} tail claims only what is left after the fixed fields, never more. Jet already uses this law for string patterns.",
+      "explainer": "",
+      "story": "Marcus Bell writes a game server. Clients send a 20-byte header, then a variable body.\n\nToday he reads each field by hand, tracking a byte offset and shifting bits. One off-by-one corrupts every field after it.\n\nHe wants to name the shape once and let the compiler slice it. He also wants a bad packet to be a clean no-match, not a silent misread.",
+      "inWild": "A protocol router matches an incoming frame against several packet shapes and dispatches on the opcode. The same shapes must also drive a streaming cursor that consumes bytes as they arrive.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Binary pattern literals in the one pattern engine",
+          "detail": "b\"...\" literals hold bit-typed holes. They work anywhere string patterns work: ==-tests, if-table arms, and Reader.take_pattern consume mode.\n\nSame engine, same non-greedy anchoring law, same exhaustiveness rules as string patterns. A refutable match without a fallback is a checked error.",
+          "code": "// whole-value match: holes are bit-typed\nif packet == b\"{version:U4}{ihl:U4}{tos:U8}{len:U16be}{rest:...}\" {\n    print(\"IPv{version}, {len} bytes\")\n}\n\n// consume mode, same literal, via the ratified cursor (D-SHIFT1)\nr :: Reader.over(bytes)\n(version, ihl) :: r.take_pattern(b\"{version:U4}{ihl:U4}\")?\n\n// refutable match with no fallback arm:\nmatch frame {\n    b\"{op:U8}{body:...}\" => handle(op, body)\n}\n// error[E0521]: binary pattern is refutable; `match` is not exhaustive\n//   help: add a `_ =>` arm to handle a frame that does not fit"
+        },
+        {
+          "key": "B",
+          "name": "Cursor-only: more typed reads, no literal",
+          "detail": "No pattern literal. Reader grows sub-byte reads like read_bits, and parsing stays imperative.\n\nEvery field is a separate call. There is no whole-value == test and no if-table arm over bytes.",
+          "code": "r :: Reader.over(bytes)\nversion :: r.read_bits(4)?\nihl     :: r.read_bits(4)?\ntos     :: r.read_u8()?\nlen     :: r.read_u16_be()?\nrest    :: r.take_rest()\nprint(\"IPv{version}, {len} bytes\")\n\n// a whole-value match is simply unavailable:\nif packet == b\"{version:U4}...\" { }\n// error[E0522]: binary pattern literals are not supported\n//   help: read fields one at a time with Reader"
+        },
+        {
+          "key": "C",
+          "name": "Comptime packed layout structs",
+          "detail": "Declare a #Layout(packed) struct and decode bytes into it. Declarative, but a second mechanism beside patterns.\n\nFields decode at fixed offsets. There is no mid-stream anchor, so a variable-length field before the tail cannot be expressed.",
+          "code": "#Layout(packed)\nstruct Ipv4Head {\n    version: U4, ihl: U4, tos: U8, len: U16be, rest: [U8],\n}\nhead :: Ipv4Head.decode(bytes)?\nprint(\"IPv{head.version}, {head.len} bytes\")\n\n// a run before the tail has no fixed offset:\n// error[E0523]: #Layout field `rest` follows a variable-run field\n//   help: #Layout needs fixed offsets; use a binary pattern for variable shapes"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Erlang",
+          "note": "Bit syntax is the feature systems programmers cite as the reason to reach for Erlang on protocol work. Jet folds it into the one pattern engine instead of a bespoke syntax.",
+          "code": "<<Version:4, IHL:4, TOS:8, Len:16, Rest/binary>> = Packet."
+        },
+        {
+          "lang": "Kaitai Struct",
+          "note": "Kaitai declares binary formats in a separate YAML file and generates a parser. That is a second schema language living outside the program. Option A keeps the shape inline and typed.",
+          "code": "seq:\n  - id: version\n    type: b4\n  - id: len\n    type: u2be"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "One pattern engine handles strings and bytes, so users learn anchoring and exhaustiveness once (I8). Erlang proved bit syntax is the ergonomic win for protocol and parser work.\n\nA refutable binary match is checked like any other pattern, so a malformed packet is a clean no-match, never a silent misread.",
+        "tradeoff": "Bit-typed holes add grammar to the pattern engine, and byte-order and width rules must be learned. The payoff is that one surface covers text and binary parsing with the same laws.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Imperative reads force a separate call per field and repeat the offset bookkeeping the owner wants cut. No whole-value match means no if-table dispatch over frames."
+          },
+          {
+            "key": "C",
+            "reason": "A packed struct is a second parsing mechanism beside patterns, against I8. Fixed offsets cannot express a variable-length field before the tail, which most real protocols need."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "The pattern literal is the surface. It reads through the same cursor primitives option B would expose, and a destructuring bind recovers the named-field feel option C offered, with no second grammar.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "Pattern literal in the one engine",
+            "use": "Ship as the canonical binary parsing surface, valid in tests, arms, and consume mode."
+          },
+          {
+            "key": "B",
+            "aspect": "Typed sub-byte reads",
+            "use": "Keep as the cursor primitives the literal lowers onto, available when a user wants manual stepping."
+          },
+          {
+            "key": "C",
+            "aspect": "Named-field layout",
+            "use": "Recover by binding holes to names in the pattern, so no separate struct schema is needed."
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T02:57:32.507Z"
+    },
+    {
+      "id": "D-STM1",
+      "cardId": "c0n6vj96",
+      "group": "runtime",
+      "title": "Atomic memory transactions across shared handles",
+      "gist": "Whether #Transact can commit reads and writes across several Shared handles atomically.",
+      "lesson": "Shared<T> is Jet's ratified handle for state two tasks touch at once. You read or edit it inside a short closure that holds a lock.\n\nSTM means software transactional memory. You mark a block atomic. If another task changed the same state first, the runtime discards the work and retries, so there are no locks to order by hand.\n\nA deadlock is two tasks each holding one lock and waiting for the other's, so both stall forever. Hand-ordered locking is the classic source.\n\nAn irreversible effect is an action that cannot be undone on retry, like sending a network packet. Jet already rejects those inside #Transact with E0746.",
+      "explainer": "",
+      "story": "Ruth Callahan runs an inventory service. A transfer moves stock from one warehouse handle to another under heavy concurrent load.\n\nWith two separate edit closures, a second task can slip between them and read a total that is briefly wrong. If she locks both by hand, one bad ordering deadlocks production at 2am.\n\nShe wants both changes to land together or not at all, with the runtime handling the retry.",
+      "inWild": "A bank-style transfer debits one account handle and credits another. Dozens of tasks run transfers concurrently, and no intermediate state may ever be observable.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "#Transact gains the Shared plane",
+          "detail": "When a #Transact block touches Shared handles, every read and write inside becomes one atomic commit, retried on conflict. No new marker (I8).\n\nThe existing rule that rejects irreversible effects inside the block still applies, so a retry is always safe.",
+          "code": "#Transact(tx) {\n    from.edit((b) => b.balance -= 100)   // both land, or neither\n    to.edit((b) => b.balance += 100)     // no lock ordering to get wrong\n}\n\n// an irreversible effect inside is still rejected:\n#Transact(tx) {\n    from.edit((b) => b.balance -= 100)\n    net.send(receipt)?\n}\n// error[E0746]: irreversible effect `Net.Send` inside #Transact cannot be rolled back\n//   help: move the send after the transaction commits"
+        },
+        {
+          "key": "B",
+          "name": "Multi-lock API with canonical ordering",
+          "detail": "A new call locks a set of handles at once, sorted into a canonical order so it cannot deadlock. It has no retry, so it blocks until every lock is free.\n\nThis is a second concurrency mechanism beside #Transact.",
+          "code": "Shared.edit_all((from, to), (f, t) => {\n    f.balance -= 100\n    t.balance += 100\n})\n// deadlock-free by sorting the handles, but no atomic retry:\n// a long edit blocks every other transfer touching `from` or `to`"
+        },
+        {
+          "key": "C",
+          "name": "Status quo: nested edit closures",
+          "detail": "Keep only single-handle edit closures. The user nests them and owns the lock ordering entirely.\n\nCorrectness rests on discipline, and a wrong ordering deadlocks with no compiler help.",
+          "code": "from.edit((f) => {\n    to.edit((t) => {          // nested lock, hand-ordered\n        f.balance -= 100\n        t.balance += 100\n    })\n})\n// another task doing to.edit -> from.edit deadlocks; no diagnostic"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Haskell",
+          "note": "STM composes atomic blocks and retries on conflict, which killed the deadlock class for good. Jet borrows the semantics but keeps the one marker it already has, rather than a new monad.",
+          "code": "atomically $ do\n  modifyTVar from (subtract 100)\n  modifyTVar to   (+ 100)"
+        },
+        {
+          "lang": "Clojure",
+          "note": "Refs and dosync give the same conflict-retry model with mutable identities. Jet reaches the same guarantee through Shared handles inside #Transact, so there is one boundary, not two.",
+          "code": "(dosync\n  (alter from - 100)\n  (alter to   + 100))"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "One marker already means atomic in Jet. Extending #Transact to the Shared plane makes the transfer safe by construction, with the runtime retrying on conflict and no lock order to get wrong.\n\nE0746 already blocks irreversible effects inside, so every retry is provably safe.",
+        "tradeoff": "Atomic memory blocks can retry, so the code inside must be free of irreversible effects, which the checker enforces. The gain is that the deadlock class disappears entirely.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A separate multi-lock call is a second concurrency mechanism against I8. It blocks rather than retries, so a slow edit stalls every other transfer touching the same handles."
+          },
+          {
+            "key": "C",
+            "reason": "Hand-ordered nested locks put correctness on the user and offer no diagnostic when an ordering deadlocks. This is the exact footgun STM was invented to remove."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "#Transact is the single atomic boundary for both locals and shared state. It gives option B's deadlock-freedom and more, because it retries instead of blocking, and it retires option C's manual ordering.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "Atomic Shared plane on #Transact",
+            "use": "Ship as the canonical way to change several shared handles together."
+          },
+          {
+            "key": "B",
+            "aspect": "Deadlock-free ordering",
+            "use": "Keep as an internal acquisition strategy for the transaction runtime, not a user-facing second API."
+          },
+          {
+            "key": "C",
+            "aspect": "Single-handle edit closure",
+            "use": "Remains the primitive for one-handle changes, unchanged, under the transaction layer."
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T02:57:32.603Z"
+    },
+    {
+      "id": "D-AUTH1",
+      "cardId": "c0n6vj96",
+      "group": "stdlib",
+      "title": "core.auth batteries for web apps",
+      "gist": "How much of authentication ships in the standard library versus staying the user's problem.",
+      "lesson": "A session is how a server remembers a logged-in user between requests, usually via a signed cookie.\n\nargon2id is a slow, memory-hard hash for passwords, so a stolen database is expensive to crack. It is the current best-practice default.\n\nOAuth and OIDC are the standards behind Sign in with Google or GitHub. JWT and PASETO are signed tokens an API checks without a database lookup.\n\nA magic link is a one-time sign-in URL emailed to the user, so there is no password at all.\n\nhttponly, secure, and samesite are cookie flags that block common theft and cross-site attacks. Constant-time compare checks a secret without leaking its length through timing.\n\nA .Credential taint marks a value as a secret the compiler tracks, so it cannot be logged or leaked by accident.",
+      "explainer": "",
+      "story": "Dale Whitmore is a solo founder shipping a SaaS. He needs email-and-password login, Sign in with Google, and secure sessions.\n\nIn most stacks this is a week of wiring cookie flags, hashing, and OAuth callbacks, with a real chance of a subtle leak. Firebase and Clerk made it an afternoon and won his kind of user.\n\nHe wants the magic default now and the knobs later when an enterprise buyer asks.",
+      "inWild": "A new app needs a login page, a protected dashboard, Sign in with Google, and an API that accepts a bearer token. Later a customer demands two-factor for admins.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Full batteries suite",
+          "detail": "core.auth ships sessions, password login, OAuth and OIDC, email magic links, and JWT or PASETO verification. app.auth gives a magic default with safe cookie flags.\n\nEvery knob is expert-overridable. Credentials carry the .Credential taint, and policy can require stronger factors.",
+          "code": "auth :: app.auth(users: db)          // default: sessions + password, safe cookie flags\nauth.oauth(google, github)           // opt-in providers\napp.mount(\"/login\", auth.routes())\n\nfn dashboard(req: Request) -> Response {\n    user :: auth.user(req) ?? return Response.redirect(\"/login\")\n    return view(user)\n}\n\n// policy can demand a second factor for a role:\n// policy.auth: { require_2fa: [admin] }\n// an admin session without 2fa -> auth.user returns None, redirect fires"
+        },
+        {
+          "key": "B",
+          "name": "Primitives only",
+          "detail": "core.crypto grows password hashing and token signing. The actual login flows, sessions, and OAuth callbacks stay in userland or community packages.\n\nExperts get clean building blocks. Beginners still assemble the dangerous parts themselves.",
+          "code": "hash :: crypto.password.hash(pw)?\nok   :: crypto.password.verify(pw, hash)?\ntoken :: crypto.token.sign(claims, key)?\n\n// sessions, cookie flags, OAuth callbacks: you write them\n// a beginner who forgets `httponly` ships a token-theft bug, uncaught"
+        },
+        {
+          "key": "C",
+          "name": "Sessions and password only",
+          "detail": "Ship sessions and password login now. Defer OAuth, OIDC, and magic links to a later card.\n\nCovers the simplest app. A user who needs Sign in with Google reaches for a third-party package and leaves the safe defaults.",
+          "code": "auth :: app.auth(users: db)          // sessions + password only\napp.mount(\"/login\", auth.routes())\n\nauth.oauth(google)\n// error[E0731]: OAuth is not available in core.auth\n//   help: this is planned; use a community provider for now"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Firebase / Clerk",
+          "note": "These platforms made auth a magic default and won beginners, at the cost of a cloud dependency. Jet delivers the same one-line feel with a local-first library and no vendor lock-in.",
+          "code": "// Clerk\n<SignIn />   // hosted, magic, but tied to their cloud"
+        },
+        {
+          "lang": "Rails",
+          "note": "has_secure_password is a pleasant primitive, but real apps still reach for Devise, a large gem that many teams misconfigure. A safe batteries default avoids that sprawl.",
+          "code": "class User < ApplicationRecord\n  has_secure_password\nend"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Auth is where beginners get hurt most, so the safe path must be the default one. A batteries suite with httponly, secure, samesite, argon2id, and constant-time compares removes the whole footgun class.\n\nOne mechanism serves both facets: the same app.auth a beginner calls exposes every knob an expert needs.",
+        "tradeoff": "A broad auth surface is a large ongoing security commitment for the standard library. The alternative is every app reinventing it and shipping the same leaks, which safety cannot accept.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Primitives leave beginners assembling cookie flags and OAuth callbacks, which is exactly where the dangerous mistakes live. Safety ranks above minimalism here."
+          },
+          {
+            "key": "C",
+            "reason": "Dropping OAuth and magic links pushes the most common real need onto third-party packages, so users leave the safe defaults for the feature they most wanted."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "app.auth is the one entrypoint. Its internals are exactly option B's crypto primitives, and option C's sessions-and-password path is simply the default before providers are added.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "Magic default with full knobs",
+            "use": "Ship as core.auth, the single auth surface for both beginners and experts."
+          },
+          {
+            "key": "B",
+            "aspect": "Crypto primitives",
+            "use": "Provide as the audited building blocks core.auth is built on and experts can drop to."
+          },
+          {
+            "key": "C",
+            "aspect": "Sessions and password first",
+            "use": "Treat as the zero-config starting state of the same suite, with providers added by one call."
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T02:57:32.704Z"
+    },
+    {
+      "id": "D-SYNC1",
+      "cardId": "c0n6vj96",
+      "group": "stdlib",
+      "title": "CRDT sync value types",
+      "gist": "Whether Jet ships conflict-free collaborative value types or stays server-authoritative.",
+      "lesson": "A CRDT is a conflict-free replicated data type. Two people can edit their own copy offline, and the copies merge to the same result with no coordination and no lost work.\n\nOffline-first means the app keeps working with no network and syncs when it reconnects.\n\nLast-write-wins means a later edit silently overwrites an earlier one, which loses data when two people edit at once.\n\nA vector clock is the small bit of bookkeeping a CRDT uses to know which edits each copy has already seen.\n\nLive queries are Jet's ratified server-push channel: when data a client watches changes, the server pushes the new result.",
+      "explainer": "",
+      "story": "Nora Fitzgerald builds a flight-planning app. Two dispatchers open the same route note, and one is on a plane with spotty wifi.\n\nBoth add a line at the same time. She wants the Figma feel: both edits survive, merged cleanly, with no dialog asking who wins.\n\nToday she would hand-roll a CRDT or buy one, then wire it to her push channel by hand.",
+      "inWild": "A shared document has a title, a body of text, a list of waypoints, and a like counter. Several users edit all of it at once, some offline, and everyone must converge.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "core.sync CRDT value types",
+          "detail": "SyncText, SyncMap, SyncList, and SyncCounter are @Codable and merge deterministically. app.sync carries them over the live-query channel.\n\nOffline edits merge conflict-free on reconnect. Experts can reach the merge metadata and vector clocks.",
+          "code": "doc :: SyncText.new()\ndoc.edit(at: 120, insert: \"flap angle\")   // offline OK\napp.sync(doc, over: session)               // merges on reconnect\n\nlikes :: SyncCounter.new()\nlikes.inc()                                // two clients, no lost count\n\n// expert view of the merge bookkeeping:\nclock :: doc.metadata().vector_clock()"
+        },
+        {
+          "key": "B",
+          "name": "Server-authoritative only",
+          "detail": "No CRDTs. Live queries push server state, and fields use last-write-wins. Offline edits queue and replay as mutations on reconnect.\n\nWhen two offline edits collide, the conflict surfaces as an error the app must handle.",
+          "code": "note :: app.live(get_note, id)             // server is the truth\nqueue.push(edit_note(id, \"flap angle\"))    // offline: queued mutation\n\n// on reconnect, a stale base is rejected:\n// error[E0755]: mutation `edit_note` rejected: row changed since read\n//   help: refetch and reapply, or resolve the conflict in app code"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Automerge / Yjs",
+          "note": "These libraries made CRDTs practical, but every team wires them to a transport and a store by hand. Jet ships the value types already riding its own push channel.",
+          "code": "const doc = Automerge.change(old, d => { d.text.insertAt(120, 'x') })"
+        },
+        {
+          "lang": "Linear",
+          "note": "Linear's sync engine is a headline feature that took years to build. Providing the same conflict-free feel as a library is how Jet makes that class of app easy by default.",
+          "code": "// Linear: local mutation applies instantly, syncs and merges in the background"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Collaborative and offline-first apps are table stakes, and the safe path is a merge that never loses a user's work. CRDT value types on the existing live-query channel deliver that with no plumbing.\n\nThe beginner writes one edit call and one sync call. The expert can still inspect the merge metadata.",
+        "tradeoff": "CRDT types carry merge metadata, so they use more memory and cannot express arbitrary custom conflict rules. The gain is convergence with no lost edits and no conflict dialogs.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Last-write-wins silently drops a user's edit, which safety ranks below convergence. Surfacing every offline collision as an error pushes the hardest merge work back onto app authors."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "core.sync rides the same live-query push channel option B already provides, so there is one transport. The server-authoritative path stays for plain non-collaborative data that needs no merge.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "CRDT value types",
+            "use": "Ship as core.sync for collaborative and offline-first data, over the live-query channel."
+          },
+          {
+            "key": "B",
+            "aspect": "Server-authoritative live queries",
+            "use": "Keep as the default for ordinary data where a single source of truth is correct and simpler."
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T02:57:32.806Z"
+    },
+    {
+      "id": "D-VALIDATE1",
+      "cardId": "c0n6vj96",
+      "group": "stdlib",
+      "title": "Accumulated validation over decoded values",
+      "gist": "Whether validation reports every field error at once or stops at the first failure.",
+      "lesson": "Decode turns incoming bytes, like JSON, into a typed value, and reports a shape mismatch as a DecodeError with a path and a reason.\n\nA refinement is a bound the compiler proves statically, like an integer that must stay between 0 and 120.\n\nA @Pre condition is a predicate that must hold before a value is accepted, checked at runtime.\n\nFail-fast means stop at the first error. Accumulate means collect every error and report them together, which is what a form needs to highlight all bad fields at once.\n\nA schema is the declared shape and rules of data. In Jet the struct itself is the schema, so there is no second schema language.",
+      "explainer": "",
+      "story": "Glenn Porter runs a signup form. A user submits a bad email, a short password, and an out-of-range age at once.\n\nFail-fast validation shows only the email error. The user fixes it, resubmits, and is told the password is bad, then the age. Three round trips for one form.\n\nGlenn wants every error back in one response, each tagged with its field, so the form lights up all at once.",
+      "inWild": "A Signup struct has an email, a password, and an age with a refinement. The handler decodes the request and must return every field error together as data the frontend can render beside inputs.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Accumulating .validate() over the struct",
+          "detail": "validate() runs @Pre predicates and refinement bounds declared on the struct's fields. It accumulates every failure as a list of path-and-reason records, reusing the DecodeError shape.\n\nThe struct is the schema, so there is no second schema language (I8). Forms consume the list directly.",
+          "code": "struct Signup {\n    email: String  @Pre(is_email),\n    password: String @Pre(len >= 8),\n    age: Int(0..120),\n}\n\nsignup :: req.decode<Signup>().validate() ?? (errs) => {\n    return Response.unprocessable(errs)\n}\n// errs = [\n//   {path: \"email\",    reason: \"not a valid email\"},\n//   {path: \"password\", reason: \"must be at least 8 characters\"},\n//   {path: \"age\",      reason: \"must be between 0 and 120\"},\n// ]"
+        },
+        {
+          "key": "B",
+          "name": "Fail-fast field predicates",
+          "detail": "Field predicates run during decode and return the first failure only, extending today's decode behavior.\n\nSimple, but a form can never show more than one error per submit.",
+          "code": "signup :: req.decode<Signup>() ?? (err) => {\n    return Response.unprocessable([err])\n}\n// err = {path: \"email\", reason: \"not a valid email\"}\n// the short password and bad age are never reported this pass"
+        },
+        {
+          "key": "C",
+          "name": "Separate validator-combinator library",
+          "detail": "A Zod-style library builds schema objects separate from the struct. Explicit and composable, but a second schema definition beside the type.\n\nThe struct and the validator can drift out of sync.",
+          "code": "schema :: Validator.object({\n    email: Validator.string().email(),\n    password: Validator.string().min(8),\n    age: Validator.int().range(0, 120),\n})\nerrs :: schema.check(raw)\n// a field added to the struct but not the schema goes unchecked, silently"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Zod / Pydantic",
+          "note": "Both accumulate every error, which is why forms feel good on those stacks. Zod pays for it with a schema object separate from the type. Jet gets the accumulation from the struct itself.",
+          "code": "z.object({ email: z.string().email(), age: z.number().min(0).max(120) })"
+        },
+        {
+          "lang": "Ecto",
+          "note": "Ecto changesets collect all field errors into one structure the form renders. Jet reaches the same result by validating the struct directly, with no changeset layer to maintain.",
+          "code": "changeset |> validate_required([:email]) |> validate_number(:age, less_than: 120)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A form that shows every error at once is the good beginner experience, and it comes free when validation accumulates. Reusing the DecodeError path-and-reason shape means one error model across decode and validation.\n\nThe struct stays the single schema, so the type and its rules can never drift apart.",
+        "tradeoff": "Accumulating means running every predicate even after one fails, so validation does a little more work per value. For form-shaped data that cost is trivial next to the round trips it saves.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Fail-fast forces a user through one round trip per bad field, the exact repetition the owner cuts. It is strictly weaker than accumulation for the form case that motivates this."
+          },
+          {
+            "key": "C",
+            "reason": "A separate validator library is a second schema beside the struct, against I8, and the two can drift so a new field goes unchecked silently."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "validate() over the struct accumulates by default and can short-circuit when a caller truly wants fail-fast, so option B is a mode, not a rival. The struct being the schema removes any need for option C's separate objects.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "Accumulating validate over the struct",
+            "use": "Ship as the canonical validation surface, returning DecodeError-shaped lists."
+          },
+          {
+            "key": "B",
+            "aspect": "Fail-fast",
+            "use": "Offer as an opt-in short-circuit mode of the same validate call for hot paths that want the first error."
+          },
+          {
+            "key": "C",
+            "aspect": "Composable rule expression",
+            "use": "Express as field-level @Pre and refinements on the struct, giving composability without a second schema."
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T02:57:32.908Z"
+    },
+    {
+      "id": "D-DBPOLICY1",
+      "cardId": "c0n6vj96",
+      "group": "safety",
+      "title": "Typed row-level access policies",
+      "gist": "Whether the database enforces per-row access below app code or leaves it to convention.",
+      "lesson": "RLS means row-level security. The data layer, not the app, decides which rows a given user may see or change, so a forgotten filter cannot leak data.\n\nMulti-tenant means one deployment serves many customers whose data must never cross. One missing WHERE clause is the classic leak.\n\nAn effect is a tracked capability in Jet, like reading the database. The compiler already reasons about which code touches which effect.\n\nA runtime filter is a condition the system adds to every query automatically, so rows outside the policy never come back even if app code forgot to ask.\n\nLive queries are the ratified server-push path. A policy must cover those too, not only direct reads.",
+      "explainer": "",
+      "story": "Edith Hollis runs a multi-tenant support tool. Every ticket belongs to a team, and no team may ever see another's tickets.\n\nHer safety rests on remembering a WHERE team clause on every query and every live subscription. One forgotten clause on one endpoint is a cross-tenant leak and a breach report.\n\nShe wants the rule declared once, enforced below her handlers, and impossible to forget.",
+      "inWild": "A Ticket table is read by list endpoints, a search box, and a live query, and written by an update handler. Every one of those paths must be confined to the caller's own team.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Typed row policies enforced below app code",
+          "detail": "db.policy declares a per-row rule. Every query and mutation path, including live queries, either provably satisfies it or gets the generated runtime filter.\n\nA path that could violate the policy is a compile-time effect error where provable, and the filter covers the rest. Audit lists active policies.",
+          "code": "db.policy<Ticket>((user, row) => row.team == user.team)\n\n// every read is confined automatically:\ntickets :: db.query(\"SELECT * FROM tickets WHERE open\")?   // team filter added\n\n// a path with no caller identity in scope is caught:\nfn all_tickets() -> [Ticket] { db.query(\"SELECT * FROM tickets\")? }\n// error[E0762]: query under policy<Ticket> has no `user` in scope\n//   help: take the caller identity, or mark this path #Unsafe(\"admin export\")"
+        },
+        {
+          "key": "B",
+          "name": "Library filter by convention",
+          "detail": "A .scoped(user) helper adds the team filter when the author remembers to call it. Nothing is enforced.\n\nIt reads clean on the paths that use it, and leaks on the one path that forgets.",
+          "code": "tickets :: db.query(\"SELECT * FROM tickets WHERE open\").scoped(user)?\n\n// forget it on one endpoint and every team's tickets leak:\nsearch :: db.query(\"SELECT * FROM tickets WHERE body LIKE {q}\")?\n// compiles fine, ships the breach, no diagnostic"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Supabase / Postgres RLS",
+          "note": "Postgres enforces row policies in the database, which is why Supabase can expose tables to the client safely. Jet lifts the same guarantee into the type system so violations surface at compile time where provable.",
+          "code": "CREATE POLICY team_isolation ON tickets\n  USING (team = current_setting('app.team')::uuid);"
+        },
+        {
+          "lang": "Rails",
+          "note": "default_scope adds an implicit filter, but unscoped bypasses it and it applies unevenly, so teams still leak rows. A checked policy cannot be silently skipped.",
+          "code": "default_scope { where(team_id: Current.team) }   # bypassed by .unscoped"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Cross-tenant leaks are among the worst failures a web app ships, and today they hinge on remembering a clause on every path. A checked policy makes the rule declared once and enforced everywhere.\n\nWhere the compiler can prove a path lacks caller identity it errors. Otherwise the generated filter guarantees the confinement.",
+        "tradeoff": "Policies require the caller identity to be in scope on data paths, so some helpers must thread a user they did not before. That is the cost of making a leak structurally impossible.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A convention that must be remembered on every query will eventually be forgotten on one, and that one is the breach. Safety cannot rest on discipline where enforcement is available."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "The checked policy is the mechanism, and option B's .scoped helper becomes the readable way to spell an explicit exception, such as an audited admin export marked #Unsafe. Convenience without giving up enforcement.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "Compile-checked row policy",
+            "use": "Ship as db.policy, enforced across queries, mutations, and live queries."
+          },
+          {
+            "key": "B",
+            "aspect": "Explicit scoping call",
+            "use": "Keep as the sanctioned way to name an audited exception to a policy, never as the only line of defense."
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T02:57:33.005Z"
+    },
+    {
+      "id": "D-ENVHOOK1",
+      "cardId": "c0n6vj96",
+      "group": "tooling",
+      "title": "Shell auto-activation for jet env",
+      "gist": "Whether entering a project directory activates its env automatically or stays explicit.",
+      "lesson": "An env in Jet is a per-project dev shell, declared in env.jet, that sets tools and variables for that project.\n\nA shell hook is a small snippet the shell runs on every directory change, so a tool can react to where you are.\n\ndirenv is the popular tool that pioneered this: cd into a project and its environment loads, leave and it unloads.\n\nA trust prompt is Jet's ratified rule that the first time an untrusted directory would run code, the tool asks the user to approve it.\n\nOpt-in means nothing happens until the user installs the hook themselves with one line.",
+      "explainer": "",
+      "story": "Warren Boyd hops between six repos a day. Each needs its own toolchain and variables.\n\nWith explicit activation he types jet env enter in every one, and forgets it often enough to debug with the wrong tool version. His direnv habit trained him to expect the shell to just follow the project.\n\nHe wants cd into a repo to load its env, and cd out to drop it, safely.",
+      "inWild": "A developer clones a repo containing env.jet and changes into it. They expect the right compiler and environment variables to be active with no manual command, but only after approving an unfamiliar project once.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Opt-in cd-activation hook",
+          "detail": "jet env hook <shell> prints a hook the user adds to their shell config once. After that, entering a directory with env.jet activates it, and leaving deactivates.\n\nThe first activation of an untrusted env uses the same trust prompt as the rest of Jet. JET_ENV_DISABLE turns it off anywhere.",
+          "code": "# install once:\n$ jet env hook fish | source   # or add to config.fish\n\n$ cd ~/work/router\njet: env.jet in this directory is not yet trusted. Activate it? [y/N] y\njet env: activated (jet 0.9, PGHOST=localhost)\n\n$ cd ..\njet env: deactivated\n\n$ JET_ENV_DISABLE=1 cd ~/work/router   # no activation this session"
+        },
+        {
+          "key": "B",
+          "name": "Status quo: explicit enter only",
+          "detail": "Keep activation manual. The user runs jet env or jetpack enter in each project.\n\nNothing runs on cd, so there is no hook to install, but the developer must remember every time.",
+          "code": "$ cd ~/work/router\n$ jet env enter        // must remember, every directory, every session\njet env: activated\n\n# forget it and you build with the wrong toolchain, no warning"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "direnv",
+          "note": "direnv made cd-activation the habit a generation of developers now expect, guarded by an explicit allow per directory. Jet mirrors the model and reuses its own trust prompt for the approval step.",
+          "code": "$ cd myproject\ndirenv: error .envrc is blocked. Run `direnv allow` to approve."
+        },
+        {
+          "lang": "mise",
+          "note": "mise activate installs a shell hook that swaps toolchains per directory. It proved the one-line opt-in install is the right ergonomic. Jet follows the same shape with jet env hook.",
+          "code": "eval \"$(mise activate zsh)\"   # one line in your shell config"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Auto-activation is the ergonomic developers already expect from direnv and mise, and forgetting to activate is a real source of wrong-toolchain bugs. The hook removes that whole failure mode.\n\nIt stays safe because the first activation of an unfamiliar project goes through Jet's existing trust prompt.",
+        "tradeoff": "A shell hook runs on every directory change, so it must stay fast and is opt-in rather than on by default. The payoff is that the environment always matches the project you are in.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Explicit enter is easy to forget, which silently builds with the wrong toolchain and gives no warning. It leaves a papercut every other tool in this space has already removed."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "The opt-in hook is the feature, and the explicit enter of option B stays available for one-off shells and for anyone who declines to install the hook. Auto by choice, manual always possible.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "cd-activation hook with trust prompt",
+            "use": "Ship as jet env hook, opt-in, reusing the ratified trust and disable controls."
+          },
+          {
+            "key": "B",
+            "aspect": "Explicit enter",
+            "use": "Keep as the manual path for scripts, one-off shells, and users who prefer no hook."
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T02:57:33.102Z"
+    },
+    {
+      "id": "D-OBSERVE-LIVE1",
+      "cardId": "c0n6vj96",
+      "group": "tooling",
+      "title": "Live runtime inspector",
+      "gist": "Whether Jet gets a live view of a running program or relies on post-mortem traces.",
+      "lesson": "A task is Jet's unit of concurrent work, and tasks form a tree as one spawns another.\n\nA channel is a typed pipe between tasks. Its depth is how many messages are waiting, and a full channel means a producer is blocked.\n\nA deadline is a time budget on a task, from the ratified #Context machinery.\n\nAn arena is a region of memory freed all at once. Its stats show how much the program is holding.\n\nPost-mortem means you inspect a recording after the run. Live means you attach to a process and watch it right now. .jtrace and jet perf are Jet's existing recording and profiling rails.",
+      "explainer": "",
+      "story": "Clara Dawson's data pipeline hangs in staging. Nothing crashes; it just stops making progress.\n\nA post-mortem trace tells her what happened after she kills it, but not what is stuck while it hangs. She needs to see, right now, which channel is full and which task is blocked on it.\n\nIn Erlang she would open observer and watch the process live. Jet's runtime is opaque while it runs.",
+      "inWild": "A running pipeline stalls with no error. The developer wants a live picture of the task tree, each channel's depth, pending deadlines, and current effect activity, without stopping the process.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "jet inspect live",
+          "detail": "jet inspect live shows a live task tree, channel depths, deadlines, effect activity, and arena stats. It attaches to a jet dev session or any process started with observe enabled.\n\nIt is a viewer over the existing observability rails, not a new fact producer. The same facts feed Canvas's proof rail.",
+          "code": "$ jet inspect live --attach 48213\ntask tree                         chan depth    deadline\nmain                                            -\n ingest         running          in:0          -\n   transform    BLOCKED          out:1024/1024 480ms\n     write      idle             -             -\neffects: Db.Read x3   Net.Send x0\n# transform is blocked pushing to a full channel; write task is idle"
+        },
+        {
+          "key": "B",
+          "name": "Post-mortem only",
+          "detail": "No live attach. Richer .jtrace recording plus the jet perf viewer cover analysis after the run.\n\nGood for a run that finishes or crashes. Useless for a hang you must observe while it is happening.",
+          "code": "$ jet run --trace pipeline.jet     // records a .jtrace\n$ jet perf view pipeline.jtrace    // inspect afterward\n\n// but a live hang never ends, so there is no finished trace:\n$ jet perf view pipeline.jtrace\nerror: trace is incomplete; process still running"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Erlang observer",
+          "note": "observer shows every process, mailbox, and memory cell of a live node, and is the tool Erlang developers reach for on a stuck system. jet inspect live brings that live picture to Jet's tasks and channels.",
+          "code": "1> observer:start().   %% live process and mailbox view"
+        },
+        {
+          "lang": "Go",
+          "note": "Go has pprof for profiling and a goroutine dump on demand, but no continuous live view of a running scheduler. A dedicated live inspector fills that exact gap.",
+          "code": "curl localhost:6060/debug/pprof/goroutine?debug=2   # a one-shot dump, not live"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A hang has no post-mortem, because the run never ends, so only a live view can show which channel is full and which task is blocked. That is the case where developers are most stuck.\n\nIt adds no new fact producer. It views the observability rails that already exist and feeds the same facts to Canvas.",
+        "tradeoff": "Live attach means a process must expose an inspection endpoint, on by default in jet dev and opt-in elsewhere. The benefit is diagnosing a stall while it is happening rather than guessing after.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Post-mortem traces cannot help with a hang that never terminates, which is the motivating failure. Profiling a finished run is a different job the perf viewer already covers."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "The live inspector and the post-mortem tools are complementary views over the same observability facts. jet inspect live handles the running system, and .jtrace and jet perf handle the finished one.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "Live attach viewer",
+            "use": "Ship as jet inspect live for stalls and running-system diagnosis, feeding Canvas's proof rail."
+          },
+          {
+            "key": "B",
+            "aspect": "Recorded trace and profiler",
+            "use": "Keep .jtrace and jet perf as the post-mortem path for completed or crashed runs."
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T02:57:33.205Z"
+    },
+    {
+      "id": "D-FFI-COM1",
+      "cardId": "c0oqtn3i",
+      "group": "runtime",
+      "title": "Windows COM automation binder (the Office / VBA estate)",
+      "gist": "How Jet reaches the Windows COM estate — Excel, Word, and Outlook automation plus VBA-macro migration.",
+      "lesson": "COM is the Windows component ABI. It is a binary contract that lets one program drive another. Office exposes all of its features through COM.\n\nIDispatch is COM's dynamic call interface. A caller invokes methods by name at runtime instead of through a fixed table.\n\nA type library is a machine-readable description of a component's API. It names the methods, arguments, and types.\n\nVBA is the macro language that scripts Office through COM. Millions of business workbooks carry VBA logic that nobody wants to lose.",
+      "explainer": "",
+      "story": "Ruth Callahan runs the quarterly close for a finance team. Their reporting lives in twenty Excel workbooks driven by VBA macros.\n\nThe macros are fragile and the person who wrote them left years ago. Ruth wants to automate the close from a Jet service today.\n\nShe also wants to migrate the macros into Jet gradually, without a big-bang rewrite that could change a number.",
+      "inWild": "use com.excel as xl\n\nwb :: xl.workbooks.open(\"q3.xlsx\")?\nwb.sheet(\"Summary\").cell(\"B4\").set(total)\nwb.save()?",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "com.* root, Windows-gated, typed stubs from the type library",
+          "detail": "Mount COM as `com.*`, Windows-only with an honest gated error elsewhere (the ratified swift precedent). `use com.excel as xl` binds from the installed type library. `jet inspect bind com` generates committable typed stubs, the way the js binder emits `.d.ts` stubs. Libraries with no type library get a dynamic IDispatch fallback behind `#Unsafe`. The same surface serves both live automation and VBA-estate migration, since the D-MIGRATE-SRC1 importer emits Jet calling `com.*`.",
+          "code": "use com.excel as xl                       // binds from the installed type library\n\nfn write_summary(total: Money) -> Unit ? ComError {\n    wb :: xl.workbooks.open(\"q3.xlsx\")?\n    wb.sheet(\"Summary\").cell(\"B4\").set(total)\n    wb.save()?\n}\n\n// On a non-Windows host the gated error is honest, like swift off macOS:\n$ jet build --target linux\nerror[E3260]: `com.*` needs a Windows host\n  ── close.jet:1:5\n  use com.excel as xl\n      ^^^^^^^^^ COM automation runs only on Windows\n  = help: build with --target windows, or run this module on a Windows host"
+        },
+        {
+          "key": "B",
+          "name": "No COM root — pwsh sidecar or hand C FFI",
+          "detail": "Ship no `com.*` root. Office automation goes through a pwsh sidecar or a hand-written C FFI layer over raw IDispatch. Both work, both are miserable, and both concede the estate. Values cross as interpolated text with no type checks, and there is no migration path.",
+          "code": "use pwsh                                   // sidecar worker, no typed Office surface\n\nrun :: pwsh.eval(\"\"\"\n    $xl = New-Object -ComObject Excel.Application\n    $wb = $xl.Workbooks.Open('q3.xlsx')\n    $wb.Sheets('Summary').Range('B4').Value = {total}\n    $wb.Save()\n\"\"\", total: total)?                        // interpolated as text, no type checks\n\n// The C-FFI alternative hand-marshals every IDispatch call\n// and gives no migration path at all."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Python (pywin32)",
+          "note": "pywin32 drives Office through late-bound IDispatch. Calls are dynamic, so a misspelled property or a wrong type fails at runtime, not before. Jet's typed stubs from the type library move those failures to build time.",
+          "code": "xl = win32com.client.Dispatch('Excel.Application')  # dynamic, unchecked"
+        },
+        {
+          "lang": "VBScript (legacy)",
+          "note": "The old estate glue is VBScript over COM, now deprecated on modern Windows. It has no types and no package story. A typed com.* surface replaces it without a rewrite of the underlying components.",
+          "code": "Set xl = CreateObject(\"Excel.Application\")   ' untyped, deprecated"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Option A is the only path that both automates the estate and migrates it. The type library gives a typed, checked surface with no string scraping. The gated error follows the ratified swift precedent, so non-Windows builds fail clearly. The IDispatch fallback still reaches old components that ship no type library.",
+        "tradeoff": "The `com.*` surface runs only on Windows. That is inherent to COM, not a Jet limit. A cross-platform caller wraps the module behind a service boundary and calls it from a Windows host.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Option B leaves Office behind a stringly-typed pwsh script or a hand-marshaled C shim. Values cross as interpolated text, so a wrong cell type fails at runtime instead of at build. It also gives no migration path, so the VBA estate stays trapped."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "Ship A. The typed type-library surface is the default. IDispatch behind `#Unsafe` is the escape hatch for components with no type library. The pwsh path from B stays available for one-off glue, never as the Office story.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "typed automation and migration",
+            "use": "the shipped com.* surface with committable stubs"
+          },
+          {
+            "key": "B",
+            "aspect": "scripted glue",
+            "use": "pwsh sidecar remains for throwaway automation outside the estate"
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T02:57:33.303Z"
+    },
+    {
+      "id": "D-FFI-PWSH1",
+      "cardId": "c0oqtn3i",
+      "group": "runtime",
+      "title": "PowerShell binder and object pipeline",
+      "gist": "How Jet calls PowerShell and carries its object pipeline across the boundary.",
+      "lesson": "PowerShell is Microsoft's automation shell and scripting language. PowerShell 7 runs on Windows, Linux, and macOS.\n\nA cmdlet is a built-in command that returns objects, not text. PowerShell pipelines pass whole objects between commands rather than strings.\n\nDataTree is Jet's ratified dynamic value. It is a self-describing tree of typed fields, and it is how loosely shaped foreign data crosses into Jet.",
+      "explainer": "",
+      "story": "Frank Delgado runs a Windows operations team. Years of runbooks manage Active Directory and Exchange through PowerShell cmdlets.\n\nA new Jet service needs to call those runbooks and read their results. Frank does not want to rewrite them or scrape their console text, which reformats between versions.",
+      "inWild": "use pwsh\n\nfn disabled_users() -> [DataTree] ? PwshError {\n    users :: pwsh.cmd(\"Get-ADUser -Filter {Enabled -eq $false}\")?\n    return users.rows()\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Sidecar pwsh worker, objects cross as DataTree",
+          "detail": "Run a supervised sidecar pwsh 7 worker, matching the ratified Python model. Cmdlet results cross as `DataTree`, since PowerShell objects are property bags. Whole pipelines are callable as Jet functions, and field access is checked at the boundary. The effect root is `#(Pwsh)`.",
+          "code": "use pwsh\n\nfn stale_mailboxes(days: Int) -> [Mailbox] ? PwshError {\n    result :: pwsh.pipeline(\"\"\"\n        Get-Mailbox -ResultSize Unlimited\n          | Where-Object { $_.LastLogon -lt (Get-Date).AddDays(-{days}) }\n    \"\"\", days: days)?\n    return result.rows().map(m -> Mailbox.{\n        name: m[\"DisplayName\"].text()?,\n        last: m[\"LastLogon\"].date()?,\n    })\n}\n\n// A missing field is a Jet diagnostic, not a silent nil:\nerror[E3271]: field \"LastLogon\" not present in this DataTree row\n  = help: run `jet inspect pwsh Get-Mailbox` to see the emitted fields"
+        },
+        {
+          "key": "B",
+          "name": "Shell-out only via Sh typed text",
+          "detail": "Reach PowerShell only by launching `pwsh -c` through the ratified `Sh` typed text. This loses the object pipeline entirely. Results come back as formatted console text that the caller must scrape column by column, with no types.",
+          "code": "use core.process\n\ncmd: Sh :: \"pwsh -c \\\"Get-Mailbox | Format-Table Name,LastLogon\\\"\"\nout :: process.run(cmd)?\n\n// out.stdout is raw text — parse the columns yourself, no types:\nrows :: out.stdout.lines().map(l -> l.split_whitespace())"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Bash",
+          "note": "Bash pipes bytes between commands, so every stage re-parses text. PowerShell pipes objects, so fields keep their types. Option A preserves that. Scraping the text throws it away.",
+          "code": "ps aux | grep bash | awk '{print $2}'   # re-parse at every stage"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Option A keeps PowerShell's whole point, which is objects rather than text. Cmdlet results cross as DataTree with typed field access checked at the boundary. The sidecar runs cross-platform pwsh 7, so a Linux Jet service can drive Windows runbooks over a remote session.",
+        "tradeoff": "The sidecar adds a worker process and a typed message hop. That isolation is the same crash-safe model already ratified for Python and Ruby.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Option B shells out and scrapes formatted text. It discards the object pipeline, so every result is untyped string columns. A renamed column silently breaks the parsing with no diagnostic at all."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "Ship A. The object-preserving sidecar is the default. The `Sh` path from B still exists through the ratified D-FFI-SH1 surface for a bare one-line invocation. Any structured work uses the DataTree surface.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "typed object pipeline",
+            "use": "the shipped pwsh sidecar and DataTree rows"
+          },
+          {
+            "key": "B",
+            "aspect": "bare invocation",
+            "use": "D-FFI-SH1 Sh text covers a one-off pwsh -c with no result parsing"
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T02:57:33.403Z"
+    },
+    {
+      "id": "D-FFI-DART1",
+      "cardId": "c0oqtn3i",
+      "group": "runtime",
+      "title": "Dart binder and Flutter embedding direction",
+      "gist": "How Jet interoperates with Dart, and whether it also embeds into Flutter apps.",
+      "lesson": "Dart is Google's application language. Flutter is Google's UI toolkit, written in Dart, for mobile, web, and desktop apps.\n\ndart_api_dl is Dart's C interop layer. It lets native code call into a running Dart runtime.\n\nA C ABI is the plain C calling convention that every language can link against. A c-archive is a static library exposing C-ABI entry points.\n\nFlutter apps reach native code through platform channels or through C FFI.",
+      "explainer": "",
+      "story": "Grace Holloway leads a small product team. They ship a Flutter mobile app and a backend service.\n\nBoth need the same pricing-and-rules engine. Today the logic is copied into Dart and into the server, and the two copies drift apart.\n\nGrace wants one Jet core called from both sides, so a rule change lands in exactly one place.",
+      "inWild": "// pricing/core.jet — one engine, shared by the app and the server\npub fn quote(base: Float, qty: Float) -> Float {\n    return base * qty * bracket(qty)\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Dual surface — dart.* binder plus Flutter C-ABI embedding",
+          "detail": "Bind Dart libraries through `dart.*` over dart_api_dl. Also ship the embedding path: a Jet library compiled to a C-ABI archive through the existing plugin and c-archive machinery, callable from a Flutter app. Embedding is the direction mobile teams reach for first.",
+          "code": "// core.jet — plugin target, exported C-ABI surface (D-PLUGIN-EXPORT1)\npub fn quote(base: Float, qty: Float) -> Float {\n    return base * qty * bracket(qty)\n}\n\n$ jet build --target plugin --emit c-archive\nwrote libpricing.a + pricing.h   (Dart FFI-ready)\n\n// Flutter side links the archive and calls one typed function:\nfinal quote = lib.lookupFunction<...>('quote');\nfinal price = quote(base, qty);   // one engine, no drift\n\n// The other direction binds a Dart library:\nuse dart.intl as intl\nlabel :: intl.format_currency(price, locale: \"en-US\")"
+        },
+        {
+          "key": "B",
+          "name": "dart.* library binder only, no embedding",
+          "detail": "Ship only the `dart.*` library binder over dart_api_dl. Jet can call Dart packages, but nothing lets a Flutter app call a Jet core. The app keeps its own copy of the shared logic.",
+          "code": "use dart.intl as intl\nlabel :: intl.format_currency(price, locale: \"en-US\")\n\n// But the Flutter app still cannot call the Jet engine —\n// the pricing logic stays copied into Dart and drifts."
+        },
+        {
+          "key": "C",
+          "name": "Defer until the native mobile UI decision (#480)",
+          "detail": "Ship no `dart` root yet. Wait until E3-UL9 / card #480 decides Jet's native mobile UI strategy, then design the Dart story around that outcome.",
+          "code": "$ jet build --target plugin\nerror[E3299]: no `dart` binder — deferred pending the mobile UI decision (#480)\n  = help: no interop path to a Flutter app is available yet"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Flutter (platform channels)",
+          "note": "Flutter's own native bridge serializes messages across an async channel, so calls are stringly-keyed and asynchronous. A C-ABI archive links directly, so the shared engine is a plain typed function call with no message hop.",
+          "code": "await channel.invokeMethod('quote', {'qty': qty});  // async, untyped map"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Option A ships the direction mobile teams reach for first, which is one Jet engine linked into the Flutter app as a C-ABI archive. It also binds Dart libraries through dart_api_dl. This binder is the interop floor no matter how #480 rules on native mobile UI.",
+        "tradeoff": "The embedding side reuses the existing plugin and c-archive machinery, so the app links a static library and a header. The library side needs a running Dart runtime, provisioned by jetpack.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Option B binds Dart libraries but gives no embedding path. Grace's real need, one engine shared with the Flutter app, stays unmet, and the two copies keep drifting."
+          },
+          {
+            "key": "C",
+            "reason": "Option C defers everything and blocks Grace today. The C-ABI interop floor is useful whatever #480 decides about native UI, so waiting buys nothing."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "Ship A. The C-ABI embedding path is the headline. The `dart.*` library binder rides the same ballot. Whatever #480 later decides about native mobile UI builds on top of this interop floor, never around it.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "dual interop",
+            "use": "C-ABI embedding and the dart.* binder both ship"
+          },
+          {
+            "key": "B",
+            "aspect": "library reach",
+            "use": "the dart.* binder half is exactly B, kept inside A"
+          },
+          {
+            "key": "C",
+            "aspect": "mobile-UI caution",
+            "use": "the #480 dependency is noted honestly, not used to block the interop floor"
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T02:57:33.499Z"
+    },
+    {
+      "id": "D-FFI-TCL1",
+      "cardId": "c0oqtn3i",
+      "group": "runtime",
+      "title": "Tcl binder host model (the EDA tooling estate)",
+      "gist": "Whether Jet embeds Tcl in-process or runs it as a sidecar, for the chip-design tool estate.",
+      "lesson": "Tcl is a small scripting language built from the start to be embedded inside other programs.\n\nEDA means electronic design automation. It is the software that turns chip and FPGA designs into real hardware. Vivado, Quartus, and Synopsys drive their flows through Tcl scripts.\n\nPlace-and-route is the step that positions logic on a chip and wires it together. These flows emit their results as Tcl values.",
+      "explainer": "",
+      "story": "Wes Harmon builds FPGA images for a hardware team. The vendor toolchain is driven entirely by Tcl scripts.\n\nWes wants a Jet pipeline to launch a place-and-route run and read its timing results. Today he shells out and greps the log, which breaks whenever the tool reformats its output.",
+      "inWild": "use tcl.vivado as vivado\n\nsession :: vivado.open(\"top.xpr\")?\ntiming :: session.report_timing()?\nassert(timing.worst_slack >= 0.0, \"setup timing violated\")",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "In-process interpreter with live sessions",
+          "detail": "Embed a Tcl interpreter in-process, the way Tcl was designed to run and the way every EDA tool already hosts it. A design session stays live across calls, so place, route, and timing steps share state. Tcl dicts cross as typed fields. Long runs declare a `#(Tcl)` effect.",
+          "code": "use tcl.vivado as vivado\n\nfn build_bitstream(proj: Path) -> Timing ? TclError {\n    s :: vivado.open(proj)?\n    s.run(\"place_design\")?\n    s.run(\"route_design\")?\n    rpt :: s.report_timing()?            // Tcl dict crosses as typed fields\n    return Timing.{\n        worst_slack: rpt[\"WNS\"].float()?,\n        failing:     rpt[\"FAILING_ENDPOINTS\"].int()?,\n    }\n}\n\n// A negative-slack build fails as a checked Jet error, not a grep miss."
+        },
+        {
+          "key": "B",
+          "name": "Sidecar tclsh worker",
+          "detail": "Run Tcl as a separate `tclsh` process and evaluate strings against it. Interpreter state does not persist between calls without a hand-rolled session protocol, so a multi-step flow keeps re-sourcing scripts. Results still come back as text to scrape.",
+          "code": "use tcl                                    // sidecar tclsh, separate process\n\nout :: tcl.eval(\"source build.tcl; puts [report_timing]\")?\n// design state does not persist across calls without a session protocol,\n// so each step re-sources the whole script and re-parses text output."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Vivado / Quartus",
+          "note": "The vendor tools host a Tcl interpreter inside their own process and expose their whole API as Tcl commands. An in-process Jet interpreter matches that model, so sessions and design state stay live between calls.",
+          "code": "vivado -mode tcl -source build.tcl   # the tool itself IS a Tcl host"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Option A embeds Tcl in-process, the way Tcl was designed and the way every EDA tool already hosts it. A design session stays live across calls, so place, route, and timing share state. Results cross as typed values, so a slack check is a real assertion rather than a log grep.",
+        "tradeoff": "The in-process interpreter shares the host process, matching the ratified Lua model. A long tool run still declares a `#(Tcl)` effect, so blocking stays visible.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Option B runs a separate tclsh and evaluates strings. Interpreter state does not persist between calls without a hand-rolled protocol, so a multi-step flow keeps re-sourcing scripts. Results still come back as text to scrape."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "Ship A. The in-process interpreter with live sessions is the default and matches how the EDA tools themselves run. The plain `tcl.eval` one-shot from B is available for a stateless script, but the session surface is the estate's real entry.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "live-session embedding",
+            "use": "the shipped in-process interpreter with typed results"
+          },
+          {
+            "key": "B",
+            "aspect": "stateless one-shot",
+            "use": "tcl.eval covers a single self-contained script with no session"
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T02:57:33.591Z"
+    },
+    {
+      "id": "D-FFI-ADA1",
+      "cardId": "c0oqtn3i",
+      "group": "runtime",
+      "title": "Ada binder with constraint facts (the certified-code estate)",
+      "gist": "How Jet reuses certified Ada libraries while keeping their range checks at the boundary.",
+      "lesson": "Ada is a systems language used where failure is unacceptable — avionics, rail, and defense.\n\nGNAT is the open-source Ada compiler in the GCC family. Ada can mark a routine as C-callable with pragma Export and pragma Convention.\n\nAda types carry ranges and constraints, so a value outside its declared range is an error the language enforces.\n\njet prove is Jet's static-proof mode. It matches the assurance culture around Ada and its SPARK subset.",
+      "explainer": "",
+      "story": "Ellen Marsh is an engineer at an avionics supplier. Her group owns a certified Ada library for geodesy, the math that turns sensor angles into ground positions.\n\nNew ground-station software is being written in Jet. Ellen must reuse the certified library exactly, without re-certifying a rewrite, and keep its range checks intact.",
+      "inWild": "use ada.geodesy as geo\n\npos :: geo.to_ecef(lat: 47.6, lon: -122.3, alt_m: 130.0)?",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "GNAT C-ABI binder that transports constraint facts",
+          "detail": "Bind Ada through its C-ABI exports (pragma Export, Convention C), following the ratified Fortran model. The binder drives gnatmake and reads the Ada spec. It records each range and constraint into the binding, so an out-of-range Jet value is a checked error before the call. This pairs with `jet prove`.",
+          "code": "use ada.geodesy as geo\n\n// Ada spec: subtype Latitude is Float range -90.0 .. 90.0;\n// the binder records that range as a boundary check.\nfn locate(lat: Float, lon: Float) -> Ecef ? AdaError {\n    return geo.to_ecef(lat: lat, lon: lon, alt_m: 0.0)?\n}\n\n// An out-of-range value is caught before the Ada call:\nerror[E3283]: 95.0 is outside `Latitude` range -90.0 .. 90.0\n  ── locate.jet:6:26\n  = note: constraint recorded from the Ada spec by `jet inspect bind ada`\n  = help: this would raise Constraint_Error inside the Ada library"
+        },
+        {
+          "key": "B",
+          "name": "No root — hand-written C shims",
+          "detail": "Ship no `ada.*` root. Reach the library through hand-written C shims declared in an `#Extern` overlay under `#Unsafe`. Every Ada range constraint is dropped, so a bad value faults inside the Ada runtime at run time.",
+          "code": "#Unsafe(\"hand C shim over an Ada export\")\n#Extern module ada.geodesy {\n    fn to_ecef(lat: Float, lon: Float, alt: Float) -> Ecef   // ranges lost\n}\n\n// Nothing records Latitude's -90..90, so a bad value faults\n// deep inside Ada as Constraint_Error, surfacing as a foreign crash."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "GNAT (pragma Export)",
+          "note": "GNAT already emits C-callable entry points with pragma Export and Convention C. The binder drives gnatmake and reads the Ada spec, so the same declarations that make a routine callable also carry its range constraints into Jet.",
+          "code": "pragma Export (C, To_ECEF, \"to_ecef\");   -- C-ABI entry point"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Option A reuses the certified library through its own C-ABI exports, with no rewrite to re-certify. It reads range and constraint facts from the Ada spec, so an out-of-range Jet value is a checked error before the call. That pairs naturally with jet prove for the assurance-minded audience.",
+        "tradeoff": "The binder drives gnatmake and needs GNAT present, provisioned by jetpack. This mirrors the ratified Fortran gfortran model.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Option B hand-writes C shims and drops every Ada constraint. A latitude of 95 crosses silently and faults as Constraint_Error deep inside the Ada runtime, surfacing as a foreign crash rather than a clean Jet diagnostic."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "Ship A. The GNAT binder that transports Ada's range constraints into checked Jet boundaries is the default. There is no separate hand-shim tier, because B's manual path is exactly what the binder removes.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "constraint-carrying binder",
+            "use": "the shipped ada.* surface with range facts and jet prove"
+          },
+          {
+            "key": "B",
+            "aspect": "raw extern escape",
+            "use": "the #Extern overlay under #Unsafe still exists for a symbol the binder cannot see, never as the default"
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T02:57:33.696Z"
+    },
+    {
+      "id": "D-FFI-PASCAL1",
+      "cardId": "c0oqtn3i",
+      "group": "runtime",
+      "title": "Delphi / Object Pascal binder (the long-lived business-app estate)",
+      "gist": "How Jet calls Delphi business rules in place and migrates the estate gradually.",
+      "lesson": "Object Pascal is the language behind Delphi, a long-standing tool for business desktop applications.\n\nDelphi apps run inventory, billing, and scheduling at many companies for decades. Such apps are called LOB, meaning line-of-business.\n\nFreePascal is the open-source Object Pascal compiler. cdecl is the plain C calling convention it can export.\n\nAn opaque handle is a reference to a foreign object whose internals Jet never inspects.",
+      "explainer": "",
+      "story": "Roy Anderson maintains a twenty-year-old Delphi inventory system. Its pricing and stock rules are correct and battle-tested, but the desktop UI is dated.\n\nThe company wants a new Jet web front end. Roy needs it to call the existing Delphi business rules in place, not reimplement them and risk changing a number.",
+      "inWild": "use pascal.inventory as inv\n\nprice :: inv.net_price(sku: \"A-118\", qty: 40)?",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "FreePascal C-ABI binder, classes as opaque handles",
+          "detail": "Bind Object Pascal through FreePascal's cdecl exports. Classes become opaque handles, reusing the ratified C++ model but shallower, with no templates. The long-lived LOB estate gets a call-in-place surface today, and the same binder underwrites gradual migration through D-MIGRATE-SRC1.",
+          "code": "use pascal.inventory as inv               // FreePascal cdecl exports, cached shim\n\nfn quote_line(sku: Text, qty: Int) -> Money ? PascalError {\n    item :: inv.lookup(sku)?              // TInventoryItem -> opaque handle\n    return item.net_price(qty)?           // business rule runs unchanged\n}\n\n// Gradual migration reuses the same call sites:\n$ jet import pascal ./inventory\ninventory/ -> jet/inventory/     8 units, rules preserved\n  4 TODO diagnostics (JT02xx): pointer arithmetic in StockLevel.pas"
+        },
+        {
+          "key": "B",
+          "name": "No root — rewrite big-bang or stay",
+          "detail": "Ship no `pascal` root. The company either reimplements twenty years of rules in Jet all at once or keeps the dated Delphi desktop app. There is no call-in-place path and no gradual migration.",
+          "code": "$ jet build\nerror[E3299]: no `pascal` binder — the Delphi rules are not reachable\n  = help: reimplement the rules in Jet, or keep the Delphi app as-is"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "FreePascal (FPC)",
+          "note": "FreePascal exports routines with the cdecl convention, so its compiled units link like any C library. The binder wraps those exports and models classes as opaque handles, the same shape the ratified C++ binder uses without templates.",
+          "code": "function NetPrice(Qty: Integer): Currency; cdecl; export;"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Option A calls the battle-tested Delphi rules in place, so no number changes and nothing is re-verified by hand. Classes become opaque handles, reusing the ratified C++ model without templates. The same binder underwrites gradual migration through D-MIGRATE-SRC1, so the estate moves file by file at its own pace.",
+        "tradeoff": "The binder needs FreePascal to compile the cdecl shims, provisioned by jetpack. A Delphi-only unit may need a small FreePascal-compatible export shim.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Option B offers no reachable path, so the company either rewrites twenty years of rules big-bang or keeps the dated desktop app forever. A rewrite risks changing a value the business depends on being exact."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "Ship A. The FreePascal C-ABI binder gives call-in-place today and a gradual migration path through the shared source importer. There is no B tier, because its rewrite-or-stay is precisely the trap the binder removes.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "call-in-place and migrate",
+            "use": "the shipped pascal.* binder joined to D-MIGRATE-SRC1"
+          },
+          {
+            "key": "B",
+            "aspect": "clean-rewrite end state",
+            "use": "still available later as the finish line of a D-MIGRATE-SRC1 migration, never forced up front"
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T02:57:33.796Z"
     }
   ],
   "questions": [
@@ -29632,6 +30634,104 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-12T02:57:33.797Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-FFI-PASCAL1",
+      "note": "Delphi / Object Pascal binder (the long-lived business-app estate)"
+    },
+    {
+      "at": "2026-07-12T02:57:33.696Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-FFI-ADA1",
+      "note": "Ada binder with constraint facts (the certified-code estate)"
+    },
+    {
+      "at": "2026-07-12T02:57:33.591Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-FFI-TCL1",
+      "note": "Tcl binder host model (the EDA tooling estate)"
+    },
+    {
+      "at": "2026-07-12T02:57:33.499Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-FFI-DART1",
+      "note": "Dart binder and Flutter embedding direction"
+    },
+    {
+      "at": "2026-07-12T02:57:33.403Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-FFI-PWSH1",
+      "note": "PowerShell binder and object pipeline"
+    },
+    {
+      "at": "2026-07-12T02:57:33.304Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-FFI-COM1",
+      "note": "Windows COM automation binder (the Office / VBA estate)"
+    },
+    {
+      "at": "2026-07-12T02:57:33.205Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-OBSERVE-LIVE1",
+      "note": "Live runtime inspector"
+    },
+    {
+      "at": "2026-07-12T02:57:33.102Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-ENVHOOK1",
+      "note": "Shell auto-activation for jet env"
+    },
+    {
+      "at": "2026-07-12T02:57:33.006Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-DBPOLICY1",
+      "note": "Typed row-level access policies"
+    },
+    {
+      "at": "2026-07-12T02:57:32.908Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-VALIDATE1",
+      "note": "Accumulated validation over decoded values"
+    },
+    {
+      "at": "2026-07-12T02:57:32.806Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-SYNC1",
+      "note": "CRDT sync value types"
+    },
+    {
+      "at": "2026-07-12T02:57:32.705Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-AUTH1",
+      "note": "core.auth batteries for web apps"
+    },
+    {
+      "at": "2026-07-12T02:57:32.603Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-STM1",
+      "note": "Atomic memory transactions across shared handles"
+    },
+    {
+      "at": "2026-07-12T02:57:32.507Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-BINPAT1",
+      "note": "Binary patterns for byte parsing"
+    },
     {
       "at": "2026-07-12T02:52:08.450Z",
       "by": "claude-main",
@@ -33033,104 +34133,6 @@
       "action": "card.criteria-verify",
       "ref": "c021gh90",
       "note": "#3"
-    },
-    {
-      "at": "2026-07-11T16:23:38.844Z",
-      "by": "sol-494-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c021gh90",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-11T16:23:38.765Z",
-      "by": "sol-494-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c021gh90",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-11T16:23:36.071Z",
-      "by": "terra-417-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0lh5jgy",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-11T16:22:03.665Z",
-      "by": "terra-494-builder",
-      "action": "card.update",
-      "ref": "c021gh90",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-11T16:20:38.790Z",
-      "by": "terra-494-builder",
-      "action": "card.update",
-      "ref": "c021gh90",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-11T16:16:11.131Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0lh5jgy",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-11T16:16:11.043Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0lh5jgy",
-      "note": "#5 Focused JetOS identity/install-media tests pin all surfaces "
-    },
-    {
-      "at": "2026-07-11T16:16:10.957Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0lh5jgy",
-      "note": "#4 A baseline non-NixOS JetOS wallpaper/branding asset is shipp"
-    },
-    {
-      "at": "2026-07-11T16:16:10.864Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0lh5jgy",
-      "note": "#3 Every generated installed and installer boot-menu title incl"
-    },
-    {
-      "at": "2026-07-11T16:16:10.778Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0lh5jgy",
-      "note": "#2 Installed and installer /etc/os-release plus /usr/lib/os-rel"
-    },
-    {
-      "at": "2026-07-11T16:16:10.690Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0lh5jgy",
-      "note": "#1 One committed JetOS release identity canon declares 26.10 Ap"
-    },
-    {
-      "at": "2026-07-11T16:15:51.429Z",
-      "by": "terra-417-builder",
-      "action": "card.claim",
-      "ref": "c0lh5jgy",
-      "note": ""
-    },
-    {
-      "at": "2026-07-11T16:15:27.162Z",
-      "by": "terra-494-builder",
-      "action": "card.update",
-      "ref": "c021gh90",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-11T16:15:27.081Z",
-      "by": "terra-494-builder",
-      "action": "card.criteria-meet",
-      "ref": "c021gh90",
-      "note": "#4"
     }
   ],
   "nextNum": 368,
