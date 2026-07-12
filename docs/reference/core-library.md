@@ -2238,9 +2238,6 @@ Beginner calls accept strings; expert calls accept typed
 | `dns_srv(name, ms)` | `[DnsSrv] ? NetError` | SRV records |
 | `dns_*_at(server, name, ms)` | same as matching lookup | Expert override for a specific DNS server |
 | `dns_srv_target(srv)` / `dns_srv_port(srv)` | `String` / `Int` | Inspect SRV records |
-| `core.tls.client(stream, server_name)` | `TlsStream ? NetError` | Consume a connected `TcpStream`; verify name with system roots |
-| `core.tls.read/write/write_all/read_text/write_text/close` | byte-stream results with `NetError` | Same byte/text and idempotent close law; close sends close-notify |
-
 `NetError` has stable variants for input, permission, address, connection,
 closed, timeout, cancellation, unsupported, DNS, TLS, protocol, and other OS
 failures. `error_operation/address/name/message/os_code` expose portable control
@@ -2252,6 +2249,23 @@ servers; explicit `_at` calls query only their named server. The wire resolver
 uses unpredictable IDs, validates sender/header/question/bounds/compression,
 follows bounded CNAME chains across answer/additional records, and retries a
 truncated UDP answer over bounded TCP. It never falls back to a public resolver.
+
+---
+
+## `core.tls`
+
+`core.tls` upgrades a connected `core.net` TCP stream to a client TLS stream.
+The built module exposes only this byte/text stream surface:
+
+| Function | Returns | Notes |
+|----------|---------|-------|
+| `client(stream, server_name)` | `TlsStream ? NetError` | Consume the `TcpStream`; verify the server name with system roots |
+| `read(stream, limit)` / `read_text(stream)` | `[U8] ? NetError` / `String ? NetError` | Read bytes or checked text from the TLS stream |
+| `write(stream, bytes)` / `write_all(stream, bytes)` | `Int ? NetError` / `() ? NetError` | Write some or all bytes |
+| `write_text(stream, text)` | `() ? NetError` | Write the complete text payload |
+| `close(stream)` | `() ? NetError` | Send close-notify; repeated close is harmless |
+
+TLS failures use `core.net.NetError`; there is no separate TLS error hierarchy.
 
 ---
 

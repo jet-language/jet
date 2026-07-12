@@ -2650,7 +2650,7 @@ fn run() {
 "#;
     let (code, stdout, stderr) = build_and_run(&dir, "enum_serde", src, &[], None);
     assert_eq!(code, 0, "generated enum codec failed: {stderr}");
-    assert_eq!(stdout, "\"Idle\"\n{\"Count\":3}\n{\"Named\":{\"enabled\":true,\"name\":\"x\"}}\n7\n");
+    assert_eq!(stdout, "\"Idle\"\n{\"Count\":3}\n{\"Named\":{\"name\":\"x\",\"enabled\":true}}\n7\n");
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -2691,7 +2691,7 @@ fn run() {
     assert_eq!(code, 0, "generated internally tagged enum failed: {stderr}");
     assert_eq!(
         stdout,
-        "{\"type\":\"Idle\"}\n{\"type\":\"Count\",\"value\":3}\n{\"enabled\":true,\"name\":\"x\",\"type\":\"Named\"}\n{\"type\":\"Idle\"}\n{\"type\":\"Count\",\"value\":7}\n{\"enabled\":false,\"name\":\"y\",\"type\":\"Named\"}\n"
+        "{\"type\":\"Idle\"}\n{\"type\":\"Count\",\"value\":3}\n{\"type\":\"Named\",\"name\":\"x\",\"enabled\":true}\n{\"type\":\"Idle\"}\n{\"type\":\"Count\",\"value\":7}\n{\"type\":\"Named\",\"name\":\"y\",\"enabled\":false}\n"
     );
     let _ = fs::remove_dir_all(&dir);
 }
@@ -2925,23 +2925,23 @@ fn pick() -> Int {
 }
 
 fn encoded(e: Email, i: Int) -> String {
-    shallow := Data.Text(copy e.addr)
-    nested := Data.Text(copy e.nested.text)
-    indexed := Data.Text(copy e.items[0].text)
-    computed := Data.Text(copy e.items[i + 1].text)
-    called := Data.Text(copy e.items[pick()].text)
-    parenthesized := Data.Text(copy e.items[-(-i)].text)
-    conditional := Data.Text(copy e.items[if i == 0 { 0 } else { 1 }].text)
+    shallow := DataTree.Text(copy e.addr)
+    nested := DataTree.Text(copy e.nested.text)
+    indexed := DataTree.Text(copy e.items[0].text)
+    computed := DataTree.Text(copy e.items[i + 1].text)
+    called := DataTree.Text(copy e.items[pick()].text)
+    parenthesized := DataTree.Text(copy e.items[-(-i)].text)
+    conditional := DataTree.Text(copy e.items[if i == 0 { 0 } else { 1 }].text)
     return "{json.to_string(shallow)}|{json.to_string(nested)}|{json.to_string(indexed)}|{json.to_string(computed)}|{json.to_string(called)}|{json.to_string(parenthesized)}|{json.to_string(conditional)}"
 }
 
-fn slice_data(xs: [Data]) -> Data {
-    return Data.Array(xs[0..1])
+fn slice_data(xs: [DataTree]) -> DataTree {
+    return DataTree.Array(xs[0..1])
 }
 
 fn run() {
     e := Email.{addr: "a@b.com", nested: Address.{text: "inside"}, items: [Address.{text: "zero"}, Address.{text: "item"}]}
-    sliced := slice_data([Data.Text("slice0"), Data.Text("slice1")])
+    sliced := slice_data([DataTree.Text("slice0"), DataTree.Text("slice1")])
     print("{encoded(e, 0)}|{json.to_string(sliced)}")
 }
 "#,
