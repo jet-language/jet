@@ -1733,6 +1733,15 @@ fn bare_question_name_is_the_primary_docs_spelling() {
 }
 
 #[test]
+fn live_binding_shadows_same_name_session_item_in_docs_and_completion() {
+    let out = run_transcript(
+        &["fn answer() -> Int { return 1 }", "answer :: 42", "?answer"],
+        None,
+    );
+    assert!(out.contains("answer: Int :: 42"), "got: {out:?}");
+}
+
+#[test]
 fn bare_question_mark_alone_shows_help_like_colon_form() {
     let out = run_transcript(&["?"], None);
     assert!(out.contains("REPL meta-commands"), "got: {out:?}");

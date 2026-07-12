@@ -1,8 +1,8 @@
 //! D-SEMINDEX1 integration tests for the stable semantic-index API.
 
 use jet_semindex::{
-    open, open_symbols, SemanticProvenance, SemanticSymbolKind, SymbolKind, ViewProjectionFact,
-    ViewSourceFact, SCHEMA_VERSION,
+    open, open_symbols, SemanticProvenance, SemanticSymbol, SemanticSymbolIndex,
+    SemanticSymbolKind, SymbolKind, ViewProjectionFact, ViewSourceFact, SCHEMA_VERSION,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -19,6 +19,122 @@ fn temp_fixture(name: &str, src: &str) -> PathBuf {
     let path = dir.join(name);
     fs::write(&path, src).expect("write semindex fixture");
     path
+}
+
+fn fact(
+    identity: &str,
+    name: &str,
+    qualified_name: &str,
+    kind: SemanticSymbolKind,
+    provenance: SemanticProvenance,
+) -> SemanticSymbol {
+    SemanticSymbol {
+        identity: identity.to_string(),
+        name: name.to_string(),
+        qualified_name: qualified_name.to_string(),
+        owner: qualified_name.split_once('.').map(|(owner, _)| owner.to_string()),
+        module_path: "test".to_string(),
+        kind,
+        signature: identity.to_string(),
+        summary: String::new(),
+        examples: Vec::new(),
+        provenance,
+        span: None,
+    }
+}
+
+#[test]
+fn semantic_visibility_prefers_live_and_local_bindings() {
+    let index = SemanticSymbolIndex::new(vec![
+        fact(
+            "builtin:keyword:answer", "answer", "answer", SemanticSymbolKind::Keyword,
+            SemanticProvenance::Builtin { module: "syntax".to_string() },
+        ),
+        fact(
+            "import:test::api.answer::answer", "answer", "answer",
+            SemanticSymbolKind::Function, SemanticProvenance::Session,
+        ),
+        fact(
+            "fn:session::answer", "answer", "answer", SemanticSymbolKind::Function,
+            SemanticProvenance::Session,
+        ),
+        fact(
+            "session:binding:answer", "answer", "answer", SemanticSymbolKind::Local,
+            SemanticProvenance::Session,
+        ),
+    ]);
+    assert_eq!(
+        index.resolve_visible("answer").expect("visible answer").identity,
+        "session:binding:answer"
+    );
+    let completions = index.complete_visible("ans", None);
+    assert_eq!(completions.len(), 1);
+    assert_eq!(completions[0].identity, "session:binding:answer");
+}
+
+#[test]
+fn semantic_visibility_orders_items_imports_and_builtins() {
+    let builtin = fact(
+        "builtin:keyword:answer", "answer", "answer", SemanticSymbolKind::Keyword,
+        SemanticProvenance::Builtin { module: "syntax".to_string() },
+    );
+    let import = fact(
+        "import:test::api.answer::answer", "answer", "answer",
+        SemanticSymbolKind::Function, SemanticProvenance::Session,
+    );
+    let item = fact(
+        "fn:session::answer", "answer", "answer", SemanticSymbolKind::Function,
+        SemanticProvenance::Session,
+    );
+    assert_eq!(
+        SemanticSymbolIndex::new(vec![builtin.clone(), import.clone()])
+            .resolve_visible("answer").unwrap().identity,
+        import.identity
+    );
+    assert_eq!(
+        SemanticSymbolIndex::new(vec![builtin, import, item.clone()])
+            .resolve_visible("answer").unwrap().identity,
+        item.identity
+    );
+}
+
+#[test]
+fn semantic_visibility_uses_current_module_context() {
+    let mut current = fact(
+        "fn:current::answer", "answer", "answer", SemanticSymbolKind::Function,
+        SemanticProvenance::Source { module_path: "current.jet".to_string() },
+    );
+    current.module_path = "current.jet".to_string();
+    let mut foreign_local = fact(
+        "local:other::answer", "answer", "answer", SemanticSymbolKind::Local,
+        SemanticProvenance::Source { module_path: "other.jet".to_string() },
+    );
+    foreign_local.module_path = "other.jet".to_string();
+    let index = SemanticSymbolIndex::new(vec![current.clone(), foreign_local]);
+    assert_eq!(
+        index.resolve_visible_in("answer", Some("current.jet")).unwrap().identity,
+        current.identity
+    );
+    assert_eq!(index.complete_visible_in("ans", None, Some("current.jet")).len(), 1);
+}
+
+#[test]
+fn semantic_visibility_retains_explicit_qualified_alternatives() {
+    let index = SemanticSymbolIndex::new(vec![
+        fact(
+            "method:List.answer", "answer", "List.answer", SemanticSymbolKind::Member,
+            SemanticProvenance::Builtin { module: "core".to_string() },
+        ),
+        fact(
+            "method:Map.answer", "answer", "Map.answer", SemanticSymbolKind::Member,
+            SemanticProvenance::Builtin { module: "core".to_string() },
+        ),
+    ]);
+    assert_eq!(index.resolve_visible("List.answer").unwrap().identity, "method:List.answer");
+    let qualified = index.complete_visible("", Some("List"));
+    assert_eq!(qualified.len(), 1);
+    assert_eq!(qualified[0].identity, "method:List.answer");
+    assert!(index.lookup_identity("method:Map.answer").is_some());
 }
 
 #[test]

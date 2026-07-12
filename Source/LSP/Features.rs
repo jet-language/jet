@@ -51,9 +51,8 @@ pub(crate) fn compute_hover(
         }
     }
     let name = find_ident_at(tokens, offset)?;
-    let symbols = db.symbols.lookup(name);
-    if symbols.len() == 1 {
-        return Some(semantic_hover(symbols[0]));
+    if let Some(symbol) = db.symbols.resolve_visible_in(name, Some(path)) {
+        return Some(semantic_hover(symbol));
     }
     db.hover_at(path, offset).map(str::to_string)
 }
