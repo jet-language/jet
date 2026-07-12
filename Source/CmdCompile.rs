@@ -1663,6 +1663,12 @@ fn manifest_fingerprint(file: &str) -> String {
 /// separate key spaces (a `jet test` harness binary can never be served for a
 /// `jet run`). The toolchain version and `pkg.jet` fingerprint ride the salt.
 fn native_cache_key(file: &str, profile_tag: &str, mode_tag: &str) -> Option<String> {
+    // `jet prove` consumes a compiler-private structured harness protocol. A
+    // dirty/development compiler must never receive an older cached harness
+    // that predates or mismatches that protocol.
+    if std::env::var_os("JET_PROVE_FRESH_TEST").is_some() {
+        return None;
+    }
     let bundle = jet::Loader::load_entry_with_overlay(file, None, false).ok()?;
     let uses_embed = bundle.modules.iter().any(|m| {
         m.source.contains(jet::Syntax::BUILTIN_EMBED_FILE)

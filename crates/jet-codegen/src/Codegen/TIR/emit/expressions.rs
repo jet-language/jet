@@ -1040,7 +1040,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         TExprKind::Lambda(lam) => {
             let move_kw = if lam.is_move { "move " } else { "" };
             let closure = format!("{}|{}| {}", move_kw, lam.params.join(", "), lam.body);
-            let wrapped = if lam.boxed {
+            let wrapped = if lam.arc {
+                format!("std::sync::Arc::new({})", closure)
+            } else if lam.boxed {
                 format!("Box::new({})", closure)
             } else {
                 closure
@@ -1832,7 +1834,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     match (kind.as_str(), method.as_str()) {
                         ("HttpMux", "get" | "post" | "put" | "delete" | "patch" | "head" | "options") => {
                             format!(
-                                "{{ {}jet_http_mux_add(&({}), \"{}\", &({}), {}) }}",
+                                "{{ {}jet_http_mux_add_handler(&({}), \"{}\", &({}), {}) }}",
                                 root,
                                 recv,
                                 method.to_uppercase(),
@@ -1875,6 +1877,8 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             a(0),
                             a(1)
                         ),
+                        ("HttpSrvResp", "status") => format!("{}jet_http_srv_response_status(&({}))", root, recv),
+                        ("HttpSrvResp", "body") => format!("{}jet_http_srv_response_body(&({}))", root, recv),
                         ("HttpServer", "local_addr") => format!("{}jet_http_server_local_addr(&({}))", root, recv),
                         ("HttpServer", "serve") => format!("{}jet_http_server_serve(&({}))", root, recv),
                         ("HttpServer", "shutdown") => format!("{}jet_http_server_shutdown(&({}), &({}))", root, recv, a(0)),

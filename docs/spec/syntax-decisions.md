@@ -3267,6 +3267,22 @@ Complex calendars (cron expressions, timezones, jitter) stay with the
 runtime API or jetos timers; operator-side cadence overrides live at the
 jetos/service layer with explain provenance.
 
+*Shipped 2026-07-12 (card #505, slice 2)*: `#Task fn` (D-JPK-TASKRUN1) and
+`#Every(…)` parse, placement-check (E0925), and value-check (E0926); `jet
+dev`'s watch loop runs due tasks on their own schedule (UTC for
+`#Every("HH:MM")` — timezone-aware calendars stay the jetos/service tier's
+job per this same law). The other two named consumers have no substrate to
+wire into, not merely a missing wire: D-JPK-TASKRUN1 itself has no `jetpack run
+<name>` dispatch yet (no CLI verb, no by-name invocation outside `jet dev`),
+and D-SERVICE1 ("sema-known structured service tree") has no typed
+builder/worker/group behind it at all — nothing exists yet to carry a
+schedule INTO a service runtime or a jetos workload. jetos's systemd timer
+EMISSION already exists (`systemd.timers.<name>` in
+`crates/jetpack/src/JetOS/nixos_backend.rs`, driven by a `Service`'s
+`timer:` extra field) but nothing feeds it a Jet-source `#Every(…)` fact,
+because the app-to-jetos-workload deployment pipeline that would carry it
+doesn't exist either. Both are real future cards, not corners cut here.
+
 **D-JPK-TOOLRUN1=A — unified `jetpack tool` noun**: `jetpack tool run <ref>`
 executes a package binary ephemerally across all providers (generalizing the
 nix-only `jetpack run nixpkgs:pkg` bridge); `jetpack tool install <ref>`

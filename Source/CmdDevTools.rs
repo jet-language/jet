@@ -77,9 +77,15 @@ pub(crate) fn run_dev(
     // diffed against it for type stability (D-HOTSWAP1).
     let mut prev_bundle = render_dev_iteration(file, try_anyway, mode, use_interpreter);
     let mut last_mtime = file_mtime(path);
+    // D-SCHEDULE1 (card #505): due `#Task #Every(…)` fns fire on their own
+    // schedule, independent of file-change ticks.
+    let mut clock = TaskClock::new();
 
     loop {
         std::thread::sleep(std::time::Duration::from_millis(120));
+        if let Some(bundle) = &prev_bundle {
+            run_due_tasks(bundle, file, try_anyway, mode, &mut clock);
+        }
         let now = file_mtime(path);
         if now != last_mtime {
             last_mtime = now;
@@ -94,6 +100,114 @@ pub(crate) fn run_dev(
                 use_interpreter,
             );
         }
+    }
+}
+
+/// D-SCHEDULE1 (ratified 2026-07-11, card #505): the `jet dev` consumer of
+/// schedule-as-code — check every `#Task #Every(…)` fn in `bundle` against
+/// `clock`, and run whichever are due through the same interpreter tier the
+/// rest of the dev loop uses (`jet::Interpreter::run_named_task`). This is
+/// the dev-loop tier only (D-DEV3); the service runtime (D-SERVICE1) and a
+/// jetos timer projection are the production/OS consumers of the identical
+/// `#Every(…)` declaration — see the D-SCHEDULE1 row in
+/// docs/spec/syntax-decisions.md for the full three-consumer law.
+fn run_due_tasks(
+    bundle: &jet::AST::ProgramBundle,
+    file: &str,
+    try_anyway: bool,
+    mode: OutputMode,
+    clock: &mut TaskClock,
+) {
+    let tasks = jet::Interpreter::scheduled_tasks(bundle);
+    if tasks.is_empty() {
+        return;
+    }
+    for name in clock.due(&tasks) {
+        println!("\n— due task `{}` —", name);
+        match jet::Interpreter::run_named_task(bundle, &name, try_anyway) {
+            jet::Interpreter::RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => {
+                print!("{stdout}");
+                eprint!("{stderr}");
+                if exit_code != 0 {
+                    eprintln!("task `{name}` exited with code {exit_code}");
+                }
+            }
+            jet::Interpreter::RunOutcome::Problems(diags) => {
+                let src = fs::read_to_string(file).unwrap_or_default();
+                report_problems(mode, file, &src, &diags);
+            }
+        }
+    }
+}
+
+/// D-SCHEDULE1: per-task last-run bookkeeping for the due-task tick. An
+/// `Interval` schedule tracks the `Instant` it last ran; a `DailyAt`
+/// schedule tracks the UTC day index (days since the Unix epoch) it last
+/// ran, so it fires once inside its matching minute, not on every 120ms
+/// tick within that minute. UTC only — D-SCHEDULE1's own law text carves
+/// timezone-aware calendars out to "the runtime API or jetos timers"; this
+/// is the lightweight dev-loop convenience tier, not that.
+pub(crate) struct TaskClock {
+    last_interval_run: std::collections::HashMap<String, std::time::Instant>,
+    last_daily_run_day: std::collections::HashMap<String, u64>,
+}
+
+impl TaskClock {
+    pub(crate) fn new() -> Self {
+        TaskClock {
+            last_interval_run: std::collections::HashMap::new(),
+            last_daily_run_day: std::collections::HashMap::new(),
+        }
+    }
+
+    /// Which task names are due right now — records the firing so the same
+    /// task doesn't fire again on the very next tick.
+    pub(crate) fn due(&mut self, tasks: &[(String, jet::AST::EverySchedule)]) -> Vec<String> {
+        let unix_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        self.due_at(tasks, unix_secs)
+    }
+
+    /// The testable core of `due`: `unix_secs` is injected so the day/window
+    /// arithmetic can be checked without racing real wall-clock time.
+    fn due_at(&mut self, tasks: &[(String, jet::AST::EverySchedule)], unix_secs: u64) -> Vec<String> {
+        let now = std::time::Instant::now();
+        let day = unix_secs / 86_400;
+        let secs_of_day = unix_secs % 86_400;
+        let mut fired = Vec::new();
+        for (name, schedule) in tasks {
+            match *schedule {
+                jet::AST::EverySchedule::Interval { nanos } => {
+                    let due = match self.last_interval_run.get(name) {
+                        None => true,
+                        Some(last) => now.duration_since(*last).as_nanos() >= nanos,
+                    };
+                    if due {
+                        self.last_interval_run.insert(name.clone(), now);
+                        fired.push(name.clone());
+                    }
+                }
+                jet::AST::EverySchedule::DailyAt { hour, minute } => {
+                    let target_secs = hour as u64 * 3600 + minute as u64 * 60;
+                    // Due once inside the matching minute — a 120ms poll tick
+                    // easily lands inside a 60-second window.
+                    let in_window =
+                        secs_of_day >= target_secs && secs_of_day < target_secs + 60;
+                    let already_ran_today = self.last_daily_run_day.get(name) == Some(&day);
+                    if in_window && !already_ran_today {
+                        self.last_daily_run_day.insert(name.clone(), day);
+                        fired.push(name.clone());
+                    }
+                }
+            }
+        }
+        fired
     }
 }
 
@@ -1681,5 +1795,63 @@ fn run_bench_regions(file: &str, src: &str, mode: OutputMode) {
     }
     if !out.status.success() {
         exit(ExitCodes::USER_ERROR);
+    }
+}
+
+#[cfg(test)]
+mod schedule_tests {
+    use super::TaskClock;
+
+    /// D-SCHEDULE1 (card #505): an interval task fires the first time it's
+    /// checked (no prior run), then not again immediately after.
+    #[test]
+    fn interval_fires_once_then_waits() {
+        let mut clock = TaskClock::new();
+        let tasks = vec![(
+            "prune".to_string(),
+            jet::AST::EverySchedule::Interval {
+                nanos: 60 * 1_000_000_000,
+            },
+        )];
+        assert_eq!(clock.due(&tasks), vec!["prune".to_string()]);
+        assert!(
+            clock.due(&tasks).is_empty(),
+            "must not re-fire on the very next tick"
+        );
+    }
+
+    /// A daily task fires when `unix_secs` lands inside its target minute,
+    /// stays quiet outside that window, and does not re-fire later the same
+    /// day even if checked again inside the window.
+    #[test]
+    fn daily_fires_in_window_then_dedupes_same_day() {
+        let mut clock = TaskClock::new();
+        let tasks = vec![(
+            "nightly".to_string(),
+            jet::AST::EverySchedule::DailyAt { hour: 3, minute: 0 },
+        )];
+        let day0_before_window = 10 * 86_400 + 2 * 3600 + 59 * 60; // 02:59 on day 10
+        let day0_in_window = 10 * 86_400 + 3 * 3600 + 0 * 60 + 30; // 03:00:30 on day 10
+        let day0_after_window = 10 * 86_400 + 3 * 3600 + 5 * 60; // 03:05 on day 10
+        let day1_in_window = 11 * 86_400 + 3 * 3600; // 03:00 on day 11
+
+        assert!(
+            clock.due_at(&tasks, day0_before_window).is_empty(),
+            "must not fire before the target minute"
+        );
+        assert_eq!(
+            clock.due_at(&tasks, day0_in_window),
+            vec!["nightly".to_string()],
+            "must fire inside the target minute"
+        );
+        assert!(
+            clock.due_at(&tasks, day0_after_window).is_empty(),
+            "must not re-fire later the same day, even outside the window"
+        );
+        assert_eq!(
+            clock.due_at(&tasks, day1_in_window),
+            vec!["nightly".to_string()],
+            "must fire again the next day's matching window"
+        );
     }
 }

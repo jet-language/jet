@@ -1423,7 +1423,7 @@ fn emit_func_with_contracts(cx: &Cx, f: &Func, tir: &TIR::TFunc, out: &mut Strin
         let cond = TIR::render_contract_cond(f, &clause.cond, None, cx);
         let (_, line, _) = TIR::tir_src_line_at(&cx.src, clause.span.start);
         out.push_str(&format!(
-            "    if !({cond}) {{ jet_contract_fail({file}, {line}, \"Pre\", &{msg}); }}\n",
+            "    let __jet_contract_ok = {cond};\n    jet_proof_record(1, if __jet_contract_ok {{ 0 }} else {{ 1 }}, \"Pre\", &{msg}, {file}, {line});\n    if !__jet_contract_ok {{ jet_contract_fail({file}, {line}, \"Pre\", &{msg}); }}\n",
             cond = cond,
             file = escape_rust_str(&cx.file),
             line = line,
@@ -1446,7 +1446,7 @@ fn emit_func_with_contracts(cx: &Cx, f: &Func, tir: &TIR::TFunc, out: &mut Strin
                 TIR::render_contract_cond(f, &clause.cond, Some(("__jet_result", &ret_ty)), cx);
             let (_, line, _) = TIR::tir_src_line_at(&cx.src, clause.span.start);
             out.push_str(&format!(
-                "    if !({cond}) {{ jet_contract_fail({file}, {line}, \"Post\", &{msg}); }}\n",
+                "    let __jet_contract_ok = {cond};\n    jet_proof_record(1, if __jet_contract_ok {{ 0 }} else {{ 1 }}, \"Post\", &{msg}, {file}, {line});\n    if !__jet_contract_ok {{ jet_contract_fail({file}, {line}, \"Post\", &{msg}); }}\n",
                 cond = cond,
                 file = escape_rust_str(&cx.file),
                 line = line,

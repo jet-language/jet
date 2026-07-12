@@ -486,6 +486,32 @@ impl<'a> Fmt<'a> {
         if f.is_replayable {
             self.write(&format!("#{} ", Syntax::ATTR_REPLAYABLE));
         }
+        // D-SCHEDULE1 (card #505): `#Task` / `#Every(…)` schedule-as-code
+        // markers precede `pub`/`fn`, `#Task` first (the parser accepts
+        // either order; fmt canonicalizes on one so round-tripping is
+        // idempotent).
+        if f.is_task {
+            self.write(&format!("#{} ", Syntax::KW_TASK));
+        }
+        if let Some(every) = &f.every {
+            self.write(&format!("#{}(", Syntax::ATTR_EVERY));
+            match &every.arg {
+                crate::AST::EveryArg::Duration { int, float, suffix, .. } => {
+                    if let Some(n) = int {
+                        self.write(&n.to_string());
+                    } else if let Some(v) = float {
+                        self.write(&fmt_float(*v));
+                    }
+                    self.write(suffix);
+                }
+                crate::AST::EveryArg::WallClock { text, .. } => {
+                    self.write("\"");
+                    self.write(&escape_str_lit(text));
+                    self.write("\"");
+                }
+            }
+            self.write(") ");
+        }
         // D-MUSTUSE1 (c18iwxqx): `@MustUse fn` / method precedes `pub`/`fn`.
         if f.is_must_use {
             self.write(&format!("@{} ", Syntax::ATTR_MUST_USE));

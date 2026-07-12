@@ -120,6 +120,11 @@ impl<'a> Parser<'a> {
             let mut is_replayable = false;
             let mut replayable_span = None;
             let mut meta = None;
+            // D-SCHEDULE1 (card #505): `#Task fn` / `#Every(…) #Task fn` —
+            // schedule-as-code. Either order, alongside the other markers above.
+            let mut is_task = false;
+            let mut task_span = None;
+            let mut every = None;
             // D-PREPOST1: `@Pre(cond, "msg")` / `@Post(cond, "msg")` — repeatable,
             // any order, alongside the typestate/web markers above.
             let mut pre = Vec::new();
@@ -144,6 +149,13 @@ impl<'a> Parser<'a> {
                     replayable_span = Some(Span::new(start, end));
                 } else if meta.is_none() && self.at_meta_attr() {
                     meta = Some(self.parse_meta_attr()?);
+                } else if !is_task && self.at_task_fn() {
+                    let start = self.bump().span.start; // `#`
+                    let end = self.bump().span.end; // `Task`
+                    is_task = true;
+                    task_span = Some(Span::new(start, end));
+                } else if every.is_none() && self.at_every_fn() {
+                    every = Some(self.parse_every_marker()?);
                 } else if self.at_contract_clause_fn(Syntax::CONTRACT_PRE) {
                     pre.push(self.parse_contract_clause(Syntax::CONTRACT_PRE)?);
                 } else if self.at_contract_clause_fn(Syntax::CONTRACT_POST) {
@@ -193,7 +205,22 @@ impl<'a> Parser<'a> {
                 is_replayable,
                 replayable_span,
             )?;
-            Ok(Func { pre, post, ..f })
+            // D-SCHEDULE1: `#Every(…)` only means something alongside `#Task` —
+            // pushed as a recoverable diagnostic (like the E0062 plane teaching
+            // errors above) so the rest of the function still parses normally.
+            if let Some(m) = &every {
+                if !is_task {
+                    self.diags.push(Self::e0925_every_without_task(m.span));
+                }
+            }
+            Ok(Func {
+                pre,
+                post,
+                is_task,
+                task_span,
+                every,
+                ..f
+            })
         }
     
         /// D-PREPOST1: is the cursor at `@Pre(`/`@Post(` (or the retired `#`
@@ -436,5 +463,94 @@ impl<'a> Parser<'a> {
                 span: Span::new(start, end),
             })
         }
-    
+
+        /// D-SCHEDULE1 (card #505): parse `#Every(…)` — a duration literal
+        /// (`5min`) or a quoted daily wall-clock time (`"03:00"`). The parser
+        /// only records the raw shape; sema resolves+range-checks it
+        /// (`EveryArg::resolve`, E0926 on a bad value) — matching D-UNITLIT1's
+        /// own parse-raw/sema-resolves split for `Expr::UnitLit`.
+        pub(super) fn parse_every_marker(&mut self) -> Result<crate::AST::EveryMarker, Diagnostic> {
+            let start = self.bump().span.start; // `#`
+            self.bump(); // `Every`
+            self.expect(TokKind::LParen, "after `#Every`")?;
+            let arg = match self.peek().kind.clone() {
+                TokKind::UnitNumber { int, float, suffix } => {
+                    let tok_span = self.bump().span;
+                    let suffix_span = Span::new(tok_span.end - suffix.len(), tok_span.end);
+                    crate::AST::EveryArg::Duration {
+                        int,
+                        float,
+                        suffix,
+                        suffix_span,
+                    }
+                }
+                TokKind::Str(parts) => {
+                    let tok_span = self.bump().span;
+                    if parts.len() != 1 {
+                        return Err(Self::e0926_bad_every_arg(tok_span));
+                    }
+                    match &parts[0] {
+                        StrTokPart::Lit(s) => crate::AST::EveryArg::WallClock {
+                            text: s.clone(),
+                            text_span: tok_span,
+                        },
+                        StrTokPart::Interp(_) => return Err(Self::e0926_bad_every_arg(tok_span)),
+                    }
+                }
+                _ => return Err(Self::e0926_bad_every_arg(self.peek().span)),
+            };
+            let end = self.peek().span.end;
+            self.expect(TokKind::RParen, "to close `#Every(…)`")?;
+            Ok(crate::AST::EveryMarker {
+                arg,
+                span: Span::new(start, end),
+            })
+        }
+
+        /// E0925: `#Task`/`#Every(…)` written somewhere D-SCHEDULE1 doesn't
+        /// place them — on a method (only a top-level function can be a
+        /// task, D-JPK-TASKRUN1).
+        pub(super) fn e0925_task_not_toplevel(span: Span) -> Diagnostic {
+            Diagnostic::error(
+                "E0925",
+                "`#Task`/`#Every(…)` only mark a top-level function".to_string(),
+                "a task is `jetpack run <name>`'s unit of work — a method has no free-standing \
+                 name to invoke, so it can't be one (D-JPK-TASKRUN1)."
+                    .to_string(),
+                "move this function to the top level, beside `fn run()`.".to_string(),
+                Some(span),
+            )
+        }
+
+        /// E0925: `#Every(…)` without the `#Task` marker it schedules.
+        pub(super) fn e0925_every_without_task(span: Span) -> Diagnostic {
+            Diagnostic::error(
+                "E0925",
+                "`#Every(…)` needs `#Task` on the same function".to_string(),
+                "a schedule only means something on a task — `#Every(…)` names when `#Task` \
+                 runs, it isn't a standalone timer."
+                    .to_string(),
+                "add `#Task` (`#Task #Every(5min) fn …`), or drop `#Every(…)` if this isn't a \
+                 scheduled task."
+                    .to_string(),
+                Some(span),
+            )
+        }
+
+        /// E0926: `#Every(…)`'s argument isn't a duration literal or a quoted
+        /// `"HH:MM"` wall-clock time — the two shapes D-SCHEDULE1 allows.
+        pub(super) fn e0926_bad_every_arg(span: Span) -> Diagnostic {
+            Diagnostic::error(
+                "E0926",
+                "`#Every(…)` needs a duration literal or a quoted daily time".to_string(),
+                "a schedule is either a repeat interval (D-UNITLIT1 duration literal) or a fixed \
+                 daily wall-clock trigger — nothing else names a cadence."
+                    .to_string(),
+                "write `#Every(5min)` (`ns`/`us`/`ms`/`s`/`min`) or `#Every(\"03:00\")` (24h \
+                 `HH:MM`)."
+                    .to_string(),
+                Some(span),
+            )
+        }
+
 }

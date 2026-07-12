@@ -2,6 +2,7 @@ use crate::AST::{Expr, Lambda, LambdaBody, Stmt, Type};
 use crate::Codegen::Cx;
 use crate::Codegen::mangle;
 use crate::Codegen::TIR::emit_tir_expr;
+use crate::Codegen::TIR::emit_tir_lambda_block;
 use crate::Codegen::TIR::emit_tir_stmts;
 use crate::Codegen::TIR::fork_panic;
 use crate::Codegen::TIR::JitSpawnCapture;
@@ -102,7 +103,7 @@ pub(crate) fn lower_lambda_expecting(
         LambdaBody::Block(stmts) => {
             let lowered = lower_stmts(stmts, cx, &mut lam_env);
             let mut inner = String::new();
-            emit_tir_stmts(&lowered, cx, &mut inner, 1);
+            emit_tir_lambda_block(&lowered, cx, &mut inner, 1);
             (format!("{{ {} }}", inner), TLambdaBody::Block(lowered))
         }
     };
@@ -116,6 +117,9 @@ pub(crate) fn lower_lambda_expecting(
         source_params: lam.params.iter().map(|p| p.name.clone()).collect(),
         is_move,
         boxed: lam.meta.escapes,
+        arc: lam.meta.escapes
+            && lam.params.len() == 1
+            && matches!(lam.params[0].ty.as_ref(), Some(Type::Named(name)) if name == "HttpSrvReq"),
     }
 }
 

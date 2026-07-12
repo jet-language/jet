@@ -775,6 +775,18 @@ pub struct Func {
     /// ambient Time/Rand/Net/Io unless routed through deterministic capabilities.
     pub is_replayable: bool,
     pub replayable_span: Option<Span>,
+    /// D-JPK-TASKRUN1 / D-SCHEDULE1 (card #505): `#Task fn` — a top-level
+    /// function jetpack can invoke by name (`jetpack run <name>`). Top-level
+    /// only (E0925 elsewhere). Erased in codegen (I3) — an ordinary fn.
+    pub is_task: bool,
+    pub task_span: Option<Span>,
+    /// D-SCHEDULE1 (ratified 2026-07-11, card #505): `#Every(...)` — a
+    /// declarative schedule on a `#Task fn`. `None` means unscheduled (a
+    /// plain task, invoked manually only). Legal only alongside `is_task`
+    /// (E0925 otherwise). Compile-checked (E0926 on a bad argument), then
+    /// carried as metadata for `jet dev`/service-runtime/jetos consumers —
+    /// erased in codegen (I3), never a runtime value the generated fn sees.
+    pub every: Option<EveryMarker>,
     /// D-MUSTUSE1 (c18iwxqx): `@MustUse fn` / `@MustUse` method — callers must not
     /// drop the return value as a bare expression statement (E0419).
     pub is_must_use: bool,
@@ -823,6 +835,114 @@ pub struct StateTransition {
     pub from: Option<String>,
     pub to: String,
     pub span: Span,
+}
+
+/// D-SCHEDULE1 (ratified 2026-07-11, card #505): the raw `#Every(…)`
+/// argument as the parser saw it — a duration literal (`#Every(5min)`) or a
+/// quoted daily wall-clock time (`#Every("03:00")`). Sema resolves this
+/// (`Syntax::resolve_every_schedule`) into a checked `EverySchedule`,
+/// pushing E0926 on a bad value; codegen never reads it (I3, erased).
+#[derive(Debug, Clone)]
+pub enum EveryArg {
+    /// `#Every(5min)` — same raw pieces as `Expr::UnitLit`, minus the
+    /// `#UnitFamily` scoping (a schedule duration is a fixed, closed
+    /// vocabulary — `Syntax::schedule_duration_suffix_nanos`).
+    Duration {
+        int: Option<i64>,
+        float: Option<f64>,
+        suffix: String,
+        suffix_span: Span,
+    },
+    /// `#Every("03:00")` — the plain string content (no interpolation).
+    WallClock { text: String, text_span: Span },
+}
+
+/// D-SCHEDULE1: the whole `#Every(…)` marker — its raw argument plus the
+/// span of the marker itself (diagnostics point here by default).
+#[derive(Debug, Clone)]
+pub struct EveryMarker {
+    pub arg: EveryArg,
+    pub span: Span,
+}
+
+/// D-SCHEDULE1: a resolved, checked `#Every(…)` schedule — what
+/// `Syntax::resolve_every_schedule` produces from a valid `EveryArg`. One
+/// value; every consumer (`jet dev`, the service runtime, a jetos timer
+/// projection) derives from the same `EveryArg` instead of re-parsing it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum EverySchedule {
+    /// Re-run every `nanos` nanoseconds since the task last ran.
+    Interval { nanos: u128 },
+    /// Re-run once daily at this local 24h wall-clock time.
+    DailyAt { hour: u8, minute: u8 },
+}
+
+/// D-SCHEDULE1: why `resolve_every_schedule` rejected an `EveryArg` — sema
+/// turns each into the matching E0926 What/Why/Fix row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EveryScheduleError {
+    /// The duration suffix isn't in the closed schedule vocabulary
+    /// (`ns`/`us`/`ms`/`s`/`min`).
+    UnknownDurationUnit,
+    /// The duration is zero or negative — a schedule must advance time.
+    NonPositiveDuration,
+    /// The wall-clock string isn't exactly `HH:MM` (two digits, `:`, two
+    /// digits).
+    BadWallClockFormat,
+    /// `HH` is outside `00`..=`23`.
+    HourOutOfRange,
+    /// `MM` is outside `00`..=`59`.
+    MinuteOutOfRange,
+}
+
+impl EveryArg {
+    /// D-SCHEDULE1: resolve this raw `#Every(…)` argument into a checked
+    /// schedule. Sema calls this once to decide E0926; a runtime consumer
+    /// (`jet dev`, …) calls it again to get the identical answer — one
+    /// function, nothing cached to drift between the two callers.
+    pub fn resolve(&self) -> Result<EverySchedule, EveryScheduleError> {
+        match self {
+            EveryArg::Duration { int, float, suffix, .. } => {
+                let Some(unit_nanos) = crate::Syntax::schedule_duration_suffix_nanos(suffix)
+                else {
+                    return Err(EveryScheduleError::UnknownDurationUnit);
+                };
+                let value = float.unwrap_or_else(|| int.unwrap_or(0) as f64);
+                if value <= 0.0 {
+                    return Err(EveryScheduleError::NonPositiveDuration);
+                }
+                let nanos = (value * unit_nanos as f64).round() as u128;
+                if nanos == 0 {
+                    return Err(EveryScheduleError::NonPositiveDuration);
+                }
+                Ok(EverySchedule::Interval { nanos })
+            }
+            EveryArg::WallClock { text, .. } => {
+                let bytes = text.as_bytes();
+                let digits_ok = bytes.len() == 5
+                    && bytes[2] == b':'
+                    && bytes[0].is_ascii_digit()
+                    && bytes[1].is_ascii_digit()
+                    && bytes[3].is_ascii_digit()
+                    && bytes[4].is_ascii_digit();
+                if !digits_ok {
+                    return Err(EveryScheduleError::BadWallClockFormat);
+                }
+                let hour: u32 = text[0..2].parse().unwrap_or(99);
+                let minute: u32 = text[3..5].parse().unwrap_or(99);
+                if hour > 23 {
+                    return Err(EveryScheduleError::HourOutOfRange);
+                }
+                if minute > 59 {
+                    return Err(EveryScheduleError::MinuteOutOfRange);
+                }
+                Ok(EverySchedule::DailyAt {
+                    hour: hour as u8,
+                    minute: minute as u8,
+                })
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

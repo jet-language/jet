@@ -225,6 +225,11 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: true,
     },
     CommandSpec {
+        name: "prove",
+        summary: "run checked evidence producers and report what they establish",
+        headline: false,
+    },
+    CommandSpec {
         name: "build",
         summary: "compile to a native binary in ./build/",
         headline: false,
@@ -628,6 +633,7 @@ pub const FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--time", help: "with fuzz: wall-clock budget in seconds --time=<n>" },
     FlagSpec { long: "--seed", help: "with fuzz: base PRNG seed --seed=<n> (default: fixed, reproducible)" },
     FlagSpec { long: "--corpus", help: "with fuzz: corpus directory --corpus=<dir> (default: .jet/fuzz/<test>)" },
+    FlagSpec { long: "--lens", help: "with prove: project the human report by an exact evidence facet" },
 ];
 
 /// Is `name` a built-in command?
@@ -685,6 +691,7 @@ pub fn owns_flag_vocabulary(name: &str) -> bool {
             | "expand"
             | "diff"
             | "merge"
+            | "prove"
     )
 }
 

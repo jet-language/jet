@@ -394,6 +394,9 @@ mod tests {
             is_inline_always: false,
             is_replayable: false,
             replayable_span: None,
+            is_task: false,
+            task_span: None,
+            every: None,
             inline_span: None,
             body: Vec::new(),
         }

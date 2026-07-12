@@ -41,6 +41,7 @@ pub use Web::{emit_web, validate_web_tir_support, WebArtifacts, WebTirUnsupporte
 
 /// Emitted at the top of every program: core runtime helpers used by generated Rust.
 const PRELUDE: &str = include_str!("../Prelude/Core.rs");
+const ENV_INIT_PRELUDE: &str = include_str!("../Prelude/EnvInit.rs");
 
 /// Extra helpers for `jet test` harnesses only (M6/S43, E2-M11 D-TOOL4).
 const TEST_PRELUDE: &str = r#"
@@ -803,6 +804,7 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
     out.push_str(&format!("// jet:source-map source={}\n", file));
     out.push_str("#![allow(warnings)]\n\n");
     out.push_str(PRELUDE);
+    out.push_str(ENV_INIT_PRELUDE);
     out.push_str(MEM_PRELUDE);
     out.push_str(GC_PRELUDE);
     out.push_str(LAYOUT_PRELUDE);
@@ -994,6 +996,7 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
     ));
     out.push_str("#![allow(warnings)]\n\n");
     out.push_str(PRELUDE);
+    out.push_str(ENV_INIT_PRELUDE);
     out.push_str(MEM_PRELUDE);
     out.push_str(GC_PRELUDE);
     out.push_str(LAYOUT_PRELUDE);
@@ -1120,6 +1123,7 @@ fn emit_test_main_cov(tests: &[&TestDef], out: &mut String, coverage: bool) {
     out.push_str("struct JetTestSlot { name: &'static str, skip: bool, run: fn() -> Result<(), String> }\n");
     out.push_str("fn main() {\n");
     out.push_str("    jet_std_env_init();\n");
+    out.push_str("    if let Ok(path) = std::env::var(\"JET_TEST_PROOF_REPORT\") { if let Ok(mut file) = std::fs::File::create(path) { use std::io::Write as _; let _ = file.write_all(b\"JETTEST2\"); } }\n");
     out.push_str("    let mut slots: Vec<JetTestSlot> = vec![\n");
     for (i, test) in tests.iter().enumerate() {
         let name = escape_rust_str(&test.name);
@@ -1173,9 +1177,9 @@ fn emit_test_main_cov(tests: &[&TestDef], out: &mut String, coverage: bool) {
     out.push_str("    for (name, skip, res, output) in results {\n");
     out.push_str("        if !output.is_empty() { print!(\"{}\", output); }\n");
     out.push_str("        match (skip, res) {\n");
-    out.push_str("            (true, _) => { println!(\"{}: skip\", name); skipped += 1; }\n");
-    out.push_str("            (false, Some(Ok(()))) => { println!(\"{}: pass\", name); passed += 1; }\n");
-    out.push_str("            (false, Some(Err(msg))) => { println!(\"{}: FAIL\", name); eprintln!(\"  {}\", msg); failed += 1; }\n");
+    out.push_str("            (true, _) => { println!(\"{}: skip\", name); jet_proof_record(0, 2, &name, \"\", \"\", 0); skipped += 1; }\n");
+    out.push_str("            (false, Some(Ok(()))) => { println!(\"{}: pass\", name); jet_proof_record(0, 0, &name, \"\", \"\", 0); passed += 1; }\n");
+    out.push_str("            (false, Some(Err(msg))) => { println!(\"{}: FAIL\", name); eprintln!(\"  {}\", msg); jet_proof_record(0, 1, &name, &msg, \"\", 0); failed += 1; }\n");
     out.push_str("            (false, None) => unreachable!(),\n");
     out.push_str("        }\n");
     out.push_str("    }\n");
@@ -1378,6 +1382,7 @@ pub fn emit_bundle_dbg(
         out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
     }
     out.push_str(PRELUDE);
+    out.push_str(ENV_INIT_PRELUDE);
     out.push_str(MEM_PRELUDE);
     out.push_str(GC_PRELUDE);
     out.push_str(LAYOUT_PRELUDE);
@@ -1499,6 +1504,7 @@ pub fn emit_bundle_tests_cov(
         out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
     }
     out.push_str(PRELUDE);
+    out.push_str(ENV_INIT_PRELUDE);
     out.push_str(MEM_PRELUDE);
     out.push_str(GC_PRELUDE);
     out.push_str(LAYOUT_PRELUDE);
@@ -1682,6 +1688,7 @@ pub fn emit_bundle_fuzz(
         out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
     }
     out.push_str(PRELUDE);
+    out.push_str(ENV_INIT_PRELUDE);
     out.push_str(MEM_PRELUDE);
     out.push_str(GC_PRELUDE);
     out.push_str(LAYOUT_PRELUDE);
@@ -1921,6 +1928,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
     }
     out.push_str(PRELUDE);
+    out.push_str(ENV_INIT_PRELUDE);
     out.push_str(MEM_PRELUDE);
     out.push_str(GC_PRELUDE);
     out.push_str(LAYOUT_PRELUDE);

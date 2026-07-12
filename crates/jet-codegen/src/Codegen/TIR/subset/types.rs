@@ -37,6 +37,9 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
     if matches!(&ty, Type::Named(n) if n == crate::Syntax::TYPE_KEY) {
         return true;
     }
+    if matches!(&ty, Type::Named(n) if n == "HttpHandler") {
+        return true;
+    }
     ty.is_scalar()
         || matches!(&ty, Type::Char | Type::String)
         || is_type_var_param_ty(&ty, cx)

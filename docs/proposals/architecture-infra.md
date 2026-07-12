@@ -18,7 +18,7 @@ already right.
 - **Tests**: 101 integration files, 1,637 `#[test]`s; largest
   tests/jetpack.rs 7.0k LOC. verify-full.sh already tiers (parallel,
   repo-local TMPDIR, Canvas gate, D-CI3 red-flag CI).
-- **Surface census**: 58 registered markers (20 `@` / 38 `#`), derived from
+- **Surface census**: 60 registered markers (20 `@` / 40 `#`), derived from
   `Syntax::CONTRACT_MARKERS` and `Syntax::DIRECTIVE_MARKERS`; 111 KW_ entries,
   ~70 core modules, 587 diagnostic codes.
 - **Census/law drift in Syntax.rs**: `view` listed as a keyword

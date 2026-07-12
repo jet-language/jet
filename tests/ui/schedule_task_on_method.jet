@@ -1,0 +1,18 @@
+// E0925 (D-SCHEDULE1, card #505): `#Task`/`#Every(…)` only mark a top-level
+// function — a method has no free-standing name `jetpack run <name>` could
+// invoke.
+struct Cleaner {
+    label: String,
+}
+
+impl Cleaner {
+    #Task
+    fn sweep(self) {
+        print(self.label)
+    }
+}
+
+fn run() {
+    c := Cleaner.{ label: "x" }
+    c.sweep()
+}

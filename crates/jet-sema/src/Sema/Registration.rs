@@ -1152,6 +1152,9 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     is_reactive: false,
             is_replayable: false,
             replayable_span: None,
+            is_task: false,
+            task_span: None,
+            every: None,
                     is_sanitizer: false,
                     declared_effects: None,
         effect_via: None,
@@ -2910,6 +2913,8 @@ pub(crate) fn check_func_body(
     if f.is_inline_always {
         ck.diags.extend(check_inline_always_fn(f));
     }
+    // D-SCHEDULE1 (card #505): a bad `#Every(…)` value is E0926.
+    ck.diags.extend(check_every_marker(f));
     global_addr_taken.extend(std::mem::take(&mut ck.inline_addr_taken));
     // D-EFF1: record this function's effect summary for the whole-program fixpoint.
     // D-PROP1=A: seed direct with declared positives so solve() propagates the
@@ -2999,6 +3004,9 @@ pub(crate) fn check_error_conv_body(
         is_reactive: false,
         is_replayable: false,
         replayable_span: None,
+        is_task: false,
+        task_span: None,
+        every: None,
         is_must_use: false,
         must_use_span: None,
         maturity: None,
@@ -3331,6 +3339,9 @@ pub(crate) fn synthesize_delegation_method(
         is_reactive: false,
         is_replayable: false,
         replayable_span: None,
+        is_task: false,
+        task_span: None,
+        every: None,
         is_must_use: false,
         must_use_span: None,
         maturity: None,
@@ -3396,6 +3407,9 @@ pub(crate) fn synthesize_default_method(
         is_reactive: false,
         is_replayable: false,
         replayable_span: None,
+        is_task: false,
+        task_span: None,
+        every: None,
         is_must_use: false,
         must_use_span: None,
         maturity: None,

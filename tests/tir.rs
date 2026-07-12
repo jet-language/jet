@@ -1374,6 +1374,37 @@ fn run() {
     assert_eq!(stdout, "42\n");
 }
 
+/// A block lambda's last expression is its value. Prefix statements retain their
+/// semicolons, while the tail must not gain one in generated Rust. The unit lambda
+/// covers the same emitter path and proves removing the tail semicolon does not
+/// change Void closure behavior.
+#[test]
+fn block_lambda_preserves_value_tail_and_void_behavior() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn apply(f: fn(Int) -> Int, x: Int) -> Int {
+    return f(x)
+}
+fn visit(f: fn(Int), x: Int) {
+    f(x)
+}
+fn run() {
+    print(apply((n: Int) => {
+        doubled :: (n * 2)
+        (doubled + 1)
+    }, 20))
+    visit((n: Int) => {
+        print(\"seen {n}\")
+    }, 7)
+}
+";
+    let (code, stdout) = build_and_run("tir_block_lambda_tail", src);
+    assert_eq!(code, 0, "block lambda generated Rust must compile");
+    assert_eq!(stdout, "41\nseen 7\n");
+}
+
 /// c109 Phase 12: numeric width conversions (D-NUMOPS1) — widening (`to_i64`,
 /// infallible `as`), narrowing (`to_u8`, fallible `try_from` unwrapped with `??`),
 /// and int→float (`to_float`, `as`). Each fully-covered function routes through the

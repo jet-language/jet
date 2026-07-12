@@ -1470,6 +1470,7 @@ fn jet_scheduler_panic_should_unwind() -> bool {
 }
 
 fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
+    jet_proof_record(2, 1, "panic", msg, file, line);
     if jet_runtime_should_unwind() {
         panic!("{} (at {}:{})", msg, file, line);
     }
@@ -1499,6 +1500,25 @@ fn jet_contract_fail(file: &str, line: u32, clause_kw: &str, msg: &str) -> ! {
     eprintln!("@{} contract failed: {}", clause_kw, msg);
     eprintln!("  --> {}:{}", file, line);
     std::process::exit(70);
+}
+
+/// Private structured producer channel used only when `jet prove` launches a
+/// test harness. Length framing keeps user strings opaque; terminal text is
+/// never parsed as evidence.
+fn jet_proof_record(kind: u8, state: u8, name: &str, message: &str, file: &str, line: u32) {
+    let Ok(path) = std::env::var("JET_TEST_PROOF_REPORT") else { return };
+    let Ok(mut report) = std::fs::OpenOptions::new().create(true).append(true).open(path) else { return };
+    use std::io::Write as _;
+    if report.metadata().map(|m| m.len() == 0).unwrap_or(false) {
+        let _ = report.write_all(b"JETTEST2");
+    }
+    let _ = report.write_all(&[kind, state]);
+    let _ = report.write_all(&(line as u64).to_be_bytes());
+    for bytes in [name.as_bytes(), message.as_bytes(), file.as_bytes()] {
+        let _ = report.write_all(&(bytes.len() as u64).to_be_bytes());
+        let _ = report.write_all(bytes);
+    }
+    let _ = report.flush();
 }
 // D-NUMOPS1: plain integer arithmetic traps on overflow (safe by default) — a
 // silent corruption becomes a caught bug. Each `+`/`-`/`*`/`/` on a fixed-width
@@ -1569,6 +1589,7 @@ fn jet_panic_rich(
     msg: &str,
     locals: &str,
 ) -> ! {
+    jet_proof_record(2, 1, "panic", msg, file, line);
     let line_s = line.to_string();
     let margin = line_s.len();
     let pad = " ".repeat(margin);

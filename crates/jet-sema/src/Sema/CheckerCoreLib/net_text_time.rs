@@ -216,6 +216,8 @@ pub fn http_type_method_return(
         },
         Type::Named(n) if n == "HttpSrvResp" => match method {
             "header" => mk("HttpSrvResp"),
+            "status" => mk_int(),
+            "body" => mk_str(),
             _ => None,
         },
         Type::Named(n) if n == "HttpServer" => match method {

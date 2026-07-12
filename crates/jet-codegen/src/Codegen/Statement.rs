@@ -288,7 +288,9 @@ pub(crate) fn emit_named_fn_value(cx: &Cx, name: &str, ft: &Type) -> String {
         .iter()
         .enumerate()
         .map(|(i, p)| {
-            if matches!(
+            if matches!(p, Type::Named(name) if name == "HttpHandler") {
+                format!("__jet_a{i}")
+            } else if matches!(
                 p,
                 Type::Named(_) | Type::String | Type::List(_) | Type::Map { .. }
             ) {

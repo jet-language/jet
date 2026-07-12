@@ -839,6 +839,7 @@ fn registered_unimplemented_codes_are_expected() {
         "E2803", // E2-M10 — staged
         "E2804", // E2-M10 — staged, but appears in tests/ui snapshot
         "E2902", // E2-M11 (#Todo typed holes) — staged
+        "E2940", // D-PROVE-SEM1: emitted only when complete_required policy is wired
         "E3001", // E2-M12 runtime panic report — runtime, not compile-time
         "E3002", // E2-M12 error propagation trace — runtime
         "E3005", // D-PREPOST1 @Pre/@Post contract failure — runtime (jet_contract_fail in generated code), not a compile Diagnostic

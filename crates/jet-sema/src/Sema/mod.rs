@@ -851,6 +851,7 @@ mod CheckerInline;
 mod CheckerItems;
 mod CheckerOwnership;
 mod CheckerPatchable;
+mod CheckerSchedule;
 mod CheckerTaskGroup;
 use CheckerTaskGroup::TaskGroupCtx;
 mod Diagnostics;
@@ -907,6 +908,7 @@ pub use PolicyFacts::{
 // manifest parsing need root validation and ancestor-subsumption coverage
 // too, not just the bare enum.
 pub(crate) use CheckerInline::{check_inline_always_fn, e0918_address_taken};
+pub(crate) use CheckerSchedule::check_every_marker;
 pub use Effects::{effect_covers, effect_root, parse_effect_name, show_set, Effect, EffectSet};
 pub use Purity::{check_pure_fn, check_pure_program_root, e3401, e3402, e3403};
 pub use Registration::{check, check_with_mode, effect_key};

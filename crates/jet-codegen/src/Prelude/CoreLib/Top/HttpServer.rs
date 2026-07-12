@@ -142,6 +142,14 @@ where
     mux.add(method, pattern, f);
 }
 
+fn jet_http_mux_add_handler(mux: &JetHttpMux, method: &str, pattern: &str, handler: JetHttpMuxHandlerFn) {
+    mux.0.lock().unwrap().push(JetHttpMuxRoute {
+        method: method.to_uppercase(),
+        pattern: pattern.to_string(),
+        handler,
+    });
+}
+
 fn jet_http_srv_response(status: i64, body: &String) -> JetHttpSrvResp {
     JetHttpSrvResp {
         status,
@@ -158,6 +166,8 @@ fn jet_http_srv_response_header(
     resp.headers.insert(name.clone(), value.clone());
     resp
 }
+fn jet_http_srv_response_status(resp: &JetHttpSrvResp) -> i64 { resp.status }
+fn jet_http_srv_response_body(resp: &JetHttpSrvResp) -> String { resp.body.clone() }
 
 fn jet_http_mux_serve(addr: &String, mux: JetHttpMux) -> Result<(), String> {
     let listener = std::net::TcpListener::bind(addr.as_str())

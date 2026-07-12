@@ -536,6 +536,31 @@ pub fn duration_suffix_nanos(suffix: &str) -> Option<u128> {
     }
 }
 
+/// D-SCHEDULE1 (ratified 2026-07-11, card #505): `#Task fn` — a top-level
+/// function jetpack can invoke by name (D-JPK-TASKRUN1), living beside
+/// `fn run()`. Bare marker, no arguments.
+pub const KW_TASK: &str = "Task";
+
+/// D-SCHEDULE1: `#Every(…)` — a declarative schedule marker on a `#Task fn`.
+/// Legal only alongside `#Task` (E0925 otherwise).
+pub const ATTR_EVERY: &str = "Every";
+
+/// D-SCHEDULE1: recognized duration suffixes for `#Every(<dur>)` — extends
+/// `duration_suffix_nanos` (`ns`/`us`/`ms`/`s`) with `min`, the ratified
+/// example spelling (`#Every(5min)`); a schedule finer than a second is
+/// never realistic, so `min` is added here rather than widening the shared
+/// `.timeout` table. `u128` nanoseconds, same overflow-safety reasoning as
+/// `duration_suffix_nanos`.
+pub fn schedule_duration_suffix_nanos(suffix: &str) -> Option<u128> {
+    if let Some(nanos) = duration_suffix_nanos(suffix) {
+        return Some(nanos);
+    }
+    match suffix {
+        "min" => Some(60_000_000_000),
+        _ => None,
+    }
+}
+
 /// D-DOTSCOPE1: the scope-member vocabulary a `#Marker { }` block declares, or
 /// `None` if the marker declares no members. Each marker that grows a member
 /// vocabulary is added here (an API decision, not a syntax one — the `.name { }`

@@ -14,6 +14,29 @@ pub(crate) fn emit_tir_stmts(stmts: &[TStmt], cx: &Cx, out: &mut String, indent:
     }
 }
 
+/// Emit a closure block while preserving Jet's final-expression return rule.
+/// Ordinary statement blocks terminate expression statements with `;`; a lambda's
+/// final expression is its value and must remain a Rust tail expression. A final
+/// non-expression statement (including an explicit return) keeps normal emission,
+/// which also preserves unit-returning closures.
+pub(crate) fn emit_tir_lambda_block(
+    stmts: &[TStmt],
+    cx: &Cx,
+    out: &mut String,
+    indent: usize,
+) {
+    let Some((last, prefix)) = stmts.split_last() else {
+        return;
+    };
+    emit_tir_stmts(prefix, cx, out, indent);
+    if let TStmt::ExprStmt(expr) = last {
+        let pad = "    ".repeat(indent);
+        out.push_str(&format!("{}{}\n", pad, emit_tir_expr(expr, cx)));
+    } else {
+        emit_tir_stmt(last, cx, out, indent);
+    }
+}
+
 pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize) {
     let pad = "    ".repeat(indent);
     match s {

@@ -1280,6 +1280,8 @@ pub(crate) fn lower_method_call(
                 Type::Option(Box::new(Type::String))
             }
             ("HttpSrvResp", "header") => Type::Named("HttpSrvResp".to_string()),
+            ("HttpSrvResp", "status") => Type::Int,
+            ("HttpSrvResp", "body") => Type::String,
             ("HttpServer", "local_addr") => Type::Result { ok: Box::new(Type::String), err: Box::new(Type::String) },
             ("HttpServer", "serve" | "shutdown") => Type::Result {
                 ok: Box::new(Type::Named("HttpShutdownReport".to_string())),

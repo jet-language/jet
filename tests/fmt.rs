@@ -2121,3 +2121,31 @@ fn run() {
     let twice = jet::format_source(&out).expect("re-fmt");
     assert_eq!(out, twice, "maturity next-line canonicalize must be idempotent");
 }
+
+#[test]
+fn fmt_preserves_schedule_markers() {
+    // D-SCHEDULE1 (ratified 2026-07-11, card #505): `#Task`/`#Every(…)` must
+    // round-trip byte-for-byte (fmt STABILITY, not just accept-without-crash)
+    // — same inline-marker convention as `#Reactive`/`#Sanitizer`/
+    // `#Replayable`/`#State(…)` (one space-separated line before `fn`).
+    let src = "\
+#Task #Every(5min) fn prune_sessions() {
+    print(\"pruning\")
+}
+
+#Task #Every(\"03:00\") fn nightly_backup() {
+    print(\"backing up\")
+}
+
+#Task fn manual_only() {
+    print(\"manual\")
+}
+
+fn run() {
+    prune_sessions()
+    nightly_backup()
+    manual_only()
+}
+";
+    assert_fmt_stable(src, "#Task/#Every schedule markers (D-SCHEDULE1)");
+}

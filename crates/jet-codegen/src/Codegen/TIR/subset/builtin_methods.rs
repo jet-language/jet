@@ -255,7 +255,7 @@ pub(crate) fn is_http_method_name(recv_type: Option<&str>, method: &str) -> bool
             method,
             "method" | "path" | "body" | "param" | "header" | "body_len" | "under_limit"
         ),
-        Some("HttpSrvResp") => matches!(method, "header"),
+        Some("HttpSrvResp") => matches!(method, "header" | "status" | "body"),
         Some("HttpServer") => matches!(method, "local_addr" | "serve" | "shutdown"),
         _ => false,
     }

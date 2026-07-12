@@ -2408,3 +2408,62 @@ fn run() {
     }
     let _ = fs::remove_dir_all(&dir);
 }
+
+/// D-SCHEDULE1 (ratified 2026-07-11, card #505): `jet dev`'s due-task tick
+/// consumer. `scheduled_tasks` must enumerate every `#Task #Every(…)` fn
+/// with its resolved schedule (and skip a plain `#Task fn` with no
+/// `#Every(…)`), and `run_named_task` must actually execute one by name
+/// through the same interpreter tier `dev_iteration` uses — golden-testing
+/// the loop's per-tick logic without the long-running file watcher, same
+/// spirit as `dev_iteration` itself (see the module doc above).
+#[test]
+fn schedule_every_dev_loop_consumer() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let file = root.join("examples/features/devloop/schedule_every.jet");
+    let src = fs::read_to_string(&file).unwrap();
+    let mut bundle = jet::Loader::load_entry(file.to_str().unwrap())
+        .unwrap_or_else(|diags| panic!("schedule_every.jet failed to load: {diags:?}"));
+    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diags
+        .iter()
+        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "schedule_every.jet must compile clean:\n{}",
+        jet::render_diagnostics("schedule_every.jet", &src, &diags)
+    );
+
+    let mut tasks = jet::Interpreter::scheduled_tasks(&bundle);
+    tasks.sort_by(|a, b| a.0.cmp(&b.0));
+    let names: Vec<&str> = tasks.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(
+        names,
+        vec!["nightly_backup", "prune_sessions"],
+        "scheduled_tasks must list every #Task fn carrying #Every(…), and skip the \
+         #Every(…)-less `manual_only` task"
+    );
+    let schedules: std::collections::HashMap<&str, &jet::AST::EverySchedule> =
+        tasks.iter().map(|(n, s)| (n.as_str(), s)).collect();
+    assert_eq!(
+        *schedules["prune_sessions"],
+        jet::AST::EverySchedule::Interval {
+            nanos: 5 * 60 * 1_000_000_000
+        },
+        "`#Every(5min)` must resolve to a 5-minute interval"
+    );
+    assert_eq!(
+        *schedules["nightly_backup"],
+        jet::AST::EverySchedule::DailyAt { hour: 3, minute: 0 },
+        "`#Every(\"03:00\")` must resolve to 03:00 daily"
+    );
+
+    // Actually invoking a named task runs it like an ordinary call.
+    match jet::Interpreter::run_named_task(&bundle, "prune_sessions", false) {
+        RunOutcome::Ran { stdout, exit_code, .. } => {
+            assert_eq!(exit_code, 0);
+            assert_eq!(stdout, "pruning sessions\n");
+        }
+        RunOutcome::Problems(diags) => panic!("run_named_task failed: {diags:?}"),
+    }
+}

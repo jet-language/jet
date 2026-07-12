@@ -4,15 +4,19 @@ use core.http.server as Server
 use core.tasks as tasks
 use core.time as time
 
-fn outer(next: HttpHandler) -> HttpHandler {
-    return (req: HttpSrvReq) => next.handle(req).header("x-outer", "after")
+fn outer(next: ^HttpHandler) -> HttpHandler {
+    return (req: HttpSrvReq) => {
+        response :: next.handle(req)
+        Server.response(response.status(), "outer>{response.body()}<outer")
+    }
 }
 
-fn inner(next: HttpHandler) -> HttpHandler {
+fn inner(next: ^HttpHandler) -> HttpHandler {
     return (req: HttpSrvReq) => if req.path() == "/blocked" {
         Server.response(403, "blocked")
     } else {
-        next.handle(req).header("x-inner", "after")
+        response :: next.handle(req)
+        Server.response(response.status(), "inner>{response.body()}<inner")
     }
 }
 
@@ -30,8 +34,6 @@ fn run() {
     success :: Client.get("http://{addr}/ok") ?? panic("ok")
     print(success.status())
     print(success.body())
-    print(success.header("x-inner") ?? "missing")
-    print(success.header("x-outer") ?? "missing")
     blocked :: Client.get("http://{addr}/blocked") ?? panic("blocked")
     print(blocked.status())
     print(blocked.body())

@@ -1633,6 +1633,7 @@ pub struct TLambda {
     pub source_params: Vec<String>,
     pub is_move: bool,
     pub boxed: bool,
+    pub arc: bool,
 }
 
 pub enum TLambdaBody {

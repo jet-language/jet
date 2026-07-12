@@ -1076,7 +1076,14 @@ impl Cx {
             .map(|t| self.rust_type(t))
             .unwrap_or_else(|| "()".to_string());
         let trait_name = if mut_capture { "FnMut" } else { "Fn" };
-        format!("Box<dyn {}({}) -> {}>", trait_name, ps, r)
+        let thread_safe = params.len() == 1
+            && matches!(&params[0], Type::Named(name) if name == "HttpHandler")
+            && matches!(ret, Some(Type::Named(name)) if name == "HttpHandler");
+        if thread_safe {
+            format!("Box<dyn {}({}) -> {} + Send + Sync>", trait_name, ps, r)
+        } else {
+            format!("Box<dyn {}({}) -> {}>", trait_name, ps, r)
+        }
     }
 
     pub(crate) fn mangle_name(&self, name: &str) -> String {

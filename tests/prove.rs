@@ -1,0 +1,150 @@
+use std::fs;
+use std::path::PathBuf;
+use std::process::Command;
+
+fn jet() -> PathBuf { PathBuf::from(env!("CARGO_BIN_EXE_jet")) }
+
+fn workspace(name: &str) -> PathBuf {
+    let path = std::env::temp_dir().join(format!("jet_prove_{name}_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&path);
+    fs::create_dir_all(&path).unwrap();
+    path
+}
+
+#[test]
+fn prove_json_is_derived_from_real_front_end_and_sorted_target() {
+    let root = workspace("report");
+    fs::write(root.join("b.jet"), "fn b() -> Int { return 2 }\n").unwrap();
+    fs::write(root.join("a.jet"), "fn a() -> Int { return 1 }\n").unwrap();
+    let out = Command::new(jet()).current_dir(&root).args(["prove", ".", "--json"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    let report = String::from_utf8(out.stdout).unwrap();
+    assert!(report.contains("\"kind\":\"workspace\""), "{report}");
+    assert!(report.find("a.jet").unwrap() < report.find("b.jet").unwrap(), "{report}");
+    assert!(report.contains("\"producer\":\"jet-sema\""), "{report}");
+    assert!(report.contains("\"frontEnd\":{\"failed\":0,\"proved\":2,\"selected\":2"), "{report}");
+}
+
+#[test]
+fn prove_front_end_failure_is_typed_evidence_and_exit_one() {
+    let root = workspace("failure");
+    fs::write(root.join("bad.jet"), "fn run() { missing() }\n").unwrap();
+    let out = Command::new(jet()).current_dir(&root).args(["prove", "bad.jet", "--json"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(out.stderr.is_empty(), "JSON mode leaked stderr: {}", String::from_utf8_lossy(&out.stderr));
+    let report = String::from_utf8(out.stdout).unwrap();
+    assert!(report.contains("\"result\":\"fail\""), "{report}");
+    assert!(report.contains("\"outcome\":\"failed\""), "{report}");
+    assert!(report.contains("\"diagnosticIndexes\":[0]"), "{report}");
+    assert!(report.contains("\"code\":\"E0102\""), "{report}");
+}
+
+#[test]
+fn prove_usage_and_missing_target_have_exact_exit_classes() {
+    let root = workspace("usage");
+    let usage = Command::new(jet()).current_dir(&root).arg("prove").output().unwrap();
+    assert_eq!(usage.status.code(), Some(2));
+    let missing = Command::new(jet()).current_dir(&root).args(["prove", "missing.jet"]).output().unwrap();
+    assert_eq!(missing.status.code(), Some(1));
+}
+
+#[test]
+fn prove_uses_structured_test_evidence_and_continues_after_failure() {
+    let root = workspace("test_continuation");
+    fs::write(
+        root.join("a_fail.jet"),
+        "#Test(\"first fails\") {\n    require(false, \"intentional\")\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("b_pass.jet"),
+        "#Test(\"later passes\") {\n    require(true)\n}\n",
+    )
+    .unwrap();
+    let out = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", ".", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", String::from_utf8_lossy(&out.stderr));
+    let report = String::from_utf8(out.stdout).unwrap();
+    assert!(report.contains("\"unit\":{\"failed\":1,\"passed\":1,\"selected\":2"), "{report}");
+    assert!(report.contains("\"outcome\":\"failed\",\"producer\":\"jet-test\""), "{report}");
+    assert!(report.contains("\"outcome\":\"passed\",\"producer\":\"jet-test\""), "{report}");
+}
+
+#[test]
+fn prove_captures_contract_results_and_runtime_panics_structurally() {
+    let root = workspace("contract_runtime");
+    fs::write(
+        root.join("a_contract_pass.jet"),
+        "@Pre(value > 0, \"positive\") fn checked(value: Int) -> Int { return value }\n#Test(\"contract pass\") { require_eq(checked(1), 1) }\n",
+    ).unwrap();
+    fs::write(
+        root.join("b_contract_fail.jet"),
+        "@Pre(value > 0, \"positive\") fn checked(value: Int) -> Int { return value }\n#Test(\"contract fail\") { checked(0) }\n",
+    ).unwrap();
+    fs::write(
+        root.join("c_panic.jet"),
+        "#Test(\"runtime panic\") { panic(\"structured boom\") }\n",
+    ).unwrap();
+    fs::write(
+        root.join("d_later.jet"),
+        "#Test(\"later still runs\") { require(true) }\n",
+    ).unwrap();
+
+    let out = Command::new(jet()).current_dir(&root).args(["prove", ".", "--json"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(70), "stderr={} stdout={}", String::from_utf8_lossy(&out.stderr), String::from_utf8_lossy(&out.stdout));
+    assert!(out.stderr.is_empty(), "JSON prove parsed/leaked terminal stderr");
+    let report = String::from_utf8(out.stdout).unwrap();
+    assert!(report.contains("\"kind\":\"contract\",\"outcome\":\"passed\""), "{report}");
+    assert!(report.contains("\"kind\":\"contract\",\"outcome\":\"failed\""), "{report}");
+    assert!(report.contains("\"code\":\"E3005\""), "{report}");
+    assert!(report.contains("\"code\":\"E3001\""), "{report}");
+    assert!(report.contains("structured boom"), "{report}");
+    assert!(report.contains("\"path\":\"./d_later.jet\""), "later producer did not continue: {report}");
+}
+
+#[test]
+fn mandatory_env_init_does_not_pull_optional_core_env_surface() {
+    let root = workspace("env_prelude");
+    fs::write(root.join("plain.jet"), "fn run() {}\n").unwrap();
+    let out = Command::new(jet())
+        .current_dir(&root)
+        .args(["emit", "--rust", "plain.jet"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    let rust = String::from_utf8(out.stdout).unwrap();
+    assert!(rust.contains("fn jet_std_env_init()"), "{rust}");
+    assert!(rust.contains("fn main() {\n    jet_std_env_init();"), "{rust}");
+    assert!(!rust.contains("fn jet_std_env_get("), "optional Core env accessors leaked into plain program");
+}
+
+#[test]
+fn unknown_lens_is_exact_e2941_in_human_and_json_modes() {
+    let root = workspace("bad_lens");
+    fs::write(root.join("plain.jet"), "fn run() {}\n").unwrap();
+    let human = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "plain.jet", "--lens", "test"])
+        .output()
+        .unwrap();
+    assert_eq!(human.status.code(), Some(2));
+    assert!(human.stdout.is_empty());
+    assert_eq!(
+        String::from_utf8(human.stderr).unwrap(),
+        "Error [E2941]: unknown proof lens `test`\n Why: `jet prove` accepts all, refinements, effects, taint, contracts, tests, budgets, replay, solver\n Fix: try `jet prove plain.jet --lens tests`\n"
+    );
+
+    let machine = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "plain.jet", "--lens=test", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(machine.status.code(), Some(2));
+    assert!(machine.stderr.is_empty());
+    let json = String::from_utf8(machine.stdout).unwrap();
+    assert!(json.contains("\"code\":\"E2941\""), "{json}");
+    assert!(!json.contains("\"evidence\""), "malformed CLI emitted a ProofReport: {json}");
+}

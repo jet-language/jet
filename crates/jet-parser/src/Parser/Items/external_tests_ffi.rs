@@ -171,6 +171,26 @@ impl<'a> Parser<'a> {
                 && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_REPLAYABLE)
                 && matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub)
         }
+
+        /// D-SCHEDULE1 (card #505): true when the cursor is at `#Task` (a bare
+        /// schedule fn marker). Unlike `#Sanitizer`/`#Replayable`, this does
+        /// NOT require `fn`/`pub` immediately next — the ratified spelling
+        /// stacks `#Task` before `#Every(…)` (`#Task #Every(5min) fn …`), so
+        /// the marker after `#Task` is usually another marker, not `fn`
+        /// itself. Same looseness as `#State(`/`#Transition(`/`#Every(`,
+        /// which only look as far as their own shape.
+        pub(in crate::Parser) fn at_task_fn(&self) -> bool {
+            matches!(self.peek().kind, TokKind::Hash)
+                && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_TASK)
+        }
+
+        /// D-SCHEDULE1: true when the cursor is at `#Every(…)` (a schedule fn
+        /// marker). Token stream: `# Every (`.
+        pub(in crate::Parser) fn at_every_fn(&self) -> bool {
+            matches!(self.peek().kind, TokKind::Hash)
+                && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_EVERY)
+                && matches!(self.peek3().kind, TokKind::LParen)
+        }
     
         /// D-MUSTUSE1 (c18iwxqx) / D-MARKERMOVE1: true when the cursor is at
         /// `@MustUse fn` / `@MustUse pub fn` — or the retired `@MustUse` spelling,

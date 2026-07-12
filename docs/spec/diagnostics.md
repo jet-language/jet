@@ -459,6 +459,8 @@ duplicate this — it is the one surface for lint walls (I8).
 | E0920 | parse | a function/method written with both `@Inline` and `@InlineAlways` (D-METHODMACRO1) |
 | E0921 | sema  | `policy no_alloc` floor violation — an allocation-shaped expression in the module's own function bodies (D-MEM1/S7, D-NOALLOC-SEM1) |
 | E0922 | sema  | explicit `Debug` derive (`@Debug`, `@[.., Debug]`, body `derive Debug;`) — `Debug` auto-derives, the opt-in spelling is retired (D-MARK-DEBUG1=A) |
+| E0925 | parse | `#Task`/`#Every(…)` written somewhere D-SCHEDULE1 doesn't place them — a method, or `#Every(…)` without `#Task` (card #505) |
+| E0926 | sema  | `#Every(…)`'s argument isn't a valid schedule — bad duration unit, non-positive duration, or malformed/out-of-range `"HH:MM"` (D-SCHEDULE1, card #505) |
 | E0951 | sema  | comptime code reaches an impure operation (shows call path) |
 | E0952 | sema  | comptime budget exhausted (fuel) |
 | E0953 | sema  | comptime panic = user-authored compile error (message verbatim) |
@@ -914,6 +916,8 @@ Quality workflows: doctests, snapshot testing, `todo` typed holes, `jet bench`, 
 |------|------|-----|-----|
 | E2901 | Doctest output mismatch. Expected: `{expected}` Got: `{actual}` | The example in the doc comment claims a different result from what the code produces. Docs cannot lie (D-TEST4/I5 generalized to user code). | Run `jet test --update-snapshots` to update the golden output, or fix the code to match the claimed output. |
 | E2902 | `#Todo` at `{file}:{line}` — expected `{type}` | A `#Todo` typed hole was reached at runtime. The hole compiles anywhere and type-checks, but panics when executed (D-TOOL2). | Replace `#Todo` with a real implementation. |
+| E2940 | required proof evidence is unavailable | The `complete_required` policy needs `{producer}`, but `{reason}`. | Perform the producer-specific action named by `jet prove`, then run the same command again. |
+| E2941 | unknown proof lens `{value}` | `jet prove` accepts `all`, `refinements`, `effects`, `taint`, `contracts`, `tests`, `budgets`, `replay`, and `solver`. | Use one exact value, for example `jet prove TARGET --lens tests`. |
 | E2910 | `reactive.{kind}` needs a lambda, not {type}. | `reactive.derived`/`reactive.effect` build a reactive value from a `() => …` body so it can re-run when a signal changes (D-REACT1=B). A non-lambda argument has nothing to re-run. | Write `reactive.derived(() => … )` or `reactive.effect(() => { … })`. |
 | E2911 | `reactive.{kind}` needs a zero-parameter lambda, got {n} parameter(s). | The body of a derived/effect takes no arguments — it reads the signals it depends on via `.get()` (D-REACT1=B). | Drop the parameters: `reactive.{kind}(() => { … })`. |
 | E2912 | `reactive.derived` must compute and return a value. | A derived value is recomputed from its signals, so its lambda has to return the new value (D-REACT1=B). A body that returns nothing is a side effect, not a value. | Return a value from the body, or use `reactive.effect(() => { … })` for a side effect. |
@@ -1617,6 +1621,31 @@ nothing (the pre-D-MARK-DEBUG1 behavior).
 A hand-written `impl T.Debug { … }` override, and `{value@Debug}`
 interpolation/reflection lookups, are unaffected — only the explicit
 *derive* spelling is retired.
+
+### E0925 — `#Task`/`#Every(…)` wrong placement (D-SCHEDULE1, card #505)
+
+`#Every(…)` names when a `#Task fn` runs (D-JPK-TASKRUN1); `#Task` itself
+only marks a top-level function, because a task needs a free-standing name
+`jetpack run <name>` can invoke.
+
+| What | Why | Fix |
+|------|-----|-----|
+| `` `#Task`/`#Every(…)` only mark a top-level function ``. | a method has no free-standing name to invoke, so it can't be a task. | Move the function to the top level, beside `fn run()`. |
+| `` `#Every(…)` needs `#Task` on the same function ``. | a schedule only means something on a task — `#Every(…)` isn't a standalone timer. | Add `#Task` (`#Task #Every(5min) fn …`), or drop `#Every(…)` if this isn't a scheduled task. |
+
+### E0926 — bad `#Every(…)` schedule value (D-SCHEDULE1, card #505)
+
+`#Every(…)` takes a duration literal (`#Every(5min)`, D-UNITLIT1) or a
+quoted daily wall-clock time (`#Every("03:00")`). The shape is checked at
+parse time (a generic E0003 for anything else); this code covers a
+recognizable shape whose *value* isn't a real schedule.
+
+| What | Why | Fix |
+|------|-----|-----|
+| this duration's unit isn't a recognized schedule cadence. | a schedule interval is one of a closed set of time units — `ns`/`us`/`ms`/`s`/`min` — not an arbitrary `#UnitFamily` member. | Use `ns`, `us`, `ms`, `s`, or `min` (e.g. `#Every(5min)`). |
+| a schedule interval must be a positive duration. | `#Every(0ms)` or a negative duration never becomes due. | Write a duration greater than zero, e.g. `#Every(5min)`. |
+| this daily schedule isn't a plain `"HH:MM"` time. | a wall-clock trigger is exactly two digits, a colon, and two digits — 24h time, no seconds, no timezone. | Write a fixed daily time like `#Every("03:00")`. |
+| this daily schedule's hour/minute is out of range. | 24h hours run `00`..=`23`, minutes run `00`..=`59`. | Write an hour between `00` and `23` and a minute between `00` and `59`. |
 
 ## Process for a new diagnostic
 

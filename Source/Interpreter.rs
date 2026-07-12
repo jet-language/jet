@@ -633,6 +633,75 @@ pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
     }
 }
 
+/// D-SCHEDULE1 (ratified 2026-07-11, card #505): run one `#Task fn` by name,
+/// the same way `run_checked` runs `fn run()` — the `jet dev` consumer
+/// (`Source/CmdDevTools.rs`'s due-task tick) calls this to invoke a scheduled
+/// task automatically. The caller has already filtered to `Func::is_task`
+/// fns pulled from this same checked bundle, so a missing name here is an
+/// internal-tooling mismatch, not a source error.
+pub fn run_named_task(bundle: &ProgramBundle, name: &str, try_anyway: bool) -> RunOutcome {
+    if !try_anyway {
+        if let Some(b) = boundary_scan(bundle) {
+            return RunOutcome::Problems(vec![boundary_diag(&b)]);
+        }
+    }
+    let (funcs, program) = collect_funcs_and_info(bundle);
+    let Some(task_fn) = funcs.get(name) else {
+        return RunOutcome::Problems(vec![Diagnostic::error(
+            "E2201",
+            format!("`{name}` isn't a task in this file"),
+            "the dev loop's due-task tick looks up the task by name in the checked bundle."
+                .to_string(),
+            "this is an internal-tooling mismatch, not a source error — please report it."
+                .to_string(),
+            None,
+        )]);
+    };
+    let base_dir = &bundle.project_root;
+    let mut sink = crate::Comptime::DevSink::new();
+    match crate::Comptime::run_main(task_fn, &funcs, base_dir, &mut sink, &program) {
+        Ok(crate::Comptime::CtValue::ResErr(error)) => {
+            sink.stderr.push_str(&error.jet_show());
+            sink.stderr.push('\n');
+            RunOutcome::Ran {
+                stdout: sink.stdout,
+                stderr: sink.stderr,
+                exit_code: 1,
+            }
+        }
+        Ok(_) => RunOutcome::Ran {
+            stdout: sink.stdout,
+            stderr: sink.stderr,
+            exit_code: 0,
+        },
+        Err(d) => RunOutcome::Problems(vec![dev_boundary_from_comptime(d)]),
+    }
+}
+
+/// D-SCHEDULE1: the `#Task`/`#Every(…)` facts the dev loop's due-task tick
+/// needs — a task's name and its resolved schedule (`None` for a `#Task fn`
+/// with no `#Every(…)`, i.e. manual-invocation-only). Scoped to the entry
+/// module's top-level items only (D-JPK-TASKRUN1: a task lives "beside `fn
+/// run()`" — the same file, not an imported one). Sema has already rejected
+/// a bad `#Every(…)` value (E0926) by the time a bundle reaches `jet dev`,
+/// so `resolve()` failing here is defensive, not a real path.
+pub fn scheduled_tasks(bundle: &ProgramBundle) -> Vec<(String, crate::AST::EverySchedule)> {
+    let Some(entry) = bundle.modules.get(bundle.entry) else {
+        return Vec::new();
+    };
+    entry
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Func(f) if f.is_task => {
+                let schedule = f.every.as_ref()?.arg.resolve().ok()?;
+                Some((f.name.clone(), schedule))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 /// c139 JIT-parity fix (2026-07-03): the dev interpreter IS the comptime
 /// tree-walker (see module doc), so a construct it can't run leaks the
 /// comptime evaluator's own E0956 ("unsupported")/E0951 ("impurity") codes —

@@ -1,0 +1,39 @@
+// D-SCHEDULE1 (ratified 2026-07-11, card #505) — schedule-as-code.
+// `#Every(…)` is a directive marker on a `#Task fn` (D-JPK-TASKRUN1): one
+// declaration feeds `jet dev` (runs due tasks in the dev loop), the service
+// runtime (D-SERVICE1), and a jetos timer projection. `#Every(5min)` takes a
+// duration literal (D-UNITLIT1: `ns`/`us`/`ms`/`s`/`min`); `#Every("03:00")`
+// takes a daily wall-clock time. A `#Task fn` with no `#Every(…)` is a plain
+// manually-invoked task (`jetpack run manual_only`).
+//
+// Calling a `#Task fn` directly — as `run()` does below — behaves exactly
+// like calling an ordinary function; the schedule only changes when a
+// runtime consumer invokes it *automatically*. `jet dev`'s due-task tick is
+// exercised by tests/dev.rs, not by this golden AOT run (I5's ordinary-run
+// convention for dev-loop-only behavior — see devloop/persist.jet).
+#Task
+#Every(5min)
+fn prune_sessions() {
+    print("pruning sessions")
+}
+
+#Task
+#Every("03:00")
+fn nightly_backup() {
+    print("running nightly backup")
+}
+
+#Task
+fn manual_only() {
+    print("ran manually")
+}
+
+fn run() {
+    prune_sessions()
+    nightly_backup()
+    manual_only()
+}
+// --- expected output --------------------------------------------------
+// pruning sessions
+// running nightly backup
+// ran manually

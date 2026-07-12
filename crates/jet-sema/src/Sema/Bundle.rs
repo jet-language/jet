@@ -2839,6 +2839,9 @@ pub(crate) fn check_module_bodies(
                     is_reactive: false,
                     is_replayable: false,
                     replayable_span: None,
+                    is_task: false,
+                    task_span: None,
+                    every: None,
                     is_must_use: false,
                     must_use_span: None,
                     maturity: None,
@@ -2899,6 +2902,9 @@ pub(crate) fn check_module_bodies(
                     is_reactive: false,
                     is_replayable: false,
                     replayable_span: None,
+                    is_task: false,
+                    task_span: None,
+                    every: None,
                     is_must_use: false,
                     must_use_span: None,
                     maturity: None,
@@ -3102,6 +3108,8 @@ pub(crate) fn check_func_body_bundle(
     if f.is_inline_always {
         ck.diags.extend(check_inline_always_fn(f));
     }
+    // D-SCHEDULE1 (card #505): a bad `#Every(…)` value is E0926.
+    ck.diags.extend(check_every_marker(f));
     global_addr_taken.extend(std::mem::take(&mut ck.inline_addr_taken));
     // D-EXPANDCLI1 (card #183): roll this function's resolved ref-owner facts
     // into the whole-bundle accumulator for `jet inspect expand --facts refs`.

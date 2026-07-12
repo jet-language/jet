@@ -98,13 +98,36 @@ impl<'a> Parser<'a> {
             let mut state_requires = None;
             let mut state_transition = None;
             loop {
+                // D-SCHEDULE1 (card #505): a marker on its own line before `fn`
+                // gets a lexer-inserted `;` — skip it, matching `func()`'s own
+                // stacked-marker loop, so `#Task`/`#Every(…)` (wrong here, but
+                // still stacked with `#State`/`#Transition`) don't cascade into
+                // a spurious "expected `fn`" parse error after the E0925 push.
+                while matches!(self.peek().kind, TokKind::Semi) {
+                    self.bump();
+                }
                 if state_requires.is_none() && self.at_state_fn() {
                     state_requires = Some(self.parse_state_require_marker()?);
                 } else if state_transition.is_none() && self.at_transition_fn() {
                     state_transition = Some(self.parse_transition_marker()?);
+                } else if self.at_task_fn() {
+                    // D-SCHEDULE1 (card #505): `#Task` only marks a top-level
+                    // function (D-JPK-TASKRUN1) — recoverable diagnostic, same
+                    // shape as the E0062 plane-teaching pushes elsewhere, then
+                    // keep parsing the method normally.
+                    let start = self.bump().span.start; // `#`
+                    let end = self.bump().span.end; // `Task`
+                    self.diags
+                        .push(Self::e0925_task_not_toplevel(Span::new(start, end)));
+                } else if self.at_every_fn() {
+                    let m = self.parse_every_marker()?;
+                    self.diags.push(Self::e0925_task_not_toplevel(m.span));
                 } else {
                     break;
                 }
+            }
+            while matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
             }
             let (is_pub, is_package_pub) = self.parse_pub_qualifier();
             self.expect_kw(TokKind::KwFn, "to start a method")?;

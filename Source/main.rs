@@ -24,6 +24,7 @@ mod CmdDossier;
 mod CmdExpand;
 mod CmdImpact;
 mod CmdPkg;
+mod CmdProve;
 mod CmdSchema;
 mod CmdSemIndex;
 mod CmdSupply;
@@ -47,6 +48,7 @@ use CmdPkg::{
     run_add, run_fetch, run_hangar_generations, run_hangar_rollback, run_hangar_verify,
     run_remove, run_update,
 };
+use CmdProve::run_prove;
 use CmdSchema::run_schema;
 use CmdSemIndex::run_semindex;
 use CmdSupply::{
@@ -980,6 +982,11 @@ fn main() {
 
     // Commands with no required positional target.
     match cmd {
+        "prove" => {
+            let prove_args: Vec<String> = raw.iter().skip(1).cloned().collect();
+            run_prove(&prove_args, mode.json);
+            return;
+        }
         "diff" => { run_diff(&raw); return; }
         "merge" => { run_merge(&raw); return; }
         "help" => {
