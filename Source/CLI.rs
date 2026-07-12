@@ -566,6 +566,8 @@ pub const FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--changed", help: "with fmt: format only VCS-changed .jet files (requires git)" },
     FlagSpec { long: "--stdin-path", help: "with fmt -: path label used in diagnostics when reading from stdin" },
     FlagSpec { long: "--small", help: "with build/run: smallest binary (S15)" },
+    // D-JPK-TASKRUN1 (card #476): run a `#Task fn` instead of `fn run`.
+    FlagSpec { long: "--task", help: "with run: invoke a `#Task fn` by name (D-JPK-TASKRUN1)" },
     FlagSpec { long: "--locked", help: "with fetch: verify only, refuse network" },
     // D-CLI-STORE2=A: script locking folds into `fetch`, not a separate verb.
     FlagSpec { long: "--lock", help: "with fetch: lock a manifest-less script's inline deps instead of fetching a project" },

@@ -1375,6 +1375,10 @@ pub(crate) fn expand_generic_module_aliases(
         })
         .collect();
 
+    // Snapshot aliases up front — the mut loop below can't re-borrow `bundle.modules`
+    // for an E0609 message that names the source module.
+    let module_aliases: Vec<String> = bundle.modules.iter().map(|m| m.alias.clone()).collect();
+
     for (module_idx, module) in bundle.modules.iter_mut().enumerate() {
         if report_generic_module_cycles(&module.items, diags) {
             continue;
@@ -1455,7 +1459,7 @@ pub(crate) fn expand_generic_module_aliases(
                 if !source.def.is_pub && !source.def.is_package_pub {
                     diags.push(Diagnostic::error(
                         "E0609",
-                        format!("`{original}` is private in module `{}`", bundle.modules[source_idx].alias),
+                        format!("`{original}` is private in module `{}`", module_aliases[source_idx]),
                         "only `pub` items can be brought into scope with `use`".to_string(),
                         format!("add `pub` before `module {original}` in the defining file"),
                         Some(import.span),

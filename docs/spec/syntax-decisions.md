@@ -3271,17 +3271,15 @@ jetos/service layer with explain provenance.
 `#Every(…)` parse, placement-check (E0925), and value-check (E0926); `jet
 dev`'s watch loop runs due tasks on their own schedule (UTC for
 `#Every("HH:MM")` — timezone-aware calendars stay the jetos/service tier's
-job per this same law). The other two named consumers have no substrate to
-wire into, not merely a missing wire: D-JPK-TASKRUN1 itself has no `jetpack run
-<name>` dispatch yet (no CLI verb, no by-name invocation outside `jet dev`),
-and D-SERVICE1 ("sema-known structured service tree") has no typed
-builder/worker/group behind it at all — nothing exists yet to carry a
-schedule INTO a service runtime or a jetos workload. jetos's systemd timer
-EMISSION already exists (`systemd.timers.<name>` in
-`crates/jetpack/src/JetOS/nixos_backend.rs`, driven by a `Service`'s
-`timer:` extra field) but nothing feeds it a Jet-source `#Every(…)` fact,
-because the app-to-jetos-workload deployment pipeline that would carry it
-doesn't exist either. Both are real future cards, not corners cut here.
+job per this same law).
+
+*Shipped 2026-07-12 (card #476)*: reserved-lifecycle reject on `#Task fn
+run|dev|build|test` (E0928); `jetpack run <name>` discovers `#Task fn`s in
+the project entry and dispatches via `jet run --task <name> <entry>`
+(D-JPK-DISPATCH1); unknown names list declared tasks (E1294). Typed task
+args reuse D-CLIFLAG1 once the task is the entry. D-SERVICE1 still has no
+typed builder/worker/group to carry a schedule into a service runtime —
+that remains a future card, not a corner cut here.
 
 **D-JPK-TOOLRUN1=A — unified `jetpack tool` noun**: `jetpack tool run <ref>`
 executes a package binary ephemerally across all providers (generalizing the

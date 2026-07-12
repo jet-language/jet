@@ -1876,6 +1876,11 @@ pub fn compile_bundle_path_with_entry(
 /// Rename the function literally named `entry_fn` in the entry module to
 /// `run`, first moving any pre-existing `run` out of the way. A no-op when
 /// `entry_fn` is already `"run"`.
+///
+/// D-JPK-TASKRUN1: when the swapped-in function was a `#Task fn`, clear the
+/// task marker after the rename — otherwise sema sees a synthetic
+/// `#Task fn run` and fires E0928 (reserved lifecycle name). The marker's
+/// job was dispatch selection; once it's the entry, it's just `fn run`.
 fn swap_entry_point(bundle: &mut crate::AST::ProgramBundle, entry_fn: &str) {
     if entry_fn == "run" {
         return;
@@ -1892,6 +1897,8 @@ fn swap_entry_point(bundle: &mut crate::AST::ProgramBundle, entry_fn: &str) {
         if let crate::AST::Item::Func(f) = item {
             if f.name == entry_fn {
                 f.name = "run".to_string();
+                f.is_task = false;
+                f.task_span = None;
             }
         }
     }

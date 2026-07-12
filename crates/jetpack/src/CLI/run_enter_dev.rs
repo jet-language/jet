@@ -2,8 +2,8 @@ use super::package_hangar_vendor::auto_clean_after_success;
 use super::parse::Parsed;
 use super::realize::{apply_locked_channels, classify_or_report, load_project_plan, RunPlan};
 use super::services_secrets_config::{
-    find_jet_binary, find_project_entry, has_dev_or_run_entry, validate_declared_secrets,
-    wait_for_services_ready,
+    find_jet_binary, find_project_entry, has_dev_or_run_entry, list_project_tasks,
+    validate_declared_secrets, wait_for_services_ready,
 };
 use super::trust_env_build::compose_env;
 use super::workspace_sources::cwd_table;
@@ -18,7 +18,11 @@ use crate::Syntax;
 use crate::Trust;
 use std::path::{Path, PathBuf};
 
-/// `jetpack run [<ref>] [-- cmd…]`
+/// `jetpack run [<ref>|<task>] [-- cmd…]`
+///
+/// D-JPK-TASKRUN1: a bare first positional that names a `#Task fn` in the
+/// project entry runs that task (via `jet run --task <name> <entry>`). Package
+/// refs (`source:pkg`, workspace members) keep the existing realize path.
 pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
     let roots = Store::resolve();
     if roots.dev_mode {
@@ -26,6 +30,18 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
             "user-owned hangar: using {}",
             roots.root.display()
         )));
+    }
+
+    let project_dir = std::env::current_dir().unwrap_or_default();
+    let entry = find_project_entry(&project_dir);
+    let declared_tasks = list_project_tasks(&entry);
+
+    // Prefer a project `#Task` over package-ref classification when the first
+    // positional is a bare name (no `source:pkg` colon).
+    if let Some(raw) = parsed.positional.first() {
+        if !raw.contains(':') && declared_tasks.iter().any(|t| t == raw) {
+            return run_project_task(theme, parsed, &roots, &project_dir, &entry, raw);
+        }
     }
 
     // Collect the refs to realize plus the source table that resolves any
@@ -46,14 +62,27 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
                     secrets: Vec::new(),
                 }
             }
-            Err(_) => return 2,
+            Err(_) => {
+                // Bare unknown name + declared tasks → E1290 (list them).
+                if !raw.contains(':') && !declared_tasks.is_empty() {
+                    let list = declared_tasks.join(", ");
+                    theme.error_coded(
+                        "E1294",
+                        &format!("no task named `{raw}`"),
+                        "`jetpack run <name>` invokes a `#Task fn` in the project entry (D-JPK-TASKRUN1).",
+                        "mark a function `#Task` to make it runnable, or check the spelling.",
+                    );
+                    theme.detail(&format!("declared tasks: {list}"));
+                    return 2;
+                }
+                return 2;
+            }
         },
         None => match load_project_plan(theme) {
             Ok(plan) => plan,
             Err(code) => return code,
         },
     };
-    let project_dir = std::env::current_dir().unwrap_or_default();
     if let Err(code) = apply_locked_channels(theme, &project_dir, &mut plan.table) {
         return code;
     }
@@ -76,6 +105,85 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
     };
     if code == 0 {
         auto_clean_after_success(theme, &roots);
+    }
+    code
+}
+
+/// D-JPK-TASKRUN1: realize the project env (when present), then shell out to
+/// `jet run --task <name> <entry> -- <task-args>` (D-JPK-DISPATCH1).
+fn run_project_task(
+    theme: &Theme,
+    parsed: &Parsed,
+    roots: &Store::Roots,
+    project_dir: &Path,
+    entry: &Path,
+    task: &str,
+) -> i32 {
+    // Env optional for task-only projects (no env.jet) — host PATH still works.
+    // Probe the file first so a missing env doesn't print load_project_plan's
+    // "nothing to do" error before we fall through to an empty Env.
+    let env = if EnvFile::path_in(project_dir).is_file() {
+        match load_project_plan(theme) {
+            Ok(mut plan) => {
+                if let Err(code) = apply_locked_channels(theme, project_dir, &mut plan.table) {
+                    return code;
+                }
+                if let Err(code) = Trust::gate(
+                    theme,
+                    &Trust::store_path(),
+                    project_dir,
+                    &plan.refs,
+                    &plan.table,
+                    &plan.secrets,
+                    parsed.flags.trust,
+                ) {
+                    return code;
+                }
+                if let Err(code) = validate_declared_secrets(theme, project_dir, &plan.secrets) {
+                    return code;
+                }
+                match compose_env(theme, roots, &parsed.flags, &plan) {
+                    Ok(env) => env,
+                    Err(code) => return code,
+                }
+            }
+            Err(code) => return code,
+        }
+    } else {
+        Env {
+            bin_dirs: Vec::new(),
+            refs: Vec::new(),
+            label: Syntax::JETPACK_PROMPT_LABEL.to_string(),
+            prompt_path: ModuleEval::PromptPathMode::default(),
+            prompt_strip: ModuleEval::PromptStripMode::default(),
+            cache_leases: Vec::new(),
+        }
+    };
+
+    theme.status(&format!(
+        "running task {} ({})",
+        theme.bold(task),
+        theme.gray(&entry.display().to_string())
+    ));
+
+    let mut task_args: Vec<String> = parsed.positional.iter().skip(1).cloned().collect();
+    if let Some(cmd) = &parsed.command {
+        task_args.extend(cmd.iter().cloned());
+    }
+
+    let mut argv = vec![
+        find_jet_binary(),
+        "run".to_string(),
+        format!("--task={task}"),
+        entry.to_string_lossy().into_owned(),
+    ];
+    if !task_args.is_empty() {
+        argv.push("--".to_string());
+        argv.extend(task_args);
+    }
+    let code = Shell::run_command(&env, &argv);
+    if code == 0 {
+        auto_clean_after_success(theme, roots);
     }
     code
 }

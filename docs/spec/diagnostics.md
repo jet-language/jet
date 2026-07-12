@@ -469,6 +469,7 @@ duplicate this — it is the one surface for lint walls (I8).
 | E0925 | parse | `#Task`/`#Every(…)` written somewhere D-SCHEDULE1 doesn't place them — a method, or `#Every(…)` without `#Task` (card #505) |
 | E0926 | sema  | `#Every(…)`'s argument isn't a valid schedule — bad duration unit, non-positive duration, or malformed/out-of-range `"HH:MM"` (D-SCHEDULE1, card #505) |
 | E0927 | sema  | a `@Name`/`#Name` marker isn't in the registered vocabulary for its plane — a typo, or a spelling no longer supported (card #518) |
+| E0928 | sema  | `#Task fn` reused a reserved lifecycle verb (`run`/`dev`/`build`/`test`) (D-JPK-TASKRUN1, card #476) |
 | E0951 | sema  | comptime code reaches an impure operation (shows call path) |
 | E0952 | sema  | comptime budget exhausted (fuel) |
 | E0953 | sema  | comptime panic = user-authored compile error (message verbatim) |
@@ -625,6 +626,7 @@ duplicate this — it is the one surface for lint walls (I8).
 | E1287 | jetpack | `jet os vm run` needs a proved installed disk (D-JOS-VMRUN1) |
 | E1288 | jetpack | the GNOME desktop package is missing (D-JOS-DESKTOP1) |
 | E1289 | jetpack | a NixOS import failed or would overwrite output (D-JOS-NIXIMPORT1) |
+| E1294 | jetpack / jet | `jetpack run <name>` / `jet run --task <name>` names no `#Task fn` in the entry (D-JPK-TASKRUN1, card #476) |
 | E1290 | jetpack | real JetOS replacement proof was requested with fake/script VM tools (D-JOS-REALGUEST1) |
 | E1291 | jetpack | a jetos real-tier system option/service/package has no NixOS mapping (D-JOS-NIXBACKEND1) |
 | E1292 | jet   | signing key generation needs cryptographic randomness (D-CRYPTO-KEYGEN-DIAG1, D-CRYPTO-KEYGEN-CODE2) |
@@ -1441,6 +1443,7 @@ snapshots in `tests/jetpack.rs` (the `tests/ui/` harness only renders front-end
 | E1291 | jetos real tier could not map every system declaration to NixOS. | D-JOS-NIXBACKEND1=C generates a hidden NixOS backend from the checked `SystemPlan` and refuses to silently drop an option, service, or package it cannot translate — every unmapped declaration is listed together, before `nix` ever runs. | Rename or drop the unmapped keys/packages/services, or map them to the nearest supported real-tier option (see the option/service/package mapping table for `--real`). |
 | E1292 | Jet could not create the package-signing key. | The operating system could not provide cryptographic randomness. | Retry as a new operation on a supported host; no key files were created. |
 | E1293 | `` lint `{code}` is denied by policy: {what} `` | D-LINTPOLICY1=A (the override law): warnings never fail a build by default — but `pkg.jet`'s `policy: { lints: { deny: […] } }` is the one surface a team uses to wall a named lint into a build failure. This fires in place of the plain warning, once, when a listed lint's code matches. | Fix the underlying lint (same fix the warning already gave), or remove the code from `policy.lints.deny` if this team no longer wants the wall. |
+| E1294 | no task named `{name}`. | `jetpack run <name>` / `jet run --task <name>` only invoke `#Task fn`s (D-JPK-TASKRUN1). | Mark a function `#Task`, or check the spelling; the diagnostic lists declared tasks. |
 | L0203 | `use {name}#{selector};` isn't pinned to an exact version. | An inline script dependency (U11) has no lockfile until `jet fetch --lock` runs; a loose selector (`1.4` rather than `1.4.2`) can resolve to a different version on a fresh clone (D-JPK-SCRIPTDEP1). | Write the exact version Jet resolved (`use {name}#<major.minor.patch>;`), or run `jet fetch --lock` to pin it in `<script>.lock`. |
 | L0204 | `{field}` in `{file}` has no `env.*` equivalent yet. | `jet bridge flake` (U16) is a best-effort translator; some `flake.nix`/`devenv.nix` fields (`shellHook`, multiple named devShells, `buildInputs` vs `nativeBuildInputs`) have no ratified `env.*` spelling. | Review the generated shim and add `{field}`'s effect by hand if you need it — the shim is a starting point, not a full translation. |
 | L0205 | Build sandboxing is unavailable; adapter builds will run unsandboxed. | D-JPK-NODAEMON1 forbids privileged helpers and daemons. When the platform cannot offer an unprivileged sandbox, Jetpack must say so instead of silently downgrading. | Run `jetpack config sandbox require` to refuse fallback. |
@@ -1700,6 +1703,16 @@ pointer to `docs/spec/syntax-decisions.md`.
 | What | Why | Fix |
 |------|-----|-----|
 | `` `@Name`/`#Name` isn't a known marker ``. | markers are a closed, registered vocabulary (I7), not any PascalCase word. | Fix the spelling (`did you mean`), or check `docs/spec/syntax-decisions.md` for the full marker list. |
+
+### E0928 — `#Task fn` reused a reserved lifecycle verb (D-JPK-TASKRUN1, card #476)
+
+`run`, `dev`, `build`, and `test` already name Jet's built-in entry points.
+A `#Task fn` picks a *user-chosen* verb beside them — reusing a reserved name
+is a collision, not a task.
+
+| What | Why | Fix |
+|------|-----|-----|
+| `` `{name}` is a built-in lifecycle verb, not a task name ``. | `run`/`dev`/`build`/`test` already name Jet's built-in entry points. | Rename it, e.g. `#Task fn build_assets()`, or drop `#Task` if this is the lifecycle entry. |
 
 ## Process for a new diagnostic
 
