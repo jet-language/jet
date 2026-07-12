@@ -2593,7 +2593,7 @@ fn run() {
 }
 
 /// c109 Phase 19: a `#Context(allocator: …) { … }` smart-context block (D-CTX1) — a
-/// plain block with an `_ctx_guard_<i>` RAII guard, body leaking like a region.
+/// plain lexical block with an `_ctx_guard_<i>` RAII guard.
 #[test]
 fn smart_context_block() {
     if !have_rustc() {

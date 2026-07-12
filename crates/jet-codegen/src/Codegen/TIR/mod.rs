@@ -715,8 +715,7 @@ pub enum TStmt {
     /// block; the `#Audit("…")` annotation (the `audit` field) emits NOTHING (codegen is
     /// dumb — sema validated the audit). I1: this TIR node exists ONLY for a source
     /// `#Unsafe` region, so the emitted `unsafe { … }` is always 1:1 with a source gate.
-    /// The body's `let`s LEAK into the outer scope (the AST shares `&mut env`), so the
-    /// body is lowered on the SAME `LowerEnv` (not a cloned scope).
+    /// Body bindings use the `unsafe` block's child lexical env.
     Unsafe(Vec<TStmt>),
     /// D-REACTCORE1: `#Reactive { … }` — register a reactive effect at this point.
     Reactive {
@@ -724,9 +723,8 @@ pub enum TStmt {
     },
     /// c109 Phase 19: an explicit `region r { … }` (D-REGION1 opt B). Lowers to a plain
     /// Rust block `{ … }` — a lexical scope. The region's escape bound (E0631) and arena
-    /// drop ordering (S63 RAII) are enforced entirely in sema; codegen is dumb (I3). The
-    /// body's `let`s LEAK into the outer scope (the AST shares `&mut env`), so the body is
-    /// lowered on the SAME `LowerEnv`.
+    /// drop ordering (S63 RAII) are enforced entirely in sema; codegen is dumb (I3).
+    /// Body bindings live only in the child `LowerEnv` matching that Rust scope.
     Region(Vec<TStmt>),
     /// D-LAYOUT1 / D-LAYOUT-GATES1: `layout NAME { … }` — a Cassowary-style
     /// constraint block. Unlike `Region`/the taskgroup path, this DOES need a
@@ -747,7 +745,7 @@ pub enum TStmt {
     /// to a plain block with one RAII/no-op guard per field (in declaration order)
     /// BEFORE the body: `allocator`/`deadline` push a dynamic context guard in
     /// `jet_mem`; `logger` stays a v1 no-op value bind. Each `(field_name, value)`
-    /// pair is resolved at lowering. The body leaks like a region.
+    /// pair is resolved at lowering. The body uses the block's child lexical env.
     ContextBlock {
         guards: Vec<(String, TExpr)>,
         body: Vec<TStmt>,

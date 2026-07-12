@@ -1,3 +1,12 @@
+fn scoped_stmts_in_subset(
+    body: &[Stmt],
+    cx: &Cx,
+    locals: &HashSet<String>,
+) -> bool {
+    let mut scoped = locals.clone();
+    body.iter().all(|s| stmt_in_subset(s, cx, &mut scoped))
+}
+
 /// `locals` is the set of names bound as params/locals so far in this scope.
 /// It is threaded so an `Expr::Ident` can be classified: a name that is not a
 /// local must not be a const/fn-value (excluded). Bindings extend it in order.
@@ -234,6 +243,9 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
         // D-CTMARKER1 (ratified 2026-06-25, piece 2): `comptime { … }` erases entirely.
         // Always "in subset" since it emits nothing in Rust (I3).
         Stmt::ComptimeBlock { .. } => true,
+        // Scope classification mirrors lowering: an emitted Rust block gets a cloned
+        // locals set. Selected comptime-if, `layout`, and `.setup` are the only statement
+        // bodies emitted inline, so only those intentionally extend `locals`.
         // c109 Phase 15: a resolved comptime-if (`Stmt::ComptimeIf`). Sema picks the
         // branch (`selected_then`); codegen emits ONLY that branch's statements inline.
         // The gate must classify the SELECTED branch (the unselected one is dropped and
@@ -254,21 +266,20 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
             };
             chosen.iter().all(|s| stmt_in_subset(s, cx, locals))
         }
-        // c109 Phase 18: an audited `#Unsafe { … }` gate region (`Stmt::Unsafe`). The AST
-        // `emit_stmts` lowers it to `unsafe { … }` and emits the body on the SAME `&mut
-        // env` (so the body's `let`s LEAK into the outer scope). The gate checks the body
-        // on the same `locals` (matching that leak). The `#Audit("…")` annotation emits
+        // c109 Phase 18: an audited `#Unsafe { … }` gate region (`Stmt::Unsafe`). It
+        // emits a Rust lexical block, so body declarations stay in a child locals set.
+        // The `#Audit("…")` annotation emits
         // nothing. I1: this is the source gate — the only place a Rust `unsafe` block is
         // produced — so admitting it here cannot introduce an ungated `unsafe`.
-        Stmt::Unsafe { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
+        Stmt::Unsafe { body, .. } => scoped_stmts_in_subset(body, cx, locals),
         // D-CTEFFECT1: `#Impure` erases to a plain block at codegen (I3).
-        Stmt::Impure { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
-        Stmt::Reactive { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
-        // D-SHIELDNAME1=A: the body lowers to `TStmt::Shield` on the same
-        // lexical environment; the runtime enter/RAII-leave guard wraps it.
-        Stmt::Shield { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
+        Stmt::Impure { body, .. } => scoped_stmts_in_subset(body, cx, locals),
+        // Reactive bodies emit as closures, another lexical boundary.
+        Stmt::Reactive { body, .. } => scoped_stmts_in_subset(body, cx, locals),
+        // D-SHIELDNAME1=A: runtime enter/RAII-leave guards wrap a lexical block.
+        Stmt::Shield { body, .. } => scoped_stmts_in_subset(body, cx, locals),
         // D-IGNORERET2=A: `#Suppress(MustUse)` erases to a plain block at codegen (I3).
-        Stmt::SuppressMustUse { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
+        Stmt::SuppressMustUse { body, .. } => scoped_stmts_in_subset(body, cx, locals),
         // D-CANVASSTATE1=D: `#Off` erases; `#DebugOnly` lowers in a lexical
         // debug-only block, so its local declarations do not extend `locals`.
         Stmt::Off { .. } => true,
@@ -276,11 +287,9 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
             let mut scoped = locals.clone();
             body.iter().all(|s| stmt_in_subset(s, cx, &mut scoped))
         }
-        // c109 Phase 19: an explicit `region r { … }` (D-REGION1) lowers to a plain Rust
-        // block; the body's `let`s LEAK into the outer scope (the AST shares `&mut env`),
-        // so the gate checks the body on the SAME `locals`.
-        Stmt::Region { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
-        Stmt::TaskGroup { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
+        // Plain Rust lexical blocks.
+        Stmt::Region { body, .. } => scoped_stmts_in_subset(body, cx, locals),
+        Stmt::TaskGroup { body, .. } => scoped_stmts_in_subset(body, cx, locals),
         // D-LAYOUT1 / D-LAYOUT-GATES1: `layout NAME { … }`. UNLIKE `Region`/
         // `TaskGroup`, `name` is a REAL runtime binding that must stay valid
         // for statements AFTER this one (`lower_stmt`/`TStmt::Layout` binds
@@ -291,36 +300,34 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
             body.iter().all(|s| stmt_in_subset(s, cx, locals))
         }
         // c109 Phase 19: a `#Context(field: value) { … }` block (D-CTX1) — a plain block
-        // with a per-field guard. Each field value + the body must be in-subset (the body
-        // leaks like a region).
+        // with a per-field guard. Field values use the outer scope; the body is lexical.
         Stmt::ContextBlock { fields, body, .. } => {
             fields.iter().all(|(_, v, _)| expr_in_subset(v, cx, locals))
-                && body.iter().all(|s| stmt_in_subset(s, cx, locals))
+                && scoped_stmts_in_subset(body, cx, locals)
         }
         // c109 Phase 26: a `#Caps(Io) { … }` effect-restriction region (D-EFF1/D-QUAL1)
         // erases to a plain Rust block — `emit_stmt`'s `Stmt::Caps` arm is byte-for-byte
-        // identical to `Stmt::Region` (`{ <body> }` on the SAME `&mut env`, so the body's
-        // `let`s LEAK into the outer scope). The cap set is enforced entirely in sema
-        // (E0741); codegen is dumb (I3). Check the body on the SAME `locals` (it leaks
-        // like a region), reusing the covered `TStmt::Region` lowering.
-        Stmt::Caps { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
+        // identical to `Stmt::Region` (`{ <body> }`). The cap set is enforced entirely
+        // in sema (E0741); codegen is dumb (I3).
+        Stmt::Caps { body, .. } => scoped_stmts_in_subset(body, cx, locals),
         // D-SCAP1: a `#grant(Fs) { caps -> … }` scoped-capability grant erases to a
         // plain Rust block (the grant/revoke is a compile-time capability fact, I3).
         // The capability handle is sema-only — it is NOT emitted, so the body lowers
-        // exactly like `Stmt::Region`. Check the body on the SAME `locals`.
-        Stmt::Grant { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
+        // exactly like a lexical `Stmt::Region`.
+        Stmt::Grant { body, .. } => scoped_stmts_in_subset(body, cx, locals),
         // D-TERM1 (ratified 2026-06-22): `live { … }` lowers to a guarded Rust block.
-        // The body leaks into the outer scope like a region; check it on the SAME `locals`.
-        Stmt::Live { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
+        Stmt::Live { body, .. } => scoped_stmts_in_subset(body, cx, locals),
         // D-DOTSCOPE1: a `#Test` scope member — in-subset iff its region body is.
         // Args are literals folded at lowering, not lowered as exprs, so only the
-        // body gates the subset. Check it on the SAME `locals` (bindings from a
-        // `.setup` region leak to the rest of the test).
-        Stmt::ScopeMember { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
+        // body gates the subset. `.setup` emits inline and intentionally extends the
+        // test scope; every other member emits a Rust lexical block.
+        Stmt::ScopeMember { name, body, .. } if name == Syntax::SCOPE_TEST_SETUP => {
+            body.iter().all(|s| stmt_in_subset(s, cx, locals))
+        }
+        Stmt::ScopeMember { body, .. } => scoped_stmts_in_subset(body, cx, locals),
         // D-DET1: `assume_deterministic { … }` erases to a plain Rust block (the
-        // determinism suspension is a compile-time fact, I3). Body leaks like a
-        // region; check it on the SAME `locals`.
-        Stmt::AssumeDet { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
+        // determinism suspension is a compile-time fact, I3).
+        Stmt::AssumeDet { body, .. } => scoped_stmts_in_subset(body, cx, locals),
         // D-TXN1–D-TXN4 (ratified 2026-06-24): `#Transact(name) { … }` lowers to a
         // transaction-guarded Rust block. The handle `name` is a covered local
         // inside the body (so `name.on_commit(…)` resolves); check the body with it

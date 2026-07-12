@@ -265,42 +265,118 @@ fn run() {
 }
 
 #[test]
-fn panic_context_excludes_out_of_scope_branch_locals() {
+fn panic_context_uses_only_lexically_live_locals() {
     let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
     if !have_rustc {
         return;
     }
 
-    let src = r#"
-fn missing() -> (Int?) {
+    let cases: &[(&str, &str, &[&str])] = &[
+        (
+            "if_branch",
+            "if live > 0 { branch_only :: 7; print(branch_only) }",
+            &["branch_only"],
+        ),
+        (
+            "region",
+            "region inner { region_only :: 7; print(region_only) }",
+            &["region_only"],
+        ),
+        (
+            "counted_loop",
+            "loop i := 0; i < 1; i++ { counted_only :: 7; print(counted_only) }",
+            &["i", "counted_only"],
+        ),
+        (
+            "unsafe",
+            "#Unsafe(\"scope audit\") { unsafe_only :: 7; print(unsafe_only) }",
+            &["unsafe_only"],
+        ),
+        (
+            "impure",
+            "#Impure(\"scope audit\") { impure_only :: 7; print(impure_only) }",
+            &["impure_only"],
+        ),
+        (
+            "suppress",
+            "#Suppress(MustUse) { suppress_only :: 7; print(suppress_only) }",
+            &["suppress_only"],
+        ),
+        (
+            "shield",
+            "#Shield { shield_only :: 7; print(shield_only) }",
+            &["shield_only"],
+        ),
+        (
+            "caps",
+            "#Caps(Io) { caps_only :: 7; print(caps_only) }",
+            &["caps_only"],
+        ),
+        (
+            "grant",
+            "#Grant(Io) { caps -> grant_only :: 7; print(grant_only) }",
+            &["grant_only"],
+        ),
+        (
+            "assume_deterministic",
+            "assume_deterministic { deterministic_only :: 7; print(deterministic_only) }",
+            &["deterministic_only"],
+        ),
+        (
+            "transact",
+            "#Transact { transact_only :: 7; print(transact_only) }",
+            &["transact_only"],
+        ),
+        (
+            "context",
+            "#Context(logger: 0) { context_only :: 7; print(context_only) }",
+            &["context_only"],
+        ),
+        (
+            "taskgroup",
+            "taskgroup g { taskgroup_only :: 7; print(taskgroup_only) }",
+            &["taskgroup_only"],
+        ),
+    ];
+
+    for (name, scoped_stmt, dead_names) in cases {
+        let src = format!(r#"
+fn missing() -> (Int?) {{
     return None
-}
-fn capture(live: Int) {
-    if live > 0 {
-        branch_only :: 7
-        print(branch_only)
-    }
+}}
+fn capture(live: Int) {{
+    {scoped_stmt}
     _value :: missing() ?? panic("missing value")
-}
-fn run() {
+}}
+fn run() {{
     capture(3)
-}
-"#;
-    let (code, _stdout, stderr) = build_and_run_debug("panic_lexical_locals", src);
-    assert_eq!(code, 70, "expected Jet panic, not a rustc ICE: {stderr}");
-    assert!(
-        stderr.contains("panic: missing value"),
-        "missing Jet panic: {stderr}"
-    );
-    assert!(stderr.contains("live = 3"), "live local missing: {stderr}");
-    assert!(
-        !stderr.contains("branch_only ="),
-        "out-of-scope branch local leaked: {stderr}"
-    );
-    assert!(
-        !stderr.contains("internal compiler error"),
-        "rustc failure escaped I2 handling: {stderr}"
-    );
+}}
+"#);
+        let test_name = format!("panic_lexical_{name}");
+        let (code, _stdout, stderr) = build_and_run_debug(&test_name, &src);
+        assert_eq!(
+            code, 70,
+            "{name}: expected Jet panic, not a rustc ICE: {stderr}"
+        );
+        assert!(
+            stderr.contains("panic: missing value"),
+            "{name}: missing Jet panic: {stderr}"
+        );
+        assert!(
+            stderr.contains("live = 3"),
+            "{name}: live local missing: {stderr}"
+        );
+        for dead in *dead_names {
+            assert!(
+                !stderr.contains(&format!("{dead} =")),
+                "{name}: out-of-scope local `{dead}` leaked: {stderr}"
+            );
+        }
+        assert!(
+            !stderr.contains("internal compiler error"),
+            "{name}: rustc failure escaped I2 handling: {stderr}"
+        );
+    }
 }
 
 #[test]

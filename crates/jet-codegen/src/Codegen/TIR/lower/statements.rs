@@ -538,10 +538,12 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             label,
             ..
         } => {
-            // Lower the init binding as a `let mut` local.
+            // The emitted outer Rust block owns the init binding and every loop-body
+            // binding. Lower all of them in one child env so none survives the loop.
             let init_val = lower_expr(&init.init, cx, env);
             let init_ty = init.ty.clone();
-            env.bind(&init.name, mangle(&init.name), init_ty);
+            let mut scoped = clone_env(env);
+            scoped.bind(&init.name, mangle(&init.name), init_ty);
             let init_stmt = Box::new(TStmt::Let {
                 name: init.name.clone(),
                 kw: "let mut",
@@ -549,15 +551,14 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 init: init_val,
                 track_origin: None,
             });
-            let cond = lower_expr(cond, cx, env);
-            let mut branch = clone_env(env);
-            let step = Box::new(lower_stmt(step.as_ref(), cx, &mut branch));
+            let cond = lower_expr(cond, cx, &mut scoped);
+            let step = Box::new(lower_stmt(step.as_ref(), cx, &mut scoped));
             TStmt::CountedLoop {
                 label: label_name(label),
                 init: init_stmt,
                 cond,
                 step,
-                body: lower_stmts(body, cx, &mut branch),
+                body: lower_stmts(body, cx, &mut scoped),
             }
         }
         Stmt::For {
@@ -685,6 +686,10 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             let mut scoped = clone_env(env);
             TStmt::DebugOnly(lower_stmts(body, cx, &mut scoped))
         }
+        // Lexical-scope rule: whenever `emit_tir_stmt` opens a Rust `{ ... }`, lower
+        // declarations in a cloned env. Only three statement forms deliberately reuse
+        // the parent env because emission is inline with no Rust block: selected
+        // comptime-if, `layout`, and `.setup`.
         // c109 Phase 15: a resolved comptime-if (`Stmt::ComptimeIf`). Sema chose the
         // branch (`selected_then`); the AST `emit_stmts` emits ONLY that branch's
         // statements INLINE on the SAME `&mut env` at the SAME indent (no `if`, no
@@ -705,36 +710,50 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             };
             TStmt::Inline(lower_stmts(chosen, cx, env))
         }
-        // c109 Phase 18: an audited `#Unsafe { … }` region (`Stmt::Unsafe`). The AST
-        // `emit_stmts` emits `unsafe { … }` and lowers the body on the SAME `&mut env`
-        // (the body's `let`s leak into the outer scope). Reproduce: lower the body on the
-        // SAME `env` (so bindings leak) and wrap in `TStmt::Unsafe`. The `#Audit("…")`
+        // c109 Phase 18: an audited `#Unsafe { … }` region (`Stmt::Unsafe`). Emission
+        // adds a Rust lexical block, so lower its declarations in a child env. The `#Audit("…")`
         // annotation is dropped (codegen is dumb — it emits nothing, matching the AST).
         // I1: the source `#Unsafe` gate is 1:1 with this node, the only producer of a
         // Rust `unsafe` block.
-        Stmt::Unsafe { body, .. } => TStmt::Unsafe(lower_stmts(body, cx, env)),
+        Stmt::Unsafe { body, .. } => {
+            let mut scoped = clone_env(env);
+            TStmt::Unsafe(lower_stmts(body, cx, &mut scoped))
+        }
         // D-CTEFFECT1: `#Impure` erases to a plain block at codegen (comptime-only gate, I3).
-        Stmt::Impure { body, .. } => TStmt::Region(lower_stmts(body, cx, env)),
+        Stmt::Impure { body, .. } => {
+            let mut scoped = clone_env(env);
+            TStmt::Region(lower_stmts(body, cx, &mut scoped))
+        }
         // D-IGNORERET2=A: `#Suppress(MustUse)` erases to a plain block at codegen.
         // The sema suppression is a compile-time-only fact (I3).
-        Stmt::SuppressMustUse { body, .. } => TStmt::Region(lower_stmts(body, cx, env)),
+        Stmt::SuppressMustUse { body, .. } => {
+            let mut scoped = clone_env(env);
+            TStmt::Region(lower_stmts(body, cx, &mut scoped))
+        }
         // D-REACTCORE1: `#Reactive { … }` lowers to `jet_reactive_effect(closure)`.
         // Clone outer captures into the closure (same as a stored lambda).
         Stmt::Reactive { body, .. } => {
             let closure = render_reactive_block_closure(body, cx, env);
             TStmt::Reactive { closure }
         }
-        // D-SHIELDNAME1=A: `#Shield { … }` lowers to a shield-guarded block. The
-        // body leaks like a region (AST shares `&mut env`), so lower on the SAME env.
-        Stmt::Shield { body, .. } => TStmt::Shield {
-            body: lower_stmts(body, cx, env),
-        },
-        // c109 Phase 19: an explicit `region r { … }` (D-REGION1). The AST emits a plain
-        // block and lowers the body on the SAME `&mut env` (its `let`s leak into the outer
-        // scope). Reproduce: lower the body on the SAME `env`, wrap in `TStmt::Region`.
-        Stmt::Region { body, .. } => TStmt::Region(lower_stmts(body, cx, env)),
+        // D-SHIELDNAME1=A: `#Shield { … }` lowers to a shield-guarded lexical block.
+        Stmt::Shield { body, .. } => {
+            let mut scoped = clone_env(env);
+            TStmt::Shield {
+                body: lower_stmts(body, cx, &mut scoped),
+            }
+        }
+        // c109 Phase 19: an explicit `region r { … }` (D-REGION1) emits a plain
+        // Rust lexical block.
+        Stmt::Region { body, .. } => {
+            let mut scoped = clone_env(env);
+            TStmt::Region(lower_stmts(body, cx, &mut scoped))
+        }
         // D-TASKSCOPE1=A: taskgroup erases to a plain block at codegen (I3).
-        Stmt::TaskGroup { body, .. } => TStmt::Region(lower_stmts(body, cx, env)),
+        Stmt::TaskGroup { body, .. } => {
+            let mut scoped = clone_env(env);
+            TStmt::Region(lower_stmts(body, cx, &mut scoped))
+        }
         // D-LAYOUT1 / D-LAYOUT-GATES1: `layout NAME { … }` needs a REAL
         // runtime object (unlike Region/TaskGroup, which erase) — bind `name`
         // to a fresh `jet_layout::Handle` BEFORE lowering the body, so the
@@ -755,42 +774,45 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             }
         }
         // c109 Phase 26: a `#Caps(Io) { … }` effect-restriction region (D-EFF1). `emit_stmt`'s
-        // `Stmt::Caps` arm is byte-for-byte `Stmt::Region` — a plain block with the body lowered
-        // on the SAME `&mut env` (its `let`s leak). Effects erase at codegen (I3); reuse the
-        // `TStmt::Region` shape.
-        Stmt::Caps { body, .. } => TStmt::Region(lower_stmts(body, cx, env)),
+        // `Stmt::Caps` arm is byte-for-byte `Stmt::Region`; effects erase at codegen (I3).
+        Stmt::Caps { body, .. } => {
+            let mut scoped = clone_env(env);
+            TStmt::Region(lower_stmts(body, cx, &mut scoped))
+        }
         // D-SCAP1: a `#grant(Fs) { caps -> … }` grant region. The capability handle
         // is a compile-time-only fact (authority to perform the granted effects),
-        // erased here (I3); the body lowers on the SAME `&mut env` (its `let`s leak)
-        // into a plain `TStmt::Region` — byte-for-byte the `Stmt::Region`/`Stmt::Caps`
-        // shape. No runtime grant/revoke value, no `unsafe`.
-        Stmt::Grant { body, .. } => TStmt::Region(lower_stmts(body, cx, env)),
+        // erased here (I3); the body emits as a plain lexical `TStmt::Region`.
+        // No runtime grant/revoke value, no `unsafe`.
+        Stmt::Grant { body, .. } => {
+            let mut scoped = clone_env(env);
+            TStmt::Region(lower_stmts(body, cx, &mut scoped))
+        }
         // c109 Phase 19: a `#Context(field: value) { … }` block (D-CTX1/D-DEADLINE1).
-        // Resolve each field into a `(field_name, value)` guard at lowering, then lower the body on
-        // the SAME `env` (it leaks like a region). Emit reproduces `emit_stmts`'s
-        // `Stmt::ContextBlock` arm byte-for-byte.
+        // Resolve each field against the outer env, then lower the guarded Rust block
+        // in a lexical child env.
         Stmt::ContextBlock { fields, body, .. } => {
             let guards = fields
                 .iter()
                 .map(|(name, v, _)| (name.clone(), lower_expr(v, cx, env)))
                 .collect();
+            let mut scoped = clone_env(env);
             TStmt::ContextBlock {
                 guards,
-                body: lower_stmts(body, cx, env),
+                body: lower_stmts(body, cx, &mut scoped),
             }
         }
-        // D-TERM1 (ratified 2026-06-22): `live { … }` block. The body leaks into the
-        // enclosing `env` (same as `Stmt::Region`) so let-bindings inside are visible
-        // after the block (consistent with all other Jet lexical blocks). Lowering only
-        // records the body; the enter/guard/leave preamble is emitted in `emit_tir_stmt`.
-        Stmt::Live { body, .. } => TStmt::Live {
-            body: lower_stmts(body, cx, env),
-        },
+        // D-TERM1: `live { … }` emits an enter/guard/leave Rust lexical block.
+        Stmt::Live { body, .. } => {
+            let mut scoped = clone_env(env);
+            TStmt::Live {
+                body: lower_stmts(body, cx, &mut scoped),
+            }
+        }
         // D-DOTSCOPE1: a `#Test` scope member (`.setup`/`.expect_fail`/`.timeout`/
         // `.skip`). Legality/args were checked in sema; here we pick the lowering
         // kind and fold `.timeout`'s duration literal to a nanosecond budget.
-        // `.setup`'s body leaks into `env` (like a region) so its bindings are
-        // visible to the rest of the test; the others open their own scope in
+        // `.setup` emits inline, so its bindings are visible to the rest of the test;
+        // the others open their own scope in
         // `emit_tir_stmt`.
         Stmt::ScopeMember {
             name, args, body, ..
@@ -804,24 +826,36 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             } else {
                 ScopeMemberKind::Skip
             };
+            let lowered_body = if matches!(&kind, ScopeMemberKind::Setup) {
+                // `.setup` is emitted inline so its declarations intentionally remain
+                // available to later statements in the test.
+                lower_stmts(body, cx, env)
+            } else {
+                let mut scoped = clone_env(env);
+                lower_stmts(body, cx, &mut scoped)
+            };
             TStmt::ScopeMember {
                 kind,
-                body: lower_stmts(body, cx, env),
+                body: lowered_body,
             }
         }
         // D-DET1: `assume_deterministic { … }` erases to a plain `TStmt::Region`
         // (byte-for-byte the `Stmt::Region`/`Stmt::Caps` shape). The determinism
         // suspension is a sema-only fact; nothing runtime, no `unsafe` (I3).
-        Stmt::AssumeDet { body, .. } => TStmt::Region(lower_stmts(body, cx, env)),
+        Stmt::AssumeDet { body, .. } => {
+            let mut scoped = clone_env(env);
+            TStmt::Region(lower_stmts(body, cx, &mut scoped))
+        }
         // D-TXN1–D-TXN4 (ratified 2026-06-24): `#Transact(name) { … }` block. Bind the
-        // handle (typed `Transaction`) in `env` so `name.on_commit(…)` lowers against
-        // it, then lower the body on the SAME `env` (it leaks like a region). The
+        // handle (typed `Transaction`) in a child env so `name.on_commit(…)` lowers
+        // against it without escaping the emitted Rust block. The
         // `let mut <handle> = jet_transaction(); … <handle>.commit();` framing is
         // emitted in `emit_tir_stmt`; codegen is dumb (I3).
         Stmt::Transact { name, body, .. } => {
+            let mut scoped = clone_env(env);
             let handle = name.as_ref().map(|name| {
                 let h = mangle(name);
-                env.bind(
+                scoped.bind(
                     name,
                     h.clone(),
                     Some(Type::Named(Syntax::TXN_HANDLE_TYPE.to_string())),
@@ -858,7 +892,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             TStmt::Transact {
                 handle,
                 snapshots,
-                body: lower_stmts(body, cx, env),
+                body: lower_stmts(body, cx, &mut scoped),
             }
         }
         // Forward-safety default: a Stmt variant not in the subset never reaches
