@@ -98,6 +98,7 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/repl_effect_denied_e1803.jet",
     "tests/ui/result_old_syntax.jet",
     "tests/ui/return_arrow_split.jet",
+    "tests/ui/shield_arguments.jet",
     "tests/ui/stacked_type_markers.jet",
     "tests/ui/string_lone_brace.jet",
     "tests/ui/suppress_unknown_argument.jet",
