@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 501,
-    "rev": 4006,
+    "nextNum": 505,
+    "rev": 4017,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -13514,6 +13514,99 @@
       "needsAcceptance": false,
       "created": "2026-07-12T00:42:29.884Z",
       "updated": "2026-07-12"
+    },
+    {
+      "id": "c0skyr40",
+      "num": 501,
+      "title": "Polyglot Phase 1: systems floor — inline tier, inline asm, C++ binder",
+      "body": "From docs/proposals/polyglot.md. Adds the missing fourth D-FFI-UNIFY1 tier (#Foreign(<lang>) inline bodies with the Jet signature as checked contract), the assembly floor (#Foreign(asm) inside #Unsafe, typed operands), and the cpp.* binder (clang bindgen, opaque class handles, exceptions -> T ? CppError, on-demand template instantiation). One ballot per decision: D-FFI-INLINE1, D-FFI-ASM1, D-FFI-CPP1. Gates every later phase: inline tier shape is reused by all languages.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/proposals/polyglot.md",
+        "docs/spec/syntax-decisions.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-12T00:54:48.236Z",
+      "updated": "2026-07-12"
+    },
+    {
+      "id": "c0u6kwwb",
+      "num": 502,
+      "title": "Polyglot Phase 2: managed runtimes — Go, JVM, .NET, Fortran binders",
+      "body": "From docs/proposals/polyglot.md. Four binder-depth ballots following the D-FFI-PY1/JS1/SWIFT1 precedent: go.* (c-archive shims), java.* (embedded JVM default, sidecar opt-in; Kotlin/Scala ride along), cs.* (hostfxr embed, async -> tasks), fortran.* (ISO C binding, column-major-aware arrays; unlocks BLAS/LAPACK-class numerics). Decisions: D-FFI-GO1, D-FFI-JVM1, D-FFI-DOTNET1, D-FFI-FORTRAN1. Blocked on Phase 1 inline-tier shape only for the inline instances; project/script tiers are independent.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/proposals/polyglot.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-12T00:54:48.332Z",
+      "updated": "2026-07-12"
+    },
+    {
+      "id": "c0vt1qwz",
+      "num": 503,
+      "title": "Polyglot Phase 3: scripting and shell — Lua, Ruby, Perl, PHP, R, Sh typed text",
+      "body": "From docs/proposals/polyglot.md. Five binder ballots (lua.* in-process VM; ruby.*/perl.*/php.* sidecar workers per the D-FFI-PY1 precedent; r.* binder for the already-reserved root, data.frame <-> core.data.Table) plus D-FFI-SH1: Sh as the third D-TYPEDTEXT1 instance (holes become injection-safe argv items, never word-split). Decisions: D-FFI-LUA1, D-FFI-RUBY1, D-FFI-PERL1, D-FFI-PHP1, D-FFI-R1, D-FFI-SH1.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/proposals/polyglot.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-12T00:54:48.431Z",
+      "updated": "2026-07-12"
+    },
+    {
+      "id": "c0xede68",
+      "num": 504,
+      "title": "Polyglot Phase 4: legacy replacement — COBOL, Octave, source importers",
+      "body": "From docs/proposals/polyglot.md. cobol.* binder (GnuCOBOL C ABI; copybooks -> @Codable structs), octave.* sidecar (matrices <-> Matrix/Tensor), and D-MIGRATE-SRC1: the source-level transpile-in framework (jet import <lang> ./src emits editable canonical Jet + TODO diagnostics, extending the D-WD5/D-JOS-NIXIMPORT1 discipline from manifests to source). Decisions: D-FFI-COBOL1, D-FFI-OCTAVE1, D-MIGRATE-SRC1. This is the enterprise replacement story.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/proposals/polyglot.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-12T00:54:48.527Z",
+      "updated": "2026-07-12"
     }
   ],
   "decisions": [
@@ -26116,6 +26209,542 @@
       "created": "2026-07-12T00:49:06.976Z",
       "outcome": "B",
       "ratifiedAt": "2026-07-12"
+    },
+    {
+      "id": "D-FFI-CPP1",
+      "cardId": "c0skyr40",
+      "group": "runtime",
+      "title": "C++ binder depth: `cpp.*` — opaque classes, laundered exceptions, on-demand templates",
+      "gist": "Decide how deep the C++ binder goes: classes, exceptions, and templates across the boundary.",
+      "lesson": "The C binder (S59) is shipped law, but the world's performance libraries are C++: OpenCV, LLVM, TensorRT, Qt, game physics. C++ has no stable ABI, so every language binds it by generating a C shim layer underneath.\n\nD-FFI-UNIFY1 already fixes the user surface: `cpp.<lib>` with script/project/overlay tiers and a `jet inspect bind cpp` binder. This ballot picks the binder's depth: what happens to classes, exceptions, and templates — the three things C++ has that C doesn't. The swift binder (D-FFI-SWIFT1) set the precedent shape: opaque ref-counted handles, throws mapped to Result.",
+      "explainer": "",
+      "story": "Grace needs OpenCV's image pipeline. Python users type two lines. Today she would hand-write a C wrapper around every C++ method she touches, recreating the shim layer pybind11 generates automatically for Python.",
+      "inWild": "use cpp.opencv as cv               // project tier: opencv: cpp@\"4.10\" in pkg.jet\n\nimg :: cv.imread(\"scan.png\")?      // cv::Exception -> `? CppError`\nblur :: img.gaussian_blur(kernel: 5)?\nfiles.write_bytes(\"out.png\", blur.encode(\".png\")?)?",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Full depth — opaque classes, `? CppError`, on-demand template instantiation",
+          "detail": "The binder (clang-based) emits a generated C shim crate per library, cached content-addressed like every bridge. Classes become opaque owned handles with RAII mapped to Jet scope cleanup (S63); methods become ordinary Jet methods on the handle type. Exceptions are caught at the shim and surface as `T ? CppError` — fallibility is visible at every call site.\n\nTemplates instantiate on demand: `cpp.vector<Int>` asks the binder to instantiate `std::vector<int64_t>` in the shim on cache miss. Overloads collapse to argument labels (S61); operator overloads become named methods. The overlay tier corrects any wrong guess.",
+          "code": "use cpp.opencv as cv\n\nimg :: cv.imread(\"scan.png\")?        // handle; frees at scope end (S63)\nout :: img.gaussian_blur(kernel: 5)?\n\n$ jet check vision.jet   # exception type not convertible\nerror[E32xx]: `cv.imread` can throw `cv::Exception`\n  the call is fallible — write `cv.imread(\"scan.png\")?` and handle `CppError`"
+        },
+        {
+          "key": "B",
+          "name": "C-surface only — bind `extern \"C\"` symbols, classes stay out",
+          "detail": "The cpp binder binds only what the C binder already understands: free functions with C linkage. Libraries exposing C APIs (many do) work day one; anything class-shaped needs a hand-written C wrapper, exactly like today.\n\nHonest and small, but it concedes the actual C++ ecosystem: OpenCV, Qt, and LLVM are class-first. The gap between Jet and Python/Swift interop stays visible in every migration conversation.",
+          "code": "use cpp.sqlite3 as sq       // works: C API\nuse cpp.opencv as cv        // fails:\n$ jet check vision.jet\nerror[E32xx]: `opencv` exposes no C-linkage surface\n  the cpp binder binds extern \"C\" symbols only; write a C wrapper for classes"
+        },
+        {
+          "key": "C",
+          "name": "Full depth minus templates — classes and exceptions, no generic instantiation",
+          "detail": "Everything in A except template instantiation: template types appear only where a library already instantiates them in its own headers. Cuts the binder's hardest surface. Users hit the wall exactly at `std::vector<T>` returns and Eigen-style math libraries — common in the target workloads — and fall back to overlay-tier hand shims.",
+          "code": "use cpp.opencv as cv\nimg :: cv.imread(\"x.png\")?          // fine: concrete class\nhist :: img.histogram()?             // fails if return is std::vector<float>\nerror[E32xx]: `histogram` returns `std::vector<float>` — no instantiation support\n  add an overlay shim, or vote template support"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Python (pybind11)",
+          "note": "pybind11 proved the full-depth model: opaque class handles, exceptions translated, templates instantiated at binding time. It is why C++ libraries feel native from Python.",
+          "code": "import cv2\nimg = cv2.imread(\"scan.png\")"
+        },
+        {
+          "lang": "Swift",
+          "note": "Swift's C++ interop (5.9+) also chose classes-as-values/handles with throws mapping — the same shape D-FFI-SWIFT1 already ratified for Swift itself.",
+          "code": "import CxxOpenCV\nlet img = try cv.imread(\"scan.png\")"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The C++ ecosystem is the single biggest performance-library pool Jet can absorb, and it is class-first. Full depth is what makes `use cpp.opencv` two lines instead of a wrapper project; pybind11 proved the model at scale.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It binds the part of C++ that is already C and concedes the actual target — every class-first library stays a manual wrapper project."
+          },
+          {
+            "key": "C",
+            "reason": "Template returns pervade the exact math/vision libraries this binder exists for; stopping there moves the wall two steps back instead of removing it."
+          }
+        ],
+        "tradeoff": "The binder owns a clang toolchain dependency (jetpack-provisioned, never in Source/ — I6) and template instantiation lengthens first-compile cache misses."
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "A ships staged along B→C→A internally — C-linkage binding lands first, classes/exceptions next, templates last — but the ratified surface is A so no intermediate stage becomes accidental law.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "full-depth binder surface",
+            "use": "ratified as the contract"
+          },
+          {
+            "key": "B",
+            "aspect": "C-linkage floor",
+            "use": "first internal stage; already proven by the shipped C binder"
+          },
+          {
+            "key": "C",
+            "aspect": "classes + exceptions without templates",
+            "use": "second internal stage; overlay tier covers gaps until templates land"
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T00:57:34.580Z"
+    },
+    {
+      "id": "D-CLI-BARE1",
+      "cardId": "c0gv4b2r",
+      "group": "tooling",
+      "title": "Bare project verbs: run/dev/debug/bench/check/build with no file argument",
+      "gist": "Whether the six build verbs work with no file argument inside a package, resolving the entry the way run and test already do.",
+      "lesson": "Terms first. A single .jet file is a whole program; you run it with `jet file.jet` and it never needs a manifest. A package is a directory with a pkg.jet manifest that declares one or more targets (buildable entry points). Inside a package the entry is already known: pkg.jet lists targets, and an omitted target is inferred from a top-level `fn run()` (decision D-ILE1). A workspace holds several packages; you pick one member with `-p <member>`.\n\nToday two verbs already run bare inside a package. `jet test` collects the package's #Test blocks with no argument. `jet fmt` discovers workspace, package, or current-directory scope on its own. But `jet run`, `jet dev`, `jet debug`, `jet bench`, `jet check`, and `jet build` still demand a file argument even when the package entry is unambiguous. So a beginner who scaffolds a project and types `jet run` gets a usage error instead of their program.\n\nThis choice is whether those six verbs learn the same entry-resolution rule the rest of the tool already uses.",
+      "explainer": "",
+      "story": "Marcus Bell finishes the Jet tutorial and scaffolds his first real project. He runs `jet new weather-cli`, cd's in, opens the generated main file, and types the command every other language taught him: `jet run`. Instead of his program, he gets a usage error telling him to name a file. He knows the file is right there. He knows the project knows. He types the path by hand, and again the next twenty times.",
+      "inWild": "$ jet new weather-cli\n  created weather-cli/ (pkg.jet, Source/Main.jet)\n$ cd weather-cli\n$ jet run\nerror: no input file\n  usage: jet run <file.jet>\n\n# pkg.jet already names the entry:\npackage: weather-cli\ntargets:\n  main: { entry: Source/Main.jet }",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "One shared entry-resolution rule for all six verbs",
+          "detail": "run, dev, debug, bench, check, and build all become bare-capable inside a package. With no file, each resolves the entry the same way: the package's declared targets, falling back to an inferred `fn run()` (D-ILE1). One declared target runs directly. Several targets with no default is an error that lists them and shows how to pick. An explicit file or `-p <member>` always wins. Outside a package, bare use stays today's usage error. One rule, learned once, applied everywhere.",
+          "code": "$ cd weather-cli\n$ jet run\n  weather-cli 22C, clear\n\n# two targets, none default:\n$ jet build\nerror: package has 2 targets; name one\n  targets: main, bench-tool\n  pick with:  jet build -p main\n  or a file:  jet build Source/Main.jet\n\n$ jet build -p main\n  built target 'main'"
+        },
+        {
+          "key": "B",
+          "name": "Only run and dev go bare",
+          "detail": "The two most-typed verbs, run and dev, become bare-capable inside a package. debug, bench, check, and build keep requiring an explicit file. The everyday loop gets shorter, but the tool now has two classes of verb. Some read the manifest for you; some make you name the file even though the manifest is right there. A beginner learns `jet run` works bare, assumes `jet check` does too, and hits the wall.",
+          "code": "$ cd weather-cli\n$ jet run\n  weather-cli 22C, clear\n$ jet check\nerror: no input file\n  usage: jet check <file.jet>\n$ jet check Source/Main.jet\n  no errors"
+        },
+        {
+          "key": "C",
+          "name": "Status quo: file always required",
+          "detail": "All six verbs keep demanding an explicit file, even inside a package whose entry is declared. Nothing new to learn about resolution, but every beginner keeps typing the path the manifest already knows, and the tool stays inconsistent with test and fmt, which resolve scope on their own.",
+          "code": "$ cd weather-cli\n$ jet run\nerror: no input file\n  usage: jet run <file.jet>\n$ jet run Source/Main.jet\n  weather-cli 22C, clear"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Cargo",
+          "note": "`cargo run` and `cargo build` read Cargo.toml and need no path; `--bin <name>` disambiguates. Jet already has the manifest and the `-p` selector; option A finishes the same convenience for its build verbs.",
+          "code": "$ cargo run\n   Running `target/debug/app`\n$ cargo run --bin other"
+        },
+        {
+          "lang": "Go",
+          "note": "`go run .` and `go build` operate on the current package by directory, no file named. The bare-verb ergonomics beginners expect are the norm, not a special case.",
+          "code": "$ go run .\nhello"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "One entry-resolution rule across every verb is the ceremony-free default a beginner expects: cd into a project and `jet run` just works, same as test and fmt already do. It stays honest about ambiguity by listing targets, and it never removes expert control because an explicit file or `-p` always wins.",
+        "tradeoff": "A package with several targets and no default gets an error on bare use instead of guessing. That is the safe direction: it names the real targets and shows the exact pick, so the one-time friction lands on the ambiguous case, not the common one.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Splitting verbs into bare-capable and not creates two classes the beginner cannot predict. Learning `jet run` works bare teaches the wrong lesson about `jet check`. Inconsistent surface, against one-path."
+          },
+          {
+            "key": "C",
+            "reason": "Keeps every beginner typing a path the manifest already holds, and leaves the tool inconsistent with test and fmt. It fixes nothing the card exists to fix."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "Adopt one shared entry-resolution rule for all six verbs (A). It already contains B's win, since run and dev are simply two of the six, and it answers C's only virtue, predictability, with a single rule instead of a per-verb table.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "One rule for all six verbs, explicit file or -p always wins",
+            "use": "The core mechanism: bare resolves via targets then inferred fn run(); ambiguity errors with the target list."
+          },
+          {
+            "key": "B",
+            "aspect": "run and dev are the highest-value verbs to shorten",
+            "use": "They are included first-class in A; the everyday loop gets the shortest path without inventing a special case."
+          },
+          {
+            "key": "C",
+            "aspect": "Predictability and no new resolution surprises",
+            "use": "A delivers this through a single rule shared with test and fmt, so there is nothing per-verb to memorize."
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T00:59:33.972Z"
+    },
+    {
+      "id": "D-MARK-DISCARD1",
+      "cardId": "c0iftbrr",
+      "group": "syntax",
+      "title": "One spelling for discarding a fallible or must-use result: .drop(reason) vs #Suppress region",
+      "gist": "Whether discarding an ignored result stays the per-value `.drop(\"reason\")` only, or also keeps the block-wide `#Suppress(MustUse) { ... }` region that ships alongside it.",
+      "lesson": "Terms first. Some Jet calls return a result you are not allowed to silently throw away. These are fallible results (they might carry an error) and @MustUse values (the caller must look at them). Discarding one requires visible intent, so the reader sees you meant to (decisions D-IGNORERET1 and D-IGNORERET2). Ignore one by accident and you get error E0402 or E0419.\n\nRight now the code ships two ways to say the same thing. The recorded spelling is `.drop(\"reason\")`, written on the value: `cleanup_temp().drop(\"best-effort\")`. But the parser and sema also ship a region form, `#Suppress(MustUse) { ... }`, which suppresses those same errors for every statement in the block. That is two spellings for one semantic job, which invariant I8 forbids: one canonical mechanism per job.\n\nThis choice picks which one is canonical, or ratifies them as genuinely distinct jobs.",
+      "explainer": "",
+      "story": "Priscilla Hoffman writes a test-helper file full of teardown calls whose results nobody checks. She wraps the whole file's noisy section in `#Suppress(MustUse) { ... }` and moves on. Months later a teammate adds a real fallible call inside that same block, `db.commit()`, and forgets the return matters. The commit fails in CI, returns an error, and the region silently swallows it. No E0419, no diagnostic, a green test over a broken write.",
+      "inWild": "// Priscilla's teardown, region form:\n#Suppress(MustUse) {\n  cleanup_temp()\n  reset_fixtures()\n  db.commit()   // added later; its error is now silently eaten\n}\n\n// same intent, per-value form:\ncleanup_temp().drop(\"best-effort\")\nreset_fixtures().drop(\"test teardown\")\ndb.commit()   // still checked; forgetting it is E0419",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Per-value .drop(\"reason\") only; #Suppress region is removed",
+          "detail": "`.drop(\"reason\")` on the value is the one canonical discard. Each site names why it is safe to ignore, so intent is auditable per result and grep-able. The `#Suppress(MustUse)` region leaves the language; writing it becomes an ordinary unknown-marker error with no special teaching residue. A fallible call added later without its own `.drop` still triggers E0419, so nothing gets silently swallowed by proximity.",
+          "code": "cleanup_temp().drop(\"best-effort\")\nreset_fixtures().drop(\"test teardown\")\n\n// later addition is caught, not swallowed:\ndb.commit()\n// error[E0419]: result of `commit` must be used\n//   it may carry an error\n//   fix: handle it, or discard on purpose: db.commit().drop(\"reason\")\n\n// the old region no longer exists:\n#Suppress(MustUse) { ... }\n// error: unknown marker `Suppress`"
+        },
+        {
+          "key": "B",
+          "name": "Keep both, ratified as distinct jobs",
+          "detail": "Declare the two forms serve different jobs and keep both. `.drop(\"reason\")` discards one value with a reason; `#Suppress(MustUse) { ... }` marks a scaffolding or test block where many known-noisy results are discarded together. Convenient for teardown-heavy files, but it means one semantic intent, 'I mean to discard this result', has two spellings, and the region keeps swallowing any new fallible call dropped into the block.",
+          "code": "// one value, with reason:\ncleanup_temp().drop(\"best-effort\")\n\n// many noisy calls, one region:\n#Suppress(MustUse) {\n  cleanup_temp()\n  reset_fixtures()\n  db.commit()   // still silently swallowed\n}"
+        },
+        {
+          "key": "C",
+          "name": "Region only; .drop is removed",
+          "detail": "`#Suppress(MustUse) { ... }` becomes the one discard mechanism; `.drop` leaves the language. Discarding a single value then means wrapping one statement in a region, which is noisy for the common case and still hides any later fallible call inside the block. The per-site reason string is lost, so audits cannot see why each result was ignored.",
+          "code": "// discarding one value now needs a whole region:\n#Suppress(MustUse) {\n  cleanup_temp()\n}\n\n// .drop no longer exists:\ncleanup_temp().drop(\"best-effort\")\n// error: unknown method `drop` on Result"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust's must-use discard is per-value (`let _ = x;`) with no block-wide suppression; #[allow(unused_must_use)] on an item is the escape hatch and is known to hide later real cases. Jet's `.drop(\"reason\")` improves on `let _ =` by requiring a stated reason.",
+          "code": "let _ = cleanup_temp();  // per value, no reason recorded"
+        },
+        {
+          "lang": "Go",
+          "note": "Go discards per-value with `_ =`, never a region. The blank identifier is deliberately one assignment at a time, so a newly added error return is a fresh, visible discard, not something a wrapper already covers.",
+          "code": "_ = cleanupTemp()"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The per-value reason string keeps intent auditable at the exact discard site and reads clearly for the common case of ignoring one result. It satisfies I8 with a single canonical mechanism and keeps the greenfield break clean: the retired region becomes an ordinary error with no teaching residue.",
+        "tradeoff": "Teardown-heavy files repeat `.drop(\"reason\")` per line instead of wrapping once. That repetition is the point: each ignored result carries its own visible reason, and a later fallible call cannot hide behind a block that already suppresses the check.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Two spellings for one intent violates I8, and the region's real danger stays: a fallible call added inside the block later is silently swallowed with no E0419. The convenience buys a safety hole."
+          },
+          {
+            "key": "C",
+            "reason": "Loses the per-site reason string, makes single-value discard noisy, and keeps the same swallow-later-calls hazard as B. It removes the safer, clearer form and keeps the risky one."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "Keep the per-value `.drop(\"reason\")` as the sole discard (A). B and C both trade less typing against a checked boundary. The repetition A costs is a feature: every discard states its own reason, and no future call hides inside a suppression.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "Per-value discard with a mandatory reason string",
+            "use": "The canonical mechanism; auditable at each site and safe against later-added fallible calls."
+          },
+          {
+            "key": "B",
+            "aspect": "Recognizes teardown blocks are noisy",
+            "use": "Answered without a region: `.drop(\"reason\")` per line stays terse and keeps each discard's intent visible."
+          },
+          {
+            "key": "C",
+            "aspect": "Single mechanism, no dual spelling",
+            "use": "A also gives exactly one mechanism, but keeps the reason string and avoids wrapping single statements in a block."
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T00:59:34.068Z"
+    },
+    {
+      "id": "D-MARK-DEBUG1",
+      "cardId": "c0iftbrr",
+      "group": "syntax",
+      "title": "Debug derivation: auto-derive like Printable/Equatable, or opt-in @Debug marker",
+      "gist": "Whether the Debug view of a value is derived automatically when every field qualifies, or requires a hand-written @Debug marker on the type.",
+      "lesson": "Terms first. Printable is the pretty, user-facing rendering of a value; Debug is the developer-facing dump you use while diagnosing, selected in interpolation with `{value@Debug}`. Equatable means the type supports `==`. A derive is the compiler writing one of these for you when every field already supports it, so you write no boilerplate. A field marked `#[Redact]` renders as \"[redacted]\" in Debug so secrets never leak into logs (D-DEBUG-REDACT).\n\nTwo ratified rules disagree. S55, the built-in derive policy, says Printable and Equatable auto-derive silently when every field qualifies, and lists other derives, including `@Debug`, as explicit opt-in markers. D-DISPLAYDBG1 says the opposite for Debug: 'Debug is dev-facing and auto-derived; `{value@Debug}` selects it.' One says add a marker to get Debug; the other says it is already there.\n\nThis choice settles which rule is law.",
+      "explainer": "",
+      "story": "Deborah Nguyen is chasing a bad total on an order. She drops a print into her handler, `print(\"order: {order@Debug}\")`, exactly as the tutorial showed. One doc page told her Debug is auto-derived and just works; another told her she must first add an `@Debug` marker to the Order type. Depending on which rule is real, she either sees her struct dumped or gets a compile error mid-debug, pointing at a marker she did not know she needed.",
+      "inWild": "struct Order {\n  id: Int\n  items: [Item]\n  card: String   #[Redact]\n}\n\nfn handle(order: Order) {\n  print(\"order: {order@Debug}\")\n}\n\n// Under auto-derive (A): prints, card shows as [redacted].\n// Under opt-in (B): compile error unless `@Debug` is on Order.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Debug auto-derives like Printable and Equatable",
+          "detail": "Debug derives automatically whenever every field qualifies, matching Printable and Equatable under S55. `{value@Debug}` always works in development with no marker. A hand-written Debug impl still overrides the derived one, and `#[Redact]` still renders sensitive fields as \"[redacted]\". The standalone opt-in `@Debug` marker leaves the derive list, since it now selects nothing you did not already have. Inspecting your own struct needs no ceremony.",
+          "code": "struct Order { id: Int, items: [Item], card: String #[Redact] }\n\nprint(\"order: {order@Debug}\")\n// order: Order { id: 42, items: [Item { sku: \"AB\" }], card: [redacted] }\n\n// hand-written impl still wins where you want it:\nimpl Debug for Order { ... }"
+        },
+        {
+          "key": "B",
+          "name": "Opt-in @Debug marker stays required",
+          "detail": "Debug stays explicit opt-in per S55's list. Using `{value@Debug}` on a type without an `@Debug` marker is a compile error carrying a fix-it that adds the marker. The surface is explicit: you can point at exactly which types are debuggable. The cost is ceremony on every struct you inspect, paid during debugging when friction hurts most.",
+          "code": "struct Order { id: Int, items: [Item], card: String #[Redact] }\n\nprint(\"order: {order@Debug}\")\n// error: type `Order` has no Debug view\n//   `{x@Debug}` needs Debug derived on the type\n//   fix: mark the type\n//     @Debug\n//     struct Order { ... }\n\n@Debug\nstruct Order { id: Int, items: [Item], card: String #[Redact] }\n// now prints, card shows as [redacted]"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust makes Debug opt-in with `#[derive(Debug)]` and errors if you `{:?}` a type without it. It is a frequent beginner speed bump; you interrupt debugging to annotate the type. Jet's redaction removes the usual reason to keep Debug off by default.",
+          "code": "println!(\"{order:?}\");\n// error[E0277]: `Order` doesn't implement `Debug`"
+        },
+        {
+          "lang": "Python",
+          "note": "Python gives every object a default repr with zero ceremony; you can always print something while debugging. Auto-derive brings that friction-free inspection while `#[Redact]` keeps secrets out of the dump.",
+          "code": ">>> print(order)\n<Order id=42 card=[redacted]>"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Debug is a dev-facing tool. Requiring a marker before you can inspect your own struct fights priority two, the beginner experience, at the exact moment friction hurts, mid-debug. Auto-derive matches how Printable and Equatable already behave, so the model stays consistent, and #[Redact] carries the secrets-in-logs safety story.",
+        "tradeoff": "Auto-derive means every qualifying type carries a Debug view whether or not it is ever printed. That view exists only for developer inspection, redaction protects sensitive fields, and a hand-written impl overrides it, so the cost is a capability you never see until you ask for it.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Puts ceremony on the debugging path itself: you hit a compile error mid-diagnosis and must annotate the type before you can look at it. The usual reason for opt-in, secret leakage, is already handled by #[Redact], so the friction buys little."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "Auto-derive Debug (A) and keep the two controls B's explicitness relied on: a hand-written impl still overrides, and #[Redact] still hides sensitive fields. That preserves expert control over the exact dump without making every beginner annotate a type just to print it.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "Ceremony-free Debug that matches Printable and Equatable",
+            "use": "The default: `{value@Debug}` works everywhere in dev, consistent with the other auto-derives."
+          },
+          {
+            "key": "B",
+            "aspect": "Explicit control over what the Debug dump shows",
+            "use": "Kept via hand-written impl override and #[Redact], so experts still shape or hide fields without a mandatory opt-in marker."
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T00:59:34.164Z"
+    },
+    {
+      "id": "D-CORE-COMPRESS1",
+      "cardId": "c0k0v4gj",
+      "group": "stdlib",
+      "title": "core.archive vs core.compress: split stream codecs from container formats, or merge",
+      "gist": "Whether gzip's two current homes resolve by splitting stream codecs from container formats, or by merging everything compression-ish into one module.",
+      "lesson": "Terms first. A byte-stream codec transforms one stream of bytes into a smaller stream and back: gzip and zstd are codecs. A container format holds many named entries in one file: zip and tar are containers. They are different jobs; a codec never names an entry, a container never has to compress.\n\nRight now two registered core modules overlap on gzip. `core.archive` (D-DEP-ARCHIVE1) offers gzip, zip, and tar over a flate2-family FFI bridge. `core.compress.gzip` and `core.compress.zstd` (D-CODECS1) register the same codecs standalone. So gzip lives in two places and a reader cannot tell which import is canonical.\n\nThis choice picks the shape that removes the overlap.",
+      "explainer": "",
+      "story": "Frank Castellano ships a service that compresses a rolling log stream with zstd, then, in the same afternoon, unpacks a vendor release tarball to read its manifest. He reaches for compression and finds gzip exported from both `core.archive` and `core.compress`. He cannot tell which is the real one, imports both to be safe, and ends up with two spellings of the same call in one file.",
+      "inWild": "import core.compress\nimport core.archive\n\n// codec on a stream:\nlet packed = core.compress.gzip.encode(log_bytes)\n// ...but also exported here:\nlet packed2 = core.archive.gzip.encode(log_bytes)\n\n// container, only makes sense as an archive:\nlet files = core.archive.tar.unpack(release_bytes)",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Split by job: compress owns codecs, archive owns containers",
+          "detail": "`core.compress` owns stream codecs (gzip, zstd, and future additions). `core.archive` owns container formats (zip, tar). A compressed tarball composes the two: archive builds the tar, compress gzips the stream. archive's standalone gzip helpers move to core.compress as a clean break, so gzip has exactly one home. Each name states its real job, and a reader always knows which import to reach for.",
+          "code": "import core.compress\nimport core.archive\n\n// stream codec, one home:\nlet packed = core.compress.zstd.encode(log_bytes)\nlet gz = core.compress.gzip.encode(log_bytes)\n\n// container:\nlet files = core.archive.tar.unpack(release_bytes)\n\n// tar.gz composes the two:\nlet tarball = core.compress.gzip.encode(core.archive.tar.pack(files))\n\n// old spelling is gone:\ncore.archive.gzip.encode(log_bytes)\n// error: no member `gzip` in module `core.archive`"
+        },
+        {
+          "key": "B",
+          "name": "Merge: archive absorbs the codecs, compress dies",
+          "detail": "`core.archive` absorbs gzip and zstd; `core.compress` leaves the language. Everything compression-related lives behind one import. The cost is a lie in the name: `core.archive.zstd` labels a codec that never archives anything. The module name stops describing its members, and the codec-vs-container distinction disappears from the API.",
+          "code": "import core.archive\n\n// codec now lives under archive, name misleads:\nlet packed = core.archive.zstd.encode(log_bytes)\n// zstd archives nothing; it is a stream codec\n\nlet files = core.archive.tar.unpack(release_bytes)\n\n// core.compress no longer exists:\nimport core.compress\n// error: no module `core.compress`"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Python",
+          "note": "Python keeps them separate for exactly this reason: `gzip`/`zlib`/`lzma` are stream codecs, `zipfile`/`tarfile` are containers. The split maps to how the two jobs actually differ, and tar.gz composes tarfile with a gzip stream.",
+          "code": "import gzip, tarfile\ndata = gzip.compress(log_bytes)\ntf = tarfile.open('release.tar')"
+        },
+        {
+          "lang": "Rust",
+          "note": "Rust's ecosystem splits the same way: `flate2`/`zstd` are stream codecs, `tar`/`zip` are container crates, and a tar.gz is a tar writer wrapped in a gzip encoder. Option A mirrors this composition.",
+          "code": "let enc = GzEncoder::new(tar_writer, Compression::default());"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Splitting by job mirrors the ratified one-adapter-identity shape (D-ENCSTREAM1) and keeps every name truthful: codecs live where the name says codec, containers where it says archive. A reader always knows which module is canonical, and tar.gz composes cleanly instead of one module owning two unrelated jobs.",
+        "tradeoff": "A compressed tarball now touches two modules, archive to pack and compress to gzip. That composition is the accurate model: it names each step for what it is, so nothing hides a codec under an archive label or an archive under a codec one.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Puts a codec under a name that lies about it: `core.archive.zstd` never archives anything. It erases the codec-vs-container distinction from the surface and keeps one module owning two different jobs, against the truthful-naming and one-job goals."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "Split by job (A), keeping B's one virtue, discoverability, through clean composition rather than a merged module. tar.gz is written as compress-over-archive, so both jobs stay reachable and each name still tells the truth about its members.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "Truthful split: codecs in compress, containers in archive",
+            "use": "The canonical shape; gzip gets one home and each module name matches its members."
+          },
+          {
+            "key": "B",
+            "aspect": "One obvious place to find compression",
+            "use": "Answered by composition: core.compress is the single home for codecs, and tar.gz is compress applied over an archive, so nothing is scattered."
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T00:59:34.264Z"
+    },
+    {
+      "id": "D-FFI-INLINE1",
+      "cardId": "c0skyr40",
+      "group": "syntax",
+      "title": "Inline foreign code: a fourth FFI tier with the Jet signature as the checked contract",
+      "gist": "Let a Jet file carry a small foreign function body inline, type-checked against a Jet signature.",
+      "lesson": "D-FFI-UNIFY1 gives every foreign language three tiers. Script tier binds a foreign file (`use \"raylib.h\" as rl`). Project tier pins a dependency (`use py.h5 as h5`). Overlay tier corrects generated bindings. All three bind code that lives in another file.\n\nNothing covers ten lines of foreign code that belong inside one Jet file — a checksum kernel, one intrinsic, one tricky syscall wrapper. Today you create a separate header or dependency for it. Other languages solve this with inline blocks: Rust has `asm!`, C++ has `asm`, Zig has inline assembly and C import. None type-check the boundary as a real signature.",
+      "explainer": "",
+      "story": "Walter ports a hash function whose reference implementation is 12 lines of C. The algorithm is stable; wrapping it as a whole vendored library is absurd. He wants those 12 lines next to the Jet code that calls them, with the call boundary checked like any Jet function.",
+      "inWild": "// today: 12 lines of C need a whole script-tier header file + pkg wiring\n// proposed: the body lives here, the Jet signature is the contract\n#Foreign(c) fn crc32(data: [U8], seed: U32) -> U32 {\n    \"\"\"\n    uint32_t crc32(const uint8_t* data, size_t data_len, uint32_t seed) {\n        uint32_t c = ~seed;\n        for (size_t i = 0; i < data_len; i++) { c = step(c, data[i]); }\n        return ~c;\n    }\n    \"\"\"\n}\n\nsum :: crc32(files.read_bytes(\"payload.bin\")?, 0)",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "`#Foreign(<lang>)` fn — one directive shape for every language",
+          "detail": "A fourth D-FFI-UNIFY1 tier. The declaration is an ordinary Jet `fn` signature; the body is one multi-line string of foreign source. Sema checks every call site against the Jet signature. The language's existing binder compiles the body on cache miss and generates the same safe marshaling as the script tier.\n\nA body/signature mismatch is a Jet diagnostic naming both sides — no foreign compiler error reaches the user unlaundered (I2). Effects declare like any extern; unsafe-language bodies (c, cpp, asm) additionally require the enclosing `#Unsafe(\"reason\")` gate (S58). One shape, reused by every current and future language.",
+          "code": "#Unsafe(\"vetted reference implementation\")\n#Foreign(c) fn crc32(data: [U8], seed: U32) -> U32 {\n    \"\"\"…c body…\"\"\"\n}\n\n#Foreign(py) fn sentiment(text: String) -> Float {\n    \"\"\"\n    from vader import polarity\n    return polarity(text)\n    \"\"\"\n}\n\n$ jet check app.jet   # body drifts from signature\nerror[E32xx]: foreign body of `crc32` does not match its Jet signature\n  the C body takes 2 parameters; the Jet signature declares 3\n  = declared: fn crc32(data: [U8], seed: U32, salt: U32) -> U32"
+        },
+        {
+          "key": "B",
+          "name": "No inline tier — script tier is enough",
+          "detail": "Keep the ratified three tiers. Small foreign snippets live in a sibling file bound by the script tier (`use \"./crc32.h\" as c`). The surface stays smaller and every foreign line stays in a file its own toolchain can open directly.\n\nThe cost: the ten-line case keeps real friction — a second file, a header/source split for C, and pkg wiring for anything the script tier can't bind. The friction pushes people toward vendoring or toward not using the best tool.",
+          "code": "// crc32.h + crc32.c sit beside the Jet file\nuse \"./crc32.h\" as c\nsum :: c.crc32(bytes, bytes.len(), 0)"
+        },
+        {
+          "key": "C",
+          "name": "Typed-text values — foreign code as a checked string type",
+          "detail": "Reuse D-TYPEDTEXT1: a string literal in a `C`/`Py` typed position becomes a checked foreign-code value, compiled and invoked through a Core call. Symmetry with `Sql`/`Html` is elegant. But code-as-value blurs the boundary: the signature lives in a turbofish, call sites read like dynamic strings, and the `#Unsafe` audit gate has no natural declaration to attach to.",
+          "code": "kernel: C<fn([U8], U32) -> U32> :: \"\"\"\n  uint32_t crc32(const uint8_t* d, size_t n, uint32_t s) { … }\n\"\"\"\nsum :: kernel.call(bytes, 0)?"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Zig",
+          "note": "Zig's `@cImport` binds headers (Jet's script tier already matches it). Zig still has no inline foreign bodies except asm.",
+          "code": "const c = @cImport(@cInclude(\"crc32.h\"));"
+        },
+        {
+          "lang": "Rust",
+          "note": "Rust inline is asm-only and the operand contract is spelled in strings, not a function signature. cc/cxx crates need build scripts for anything more.",
+          "code": "unsafe { asm!(\"rdtsc\", out(\"rax\") lo, out(\"rdx\") hi); }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The signature-as-contract shape is what makes Jet's FFI safer than every host language: sema owns the boundary, binders own the body, and the same spelling scales from asm to Python. It completes D-FFI-UNIFY1 with one rule instead of per-language hacks.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It leaves the highest-frequency FFI case (a few lines) with the highest ceremony, which is backwards for a language selling ergonomic interop."
+          },
+          {
+            "key": "C",
+            "reason": "Code-as-value hides the declaration: no natural home for the #Unsafe gate, effects, or docs, and call sites stop looking like ordinary Jet calls."
+          }
+        ],
+        "tradeoff": "Foreign bodies inside .jet files get editor support only through injected-language regions; the binder cache must rebuild the snippet when the body string changes."
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "A absorbs B's discipline: bodies compile through the same binder and cache as script-tier files. It also keeps C's checked boundary — the check just lives on a real fn declaration.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "one directive shape, signature as contract",
+            "use": "adopted"
+          },
+          {
+            "key": "B",
+            "aspect": "binder + cache reuse, no second compilation path",
+            "use": "A compiles inline bodies through the exact script-tier binder machinery"
+          },
+          {
+            "key": "C",
+            "aspect": "typed checked boundary",
+            "use": "A keeps the check, attached to the fn signature where audit gates and effects already live"
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T00:59:34.363Z"
+    },
+    {
+      "id": "D-FFI-ASM1",
+      "cardId": "c0skyr40",
+      "group": "syntax",
+      "title": "Inline assembly: the `asm` instance of the inline tier, gated by #Unsafe",
+      "gist": "Give experts real inline assembly with typed operands, behind the existing #Unsafe gate.",
+      "lesson": "Master-of-ALL bottoms out in assembly: cycle counters, cache-line tricks, crypto with constant-time guarantees, kernel entry stubs, intrinsics the SIMD lane types (D-SIMD1) don't cover. Jet has no asm story today — the expert hits a wall and reaches for C or Rust.\n\nThe low-level tier already has the right gates: `use core.mem` for discovery, `#Unsafe(\"reason\")` for audit (S58). Rust lowers inline asm through `asm!`, which rustc verifies per target — Jet's generated-Rust backend can reuse that verification while keeping the user-facing surface and diagnostics Jet-owned (I2).",
+      "explainer": "",
+      "story": "Dale profiles a hot loop and needs the CPU's cycle counter, not wall-clock time. `core.time` has no such call. In Rust he would write three lines of `asm!`. In Jet today his only path is an FFI round-trip through a C file for one instruction.",
+      "inWild": "use core.mem\n\n#Unsafe(\"cycle counter — no Core surface exists\")\n#Foreign(asm) fn rdtsc() -> U64 {\n    \"\"\"\n    rdtsc\n    shl rdx, 32\n    or  rax, rdx        ; -> return\n    \"\"\"\n}\n\nstart :: rdtsc()\nhot_loop()\nprint(\"cycles: {rdtsc() - start}\")",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "`#Foreign(asm)` — asm is a language in the inline tier",
+          "detail": "Assembly reuses D-FFI-INLINE1's shape exactly: a Jet `fn` signature is the operand contract — parameters map to input registers, the return value to outputs, per a small documented convention with named `; -> return` anchors. Requires `use core.mem` plus an enclosing `#Unsafe(\"reason\")`. Bodies are per-target; the existing `comptime if build.os ==` and `#Target` machinery select variants.\n\nLowering emits Rust `asm!`, so rustc verifies register/clobber facts per target while every user-facing error stays a Jet diagnostic naming the Jet span (I2). No new sigil, no new block form — the inline tier absorbs asm as just another language.",
+          "code": "#Unsafe(\"constant-time compare — timing safety\")\n#Foreign(asm) fn ct_eq(a: U64, b: U64) -> Bool {\n    \"\"\"\n    xor {a}, {b}\n    setz al             ; -> return\n    \"\"\"\n}\n\n$ jet check crypto.jet   # outside the gate\nerror[E0208]: `#Foreign(asm)` requires an enclosing `#Unsafe(\"reason\")`\n  assembly bypasses every safety proof — state why, then own it"
+        },
+        {
+          "key": "B",
+          "name": "Intrinsics library only — no user-visible asm",
+          "detail": "Instead of asm syntax, `core.mem.intrinsics` grows curated functions (cycle counters, prefetch, CAS variants, crc32 hardware ops), each internally implemented with vetted asm. Beginners never see assembly; every operation is named, documented, and effect-tagged.\n\nThe ceiling is real: an expert who needs an instruction Core hasn't wrapped is stuck writing C again. The library also chases every new ISA extension forever, always behind.",
+          "code": "use core.mem\n\nstart :: mem.intrinsics.cycle_count()\nhot_loop()\nprint(\"cycles: {mem.intrinsics.cycle_count() - start}\")\n\n// need CLDEMOTE? not wrapped yet — back to C FFI"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "`asm!` is string templates with operand constraints spelled inline; powerful, but the contract is not a function signature and beginners meet it in library code.",
+          "code": "unsafe {\n    asm!(\"rdtsc\", \"shl rdx, 32\", \"or rax, rdx\",\n         out(\"rax\") ticks, out(\"rdx\") _);\n}"
+        },
+        {
+          "lang": "Zig",
+          "note": "Zig treats asm as an expression with typed outputs — closest to option A's spirit; Jet goes further by making the whole fn signature the contract.",
+          "code": "const ticks = asm volatile (\"rdtsc\" : [ret] \"={rax}\" (-> u64));"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A removes the last wall between an expert and the machine while staying inside gates that already exist. The signature-as-contract convention makes Jet asm more checkable than C's or Rust's, and rustc's verifier rides underneath for free.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A curated library is a ceiling, not a floor — the expert one instruction past the catalog falls back to C, which is the outcome this ballot exists to end."
+          }
+        ],
+        "tradeoff": "Per-target bodies are the user's responsibility; a program using #Foreign(asm) gives up target portability for those functions and must gate variants explicitly."
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "Ship A as the floor and let B grow on top. `core.mem.intrinsics` wraps popular cases as ordinary functions implemented with the same #Foreign(asm) mechanism. Beginners meet named functions; the expert path never hits a ceiling.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "ungated-ceiling asm floor behind #Unsafe",
+            "use": "adopted as the mechanism"
+          },
+          {
+            "key": "B",
+            "aspect": "curated named intrinsics for the common cases",
+            "use": "grows in Core on top of A; beginners meet only the named functions"
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T00:59:34.462Z"
     }
   ],
   "questions": [
@@ -26917,6 +27546,83 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-12T00:59:34.462Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-FFI-ASM1",
+      "note": "Inline assembly: the `asm` instance of the inline tier, gated by #Unsafe"
+    },
+    {
+      "at": "2026-07-12T00:59:34.364Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-FFI-INLINE1",
+      "note": "Inline foreign code: a fourth FFI tier with the Jet signature as the checked contract"
+    },
+    {
+      "at": "2026-07-12T00:59:34.264Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-CORE-COMPRESS1",
+      "note": "core.archive vs core.compress: split stream codecs from container formats, or merge"
+    },
+    {
+      "at": "2026-07-12T00:59:34.164Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-MARK-DEBUG1",
+      "note": "Debug derivation: auto-derive like Printable/Equatable, or opt-in @Debug marker"
+    },
+    {
+      "at": "2026-07-12T00:59:34.068Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-MARK-DISCARD1",
+      "note": "One spelling for discarding a fallible or must-use result: .drop(reason) vs #Suppress region"
+    },
+    {
+      "at": "2026-07-12T00:59:33.973Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-CLI-BARE1",
+      "note": "Bare project verbs: run/dev/debug/bench/check/build with no file argument"
+    },
+    {
+      "at": "2026-07-12T00:57:34.580Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-FFI-CPP1",
+      "note": "C++ binder depth: `cpp.*` — opaque classes, laundered exceptions, on-demand templates"
+    },
+    {
+      "at": "2026-07-12T00:54:48.527Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0xede68",
+      "note": "Polyglot Phase 4: legacy replacement — COBOL, Octave, source importers"
+    },
+    {
+      "at": "2026-07-12T00:54:48.431Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0vt1qwz",
+      "note": "Polyglot Phase 3: scripting and shell — Lua, Ruby, Perl, PHP, R, Sh typed text"
+    },
+    {
+      "at": "2026-07-12T00:54:48.333Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0u6kwwb",
+      "note": "Polyglot Phase 2: managed runtimes — Go, JVM, .NET, Fortran binders"
+    },
+    {
+      "at": "2026-07-12T00:54:48.236Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0skyr40",
+      "note": "Polyglot Phase 1: systems floor — inline tier, inline asm, C++ binder"
+    },
     {
       "at": "2026-07-12T00:51:08.564Z",
       "by": "owner",
@@ -30339,83 +31045,6 @@
       "action": "decision.update",
       "ref": "D-SERDE2",
       "note": "marked ready"
-    },
-    {
-      "at": "2026-07-11T11:38:48.683Z",
-      "by": "fable-ballot",
-      "action": "decision.add",
-      "ref": "D-CANCELMODEL1",
-      "note": "Task cancellation model at wait points (draft)"
-    },
-    {
-      "at": "2026-07-11T11:37:43.806Z",
-      "by": "fable-ballot",
-      "action": "decision.add",
-      "ref": "D-SERDE2",
-      "note": "Hand-writable Encode/Decode surface (and whether built-in derives re-enter through it) (draft)"
-    },
-    {
-      "at": "2026-07-11T11:36:07.852Z",
-      "by": "terra-456-ratchet",
-      "action": "card.claim",
-      "ref": "c083j754",
-      "note": ""
-    },
-    {
-      "at": "2026-07-11T11:35:57.944Z",
-      "by": "terra-456-store-final",
-      "action": "card.release",
-      "ref": "c083j754",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-11T11:35:57.773Z",
-      "by": "sol-456-store-review",
-      "action": "card.criteria-verify",
-      "ref": "c083j754",
-      "note": "#12"
-    },
-    {
-      "at": "2026-07-11T11:35:57.583Z",
-      "by": "terra-456-store-final",
-      "action": "card.criteria-meet",
-      "ref": "c083j754",
-      "note": "#12"
-    },
-    {
-      "at": "2026-07-11T11:35:57.392Z",
-      "by": "codex-main",
-      "action": "card.criteria-add",
-      "ref": "c083j754",
-      "note": "#12 Store lease setup and snapshot traversal contain no producti"
-    },
-    {
-      "at": "2026-07-11T11:34:38.826Z",
-      "by": "fable-medium",
-      "action": "card.update",
-      "ref": "c2iizmyx",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-11T11:34:19.675Z",
-      "by": "fable-medium",
-      "action": "card.update",
-      "ref": "c2nizvzp",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-11T11:33:59.965Z",
-      "by": "fable-medium",
-      "action": "card.update",
-      "ref": "c0ewbiud",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-11T11:33:22.965Z",
-      "by": "fable-medium",
-      "action": "card.criteria-meet",
-      "ref": "c0ewbiud",
-      "note": "#4"
     }
   ],
   "nextNum": 368,
