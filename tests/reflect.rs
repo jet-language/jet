@@ -24,6 +24,7 @@ fn field(name: &str, ty: &str, is_pub: bool) -> Field {
 
 fn method(name: &str, is_pub: bool) -> Func {
     Func {
+        span: span(),
         is_pub,
         is_package_pub: false,
         external_type: None,
@@ -41,6 +42,7 @@ fn method(name: &str, is_pub: bool) -> Func {
             variadic_bound_list: None,
         }],
         return_type: Some(Type::Named("String".to_string())),
+        return_type_span: Some(span()),
         is_unsafe: false,
         unsafe_reason: None,
         unsafe_span: None,
@@ -85,6 +87,7 @@ fn struct_field<'a>(v: &'a CtValue, name: &str) -> &'a CtValue {
 #[test]
 fn type_info_exposes_methods_type_params_and_markers() {
     let s = StructDef {
+        span: span(),
         is_pub: true,
         is_package_pub: false,
         name: "Box".to_string(),
@@ -124,6 +127,7 @@ fn type_info_exposes_methods_type_params_and_markers() {
 #[test]
 fn field_info_carries_visibility() {
     let s = StructDef {
+        span: span(),
         is_pub: true,
         is_package_pub: false,
         name: "Secret".to_string(),
