@@ -101,9 +101,13 @@ pub(crate) fn is_c_abi_type(ty: &Type, registry: &TypeRegistry) -> bool {
         | Type::Shared(_)
         | Type::Apply { .. }
         | Type::TraitObject(_)
-        | Type::Fn { .. }
         | Type::Tuple(_)
         | Type::FixedList { .. } => false,
+        Type::Fn { params, ret, effect_bound } => {
+            matches!(effect_bound, Some(b) if b.is_empty())
+                && params.iter().all(|p| is_c_abi_type(p, registry))
+                && ret.as_deref().is_none_or(|r| is_c_abi_type(r, registry))
+        }
         Type::Tagged { inner, .. } => is_c_abi_type(inner, registry),
     }
 }

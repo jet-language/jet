@@ -26,6 +26,8 @@ pub struct CallArgFlags {
     /// argument-type mismatch when the parameter it lands in isn't a
     /// zero-parameter function.
     pub is_trailing_block: bool,
+    /// D-CABI-CALLBACK1: sema proved this argument is a stable C callback symbol.
+    pub c_callback_symbol: bool,
 }
 
 #[derive(Debug, Clone)]

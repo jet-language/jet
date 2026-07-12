@@ -12,6 +12,7 @@ impl<'a> Checker<'a> {
                     implicit_clone: false,
                     shared_auto_clone: false,
                     is_trailing_block: false,
+                    c_callback_symbol: false,
                 },
                 label: None,
                 spread: false,

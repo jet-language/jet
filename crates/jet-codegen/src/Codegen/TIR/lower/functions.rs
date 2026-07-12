@@ -124,6 +124,7 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
         is_main: false,
         line: cov_line(cx, f.name_span.start),
         is_unsafe: f.is_unsafe,
+        is_pure: f.is_pure,
         is_reactive: f.is_reactive,
         is_inline: f.is_inline,
         is_inline_always: f.is_inline_always,
@@ -303,6 +304,7 @@ pub(crate) fn lower_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
         is_main: false,
         line: cov_line(cx, f.name_span.start),
         is_unsafe: f.is_unsafe,
+        is_pure: f.is_pure,
         is_reactive: f.is_reactive,
         is_inline: f.is_inline,
         is_inline_always: f.is_inline_always,
@@ -387,6 +389,7 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx, trait_name:
         // (the dedicated trait-method emit reads it there); the top-level flag is unused
         // for this kind, but keep it consistent.
         is_unsafe: f.is_unsafe,
+        is_pure: f.is_pure,
         is_reactive: f.is_reactive,
         is_inline: f.is_inline,
         is_inline_always: f.is_inline_always,
@@ -474,6 +477,7 @@ pub(crate) fn lower_delegation_method(f: &Func, field: &str, cx: &Cx) -> TFunc {
         // Same for `@Inline`/`@InlineAlways` — a delegation method is pure forwarding,
         // never parsed with an inline marker.
         is_unsafe: false,
+        is_pure: false,
         is_reactive: false,
         is_inline: false,
         is_inline_always: false,

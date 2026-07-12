@@ -108,6 +108,10 @@ pub(crate) fn lower_one_call_arg(
     // types from that fn-type so codegen emits the Rust closure-param types
     // rustc needs (c142). Other args lower normally.
     let value = match (&a.expr, &conv) {
+        (Expr::Ident(name, _), Some((_, Type::Fn { .. }))) if a.flags.c_callback_symbol => TExpr {
+            ty: conv.as_ref().map(|(_, t)| t.clone()).unwrap(),
+            kind: TExprKind::ConstInline(cx.mangle_name(name)),
+        },
         (Expr::Lambda(lam), Some((_, Type::Fn { params, .. }))) => {
             let tl = lower_lambda_expecting(lam, cx, env, Some(params.as_slice()));
             TExpr {
@@ -125,6 +129,7 @@ pub(crate) fn lower_one_call_arg(
     let arc_clone = a.flags.shared_auto_clone;
     // The Fn-typed Box-coercion (`emit_call_args`' `if let Some((_, Type::Fn …))`).
     let fn_coerce = match &conv {
+        Some((_, Type::Fn { .. })) if a.flags.c_callback_symbol => None,
         Some((_, Type::Fn { .. })) => {
             // `already_boxed`: the value already produces a `Box::new(…)`. The AST
             // checks two cases — the emitted string starts with `Box::new(` (only a

@@ -303,6 +303,9 @@ pub struct TFunc {
     /// ever emitted without that source gate. Applies to `TopLevel`/`Method`; a trait
     /// method carries its own `is_unsafe` on `TFuncKind::TraitMethod`.
     pub is_unsafe: bool,
+    /// D-CABI-CALLBACK1: named pure, monomorphic top-level functions expose a
+    /// stable C-convention symbol; sema alone decides whether it may cross C.
+    pub is_pure: bool,
     /// D-REACTCORE1: `#Reactive fn` — the body is emitted inside `jet_reactive_effect`.
     pub is_reactive: bool,
     /// D-METHODMACRO1=A: `@Inline fn` — emits `#[inline]`. Soft hint; sema never

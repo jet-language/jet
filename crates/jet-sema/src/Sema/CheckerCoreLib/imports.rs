@@ -158,6 +158,17 @@ impl<'a> Checker<'a> {
                             }
                         }
                     }
+                    if sig.is_c_abi && matches!(pty, Type::Fn { .. }) {
+                        if let Expr::Ident(callback, span) = &arg.expr {
+                            if self.funcs.get(callback).is_some_and(|f| !f.is_extern && f.is_pure) {
+                                arg.flags.c_callback_symbol = true;
+                            } else {
+                                self.diags.push(crate::Sema::FFI::e3203(pty, *span));
+                            }
+                        } else {
+                            self.diags.push(crate::Sema::FFI::e3203(pty, arg.expr.span()));
+                        }
+                    }
                     // D-SG9: a fixed-width literal argument adopts the parameter's width.
                     let saved = self.expected_type.clone();
                     self.expected_type = Some(pty.clone());

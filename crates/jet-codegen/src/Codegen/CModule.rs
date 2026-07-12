@@ -145,6 +145,11 @@ fn c_abi_rust_type(ty: &Type, cx: &Cx) -> String {
         Type::String => "*const std::os::raw::c_char".to_string(),
         Type::IntN { .. } | Type::Float32 => cx.rust_type(ty),
         Type::Named(_) => qualify_named_rust_type(cx, ty),
+        Type::Fn { params, ret, .. } => {
+            let ps = params.iter().map(|p| c_abi_rust_type(p, cx)).collect::<Vec<_>>().join(", ");
+            let r = ret.as_deref().map(|t| format!(" -> {}", c_abi_rust_type(t, cx))).unwrap_or_default();
+            format!("extern \"C\" fn({ps}){r}")
+        }
         Type::Tagged { inner, .. } => c_abi_rust_type(inner, cx),
         // Sema (E3203) rejects anything else at the C boundary.
         other => format!("/* unsupported: {} */ ()", other.name()),
@@ -167,6 +172,7 @@ fn c_wrapper_param_type(ty: &Type, cx: &Cx) -> String {
         // in `emit_c_module`, which clones through this reference before
         // the real `extern "C"` call).
         Type::Named(_) => format!("&{}", qualify_named_rust_type(cx, ty)),
+        Type::Fn { .. } => c_abi_rust_type(ty, cx),
         Type::Tagged { inner, .. } => c_wrapper_param_type(inner, cx),
         other => format!("/* unsupported: {} */ ()", other.name()),
     }
@@ -181,6 +187,7 @@ fn c_wrapper_ret_type(ty: &Type, cx: &Cx) -> String {
         Type::String => "String".to_string(),
         Type::IntN { .. } | Type::Float32 => cx.rust_type(ty),
         Type::Named(_) => qualify_named_rust_type(cx, ty),
+        Type::Fn { .. } => c_abi_rust_type(ty, cx),
         Type::Tagged { inner, .. } => c_wrapper_ret_type(inner, cx),
         other => format!("/* unsupported: {} */ ()", other.name()),
     }

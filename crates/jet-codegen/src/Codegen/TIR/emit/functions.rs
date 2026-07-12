@@ -49,6 +49,7 @@ pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
     // `vis`, exactly as `emit_func` (`{vis}{unsafe_kw}fn …`). I1: emitted ONLY when the
     // source was `#Unsafe fn` (`tir.is_unsafe`).
     let unsafe_kw = if tir.is_unsafe { "unsafe " } else { "" };
+    let abi = if tir.is_pure && tir.generics.is_empty() { "extern \"C\" " } else { "" };
     // D-METHODMACRO1=A: `@Inline`/`@InlineAlways` lower to a Rust `#[inline]`/
     // `#[inline(always)]` attribute right above the signature. `is_inline_always`
     // is only ever `true` here once sema has confirmed the function can actually
@@ -65,11 +66,12 @@ pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
     // matches `emit_func` so panic output is identical.
     *cx.current_fn.borrow_mut() = tir.name.clone();
     out.push_str(&format!(
-        "{inline_attr}{vis}{unsafe_kw}fn {name}{gen}({params}){ret} {{\n",
+        "{inline_attr}{vis}{unsafe_kw}{abi}fn {name}{gen}({params}){ret} {{\n",
         name = cx.mangle_name(&tir.name),
         gen = tir.generics,
         params = params,
         ret = ret_clause,
+        abi = abi,
     ));
     // D-COV1: probe at the function head (skip the synthetic `main`).
     if cx.coverage && !tir.is_main {
