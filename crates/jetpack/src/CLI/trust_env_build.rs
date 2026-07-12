@@ -424,6 +424,10 @@ pub(super) fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
         }
     }
     if !holes.is_empty() {
+        // Erase any pinned region before the Nix-bridge diagnostic (D-FE-CLI1).
+        if live_mode {
+            live.clear();
+        }
         report_nix_bridge_required(theme, &parsed.flags, &holes, &realized_refs);
         return 2;
     }
@@ -444,6 +448,12 @@ pub(super) fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
         auto_clean_after_success(theme, &roots);
         0
     } else {
+        // Failure path: region already cleared before each diagnostic inside
+        // `realize_ref_outcome`; force one last erase so a stale bar cannot
+        // survive past the process exit (D-FE-CLI1 still 8 / hybrid.html).
+        if live_mode {
+            live.clear();
+        }
         1
     }
 }

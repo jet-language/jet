@@ -678,6 +678,56 @@ mod tests {
     }
 
     #[test]
+    fn plan_rows_paint_symbols_when_colored() {
+        let theme = Theme { color: true };
+        let add = theme.render_plan_row(PlanMark::Add, "ripgrep", 8, "-", "14.1.0");
+        let remove = theme.render_plan_row(PlanMark::Remove, "old", 8, "1.0.0", "-");
+        let change = theme.render_plan_row(PlanMark::Change, "linux", 8, "6.9", "6.10");
+        assert!(add.starts_with("\x1b[32m+\x1b[0m"), "add: {add}");
+        assert!(remove.starts_with("\x1b[31m-\x1b[0m"), "remove: {remove}");
+        assert!(change.starts_with("\x1b[33m~\x1b[0m"), "change: {change}");
+        assert!(add.contains("ripgrep"), "add: {add}");
+        assert!(remove.contains("old"), "remove: {remove}");
+        assert!(change.contains("linux"), "change: {change}");
+    }
+
+    #[test]
+    fn theme_resolve_honors_no_color_flag() {
+        // Explicit `--no-color` is the deterministic floor (also covers the
+        // NO_COLOR path's `color: false` branch without mutating process env
+        // under parallel cargo test).
+        let theme = Theme::resolve(true);
+        assert!(!theme.color, "--no-color flag must force color=false");
+    }
+
+    #[test]
+    fn confirm_apply_yes_bypasses_gate() {
+        let theme = Theme { color: false };
+        assert!(theme.confirm_apply(true));
+    }
+
+    #[test]
+    fn confirm_apply_non_tty_without_yes_is_plan_only() {
+        // Cargo tests pipe stdin; without `-y`/`--yes` the gate must refuse
+        // apply and never hang waiting for a prompt (D-FE-CLI1 non-TTY rule).
+        let theme = Theme { color: false };
+        if std::io::stdin().is_terminal() {
+            // Host matrix may attach a real TTY; skip rather than hang.
+            return;
+        }
+        assert!(!theme.confirm_apply(false));
+    }
+
+    #[test]
+    fn live_region_is_non_tty_when_color_off() {
+        // Color-off is the CI/NO_COLOR floor: `set_status` must be inert so
+        // only `finish`/`set_dependency_status` append plain ledger lines.
+        let theme = Theme { color: false };
+        let live = theme.live_region();
+        assert!(!live.tty);
+    }
+
+    #[test]
     fn progress_chain_has_deterministic_plain_fallback() {
         let theme = Theme { color: false };
         assert_eq!(

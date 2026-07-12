@@ -1097,6 +1097,53 @@ fn remove_without_yes_prints_plan_and_keeps_env_file_in_non_tty() {
 }
 
 #[test]
+fn remove_with_short_yes_applies_identically_to_long_yes() {
+    // D-FE-CLI1: `-y` and `--yes` bypass the mutation gate identically.
+    let (_base, proj, root) = core_hello_project("remove-short-yes");
+    let env_path = proj.join("env.jet");
+    fs::write(
+        &env_path,
+        fs::read_to_string(&env_path).unwrap().replace("\"mine:hello\"", ""),
+    )
+    .unwrap();
+    let add = jetpack()
+        .args(["add", "mine:hello", "--no-color"])
+        .current_dir(&proj)
+        .env("JETPACK_ROOT", &root)
+        .output()
+        .unwrap();
+    assert!(
+        add.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+
+    let remove = jetpack()
+        .args(["remove", "mine:hello", "--no-color", "-y"])
+        .current_dir(&proj)
+        .env("JETPACK_ROOT", &root)
+        .output()
+        .unwrap();
+    assert!(
+        remove.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&remove.stderr)
+    );
+    let env = fs::read_to_string(proj.join("env.jet")).unwrap();
+    assert!(
+        !env.contains("\"mine:hello\""),
+        "short -y must apply the remove plan: {env}"
+    );
+    let stderr = String::from_utf8_lossy(&remove.stderr);
+    assert!(stderr.contains("Plan env edit"), "stderr: {stderr}");
+    assert!(stderr.contains("- hello"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("applying plan (--yes)") || stderr.contains("removed"),
+        "short -y must take the yes-bypass path: {stderr}"
+    );
+}
+
+#[test]
 fn run_with_project_env_file_resolves_declared_packages() {
     let proj = Scratch::new("proj");
     let root = Scratch::new("root");
@@ -2286,6 +2333,12 @@ fn failed_first_dependency_reports_zero_completed_nodes() {
         "first failure must not claim completion: {stderr}"
     );
     assert!(!stderr.contains("building completed 1/2 · current: mine -> missing"));
+    // Region erased before diagnostic: a verbatim error block follows the
+    // dependency-status line (D-FE-CLI1 failure rule / hybrid.html still 8).
+    assert!(
+        stderr.contains("error:") || stderr.to_lowercase().contains("could not"),
+        "failure must print a diagnostic after erasing the live region: {stderr}"
+    );
 }
 
 #[test]
