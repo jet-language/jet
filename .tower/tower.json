@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 515,
-    "rev": 4408,
+    "rev": 4415,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -20,7 +20,6 @@
         "radar:e8",
         "radar:e7",
         "radar-cards",
-        "radar:e4",
         "radar:e3",
         "radar:e5",
         "radar:e6",
@@ -11084,6 +11083,11 @@
         {
           "at": "2026-07-12",
           "by": "claude-main",
+          "text": "[handoff] Round-2 conversions COMPLETE + independently reviewed (sol-452-round2-reviewer): criterion 7 met+verified. Criteria 4/9 unmet solely because tests/truthfulness capability subtest is red from CONCURRENT cards' in-flight work (crypto anchor drift, #143 structural-merge, #292 env-overlay example digests) — that reconciliation is criterion 8, gated on those cards landing. Criterion 8 partially advanced: CLI ownership (diff/merge→claim.structural-merge) + syntax-law digest legitimately fixed in docs/spec/capability-claim-manifest.json; 15 remaining mismatches documented as blocked-by-in-flight with per-artifact baseline evidence (see agent report 2026-07-12). NEXT SESSION: once #136/#143/#292/crypto land, refresh remaining digests with landed-commit citations + reclassify core-security off facade, rerun truthfulness, meet+verify 4/8/9, close. Zero-include pin test: tests/truthfulness.rs::compiler_code_has_no_include_splices."
+        },
+        {
+          "at": "2026-07-12",
+          "by": "claude-main",
           "text": "Criterion-7 conversions complete: all 13 remaining include! parents converted to real modules with explicit named imports, zero globs (sema CheckerCoreLib/CheckerCore/CheckerInfer-calls, codegen TIR emit/lower/subset, parser Items, Source/Canvas, comptime Build, jit lib, jetpack CLI/JetOS). Sole remaining include!: jetpack FFI.rs:205 dual-use runtime bridge template (test-only, non-compiler crate) — allowlisted. Workspace cargo check + build green; jet-codegen 143 lib tests, jet-comptime 15, jetpack build+CLI smoke green. In flight: zero-include pin test + criterion-8 ledger reconciliation. Pre-existing tree break noted: in-flight #292 env-overlay prelude work ICEs jet run (jet_std_env_init missing) — predates session, not #452 fallout."
         },
         {
@@ -11162,11 +11166,11 @@
         {
           "n": 7,
           "text": "Every remaining compiler/Source include! parent is replaced by real private modules with explicit minimal dependencies, preserved declaration order/type identity/privacy/public API, and structural zero-include proof.",
-          "status": "met",
+          "status": "verified",
           "metBy": "claude-main",
-          "verifiedBy": null,
-          "evidence": "All 13 remaining include! parents converted to real private modules with explicit named imports, zero fragment globs (commits cb58ec9b..HEAD). Sole remaining include!: crates/jetpack/src/FFI.rs:205 dual-use runtime bridge template, allowlisted. Structural proof pinned: tests/truthfulness.rs::compiler_code_has_no_include_splices, detector proven both directions. Workspace cargo check + build green.",
-          "at": "2026-07-12T12:46:22.554Z"
+          "verifiedBy": "sol-452-round2-reviewer",
+          "evidence": "Independent round-2: 13 include! parents->real private mods (cb58ec9b..HEAD); zero fragment header globs (8 super::* all inside cfg(test) mods); sampled >3 fragments/group show use/mod-decl + scoped-visibility only (pub(super)/pub(in crate::Parser)/pub(crate)), 0 bare-pub items/fields added, no logic/reorder/body edits (super::X->crate::X path fixes neutral); pin test compiler_code_has_no_include_splices green, detector recurses nested dirs + tolerates space, allowlist=FFI.rs only; sole remaining include!=FFI.rs:205; workspace cargo check + focused grammar/syntax_reconciliation/canvas/codegen-lib/comptime-lib green.",
+          "at": "2026-07-12T12:54:50.462Z"
         },
         {
           "n": 8,
@@ -13866,12 +13870,17 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "claude-main",
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "claude-main",
+          "text": "Implementing 4 ratified CLI decisions (D-CLI-STORE2=A, D-CLI-DEVSERVE1=A, D-CLI-SURFACE3=B, D-CLI-BARE1=A); reusing #468 registry/help/man/completion machinery per Sol audit."
+        },
         {
           "at": "2026-07-12",
           "by": "codex-main",
@@ -13936,7 +13945,8 @@
       "needsAcceptance": false,
       "created": "2026-07-12T00:42:29.598Z",
       "updated": "2026-07-12",
-      "workOrder": 18
+      "workOrder": 18,
+      "claimedAt": "2026-07-12T12:57:40.268Z"
     },
     {
       "id": "c0iftbrr",
@@ -13947,12 +13957,17 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "claude-main",
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "claude-main",
+          "text": "Implementing 3 ratified marker decisions (D-MARK-TARGET1=A, D-MARK-DISCARD1=A, D-MARK-DEBUG1=A) per syntax-decisions.md law."
+        },
         {
           "at": "2026-07-12",
           "by": "claude-main",
@@ -14044,7 +14059,8 @@
       "needsAcceptance": false,
       "created": "2026-07-12T00:42:29.693Z",
       "updated": "2026-07-12",
-      "workOrder": 19
+      "workOrder": 19,
+      "claimedAt": "2026-07-12T12:57:40.464Z"
     },
     {
       "id": "c0k0v4gj",
@@ -32633,6 +32649,48 @@
   ],
   "events": [
     {
+      "at": "2026-07-12T12:57:40.562Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0iftbrr",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T12:57:40.464Z",
+      "by": "claude-main",
+      "action": "card.claim",
+      "ref": "c0iftbrr",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T12:57:40.369Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0gv4b2r",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T12:57:40.268Z",
+      "by": "claude-main",
+      "action": "card.claim",
+      "ref": "c0gv4b2r",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T12:55:55.133Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c02wa1dn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-12T12:54:50.462Z",
+      "by": "sol-452-round2-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c02wa1dn",
+      "note": "#7"
+    },
+    {
       "at": "2026-07-12T12:46:22.554Z",
       "by": "claude-main",
       "action": "card.criteria-meet",
@@ -36089,48 +36147,6 @@
       "action": "card.criteria-verify",
       "ref": "c2nizvzp",
       "note": "#3"
-    },
-    {
-      "at": "2026-07-11T23:45:40.420Z",
-      "by": "sol-131-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c2nizvzp",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-11T23:45:40.225Z",
-      "by": "sol-131-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c2nizvzp",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-11T23:44:25.758Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c1jixkit",
-      "note": "#8 AOT golden and default-dev/JIT parity prove one shared TIR s"
-    },
-    {
-      "at": "2026-07-11T23:44:25.640Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c1jixkit",
-      "note": "#7 Obsolete E0854 MVP restriction is removed; accepted speciali"
-    },
-    {
-      "at": "2026-07-11T23:44:25.519Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c1jixkit",
-      "note": "#6 Instance fingerprints flow through sema, TIR, codegen, semin"
-    },
-    {
-      "at": "2026-07-11T23:44:25.400Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c1jixkit",
-      "note": "#5 Canonical instance identity uses resolved template identity "
     }
   ],
   "nextNum": 368,

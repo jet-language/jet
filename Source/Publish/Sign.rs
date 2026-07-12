@@ -255,10 +255,12 @@ pub fn e1292() -> Diagnostic {
 /// D-CRYPTO-KEYGEN-DIAG1's command frame has a separate headline and What
 /// line, so it is rendered here instead of through the source-span renderer.
 pub fn render_e1292() -> &'static str {
-    "Error [E1292]: signing key generation needs cryptographic randomness\n\
- What: Jet could not create the package-signing key\n\
- Why: the operating system could not provide cryptographic randomness\n\
- Fix: retry as a new operation on a supported host; no key files were created\n"
+    concat!(
+        "Error [E1292]: signing key generation needs cryptographic randomness\n",
+        " What: Jet could not create the package-signing key\n",
+        " Why: the operating system could not provide cryptographic randomness\n",
+        " Fix: retry as a new operation on a supported host; no key files were created\n",
+    )
 }
 
 /// Internal helper/bridge failure. Reuses E0704 (foreign-crate bridge build
