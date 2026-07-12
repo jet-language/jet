@@ -16,6 +16,9 @@ pub struct FuncSig {
     /// S60 (E2-M16): `pure fn` — this function is free of ambient I/O and
     /// non-determinism. Call sites inside a `pure fn` must also be pure (E3401).
     pub is_pure: bool,
+    /// D-CABI-CALLBACK1: body contains only allocation-free, panic-free scalar
+    /// computation and has no generic parameters or runtime/global access.
+    pub is_foreign_thread_safe: bool,
     /// D-TAINT1: `#Sanitizer fn` — its return value is untainted by contract.
     pub is_sanitizer: bool,
     /// D-MUSTUSE1 (c18iwxqx): `@MustUse fn` / method — return value cannot be

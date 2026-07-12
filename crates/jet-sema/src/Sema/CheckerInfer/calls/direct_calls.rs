@@ -1016,7 +1016,7 @@ impl<'a> Checker<'a> {
                 if let Some((param_conv, param_ty)) = effective_params.get(i) {
                     if sig.is_c_abi && matches!(param_ty, Type::Fn { .. }) {
                         if let Expr::Ident(callback, span) = &arg.expr {
-                            if self.funcs.get(callback).is_some_and(|f| !f.is_extern && f.is_pure) {
+                            if self.funcs.get(callback).is_some_and(|f| !f.is_extern && f.is_foreign_thread_safe) {
                                 arg.flags.c_callback_symbol = true;
                             } else {
                                 self.diags.push(crate::Sema::FFI::e3203(param_ty, *span));

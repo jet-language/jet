@@ -367,6 +367,7 @@ fn func_to_sig(f: &Func) -> FuncSig {
         is_c_abi: false,
         is_unsafe: f.is_unsafe,
         is_pure: f.is_pure,
+        is_foreign_thread_safe: foreign_thread_safe_func(f),
         is_sanitizer: f.is_sanitizer,
         is_must_use: f.is_must_use,
     }
@@ -395,9 +396,32 @@ fn extern_to_sig(ef: &ExternFn, is_c_abi: bool) -> FuncSig {
         is_c_abi,
         is_unsafe: false,
         is_pure: false,      // extern functions are always considered impure
+        is_foreign_thread_safe: false,
         is_sanitizer: false, // extern functions can't be sanitizers
         is_must_use: false,
     }
+}
+
+fn foreign_thread_safe_func(f: &Func) -> bool {
+    fn expr(e: &Expr) -> bool {
+        match e {
+            Expr::Int(..) | Expr::Float(..) | Expr::Bool(..) | Expr::Char(..) | Expr::Ident(..) => true,
+            Expr::Unary(_, a, _) | Expr::Copy(a, _) => expr(a),
+            Expr::Binary(_, a, b, _) => expr(a) && expr(b),
+            Expr::CompareChain { operands, .. } => operands.iter().all(expr),
+            _ => false,
+        }
+    }
+    fn stmt(s: &Stmt) -> bool {
+        match s {
+            Stmt::Return(v, _) => v.as_ref().is_none_or(expr),
+            Stmt::Expr(e) => expr(e),
+            Stmt::Val(b) => expr(&b.init),
+            _ => false,
+        }
+    }
+    f.is_pure && f.type_params.is_empty() && f.pre.is_empty() && f.post.is_empty()
+        && f.body.iter().all(stmt)
 }
 
 /// D-NARG-D2: Walk a default expression and substitute any `Ident` that names
