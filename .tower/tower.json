@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 515,
-    "rev": 4286,
+    "rev": 4294,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -14659,7 +14659,44 @@
       "workOrder": 35,
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Syntax.rs entry updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T10:20:11.918Z"
+        },
+        {
+          "n": 2,
+          "text": "syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T10:20:11.918Z"
+        },
+        {
+          "n": 3,
+          "text": "jet devtools grammars regenerated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T10:20:11.918Z"
+        },
+        {
+          "n": 4,
+          "text": "snapshots re-blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-12T10:20:11.918Z"
+        }
+      ],
       "refs": [
         "docs/proposals/surface-condensation.md"
       ],
@@ -29576,78 +29613,78 @@
       "id": "D-VALIDATE1",
       "cardId": "c0n6vj96",
       "group": "stdlib",
-      "title": "Accumulated validation over decoded values",
-      "gist": "Whether validation reports every field error at once or stops at the first failure.",
-      "lesson": "Decode turns incoming bytes, like JSON, into a typed value, and reports a shape mismatch as a DecodeError with a path and a reason.\n\nA refinement is a bound the compiler proves statically, like an integer that must stay between 0 and 120.\n\nA @Pre condition is a predicate that must hold before a value is accepted, checked at runtime.\n\nFail-fast means stop at the first error. Accumulate means collect every error and report them together, which is what a form needs to highlight all bad fields at once.\n\nA schema is the declared shape and rules of data. In Jet the struct itself is the schema, so there is no second schema language.",
+      "title": "Validation ergonomics: chainable Validate value + type-level constraints; @Pre stays out of it",
+      "gist": "Best-of-all-worlds validation: constraints that fit the type system live in types, everything else is a chainable Validate value that accumulates every field error.",
+      "lesson": "Forms and API payloads need whole-value validation: check every rule, collect every failure with its field path, return them as data to render beside form fields.\n\nJet already has two ratified pieces. Type-level constraints — `distinct Int(13..120)` ranged types (D-RANGETYPE1) and `#Invariant` refinements (D-REFINE1) — are compile-checked where static and fallible at construction. And decode gives `DecodeError { path, reason }` per shape mismatch.\n\nYour direction: dot-method chaining reads right; `@Pre`-style declarations feel clunky for this job. `@Pre` remains what it is — a call-site contract (D-PREPOST1) — and stays out of the validation story entirely.",
       "explainer": "",
-      "story": "Glenn Porter runs a signup form. A user submits a bad email, a short password, and an out-of-range age at once.\n\nFail-fast validation shows only the email error. The user fixes it, resubmits, and is told the password is bad, then the age. Three round trips for one form.\n\nGlenn wants every error back in one response, each tagged with its field, so the form lights up all at once.",
-      "inWild": "A Signup struct has an email, a password, and an age with a refinement. The handler decodes the request and must return every field error together as data the frontend can render beside inputs.",
+      "story": "Wanda ships a signup form. Age bounds fit the type system; \"email looks like an email\" and \"password has a digit\" do not. She wants one readable chain that runs every rule, and one error list she can map onto the form — not marker soup above the struct and not a second schema language beside it.",
+      "inWild": "struct Signup {\n    email: String\n    age: Age                      // Age :: distinct Int(13..120) — type-level, free\n    password: String\n}\n\nfn validate(s: Signup) -> Signup ? [FieldError] {\n    v :: Validate.over(s)\n    v.field(\"email\", s.email).email().max_len(254)\n    v.field(\"password\", s.password).min_len(12).has_digit()\n    v.check(s.password != s.email, at: \"password\", \"password can't be the email\")\n    return v.finish()\n}\n\nsignup :: req.decode<Signup>().validate() ?? (errs) => {\n    return Response.unprocessable(errs)    // [{path: \"email\", reason: \"…\"}, …]\n}",
       "detail": "",
       "options": [
         {
           "key": "A",
-          "name": "Accumulating .validate() over the struct",
-          "detail": "validate() runs @Pre predicates and refinement bounds declared on the struct's fields. It accumulates every failure as a list of path-and-reason records, reusing the DecodeError shape.\n\nThe struct is the schema, so there is no second schema language (I8). Forms consume the list directly.",
-          "code": "struct Signup {\n    email: String  @Pre(is_email),\n    password: String @Pre(len >= 8),\n    age: Int(0..120),\n}\n\nsignup :: req.decode<Signup>().validate() ?? (errs) => {\n    return Response.unprocessable(errs)\n}\n// errs = [\n//   {path: \"email\",    reason: \"not a valid email\"},\n//   {path: \"password\", reason: \"must be at least 8 characters\"},\n//   {path: \"age\",      reason: \"must be between 0 and 120\"},\n// ]"
+          "name": "Three layers, one chain — types, Validate value, decode integration",
+          "detail": "Layer 1: constraints that fit the type system stay in types — ranged ints, refinements — checked at construction, zero ceremony, already law. Layer 2: `Validate.over(s)` (the view idiom) gives the chain you want: `v.field(\"email\", s.email).email().max_len(254)`; built-in rules are ordinary methods, custom rules are `.check(cond, at:, \"msg\")`, and everything ACCUMULATES. `v.finish()` returns `T ? [FieldError]` (the DecodeError shape, reused).\n\nLayer 3: `req.decode<T>().validate()` calls the type's `fn validate` when one is defined — decode errors and rule errors arrive in the same list. No markers, no second schema; the struct plus one plain function IS the schema.",
+          "code": "v :: Validate.over(s)\nv.field(\"age\", s.age).range(13..120)      // for types that stayed plain\nv.field(\"email\", s.email).email()\nv.check(s.end > s.start, at: \"end\", \"end before start\")\nreturn v.finish()\n\n$ jet run signup.jet    # all failures at once, paths attached\nunprocessable: [\n  { path: \"email\",    reason: \"not an email address\" },\n  { path: \"password\", reason: \"needs at least 12 characters\" },\n]"
         },
         {
           "key": "B",
-          "name": "Fail-fast field predicates",
-          "detail": "Field predicates run during decode and return the first failure only, extending today's decode behavior.\n\nSimple, but a form can never show more than one error per submit.",
-          "code": "signup :: req.decode<Signup>() ?? (err) => {\n    return Response.unprocessable([err])\n}\n// err = {path: \"email\", reason: \"not a valid email\"}\n// the short password and bad age are never reported this pass"
+          "name": "Fail-fast only — first error returns",
+          "detail": "Extend decode with per-field predicates that stop at the first failure. Cheapest surface, but the form use case is precisely \"show ALL the errors\"; fail-fast sends users through submit-fix-submit loops, one field at a time.",
+          "code": "signup :: req.decode<Signup>()?   // first bad field aborts\n// user fixes email, resubmits, THEN learns the password is short"
         },
         {
           "key": "C",
-          "name": "Separate validator-combinator library",
-          "detail": "A Zod-style library builds schema objects separate from the struct. Explicit and composable, but a second schema definition beside the type.\n\nThe struct and the validator can drift out of sync.",
-          "code": "schema :: Validator.object({\n    email: Validator.string().email(),\n    password: Validator.string().min(8),\n    age: Validator.int().range(0, 120),\n})\nerrs :: schema.check(raw)\n// a field added to the struct but not the schema goes unchecked, silently"
+          "name": "Schema-combinator library — Zod-style validator objects",
+          "detail": "A separate schema value describes the shape and rules: `signup_schema :: v.object(email: v.string().email(), …)`. Chainable and familiar, but the schema duplicates the struct field-for-field — two sources of truth that drift, which is the second-schema-language trap I8 exists to block.",
+          "code": "signup_schema :: v.object(\n    email: v.string().email(),\n    age: v.int().range(13..120),\n)   // Signup already declares all of this"
         }
       ],
       "comparisons": [
         {
-          "lang": "Zod / Pydantic",
-          "note": "Both accumulate every error, which is why forms feel good on those stacks. Zod pays for it with a schema object separate from the type. Jet gets the accumulation from the struct itself.",
-          "code": "z.object({ email: z.string().email(), age: z.number().min(0).max(120) })"
+          "lang": "Zod (TS)",
+          "note": "Zod proved chainable rules and accumulated errors are the winning ergonomics — but its schema IS the type, which TypeScript allows and Jet's nominal structs make redundant.",
+          "code": "z.object({ email: z.string().email() }).safeParse(data)\n// .error.issues = every failure, with paths"
         },
         {
-          "lang": "Ecto",
-          "note": "Ecto changesets collect all field errors into one structure the form renders. Jet reaches the same result by validating the struct directly, with no changeset layer to maintain.",
-          "code": "changeset |> validate_required([:email]) |> validate_number(:age, less_than: 120)"
+          "lang": "Ecto (Elixir)",
+          "note": "Ecto changesets pipe rules over the struct and accumulate — option A's shape, minus the types layer Jet already has.",
+          "code": "cast(user, params, [:email])\n|> validate_format(:email, ~r/@/)\n|> validate_length(:password, min: 12)"
         }
       ],
       "rec": "A",
       "recommendation": {
-        "why": "A form that shows every error at once is the good beginner experience, and it comes free when validation accumulates. Reusing the DecodeError path-and-reason shape means one error model across decode and validation.\n\nThe struct stays the single schema, so the type and its rules can never drift apart.",
-        "tradeoff": "Accumulating means running every predicate even after one fails, so validation does a little more work per value. For form-shaped data that cost is trivial next to the round trips it saves.",
+        "why": "It puts each rule where it is cheapest: static bounds in types (free, already ratified), dynamic rules in a chain that reads like the requirement, and one integration point so beginners get a single `.validate()` call. No markers, no drift-prone second schema.",
         "whyNot": [
           {
             "key": "B",
-            "reason": "Fail-fast forces a user through one round trip per bad field, the exact repetition the owner cuts. It is strictly weaker than accumulation for the form case that motivates this."
+            "reason": "Fail-fast fails the form use case the feature exists for — users need every error at once."
           },
           {
             "key": "C",
-            "reason": "A separate validator library is a second schema beside the struct, against I8, and the two can drift so a new field goes unchecked silently."
+            "reason": "The combinator schema restates the struct field-for-field; two sources of truth drift, and the struct was already the schema."
           }
-        ]
+        ],
+        "tradeoff": "Two places to read a type's full rule set (its field types and its validate fn) — the chain's readability is what pays for the split."
       },
       "hybrid": {
         "result": "A",
-        "synthesis": "validate() over the struct accumulates by default and can short-circuit when a caller truly wants fail-fast, so option B is a mode, not a rival. The struct being the schema removes any need for option C's separate objects.",
+        "synthesis": "A is the synthesis: C's chainable rule vocabulary attached to the existing struct instead of a parallel schema, B's decode integration kept as the entry point, and the ratified type-level constraints doing the static share for free.",
         "harvest": [
           {
             "key": "A",
-            "aspect": "Accumulating validate over the struct",
-            "use": "Ship as the canonical validation surface, returning DecodeError-shaped lists."
+            "aspect": "Validate.over chain + finish, accumulated FieldErrors",
+            "use": "adopted"
           },
           {
             "key": "B",
-            "aspect": "Fail-fast",
-            "use": "Offer as an opt-in short-circuit mode of the same validate call for hot paths that want the first error."
+            "aspect": "decode as the one entry point",
+            "use": "kept — decode<T>().validate() is the beginner path"
           },
           {
             "key": "C",
-            "aspect": "Composable rule expression",
-            "use": "Express as field-level @Pre and refinements on the struct, giving composability without a second schema."
+            "aspect": "rich chainable rule vocabulary (email, min_len, range, …)",
+            "use": "adopted as methods on the field handle, no schema object"
           }
         ]
       },
@@ -30784,78 +30821,78 @@
       "id": "D-API-STORE1",
       "cardId": "c0y0m8yx",
       "group": "stdlib",
-      "title": "One storage-verb law: insert for keyed, add for elements; Lru's put dies",
-      "gist": "Three verbs store a value into a collection today — insert, add, and put; fix the law so the verb is guessable.",
-      "lesson": "Storing into a Core collection is spelled three ways. Maps use `insert(key, value)`. `Set`, `SortedSet`, and `Bag` use `add(value)` — and `Bag`'s method list is in ratified law (D-TAG1/D-COLLBREADTH1). The `Lru` cache uses `put(key, value)`, the same keyed job as the map's `insert`.\n\nThe API rubric's Law 8 says one way to mean it; Law 1 says names should be guessable. A user writing a new collection call today has to remember which of three verbs this particular type took.",
+      "title": "One storage verb: add — upsert by default, add_new for no-overwrite; insert and put die",
+      "gist": "One verb stores into every collection: add upserts and reports what it displaced, add_new refuses collisions; insert and put both die.",
+      "lesson": "Storing into a Core collection is spelled three ways today. Maps use `insert(key, value)`. `Set`, `SortedSet`, and `Bag` use `add(value)`. The `Lru` cache uses `put(key, value)`.\n\nYour direction: the verb is `add`, and experts need both collision behaviors — overwrite-by-default and only-if-new. The two behaviors are real semantics: an upsert replaces silently; a unique-add must leave the existing value untouched and say so.",
       "explainer": "",
-      "story": "Ellen switches a hot map to an `Lru` cache. Every `insert` call breaks — the cache spells the same operation `put`. Nothing about an LRU makes storing different; she pays a rename tax for an implementation detail, then teaches the quirk to the next reader.",
-      "inWild": "scores[name] = 10          // map: index-insert (S39)\nscores.insert(name, 10)     // map: method form\ntags.add(\"urgent\")          // Set / SortedSet / Bag\nrecent.put(user_id, page)   // Lru — same keyed job as insert",
+      "story": "Ellen caches sessions. Most writes should just land — latest wins. But when two workers race to claim a job id, the second must NOT overwrite the first; it must learn it lost. Today she gets `put` with one behavior and hand-rolls the other with a get-then-put race.",
+      "inWild": "scores[name] = 10               // map index-write (S39) — stays the literal upsert\nscores.add(name, 10)             // method form, same upsert\ntags.add(\"urgent\")               // element containers, same verb\nclaims.add_new(job_id, worker)   // only-if-absent — the race-safe claim",
       "detail": "",
       "options": [
         {
           "key": "A",
-          "name": "Keyed = insert, element = add; put dies",
-          "detail": "One rule with a teachable split. Keyed containers (`[K: V]`, `Lru`, future `HashMap`/`BTreeMap`) spell storage `insert(key, value)`. Element containers (`Set`, `SortedSet`, `Bag`, `PriorityQueue`) spell it `add(value)`; `Deque` keeps its positional verbs. `Lru.put` renames to `insert` — a clean break, ordinary no-such-method error. The rule enters stdlib-api-laws.md Law 1 so reviews enforce it.",
-          "code": "recent.insert(user_id, page)   // Lru joins the keyed rule\ntags.add(\"urgent\")             // element rule unchanged\n\n$ jet check cache.jet   # after the break\nerror[E0104]: no method `put` on `Lru<Int, Page>`\n  keyed storage is `insert(key, value)`"
+          "name": "add upserts and returns the displaced value; add_new refuses collisions",
+          "detail": "One verb family on every collection; `insert` and `put` both die. Keyed containers: `add(key, value) -> T?` upserts and returns the displaced old value (`None` means the key was fresh) — the expert reads the collision from the return, free. `add_new(key, value) -> Bool` stores only if the key is absent; `false` means it existed and was left untouched.\n\nElement containers: `add(value) -> Bool` (`Set`/`SortedSet`: `true` if newly added; `Bag`: always `true`). `S39` index-writes stay the literal upsert. The rule enters Law 1.",
+          "code": "old :: scores.add(name, 10)          // T? — Val(prev) if replaced, None if fresh\nif claims.add_new(job_id, me) == false {\n    return Err(\"job already claimed\")\n}\n\n$ jet check cache.jet   # after the break\nerror[E0104]: no method `put` on `Lru<Int, Page>`\n  storage is `add(key, value)`; refuse collisions with `add_new`"
         },
         {
           "key": "B",
-          "name": "One verb everywhere — everything is add",
-          "detail": "`add` becomes the universal storage verb: `map.add(key, value)`, `set.add(v)`, `lru.add(k, v)`. Maximum uniformity, but it breaks the ratified map surface and erases a real semantic distinction — keyed stores replace on collision, element adds don't take a key. One word hiding two behaviors is the confusion I8 warns about, inverted.",
-          "code": "scores.add(name, 10)\ntags.add(\"urgent\")\nrecent.add(user_id, page)"
+          "name": "Two verbs by container kind — insert for keyed, add for elements",
+          "detail": "The earlier shape: keyed containers spell storage `insert(key, value)`, element containers spell it `add(value)`; `Lru.put` renames to `insert`. The keyed/element split is teachable, but it keeps two verbs where one now suffices, and it leaves the only-if-new behavior unspecified — the gap your question names.",
+          "code": "scores.insert(name, 10)\ntags.add(\"urgent\")\nrecent.insert(user_id, page)   // and no race-safe claim exists"
         },
         {
           "key": "C",
-          "name": "Status quo — per-type verbs",
-          "detail": "Keep insert/add/put as shipped. Zero churn; the memorization tax stays, and the next cache-like type will plausibly mint a fourth verb because no law binds it.",
-          "code": "scores.insert(name, 10)\ntags.add(\"urgent\")\nrecent.put(user_id, page)   // and the next type picks its own"
+          "name": "Status quo — insert, add, and put coexist",
+          "detail": "Keep all three per-type verbs. Zero churn; the memorization tax stays, the collision behavior stays implicit per type, and the next cache-like type mints a fourth verb.",
+          "code": "scores.insert(name, 10)\ntags.add(\"urgent\")\nrecent.put(user_id, page)"
         }
       ],
       "comparisons": [
         {
           "lang": "Rust",
-          "note": "Rust uses insert for both HashMap and HashSet — one verb, but it papers over the key/element split; sets returning bool from insert surprises people.",
-          "code": "map.insert(k, v);\nset.insert(v);   // same word, different contract"
+          "note": "Rust's insert returns Option<old> — the displaced-value trick A adopts; the only-if-new case needs the separate entry API most users never find.",
+          "code": "let old = map.insert(k, v);          // Some(prev) on collision\nmap.entry(k).or_insert(v);            // the hidden only-if-new path"
         },
         {
-          "lang": "Java",
-          "note": "Java's Map.put vs Collection.add is the two-verb split by interface — fifty years of developers guess it correctly; the split itself is teachable.",
-          "code": "map.put(k, v);\nset.add(v);"
+          "lang": "C# / .NET",
+          "note": ".NET ships exactly A's pair: the indexer upserts, TryAdd refuses collisions and returns bool — race-safe claims are one call.",
+          "code": "dict[k] = v;            // upsert\ndict.TryAdd(k, v);      // false if present, untouched"
         }
       ],
       "rec": "A",
       "recommendation": {
-        "why": "The keyed/element split is real semantics worth two verbs, and two is the minimum that preserves it. Lru's `put` is the only outlier against that rule, so the fix is one rename plus one review-gate line.",
+        "why": "It answers the requirement exactly: one guessable verb, magic upsert default, and both collision behaviors first-class — the return value gives experts collision visibility on the default path, and add_new makes the race-safe claim a single call.",
         "whyNot": [
           {
             "key": "B",
-            "reason": "It trades a guessable two-verb rule for one word with two contracts, and breaks the ratified map surface for uniformity nobody asked for."
+            "reason": "Two verbs where one now suffices, and it never answers the only-if-new requirement."
           },
           {
             "key": "C",
-            "reason": "No law means the next keyed type mints a fourth verb, and the memorization tax compounds."
+            "reason": "Three verbs, implicit collision behavior, and the gap stays open per type."
           }
         ],
-        "tradeoff": "One clean break on `Lru.put`; Java-trained users retype `put` once, guided by the error."
+        "tradeoff": "Two clean breaks (map.insert and Lru.put respell to add); Set.add gains a Bool return."
       },
       "hybrid": {
         "result": "A",
-        "synthesis": "A takes B's uniformity exactly as far as semantics allow — one verb per storage kind — and C's respect for shipped law everywhere except the single outlier.",
+        "synthesis": "A absorbs B's keyed/element distinction inside one verb — the signature (key + value vs value) carries it — and adds the collision pair B lacked.",
         "harvest": [
           {
             "key": "A",
-            "aspect": "keyed=insert / element=add law",
-            "use": "adopted, entered into Law 1"
+            "aspect": "add/add_new pair with displaced-value return",
+            "use": "adopted; enters Law 1"
           },
           {
             "key": "B",
-            "aspect": "maximal uniformity",
-            "use": "bounded at the keyed/element line where semantics genuinely differ"
+            "aspect": "keyed vs element distinction",
+            "use": "carried by the signature, not the verb"
           },
           {
             "key": "C",
-            "aspect": "minimal churn",
-            "use": "only Lru.put moves; every other shipped verb already obeys the law"
+            "aspect": "minimal churn instinct",
+            "use": "two renames total; index-write upsert untouched"
           }
         ]
       },
@@ -31003,8 +31040,10 @@
         ]
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-07-12T10:12:40.265Z"
+      "status": "ratified",
+      "created": "2026-07-12T10:12:40.265Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-12"
     },
     {
       "id": "D-ARTIFACT-EXT1",
@@ -31081,8 +31120,10 @@
         ]
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-07-12T10:13:23.490Z"
+      "status": "ratified",
+      "created": "2026-07-12T10:13:23.490Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-12"
     }
   ],
   "questions": [
@@ -31627,9 +31668,24 @@
       "by": "owner",
       "kind": "question",
       "text": "I want to use add but we need to have two methods available. One that adds and overwrites on collision and one that does not overwrite on collision. Propose updated methods so experts can control whether they want to have values be updated by default if key already exists or if they want to add unique, only if the key is new",
-      "status": "open",
-      "answer": "",
-      "created": "2026-07-12T10:14:36.428Z"
+      "status": "answered",
+      "answer": "Ballot updated to your direction. Option A (rec) is now: one verb family — add(key, value) -> T? upserts and returns the displaced old value (None = the key was fresh), so the default path already gives experts collision visibility for free; add_new(key, value) -> Bool stores only if the key is absent and returns false with the existing value untouched — the race-safe claim in one call. Element containers: add(value) -> Bool. insert and put both die; scores[name] = v index-write stays the literal upsert. Precedents: Rust insert returning Option<old>, .NET indexer + TryAdd.",
+      "created": "2026-07-12T10:14:36.428Z",
+      "answeredAt": "2026-07-12",
+      "answeredBy": "claude-main"
+    },
+    {
+      "id": "q3lhm9fa",
+      "cardId": "c0n6vj96",
+      "decisionId": "D-VALIDATE1",
+      "by": "owner",
+      "kind": "question",
+      "text": "I like the dot method chaining for the validator type, the pre syntax seems a little clunky. Propose a best of all worlds solution for incredible ergonomics",
+      "status": "answered",
+      "answer": "Ballot updated. Option A (rec) is now the best-of-all-worlds chain, with @Pre removed from the validation story entirely (it stays a call-site contract only). Three layers: (1) constraints that fit the type system stay in types — distinct Int(13..120), #Invariant — free and already law; (2) Validate.over(s) gives the dot-chain you want: v.field(\"email\", s.email).email().max_len(254), custom rules via .check(cond, at:, msg), everything accumulates, v.finish() -> T ? [FieldError] reusing the DecodeError path shape; (3) req.decode<T>().validate() is the one beginner entry point — decode errors and rule errors land in the same list. No markers, no second schema object: the struct plus one plain fn is the schema.",
+      "created": "2026-07-12T10:18:19.767Z",
+      "answeredAt": "2026-07-12",
+      "answeredBy": "claude-main"
     }
   ],
   "ideas": [
@@ -31895,6 +31951,90 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-12T10:24:19.256Z",
+      "by": "claude-main",
+      "action": "question.answer",
+      "ref": "q3lhm9fa",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T10:24:19.152Z",
+      "by": "claude-main",
+      "action": "question.answer",
+      "ref": "q2zvcuql",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T10:24:19.050Z",
+      "by": "claude-main",
+      "action": "decision.update",
+      "ref": "D-VALIDATE1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T10:24:18.944Z",
+      "by": "claude-main",
+      "action": "decision.update",
+      "ref": "D-API-STORE1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T10:20:53.930Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-ARTIFACT-EXT1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-12T10:20:53.464Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-ARTIFACT-EXT1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-12T10:20:11.918Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-PRELUDE-LAW1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-12T10:20:11.918Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c019rl6u",
+      "note": "#4 snapshots re-blessed"
+    },
+    {
+      "at": "2026-07-12T10:20:11.918Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c019rl6u",
+      "note": "#3 jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-07-12T10:20:11.918Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c019rl6u",
+      "note": "#2 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-07-12T10:20:11.918Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c019rl6u",
+      "note": "#1 Syntax.rs entry updated"
+    },
+    {
+      "at": "2026-07-12T10:18:19.767Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "q3lhm9fa",
+      "note": ""
+    },
     {
       "at": "2026-07-12T10:18:11.507Z",
       "by": "claude-main",
@@ -35310,90 +35450,6 @@
       "action": "card.criteria-add",
       "ref": "c0by6tvm",
       "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-07-11T21:39:37.419Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0by6tvm",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-07-11T21:34:57.045Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-PERFBUDGET-INTEGRATION1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-11T21:34:56.878Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-PERFBUDGET-PROVIDER1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-11T21:34:56.694Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-PERFBUDGET-GAMEMIGRATE1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-11T21:34:56.518Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-PERFBUDGET-BENCHMIGRATE1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-11T21:34:56.350Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-CABI-PLATFORM1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-11T21:34:56.176Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-CABI-RESULT1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-11T21:34:56.002Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-CABI-CALLBACK1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-11T21:34:55.823Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-JOS-PRIORITY-SURFACE2",
-      "note": ""
-    },
-    {
-      "at": "2026-07-11T21:33:46.255Z",
-      "by": "codex-84-builder",
-      "action": "card.claim",
-      "ref": "c1cix784",
-      "note": ""
-    },
-    {
-      "at": "2026-07-11T20:32:41.821Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "ccq07pav",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-11T20:32:35.385Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-PERFBUDGET-INTEGRATION1",
-      "note": "Performance budget integration contract"
     }
   ],
   "nextNum": 368,
