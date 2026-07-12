@@ -358,7 +358,7 @@ pub enum PolicyOutcome { Pass, Warn, Fail }
 pub enum Comparison {
     Absolute { limit: Rational, direction: LimitDirection },
     AbsoluteFrom { limit: Rational, direction: LimitDirection },
-    RelativeTo { limit_basis_points: i128, goal: RelativeGoal },
+    RelativeTo { limit_basis_points: BigInt, goal: RelativeGoal },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -408,7 +408,7 @@ pub fn evaluate(
             if baseline.is_empty() { return Err("RelativeTo baseline samples are empty".into()); }
             let baseline_point = estimator(baseline, percentile)?;
             if baseline_point == Rational::zero() { return Ok(finish(Rational::zero(), None, None, Evidence::Unavailable, enforcement, Vec::new())); }
-            let point = relative_stat(candidate_point, baseline_point, *limit_basis_points, *goal, direction)?;
+            let point = relative_stat(candidate_point, baseline_point, limit_basis_points.clone(), *goal, direction)?;
             let policy = policy.ok_or("RelativeTo requires a measurement policy")?;
             let values = bootstrap_values(evidence_id, context_key, baseline_report_ids, candidate, baseline, percentile, comparison, direction, policy)?;
             (point, values)
@@ -447,7 +447,7 @@ fn bootstrap_values(evidence_id: &str, context_key: &str, baseline_report_ids: &
                 let baseline_resample = resample(baseline, baseline.len(), &mut stream)?;
                 let baseline_estimator = estimator(&baseline_resample, percentile)?;
                 if baseline_estimator == Rational::zero() { return Err("RelativeTo bootstrap baseline estimator is zero".into()); }
-                relative_stat(candidate_estimator, baseline_estimator, *limit_basis_points, *goal, direction)?
+                relative_stat(candidate_estimator, baseline_estimator, limit_basis_points.clone(), *goal, direction)?
             }
             Comparison::Absolute { .. } => return Err("Absolute does not bootstrap".into()),
         };
@@ -457,13 +457,14 @@ fn bootstrap_values(evidence_id: &str, context_key: &str, baseline_report_ids: &
     Ok(values)
 }
 
-fn relative_stat(candidate: Rational, baseline: Rational, limit_basis_points: i128, goal: RelativeGoal, direction: Direction) -> Result<Rational, String> {
+fn relative_stat(candidate: Rational, baseline: Rational, limit_basis_points: BigInt, goal: RelativeGoal, direction: Direction) -> Result<Rational, String> {
     let delta = match (goal, direction) {
         (RelativeGoal::RegressionAtMost, Direction::LowerIsBetter) | (RelativeGoal::ImprovementAtLeast, Direction::HigherIsBetter) => candidate.sub(&baseline)?.max_zero(),
         (RelativeGoal::RegressionAtMost, Direction::HigherIsBetter) | (RelativeGoal::ImprovementAtLeast, Direction::LowerIsBetter) => baseline.sub(&candidate)?.max_zero(),
     };
     let basis_points = delta.mul(&Rational::integer(10_000))?.div(&baseline)?;
-    match goal { RelativeGoal::RegressionAtMost => basis_points.sub(&Rational::integer(limit_basis_points)), RelativeGoal::ImprovementAtLeast => Rational::integer(limit_basis_points).sub(&basis_points) }
+    let limit = Rational::from_bigints(limit_basis_points, BigInt::one())?;
+    match goal { RelativeGoal::RegressionAtMost => basis_points.sub(&limit), RelativeGoal::ImprovementAtLeast => limit.sub(&basis_points) }
 }
 
 const BOOTSTRAP_DOMAIN: &[u8] = b"jet.performance-budget.bootstrap.v1\0";
@@ -565,7 +566,7 @@ fn validate_rational(value:&CanonicalJson,quantity:bool,name:&str)->Result<Ratio
     let reduced=Rational::from_bigints(n.clone(),d.clone())?;if reduced.num!=n||reduced.den!=d{return Err(format!("{name} is not gcd-reduced"));}Ok(reduced)
 }
 fn validate_policy(value:&CanonicalJson)->Result<(),String>{let f=object(value,"measurement policy",&["min_candidate_samples","min_baseline_samples","baseline_generations","bootstrap_resamples","lower_rank","upper_rank","stale_after_seconds","trend_generations"])?;for key in f.keys(){unsigned(&f[key],&format!("measurement policy.{key}"))?;}Ok(())}
-fn validate_statistics(value:&CanonicalJson)->Result<(),String>{let f=object(value,"statistics",&["count","sorted_samples","p50","p90","p95","p99","p999","mean","mad"])?;let count=unsigned(&f["count"],"statistics.count")?;let samples=array(&f["sorted_samples"],"statistics.sorted_samples")?;let mut previous=None;for sample in samples{let q=validate_rational(sample,true,"statistics sample")?;if previous.as_ref().is_some_and(|p:&Rational|p> &q){return Err("statistics.sorted_samples is not sorted".into());}previous=Some(q);}if count.to_string()!=samples.len().to_string(){return Err("statistics.count does not match sorted_samples".into());}for key in ["p50","p90","p95","p99","p999","mean","mad"]{validate_rational(&f[key],true,&format!("statistics.{key}"))?;}Ok(())}
+fn validate_statistics(value:&CanonicalJson)->Result<(),String>{let f=object(value,"statistics",&["count","sorted_samples","p50","p90","p95","p99","p999","mean","mad"])?;let count=unsigned(&f["count"],"statistics.count")?;let raw=array(&f["sorted_samples"],"statistics.sorted_samples")?;let mut samples=Vec::with_capacity(raw.len());for sample in raw{samples.push(validate_rational(sample,true,"statistics sample")?);}if samples.windows(2).any(|w|w[0]>w[1]){return Err("statistics.sorted_samples is not sorted".into());}if count.to_string()!=samples.len().to_string(){return Err("statistics.count does not match sorted_samples".into());}let actual=statistics(&samples)?;for (key,want) in [("p50",actual.p50),("p90",actual.p90),("p95",actual.p95),("p99",actual.p99),("p999",actual.p999),("mean",actual.mean),("mad",actual.mad)]{if validate_rational(&f[key],true,&format!("statistics.{key}"))?!=want{return Err(format!("statistics.{key} does not match independent recomputation"));}}Ok(())}
 fn validate_history(value:&CanonicalJson)->Result<(),String>{let f=object(value,"history selection",&["state_id","report_ids"])?;hex64(&f["state_id"],"history.state_id")?;for id in array(&f["report_ids"],"history.report_ids")?{hex64(id,"history report id")?;}Ok(())}
 fn validate_baseline(value:&CanonicalJson)->Result<(),String>{let f=object(value,"statistical baseline",&["history","pooled_samples","statistics","policy"])?;validate_history(&f["history"])?;for q in array(&f["pooled_samples"],"baseline.pooled_samples")?{validate_rational(q,true,"baseline sample")?;}validate_statistics(&f["statistics"])?;validate_policy(&f["policy"])}
 fn validate_trend(value:&CanonicalJson)->Result<(),String>{let f=object(value,"trend",&["label","report_ids","estimators","score"])?;one_of(&f["label"],"trend.label",&["improving","stable","regressing","insufficient"])?;let ids=array(&f["report_ids"],"trend.report_ids")?;for id in ids{hex64(id,"trend report id")?;}let estimators=array(&f["estimators"],"trend.estimators")?;if ids.len()!=estimators.len(){return Err("trend inputs are not index-aligned".into());}for q in estimators{validate_rational(q,true,"trend estimator")?;}nullable(&f["score"],|v|validate_rational(v,false,"trend.score").map(|_|()))}
@@ -581,10 +582,42 @@ fn validate_report_content(value:&CanonicalJson)->Result<(),String>{
     let f=object(value,"report content",&["subject","toolchain","evidence_id","measurements","summary","privacy"])?;
     let subject=object(&f["subject"],"subject",&["target_id","member_sources","target_triple","target_class","profile","artifact","measured_start","measured_end"])?;for key in ["target_id","target_triple","target_class","profile","measured_start","measured_end"]{text(&subject[key],&format!("subject.{key}"))?;}let mut prior:Option<(&str,&str)>=None;for source in array(&subject["member_sources"],"subject.member_sources")?{let sf=object(source,"member source",&["path","sha256"])?;let path=text(&sf["path"],"member source.path")?;let hash=hex64(&sf["sha256"],"member source.sha256")?;if prior.is_some_and(|p|p>(path,hash)){return Err("member_sources is not sorted".into());}prior=Some((path,hash));}nullable(&subject["artifact"],|v|{let a=object(v,"artifact",&["sha256","bytes"])?;hex64(&a["sha256"],"artifact.sha256")?;unsigned(&a["bytes"],"artifact.bytes")?;Ok(())})?;
     let tool=object(&f["toolchain"],"toolchain",&["jet_version","compiler_build_id","stdlib_id","runner_id","digest"])?;for key in ["jet_version","compiler_build_id","stdlib_id","runner_id"]{text(&tool[key],&format!("toolchain.{key}"))?;}hex64(&tool["digest"],"toolchain.digest")?;let digest_content=CanonicalJson::object(["jet_version","compiler_build_id","stdlib_id","runner_id"].into_iter().map(|k|(k.into(),tool[k].clone())))?;verify_stable_id(&digest_content,text(&tool["digest"],"toolchain.digest")?).map_err(|_|"toolchain digest mismatch".to_string())?;
-    hex64(&f["evidence_id"],"evidence_id")?;let measurements=array(&f["measurements"],"measurements")?;let mut order=None;for measurement in measurements{validate_measurement(measurement)?;let mf=match measurement{CanonicalJson::Object(v)=>v,_=>unreachable!()};let key=(text(&mf["budget_id"],"budget_id")?,text(&mf["source"],"source")?);if order.is_some_and(|p|p>key){return Err("measurements is not sorted by budget_id then source".into());}order=Some(key);}
+    let evidence=hex64(&f["evidence_id"],"evidence_id")?;let measurements=array(&f["measurements"],"measurements")?;let mut order=None;for measurement in measurements{validate_measurement(measurement)?;let mf=match measurement{CanonicalJson::Object(v)=>v,_=>unreachable!()};let key=(text(&mf["budget_id"],"budget_id")?,text(&mf["source"],"source")?);if order.is_some_and(|p|p>key){return Err("measurements is not sorted by budget_id then source".into());}order=Some(key);validate_context_key(subject,tool,mf)?;verify_wire_evaluation(evidence,mf)?;}
+    let sanitized=CanonicalJson::object([("measurements".into(),CanonicalJson::Array(measurements.iter().map(sanitize_measurement).collect::<Result<Vec<_>,_>>()?)),("subject".into(),f["subject"].clone()),("toolchain".into(),f["toolchain"].clone())])?;verify_stable_id(&sanitized,evidence).map_err(|_|"evidence_id mismatch".to_string())?;
     let summary=object(&f["summary"],"summary",&["outcome","pass","warn","fail"])?;one_of(&summary["outcome"],"summary.outcome",&["pass","warn","fail"])?;for key in ["pass","warn","fail"]{unsigned(&summary[key],&format!("summary.{key}"))?;}
     let privacy=object(&f["privacy"],"privacy",&["schema","workspace_paths_only","retained","excluded"])?;if privacy["schema"]!=CanonicalJson::Integer("1".into())||!boolean(&privacy["workspace_paths_only"],"privacy.workspace_paths_only")?{return Err("unsupported privacy schema/policy".into());}for key in ["retained","excluded"]{let vals=array(&privacy[key],&format!("privacy.{key}"))?;let mut prior=None;for v in vals{let v=text(v,&format!("privacy.{key} item"))?;if prior.is_some_and(|p|p>v){return Err(format!("privacy.{key} is not sorted"));}prior=Some(v);}}
     Ok(())
+}
+
+fn sanitize_measurement(value:&CanonicalJson)->Result<CanonicalJson,String>{let mut f=match value{CanonicalJson::Object(v)=>v.clone(),_=>return Err("measurement is not object".into())};for key in ["history","baseline","decision"]{f.insert(key.into(),CanonicalJson::Null);}Ok(CanonicalJson::Object(f))}
+fn frame(input:&mut Vec<u8>,value:&str){input.extend_from_slice(&(value.len() as u64).to_be_bytes());input.extend_from_slice(value.as_bytes());}
+fn wire_text(value:&CanonicalJson)->String{match value{CanonicalJson::String(v)|CanonicalJson::Integer(v)=>v.clone(),CanonicalJson::Null=>String::new(),_=>String::from_utf8(value.bytes()).expect("canonical JSON UTF-8").trim_end().into()}}
+fn validate_context_key(subject:&BTreeMap<String,CanonicalJson>,tool:&BTreeMap<String,CanonicalJson>,measurement:&BTreeMap<String,CanonicalJson>)->Result<(),String>{
+    let metric=match &measurement["metric"]{CanonicalJson::Object(v)=>v,_=>return Err("metric is not object".into())};let provider=match &measurement["provider"]{CanonicalJson::Object(v)=>v,_=>return Err("provider is not object".into())};let mut input=b"jet-budget-context-v1\0".to_vec();
+    for value in [&subject["target_id"],&metric["name"],&metric["percentile"],&measurement["target_class"],&subject["target_triple"],&subject["profile"]]{frame(&mut input,&wire_text(value));}
+    for key in ["jet_version","compiler_build_id","stdlib_id","runner_id","digest"]{frame(&mut input,&wire_text(&tool[key]));}
+    for key in ["kind","identity","version","isolation","cpu_arch","cpu_model","logical_cpus","memory_bytes","os","kernel","power_governor","hardware_fingerprint"]{frame(&mut input,&wire_text(&provider[key]));}
+    let actual=SHA256::sha256_hex(&input);if text(&measurement["context_key"],"context_key")?!=actual{return Err("measurement context_key mismatch".into());}Ok(())
+}
+
+fn usize_wire(value:&CanonicalJson,name:&str)->Result<usize,String>{unsigned(value,name)?.to_string().parse().map_err(|_|format!("{name} exceeds implementation resource limit"))}
+fn rational_or_none(value:&CanonicalJson,name:&str)->Result<Option<Rational>,String>{if matches!(value,CanonicalJson::Null){Ok(None)}else{Ok(Some(validate_rational(value,false,name)?))}}
+fn parse_percentile(value:&CanonicalJson)->Result<Option<Percentile>,String>{match value{CanonicalJson::Null=>Ok(None),CanonicalJson::String(v)=>match v.as_str(){"p50"=>Ok(Some(Percentile::P50)),"p90"=>Ok(Some(Percentile::P90)),"p95"=>Ok(Some(Percentile::P95)),"p99"=>Ok(Some(Percentile::P99)),"p999"=>Ok(Some(Percentile::P999)),_=>Err("unknown percentile".into())},_=>Err("percentile is not text or null".into())}}
+fn parse_direction(value:&CanonicalJson)->Result<Direction,String>{match text(value,"direction")?{"lower_is_better"=>Ok(Direction::LowerIsBetter),"higher_is_better"=>Ok(Direction::HigherIsBetter),_=>Err("unknown direction".into())}}
+fn parse_enforcement(value:&CanonicalJson)->Result<Enforcement,String>{match text(value,"enforcement")?{"warn"=>Ok(Enforcement::Warn),"fail"=>Ok(Enforcement::Fail),_=>Err("unknown enforcement".into())}}
+fn parse_comparison(value:&CanonicalJson)->Result<Comparison,String>{let f=match value{CanonicalJson::Object(v)=>v,_=>return Err("comparison is not object".into())};match text(&f["kind"],"comparison.kind")?{"absolute"=>Ok(Comparison::Absolute{limit:validate_rational(&f["limit"],true,"comparison.limit")?,direction:match text(&f["direction"],"comparison.direction")?{"at_most"=>LimitDirection::AtMost,"at_least"=>LimitDirection::AtLeast,_=>return Err("unknown limit direction".into())}}),"absolute_from"=>Ok(Comparison::AbsoluteFrom{limit:validate_rational(&f["limit"],true,"comparison.limit")?,direction:match text(&f["direction"],"comparison.direction")?{"at_most"=>LimitDirection::AtMost,"at_least"=>LimitDirection::AtLeast,_=>return Err("unknown limit direction".into())}}),"relative_to"=>Ok(Comparison::RelativeTo{limit_basis_points:unsigned(&f["limit_basis_points"],"comparison.limit_basis_points")?,goal:match text(&f["goal"],"comparison.goal")?{"regression_at_most"=>RelativeGoal::RegressionAtMost,"improvement_at_least"=>RelativeGoal::ImprovementAtLeast,_=>return Err("unknown relative goal".into())}}),_=>Err("unknown comparison kind".into())}}
+fn parse_policy(value:&CanonicalJson)->Result<Option<MeasurementPolicy>,String>{if matches!(value,CanonicalJson::Null){return Ok(None);}let f=match value{CanonicalJson::Object(v)=>v,_=>return Err("policy is not object".into())};Ok(Some(MeasurementPolicy{bootstrap_resamples:usize_wire(&f["bootstrap_resamples"],"policy.bootstrap_resamples")?,lower_rank:usize_wire(&f["lower_rank"],"policy.lower_rank")?,upper_rank:usize_wire(&f["upper_rank"],"policy.upper_rank")?}))}
+fn quantities(value:&CanonicalJson,name:&str)->Result<Vec<Rational>,String>{array(value,name)?.iter().map(|v|validate_rational(v,true,name)).collect()}
+fn history_ids(value:&CanonicalJson)->Result<Vec<String>,String>{if matches!(value,CanonicalJson::Null){return Ok(Vec::new());}let f=match value{CanonicalJson::Object(v)=>v,_=>return Err("history is not object".into())};Ok(array(&f["report_ids"],"history.report_ids")?.iter().map(|v|text(v,"history report id").map(str::to_owned)).collect::<Result<_,_>>()?)}
+fn evidence_enum(value:&CanonicalJson)->Result<Evidence,String>{match text(value,"decision.evidence")?{"pass"=>Ok(Evidence::Pass),"regression"=>Ok(Evidence::Regression),"inconclusive"=>Ok(Evidence::Inconclusive),"unavailable"=>Ok(Evidence::Unavailable),_=>Err("unknown evidence".into())}}
+fn outcome_enum(value:&CanonicalJson)->Result<PolicyOutcome,String>{match text(value,"decision.policy_outcome")?{"pass"=>Ok(PolicyOutcome::Pass),"warn"=>Ok(PolicyOutcome::Warn),"fail"=>Ok(PolicyOutcome::Fail),_=>Err("unknown policy outcome".into())}}
+fn trend_label_enum(value:&CanonicalJson)->Result<TrendLabel,String>{match text(value,"trend.label")?{"improving"=>Ok(TrendLabel::Improving),"stable"=>Ok(TrendLabel::Stable),"regressing"=>Ok(TrendLabel::Regressing),"insufficient"=>Ok(TrendLabel::Insufficient),_=>Err("unknown trend label".into())}}
+fn verify_wire_evaluation(evidence_id:&str,m:&BTreeMap<String,CanonicalJson>)->Result<(),String>{
+    if matches!(m["decision"],CanonicalJson::Null){return Ok(());}let d=match &m["decision"]{CanonicalJson::Object(v)=>v,_=>unreachable!()};let direction=parse_direction(&m["direction"])?;let enforcement=parse_enforcement(&m["enforcement"])?;let comparison=parse_comparison(&m["comparison"])?;let policy=parse_policy(&m["policy"])?;let candidate=quantities(&m["samples"],"measurement.samples")?;let (baseline,ids)=if let CanonicalJson::Object(b)=&m["baseline"]{(quantities(&b["pooled_samples"],"baseline.pooled_samples")?,history_ids(&b["history"])?)}else{(Vec::new(),history_ids(&m["history"])?)};
+    let stored_evidence=evidence_enum(&d["evidence"])?;let stored_outcome=outcome_enum(&d["policy_outcome"])?;
+    if matches!(comparison,Comparison::RelativeTo{..})&&baseline.is_empty(){if stored_evidence!=Evidence::Unavailable{return Err("relative decision without baseline must be unavailable".into());}let expected=match enforcement{Enforcement::Warn=>PolicyOutcome::Warn,Enforcement::Fail=>PolicyOutcome::Fail};if stored_outcome!=expected{return Err("unavailable decision policy outcome mismatch".into());}}
+    else {let metric=match &m["metric"]{CanonicalJson::Object(v)=>v,_=>unreachable!()};let actual=evaluate(evidence_id,text(&m["context_key"],"context_key")?,&ids,&candidate,&baseline,parse_percentile(&metric["percentile"])?,&comparison,direction,enforcement,policy.as_ref())?;if rational_or_none(&d["point"],"decision.point")?!=Some(actual.point)||rational_or_none(&d["lower95"],"decision.lower95")?!=actual.lower95||rational_or_none(&d["upper95"],"decision.upper95")?!=actual.upper95||stored_evidence!=actual.evidence||stored_outcome!=actual.outcome{return Err("persisted decision does not match independent evaluator recomputation".into());}}
+    let t=match &d["trend"]{CanonicalJson::Object(v)=>v,_=>unreachable!()};let tids=history_ids(&CanonicalJson::Object(BTreeMap::from([("state_id".into(),CanonicalJson::String("0".repeat(64))),("report_ids".into(),t["report_ids"].clone())])))?;let estimators=quantities(&t["estimators"],"trend.estimators")?;let actual=trend(&tids,&estimators,direction)?;if trend_label_enum(&t["label"])?!=actual.label||rational_or_none(&t["score"],"trend.score")?!=actual.score{return Err("persisted trend does not match independent recomputation".into());}Ok(())
 }
 
 pub fn verify_evaluation(expected: &Evaluation, inputs: EvaluationInputs<'_>) -> Result<(), String> {
@@ -658,7 +691,7 @@ mod tests {
     #[test]
     fn bootstrap_is_deterministic_and_reader_recomputes_every_outcome() {
         let policy = MeasurementPolicy { bootstrap_resamples: 20, lower_rank: 1, upper_rank: 20 };
-        let comparison = Comparison::RelativeTo { limit_basis_points: 500, goal: RelativeGoal::RegressionAtMost };
+        let comparison = Comparison::RelativeTo { limit_basis_points: BigInt::from_i128(500), goal: RelativeGoal::RegressionAtMost };
         let ids = vec!["0".repeat(64)];
         let inputs = EvaluationInputs { evidence_id: &"1".repeat(64), context_key: &"2".repeat(64), baseline_report_ids: &ids, candidate: &[q(90), q(91), q(92)], baseline: &[q(100), q(101), q(102)], percentile: Some(Percentile::P50), comparison: &comparison, direction: Direction::LowerIsBetter, enforcement: Enforcement::Fail, policy: Some(&policy) };
         let got = evaluate(inputs.evidence_id, inputs.context_key, inputs.baseline_report_ids, inputs.candidate, inputs.baseline, inputs.percentile, inputs.comparison, inputs.direction, inputs.enforcement, inputs.policy).unwrap();
@@ -680,5 +713,44 @@ mod tests {
         assert!(verify_budget_report(spaced.as_bytes()).is_err());
         let corrupt = String::from_utf8(bytes).unwrap().replace("\"pass\"", "\"fail\"");
         assert!(verify_budget_report(corrupt.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn typed_schema_rejects_extra_nonreduced_and_forged_statistics() {
+        let extra = CanonicalJson::object([
+            ("den".into(), CanonicalJson::Integer("2".into())),
+            ("num".into(), CanonicalJson::Integer("1".into())),
+            ("surprise".into(), CanonicalJson::Null),
+        ]).unwrap();
+        assert!(validate_rational(&extra, false, "q").unwrap_err().contains("unknown"));
+        let nonreduced = CanonicalJson::object([
+            ("den".into(), CanonicalJson::Integer("4".into())),
+            ("num".into(), CanonicalJson::Integer("2".into())),
+        ]).unwrap();
+        assert!(validate_rational(&nonreduced, false, "q").unwrap_err().contains("gcd-reduced"));
+        let qj = |n:i128| Rational::integer(n).to_json();
+        let forged = CanonicalJson::object([
+            ("count".into(), CanonicalJson::Integer("3".into())),
+            ("sorted_samples".into(), CanonicalJson::Array(vec![qj(1),qj(2),qj(3)])),
+            ("p50".into(), qj(3)), ("p90".into(), qj(3)), ("p95".into(), qj(3)),
+            ("p99".into(), qj(3)), ("p999".into(), qj(3)), ("mean".into(), qj(2)), ("mad".into(), qj(1)),
+        ]).unwrap();
+        assert!(validate_statistics(&forged).unwrap_err().contains("p50"));
+    }
+
+    #[test]
+    fn wire_reader_recomputes_decision_confidence_trend_and_history() {
+        let evidence="1".repeat(64);let context="2".repeat(64);let ids=vec!["3".repeat(64)];let samples=vec![q(1),q(10),q(100),q(1000)];
+        let comparison=Comparison::AbsoluteFrom{limit:q(50),direction:LimitDirection::AtMost};let policy=MeasurementPolicy{bootstrap_resamples:100,lower_rank:3,upper_rank:98};
+        let actual=evaluate(&evidence,&context,&ids,&samples,&[],Some(Percentile::P50),&comparison,Direction::LowerIsBetter,Enforcement::Fail,Some(&policy)).unwrap();
+        let ev=match actual.evidence{Evidence::Pass=>"pass",Evidence::Regression=>"regression",Evidence::Inconclusive=>"inconclusive",Evidence::Unavailable=>"unavailable"};let outcome=match actual.outcome{PolicyOutcome::Pass=>"pass",PolicyOutcome::Warn=>"warn",PolicyOutcome::Fail=>"fail"};
+        let trend_json=CanonicalJson::object([("label".into(),CanonicalJson::String("insufficient".into())),("report_ids".into(),CanonicalJson::Array(Vec::new())),("estimators".into(),CanonicalJson::Array(Vec::new())),("score".into(),CanonicalJson::Null)]).unwrap();
+        let decision=CanonicalJson::object([("evidence".into(),CanonicalJson::String(ev.into())),("reason".into(),CanonicalJson::Null),("point".into(),actual.point.to_json()),("lower95".into(),actual.lower95.as_ref().unwrap().to_json()),("upper95".into(),actual.upper95.as_ref().unwrap().to_json()),("trend".into(),trend_json),("policy_outcome".into(),CanonicalJson::String(outcome.into()))]).unwrap();
+        let policy_json=CanonicalJson::object([("min_candidate_samples".into(),CanonicalJson::Integer("1".into())),("min_baseline_samples".into(),CanonicalJson::Integer("1".into())),("baseline_generations".into(),CanonicalJson::Integer("5".into())),("bootstrap_resamples".into(),CanonicalJson::Integer("100".into())),("lower_rank".into(),CanonicalJson::Integer("3".into())),("upper_rank".into(),CanonicalJson::Integer("98".into())),("stale_after_seconds".into(),CanonicalJson::Integer("2592000".into())),("trend_generations".into(),CanonicalJson::Integer("5".into()))]).unwrap();
+        let mut m=BTreeMap::from([("decision".into(),decision),("direction".into(),CanonicalJson::String("lower_is_better".into())),("enforcement".into(),CanonicalJson::String("fail".into())),("comparison".into(),CanonicalJson::object([("kind".into(),CanonicalJson::String("absolute_from".into())),("baseline".into(),CanonicalJson::String("main".into())),("limit".into(),q(50).to_json()),("direction".into(),CanonicalJson::String("at_most".into()))]).unwrap()),("policy".into(),policy_json),("samples".into(),CanonicalJson::Array(samples.iter().map(Rational::to_json).collect())),("baseline".into(),CanonicalJson::Null),("history".into(),CanonicalJson::object([("state_id".into(),CanonicalJson::String("4".repeat(64))),("report_ids".into(),CanonicalJson::Array(ids.iter().cloned().map(CanonicalJson::String).collect()))]).unwrap()),("metric".into(),CanonicalJson::object([("name".into(),CanonicalJson::String("BenchTime".into())),("percentile".into(),CanonicalJson::String("p50".into()))]).unwrap()),("context_key".into(),CanonicalJson::String(context))]);
+        verify_wire_evaluation(&evidence,&m).unwrap();
+        let original=m["decision"].clone();if let CanonicalJson::Object(d)=m.get_mut("decision").unwrap(){d.insert("upper95".into(),q(999).to_json());}assert!(verify_wire_evaluation(&evidence,&m).is_err());m.insert("decision".into(),original.clone());
+        if let CanonicalJson::Object(d)=m.get_mut("decision").unwrap(){d.insert("policy_outcome".into(),CanonicalJson::String("warn".into()));}assert!(verify_wire_evaluation(&evidence,&m).is_err());m.insert("decision".into(),original);
+        if let CanonicalJson::Object(h)=m.get_mut("history").unwrap(){h.insert("report_ids".into(),CanonicalJson::Array(vec![CanonicalJson::String("9".repeat(64))]));}assert!(verify_wire_evaluation(&evidence,&m).is_err());
     }
 }
