@@ -126,6 +126,7 @@ fn selector_routes_exactly_one_fixture_category() {
 
 #[test]
 fn exact_invalid_corpus_rejects_in_jet() {
+    // CAPABILITY_CLAIM: claim.native-language / invalid-front-end-boundary
     let filter = case_filter();
     let selected = selected_cases("invalid", filter.as_deref());
     if filter.is_some() && selected.is_empty() { return; }
@@ -221,6 +222,7 @@ fn valid_corpus_reaches_rustc() {
 
 #[test]
 fn executable_corpus_matches_aot_and_default_dev() {
+    // CAPABILITY_CLAIM: claim.native-language / accepted-native-semantics
     let filter = case_filter();
     let selected = selected_cases("differential", filter.as_deref());
     if filter.is_some() && selected.is_empty() { return; }
@@ -286,6 +288,7 @@ fn full_corpus_meets_minimum_case_count() {
 /// I1 check, applied across the whole soundness corpus.
 #[test]
 fn generated_rust_has_no_unaudited_unsafe() {
+    // CAPABILITY_CLAIM: claim.native-language / safe-codegen-boundary
     let filter = case_filter();
     let mut selected = selected_cases("valid", filter.as_deref());
     selected.extend(selected_cases("differential", filter.as_deref()));

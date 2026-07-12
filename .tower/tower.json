@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 514,
-    "rev": 4229,
+    "rev": 4232,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -30528,6 +30528,235 @@
       "draft": false,
       "status": "open",
       "created": "2026-07-12T07:00:47.945Z"
+    },
+    {
+      "id": "D-API-LEN1",
+      "cardId": "c0y0m8yx",
+      "group": "stdlib",
+      "title": "Law 1 says `length`, the shipped surface says `len()` — reconcile the naming law with ratified law",
+      "gist": "The Core API rubric bans abbreviations and names len as its example, but len() is the ratified, shipped spelling everywhere; one text must bend.",
+      "lesson": "Two ratified texts disagree. The Core API rubric (D-STDRUBRIC1=A, Law 1) says names are plain English words, not abbreviations — its own example is \"`length`, not `len`\".\n\nThe shipped, ratified surface says otherwise: S41 ratifies `s.len()` for string length; S76 ratifies `.len` as the compile-time constant on fixed lists; every collection ships `xs.len()`. The rubric and the surface cannot both be law.\n\nThis matters beyond one method: the rubric is the review gate for every future Core API, so its examples teach reviewers what to reject.",
+      "explainer": "",
+      "story": "Ted reviews a new Core API against the rubric checklist. Law 1's example tells him to reject `len`-style names. The very first file he opens uses `xs.len()` — ratified, golden-tested, everywhere. He now has to guess whether the rubric or the surface is the real law, which is the guess a review gate exists to remove.",
+      "inWild": "// shipped + ratified (S41, S76):\ncount :: names.len()\nsize  :: buffer.len          // compile-time constant on [U8#4096]\n\n// docs/spec/stdlib-api-laws.md, Law 1:\n// \"Names are plain English words, not abbreviations\n//  (`remove`, not `rm`; `length`, not `len`).\"",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Amend Law 1 — `len` joins the blessed vocabulary",
+          "detail": "Law 1 keeps its plain-English rule but swaps its example. It gains a short blessed-abbreviation list: programmer vocabulary shared across every mainstream language (`len`, plus the module names `fmt`, `args`, `env`). The shipped surface is untouched. The rubric stops contradicting the code it reviews, and the blessed list is closed — additions need a ballot.",
+          "code": "// stdlib-api-laws.md, Law 1 after the amendment:\n// \"Names are plain English words, not abbreviations (`remove`, not `rm`).\n//  Blessed exceptions (closed list, ballot to extend):\n//  `len`, and the module names `fmt`, `args`, `env`, `mem`.\"\n\ncount :: names.len()   // unchanged, now law-consistent"
+        },
+        {
+          "key": "B",
+          "name": "Rename the surface — `.length()` everywhere",
+          "detail": "The rubric wins: `len()` becomes `length()` across strings, collections, and the fixed-list constant. Plain-English purity, at the cost of respelling the single most-typed method in the language and re-blessing every example, snapshot, and golden. Go, Rust, and Python all chose the short word; no mainstream precedent supports the long one.",
+          "code": "count :: names.length()\nsize  :: buffer.length\n\n$ jet check app.jet   # after the break\nerror[E0104]: no method `len` on `[String]`\n  the length method is `length()`"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "Go's builtin is len() — the abbreviation IS the plain word for programmers; Go's own style guide bans other abbreviations while keeping it.",
+          "code": "n := len(names)"
+        },
+        {
+          "lang": "Rust / Python",
+          "note": "Rust ships .len(); Python ships len(x). Three ecosystems agree the short form is the universal spelling.",
+          "code": "names.len()      // Rust\nlen(names)       # Python"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "`len` is not an abbreviation to its audience — it is the cross-language word for length, which serves Law 1's actual goal (guessable names) better than `length` would. A closed blessed list keeps the rubric's teeth for real abbreviations like `rm`.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It respells the most-typed method in the language against every mainstream precedent, to satisfy a rubric example rather than a user need."
+          }
+        ],
+        "tradeoff": "Law 1 gains a small exception list reviewers must know; the list is closed and ballot-gated."
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "A absorbs B's discipline by making the exception list closed and ballot-gated — plain English stays the default, and the next `rm`-style name still gets rejected.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "rubric matches shipped law",
+            "use": "adopted"
+          },
+          {
+            "key": "B",
+            "aspect": "plain-English strictness",
+            "use": "kept as the default rule; the blessed list is the only carve-out and it is closed"
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T07:01:34.170Z"
+    },
+    {
+      "id": "D-API-STORE1",
+      "cardId": "c0y0m8yx",
+      "group": "stdlib",
+      "title": "One storage-verb law: insert for keyed, add for elements; Lru's put dies",
+      "gist": "Three verbs store a value into a collection today — insert, add, and put; fix the law so the verb is guessable.",
+      "lesson": "Storing into a Core collection is spelled three ways. Maps use `insert(key, value)`. `Set`, `SortedSet`, and `Bag` use `add(value)` — and `Bag`'s method list is in ratified law (D-TAG1/D-COLLBREADTH1). The `Lru` cache uses `put(key, value)`, the same keyed job as the map's `insert`.\n\nThe API rubric's Law 8 says one way to mean it; Law 1 says names should be guessable. A user writing a new collection call today has to remember which of three verbs this particular type took.",
+      "explainer": "",
+      "story": "Ellen switches a hot map to an `Lru` cache. Every `insert` call breaks — the cache spells the same operation `put`. Nothing about an LRU makes storing different; she pays a rename tax for an implementation detail, then teaches the quirk to the next reader.",
+      "inWild": "scores[name] = 10          // map: index-insert (S39)\nscores.insert(name, 10)     // map: method form\ntags.add(\"urgent\")          // Set / SortedSet / Bag\nrecent.put(user_id, page)   // Lru — same keyed job as insert",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Keyed = insert, element = add; put dies",
+          "detail": "One rule with a teachable split. Keyed containers (`[K: V]`, `Lru`, future `HashMap`/`BTreeMap`) spell storage `insert(key, value)`. Element containers (`Set`, `SortedSet`, `Bag`, `PriorityQueue`) spell it `add(value)`; `Deque` keeps its positional verbs. `Lru.put` renames to `insert` — a clean break, ordinary no-such-method error. The rule enters stdlib-api-laws.md Law 1 so reviews enforce it.",
+          "code": "recent.insert(user_id, page)   // Lru joins the keyed rule\ntags.add(\"urgent\")             // element rule unchanged\n\n$ jet check cache.jet   # after the break\nerror[E0104]: no method `put` on `Lru<Int, Page>`\n  keyed storage is `insert(key, value)`"
+        },
+        {
+          "key": "B",
+          "name": "One verb everywhere — everything is add",
+          "detail": "`add` becomes the universal storage verb: `map.add(key, value)`, `set.add(v)`, `lru.add(k, v)`. Maximum uniformity, but it breaks the ratified map surface and erases a real semantic distinction — keyed stores replace on collision, element adds don't take a key. One word hiding two behaviors is the confusion I8 warns about, inverted.",
+          "code": "scores.add(name, 10)\ntags.add(\"urgent\")\nrecent.add(user_id, page)"
+        },
+        {
+          "key": "C",
+          "name": "Status quo — per-type verbs",
+          "detail": "Keep insert/add/put as shipped. Zero churn; the memorization tax stays, and the next cache-like type will plausibly mint a fourth verb because no law binds it.",
+          "code": "scores.insert(name, 10)\ntags.add(\"urgent\")\nrecent.put(user_id, page)   // and the next type picks its own"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust uses insert for both HashMap and HashSet — one verb, but it papers over the key/element split; sets returning bool from insert surprises people.",
+          "code": "map.insert(k, v);\nset.insert(v);   // same word, different contract"
+        },
+        {
+          "lang": "Java",
+          "note": "Java's Map.put vs Collection.add is the two-verb split by interface — fifty years of developers guess it correctly; the split itself is teachable.",
+          "code": "map.put(k, v);\nset.add(v);"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The keyed/element split is real semantics worth two verbs, and two is the minimum that preserves it. Lru's `put` is the only outlier against that rule, so the fix is one rename plus one review-gate line.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It trades a guessable two-verb rule for one word with two contracts, and breaks the ratified map surface for uniformity nobody asked for."
+          },
+          {
+            "key": "C",
+            "reason": "No law means the next keyed type mints a fourth verb, and the memorization tax compounds."
+          }
+        ],
+        "tradeoff": "One clean break on `Lru.put`; Java-trained users retype `put` once, guided by the error."
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "A takes B's uniformity exactly as far as semantics allow — one verb per storage kind — and C's respect for shipped law everywhere except the single outlier.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "keyed=insert / element=add law",
+            "use": "adopted, entered into Law 1"
+          },
+          {
+            "key": "B",
+            "aspect": "maximal uniformity",
+            "use": "bounded at the keyed/element line where semantics genuinely differ"
+          },
+          {
+            "key": "C",
+            "aspect": "minimal churn",
+            "use": "only Lru.put moves; every other shipped verb already obeys the law"
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T07:01:34.272Z"
+    },
+    {
+      "id": "D-API-CTOR1",
+      "cardId": "c0y0m8yx",
+      "group": "stdlib",
+      "title": "Constructor-idiom law: codify when bare Type(…), .new, .over, and .from_* each apply",
+      "gist": "Four construction idioms ship across Core with an implicit pattern; write the pattern down so it binds reviews.",
+      "lesson": "Core constructs values four ways today. Bare type-name calls build a value from its components: `Vec3(1.0, 2.0, 3.0)`, `F32x4(…)`, `BigInt(\"…\")`, `Severity(raw)?`. `.new()` makes a fresh, usually empty, stateful container: `Set.new()`, `Pool<T>.new()`, `Shared.new(x)`, `Scene.new()`. `.over()` wraps a view around existing data without owning it: `Reader.over(bytes)`, `Cursor.over(s)`. `.from_*()` converts from another representation: `F32x4.from_array(…)`.\n\nEach idiom is individually ratified, and the pattern is real — but it is nowhere written down. The API rubric (D-STDRUBRIC1) only says literals use `Type.{ }` and factories use `Type.from_*`, which under-describes the shipped surface. Unwritten patterns drift: the next contributor picks by taste.",
+      "explainer": "",
+      "story": "Gene adds a `RingLog` type to Core. Should construction be `RingLog(capacity)`, `RingLog.new(capacity)`, or `RingLog.over(buf)`? He greps Core, finds all three idioms, and picks by coin flip. Review argues about it for a day because the rubric has no line to point at.",
+      "inWild": "v :: Vec3(1.0, 2.0, 3.0)          // bare call: value from components\nids :: Pool<Marker>.new()          // .new: fresh stateful container\nr :: Reader.over(bytes)            // .over: view over existing data\nlanes :: F32x4.from_array(vals)    // .from_*: conversion\n// four idioms, zero written law",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Codify the four-idiom law as shipped",
+          "detail": "One rubric rule, matching every ratified constructor. Bare `Type(…)` applies when the arguments ARE the value (components; fallible where narrowing, like `Severity(raw)?`). `.new(…)` makes fresh stateful containers. `.over(…)` wraps non-owning views of existing data. `.from_*(…)` converts between representations. `Type.{ }` stays the literal for plain data records (D-DOTCTOR1). Nothing shipped changes; the law enters stdlib-api-laws.md and the review checklist.",
+          "code": "// stdlib-api-laws.md, Law 1 addition:\n// bare Type(args)  — the args are the value's components\n// Type.new(…)      — fresh stateful container\n// Type.over(x)     — non-owning view over existing data\n// Type.from_*(x)   — conversion from another representation\n\nlog :: RingLog.new(capacity: 512)   // Gene's answer, derivable"
+        },
+        {
+          "key": "B",
+          "name": "Collapse toward one idiom — .new everywhere",
+          "detail": "Every non-literal construction becomes `.new(…)`: `Vec3.new(1.0, 2.0, 3.0)`, `Reader.new(bytes)`, `BigInt.new(\"…\")`. One idiom to learn, but it erases distinctions the current surface communicates. A Reader borrowing bytes reads identically to a Pool owning slots. It also respells the ratified math/SIMD/numeric constructors beginners type most.",
+          "code": "v :: Vec3.new(1.0, 2.0, 3.0)\nr :: Reader.new(bytes)      // owning? borrowing? the name stopped saying"
+        },
+        {
+          "key": "C",
+          "name": "No law — reviews keep arguing",
+          "detail": "Status quo. The pattern stays folklore; each new type re-litigates construction in review, and drift accumulates exactly where beginners form first impressions.",
+          "code": "// next quarter, plausibly:\nbuf :: RingLog.create(512)   // a fifth idiom arrives unballoted"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust's new/from/with conventions are API-guideline law, not folklore — the written rule is why the ecosystem converged.",
+          "code": "Vec::new()\nString::from(\"x\")\nVec::with_capacity(8)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The surface already agrees with itself; the cheapest possible act — writing the pattern down — locks the consistency in and ends the per-review argument. Zero churn, one rubric rule.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It buys uniformity by deleting information the idioms carry (owning vs viewing vs converting) and respells the constructors beginners meet first."
+          },
+          {
+            "key": "C",
+            "reason": "Folklore drifts; the fifth idiom arrives with the next contributor."
+          }
+        ],
+        "tradeoff": "One more rule in the review checklist; genuinely new construction shapes need a ballot to extend the list."
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "A gives B's one-rule learnability at the meta level — one LAW covering four idioms — while keeping the information each idiom encodes.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "written four-idiom law",
+            "use": "adopted into stdlib-api-laws.md + review template"
+          },
+          {
+            "key": "B",
+            "aspect": "single-idiom learnability",
+            "use": "achieved as a single derivation rule instead of a single spelling"
+          },
+          {
+            "key": "C",
+            "aspect": "per-type judgment",
+            "use": "survives as the ballot path for genuinely new construction shapes"
+          }
+        ]
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-12T07:01:34.369Z"
     }
   ],
   "questions": [
@@ -31329,6 +31558,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-12T07:01:34.369Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-API-CTOR1",
+      "note": "Constructor-idiom law: codify when bare Type(…), .new, .over, and .from_* each apply"
+    },
+    {
+      "at": "2026-07-12T07:01:34.272Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-API-STORE1",
+      "note": "One storage-verb law: insert for keyed, add for elements; Lru's put dies"
+    },
+    {
+      "at": "2026-07-12T07:01:34.171Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-API-LEN1",
+      "note": "Law 1 says `length`, the shipped surface says `len()` — reconcile the naming law with ratified law"
+    },
     {
       "at": "2026-07-12T07:00:48.183Z",
       "by": "claude-main",
@@ -34807,27 +35057,6 @@
       "action": "card.update",
       "ref": "c2nizvzp",
       "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-11T18:05:45.429Z",
-      "by": "sol-451-builder",
-      "action": "card.release",
-      "ref": "c01lj8gw",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-11T18:03:52.560Z",
-      "by": "card131-recovery",
-      "action": "card.claim",
-      "ref": "c2nizvzp",
-      "note": ""
-    },
-    {
-      "at": "2026-07-11T18:03:49.939Z",
-      "by": "card131-recovery",
-      "action": "card.release",
-      "ref": "c2nizvzp",
-      "note": "[handoff] logged"
     }
   ],
   "nextNum": 368,
