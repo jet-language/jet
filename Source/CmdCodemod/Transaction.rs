@@ -633,8 +633,11 @@ fn prepare_recovery_handles(lock: &Lock, parsed: &Journal) -> Vec<UnixRecoveryHa
             let file = unsafe { File::from_raw_fd(temp_fd) };
             let metadata = file.metadata().unwrap_or_else(|e| fail(&format!("could not identify recovery temp: {e}")));
             let identity = (metadata.dev(), metadata.ino());
-            if !metadata.is_file() || metadata.nlink() != 1 || identity != record.temp_id || !identities.insert(identity) {
-                fail("recovery temp identity changed or aliases another row; journal preserved")
+            let content_matches = read_held(&file).is_ok_and(|content| content == record.after);
+            if !metadata.is_file() || metadata.nlink() != 1 || identity != record.temp_id
+                || !content_matches || !identities.insert(identity)
+            {
+                fail("recovery temp identity changed, contents differ, or aliases another row; journal preserved")
             }
             Some(file)
         };
