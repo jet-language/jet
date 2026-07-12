@@ -1,3 +1,17 @@
+use super::activation_provenance::compat_hatches_json;
+use super::options_rendering::{
+    clean_bool_json, clean_symbol, option_rows_json, option_value, parse_list_items,
+    prefixed_options, risk_classes, strings_json, user_names,
+};
+use super::root_projection::enable_unit;
+use super::store_realize::RealizedPackage;
+use super::studio_projection::make_executable;
+use super::types::VM_TOOLS;
+use crate::ModuleEval::SystemPlan;
+use crate::JSON;
+use std::fs;
+use std::path::{Path, PathBuf};
+
 pub(super) fn write_acceptance_fixture(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     let acceptance_dir = dir.join("acceptance");
     let bin_dir = dir.join("sw/bin");

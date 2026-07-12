@@ -1,3 +1,22 @@
+use super::commands::{
+    cmd_build, cmd_check, cmd_generations, cmd_image, cmd_init, cmd_lift, cmd_plan, cmd_proof,
+    cmd_rollback,
+};
+use super::generation::build_generation;
+use super::generations_activation::{
+    activate_generation, find_rollback_generation, latest_generation_for, print_help,
+};
+use super::load_validate::load_user_profile_target;
+use super::nixos_import::cmd_import;
+use super::options_rendering::render_user_profile_json;
+use super::types::{OsFlags, Target};
+use super::vm_commands::cmd_vm;
+use crate::Output::Theme;
+use crate::Syntax;
+use crate::JSON;
+use std::fs;
+use std::path::PathBuf;
+
 pub fn main(theme: &Theme, verb: Option<&str>, args: &[String], flags: &OsFlags) -> i32 {
     match verb {
         Some(v) if v == Syntax::OS_VERB_CHECK => cmd_check(theme, args),

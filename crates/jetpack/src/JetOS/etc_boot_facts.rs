@@ -1,3 +1,16 @@
+use super::generation_files::sanitize_runtime_branding_file;
+use super::identity::{jetos_release_label, render_jetos_os_release, write_jetos_identity_assets};
+use super::options_rendering::{
+    boot_profile, collect_names, option_value, package_path_or_literal, parse_list_items,
+};
+use super::root_projection::copy_file_replace;
+use super::store_realize::RealizedPackage;
+use super::types::CACHYOS_KERNEL_PACKAGE;
+use crate::ModuleEval::SystemPlan;
+use crate::JSON;
+use std::fs;
+use std::path::{Path, PathBuf};
+
 pub(super) fn write_etc_tree(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     let etc = dir.join("etc");
     fs::create_dir_all(&etc)?;
