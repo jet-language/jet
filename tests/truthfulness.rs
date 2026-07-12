@@ -595,6 +595,57 @@ fn codegen_never_constructs_diagnostics() {
 }
 
 // ---------------------------------------------------------------------------
+// Check 12 (durability pin, card #452): zero `include!` splices of sibling
+// .rs fragments in compiler code. All former include!-splice parents were
+// converted to real modules; this pins the state so nobody reintroduces the
+// pattern. `include_str!` (data embedding, e.g. the prelude) is unaffected —
+// only the `include!` code-splice macro is checked.
+// ---------------------------------------------------------------------------
+#[test]
+fn compiler_code_has_no_include_splices() {
+    // Exact allowlist: dual-use runtime template also include_str!'d and
+    // spliced into generated bridge crates at codegen time. jetpack is a
+    // tool crate (jetpack run/build), not a compiler seam crate, and this
+    // include! is a test-only splice for the template's own unit tests.
+    const ALLOWLIST: &[&str] = &["crates/jetpack/src/FFI.rs.DISABLED_FOR_PROOF"];
+
+    let root = root();
+    let mut dirs = vec![root.join("Source")];
+    for entry in fs::read_dir(root.join("crates")).expect("crates/ missing").flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            dirs.push(path);
+        }
+    }
+
+    let mut offenders = Vec::new();
+    for dir in dirs {
+        for path in rs_files(&dir) {
+            let rel = path.strip_prefix(&root).unwrap().display().to_string();
+            if ALLOWLIST.contains(&rel.as_str()) {
+                continue;
+            }
+            let text = fs::read_to_string(&path).unwrap_or_default();
+            for (i, line) in text.lines().enumerate() {
+                if let Some(pos) = line.find("include!") {
+                    let after = line[pos + "include!".len()..].trim_start();
+                    if after.starts_with('(') {
+                        offenders.push(format!("{}:{}: {}", rel, i + 1, line.trim()));
+                    }
+                }
+            }
+        }
+    }
+
+    assert!(
+        offenders.is_empty(),
+        "compiler code must not `include!`-splice sibling .rs fragments — convert to a \
+         real module instead (card #452 durability pattern):\n{}",
+        offenders.join("\n")
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Check 10: Core spec files referenced by D-STDRUBRIC1 exist (c44)
 // ---------------------------------------------------------------------------
 #[test]
