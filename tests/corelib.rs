@@ -2879,7 +2879,7 @@ fn run() {
         &[("main.jet", main), ("orders.jet", lib)],
     );
     assert_eq!(code, 0, "cross-module generated decode failed: {stderr}");
-    assert_eq!(stdout, "{\"labels\":{\"fragile\":1},\"quantities\":[2,3],\"shipping\":{\"city\":\"Paris\"}}\n");
+    assert_eq!(stdout, "{\"shipping\":{\"city\":\"Paris\"},\"quantities\":[2,3],\"labels\":{\"fragile\":1}}\n");
     let _ = fs::remove_dir_all(&dir);
 }
 
