@@ -68,7 +68,7 @@ pub fn e2001(requested: &str) -> Diagnostic {
             requested,
         ),
         format!(
-            "upgrade with `{} upgrade`, or set `{}: \"{}\"` in `{}`.",
+            "upgrade with `{} self upgrade`, or set `{}: \"{}\"` in `{}`.",
             Syntax::BINARY_NAME,
             Syntax::MANIFEST_FIELD_EDITION,
             latest_edition(),
