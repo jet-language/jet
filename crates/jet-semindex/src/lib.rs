@@ -5,6 +5,7 @@
 
 mod Build;
 mod Json;
+mod Symbols;
 mod Types;
 
 pub use jet_sema::SemIndexEffectFacts;
@@ -17,6 +18,10 @@ pub use Types::{
     StructuralAudit, StructuralNode, StructuralSlotKind, SymbolDef, SymbolKind, SymbolRef, TypeDossier,
     ViewProjectionFact, ViewProvenanceFact, ViewSourceFact,
     SCHEMA_VERSION,
+};
+pub use Symbols::{
+    build_semantic_symbol_index, SemanticProvenance, SemanticSymbol, SemanticSymbolIndex,
+    SemanticSymbolKind,
 };
 
 use jet_foundation::Diagnostics::Diagnostic;
@@ -56,6 +61,22 @@ pub fn open(entry: &Path) -> Result<SemIndex, SemIndexError> {
     {
         if let Some(bundle) = bundle {
             return Ok(build_index(&bundle, &facts));
+        }
+    }
+    Err(SemIndexError::Load(diags))
+}
+
+/// Load, check, and build consumer-neutral symbol facts for docs/completion/help.
+pub fn open_symbols(entry: &Path) -> Result<SemanticSymbolIndex, SemIndexError> {
+    let entry_str = entry.to_string_lossy();
+    let (diags, bundle, facts) =
+        jet_driver::Driver::check_file_with_effect_facts(&entry_str, None, false);
+    if !diags
+        .iter()
+        .any(|d| d.severity == jet_foundation::Diagnostics::Severity::Error)
+    {
+        if let Some(bundle) = bundle {
+            return Ok(build_symbol_db(&bundle, &facts).symbols);
         }
     }
     Err(SemIndexError::Load(diags))

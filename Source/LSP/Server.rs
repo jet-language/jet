@@ -1797,6 +1797,7 @@ fn merge_workspace_defs(server: &Server, current: &Document, db: &mut SymbolDB) 
         let (_diags, bundle, facts) = check_document_with_bundle(&path, &text);
         if let Some(bundle) = bundle {
             let mut other = build_symbol_db(&bundle, &facts);
+            db.symbols.extend(other.symbols.symbols().iter().cloned());
             db.defs.append(&mut other.defs);
             db.refs.append(&mut other.refs);
             db.calls.append(&mut other.calls);

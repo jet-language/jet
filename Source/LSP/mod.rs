@@ -155,4 +155,41 @@ mod tests {
             "expected use (KW_USE) in completions"
         );
     }
+
+    #[test]
+    fn hover_and_completion_use_same_semantic_fact() {
+        let src = "/// Adds two values.\n/// Example: add(1, 2)\nfn add(a: Int, b: Int) -> Int { return a + b }\nfn run() {\n    \n}\n";
+        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
+        let bundle = bundle.expect("bundle");
+        let db = build_symbol_db(&bundle, &facts);
+        let symbol = db
+            .symbols
+            .lookup_identity("fn:module:test.jet::add")
+            .expect("add fact");
+        let (tokens, _) = crate::Lexer::lex(src);
+        let hover_offset = src.find("\nfn add").unwrap() + 4;
+        let hover = compute_hover(&db, &tokens, src, "test.jet", hover_offset).expect("hover");
+        let offset = src.rfind("    \n").unwrap() + 4;
+        let completion = compute_completions(&db, src, offset, "test.jet", None, None)
+            .into_iter()
+            .find(|item| item.label == "add")
+            .expect("add completion");
+        assert!(hover.contains(&symbol.signature));
+        assert!(hover.contains(&symbol.summary));
+        assert_eq!(completion.detail.as_deref(), Some(symbol.signature.as_str()));
+    }
+
+    #[test]
+    fn completion_uses_builtin_member_facts_for_list_local() {
+        let src = "fn run() {\n    items :: [1, 2]\n    count :: items.len()\n}\n";
+        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
+        let bundle = bundle.expect("bundle");
+        let db = build_symbol_db(&bundle, &facts);
+        let offset = src.find("items.len").unwrap() + "items.l".len();
+        let items = compute_completions(&db, src, offset, "test.jet", None, None);
+        let len = db.symbols.lookup_qualified("List.len").unwrap();
+        assert!(items.iter().any(|item| {
+            item.label == "len" && item.detail.as_deref() == Some(len.signature.as_str())
+        }));
+    }
 }

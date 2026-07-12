@@ -202,7 +202,7 @@ pub fn run(color: bool) -> io::Result<()> {
             Key::Right if matches!(mode, Mode::Reference) => {
                 let cat = super::CATEGORIES[ref_category];
                 if let Some(e) = index.iter().find(|e| e.category == cat) {
-                    ref_entry = index.iter().position(|x| x.cmd == e.cmd);
+                    ref_entry = index.iter().position(|x| x.symbol.identity == e.symbol.identity);
                 }
             }
             Key::Enter => {
@@ -359,7 +359,7 @@ fn current_entry<'a>(
     index: &'a [Entry],
 ) -> Option<&'a Entry> {
     if let Some(Hit::Command { entry, .. }) = hits.get(res_selected) {
-        return index.iter().find(|e| e.cmd == entry.cmd);
+        return index.iter().find(|e| e.symbol.identity == entry.symbol.identity);
     }
     selected_category_index(index, cat_selected, cat_entry).map(|i| &index[i])
 }
@@ -395,7 +395,7 @@ fn selected_category_index(index: &[Entry], category: usize, entry: Option<usize
 }
 
 fn selected_category_cmd(index: &[Entry], category: usize, entry: Option<usize>) -> Option<&str> {
-    selected_category_index(index, category, entry).map(|i| index[i].cmd.as_str())
+    selected_category_index(index, category, entry).map(|i| index[i].symbol.name.as_str())
 }
 
 fn apply_reference_search(index: &[Entry], query: &str, category: &mut usize, entry: &mut Option<usize>) {
@@ -404,7 +404,7 @@ fn apply_reference_search(index: &[Entry], query: &str, category: &mut usize, en
         if let Some(ci) = super::CATEGORIES.iter().position(|c| *c == found.category) {
             *category = ci;
         }
-        *entry = index.iter().position(|e| e.cmd == found.cmd);
+        *entry = index.iter().position(|e| e.symbol.identity == found.symbol.identity);
     }
 }
 
@@ -425,5 +425,10 @@ fn terminal_size() -> (usize, usize) {
 }
 
 fn prefill_for(entry: &Entry) -> String {
-    entry.example.clone().unwrap_or_else(|| format!("jet {}", entry.cmd))
+    entry
+        .symbol
+        .examples
+        .first()
+        .cloned()
+        .unwrap_or_else(|| format!("jet {}", entry.symbol.name))
 }

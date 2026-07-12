@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 use crate::Json::{convert_defs, convert_effects, convert_refs};
 use crate::Types::{BypassFact, BypassKind, CallEdge, DefinitionAnchor, DefinitionFact, InstanceApplicationFact, InstanceFact, MemberFact, MemberKind, MemberOrigin, SemIndex, StructuralNode, StructuralSlotKind, SymbolDef, SymbolKind};
+use crate::Symbols::{build_semantic_symbol_index, SemanticSymbolIndex};
 
 /// The semantic kind of a defined symbol (LSP-facing; uses AST types internally).
 #[derive(Debug, Clone)]
@@ -96,6 +97,7 @@ pub struct SymbolDB {
     /// Sema-owned returned-view summaries keyed by semantic function identity.
     /// Kept beside `SymKind` so existing LSP/REPL consumers retain its shape.
     pub view_provenance: HashMap<String, AST::ViewProvenanceMap>,
+    pub symbols: SemanticSymbolIndex,
 }
 
 struct CallerFrame {
@@ -129,6 +131,7 @@ impl SymbolDB {
             nodes: Vec::new(),
             bypasses: Vec::new(),
             view_provenance: HashMap::new(),
+            symbols: SemanticSymbolIndex::language(),
         }
     }
 
@@ -536,6 +539,7 @@ pub fn build_symbol_db(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> S
     }
     add_breadcrumb_hints(&mut db);
     db.finalize_index(facts, bundle);
+    db.symbols = build_semantic_symbol_index(&db, bundle);
     db
 }
 

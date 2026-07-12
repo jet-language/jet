@@ -38,17 +38,31 @@ pub mod Render;
 /// One command in the help index.
 #[derive(Debug, Clone)]
 pub struct Entry {
-    /// Canonical route after `jet`, including the group for nested actions.
-    pub cmd: String,
+    /// Shared identity/signature/docs/provenance fact. Help adds only layout,
+    /// flags, related routes, and fuzzy task aliases.
+    pub symbol: jet_semindex::SemanticSymbol,
     pub category: &'static str,
-    pub usage: String,
-    pub summary: &'static str,
     pub flags: Vec<(&'static str, &'static str)>,
-    pub example: Option<String>,
     pub see_also: Vec<&'static str>,
     /// Extra fuzzy-searchable aliases: task/outcome phrases ratified for this
     /// entry, plus nothing else — never a second name for the command.
     pub keywords: Vec<&'static str>,
+}
+
+fn command_symbol(cmd: String, usage: String, summary: &str, example: Option<String>) -> jet_semindex::SemanticSymbol {
+    jet_semindex::SemanticSymbol {
+        identity: format!("command:{cmd}"),
+        name: cmd.clone(),
+        qualified_name: cmd,
+        owner: None,
+        module_path: "jet CLI".to_string(),
+        kind: jet_semindex::SemanticSymbolKind::Command,
+        signature: usage,
+        summary: summary.to_string(),
+        examples: example.into_iter().collect(),
+        provenance: jet_semindex::SemanticProvenance::CommandRegistry,
+        span: None,
+    }
 }
 
 /// Category display order for the categorized (empty-query) view and the
@@ -182,12 +196,14 @@ pub fn build_index() -> Vec<Entry> {
         .iter()
         .filter(|c| CLI::is_canonical_top_level(c.name))
         .map(|c| Entry {
-            cmd: c.name.to_string(),
+            symbol: command_symbol(
+                c.name.to_string(),
+                usage_for(c.name),
+                c.summary,
+                example_for(c.name),
+            ),
             category: category_for(c.name),
-            usage: usage_for(c.name),
-            summary: c.summary,
             flags: flags_for(c.name),
-            example: example_for(c.name),
             see_also: see_also_for(c.name),
             keywords: keywords_for(c.name),
         })
@@ -195,18 +211,26 @@ pub fn build_index() -> Vec<Entry> {
     for group in CLI::COMMAND_GROUPS {
         for action in group.actions {
             entries.push(Entry {
-                cmd: format!("{} {}", group.name, action.name),
+                symbol: command_symbol(
+                    format!("{} {}", group.name, action.name),
+                    format!("jet {} {} [args]", group.name, action.name),
+                    action.summary,
+                    None,
+                ),
                 category: category_for(action.handler.dispatch_word()),
-                usage: format!("jet {} {} [args]", group.name, action.name),
-                summary: action.summary,
                 flags: flags_for(action.handler.dispatch_word()),
-                example: None,
                 see_also: Vec::new(),
                 keywords: keywords_for(action.handler.dispatch_word()),
             });
         }
     }
     entries
+}
+
+pub fn symbol_index(entries: &[Entry]) -> jet_semindex::SemanticSymbolIndex {
+    jet_semindex::SemanticSymbolIndex::new(
+        entries.iter().map(|entry| entry.symbol.clone()).collect(),
+    )
 }
 
 /// A search result: either a command entry (with its fuzzy score and the
@@ -289,12 +313,17 @@ pub fn search(index: &[Entry], query: &str) -> Vec<Hit> {
         }
     }
     let mut hits: Vec<Hit> = Vec::new();
-    for entry in index {
-        let haystacks: Vec<String> = std::iter::once(format!("jet {}", entry.cmd))
-            .chain(std::iter::once(entry.usage.clone()))
-            .chain(std::iter::once(entry.summary.to_string()))
+    let symbols = symbol_index(index);
+    for symbol in symbols.symbols() {
+        let entry = index
+            .iter()
+            .find(|entry| entry.symbol.identity == symbol.identity)
+            .expect("help presentation for command symbol");
+        let haystacks: Vec<String> = std::iter::once(format!("jet {}", entry.symbol.name))
+            .chain(std::iter::once(entry.symbol.signature.clone()))
+            .chain(std::iter::once(entry.symbol.summary.clone()))
             .chain(entry.flags.iter().map(|(flag, help)| format!("{} {}", flag, help)))
-            .chain(entry.example.iter().cloned())
+            .chain(entry.symbol.examples.iter().cloned())
             .chain(entry.see_also.iter().map(|name| name.to_string()))
             .chain(entry.keywords.iter().map(|k| k.to_string()))
             .collect();
@@ -307,7 +336,7 @@ pub fn search(index: &[Entry], query: &str) -> Vec<Hit> {
             }
         }
         if let Some((score, haystack, positions)) = best {
-            let score = score + if entry.cmd.eq_ignore_ascii_case(query) { 1000 } else { 0 };
+            let score = score + if entry.symbol.name.eq_ignore_ascii_case(query) { 1000 } else { 0 };
             hits.push(Hit::Command {
                 entry: entry.clone(),
                 score,
@@ -318,7 +347,7 @@ pub fn search(index: &[Entry], query: &str) -> Vec<Hit> {
     }
     hits.sort_by(|a, b| match (a, b) {
         (Hit::Command { score: sa, entry: ea, .. }, Hit::Command { score: sb, entry: eb, .. }) => {
-            sb.cmp(sa).then_with(|| ea.cmd.cmp(&eb.cmd))
+            sb.cmp(sa).then_with(|| ea.symbol.name.cmp(&eb.symbol.name))
         }
         _ => std::cmp::Ordering::Equal,
     });
@@ -360,12 +389,12 @@ mod tests {
             + CLI::COMMAND_GROUPS.iter().map(|g| g.actions.len()).sum::<usize>();
         assert_eq!(index.len(), expected);
         for c in CLI::COMMANDS.iter().filter(|c| CLI::is_canonical_top_level(c.name)) {
-            assert!(index.iter().any(|e| e.cmd == c.name), "missing {}", c.name);
+            assert!(index.iter().any(|e| e.symbol.name == c.name), "missing {}", c.name);
         }
         for group in CLI::COMMAND_GROUPS {
             for action in group.actions {
                 let route = format!("{} {}", group.name, action.name);
-                assert!(index.iter().any(|e| e.cmd == route), "missing {route}");
+                assert!(index.iter().any(|e| e.symbol.name == route), "missing {route}");
             }
         }
     }
@@ -373,14 +402,24 @@ mod tests {
     #[test]
     fn every_entry_has_a_real_category() {
         for e in build_index() {
-            assert!(CATEGORIES.contains(&e.category), "bad category for {}", e.cmd);
+            assert!(CATEGORIES.contains(&e.category), "bad category for {}", e.symbol.name);
         }
+    }
+
+    #[test]
+    fn help_entries_are_shared_semantic_facts() {
+        let entries = build_index();
+        let symbols = symbol_index(&entries);
+        let run = symbols.lookup_qualified("run").expect("run command fact");
+        assert_eq!(run.signature, usage_for("run"));
+        assert_eq!(run.summary, CLI::COMMANDS.iter().find(|c| c.name == "run").unwrap().summary);
+        assert!(matches!(run.provenance, jet_semindex::SemanticProvenance::CommandRegistry));
     }
 
     #[test]
     fn run_flags_are_real_not_invented() {
         let index = build_index();
-        let run = index.iter().find(|e| e.cmd == "run").unwrap();
+        let run = index.iter().find(|e| e.symbol.name == "run").unwrap();
         // `run` has no `--watch` flag on the real CLI surface (that's `dev`'s
         // job) — the help index must not invent one.
         assert!(!run.flags.iter().any(|(f, _)| *f == "--watch"));
@@ -394,17 +433,17 @@ mod tests {
         let Hit::Command { entry, .. } = &hits[0] else {
             panic!("expected a command hit");
         };
-        assert_eq!(entry.cmd, "dev");
+        assert_eq!(entry.symbol.name, "dev");
     }
 
     #[test]
     fn search_covers_registry_flags_and_examples() {
         let index = build_index();
         assert!(search(&index, "--release").iter().any(|hit| {
-            matches!(hit, Hit::Command { entry, .. } if entry.cmd == "run")
+            matches!(hit, Hit::Command { entry, .. } if entry.symbol.name == "run")
         }));
         assert!(search(&index, "hello.jet").iter().any(|hit| {
-            matches!(hit, Hit::Command { entry, .. } if entry.cmd == "run")
+            matches!(hit, Hit::Command { entry, .. } if entry.symbol.name == "run")
         }));
     }
 

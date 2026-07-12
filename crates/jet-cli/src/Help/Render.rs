@@ -265,17 +265,17 @@ pub fn render_categorized(
             }
             for e in entries {
                 let line = if color {
-                    let cmd_col = format!("{:<20}", e.cmd);
+                    let cmd_col = format!("{:<20}", e.symbol.name);
                     format!(
                         "{} {} {}",
                         paint(true, "1;36", "jet"),
                         paint(true, "1;37", &cmd_col),
-                        paint(true, "2;37", &e.summary)
+                        paint(true, "2;37", &e.symbol.summary)
                     )
                 } else {
-                    format!("jet {:<20} {}", e.cmd, e.summary)
+                    format!("jet {:<20} {}", e.symbol.name, e.symbol.summary)
                 };
-                out.push_str(&selected_row(width, &line, selected_cmd == Some(e.cmd.as_str()), color));
+                out.push_str(&selected_row(width, &line, selected_cmd == Some(e.symbol.name.as_str()), color));
                 out.push('\n');
             }
         }
@@ -289,7 +289,7 @@ pub fn render_categorized(
 pub fn categorized_order(index: &[Entry]) -> Vec<&str> {
     super::CATEGORIES
         .iter()
-        .flat_map(|cat| index.iter().filter(move |e| &e.category == cat).map(|e| e.cmd.as_str()))
+        .flat_map(|cat| index.iter().filter(move |e| &e.category == cat).map(|e| e.symbol.name.as_str()))
         .collect()
 }
 
@@ -318,7 +318,7 @@ pub fn render_result_list(hits: &[Hit], query: &str, width: usize, color: bool, 
         let is_sel = selected == Some(i) || (selected.is_none() && i == 0);
         match hit {
             Hit::Command { entry, haystack, positions, .. } => {
-                let display = format!("jet {}   {}", entry.cmd, entry.summary);
+                let display = format!("jet {}   {}", entry.symbol.name, entry.symbol.summary);
                 // Only emphasize when the matched haystack IS the displayed
                 // usage/command text (keyword-alias hits show plain — the
                 // matched words aren't on screen to bracket).
@@ -338,9 +338,13 @@ pub fn render_result_list(hits: &[Hit], query: &str, width: usize, color: bool, 
     out.push_str(&mid(width, color));
     out.push('\n');
     if let Some(Hit::Command { entry, .. }) = hits.first() {
-        if let Some(ex) = &entry.example {
+        if let Some(ex) = entry.symbol.examples.first() {
             let ex_line = if color {
-                format!("{} {}", paint(true, "2;37", "example"), paint(true, "37", ex))
+                format!(
+                    "{} {}",
+                    paint(true, "2;37", "example"),
+                    paint(true, "37", ex)
+                )
             } else {
                 format!("example  {}", ex)
             };
@@ -364,11 +368,20 @@ pub fn render_result_list(hits: &[Hit], query: &str, width: usize, color: bool, 
 pub fn render_detail(entry: &Entry, width: usize, color: bool) -> String {
     let width = w(width);
     let mut out = String::new();
-    out.push_str(&top(width, &format!("jet {}  ⇥ collapse", entry.cmd), color));
+    out.push_str(&top(
+        width,
+        &format!("jet {}  ⇥ collapse", entry.symbol.name),
+        color,
+    ));
     out.push('\n');
-    out.push_str(&selected_row(width, &format!("Usage   {}", entry.usage), false, color));
+    out.push_str(&selected_row(
+        width,
+        &format!("Usage   {}", entry.symbol.signature),
+        false,
+        color,
+    ));
     out.push('\n');
-    out.push_str(&selected_row(width, entry.summary, false, color));
+    out.push_str(&selected_row(width, &entry.symbol.summary, false, color));
     out.push('\n');
     if entry.flags.is_empty() {
         out.push_str(&selected_row(width, "Flags   (none)", false, color));
@@ -380,8 +393,13 @@ pub fn render_detail(entry: &Entry, width: usize, color: bool) -> String {
             out.push('\n');
         }
     }
-    if let Some(ex) = &entry.example {
-        out.push_str(&selected_row(width, &format!("Example {}", ex), false, color));
+    if let Some(ex) = entry.symbol.examples.first() {
+        out.push_str(&selected_row(
+            width,
+            &format!("Example {}", ex),
+            false,
+            color,
+        ));
         out.push('\n');
     }
     if !entry.see_also.is_empty() {
@@ -390,7 +408,12 @@ pub fn render_detail(entry: &Entry, width: usize, color: bool) -> String {
     }
     out.push_str(&mid(width, color));
     out.push('\n');
-    let prefill = entry.example.clone().unwrap_or_else(|| format!("jet {}", entry.cmd));
+    let prefill = entry
+        .symbol
+        .examples
+        .first()
+        .cloned()
+        .unwrap_or_else(|| format!("jet {}", entry.symbol.name));
     let footer = if color {
         format!("\x1b[2;37m⏎ prefill: {} · F1 open in reference\x1b[0m", prefill)
     } else {
@@ -502,12 +525,12 @@ pub fn render_reference(
         left_rows.push(format!("{} {}", marker, cat));
         if ci == selected_category {
             for e in index.iter().filter(|e| &e.category == cat) {
-                let sel = selected_entry.map(|s| s.cmd.as_str()) == Some(e.cmd.as_str());
+                let sel = selected_entry.map(|s| s.symbol.name.as_str()) == Some(e.symbol.name.as_str());
                 let prefix = if sel { "> " } else { "  " };
                 if sel {
                     selected_row = Some(left_rows.len());
                 }
-                left_rows.push(format!("{}  {}", prefix, e.cmd));
+                left_rows.push(format!("{}  {}", prefix, e.symbol.name));
             }
         }
     }
@@ -544,7 +567,11 @@ mod tests {
         let index = build_index();
         let out = render_categorized(&index, 0, false, None, 72, false);
         for e in &index {
-            assert!(!out.contains(&format!("jet {}", e.cmd)), "collapsed view leaked {}", e.cmd);
+            assert!(
+                !out.contains(&format!("jet {}", e.symbol.name)),
+                "collapsed view leaked {}",
+                e.symbol.name
+            );
         }
     }
 
@@ -585,7 +612,7 @@ mod tests {
         let order = categorized_order(&index);
         assert_eq!(order.len(), index.len());
         for e in &index {
-            assert!(order.contains(&e.cmd.as_str()));
+            assert!(order.contains(&e.symbol.name.as_str()));
         }
     }
 
@@ -607,7 +634,7 @@ mod tests {
     #[test]
     fn detail_view_never_shows_invented_flags() {
         let index = build_index();
-        let run = index.iter().find(|e| e.cmd == "run").unwrap();
+        let run = index.iter().find(|e| e.symbol.name == "run").unwrap();
         let out = render_detail(run, 70, false);
         assert!(!out.contains("--watch"));
     }
@@ -630,7 +657,10 @@ mod tests {
         let selected = index.iter().filter(|e| e.category == "Reference").last().unwrap();
         let out = render_reference(&index, category, Some(selected), 60, 8, false, "");
         assert_eq!(out.lines().count(), 8);
-        assert!(out.contains(&format!(">   {}", selected.cmd)), "selected row clipped:\n{out}");
+        assert!(
+            out.contains(&format!(">   {}", selected.symbol.name)),
+            "selected row clipped:\n{out}"
+        );
         assert!(out.lines().all(|line| cols(line) == 60));
     }
 
