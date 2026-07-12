@@ -25,7 +25,7 @@ fn escape(s: &str) -> String {
 }
 
 fn json_definition_fact(f: &DefinitionFact) -> String {
-    format!("{{\"stable_id\":{},\"content_id\":{},\"human_identity\":{},\"name\":{},\"kind\":{},\"module\":{},\"span\":{}}}", json_str(&f.stable_id), json_str(&f.content_id), json_str(&f.human_identity), json_str(&f.name), json_str(&f.kind), json_str(&f.module_path), json_span(f.span))
+    format!("{{\"stable_id\":{},\"signature_id\":{},\"content_id\":{},\"human_identity\":{},\"name\":{},\"kind\":{},\"module\":{},\"span\":{}}}", json_str(&f.stable_id), json_str(&f.signature_id), json_str(&f.content_id), json_str(&f.human_identity), json_str(&f.name), json_str(&f.kind), json_str(&f.module_path), json_span(f.span))
 }
 
 fn json_str(s: &str) -> String {

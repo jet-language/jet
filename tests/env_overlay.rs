@@ -82,7 +82,7 @@ use core.env as env
 use core.process as process
 
 fn remove(name: String) -> Bool ? env.EnvError {
-    return env.unset(name)?
+    return ok(env.unset(name)?)
 }
 
 fn run() {

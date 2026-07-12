@@ -6,6 +6,20 @@ impl<'a> Checker<'a> {
                 Type::Named(n) if crate::Syntax::is_data_type_name(&n) => {
                     Type::Named(crate::Syntax::TYPE_DATA.to_string())
                 }
+                // D-ENV-MUTATE1=A: Core docs spell the exported error through
+                // the user's chosen module alias (`env.EnvError`). Canonicalize
+                // that qualified spelling to the one built-in runtime type.
+                Type::Named(n)
+                    if n.split_once('.').is_some_and(|(alias, leaf)| {
+                        leaf == "EnvError"
+                            && self
+                                .core_imports
+                                .get(alias)
+                                .is_some_and(|module| module == "core.env")
+                    }) =>
+                {
+                    Type::Named("EnvError".to_string())
+                }
                 Type::Named(n) if self.trait_reg.is_trait_name(&n) && !self.registry.contains(&n) => {
                     Type::TraitObject(vec![n])
                 }

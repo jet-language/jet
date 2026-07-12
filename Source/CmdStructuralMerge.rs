@@ -139,13 +139,31 @@ fn match_units(base: &[Unit], side: &[Unit]) -> BTreeMap<usize, Option<usize>> {
     let mut result = BTreeMap::new();
     let mut used = BTreeSet::new();
     for (index, unit) in base.iter().enumerate() {
-        let stable: Vec<usize> = side.iter().enumerate().filter(|(i, candidate)| !used.contains(i) && candidate.fact.stable_id == unit.fact.stable_id).map(|(i, _)| i).collect();
         let named: Vec<usize> = side.iter().enumerate().filter(|(i, candidate)| !used.contains(i) && candidate.fact.name == unit.fact.name && candidate.fact.kind == unit.fact.kind).map(|(i, _)| i).collect();
-        let found = if stable.len() == 1 { Some(stable[0]) } else if named.len() == 1 { Some(named[0]) } else { None };
+        let stable: Vec<usize> = side.iter().enumerate().filter(|(i, candidate)| !used.contains(i) && candidate.fact.stable_id == unit.fact.stable_id).map(|(i, _)| i).collect();
+        let renamed: Vec<usize> = side.iter().enumerate().filter(|(i, candidate)| !used.contains(i) && rename_key(candidate) == rename_key(unit)).map(|(i, _)| i).collect();
+        let signature: Vec<usize> = side.iter().enumerate().filter(|(i, candidate)| !used.contains(i) && candidate.fact.signature_id == unit.fact.signature_id).map(|(i, _)| i).collect();
+        let found = if named.len() == 1 { Some(named[0]) } else if renamed.len() == 1 { Some(renamed[0]) } else if stable.len() == 1 { Some(stable[0]) } else if signature.len() == 1 { Some(signature[0]) } else { None };
         if let Some(found) = found { used.insert(found); }
         result.insert(index, found);
     }
     result
+}
+
+fn rename_key(unit: &Unit) -> String {
+    let mut out = String::new();
+    let mut chars = unit.source.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '/' && chars.peek() == Some(&'/') {
+            chars.next();
+            for next in chars.by_ref() { if next == '\n' { break; } }
+        } else if ch.is_alphabetic() || ch == '_' {
+            let mut word = ch.to_string();
+            while chars.peek().is_some_and(|next| next.is_alphanumeric() || *next == '_') { word.push(chars.next().unwrap()); }
+            if word == unit.fact.name { out.push('_'); } else { out.push_str(&word); }
+        } else if !ch.is_whitespace() { out.push(ch); }
+    }
+    out
 }
 
 fn merge_units(base: &Document, ours: &Document, theirs: &Document) -> (String, Vec<Conflict>) {

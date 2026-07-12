@@ -108,6 +108,7 @@ pub struct SymbolDef {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DefinitionFact {
     pub stable_id: String,
+    pub signature_id: String,
     pub content_id: String,
     pub human_identity: String,
     pub name: String,

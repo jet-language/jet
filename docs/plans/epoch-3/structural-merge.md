@@ -28,9 +28,9 @@ install-driver --repo <path>` installs the opt-in Git driver.
 ## Shipped contract
 
 `jet-semindex` emits one `DefinitionFact` per compiler-owned top-level item.
-`stable_id` hashes typed signature, AST ownership/slot shape, and an
-identifier-insensitive literal/operator stream. It survives formatting, source
-moves, and symbol renames. `content_id` hashes normalized definition source and
+`stable_id` hashes typed signature and AST ownership/slot shape. It survives
+formatting, source moves, symbol renames, and body-literal edits. `content_id`
+hashes normalized definition source and
 changes for semantic edits. Human spelling and paths stay separate from both
 machine identities.
 

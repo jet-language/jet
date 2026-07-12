@@ -382,6 +382,13 @@ pub(crate) use crate::Syntax::binary_text_handle_rust_type;
 pub(crate) use crate::Syntax::reflect_handle_rust_type;
 
 impl Cx {
+    pub(crate) fn core_qualified_rust_type_name(&self, name: &str) -> Option<&'static str> {
+        let (alias, leaf) = name.split_once('.')?;
+        match (self.core_imports.get(alias).map(String::as_str), leaf) {
+            (Some("core.env"), "EnvError") => Some("EnvError"),
+            _ => None,
+        }
+    }
     pub(crate) fn field_rust_type(&self, owner: &str, edge: &str, ty: &Type) -> String {
         let base = self.rust_type(ty);
         if self
@@ -744,6 +751,13 @@ impl Cx {
                     "{}jet_std::{}",
                     self.root_prefix,
                     core_rust_type_name(name).unwrap()
+                )
+            }
+            Type::Named(name) if self.core_qualified_rust_type_name(name).is_some() => {
+                format!(
+                    "{}jet_std::{}",
+                    self.root_prefix,
+                    self.core_qualified_rust_type_name(name).unwrap()
                 )
             }
             Type::Named(name) if self.trait_names.contains(name) => {

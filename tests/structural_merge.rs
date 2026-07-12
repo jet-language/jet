@@ -51,6 +51,22 @@ fn structural_diff_ignores_format_comments_and_reports_signature_and_move() {
 }
 
 #[test]
+fn structural_diff_add_remove_reorder_rename_edit_is_deterministic() {
+    let root = dir("diff_matrix");
+    let before = write(&root, "before.jet", "fn only(value: Int) -> Int { return value }\nfn gone() -> Int { return 1 }\nfn run() { print(only(7)) }\n");
+    let after = write(&root, "after.jet", "fn run() { print(renamed(7)) }\nfn added() -> Bool { return true }\nfn renamed(value: Int) -> Int { return 9 }\n");
+    let args = ["diff", "--structural", before.to_str().unwrap(), after.to_str().unwrap(), "--report", "json"];
+    let first = run(&args);
+    let second = run(&args);
+    assert!(first.status.success(), "{}", String::from_utf8_lossy(&first.stderr));
+    assert_eq!(first.stdout, second.stdout);
+    let report = String::from_utf8_lossy(&first.stdout);
+    for kind in ["added", "removed", "renamed", "body_changed"] {
+        assert!(report.contains(&format!("\"kind\":\"{kind}\"")), "{report}");
+    }
+}
+
+#[test]
 fn structural_merge_composes_disjoint_edits_and_rechecks_output() {
     let root = dir("disjoint");
     let base = write(&root, "base.jet", BASE);
@@ -79,6 +95,19 @@ fn overlapping_edit_conflicts_without_writing_success_output() {
     let report = String::from_utf8_lossy(&output.stderr);
     assert!(report.contains("\"status\":\"conflict\""), "{report}");
     assert!(report.contains("\"kind\":\"overlapping_edit\""), "{report}");
+}
+
+#[test]
+fn delete_edit_and_duplicate_stable_identity_never_auto_merge() {
+    let root = dir("identity_collision");
+    let base = write(&root, "base.jet", "fn a() -> Int { return 1 }\nfn b() -> Int { return 1 }\nfn run() { print(a() + b()) }\n");
+    let ours = write(&root, "ours.jet", "fn c() -> Int { return 1 }\nfn b() -> Int { return 1 }\nfn run() { print(c() + b()) }\n");
+    let theirs = write(&root, "theirs.jet", "fn a() -> Int { return 2 }\nfn b() -> Int { return 1 }\nfn run() { print(a() + b()) }\n");
+    let merged = root.join("must-not-exist.jet");
+    let output = run(&["merge", "--structural", base.to_str().unwrap(), ours.to_str().unwrap(), theirs.to_str().unwrap(), "--out", merged.to_str().unwrap(), "--report", "json"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(!merged.exists());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("delete_edit"));
 }
 
 #[test]

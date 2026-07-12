@@ -98,7 +98,7 @@ impl<'a> Checker<'a> {
         let inner_ty = self.infer(inner)?;
         match inner_ty {
             Type::Result { ok, err } => {
-                let ret = self.ret.clone().unwrap_or(Type::Int);
+                let ret = self.resolve_type(self.ret.clone().unwrap_or(Type::Int));
                 match &ret {
                     // E2-M7: error types match — propagate and unwrap the Ok value.
                     // The Ok types (`ret_ok` and `ok`) do NOT need to be equal: `?`
