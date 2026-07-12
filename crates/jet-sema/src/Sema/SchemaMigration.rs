@@ -141,6 +141,7 @@ pub fn desugar_migrations(bundle: &mut ProgramBundle) {
 /// Build `fn <name>() -> T { return <default expr> }` for an `add` op.
 fn build_default_func(name: &str, ty: &Type, default: &Expr, span: Span) -> Func {
     Func {
+        span,
         is_pub: false,
         is_package_pub: false,
         external_type: None,
@@ -150,6 +151,7 @@ fn build_default_func(name: &str, ty: &Type, default: &Expr, span: Span) -> Func
                     type_params: Vec::new(),
         params: Vec::new(),
         return_type: Some(ty.clone()),
+        return_type_span: Some(span),
         is_unsafe: false,
         unsafe_reason: None,
         unsafe_span: None,
@@ -210,6 +212,7 @@ fn build_converter_func(name: &str, old_ty: &Type, new_ty: &Type, conv: &Expr, s
         }
     };
     Func {
+        span,
         is_pub: false,
         is_package_pub: false,
         external_type: None,
@@ -228,6 +231,7 @@ fn build_converter_func(name: &str, old_ty: &Type, new_ty: &Type, conv: &Expr, s
             variadic_bound_list: None,
         }],
         return_type: Some(new_ty.clone()),
+        return_type_span: Some(span),
         is_unsafe: false,
         unsafe_reason: None,
         unsafe_span: None,

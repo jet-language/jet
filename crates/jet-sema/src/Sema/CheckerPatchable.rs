@@ -49,6 +49,7 @@ pub(crate) fn inject_patchable_types(items: &mut Vec<Item>, diags: &mut Vec<Diag
             })
             .collect();
         to_add.push(Item::Struct(StructDef {
+            span: s.span,
             is_pub: s.is_pub,
             is_package_pub: s.is_package_pub,
             name: patch_name,

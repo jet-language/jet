@@ -856,6 +856,7 @@ pub mod Schema;
 mod SchemaMigration;
 mod ScopeMembers;
 mod PolicyFacts;
+mod ReferenceFacts;
 mod State;
 mod Taint;
 mod WebPartition;
@@ -884,7 +885,7 @@ pub use Bundle::{
     check_bundle, check_bundle_allow_impure, check_bundle_freestanding,
     check_bundle_with_effect_facts,
 };
-pub use Effects::{EffectSummary, SemIndexEffectFacts};
+pub use Effects::{DefinitionAnchorFact, EffectSummary, SemIndexEffectFacts};
 pub use PolicyFacts::{
     collect_policy_facts, collect_policy_facts_from_program, PolicyDomain, PolicyFact,
     PolicyFactGraph,

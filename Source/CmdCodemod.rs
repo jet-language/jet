@@ -655,18 +655,18 @@ struct Found {
     end: usize,
     captures: BTreeMap<String, String>,
 }
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum SlotKind {
-    Scalar,
-    List,
-}
 #[derive(Clone)]
 struct TypedTree {
     class: String,
     shape: String,
     span: jet_semindex::SourceSpan,
     signature: Vec<String>,
-    slot_kind: SlotKind,
+    slots: Vec<TypedSlot>,
+}
+#[derive(Clone)]
+struct TypedSlot {
+    name: String,
+    kind: jet_semindex::StructuralSlotKind,
     children: Vec<TypedTree>,
 }
 #[derive(Clone)]
@@ -680,9 +680,14 @@ enum PatternTree {
         class: String,
         shape: String,
         signature: Vec<String>,
-        slot_kind: SlotKind,
-        children: Vec<PatternTree>,
+        slots: Vec<PatternSlot>,
     },
+}
+#[derive(Clone)]
+struct PatternSlot {
+    name: String,
+    kind: jet_semindex::StructuralSlotKind,
+    children: Vec<PatternTree>,
 }
 #[derive(Clone)]
 struct CapturedTree {
@@ -922,36 +927,23 @@ fn typed_tree(
     source: &str,
     path: &Path,
 ) -> TypedTree {
-    let contained = nodes
+    let mut direct = nodes
         .iter()
         .filter(|node| {
             same_path(Path::new(&node.module_path), path)
-                && structural_child_class(&root.class, &node.class)
-                && node.span.start >= root.span.start
-                && node.span.end <= root.span.end
-                && (node.span.start > root.span.start || node.span.end < root.span.end)
+                && node.parent == Some(root.id)
         })
         .collect::<Vec<_>>();
-    let mut immediate = contained
-        .iter()
-        .copied()
-        .filter(|candidate| {
-            !contained.iter().any(|middle| {
-                middle.span.start <= candidate.span.start
-                    && middle.span.end >= candidate.span.end
-                    && (middle.span.start < candidate.span.start || middle.span.end > candidate.span.end)
-            })
-        })
-        .collect::<Vec<_>>();
-    immediate.sort_by_key(|node| (node.span.start, node.span.end, node.class.as_str()));
-    immediate.dedup_by_key(|node| (node.span.start, node.span.end, node.class.as_str()));
-    let children = immediate
+    direct.sort_by_key(|node| (node.slot.as_str(), node.ordinal));
+    let children = direct
         .iter()
         .map(|node| typed_tree(node, nodes, source, path))
         .collect::<Vec<_>>();
     let mut scalar = String::new();
     let mut cursor = root.span.start;
-    for child in &children {
+    let mut source_order = children.iter().collect::<Vec<_>>();
+    source_order.sort_by_key(|child| (child.span.start, child.span.end));
+    for child in source_order {
         if cursor <= child.span.start {
             scalar.push_str(&source[cursor..child.span.start]);
         }
@@ -964,23 +956,24 @@ fn typed_tree(
         .into_iter()
         .filter(|token| token != ",")
         .collect();
+    let mut slots = Vec::<TypedSlot>::new();
+    for node in direct {
+        let child = typed_tree(node, nodes, source, path);
+        match slots.last_mut() {
+            Some(slot) if slot.name == node.slot && slot.kind == node.slot_kind => slot.children.push(child),
+            _ => slots.push(TypedSlot {
+                name: node.slot.clone(),
+                kind: node.slot_kind,
+                children: vec![child],
+            }),
+        }
+    }
     TypedTree {
         class: root.class.clone(),
         shape: root.shape.clone(),
         span: root.span,
         signature,
-        slot_kind: if children.len() > 1 { SlotKind::List } else { SlotKind::Scalar },
-        children,
-    }
-}
-
-fn structural_child_class(parent: &str, child: &str) -> bool {
-    match parent {
-        "expr" => matches!(child, "expr" | "type"),
-        "stmt" => matches!(child, "stmt" | "expr" | "type"),
-        "type" => child == "type",
-        "item" => matches!(child, "item" | "stmt" | "expr" | "type"),
-        _ => false,
+        slots,
     }
 }
 
@@ -997,24 +990,16 @@ fn pattern_tree(
             class: tree.class.clone(),
         };
     }
-    let children = tree
-        .children
-        .iter()
-        .map(|child| pattern_tree(child, source, captures))
-        .collect::<Vec<_>>();
-    let slot_kind = if children.iter().any(|child| matches!(child, PatternTree::Capture { variadic: true, .. }))
-        || children.len() > 1
-    {
-        SlotKind::List
-    } else {
-        tree.slot_kind
-    };
+    let slots = tree.slots.iter().map(|slot| PatternSlot {
+        name: slot.name.clone(),
+        kind: slot.kind,
+        children: slot.children.iter().map(|child| pattern_tree(child, source, captures)).collect(),
+    }).collect();
     PatternTree::Node {
         class: tree.class.clone(),
         shape: tree.shape.clone(),
         signature: tree.signature.clone(),
-        slot_kind,
-        children,
+        slots,
     }
 }
 
@@ -1032,11 +1017,19 @@ fn match_typed_tree(
             bind_capture(name, source[candidate.span.start..candidate.span.end].to_string(), tree_key(candidate), captures)
         }
         PatternTree::Capture { variadic: true, .. } => false,
-        PatternTree::Node { class, shape, signature, slot_kind, children } => {
+        PatternTree::Node { class, shape, signature, slots } => {
             if class != &candidate.class || shape != &candidate.shape || signature != &candidate.signature {
                 return false;
             }
-            match_children(children, &candidate.children, *slot_kind, source, captures)
+            if slots.len() != candidate.slots.len() { return false; }
+            for (pattern_slot, candidate_slot) in slots.iter().zip(&candidate.slots) {
+                if pattern_slot.name != candidate_slot.name || pattern_slot.kind != candidate_slot.kind
+                    || !match_children(&pattern_slot.children, &candidate_slot.children, pattern_slot.kind, source, captures)
+                {
+                    return false;
+                }
+            }
+            true
         }
     }
 }
@@ -1044,7 +1037,7 @@ fn match_typed_tree(
 fn match_children(
     patterns: &[PatternTree],
     candidates: &[TypedTree],
-    slot_kind: SlotKind,
+    slot_kind: jet_semindex::StructuralSlotKind,
     source: &str,
     captures: &mut BTreeMap<String, CapturedTree>,
 ) -> bool {
@@ -1053,7 +1046,7 @@ fn match_children(
         pi: usize,
         candidates: &[TypedTree],
         ci: usize,
-        slot_kind: SlotKind,
+        slot_kind: jet_semindex::StructuralSlotKind,
         source: &str,
         captures: &mut BTreeMap<String, CapturedTree>,
     ) -> bool {
@@ -1061,7 +1054,7 @@ fn match_children(
             return ci == candidates.len();
         }
         if let PatternTree::Capture { name, variadic: true, class } = &patterns[pi] {
-            if slot_kind != SlotKind::List {
+            if slot_kind != jet_semindex::StructuralSlotKind::List {
                 return false;
             }
             for end in (ci..=candidates.len()).rev() {
@@ -1112,12 +1105,15 @@ fn bind_capture(
 }
 
 fn tree_key(tree: &TypedTree) -> String {
+    let slots = tree.slots.iter().map(|slot| {
+        format!("{}:{:?}=[{}]", slot.name, slot.kind, slot.children.iter().map(tree_key).collect::<Vec<_>>().join(","))
+    }).collect::<Vec<_>>().join(";");
     format!(
         "{}:{}:{:?}:[{}]",
         tree.class,
         tree.shape,
         tree.signature,
-        tree.children.iter().map(tree_key).collect::<Vec<_>>().join(",")
+        slots
     )
 }
 fn semantic_candidate(t: &Template, f: &Found, idx: &SemIndex, path: &Path) -> bool {
@@ -1373,6 +1369,7 @@ fn undo_v2(value: Value, path: &Path, project: &Path) {
     }
     let paths = decoded.iter().map(|(path, _, _)| path.clone()).collect::<Vec<_>>();
     Transaction::validate_destinations(project, &paths);
+    Transaction::validate_replay_aliases(project, path, &paths);
     let _lock = Transaction::lock(project);
     Transaction::recover(project);
     let mut changes = Vec::new();
@@ -1486,6 +1483,7 @@ fn undo_v1(value: Value, path: &Path, project: &Path) {
     }
     let paths = decoded.iter().map(|row| row.0.clone()).collect::<Vec<_>>();
     Transaction::validate_destinations(project, &paths);
+    Transaction::validate_replay_aliases(project, path, &paths);
     let _lock = Transaction::lock(project);
     Transaction::recover(project);
     let mut changes = Vec::new();

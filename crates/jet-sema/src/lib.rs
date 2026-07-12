@@ -8,7 +8,7 @@ pub use jet_parser::{
     TargetProfile, Traits, AST, SHA256,
 };
 pub mod Sema;
-pub use Sema::{effect_key, SemIndexEffectFacts};
+pub use Sema::{effect_key, DefinitionAnchorFact, SemIndexEffectFacts};
 pub use Sema::{
     collect_policy_facts, collect_policy_facts_from_program, PolicyDomain, PolicyFact,
     PolicyFactGraph,

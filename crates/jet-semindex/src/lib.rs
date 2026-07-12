@@ -14,7 +14,7 @@ pub use Build::{
 };
 pub use Types::{
     CallEdge, DefinitionAnchor, EffectFact, MemberFact, MemberKind, MemberOrigin, SemIndex, SourceSpan,
-    StructuralAudit, StructuralNode, SymbolDef, SymbolKind, SymbolRef, TypeDossier,
+    StructuralAudit, StructuralNode, StructuralSlotKind, SymbolDef, SymbolKind, SymbolRef, TypeDossier,
     SCHEMA_VERSION,
 };
 
@@ -167,5 +167,38 @@ mod tests {
         assert!(json.contains("\"effects\""));
         assert!(json.contains("\"members\""));
         assert!(json.contains("\"run\""));
+    }
+
+    #[test]
+    fn checked_reference_facts_cover_import_members_aliases_and_receivers() {
+        let root = std::env::temp_dir().join(format!(
+            "jet_semindex_reference_facts_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let library = root.join("library.jet");
+        let main = root.join("main.jet");
+        std::fs::write(&library, "pub fn report() { print(\"library\") }\n").unwrap();
+        std::fs::write(
+            &main,
+            "use \"./library\" as api\nuse api.{report as alias_report}\n\nstruct Worker { value: Int }\nimpl Worker {\n    fn step(self) { print(\"step\") }\n}\n\nfn run() {\n    api.report()\n    alias_report()\n    worker :: Worker.{value: 1}\n    worker.step()\n}\n",
+        )
+        .unwrap();
+
+        let index = open(&main).expect("multi-file reference fixture should index");
+        let target_kind = |name: &str| {
+            index
+                .references()
+                .iter()
+                .filter(|reference| reference.name == name)
+                .filter_map(|reference| reference.target.as_ref().map(|target| target.kind.as_str()))
+                .collect::<Vec<_>>()
+        };
+        assert!(target_kind("api").contains(&"import_alias"));
+        assert!(target_kind("report").contains(&"function"));
+        assert!(target_kind("alias_report").contains(&"function"));
+        assert!(target_kind("step").contains(&"function"));
+        let _ = std::fs::remove_dir_all(root);
     }
 }

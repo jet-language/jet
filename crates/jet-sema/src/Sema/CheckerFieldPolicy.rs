@@ -353,6 +353,7 @@ fn synthesize_computed_field_getter(f: &Field) -> Func {
     };
 
     Func {
+        span,
         is_pub: f.is_pub,
         is_package_pub: f.is_package_pub,
         external_type: None,
@@ -362,6 +363,7 @@ fn synthesize_computed_field_getter(f: &Field) -> Func {
                     type_params: vec![],
         params: vec![self_param],
         return_type: Some(f.ty.clone()),
+        return_type_span: Some(f.ty_span),
         is_unsafe: false,
         unsafe_reason: None,
         unsafe_span: None,

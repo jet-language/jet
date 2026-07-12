@@ -166,6 +166,7 @@ impl<'a> Parser<'a> {
         }
     
         pub(super) fn const_def(&mut self) -> Result<ConstDef, Diagnostic> {
+            let item_start = self.peek().span.start;
             let meta = if self.at_meta_attr() {
                 let meta = self.parse_meta_attr()?;
                 while matches!(self.peek().kind, TokKind::Semi) {
@@ -215,6 +216,7 @@ impl<'a> Parser<'a> {
             let value = self.expr()?;
             self.expect(TokKind::Semi, "after a const value")?;
             Ok(ConstDef {
+                span: Span::new(item_start, self.toks[self.pos.saturating_sub(1)].span.end),
                 name,
                 name_span,
                 value,
@@ -230,6 +232,7 @@ impl<'a> Parser<'a> {
     
         /// S57 (M9.5): `comptime NAME = expr;` — a compile-time constant binding.
         pub(super) fn comptime_def(&mut self) -> Result<ConstDef, Diagnostic> {
+            let item_start = self.peek().span.start;
             let meta = if self.at_meta_attr() {
                 let meta = self.parse_meta_attr()?;
                 while matches!(self.peek().kind, TokKind::Semi) {
@@ -245,6 +248,7 @@ impl<'a> Parser<'a> {
             let value = self.expr()?;
             self.expect(TokKind::Semi, "after a comptime value")?;
             Ok(ConstDef {
+                span: Span::new(item_start, self.toks[self.pos.saturating_sub(1)].span.end),
                 name,
                 name_span,
                 value,

@@ -728,6 +728,7 @@ impl<'a> Parser<'a> {
             is_pub: bool,
             is_package_pub: bool,
         ) -> Result<crate::AST::StructDef, Diagnostic> {
+            let item_start = self.peek().span.start;
             self.expect_kw(TokKind::KwStruct, "to start a struct definition")?;
             let (name, name_span) = self.parse_dotted_type_name("after `struct`")?;
             let type_params = self.parse_opt_type_params()?;
@@ -787,8 +788,9 @@ impl<'a> Parser<'a> {
                     }
                 }
             }
-            self.bump(); // }
+            let item_end = self.bump().span.end; // }
             Ok(crate::AST::StructDef {
+                span: Span::new(item_start, item_end),
                 is_pub,
                 is_package_pub,
                 name,

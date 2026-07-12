@@ -434,6 +434,17 @@ pub struct EffectSummary {
 pub struct SemIndexEffectFacts {
     pub summaries: HashMap<String, EffectSummary>,
     pub solved: HashMap<String, EffectSet>,
+    /// Reference targets proven by sema/name resolution. Key is
+    /// `(module path, reference start, reference end)`. Tooling may copy these
+    /// facts but must never independently resolve by spelling or proximity.
+    pub reference_anchors: HashMap<(String, usize, usize), DefinitionAnchorFact>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DefinitionAnchorFact {
+    pub module_path: String,
+    pub kind: String,
+    pub def_span: Span,
 }
 
 /// D-EFF2 (callback param bound): one obligation that a callback argument passed

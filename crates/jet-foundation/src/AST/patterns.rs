@@ -231,6 +231,7 @@ pub enum ConstAttr {
 
 #[derive(Debug)]
 pub struct ConstDef {
+    pub span: Span,
     pub name: String,
     pub name_span: Span,
     pub value: Expr,

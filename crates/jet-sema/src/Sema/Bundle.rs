@@ -1905,11 +1905,13 @@ pub(crate) fn check_bundle_opts(
     bundle.used_core = used_core;
     apply_helper_layer_inference(bundle, &states, &usage_spans, &mut diags);
     let (public_summaries, public_solved) = qualified_effect_facts(&module_effect_summaries);
+    let reference_anchors = super::ReferenceFacts::collect(bundle);
     (
         diags,
         super::Effects::SemIndexEffectFacts {
             summaries: public_summaries,
             solved: public_solved,
+            reference_anchors,
         },
     )
 }
@@ -2782,6 +2784,7 @@ pub(crate) fn check_module_bodies(
                     }
                 }
                 let mut synthetic = Func {
+                    span: t.name_span,
                     is_pub: false,
                     is_package_pub: false,
                     external_type: None,
@@ -2791,6 +2794,7 @@ pub(crate) fn check_module_bodies(
                     type_params: Vec::new(),
                     params: t.params.clone(),
                     return_type: None,
+                    return_type_span: None,
                     is_unsafe: false,
                     unsafe_reason: None,
                     unsafe_span: None,
@@ -2839,6 +2843,7 @@ pub(crate) fn check_module_bodies(
             // gate differs.
             Item::Bench(b) if mode == CompileMode::Bench => {
                 let mut synthetic = Func {
+                    span: b.name_span,
                     is_pub: false,
                     is_package_pub: false,
                     external_type: None,
@@ -2848,6 +2853,7 @@ pub(crate) fn check_module_bodies(
                     type_params: Vec::new(),
                     params: Vec::new(),
                     return_type: None,
+                    return_type_span: None,
                     is_unsafe: false,
                     unsafe_reason: None,
                     unsafe_span: None,
