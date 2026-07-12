@@ -101,8 +101,12 @@ fn failed_adapter_preserves_scratch_and_json_logs() {
     );
 }
 
+/// `explain` stayed a flat top-level command (D-CLI-SURFACE3=B did not move
+/// it — verified against the `COMMANDS`/inspect-action registry in
+/// `Source/CLI.rs`: only `inspect explain-build` exists there, bare
+/// `explain` is unrelated and still dispatches directly).
 #[test]
-fn top_level_explain_and_logs_dispatch_to_jetpack() {
+fn top_level_explain_dispatches_to_jetpack() {
     let project = Scratch::new("project");
     let root = Scratch::new("root");
     write_project(&project.path);
@@ -128,9 +132,54 @@ fn top_level_explain_and_logs_dispatch_to_jetpack() {
     );
     assert!(stdout.contains("failed"), "{stdout}");
     assert!(stdout.contains("jet logs weirdctl"), "{stdout}");
+}
+
+/// D-CLI-SURFACE3=B: `logs` moved under `jet inspect` — bare `jet logs` is
+/// now a teaching error (E2101) naming the new spelling.
+#[test]
+fn bare_jet_logs_is_a_teaching_error_naming_jet_inspect_logs() {
+    let project = Scratch::new("project");
+    let root = Scratch::new("root");
+    write_project(&project.path);
+
+    let _ = jetpack()
+        .args(["build", "--no-color"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
 
     let logs = jet()
         .args(["logs", "weirdctl", "--json", "--no-color"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert_eq!(logs.status.code(), Some(2), "bare `jet logs` must be rejected");
+    // E2101 in --json mode reports on stdout, not stderr (see cli.rs's
+    // every_moved_bare_action_is_e2101_in_human_and_json_modes).
+    let stdout = String::from_utf8_lossy(&logs.stdout);
+    assert!(stdout.contains("\"code\":\"E2101\""), "stdout: {stdout}");
+    assert!(stdout.contains("jet inspect logs"), "stdout: {stdout}");
+}
+
+/// `jet inspect logs` is the canonical top-level spelling and still
+/// dispatches through to the jetpack build-debug engine.
+#[test]
+fn jet_inspect_logs_dispatches_to_jetpack() {
+    let project = Scratch::new("project");
+    let root = Scratch::new("root");
+    write_project(&project.path);
+
+    let _ = jetpack()
+        .args(["build", "--no-color"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+
+    let logs = jet()
+        .args(["inspect", "logs", "weirdctl", "--json", "--no-color"])
         .current_dir(&project.path)
         .env("JETPACK_ROOT", &root.path)
         .output()
