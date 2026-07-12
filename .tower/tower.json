@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 522,
-    "rev": 4789,
+    "rev": 4791,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -8293,6 +8293,11 @@
       "log": [
         {
           "at": "2026-07-12",
+          "by": "claude-main",
+          "text": "Slice 5 remainder identified precisely: Canvas WorkspaceFile/WorkspaceLock scans (schema_api.rs:217, project_transactions.rs:343/799, project_scan.rs:87-252) still call jetpack:: engine — WorkspaceFile evaluation is not yet model-shaped; whether it sinks to jet-pkg-model (read side) or stays engine is bound up with D-JOS-ENGINEHOME1 + workspace evaluation semantics. Leave criterion 5 open until that lands."
+        },
+        {
+          "at": "2026-07-12",
           "by": "sol-367-planner",
           "text": "Slice-4 design (docs/plans/epoch-3/product-split-slice4.md). Finding: ModuleEval is ALREADY pure (parse->comptime->merge->typed plans); touches NO Provider/Store/Trust/Toolchain engine. Only jetpack-internal deps: Merge (pure, BTreeMap-only), RefSpec+PackageManifest (already in jet-pkg-model), BuildRecipe STRUCT (engine fns separate). check_build_io is in-crate pure. Boundary = 3 acyclic layers: L1 jet-pkg-model (add pure Merge + BuildRecipe struct); L2 NEW crate jet-env-model (ModuleEval + plan Types EnvPlan/SystemPlan/ImagePlan/FleetPlan/HostPlan/VmTestPlan/Service/DevService/Adapter; deps jet-pkg-model+jet-codegen); L3 realizers dep DOWN on L2 -- env-runtime (run_enter_dev/Shell/Overlay/EnvFile/Services, consumes EnvPlan) and JetOS/* (29 mods, consumes System/Image/Fleet/Host). No env<->OS lateral coupling. Steps: 1 sink Merge+BuildRecipe->pkg-model (re-export legacy paths); 2 create jet-env-model, move ModuleEval+Types, rewrite crate::->jet_codegen/jet_pkg_model, jetpack re-exports ModuleEval shim; 3 repoint realizers to jet_env_model, drop shim; 4 Canvas/driver import repoint (slice-5 seam); 5 workspace_crates guards + architecture.md. Each keeps cargo build green; targeted tests per step (pkg/fleet/image/jetpack_engine/jetpack_jetos/canvas/workspace_crates). No teaching shim owed (no command moves). GATES for owner: (1) does JetOS realization engine relocate to crates/jetos this card or stay in jetpack behind jetos binary (later card)? (2) any command surface move across binaries = D-PRODUCT-SPLIT1=C shim ballot. jet-env-model name is internal, not a ballot."
         },
@@ -8370,11 +8375,11 @@
         {
           "n": 4,
           "text": "Slice 4: ModuleEval plan model split from env runtime and JetOS realization",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "claude-main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-12T18:09:56.912Z"
+          "evidence": "L2 crate jet-env-model created (ModuleEval 7 files + plan Types, deps jet-codegen+jet-pkg-model only, path-only I6); Merge+BuildRecipe struct sunk to jet-pkg-model; 26 jetpack realizer files + Canvas + fleet/image repointed; shim dropped; workspace_crates row + architecture.md L1/L2/L3 updated. Proof: cargo tree acyclic, jet-env-model 58 tests, jetpack_engine 67 + jetpack_jetos 39 + fleet 9 + image 11 + canvas 56 + pkg 136 green; workspace build + hello smoke green. JetOS engine home = open ballot D-JOS-ENGINEHOME1, correctly untouched.",
+          "at": "2026-07-12T21:43:44.656Z"
         },
         {
           "n": 5,
@@ -33755,6 +33760,20 @@
   ],
   "events": [
     {
+      "at": "2026-07-12T21:43:44.784Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c_audit_367_q80zrm",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-12T21:43:44.656Z",
+      "by": "claude-main",
+      "action": "card.criteria-meet",
+      "ref": "c_audit_367_q80zrm",
+      "note": "#4"
+    },
+    {
       "at": "2026-07-12T21:15:56.519Z",
       "by": "terra-367-ballot",
       "action": "decision.add",
@@ -37239,20 +37258,6 @@
       "action": "card.criteria-add",
       "ref": "c0llk894",
       "note": "#5 spec.md drift: input() documented as returning Result(String"
-    },
-    {
-      "at": "2026-07-12T10:11:09.820Z",
-      "by": "claude-main",
-      "action": "card.criteria-add",
-      "ref": "c0llk894",
-      "note": "#4 spec.md drift: EBNF param rule still shows retired ~ sigil ("
-    },
-    {
-      "at": "2026-07-12T10:11:09.718Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c019rl6u",
-      "note": "Naming-system laws: artifact-extension family + ambient prelude admission"
     }
   ],
   "nextNum": 368,
