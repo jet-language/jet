@@ -400,7 +400,7 @@ bracket forms; shipped today: `Set<T>`, `SortedSet<T>`, `Deque<T>`,
 `HashMap<K,V>` and `BTreeMap<K,V>` are reserved names for specialized map
 implementations.
 
-**D-BIGINT1**: Core `BigInt`, explicit construction `BigInt(…)`/`BigInt("…")`;
+**D-BIGINT1** *(home moved to `core.math` by D-CORE-NUMERIC1=A, 2026-07-12)*: Core `BigInt`, explicit construction `BigInt(…)`/`BigInt("…")`;
 `Int` never auto-promotes (E0130–E0133). **D-DECIMAL1**: arbitrary-precision
 base-10 `Decimal` in `core.numeric`; default-on lint L0504 fires when a
 money-named field holds a float (`#[allow(float_money)]` suppresses).
@@ -807,6 +807,30 @@ bare `#Wasm` and `#Js` markers are removed from the grammar (ordinary
 unknown-marker errors, no teaching residue). `#WasmExport` is a different
 job (export surface) and is untouched.
 
+**D-BLOCKPLANE1=A — expert regions are `#` blocks** *(ratified by owner
+2026-07-12, card #512)*: the three keyword regions join the marker
+family. `region r { }` → `#Region(r) { }` (D-REGION1 semantics
+unchanged); `live { }` → `#Live { }` (D-TERM1 semantics unchanged, no
+reason argument); `assume_deterministic { }` →
+`#Nondeterministic("reason") { }` (D-DET1 semantics unchanged, now
+reason-gated like `#Unsafe`/`#Impure`). The three keywords leave the
+grammar as ordinary syntax errors. The rule is now universal: an expert
+scoped region is a `#` block.
+
+**D-POLICY-WORD1=A — one meaning for `policy`** *(ratified by owner
+2026-07-12, card #512)*: the in-source module floor respells as
+`#Policy(no_alloc)` — a module-level directive; future floors arrive as
+arguments, never new keywords. The D-NOALLOC-SEM1 checker (local-only
+walk, E0921, ratified scope cut) is unchanged; only the trigger
+respells. The bare `policy` keyword leaves the grammar; the word means
+the manifest governance namespace alone.
+
+**D-DROP-WORD1=A — one meaning for `drop`** *(ratified by owner
+2026-07-12, card #512)*: the linear finisher for `#SingleUse` values
+respells `drop(x)` → `consume(x)` (still `#Unsafe`-gated, D-LIN1
+semantics unchanged). `.drop("reason")` keeps sole ownership of the
+discard meaning.
+
 **D-DOTSCOPE1 — Scope members**: inside a `#Marker { }` block body, a
 statement-position `.name { … }` / `.name(args) { … }` resolves against that
 marker's declared scope members (`#Test`: `.expect_fail`, `.setup`,
@@ -1078,7 +1102,7 @@ Full IFC deferred post-Epoch 3.
 **D-DET1 — Determinism** *(D-DET-CAPAPI)*: `#Pure` implies reproducible —
 wall-clock/OS-rng/fs/net rejected (E3401/E3403); injectable `Clock`
 (`now/tick/advance/wait`) and `Rng` (`int/float/bool/pick/shuffle`) are the
-pure-callable capabilities; `assume_deterministic { }` expert escape.
+pure-callable capabilities; `#Nondeterministic("reason") { }` expert escape (respelled by D-BLOCKPLANE1, 2026-07-12).
 
 **D-REPLAY1**: `#Replayable` rejects any reachable `Time`/`Rand`/`Net`/`Io`
 not routed through a deterministic/mockable capability. Implemented by the
@@ -1093,7 +1117,7 @@ after the block or register via `on_commit`.
 
 **D-LIN1 — Single-use values** *(D-LIN1-DROP)*: `#SingleUse` (implies
 `#NoCopy`) must be consumed exactly once on every path — `^` param, return,
-or `drop(x)` inside `#Unsafe("reason")` (else E0143). Unconsumed E0140;
+or `consume(x)` inside `#Unsafe("reason")` (respelled by D-DROP-WORD1, 2026-07-12; else E0143). Unconsumed E0140;
 one-branch-only E0141; lending instead E0142.
 
 **D-PREPOST1 — Contracts**: `@Pre(cond, "msg")` / `@Post(cond, "msg")` on a
@@ -1242,7 +1266,7 @@ D-MARKERMOVE1. Deleted along with D-REF-SHORTHAND1's `&T` fields; a
 
 **D-REGION1 / D-ALLOC1 / D-ALLOC2 — Arenas & regions**: regions are implicit
 and scope-inferred by default (the region is the arena binding's lexical
-scope); explicit `region r { … }` for the expert tier. `arena ::
+scope); explicit `#Region(r) { … }` for the expert tier (respelled by D-BLOCKPLANE1, 2026-07-12). `arena ::
 mem.Arena.new(capacity: 4096)`; `arena.alloc(value)` returns a scope-bound
 view — escape E0631, use-after-`reset`/`free` E0632. Arenas live flat in
 `core.mem` (D-REF2); arena values are not `#Unsafe`.
@@ -1694,7 +1718,7 @@ hidden alias, alternate codec, or fallback exists.
 
 **CLI & IO**: builder-spec arg parsing `args.spec().flag(…).option(…)
 .positional(…)` with generated `--help` (D-ARGS1). `io.stdin()` handle with
-`.lines()`/`.read_line()` (D-STDIN1). Scoped `live { … }` raw-terminal block
+`.lines()`/`.read_line()` (D-STDIN1). Scoped `#Live { … }` raw-terminal block (respelled by D-BLOCKPLANE1, 2026-07-12)
 with guaranteed restore (D-TERM1). `core.log` auto-detects TTY (text) vs
 piped (JSON); `log.setup(format:)` overrides (D-LOGFMT1).
 
@@ -1954,6 +1978,12 @@ primitives require `core.crypto.expert` behind `#Unsafe` (D-CRYPTOENV1,
 E0510/E0511). Versioned `JETC` envelope header gives algorithm agility;
 PQ algorithms later (D-PQCRYPTO1). `core.encoding` hex/base64 + `core.uuid`
 v4/v7 (D-UUIDENC1).
+
+**D-CORE-NUMERIC1=A — one math home** *(ratified by owner 2026-07-12, card #512)*: `BigInt` and `Decimal` move into `core.math`; `core.numeric` leaves the registry (ordinary unknown-module error). Construction spellings, the no-auto-promotion law (E0130–E0133), and lint L0504 are unchanged.
+
+**D-API-LEN1=A — Law 1 blessed vocabulary** *(ratified by owner 2026-07-12, card #513)*: the API rubric keeps its plain-English rule; `len` joins a closed blessed-abbreviation list (with the module names `fmt`, `args`, `env`, `mem`); extensions to the list need a ballot. The shipped `len()`/`.len` surface is untouched.
+
+**D-API-CONTAINS1=B — membership is `has`** *(ratified by owner 2026-07-12, card #513; owner picked B over the rec)*: the membership word is `has` everywhere — `Set`/`SortedSet`/`BitSet` `contains` respells to `has(value)`, map/`Lru` `contains_key` respells to `has_key(key)`, `Bag.has` is already law. `contains`/`contains_key` leave the surface as ordinary no-such-method errors. Amends the D-COLLBREADTH1/D-ITER method lists.
 
 **D-CORE-SECRETS1=A — one secrets home** *(ratified by owner
 2026-07-12, card #509)*: `core.vault` owns secret storage AND lifecycle
@@ -2768,6 +2798,8 @@ the `policy:` namespace (D-JPK-POLICYSURFACE1) gains
 policy narrows, never widens. Memory/type safety (I1) has no override
 and is outside this law. Existing gates keep their spellings; behavior
 and audit become uniform.
+
+**D-CLI-EMIT1=A — one generated-Rust spelling** *(ratified by owner 2026-07-12, card #512)*: `jet emit --rust <file>` is the sole spelling; the global `--emit-rust` flag leaves the table (unknown-flag teaching error naming the verb).
 
 **D-LSP1 / D-LSP2**: LSP v2 uses one incremental compiler-service query cache
 (`crates/jet-queries`) shared by editor requests, with full applicable LSP

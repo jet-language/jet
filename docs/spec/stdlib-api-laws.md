@@ -8,7 +8,10 @@ existing drift found during review.
 
 ## Law 1 — Naming
 
-- Names are plain English words, not abbreviations (`remove`, not `rm`; `length`, not `len`).
+- Names are plain English words, not abbreviations (`remove`, not `rm`).
+  Blessed exceptions (closed list, D-API-LEN1=A; ballot to extend): `len`,
+  and the module names `fmt`, `args`, `env`, `mem`.
+- Membership predicates are `has(value)` / `has_key(key)` (D-API-CONTAINS1=B).
 - Boolean predicates are verb-prefixed: `is_empty`, `has_prefix`, `contains`.
 - Fallible variants add no suffix; the `?` return type signals fallibility.
 - Constructor sugar uses `Type.{ }` (D-DOTCTOR1); factory functions use `Type.from_*(...)`.
