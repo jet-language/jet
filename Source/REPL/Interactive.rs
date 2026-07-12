@@ -537,6 +537,52 @@ struct EditorDisplay {
     cursor_row: usize,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct DisplayPosition {
+    row: usize,
+    column: usize,
+    pending_wrap: bool,
+}
+
+impl DisplayPosition {
+    fn write_cells(&mut self, cells: usize, terminal_width: usize) {
+        if cells == 0 {
+            return;
+        }
+        let width = terminal_width.max(1);
+        if self.pending_wrap {
+            self.row += 1;
+            self.column = 0;
+            self.pending_wrap = false;
+        }
+        if self.column + cells > width {
+            self.row += 1;
+            self.column = 0;
+        }
+        // One display scalar never exceeds two cells. Wide scalars wrap as
+        // a unit instead of being split across the terminal edge.
+        let cells = cells.min(width);
+        self.column += cells;
+        if self.column == width {
+            self.column = width - 1;
+            self.pending_wrap = true;
+        }
+    }
+
+    fn newline(&mut self) {
+        self.row += 1;
+        self.column = 0;
+        self.pending_wrap = false;
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct DisplayGeometry {
+    rows: usize,
+    cursor: DisplayPosition,
+    end: DisplayPosition,
+}
+
 impl EditorDisplay {
     fn redraw(
         &mut self,
@@ -546,6 +592,19 @@ impl EditorDisplay {
         ghost: Option<String>,
         color: bool,
     ) {
+        // Refresh every redraw: SIGWINCH is not needed because raw reads
+        // already wake at least every 100ms and the next key repaints using
+        // the current PTY width.
+        let terminal_width = super::Terminal::terminal_width();
+        let continuation = dim("· ", color);
+        let geometry = display_geometry(
+            prompt,
+            &continuation,
+            buf,
+            cursor,
+            ghost.as_deref(),
+            terminal_width,
+        );
         if self.rows > 0 {
             print!("\r");
             if self.cursor_row > 0 {
@@ -555,7 +614,6 @@ impl EditorDisplay {
         }
 
         let typed: String = buf.iter().collect();
-        let continuation = dim("· ", color);
         for (row, line) in typed.split('\n').enumerate() {
             if row > 0 {
                 print!("\r\n{}", continuation);
@@ -570,29 +628,16 @@ impl EditorDisplay {
             }
         }
 
-        let cursor_row = buf[..cursor].iter().filter(|c| **c == '\n').count();
-        let end_row = buf.iter().filter(|c| **c == '\n').count();
-        if end_row > cursor_row {
-            print!("\x1b[{}A", end_row - cursor_row);
+        if geometry.end.row > geometry.cursor.row {
+            print!("\x1b[{}A", geometry.end.row - geometry.cursor.row);
         }
         print!("\r");
-        let line_start = buf[..cursor]
-            .iter()
-            .rposition(|c| *c == '\n')
-            .map(|i| i + 1)
-            .unwrap_or(0);
-        let prompt_width = if cursor_row == 0 {
-            visible_width(prompt)
-        } else {
-            visible_width(&continuation)
-        };
-        let column = prompt_width + cursor - line_start;
-        if column > 0 {
-            print!("\x1b[{}C", column);
+        if geometry.cursor.column > 0 {
+            print!("\x1b[{}C", geometry.cursor.column);
         }
         io::stdout().flush().ok();
-        self.rows = end_row + 1;
-        self.cursor_row = cursor_row;
+        self.rows = geometry.rows;
+        self.cursor_row = geometry.cursor.row;
     }
 
     fn finish(&mut self) {
@@ -608,8 +653,49 @@ impl EditorDisplay {
     }
 }
 
-fn visible_width(text: &str) -> usize {
-    let mut width = 0;
+fn display_geometry(
+    prompt: &str,
+    continuation: &str,
+    buf: &[char],
+    cursor: usize,
+    ghost: Option<&str>,
+    terminal_width: usize,
+) -> DisplayGeometry {
+    let mut position = DisplayPosition::default();
+    write_display_text(&mut position, prompt, terminal_width);
+    let mut cursor_position = if cursor == 0 { Some(position) } else { None };
+    for (index, ch) in buf.iter().enumerate() {
+        if *ch == '\n' {
+            position.newline();
+            write_display_text(&mut position, continuation, terminal_width);
+        } else {
+            position.write_cells(
+                jet_foundation::Diagnostics::display_char_width(*ch),
+                terminal_width,
+            );
+        }
+        if index + 1 == cursor {
+            cursor_position = Some(position);
+        }
+    }
+    if cursor == buf.len() {
+        if let Some(ghost) = ghost {
+            for ch in ghost.chars() {
+                position.write_cells(
+                    jet_foundation::Diagnostics::display_char_width(ch),
+                    terminal_width,
+                );
+            }
+        }
+    }
+    DisplayGeometry {
+        rows: position.row + 1,
+        cursor: cursor_position.unwrap_or(position),
+        end: position,
+    }
+}
+
+fn write_display_text(position: &mut DisplayPosition, text: &str, terminal_width: usize) {
     let mut escape = false;
     for ch in text.chars() {
         if escape {
@@ -619,10 +705,46 @@ fn visible_width(text: &str) -> usize {
         } else if ch == '\x1b' {
             escape = true;
         } else {
-            width += 1;
+            position.write_cells(
+                jet_foundation::Diagnostics::display_char_width(ch),
+                terminal_width,
+            );
         }
     }
-    width
+}
+
+#[cfg(test)]
+mod display_tests {
+    use super::*;
+
+    #[test]
+    fn geometry_counts_wide_and_combining_cells_across_soft_wrap() {
+        let buf: Vec<char> = "界界e\u{301}".chars().collect();
+        let geometry = display_geometry("> ", "· ", &buf, 2, None, 6);
+        assert_eq!(geometry.rows, 2);
+        assert_eq!(geometry.cursor.row, 0);
+        assert_eq!(geometry.cursor.column, 5);
+        assert!(geometry.cursor.pending_wrap);
+        assert_eq!(geometry.end.row, 1);
+        assert_eq!(geometry.end.column, 1);
+    }
+
+    #[test]
+    fn geometry_combines_explicit_newlines_and_soft_wraps() {
+        let buf: Vec<char> = "abcd\n界x".chars().collect();
+        let geometry = display_geometry("> ", "· ", &buf, buf.len(), None, 6);
+        assert_eq!(geometry.rows, 2);
+        assert_eq!(geometry.cursor.row, 1);
+        assert_eq!(geometry.cursor.column, 5);
+    }
+
+    #[test]
+    fn geometry_wraps_prompt_cells_at_narrow_width() {
+        let geometry = display_geometry("1234", "· ", &[], 0, None, 3);
+        assert_eq!(geometry.rows, 2);
+        assert_eq!(geometry.cursor.row, 1);
+        assert_eq!(geometry.cursor.column, 1);
+    }
 }
 
 /// Tab completion: bare-identifier prefix over session bindings/functions,
