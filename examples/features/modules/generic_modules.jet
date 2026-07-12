@@ -3,21 +3,28 @@
 // A generic module is a module template parameterised by types and values.
 // `module Cache<K>` defines the template; `module IntCache = Cache<Int>`
 // instantiates it, producing a concrete module with all type params resolved.
-module Cache<K> {
+module Cache<K, capacity: Int> {
     pub fn key_of(k: K) -> String {
+        value: K := k
         return "key"
     }
 
     pub fn describe() -> String {
         return "generic cache"
     }
+
+    pub fn size() -> Int {
+        return capacity
+    }
 }
 
-module IntCache = Cache<Int>
+module IntCache = Cache<Int, 32>
 
 fn run() {
     k :: IntCache__key_of(42)
     d :: IntCache__describe()
+    n :: IntCache__size()
     print(k)
     print(d)
+    print(n)
 }

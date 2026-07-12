@@ -441,6 +441,9 @@ duplicate this — it is the one surface for lint walls (I8).
 | E0853 | sema  | D-GENMOD2=A: value argument has wrong type |
 | E0854 | sema  | D-GENMOD2=A: generic module body contains non-fn item (MVP restriction) |
 | E0855 | sema  | D-GENMOD2=A: circular module alias instantiation |
+| E0856 | sema  | D-GENMOD-VALUE1=A: generic-module value parameter uses a non-Tier-0 type |
+| E0857 | sema  | D-GENMOD-VALUE1=A: generic-module value argument is not a closed compile-time value |
+| E0859 | compiler | D-GENMOD-IDENTITY1=A: distinct generic-module full keys produced one fingerprint (ICE 101) |
 | E0901 | sema  | method needs a generic bound |
 | E0902 | sema  | orphan `impl` (neither type nor trait local) |
 | E0903 | sema  | hand-written built-in trait impl staged |

@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 520,
-    "rev": 4707,
+    "rev": 4709,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -1007,6 +1007,11 @@
       "plan": "Plan: docs/sidequests/generic-modules.md. D-GENMOD1=A + D-GENMOD2=A shipped: parser/sema expansion, E0850–E0854, example 170_generic_modules.jet, ui snapshots.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-12",
+          "by": "codex-orchestrator",
+          "text": "[progress] VALUE1 slice landed: parser now handles identifier-led closed module arguments and > terminator; annotation resolution is casing-independent; E0853/E0856/E0857 plus UI fixtures added. Parent parser regression 2/2 green. Sema/UI execution presently blocked by unrelated ApiFreeze Func.inline_foreign initializer. Same Terra continuing full-body specialization; no card switch."
+        },
         {
           "at": "2026-07-12",
           "by": "codex-orchestrator",
@@ -8283,11 +8288,11 @@
         {
           "n": 3,
           "text": "Slice 3: jet root package no longer references jetpack directly outside Bin shims/CLI dispatch; compatibility forms route with teaching/provenance messages",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "terra-367b-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-12T18:09:41.720Z"
+          "evidence": "Removed Source/lib.rs's blanket 'pub use jetpack as Jetpack' re-export (D-PRODUCT-SPLIT1=C). Read-only model needs (PackageManifest, Manifest, ScriptDeps, Lock, CBind, CFFI, FFI) plus pure policy computation (EffectBudget, LintPolicy -- verified zero network/provider/shell code, only depend on AST/Sema/Diagnostics/PackageManifest/Lock, all already in jet-pkg-model) moved crates/jetpack/src/{EffectBudget,LintPolicy}.rs -> crates/jet-pkg-model/src/, re-exported jetpack-side under historical paths, threaded through jet-driver's existing jet_pkg_model re-export into Source/lib.rs's jet_driver re-export list (Store renamed to PkgStore to avoid clash with Source's own build-cache crate::Store). Source/CmdCompile.rs and Source/main.rs (bin crate) now reference jet::PackageManifest/Manifest/ScriptDeps/EffectBudget/LintPolicy/PkgStore instead of jet::Jetpack::X. CmdCompile.rs is now 100% clear of jetpack:: references. Genuine engine calls that don't have a model home yet stay direct jetpack::X (Overlay in lib.rs; WorkspaceFile/JetPin/ScriptLock in main.rs; Discovery in LSP/Completion.rs+Server.rs) -- tracked exactly by tests/workspace_crates.rs::direct_jetpack_imports_stay_behind_known_boundaries, which now also catches main.rs (a pre-existing jet::Jetpack:: coupling the old regex blind-spotted) while Canvas/query_actions.rs dropped off the list entirely (fully clean). All ~90 test-file call sites across tests/*.rs that used jet::Jetpack::X were fixed to jetpack::X (mechanical, same target functions, tests already depend on the jetpack crate directly).\nEvidence: cargo build --workspace clean. cargo test --test workspace_crates: 3/3 ok. cargo test --test pkg: 136/136 ok. cargo test -p jetpack --lib: 319 ok/1 known-pre-existing-fail (Shell::tests::fish_prompt_pty_reports_real_command_receipts_when_available, matches told collision list). cargo test -p jet-pkg-model --lib: 123/123 ok (incl. LintPolicy::tests::* in new location). cargo test --test cli: 65/67 ok (2 known external fails: completions_generate_for_every_shell, man_page_golden -- matches told collision). cargo test --test canvas: 56/56 ok. cargo test --test lsp: 40/40 ok. Fresh-binary smoke after rm -rf ~/.cache/jet/build: jet run hello.jet -> \"hello, world\"; jetpack help -> prints; jetos (no args) -> usage line. docs/spec/architecture.md updated with jetos crate row + slice-3 routing description.",
+          "at": "2026-07-12T18:56:54.150Z"
         },
         {
           "n": 4,
@@ -33225,6 +33230,20 @@
   ],
   "events": [
     {
+      "at": "2026-07-12T18:56:54.150Z",
+      "by": "terra-367b-builder",
+      "action": "card.criteria-meet",
+      "ref": "c_audit_367_q80zrm",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-12T18:53:38.499Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c1jixkit",
+      "note": "phase,logEntry"
+    },
+    {
       "at": "2026-07-12T18:49:19.908Z",
       "by": "claude-main",
       "action": "card.update",
@@ -36709,20 +36728,6 @@
       "action": "card.criteria-add",
       "ref": "c0k0v4gj",
       "note": "#2 core.compress is the only public home for gzip and zstd byte"
-    },
-    {
-      "at": "2026-07-12T06:36:39.951Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0df169q",
-      "note": "phase,assignee,logEntry"
-    },
-    {
-      "at": "2026-07-12T06:36:24.568Z",
-      "by": "card296-audit",
-      "action": "card.criteria-verify",
-      "ref": "c0df169q",
-      "note": "#8"
     }
   ],
   "nextNum": 368,

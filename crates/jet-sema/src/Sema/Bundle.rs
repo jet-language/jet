@@ -5,7 +5,7 @@ use crate::Traits::TraitRegistry;
 use crate::AST::{
     CodeModule, ConstAttr, ElseBranch, EnumDef, EnumLitArg, Expr, ForKind, Func, GenericModuleDef,
     GenericModuleParam, IfStmt, ImportKind, Item, LValue, LambdaBody, ModuleAliasDef, ModuleArg,
-    OrFallback, Param, ProgramBundle, RustConstKind, Stmt, StrPart, Type, VariantPayload,
+    OrFallback, ProgramBundle, RustConstKind, Stmt, StrPart, Type, VariantPayload,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -119,107 +119,361 @@ fn normalize_sem_path(path: &Path) -> PathBuf {
 // GenericModule/ModuleAlias items are then erased. This runs before
 // `mangle_inline_sibling_calls` so the expanded body is visible to that pass.
 
-/// Substitute every occurrence of `param_name` in `ty` with `replacement`.
-fn substitute_type(ty: Type, param_name: &str, replacement: &Type) -> Type {
-    match ty {
-        Type::Named(ref n) if n == param_name => replacement.clone(),
-        Type::Named(_) => ty,
-        Type::List(inner) => Type::List(Box::new(substitute_type(*inner, param_name, replacement))),
-        Type::Map {
-            key,
-            key_span,
-            value,
-        } => Type::Map {
-            key: Box::new(substitute_type(*key, param_name, replacement)),
-            key_span,
-            value: Box::new(substitute_type(*value, param_name, replacement)),
+fn ct_value_expr(value: &crate::AST::CtValue, span: crate::Diagnostics::Span) -> Expr {
+    match value {
+        crate::AST::CtValue::Bool(v) => Expr::Bool(*v, span),
+        crate::AST::CtValue::Int(v) => Expr::Int(*v, span, None),
+        crate::AST::CtValue::Char(v) => Expr::Char(*v, span),
+        crate::AST::CtValue::Str(v) => Expr::Str(vec![StrPart::Lit(v.clone())], span),
+        crate::AST::CtValue::Enum {
+            type_name,
+            variant,
+            args,
+        } if args.is_empty() => Expr::EnumLit {
+            type_name: type_name.clone(),
+            variant: variant.clone(),
+            args: Vec::new(),
+            span,
         },
-        Type::Shared(inner) => {
-            Type::Shared(Box::new(substitute_type(*inner, param_name, replacement)))
-        }
-        Type::Option(inner) => {
-            Type::Option(Box::new(substitute_type(*inner, param_name, replacement)))
-        }
-        Type::Result { ok, err } => Type::Result {
-            ok: Box::new(substitute_type(*ok, param_name, replacement)),
-            err: Box::new(substitute_type(*err, param_name, replacement)),
-        },
-        Type::Fn {
-            params,
-            ret,
-            effect_bound,
-        } => Type::Fn {
-            params: params
-                .into_iter()
-                .map(|t| substitute_type(t, param_name, replacement))
-                .collect(),
-            ret: ret.map(|r| Box::new(substitute_type(*r, param_name, replacement))),
-            effect_bound,
-        },
-        Type::Apply { name, args } => Type::Apply {
-            name,
-            args: args
-                .into_iter()
-                .map(|t| substitute_type(t, param_name, replacement))
-                .collect(),
-        },
-        Type::Tuple(parts) => Type::Tuple(
-            parts
-                .into_iter()
-                .map(|(n, t)| (n, Box::new(substitute_type(*t, param_name, replacement))))
-                .collect(),
-        ),
-        Type::FixedList { elem, len } => Type::FixedList {
-            elem: Box::new(substitute_type(*elem, param_name, replacement)),
-            len,
-        },
-        Type::Tagged { marker, inner } => Type::Tagged {
-            marker,
-            inner: Box::new(substitute_type(*inner, param_name, replacement)),
-        },
-        // Primitives and opaque variants carry no nested Type.
-        other => other,
+        _ => unreachable!("generic-module value domain was checked before substitution"),
     }
 }
 
-fn substitute_type_in_param(mut p: Param, param_name: &str, replacement: &Type) -> Param {
-    p.ty = substitute_type(p.ty, param_name, replacement);
-    p
+fn substitute_expr(
+    expr: &mut Expr,
+    types: &HashMap<String, Type>,
+    values: &HashMap<String, crate::AST::CtValue>,
+) {
+    if let Expr::Ident(name, span) = expr {
+        if let Some(value) = values.get(name) {
+            *expr = ct_value_expr(value, *span);
+            return;
+        }
+    }
+    match expr {
+        Expr::Ident(..)
+        | Expr::Char(..)
+        | Expr::Int(..)
+        | Expr::Float(..)
+        | Expr::Bool(..)
+        | Expr::Absent(..)
+        | Expr::ReduceMarker(..)
+        | Expr::Todo { .. }
+        | Expr::UnitLit { .. }
+        | Expr::ComptimeSplice { .. }
+        | Expr::StrMatchLit(..) => {}
+        Expr::Str(parts, _) => parts.iter_mut().for_each(|part| {
+            if let StrPart::Interp(inner, _) = part {
+                substitute_expr(inner, types, values);
+            }
+        }),
+        Expr::Call(call) => {
+            call.args
+                .iter_mut()
+                .for_each(|arg| substitute_expr(&mut arg.expr, types, values));
+        }
+        Expr::Unary(_, inner, _)
+        | Expr::IncDec { operand: inner, .. }
+        | Expr::Deref(inner, _)
+        | Expr::RawOf(inner, _)
+        | Expr::Copy(inner, _)
+        | Expr::Field(inner, _, _)
+        | Expr::Tainted(inner, _)
+        | Expr::Present(inner, _)
+        | Expr::Ok(inner, _)
+        | Expr::Err(inner, _)
+        | Expr::Try(inner, _, _)
+        | Expr::Paren(inner, _)
+        | Expr::Spread(inner, _) => substitute_expr(inner, types, values),
+        Expr::OptField { base, .. } => substitute_expr(base, types, values),
+        Expr::MethodCall {
+            receiver,
+            type_args,
+            args,
+            resolved_ret,
+            ..
+        } => {
+            substitute_expr(receiver, types, values);
+            for ty in type_args {
+                *ty = crate::Generics::substitute_type(ty, types);
+            }
+            if let Some(ty) = resolved_ret {
+                *ty = crate::Generics::substitute_type(ty, types);
+            }
+            args.iter_mut()
+                .for_each(|arg| substitute_expr(&mut arg.expr, types, values));
+        }
+        Expr::StructLit {
+            type_args, fields, ..
+        } => {
+            for ty in type_args {
+                *ty = crate::Generics::substitute_type(ty, types);
+            }
+            fields
+                .iter_mut()
+                .for_each(|(_, _, value)| substitute_expr(value, types, values));
+        }
+        Expr::EnumLit { args, .. } => args.iter_mut().for_each(|arg| match arg {
+            EnumLitArg::Positional(value) | EnumLitArg::Named { expr: value, .. } => {
+                substitute_expr(value, types, values)
+            }
+        }),
+        Expr::OrFallback {
+            value, fallback, ..
+        } => {
+            substitute_expr(value, types, values);
+            match fallback {
+                OrFallback::Value(value) | OrFallback::Return(Some(value), _) => {
+                    substitute_expr(value, types, values)
+                }
+                OrFallback::Panic { args, .. } => args
+                    .iter_mut()
+                    .for_each(|arg| substitute_expr(&mut arg.expr, types, values)),
+                OrFallback::Return(None, _)
+                | OrFallback::Break(_)
+                | OrFallback::Continue(_) => {}
+            }
+        }
+        Expr::PatternTest { subject, .. } => substitute_expr(subject, types, values),
+        Expr::Binary(_, left, right, _) => {
+            substitute_expr(left, types, values);
+            substitute_expr(right, types, values);
+        }
+        Expr::CompareChain { operands, .. } | Expr::ListLit(operands, _) => operands
+            .iter_mut()
+            .for_each(|value| substitute_expr(value, types, values)),
+        Expr::TupleLit(fields, _, inferred) => {
+            fields
+                .iter_mut()
+                .for_each(|(_, value)| substitute_expr(value, types, values));
+            if let Some(ty) = inferred {
+                *ty = crate::Generics::substitute_type(ty, types);
+            }
+        }
+        Expr::MapLit(entries, _) => entries.iter_mut().for_each(|(key, value)| {
+            substitute_expr(key, types, values);
+            substitute_expr(value, types, values);
+        }),
+        Expr::Index { base, index, .. } => {
+            substitute_expr(base, types, values);
+            substitute_expr(index, types, values);
+        }
+        Expr::Slice {
+            base, start, end, ..
+        } => {
+            substitute_expr(base, types, values);
+            substitute_expr(start, types, values);
+            substitute_expr(end, types, values);
+        }
+        Expr::CallValue { callee, args, .. } => {
+            substitute_expr(callee, types, values);
+            args.iter_mut()
+                .for_each(|arg| substitute_expr(&mut arg.expr, types, values));
+        }
+        Expr::Lambda(lambda) => {
+            for param in &mut lambda.params {
+                if let Some(ty) = &mut param.ty {
+                    *ty = crate::Generics::substitute_type(ty, types);
+                }
+            }
+            match &mut lambda.body {
+                LambdaBody::Expr(value) => substitute_expr(value, types, values),
+                LambdaBody::Block(body) => substitute_stmts(body, types, values),
+            }
+        }
+        Expr::If {
+            cond,
+            then_body,
+            then_value,
+            else_body,
+            else_value,
+            ..
+        } => {
+            substitute_expr(cond, types, values);
+            substitute_stmts(then_body, types, values);
+            substitute_expr(then_value, types, values);
+            substitute_stmts(else_body, types, values);
+            substitute_expr(else_value, types, values);
+        }
+        Expr::PtrFromAddr { elem, addr, .. } => {
+            *elem = crate::Generics::substitute_type(elem, types);
+            substitute_expr(addr, types, values);
+        }
+        Expr::FanOut { callee, items, .. } => {
+            substitute_expr(callee, types, values);
+            items
+                .iter_mut()
+                .for_each(|value| substitute_expr(value, types, values));
+        }
+    }
 }
 
-fn substitute_type_in_func(mut f: Func, param_name: &str, replacement: &Type) -> Func {
-    f.params = f
-        .params
-        .into_iter()
-        .map(|p| substitute_type_in_param(p, param_name, replacement))
-        .collect();
-    if let Some(ret) = f.return_type {
-        f.return_type = Some(substitute_type(ret, param_name, replacement));
+fn substitute_if(
+    branch: &mut IfStmt,
+    types: &HashMap<String, Type>,
+    values: &HashMap<String, crate::AST::CtValue>,
+) {
+    substitute_expr(&mut branch.cond, types, values);
+    substitute_stmts(&mut branch.then_body, types, values);
+    match &mut branch.else_branch {
+        Some(ElseBranch::ElseIf(next)) => substitute_if(next, types, values),
+        Some(ElseBranch::Else(body)) => substitute_stmts(body, types, values),
+        None => {}
     }
-    // Body stmt-level substitution is not done here — the sema checker resolves
-    // type names from declarations, so only signature types need substitution.
-    f
+}
+
+fn substitute_stmts(
+    stmts: &mut [Stmt],
+    types: &HashMap<String, Type>,
+    values: &HashMap<String, crate::AST::CtValue>,
+) {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Expr(value) | Stmt::Yield(value, _) => substitute_expr(value, types, values),
+            Stmt::Val(binding) => {
+                if let Some(ty) = &mut binding.ty {
+                    *ty = crate::Generics::substitute_type(ty, types);
+                }
+                substitute_expr(&mut binding.init, types, values);
+            }
+            Stmt::Assign { value, .. } | Stmt::Return(Some(value), _) => {
+                substitute_expr(value, types, values)
+            }
+            Stmt::Return(None, _)
+            | Stmt::Break(_)
+            | Stmt::Continue(_)
+            | Stmt::BreakLabel(..)
+            | Stmt::ContinueLabel(..) => {}
+            Stmt::If(branch) => substitute_if(branch, types, values),
+            Stmt::While { cond, body, .. } => {
+                substitute_expr(cond, types, values);
+                substitute_stmts(body, types, values);
+            }
+            Stmt::For { kind, body, .. } => {
+                match kind {
+                    ForKind::Range { start, end, step } => {
+                        substitute_expr(start, types, values);
+                        substitute_expr(end, types, values);
+                        if let Some(step) = step {
+                            substitute_expr(step, types, values);
+                        }
+                    }
+                    ForKind::In { collection } => substitute_expr(collection, types, values),
+                }
+                substitute_stmts(body, types, values);
+            }
+            Stmt::Switch {
+                subject,
+                arms,
+                else_body,
+                ..
+            }
+            | Stmt::ComptimeSwitch {
+                subject,
+                arms,
+                else_body,
+                ..
+            } => {
+                substitute_expr(subject, types, values);
+                for arm in arms {
+                    substitute_expr(&mut arm.cond, types, values);
+                    substitute_stmts(&mut arm.body, types, values);
+                }
+                if let Some(body) = else_body {
+                    substitute_stmts(body, types, values);
+                }
+            }
+            Stmt::CountedLoop {
+                init,
+                cond,
+                step,
+                body,
+                ..
+            } => {
+                if let Some(ty) = &mut init.ty {
+                    *ty = crate::Generics::substitute_type(ty, types);
+                }
+                substitute_expr(&mut init.init, types, values);
+                substitute_expr(cond, types, values);
+                substitute_stmts(std::slice::from_mut(step), types, values);
+                substitute_stmts(body, types, values);
+            }
+            Stmt::Loop { body, .. }
+            | Stmt::Unsafe { body, .. }
+            | Stmt::Impure { body, .. }
+            | Stmt::Reactive { body, .. }
+            | Stmt::Shield { body, .. }
+            | Stmt::Off { body, .. }
+            | Stmt::DebugOnly { body, .. }
+            | Stmt::Region { body, .. }
+            | Stmt::TaskGroup { body, .. }
+            | Stmt::Layout { body, .. }
+            | Stmt::Caps { body, .. }
+            | Stmt::Grant { body, .. }
+            | Stmt::Transact { body, .. }
+            | Stmt::AssumeDet { body, .. }
+            | Stmt::ComptimeBlock { body, .. }
+            | Stmt::Live { body, .. }
+            | Stmt::ScopeMember { body, .. } => substitute_stmts(body, types, values),
+            Stmt::ComptimeIf {
+                cond,
+                then_body,
+                else_body,
+                ..
+            } => {
+                substitute_expr(cond, types, values);
+                substitute_stmts(then_body, types, values);
+                if let Some(body) = else_body {
+                    substitute_stmts(body, types, values);
+                }
+            }
+            Stmt::ContextBlock { fields, body, .. } => {
+                fields
+                    .iter_mut()
+                    .for_each(|(_, value, _)| substitute_expr(value, types, values));
+                substitute_stmts(body, types, values);
+            }
+        }
+    }
+}
+
+fn specialize_func(
+    mut func: Func,
+    params: &[ResolvedModuleParam],
+    args: &[ResolvedModuleArg],
+) -> Func {
+    let mut types = HashMap::new();
+    let mut values = HashMap::new();
+    for (param, arg) in params.iter().zip(args) {
+        match (param, arg) {
+            (ResolvedModuleParam::Type { name, .. }, ResolvedModuleArg::Type(ty)) => {
+                types.insert(name.clone(), ty.clone());
+            }
+            (ResolvedModuleParam::Value { name, .. }, ResolvedModuleArg::Value(value, bytes)) => {
+                let _ = bytes;
+                values.insert(name.clone(), value.clone());
+            }
+            _ => {}
+        }
+    }
+    for param in &mut func.params {
+        param.ty = crate::Generics::substitute_type(&param.ty, &types);
+        if let Some(default) = &mut param.default {
+            substitute_expr(default, &types, &values);
+        }
+    }
+    if let Some(ret) = &mut func.return_type {
+        *ret = crate::Generics::substitute_type(ret, &types);
+    }
+    substitute_stmts(&mut func.body, &types, &values);
+    func
 }
 
 #[derive(Clone)]
-enum ResolvedModuleParam { Type { name:String, bound:Option<String> }, Value { name:String, ty:Type } }
-
-fn apply_type_args_to_func(f: Func, params: &[ResolvedModuleParam], args: &[ResolvedModuleArg]) -> Func {
-    let mut out = f;
-    for (param, arg) in params.iter().zip(args.iter()) {
-        match (param, arg) {
-            (ResolvedModuleParam::Type { name, .. }, ResolvedModuleArg::Type(ty)) => {
-                out = substitute_type_in_func(out, name, ty);
-            }
-            (ResolvedModuleParam::Value { .. }, ResolvedModuleArg::Value(value, bytes)) => {
-                // Value arguments affect template identity/caching, not function
-                // signature substitution. Keep both checked representations live.
-                let _ = (value, bytes);
-            }
-            _ => {} // value params are left as-is for now (would need const-eval)
-        }
-    }
-    out
+enum ResolvedModuleParam {
+    Type { name: String, bound: Option<String> },
+    Value { name: String, ty: Type },
+    Invalid,
 }
 
 /// A cloned-and-filtered view of a generic module template.
@@ -234,7 +488,58 @@ struct TemplateInfo {
 #[derive(Clone)]
 enum ResolvedModuleArg { Type(Type), Value(crate::AST::CtValue, Vec<u8>) }
 
-fn resolve_params(def:&GenericModuleDef,traits:&TraitRegistry)->Vec<ResolvedModuleParam>{def.params.iter().map(|p|match p{GenericModuleParam::Bare{name,..}=>ResolvedModuleParam::Type{name:name.clone(),bound:None},GenericModuleParam::Annotated{name,annotation,..}=>{if let Type::Named(bound)=annotation{if traits.traits.contains_key(bound){return ResolvedModuleParam::Type{name:name.clone(),bound:Some(bound.clone())};}}ResolvedModuleParam::Value{name:name.clone(),ty:annotation.clone()}}}).collect()}
+fn resolve_params(
+    def: &GenericModuleDef,
+    traits: &TraitRegistry,
+    enums: &HashMap<String, bool>,
+    diags: &mut Vec<Diagnostic>,
+) -> Vec<ResolvedModuleParam> {
+    def.params
+        .iter()
+        .map(|param| match param {
+            GenericModuleParam::Bare { name, .. } => ResolvedModuleParam::Type {
+                name: name.clone(),
+                bound: None,
+            },
+            GenericModuleParam::Annotated {
+                name,
+                name_span,
+                annotation,
+            } => {
+                if let Type::Named(bound) = annotation {
+                    if traits.traits.contains_key(bound) {
+                        return ResolvedModuleParam::Type {
+                            name: name.clone(),
+                            bound: Some(bound.clone()),
+                        };
+                    }
+                }
+                let allowed = matches!(annotation, Type::Bool | Type::Int | Type::Char | Type::String)
+                    || matches!(annotation, Type::Named(n) if enums.get(n).copied() == Some(true));
+                if allowed {
+                    ResolvedModuleParam::Value {
+                        name: name.clone(),
+                        ty: annotation.clone(),
+                    }
+                } else {
+                    diags.push(Diagnostic::error(
+                        "E0856",
+                        format!(
+                            "generic module value parameter `{name}` uses unsupported type `{}`",
+                            type_name(annotation)
+                        ),
+                        "value parameters admit only Bool, Int, Char, String, or a fieldless enum"
+                            .to_string(),
+                        "use a Tier-0 value type, or make this an unannotated type parameter"
+                            .to_string(),
+                        Some(*name_span),
+                    ));
+                    ResolvedModuleParam::Invalid
+                }
+            }
+        })
+        .collect()
+}
 
 fn type_name(ty:&Type)->String{match ty{Type::Int=>"Int".into(),Type::Bool=>"Bool".into(),Type::Char=>"Char".into(),Type::String=>"String".into(),Type::Named(n)=>n.clone(),Type::Apply{name,..}=>name.clone(),other=>format!("{other:?}")}}
 fn value_type(value:&crate::AST::CtValue)->Option<Type>{match value{crate::AST::CtValue::Bool(_)=>Some(Type::Bool),crate::AST::CtValue::Int(_)=>Some(Type::Int),crate::AST::CtValue::Char(_)=>Some(Type::Char),crate::AST::CtValue::Str(_)=>Some(Type::String),crate::AST::CtValue::Enum{type_name,args,..}if args.is_empty()=>Some(Type::Named(type_name.clone())),_=>None}}
@@ -242,7 +547,107 @@ fn normalized_value(value:&crate::AST::CtValue)->Option<Vec<u8>>{let mut out=Vec
 
 fn module_arg_expr(arg:&ModuleArg)->Option<Expr>{match arg{ModuleArg::Value(expr,_)=>Some(expr.clone()),ModuleArg::Type(Type::Named(name),span)=>Some(Expr::Ident(name.clone(),*span)),_=>None}}
 
-fn resolve_args(alias:&ModuleAliasDef,template:&TemplateInfo,traits:&TraitRegistry,funcs:&HashMap<String,&Func>,globals:&HashMap<String,crate::AST::CtValue>,enums:&HashMap<String,bool>,diags:&mut Vec<Diagnostic>)->Option<Vec<ResolvedModuleArg>>{let mut out=Vec::new();for(param,arg)in template.params.iter().zip(&alias.args){match param{ResolvedModuleParam::Type{name,bound}=>{let ty=match arg{ModuleArg::Type(ty,_)=>ty.clone(),ModuleArg::Value(Expr::Ident(n,_),_)=>Type::Named(n.clone()),_=>{diags.push(Diagnostic::error("E0852",format!("type argument for `{name}` does not satisfy its module bound"),"this slot resolves to a type parameter, but the argument is a value expression".into(),"pass a type that satisfies the declared bound".into(),Some(arg.span())));return None;}};if let Some(bound)=bound{let identity=type_name(&ty);if !traits.implements_trait(&identity,bound){diags.push(Diagnostic::error("E0852",format!("type argument `{identity}` does not satisfy `{bound}`"),format!("generic module parameter `{name}` requires the `{bound}` bound"),format!("pass a type that implements `{bound}`"),Some(arg.span())));return None;}}out.push(ResolvedModuleArg::Type(ty));},ResolvedModuleParam::Value{name,ty}=>{let Some(expr)=module_arg_expr(arg)else{diags.push(Diagnostic::error("E0853",format!("value argument for `{name}` has the wrong type"),format!("this slot requires an exact `{}` Tier-0 value",type_name(ty)),format!("pass a compile-time `{}` value without conversion",type_name(ty)),Some(arg.span())));return None;};let value=match crate::Comptime::evaluate(&expr,funcs,&HashSet::new(),Path::new("."),globals){Ok(v)=>v,Err(_)=>{diags.push(Diagnostic::error("E0853",format!("value argument for `{name}` has the wrong type"),format!("the argument did not evaluate to an exact `{}` Tier-0 value",type_name(ty)),format!("pass a pure compile-time `{}` value",type_name(ty)),Some(arg.span())));return None;}};let actual=value_type(&value);let allowed=match ty{Type::Bool|Type::Int|Type::Char|Type::String=>true,Type::Named(n)=>enums.get(n).copied()==Some(true),_=>false};if !allowed||actual.as_ref()!=Some(ty){diags.push(Diagnostic::error("E0853",format!("value argument for `{name}` has the wrong type"),format!("expected exact `{}`, found `{}`",type_name(ty),actual.as_ref().map(type_name).unwrap_or_else(||"non-Tier-0 value".into())),format!("pass a compile-time `{}` value without conversion",type_name(ty)),Some(arg.span())));return None;}let bytes=normalized_value(&value).expect("allowed Tier-0 value normalizes");out.push(ResolvedModuleArg::Value(value,bytes));}}}Some(out)}
+fn resolve_args(
+    alias: &ModuleAliasDef,
+    template: &TemplateInfo,
+    traits: &TraitRegistry,
+    funcs: &HashMap<String, &Func>,
+    globals: &HashMap<String, crate::AST::CtValue>,
+    enums: &HashMap<String, bool>,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<Vec<ResolvedModuleArg>> {
+    let mut out = Vec::new();
+    for (param, arg) in template.params.iter().zip(&alias.args) {
+        match param {
+            ResolvedModuleParam::Invalid => return None,
+            ResolvedModuleParam::Type { name, bound } => {
+                let ty = match arg {
+                    ModuleArg::Type(ty, _) => ty.clone(),
+                    ModuleArg::Value(Expr::Ident(n, _), _) => Type::Named(n.clone()),
+                    _ => {
+                        diags.push(Diagnostic::error(
+                            "E0852",
+                            format!("type argument for `{name}` does not satisfy its module bound"),
+                            "this slot resolves to a type parameter, but the argument is a value expression".into(),
+                            "pass a type that satisfies the declared bound".into(),
+                            Some(arg.span()),
+                        ));
+                        return None;
+                    }
+                };
+                if let Some(bound) = bound {
+                    let identity = type_name(&ty);
+                    if !traits.implements_trait(&identity, bound) {
+                        diags.push(Diagnostic::error(
+                            "E0852",
+                            format!("type argument `{identity}` does not satisfy `{bound}`"),
+                            format!("generic module parameter `{name}` requires the `{bound}` bound"),
+                            format!("pass a type that implements `{bound}`"),
+                            Some(arg.span()),
+                        ));
+                        return None;
+                    }
+                }
+                out.push(ResolvedModuleArg::Type(ty));
+            }
+            ResolvedModuleParam::Value { name, ty } => {
+                let Some(expr) = module_arg_expr(arg) else {
+                    diags.push(Diagnostic::error(
+                        "E0853",
+                        format!("value argument for `{name}` has the wrong type"),
+                        format!("this slot requires an exact `{}` Tier-0 value", type_name(ty)),
+                        format!("pass a compile-time `{}` value without conversion", type_name(ty)),
+                        Some(arg.span()),
+                    ));
+                    return None;
+                };
+                let value = match crate::Comptime::evaluate(
+                    &expr,
+                    funcs,
+                    &HashSet::new(),
+                    Path::new("."),
+                    globals,
+                ) {
+                    Ok(value) => value,
+                    Err(_) => {
+                        diags.push(Diagnostic::error(
+                            "E0857",
+                            format!("value argument for `{name}` is not known at compile time"),
+                            "generic module instances need one closed, deterministic Tier-0 value"
+                                .to_string(),
+                            format!("pass a literal or comptime `{}` value", type_name(ty)),
+                            Some(arg.span()),
+                        ));
+                        return None;
+                    }
+                };
+                let actual = value_type(&value);
+                let allowed = matches!(ty, Type::Bool | Type::Int | Type::Char | Type::String)
+                    || matches!(ty, Type::Named(n) if enums.get(n).copied() == Some(true));
+                if !allowed || actual.as_ref() != Some(ty) {
+                    diags.push(Diagnostic::error(
+                        "E0853",
+                        format!("value argument for `{name}` has the wrong type"),
+                        format!(
+                            "expected exact `{}`, found `{}`",
+                            type_name(ty),
+                            actual
+                                .as_ref()
+                                .map(type_name)
+                                .unwrap_or_else(|| "non-Tier-0 value".into())
+                        ),
+                        format!("pass a compile-time `{}` value without conversion", type_name(ty)),
+                        Some(arg.span()),
+                    ));
+                    return None;
+                }
+                let bytes = normalized_value(&value).expect("allowed Tier-0 value normalizes");
+                out.push(ResolvedModuleArg::Value(value, bytes));
+            }
+        }
+    }
+    Some(out)
+}
 
 trait ModuleArgSpan{fn span(&self)->crate::Diagnostics::Span;}impl ModuleArgSpan for ModuleArg{fn span(&self)->crate::Diagnostics::Span{match self{ModuleArg::Type(_,s)|ModuleArg::Value(_,s)=>*s}}}
 
@@ -321,7 +726,7 @@ fn expand_alias(
         .iter()
         .filter_map(|item| {
             if let Item::Func(f) = item {
-                let expanded = apply_type_args_to_func(f.clone(), &info.params, &resolved_args);
+                let expanded = specialize_func(f.clone(), &info.params, &resolved_args);
                 Some(Item::Func(expanded))
             } else {
                 None // already reported above
@@ -394,7 +799,7 @@ pub(crate) fn expand_generic_module_aliases(
                                 span: gm.span,
                             },
                             non_fn_kinds,
-                            params: resolve_params(gm,&traits),
+                            params: resolve_params(gm, &traits, &enums, diags),
                         },
                     ))
                 } else {

@@ -159,10 +159,16 @@ fn jetpack_dependency_debt_is_explicit_until_product_split() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     // Card #367 / D-PRODUCT-SPLIT1=C slice 1: `jet-driver` moved off
     // `jetpack` onto `jet-pkg-model` (the read-only data model), so it left
-    // this debt list. The root package still bundles `jetpack` (the `jet`
-    // binary embeds `jetpack help`/manifest parsing) — that is slice 3.
-    // `jetos` (slice 2) is expected to depend on `jetpack` until slice 4
-    // splits the JetOS engine out of it.
+    // this debt list. Slice 3 moved the root package's read-only-model
+    // touch points (`PackageManifest`/`Manifest`/`ScriptDeps`/`Lock`/`CBind`/
+    // `CFFI`/`FFI`/`EffectBudget`/`LintPolicy`/hangar-listing `Store`) off
+    // `jetpack` too, onto the same `jet-pkg-model` seam via `jet-driver`'s
+    // re-export — but the root package still bundles `jetpack` itself for
+    // its remaining genuine engine calls (`Overlay`, `WorkspaceFile`,
+    // `ModuleEval`, `JetPin`, `ScriptLock`, `Discovery`) and `jetpack help`/
+    // CLI dispatch, so this row isn't debt to shrink to zero — only to keep
+    // narrow. `jetos` (slice 2) is expected to depend on `jetpack` until
+    // slice 4 splits the JetOS engine out of it.
     let allowed = ["Cargo.toml", "crates/jetos/Cargo.toml"];
     let mut actual = Vec::new();
     for manifest in repo_files_with_suffix("crates", "Cargo.toml")
