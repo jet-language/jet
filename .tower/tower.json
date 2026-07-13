@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 530,
-    "rev": 5048,
+    "rev": 5057,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -13811,13 +13811,51 @@
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "fable-impl-522",
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "watcher restarts process within a few seconds of an edit to Tower/app/*.mjs or tower.mjs (fs.watch, debounced)",
+          "status": "met",
+          "metBy": "fable-impl-522",
+          "verifiedBy": null,
+          "evidence": "smoke-tested: edited Tower/app/lock.mjs on a live tower serve --port 7959; log shows 'source changed -- restarting' then 'new process is up -- handing off', PID changed 3856743->3908665; test/restart.test.mjs (3/3 green)",
+          "at": "2026-07-13T09:10:28.664Z"
+        },
+        {
+          "n": 2,
+          "text": "stale-server banner: served HTML always carries a fresh on-disk version marker; /api/version reports what the process actually loaded; mismatch shows a persistent owner-visible banner",
+          "status": "met",
+          "metBy": "fable-impl-522",
+          "verifiedBy": null,
+          "evidence": "test/server.test.mjs: 'served index.html stamps a live tower-version meta tag' + 'GET /api/version reports start/current/stale' both green; tower.js checkVersion()/setStaleBanner wired to init, poll tick, SSE reconnect",
+          "at": "2026-07-13T09:10:43.920Z"
+        },
+        {
+          "n": 3,
+          "text": "restart-loop guard: if the newly spawned process crashes within the 2s window, the old process falls back to reopening its own server instead of retrying — verified by test/restart.test.mjs",
+          "status": "met",
+          "metBy": "fable-impl-522",
+          "verifiedBy": null,
+          "evidence": "test/restart.test.mjs 'child crashes inside the window -> falls back, does not exit': exitFn never called, reopen() called instead; verified",
+          "at": "2026-07-13T09:10:59.472Z"
+        },
+        {
+          "n": 4,
+          "text": "live server on port 7878 relaunched with the fix and verified responding (curl /api/state + new /api/version)",
+          "status": "met",
+          "metBy": "fable-impl-522",
+          "verifiedBy": null,
+          "evidence": "old PID 3484762 (running stale code, /api/version 404'd) killed; relaunched via nix develop -c node Tower/tower.mjs serve > .tower/server.log 2>&1 & disown (same invocation as before, cwd /home/nate/Projects/Github/jet); new PID 4035624; curl localhost:7878/api/state returns JSON, curl localhost:7878/api/version -> {start:2acfbc62af51,current:2acfbc62af51,stale:false}, index.html carries matching marker",
+          "at": "2026-07-13T09:12:28.335Z"
+        }
+      ],
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-12T23:39:41.196Z",
-      "updated": "2026-07-12"
+      "updated": "2026-07-13",
+      "claimedAt": "2026-07-13T08:52:28.914Z"
     },
     {
       "id": "c0h1r3b8",
@@ -31213,6 +31251,69 @@
   ],
   "events": [
     {
+      "at": "2026-07-13T09:12:28.335Z",
+      "by": "fable-impl-522",
+      "action": "card.criteria-meet",
+      "ref": "c0wf4bxf",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-13T09:10:59.472Z",
+      "by": "fable-impl-522",
+      "action": "card.criteria-meet",
+      "ref": "c0wf4bxf",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-13T09:10:43.920Z",
+      "by": "fable-impl-522",
+      "action": "card.criteria-meet",
+      "ref": "c0wf4bxf",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-13T09:10:28.664Z",
+      "by": "fable-impl-522",
+      "action": "card.criteria-meet",
+      "ref": "c0wf4bxf",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-13T09:08:22.913Z",
+      "by": "fable-impl-522",
+      "action": "card.criteria-add",
+      "ref": "c0wf4bxf",
+      "note": "#4 live server on port 7878 relaunched with the fix and verifie"
+    },
+    {
+      "at": "2026-07-13T09:08:06.982Z",
+      "by": "fable-impl-522",
+      "action": "card.criteria-add",
+      "ref": "c0wf4bxf",
+      "note": "#3 restart-loop guard: if the newly spawned process crashes wit"
+    },
+    {
+      "at": "2026-07-13T09:07:48.980Z",
+      "by": "fable-impl-522",
+      "action": "card.criteria-add",
+      "ref": "c0wf4bxf",
+      "note": "#2 stale-server banner: served HTML always carries a fresh on-d"
+    },
+    {
+      "at": "2026-07-13T09:07:26.198Z",
+      "by": "fable-impl-522",
+      "action": "card.criteria-add",
+      "ref": "c0wf4bxf",
+      "note": "#1 watcher restarts process within a few seconds of an edit to "
+    },
+    {
+      "at": "2026-07-13T08:52:28.915Z",
+      "by": "fable-impl-522",
+      "action": "card.claim",
+      "ref": "c0wf4bxf",
+      "note": ""
+    },
+    {
       "at": "2026-07-13T08:50:57.702Z",
       "by": "fable-main",
       "action": "card.update",
@@ -34648,69 +34749,6 @@
       "action": "card.update",
       "ref": "c0n3n975",
       "note": "phase,logEntry,refs"
-    },
-    {
-      "at": "2026-07-12T14:58:44.500Z",
-      "by": "terra-519-owner-accept",
-      "action": "card.criteria-meet",
-      "ref": "c0n3n975",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-12T14:58:44.413Z",
-      "by": "terra-519-owner-accept",
-      "action": "card.criteria-meet",
-      "ref": "c0n3n975",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-12T14:58:44.322Z",
-      "by": "terra-519-owner-accept",
-      "action": "card.criteria-meet",
-      "ref": "c0n3n975",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-12T14:58:44.225Z",
-      "by": "terra-519-owner-accept",
-      "action": "card.criteria-meet",
-      "ref": "c0n3n975",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-12T14:47:51.071Z",
-      "by": "terra-519-owner-accept",
-      "action": "card.claim",
-      "ref": "c0n3n975",
-      "note": ""
-    },
-    {
-      "at": "2026-07-12T14:47:12.782Z",
-      "by": "terra-519-owner-accept",
-      "action": "card.claim",
-      "ref": "c0n3n975",
-      "note": ""
-    },
-    {
-      "at": "2026-07-12T14:46:54.688Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0n3n975",
-      "note": "phase,logEntry,needsAcceptance"
-    },
-    {
-      "at": "2026-07-12T14:46:54.531Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0n3n975",
-      "note": "#4 Regression tests reproduce the forged #515/#516 path and pro"
-    },
-    {
-      "at": "2026-07-12T14:46:54.380Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0n3n975",
-      "note": "#3 Accept and bounce still work from the owner verification UI,"
     }
   ],
   "nextNum": 368,

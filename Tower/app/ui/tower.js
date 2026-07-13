@@ -143,7 +143,7 @@ function renderPreservingScroll() {
 function connectStream() {
   try { es = new EventSource('/api/stream'); } catch { return scheduleFallbackPoll(); }
   es.addEventListener('state', (e) => { try { applyState(JSON.parse(e.data)); } catch { /* bad frame */ } });
-  es.onerror = () => { es.close(); es = null; scheduleFallbackPoll(); setTimeout(connectStream, 8000); };
+  es.onerror = () => { es.close(); es = null; scheduleFallbackPoll(); checkVersion(); setTimeout(connectStream, 8000); };
 }
 let pollTimer = null;
 function scheduleFallbackPoll() {
@@ -151,7 +151,33 @@ function scheduleFallbackPoll() {
   pollTimer = setInterval(async () => {
     if (es || document.hidden) return;
     try { applyState(await (await fetch('/api/state')).json()); } catch { /* offline */ }
+    checkVersion();
   }, 30_000);
+}
+
+// ---- stale-server banner (#522) --------------------------------------------
+// Belt+braces to the self-restart watcher (Tower/app/restart.mjs): SRC_VERSION
+// is stamped into index.html fresh on every request (server.mjs reads it off
+// disk each time), so it always reflects the latest source on disk. /api/version
+// reports what the running PROCESS actually loaded at boot (`start`). If those
+// diverge, the watcher failed (or hasn't finished) and the process needs a
+// restart — surface it instead of letting actions 404 silently.
+const SRC_VERSION = document.querySelector('meta[name="tower-version"]')?.content || null;
+let staleShown = false;
+function setStaleBanner(stale) {
+  if (stale === staleShown) return;
+  staleShown = stale;
+  const b = $('#stale-banner');
+  if (!b) return;
+  b.hidden = !stale;
+  if (stale) b.textContent = 'Tower’s server process is running old code — restart `tower serve` to pick up the latest change.';
+}
+async function checkVersion() {
+  if (!SRC_VERSION) return;
+  try {
+    const j = await (await fetch('/api/version')).json();
+    setStaleBanner(j.start !== SRC_VERSION);
+  } catch { /* offline; leave banner as it was */ }
 }
 
 async function refresh() {
@@ -1116,7 +1142,8 @@ window.addEventListener('hashchange', () => { const h = location.hash.slice(1); 
 
 // live updates: SSE stream (fallback: slow poll)
 connectStream();
-document.addEventListener('visibilitychange', () => { if (!document.hidden) { refresh(); } });
+checkVersion();
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { refresh(); checkVersion(); } });
 
 // PWA: service worker + push
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});

@@ -19,6 +19,7 @@ import { generateVapid, pushTo } from './webpush.mjs';
 import * as db from './store.mjs';
 import { TowerError } from './store.mjs';
 import { lint } from './lint.mjs';
+import { computeVersion } from './version.mjs';
 
 const MIME = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
 
@@ -46,7 +47,14 @@ const OWNER_SESSION_COOKIE = 'tower-owner-session';
 const ownerSessions = new Map();
 const acceptanceChallenges = new Map();
 const resolveAcceptance = db.createAcceptanceResolver();
-const TOWER_BIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'tower.mjs');
+const TOWER_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const TOWER_BIN = join(TOWER_ROOT, 'tower.mjs');
+// #522 — content-hash of the source this PROCESS actually loaded at boot.
+// Compared against a fresh computeVersion() of what's on disk NOW (exposed
+// via /api/version and stamped into every served index.html) so a stale
+// process — one the self-restart watcher failed to swap out — is visible
+// to the owner instead of silently 404ing new routes.
+const START_VERSION = computeVersion(TOWER_ROOT);
 const projected = (store) => ({ ...store.project(), boot: BOOT, cli: `node ${TOWER_BIN}` });
 const sseClients = new Set();
 function broadcast(store) {
@@ -199,6 +207,15 @@ async function serveStatic(req, res) {
   if (!file.startsWith(UI)) { res.writeHead(403); return res.end(); }
   try {
     const data = await readFile(file);
+    if (extname(file) === '.html') {
+      // Stamp the CURRENT on-disk version into the page every time — this
+      // file is read fresh per request, so it always reflects the latest
+      // source even when the running process (START_VERSION) hasn't caught
+      // up yet. See version.mjs + the stale-banner logic in tower.js.
+      const html = data.toString('utf8').replace('__TOWER_VERSION__', computeVersion(TOWER_ROOT));
+      res.writeHead(200, { 'content-type': MIME['.html'], 'cache-control': 'no-store' });
+      return res.end(html);
+    }
     res.writeHead(200, { 'content-type': MIME[extname(file)] || 'application/octet-stream', 'cache-control': 'no-store' });
     res.end(data);
   } catch { res.writeHead(404); res.end('not found'); }
@@ -231,6 +248,13 @@ export function serve(store, port = 7878, open = false) {
 
       // ---- reads ----
       if (req.method === 'GET' && url.pathname === '/api/state') return send(res, 200, projected(store));
+      // #522 — belt+braces to the self-restart watcher: `start` is what
+      // THIS process loaded at boot; `current` is a fresh read of what's on
+      // disk right now. A mismatch means the process needs a restart.
+      if (req.method === 'GET' && url.pathname === '/api/version') {
+        const current = computeVersion(TOWER_ROOT);
+        return send(res, 200, { start: START_VERSION, current, stale: current !== START_VERSION });
+      }
       if (req.method === 'GET' && url.pathname === '/api/push/key') return send(res, 200, { key: store.config.push.publicKey, subscribed: store.config.push.subscriptions.length });
       if (req.method === 'GET' && url.pathname === '/api/events') {
         return send(res, 200, store.load().events.slice(0, Number(url.searchParams.get('limit') || 50)));

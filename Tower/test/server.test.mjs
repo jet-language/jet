@@ -55,6 +55,27 @@ test('server round-trip: add, state, validation, conflict, next', async () => {
   assert.equal(unknown.status, 404);
 });
 
+// #522 — stale-process trap: /api/version reports what this process loaded
+// at boot vs. a fresh read of the source on disk right now.
+test('GET /api/version reports start/current/stale', async () => {
+  const v = await (await fetch(url('/api/version'))).json();
+  assert.equal(typeof v.start, 'string');
+  assert.equal(typeof v.current, 'string');
+  assert.equal(v.stale, false, 'source on disk has not changed since this process booted');
+  assert.equal(v.current, v.start);
+});
+
+// #522 — index.html always carries the CURRENT on-disk version (it's
+// re-read fresh every request), independent of what the process loaded.
+test('served index.html stamps a live tower-version meta tag', async () => {
+  const html = await (await fetch(url('/'))).text();
+  const m = /<meta name="tower-version" content="([^"]+)">/.exec(html);
+  assert.ok(m, 'index.html carries the tower-version meta tag');
+  assert.notEqual(m[1], '__TOWER_VERSION__', 'placeholder was replaced');
+  const v = await (await fetch(url('/api/version'))).json();
+  assert.equal(m[1], v.current, 'stamped marker matches a fresh on-disk read');
+});
+
 test('server ratify flow advances the card', async () => {
   await post('decision/add', { cardId: '#1', id: 'D-S1', title: 'pick',
     gist: 'g', lesson: 'teach from zero', story: 's', inWild: 'w', rec: 'A',

@@ -6,6 +6,7 @@
 //   complex payloads (decisions) → --file payload.json or `-` for stdin
 import { readFileSync, mkdirSync, existsSync, writeFileSync, readdirSync, chmodSync, statSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import * as db from './store.mjs';
 import { openStore, TowerError, PHASE_IDS } from './store.mjs';
 import { findDataDir, readJSON, writeJSON, historyFile } from './paths.mjs';
@@ -600,7 +601,10 @@ async function githookPostCommit(store) {
 const HELP = `tower — file-backed project board for an owner + AI agents
 
   tower init [--name X] [--dir .]           set up .tower/ in a project
-  tower serve [--port ${DEFAULTS.port}] [--open]          board UI + HTTP API
+  tower serve [--port ${DEFAULTS.port}] [--open] [--no-watch]
+                                            board UI + HTTP API; self-restarts
+                                            when Tower's own source changes
+                                            (--no-watch disables that)
   tower status [--json]                     terminal snapshot
   tower state                               full projected state (JSON)
   tower next [--epoch E] [--track T] [--agent A] [--limit N] [--burndown]
@@ -683,7 +687,22 @@ export async function run(argv) {
     switch (cmd) {
       case 'serve': {
         const { serve } = await import('./server.mjs');
-        return serve(store, Number(flags.port || store.config.port), !!flags.open);
+        const port = Number(flags.port || store.config.port);
+        let server = serve(store, port, !!flags.open);
+        // #522 — the running process loads all routes/db code once at
+        // start; without this, an edit to Tower/app/*.mjs never takes
+        // effect until someone remembers to restart `tower serve` by hand.
+        // --no-watch is the escape hatch (tests, embedding).
+        if (!flags.noWatch) {
+          const { watchForRestart } = await import('./restart.mjs');
+          watchForRestart({
+            towerRoot: join(dirname(fileURLToPath(import.meta.url)), '..'),
+            argv: process.argv.slice(2),
+            getServer: () => server,
+            reopen: () => { server = serve(store, port, !!flags.open); },
+          });
+        }
+        return server;
       }
       case 'status':    return cmdStatus(store, sub);
       case 'state':     return console.log(JSON.stringify(store.project(), null, 2));

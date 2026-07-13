@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#060608">
+<!-- #522: content-hash of the source on disk AT THE TIME THIS PAGE WAS SERVED
+     (index.html is re-read fresh every request — see server.mjs's serveStatic).
+     tower.js compares this against /api/version's `start` (what the running
+     process actually loaded) to show a stale-server banner if they diverge. -->
+<meta name="tower-version" content="__TOWER_VERSION__">
 <title>Tower</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
@@ -19,6 +24,9 @@
 <!-- Beacon: one segment per thing blocked on the owner. Lit red = waiting on
      you; extinguishes as you clear it; fully dark = tower clear. -->
 <aside class="beacon" id="beacon" aria-label="Blocked on you"></aside>
+
+<!-- #522: server-process-is-stale banner (see tower.js checkVersion) -->
+<div class="stale-banner" id="stale-banner" hidden role="status"></div>
 
 <div class="shell">
   <header class="top">
