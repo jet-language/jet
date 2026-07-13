@@ -186,6 +186,7 @@ fn run() {}
 }
 
 #[test]
+#[cfg(unix)]
 fn budget_path_tools_cannot_forge_provenance() {
     use std::os::unix::fs::PermissionsExt;
     let dir = budget_project("budget_hostile_path", 10);
@@ -208,6 +209,7 @@ fn budget_path_tools_cannot_forge_provenance() {
 }
 
 #[test]
+#[cfg(unix)]
 fn budget_unreadable_compiler_identity_rejects_before_artifact() {
     use std::os::unix::fs::PermissionsExt;
     let dir = budget_project("budget_missing_compiler_identity", 10);
