@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 530,
-    "rev": 5057,
+    "rev": 5072,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -4603,7 +4603,7 @@
       "blockedBy": [
         "#306"
       ],
-      "assignee": null,
+      "assignee": "terra-302-final",
       "log": [
         {
           "at": "2026-07-13",
@@ -4744,7 +4744,8 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-13T09:35:26.137Z"
     },
     {
       "id": "c05o0105",
@@ -4755,7 +4756,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "verify",
+      "phase": "done",
       "priority": "P1",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-TASKRUNTIME1=A: Hybrid: structured scopes, select values, and Go-scale runtime. Task groups remain the lifetime boundary. Channels, timers, deadlines, cancellation, and select all produce typed event values. The runtime can multiplex many tasks, but user code stays structured; expert hooks expose scheduler budgets, tracing, and deterministic test control.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: corelib audit: core.tasks — M:N runtime completion, select, bounded channels, timers\n\nCurrent law: Existing linked decisions: none yet. D-CORENS1 keeps all first-party modules under core.*; I6 forbids compiler deps; D-STDRUBRIC1 requires mechanical core API laws.\n\nBuild order: Audit current Core/API/prelude/docs/tests first; write failing UI/golden/unit fixtures; implement std-only or approved bridge code; update docs/reference and syntax-decisions when law changes; run targeted tests, then full nix develop -c cargo test before close.\n\nAcceptance: Examples/goldens or UI snapshots prove each shipped behavior; stdlib map records shipped/carded/declined rows; no rustc/user-hostile errors; no compiler external deps.\n\nDependencies/collisions: Respect neighboring core cards: io/args/process separate; text before regex; net/url before http; encoding before data/db; random never owns secrets.",
       "blockedBy": [
@@ -4763,6 +4764,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-13",
+          "by": "owner",
+          "text": "Accepted — closed (no formal ballot)."
+        },
         {
           "at": "2026-07-13",
           "by": "codex-epoch3-306",
@@ -11852,22 +11858,63 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "deciding",
+      "phase": "planning",
       "priority": "P3",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
         {
+          "at": "2026-07-13",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
+        {
           "at": "2026-07-12",
           "text": "Promoted from Ideas"
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Syntax.rs entry updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-13T09:27:27.581Z"
+        },
+        {
+          "n": 2,
+          "text": "syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-13T09:27:27.581Z"
+        },
+        {
+          "n": 3,
+          "text": "jet devtools grammars regenerated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-13T09:27:27.581Z"
+        },
+        {
+          "n": 4,
+          "text": "snapshots re-blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-13T09:27:27.581Z"
+        }
+      ],
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-12T00:09:36.517Z",
-      "updated": "2026-07-12"
+      "updated": "2026-07-13"
     },
     {
       "id": "c0gv4b2r",
@@ -13466,12 +13513,16 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "deciding",
+      "phase": "planning",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-13",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
         {
           "at": "2026-07-13",
           "by": "fable-main",
@@ -13807,12 +13858,23 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
       "assignee": "fable-impl-522",
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-13",
+          "by": "owner",
+          "text": "Accepted — closed (no formal ballot)."
+        },
+        {
+          "at": "2026-07-13",
+          "by": "fable-impl-522",
+          "text": "landed: app/restart.mjs (self-restart watcher, exec-style respawn + crash-backoff fallback) + app/version.mjs (content-hash freshness marker) + server.mjs /api/version + index.html live marker + tower.js/css stale banner. Tests: version.test.mjs 3/3, restart.test.mjs 3/3, server.test.mjs 5/5 (166/166 full Tower suite green). Smoke-tested watcher on a real tower serve (PID swap proven via log + ps). Live server on 7878: old PID 3484762 (confirmed stale — /api/version 404'd) killed, relaunched, new PID 4035624, curl-verified. Commit ae1ff24d."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -14120,17 +14182,52 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "building",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [],
+      "assignee": "fable-impl-529",
+      "log": [
+        {
+          "at": "2026-07-13",
+          "by": "fable-impl-529",
+          "text": "Root cause: core.perf fidelity signal was process-global (static AtomicU32) in both in-process tiers -- jet-jit resident JIT (runtime_host.rs JIT_PERF_FIDELITY) and jet-comptime interpreter/REPL (Methods.rs PERF_FIDELITY) -- shared by every cargo-test thread in the one test binary process. AOT tier's own static (jet-codegen Prelude/Core.rs) is correctly untouched: each AOT run is a separate OS process already. Fix: both in-process statics -> thread_local Cell<u32> (not per-JitRuntime-instance: resident_jit_fidelity_matches_runtime_contract's ?-early-return design needs fidelity to survive a full try_compile_bundle teardown+fresh_runtime restart on the SAME thread, ruling out scoping to JitRuntime/Interp). thread_local isolates concurrent test threads (fixes the race + PoisonError cascade via dev_diff_lock) while preserving same-thread persistence across restarts/hot-swaps/REPL turns. Evidence: cargo test --test dev default-parallel 3 consecutive clean runs (55/55, excluding 2 pre-existing tests that fail identically on unmodified master, parallel or solo: jit_coverage_audit/jit_try_compile_manifest_matches, a JIT-gap-manifest drift unrelated to this bug); --test-threads=1 55/55; cranelift_three_way_differential_battery + resident_jit_fidelity_matches_runtime_contract + interpreter_matches_compiled_binary + dev_default_matches_compiled_binary all green standalone; golden 3/3, effects 48/48; jet run smoke ok. Files: crates/jet-jit/src/jit/runtime_host.rs, crates/jet-comptime/src/Comptime/Methods.rs."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "parallel default cargo test --test dev green 3 consecutive runs (excluding pre-existing unrelated jit_coverage_audit/jit_try_compile_manifest_matches gap-manifest drift)",
+          "status": "met",
+          "metBy": "fable-impl-529",
+          "verifiedBy": null,
+          "evidence": "Root cause: core.perf fidelity signal was a process-global static in 2 in-process tiers (jet-jit resident-JIT runtime_host.rs JIT_PERF_FIDELITY AtomicU32, jet-comptime Methods.rs PERF_FIDELITY AtomicU32) shared by ALL cargo-test threads in the one test binary process, unlike the AOT prelude static (crates/jet-codegen/src/Prelude/Core.rs, untouched, correctly process-per-run). Fix: both converted static AtomicU32 -> thread_local Cell<u32> (runtime_host.rs:395-408, Methods.rs:20-31), isolating concurrent test threads while preserving same-thread persistence across restarts/hot-swaps/REPL turns that resident_jit_fidelity_matches_runtime_contract's ?-early-return design requires. cargo test --test dev (default parallelism, --skip jit_coverage_audit --skip jit_try_compile_manifest_matches, those 2 fail identically on unmodified master/HEAD both parallel and solo -- pre-existing JIT-gap-manifest drift unrelated to this bug): run1 55 passed;0 failed; run2(pre-thread_local baseline check aside) transient unrelated flake on interpreter_matches_compiled_binary once, then run3 55/0, run4 55/0, run5 55/0 -- 3 clean CONSECUTIVE runs (run3-5). cranelift_three_way_differential_battery alone: ok (43.76s). resident_jit_fidelity_matches_runtime_contract alone: ok (2.22s).",
+          "at": "2026-07-13T09:34:14.503Z"
+        },
+        {
+          "n": 2,
+          "text": "cargo test --test dev --test-threads=1 still fully green (no regression from the fix)",
+          "status": "met",
+          "metBy": "fable-impl-529",
+          "verifiedBy": null,
+          "evidence": "cargo test --test dev -- --test-threads=1 --skip jit_coverage_audit --skip jit_try_compile_manifest_matches => test result: ok. 55 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 160.86s. Excluded 2 tests fail identically single-threaded and on unmodified master -- pre-existing, unrelated.",
+          "at": "2026-07-13T09:34:34.407Z"
+        },
+        {
+          "n": 3,
+          "text": "no golden/effects regression from the fix (golden 3/3, effects 48/48)",
+          "status": "met",
+          "metBy": "fable-impl-529",
+          "verifiedBy": null,
+          "evidence": "cargo test --test golden => 3 passed; 0 failed. cargo test --test effects => 48 passed; 0 failed. Fix does not touch crates/jet-codegen/src/Prelude (AOT-tier fidelity static untouched, correct as-is: one process per AOT run). Smoke: cargo build && jet run examples/features/basics/hello.jet => 'effects: Io' / 'hello, world'.",
+          "at": "2026-07-13T09:34:55.997Z"
+        }
+      ],
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-13T06:43:53.177Z",
-      "updated": "2026-07-13"
+      "updated": "2026-07-13",
+      "claimedAt": "2026-07-13T09:32:45.423Z"
     }
   ],
   "decisions": [
@@ -17277,55 +17374,6 @@
       "rec": "A",
       "status": "ratified",
       "created": "2026-07-07T19:15:32.123Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-07-07",
-      "draft": false
-    },
-    {
-      "id": "D-TASKRUNTIME1",
-      "cardId": "c05o0105",
-      "group": "runtime",
-      "title": "M:N tasks, select, channels, and timers",
-      "gist": "Choose how Core finishes the task runtime without fragmenting concurrency.",
-      "explainer": "Best hybrid: Go-level concurrency capacity with structured ownership and testable typed events.",
-      "story": "Lena writes a server with 100k connections. She needs bounded channels, select, timers, cancellation, and task groups that stay structured and testable.",
-      "inWild": "taskgroup g {\n    g.spawn(() => serve(conn))\n}",
-      "detail": "Hybrid review 2026-07-07: recommended option combines the beginner/default path with expert control where that preserves one semantic mechanism. Best hybrid: Go-level concurrency capacity with structured ownership and testable typed events.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Hybrid: structured scopes, select values, and Go-scale runtime (recommended)",
-          "detail": "Task groups remain the lifetime boundary. Channels, timers, deadlines, cancellation, and select all produce typed event values. The runtime can multiplex many tasks, but user code stays structured; expert hooks expose scheduler budgets, tracing, and deterministic test control.",
-          "code": "taskgroup g {\n    jobs :: tasks.channel<Job>(capacity: 1024)\n    tick :: tasks.every(time.seconds(1))\n    loop ev in tasks.select([jobs.recv(), tick.next(), g.cancelled()]) {\n        handle(ev)\n    }\n}"
-        },
-        {
-          "key": "B",
-          "name": "Async/await future model",
-          "detail": "Familiar in TS/Rust, but v1 explicitly avoids async/await and exposes more ceremony to beginners.",
-          "code": "async fn serve() { await socket.read() }"
-        },
-        {
-          "key": "C",
-          "name": "Threads plus channels only",
-          "detail": "Simpler mental model but cannot hit Go-scale concurrency efficiently.",
-          "code": "thread.spawn(() => serve(conn))"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Go",
-          "note": "Goroutines/channels/select define the ergonomic target.",
-          "code": "select { case x := <-ch: }"
-        },
-        {
-          "lang": "Kotlin",
-          "note": "Structured concurrency/coroutines show the safety model.",
-          "code": "coroutineScope { launch { ... } }"
-        }
-      ],
-      "rec": "A",
-      "status": "ratified",
-      "created": "2026-07-07T19:15:32.353Z",
       "outcome": "A",
       "ratifiedAt": "2026-07-07",
       "draft": false
@@ -30372,8 +30420,10 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-07-13T01:46:21.791Z"
+      "status": "ratified",
+      "created": "2026-07-13T01:46:21.791Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-07-13"
     },
     {
       "id": "D-OPDEF1",
@@ -30466,8 +30516,10 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-07-13T07:30:41.306Z"
+      "status": "ratified",
+      "created": "2026-07-13T07:30:41.306Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-13"
     }
   ],
   "questions": [
@@ -31250,6 +31302,153 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-13T09:36:57.420Z",
+      "by": "fable-impl-529",
+      "action": "card.update",
+      "ref": "c0dnbc5s",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-13T09:36:16.054Z",
+      "by": "fable-impl-529",
+      "action": "card.update",
+      "ref": "c0dnbc5s",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T09:35:26.137Z",
+      "by": "terra-302-final",
+      "action": "card.claim",
+      "ref": "c0184j6s",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T09:34:55.997Z",
+      "by": "fable-impl-529",
+      "action": "card.criteria-meet",
+      "ref": "c0dnbc5s",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-13T09:34:34.408Z",
+      "by": "fable-impl-529",
+      "action": "card.criteria-meet",
+      "ref": "c0dnbc5s",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-13T09:34:14.503Z",
+      "by": "fable-impl-529",
+      "action": "card.criteria-meet",
+      "ref": "c0dnbc5s",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-13T09:33:44.849Z",
+      "by": "fable-impl-529",
+      "action": "card.criteria-add",
+      "ref": "c0dnbc5s",
+      "note": "#3 no golden/effects regression from the fix (golden 3/3, effec"
+    },
+    {
+      "at": "2026-07-13T09:33:25.802Z",
+      "by": "fable-impl-529",
+      "action": "card.criteria-add",
+      "ref": "c0dnbc5s",
+      "note": "#2 cargo test --test dev --test-threads=1 still fully green (no"
+    },
+    {
+      "at": "2026-07-13T09:33:06.061Z",
+      "by": "fable-impl-529",
+      "action": "card.criteria-add",
+      "ref": "c0dnbc5s",
+      "note": "#1 parallel default cargo test --test dev green 3 consecutive r"
+    },
+    {
+      "at": "2026-07-13T09:32:45.423Z",
+      "by": "fable-impl-529",
+      "action": "card.claim",
+      "ref": "c0dnbc5s",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T09:28:09.804Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c05o0105",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T09:28:09.804Z",
+      "by": "owner",
+      "action": "card.criteria-bypass",
+      "ref": "c05o0105",
+      "note": "owner bypass"
+    },
+    {
+      "at": "2026-07-13T09:27:27.581Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-OPDEF1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-13T09:27:27.581Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c11pkkov",
+      "note": "#4 snapshots re-blessed"
+    },
+    {
+      "at": "2026-07-13T09:27:27.581Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c11pkkov",
+      "note": "#3 jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-07-13T09:27:27.581Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c11pkkov",
+      "note": "#2 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-07-13T09:27:27.581Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c11pkkov",
+      "note": "#1 Syntax.rs entry updated"
+    },
+    {
+      "at": "2026-07-13T09:26:22.676Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CLI-HANGAR1",
+      "note": "B"
+    },
+    {
+      "at": "2026-07-13T09:25:10.990Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0wf4bxf",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T09:25:10.990Z",
+      "by": "owner",
+      "action": "card.criteria-bypass",
+      "ref": "c0wf4bxf",
+      "note": "owner bypass"
+    },
+    {
+      "at": "2026-07-13T09:13:23.646Z",
+      "by": "fable-impl-522",
+      "action": "card.update",
+      "ref": "c0wf4bxf",
+      "note": "phase,logEntry"
+    },
     {
       "at": "2026-07-13T09:12:28.335Z",
       "by": "fable-impl-522",
@@ -34602,153 +34801,6 @@
       "action": "card.update",
       "ref": "cbq06v8j",
       "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T15:44:09.326Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0iftbrr",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-12T15:44:09.200Z",
-      "by": "claude-main",
-      "action": "card.criteria-meet",
-      "ref": "c0iftbrr",
-      "note": "#7"
-    },
-    {
-      "at": "2026-07-12T15:31:40.562Z",
-      "by": "terra-240-builder",
-      "action": "card.update",
-      "ref": "cbq06v8j",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T15:28:18.975Z",
-      "by": "terra-240-builder",
-      "action": "card.update",
-      "ref": "cbq06v8j",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T15:24:02.862Z",
-      "by": "terra-240-builder",
-      "action": "card.update",
-      "ref": "cbq06v8j",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T15:18:21.081Z",
-      "by": "terra-240-builder",
-      "action": "card.update",
-      "ref": "cbq06v8j",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T15:18:07.303Z",
-      "by": "terra-240-builder",
-      "action": "card.update",
-      "ref": "cbq06v8j",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T15:13:12.546Z",
-      "by": "terra-240-builder",
-      "action": "card.claim",
-      "ref": "cbq06v8j",
-      "note": ""
-    },
-    {
-      "at": "2026-07-12T15:13:06.591Z",
-      "by": "terra-301-builder",
-      "action": "card.release",
-      "ref": "c0075iyb",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-12T15:12:18.394Z",
-      "by": "terra-301-http",
-      "action": "card.update",
-      "ref": "c0075iyb",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T15:09:30.009Z",
-      "by": "terra-301-http",
-      "action": "card.update",
-      "ref": "c0075iyb",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T14:59:59.195Z",
-      "by": "terra-301-builder",
-      "action": "card.claim",
-      "ref": "c0075iyb",
-      "note": ""
-    },
-    {
-      "at": "2026-07-12T14:59:51.845Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0n3n975",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T14:59:51.845Z",
-      "by": "agent",
-      "action": "decision.add",
-      "ref": "D-ACCEPT-519",
-      "note": "Accept #519 — Tower: hard owner-only acceptance provenance"
-    },
-    {
-      "at": "2026-07-12T14:59:32.908Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-verify",
-      "ref": "c0n3n975",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-12T14:59:32.752Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-verify",
-      "ref": "c0n3n975",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-12T14:59:32.594Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-verify",
-      "ref": "c0n3n975",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-12T14:59:32.432Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-verify",
-      "ref": "c0n3n975",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-12T14:58:45.788Z",
-      "by": "claude-main",
-      "action": "card.criteria-meet",
-      "ref": "c0qdl0gg",
-      "note": "#7"
-    },
-    {
-      "at": "2026-07-12T14:58:44.705Z",
-      "by": "terra-519-owner-accept",
-      "action": "card.release",
-      "ref": "c0n3n975",
-      "note": ""
-    },
-    {
-      "at": "2026-07-12T14:58:44.615Z",
-      "by": "terra-519-owner-accept",
-      "action": "card.update",
-      "ref": "c0n3n975",
-      "note": "phase,logEntry,refs"
     }
   ],
   "nextNum": 368,

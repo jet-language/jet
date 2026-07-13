@@ -20163,6 +20163,56 @@
       "ratifiedAt": "2026-06-28",
       "draft": false,
       "retiredAt": "2026-07-13T02:50:02.048Z"
+    },
+    {
+      "id": "D-TASKRUNTIME1",
+      "cardId": "c05o0105",
+      "group": "runtime",
+      "title": "M:N tasks, select, channels, and timers",
+      "gist": "Choose how Core finishes the task runtime without fragmenting concurrency.",
+      "explainer": "Best hybrid: Go-level concurrency capacity with structured ownership and testable typed events.",
+      "story": "Lena writes a server with 100k connections. She needs bounded channels, select, timers, cancellation, and task groups that stay structured and testable.",
+      "inWild": "taskgroup g {\n    g.spawn(() => serve(conn))\n}",
+      "detail": "Hybrid review 2026-07-07: recommended option combines the beginner/default path with expert control where that preserves one semantic mechanism. Best hybrid: Go-level concurrency capacity with structured ownership and testable typed events.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Hybrid: structured scopes, select values, and Go-scale runtime (recommended)",
+          "detail": "Task groups remain the lifetime boundary. Channels, timers, deadlines, cancellation, and select all produce typed event values. The runtime can multiplex many tasks, but user code stays structured; expert hooks expose scheduler budgets, tracing, and deterministic test control.",
+          "code": "taskgroup g {\n    jobs :: tasks.channel<Job>(capacity: 1024)\n    tick :: tasks.every(time.seconds(1))\n    loop ev in tasks.select([jobs.recv(), tick.next(), g.cancelled()]) {\n        handle(ev)\n    }\n}"
+        },
+        {
+          "key": "B",
+          "name": "Async/await future model",
+          "detail": "Familiar in TS/Rust, but v1 explicitly avoids async/await and exposes more ceremony to beginners.",
+          "code": "async fn serve() { await socket.read() }"
+        },
+        {
+          "key": "C",
+          "name": "Threads plus channels only",
+          "detail": "Simpler mental model but cannot hit Go-scale concurrency efficiently.",
+          "code": "thread.spawn(() => serve(conn))"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "Goroutines/channels/select define the ergonomic target.",
+          "code": "select { case x := <-ch: }"
+        },
+        {
+          "lang": "Kotlin",
+          "note": "Structured concurrency/coroutines show the safety model.",
+          "code": "coroutineScope { launch { ... } }"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "created": "2026-07-07T19:15:32.353Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-07",
+      "draft": false,
+      "retiredAt": "2026-07-13T09:28:09.821Z"
     }
   ],
   "cards": [
@@ -68065,6 +68115,153 @@
       "action": "card.criteria-meet",
       "ref": "c0n3n975",
       "note": "#4"
+    },
+    {
+      "at": "2026-07-12T14:58:44.615Z",
+      "by": "terra-519-owner-accept",
+      "action": "card.update",
+      "ref": "c0n3n975",
+      "note": "phase,logEntry,refs"
+    },
+    {
+      "at": "2026-07-12T14:58:44.705Z",
+      "by": "terra-519-owner-accept",
+      "action": "card.release",
+      "ref": "c0n3n975",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T14:58:45.788Z",
+      "by": "claude-main",
+      "action": "card.criteria-meet",
+      "ref": "c0qdl0gg",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-12T14:59:32.432Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c0n3n975",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-12T14:59:32.594Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c0n3n975",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-12T14:59:32.752Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c0n3n975",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-12T14:59:32.908Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c0n3n975",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-12T14:59:51.845Z",
+      "by": "agent",
+      "action": "decision.add",
+      "ref": "D-ACCEPT-519",
+      "note": "Accept #519 — Tower: hard owner-only acceptance provenance"
+    },
+    {
+      "at": "2026-07-12T14:59:51.845Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0n3n975",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T14:59:59.195Z",
+      "by": "terra-301-builder",
+      "action": "card.claim",
+      "ref": "c0075iyb",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T15:09:30.009Z",
+      "by": "terra-301-http",
+      "action": "card.update",
+      "ref": "c0075iyb",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T15:12:18.394Z",
+      "by": "terra-301-http",
+      "action": "card.update",
+      "ref": "c0075iyb",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T15:13:06.591Z",
+      "by": "terra-301-builder",
+      "action": "card.release",
+      "ref": "c0075iyb",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-12T15:13:12.546Z",
+      "by": "terra-240-builder",
+      "action": "card.claim",
+      "ref": "cbq06v8j",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T15:18:07.303Z",
+      "by": "terra-240-builder",
+      "action": "card.update",
+      "ref": "cbq06v8j",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T15:18:21.081Z",
+      "by": "terra-240-builder",
+      "action": "card.update",
+      "ref": "cbq06v8j",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T15:24:02.862Z",
+      "by": "terra-240-builder",
+      "action": "card.update",
+      "ref": "cbq06v8j",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T15:28:18.975Z",
+      "by": "terra-240-builder",
+      "action": "card.update",
+      "ref": "cbq06v8j",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T15:31:40.562Z",
+      "by": "terra-240-builder",
+      "action": "card.update",
+      "ref": "cbq06v8j",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T15:44:09.200Z",
+      "by": "claude-main",
+      "action": "card.criteria-meet",
+      "ref": "c0iftbrr",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-12T15:44:09.326Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0iftbrr",
+      "note": "logEntry"
     }
   ]
 }
