@@ -50,12 +50,17 @@ pub(crate) fn emit_c_module(cx: &Cx, cm: &crate::AST::CModule, out: &mut String)
             .params
             .iter()
             .enumerate()
-            .map(|(i, p)| format!("a{i}: {}", c_abi_rust_type(&p.ty, cx)))
+            .map(|(i, p)| format!("a{i}: {}", c_abi_rust_type(&p.ty, cx, p.ty_span)))
             .collect();
         let ret = ef
             .return_type
             .as_ref()
-            .map(|t| format!(" -> {}", c_abi_rust_type(t, cx)))
+            .map(|t| {
+                format!(
+                    " -> {}",
+                    c_abi_rust_type(t, cx, ef.return_type_span.unwrap_or(ef.span))
+                )
+            })
             .unwrap_or_default();
         let abi = ef.abi.as_ref().map(|(a, _)| a.as_str()).unwrap_or("C");
         out.push_str(&format!(
@@ -73,7 +78,10 @@ pub(crate) fn emit_c_module(cx: &Cx, cm: &crate::AST::CModule, out: &mut String)
         let mut conv_lines = Vec::new();
         let mut call_args = Vec::new();
         for (i, p) in ef.params.iter().enumerate() {
-            sig_params.push(format!("a{i}: {}", c_wrapper_param_type(&p.ty, cx)));
+            sig_params.push(format!(
+                "a{i}: {}",
+                c_wrapper_param_type(&p.ty, cx, p.ty_span)
+            ));
             match &p.ty {
                 Type::String => {
                     conv_lines.push(format!(
@@ -99,7 +107,12 @@ pub(crate) fn emit_c_module(cx: &Cx, cm: &crate::AST::CModule, out: &mut String)
         let ret = ef
             .return_type
             .as_ref()
-            .map(|t| format!(" -> {}", c_wrapper_ret_type(t, cx)))
+            .map(|t| {
+                format!(
+                    " -> {}",
+                    c_wrapper_ret_type(t, cx, ef.return_type_span.unwrap_or(ef.span))
+                )
+            })
             .unwrap_or_default();
         let call = format!("{}({})", ef.rust_path, call_args.join(", "));
         let call_body = match &ef.return_type {
@@ -141,7 +154,7 @@ pub(crate) fn emit_c_module(cx: &Cx, cm: &crate::AST::CModule, out: &mut String)
 /// struct/distinct (D-REPRC1/D-DIST1 — sema already required `#Layout(c)` /
 /// a C-abi base) all get their ordinary generated Rust type via `cx.rust_type`,
 /// which is ABI-identical to the C shape sema verified.
-fn c_abi_rust_type(ty: &Type, cx: &Cx) -> String {
+fn c_abi_rust_type(ty: &Type, cx: &Cx, span: crate::Diagnostics::Span) -> String {
     match ty {
         Type::Int => "std::os::raw::c_longlong".to_string(),
         Type::Float => "f64".to_string(),
@@ -151,24 +164,35 @@ fn c_abi_rust_type(ty: &Type, cx: &Cx) -> String {
         Type::IntN { .. } | Type::Float32 => cx.rust_type(ty),
         Type::Named(_) => qualify_named_rust_type(cx, ty),
         Type::Fn { params, ret, .. } => {
-            let ps = params.iter().map(|p| c_abi_rust_type(p, cx)).collect::<Vec<_>>().join(", ");
-            let r = ret.as_deref().map(|t| format!(" -> {}", c_abi_rust_type(t, cx))).unwrap_or_default();
+            let ps = params
+                .iter()
+                .map(|p| c_abi_rust_type(p, cx, span))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let r = ret
+                .as_deref()
+                .map(|t| format!(" -> {}", c_abi_rust_type(t, cx, span)))
+                .unwrap_or_default();
             format!("extern \"C\" fn({ps}){r}")
         }
         Type::Apply { name, args } if name == Syntax::TYPE_PTR && args.len() == 1 => {
             format!("*mut {}", qualify_named_rust_type(cx, &args[0]))
         }
-        Type::Tagged { inner, .. } => c_abi_rust_type(inner, cx),
+        Type::Tagged { inner, .. } => c_abi_rust_type(inner, cx, span),
         // Sema owns this closed set (I3). Reaching here is a compiler invariant
         // violation, never generated placeholder Rust.
-        other => panic!("I3: sema admitted unsupported C ABI type {}", other.name()),
+        other => jet_foundation::ice!(
+            Some(span),
+            "I3: sema admitted unsupported C ABI type {}",
+            other.name()
+        ),
     }
 }
 
 /// The Rust type the safe wrapper accepts, matching cross-module call sites
 /// (Read convention: scalars by value, `String`/`Char` by shared reference).
 /// See `c_abi_rust_type` — same acceptance contract with `is_c_abi_type`.
-fn c_wrapper_param_type(ty: &Type, cx: &Cx) -> String {
+fn c_wrapper_param_type(ty: &Type, cx: &Cx, span: crate::Diagnostics::Span) -> String {
     match ty {
         Type::Int => "i64".to_string(),
         Type::Float => "f64".to_string(),
@@ -181,16 +205,20 @@ fn c_wrapper_param_type(ty: &Type, cx: &Cx) -> String {
         // in `emit_c_module`, which clones through this reference before
         // the real `extern "C"` call).
         Type::Named(_) => format!("&{}", qualify_named_rust_type(cx, ty)),
-        Type::Fn { .. } => c_abi_rust_type(ty, cx),
+        Type::Fn { .. } => c_abi_rust_type(ty, cx, span),
         Type::Apply { name, args } if name == Syntax::TYPE_PTR && args.len() == 1 => {
             format!("*mut {}", qualify_named_rust_type(cx, &args[0]))
         }
-        Type::Tagged { inner, .. } => c_wrapper_param_type(inner, cx),
-        other => panic!("I3: sema admitted unsupported C ABI parameter {}", other.name()),
+        Type::Tagged { inner, .. } => c_wrapper_param_type(inner, cx, span),
+        other => jet_foundation::ice!(
+            Some(span),
+            "I3: sema admitted unsupported C ABI parameter {}",
+            other.name()
+        ),
     }
 }
 
-fn c_wrapper_ret_type(ty: &Type, cx: &Cx) -> String {
+fn c_wrapper_ret_type(ty: &Type, cx: &Cx, span: crate::Diagnostics::Span) -> String {
     match ty {
         Type::Int => "i64".to_string(),
         Type::Float => "f64".to_string(),
@@ -199,8 +227,12 @@ fn c_wrapper_ret_type(ty: &Type, cx: &Cx) -> String {
         Type::String => "String".to_string(),
         Type::IntN { .. } | Type::Float32 => cx.rust_type(ty),
         Type::Named(_) => qualify_named_rust_type(cx, ty),
-        Type::Fn { .. } => c_abi_rust_type(ty, cx),
-        Type::Tagged { inner, .. } => c_wrapper_ret_type(inner, cx),
-        other => panic!("I3: sema admitted unsupported C ABI return {}", other.name()),
+        Type::Fn { .. } => c_abi_rust_type(ty, cx, span),
+        Type::Tagged { inner, .. } => c_wrapper_ret_type(inner, cx, span),
+        other => jet_foundation::ice!(
+            Some(span),
+            "I3: sema admitted unsupported C ABI return {}",
+            other.name()
+        ),
     }
 }

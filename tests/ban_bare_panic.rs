@@ -71,6 +71,16 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
         "#[cfg(test)] mod s61_tests fixtures",
     ),
     (
+        "crates/jet-parser/src/lib.rs",
+        5,
+        "#[cfg(test)] generic-module parser assertion fixtures",
+    ),
+    (
+        "crates/jet-sema/tests/generic_module_body.rs",
+        1,
+        "integration-test assertion fixture",
+    ),
+    (
         "Source/Help/mod.rs",
         1,
         "#[test]-only assertion fixture",
@@ -79,6 +89,21 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
         "Source/REPL/mod.rs",
         3,
         "three #[cfg(test)] REPL statement-classifier assertion fixtures",
+    ),
+    (
+        "Source/REPL/HistoryPlatform.rs",
+        1,
+        "#[cfg(test)] Unix ABI-table assertion helper",
+    ),
+    (
+        "Source/REPL/History.rs",
+        1,
+        "#[test] history lock assertion fixture",
+    ),
+    (
+        "Source/BudgetProviders.rs",
+        1,
+        "#[cfg(test)] deliberately panicking hostile provider fixture for catch_unwind",
     ),
     (
         "Source/CLI.rs",
