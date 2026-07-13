@@ -7,7 +7,7 @@ use crate::Sema::CheckerCoreLib::{
     alloc_method_return, args_spec_method_return, binary_reader_method_return,
     civil_time_method_return, data_renamed_to_datatree, datatree_method_return,
     devserver_method_return, db_value_method_return, e3104, expiring_method_return,
-    encoding_handle_method_return, file_handle_method_return, gc_method_return, http_type_method_return, is_db_value_type_name,
+    email_method_return, encoding_handle_method_return, file_handle_method_return, gc_method_return, http_type_method_return, is_db_value_type_name,
     is_gc_type, is_json_type_name, is_layout_axis_type, is_layout_type, is_math_type,
     is_polymorphic_core_special, is_reflect_type_name, is_simd_lane_type, json_ty,
     layout_method_arg_ty, layout_method_return, loadable_method_return, math_method_arg_ty,
@@ -1488,6 +1488,14 @@ impl<'a> Checker<'a> {
                     Type::Named(n) => n.clone(),
                     _ => "Url".to_string(),
                 });
+                return ret;
+            }
+            // D-EMAIL-SMTP-SURFACE1=A: exact envelope access/replacement methods.
+            if let Some(ret) = email_method_return(&recv_ty, method, args.len()) {
+                if method == "with_envelope" {
+                    self.expect_core_arg(method, 0, &Type::Named("Envelope".to_string()), &mut args[0]);
+                }
+                *recv_type_out = Some("Message".to_string());
                 return ret;
             }
             // D-REGEXENGINE1=A: method calls on compiled Regex and Match values.

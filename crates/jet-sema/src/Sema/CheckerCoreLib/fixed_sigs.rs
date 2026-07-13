@@ -720,6 +720,13 @@ pub fn core_fixed_sig(
             ],
             Some(result_ty(Type::Named("Message".to_string()), Type::Named("EmailError".to_string()))),
         )),
+        ("core.email", "envelope") => Some((
+            vec![
+                (read, Type::Named("Address".to_string())),
+                (read, Type::List(Box::new(Type::Named("Address".to_string())))),
+            ],
+            Some(result_ty(Type::Named("Envelope".to_string()), Type::Named("EmailError".to_string()))),
+        )),
         ("core.email", "serialize") => Some((
             vec![(read, Type::Named("Message".to_string()))],
             Some(result_ty(list_u8, Type::Named("EmailError".to_string()))),

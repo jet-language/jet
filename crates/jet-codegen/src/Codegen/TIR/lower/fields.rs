@@ -143,6 +143,9 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         "EncodingLimits" => matches!(member, "buffer_bytes" | "max_depth" | "max_item_bytes" | "max_total_bytes" | "max_expansion_depth" | "max_expansion_bytes"),
         "EncodingCause" => matches!(member, "kind" | "os_code" | "message"),
         "EncodingError" => matches!(member, "format" | "kind" | "byte_offset" | "line" | "column" | "path" | "reason" | "cause"),
+        "Envelope" => matches!(member, "from" | "recipients"),
+        "RecipientReport" => matches!(member, "address" | "accepted" | "code" | "message"),
+        "SendReport" => matches!(member, "server" | "accepted" | "rejected" | "response_code" | "response" | "accepted_at"),
         _ => false,
     };
     if known {

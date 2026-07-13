@@ -28,6 +28,17 @@ impl<'a> Checker<'a> {
                                 ("core.encoding.cbor", "CBORReader" | "CBORWriter"))
                         })
                     }) => Type::Named(n.split_once('.').unwrap().1.to_string()),
+                // D-EMAIL-SMTP-SURFACE1=A: core.email value annotations may use
+                // the caller's module alias while lowering to one Core type.
+                Type::Named(n)
+                    if n.split_once('.').is_some_and(|(alias, leaf)| {
+                        self.core_imports.get(alias).is_some_and(|module| {
+                            module == "core.email" && matches!(leaf,
+                                "Address" | "Message" | "Attachment" | "Envelope" |
+                                "SmtpSecurity" | "RecipientPolicy" | "RecipientReport" |
+                                "SendReport" | "EmailError")
+                        })
+                    }) => Type::Named(n.split_once('.').unwrap().1.to_string()),
                 // D-ENV-MUTATE1=A: Core docs spell the exported error through
                 // the user's chosen module alias (`env.EnvError`). Canonicalize
                 // that qualified spelling to the one built-in runtime type.

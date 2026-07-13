@@ -23,6 +23,7 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
     let etype = resolved_type.as_deref().or(enum_type);
     let is_json = etype.map(is_json_type_name).unwrap_or(false);
     let is_io = etype.map(|t| matches!(t, "IOError" | "IOOperation")).unwrap_or(false);
+    let is_email = etype.is_some_and(|t| matches!(t, "SmtpSecurity" | "RecipientPolicy" | "EmailError"));
     // D-TERM1: detect `Key` from the variant name when the type isn't resolved in etype.
     let is_key = {
         let from_etype = etype.map(|t| t == crate::Syntax::TYPE_KEY).unwrap_or(false);
@@ -43,6 +44,9 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
                 format!("{}jet_std::IoError", cx.root_prefix)
             } else if t == crate::Syntax::TYPE_IO_OPERATION {
                 format!("{}jet_std::IoOperation", cx.root_prefix)
+            } else if matches!(t, "SmtpSecurity" | "RecipientPolicy" | "EmailError") {
+                let rust = if t == "EmailError" { "Error" } else { t };
+                format!("{}jet_email::{rust}", cx.root_prefix)
             } else if let Some(rust_mod) = cx.foreign_types.get(t) {
                 format!("{}{}::user_{}", cx.root_prefix, rust_mod, t)
             } else {
@@ -61,7 +65,7 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
     // Variant names are mangled for user enums, but JSON and Key variants keep
     // their original Rust name (defined as plain Rust identifiers in the prelude).
     let vname = |v: &str| -> String {
-        if is_json || is_key || is_io {
+        if is_json || is_key || is_io || is_email {
             v.to_string()
         } else {
             mangle_variant(v)
@@ -109,7 +113,13 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
                 // index -> the real Rust field name (mangle(&f.name), matching enum
                 // definition codegen in Items.rs) rather than always assuming a
                 // tuple variant. `VariantPayload::Single` is the only real tuple case.
-                let real_names = variant_field_names(cx, variant);
+                let real_names = variant_field_names(cx, variant).map(|names| {
+                    if is_email {
+                        names.into_iter().map(|name| name.strip_prefix("user_").unwrap_or(&name).to_string()).collect()
+                    } else {
+                        names
+                    }
+                });
                 if let Some(real_names) = real_names {
                     let fields: Vec<String> = slot_pats
                         .iter()

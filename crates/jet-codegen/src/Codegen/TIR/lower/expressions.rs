@@ -927,6 +927,23 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // Resolve the head here (totality); a missing alias falls to `user_unknown`,
             // exactly as the AST path (the gate already required the alias to resolve).
             if let Some(alias) = import_ns {
+                if cx.core_imports.get(alias).map(String::as_str) == Some(crate::Syntax::CORE_EMAIL_MODULE)
+                    && matches!(type_name.as_str(), "RecipientReport" | "SendReport")
+                {
+                    let tfields = fields
+                        .iter()
+                        .map(|(name, _, value)| (name.clone(), lower_expr(value, cx, env), false))
+                        .collect();
+                    return TExpr {
+                        ty: Type::Named(type_name.clone()),
+                        kind: TExprKind::StructLit {
+                            rust_type: format!("{}jet_email::{}", cx.root_prefix, type_name),
+                            fields: tfields,
+                            extra: None,
+                            as_trait: None,
+                        },
+                    };
+                }
                 let mod_name = cx
                     .import_mods
                     .get(alias)
@@ -1055,6 +1072,21 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     },
                 };
             }
+            if matches!(type_name.as_str(), "RecipientReport" | "SendReport") {
+                let tfields = fields
+                    .iter()
+                    .map(|(name, _, value)| (name.clone(), lower_expr(value, cx, env), false))
+                    .collect();
+                return TExpr {
+                    ty: Type::Named(type_name.clone()),
+                    kind: TExprKind::StructLit {
+                        rust_type: format!("{}jet_email::{}", cx.root_prefix, type_name),
+                        fields: tfields,
+                        extra: None,
+                        as_trait: None,
+                    },
+                };
+            }
             // c109 Phase 19: a GENERIC struct literal carries `type_args` (`Pair<T> {…}`).
             // The Rust head is the turbofish `user_<Name>::<args>` (`user_type_apply_rust`),
             // resolved at lowering; fields mangle. A non-generic literal renders `user_<Name>`.
@@ -1155,6 +1187,9 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // not rewrite the node). The gate proved this is a covered enum + unit
             // variant; emit `user_<Enum>::user_<variant>` (the AST path's form).
             if let Expr::Ident(enum_name, _) = receiver.as_ref() {
+                let resolved_enum = cx
+                    .core_qualified_rust_type_name(enum_name)
+                    .unwrap_or(enum_name.as_str());
                 if env.ty_of(enum_name).is_none()
                     && matches!(enum_name.as_str(), "Overflow" | "FailurePolicy" | "DispatchState")
                 {
@@ -1174,6 +1209,19 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         ty: Type::Named("DataEvent".to_string()),
                         kind: TExprKind::EnumLit {
                             prefix: format!("{}jet_std::DataEvent::{}", cx.root_prefix, member),
+                            payload: TEnumPayload::Unit,
+                        },
+                    };
+                }
+                if env.ty_of(enum_name).is_none()
+                    && matches!(resolved_enum, "SmtpSecurity" | "RecipientPolicy")
+                    && ((resolved_enum == "SmtpSecurity" && matches!(member.as_str(), "StartTls" | "Tls"))
+                        || (resolved_enum == "RecipientPolicy" && matches!(member.as_str(), "RequireAll" | "DeliverAccepted")))
+                {
+                    return TExpr {
+                        ty: Type::Named(resolved_enum.to_string()),
+                        kind: TExprKind::EnumLit {
+                            prefix: format!("{}jet_email::{}::{}", cx.root_prefix, resolved_enum, member),
                             payload: TEnumPayload::Unit,
                         },
                     };
@@ -1375,7 +1423,10 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             args,
             ..
         } => {
-            let prefix = tir_enum_lit_prefix(cx, type_name, variant);
+            let resolved_type = cx
+                .core_qualified_rust_type_name(type_name)
+                .unwrap_or(type_name.as_str());
+            let prefix = tir_enum_lit_prefix(cx, resolved_type, variant);
             let payload = if args.is_empty() {
                 TEnumPayload::Unit
             } else if args.iter().all(|a| matches!(a, EnumLitArg::Positional(_))) {
@@ -1383,7 +1434,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     .iter()
                     .map(|a| match a {
                         EnumLitArg::Positional(e) => {
-                            lower_enum_arg(type_name, variant, variant, e, cx, env)
+                            lower_enum_arg(resolved_type, variant, variant, e, cx, env)
                         }
                         _ => unreachable!("all positional in this branch"),
                     })
@@ -1397,22 +1448,22 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         EnumLitArg::Named { label, expr } => {
                             let edge = format!("{}.{}", variant, label);
                             (
-                                mangle(label),
-                                lower_enum_arg(type_name, variant, &edge, expr, cx, env),
+                                if resolved_type == "EmailError" { label.clone() } else { mangle(label) },
+                                lower_enum_arg(resolved_type, variant, &edge, expr, cx, env),
                             )
                         }
                         // A positional arg mixed with named is a sema error that
                         // never reaches a covered function; default to a field.
                         EnumLitArg::Positional(e) => (
                             String::new(),
-                            lower_enum_arg(type_name, variant, variant, e, cx, env),
+                            lower_enum_arg(resolved_type, variant, variant, e, cx, env),
                         ),
                     })
                     .collect();
                 TEnumPayload::Named(named)
             };
             TExpr {
-                ty: Type::Named(type_name.clone()),
+                ty: Type::Named(resolved_type.to_string()),
                 kind: TExprKind::EnumLit { prefix, payload },
             }
         }

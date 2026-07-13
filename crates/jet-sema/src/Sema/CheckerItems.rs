@@ -454,6 +454,9 @@ impl<'a> Checker<'a> {
         if is_io_error_type_name(enum_name) || enum_name == Syntax::TYPE_IO_OPERATION {
             return true;
         }
+        if matches!(enum_name, "SmtpSecurity" | "RecipientPolicy" | "EmailError") {
+            return true;
+        }
         false
     }
 
@@ -507,6 +510,9 @@ impl<'a> Checker<'a> {
             return Some(v);
         }
         if let Some(v) = core_encoding_variants(enum_name) {
+            return Some(v);
+        }
+        if let Some(v) = core_email_variants(enum_name) {
             return Some(v);
         }
         None

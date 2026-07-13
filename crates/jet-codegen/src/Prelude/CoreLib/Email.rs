@@ -9,9 +9,18 @@ pub mod jet_email {
     pub const MAX_MESSAGE_BYTES: usize = 32 * 1024 * 1024;
 
     #[derive(Clone, Debug, PartialEq)]
-    pub struct Error {
-        pub kind: &'static str,
-        pub message: String,
+    pub enum Error {
+        Configuration { operation: String, server: Option<String>, code: Option<i64>, reason: String },
+        Dns { operation: String, server: Option<String>, code: Option<i64>, reason: String },
+        Connect { operation: String, server: Option<String>, code: Option<i64>, reason: String },
+        Tls { operation: String, server: Option<String>, code: Option<i64>, reason: String },
+        Auth { operation: String, server: Option<String>, code: Option<i64>, reason: String },
+        Protocol { operation: String, server: Option<String>, code: Option<i64>, reason: String },
+        Rejected { operation: String, server: Option<String>, code: Option<i64>, reason: String },
+        Transient { operation: String, server: Option<String>, code: Option<i64>, reason: String },
+        TimedOut { operation: String, server: Option<String>, code: Option<i64>, reason: String },
+        Cancelled { operation: String, server: Option<String>, code: Option<i64>, reason: String },
+        DeliveryUnknown { operation: String, server: Option<String>, code: Option<i64>, reason: String },
     }
 
     #[derive(Clone, Debug, PartialEq)]
@@ -36,11 +45,44 @@ pub mod jet_email {
         text: String,
         html: String,
         attachments: Vec<Attachment>,
+        envelope: Envelope,
         wire_upper: usize,
     }
 
-    fn error(kind: &'static str, message: impl Into<String>) -> Error {
-        Error { kind, message: message.into() }
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct Envelope {
+        pub from: Address,
+        pub recipients: Vec<Address>,
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub enum SmtpSecurity { StartTls, Tls }
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub enum RecipientPolicy { RequireAll, DeliverAccepted }
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct RecipientReport {
+        pub address: Address,
+        pub accepted: bool,
+        pub code: i64,
+        pub message: String,
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct SendReport {
+        pub server: String,
+        pub accepted: Vec<RecipientReport>,
+        pub rejected: Vec<RecipientReport>,
+        pub response_code: i64,
+        pub response: String,
+        pub accepted_at: String,
+    }
+
+    fn error(operation: &'static str, reason: impl Into<String>) -> Error {
+        Error::Configuration {
+            operation: operation.to_string(), server: None, code: None, reason: reason.into(),
+        }
     }
 
     fn reject_controls(value: &str, what: &str) -> Result<(), Error> {
@@ -242,10 +284,41 @@ pub mod jet_email {
         ensure_rendered_address_header("From", std::slice::from_ref(from))?;
         ensure_rendered_address_header("To", to)?;
         ensure_encoded_header_lines("Subject", subject)?;
+        let envelope = default_envelope(from, to, bcc)?;
         Ok(Message {
             from: from.clone(), to: to.clone(), bcc: bcc.clone(), subject: subject.clone(),
-            text: text.clone(), html: html.clone(), attachments: attachments.clone(), wire_upper,
+            text: text.clone(), html: html.clone(), attachments: attachments.clone(), envelope, wire_upper,
         })
+    }
+
+    fn default_envelope(from: &Address, to: &[Address], bcc: &[Address]) -> Result<Envelope, Error> {
+        let mut recipients = Vec::with_capacity(to.len().saturating_add(bcc.len()));
+        recipients.extend_from_slice(to);
+        recipients.extend_from_slice(bcc);
+        envelope(from, &recipients)
+    }
+
+    pub fn envelope(from: &Address, recipients: &Vec<Address>) -> Result<Envelope, Error> {
+        if recipients.is_empty() {
+            return Err(error("envelope", "email envelope needs at least one recipient"));
+        }
+        if recipients.len() > MAX_RECIPIENTS {
+            return Err(error("envelope", format!("email envelope exceeds {MAX_RECIPIENTS} recipients")));
+        }
+        Ok(Envelope { from: from.clone(), recipients: recipients.clone() })
+    }
+
+    impl Message {
+        pub fn envelope(&self) -> &Envelope { &self.envelope }
+
+        pub fn with_envelope(&self, envelope: &Envelope) -> Result<Message, Error> {
+            if envelope.recipients.is_empty() || envelope.recipients.len() > MAX_RECIPIENTS {
+                return Err(error("with_envelope", "email envelope recipient count is outside the supported range"));
+            }
+            let mut message = self.clone();
+            message.envelope = envelope.clone();
+            Ok(message)
+        }
     }
 
     fn prospective_wire_upper(

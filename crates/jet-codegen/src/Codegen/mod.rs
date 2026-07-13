@@ -1518,6 +1518,7 @@ pub fn emit_bundle_dbg(
         cx.import_sigs = import_sig_map(bundle, i);
         cx.import_rets = import_ret_map(bundle, i);
         cx.core_imports = core_import_map(bundle, i);
+        register_core_import_surfaces(&mut cx);
         cx.used_core = bundle.used_core.clone();
         cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
         cx.root_prefix = "super::".to_string();
@@ -1546,6 +1547,7 @@ pub fn emit_bundle_dbg(
     cx.import_sigs = import_sig_map(bundle, bundle.entry);
     cx.import_rets = import_ret_map(bundle, bundle.entry);
     cx.core_imports = core_import_map(bundle, bundle.entry);
+    register_core_import_surfaces(&mut cx);
     cx.used_core = bundle.used_core.clone();
     cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
     let (uinline, ufile) = unqualified_import_maps(bundle, bundle.entry);
@@ -1648,6 +1650,7 @@ pub fn emit_bundle_tests_cov(
         cx.import_sigs = import_sig_map(bundle, i);
         cx.import_rets = import_ret_map(bundle, i);
         cx.core_imports = core_import_map(bundle, i);
+        register_core_import_surfaces(&mut cx);
         cx.used_core = bundle.used_core.clone();
         cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
         cx.root_prefix = "super::".to_string();
@@ -1675,6 +1678,7 @@ pub fn emit_bundle_tests_cov(
     cx.import_sigs = import_sig_map(bundle, bundle.entry);
     cx.import_rets = import_ret_map(bundle, bundle.entry);
     cx.core_imports = core_import_map(bundle, bundle.entry);
+    register_core_import_surfaces(&mut cx);
     cx.used_core = bundle.used_core.clone();
     cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
     let (uinline, ufile) = unqualified_import_maps(bundle, bundle.entry);
@@ -1831,6 +1835,7 @@ pub fn emit_bundle_fuzz(
         cx.import_sigs = import_sig_map(bundle, i);
         cx.import_rets = import_ret_map(bundle, i);
         cx.core_imports = core_import_map(bundle, i);
+        register_core_import_surfaces(&mut cx);
         cx.used_core = bundle.used_core.clone();
         cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
         cx.root_prefix = "super::".to_string();
@@ -1857,6 +1862,7 @@ pub fn emit_bundle_fuzz(
     cx.import_sigs = import_sig_map(bundle, bundle.entry);
     cx.import_rets = import_ret_map(bundle, bundle.entry);
     cx.core_imports = core_import_map(bundle, bundle.entry);
+    register_core_import_surfaces(&mut cx);
     cx.used_core = bundle.used_core.clone();
     cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
     let (uinline, ufile) = unqualified_import_maps(bundle, bundle.entry);
@@ -2076,6 +2082,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         cx.import_sigs = import_sig_map(bundle, i);
         cx.import_rets = import_ret_map(bundle, i);
         cx.core_imports = core_import_map(bundle, i);
+        register_core_import_surfaces(&mut cx);
         cx.used_core = bundle.used_core.clone();
         cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
         cx.root_prefix = "super::".to_string();
@@ -2103,6 +2110,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
     cx.import_sigs = import_sig_map(bundle, bundle.entry);
     cx.import_rets = import_ret_map(bundle, bundle.entry);
     cx.core_imports = core_import_map(bundle, bundle.entry);
+    register_core_import_surfaces(&mut cx);
     cx.used_core = bundle.used_core.clone();
     cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
     let (uinline, ufile) = unqualified_import_maps(bundle, bundle.entry);

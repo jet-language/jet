@@ -1807,6 +1807,23 @@ index, not a substitute for that law.
   timeout, cancellation, and DeliveryUnknown. No hidden retry, thread-per-send,
   raw transport error, credential disclosure, external dependency, or duplicate
   async API exists. DKIM signs final bytes; SPF and DMARC remain DNS policy.
+- **D-EMAIL-SMTP-SURFACE1=A**: SMTP uses closed records and enums plus one
+  `Mailer.send(message)` mechanism. `Envelope` contains `from:Address` and
+  `recipients:[Address]`; `email.envelope` validates it, and
+  `message.with_envelope(envelope)` replaces only SMTP routing. MIME headers
+  remain unchanged, so Bcc stays envelope-only. `SmtpConfig` contains host,
+  port, `.StartTls`/`.Tls` security, `.None`/`.Password` auth,
+  `.RequireAll`/`.DeliverAccepted` recipient policy, verified system or
+  system-plus-CA trust, and bounded `Limits`. Ambient `#Context` alone owns
+  deadline and cancellation. `SendReport` records server, accepted and rejected
+  recipient reports, final response, and acceptance time; acceptance never
+  claims inbox delivery. `EmailError` is the closed Configuration, Dns, Connect,
+  Tls, Auth, Protocol, Rejected, Transient, TimedOut, Cancelled, and
+  DeliveryUnknown set, each with operation, optional server/code, and reason.
+  No trust-all mode, TLS downgrade, plaintext password auth, or automatic retry
+  exists. Exact `Limits`, password-secret, and custom-root bridge completion is
+  owner-gated by D-EMAIL-SMTP-CONFIG1; config, Mailer, and send remain unexported
+  until that gate is ratified and implemented.
 - **D-ENCSTREAM1=A**: each `core.encoding` codec has one adapter identity with
   whole-value and reader/writer stream modes over the shared `DataTree`
   and `Codable` machinery. Streaming is a mode of that adapter, never a second

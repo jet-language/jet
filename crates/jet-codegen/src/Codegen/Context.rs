@@ -5,7 +5,7 @@ use crate::Syntax;
 use crate::AST::FfiLink;
 use crate::AST::{
     AccessConvention, CtValue, EnumDef, Func, Item, Program, ProgramBundle, StructDef, Type,
-    VariantPayload,
+    VariantField, VariantPayload,
 };
 use std::collections::{HashMap, HashSet};
 pub(crate) struct Cx {
@@ -434,6 +434,15 @@ impl Cx {
             (Some("core.encoding"), "EncodingFormat") => Some("EncodingFormat"),
             (Some("core.encoding"), "EncodingErrorKind") => Some("EncodingErrorKind"),
             (Some("core.encoding"), "DataEvent") => Some("DataEvent"),
+            (Some("core.email"), "Address") => Some("Address"),
+            (Some("core.email"), "Message") => Some("Message"),
+            (Some("core.email"), "Attachment") => Some("Attachment"),
+            (Some("core.email"), "Envelope") => Some("Envelope"),
+            (Some("core.email"), "SmtpSecurity") => Some("SmtpSecurity"),
+            (Some("core.email"), "RecipientPolicy") => Some("RecipientPolicy"),
+            (Some("core.email"), "RecipientReport") => Some("RecipientReport"),
+            (Some("core.email"), "SendReport") => Some("SendReport"),
+            (Some("core.email"), "EmailError") => Some("EmailError"),
             (Some("core.encoding.json"), "JSONReader") => Some("JSONReader"),
             (Some("core.encoding.json"), "JSONWriter") => Some("JSONWriter"),
             (Some("core.encoding.jsonl"), "JSONLReader") => Some("JSONLReader"),
@@ -642,10 +651,15 @@ impl Cx {
             Type::Named(name) if name == "Mime" => {
                 format!("{}jet_std::JetMime", self.root_prefix)
             }
-            Type::Named(name) if matches!(name.as_str(), "Address" | "Message" | "Attachment" | "EmailError") => {
+            Type::Named(name) if matches!(name.as_str(),
+                "Address" | "Message" | "Attachment" | "Envelope" | "SmtpSecurity"
+                | "RecipientPolicy" | "RecipientReport" | "SendReport" | "EmailError"
+            ) => {
                 let rust = match name.as_str() {
                     "Address" => "Address", "Message" => "Message", "Attachment" => "Attachment",
-                    _ => "Error",
+                    "Envelope" => "Envelope", "SmtpSecurity" => "SmtpSecurity",
+                    "RecipientPolicy" => "RecipientPolicy", "RecipientReport" => "RecipientReport",
+                    "SendReport" => "SendReport", _ => "Error",
                 };
                 format!("{}jet_email::{rust}", self.root_prefix)
             }
@@ -834,10 +848,18 @@ impl Cx {
                 )
             }
             Type::Named(name) if self.core_qualified_rust_type_name(name).is_some() => {
+                let resolved = self.core_qualified_rust_type_name(name).unwrap();
+                if matches!(resolved,
+                    "Address" | "Message" | "Attachment" | "Envelope" | "SmtpSecurity"
+                    | "RecipientPolicy" | "RecipientReport" | "SendReport" | "EmailError"
+                ) {
+                    let rust = if resolved == "EmailError" { "Error" } else { resolved };
+                    return format!("{}jet_email::{rust}", self.root_prefix);
+                }
                 format!(
                     "{}jet_std::{}",
                     self.root_prefix,
-                    self.core_qualified_rust_type_name(name).unwrap()
+                    resolved
                 )
             }
             Type::Named(name) if self.trait_names.contains(name) => {
@@ -1251,11 +1273,60 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
     cx.import_sigs = import_sig_map(bundle, module_idx);
     cx.import_rets = import_ret_map(bundle, module_idx);
     cx.core_imports = core_import_map(bundle, module_idx);
+    register_core_import_surfaces(cx);
     cx.used_core = bundle.used_core.clone();
     cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
     let (uinline, ufile) = unqualified_import_maps(bundle, module_idx);
     cx.unqualified_inline = uinline;
     cx.unqualified_file = ufile;
+}
+
+/// Populate value-shape tables that depend on bundle-resolved Core imports.
+pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
+    if !cx.core_imports.values().any(|module| module == Syntax::CORE_EMAIL_MODULE) {
+        return;
+    }
+    let zero = Span::new(0, 0);
+    for (name, variants) in [
+        ("SmtpSecurity", vec![("StartTls".to_string(), VariantPayload::Unit), ("Tls".to_string(), VariantPayload::Unit)]),
+        ("RecipientPolicy", vec![("RequireAll".to_string(), VariantPayload::Unit), ("DeliverAccepted".to_string(), VariantPayload::Unit)]),
+    ] {
+        for (variant, _) in &variants { cx.variant_owner.insert(variant.clone(), name.to_string()); }
+        cx.enum_variants.insert(name.to_string(), variants);
+        cx.cloneable.insert(name.to_string());
+    }
+    let error_fields = || [
+        ("operation", Type::String),
+        ("server", Type::Option(Box::new(Type::String))),
+        ("code", Type::Option(Box::new(Type::Int))),
+        ("reason", Type::String),
+    ].into_iter().map(|(field, ty)| VariantField {
+        name: field.to_string(), name_span: zero, ty, ty_span: zero,
+    }).collect();
+    let errors = [
+        "Configuration", "Dns", "Connect", "Tls", "Auth", "Protocol", "Rejected",
+        "Transient", "TimedOut", "Cancelled", "DeliveryUnknown",
+    ].into_iter().map(|variant| (variant.to_string(), VariantPayload::Named(error_fields()))).collect::<Vec<_>>();
+    for (variant, _) in &errors { cx.variant_owner.insert(variant.clone(), "EmailError".to_string()); }
+    cx.enum_variants.insert("EmailError".to_string(), errors);
+    cx.cloneable.insert("EmailError".to_string());
+    cx.struct_fields.insert("Envelope".to_string(), vec![
+        ("from".to_string(), Type::Named("Address".to_string())),
+        ("recipients".to_string(), Type::List(Box::new(Type::Named("Address".to_string())))),
+    ]);
+    cx.struct_fields.insert("RecipientReport".to_string(), vec![
+        ("address".to_string(), Type::Named("Address".to_string())),
+        ("accepted".to_string(), Type::Bool), ("code".to_string(), Type::Int),
+        ("message".to_string(), Type::String),
+    ]);
+    cx.struct_fields.insert("SendReport".to_string(), vec![
+        ("server".to_string(), Type::String),
+        ("accepted".to_string(), Type::List(Box::new(Type::Named("RecipientReport".to_string())))),
+        ("rejected".to_string(), Type::List(Box::new(Type::Named("RecipientReport".to_string())))),
+        ("response_code".to_string(), Type::Int), ("response".to_string(), Type::String),
+        ("accepted_at".to_string(), Type::String),
+    ]);
+    cx.cloneable.extend(["Envelope".to_string(), "RecipientReport".to_string(), "SendReport".to_string()]);
 }
 
 pub(crate) fn build_cx_items(

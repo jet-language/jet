@@ -272,6 +272,10 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             fields,
             ..
         } => {
+            let core_email_struct = import_ns.as_deref().is_some_and(|alias| {
+                cx.core_imports.get(alias).map(String::as_str) == Some(crate::Syntax::CORE_EMAIL_MODULE)
+                    && matches!(type_name.as_str(), "RecipientReport" | "SendReport")
+            });
             // c109 Phase 30: a TRAIT-OBJECT coercion (S48 — `Circle {…}` in a `[Shape]`
             // list). The AST wraps the rendered literal `Box::new(<lit>) as Box<dyn
             // user_<Trait>>` (`emit_struct_lit`'s `as_trait` branch). Covered when the trait
@@ -295,7 +299,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             // namespace head (`{root}{mod}::{user_<Name>}[::<args>]`, mangled fields).
             // Covered when the named foreign type is a covered foreign struct and the
             // import alias resolves; the head is resolved at lowering (`lower_expr`).
-            if import_ns.is_some() {
+            if import_ns.is_some() && !core_email_struct {
                 return foreign_struct_lit_in_subset(
                     type_name,
                     type_args,
@@ -368,15 +372,24 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             // its (unit) variants. A receiver that is a known local can't also be a
             // covered enum name, so the two branches never collide.
             if let Expr::Ident(enum_name, _) = receiver.as_ref() {
+                let resolved_enum = cx
+                    .core_qualified_rust_type_name(enum_name)
+                    .unwrap_or(enum_name.as_str());
+                if !locals.contains(enum_name)
+                    && ((resolved_enum == "SmtpSecurity" && matches!(member.as_str(), "StartTls" | "Tls"))
+                        || (resolved_enum == "RecipientPolicy" && matches!(member.as_str(), "RequireAll" | "DeliverAccepted")))
+                {
+                    return true;
+                }
                 if enum_name == "DataEvent"
                     && matches!(member.as_str(), "Null" | "ArrayStart" | "ArrayEnd" | "ObjectStart" | "ObjectEnd")
                 {
                     return true;
                 }
                 if !locals.contains(enum_name)
-                    && (enum_is_covered(enum_name, cx)
-                        || crate::Codegen::core_rust_type_name(enum_name).is_some())
-                    && cx.enum_variants.get(enum_name).is_some_and(|variants| {
+                    && (enum_is_covered(resolved_enum, cx)
+                        || crate::Codegen::core_rust_type_name(resolved_enum).is_some())
+                    && cx.enum_variants.get(resolved_enum).is_some_and(|variants| {
                         variants.iter().any(|(name, payload)| {
                             name == member && matches!(payload, crate::AST::VariantPayload::Unit)
                         })
@@ -446,6 +459,14 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             args,
             ..
         } => {
+            let resolved_type = cx
+                .core_qualified_rust_type_name(type_name)
+                .unwrap_or(type_name.as_str());
+            if (resolved_type == "SmtpSecurity" && matches!(variant.as_str(), "StartTls" | "Tls"))
+                || (resolved_type == "RecipientPolicy" && matches!(variant.as_str(), "RequireAll" | "DeliverAccepted"))
+            {
+                return args.is_empty();
+            }
             // D-TERM1 (ratified 2026-06-22): `Key` is a core prelude enum, not in
             // the user registry, but is always covered — all payloads are scalar/Char.
             let key_type = crate::Syntax::TYPE_KEY;
@@ -477,14 +498,14 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             if type_name == "NetReadyInterest" {
                 return matches!(variant.as_str(), "Read" | "Write" | "ReadWrite");
             }
-            if !enum_is_covered(type_name, cx)
-                && !(crate::Codegen::core_rust_type_name(type_name).is_some()
-                    && cx.enum_variants.contains_key(type_name))
+            if !enum_is_covered(resolved_type, cx)
+                && !(crate::Codegen::core_rust_type_name(resolved_type).is_some()
+                    && cx.enum_variants.contains_key(resolved_type))
             {
                 return false;
             }
             // Defensive: the variant must belong to this enum (sema guaranteed it).
-            if !cx.enum_variants.get(type_name).is_some_and(|variants| {
+            if !cx.enum_variants.get(resolved_type).is_some_and(|variants| {
                 variants.iter().any(|(candidate, _)| candidate == variant)
             }) {
                 return false;

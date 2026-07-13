@@ -612,6 +612,10 @@ pub(crate) fn tir_enum_lit_prefix(cx: &Cx, type_name: &str, variant: &str) -> St
     if matches!(type_name, "IOError" | "IOOperation") {
         return format!("{}jet_std::{}::{}", cx.root_prefix, if type_name == "IOError" { "IoError" } else { "IoOperation" }, variant);
     }
+    if matches!(type_name, "SmtpSecurity" | "RecipientPolicy" | "EmailError") {
+        let rust = if type_name == "EmailError" { "Error" } else { type_name };
+        return format!("{}jet_email::{}::{}", cx.root_prefix, rust, variant);
+    }
     let type_prefix = match cx.foreign_types.get(type_name) {
         Some(rust_mod) => format!("{}{}::user_{}", cx.root_prefix, rust_mod, type_name),
         None => format!("user_{}", type_name),

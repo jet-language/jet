@@ -351,12 +351,17 @@ fn run() {
 }
 ```
 
-This first native vertical ships `address`, `attachment`, `message`, and
-`serialize` over `Address`, `Attachment`, `Message`, and `EmailError`. SMTP,
-Mailer configuration, SendReport, scheduler/deadline integration, and DKIM use
-the same ratified types but are not yet callable. No send-shaped placeholder is
-exported. `serialize` returns final MIME bytes; Bcc remains available only to
-the later envelope/transport path.
+The native surface ships `address`, `attachment`, `message`, `envelope`, and
+`serialize`. `Message.with_envelope` replaces SMTP routing without changing MIME
+headers. `SmtpSecurity`, `RecipientPolicy`, `RecipientReport`, `SendReport`, and
+the closed `EmailError` variants are real values. Bcc enters the default
+envelope but never serialized headers.
+
+`SmtpConfig`, authentication, custom certificate roots, `Mailer`, and `send`
+remain unavailable while D-EMAIL-SMTP-CONFIG1 fixes the missing limit names,
+password-secret representation, and verified custom-root bridge. No
+send-shaped placeholder is exported. Relay acceptance, cancellation, DKIM, and
+D-AUTH1 injection remain transport follow-up work.
 
 ### `core.http` — HTTP client and server
 

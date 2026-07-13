@@ -1968,6 +1968,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         }
                     }
                 },
+                THandleOp::EmailMethod { method } => match method.as_str() {
+                    "envelope" => format!("({}).envelope().clone()", recv),
+                    "with_envelope" => format!("({}).with_envelope(&({}))", recv, a(0)),
+                    _ => unreachable!("unknown email method"),
+                },
                 THandleOp::RegexMethod { kind: _, method } => match method.as_str() {
                     "match" => format!("({}).match_value(&({}))", recv, a(0)),
                     "is_match" | "find" | "find_all" | "matches" | "split" | "name" => {

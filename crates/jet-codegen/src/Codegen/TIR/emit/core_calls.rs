@@ -999,6 +999,9 @@ pub(crate) fn emit_tir_core_call(
             "{}jet_email::message(&({}), &({}), &({}), &({}), &({}), &({}), &({}))",
             cx.root_prefix, arg(0), arg(1), arg(2), arg(3), arg(4), arg(5), arg(6)
         ),
+        ("core.email", "envelope") => format!(
+            "{}jet_email::envelope(&({}), &({}))", cx.root_prefix, arg(0), arg(1)
+        ),
         ("core.email", "serialize") => format!("{}jet_email::serialize(&({}))", cx.root_prefix, arg(0)),
         // D-TEXTUNICODE1: std-only Unicode scalar helpers.
         ("core.text.unicode", "scalar_count") => {

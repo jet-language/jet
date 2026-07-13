@@ -2394,6 +2394,10 @@ pub enum THandleOp {
         kind: String,
         method: String,
     },
+    /// D-EMAIL-SMTP-SURFACE1=A: Message envelope replacement.
+    EmailMethod {
+        method: String,
+    },
     /// D-REGEXENGINE1=A: method call on Regex/Match value types.
     RegexMethod {
         kind: String,

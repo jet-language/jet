@@ -122,6 +122,32 @@ fn core_email_headers_and_wire_bounds_are_prospective() {
 }
 
 #[test]
+fn core_email_envelope_reports_and_errors_follow_smtp_law() {
+    use email_native::jet_email;
+    let from = jet_email::address(&"sender@example.com".to_string()).unwrap();
+    let visible = jet_email::address(&"visible@example.net".to_string()).unwrap();
+    let hidden = jet_email::address(&"hidden@example.org".to_string()).unwrap();
+    let message = jet_email::message(
+        &from, &vec![visible.clone()], &vec![hidden.clone()], &"subject".to_string(),
+        &"body".to_string(), &String::new(), &vec![],
+    ).unwrap();
+    assert_eq!(message.envelope().recipients, vec![visible.clone(), hidden.clone()]);
+    let replacement = jet_email::envelope(&from, &vec![hidden.clone()]).unwrap();
+    let replaced = message.with_envelope(&replacement).unwrap();
+    assert_eq!(replaced.envelope().recipients, vec![hidden]);
+    assert!(!String::from_utf8(jet_email::serialize(&replaced).unwrap()).unwrap().contains("Bcc:"));
+    let error = jet_email::envelope(&from, &vec![]).unwrap_err();
+    match error {
+        jet_email::Error::Configuration { operation, server, code, reason } => {
+            assert_eq!(operation, "envelope");
+            assert_eq!((server, code), (None, None));
+            assert!(reason.contains("recipient"));
+        }
+        other => panic!("unexpected envelope error: {other:?}"),
+    }
+}
+
+#[test]
 fn encoding_stream_foundation_types_are_real_jet_values() {
     let dir = std::env::temp_dir().join(format!("jet_encoding_foundation_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
@@ -2908,6 +2934,7 @@ fn run() {
     print(first == second)
     print(first.len())
 }
+
 "#;
     let (code, stdout, stderr) = build_and_run(&dir, "email_mime", src, &[], None);
     assert_eq!(code, 0, "stderr:\n{stderr}");
@@ -2920,6 +2947,87 @@ fn run() {
             assert!(stdout.starts_with("address-rejected\nheader-rejected\nrecipient-bound\nattachment-bound\ntrue\n"), "{stdout}");
         }
         other => panic!("email MIME did not run in default dev: {other:?}"),
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn core_email_policy_envelope_and_reports_are_real_jet_values() {
+    let dir = std::env::temp_dir().join(format!("jet_corelib_email_policy_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let src = r#"
+use core.email as email
+
+fn error_text(problem: email.EmailError) -> String {
+    if problem == {
+        .Configuration(_, _, _, _) -> { return "matched" }
+        .Tls(_, _, _, _) -> { return "tls-error" }
+    }
+    return "unknown"
+}
+
+fn run() {
+    sender :: email.address("sender@example.com") ?? panic("sender")
+    visible :: email.address("visible@example.net") ?? panic("visible")
+    hidden :: email.address("hidden@example.org") ?? panic("hidden")
+    message :: email.message(copy sender, [copy visible], [copy hidden], "subject", "body", "", []) ?? panic("message")
+    original_bytes :: email.serialize(copy message) ?? panic("serialize original")
+    default_envelope :: message.envelope()
+    envelope :: email.envelope(sender, [copy hidden]) ?? panic("envelope")
+    replaced :: message.with_envelope(envelope) ?? panic("replace")
+    bytes :: email.serialize(replaced) ?? panic("serialize")
+    start_tls: email.SmtpSecurity := .StartTls
+    transport_tls: email.SmtpSecurity := .Tls
+    require_all: email.RecipientPolicy := .RequireAll
+    recipient := email.RecipientReport.{
+        address: hidden,
+        accepted: true,
+        code: 250,
+        message: "accepted",
+    }
+    report := email.SendReport.{
+        server: "smtp.example.com",
+        accepted: [recipient],
+        rejected: [],
+        response_code: 250,
+        response: "queued",
+        accepted_at: "2026-07-13T17:00:00Z",
+    }
+    problem: email.EmailError := .Configuration.{
+        operation: "send",
+        server: Val("smtp.example.com"),
+        code: Val(451),
+        reason: "stopped",
+    }
+    tls_problem: email.EmailError := .Tls.{
+        operation: "handshake",
+        server: Val("smtp.example.com"),
+        code: Val(525),
+        reason: "certificate",
+    }
+    print(start_tls == .StartTls)
+    print(transport_tls == .Tls)
+    print(require_all == .RequireAll)
+    print(default_envelope.recipients.len())
+    print(original_bytes == bytes)
+    print(report.server)
+    print(report.accepted.len())
+    print(error_text(problem))
+    print(error_text(tls_problem))
+    print(bytes.len() > 0)
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "email_policy", src, &[], None);
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "true\ntrue\ntrue\n2\ntrue\nsmtp.example.com\n1\nmatched\ntls-error\ntrue\n");
+    let file = dir.join("email_policy.jet");
+    fs::write(&file, src).unwrap();
+    match jet::Interpreter::dev_iteration(file.to_str().unwrap(), false, false) {
+        jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
+            assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
+        }
+        other => panic!("email policy default-dev failed: {other:?}"),
     }
     let _ = fs::remove_dir_all(&dir);
 }

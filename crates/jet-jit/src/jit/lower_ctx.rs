@@ -2270,6 +2270,7 @@ impl LowerCtx<'_, '_> {
             THandleOp::SketchMethod { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::CivilTimeMethod { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::UrlMimeMethod { .. } => Err("jit handle method unsupported".to_string()),
+            THandleOp::EmailMethod { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::RegexMethod { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::HttpClientMethod { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::HttpServerMethod { .. } => Err("jit handle method unsupported".to_string()),

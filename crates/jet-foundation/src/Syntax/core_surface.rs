@@ -421,16 +421,23 @@ pub const CORE_MEM_ALLOC_MODULE: &str = "core.mem.alloc";
 /// D-ARGS1 (ratified 2026-06-22): declarative CLI argument parsing module.
 pub const CORE_ARGS_MODULE: &str = "core.args";
 
-// D-EMAIL1=A: implemented email message/MIME vertical. Transport types remain
-// unavailable until their real runtime vertical lands.
+// D-EMAIL1=A / D-EMAIL-SMTP-SURFACE1=A: bounded message/MIME plus exact
+// ungated envelope, policy, report, and error values. D-EMAIL-SMTP-CONFIG1
+// gates config/auth/trust/Mailer transport spellings and remains unexported.
 pub const CORE_EMAIL_MODULE: &str = "core.email";
 pub const TYPE_EMAIL_ADDRESS: &str = "Address";
 pub const TYPE_EMAIL_MESSAGE: &str = "Message";
 pub const TYPE_EMAIL_ATTACHMENT: &str = "Attachment";
+pub const TYPE_EMAIL_ENVELOPE: &str = "Envelope";
+pub const TYPE_EMAIL_SMTP_SECURITY: &str = "SmtpSecurity";
+pub const TYPE_EMAIL_RECIPIENT_POLICY: &str = "RecipientPolicy";
+pub const TYPE_EMAIL_RECIPIENT_REPORT: &str = "RecipientReport";
+pub const TYPE_EMAIL_SEND_REPORT: &str = "SendReport";
 pub const TYPE_EMAIL_ERROR: &str = "EmailError";
 pub const CORE_EMAIL_ADDRESS_FN: &str = "address";
 pub const CORE_EMAIL_ATTACHMENT_FN: &str = "attachment";
 pub const CORE_EMAIL_MESSAGE_FN: &str = "message";
+pub const CORE_EMAIL_ENVELOPE_FN: &str = "envelope";
 pub const CORE_EMAIL_SERIALIZE_FN: &str = "serialize";
 
 /// D-REGION1 (ratified 2026-06-21, opt B): explicit allocation-region block

@@ -1,4 +1,4 @@
-use crate::AST::{Expr, Type};
+use crate::AST::{Expr, Type, VariantField, VariantPayload};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Sema::Checker;
 use crate::Sema::Diagnostics::expr_root_ident;
@@ -33,6 +33,19 @@ pub(crate) fn is_u8_ty(ty: &Type) -> bool {
             bits: 8
         }
     )
+}
+
+/// D-EMAIL-SMTP-SURFACE1=A: exact ungated Message envelope access/replacement.
+pub fn email_method_return(ty: &Type, method: &str, argc: usize) -> Option<Option<Type>> {
+    match (ty, method, argc) {
+        (Type::Named(name), "envelope", 0) if name == "Message" => {
+            Some(Some(Type::Named("Envelope".to_string())))
+        }
+        (Type::Named(name), "with_envelope", 1) if name == "Message" => Some(Some(result_ty(
+            Type::Named("Message".to_string()), Type::Named("EmailError".to_string()),
+        ))),
+        _ => None,
+    }
 }
 
 pub(crate) fn json_ty() -> Type {
@@ -207,8 +220,9 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "ZonedDateTime"
         // D-URL1=A: typed URL and MIME values.
         | "Url" | "Mime"
-        // D-EMAIL1=A: implemented email message/MIME vertical.
-        | "Address" | "Message" | "Attachment" | "EmailError"
+        // D-EMAIL1=A / D-EMAIL-SMTP-SURFACE1=A: exact ungated email values.
+        | "Address" | "Message" | "Attachment" | "Envelope" | "EmailError"
+        | "SmtpSecurity" | "RecipientPolicy" | "RecipientReport" | "SendReport"
         // D-REGEXENGINE1=A: std-only linear regex values.
         | "Regex" | "RegexFlags" | "Match"
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP types.
@@ -246,8 +260,15 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     if type_name == "HttpShutdownReport" && matches!(field, "accepted" | "overloaded" | "completed" | "cancelled") {
         return Some(Type::Int);
     }
-    if matches!(type_name, "EncodingLimits" | "EncodingCause" | "EncodingError" | "AsyncPolicy") {
+    if matches!(type_name, "EncodingLimits" | "EncodingCause" | "EncodingError" | "AsyncPolicy" | "RecipientReport" | "SendReport") {
         return core_constructable_fields(type_name)?.into_iter().find(|(name, _)| name == field).map(|(_, ty)| ty);
+    }
+    if type_name == "Envelope" {
+        return match field {
+            "from" => Some(Type::Named("Address".to_string())),
+            "recipients" => Some(Type::List(Box::new(Type::Named("Address".to_string())))),
+            _ => None,
+        };
     }
     if type_name == Syntax::TYPE_BUILD_CONTEXT && field == "program" {
         return Some(Type::Named(Syntax::TYPE_PROGRAM_INFO.to_string()));
@@ -897,8 +918,56 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             ("reason".to_string(), Type::String),
             ("cause".to_string(), Type::Option(Box::new(Type::Named("EncodingCause".to_string())))),
         ]),
+        "RecipientReport" => Some(vec![
+            ("address".to_string(), Type::Named("Address".to_string())),
+            ("accepted".to_string(), Type::Bool),
+            ("code".to_string(), Type::Int),
+            ("message".to_string(), Type::String),
+        ]),
+        "SendReport" => Some(vec![
+            ("server".to_string(), Type::String),
+            ("accepted".to_string(), Type::List(Box::new(Type::Named("RecipientReport".to_string())))),
+            ("rejected".to_string(), Type::List(Box::new(Type::Named("RecipientReport".to_string())))),
+            ("response_code".to_string(), Type::Int),
+            ("response".to_string(), Type::String),
+            ("accepted_at".to_string(), Type::String),
+        ]),
         _ => None,
     }
+}
+
+/// D-EMAIL-SMTP-SURFACE1=A: closed ungated email policy and error enums.
+pub(crate) fn core_email_variants(
+    enum_name: &str,
+) -> Option<std::collections::HashMap<String, (Span, VariantPayload)>> {
+    let zero = Span::new(0, 0);
+    let mut variants = std::collections::HashMap::new();
+    let units: &[&str] = match enum_name {
+        "SmtpSecurity" => &["StartTls", "Tls"],
+        "RecipientPolicy" => &["RequireAll", "DeliverAccepted"],
+        "EmailError" => &[],
+        _ => return None,
+    };
+    for name in units {
+        variants.insert((*name).to_string(), (zero, VariantPayload::Unit));
+    }
+    if enum_name == "EmailError" {
+        for name in [
+            "Configuration", "Dns", "Connect", "Tls", "Auth", "Protocol", "Rejected",
+            "Transient", "TimedOut", "Cancelled", "DeliveryUnknown",
+        ] {
+            let fields = [
+                ("operation", Type::String),
+                ("server", Type::Option(Box::new(Type::String))),
+                ("code", Type::Option(Box::new(Type::Int))),
+                ("reason", Type::String),
+            ].into_iter().map(|(field, ty)| VariantField {
+                name: field.to_string(), name_span: zero, ty, ty_span: zero,
+            }).collect();
+            variants.insert(name.to_string(), (zero, VariantPayload::Named(fields)));
+        }
+    }
+    Some(variants)
 }
 
 /// D-ENCSTREAM-SURFACE1=A: closed shared stream enums.

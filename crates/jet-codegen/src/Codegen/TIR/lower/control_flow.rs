@@ -182,10 +182,19 @@ pub(super) fn lower_binding_free_variant_pattern_test(
         _ => unreachable!("binding-free variant gate admitted non-variant"),
     };
     let subject_enum = match &subj.ty {
-        Type::Named(name) | Type::Apply { name, .. }
-            if cx.enum_variants.get(name).is_some_and(|variants| {
-                variants.iter().any(|(candidate, _)| candidate == variant)
-            }) => Some(name.as_str()),
+        Type::Named(name) | Type::Apply { name, .. } => {
+            let resolved = cx
+                .core_qualified_rust_type_name(name)
+                .unwrap_or(name.as_str());
+            cx.enum_variants
+                .get(resolved)
+                .is_some_and(|variants| {
+                    variants
+                        .iter()
+                        .any(|(candidate, _)| candidate == variant)
+                })
+                .then_some(resolved)
+        }
         _ => None,
     };
     let enum_type = subject_enum.or_else(|| cx.variant_owner.get(variant).map(String::as_str));

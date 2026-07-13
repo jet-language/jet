@@ -320,6 +320,9 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
             kind: "Mime".to_string(),
             method: method.to_string(),
         },
+        ("Message", "envelope", 0) | ("Message", "with_envelope", 1) => THandleOp::EmailMethod {
+            method: method.to_string(),
+        },
         ("Regex", "is_match" | "match" | "find" | "find_all" | "matches" | "split", 1) => {
             THandleOp::RegexMethod {
                 kind: "Regex".to_string(),
@@ -466,6 +469,11 @@ pub(crate) fn handle_method_return_ty(handle: &str, method: &str, nargs: usize) 
             ("Mime", "params", 0) => Some(Some(Type::List(Box::new(Type::List(Box::new(
                 Type::String,
             )))))),
+            ("Message", "envelope", 0) => Some(Some(Type::Named("Envelope".to_string()))),
+            ("Message", "with_envelope", 1) => Some(Some(Type::Result {
+                ok: Box::new(Type::Named("Message".to_string())),
+                err: Box::new(Type::Named("EmailError".to_string())),
+            })),
             ("Regex", "is_match", 1) => Some(Some(Type::Bool)),
             ("Regex", "match", 1) => Some(Some(Type::Option(Box::new(Type::Named(
                 "Match".to_string(),

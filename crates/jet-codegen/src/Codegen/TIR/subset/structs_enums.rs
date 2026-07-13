@@ -129,6 +129,7 @@ pub(crate) fn enum_payload_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<Str
         // A collection payload: its element/key/value types must each be a covered
         // value type, with enum references re-checked under the SAME `seen` guard.
         Type::List(inner) => enum_payload_ty_covered(inner, cx, seen),
+        Type::Option(inner) => enum_payload_ty_covered(inner, cx, seen),
         Type::Map { key, value, .. } => {
             enum_payload_ty_covered(key, cx, seen) && enum_payload_ty_covered(value, cx, seen)
         }
