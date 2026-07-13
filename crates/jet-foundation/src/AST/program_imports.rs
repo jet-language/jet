@@ -125,10 +125,11 @@ pub enum ForeignLanguage {
     Java,
     Tcl,
     Fortran,
+    Ada,
 }
 
 impl ForeignLanguage {
-    pub const ALL: [ForeignLanguage; 9] = [
+    pub const ALL: [ForeignLanguage; 10] = [
         ForeignLanguage::C,
         ForeignLanguage::Rust,
         ForeignLanguage::Py,
@@ -138,6 +139,7 @@ impl ForeignLanguage {
         ForeignLanguage::Java,
         ForeignLanguage::Tcl,
         ForeignLanguage::Fortran,
+        ForeignLanguage::Ada,
     ];
 
     pub fn from_root(root: &str) -> Option<Self> {
@@ -151,6 +153,7 @@ impl ForeignLanguage {
             Syntax::JAVA_MODULE_ROOT => Some(ForeignLanguage::Java),
             Syntax::TCL_MODULE_ROOT => Some(ForeignLanguage::Tcl),
             Syntax::FORTRAN_MODULE_ROOT => Some(ForeignLanguage::Fortran),
+            Syntax::ADA_MODULE_ROOT => Some(ForeignLanguage::Ada),
             _ => None,
         }
     }
@@ -166,6 +169,7 @@ impl ForeignLanguage {
             ForeignLanguage::Java => Syntax::JAVA_MODULE_ROOT,
             ForeignLanguage::Tcl => Syntax::TCL_MODULE_ROOT,
             ForeignLanguage::Fortran => Syntax::FORTRAN_MODULE_ROOT,
+            ForeignLanguage::Ada => Syntax::ADA_MODULE_ROOT,
         }
     }
 

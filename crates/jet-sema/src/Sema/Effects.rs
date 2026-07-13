@@ -65,6 +65,8 @@ pub enum Effect {
     Java,
     /// D-FFI-TCL1=A: synchronous in-process Tcl evaluation.
     Tcl,
+    /// D-FFI-ADA1=A: checked call into a GNAT C-ABI export.
+    Ada,
     /// D-WASM1=A: browser/DOM API use — implies JS partition for web targets.
     Browser,
     /// U13 (D-JPK-SECRETCRYPTO1): reading a decrypted repo secret
@@ -91,6 +93,7 @@ impl Effect {
             Effect::Go => "Go",
             Effect::Java => "Java",
             Effect::Tcl => "Tcl",
+            Effect::Ada => "Ada",
             Effect::Browser => "Browser",
             Effect::Secret => "Secret",
         }
@@ -112,6 +115,7 @@ impl Effect {
             "Go" => Effect::Go,
             "Java" => Effect::Java,
             "Tcl" => Effect::Tcl,
+            "Ada" => Effect::Ada,
             "Browser" => Effect::Browser,
             "Secret" => Effect::Secret,
             _ => return None,
@@ -137,6 +141,7 @@ impl Effect {
             Effect::Go,
             Effect::Java,
             Effect::Tcl,
+            Effect::Ada,
             Effect::Browser,
             Effect::Secret,
         ]

@@ -956,6 +956,27 @@ future Tcl event-limit contract. Bridge tools run under a 60-second deadline
 with 64-KiB diagnostic capture. Binding provenance hashes the initialization
 script, Tcl runtime identity, and schema. Bind failures use **E3208**.
 
+## E3 — Ada project binder (D-FFI-ADA1=A, GNAT C-ABI vertical)
+
+`jet inspect bind ada <package.ads> --pkg <lib>` reads exported functions from
+an Ada package spec, compiles its sibling body with Nix-provisioned GNAT, and
+writes a typed `ada.<lib>` binding cache. Supported exports use `Export`,
+`Convention => C`, and `External_Name`; inputs and results are
+`Interfaces.C.long_long`/`Long_Long_Integer` or
+`Interfaces.C.double`/`Long_Float`. Unsupported ABI shapes fail binding rather
+than being guessed.
+
+Scalar subtypes with `range LOW .. HIGH` become pre-call checks in generated
+Jet wrappers. A value outside the Ada range returns `AdaError.Constraint`
+before the C-ABI export executes. Calls carry the `Ada` effect. Generated
+bridges run GNAT elaboration once and finalization at process exit.
+
+GNAT, binder, C compiler, and archiver processes have a 60-second deadline and
+64-KiB output bounds. Raw GNAT locations are laundered behind **E3208**.
+Provenance hashes the spec, package body, GNAT runtime identity, and binding
+schema. The native link records the exact GNAT runtime directory and rejects a
+missing or non-absolute runtime identity.
+
 ## E2-M13 — Expert low-level tier (S58, implemented)
 
 C/Zig-class control behind two explicit gates; ordinary Jet never reaches it and

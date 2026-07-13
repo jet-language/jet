@@ -35,6 +35,7 @@ pub enum BinderRuntime {
     EmbeddedJvm,
     EmbeddedTcl,
     FortranIsoCBinding,
+    AdaGnatCAbi,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,6 +49,7 @@ pub enum BindingStubKind {
     JvmClass,
     TclScript,
     FortranIsoCBinding,
+    AdaSpec,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,6 +78,7 @@ pub enum ForeignHost {
     EmbeddedJvm,
     EmbeddedTcl,
     FortranIsoCBinding,
+    AdaGnatCAbi,
     LegacyRustExtern,
 }
 
@@ -153,6 +156,13 @@ pub const BINDERS: &[BinderDescriptor] = &[
         runtime: BinderRuntime::FortranIsoCBinding,
         stub_kind: BindingStubKind::FortranIsoCBinding,
     },
+    BinderDescriptor {
+        language: ForeignLanguage::Ada,
+        surface: BinderSurface::Namespace,
+        status: BinderStatus::Active,
+        runtime: BinderRuntime::AdaGnatCAbi,
+        stub_kind: BindingStubKind::AdaSpec,
+    },
 ];
 
 pub fn binder_for(language: ForeignLanguage) -> Option<&'static BinderDescriptor> {
@@ -199,6 +209,7 @@ pub fn host_for(language: ForeignLanguage, target: ForeignTarget) -> ForeignHost
         ForeignLanguage::Java => ForeignHost::EmbeddedJvm,
         ForeignLanguage::Tcl => ForeignHost::EmbeddedTcl,
         ForeignLanguage::Fortran => ForeignHost::FortranIsoCBinding,
+        ForeignLanguage::Ada => ForeignHost::AdaGnatCAbi,
     }
 }
 

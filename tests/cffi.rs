@@ -78,6 +78,13 @@ fn unified_foreign_binder_registry_routes_active_and_planned_languages() {
             BinderSurface::Namespace,
             BinderStatus::Active,
         ),
+        (
+            ForeignLanguage::Ada,
+            "ada",
+            "bindings/ada",
+            BinderSurface::Namespace,
+            BinderStatus::Active,
+        ),
     ];
 
     for (lang, root, bindings, surface, status) in expected {
@@ -113,6 +120,7 @@ fn unified_foreign_namespace_model_recognizes_c_project_import_only() {
     );
     assert_eq!(ForeignNamespace::from_module_path("java.counter").unwrap().language, ForeignLanguage::Java);
     assert_eq!(ForeignNamespace::from_module_path("tcl.eda").unwrap().language, ForeignLanguage::Tcl);
+    assert_eq!(ForeignNamespace::from_module_path("ada.geodesy").unwrap().language, ForeignLanguage::Ada);
     assert!(ForeignNamespace::from_module_path("c").is_none());
     assert!(ForeignNamespace::from_module_path("c.raylib.extra").is_none());
     assert!(ForeignNamespace::from_module_path("lua.socket").is_none());

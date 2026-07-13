@@ -27,6 +27,7 @@
 // build graph — it is the compiler's checker, not Jetpack's engine).
 pub use jet_sema::{Diagnostics, Lexer, Parser, Sema, Syntax, AST, SHA256};
 
+pub mod AdaBind;
 pub mod CBind;
 pub mod CFFI;
 pub mod FortranBind;

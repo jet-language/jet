@@ -1722,6 +1722,64 @@ fn run() #(Tcl, Io) {
 }
 
 #[test]
+fn ada_bind_compiles_runs_and_rejects_range_before_call() {
+    let dir=isolated_cwd("ada_bind_range");let spec=dir.join("geodesy.ads");let body=dir.join("geodesy.adb");
+    fs::write(&spec,r#"with Interfaces.C;
+use type Interfaces.C.double;
+package Geodesy is
+   subtype Latitude is Interfaces.C.double range -90.0 .. 90.0;
+   function Double_Lat (Lat : Latitude) return Interfaces.C.double
+     with Export, Convention => C, External_Name => "geo_double";
+   function Calls (Unused : Interfaces.C.long_long) return Interfaces.C.long_long
+     with Export, Convention => C, External_Name => "geo_calls";
+end Geodesy;
+"#).unwrap();
+    fs::write(&body,r#"with Interfaces.C;
+use type Interfaces.C.double;
+use type Interfaces.C.long_long;
+package body Geodesy is
+   Calls_Count : Interfaces.C.long_long := 0;
+   function Double_Lat (Lat : Latitude) return Interfaces.C.double is
+   begin
+      Calls_Count := Calls_Count + 1;
+      return Lat * 2.0;
+   end Double_Lat;
+   function Calls (Unused : Interfaces.C.long_long) return Interfaces.C.long_long is
+   begin
+      return Calls_Count + Unused;
+   end Calls;
+end Geodesy;
+"#).unwrap();
+    let bind=Command::new(jet()).args(["inspect","bind","ada"]).arg(&spec).args(["--pkg","geodesy"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
+    assert!(bind.status.success(),"Ada bind failed:\n{}",String::from_utf8_lossy(&bind.stderr));
+    assert!(dir.join(".jet/bindings/ada/libjet_ada_geodesy.a").is_file());
+    assert!(dir.join(".jet/bindings/ada/geodesy.provenance").is_file());
+    fs::write(dir.join("main.jet"),r#"use ada.geodesy as geo
+
+fn run() #(Ada, Io) {
+    print(geo.double_lat(95.0) ?? -1.0)
+    print(geo.calls(0) ?? -1)
+    print(geo.double_lat(21.0) ?? -1.0)
+    print(geo.calls(0) ?? -1)
+}
+"#).unwrap();
+    let run=Command::new(jet()).args(["run","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
+    assert!(run.status.success(),"generated Ada binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));
+    assert_eq!(String::from_utf8_lossy(&run.stdout),"-1.0\n0\n42.0\n1\n");
+}
+
+#[test]
+fn ada_bind_launders_gnat_failure_as_e3208() {
+    let dir=isolated_cwd("ada_bind_failure");let spec=dir.join("broken.ads");
+    fs::write(&spec,"package Broken is function Value (N : Long_Long_Integer) return Long_Long_Integer with Export, Convention => C, External_Name => \"broken_value\"; end Broken;\n").unwrap();
+    fs::write(dir.join("broken.adb"),"package body Broken is function Value (N : Long_Long_Integer) return Long_Long_Integer is begin return N +; end Value; end Broken;\n").unwrap();
+    let output=Command::new(jet()).args(["inspect","bind","ada"]).arg(&spec).args(["--pkg","broken"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
+    assert!(!output.status.success());let stderr=String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Error [E3208]:"));assert!(stderr.contains(" Why:"));assert!(stderr.contains(" Fix:"));assert!(!stderr.contains("broken.adb:"));
+    check_snapshot("bind_ada_invalid_e3208.txt",&scrub(&stderr,&spec));
+}
+
+#[test]
 fn tcl_bind_missing_source_is_laundered_e3208() {
     let dir=isolated_cwd("tcl_bind_missing");let source=dir.join("missing.tcl");
     let output=Command::new(jet()).args(["inspect","bind","tcl"]).arg(&source).args(["--pkg","missing"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();

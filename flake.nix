@@ -101,6 +101,8 @@
             pkgs.cargo
             pkgs.rustc
             pkgs.gcc
+            # D-FFI-ADA1=A: provision GNAT for C-ABI Ada binder compilation.
+            pkgs.gnat
             # D-FFI-FORTRAN1=A: provision the ISO_C_BINDING bridge compiler.
             pkgs.gfortran
             # D-FFI-GO1=A: provision the in-process c-archive bridge compiler.
