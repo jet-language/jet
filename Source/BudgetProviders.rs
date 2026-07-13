@@ -136,6 +136,12 @@ impl ProviderRegistry {
             .expect("fixed compiler provider identity");
         registry
     }
+    pub fn with_builtins() -> Self {
+        let mut registry = Self::with_compiler_facts();
+        registry.register_in_process("BuildArtifact", build_artifact_provider)
+            .expect("fixed build-artifact provider identity");
+        registry
+    }
     /// Provider runs in an isolated process group; collection terminates the
     /// entire group at the deadline without waiting on a blocked worker.
     pub fn register_in_process(&mut self, identity: impl Into<String>, provider: InProcessProvider) -> Result<(), String> { self.insert(identity.into(), Provider::InProcess(provider)) }
@@ -183,6 +189,34 @@ fn compiler_facts_provider(request: &ProviderRequest, _: &ProviderCancellation) 
     Ok(events)
 }
 
+fn build_artifact_provider(request: &ProviderRequest, _: &ProviderCancellation) -> Result<Vec<ProviderEvent>, ProviderFailure> {
+    let CanonicalJson::Object(workload) = &request.workload else {
+        return Err(ProviderFailure::malformed("BuildArtifact workload is not an object"));
+    };
+    let Some(CanonicalJson::String(path)) = workload.get("path") else {
+        return Err(ProviderFailure::malformed("BuildArtifact workload has no artifact path"));
+    };
+    let path = Path::new(path);
+    if !path.is_absolute() {
+        return Err(ProviderFailure::malformed("BuildArtifact path is not compiler-resolved absolute text"));
+    }
+    let metadata = std::fs::symlink_metadata(path)
+        .map_err(|error| ProviderFailure::operation(FailureClass::Unavailable, format!("built artifact is unavailable: {error}")))?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(ProviderFailure::operation(FailureClass::Incompatible, "built artifact is not a regular file"));
+    }
+    let value = Rational::parse(&metadata.len().to_string(), "1").map_err(ProviderFailure::malformed)?;
+    let mut events = Vec::with_capacity(request.specs.len() + 1);
+    for (index, spec) in request.specs.iter().enumerate() {
+        if !matches!(spec.metric.as_str(), "BinarySize" | "ArtifactSize") {
+            return Err(ProviderFailure::operation(FailureClass::Unsupported, format!("BuildArtifact does not support metric `{}`", spec.metric)));
+        }
+        events.push(ProviderEvent::Sample { spec: index as u32, metric: spec.metric.clone(), value: value.clone() });
+    }
+    events.push(ProviderEvent::Complete { request_id: request.request_id.clone(), samples: request.specs.len() as u64 });
+    Ok(events)
+}
+
 fn run_in_process(function: InProcessProvider, request: &ProviderRequest, timeout: Duration, identity: &str) -> Result<Vec<ProviderEvent>, ProviderFailure> {
     #[cfg(target_os="linux")]{let cancellation=ProviderCancellation{cancelled:Arc::new(AtomicBool::new(false))};let bytes=run_isolated_bytes(timeout,&format!("provider `{identity}`"),move||std::panic::catch_unwind(std::panic::AssertUnwindSafe(||function(request,&cancellation))).map_err(|_|ProviderFailure::operation(FailureClass::Panic,"in-process provider failed unexpectedly"))?.map(|events|encode_stream(&events)))?;decode_stream(&bytes,request)}
     #[cfg(not(target_os="linux"))]{let _=(function,request,timeout,identity);Err(ProviderFailure::operation(FailureClass::Execution,"bounded in-process providers are enabled only on Linux"))}
@@ -226,7 +260,8 @@ fn run_subprocess(path: &Path, request: &[u8], timeout: Duration) -> Result<Vec<
     let deadline=Instant::now()+timeout;loop { match child.try_wait() { Ok(Some(status)) => { if !status.success(){terminate_group(&mut child);return Err(ProviderFailure::operation(FailureClass::Execution,format!("provider exited with {status}")));}let remaining=deadline.saturating_duration_since(Instant::now());let bytes=rx.recv_timeout(remaining).map_err(|_|{terminate_group(&mut child);ProviderFailure::operation(FailureClass::Timeout,"provider stdout did not close before deadline")})?.map_err(|e|ProviderFailure::operation(FailureClass::Execution,format!("cannot read provider stdout: {e}")))?;writer_rx.recv_timeout(deadline.saturating_duration_since(Instant::now())).map_err(|_|{terminate_group(&mut child);ProviderFailure::operation(FailureClass::Timeout,"provider stdin did not close before deadline")})?.map_err(|e|ProviderFailure::operation(FailureClass::Execution,format!("cannot write provider stdin: {e}")))?;if bytes.len()>MAX_BYTES{return Err(ProviderFailure::malformed("provider stream exceeds 16 MiB"));}return Ok(bytes); },Ok(None) if Instant::now()<deadline=>std::thread::sleep(Duration::from_millis(2)),Ok(None)=>{terminate_group(&mut child);return Err(ProviderFailure::operation(FailureClass::Timeout,"provider timed out and was terminated"));},Err(error)=>{terminate_group(&mut child);return Err(ProviderFailure::operation(FailureClass::Execution,format!("cannot supervise provider: {error}")))} } }
 }
 
-fn terminate_group(child: &mut std::process::Child) {
+#[doc(hidden)]
+pub fn terminate_group(child: &mut std::process::Child) {
     #[cfg(unix)] { unsafe { extern "C" { fn kill(pid: i32, signal: i32) -> i32; } let _ = kill(-(child.id() as i32), 9); } }
     let _ = child.kill();
     let _ = child.wait();

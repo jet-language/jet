@@ -95,6 +95,32 @@ fn run() {{}}
     dir
 }
 
+fn artifact_budget_project(tag: &str, limit: u64) -> PathBuf {
+    let dir = isolated_cwd(tag);
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(
+        dir.join("pkg.jet"),
+        "payload: { name: \"app\", version: \"0.1.0\" }\n",
+    ).unwrap();
+    fs::write(
+        dir.join("src/main.jet"),
+        format!(r#"module perf.package {{
+    budgets: [Budget.{{
+        name: "binary",
+        scope: .Package,
+        metric: .BinarySize,
+        comparison: .Absolute,
+        limit: .AtMost({limit}B),
+    }}],
+}}
+fn run() {{
+    print("tiny")
+}}
+"#),
+    ).unwrap();
+    dir
+}
+
 #[test]
 fn budget_usage_and_preflight_fail_without_artifacts() {
     let dir = budget_project("budget_no_artifact", 10);
@@ -151,6 +177,34 @@ fn budget_check_uses_real_compiler_fact_and_writes_verified_report() {
         let jet_foundation::PerformanceBudget::CanonicalJson::String(value) = &provider[key] else { panic!("{key} is not text") };
         assert!(!value.is_empty() && !matches!(value.as_str(), "compiler" | "unknown"));
     }
+}
+
+#[test]
+fn budget_build_artifact_measures_real_selected_binary() {
+    use jet_foundation::PerformanceBudget::CanonicalJson;
+    let dir = artifact_budget_project("budget_build_artifact", 100_000_000);
+    let out = Command::new(jet()).args(["budget", "check", "--json"]).current_dir(&dir).output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "stdout: {}\nstderr: {}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    assert!(out.stderr.is_empty());
+    let CanonicalJson::Object(command) = CanonicalJson::parse_canonical(&out.stdout).unwrap() else { panic!("command object") };
+    let CanonicalJson::Object(report) = &command["report"] else { panic!("report object") };
+    let CanonicalJson::Object(content) = &report["content"] else { panic!("content object") };
+    let CanonicalJson::Object(subject) = &content["subject"] else { panic!("subject object") };
+    let CanonicalJson::Object(artifact) = &subject["artifact"] else { panic!("artifact identity") };
+    let CanonicalJson::Integer(bytes) = &artifact["bytes"] else { panic!("artifact byte count") };
+    let CanonicalJson::String(digest) = &artifact["sha256"] else { panic!("artifact digest") };
+    let artifact_path = dir.join("build/main");
+    let metadata = fs::metadata(&artifact_path).unwrap();
+    assert_eq!(bytes, &metadata.len().to_string());
+    assert_eq!(digest, &jet::SHA256::sha256_file_hex(&artifact_path).unwrap());
+    let CanonicalJson::Array(measurements) = &content["measurements"] else { panic!("measurements") };
+    let CanonicalJson::Object(measurement) = &measurements[0] else { panic!("measurement") };
+    let CanonicalJson::Array(samples) = &measurement["samples"] else { panic!("samples") };
+    let CanonicalJson::Object(sample) = &samples[0] else { panic!("sample") };
+    assert_eq!(sample["num"], CanonicalJson::Integer(metadata.len().to_string()));
+    let CanonicalJson::Object(provider) = &measurement["provider"] else { panic!("provider") };
+    assert_eq!(provider["kind"], CanonicalJson::String("BuildArtifact".into()));
+    assert_eq!(measurement["unit"], CanonicalJson::String("Bytes".into()));
 }
 
 #[test]
@@ -365,6 +419,8 @@ fn budget_tty_confirmation_cancel_and_yes_control_mutation() {
     let (code, transcript) = run_budget_update_pty(&applied, b"yes\n");
     assert_eq!(code, 0, "{transcript}");
     assert!(transcript.contains("Apply? [y/N]"), "{transcript}");
+    assert_eq!(transcript.matches("+ report ").count(), 1, "plan/apply duplicated report row: {transcript}");
+    assert_eq!(transcript.matches("~ baseline ").count(), 1, "plan/apply duplicated baseline row: {transcript}");
     assert!(applied.join(".jet/perf/baselines/names/ci/linux.json").is_file(), "TTY yes did not apply");
     assert!(applied.join(".jet/perf/reports").read_dir().unwrap().next().is_some(), "TTY yes omitted report artifact");
 }
