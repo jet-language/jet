@@ -1557,8 +1557,8 @@ fn core_net_tcp_implements_nominal_io_reader_writer() {
 use core.net as net
 use core.tasks as tasks
 
-fn receive_four<T: Reader>(&stream: T) -> [U8] ? IOError {
-    return stream.read(4)
+fn receive<T: Reader>(&stream: T, limit: Int) -> [U8] ? IOError {
+    return stream.read(limit)
 }
 
 fn send_four<T: Writer>(&stream: T) -> Int ? IOError {
@@ -1572,12 +1572,17 @@ fn run() {
     address :: net.socket_to_string(typed_address)
     server :: tasks.spawn(take(listener) () => {
         stream := net.tcp_accept(listener) ?? panic("accept")
-        bytes :: receive_four(&stream) ?? panic("read")
-        print(bytes.len())
+        if receive(&stream, 0) == {
+            ok(_) -> panic("zero limit looked like EOF")
+            err(_) -> print("invalid")
+        }
+        bytes :: receive(&stream, 4) ?? panic("read")
+        print("read:{bytes.len()}")
+        eof :: receive(&stream, 4) ?? panic("eof")
+        if eof.len() == 0 { print("eof") }
     })
     client := net.tcp_connect(address) ?? panic("connect")
-    count :: send_four(&client) ?? panic("write")
-    print(count)
+    _count :: send_four(&client) ?? panic("write")
     client.close() ?? panic("close")
     server.join()
 }
@@ -1586,7 +1591,7 @@ fn run() {
         None,
     );
     assert_eq!(code, 0, "{stderr}");
-    assert_eq!(stdout, "4\n4\n");
+    assert_eq!(stdout, "invalid\nread:4\neof\n");
     let _ = fs::remove_dir_all(&dir);
 }
 

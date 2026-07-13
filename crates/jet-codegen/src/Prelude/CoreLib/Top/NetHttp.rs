@@ -32,6 +32,11 @@ fn jet_net_to_io_error(error: JetNetError) -> jet_std::IoError {
 
 impl JetIoReader for JetTcpStream {
     fn read(&mut self, limit: i64) -> Result<Vec<u8>, jet_std::IoError> {
+        if limit <= 0 {
+            return Err(jet_std::IoError::Other {
+                message: "tcp read limit must be positive".to_string(),
+            });
+        }
         jet_net_tcp_read_bytes(self, limit).map_err(jet_net_to_io_error)
     }
 }
