@@ -1,6 +1,6 @@
 //! D-DBG3 step 2 (dap-debugger): the native lldb-backed `jet debug` session.
 //! Reuses the EXACT `(jet)` command vocabulary the step-1 interpreter debugger
-//! ships (`Source/Debug/mod.rs`, D-DBG3 — I8: one vocabulary regardless of
+//! ships (`jet-debug`, D-DBG3 — I8: one vocabulary regardless of
 //! backend) but steps the REAL compiled binary through [`super::Inferior`], so
 //! it covers the full feature set the interpreter declines (FFI, tasks,
 //! `#Unsafe`, native std — the E2203 boundary).
@@ -31,7 +31,7 @@ use crate::Syntax;
 const MAX_STEP_OVER_UNMAPPED: usize = 200;
 
 /// How the session reads its `(jet)` commands and where its output goes — the
-/// same split `Source/Debug/mod.rs`'s interpreter backend uses, so a test can
+/// same split this crate's interpreter backend uses, so a test can
 /// script a native session exactly like `run_session` scripts the interpreter.
 enum Io {
     Interactive,
@@ -227,7 +227,7 @@ impl Session {
     }
 
     /// A stop banner + source window, in the SAME shape as the step-1
-    /// interpreter debugger (`Debugger::show_stop`, `Source/Debug/mod.rs`):
+    /// interpreter debugger (`Debugger::show_stop`, this crate):
     /// `breakpoint hit  file:line  in fn()`, a two-line window with `<- here`.
     fn print_stop_banner(&mut self, func: &str, file: &str, line: usize) {
         if !self.started {

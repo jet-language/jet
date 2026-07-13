@@ -5,7 +5,7 @@
 //! the same convention `Source/LSP/Server.rs` already speaks) so VS Code/Zed
 //! can launch `jet debug --dap <file>` as a debug adapter.
 //!
-//! I6: reuses the hand-rolled JSON codec in `Source/LSP/JSON.rs` (no serde, no
+//! I6: reuses the foundation hand-rolled JSON codec (no serde, no
 //! DAP crate). I2: every `stackTrace`/`variables` response is translated to
 //! Jet terms through `LineMap` before it reaches the editor — the raw Rust
 //! frame never crosses the wire (DAP has no `--raw-frames` equivalent; that's
@@ -20,7 +20,7 @@ use std::path::Path;
 
 use super::Inferior::{Inferior, ResumeResult};
 use super::LineMap::LineMap;
-use crate::LSP::JSON::{json_escape, json_get, json_int, json_str, parse_json, JsonValue};
+use jet_foundation::JSON::{json_escape, json_get, json_int, json_str, parse_json, JsonValue};
 
 pub fn run(binary: &Path, rust_file: &str, rust_src: &str, jet_file: &str, jet_src: &str) -> i32 {
     let map = LineMap::build(rust_src);

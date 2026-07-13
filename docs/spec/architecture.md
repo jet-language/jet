@@ -46,7 +46,7 @@ D-COMPILERSEAMS1/2 split the compiler into workspace seam crates. The root
 
 | Crate | Job | May emit diagnostics? |
 |-------|-----|-----------------------|
-| `jet-foundation` | shared leaf types: `Syntax`, `Diagnostics`, `AST`, `Span`, `Generics`, `JitBackend` | renders them |
+| `jet-foundation` | shared leaf types and policies: `Syntax`, `Diagnostics`, `AST`, `Span`, `Generics`, `JitBackend`, stable exit codes, std-only JSON | renders diagnostics |
 | `jet-lexer` | text to tokens | yes (E00xx) |
 | `jet-parser` | tokens to AST, formatter | yes (E00xx) |
 | `jet-comptime` | comptime values and interpreter support | no user-facing surface by itself |
@@ -56,10 +56,12 @@ D-COMPILERSEAMS1/2 split the compiler into workspace seam crates. The root
 | `jet-env-model` | **L2**, the shared pure plan model (card #367 slice 4): `ModuleEval` (the computed-modules evaluator) and its typed plan outputs (`EnvPlan`/`SystemPlan`/`ImagePlan`/`FleetPlan`/…). Depends on `jet-pkg-model` (L1) + `jet-codegen`; no provider/store/network/shell | plan-evaluation diagnostics |
 | `jetpack` | **L3**, package manager engine: provider/network/shell realization, JetOS, CLI — depends on `jet-pkg-model` (L1) for read-only data and `jet-env-model` (L2) for the plan model it realizes | package/JetOS diagnostics |
 | `jetos` | `jetos` binary front door for OS workflows; still dispatches into `jetpack`'s `os` verb (JetOS realization hasn't physically relocated out of `jetpack::JetOS` — that's a distinct, still-open scope gate, not part of slice 4) | package/JetOS diagnostics (via `jetpack`) |
-| `jet-driver` | front-end orchestration and compile outputs; depends on `jet-pkg-model` (never `jetpack`'s engine) for manifest/lock/FFI preparation | front-end diagnostics only |
+| `jet-driver` | front-end orchestration and compile outputs; depends on `jet-pkg-model` (never `jetpack`'s engine) for manifest/lock/FFI preparation; owns the shared pure dev/debug interpreter-boundary classifier | front-end and interpreter-boundary diagnostics |
 | `jet-queries` | std-only demand cache for incremental inputs and derived query values | no |
 | `jet-semindex` | stable semantic index over checked programs for tooling | no new diagnostics |
 | `jet-impact` | blast-radius reports over `jet-semindex` | no |
+| `jet-repl` | complete interactive shell product over `jet-driver`, `jet-semindex`, and leaf policy | no new diagnostics |
+| `jet-debug` | complete source debugger and DAP product over `jet-driver` plus leaf JSON/exit policy | debugger diagnostics only |
 | `jet-rt` | runtime helpers shared by generated code and JIT/dev paths | no |
 | `jet-jit` | dev/JIT execution tier over codegen/TIR facts | internal fallback only |
 | `jet-net` | runtime/comptime fetch helper with TLS diagnostics | yes, for fetch failures |
@@ -106,6 +108,16 @@ still owns native build execution: `Source/CmdCompile.rs`
 invokes rustc, classifies linker/tool failures, renders the I2 ICE banner, and
 links any prepared FFI artifact. Do not move that responsibility into a seam
 crate in documentation until the code moves with it.
+
+D-ARCH-SOURCE1=A also puts interactive product ownership behind real workspace
+seams. `crates/jet-repl` owns the REPL and terminal implementation;
+`crates/jet-debug` owns the source debugger, native adapter, line map, and DAP
+server. The root host only wires commands and re-exports `jet::REPL` and
+`jet::Debug`. Both products depend inward on compiler seams. Their shared
+interpreter eligibility walk lives in `jet-driver`; stable exit codes and the
+std-only JSON codec live in dependency-free `jet-foundation`. Neither product
+depends on the root package, splices root source with `include!`, or owns rustc
+invocation and ICE classification; R5 remains in `Source/CmdCompile.rs`.
 
 ### Adding an FFI bridge
 

@@ -19,7 +19,7 @@ use super::Position::{
     range_json, LspPos, LspRange,
 };
 use super::SymbolDB::{build_symbol_db, InlayHint, SymKind, SymbolDB};
-use super::JSON::{json_escape, json_get, json_int, json_str, parse_json, JsonValue};
+use jet_foundation::JSON::{json_escape, json_get, json_int, json_str, parse_json, JsonValue};
 
 // ── Document state ────────────────────────────────────────────────────────────
 

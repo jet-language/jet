@@ -453,9 +453,23 @@ fn compiler_seam_crates_have_only_path_dependencies() {
     // D-ARCH-SOURCE1=A: interactive seams are not optional aliases hidden in
     // the root crate. Their manifests must exist and therefore pass this same
     // path-only dependency audit.
+    for required in ["jet-repl", "jet-debug"] {
+        assert!(
+            crate_manifests.iter().any(|(name, _)| name == required),
+            "D-ARCH-SOURCE1 requires the {required} workspace seam"
+        );
+    }
+    let root_lib = fs::read_to_string(root.join("Source/lib.rs")).expect("Source/lib.rs missing");
     assert!(
-        crate_manifests.iter().any(|(name, _)| name == "jet-repl"),
-        "D-ARCH-SOURCE1 requires the jet-repl workspace seam"
+        root_lib.contains("pub use jet_debug as Debug;")
+            && !root.join("Source/Debug").exists(),
+        "D-ARCH-SOURCE1 requires jet-debug ownership, not a root Debug wrapper"
+    );
+    assert!(
+        root_lib.contains("pub use jet_foundation::ExitCodes;")
+            && !root.join("Source/ExitCodes.rs").exists()
+            && !root.join("Source/LSP/JSON.rs").exists(),
+        "shared debugger/LSP policy must live in jet-foundation, not Source wrappers"
     );
 
     let mut offenders = Vec::new();

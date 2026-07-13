@@ -30,7 +30,7 @@ impl Span {
 /// reach) — same voice, different trigger, one source of the prefix text
 /// each side owns. `panic!` already exits the process with Rust's default
 /// unhandled-panic code 101, which is exactly `ExitCodes::ICE`
-/// (`Source/ExitCodes.rs`) — this macro never touches the exit code, only
+/// (`crates/jet-foundation/src/ExitCodes.rs`) — this macro never touches the exit code, only
 /// normalizes the message so every ICE reads the same.
 ///
 /// `span` is `Option<Span>`; pass `None` when the call site has no source

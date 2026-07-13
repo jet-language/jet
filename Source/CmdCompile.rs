@@ -2612,7 +2612,7 @@ pub(crate) fn build(
 /// debug` backend — a debug-profile build (full debuginfo) whose generated Rust
 /// carries the `// jet:line N` table (`emit_bundle_dbg` via
 /// `jet::compile_for_debug`), then either the `(jet)` terminal session or the
-/// DAP server (`--dap`) drives it through `Source/Debug/Inferior.rs`. Returns
+/// DAP server (`--dap`) drives it through `crates/jet-debug/src/Inferior.rs`. Returns
 /// the process exit code.
 pub(crate) fn run_debug_native(file: &str, raw_frames: bool, dap: bool, mode: OutputMode) -> i32 {
     let src = match fs::read_to_string(file) {

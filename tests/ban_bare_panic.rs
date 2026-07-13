@@ -132,6 +132,7 @@ const SCAN_ROOTS: &[&str] = &[
     "crates/jet-rt",
     "crates/jet-impact",
     "crates/jet-repl",
+    "crates/jet-debug",
     "Source",
 ];
 

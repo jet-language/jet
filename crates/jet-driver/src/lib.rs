@@ -8,6 +8,7 @@ pub use jet_codegen::{
 pub mod Compile;
 pub mod Driver;
 pub mod Foreign;
+pub mod InterpreterBoundary;
 pub mod Loader;
 pub mod PhaseTiming;
 // Card #367 / D-PRODUCT-SPLIT1=C: the compiler's module loader needs the

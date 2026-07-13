@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
-pub(crate) enum JsonValue {
+pub enum JsonValue {
     Null,
     Bool(bool),
     Number(i64),
@@ -13,7 +13,7 @@ pub(crate) enum JsonValue {
     Object(HashMap<String, JsonValue>),
 }
 
-pub(crate) fn parse_json(text: &str) -> Result<JsonValue, ()> {
+pub fn parse_json(text: &str) -> Result<JsonValue, ()> {
     let mut p = JsonParser { s: text, i: 0 };
     let v = p.value()?;
     p.skip_ws();
@@ -215,21 +215,21 @@ impl<'a> JsonParser<'a> {
     }
 }
 
-pub(crate) fn json_get<'a>(v: &'a JsonValue, key: &str) -> Option<&'a JsonValue> {
+pub fn json_get<'a>(v: &'a JsonValue, key: &str) -> Option<&'a JsonValue> {
     match v {
         JsonValue::Object(m) => m.get(key),
         _ => None,
     }
 }
 
-pub(crate) fn json_str(v: &JsonValue) -> Option<&str> {
+pub fn json_str(v: &JsonValue) -> Option<&str> {
     match v {
         JsonValue::String(s) => Some(s),
         _ => None,
     }
 }
 
-pub(crate) fn json_int(v: &JsonValue) -> Option<i64> {
+pub fn json_int(v: &JsonValue) -> Option<i64> {
     match v {
         JsonValue::Number(n) => Some(*n),
         JsonValue::Flt(f) => Some(*f as i64),
@@ -237,7 +237,7 @@ pub(crate) fn json_int(v: &JsonValue) -> Option<i64> {
     }
 }
 
-pub(crate) fn json_escape(s: &str) -> String {
+pub fn json_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         match c {

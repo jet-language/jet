@@ -63,6 +63,10 @@ pub use jet_driver::{
     SHA256,
 };
 pub use jet_queries as Queries;
+// D-ARCH-SOURCE1=A: full debugger subsystem and stable exit policy live in
+// inward workspace seams. Preserve public paths without root-owned wrappers.
+pub use jet_debug as Debug;
+pub use jet_foundation::ExitCodes;
 // D-ARCH-SOURCE1=A: real REPL seam ownership. Compatibility paths remain
 // `jet::REPL`, `jet::Term`, and `jet::SemanticSymbols`; implementation lives
 // entirely in the workspace crate.
@@ -75,10 +79,8 @@ pub mod BudgetView;
 pub mod CLI;
 pub mod Canvas;
 pub mod Compiler;
-pub mod Debug;
 pub mod Doctest;
 pub mod Doctor;
-pub mod ExitCodes;
 pub mod Explain;
 pub mod Fetch;
 pub mod FixEngine;
@@ -282,7 +284,7 @@ pub fn compile_plugin(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
 
 /// D-DBG3 step 2 (dap-debugger): compile for the native `jet debug` backend — a
 /// normal build with `debug_linemap = true`, so the generated Rust carries the
-/// `// jet:line N` table `Source/Debug/LineMap.rs` reads back.
+/// `// jet:line N` table `crates/jet-debug/src/LineMap.rs` reads back.
 pub fn compile_for_debug(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
     Driver::compile_bundle_path_opts_dbg(
         file,

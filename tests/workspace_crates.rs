@@ -148,6 +148,13 @@ fn workspace_crates_keep_declared_dependency_direction() {
         "crates/jet-repl/Cargo.toml",
         &["jet-driver", "jet-foundation", "jet-semindex"],
     );
+    // D-ARCH-SOURCE1=A: source debugger owns its full product behavior and
+    // depends only inward on compiler semantics plus dependency-free shared
+    // JSON/exit policy.
+    assert_deps(
+        "crates/jet-debug/Cargo.toml",
+        &["jet-driver", "jet-foundation"],
+    );
     assert_deps(
         "crates/jet-jit/Cargo.toml",
         &["jet-codegen", "jet-foundation", "jet-rt"],
@@ -160,6 +167,7 @@ fn workspace_crates_keep_declared_dependency_direction() {
     assert_deps(
         "Cargo.toml",
         &[
+            "jet-debug",
             "jet-driver",
             "jet-env-model",
             "jet-foundation",

@@ -7,7 +7,7 @@ use crate::Lexer::{TokKind, Token};
 use super::Completion::{JET_KEYWORDS, JET_TYPES};
 use super::Position::byte_offset_to_lsp;
 use super::SymbolDB::{InlayHint, SymKind, SymbolDB};
-use super::JSON::json_escape;
+use jet_foundation::JSON::json_escape;
 
 // ── Hover ─────────────────────────────────────────────────────────────────────
 

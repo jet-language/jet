@@ -5,7 +5,7 @@ use crate::Syntax;
 use crate::AST;
 
 use super::SymbolDB::{SymKind, SymbolDB};
-use super::JSON::json_escape;
+use jet_foundation::JSON::json_escape;
 
 /// LSP completion item kinds (standard integers).
 #[allow(dead_code)]

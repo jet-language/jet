@@ -31,6 +31,14 @@
 //! blocks; [`Native`] is the `(jet)`-prompt terminal session; [`Dap`] is the
 //! Debug Adapter Protocol server editors (VS Code/Zed) launch instead.
 
+#![allow(non_snake_case)]
+#![deny(warnings)]
+
+// D-ARCH-SOURCE1=A: full debugger ownership lives here. Compiler semantics
+// enter through inward path-only seams; no root host dependency exists.
+pub use jet_driver::{AST, Comptime, Diagnostics, Loader, Sema, Syntax};
+pub use jet_foundation::ExitCodes;
+
 mod Dap;
 mod Inferior;
 mod LineMap;
@@ -40,8 +48,6 @@ use std::collections::{HashMap, HashSet};
 
 use crate::Comptime::{CtValue, DebugHook, DevSink};
 use crate::Diagnostics::{span_line_col, Diagnostic, Span};
-use crate::ExitCodes;
-use crate::Syntax;
 
 /// One paused frame for the `backtrace` view: the executing function and the
 /// Jet line it is stopped on. Newest (innermost) frame last.
@@ -456,7 +462,7 @@ fn run_with_io(file: &str, mut io: Io) -> (i32, String) {
     // The debugger steps the dev interpreter, so it declines the same features
     // `jet dev` does — but with E2203 (debug-specific): names `jet debug` and
     // points at the real build (D-DBG3 step 2, the native backend follow-on).
-    if let Some(b) = crate::Interpreter::debug_boundary_scan(&bundle) {
+    if let Some(b) = jet_driver::InterpreterBoundary::debug_boundary_scan(&bundle) {
         emit_diags(&mut io, file, &src, &[b]);
         return (ExitCodes::USER_ERROR, io.into_output());
     }
@@ -570,7 +576,7 @@ pub fn run_session(file: &str, inputs: &[&str]) -> String {
 /// which reports that error the normal way (no duplicated error path here).
 pub fn needs_native(file: &str) -> Option<bool> {
     let bundle = crate::Loader::load_entry(file).ok()?;
-    Some(crate::Interpreter::debug_boundary_scan(&bundle).is_some())
+    Some(jet_driver::InterpreterBoundary::debug_boundary_scan(&bundle).is_some())
 }
 
 /// D-DBG3 step 2: the native lldb-backed `(jet)` terminal session — steps the
