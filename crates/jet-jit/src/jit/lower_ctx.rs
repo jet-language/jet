@@ -731,6 +731,13 @@ impl LowerCtx<'_, '_> {
                 let merge = self.b.create_block();
                 let mut tail = self.b.create_block();
                 self.b.ins().jump(tail, &[]);
+                // Sema already proved this match exhaustive (E0307): every path is
+                // either an arm, the else, or (when `fallthrough`) the trap below —
+                // never a silent fall-through past the whole construct. So the
+                // merge block is reachable only via a path that didn't itself
+                // terminate (return/break/…); track that like `TStmt::If` does,
+                // rather than assuming the construct is always live afterward.
+                let mut any_reaches_merge = false;
                 for arm in arms {
                     self.b.switch_to_block(tail);
                     self.b.seal_block(tail);
@@ -748,6 +755,7 @@ impl LowerCtx<'_, '_> {
                     self.lower_stmts_scoped(&arm.body)?;
                     if !self.dead {
                         self.b.ins().jump(merge, &[]);
+                        any_reaches_merge = true;
                     }
                     tail = next;
                 }
@@ -757,15 +765,24 @@ impl LowerCtx<'_, '_> {
                     self.lower_stmts_scoped(body)?;
                     if !self.dead {
                         self.b.ins().jump(merge, &[]);
+                        any_reaches_merge = true;
                     }
                 } else if *fallthrough {
                     self.b.ins().trap(TrapCode::UnreachableCodeReached);
                 } else if !self.dead {
                     self.b.ins().jump(merge, &[]);
+                    any_reaches_merge = true;
                 }
-                self.b.switch_to_block(merge);
-                self.b.seal_block(merge);
-                self.dead = false;
+                if any_reaches_merge {
+                    self.b.switch_to_block(merge);
+                    self.b.seal_block(merge);
+                    self.dead = false;
+                } else {
+                    // Every arm (and the else/trap fallback) terminated. Leave the
+                    // unreferenced merge block detached and keep later statements
+                    // unreachable — same convention as `TStmt::If`.
+                    self.dead = true;
+                }
             }
             TStmt::MixedSwitch {
                 arms, else_body, ..
@@ -773,6 +790,10 @@ impl LowerCtx<'_, '_> {
                 let merge = self.b.create_block();
                 let mut tail = self.b.create_block();
                 self.b.ins().jump(tail, &[]);
+                // Unlike `EnumMatch`, a missing `else_body` here is a genuine live
+                // fall-through (no exhaustiveness proof backs this shape) — see the
+                // `TStmt::If` absent-else handling this mirrors.
+                let mut any_reaches_merge = false;
                 for (cond, body) in arms {
                     self.b.switch_to_block(tail);
                     self.b.seal_block(tail);
@@ -785,20 +806,27 @@ impl LowerCtx<'_, '_> {
                     self.lower_stmts_scoped(body)?;
                     if !self.dead {
                         self.b.ins().jump(merge, &[]);
+                        any_reaches_merge = true;
                     }
                     tail = next;
                 }
                 self.b.switch_to_block(tail);
                 self.b.seal_block(tail);
+                self.dead = false;
                 if let Some(body) = else_body {
                     self.lower_stmts_scoped(body)?;
                 }
                 if !self.dead {
                     self.b.ins().jump(merge, &[]);
+                    any_reaches_merge = true;
                 }
-                self.b.switch_to_block(merge);
-                self.b.seal_block(merge);
-                self.dead = false;
+                if any_reaches_merge {
+                    self.b.switch_to_block(merge);
+                    self.b.seal_block(merge);
+                    self.dead = false;
+                } else {
+                    self.dead = true;
+                }
             }
             TStmt::Region(body) => {
                 self.lower_stmts_scoped(body)?;

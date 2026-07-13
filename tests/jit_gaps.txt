@@ -8,6 +8,7 @@ covered:
   basics/compound
   basics/counted_loop
   basics/digits
+  basics/fizzbuzz
   basics/functions
   basics/hello
   basics/if_expression
@@ -41,16 +42,19 @@ covered:
   effects/pure
   effects/share_boundary
   errors/fallible_run
+  jetpack/task_runner
   lowlevel/cross
   lowlevel/layout_c
   modules/pub_file
   operators/chained_comparison
   syntax/maturity_tags
   text/bigint
+  tooling/bench
   tooling/canvas_blueprint_demo
   tooling/debug
   tooling/fidelity
   tooling/meta_attribute
+  tooling/solve_puzzle
   tooling/statement_attributes
   tooling/test_members
   tooling/tests
@@ -65,7 +69,6 @@ gaps:
   basics/closures: run: jit closure method unsupported
   basics/default_refs: run: jit missing static `Rect::square`
   basics/fan_out: run: jit fan-out expression unsupported
-  basics/fizzbuzz: label: label: verifier: VerifierErrors([VerifierError { location: inst27, context: None, message: "invalid block reference block8" }])
   basics/labeled_loops: run: jit for-in unknown collection `vec![1i64, 2i64, 3i64]`
   basics/loop_forms: jit compile panicked before returning an unsupported reason
   basics/named_args: run: jit missing static `Rect::new`
@@ -84,7 +87,7 @@ gaps:
   collections/iter_hook: run: jit for-in collection type unsupported: Named("Crate")
   collections/iter_tools_audit: run: jit builtin method unsupported
   collections/list_remove_bounds: run: jit builtin method unsupported
-  collections/lists: run: run: verifier: VerifierErrors([VerifierError { location: inst38, context: Some("v28, v29 = call fn11(v0, v25, v26, v27)  ; v25 = 1, v26 = 2, v27 = 8"), message: "arg 2 (v26) has type i64, expected i32" }, VerifierError { location: inst38, context: Some("v28, v29 = call fn11(v0, v25, v26, v27)  ; v25 = 1, v26 = 2, v27 = 8"), message: "mismatched argument count for `v28, v29 = call fn11(v0, v25, v26, v27)  ; v25 = 1, v26 = 2, v27 = 8`: got 4, expected 3" }])
+  collections/lists: run: run: verifier: VerifierErrors([VerifierError { location: inst38, context: Some("v28, v29 = call fn12(v0, v25, v26, v27)  ; v25 = 1, v26 = 2, v27 = 8"), message: "arg 2 (v26) has type i64, expected i32" }, VerifierError { location: inst38, context: Some("v28, v29 = call fn12(v0, v25, v26, v27)  ; v25 = 1, v26 = 2, v27 = 8"), message: "mismatched argument count for `v28, v29 = call fn12(v0, v25, v26, v27)  ; v25 = 1, v26 = 2, v27 = 8`: got 4, expected 3" }])
   collections/map_key: run: jit map literal unsupported
   collections/set: run: jit builtin method unsupported
   collections/sketch: run: jit core call unsupported
@@ -99,8 +102,9 @@ gaps:
   comptime/embed: check_nonempty: jit require/panic stop unsupported
   comptime/embed_bytes: jit param type unsupported: List(IntN { signed: false, bits: 8 })
   comptime/find: run: jit const inline unsupported
+  comptime/find_empty: run: jit const inline unsupported
   comptime/reflect: Widget::show: jit clone unsupported
-  concurrency/deadline_context: jit core call unsupported
+  concurrency/deadline_context: run: jit context block unsupported
   concurrency/detached_task: run: jit handle method unsupported
   concurrency/parallel_iter: run: jit closure method unsupported
   concurrency/parallel_scan: jit param type unsupported: List(String)
@@ -173,7 +177,7 @@ gaps:
   io/terminal_parity: run: jit require/panic stop unsupported
   io/watcher: run: jit core call unsupported
   lowlevel/ffi: run: jit extern call unsupported
-  lowlevel/freestanding: clamp: clamp: verifier: VerifierErrors([VerifierError { location: inst4, context: None, message: "invalid block reference block2" }])
+  lowlevel/freestanding: run: jit core call unsupported
   lowlevel/layout_columnar: jit param type unsupported: List(Named("Particle"))
   lowlevel/linalg_simd: run: jit math builtin unsupported
   lowlevel/lowlevel: run: jit unsafe region unsupported
@@ -203,7 +207,7 @@ gaps:
   memory/uninit_buffer: run: jit const inline unsupported
   modules/generic_modules: run: jit call to unknown function `IntCache__key_of`
   modules/inline_module: run: jit module call unsupported
-  modules/library: greet: greet: verifier: VerifierErrors([VerifierError { location: inst0, context: None, message: "invalid block reference block2" }])
+  modules/library: run: jit missing method `Person::greeting`
   modules/module_inline_sibling: run: jit module call unsupported
   modules/selective_imports: run: jit module call unsupported
   net/http_client: jit result status unsupported
@@ -211,10 +215,14 @@ gaps:
   net/http_rest_service: jit result status unsupported
   net/http_routes: jit result status unsupported
   net/http_server: run: jit core call unsupported
+  net/http_server_lifecycle: jit result status unsupported
+  net/http_server_limits: jit result status unsupported
+  net/http_server_middleware: jit result status unsupported
   net/http_server_tasks: jit result status unsupported
   net/socket_echo: jit core call unsupported
   net/url_mime: run: jit result status unsupported
   parsing/binary-reader: run: jit handle method unsupported
+  parsing/binary_pattern: run: jit const inline unsupported
   parsing/parse_interpolation: run: jit const inline unsupported
   parsing/text-cursor: run: jit handle method unsupported
   patterns/struct_destructure: run: jit struct destructure unsupported
@@ -235,6 +243,7 @@ gaps:
   serde/serde_generic: run: jit core call unsupported
   serde/toml: run: jit result status unsupported
   serde/user_derive: run: jit missing method `Point::debug_string`
+  serde/validate: report: jit unknown place `user_Signup::user_validate(&((*user_signup)))`
   serde/yaml: run: jit result status unsupported
   streams/generators: count: jit const inline unsupported
   syntax/trailing_block: jit param type unsupported: Fn { params: [], ret: None, effect_bound: None }
@@ -250,7 +259,6 @@ gaps:
   text/unicode_text: run: jit core call unsupported
   text/unicode_text_audit: run: jit core call unsupported
   text/uuid: run: jit core call unsupported
-  tooling/bench: fib: fib: verifier: VerifierErrors([VerifierError { location: inst5, context: None, message: "invalid block reference block2" }])
   tooling/data_core: run: jit result status unsupported
   tooling/data_pipeline: run: jit result status unsupported
   tooling/debug_native: word_count: jit for-in unknown collection `jet_string_split(&((*user_text)), &" ".to_string())`
@@ -258,7 +266,6 @@ gaps:
   tooling/panic_report: summarize: jit require/panic stop unsupported
   tooling/property_tests: reverse: jit for-in unknown collection `(*user_xs)`
   tooling/provenance_track: run: jit numeric method unsupported
-  tooling/solve_puzzle: run: jit handle method unsupported
   tooling/testing_helpers: run: jit core call unsupported
   tooling/todo_hole: not_yet: jit todo expression unsupported
   types/associated_types: run: jit missing method `Nums::at`
@@ -273,24 +280,24 @@ gaps:
   types/measurement: run: jit core call unsupported
   types/nested_enum_groups: run: jit enum lit `user_Damage::user_Fire__Burn`
   types/no_any_alternatives: label: jit enum pattern `user_Payload::user_Name(user_s)`
-  types/option: find_even: find_even: verifier: VerifierErrors([VerifierError { location: inst11, context: None, message: "invalid block reference block6" }])
-  types/option_combinators: lookup_price: lookup_price: verifier: VerifierErrors([VerifierError { location: inst5, context: None, message: "invalid block reference block2" }])
+  types/option: run: jit if-let condition unsupported
+  types/option_combinators: lookup_price: lookup_price: verifier: VerifierErrors([VerifierError { location: inst8, context: Some("v8 = iadd.f64 v6, v7  ; v6 = 0x1.3fd70a3d70a3dp4, v7 = 1"), message: "has an invalid controlling type f64 (allowed set is ValueTypeSet { lanes: cranelift_bitset::scalar::ScalarBitSet<u16> { 0: true, 1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: false, 10: false, 11: false, 12: false, 13: false, 14: false, 15: false }, ints: cranelift_bitset::scalar::ScalarBitSet<u8> { 0: false, 1: false, 2: false, 3: true, 4: true, 5: true, 6: true, 7: true }, floats: cranelift_bitset::scalar::ScalarBitSet<u8> { 0: false, 1: false, 2: false, 3: false, 4: false, 5: false, 6: false, 7: false }, dynamic_lanes: cranelift_bitset::scalar::ScalarBitSet<u16> { 0: false, 1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: false, 10: false, 11: false, 12: false, 13: false, 14: false, 15: false } })" }, VerifierError { location: inst8, context: Some("v8 = iadd.f64 v6, v7  ; v6 = 0x1.3fd70a3d70a3dp4, v7 = 1"), message: "arg 1 (v7) has type i64, expected f64" }, VerifierError { location: inst9, context: Some("return v8"), message: "result 0 has type f64, must match function signature of i64" }])
   types/patchable: run: jit missing method `Employee::apply`
   types/range_types: checked: jit range-checked ctor unsupported
   types/recursive_enum: run: jit enum positional payload unsupported
-  types/refinements: jit param type unsupported: FixedList { elem: String, len: 4 }
+  types/refinements: jit param type unsupported: FixedList { elem: String, len: 4, len_symbol: None }
   types/renderable-varargs-multi: run: jit call to unknown function `announce__va1`
   types/renderable-varargs: run: jit call to unknown function `log_all__va4`
   types/tags_and_traits: run: jit missing method `Doc::greet`
   types/traits: print_area: jit missing method `Shape::name`
-  types/type_alias: parse_count: parse_count: verifier: VerifierErrors([VerifierError { location: inst2, context: None, message: "invalid block reference block2" }])
+  types/type_alias: run: jit result status unsupported
   types/typestate: run: jit missing static `Reservation::book`
   types/unit_family: subtotal: jit call to unknown function `Usd`
   types/unit_literals: run: jit call to unknown function `Ms`
   types/value_tag_type: jit param type unsupported: Tagged { marker: "Raw", inner: Int }
   ui/events: run: jit core call unsupported
   ui/layout_basic: run: jit layout block unsupported
-  ui/loadable: fetch_user: fetch_user: verifier: VerifierErrors([VerifierError { location: inst5, context: None, message: "invalid block reference block2" }])
+  ui/loadable: run: jit core call unsupported
   ui/reactive: run: jit core call unsupported
   ui/reactive_scope: run: jit core call unsupported
   ui/ui_a11y: run: jit core call unsupported
@@ -305,7 +312,6 @@ gaps:
   web/ui_web_click: dev: jit core call unsupported
   web/ui_web_reactive: run: jit core call unsupported
   web/web_hello: run: jit core call unsupported
-
 parity_divergences:
   errors/typed_error_families: dev tier misses AOT stderr error-propagation trace
   serde/json_coerce: dev tier misses AOT stderr structured log output

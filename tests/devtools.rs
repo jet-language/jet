@@ -24,6 +24,25 @@ fn isolated_cwd(tag: &str) -> PathBuf {
     dir
 }
 
+/// `new-example`/`new-ui` scaffold into fixed, real repo paths by design (no
+/// override flag — that's the point of the command), so their tests can't
+/// redirect output to a tempdir; they clean up the files they created
+/// instead. A bare best-effort remove at the end of the test body only runs
+/// on the success path — any assertion panic in between (front end
+/// rejects the scaffold, rustc rejects it, output mismatch, …) leaves the
+/// scaffold committed to disk under `examples/` or `tests/ui/`, where a
+/// later broad `git add -A` can commit it permanently. This guard removes
+/// its paths on drop, panicking or not.
+struct ScaffoldCleanup(Vec<PathBuf>);
+
+impl Drop for ScaffoldCleanup {
+    fn drop(&mut self) {
+        for path in &self.0 {
+            let _ = fs::remove_file(path);
+        }
+    }
+}
+
 // ── reduce ─────────────────────────────────────────────────────────
 
 /// `--code EXXXX` oracle: shrink a file with unrelated helper functions down
@@ -199,6 +218,7 @@ fn devtools_new_example_scaffolds_a_passing_golden_pair() {
         .join(format!("{}.out", name));
     let _ = fs::remove_file(&example_path);
     let _ = fs::remove_file(&expected_path);
+    let _cleanup = ScaffoldCleanup(vec![example_path.clone(), expected_path.clone()]);
 
     let out = Command::new(jet())
         .current_dir(&root)
@@ -281,6 +301,7 @@ fn devtools_new_ui_scaffolds_a_self_consistent_snapshot_pair() {
     let stderr_path = root.join("tests/ui").join(format!("{}.stderr", name));
     let _ = fs::remove_file(&jet_path);
     let _ = fs::remove_file(&stderr_path);
+    let _cleanup = ScaffoldCleanup(vec![jet_path.clone(), stderr_path.clone()]);
 
     let out = Command::new(jet())
         .current_dir(&root)
