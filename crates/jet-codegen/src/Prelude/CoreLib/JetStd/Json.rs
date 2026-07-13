@@ -1,14 +1,13 @@
-    pub fn io_error(path: &str, e: std::io::Error) -> IoError {
+    pub fn io_error_at(operation: IoOperation, path: &str, e: std::io::Error) -> IoError {
+        let context = IoContext::new(operation, Some(path.to_string()), e.raw_os_error().map(i64::from), Some(e.to_string()));
         match e.kind() {
-            std::io::ErrorKind::NotFound => IoError::NotFound {
-                path: path.to_string(),
-            },
-            std::io::ErrorKind::PermissionDenied => IoError::PermissionDenied {
-                path: path.to_string(),
-            },
-            _ => IoError::Other {
-                message: e.to_string(),
-            },
+            std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => IoError::InvalidInput(context),
+            std::io::ErrorKind::NotFound => IoError::NotFound(context),
+            std::io::ErrorKind::PermissionDenied => IoError::PermissionDenied(context),
+            std::io::ErrorKind::TimedOut => IoError::TimedOut(context),
+            std::io::ErrorKind::WouldBlock => IoError::Other(context),
+            std::io::ErrorKind::NotConnected | std::io::ErrorKind::BrokenPipe => IoError::Closed(context),
+            _ => IoError::Other(context),
         }
     }
 
@@ -438,4 +437,3 @@
             }
         }
     }
-

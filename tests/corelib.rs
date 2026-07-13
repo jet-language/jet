@@ -2161,6 +2161,103 @@ fn run() {
 }
 
 #[test]
+fn core_ioerror_preserves_kind_operation_and_resource() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_core_ioerror_tree_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "ioerror_tree",
+        r#"
+use core.files as fs
+use core.net as net
+
+fn receive<T: Reader>(&stream: T, limit: Int) -> [U8] ? IOError {
+    return stream.read(limit)
+}
+
+fn run() {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    address :: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
+    client := net.tcp_connect(address) ?? panic("connect")
+    if receive(&client, 0) == {
+        ok(_) -> panic("zero read succeeded")
+        err(error) -> {
+            if error == {
+                .InvalidInput(context) -> print(if context.operation == .Read { "invalid-read" } else { "invalid-other" })
+                else -> { print("other") }
+            }
+        }
+    }
+    if fs.read("definitely-missing/ioerror-tree") == {
+        ok(_) -> panic("missing file read succeeded")
+        err(error) -> {
+            if error == {
+                .NotFound(context) -> print(context.resource ?? "missing-resource")
+                else -> { print("other") }
+            }
+        }
+    }
+    if fs.write(".", "cannot replace directory") == {
+        ok(_) -> panic("directory write succeeded")
+        err(error) -> {
+            if error == {
+                .Other(context) -> print(if context.operation == .Write { "write" } else { "wrong-write-operation" })
+                else -> { print("wrong-write-kind") }
+            }
+        }
+    }
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, "invalid-read\ndefinitely-missing/ioerror-tree\nwrite\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn core_ioerror_native_flush_preserves_operation() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_core_ioerror_flush_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "ioerror_flush",
+        r#"
+use core.files as files
+
+fn run() {
+    output := files.create("/dev/full") ?? panic("open")
+    output.write_line("buffered") ?? panic("buffer")
+    if output.flush() == {
+        ok(_) -> panic("flush succeeded")
+        err(error) -> {
+            if error == {
+                .Other(context) -> print(if context.operation == .Flush { "flush" } else { "wrong-flush-operation" })
+                else -> { print("wrong-flush-kind") }
+            }
+        }
+    }
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, "flush\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn core_net_tcp_read_persistent_timeout_uses_scheduler_budget() {
     let dir = std::env::temp_dir().join(format!(
         "jet_core_net_task_timeout_{}",

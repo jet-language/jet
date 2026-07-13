@@ -113,6 +113,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // handles off a `ProcessChild`; `ProcessLines` is the loop-source-only
         // result of `.lines()` on the latter two (mirrors `FileLines`/`StdinLines`).
         | "ProcessStreamMode" | "ProcessStdin" | "ProcessStdoutStream" | "ProcessStderrStream" | "ProcessLines"
+        | "IOContext" | "IOOperation"
         // D-TEXTWIDTH1=B: `TextWidth` (dot-ctor struct, `core_constructable_fields`)
         // + its two dot-literal enum fields + the `.Reject` policy error.
         | "TextWidth" | "TextWidthAmbiguous" | "TextWidthControls" | "TextError" | "EnvError"
@@ -233,6 +234,14 @@ pub(crate) fn core_type_known(name: &str) -> bool {
 }
 
 pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
+    if type_name == Syntax::TYPE_IO_CONTEXT {
+        return match field {
+            "operation" => Some(Type::Named(Syntax::TYPE_IO_OPERATION.to_string())),
+            "resource" | "cause" => Some(Type::Option(Box::new(Type::String))),
+            "os_code" => Some(Type::Option(Box::new(Type::Int))),
+            _ => None,
+        };
+    }
     if type_name == "HttpShutdownReport" && matches!(field, "accepted" | "overloaded" | "completed" | "cancelled") {
         return Some(Type::Int);
     }
@@ -599,6 +608,29 @@ pub(crate) fn core_net_error_variants(
     Some(variants)
 }
 
+pub(crate) fn core_io_variants(
+    enum_name: &str,
+) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>> {
+    use crate::AST::VariantPayload;
+    use crate::Diagnostics::Span;
+    let zero = Span::new(0, 0);
+    let mut variants = std::collections::HashMap::new();
+    if enum_name == Syntax::TYPE_IO_OPERATION {
+        for name in Syntax::IO_OPERATION_VARIANTS {
+            variants.insert((*name).to_string(), (zero, VariantPayload::Unit));
+        }
+        return Some(variants);
+    }
+    if !is_io_error_type_name(enum_name) { return None; }
+    for name in Syntax::IO_ERROR_VARIANTS {
+        variants.insert((*name).to_string(), (
+            zero,
+            VariantPayload::Single(Type::Named(Syntax::TYPE_IO_CONTEXT.to_string()), zero),
+        ));
+    }
+    Some(variants)
+}
+
 /// D-TEXTWIDTH1=B: the two `TextWidth` field enums (`.Narrow`/`.Wide`,
 /// `.Zero`/`.Reject`) — synthesised the same way as `ProcessStreamMode`.
 pub(crate) fn core_text_width_variants(
@@ -800,6 +832,12 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
         "TextWidth" => Some(vec![
             ("ambiguous".to_string(), Type::Named("TextWidthAmbiguous".to_string())),
             ("controls".to_string(), Type::Named("TextWidthControls".to_string())),
+        ]),
+        "IOContext" => Some(vec![
+            ("operation".to_string(), Type::Named(Syntax::TYPE_IO_OPERATION.to_string())),
+            ("resource".to_string(), Type::Option(Box::new(Type::String))),
+            ("os_code".to_string(), Type::Option(Box::new(Type::Int))),
+            ("cause".to_string(), Type::Option(Box::new(Type::String))),
         ]),
         // D-SERDE2 / D-SERDE14=A: a hand `decode` builds its own rejection with
         // `DecodeError.{ path: …, reason: … }` and returns it via `err(…)`. Both

@@ -27,15 +27,36 @@ trait JetIoWriter {
 }
 
 fn jet_net_to_io_error(error: JetNetError) -> jet_std::IoError {
-    jet_std::IoError::Other { message: error.jet_show() }
+    let operation = match jet_net_error_operation(&error).as_str() {
+        operation if operation.contains("read") => jet_std::IoOperation::Read,
+        operation if operation.contains("write") || operation.contains("send") => jet_std::IoOperation::Write,
+        operation if operation.contains("connect") => jet_std::IoOperation::Connect,
+        operation if operation.contains("accept") => jet_std::IoOperation::Accept,
+        operation if operation.contains("close") || operation.contains("shutdown") => jet_std::IoOperation::Close,
+        operation if operation.contains("resolve") || operation.contains("dns") => jet_std::IoOperation::Resolve,
+        _ => jet_std::IoOperation::Codec,
+    };
+    let resource = jet_net_error_address(&error).or_else(|| jet_net_error_name(&error));
+    let context = jet_std::IoContext::new(operation, resource, jet_net_error_os_code(&error), Some(error.jet_show()));
+    match error {
+        JetNetError::InvalidInput(_) => jet_std::IoError::InvalidInput(context),
+        JetNetError::PermissionDenied(_) => jet_std::IoError::PermissionDenied(context),
+        JetNetError::Timeout(_) => jet_std::IoError::TimedOut(context),
+        JetNetError::Cancelled(_) => jet_std::IoError::Cancelled(context),
+        JetNetError::Closed(_) | JetNetError::NotConnected(_) => jet_std::IoError::Closed(context),
+        _ => jet_std::IoError::Other(context),
+    }
 }
 
 impl JetIoReader for JetTcpStream {
     fn read(&mut self, limit: i64) -> Result<Vec<u8>, jet_std::IoError> {
         if limit <= 0 {
-            return Err(jet_std::IoError::Other {
-                message: "tcp read limit must be positive".to_string(),
-            });
+            return Err(jet_std::IoError::InvalidInput(jet_std::IoContext::new(
+                jet_std::IoOperation::Read,
+                None,
+                None,
+                Some("tcp read limit must be positive".to_string()),
+            )));
         }
         jet_net_tcp_read_bytes(self, limit).map_err(jet_net_to_io_error)
     }

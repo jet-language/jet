@@ -1,9 +1,46 @@
 mod jet_std {
+    // D-IOERROR-TREE1=A: one public context shape for every byte-stream error.
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    pub enum IoOperation {
+        Read,
+        Write,
+        Flush,
+        Connect,
+        Accept,
+        Close,
+        Resolve,
+        Codec,
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct IoContext {
+        pub operation: IoOperation,
+        pub resource: Option<String>,
+        pub os_code: Option<i64>,
+        pub cause: Option<String>,
+    }
+
+    impl IoContext {
+        pub fn new(operation: IoOperation, resource: Option<String>, os_code: Option<i64>, cause: Option<String>) -> Self {
+            Self { operation, resource, os_code, cause }
+        }
+    }
+
     #[derive(Clone, Debug, PartialEq)]
     pub enum IoError {
-        NotFound { path: String },
-        PermissionDenied { path: String },
-        Other { message: String },
+        InvalidInput(IoContext),
+        NotFound(IoContext),
+        PermissionDenied(IoContext),
+        TimedOut(IoContext),
+        Cancelled(IoContext),
+        Closed(IoContext),
+        Other(IoContext),
+    }
+
+    impl IoError {
+        pub fn other(operation: IoOperation, resource: Option<String>, cause: impl ToString) -> Self {
+            Self::Other(IoContext::new(operation, resource, None, Some(cause.to_string())))
+        }
     }
 
     // D-ENV-MUTATE1=A: failures never carry input or host-backend text.

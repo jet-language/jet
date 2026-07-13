@@ -763,7 +763,7 @@
         let mut stack = vec![std::path::PathBuf::from(root)];
         while let Some(path) = stack.pop() {
             let meta = std::fs::symlink_metadata(&path)
-                .map_err(|e| io_error(path.to_string_lossy().as_ref(), e))?;
+                .map_err(|e| io_error_at(IoOperation::Read, path.to_string_lossy().as_ref(), e))?;
             let modified = meta
                 .modified()
                 .ok()
@@ -775,9 +775,9 @@
             out.insert(path_s, (modified, meta.len() as i64, is_dir));
             if is_dir {
                 for entry in std::fs::read_dir(&path)
-                    .map_err(|e| io_error(path.to_string_lossy().as_ref(), e))?
+                    .map_err(|e| io_error_at(IoOperation::Read, path.to_string_lossy().as_ref(), e))?
                 {
-                    let entry = entry.map_err(|e| io_error(path.to_string_lossy().as_ref(), e))?;
+                    let entry = entry.map_err(|e| io_error_at(IoOperation::Read, path.to_string_lossy().as_ref(), e))?;
                     stack.push(entry.path());
                 }
             }

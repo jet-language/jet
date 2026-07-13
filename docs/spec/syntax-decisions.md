@@ -1911,6 +1911,17 @@ index, not a substitute for that law.
   adapters convert their native failures into the closed `IOError` tree.
   Runtime/compiler conformance remains open on card #300; native byte methods
   keep their existing error types until that one contract is wired end to end.
+- **D-IOERROR-TREE1=A**: every `core.io.Reader`/`Writer` adapter returns one
+  closed `IOError` tree: `InvalidInput(IOContext)`, `NotFound(IOContext)`,
+  `PermissionDenied(IOContext)`, `TimedOut(IOContext)`,
+  `Cancelled(IOContext)`, `Closed(IOContext)`, or `Other(IOContext)`.
+  `IOContext` has `operation: IOOperation`, `resource: String?`,
+  `os_code: Int?`, and `cause: String?`. `IOOperation` is exactly `Read`,
+  `Write`, `Flush`, `Connect`, `Accept`, `Close`, `Resolve`, or `Codec`.
+  Clean EOF remains an empty successful read; zero limits are
+  `InvalidInput(.Read)`. Native file/network errors preserve stable kind,
+  operation, resource, OS code, and owned cause. Display stays concise; no
+  compatibility constructor or flat string adapter survives.
 - **D-NETERROR1=A**: every fallible network operation returns the structured
   `NetError` family. Stable variants cover invalid input, permissions,
   address/connection state, closed handles, timeout, cancellation,

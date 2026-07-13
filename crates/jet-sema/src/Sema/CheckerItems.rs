@@ -448,6 +448,9 @@ impl<'a> Checker<'a> {
         if matches!(enum_name, "NetError" | "NetDnsError") {
             return true;
         }
+        if is_io_error_type_name(enum_name) || enum_name == Syntax::TYPE_IO_OPERATION {
+            return true;
+        }
         false
     }
 
@@ -492,6 +495,9 @@ impl<'a> Checker<'a> {
             return Some(v);
         }
         if let Some(v) = core_net_error_variants(enum_name) {
+            return Some(v);
+        }
+        if let Some(v) = core_io_variants(enum_name) {
             return Some(v);
         }
         if let Some(v) = core_encoding_variants(enum_name) {

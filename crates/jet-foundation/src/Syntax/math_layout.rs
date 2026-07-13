@@ -125,6 +125,16 @@ pub const TYPE_CHAR: &str = "Char";
 
 /// S66 (ratified 2026-06-15): standard acronyms are fully capitalized in Jet source.
 pub const TYPE_IO_ERROR: &str = "IOError";
+/// D-IOERROR-TREE1=A: shared structured byte-stream error context and operation.
+pub const TYPE_IO_CONTEXT: &str = "IOContext";
+pub const TYPE_IO_OPERATION: &str = "IOOperation";
+pub const IO_ERROR_VARIANTS: &[&str] = &[
+    "InvalidInput", "NotFound", "PermissionDenied", "TimedOut", "Cancelled", "Closed", "Other",
+];
+pub const IO_OPERATION_VARIANTS: &[&str] = &[
+    "Read", "Write", "Flush", "Connect", "Accept", "Close", "Resolve", "Codec",
+];
+pub const IO_CONTEXT_FIELDS: &[&str] = &["operation", "resource", "os_code", "cause"];
 pub const TYPE_UTF8_ERROR: &str = "UTF8Error";
 pub const TYPE_JSON: &str = "JSON";
 pub const TYPE_JSON_ERROR: &str = "JSONError";

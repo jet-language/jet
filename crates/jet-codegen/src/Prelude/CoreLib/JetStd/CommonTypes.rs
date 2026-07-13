@@ -725,7 +725,25 @@
 
     impl super::JetShow for IoError {
         fn jet_show(&self) -> String {
-            format!("{:?}", self)
+            let (kind, context) = match self {
+                IoError::InvalidInput(context) => ("invalid input", context),
+                IoError::NotFound(context) => ("not found", context),
+                IoError::PermissionDenied(context) => ("permission denied", context),
+                IoError::TimedOut(context) => ("timed out", context),
+                IoError::Cancelled(context) => ("cancelled", context),
+                IoError::Closed(context) => ("closed", context),
+                IoError::Other(context) => ("I/O error", context),
+            };
+            let operation = match context.operation {
+                IoOperation::Read => "read", IoOperation::Write => "write",
+                IoOperation::Flush => "flush", IoOperation::Connect => "connect",
+                IoOperation::Accept => "accept", IoOperation::Close => "close",
+                IoOperation::Resolve => "resolve", IoOperation::Codec => "codec",
+            };
+            let mut text = format!("{kind} during {operation}");
+            if let Some(resource) = &context.resource { text.push_str(&format!(" `{resource}`")); }
+            if let Some(cause) = &context.cause { text.push_str(&format!(": {cause}")); }
+            text
         }
     }
     impl super::JetShow for EnvError {

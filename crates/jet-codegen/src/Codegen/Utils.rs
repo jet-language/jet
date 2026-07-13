@@ -4,7 +4,11 @@ pub(crate) fn enum_type_prefix(cx: &Cx, variant: &str) -> String {
     cx.variant_owner
         .get(variant)
         .map(|t| {
-            if let Some(rust_mod) = cx.foreign_types.get(t.as_str()) {
+            if t == crate::Syntax::TYPE_IO_ERROR {
+                format!("{}jet_std::IoError", cx.root_prefix)
+            } else if t == crate::Syntax::TYPE_IO_OPERATION {
+                format!("{}jet_std::IoOperation", cx.root_prefix)
+            } else if let Some(rust_mod) = cx.foreign_types.get(t.as_str()) {
                 format!("{}{}::user_{}", cx.root_prefix, rust_mod, t)
             } else {
                 format!("user_{}", t)

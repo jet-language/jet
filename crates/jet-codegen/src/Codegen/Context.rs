@@ -202,6 +202,8 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         n if is_json_type_name(n) => Some("DataTree"),
         n if n == Syntax::TYPE_JSON_ERROR || n == "JsonError" => Some("JsonError"),
         n if n == Syntax::TYPE_IO_ERROR || n == "IoError" => Some("IoError"),
+        n if n == Syntax::TYPE_IO_CONTEXT => Some("IoContext"),
+        n if n == Syntax::TYPE_IO_OPERATION => Some("IoOperation"),
         "EnvError" => Some("EnvError"),
         n if n == Syntax::TYPE_UTF8_ERROR || n == "Utf8Error" => Some("Utf8Error"),
         "ProcessResult" => Some("ProcessResult"),
@@ -1293,6 +1295,21 @@ pub(crate) fn build_cx_items(
         in_stm_transact: std::cell::Cell::new(false),
         stm_touched: std::cell::Cell::new(false),
     };
+
+    let io_context = Type::Named(Syntax::TYPE_IO_CONTEXT.to_string());
+    cx.struct_fields.insert(Syntax::TYPE_IO_CONTEXT.to_string(), vec![
+        ("operation".to_string(), Type::Named(Syntax::TYPE_IO_OPERATION.to_string())),
+        ("resource".to_string(), Type::Option(Box::new(Type::String))),
+        ("os_code".to_string(), Type::Option(Box::new(Type::Int))),
+        ("cause".to_string(), Type::Option(Box::new(Type::String))),
+    ]);
+    cx.cloneable.insert(Syntax::TYPE_IO_CONTEXT.to_string());
+    cx.enum_variants.insert(Syntax::TYPE_IO_ERROR.to_string(), Syntax::IO_ERROR_VARIANTS.iter().map(|name| ((*name).to_string(), VariantPayload::Single(io_context.clone(), Span::new(0, 0)))).collect());
+    cx.enum_variants.insert(Syntax::TYPE_IO_OPERATION.to_string(), Syntax::IO_OPERATION_VARIANTS.iter().map(|name| ((*name).to_string(), VariantPayload::Unit)).collect());
+    for name in Syntax::IO_ERROR_VARIANTS { cx.variant_owner.insert((*name).to_string(), Syntax::TYPE_IO_ERROR.to_string()); }
+    for name in Syntax::IO_OPERATION_VARIANTS { cx.variant_owner.insert((*name).to_string(), Syntax::TYPE_IO_OPERATION.to_string()); }
+    cx.cloneable.insert(Syntax::TYPE_IO_ERROR.to_string());
+    cx.cloneable.insert(Syntax::TYPE_IO_OPERATION.to_string());
 
     for item in items {
         match item {

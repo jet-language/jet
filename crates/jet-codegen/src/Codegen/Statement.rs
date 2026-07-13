@@ -22,6 +22,7 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
     });
     let etype = resolved_type.as_deref().or(enum_type);
     let is_json = etype.map(is_json_type_name).unwrap_or(false);
+    let is_io = etype.map(|t| matches!(t, "IOError" | "IOOperation")).unwrap_or(false);
     // D-TERM1: detect `Key` from the variant name when the type isn't resolved in etype.
     let is_key = {
         let from_etype = etype.map(|t| t == crate::Syntax::TYPE_KEY).unwrap_or(false);
@@ -38,6 +39,10 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
                 format!("{}jet_std::DataTree", cx.root_prefix)
             } else if t == crate::Syntax::TYPE_KEY {
                 format!("{}JetKey", cx.root_prefix)
+            } else if t == crate::Syntax::TYPE_IO_ERROR {
+                format!("{}jet_std::IoError", cx.root_prefix)
+            } else if t == crate::Syntax::TYPE_IO_OPERATION {
+                format!("{}jet_std::IoOperation", cx.root_prefix)
             } else if let Some(rust_mod) = cx.foreign_types.get(t) {
                 format!("{}{}::user_{}", cx.root_prefix, rust_mod, t)
             } else {
@@ -56,7 +61,7 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
     // Variant names are mangled for user enums, but JSON and Key variants keep
     // their original Rust name (defined as plain Rust identifiers in the prelude).
     let vname = |v: &str| -> String {
-        if is_json || is_key {
+        if is_json || is_key || is_io {
             v.to_string()
         } else {
             mangle_variant(v)

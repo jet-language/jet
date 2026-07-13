@@ -91,6 +91,7 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
             matches!(member, "line" | "message")
         }
         n if n == Syntax::TYPE_UTF8_ERROR || n == "Utf8Error" => member == "message",
+        n if n == Syntax::TYPE_IO_CONTEXT => Syntax::IO_CONTEXT_FIELDS.contains(&member),
         // D-LSDIR1=A: DirEntry fields — name (bare filename), path (full path), is_dir.
         "DirEntry" => matches!(member, "name" | "path" | "is_dir"),
         // D-FSOPS1/D-WATCH-SCOPE1: core filesystem/watch structs use plain Rust fields.

@@ -30,9 +30,7 @@ fn jet_process_command(
     spec: &jet_std::ProcessSpec,
 ) -> Result<std::process::Command, jet_std::IoError> {
     if spec.cmd.is_empty() {
-        return Err(jet_std::IoError::Other {
-            message: "process command needs at least one word".to_string(),
-        });
+        return Err(jet_std::IoError::other(jet_std::IoOperation::Codec, None, "process command needs at least one word"));
     }
     let mut command = std::process::Command::new(&spec.cmd[0]);
     command.args(&spec.cmd[1..]);
@@ -48,12 +46,8 @@ fn jet_process_command(
         jet_std_env_snapshot_raw()
     };
     for (name, value) in &spec.env_set {
-        jet_env_validate_name(name).map_err(|error| jet_std::IoError::Other {
-            message: error.jet_show(),
-        })?;
-        jet_env_validate_value(value).map_err(|error| jet_std::IoError::Other {
-            message: error.jet_show(),
-        })?;
+        jet_env_validate_name(name).map_err(|error| jet_std::IoError::other(jet_std::IoOperation::Codec, None, error.jet_show()))?;
+        jet_env_validate_value(value).map_err(|error| jet_std::IoError::other(jet_std::IoOperation::Codec, None, error.jet_show()))?;
         let os_name = std::ffi::OsString::from(name);
         child_env.retain(|(candidate, _)| {
             !jet_env_key_eq(candidate.as_os_str(), os_name.as_os_str())
@@ -61,9 +55,7 @@ fn jet_process_command(
         child_env.push((os_name, std::ffi::OsString::from(value)));
     }
     for name in &spec.env_remove {
-        jet_env_validate_name(name).map_err(|error| jet_std::IoError::Other {
-            message: error.jet_show(),
-        })?;
+        jet_env_validate_name(name).map_err(|error| jet_std::IoError::other(jet_std::IoOperation::Codec, None, error.jet_show()))?;
         let name = std::ffi::OsStr::new(name);
         child_env.retain(|(candidate, _)| !jet_env_key_eq(candidate.as_os_str(), name));
     }
@@ -122,9 +114,7 @@ fn jet_process_spec_run_inner(
     let result = jet_process_child_wait(&child)?;
     if let Some(limit) = spec.output_limit {
         if (result.output.len() + result.errors.len()) as i64 > limit {
-            return Err(jet_std::IoError::Other {
-                message: "process output exceeded output_limit".to_string(),
-            });
+            return Err(jet_std::IoError::other(jet_std::IoOperation::Read, None, "process output exceeded output_limit"));
         }
     }
     Ok(result)
