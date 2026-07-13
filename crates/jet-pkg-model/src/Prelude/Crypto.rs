@@ -247,7 +247,7 @@ pub fn jet_crypto_constant_time_secret_impl(a:&Secret,b:&Secret)->bool{let max=a
 pub fn jet_crypto_password_hash_typed_impl(password:&Secret)->Result<JetPasswordHash,JetCryptoError>{let mut salt=[0;16];jet_crypto_entropy_fill(&mut salt).map_err(|_|JetCryptoError::EntropyUnavailable)?;let encoded=argon2::password_hash::SaltString::encode_b64(&salt).map_err(|_|JetCryptoError::Internal{incident_id:"password-salt"})?;let hash=argon2::PasswordHasher::hash_password(&argon2::Argon2::default(),&password.0,&encoded).map_err(|_|JetCryptoError::ResourceUnavailable{resource:"password hashing"})?.to_string();zeroize(&mut salt);Ok(JetPasswordHash(hash))}
 pub fn jet_crypto_password_parse_impl(text:String)->Result<JetPasswordHash,JetCryptoError>{argon2::PasswordHash::new(&text).map_err(|_|JetCryptoError::InvalidEncoding{operation:"PasswordHash.parse",value_kind:"PHC string"})?;Ok(JetPasswordHash(text))}
 pub fn jet_crypto_password_text_impl(hash:&JetPasswordHash)->String{hash.0.clone()}
-pub fn jet_crypto_password_verify_typed_impl(password:&Secret,stored:JetPasswordHash)->Result<bool,JetCryptoError>{let parsed=argon2::PasswordHash::new(&stored.0).map_err(|_|JetCryptoError::InvalidEncoding{operation:"password_verify",value_kind:"PHC string"})?;Ok(argon2::PasswordVerifier::verify_password(&argon2::Argon2::default(),&password.0,&parsed).is_ok())}
+pub fn jet_crypto_password_verify_typed_impl(password:&Secret,stored:&JetPasswordHash)->Result<bool,JetCryptoError>{let parsed=argon2::PasswordHash::new(&stored.0).map_err(|_|JetCryptoError::InvalidEncoding{operation:"password_verify",value_kind:"PHC string"})?;Ok(argon2::PasswordVerifier::verify_password(&argon2::Argon2::default(),&password.0,&parsed).is_ok())}
 
 const MAGIC: &[u8; 4] = b"JETC";
 const VERSION: u8 = 1;

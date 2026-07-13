@@ -155,9 +155,9 @@ mod tests {
         let signature = jet_crypto_sign_typed_impl(&signing, &message).unwrap();
         assert!(jet_crypto_verify_typed_impl(jet_crypto_signing_public_impl(&signing), &message, signature).unwrap());
         let stored = jet_crypto_password_hash_typed_impl(&secret).unwrap();
-        assert!(jet_crypto_password_verify_typed_impl(&secret, stored).unwrap());
+        assert!(jet_crypto_password_verify_typed_impl(&secret, &stored).unwrap());
         let wrong = jet_crypto_secret_from_text_impl("wrong".to_string());
         let stored = jet_crypto_password_hash_typed_impl(&secret).unwrap();
-        assert!(!jet_crypto_password_verify_typed_impl(&wrong, stored).unwrap());
+        assert!(!jet_crypto_password_verify_typed_impl(&wrong, &stored).unwrap());
     }
 }
