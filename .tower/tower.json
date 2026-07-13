@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 531,
-    "rev": 5180,
+    "rev": 5191,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -3251,11 +3251,11 @@
         {
           "n": 8,
           "text": "Secure report/baseline CAS uses no-follow/no-replace atomic writes, locking, compatible-history selection, plan-first update/bootstrap/accept audit, and cache identity over every ratified digest.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-11T23:48:33.444Z"
+          "status": "verified",
+          "metBy": "terra-241-builder",
+          "verifiedBy": "sol-241-reviewer",
+          "evidence": "Independent review accepted secure storage/CAS law after repeated hostile remediation: bounded process/file operations, no-follow/no-replace writes, locks, compatible history, plan integrity, GC, and zero pre-gate filesystem mutation; BudgetStore 7/7 green.",
+          "at": "2026-07-13T11:52:51.911Z"
         },
         {
           "n": 9,
@@ -9436,7 +9436,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": "Owner verdict D-VERDICT-436-1 narrows Epoch 3 platform acceptance to Linux. Ship one required non-skipping production-generated Jet+C runtime matrix on Linux x64 and Linux aarch64/QEMU covering exact layout, callback symbols/concurrency/reentrancy, raw status/out-pointer safety, and supported calling conventions. macOS and Windows runtime matrices move intact to Epoch 8 follow-up cards.",
       "blockedBy": [],
@@ -9519,38 +9519,38 @@
         {
           "n": 1,
           "text": "Syntax.rs entry updated",
-          "status": "met",
+          "status": "verified",
           "metBy": "codex-main",
-          "verifiedBy": null,
-          "evidence": "Registered #Abi as D-CABI-PLATFORM1 in Syntax.rs; callback/result decisions add no second syntax.",
-          "at": "2026-07-11T22:12:21.345Z"
+          "verifiedBy": "codex-orchestrator",
+          "evidence": "Independent source and decision tests confirm Abi directive registration is present in Syntax.rs under D-CABI-PLATFORM1; decisions suite passed 2 of 2.",
+          "at": "2026-07-13T11:53:13.881Z"
         },
         {
           "n": 2,
           "text": "syntax-decisions.md log entry",
-          "status": "met",
+          "status": "verified",
           "metBy": "codex-main",
-          "verifiedBy": null,
-          "evidence": "Recorded D-CABI-CALLBACK1=A, D-CABI-RESULT1=C, and D-CABI-PLATFORM1=A in syntax-decisions.md and UL1 plan.",
-          "at": "2026-07-11T22:12:34.387Z"
+          "verifiedBy": "codex-orchestrator",
+          "evidence": "Independent syntax reconciliation passed 9 of 9 and decisions suite passed 2 of 2 against durable syntax-decisions law.",
+          "at": "2026-07-13T11:53:14.052Z"
         },
         {
           "n": 3,
           "text": "jet devtools grammars regenerated",
-          "status": "met",
+          "status": "verified",
           "metBy": "codex-main",
-          "verifiedBy": null,
-          "evidence": "Rebuilt jet, then regenerated VS Code, Tree-sitter, and Zed grammar sections; #Abi appears in directive marker outputs.",
-          "at": "2026-07-11T22:12:34.570Z"
+          "verifiedBy": "codex-orchestrator",
+          "evidence": "Independent jet self devtools grammars regeneration completed for VS Code, Tree-sitter, and Zed with no generated diff.",
+          "at": "2026-07-13T11:53:14.218Z"
         },
         {
           "n": 4,
           "text": "snapshots re-blessed",
-          "status": "met",
+          "status": "verified",
           "metBy": "codex-main",
-          "verifiedBy": null,
-          "evidence": "Ratification adds staged law only; no diagnostic snapshot changed. cargo test --test decisions passes 2/2.",
-          "at": "2026-07-11T22:12:34.760Z"
+          "verifiedBy": "codex-orchestrator",
+          "evidence": "Independent decisions and syntax reconciliation suites passed; no snapshot or grammar drift remains.",
+          "at": "2026-07-13T11:53:14.387Z"
         },
         {
           "n": 5,
@@ -9600,11 +9600,11 @@
         {
           "n": 10,
           "text": "Required non-skipping native C ABI matrix passes on Linux x64 and Linux aarch64/QEMU with exact symbols, layouts, callbacks, raw out pointers, and calling conventions.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-11T23:37:02.937Z"
+          "status": "verified",
+          "metBy": "terra-436-aarch64",
+          "verifiedBy": "codex-orchestrator",
+          "evidence": "Builder and parent independently ran required non-skipping Linux aarch64 native C ABI matrix with pinned cross GCC and Rust sysroot under qemu-aarch64. Parent result: required_native_c_abi_matrix passed 1 of 1, zero ignored, covering generated Rust and C symbols, layouts, callbacks, raw out pointers, and default AArch64 C convention. Linux x64 proof was already verified.",
+          "at": "2026-07-13T11:53:14.722Z"
         },
         {
           "n": 11,
@@ -30621,6 +30621,184 @@
       "created": "2026-07-13T07:30:41.306Z",
       "outcome": "A",
       "ratifiedAt": "2026-07-13"
+    },
+    {
+      "id": "D-AUTH2",
+      "cardId": "c0n6vj96",
+      "group": "stdlib",
+      "title": "JWT/PASETO verify before the app graph",
+      "gist": "Whether token verification ships as standalone functions now, or waits for the whole app graph.",
+      "lesson": "A common, safe capability should not wait on unrelated infrastructure. Verifying a third-party token is useful long before Jet has an application graph.",
+      "explainer": "",
+      "story": "Priya runs an API gateway. A partner posts requests carrying a signed JWT, and she must reject any token whose signature, expiry, or audience is wrong before trusting the caller.\n\nShe does not want to stand up a full web app to do it. She wants one function that takes the token and the key and returns typed claims or a clear failure.",
+      "inWild": "A request handler on the partner endpoint verifies the token before any business logic runs:\n\n```jet\nuse core.auth\n\nfn handle(req: Request) -> Response {\n  claims := auth.verify_jwt(req.bearer(), key: partner_key)?\n  if claims.audience != \"gateway\" { return Response.forbidden(\"wrong audience\") }\n  Response.ok(for: claims.subject)\n}\n```",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "core.auth typed functions now",
+          "detail": "Ship `core.auth` now with typed verify functions. `auth.verify_jwt(token, key)` returns `Result<Claims>` with expiry and audience already checked. When the app graph lands, `app.auth` calls these same functions, so there is one mechanism with two entrypoints.",
+          "code": "use core.auth\n\n# verify a partner token inside a plain handler -- no app graph needed\nfn handle(req: Request) -> Response {\n  claims := auth.verify_jwt(req.bearer(), key: partner_key)?\n  if claims.audience != \"gateway\" {\n    return Response.forbidden(\"wrong audience\")\n  }\n  Response.ok(for: claims.subject)\n}\n\n# claims is typed; signature + expiry already checked. A bad token is a\n# normal ? failure, no panic:\n#\n#   $ jet run gateway.jet\n#   error: token verification failed: signature mismatch\n#     at handle (gateway.jet:4)\n\n# LATER: when card #438 ships, app.auth reuses the very same function --\n# one mechanism, two entrypoints:\nfn app() {\n  app.auth(users: db)   # internally calls auth.verify_jwt for bearer tokens\n}"
+        },
+        {
+          "key": "B",
+          "name": "Wait for the app graph (#438)",
+          "detail": "Ship no standalone surface. Token verification exists only through `app.auth`, which rides the app graph. Until card #438 lands, naming the auth surface is a teaching stop that points to the pending card.",
+          "code": "use core.auth\n\nfn handle(req: Request) -> Response {\n  claims := auth.verify_jwt(req.bearer(), key: partner_key)?\n  Response.ok(for: claims.subject)\n}\n\n# --- what Priya sees today under option B ---\n#\n#   $ jet build gateway.jet\n#   Error [E0763]: token verification is not available yet\n#     |-- gateway.jet:4\n#     |   claims := auth.verify_jwt(req.bearer(), key: partner_key)?\n#     |             ^^^^^^^^^^^^^^^ core.auth ships with the application graph\n#     |\n#     = why: auth is exposed only through app.auth, which is unbuilt (card #438)\n#     = fix: track card #438; there is no standalone token API this release\n#\n# E0763 is a fresh code (0760-0762 used; 0763 free)."
+        },
+        {
+          "key": "C",
+          "name": "Put verify on core.crypto",
+          "detail": "Home token verification in `core.crypto`, beside the primitives it uses. `crypto.verify_jwt(token, key)` returns `Result<Claims>`. The app graph, when built, calls into `core.crypto` for token work.",
+          "code": "use core.crypto\n\nfn handle(req: Request) -> Response {\n  claims := crypto.verify_jwt(req.bearer(), key: partner_key)?\n  Response.ok(for: claims.subject)\n}\n\n# works, but the module boundary now reads oddly: crypto both moves bytes\n# (seal/open/sign/verify) AND reasons about identity claims + audiences.\n# app.auth would later have to import token logic from core.crypto:\nfn app() {\n  app.auth(users: db)   # delegates bearer parsing to core.crypto\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go (golang-jwt)",
+          "note": "The standard Go library parses and verifies tokens with a plain function call. It needs no web framework and no app-wide graph.",
+          "code": "tok, err := jwt.Parse(raw, keyFunc)\nif err != nil || !tok.Valid { http.Error(w, \"bad token\", 401); return }"
+        },
+        {
+          "lang": "Rust (jsonwebtoken)",
+          "note": "A standalone crate returns typed claims from one call, independent of any server. Validation (expiry, audience) is passed in.",
+          "code": "let data = decode::<Claims>(&token, &key, &Validation::new(Algorithm::HS256))?;\nlet claims = data.claims;"
+        },
+        {
+          "lang": "Node (jose)",
+          "note": "jose exposes token verify as a free async function, used the same way inside or outside a framework.",
+          "code": "const { payload } = await jwtVerify(token, key, { audience: \"gateway\" })"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Verifying a token is a common, safe need that predates any app graph. Option A ships it now as typed functions, and app.auth later reuses the same functions, so there is one mechanism.",
+        "tradeoff": "A commits to the `core.auth` module name and its verify signatures before the app graph exercises them. That contract is worth fixing now, because the app graph will consume it unchanged.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B blocks a safe, ordinary task behind unrelated web infrastructure. A developer verifying a partner token gains nothing from waiting for the full app graph."
+          },
+          {
+            "key": "C",
+            "reason": "C files auth-level formats under crypto, breaking the teachable split where crypto moves bytes and auth handles identity. It also forks the auth story across two modules."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "Ship `core.auth` verify functions now (A). Keep a card-pointing teaching stop (from B) for auth surface not yet built, and layer verify on `core.crypto` primitives (from C) so there is one primitive home.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "Typed verify functions are usable without the app graph.",
+            "use": "Ship as the standalone surface now."
+          },
+          {
+            "key": "B",
+            "aspect": "A card-pointing stop teaches when a surface is unbuilt.",
+            "use": "Reuse its teaching-error voice for any not-yet-built API."
+          },
+          {
+            "key": "C",
+            "aspect": "Token verify is built on crypto primitives.",
+            "use": "Have core.auth call core.crypto, keeping one primitive home."
+          }
+        ]
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-13T11:49:40.259Z"
+    },
+    {
+      "id": "D-TAINT2",
+      "cardId": "c0n6vj96",
+      "group": "safety",
+      "title": "Credential taint: attach grammar and leak sinks",
+      "gist": "How a value gets marked as a credential, and which sinks reject it.",
+      "lesson": "The ratified `.Credential` taint kind has no way to attach it and no leak sinks beyond the database. A password that reaches a log must fail to compile.",
+      "explainer": "",
+      "story": "Marco adds password login to his app. While chasing a bug, he logs the incoming form so he can see what the client sent.\n\nThe form holds the plaintext password. In plain languages that line silently writes the secret into log files that outlive the request. Jet should stop it at compile time.",
+      "inWild": "A login form with a secret field, and a debug print that would leak it:\n\n```jet\nuse core.auth\n\nLoginForm := struct {\n  email: String\n  password: String   # auth marks this as a credential\n}\n\nfn debug_login(form: LoginForm) {\n  print(\"login attempt: {form}\")   # <-- the secret would hit stdout/logs\n}\n```",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Kinded taint: #Tainted(Credential) + credential sinks",
+          "detail": "Attach a kind by naming it: `#Tainted(Credential) value`, generalizing the closed kind set D-TAINT1 already ratified. One lattice, one spread engine. The Credential kind adds log, print, and serialize as sinks, alongside the existing `Db`/`Exec`/`Net`.",
+          "code": "LoginForm := struct {\n  email: String\n  password: #Tainted(Credential) String   # kind named inline\n}\n\nfn debug_login(form: LoginForm) {\n  print(\"login attempt: {form}\")\n}\n\n# --- what Marco sees ---\n#\n#   $ jet build login.jet\n#   Error [E0722]: a credential value reaches a logging sink\n#     |-- login.jet:8\n#     |   print(\"login attempt: {form}\")\n#     |          ^^^^^^^^^^^^^^^^^^^^^^ form.password is #Tainted(Credential)\n#     |\n#     = why: credential taint may not reach print, log, or serialize sinks\n#     = fix: log a non-secret field, or strip it with a #Sanitizer fn first\n#\n# E0722 sits beside E0721 (the existing Db/Exec/Net taint sink)."
+        },
+        {
+          "key": "B",
+          "name": "Distinct marker: #Credential",
+          "detail": "Add a dedicated marker `#Credential value`, separate from `#Tainted`. It has its own spread and its own sinks. A value that is both personal data and a credential then carries two markers, and sanitizers split across two planes.",
+          "code": "LoginForm := struct {\n  email: #Tainted(PII) String       # one plane\n  password: #Credential String      # a second, parallel plane\n}\n\n#   $ jet build login.jet\n#   Error [E0722]: a #Credential value reaches a logging sink\n#     ... (same leak caught)\n#\n# but the two planes do not compose. A field that is BOTH personal data\n# and a credential needs both markers stacked:\n#\n#   ssn: #Tainted(PII) #Credential String\n#\n# and #Sanitizer strips taint while #Credential needs its own stripper --\n# two mechanisms for one job."
+        },
+        {
+          "key": "C",
+          "name": "Type-driven: Secret<T> wrapper",
+          "detail": "Wrap the value in a `Secret<T>` type from core, with no marker at all. Sinks reject `Secret<T>` in log, print, and serialize positions; `.expose()` is the audited unwrap. This mirrors Rust's `secrecy` crate, but stands beside the ratified `.Credential` kind rather than using it.",
+          "code": "LoginForm := struct {\n  email: String\n  password: Secret<String>   # the TYPE carries secrecy; no taint marker\n}\n\nfn debug_login(form: LoginForm) {\n  print(\"login attempt: {form}\")     # rejected: Secret<String> in a log\n  print(\"email: {form.email}\")       # fine\n  store_hash(form.password.expose()) # audited unwrap at the one real use\n}\n\n#   $ jet build login.jet\n#   Error [E0722]: Secret<String> cannot be formatted into a logging sink\n#     |-- login.jet:7\n#     |   print(\"login attempt: {form}\")\n#     |          ^^^^^^^^^^^^^^^^^^^^^^ form.password is Secret<String>\n#     |\n#     = why: a Secret<T> has no Display/Serialize; only .expose() reads it\n#     = fix: log a non-secret field, or call .expose() at a deliberate site\n#\n# NOTE: this leaves the ratified .Credential taint KIND unattachable --\n# it would need amending D-TAINT1."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust (secrecy)",
+          "note": "The secrecy crate wraps secrets in a type with no Debug or Display. The only read path is expose_secret, a deliberate unwrap. This is option C.",
+          "code": "let key: Secret<String> = Secret::new(raw);\nprintln!(\"{key}\");            // compile error: no Display\nsign(key.expose_secret());    // the one deliberate read"
+        },
+        {
+          "lang": "Perl (taint mode)",
+          "note": "The -T flag turns on runtime taint that spreads by dataflow and dies at sensitive sinks. A marker-plus-dataflow lattice is exactly option A, done at runtime.",
+          "code": "perl -T script.pl   # tainted data reaching exec/open/eval dies"
+        },
+        {
+          "lang": "Ruby ($SAFE / tainting)",
+          "note": "Ruby's bolt-on taint plane was removed in 3.0 as unenforceable at scale. A caution that a second, parallel plane (option B) rots.",
+          "code": "obj.taint   # removed in Ruby 3.0; the whole mechanism was dropped"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A adds only the two things the ratified decision left unspelled: a grammar to attach the kind, and the missing leak sinks. It stays one lattice and one spread engine.",
+        "tradeoff": "A means the Credential sink list (log, print, serialize) must be defined precisely, so ordinary formatting is not blocked everywhere. That precision is the point of the feature.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B forks taint into two mechanisms for one job, which I8 forbids. A field that is both personal data and a credential needs two markers, and the sanitizer story doubles."
+          },
+          {
+            "key": "C",
+            "reason": "C introduces a second way to mean secret beside the ratified `.Credential` kind, and would force amending D-TAINT1. Every read also needs `.expose()`, and it does not compose with existing taint spread."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "Attach the kind and add the sinks in one lattice (A). Take the audited-unwrap idea from C as the `#Sanitizer` strip point, and heed Ruby's removed plane (B's shape) as the reason not to bolt on a second one.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "One lattice attaches the kind and parameterizes sinks.",
+            "use": "Ship as the mechanism."
+          },
+          {
+            "key": "B",
+            "aspect": "A credential-specific diagnostic voice reads clearly.",
+            "use": "Name credential explicitly in the E0722 sink error, even under A."
+          },
+          {
+            "key": "C",
+            "aspect": "An audited .expose() unwrap marks the one deliberate use.",
+            "use": "Model the #Sanitizer strip point on that audited-unwrap idea."
+          }
+        ]
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-13T11:49:40.368Z"
     }
   ],
   "questions": [
@@ -31403,6 +31581,83 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-13T11:53:26.828Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0ai04g0",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-13T11:53:14.722Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c0ai04g0",
+      "note": "#10"
+    },
+    {
+      "at": "2026-07-13T11:53:14.554Z",
+      "by": "terra-436-aarch64",
+      "action": "card.criteria-meet",
+      "ref": "c0ai04g0",
+      "note": "#10"
+    },
+    {
+      "at": "2026-07-13T11:53:14.387Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c0ai04g0",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-13T11:53:14.219Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c0ai04g0",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-13T11:53:14.052Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c0ai04g0",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-13T11:53:13.881Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c0ai04g0",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-13T11:52:51.912Z",
+      "by": "sol-241-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "ccq07pav",
+      "note": "#8"
+    },
+    {
+      "at": "2026-07-13T11:52:51.596Z",
+      "by": "terra-241-builder",
+      "action": "card.criteria-meet",
+      "ref": "ccq07pav",
+      "note": "#8"
+    },
+    {
+      "at": "2026-07-13T11:49:40.368Z",
+      "by": "fable-main",
+      "action": "decision.add",
+      "ref": "D-TAINT2",
+      "note": "Credential taint: attach grammar and leak sinks"
+    },
+    {
+      "at": "2026-07-13T11:49:40.259Z",
+      "by": "fable-main",
+      "action": "decision.add",
+      "ref": "D-AUTH2",
+      "note": "JWT/PASETO verify before the app graph"
+    },
     {
       "at": "2026-07-13T11:44:46.435Z",
       "by": "terra-436-aarch64",
@@ -34825,83 +35080,6 @@
       "action": "card.release",
       "ref": "c0fiunwy",
       "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-12T18:30:27.240Z",
-      "by": "codex-orchestrator",
-      "action": "card.claim",
-      "ref": "c0fiunwy",
-      "note": ""
-    },
-    {
-      "at": "2026-07-12T18:29:38.644Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c2zj0p7p",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-12T18:29:38.483Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-verify",
-      "ref": "c2zj0p7p",
-      "note": "#8"
-    },
-    {
-      "at": "2026-07-12T18:29:38.343Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-verify",
-      "ref": "c2zj0p7p",
-      "note": "#7"
-    },
-    {
-      "at": "2026-07-12T18:29:38.203Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-verify",
-      "ref": "c2zj0p7p",
-      "note": "#6"
-    },
-    {
-      "at": "2026-07-12T18:29:38.061Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-verify",
-      "ref": "c2zj0p7p",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-12T18:29:37.919Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-verify",
-      "ref": "c2zj0p7p",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-12T18:29:37.780Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-verify",
-      "ref": "c2zj0p7p",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-12T18:29:37.639Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-verify",
-      "ref": "c2zj0p7p",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-12T18:29:37.497Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-verify",
-      "ref": "c2zj0p7p",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-12T18:20:01.653Z",
-      "by": "codex-orchestrator",
-      "action": "card.claim",
-      "ref": "c2zj0p7p",
-      "note": ""
     }
   ],
   "nextNum": 368,
