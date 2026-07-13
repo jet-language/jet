@@ -65,6 +65,7 @@ rejects unknown classes, and requires non-live rows to name an active successor.
 | #476 | live | `examples/features/jetpack/task_runner.jet` | `#Task` entry dispatch (D-JPK-TASKRUN1) across AOT and interpreter tiers; not scheduling or remote run. |
 | #477 | live | `crates/jetpack/src/CLI/tool.rs` | On-demand `jetpack tool` run/install for built-in providers (D-JPK-TOOLRUN1); external-provider realization (E1298) not yet live. |
 | #478 | live | `crates/jetpack/src/CLI/run_enter_dev.rs` | Monorepo `--filter`/`-p` package selection (D-JPK-SELECTOR1) for local dev/run; narrow workspace-local selector only. |
+| #419 | live | `tests/build_graph.rs` | One BuildPlan IR + complete ActionKey (recipe lower, action kinds, dep outputs, env allowlist, helper versions, exact source, FrontEndCompletion gate); Store ingest still #393. |
 
 ## Stop-line consequences
 
