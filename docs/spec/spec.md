@@ -43,7 +43,7 @@ the spec and a passing example disagree, the spec is wrong — fix the spec.
 program  = { func | struct | const } ;
 func     = [ "pub" ] "fn" ident "(" [ params ] ")" [ "->" type ] block ;
 params   = param { "," param } ;
-param    = ident ":" [ "~" | "^" | "&" ] type ;
+param    = ident ":" [ "^" | "&" ] type ;
 block    = "{" { stmt } "}" ;            // S3: curly braces
 // S6-R: no visible `;` — the lexer inserts a synthetic terminator (NL below)
 // at each line end after a statement-ending token; the grammar stays
@@ -139,7 +139,7 @@ expr     = precedence climbing over:
   (E0103, E0112) and writes it with a trailing newline. `Float` always
   prints a decimal part (S21): `-5.0`, not `-5`.
 - `input()` / `input(prompt)` is prelude (D-PRELUDE1); reads a line from
-  stdin, strips the trailing newline, and returns `Result(String, IoError)`.
+  stdin, strips the trailing newline, and returns `String ? IOError`.
   Use `??` to unwrap or handle the error.
 - Functions: multi-argument calls, checked arity (E0104) and argument
   types (E0112). A function with a return type must return on every path

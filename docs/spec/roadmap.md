@@ -231,7 +231,7 @@ duplicated here:
 - Full adoption documentation (migration, services, debugging guides) → Epoch 3
   (owner, 2026-06-18); per-milestone docs stay as written
 - User token macros (rejected by S26; sanctioned path is S56 comptime derives)
-- Self-hosting → **Epoch 8** (Bootstrapping). Hard readiness gate before any
+- Self-hosting → **Epoch 9** (Bootstrapping). Hard readiness gate before any
   port work (owner, 2026-07-06): core lang locked-happy (stdlib may flux), a
   dogfood portfolio of complex/fringe Jet projects proving readability and
   reason-about-ability, and the memory model adversarially proven as solid as

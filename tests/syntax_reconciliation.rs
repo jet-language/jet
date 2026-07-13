@@ -102,7 +102,9 @@ const MATRIX_UNBUILT_MARKERS: &[&str] = &[
     "D-ROUTE1",
     "D-HONESTNUM1",
     "D-OPTGC1",
+    "D-WEBAPP1",
 ];
+const ENVIRONMENT_REFERENCE: &str = "docs/reference/environment.md";
 const MARKER_PLANE_ROWS: &[(&str, &[&str])] = &[
     (
         "file-target-directives",
@@ -388,6 +390,55 @@ fn syntax_status_matrix_covers_unbuilt_notes() {
         "unbuilt syntax note lacks matrix coverage:\n{}",
         uncovered.join("\n")
     );
+}
+
+#[test]
+fn environment_reference_is_canonical_and_navigable() {
+    let reference = fs::read_to_string(ENVIRONMENT_REFERENCE)
+        .expect("read canonical environment-variable reference");
+    let docs_index = fs::read_to_string("docs/README.md").expect("read docs index");
+
+    assert!(
+        docs_index.contains("reference/environment.md"),
+        "docs index must link the canonical environment-variable reference"
+    );
+    for required in [
+        "JET_PROP_SEED",
+        "JET_RAYLIB_DISPLAY",
+        "JET_UI_HEADLESS",
+        "JET_ENV_DISABLE",
+        "JET_TEST_JOBS",
+        "JET_CANVAS_PREREQUISITES",
+        "## Naming convention",
+    ] {
+        assert!(
+            reference.contains(required),
+            "environment-variable reference missing `{required}`"
+        );
+    }
+}
+
+#[test]
+fn documentation_consistency_sweep_stays_current() {
+    let spec = fs::read_to_string("docs/spec/spec.md").expect("read language spec");
+    let roadmap = fs::read_to_string("docs/spec/roadmap.md").expect("read roadmap");
+    let release =
+        fs::read_to_string("docs/spec/release-policy.md").expect("read release policy");
+
+    assert!(!spec.contains("[ \"~\" | \"^\" | \"&\" ]"));
+    assert!(!spec.contains("Result(String, IoError)"));
+    assert!(spec.contains("String ? IOError"));
+    assert!(roadmap.contains("Self-hosting → **Epoch 9** (Bootstrapping)"));
+    for current_path in [
+        "crates/jet-pkg-model/src/Manifest.rs",
+        "crates/jet-foundation/src/Syntax.rs",
+        "crates/jet-driver/src/Loader.rs",
+    ] {
+        assert!(
+            release.contains(current_path),
+            "release policy missing current path `{current_path}`"
+        );
+    }
 }
 
 #[test]

@@ -38,6 +38,7 @@ Status keys:
 | `D-ROUTE1` | router and params | shipped/partial | CoreLib router and `req.params["id"]`; tests/examples under net/http routes | #301 |
 | `D-HONESTNUM1` | `core.science.measurement` | shipped/partial, stale doc | measurement type sema/TIR/CoreLib and `examples/features/types/measurement.jet` | #340, #310 |
 | `D-OPTGC1` | opt-in `Gc<T>` | gated | Explicitly gated on I6 ballot; no implementation should land before approval | future owner gate |
+| `D-WEBAPP1` | remaining `app.live` application graph | gap/partial | `Db.Read`/`Db.Write` leaf inference shipped; `app` graph, `core.ws`, client signal binding, and transactional invalidation remain unbuilt | #438, #134 |
 
 Open global proof issue discovered while verifying #338/#339: `cargo test --test
 diagnostic_snapshots ui_snapshots` currently fails because

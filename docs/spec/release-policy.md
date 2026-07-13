@@ -125,11 +125,11 @@ bug" versus "I called `jet` wrong". Golden-tested in `tests/cli.rs`.
 
 ## Where this is enforced
 
-- `edition:` field — parsed in `Source/Jetpack/PackageManifest.rs`, surfaced on
-  `manifest::PackageMeta`, recorded in `Source/Syntax.rs` (`MANIFEST_FIELD_EDITION`,
+- `edition:` field — parsed in `crates/jet-pkg-model/src/Manifest.rs`, surfaced on
+  `manifest::PackageMeta`, recorded in `crates/jet-foundation/src/Syntax.rs` (`MANIFEST_FIELD_EDITION`,
   D-REL3).
 - Supported editions — `manifest::SUPPORTED_EDITIONS`; the check is
-  `manifest::check_edition_support` (E2001), called from `Source/Loader.rs`.
+  `manifest::check_edition_support` (E2001), called from `crates/jet-driver/src/Loader.rs`.
 - Banner — `manifest::version_banner`, printed by `jet --version`.
 - Diagnostics — E2001/E2002/L2001 in docs/spec/diagnostics.md, snapshotted in
   `tests/release/`.
