@@ -100,7 +100,18 @@ pub struct ModuleInstanceIdentity {
     pub definition_id: String,
     pub argument_keys: Vec<Vec<u8>>,
     pub template_span: Span,
-    pub applications: Vec<(String, Span)>,
+    pub applications: Vec<ModuleInstanceApplication>,
+}
+
+/// One source spelling that applies a generic-module instance. Identity and
+/// source ownership travel with the span so tooling never has to recover
+/// either from an alias name (which is neither unique nor semantic).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModuleInstanceApplication {
+    pub name: String,
+    pub source_module: String,
+    pub semantic_identity: String,
+    pub span: Span,
 }
 
 /// D-GENMOD2=A: one parameter of a generic module — `module Lru<K: Hash, capacity: Int>`.

@@ -30,10 +30,12 @@ fn jit_scalar_type(ty: &Type) -> bool {
 
 pub(crate) fn jit_list_int_type(ty: &Type) -> bool {
     matches!(ty, Type::List(inner) if matches!(inner.as_ref(), Type::Int))
+        || matches!(ty, Type::FixedList { elem, .. } if matches!(elem.as_ref(), Type::Int))
 }
 
 pub(crate) fn jit_list_float_type(ty: &Type) -> bool {
     matches!(ty, Type::List(inner) if matches!(inner.as_ref(), Type::Float))
+        || matches!(ty, Type::FixedList { elem, .. } if matches!(elem.as_ref(), Type::Float))
 }
 
 fn jit_list_native_type(ty: &Type) -> bool {
@@ -42,7 +44,8 @@ fn jit_list_native_type(ty: &Type) -> bool {
 
 pub(crate) fn jit_list_iter_elem_type(ty: &Type) -> Option<Type> {
     match ty {
-        Type::List(inner) if matches!(inner.as_ref(), Type::Int | Type::Float) => {
+        Type::List(inner) | Type::FixedList { elem: inner, .. }
+            if matches!(inner.as_ref(), Type::Int | Type::Float) => {
             Some(inner.as_ref().clone())
         }
         _ => None,
@@ -244,6 +247,9 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
         | TExprKind::FloatLit(_)
         | TExprKind::BoolLit(_)
         | TExprKind::CharLit(_) => true,
+        TExprKind::ConstInline(code) => code
+            .strip_suffix("i64")
+            .is_some_and(|value| value.parse::<i64>().is_ok()),
         TExprKind::StrLit(parts) => resident_safe_string_parts(parts, callees),
         TExprKind::Local(_) => true,
         TExprKind::Unary { op, operand } => {
@@ -338,9 +344,9 @@ fn resident_safe_call_arg(arg: &TCallArg, callees: &HashSet<String>) -> bool {
 fn resident_safe_enum_payload(payload: &TEnumPayload, callees: &HashSet<String>) -> bool {
     match payload {
         TEnumPayload::Unit => true,
-        TEnumPayload::Positional(vals) => {
-            vals.iter().all(|a| resident_safe_expr(&a.value, callees))
-        }
+        TEnumPayload::Positional(vals) => vals.len() == 1
+            && matches!(vals[0].value.ty, Type::Int)
+            && resident_safe_expr(&vals[0].value, callees),
         TEnumPayload::Named(fields) => fields
             .iter()
             .all(|(_, a)| resident_safe_expr(&a.value, callees)),
@@ -545,7 +551,10 @@ pub(crate) fn resident_safe_func(tir: &TFunc, callees: &HashSet<String>) -> bool
 }
 
 pub(crate) fn resident_safe_func_detail(tir: &TFunc, callees: &HashSet<String>) -> Option<String> {
-    if !matches!(tir.kind, TFuncKind::TopLevel | TFuncKind::Method { .. }) {
+    if !matches!(
+        tir.kind,
+        TFuncKind::TopLevel | TFuncKind::Method { .. } | TFuncKind::TraitMethod { .. }
+    ) {
         return Some("not top-level".into());
     }
     if !tir.generics.is_empty() || tir.is_unsafe || tir.is_reactive {

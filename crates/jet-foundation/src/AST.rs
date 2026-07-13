@@ -18,7 +18,7 @@ pub use program_imports::{
 #[path = "AST/items.rs"]
 mod items;
 pub use items::{
-    Item, CodeModule, ModuleInstanceIdentity, GenericModuleParam, ModuleArg, GenericModuleDef, ModuleAliasDef, CModuleKind,
+    Item, CodeModule, ModuleInstanceApplication, ModuleInstanceIdentity, GenericModuleParam, ModuleArg, GenericModuleDef, ModuleAliasDef, CModuleKind,
     CModule, ModuleDecl, SourceDecl, Contribution, ContribValue, EnvLit, SystemLit, SystemField,
     SystemFieldValue, ServiceEntry, OptionEntry, ImageLit, ImageField, ImageFromRef,
     ImageFieldValue, FleetLit, FleetField, FleetFieldValue, HostEntry, VmTestLit, VmTestField,

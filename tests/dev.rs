@@ -1766,9 +1766,11 @@ fn assert_cranelift_three_way(file: &str, stem: &str) {
         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
         .collect();
     assert!(errors.is_empty(), "`{stem}` must type-check");
+    let safety_detail = jet_jit::resident_jit_safe_bundle_detail(&bundle);
+    let compile = jet_jit::try_compile_bundle(&bundle);
     assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle) && jet_jit::try_compile_bundle(&bundle).is_ok(),
-        "`{stem}` must be resident-JIT safe for three-way differential"
+        jet_jit::resident_jit_safe_bundle(&bundle) && compile.is_ok(),
+        "`{stem}` must be resident-JIT safe for three-way differential: safety={safety_detail:?}, compile={compile:?}"
     );
 
     let interpreted = match dev_iteration(file, false, true) {
@@ -1813,6 +1815,14 @@ fn assert_cranelift_three_way(file: &str, stem: &str) {
     let run = Command::new(&bin).output().expect("run binary");
     let aot = String::from_utf8_lossy(&run.stdout).to_string();
     assert_eq!(jit, aot, "JIT vs AOT divergence for `{stem}`");
+}
+
+#[test]
+fn generic_modules_full_example_matches_resident_jit_and_aot() {
+    assert_cranelift_three_way(
+        "examples/features/modules/generic_modules.jet",
+        "modules/generic_modules",
+    );
 }
 
 #[test]

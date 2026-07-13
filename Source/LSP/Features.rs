@@ -189,29 +189,40 @@ pub(crate) fn compute_definition(
 
 pub(crate) fn compute_references(
     db: &SymbolDB,
-    tokens: &[Token],
-    _path: &str,
+    _tokens: &[Token],
+    path: &str,
     offset: usize,
     include_declaration: bool,
 ) -> Vec<(String, Span)> {
-    let name = match find_ident_at(tokens, offset) {
-        Some(n) => n,
-        None => return Vec::new(),
+    let anchor_identity = |anchor: &jet_semindex::DefinitionAnchor| {
+        db.defs.iter().find(|definition| {
+            definition.module_path == anchor.module_path
+                && definition.def_span.start == anchor.def_span.start
+                && definition.def_span.end == anchor.def_span.end
+        }).map(|definition| definition.identity.as_str())
     };
-    let aliases = db.index.instances().iter().find_map(|instance| {
-        instance.applications.iter().any(|(alias, _)| alias == &name).then(|| {
-            instance.applications.iter().map(|(alias, _)| alias.as_str()).collect::<std::collections::HashSet<_>>()
-        })
-    });
-    let same_instance = |candidate: &str| aliases.as_ref().is_some_and(|aliases| aliases.contains(candidate));
+    let identity = db.index.instances().iter().flat_map(|instance| &instance.applications)
+        .find(|application| application.module_path == path
+            && application.span.start <= offset && offset <= application.span.end)
+        .map(|application| application.semantic_identity.as_str())
+        .or_else(|| db.defs.iter().find(|definition| definition.module_path == path
+            && definition.def_span.start <= offset && offset <= definition.def_span.end)
+            .map(|definition| definition.identity.as_str()))
+        .or_else(|| db.refs.iter().find(|reference| reference.module_path == path
+            && reference.span.start <= offset && offset <= reference.span.end)
+            .and_then(|reference| reference.target.as_ref())
+            .and_then(anchor_identity));
+    let Some(identity) = identity else { return Vec::new() };
     let mut result: Vec<(String, Span)> = db
         .refs
         .iter()
-        .filter(|r| r.name == name || same_instance(&r.name))
+        .filter(|reference| reference.target.as_ref()
+            .and_then(anchor_identity)
+            .is_some_and(|candidate| candidate == identity))
         .map(|r| (r.module_path.clone(), r.span))
         .collect();
     if include_declaration {
-        for def in db.defs.iter().filter(|d| d.name == name || same_instance(&d.name)) {
+        for def in db.defs.iter().filter(|definition| definition.identity == identity) {
             result.push((def.module_path.clone(), def.def_span));
         }
     }

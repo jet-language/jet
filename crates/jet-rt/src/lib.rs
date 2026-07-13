@@ -228,6 +228,16 @@ impl JetArena {
         }
     }
 
+    pub fn clone_list(&mut self, list: i64) -> Option<i64> {
+        let values = match self.values.get(list as usize) {
+            Some(JetVal::List(values)) => values.clone(),
+            _ => return None,
+        };
+        let id = self.values.len() as i64;
+        self.values.push(JetVal::List(values));
+        Some(id)
+    }
+
     pub fn alloc_record(&mut self, fields: usize) -> i64 {
         let id = self.values.len() as i64;
         self.values

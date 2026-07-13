@@ -8,7 +8,7 @@ use jet_sema::{effect_key, SemIndexEffectFacts};
 use std::collections::HashMap;
 
 use crate::Json::{convert_defs, convert_effects, convert_refs};
-use crate::Types::{BypassFact, BypassKind, CallEdge, DefinitionAnchor, DefinitionFact, InstanceFact, MemberFact, MemberKind, MemberOrigin, SemIndex, StructuralNode, StructuralSlotKind, SymbolDef, SymbolKind};
+use crate::Types::{BypassFact, BypassKind, CallEdge, DefinitionAnchor, DefinitionFact, InstanceApplicationFact, InstanceFact, MemberFact, MemberKind, MemberOrigin, SemIndex, StructuralNode, StructuralSlotKind, SymbolDef, SymbolKind};
 
 /// The semantic kind of a defined symbol (LSP-facing; uses AST types internally).
 #[derive(Debug, Clone)]
@@ -134,19 +134,19 @@ impl SymbolDB {
                 let Item::CodeModule(instance) = item else { continue };
                 let Some(identity) = &instance.instance_identity else { continue };
                 let semantic_identity = format!("instance:{}", identity.fingerprint);
-                for (name, span) in &identity.applications {
+                for application in &identity.applications {
                     if self.defs.iter().any(|definition| {
                         definition.identity == semantic_identity
-                            && definition.name == *name
-                            && definition.module_path == module.display
+                            && definition.def_span == application.span
+                            && definition.module_path == application.source_module
                     }) {
                         continue;
                     }
                     self.defs.push(SymDef {
-                        identity: semantic_identity.clone(),
-                        name: name.clone(),
-                        def_span: *span,
-                        module_path: module.display.clone(),
+                        identity: application.semantic_identity.clone(),
+                        name: application.name.clone(),
+                        def_span: application.span,
+                        module_path: application.source_module.clone(),
                         kind: SymKind::Module,
                     });
                 }
@@ -176,7 +176,12 @@ impl SymbolDB {
                 template_definition_id: identity.definition_id.clone(),
                 template_span: identity.template_span.into(),
                 arguments: identity.argument_keys.iter().map(|key| key.iter().map(|byte| format!("{byte:02x}")).collect()).collect(),
-                applications: identity.applications.iter().map(|(name, span)| (name.clone(), (*span).into())).collect(),
+                applications: identity.applications.iter().map(|application| InstanceApplicationFact {
+                    name: application.name.clone(),
+                    module_path: application.source_module.clone(),
+                    semantic_identity: application.semantic_identity.clone(),
+                    span: application.span.into(),
+                }).collect(),
                 exported_members: cm.body.as_deref().unwrap_or_default().iter().filter_map(|item| match item {
                     Item::Func(def) if def.is_pub || def.is_package_pub => Some(def.name.clone()),
                     Item::Struct(def) if def.is_pub || def.is_package_pub => Some(def.name.clone()),

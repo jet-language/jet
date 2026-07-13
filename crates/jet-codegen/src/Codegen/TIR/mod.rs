@@ -87,6 +87,7 @@ pub struct JitProgram {
     pub struct_field_types: std::collections::HashMap<String, Vec<Type>>,
     /// M5: mangled variant names per enum type (discriminant order).
     pub enum_variants: std::collections::HashMap<String, Vec<String>>,
+    pub int_constants: std::collections::HashMap<String, i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -141,6 +142,14 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
     populate_cx_from_bundle(&mut cx, bundle, bundle.entry);
     let mut funcs = Vec::new();
     let mut have_run = false;
+    let instance_modules: std::collections::HashSet<_> = module
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::CodeModule(cm) if cm.instance_identity.is_some() => Some(cm.name.as_str()),
+            _ => None,
+        })
+        .collect();
     cx.jit_spawn_lambdas.borrow_mut().clear();
     for item in &module.items {
         match item {
@@ -167,17 +176,83 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                     funcs.push(lowered);
                 }
             }
+            Item::Impl(imp)
+                if instance_modules
+                    .iter()
+                    .any(|module_name| imp.type_name.starts_with(&format!("{module_name}__"))) =>
+            {
+                for method in &imp.methods {
+                    let mut lowered = if let Some(trait_name) = &imp.trait_name {
+                        if !tir_covers_trait_method(method, &imp.type_name, &cx, trait_name) {
+                            continue;
+                        }
+                        lower_trait_method(method, &imp.type_name, &cx, trait_name)
+                    } else {
+                        if !tir_covers_method(method, &imp.type_name, &cx) {
+                            continue;
+                        }
+                        lower_method(method, &imp.type_name, &cx)
+                    };
+                    lowered.name = format!("{}::{}", imp.type_name, method.name);
+                    funcs.push(lowered);
+                }
+            }
             Item::CodeModule(cm) => {
                 if cm.instance_identity.is_none() { continue; }
                 let Some(body) = &cm.body else { continue };
                 for inner in body {
-                    let Item::Func(f) = inner else { continue };
-                    if !f.type_params.is_empty() || !tir_covers(f, &cx) {
-                        continue;
+                    match inner {
+                        Item::Func(f) => {
+                            if !f.type_params.is_empty() || !tir_covers(f, &cx) {
+                                continue;
+                            }
+                            let mut lowered = lower_func(f, &cx);
+                            lowered.name = format!("{}__{}", cm.name, f.name);
+                            funcs.push(lowered);
+                        }
+                        Item::Struct(s) => {
+                            let type_name = if s.name.starts_with(&format!("{}__", cm.name)) {
+                                s.name.clone()
+                            } else {
+                                format!("{}__{}", cm.name, s.name)
+                            };
+                            for method in &s.methods {
+                                if !tir_covers_method(method, &type_name, &cx) {
+                                    continue;
+                                }
+                                let mut lowered = lower_method(method, &type_name, &cx);
+                                lowered.name = format!("{}::{}", type_name, method.name);
+                                funcs.push(lowered);
+                            }
+                        }
+                        Item::Impl(imp) => {
+                            let type_name = if imp
+                                .type_name
+                                .starts_with(&format!("{}__", cm.name))
+                            {
+                                imp.type_name.clone()
+                            } else {
+                                format!("{}__{}", cm.name, imp.type_name)
+                            };
+                            for method in &imp.methods {
+                                let mut lowered = if let Some(trait_name) = &imp.trait_name {
+                                    if !tir_covers_trait_method(method, &type_name, &cx, trait_name)
+                                    {
+                                        continue;
+                                    }
+                                    lower_trait_method(method, &type_name, &cx, trait_name)
+                                } else {
+                                    if !tir_covers_method(method, &type_name, &cx) {
+                                        continue;
+                                    }
+                                    lower_method(method, &type_name, &cx)
+                                };
+                                lowered.name = format!("{}::{}", type_name, method.name);
+                                funcs.push(lowered);
+                            }
+                        }
+                        _ => {}
                     }
-                    let mut lowered = lower_func(f, &cx);
-                    lowered.name = format!("{}__{}", cm.name, f.name);
-                    funcs.push(lowered);
                 }
             }
             _ => {}
@@ -190,6 +265,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
     let mut struct_fields = std::collections::HashMap::new();
     let mut struct_field_types = std::collections::HashMap::new();
     let mut enum_variants = std::collections::HashMap::new();
+    let mut int_constants = std::collections::HashMap::new();
     for item in &module.items {
         match item {
             Item::Struct(s) if s.type_params.is_empty() => {
@@ -213,6 +289,68 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                         .map(|v| format!("user_{}", v.name))
                         .collect(),
                 );
+            }
+            Item::Const(c) => {
+                let value = match &c.ct {
+                    Some(crate::AST::CtValue::Int(value)) => Some(*value),
+                    _ => match &c.value { crate::AST::Expr::Int(value, _, _) => Some(*value), _ => None },
+                };
+                if let Some(value) = value {
+                    int_constants.insert(c.name.clone(), value);
+                }
+            }
+            Item::CodeModule(cm) => {
+                if let Some(body) = &cm.body {
+                    for inner in body {
+                        match inner {
+                            Item::Struct(s) if s.type_params.is_empty() => {
+                                let name = if s.name.starts_with(&format!("{}__", cm.name)) {
+                                    s.name.clone()
+                                } else {
+                                    format!("{}__{}", cm.name, s.name)
+                                };
+                                struct_fields.insert(
+                                    name.clone(),
+                                    s.fields
+                                        .iter()
+                                        .map(|f| format!("user_{}", f.name))
+                                        .collect(),
+                                );
+                                struct_field_types.insert(
+                                    name,
+                                    s.fields.iter().map(|f| f.ty.clone()).collect(),
+                                );
+                            }
+                            Item::Enum(e) if e.type_params.is_empty() => {
+                                let name = if e.name.starts_with(&format!("{}__", cm.name)) {
+                                    e.name.clone()
+                                } else {
+                                    format!("{}__{}", cm.name, e.name)
+                                };
+                                enum_variants.insert(
+                                    name,
+                                    e.variants
+                                        .iter()
+                                        .map(|v| format!("user_{}", v.name))
+                                        .collect(),
+                                );
+                            }
+                            Item::Const(c) => {
+                                let value = match &c.ct {
+                                    Some(crate::AST::CtValue::Int(value)) => Some(*value),
+                                    _ => match &c.value {
+                                        crate::AST::Expr::Int(value, _, _) => Some(*value),
+                                        _ => None,
+                                    },
+                                };
+                                if let Some(value) = value {
+                                    int_constants.insert(format!("{}__{}", cm.name, c.name), value);
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
             }
             _ => {}
         }
@@ -244,6 +382,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
         struct_fields,
         struct_field_types,
         enum_variants,
+        int_constants,
     })
 }
 

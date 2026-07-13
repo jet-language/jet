@@ -26,7 +26,7 @@ fn escape(s: &str) -> String {
 
 fn json_instance(value: &InstanceFact) -> String {
     let arguments = value.arguments.iter().map(|value| json_str(value)).collect::<Vec<_>>().join(",");
-    let applications = value.applications.iter().map(|(name, span)| format!("{{\"name\":{},\"span\":{}}}", json_str(name), json_span(*span))).collect::<Vec<_>>().join(",");
+    let applications = value.applications.iter().map(|application| format!("{{\"name\":{},\"module_path\":{},\"semantic_identity\":{},\"span\":{}}}", json_str(&application.name), json_str(&application.module_path), json_str(&application.semantic_identity), json_span(application.span))).collect::<Vec<_>>().join(",");
     let members = value.exported_members.iter().map(|value| json_str(value)).collect::<Vec<_>>().join(",");
     format!("{{\"name\":{},\"module_path\":{},\"fingerprint\":{},\"full_key\":{},\"template_definition_id\":{},\"template_span\":{},\"arguments\":[{}],\"applications\":[{}],\"exported_members\":[{}]}}",
         json_str(&value.name), json_str(&value.module_path), json_str(&value.fingerprint), json_str(&value.full_key_hex), json_str(&value.template_definition_id), json_span(value.template_span), arguments, applications, members)

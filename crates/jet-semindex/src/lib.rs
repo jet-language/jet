@@ -13,7 +13,7 @@ pub use Build::{
     SymKind, SymRef, SymbolDB,
 };
 pub use Types::{
-    CallEdge, DefinitionAnchor, DefinitionFact, EffectFact, InstanceFact, MemberFact, MemberKind, MemberOrigin, SemIndex, SourceSpan,
+    CallEdge, DefinitionAnchor, DefinitionFact, EffectFact, InstanceApplicationFact, InstanceFact, MemberFact, MemberKind, MemberOrigin, SemIndex, SourceSpan,
     StructuralAudit, StructuralNode, StructuralSlotKind, SymbolDef, SymbolKind, SymbolRef, TypeDossier,
     SCHEMA_VERSION,
 };
@@ -209,7 +209,11 @@ mod tests {
         let instance = &index.instances()[0];
         assert_eq!(instance.fingerprint.len(), 64);
         assert!(!instance.full_key_hex.is_empty());
-        assert_eq!(instance.applications.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(), vec!["A", "B"]);
+        assert_eq!(instance.applications.iter().map(|application| application.name.as_str()).collect::<Vec<_>>(), vec!["A", "B"]);
+        assert!(instance.applications.iter().all(|application| {
+            application.module_path == main.to_string_lossy()
+                && application.semantic_identity == format!("instance:{}", instance.fingerprint)
+        }));
         assert_eq!(instance.arguments.len(), 2);
         assert_eq!(instance.exported_members, vec!["value"]);
         assert_eq!(instance.template_definition_id.len(), 64);

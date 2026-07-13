@@ -12,8 +12,8 @@ use std::collections::HashMap;
 
 use super::runtime_host::HostFns;
 use super::safety::{
-    collect_select_arms_jit, flatten_string, jit_list_float_type, jit_list_iter_elem_type,
-    jit_value_type, record_type_key, user_type_name,
+    collect_select_arms_jit, flatten_string, jit_list_float_type, jit_list_int_type,
+    jit_list_iter_elem_type, jit_value_type, record_type_key, user_type_name,
 };
 use super::types_meta::{clif_ty, init_clif_ty, JitMeta};
 use super::JitRuntime;
@@ -748,10 +748,24 @@ impl LowerCtx<'_, '_> {
                     let then_block = self.b.create_block();
                     let next = self.b.create_block();
                     let disc_const = self.b.ins().iconst(types::I64, disc);
-                    let eq = self.bool_from_icmp(IntCC::Equal, subj, disc_const);
+                    let mask = self.b.ins().iconst(types::I64, 0xff);
+                    let actual_disc = self.b.ins().band(subj, mask);
+                    let eq = self.bool_from_icmp(IntCC::Equal, actual_disc, disc_const);
                     self.b.ins().brif(eq, then_block, &[], next, &[]);
                     self.b.switch_to_block(then_block);
                     self.b.seal_block(then_block);
+                    if let Some(open) = arm.pattern.find('(') {
+                        if let Some(close) = arm.pattern[open + 1..].find(')') {
+                            let binding = arm.pattern[open + 1..open + 1 + close].trim();
+                            if !binding.is_empty() && !binding.chars().any(|ch| matches!(ch, '|' | ',' | '{')) {
+                                let payload = self.b.ins().sshr_imm(subj, 8);
+                                let var = self.fresh_var(types::I64);
+                                self.b.def_var(var, payload);
+                                self.vars.insert(binding.to_string(), var);
+                                self.var_tys.insert(binding.to_string(), Type::Int);
+                            }
+                        }
+                    }
                     self.lower_stmts_scoped(&arm.body)?;
                     if !self.dead {
                         self.b.ins().jump(merge, &[]);
@@ -1538,6 +1552,23 @@ impl LowerCtx<'_, '_> {
             TExprKind::Field {
                 recv, field_rust, ..
             } => {
+                if record_type_key(&recv.ty).is_some_and(|name| name.contains("__")) {
+                    if let Some(method_rust) = field_rust.strip_suffix("()") {
+                        let key = Self::method_key(&recv.ty, method_rust)
+                            .ok_or_else(|| format!("jit computed field on {:?}", recv.ty))?;
+                        let func_id = self
+                            .func_ids
+                            .get(&key)
+                            .copied()
+                            .ok_or_else(|| format!("jit missing computed field `{key}`"))?;
+                        let receiver = self.lower_expr(recv)?;
+                        let func_ref = self.module.declare_func_in_func(func_id, self.b.func);
+                        let call = self.b.ins().call(func_ref, &[receiver]);
+                        let result = self.b.inst_results(call)[0];
+                        self.emit_trap_check()?;
+                        return Ok(result);
+                    }
+                }
                 let handle = self.lower_expr(recv)?;
                 let type_name = record_type_key(&recv.ty)
                     .or_else(|| self.method_struct.clone())
@@ -1595,9 +1626,15 @@ impl LowerCtx<'_, '_> {
                         .ok_or_else(|| format!("jit enum lit `{prefix}`"))?;
                     Ok(self.b.ins().iconst(types::I64, disc))
                 }
-                TEnumPayload::Positional(_) => {
-                    Err("jit enum positional payload unsupported".to_string())
+                TEnumPayload::Positional(values) if values.len() == 1 && matches!(values[0].value.ty, Type::Int) => {
+                    let disc = self.meta.enum_variant_disc(prefix)
+                        .ok_or_else(|| format!("jit enum lit `{prefix}`"))?;
+                    let payload = self.lower_expr(&values[0].value)?;
+                    let shifted = self.b.ins().ishl_imm(payload, 8);
+                    let disc = self.b.ins().iconst(types::I64, disc);
+                    Ok(self.b.ins().bor(shifted, disc))
                 }
+                TEnumPayload::Positional(_) => Err("jit enum positional payload unsupported".to_string()),
                 TEnumPayload::Named(_) => Err("jit enum named payload unsupported".to_string()),
             },
             TExprKind::Present(inner) => {
@@ -1607,7 +1644,10 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.ins().iadd(v, one))
             }
             TExprKind::Absent => Ok(self.b.ins().iconst(types::I64, 0)),
-            TExprKind::ConstInline(_) => Err("jit const inline unsupported".to_string()),
+            TExprKind::ConstInline(code) => self.meta.int_constant(code)
+                .or_else(|| self.meta.has_generic_instances().then(|| code.strip_suffix("i64").and_then(|value| value.parse().ok())).flatten())
+                .map(|value| self.b.ins().iconst(types::I64, value))
+                .ok_or_else(|| "jit const inline unsupported".to_string()),
             TExprKind::RangeCheckedCtor { .. } => {
                 Err("jit range-checked ctor unsupported".to_string())
             }
@@ -1916,6 +1956,12 @@ impl LowerCtx<'_, '_> {
     }
 
     fn lower_clone(&mut self, inner: &TExpr) -> Result<Value, String> {
+        if jit_list_int_type(&inner.ty) || jit_list_float_type(&inner.ty) {
+            let val = self.lower_expr(inner)?;
+            let host_ref = self.module.declare_func_in_func(self.host.coll.list_clone, self.b.func);
+            let call = self.b.ins().call(host_ref, &[val]);
+            return Ok(self.b.inst_results(call)[0]);
+        }
         if matches!(&inner.ty, Type::Apply { name, .. } if name == "Sender") {
             let val = self.lower_expr(inner)?;
             let host_ref = self
@@ -2488,6 +2534,8 @@ impl LowerCtx<'_, '_> {
             (Type::Float, BinOp::Ge) => self.bool_from_fcmp(FloatCC::GreaterThanOrEqual, l, r),
             (Type::Bool, BinOp::Eq) => self.bool_from_icmp(IntCC::Equal, l, r),
             (Type::Bool, BinOp::Ne) => self.bool_from_icmp(IntCC::NotEqual, l, r),
+            (Type::Named(_) | Type::Apply { .. }, BinOp::Eq) => self.bool_from_icmp(IntCC::Equal, l, r),
+            (Type::Named(_) | Type::Apply { .. }, BinOp::Ne) => self.bool_from_icmp(IntCC::NotEqual, l, r),
             (Type::String, BinOp::Eq) => {
                 let host_ref = self
                     .module

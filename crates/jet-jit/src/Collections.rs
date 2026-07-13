@@ -101,6 +101,10 @@ extern "C" fn jet_jit_list_sort(list: i64) {
     });
 }
 
+extern "C" fn jet_jit_list_clone(list: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.clone_list(list).expect("jit list clone: bad handle"))
+}
+
 extern "C" fn jet_jit_list_slice(list: i64, start: i64, end: i64, _line: u32) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         if rt.heap.list_len(list).is_none() {
@@ -143,6 +147,7 @@ pub(crate) struct CollectionsHostFns {
     pub list_set_f64: cranelift_module::FuncId,
     pub list_len: cranelift_module::FuncId,
     pub list_sort: cranelift_module::FuncId,
+    pub list_clone: cranelift_module::FuncId,
     pub list_slice: cranelift_module::FuncId,
     pub list_join_str: cranelift_module::FuncId,
 }
@@ -158,6 +163,7 @@ pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuild
     builder.symbol("jet_jit_list_set_f64", jet_jit_list_set_f64 as *const u8);
     builder.symbol("jet_jit_list_len", jet_jit_list_len as *const u8);
     builder.symbol("jet_jit_list_sort", jet_jit_list_sort as *const u8);
+    builder.symbol("jet_jit_list_clone", jet_jit_list_clone as *const u8);
     builder.symbol("jet_jit_list_slice", jet_jit_list_slice as *const u8);
     builder.symbol("jet_jit_list_join_str", jet_jit_list_join_str as *const u8);
 }
@@ -215,6 +221,7 @@ pub(crate) fn declare_collections_host_fns(
         list_set_f64: import("jet_jit_list_set_f64", &sig_set_f64)?,
         list_len: import("jet_jit_list_len", &sig_len)?,
         list_sort: import("jet_jit_list_sort", &sig_sort)?,
+        list_clone: import("jet_jit_list_clone", &sig_len)?,
         list_slice: import("jet_jit_list_slice", &sig_slice)?,
         list_join_str: import("jet_jit_list_join_str", &sig_join)?,
     })

@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use super::lower_ctx::LowerCtx;
 use super::runtime_host::HostFns;
-use super::types_meta::{clif_ty, func_signature, jit_fn_name, JitMeta};
+use super::types_meta::{clif_ty, func_has_receiver, func_signature, jit_fn_name, JitMeta};
 use super::JitRuntime;
 
 fn spawn_lambda_signature(module: &JITModule, lam: &TJitSpawnLambda) -> Signature {
@@ -151,7 +151,9 @@ fn lower_function(
         let param_vals = b.block_params(entry).to_vec();
         let mut param_idx = 0usize;
         let method_struct = match &tir.kind {
-            TFuncKind::Method { .. } => tir.name.split_once("::").map(|(t, _)| t.to_string()),
+            TFuncKind::Method { .. } | TFuncKind::TraitMethod { .. } => {
+                tir.name.split_once("::").map(|(t, _)| t.to_string())
+            }
             _ => None,
         };
         let mut lctx = LowerCtx {
@@ -173,7 +175,7 @@ fn lower_function(
             ret_clif: tir.ret.as_ref().and_then(clif_ty),
             shield_depth: 0,
         };
-        if matches!(tir.kind, TFuncKind::Method { self_conv: Some(_) }) {
+        if func_has_receiver(tir) {
             let self_var = lctx.fresh_var(types::I64);
             lctx.b.def_var(self_var, param_vals[0]);
             lctx.vars.insert("self".to_string(), self_var);

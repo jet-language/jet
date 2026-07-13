@@ -1180,15 +1180,26 @@ fn package_identity(root: &Path) -> String {
     format!("jet.package.v1\u{1}{name}\u{1}{version}\u{1}{}", crate::SHA256::sha256_hex(locked_sources.join("\n").as_bytes()))
 }
 
-fn instance_identity(key: &ModuleInstanceKey, template: &TemplateInfo, alias: &ModuleAliasDef) -> crate::AST::ModuleInstanceIdentity {
+fn instance_identity(
+    key: &ModuleInstanceKey,
+    template: &TemplateInfo,
+    alias: &ModuleAliasDef,
+    source_module: &str,
+) -> crate::AST::ModuleInstanceIdentity {
     let full_key = key.bytes();
+    let fingerprint = crate::SHA256::sha256_hex(&full_key);
     crate::AST::ModuleInstanceIdentity {
-        fingerprint: crate::SHA256::sha256_hex(&full_key),
+        fingerprint: fingerprint.clone(),
         full_key,
         definition_id: template.definition_id.clone(),
         argument_keys: key.args.clone(),
         template_span: template.def.span,
-        applications: vec![(alias.name.clone(), alias.name_span)],
+        applications: vec![crate::AST::ModuleInstanceApplication {
+            name: alias.name.clone(),
+            source_module: source_module.to_string(),
+            semantic_identity: format!("instance:{fingerprint}"),
+            span: alias.name_span,
+        }],
     }
 }
 
@@ -2024,7 +2035,7 @@ pub(crate) fn expand_generic_module_aliases(
     let mut bundle_instances: HashMap<ModuleInstanceKey, String> = HashMap::new();
     let mut bundle_instance_nominals: HashMap<String, Vec<String>> = HashMap::new();
     let mut fingerprint_keys: HashMap<String, Vec<u8>> = HashMap::new();
-    let mut instance_applications: HashMap<String, Vec<(String, Span)>> = HashMap::new();
+    let mut instance_applications: HashMap<String, Vec<crate::AST::ModuleInstanceApplication>> = HashMap::new();
 
     // Snapshot aliases up front — the mut loop below can't re-borrow `bundle.modules`
     // for an E0609 message that names the source module.
@@ -2161,14 +2172,20 @@ pub(crate) fn expand_generic_module_aliases(
                     continue;
                 };
                 let key = instance_key(info, &args, &type_aliases);
-                instance_applications.entry(crate::SHA256::sha256_hex(&key.bytes()))
-                    .or_default().push((resolved.name.clone(), resolved.name_span));
+                let fingerprint = crate::SHA256::sha256_hex(&key.bytes());
+                instance_applications.entry(fingerprint.clone())
+                    .or_default().push(crate::AST::ModuleInstanceApplication {
+                        name: resolved.name.clone(),
+                        source_module: module.display.clone(),
+                        semantic_identity: format!("instance:{fingerprint}"),
+                        span: resolved.name_span,
+                    });
                 if let Some(canonical) = bundle_instances.get(&key) {
                     projections.insert(alias.name.clone(), canonical.clone());
                     continue;
                 }
                 if let Some(mut cm) = expand_alias(&resolved, module_idx, &templates, diags,&traits,&funcs,&globals,&enums, Some(args)) {
-                    let identity = instance_identity(&key, info, &resolved);
+                    let identity = instance_identity(&key, info, &resolved, &module.display);
                     register_instance_fingerprint(&mut fingerprint_keys, &identity, alias.span);
                     cm.module.instance_identity = Some(identity);
                     bundle_instance_nominals.insert(alias.name.clone(), cm.declarations.iter().filter_map(|item| match item {

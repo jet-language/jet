@@ -1,7 +1,7 @@
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_jit::JITModule;
 use cranelift_module::Module;
-use jet_codegen::Codegen::TIR::{JitProgram, TExpr, TFunc, TFuncKind};
+use jet_codegen::Codegen::TIR::{JitProgram, SerdeCodec, TExpr, TFunc, TFuncKind};
 use jet_foundation::AST::Type;
 use std::collections::HashMap;
 
@@ -58,7 +58,7 @@ pub(crate) fn clif_ty(ty: &Type) -> Option<types::Type> {
 pub(crate) fn func_signature(module: &JITModule, tir: &TFunc) -> Result<Signature, String> {
     let cc = module.target_config().default_call_conv;
     let mut sig = Signature::new(cc);
-    if matches!(tir.kind, TFuncKind::Method { self_conv: Some(_) }) {
+    if func_has_receiver(tir) {
         sig.params.push(AbiParam::new(types::I64));
     }
     for (_, ty, _) in &tir.params {
@@ -74,6 +74,14 @@ pub(crate) fn func_signature(module: &JITModule, tir: &TFunc) -> Result<Signatur
     Ok(sig)
 }
 
+pub(crate) fn func_has_receiver(tir: &TFunc) -> bool {
+    match &tir.kind {
+        TFuncKind::Method { self_conv } => self_conv.is_some(),
+        TFuncKind::TraitMethod { serde, .. } => *serde != Some(SerdeCodec::Decode),
+        _ => false,
+    }
+}
+
 pub(crate) fn jit_fn_name(name: &str) -> String {
     if name == "run" {
         "jet_jit_main".to_string()
@@ -86,6 +94,8 @@ pub(crate) struct JitMeta<'a> {
     struct_fields: &'a HashMap<String, Vec<String>>,
     struct_field_types: &'a HashMap<String, Vec<Type>>,
     enum_variants: &'a HashMap<String, Vec<String>>,
+    int_constants: &'a HashMap<String, i64>,
+    has_generic_instances: bool,
 }
 
 impl<'a> JitMeta<'a> {
@@ -94,8 +104,15 @@ impl<'a> JitMeta<'a> {
             struct_fields: &program.struct_fields,
             struct_field_types: &program.struct_field_types,
             enum_variants: &program.enum_variants,
+            int_constants: &program.int_constants,
+            has_generic_instances: !program.instance_provenance.is_empty(),
         }
     }
+
+    pub(crate) fn int_constant(&self, rust_name: &str) -> Option<i64> {
+        self.int_constants.get(rust_name.strip_prefix("user_").unwrap_or(rust_name)).copied()
+    }
+    pub(crate) fn has_generic_instances(&self) -> bool { self.has_generic_instances }
 
     pub(crate) fn struct_field_index(&self, type_name: &str, field_rust: &str) -> Option<usize> {
         self.struct_fields
@@ -113,10 +130,16 @@ impl<'a> JitMeta<'a> {
         let (enum_part, variant) = prefix.rsplit_once("::")?;
         let enum_name = enum_part.strip_prefix("user_").unwrap_or(enum_part);
         let variants = self.enum_variants.get(enum_name)?;
+        let variant = if enum_name.contains("__") {
+            variant.split_once('(').map_or(variant, |(head, _)| head)
+        } else {
+            variant
+        };
         let variant_key = variant.strip_prefix("user_").unwrap_or(variant);
         variants
             .iter()
             .position(|v| v == variant || v.strip_prefix("user_").unwrap_or(v) == variant_key)
             .map(|i| i as i64)
     }
+
 }
