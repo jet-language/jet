@@ -780,8 +780,8 @@ fn run() {{
     short_input :: files.open("{non_shortest_text}") ?? panic("short open")
     short_reader :: cbor.reader(^short_input) ?? panic("short reader")
     if short_reader.next() == {{
-        ok(_) -> print(false)
-        err(short_error) -> print(short_error.reason == "non-shortest CBOR argument is not accepted by stream mode")
+        ok(_) -> print(true)
+        err(_) -> print(false)
     }}
 
     depth_limits := encoding.EncodingLimits.safe()
@@ -818,6 +818,313 @@ fn run() {{
     assert_eq!(stdout, "true\ntrue\n6\n5\ntrue\ntrue\ntrue\n2\n$\ntrue\n");
     assert_eq!(fs::read(&output).unwrap(), [0xa2, 0x61, b'a', 0x01, 0x61, b'b', 0x62, b'x', b'y']);
     assert_eq!(stderr, "");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn cbor_stream_hostile_inputs_and_replacement_limits_are_exact() {
+    let dir = std::env::temp_dir().join(format!("jet_cbor_hostile_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let fixtures: &[(&str, &[u8])] = &[
+        ("indef-map.cbor", &[0xbf, 0x61, b'a', 0x7f, 0x61, b'x', 0x61, b'y', 0xff, 0xff]),
+        ("indef-bytes.cbor", &[0x5f, 0x42, 1, 2, 0x41, 3, 0xff]),
+        ("duplicate.cbor", &[0xbf, 0x61, b'a', 1, 0x61, b'a', 2, 0xff]),
+        ("nontext.cbor", &[0xa1, 1, 2]),
+        ("tag.cbor", &[0xc0, 1]),
+        ("range.cbor", &[0x1b, 0x80, 0, 0, 0, 0, 0, 0, 0]),
+        ("trunc-int.cbor", &[0x1a, 0]),
+        ("trunc-float.cbor", &[0xfa, 0, 0]),
+        ("trunc-indef.cbor", &[0x7f, 0x62, b'a']),
+        ("trailing.cbor", &[1, 2]),
+        ("nested.cbor", &[0x81, 0xa1, 0x61, b'x', 0x1a, 0]),
+    ];
+    for (name, bytes) in fixtures { fs::write(dir.join(name), bytes).unwrap(); }
+    let path = |name: &str| dir.join(name).to_string_lossy().replace('\\', "\\\\");
+    let array_ok = path("array-ok.cbor");
+    let array_fail = path("array-fail.cbor");
+    let object_ok = path("object-ok.cbor");
+    let object_fail = path("object-fail.cbor");
+    let incomplete = path("incomplete.cbor");
+    let source = format!(r#"
+use core.encoding as encoding
+use core.encoding.cbor as cbor
+use core.files as files
+
+fn reader_terminal(reader: &cbor.CBORReader, reason: String) -> Bool {{
+    repeated :: reader.next()
+    if repeated == {{
+        err(error) -> return error.reason == reason
+        ok(_) -> return false
+    }}
+    return false
+}}
+
+fn writer_terminal(writer: &cbor.CBORWriter, reason: String) -> Bool {{
+    repeated :: writer.flush()
+    if repeated == {{
+        err(error) -> return error.reason == reason
+        ok(_) -> return false
+    }}
+    return false
+}}
+
+fn run() {{
+    map_limits := encoding.EncodingLimits.safe()
+    map_limits.max_item_bytes = 3
+    map_input :: files.open("{}") ?? panic("map open")
+    map_reader :: cbor.reader(^map_input, map_limits) ?? panic("map reader")
+    map_count := 0
+    loop map_count < 4 {{
+        map_event :: map_reader.next() ?? panic("map error")
+        if map_event == {{
+            Val(_) -> map_count++
+            None -> panic("map eof")
+        }}
+    }}
+    print(map_count)
+
+    tight_limits := encoding.EncodingLimits.safe()
+    tight_limits.max_item_bytes = 2
+    tight_input :: files.open("{}") ?? panic("tight open")
+    tight_reader := cbor.reader(^tight_input, tight_limits) ?? panic("tight reader")
+    tight_object :: tight_reader.next() ?? panic("tight object")
+    tight_key :: tight_reader.next() ?? panic("tight key")
+    tight_first :: tight_reader.next()
+    if tight_first == {{
+        ok(_) -> panic("combined key/chunk budget missed")
+        err(first) -> {{
+            print(first.path == "$[\"a\"]" && first.byte_offset == 6 && reader_terminal(&tight_reader, copy first.reason))
+        }}
+    }}
+
+    bytes_input :: files.open("{}") ?? panic("bytes open")
+    bytes_reader :: cbor.reader(^bytes_input) ?? panic("bytes reader")
+    bytes_event :: bytes_reader.next() ?? panic("bytes event")
+    if bytes_event == {{
+        Val(_) -> print(true)
+        None -> print(false)
+    }}
+
+    short_input :: files.open("{}") ?? panic("short open")
+    short_reader :: cbor.reader(^short_input) ?? panic("short reader")
+    short_event :: short_reader.next() ?? panic("short event")
+    if short_event == {{
+        Val(_) -> print(true)
+        None -> print(false)
+    }}
+
+    duplicate_input :: files.open("{}") ?? panic("duplicate open")
+    duplicate_reader := cbor.reader(^duplicate_input) ?? panic("duplicate reader")
+    duplicate_object :: duplicate_reader.next() ?? panic("duplicate object")
+    duplicate_key :: duplicate_reader.next() ?? panic("duplicate key")
+    duplicate_value :: duplicate_reader.next() ?? panic("duplicate value")
+    duplicate_first :: duplicate_reader.next()
+    if duplicate_first == {{
+        err(first) -> {{
+            print(first.byte_offset == 4 && first.path == "$" && reader_terminal(&duplicate_reader, copy first.reason))
+        }}
+        ok(_) -> print(false)
+    }}
+
+    nontext_input :: files.open("{}") ?? panic("nontext open")
+    nontext_reader :: cbor.reader(^nontext_input) ?? panic("nontext reader")
+    nontext_object :: nontext_reader.next() ?? panic("nontext object")
+    if nontext_reader.next() == {{
+        err(e) -> print(e.byte_offset == 1 && e.path == "$" && e.reason == "CBOR map key must be text")
+        ok(_) -> print(false)
+    }}
+
+    tag_input :: files.open("{}") ?? panic("tag open")
+    tag_reader :: cbor.reader(^tag_input) ?? panic("tag reader")
+    if tag_reader.next() == {{
+        err(e) -> print(e.byte_offset == 0 && e.path == "$" && e.reason == "CBOR tags are outside DataEvent")
+        ok(_) -> print(false)
+    }}
+
+    range_input :: files.open("{}") ?? panic("range open")
+    range_reader :: cbor.reader(^range_input) ?? panic("range reader")
+    if range_reader.next() == {{
+        err(e) -> print(e.byte_offset == 0 && e.reason == "CBOR integer is outside Jet Int")
+        ok(_) -> print(false)
+    }}
+
+    int_input :: files.open("{}") ?? panic("int open")
+    int_reader := cbor.reader(^int_input) ?? panic("int reader")
+    if int_reader.next() == {{
+        err(first) -> {{
+            print(first.byte_offset == 2 && reader_terminal(&int_reader, copy first.reason))
+        }}
+        ok(_) -> print(false)
+    }}
+
+    float_input :: files.open("{}") ?? panic("float open")
+    float_reader := cbor.reader(^float_input) ?? panic("float reader")
+    if float_reader.next() == {{
+        err(first) -> {{
+            print(first.byte_offset == 3 && reader_terminal(&float_reader, copy first.reason))
+        }}
+        ok(_) -> print(false)
+    }}
+
+    indef_input :: files.open("{}") ?? panic("indef open")
+    indef_reader := cbor.reader(^indef_input) ?? panic("indef reader")
+    if indef_reader.next() == {{
+        err(first) -> {{
+            print(first.byte_offset == 3 && reader_terminal(&indef_reader, copy first.reason))
+        }}
+        ok(_) -> print(false)
+    }}
+
+    trailing_input :: files.open("{}") ?? panic("trailing open")
+    trailing_reader := cbor.reader(^trailing_input) ?? panic("trailing reader")
+    trailing_root :: trailing_reader.next() ?? panic("root")
+    if trailing_reader.next() == {{
+        err(first) -> {{
+            print(first.byte_offset == 1 && reader_terminal(&trailing_reader, copy first.reason))
+        }}
+        ok(_) -> print(false)
+    }}
+
+    nested_input :: files.open("{}") ?? panic("nested open")
+    nested_reader :: cbor.reader(^nested_input) ?? panic("nested reader")
+    nested_array :: nested_reader.next() ?? panic("nested array")
+    nested_object :: nested_reader.next() ?? panic("nested object")
+    nested_key :: nested_reader.next() ?? panic("nested key")
+    if nested_reader.next() == {{
+        err(e) -> print(e.byte_offset == 6 && e.path == "$[0][\"x\"]")
+        ok(_) -> print(false)
+    }}
+
+    array_limits := encoding.EncodingLimits.safe()
+    array_limits.max_item_bytes = 2
+    array_output :: files.create("{array_ok}") ?? panic("array output")
+    array_writer :: cbor.writer(^array_output, array_limits) ?? panic("array writer")
+    array_writer.write(encoding.DataEvent.ArrayStart) ?? panic("array start")
+    array_writer.write(encoding.DataEvent.Null) ?? panic("array null")
+    array_writer.write(encoding.DataEvent.ArrayEnd) ?? panic("array end")
+    array_writer.finish() ?? panic("array finish")
+
+    array_tight := encoding.EncodingLimits.safe()
+    array_tight.max_item_bytes = 1
+    array_fail_output :: files.create("{array_fail}") ?? panic("array fail output")
+    array_fail_writer := cbor.writer(^array_fail_output, array_tight) ?? panic("array fail writer")
+    array_fail_writer.write(encoding.DataEvent.ArrayStart) ?? panic("array fail start")
+    array_fail_writer.write(encoding.DataEvent.Null) ?? panic("array fail null")
+    if array_fail_writer.write(encoding.DataEvent.ArrayEnd) == {{
+        err(first) -> {{
+            print(writer_terminal(&array_fail_writer, copy first.reason))
+        }}
+        ok(_) -> print(false)
+    }}
+
+    object_limits := encoding.EncodingLimits.safe()
+    object_limits.max_item_bytes = 4
+    object_output :: files.create("{object_ok}") ?? panic("object output")
+    object_writer :: cbor.writer(^object_output, object_limits) ?? panic("object writer")
+    object_writer.write(encoding.DataEvent.ObjectStart) ?? panic("object start")
+    object_writer.write(encoding.DataEvent.Key("a")) ?? panic("object key")
+    object_writer.write(encoding.DataEvent.Null) ?? panic("object null")
+    object_writer.write(encoding.DataEvent.ObjectEnd) ?? panic("object end")
+    object_writer.finish() ?? panic("object finish")
+
+    object_tight := encoding.EncodingLimits.safe()
+    object_tight.max_item_bytes = 3
+    object_fail_output :: files.create("{object_fail}") ?? panic("object fail output")
+    object_fail_writer :: cbor.writer(^object_fail_output, object_tight) ?? panic("object fail writer")
+    object_fail_writer.write(encoding.DataEvent.ObjectStart) ?? panic("object fail start")
+    object_fail_writer.write(encoding.DataEvent.Key("a")) ?? panic("object fail key")
+    object_fail_writer.write(encoding.DataEvent.Null) ?? panic("object fail null")
+    if object_fail_writer.write(encoding.DataEvent.ObjectEnd) == {{
+        err(_) -> print(true)
+        ok(_) -> print(false)
+    }}
+
+    incomplete_output :: files.create("{incomplete}") ?? panic("incomplete output")
+    incomplete_writer := cbor.writer(^incomplete_output) ?? panic("incomplete writer")
+    incomplete_writer.write(encoding.DataEvent.ArrayStart) ?? panic("incomplete start")
+    incomplete_writer.flush() ?? panic("incomplete flush")
+    if incomplete_writer.finish() == {{
+        err(first) -> {{
+            print(writer_terminal(&incomplete_writer, copy first.reason))
+        }}
+        ok(_) -> print(false)
+    }}
+}}
+"#,
+        path("indef-map.cbor"), path("indef-map.cbor"), path("indef-bytes.cbor"),
+        path("non-shortest.cbor"), path("duplicate.cbor"), path("nontext.cbor"),
+        path("tag.cbor"), path("range.cbor"), path("trunc-int.cbor"),
+        path("trunc-float.cbor"), path("trunc-indef.cbor"), path("trailing.cbor"),
+        path("nested.cbor"),
+    );
+    fs::write(dir.join("non-shortest.cbor"), [0x18, 0x01]).unwrap();
+    let (code, stdout, stderr) = build_and_run(&dir, "cbor_hostile", &source, &[], None);
+    assert_eq!(code, 0, "stderr: {stderr}\nsource:\n{source}");
+    assert_eq!(stdout, "4\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n");
+    assert_eq!(fs::read(&array_ok).unwrap(), [0x81, 0xf6]);
+    assert_eq!(fs::read(&object_ok).unwrap(), [0xa1, 0x61, b'a', 0xf6]);
+    assert!(fs::read(&incomplete).unwrap().is_empty());
+    assert_eq!(stderr, "");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn cbor_stream_io_errors_latch_in_aot_and_default_dev() {
+    let dir = std::env::temp_dir().join(format!("jet_cbor_io_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let directory = dir.to_string_lossy().replace('\\', "\\\\");
+    let source = format!(r#"
+use core.encoding as encoding
+use core.encoding.cbor as cbor
+use core.files as files
+
+fn reader_terminal(reader: &cbor.CBORReader, reason: String) -> Bool {{
+    repeated :: reader.next()
+    if repeated == {{
+        err(error) -> return error.reason == reason
+        ok(_) -> return false
+    }}
+    return false
+}}
+
+fn writer_terminal(writer: &cbor.CBORWriter, reason: String) -> Bool {{
+    repeated :: writer.flush()
+    if repeated == {{
+        err(error) -> return error.reason == reason
+        ok(_) -> return false
+    }}
+    return false
+}}
+
+fn run() {{
+    directory_input :: files.open("{directory}") ?? panic("directory open")
+    directory_reader := cbor.reader(^directory_input) ?? panic("directory reader")
+    if directory_reader.next() == {{
+        err(first) -> print(reader_terminal(&directory_reader, copy first.reason))
+        ok(_) -> print(false)
+    }}
+    full_output :: files.create("/dev/full") ?? panic("full open")
+    full_writer := cbor.writer(^full_output) ?? panic("full writer")
+    full_writer.write(encoding.DataEvent.Null) ?? panic("full buffered write")
+    if full_writer.flush() == {{
+        err(first) -> print(writer_terminal(&full_writer, copy first.reason))
+        ok(_) -> print(false)
+    }}
+}}
+"#);
+    let (code, stdout, stderr) = build_and_run(&dir, "cbor_io", &source, &[], None);
+    assert_eq!((code, stdout.as_str(), stderr.as_str()), (0, "true\ntrue\n", ""));
+    let path = dir.join("cbor_io.jet");
+    fs::write(&path, &source).unwrap();
+    match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, false) {
+        jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
+            assert_eq!((exit_code, stdout.as_str(), stderr.as_str()), (0, "true\ntrue\n", ""));
+        }
+        other => panic!("CBOR default-dev fallback failed: {other:?}"),
+    }
     let _ = fs::remove_dir_all(&dir);
 }
 
