@@ -59,6 +59,8 @@ pub enum Effect {
     Exec,
     Log,
     Gpu,
+    /// D-FFI-GO1=A: an in-process Go runtime call may block in Go code.
+    Go,
     /// D-WASM1=A: browser/DOM API use — implies JS partition for web targets.
     Browser,
     /// U13 (D-JPK-SECRETCRYPTO1): reading a decrypted repo secret
@@ -82,6 +84,7 @@ impl Effect {
             Effect::Exec => "Exec",
             Effect::Log => "Log",
             Effect::Gpu => "Gpu",
+            Effect::Go => "Go",
             Effect::Browser => "Browser",
             Effect::Secret => "Secret",
         }
@@ -100,6 +103,7 @@ impl Effect {
             "Exec" => Effect::Exec,
             "Log" => Effect::Log,
             "Gpu" => Effect::Gpu,
+            "Go" => Effect::Go,
             "Browser" => Effect::Browser,
             "Secret" => Effect::Secret,
             _ => return None,
@@ -122,6 +126,7 @@ impl Effect {
             Effect::Exec,
             Effect::Log,
             Effect::Gpu,
+            Effect::Go,
             Effect::Browser,
             Effect::Secret,
         ]

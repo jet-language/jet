@@ -1464,6 +1464,75 @@ func main() {}
 }
 
 #[test]
+fn go_bind_compiles_and_runs_move_only_cgo_handle() {
+    let dir = isolated_cwd("go_bind_handle");
+    let source = dir.join("handles.go");
+    fs::write(
+        &source,
+        r#"package main
+
+/*
+#include <stdint.h>
+*/
+import "C"
+import "runtime/cgo"
+
+//export new_handle
+func new_handle(value int64) uintptr {
+    return uintptr(cgo.NewHandle(value))
+}
+
+//export consume_handle
+func consume_handle(handle uintptr) int64 {
+    owned := cgo.Handle(handle)
+    value := owned.Value().(int64)
+    owned.Delete()
+    return value
+}
+
+func main() {}
+"#,
+    )
+    .unwrap();
+
+    let bind = Command::new(jet())
+        .args(["inspect", "bind", "go"])
+        .arg(&source)
+        .args(["--pkg", "handles"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        bind.status.success(),
+        "Go handle bind failed:\n{}",
+        String::from_utf8_lossy(&bind.stderr)
+    );
+    let generated = fs::read_to_string(dir.join(".jet/bindings/go/handles.jet")).unwrap();
+    assert!(generated.contains("pub struct Handle { value: Int }"));
+    assert!(generated.contains("pub fn new_handle(value: Int) -> Handle"));
+    assert!(generated.contains("pub fn consume_handle(handle: Handle) -> Int"));
+
+    fs::write(
+        dir.join("main.jet"),
+        "use go.handles as handles\n\nfn run() #(Go, Io) {\n    handle :: handles.new_handle(42)\n    print(handles.consume_handle(handle))\n}\n",
+    )
+    .unwrap();
+    let run = Command::new(jet())
+        .args(["run", "main.jet"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        run.status.success(),
+        "generated Go handle binding did not run:\n{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "42\n");
+}
+
+#[test]
 fn go_bind_launders_foreign_compiler_failure_as_e3208() {
     let dir = isolated_cwd("go_bind_failure");
     let source = dir.join("broken.go");

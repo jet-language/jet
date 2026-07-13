@@ -706,6 +706,9 @@ pub struct ExternFn {
     pub return_type_span: Option<Span>,
     pub rust_path: String,
     pub rust_path_span: Span,
+    /// Compiler-owned effect root for a generated foreign binding. User-written
+    /// extern declarations leave this unset and retain maximal foreign effects.
+    pub effect_root: Option<String>,
     pub span: Span,
 }
 

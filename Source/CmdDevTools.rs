@@ -1451,14 +1451,14 @@ pub(crate) fn run_bind(args: &[&String]) {
     }
 }
 
-/// D-FFI-GO1=A: compile exported scalar Go functions into an in-process
-/// c-archive and emit a typed `go.<lib>` Jet module.
+/// D-FFI-GO1=A: compile exported scalar Go functions and move-only `uintptr`
+/// handles into an in-process c-archive and emit a typed `go.<lib>` Jet module.
 fn run_go_bind(args: &[&String]) {
     let usage = || eprintln!("usage: {} inspect bind go <source.go> [--pkg <lib>] [-o <out.jet>]", jet::Syntax::BINARY_NAME);
     if args.is_empty() || args[0] == "--help" || args[0] == "-h" {
         usage();
         eprintln!();
-        eprintln!("Generate typed Jet bindings for scalar //export Go functions.");
+        eprintln!("Generate typed Jet bindings for scalar and uintptr //export Go functions.");
         exit(if args.is_empty() { ExitCodes::USAGE } else { 0 });
     }
     let source_path = args[0].as_str();
@@ -1488,7 +1488,7 @@ fn run_go_bind(args: &[&String]) {
 fn go_bind_error(source: &str, why: &str) -> ! {
     eprintln!("Error [E3208]: Could not generate bindings from `{source}`.");
     eprintln!(" Why: {why}.");
-    eprintln!(" Fix: export scalar `int64`/`float64` functions with `//export Name`, then rerun `jet inspect bind go`.");
+    eprintln!(" Fix: export `int64`/`float64` scalars or move-only `uintptr` handles with `//export Name`, then rerun `jet inspect bind go`.");
     exit(ExitCodes::USER_ERROR);
 }
 
@@ -1648,6 +1648,7 @@ pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
                         is_extern: false,
                         is_c_abi: false,
                         c_abi_name: None,
+                        foreign_effect_root: None,
                         is_unsafe: f.is_unsafe,
                         is_pure: f.is_pure,
                         is_foreign_thread_safe: false,

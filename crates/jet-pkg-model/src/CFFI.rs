@@ -294,6 +294,12 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
             }
         }
 
+        if lib.starts_with("jet_go_") {
+            for function in &mut merged {
+                function.effect_root = Some("Go".to_string());
+            }
+        }
+
         let alias = synthetic_alias(lib);
         let synth_idx = bundle.modules.len();
         let merged_module = CModule {

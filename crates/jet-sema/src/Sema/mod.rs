@@ -366,6 +366,7 @@ fn func_to_sig(f: &Func) -> FuncSig {
         is_extern: false,
         is_c_abi: false,
         c_abi_name: None,
+        foreign_effect_root: None,
         is_unsafe: f.is_unsafe,
         is_pure: f.is_pure,
         is_foreign_thread_safe: foreign_thread_safe_func(f),
@@ -396,6 +397,7 @@ fn extern_to_sig(ef: &ExternFn, is_c_abi: bool) -> FuncSig {
         is_extern: true,
         is_c_abi,
         c_abi_name: ef.abi.as_ref().map(|(name, _)| name.clone()),
+        foreign_effect_root: ef.effect_root.clone(),
         // D-CABI-RESULT1=C: any raw out-pointer declaration is callable only
         // from an audited `#Unsafe` region. The declaration remains the exact
         // C status/out shape; no Result adapter is invented.

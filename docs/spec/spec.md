@@ -886,16 +886,23 @@ for those declarations. Rust FFI (S50) is unchanged. Diagnostics:
 **E3201–E3208** in diagnostics.md with snapshots (front-end ones under
 `tests/ui/cffi_*`; link-time/gated ones pinned in `tests/cffi.rs`).
 
-## E3 — Go project binder (D-FFI-GO1=A, scalar surface implemented)
+## E3 — Go project binder (D-FFI-GO1=A, scalar + handle surface implemented)
 
 `jet inspect bind go <source.go> --pkg <lib>` finds cgo `//export Name`
-functions whose parameters and optional result are `int64` or `float64`, runs
+functions whose parameters and optional result are `int64`, `float64`, or
+`uintptr`, runs
 the provisioned Go compiler with `go build -buildmode=c-archive`, and writes
 the archive plus a typed `.jet/bindings/go/<lib>.jet` cache. Programs import it
 with `use go.<lib> as alias`; calls execute in-process through the shared C ABI
 linker, so the Go runtime is part of the native program rather than a sidecar.
-Unsupported signatures fail before compilation. Go compiler failures are
-laundered through **E3208** and never expose raw foreign source frames (I2/I4).
+`uintptr` maps to a private-field, move-only `go.<lib>.Handle`; passing it to a
+foreign function consumes it, preventing Jet from reusing a released
+`runtime/cgo.Handle`. The binder accepts handles only on a 64-bit host ABI and
+supervises compilation with a 60-second deadline plus bounded diagnostic
+capture. Calls through generated `go.*` caches contribute the `Go` effect root;
+ordinary C externs remain maximally effectful. Unsupported signatures fail before compilation. Go compiler failures
+are laundered through **E3208** and never expose raw foreign source frames
+(I2/I4).
 
 ## E2-M13 — Expert low-level tier (S58, implemented)
 

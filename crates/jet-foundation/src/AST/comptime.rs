@@ -32,6 +32,9 @@ pub struct FuncSig {
     pub is_c_abi: bool,
     /// D-CABI-PLATFORM1: explicit alternate ABI; such functions are direct-call-only.
     pub c_abi_name: Option<String>,
+    /// Narrow compiler-owned effect for a generated foreign binding. `None`
+    /// keeps ordinary extern calls maximally effectful.
+    pub foreign_effect_root: Option<String>,
     /// S61: parameter names and default-value presence, parallel to `params`.
     /// Empty for extern/built-in functions.
     pub param_info: Vec<(String, bool)>,

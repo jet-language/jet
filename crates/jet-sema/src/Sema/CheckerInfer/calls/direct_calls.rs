@@ -718,7 +718,11 @@ impl<'a> Checker<'a> {
             // A foreign (`extern`) callee has an un-inspectable body, so it forces
             // the maximal effect set; a Jet callee's effects flow in via its edge.
             if sig.is_extern {
-                self.record_maximal();
+                if let Some(effect) = &sig.foreign_effect_root {
+                    self.record_effect(effect);
+                } else {
+                    self.record_maximal();
+                }
             } else {
                 self.record_edge(call.name.clone());
             }

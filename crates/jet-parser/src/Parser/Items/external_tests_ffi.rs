@@ -505,6 +505,7 @@ impl<'a> Parser<'a> {
                 return_type_span,
                 rust_path,
                 rust_path_span,
+                effect_root: None,
                 span: Span::new(fn_start, end),
             })
         }
