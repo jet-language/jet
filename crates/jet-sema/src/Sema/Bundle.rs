@@ -1588,8 +1588,16 @@ fn expand_alias(
         Some(specialize_nested_template_outer(def, &definition_types, &definition_values))
     }).collect();
     if !nested_defs.is_empty() {
+        // Disposable bound-resolution registry, same rationale as
+        // `expand_generic_module_aliases` above: register builtin hook
+        // traits and swallow diags — the canonical per-module pass
+        // re-validates every impl once these nested templates are expanded
+        // into real module items.
         let mut nested_traits = TraitRegistry::default();
-        for def in &nested_defs { nested_traits.register_items(&def.body, diags); }
+        nested_traits.register_synthetic_rollback();
+        nested_traits.register_synthetic_display_debug();
+        nested_traits.register_synthetic_iter_index();
+        for def in &nested_defs { nested_traits.register_items(&def.body, &mut Vec::new()); }
         let nested_enums: HashMap<String, bool> = nested_defs.iter().flat_map(|def| def.body.iter()).filter_map(|item| {
             let Item::Enum(def) = item else { return None };
             Some((def.name.clone(), def.variants.iter().all(|v| matches!(v.payload, VariantPayload::Unit))))
@@ -1816,8 +1824,22 @@ pub(crate) fn expand_generic_module_aliases(
         .iter()
         .enumerate()
         .map(|(source_module, module)| {
+            // This registry only feeds `resolve_params`/`resolve_args` (does a
+            // bound name exist, does a type implement it?) — it is NOT the
+            // canonical per-module trait pass (that runs later, once, in the
+            // main loop below with synthetic hooks pre-registered). Register
+            // the same builtin hook traits here so a generic-module bound
+            // like `T: Index` resolves, and throw the diagnostics away: the
+            // canonical pass re-validates every impl block and is the only
+            // place user-facing E0119/E0906/… should be reported. Without
+            // this, every `impl T.Index`/`.Iterable`/`.Rollback`/`.Display`/
+            // `.Debug` in the bundle spuriously fails E0119 here (empty trait
+            // table) before the real pass ever runs.
             let mut traits = TraitRegistry::default();
-            traits.register_items(&module.items, diags);
+            traits.register_synthetic_rollback();
+            traits.register_synthetic_display_debug();
+            traits.register_synthetic_iter_index();
+            traits.register_items(&module.items, &mut Vec::new());
             let enums: HashMap<String, bool> = module
                 .items
                 .iter()
@@ -1911,7 +1933,14 @@ pub(crate) fn expand_generic_module_aliases(
         if report_generic_module_cycles(&module.items, diags) {
             continue;
         }
-        let mut traits=TraitRegistry::default();traits.register_items(&module.items,diags);
+        // Same disposable-registry rationale as the `template_snapshots` prepass
+        // above: only used for bound resolution, never the diagnostic source of
+        // truth — register the builtin hook traits and swallow its diags.
+        let mut traits=TraitRegistry::default();
+        traits.register_synthetic_rollback();
+        traits.register_synthetic_display_debug();
+        traits.register_synthetic_iter_index();
+        traits.register_items(&module.items,&mut Vec::new());
         let enums:HashMap<String,bool>=module.items.iter().filter_map(|item|if let Item::Enum(def)=item{Some((def.name.clone(),def.variants.iter().all(|v|matches!(v.payload,VariantPayload::Unit))))}else{None}).collect();
         let funcs:HashMap<String,&Func>=module.items.iter().filter_map(|item|if let Item::Func(f)=item{Some((f.name.clone(),f))}else{None}).collect();
         let mut globals:HashMap<String,crate::AST::CtValue>=HashMap::new();for item in &module.items{if let Item::Const(c)=item{if let Ok(value)=crate::Comptime::evaluate(&c.value,&funcs,&HashSet::new(),Path::new("."),&globals){globals.insert(c.name.clone(),value);}}}

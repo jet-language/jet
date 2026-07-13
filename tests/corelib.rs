@@ -2940,7 +2940,7 @@ derive T.RemoteLabel {
     emit("impl $name {{ fn remote_label(self) -> String {{ return \"remote:$name\" }} }}")
 }
 
-#[LocalLabel]
+@LocalLabel
 pub struct RemoteType { pub value: Int }
 
 pub fn remote_type_label() -> String {
@@ -2957,7 +2957,7 @@ derive T.LocalLabel {
     emit("impl $name {{ pub fn local_label(self) -> String {{ return \"local:$name\" }} }}")
 }
 
-#[RemoteLabel]
+@RemoteLabel
 struct LocalType { value: Int }
 
 fn run() {
