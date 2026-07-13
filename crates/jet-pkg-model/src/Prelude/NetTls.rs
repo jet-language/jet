@@ -14,17 +14,32 @@ thread_local! {
 
 static JET_NET_TLS_NEXT: AtomicI64 = AtomicI64::new(1);
 
-fn jet_net_tls_config() -> Result<Arc<rustls::ClientConfig>, String> {
+fn jet_net_tls_config(custom_ca_pem: Option<&[u8]>) -> Result<Arc<rustls::ClientConfig>, String> {
     let mut roots = rustls::RootCertStore::empty();
     let certs = rustls_native_certs::load_native_certs()
         .map_err(|e| format!("TLS could not load system certificate roots: {}", e))?;
-    if certs.is_empty() {
+    if certs.is_empty() && custom_ca_pem.is_none() {
         return Err("TLS could not find system certificate roots".to_string());
     }
     for cert in certs {
         roots
             .add(cert)
             .map_err(|e| format!("TLS could not use a system certificate root: {}", e))?;
+    }
+    if let Some(pem) = custom_ca_pem {
+        let certs = jet_net_tls_pem_certificates(pem)?;
+        let mut added = 0usize;
+        for cert in certs {
+            roots
+                .add(cert)
+                .map_err(|e| format!("TLS could not use a custom certificate root: {}", e))?;
+            added = added
+                .checked_add(1)
+                .ok_or_else(|| "TLS custom CA certificate count overflow".to_string())?;
+        }
+        if added == 0 {
+            return Err("TLS custom CA PEM did not contain a certificate".to_string());
+        }
     }
     Ok(Arc::new(
         rustls::ClientConfig::builder()
@@ -33,7 +48,75 @@ fn jet_net_tls_config() -> Result<Arc<rustls::ClientConfig>, String> {
     ))
 }
 
-pub fn jet_net_tls_connect_impl(stream: TcpStream, server_name: &String) -> Result<i64, String> {
+fn jet_net_tls_pem_certificates(
+    pem: &[u8],
+) -> Result<Vec<rustls::pki_types::CertificateDer<'static>>, String> {
+    const BEGIN: &str = "-----BEGIN CERTIFICATE-----";
+    const END: &str = "-----END CERTIFICATE-----";
+    let text = std::str::from_utf8(pem)
+        .map_err(|_| "TLS custom CA PEM must be UTF-8 text".to_string())?;
+    let mut rest = text;
+    let mut out = Vec::new();
+    while let Some(start) = rest.find(BEGIN) {
+        if !rest[..start].trim().is_empty() {
+            return Err("TLS custom CA PEM contains data outside certificate blocks".to_string());
+        }
+        rest = &rest[start + BEGIN.len()..];
+        let stop = rest.find(END)
+            .ok_or_else(|| "TLS custom CA PEM has an unterminated certificate".to_string())?;
+        let der = jet_net_tls_pem_base64(&rest[..stop])?;
+        out.push(rustls::pki_types::CertificateDer::from(der));
+        rest = &rest[stop + END.len()..];
+    }
+    if out.is_empty() || !rest.trim().is_empty() {
+        return Err("TLS custom CA PEM must contain only certificate blocks".to_string());
+    }
+    Ok(out)
+}
+
+fn jet_net_tls_pem_base64(text: &str) -> Result<Vec<u8>, String> {
+    let mut out = Vec::new();
+    let mut quartet = [0u8; 4];
+    let mut used = 0usize;
+    let mut padded = false;
+    for byte in text.bytes().filter(|byte| !byte.is_ascii_whitespace()) {
+        if padded { return Err("TLS custom CA PEM has data after base64 padding".to_string()); }
+        quartet[used] = byte;
+        used += 1;
+        if used == 4 {
+            let mut values = [0u8; 4];
+            let mut pads = 0usize;
+            for index in 0..4 {
+                if quartet[index] == b'=' { pads += 1; }
+                else {
+                    if pads != 0 { return Err("TLS custom CA PEM has invalid base64 padding".to_string()); }
+                    values[index] = match quartet[index] {
+                        b'A'..=b'Z' => quartet[index] - b'A',
+                        b'a'..=b'z' => quartet[index] - b'a' + 26,
+                        b'0'..=b'9' => quartet[index] - b'0' + 52,
+                        b'+' => 62,
+                        b'/' => 63,
+                        _ => return Err("TLS custom CA PEM contains invalid base64".to_string()),
+                    };
+                }
+            }
+            if pads > 2 { return Err("TLS custom CA PEM has invalid base64 padding".to_string()); }
+            out.push(values[0] << 2 | values[1] >> 4);
+            if pads < 2 { out.push(values[1] << 4 | values[2] >> 2); }
+            if pads == 0 { out.push(values[2] << 6 | values[3]); }
+            padded = pads != 0;
+            used = 0;
+        }
+    }
+    if used != 0 || out.is_empty() { return Err("TLS custom CA PEM contains incomplete base64".to_string()); }
+    Ok(out)
+}
+
+fn jet_net_tls_connect_inner(
+    stream: TcpStream,
+    server_name: &String,
+    custom_ca_pem: Option<&[u8]>,
+) -> Result<i64, String> {
     static RUSTLS_PROVIDER: std::sync::Once = std::sync::Once::new();
     RUSTLS_PROVIDER.call_once(|| {
         let _ = rustls::crypto::ring::default_provider().install_default();
@@ -43,16 +126,33 @@ pub fn jet_net_tls_connect_impl(stream: TcpStream, server_name: &String) -> Resu
     stream
         .set_nonblocking(false)
         .map_err(|e| format!("TLS could not configure the TCP stream: {}", e))?;
-    let conn = rustls::ClientConnection::new(jet_net_tls_config()?, name)
+    let conn = rustls::ClientConnection::new(jet_net_tls_config(custom_ca_pem)?, name)
         .map_err(|e| format!("TLS handshake with `{}` failed: {}", server_name, e))?;
     let mut tls = rustls::StreamOwned::new(conn, stream);
-    tls.flush()
-        .map_err(|e| format!("TLS handshake with `{}` failed: {}", server_name, e))?;
+    while tls.conn.is_handshaking() {
+        tls.conn
+            .complete_io(&mut tls.sock)
+            .map_err(|e| format!("TLS handshake with `{}` failed: {}", server_name, e))?;
+    }
     let id = JET_NET_TLS_NEXT.fetch_add(1, Ordering::Relaxed);
     JET_NET_TLS_STREAMS.with(|cell| {
         cell.borrow_mut().insert(id, tls);
     });
     Ok(id)
+}
+
+pub fn jet_net_tls_connect_impl(stream: TcpStream, server_name: &String) -> Result<i64, String> {
+    jet_net_tls_connect_inner(stream, server_name, None)
+}
+
+/// D-EMAIL-SMTP-CONFIG1=A: verified SystemPlusCa connection. Custom roots are
+/// appended to system roots; rustls' normal DNS-name verifier remains active.
+pub fn jet_net_tls_connect_with_ca_impl(
+    stream: TcpStream,
+    server_name: &String,
+    custom_ca_pem: &Vec<u8>,
+) -> Result<i64, String> {
+    jet_net_tls_connect_inner(stream, server_name, Some(custom_ca_pem))
 }
 
 pub fn jet_net_tls_read_impl(id: i64) -> Result<String, String> {

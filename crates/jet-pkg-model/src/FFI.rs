@@ -245,6 +245,59 @@ mod net_tls_close_tests {
         assert!(error.contains("TLS close-notify flush failed"), "{error}");
         assert!(error.contains("hostile peer reset"), "{error}");
     }
+
+    fn tls_fixture() -> (std::net::SocketAddr, std::thread::JoinHandle<()>) {
+        let cert_pem = include_bytes!("../../../tests/fixtures/tls/smtp.server.cert.pem");
+        let key_pem = include_bytes!("../../../tests/fixtures/tls/smtp.server.key.pem");
+        let certs = jet_net_tls_pem_certificates(cert_pem).unwrap();
+        let key_text = std::str::from_utf8(key_pem).unwrap();
+        let body = key_text
+            .strip_prefix("-----BEGIN PRIVATE KEY-----")
+            .unwrap()
+            .strip_suffix("-----END PRIVATE KEY-----\n")
+            .unwrap();
+        let key = rustls::pki_types::PrivateKeyDer::Pkcs8(
+            rustls::pki_types::PrivatePkcs8KeyDer::from(jet_net_tls_pem_base64(body).unwrap()),
+        );
+        let config = std::sync::Arc::new(
+            rustls::ServerConfig::builder()
+                .with_no_client_auth()
+                .with_single_cert(certs, key)
+                .unwrap(),
+        );
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (socket, _) = listener.accept().unwrap();
+            let conn = rustls::ServerConnection::new(config).unwrap();
+            let mut tls = rustls::StreamOwned::new(conn, socket);
+            while tls.conn.is_handshaking() {
+                if tls.conn.complete_io(&mut tls.sock).is_err() {
+                    return;
+                }
+            }
+        });
+        (address, server)
+    }
+
+    #[test]
+    fn system_plus_ca_extends_roots_and_keeps_hostname_verification() {
+        let pem = include_bytes!("../../../tests/fixtures/tls/smtp.ca.cert.pem").to_vec();
+        let (address, server) = tls_fixture();
+        let socket = std::net::TcpStream::connect(address).unwrap();
+        let id = jet_net_tls_connect_with_ca_impl(socket, &"localhost".to_string(), &pem)
+            .expect("fixture CA should verify localhost");
+        jet_net_tls_close_impl(id).unwrap();
+        server.join().unwrap();
+
+        let (address, server) = tls_fixture();
+        let socket = std::net::TcpStream::connect(address).unwrap();
+        let error = jet_net_tls_connect_with_ca_impl(socket, &"example.com".to_string(), &pem)
+            .expect_err("custom CA must not disable DNS-name verification");
+        assert!(error.contains("TLS handshake with `example.com` failed"), "{error}");
+        assert!(error.to_ascii_lowercase().contains("not valid for name"), "{error}");
+        server.join().unwrap();
+    }
 }
 
 /// Crate dependency specs that require non-trivial TOML values (e.g. feature flags).
@@ -424,10 +477,6 @@ fn build_bridge_full(
             HTTP_SERVER_TLS_CRATE_SPEC.0.to_string(),
             HTTP_SERVER_TLS_CRATE_SPEC.1.to_string(),
         );
-        deps.insert(
-            HTTP_SERVER_TLS_PEMFILE_CRATE_SPEC.0.to_string(),
-            HTTP_SERVER_TLS_PEMFILE_CRATE_SPEC.1.to_string(),
-        );
     }
     if needs_net_tls {
         deps.insert(
@@ -437,6 +486,10 @@ fn build_bridge_full(
         deps.insert(
             RUSTLS_NATIVE_CERTS_CRATE_SPEC.0.to_string(),
             RUSTLS_NATIVE_CERTS_CRATE_SPEC.1.to_string(),
+        );
+        deps.insert(
+            HTTP_SERVER_TLS_PEMFILE_CRATE_SPEC.0.to_string(),
+            HTTP_SERVER_TLS_PEMFILE_CRATE_SPEC.1.to_string(),
         );
     }
     if needs_crypto {
