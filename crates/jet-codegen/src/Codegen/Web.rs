@@ -250,7 +250,6 @@ fn web_wasm_expr_supported(
             bundle
                 .web_partitions
                 .get(&key)
-                .or_else(|| bundle.web_partitions.get(web_name(key.rsplit("__").next().unwrap_or(&key))))
                 .copied()
                 == Some(WebBucket::Wasm)
                 && args
@@ -412,7 +411,6 @@ fn collect_module_funcs(
                 let bucket = bundle
                     .web_partitions
                     .get(&key)
-                    .or_else(|| bundle.web_partitions.get(&f.name))
                     .copied()
                     .unwrap_or(WebBucket::Wasm);
                 out.push(FuncWeb {

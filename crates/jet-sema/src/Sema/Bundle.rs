@@ -2728,6 +2728,7 @@ pub(crate) fn check_bundle_opts(
         .iter()
         .map(|m| ModuleState {
             module_path: m.display.clone(),
+            module_alias: m.alias.clone(),
             func_spans: HashMap::new(),
             const_spans: HashMap::new(),
             import_spans: HashMap::new(),
@@ -3935,7 +3936,14 @@ pub(crate) fn check_bundle_opts(
     }
 
     // D-WASM1=A (c123 M1): JS/WASM partition inference and boundary checks.
-    diags.extend(check_web_partition(bundle, &effect_summaries, &solved));
+    // File modules need qualified facts here: the bundle-local maps above use
+    // bare top-level names and therefore overwrite same-leaf functions.
+    let (public_summaries, public_solved) = qualified_effect_facts(&module_effect_summaries);
+    diags.extend(check_web_partition(
+        bundle,
+        &public_summaries,
+        &public_solved,
+    ));
 
     // D-OSTARGET1=A (ratified 2026-07-01, c134): native OS platform gating —
     // mixed-axis conflicts and unmatched cross-gate calls.
@@ -4015,7 +4023,6 @@ pub(crate) fn check_bundle_opts(
     bundle.used_core = used_core;
     bundle.ffi_callback_fns = ffi_callback_fns;
     apply_helper_layer_inference(bundle, &states, &usage_spans, &mut diags);
-    let (public_summaries, public_solved) = qualified_effect_facts(&module_effect_summaries);
     (
         diags,
         super::Effects::SemIndexEffectFacts {

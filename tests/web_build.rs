@@ -794,6 +794,53 @@ fn web_file_module_wasm_export_uses_qualified_bridge() {
 }
 
 #[test]
+fn web_file_module_same_leaf_partitions_ignore_load_order() {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web file-module partition identity test");
+        return;
+    }
+    for (stem, imports) in [
+        (
+            "mixed_partition_left_first",
+            "use \"./left\" as left\nuse \"./right\" as right",
+        ),
+        (
+            "mixed_partition_right_first",
+            "use \"./right\" as right\nuse \"./left\" as left",
+        ),
+    ] {
+        let main = format!(
+            "#Target(Web)\n{imports}\n#Target(Js)\nfn run() {{ print(left.value() + right.value()) }}\n"
+        );
+        let dir = build_web_project(
+            stem,
+            &[
+                ("main.jet", &main),
+                (
+                    "left.jet",
+                    "#Target(Js)\npub fn value() -> Int { return 1 }\n",
+                ),
+                (
+                    "right.jet",
+                    "#WasmExport\npub fn value() -> Int { return 2 }\n",
+                ),
+            ],
+        );
+        let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
+        assert!(
+            js.contains("function left__value()"),
+            "JS sibling inherited Wasm bucket under {stem}:\n{js}"
+        );
+        assert!(
+            js.contains("await bridge_right__value()"),
+            "Wasm sibling inherited JS bucket under {stem}:\n{js}"
+        );
+        assert_eq!(run_web_app(&dir), "3\n", "load order changed behavior");
+        let _ = fs::remove_dir_all(&dir);
+    }
+}
+
+#[test]
 fn module_local_run_cannot_hijack_web_entrypoint() {
     if !have_tool("rustc") || !have_tool("node") {
         eprintln!("note: skipping web entrypoint identity test");

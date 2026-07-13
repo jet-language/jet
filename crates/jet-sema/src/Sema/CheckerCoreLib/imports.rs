@@ -122,6 +122,8 @@ impl<'a> Checker<'a> {
                     return None;
                 }
                 let sig = target.funcs.get(name).unwrap().clone();
+                let target_alias = target.module_alias.clone();
+                self.record_edge(format!("{target_alias}.{name}"));
                 self.record_function_reference(mod_idx, name, span);
                 if args.len() != sig.params.len() {
                     self.diags.push(Diagnostic::error(

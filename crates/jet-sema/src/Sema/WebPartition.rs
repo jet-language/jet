@@ -15,6 +15,7 @@ use super::EffectSummary;
 #[derive(Debug, Clone)]
 pub(crate) struct FuncWebMeta {
     key: String,
+    effect_key: String,
     name: String,
     name_span: crate::Diagnostics::Span,
     marker: Option<WebPartitionMarker>,
@@ -237,18 +238,26 @@ fn collect_funcs(
     file_ceiling: Option<WebBucket>,
     module_ceiling: Option<WebBucket>,
     module_prefix: Option<&str>,
+    file_alias: &str,
+    is_entry: bool,
     out: &mut Vec<FuncWebMeta>,
 ) {
     let ceiling = module_ceiling.or(file_ceiling);
     for item in items {
         match item {
             Item::Func(f) => {
-                let key = match module_prefix {
+                let local_key = match module_prefix {
                     Some(m) => format!("{m}__{}", f.name),
                     None => effect_key(None, &f.name),
                 };
+                let key = if !is_entry && module_prefix.is_none() {
+                    format!("{file_alias}__{}", f.name)
+                } else {
+                    local_key.clone()
+                };
                 out.push(FuncWebMeta {
                     key,
+                    effect_key: format!("{file_alias}::{local_key}"),
                     name: f.name.clone(),
                     name_span: f.name_span,
                     marker: f.web_marker,
@@ -260,7 +269,15 @@ fn collect_funcs(
             Item::CodeModule(cm) => {
                 let mod_ceiling = cm.web_target.or(ceiling);
                 if let Some(body) = &cm.body {
-                    collect_funcs(body, file_ceiling, mod_ceiling, Some(&cm.name), out);
+                    collect_funcs(
+                        body,
+                        file_ceiling,
+                        mod_ceiling,
+                        Some(&cm.name),
+                        file_alias,
+                        is_entry,
+                        out,
+                    );
                 }
             }
             _ => {}
@@ -329,7 +346,7 @@ pub fn format_partition_report(
     rows.sort_by(|a, b| a.key.cmp(&b.key));
     for f in rows {
         let bucket = partitions.get(&f.key).copied().unwrap_or(WebBucket::Wasm);
-        let effects = solved.get(&f.key).cloned().unwrap_or_default();
+        let effects = solved.get(&f.effect_key).cloned().unwrap_or_default();
         lines.push(format!(
             "{:<24} -> {:<4}  {}  effects: {}",
             f.name,
@@ -384,19 +401,21 @@ pub fn check_web_partition(
     solved: &HashMap<String, EffectSet>,
 ) -> Vec<Diagnostic> {
     let mut metas = Vec::new();
-    for module in &bundle.modules {
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
         collect_funcs(
             &module.items,
             module.web_target_ceiling,
             None,
             None,
+            &module.alias,
+            module_idx == bundle.entry,
             &mut metas,
         );
     }
 
     let mut partitions: HashMap<String, WebBucket> = HashMap::new();
     for f in &metas {
-        let effects = solved.get(&f.key).cloned().unwrap_or_default();
+        let effects = solved.get(&f.effect_key).cloned().unwrap_or_default();
         let bucket = assign_bucket(f.marker, f.ceiling, &effects);
         partitions.insert(f.key.clone(), bucket);
     }
@@ -414,41 +433,37 @@ pub fn check_web_partition(
     let abi_idx = AbiTypeIndex::from_bundle(bundle);
     let mut diags = Vec::new();
     for f in &metas {
-        let effects = solved.get(&f.key).cloned().unwrap_or_default();
+        let effects = solved.get(&f.effect_key).cloned().unwrap_or_default();
         let bucket = partitions.get(&f.key).copied().unwrap_or(WebBucket::Wasm);
         check_abi_export(f, &abi_idx, &mut diags);
         check_target_browser(f, bucket, &effects, &mut diags);
     }
 
-    let meta_by_key: HashMap<&str, &FuncWebMeta> =
-        metas.iter().map(|m| (m.key.as_str(), m)).collect();
+    let meta_by_effect_key: HashMap<&str, &FuncWebMeta> = metas
+        .iter()
+        .map(|m| (m.effect_key.as_str(), m))
+        .collect();
 
     for (caller_key, summary) in summaries {
-        let Some(caller_bucket) = partitions.get(caller_key) else {
+        let Some(caller_meta) = meta_by_effect_key.get(caller_key.as_str()) else {
             continue;
         };
-        let Some(caller_meta) = meta_by_key.get(caller_key.as_str()) else {
-            continue;
-        };
+        let caller_bucket = &partitions[&caller_meta.key];
         for callee_key in &summary.edges {
-            let Some(callee_bucket) = partitions.get(callee_key) else {
+            let Some(callee_meta) = meta_by_effect_key.get(callee_key.as_str()) else {
                 continue;
             };
+            let callee_bucket = &partitions[&callee_meta.key];
             if caller_bucket != callee_bucket {
-                let callee_meta = meta_by_key.get(callee_key.as_str());
                 let wasm_export_bridge = *caller_bucket == WebBucket::Js
                     && *callee_bucket == WebBucket::Wasm
-                    && callee_meta.and_then(|m| m.marker) == Some(WebPartitionMarker::WasmExport);
+                    && callee_meta.marker == Some(WebPartitionMarker::WasmExport);
                 if wasm_export_bridge {
                     continue;
                 }
-                let callee_name = callee_key
-                    .rsplit("__")
-                    .next()
-                    .unwrap_or(callee_key.as_str());
                 diags.push(Syntax::web_cross_partition(
                     &caller_meta.key,
-                    callee_name,
+                    &callee_meta.name,
                     *caller_bucket,
                     *callee_bucket,
                     Some(caller_meta.name_span),

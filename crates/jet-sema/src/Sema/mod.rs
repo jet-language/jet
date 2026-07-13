@@ -633,6 +633,7 @@ pub enum CompileMode {
 
 pub(crate) struct ModuleState {
     module_path: String,
+    module_alias: String,
     func_spans: HashMap<String, Span>,
     const_spans: HashMap<String, Span>,
     import_spans: HashMap<String, Span>,
