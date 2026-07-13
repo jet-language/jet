@@ -1134,6 +1134,76 @@ impl<'a> Interp<'a> {
                     };
                     return self.eval_typed_decode(&module, method, &text, &type_args[0], span);
                 }
+                // D-ENC-CBOR-SURFACE1 / R12: generic whole-value CBOR decode
+                // uses the same typed tree walker as every other codec.  Keep
+                // this ahead of the compatibility `cbor.decode(DataTree)` arm
+                // below: the type argument is the semantic distinction.
+                if module == "core.encoding.cbor" && method == "decode" && !type_args.is_empty() {
+                    if argv.len() > 1 {
+                        // Never pretend the old lightweight interpreter enforces
+                        // CBOROptions. Default-dev transparently takes executable
+                        // TIR; pure comptime stays rejected until its parser owns
+                        // identical depth/item/byte/canonical accounting.
+                        return Err(unsupported(
+                            "`core.encoding.cbor.decode<T>(bytes, options)` at comptime",
+                            span,
+                        ));
+                    }
+                    let bytes = match argv.first() {
+                        Some(value) => as_bytes(value, span)?,
+                        None => return Err(unsupported("core.encoding.cbor.decode(): missing arg 0", span)),
+                    };
+                    let tree = match super::EncodingLite::cbor_decode(&bytes) {
+                        Ok(tree) => tree,
+                        Err(reason) => {
+                            return Ok(CtValue::ResErr(Box::new(CtValue::Struct {
+                                type_name: "CBORError".to_string(),
+                                fields: vec![
+                                    ("kind".to_string(), CtValue::Enum {
+                                        type_name: "CBORErrorKind".to_string(),
+                                        variant: "Syntax".to_string(),
+                                        args: Vec::new(),
+                                    }),
+                                    ("byte_offset".to_string(), CtValue::Int(0)),
+                                    ("path".to_string(), CtValue::Str("$".to_string())),
+                                    ("reason".to_string(), CtValue::Str(reason)),
+                                ],
+                            })));
+                        }
+                    };
+                    return match self.typed_decode_top(&type_args[0], &tree, span) {
+                        Ok((value, _)) => Ok(CtValue::ResOk(Box::new(value))),
+                        Err(error) => {
+                            let (path, reason) = match error {
+                                CtValue::Struct { fields, .. } => {
+                                    let path = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
+                                        ("path", CtValue::Str(value)) => Some(value.clone()),
+                                        _ => None,
+                                    }).unwrap_or_default();
+                                    let reason = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
+                                        ("reason", CtValue::Str(value)) => Some(value.clone()),
+                                        _ => None,
+                                    }).unwrap_or_else(|| "CBOR value does not match requested type".to_string());
+                                    (path, reason)
+                                }
+                                _ => (String::new(), "CBOR value does not match requested type".to_string()),
+                            };
+                            Ok(CtValue::ResErr(Box::new(CtValue::Struct {
+                                type_name: "CBORError".to_string(),
+                                fields: vec![
+                                    ("kind".to_string(), CtValue::Enum {
+                                        type_name: "CBORErrorKind".to_string(),
+                                        variant: "TypeMismatch".to_string(),
+                                        args: Vec::new(),
+                                    }),
+                                    ("byte_offset".to_string(), CtValue::Int(0)),
+                                    ("path".to_string(), CtValue::Str(path)),
+                                    ("reason".to_string(), CtValue::Str(reason)),
+                                ],
+                            })))
+                        }
+                    };
+                }
                 // D-CTEFFECT1 Tier-1: fetch is hermetic (sha256-pinned); no gate.
                 if module == "core.net" && method == "fetch" {
                     return self.eval_net_fetch(argv, span);

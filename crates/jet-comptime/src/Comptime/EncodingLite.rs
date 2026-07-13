@@ -1857,6 +1857,28 @@ fn cbor_read_len(input: &[u8], i: &mut usize, add: u8) -> Result<u64, String> {
     }
     Ok(n)
 }
+fn cbor_half_to_f64(bits: u16) -> f64 {
+    let sign = ((bits >> 15) as u64) << 63;
+    let exp = (bits >> 10) & 31;
+    let frac = bits & 1023;
+    if exp == 0 {
+        if frac == 0 {
+            return f64::from_bits(sign);
+        }
+        let mut mant = frac as u64;
+        let mut exponent = -14i32;
+        while mant & 1024 == 0 {
+            mant <<= 1;
+            exponent -= 1;
+        }
+        mant &= 1023;
+        f64::from_bits(sign | (((exponent + 1023) as u64) << 52) | (mant << 42))
+    } else if exp == 31 {
+        f64::from_bits(sign | (0x7ffu64 << 52) | ((frac as u64) << 42))
+    } else {
+        f64::from_bits(sign | (((exp as i32 - 15 + 1023) as u64) << 52) | ((frac as u64) << 42))
+    }
+}
 fn cbor_decode_val(input: &[u8], i: &mut usize) -> Result<CtValue, String> {
     if *i >= input.len() {
         return Err("truncated CBOR value".to_string());
@@ -1875,6 +1897,32 @@ fn cbor_decode_val(input: &[u8], i: &mut usize) -> Result<CtValue, String> {
             Some(CtValue::Int(-1 - cbor_read_len(input, i, add)? as i64)),
         )),
         2 | 3 => {
+            if add == 31 {
+                let mut bytes = Vec::new();
+                loop {
+                    if *i >= input.len() {
+                        return Err("indefinite CBOR string ended before its break".to_string());
+                    }
+                    if input[*i] == 0xff {
+                        *i += 1;
+                        break;
+                    }
+                    let head = input[*i];
+                    *i += 1;
+                    if head >> 5 != major || head & 31 == 31 {
+                        return Err("indefinite CBOR string contains a wrong or indefinite chunk".to_string());
+                    }
+                    let n = cbor_read_len(input, i, head & 31)? as usize;
+                    if n > input.len().saturating_sub(*i) {
+                        return Err("CBOR byte/text string chunk is truncated".to_string());
+                    }
+                    bytes.extend_from_slice(&input[*i..*i + n]);
+                    *i += n;
+                }
+                return String::from_utf8(bytes)
+                    .map(|s| json_variant("Text", Some(CtValue::Str(s))))
+                    .map_err(|_| "CBOR text is not UTF-8".to_string());
+            }
             let n = cbor_read_len(input, i, add)? as usize;
             if *i + n > input.len() {
                 return Err("truncated CBOR bytes/text".to_string());
@@ -1902,6 +1950,20 @@ fn cbor_decode_val(input: &[u8], i: &mut usize) -> Result<CtValue, String> {
             }
         }
         4 => {
+            if add == 31 {
+                let mut xs = Vec::new();
+                loop {
+                    if *i >= input.len() {
+                        return Err("indefinite CBOR array ended before its break".to_string());
+                    }
+                    if input[*i] == 0xff {
+                        *i += 1;
+                        break;
+                    }
+                    xs.push(cbor_decode_val(input, i)?);
+                }
+                return Ok(json_array(xs));
+            }
             let n = cbor_read_len(input, i, add)? as usize;
             let mut xs = Vec::with_capacity(n);
             for _ in 0..n {
@@ -1910,6 +1972,29 @@ fn cbor_decode_val(input: &[u8], i: &mut usize) -> Result<CtValue, String> {
             Ok(json_array(xs))
         }
         5 => {
+            if add == 31 {
+                let mut es = Vec::new();
+                loop {
+                    if *i >= input.len() {
+                        return Err("indefinite CBOR map ended before its break".to_string());
+                    }
+                    if input[*i] == 0xff {
+                        *i += 1;
+                        break;
+                    }
+                    let k = match cbor_decode_val(input, i)? {
+                        v => match json_payload(&v, "Text") {
+                            Some(CtValue::Str(s)) => s.clone(),
+                            _ => return Err("CBOR map key must be text".to_string()),
+                        },
+                    };
+                    if *i >= input.len() || input[*i] == 0xff {
+                        return Err("indefinite CBOR map break appears where a value is required".to_string());
+                    }
+                    es.push((k, cbor_decode_val(input, i)?));
+                }
+                return Ok(json_object(es));
+            }
             let n = cbor_read_len(input, i, add)? as usize;
             let mut es = Vec::with_capacity(n);
             for _ in 0..n {
@@ -1927,6 +2012,23 @@ fn cbor_decode_val(input: &[u8], i: &mut usize) -> Result<CtValue, String> {
             20 => Ok(json_variant("Bool", Some(CtValue::Bool(false)))),
             21 => Ok(json_variant("Bool", Some(CtValue::Bool(true)))),
             22 => Ok(json_variant("Null", None)),
+            25 => {
+                if *i + 2 > input.len() {
+                    return Err("truncated CBOR float".to_string());
+                }
+                let bits = u16::from_be_bytes([input[*i], input[*i + 1]]);
+                *i += 2;
+                Ok(json_variant("Float", Some(CtValue::Float(cbor_half_to_f64(bits)))))
+            }
+            26 => {
+                if *i + 4 > input.len() {
+                    return Err("truncated CBOR float".to_string());
+                }
+                let mut buf = [0u8; 4];
+                buf.copy_from_slice(&input[*i..*i + 4]);
+                *i += 4;
+                Ok(json_variant("Float", Some(CtValue::Float(f32::from_be_bytes(buf) as f64))))
+            }
             27 => {
                 if *i + 8 > input.len() {
                     return Err("truncated CBOR float".to_string());

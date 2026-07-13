@@ -252,6 +252,20 @@ fn comptime_module_calls_match_runtime() {
 }
 
 #[test]
+fn cbor_generic_whole_decode_matches_comptime_and_aot() {
+    if !have_rustc() {
+        eprintln!("note: rustc not found; skipping CBOR whole-value differential");
+        return;
+    }
+    // D-ENC-CBOR-SURFACE1 / #296: current generic whole-value decode,
+    // including normal-mode indefinite containers and preferred Float16,
+    // is one R12 semantic path at comptime and AOT. This intentionally does
+    // not exercise the retired untyped `decode(DataTree)` compatibility arm.
+    let src = "use core.encoding.cbor as cbor\ncomptime C = cbor.decode<[Float]>([159, 249, 62, 0, 249, 64, 0, 255]) ?? panic(\"bad\")\n\nfn run() {\n    r: [Float] := cbor.decode<[Float]>([159, 249, 62, 0, 249, 64, 0, 255]) ?? panic(\"bad\")\n    print(\"{C}\")\n    print(\"{r}\")\n}\n";
+    check_comptime_src(2000, "generic CBOR indefinite Float16 decode", src);
+}
+
+#[test]
 fn local_comptime_is_literal_data() {
     let stdout = compile_and_run(
         r#"

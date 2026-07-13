@@ -1224,6 +1224,17 @@ fn run() {
         stdout,
         "[162, 98, 105, 100, 7, 103, 112, 97, 121, 108, 111, 97, 100, 66, 222, 173]\ntrue\n7\n[222, 173]\n[1, 2, 255]\n-1\n"
     );
+    let path = dir.join("cbor_whole.jet");
+    fs::write(&path, source).unwrap();
+    match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, false) {
+        jet::Interpreter::RunOutcome::Ran {
+            stdout: dev_stdout,
+            stderr: dev_stderr,
+            exit_code,
+        } => assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new())),
+        other => panic!("CBOR whole-value default-dev failed: {other:?}"),
+    }
+    let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -1344,6 +1355,128 @@ fn run() {
         stdout,
         "[1, 2]\nabc\nJet\n[1, 2, 3]\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n"
     );
+}
+
+#[test]
+fn cbor_whole_hostile_byte_corpus_matches_aot_and_default_dev() {
+    if !Command::new("rustc").arg("--version").output().is_ok() {
+        eprintln!("note: skipping CBOR hostile whole-value corpus (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_cbor_whole_corpus_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let source = r#"
+use core.encoding.cbor as cbor
+
+fn wire(values: [Int]) -> [U8] {
+    bytes: [U8] := []
+    loop value in values {
+        bytes.push(value.to_u8() ?? panic("corpus byte outside U8"))
+    }
+    return bytes
+}
+
+fn accepted(values: [Int]) -> Bool {
+    if cbor.parse(wire(values)) == {
+        ok(_) -> return true
+        err(_) -> return false
+    }
+    return false
+}
+
+fn rejected(values: [Int], offset: Int, path: String, reason: String) -> Bool {
+    if cbor.parse(wire(values)) == {
+        ok(_) -> return false
+        err(error) -> return error.byte_offset == offset && error.path == path && error.reason == reason
+    }
+    return false
+}
+
+fn canonical_rejected(values: [Int], offset: Int, path: String, reason: String) -> Bool {
+    strict := cbor.CBOROptions.{
+        max_depth: 256,
+        max_items: 1000000,
+        max_bytes: 1073741824,
+        require_canonical: true,
+    }
+    if cbor.parse(wire(values), strict) == {
+        ok(_) -> return false
+        err(error) -> return error.byte_offset == offset && error.path == path && error.reason == reason
+    }
+    return false
+}
+
+fn run() {
+    empty: [Int] := []
+    // RFC 8949 argument widths, scalar families, nested containers, preferred
+    // floats, and every supported normal-mode indefinite family.
+    print(accepted([0]))
+    print(accepted([23]))
+    print(accepted([24, 24]))
+    print(accepted([25, 1, 0]))
+    print(accepted([26, 0, 1, 0, 0]))
+    print(accepted([27, 0, 0, 0, 1, 0, 0, 0, 0]))
+    print(accepted([32]))
+    print(accepted([56, 24]))
+    print(accepted([96]))
+    print(accepted([99, 226, 130, 172]))
+    print(accepted([131, 1, 130, 2, 3, 161, 97, 107, 245]))
+    print(accepted([246]))
+    print(accepted([249, 62, 0]))
+    print(accepted([250, 71, 195, 80, 0]))
+    print(accepted([127, 97, 97, 98, 98, 99, 255]))
+    print(accepted([159, 1, 2, 255]))
+    print(accepted([191, 97, 107, 1, 255]))
+
+    // Truncation at each structural layer, reserved heads, invalid text,
+    // closed DataTree byte identity, duplicate/non-text keys, tags/simple
+    // values, stray breaks, trailing roots, and signed-range overflow.
+    print(rejected(empty, 0, "$", "CBOR value is missing"))
+    print(rejected([28], 0, "$", "indefinite/reserved CBOR length is unsupported by whole-value decoding"))
+    print(rejected([26, 0], 2, "$", "CBOR length argument is truncated"))
+    print(rejected([27, 128, 0, 0, 0, 0, 0, 0, 0], 0, "$", "CBOR integer is outside Jet Int"))
+    print(rejected([59, 128, 0, 0, 0, 0, 0, 0, 0], 0, "$", "CBOR integer is outside Jet Int"))
+    print(rejected([65, 0], 0, "$", "CBOR byte strings are outside core.encoding.Data; use decode<[U8]>"))
+    print(rejected([98, 97], 2, "$", "CBOR byte/text string is truncated"))
+    print(rejected([97, 255], 0, "$", "CBOR text is not UTF-8"))
+    print(rejected([127, 98, 97], 3, "$", "CBOR byte/text string chunk is truncated"))
+    print(rejected([130, 1], 2, "$[1]", "CBOR value is missing"))
+    print(rejected([161, 1, 2], 1, "$", "CBOR map key must be text"))
+    print(rejected([162, 97, 97, 1, 97, 97, 2], 4, "$", "duplicate CBOR text map key"))
+    print(rejected([161, 97, 97], 3, "$[\"a\"]", "CBOR value is missing"))
+    print(rejected([192, 1], 0, "$", "CBOR tags are unsupported"))
+    print(rejected([247], 0, "$", "unsupported CBOR simple value 23"))
+    print(rejected([255], 0, "$", "CBOR break outside an indefinite container"))
+    print(rejected([249, 0], 2, "$", "CBOR Float16 is truncated"))
+    print(rejected([1, 2], 1, "$", "trailing CBOR data after root value"))
+
+    // Original wire, not a normalized tree, determines strict acceptance.
+    print(canonical_rejected([24, 1], 0, "$", "CBOR argument does not use its shortest form"))
+    print(canonical_rejected([120, 1, 97], 0, "$", "CBOR argument does not use its shortest form"))
+    print(canonical_rejected([162, 97, 98, 1, 97, 97, 2], 4, "$", "CBOR map keys are not in Core deterministic bytewise order"))
+    print(canonical_rejected([250, 63, 192, 0, 0], 0, "$", "CBOR Float does not use its preferred shortest encoding"))
+    print(canonical_rejected([159, 1, 255], 0, "$", "indefinite-length CBOR is not Core deterministic"))
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "cbor_whole_corpus", source, &[], None);
+    assert_eq!(code, 0, "CBOR hostile whole-value corpus failed: {stderr}");
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert_eq!(lines.len(), 40, "hostile corpus case count drifted: {stdout}");
+    assert!(lines.iter().all(|line| *line == "true"), "hostile corpus mismatch: {stdout}");
+    assert_eq!(stderr, "");
+
+    let path = dir.join("cbor_whole_corpus.jet");
+    fs::write(&path, source).unwrap();
+    match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, false) {
+        jet::Interpreter::RunOutcome::Ran {
+            stdout: dev_stdout,
+            stderr: dev_stderr,
+            exit_code,
+        } => assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new())),
+        other => panic!("CBOR hostile corpus default-dev failed: {other:?}"),
+    }
+    let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]
