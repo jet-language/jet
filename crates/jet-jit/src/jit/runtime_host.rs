@@ -60,6 +60,9 @@ pub(crate) struct JitRuntime {
     /// `E0953` diagnostic, exactly as the tier-0 interpreter reports the same
     /// panic. Keeps the FIRST message; later traps on the unwind path are noise.
     pub(crate) trapped: Option<String>,
+    /// Compiler-owned E3003 rendered after native code returns; never unwinds
+    /// through a Cranelift frame.
+    pub(crate) deadline_exceeded: Option<String>,
 }
 
 impl JitRuntime {
@@ -68,6 +71,12 @@ impl JitRuntime {
     pub(crate) fn set_trap(&mut self, msg: &str) {
         if self.trapped.is_none() {
             self.trapped = Some(msg.to_string());
+        }
+    }
+
+    pub(crate) fn set_deadline(&mut self, rendered: String) {
+        if self.deadline_exceeded.is_none() {
+            self.deadline_exceeded = Some(rendered);
         }
     }
 }

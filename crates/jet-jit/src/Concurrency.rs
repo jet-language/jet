@@ -4,8 +4,8 @@ use jet_codegen::scheduler::{
     jet_scheduler_all, jet_scheduler_any, jet_scheduler_race, jet_scheduler_select_int_channels,
     jet_scheduler_deliver_shield_exit, jet_scheduler_shield_enter,
     jet_scheduler_shield_leave_status, jet_scheduler_sleep_ms, jet_scheduler_spawn_with_control,
-    jet_scheduler_wait_without_unwind, jet_scheduler_yield_now, JetSchedulerChannel,
-    JetSchedulerJoin, JetSchedulerWait, JetShieldExit, JetTaskControl,
+    jet_scheduler_wait_without_unwind, JetSchedulerChannel, JetSchedulerJoin, JetSchedulerWait,
+    JetShieldExit, JetTaskControl,
 };
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -36,6 +36,10 @@ where
             set_pending_shield_exit(JetShieldExit::Cancelled);
             JitWaitStatus::Interrupted as i64
         }
+        JetSchedulerWait::Deadline(rendered) => {
+            with_runtime_mut(|rt| rt.set_deadline(rendered));
+            JitWaitStatus::Interrupted as i64
+        }
         JetSchedulerWait::Panicked(message) => {
             trap_panic(&message);
             JitWaitStatus::Panicked as i64
@@ -62,6 +66,21 @@ fn take_pending_shield_exit() -> JetShieldExit {
         1 => JetShieldExit::Cancelled,
         _ => JetShieldExit::None,
     })
+}
+
+/// Complete a control transfer after the top-level Cranelift frame returned.
+/// Spawned frames use their Rust task wrapper; resident `run` uses this hook.
+pub(crate) fn settle_pending_after_native() {
+    match take_pending_shield_exit() {
+        JetShieldExit::None => {}
+        JetShieldExit::Cancelled => {
+            with_runtime_mut(|rt| rt.set_trap("a task was cancelled"));
+        }
+        JetShieldExit::Deadline => {
+            // Deadline text was recorded by the status/shield host before the
+            // native early return. Resident reporting owns E3003.
+        }
+    }
 }
 
 pub(crate) fn with_runtime_mut<F, R>(f: F) -> R
@@ -251,6 +270,13 @@ extern "C" fn jet_jit_shield_enter() {
 
 extern "C" fn jet_jit_shield_leave() -> i64 {
     let exit = jet_scheduler_shield_leave_status();
+    if matches!(exit, JetShieldExit::Deadline) {
+        with_runtime_mut(|rt| {
+            rt.set_deadline(
+                "Error [E3003]: deadline exceeded while waiting at shield exit\nWhy: this wait point observed the task context deadline from `#Context(deadline: …)`\nFix: raise the deadline budget or shorten the work before this wait point".to_string(),
+            )
+        });
+    }
     set_pending_shield_exit(exit);
     i64::from(!matches!(exit, JetShieldExit::None))
 }
@@ -343,13 +369,6 @@ extern "C" fn jet_jit_sleep(millis: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_yield_now() -> i64 {
-    wait_status(|| {
-        jet_scheduler_yield_now();
-        0
-    })
-}
-
 pub(crate) struct ConcurrencyHostFns {
     pub channel_new: cranelift_module::FuncId,
     pub channel_sender: cranelift_module::FuncId,
@@ -373,8 +392,6 @@ pub(crate) struct ConcurrencyHostFns {
     pub shield_leave: cranelift_module::FuncId,
     pub wait_value: cranelift_module::FuncId,
     pub sleep: cranelift_module::FuncId,
-    #[allow(dead_code)] // internal scheduler-yield ABI; exercised by boundary tests
-    pub yield_now: cranelift_module::FuncId,
 }
 
 pub(crate) fn register_concurrency_symbols(builder: &mut cranelift_jit::JITBuilder) {
@@ -412,7 +429,6 @@ pub(crate) fn register_concurrency_symbols(builder: &mut cranelift_jit::JITBuild
     builder.symbol("jet_jit_shield_leave", jet_jit_shield_leave as *const u8);
     builder.symbol("jet_jit_wait_value", jet_jit_wait_value as *const u8);
     builder.symbol("jet_jit_sleep", jet_jit_sleep as *const u8);
-    builder.symbol("jet_jit_yield_now", jet_jit_yield_now as *const u8);
 }
 
 pub(crate) fn declare_concurrency_host_fns(
@@ -488,6 +504,5 @@ pub(crate) fn declare_concurrency_host_fns(
         shield_leave: import("jet_jit_shield_leave", &sig_noarg_i64)?,
         wait_value: import("jet_jit_wait_value", &sig_noarg_i64)?,
         sleep: import("jet_jit_sleep", &sig_i64)?,
-        yield_now: import("jet_jit_yield_now", &sig_noarg_i64)?,
     })
 }

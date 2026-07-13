@@ -1398,7 +1398,7 @@ impl JitBackend for RejectJitFallback {
     }
 }
 
-fn run_cranelift_without_fallback(src: &str, tag: &str) -> ProgramOutput {
+fn run_cranelift_outcome_without_fallback(src: &str, tag: &str) -> RunOutcome {
     let p = std::env::temp_dir().join(format!("jet_jit_no_fallback_{tag}.jet"));
     fs::write(&p, src).unwrap();
     let shown = p.to_string_lossy().to_string();
@@ -1411,7 +1411,11 @@ fn run_cranelift_without_fallback(src: &str, tag: &str) -> ProgramOutput {
     jet_jit::try_compile_bundle(&bundle)
         .unwrap_or_else(|e| panic!("`{tag}` JIT compile failed: {e}"));
     let mut backend = CraneliftBackend::new(RejectJitFallback);
-    match backend.run(&bundle, false) {
+    backend.run(&bundle, false)
+}
+
+fn run_cranelift_without_fallback(src: &str, tag: &str) -> ProgramOutput {
+    match run_cranelift_outcome_without_fallback(src, tag) {
         RunOutcome::Ran {
             stdout,
             stderr,
@@ -2102,6 +2106,34 @@ fn run() {
     assert_eq!(out.stdout, "");
 }
 
+#[test]
+fn cranelift_wait_failures_return_compiler_diagnostics_not_process_exit() {
+    let join_cancelled = r#"use core.tasks as tasks
+use core.time as time
+fn run() {
+    child :: tasks.spawn(() => {
+        time.sleep(200)
+    })
+    child.cancel()
+    child.join()
+}
+"#;
+    let RunOutcome::Problems(join_diags) =
+        run_cranelift_outcome_without_fallback(join_cancelled, "join_cancelled")
+    else {
+        panic!("joining a cancelled task must report a compiler-owned diagnostic")
+    };
+    assert!(join_diags.iter().any(|d| d.code == "E0953"));
+
+    let all_failfast = fs::read_to_string("examples/features/concurrency/all_failfast.jet")
+        .expect("read all_failfast example");
+    let RunOutcome::Problems(all_diags) =
+        run_cranelift_outcome_without_fallback(&all_failfast, "all_failfast_boundary")
+    else {
+        panic!("all fail-fast must report its failure without exiting the test process")
+    };
+    assert!(all_diags.iter().any(|d| d.code == "E0953"));
+}
 /// c139 M3: checked integer arithmetic with overflow traps.
 #[test]
 fn cranelift_covers_checked_arithmetic() {

@@ -68,12 +68,17 @@ fn jet_scheduler_fatal(msg: &str) -> ! {
 // `jet_scheduler_shield_enter`/`_leave` around the body (Codegen/TIR emit).
 struct JetCancelUnwind;
 
+struct JetDeadlineUnwind {
+    rendered: String,
+}
+
 /// Result of calling a scheduler wait point from a native-code boundary that
 /// cannot carry Rust unwinds (Cranelift, C, plugins). The boundary catches the
 /// scheduler's internal control transfer before it reaches foreign frames.
 pub enum JetSchedulerWait<T> {
     Ready(T),
     Cancelled,
+    Deadline(String),
     Panicked(String),
 }
 
@@ -81,9 +86,26 @@ pub fn jet_scheduler_wait_without_unwind<F, T>(f: F) -> JetSchedulerWait<T>
 where
     F: FnOnce() -> T,
 {
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+    jet_scheduler_install_panic_hook();
+    let result = JET_IN_SCHEDULER_TASK.with(|in_task| {
+        JET_SCHEDULER_CATCHING_PANIC.with(|catching| {
+            let previous_task = in_task.replace(true);
+            let previous_catching = catching.replace(true);
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+            catching.set(previous_catching);
+            in_task.set(previous_task);
+            result
+        })
+    });
+    match result {
         Ok(value) => JetSchedulerWait::Ready(value),
         Err(payload) if payload.is::<JetCancelUnwind>() => JetSchedulerWait::Cancelled,
+        Err(payload) if payload.is::<JetDeadlineUnwind>() => {
+            let deadline = payload
+                .downcast::<JetDeadlineUnwind>()
+                .expect("deadline payload type checked");
+            JetSchedulerWait::Deadline(deadline.rendered)
+        }
         Err(payload) => {
             let message = payload
                 .downcast_ref::<String>()

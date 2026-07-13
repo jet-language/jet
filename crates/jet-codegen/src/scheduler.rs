@@ -165,12 +165,16 @@ fn jet_deadline_remaining_ms() -> Option<i64> {
 
 #[cfg(test)]
 fn jet_deadline_exceeded(_kind: &str) -> ! {
-    panic!("deadline exceeded");
+    std::panic::panic_any(JetDeadlineUnwind {
+        rendered: "deadline exceeded".to_string(),
+    });
 }
 
 #[cfg(not(test))]
 fn jet_deadline_exceeded(_kind: &str) -> ! {
-    std::process::exit(70)
+    std::panic::panic_any(JetDeadlineUnwind {
+        rendered: "Error [E3003]: deadline exceeded while waiting in a scheduler wait point\nWhy: this wait point observed the task context deadline from `#Context(deadline: …)`\nFix: raise the deadline budget or shorten the work before this wait point".to_string(),
+    })
 }
 
 thread_local! {
@@ -255,12 +259,17 @@ fn jet_scheduler_fatal(msg: &str) -> ! {
 // `jet_scheduler_shield_enter`/`_leave` around the body (Codegen/TIR emit).
 struct JetCancelUnwind;
 
+struct JetDeadlineUnwind {
+    rendered: String,
+}
+
 /// Result of calling a scheduler wait point from a native-code boundary that
 /// cannot carry Rust unwinds (Cranelift, C, plugins). The boundary catches the
 /// scheduler's internal control transfer before it reaches foreign frames.
 pub enum JetSchedulerWait<T> {
     Ready(T),
     Cancelled,
+    Deadline(String),
     Panicked(String),
 }
 
@@ -268,9 +277,26 @@ pub fn jet_scheduler_wait_without_unwind<F, T>(f: F) -> JetSchedulerWait<T>
 where
     F: FnOnce() -> T,
 {
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+    jet_scheduler_install_panic_hook();
+    let result = JET_IN_SCHEDULER_TASK.with(|in_task| {
+        JET_SCHEDULER_CATCHING_PANIC.with(|catching| {
+            let previous_task = in_task.replace(true);
+            let previous_catching = catching.replace(true);
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+            catching.set(previous_catching);
+            in_task.set(previous_task);
+            result
+        })
+    });
+    match result {
         Ok(value) => JetSchedulerWait::Ready(value),
         Err(payload) if payload.is::<JetCancelUnwind>() => JetSchedulerWait::Cancelled,
+        Err(payload) if payload.is::<JetDeadlineUnwind>() => {
+            let deadline = payload
+                .downcast::<JetDeadlineUnwind>()
+                .expect("deadline payload type checked");
+            JetSchedulerWait::Deadline(deadline.rendered)
+        }
         Err(payload) => {
             let message = payload
                 .downcast_ref::<String>()
@@ -2620,6 +2646,23 @@ mod interrupt_boundary_tests {
         );
     }
 
+    #[test]
+    fn non_unwind_wait_boundary_returns_typed_deadline_for_yield() {
+        jet_scheduler_set_task_control(Some(JetTaskControl::new()));
+        jet_scheduler_task_panic_enter();
+        TEST_DEADLINE_EXCEEDED.with(|deadline| deadline.set(true));
+        let result = jet_scheduler_wait_without_unwind(jet_scheduler_yield_now);
+        TEST_DEADLINE_EXCEEDED.with(|deadline| deadline.set(false));
+        jet_scheduler_set_task_control(None);
+        jet_scheduler_task_panic_leave();
+        match result {
+            JetSchedulerWait::Deadline(rendered) => {
+                assert_eq!(rendered, "deadline exceeded");
+            }
+            _ => panic!("yield deadline must cross native boundary as typed status"),
+        }
+    }
+
     // Exercise the exact RAII shape emitted by Codegen/TIR/emit/statements.rs.
     // These helpers deliberately do not call `_leave` from test bodies: Drop is
     // what must cover every control-flow and unwind edge.
@@ -2698,11 +2741,10 @@ mod interrupt_boundary_tests {
             emitted_shield!({ TEST_DEADLINE_EXCEEDED.with(|d| d.set(true)) });
         }));
         let payload = both.expect_err("pending deadline must land at guard drop");
-        let text = if let Some(s) = payload.downcast_ref::<String>() {
-            s.as_str()
-        } else {
-            payload.downcast_ref::<&'static str>().copied().unwrap_or("")
-        };
+        let text = payload
+            .downcast_ref::<JetDeadlineUnwind>()
+            .map(|deadline| deadline.rendered.as_str())
+            .unwrap_or("");
         assert_eq!(text, "deadline exceeded");
         assert!(!jet_scheduler_shielded());
         TEST_DEADLINE_EXCEEDED.with(|d| d.set(false));

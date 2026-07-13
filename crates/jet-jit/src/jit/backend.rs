@@ -40,13 +40,10 @@ impl<F: JitBackend> JitBackend for CraneliftBackend<F> {
                         exit_code,
                     };
                 }
-                // A resident runtime trap (E0953) proves the native lowering
-                // reached user code, but the in-process JIT cannot yet emit the
-                // exact AOT panic stderr/exit envelope. Default `jet dev` uses
-                // the transparent fallback ladder here so panic demos still
-                // match `jet run`; hot_swap/restart keep returning the resident
-                // diagnostic for live-loop safety tests.
-                Ok(RunOutcome::Problems(_)) => return self.fallback.run(bundle, try_anyway),
+                // Native execution already happened. Its compiler-owned
+                // diagnostic is authoritative; re-running through another tier
+                // would duplicate effects and hide resident boundary bugs.
+                Ok(problems @ RunOutcome::Problems(_)) => return problems,
                 Err(_) => return self.fallback.run(bundle, try_anyway),
             }
         }
