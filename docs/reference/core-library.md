@@ -1693,8 +1693,9 @@ windows, no trait values, and no closure values unless they are handed over
 with `take`. A `Task` that goes out of scope without
 `.join()` emits warning **L1101**.
 With `#Context(deadline: <Int epoch_ms>)`, blocking waits (`task.join()` /
-`task.wait()` / `ch.receive()` / `sender.send()` / `time.sleep`) observe the
-inherited budget and report runtime **E3003** on exceed.
+`task.wait()` / `ch.receive()` / `sender.send()` / `time.sleep`, TCP read/write,
+and `ProcessChild.wait()`) observe the inherited budget and report runtime
+**E3003** on exceed. Task cancellation wakes the same scheduler wait points.
 
 `taskgroup` owns child tasks until scope exit. `g.all`, `g.race`, and `g.any`
 join task lists on the scheduler; `race`/`any` cancel losers. `g.select()` races
@@ -2268,8 +2269,9 @@ shift count past the type's width traps (no leaked Rust panic).
 ## `core.net` — sockets and DNS
 
 `core.net` is the low-level socket layer. Calls look blocking at the Jet
-surface. AOT socket operations bound blocking I/O by available `#Context`
-deadlines; prompt cancellation and JIT scheduler integration remain #306 work.
+surface. On Linux, TCP read/write park through the native scheduler readiness
+backend and observe task cancellation and available `#Context` deadlines.
+Windows IOCP lifecycle and platform proof remains #527.
 Beginner calls accept strings; expert calls accept typed
 `IpAddr` / `SocketAddr` values.
 

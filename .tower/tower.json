@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 528,
-    "rev": 4983,
+    "rev": 4989,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -4735,7 +4735,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-TASKRUNTIME1=A: Hybrid: structured scopes, select values, and Go-scale runtime. Task groups remain the lifetime boundary. Channels, timers, deadlines, cancellation, and select all produce typed event values. The runtime can multiplex many tasks, but user code stays structured; expert hooks expose scheduler budgets, tracing, and deterministic test control.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: corelib audit: core.tasks — M:N runtime completion, select, bounded channels, timers\n\nCurrent law: Existing linked decisions: none yet. D-CORENS1 keeps all first-party modules under core.*; I6 forbids compiler deps; D-STDRUBRIC1 requires mechanical core API laws.\n\nBuild order: Audit current Core/API/prelude/docs/tests first; write failing UI/golden/unit fixtures; implement std-only or approved bridge code; update docs/reference and syntax-decisions when law changes; run targeted tests, then full nix develop -c cargo test before close.\n\nAcceptance: Examples/goldens or UI snapshots prove each shipped behavior; stdlib map records shipped/carded/declined rows; no rustc/user-hostile errors; no compiler external deps.\n\nDependencies/collisions: Respect neighboring core cards: io/args/process separate; text before regex; net/url before http; encoding before data/db; random never owns secrets.",
       "blockedBy": [
@@ -4743,6 +4743,11 @@
       ],
       "assignee": "codex-epoch3-306",
       "log": [
+        {
+          "at": "2026-07-13",
+          "by": "codex-epoch3-306",
+          "text": "Linux/language conformance audit started. Owner gates: none; D-TASKRUNTIME1 ratified. Windows-native IOCP lifecycle/platform CI proof is exclusively #527 (E8), not duplicated here. Measurable Linux criteria follow."
+        },
         {
           "at": "2026-07-09",
           "by": "codex-main",
@@ -4796,7 +4801,53 @@
       "created": "2026-07-07T17:23:33.610Z",
       "updated": "2026-07-13",
       "workOrder": 101,
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Linux scheduler waits for bounded channel send/receive, timer/sleep, select, and task join wake on cancellation and inherited deadline; waiter registrations retire exactly once.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-13T02:52:35.607Z"
+        },
+        {
+          "n": 2,
+          "text": "Linux blocking TCP read/write and process-child wait park through scheduler-aware boundaries and wake on cancellation/deadline without pinning a worker.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-13T02:52:35.698Z"
+        },
+        {
+          "n": 3,
+          "text": "Bounded-channel backpressure, timer after/interval, and select channel/timer behavior have deterministic real-runtime tests plus task_runtime_audit example/golden.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-13T02:52:35.800Z"
+        },
+        {
+          "n": 4,
+          "text": "Cancellation/deadline cleanup and user-visible outcome agree across AOT run, Cranelift JIT, and jet dev paths on Linux; no rustc leakage or fallback facade.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-13T02:52:35.893Z"
+        },
+        {
+          "n": 5,
+          "text": "Concurrency plans/reference docs contain a reconciled shipped/carded audit: Linux core.tasks behavior here; Windows IOCP/platform proof only #527.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-13T02:52:35.985Z"
+        }
+      ],
       "needsAcceptance": false,
       "refs": [],
       "claimedAt": "2026-07-13T02:51:16.478Z"
@@ -30902,6 +30953,48 @@
   ],
   "events": [
     {
+      "at": "2026-07-13T02:52:35.985Z",
+      "by": "codex-epoch3-306",
+      "action": "card.criteria-add",
+      "ref": "c05o0105",
+      "note": "#5 Concurrency plans/reference docs contain a reconciled shippe"
+    },
+    {
+      "at": "2026-07-13T02:52:35.893Z",
+      "by": "codex-epoch3-306",
+      "action": "card.criteria-add",
+      "ref": "c05o0105",
+      "note": "#4 Cancellation/deadline cleanup and user-visible outcome agree"
+    },
+    {
+      "at": "2026-07-13T02:52:35.800Z",
+      "by": "codex-epoch3-306",
+      "action": "card.criteria-add",
+      "ref": "c05o0105",
+      "note": "#3 Bounded-channel backpressure, timer after/interval, and sele"
+    },
+    {
+      "at": "2026-07-13T02:52:35.698Z",
+      "by": "codex-epoch3-306",
+      "action": "card.criteria-add",
+      "ref": "c05o0105",
+      "note": "#2 Linux blocking TCP read/write and process-child wait park th"
+    },
+    {
+      "at": "2026-07-13T02:52:35.607Z",
+      "by": "codex-epoch3-306",
+      "action": "card.criteria-add",
+      "ref": "c05o0105",
+      "note": "#1 Linux scheduler waits for bounded channel send/receive, time"
+    },
+    {
+      "at": "2026-07-13T02:52:35.518Z",
+      "by": "codex-epoch3-306",
+      "action": "card.update",
+      "ref": "c05o0105",
+      "note": "phase,logEntry"
+    },
+    {
       "at": "2026-07-13T02:51:16.478Z",
       "by": "codex-epoch3-306",
       "action": "card.claim",
@@ -34358,48 +34451,6 @@
       "action": "card.criteria-add",
       "ref": "c0zpoz3m",
       "note": "#1 CLI: card activate command + triage/activate E_OWNER_LANE gu"
-    },
-    {
-      "at": "2026-07-12T13:48:40.978Z",
-      "by": "terra-516-builder",
-      "action": "card.claim",
-      "ref": "c0zpoz3m",
-      "note": ""
-    },
-    {
-      "at": "2026-07-12T13:43:22.866Z",
-      "by": "terra-241-builder",
-      "action": "card.update",
-      "ref": "ccq07pav",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T13:34:07.371Z",
-      "by": "terra-241-builder",
-      "action": "card.claim",
-      "ref": "ccq07pav",
-      "note": ""
-    },
-    {
-      "at": "2026-07-12T13:34:03.702Z",
-      "by": "terra-296-builder",
-      "action": "card.release",
-      "ref": "c0uxsyns",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-12T13:34:03.616Z",
-      "by": "terra-296-builder",
-      "action": "card.update",
-      "ref": "c0uxsyns",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-12T13:32:52.883Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0uxsyns",
-      "note": "logEntry"
     }
   ],
   "nextNum": 368,

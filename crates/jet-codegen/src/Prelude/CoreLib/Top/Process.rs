@@ -170,7 +170,10 @@ fn jet_process_child_wait(
             }
         }
         drop(slot);
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        // D-TASKRUNTIME1=A: process waits are scheduler wait points. Parking
+        // here keeps the worker available and makes inherited cancellation and
+        // deadlines wake the wait exactly like channel, timer, and I/O waits.
+        jet_scheduler_sleep_ms(10);
     };
     child.inner.borrow_mut().take();
     let (output, errors) = jet_process_collect_output(child)?;

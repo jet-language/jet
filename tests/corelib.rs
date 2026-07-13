@@ -1802,6 +1802,7 @@ fn run() {
         time.sleep(5)
     }
 }
+
 "#,
         &[],
         None,
@@ -1814,6 +1815,46 @@ fn run() {
     assert!(
         stderr.contains("E3003"),
         "deadline exceed should carry code E3003, got: {stderr:?}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn process_wait_observes_inherited_deadline() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping process deadline runtime test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!(
+        "jet_corelib_process_deadline_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let sleeper = dir.join("sleep.sh");
+    write_executable(&sleeper, "#!/bin/sh\nsleep 2\n");
+    let source = format!(
+        r#"
+use core.process as process
+use core.time as time
+
+fn run() {{
+    child :: process.cmd(["{sleeper}"]).spawn() ?? panic("spawn failed")
+    #Context(deadline: time.now() + 20) {{
+        child.wait() ?? panic("wait failed")
+    }}
+}}
+"#,
+        sleeper = jet_string_path(&sleeper)
+    );
+    let (code, _stdout, stderr) =
+        build_and_run(&dir, "process_wait_deadline", &source, &[], None);
+    assert_eq!(code, 70, "process wait deadline should stop with runtime code 70");
+    assert!(
+        stderr.contains("Error [E3003]") && stderr.contains("process wait"),
+        "process wait should report its compiler-owned deadline boundary: {stderr:?}"
     );
     let _ = fs::remove_dir_all(&dir);
 }

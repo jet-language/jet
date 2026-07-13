@@ -1,8 +1,9 @@
 # Epoch 3 Concurrency Vision
 
-**Status:** canonicalized 2026-06-30. Tower #126 is the single implementation
-push for Go-scale M:N runtime + scoped concurrency combinators; #36 and #103
-are merged into it.
+**Status:** canonicalized 2026-06-30. Tower #126 shipped Linux M:N runtime
+internals; #306 audits Linux Core wait-point conformance. Windows IOCP lifecycle
+and platform CI proof remains exclusively #527. Former #36 and #103 are merged
+into #126.
 
 This is the cohesive end-state if the recommended open ballots are ratified.
 Exact surface spelling remains owner-controlled; examples show the intended shape,
