@@ -36,6 +36,7 @@ pub mod Components;
 pub mod Discovery;
 pub mod Doctor;
 pub mod EnvFile;
+pub mod EnvHook;
 pub mod Image;
 pub mod JetOS;
 pub mod JetPin;

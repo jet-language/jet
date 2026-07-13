@@ -59,6 +59,9 @@ pub const JETPACK_PROMPT_LABEL: &str = "jetpack";
 /// D-JPK14: shell marker env var set inside a Jetpack shell.
 pub const JETPACK_ENV_MARKER: &str = "JETPACK_ENV";
 
+/// D-JPK14: env var carrying the realized package refs inside a Jetpack shell.
+pub const JETPACK_REF_VAR: &str = "JETPACK_REF";
+
 /// D-JPK3/17: the directive calls an `env.jet` author writes. `pkg.source`
 /// takes one arg (default built-in source) or two (named source + upstream/pin,
 /// D-JPK17). Packages reference named sources inline via `<name>:<package>`.

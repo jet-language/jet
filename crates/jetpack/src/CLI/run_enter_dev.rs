@@ -8,6 +8,7 @@ use super::services_secrets_config::{
 use super::trust_env_build::compose_env;
 use super::workspace_sources::{cwd_table, load_workspace};
 use crate::EnvFile;
+use crate::EnvHook;
 use crate::MemberSelect::{self, SelectRequest};
 use jet_env_model::ModuleEval;
 use crate::Output::Theme;
@@ -267,6 +268,16 @@ fn run_visible_command(theme: &Theme, env: &Env, refs: &[RefSpec::RefSpec], cmd:
 /// foreign `flake.nix`/`devenv.nix` fallback that shells straight to `nix
 /// develop` instead of composing jetpack's own env.
 pub(super) fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
+    // D-ENVHOOK1=A: `jet env hook <shell>` / `jet env export <shell>` route
+    // through `jetpack enter` (D-JPK-DISPATCH1) as reserved first-positional
+    // subverbs of `jet env`. The bare `jet env` shell-entry (no positional, or
+    // a `-p`/`--flake`/`-- cmd` form) is untouched.
+    match parsed.positional.first().map(String::as_str) {
+        Some(v) if v == Syntax::ENV_HOOK_VERB => return cmd_env_hook(theme, parsed),
+        Some(v) if v == Syntax::ENV_EXPORT_VERB => return cmd_env_export(theme, parsed),
+        _ => {}
+    }
+
     let project_dir = std::env::current_dir().unwrap_or_default();
 
     // U16: a project's own `env.*` always wins; the foreign-flake fallback
@@ -377,6 +388,162 @@ pub(super) fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
         auto_clean_after_success(theme, &roots);
     }
     code
+}
+
+/// D-ENVHOOK1=A: `jet env hook <shell>` — print the opt-in shell hook the user
+/// installs once. Pure text (no realize, no trust): installing the hook is a
+/// safe editor action; the trust gate only fires later, on the first activation
+/// of an untrusted env.
+fn cmd_env_hook(theme: &Theme, parsed: &Parsed) -> i32 {
+    match EnvHook::parse_shell(parsed.positional.get(1).map(String::as_str)) {
+        Some(kind) => {
+            print!("{}", EnvHook::render_hook(kind));
+            0
+        }
+        None => {
+            theme.error(
+                "unknown shell for `jet env hook`",
+                &format!(
+                    "the auto-activation hook is available for: {}.",
+                    Syntax::ENV_HOOK_SHELLS.join(", ")
+                ),
+                "try `jet env hook bash`, `jet env hook zsh`, or `jet env hook fish`.",
+            );
+            2
+        }
+    }
+}
+
+/// D-ENVHOOK1=A: `jet env export <shell>` — the hook's private per-prompt
+/// callback. Emits (to stdout) the shell statements that load the nearest
+/// `env.jet` into the current shell, or unload it when the shell has left that
+/// directory tree. Realize/trust/compose reuse the exact same path as `jet env`
+/// (`compose_env` + `Trust::gate`), so there is one env engine (I8). All
+/// human-facing output (ledger rows, the trust prompt) goes to stderr via
+/// `Theme`; stdout carries only shell code for the hook to `eval`.
+fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
+    use std::io::IsTerminal;
+
+    let Some(kind) = EnvHook::parse_shell(parsed.positional.get(1).map(String::as_str)) else {
+        // An unknown shell from an installed hook is not worth a diagnostic on
+        // every prompt — emit nothing and let the shell keep its environment.
+        return 0;
+    };
+
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let disabled = std::env::var_os(Syntax::ENV_DISABLE_VAR)
+        .is_some_and(|v| !v.is_empty());
+    let target = if disabled {
+        None
+    } else {
+        EnvHook::find_env_root(&cwd)
+    };
+    let target_s = target.as_ref().map(|p| p.to_string_lossy().into_owned());
+    let active_s = std::env::var(Syntax::ENV_HOOK_ACTIVE_DIR_VAR)
+        .ok()
+        .filter(|s| !s.is_empty());
+
+    // Nothing changed since the last prompt — stay silent so the hook is a
+    // no-op on the vast majority of prompts (and never re-realizes).
+    if target_s == active_s {
+        return 0;
+    }
+
+    // The PATH to restore on unload / build on top of when activating: the
+    // saved pre-env PATH if an env is currently live, else the live PATH.
+    let base_path = if active_s.is_some() {
+        std::env::var(Syntax::ENV_HOOK_OLD_PATH_VAR)
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| std::env::var("PATH").unwrap_or_default())
+    } else {
+        std::env::var("PATH").unwrap_or_default()
+    };
+
+    let mut script = String::new();
+    if active_s.is_some() {
+        script.push_str(&EnvHook::render_unload(kind, &base_path));
+    }
+
+    if let Some(root_s) = &target_s {
+        let root = PathBuf::from(root_s);
+        // Realize the target env with `root` as cwd so the existing
+        // cwd-relative plan/realize path composes it exactly like `jet env`
+        // would from inside it. This process exits immediately after, so
+        // changing its own cwd affects nothing else.
+        let _ = std::env::set_current_dir(&root);
+        let roots = Store::resolve();
+        let mut plan = match load_project_plan(theme) {
+            Ok(plan) => plan,
+            Err(_) => {
+                // Malformed / foreign-only env here: don't activate, but the
+                // unload (if any) still stands.
+                print!("{script}");
+                return 0;
+            }
+        };
+        if apply_locked_channels(theme, &root, &mut plan.table).is_err() {
+            print!("{script}");
+            return 0;
+        }
+
+        // D-JPK-GRANTCMD1 trust law: the first activation of an untrusted,
+        // trust-sensitive env prompts (interactive) or is refused with a hint
+        // (non-interactive). A trusted or non-sensitive env activates silently.
+        let store = Trust::store_path();
+        let hash =
+            Trust::env_definition_hash(&plan.refs, &plan.table, &plan.secrets);
+        let sensitive =
+            Trust::is_trust_sensitive_ext(&plan.refs, !plan.secrets.is_empty());
+        let trusted = !sensitive
+            || Trust::is_env_trusted(&store, &root, &hash, &plan.refs, &plan.secrets);
+        if !trusted {
+            if std::io::stdin().is_terminal() {
+                if Trust::gate(
+                    theme,
+                    &store,
+                    &root,
+                    &plan.refs,
+                    &plan.table,
+                    &plan.secrets,
+                    parsed.flags.trust,
+                )
+                .is_err()
+                {
+                    print!("{script}");
+                    return 0;
+                }
+            } else {
+                theme.detail(&format!(
+                    "{} here is not trusted — run `jet env` to approve it once",
+                    Syntax::ENV_FILE
+                ));
+                print!("{script}");
+                return 0;
+            }
+        }
+
+        let env = match compose_env(theme, &roots, &parsed.flags, &plan) {
+            Ok(env) => env,
+            Err(_) => {
+                print!("{script}");
+                return 0;
+            }
+        };
+        let composed_path = env.composed_path(&base_path);
+        script.push_str(&EnvHook::render_activate(
+            kind,
+            &EnvHook::Activation {
+                base_path,
+                composed_path,
+                refs: env.refs.join(" "),
+                root: root_s.clone(),
+            },
+        ));
+    }
+
+    print!("{script}");
+    0
 }
 
 /// The foreign flake/devenv file in `dir`, if either exists. `flake.nix` wins

@@ -84,7 +84,7 @@ impl Env {
         let base = std::env::var("PATH").unwrap_or_default();
         cmd.env("PATH", self.composed_path(&base));
         cmd.env(Syntax::JETPACK_ENV_MARKER, "1");
-        cmd.env("JETPACK_REF", self.refs.join(" "));
+        cmd.env(Syntax::JETPACK_REF_VAR, self.refs.join(" "));
     }
 
     fn validate_cache(&self, theme: &Theme) -> bool {

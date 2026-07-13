@@ -421,6 +421,35 @@ pub const FOREIGN_DEVENV_FILE: &str = "devenv.nix";
 /// to `fn run()`.
 pub const DEV_SUBCOMMAND: &str = "dev";
 
+/// D-ENVHOOK1=A (ratified 2026-07-12): direnv-style opt-in env auto-activation.
+/// `jet env hook <shell>` prints a one-line shell hook the user installs once;
+/// after that, entering a directory whose tree carries an `env.jet` activates
+/// that env (its first activation of an untrusted env prompts through the
+/// D-JPK-GRANTCMD1 trust law), and leaving it deactivates. The hook is opt-in:
+/// nothing runs on `cd` until the user adds it. These are engine subverbs of
+/// `jet env`, so they route through `jetpack enter` (D-JPK-DISPATCH1) exactly
+/// like the bare `jet env` shell-entry does.
+pub const ENV_HOOK_VERB: &str = "hook";
+/// D-ENVHOOK1=A: the hook's private per-prompt callback — realizes the nearest
+/// `env.jet` and prints the shell statements the installed hook `eval`s to
+/// activate/deactivate. Users never type this themselves; the installed hook
+/// calls it (direnv's `direnv export` shape).
+pub const ENV_EXPORT_VERB: &str = "export";
+/// D-ENVHOOK1=A: the escape hatch — set to any non-empty value to suppress
+/// auto-activation (and drop any active env) in the current shell.
+/// Documented in docs/reference/environment.md.
+pub const ENV_DISABLE_VAR: &str = "JET_ENV_DISABLE";
+/// D-ENVHOOK1=A: the hook's activation state, exported into the shell so each
+/// per-prompt `export` knows which `env.jet` directory is currently live (empty
+/// = none). A change from it to the nearest `env.jet` root is what triggers a
+/// load / unload.
+pub const ENV_HOOK_ACTIVE_DIR_VAR: &str = "JETPACK_ENV_DIR";
+/// D-ENVHOOK1=A: the pre-activation `PATH` saved on load, restored verbatim on
+/// unload so leaving a project returns the shell to exactly its prior `PATH`.
+pub const ENV_HOOK_OLD_PATH_VAR: &str = "JETPACK_ENV_OLD_PATH";
+/// D-ENVHOOK1=A: the shells `jet env hook` can emit an auto-activation hook for.
+pub const ENV_HOOK_SHELLS: &[&str] = &["bash", "zsh", "fish"];
+
 /// U12 (card c9jetpackgates): `jetpack services <verb>` supervises the
 /// project's dev `services:` processes under `.jet/services/<name>/` —
 /// `up`/`down` start/stop the enabled set (or one named service), `health`

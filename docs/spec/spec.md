@@ -1387,6 +1387,20 @@ dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
   (`path: .Full` and `strip: .Off` are the other modes). `jet env` renders that
   as one hybrid prompt: label plus path by default, `Ctrl-G` status glance on
   demand, and the optional strip showing the same status words.
+- **Auto-activation hook (D-ENVHOOK1=A):** `jet env hook <shell>`
+  (`bash`/`zsh`/`fish`) prints a one-line, opt-in shell hook the user installs
+  once (`jet env hook fish | source`, or a line in the shell config). After
+  that, entering any directory whose tree carries an `env.jet` activates that
+  env — the same packages, `PATH`, and prompt as `jet env` — and leaving the
+  tree restores the shell exactly as it was. The first activation of an
+  untrusted, trust-sensitive env prompts through the ordinary D-JPK-GRANTCMD1
+  trust gate (never on `cd` into a project you already trust); explicit
+  `jet env` stays available for one-off shells and anyone who declines the hook.
+  Set `JET_ENV_DISABLE` to any non-empty value to suppress activation (and drop
+  any active env) in the current shell. The hook re-checks on each prompt via a
+  private `jet env export <shell>` callback that emits nothing until the current
+  directory crosses an env boundary, so it is a no-op on the vast majority of
+  prompts.
 - **`image.<name>:` values are Jetpack OCI images.** Active fields are
   `kind: .Oci` (optional when `from: packages.<name>` makes it clear),
   `from: packages.<name>`, `expose: [Int]`, `env_vars: ["KEY": "value"]`,
