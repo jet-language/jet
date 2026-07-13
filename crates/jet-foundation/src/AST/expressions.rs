@@ -240,6 +240,9 @@ pub enum Expr {
     /// type or a new TIR/codegen shape (E0134 if the suffix isn't a member in
     /// scope).
     UnitLit {
+        /// Exact source digits. Configuration semantics must not recover
+        /// quantities from the convenience numeric fields below.
+        raw: String,
         int: Option<i64>,
         float: Option<f64>,
         suffix: String,

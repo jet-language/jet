@@ -263,13 +263,9 @@ impl<'a> Fmt<'a> {
             Expr::Float(v, _, _) => self.write(&fmt_float(*v)),
             // D-UNITLIT1: `500ms` — no space between the number and the suffix.
             Expr::UnitLit {
-                int, float, suffix, ..
+                raw, suffix, ..
             } => {
-                if let Some(n) = int {
-                    self.write(&n.to_string());
-                } else if let Some(v) = float {
-                    self.write(&fmt_float(*v));
-                }
+                self.write(raw);
                 self.write(suffix);
             }
             Expr::Bool(b, _) => self.write(if *b { "true" } else { "false" }),

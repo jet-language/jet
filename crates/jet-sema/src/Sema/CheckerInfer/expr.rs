@@ -234,6 +234,7 @@ impl<'a> Checker<'a> {
                 suffix,
                 suffix_span,
                 span,
+                ..
             } => {
                 let type_name = crate::AST::UnitFamilyDef::type_name(suffix);
                 let is_unit_member = self.registry.is_distinct(&type_name)

@@ -73,6 +73,9 @@ pub enum TokKind {
     /// value + suffix text; resolving the suffix against an in-scope
     /// `#UnitFamily` member is sema's job (imports aren't known here).
     UnitNumber {
+        /// Exact source digits, retained for policy/config consumers that require
+        /// rational normalization without an f64 round-trip.
+        raw: String,
         int: Option<i64>,
         float: Option<f64>,
         suffix: String,

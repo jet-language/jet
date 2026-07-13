@@ -252,18 +252,55 @@ impl<'a> Parser<'a> {
                         Some(path_span),
                     ));
                 };
-                if !matches!(budgets, Expr::ListLit(_, _)) {
+                let list_span = budgets.span();
+                let Expr::ListLit(entries, _) = budgets else {
                     return Err(Diagnostic::error(
                         "E2903",
                         format!("performance budget role `{path}` is not valid"),
                         "`budgets` must be a list of typed `Budget` values".to_string(),
                         "write `budgets: [Budget.{ ... }]`".to_string(),
-                        Some(budgets.span()),
+                        Some(list_span),
                     ));
+                };
+                let mut typed_budgets = Vec::with_capacity(entries.len());
+                for entry in entries {
+                    let entry_span = entry.span();
+                    let Expr::StructLit { type_name, fields, span, .. } = entry else {
+                        return Err(Diagnostic::error(
+                            "E2903",
+                            "performance budget entry is not valid".to_string(),
+                            "every `budgets` item must be one typed `Budget` literal".to_string(),
+                            "write `Budget.{ name: ..., metric: ..., limit: ... }`".to_string(),
+                            Some(entry_span),
+                        ));
+                    };
+                    if type_name != Syntax::TYPE_BUDGET {
+                        return Err(Diagnostic::error(
+                            "E2903",
+                            "performance budget entry is not valid".to_string(),
+                            format!("this list item has type `{type_name}`, not `Budget`"),
+                            "replace it with `Budget.{ name: ..., metric: ..., limit: ... }`".to_string(),
+                            Some(span),
+                        ));
+                    }
+                    let fields = fields
+                        .into_iter()
+                        .map(|(name, name_span, value)| {
+                            let value_span = value.span();
+                            crate::AST::BudgetField {
+                                name,
+                                name_span,
+                                value,
+                                span: Span::new(name_span.start, value_span.end),
+                            }
+                        })
+                        .collect();
+                    typed_budgets.push(crate::AST::BudgetDecl { fields, span });
                 }
                 crate::AST::ContribValue::Perf(crate::AST::PerfLit {
-                    budgets,
+                    budgets: typed_budgets,
                     budgets_span,
+                    list_span,
                     span: body_span,
                 })
             }

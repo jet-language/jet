@@ -337,6 +337,7 @@ impl<'a> Lexer<'a> {
                 let span = Span::new(start, self.pos(self.i));
                 return Token {
                     kind: TokKind::UnitNumber {
+                        raw: text,
                         int: None,
                         float: Some(v),
                         suffix,
@@ -356,6 +357,7 @@ impl<'a> Lexer<'a> {
                     let span = Span::new(start, self.pos(self.i));
                     return Token {
                         kind: TokKind::UnitNumber {
+                            raw: text,
                             int: Some(n),
                             float: None,
                             suffix,

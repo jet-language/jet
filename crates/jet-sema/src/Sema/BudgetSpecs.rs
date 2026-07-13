@@ -1,4 +1,4 @@
-use crate::AST::{ContribValue, EnumLitArg, Expr, Item, ModuleDecl, Namespace, Program, ProgramBundle, SystemFieldValue};
+use crate::AST::{BudgetDecl, ContribValue, EnumLitArg, Expr, Item, ModuleDecl, Namespace, Program, ProgramBundle, SystemFieldValue};
 use crate::Diagnostics::{Diagnostic, Span};
 use std::collections::BTreeMap;
 
@@ -212,8 +212,7 @@ fn validate_module(module: &ModuleDecl, specs: &mut Vec<BudgetSpec>, diags: &mut
             ));
             continue;
         }
-        let Expr::ListLit(entries, _) = &perf.budgets else { continue };
-        for entry in entries {
+        for entry in &perf.budgets {
             match elaborate(&contribution.path, entry) {
                 Ok(spec) => specs.push(spec),
                 Err(diag) => diags.push(diag),
@@ -222,35 +221,33 @@ fn validate_module(module: &ModuleDecl, specs: &mut Vec<BudgetSpec>, diags: &mut
     }
 }
 
-fn elaborate(role: &str, entry: &Expr) -> Result<BudgetSpec, Diagnostic> {
-    let Expr::StructLit { type_name, fields, span, .. } = entry else {
-        return Err(invalid("entry", "every budgets list item is a typed `Budget` value", "write `Budget.{ name: ..., metric: ..., limit: ... }`", entry.span()));
-    };
-    if type_name != "Budget" {
-        return Err(invalid("entry", "every budgets list item has type `Budget`", "replace this value with `Budget.{ ... }`", *span));
-    }
+fn elaborate(role: &str, entry: &BudgetDecl) -> Result<BudgetSpec, Diagnostic> {
+    let span = entry.span;
     const ALLOWED: &[&str] = &["name", "scope", "metric", "provider", "comparison", "limit", "enforcement", "applies"];
     let mut map: BTreeMap<&str, (&Expr, Span)> = BTreeMap::new();
-    for (field, field_span, value) in fields {
-        if !ALLOWED.contains(&field.as_str()) {
-            return Err(invalid("entry", format!("`{field}` is not a Budget field"), format!("use one of: {}", ALLOWED.join(", ")), *field_span));
+    for field in &entry.fields {
+        if !ALLOWED.contains(&field.name.as_str()) {
+            return Err(invalid("entry", format!("`{}` is not a Budget field", field.name), format!("use one of: {}", ALLOWED.join(", ")), field.name_span));
         }
-        if map.insert(field, (value, *field_span)).is_some() {
-            return Err(invalid("entry", format!("`{field}` is written more than once"), "keep one value for this field", *field_span));
+        if map.insert(field.name.as_str(), (&field.value, field.name_span)).is_some() {
+            return Err(invalid("entry", format!("`{}` is written more than once", field.name), "keep one value for this field", field.name_span));
         }
     }
-    let (name_expr, _name_span) = required(&map, "name", *span)?;
+    let (name_expr, _name_span) = required(&map, "name", span)?;
     let name = string_value(name_expr).ok_or_else(|| invalid("entry", "`name` must be constant quoted text", "write `name: \"lowercase-kebab-name\"`", name_expr.span()))?;
     if name.is_empty() {
         return Err(invalid("entry", "`name` cannot be empty", "give this budget a stable name", name_expr.span()));
     }
-    let (metric_expr, _) = required(&map, "metric", *span)?;
-    let metric = enum_key(metric_expr).ok_or_else(|| invalid(&name, "`metric` must be one closed performance metric", "use a metric such as `.BinarySize` or `.Latency(.P99)`", metric_expr.span()))?;
-    let metric_variant = enum_variant(metric_expr).expect("enum key requires enum literal");
-    let (limit_expr, _) = required(&map, "limit", *span)?;
+    let (metric_expr, _) = required(&map, "metric", span)?;
+    let (metric, metric_variant) = closed_metric(&name, metric_expr)?;
+    let (limit_expr, _) = required(&map, "limit", span)?;
     let limit = enum_variant(limit_expr).ok_or_else(|| invalid(&name, "`limit` must be a typed comparison limit", "use `.AtMost(value)`, `.AtLeast(value)`, `.RegressionAtMost(percent)`, or `.ImprovementAtLeast(percent)`", limit_expr.span()))?;
     let deterministic = matches!(metric_variant.as_str(), "BinarySize" | "ArtifactSize" | "GeneratedUnsafe" | "PublicApiItems" | "DependencyCount" | "EffectCount");
-    let comparison = map.get("comparison").and_then(|(e, _)| enum_variant(e)).unwrap_or_else(|| if deterministic { "Absolute".into() } else { "".into() });
+    let comparison = match map.get("comparison") {
+        Some((expr, _)) => closed_comparison(&name, expr)?,
+        None if deterministic => "Absolute".into(),
+        None => String::new(),
+    };
     if comparison.is_empty() {
         return Err(invalid(&name, "statistical metrics require `.AbsoluteFrom(baseline)` or `.RelativeTo(baseline)`", "add a pinned statistical comparison", metric_expr.span()));
     }
@@ -282,6 +279,14 @@ fn elaborate(role: &str, entry: &Expr) -> Result<BudgetSpec, Diagnostic> {
     } else {
         String::new()
     };
+    if provider.is_empty() {
+        return Err(invalid(
+            &name,
+            format!("`{metric_variant}` has no unambiguous measurement provider"),
+            "add the metric's explicit typed `provider`",
+            metric_expr.span(),
+        ));
+    }
     let applicability = match map.get("applies") {
         Some((expr, _)) => parse_applicability(&name, expr)?,
         None => BudgetApplicability { targets: BudgetAxis::Current, profiles: BudgetAxis::Current },
@@ -295,9 +300,9 @@ fn elaborate(role: &str, entry: &Expr) -> Result<BudgetSpec, Diagnostic> {
         },
         None => "Fail".into(),
     };
-    validate_scope_provider_pair(&name, &metric_variant, &scope, &provider, *span)?;
+    validate_scope_provider_pair(&name, &metric_variant, &scope, &provider, span)?;
     let field_spans = map.into_iter().map(|(k, (_, s))| (k.to_string(), s)).collect();
-    Ok(BudgetSpec { role: role.into(), name, metric, scope, provider, applicability, enforcement, comparison, limit, span: *span, field_spans })
+    Ok(BudgetSpec { role: role.into(), name, metric, scope, provider, applicability, enforcement, comparison, limit, span, field_spans })
 }
 
 fn closed_scope(name: &str, expr: &Expr) -> Result<String, Diagnostic> {
@@ -316,6 +321,69 @@ fn closed_provider(name: &str, expr: &Expr) -> Result<String, Diagnostic> {
         (Some("BuildArtifact" | "AllocationProbe" | "BenchMeasurement" | "ServiceProbe" | "SceneProbe"), Some((_, value))) if !value.is_empty() => Ok(key),
         _ => Err(invalid(name, "`provider` must be one closed provider value with the required name", "use `.CompilerFacts` or a named provider such as `.ServiceProbe(\"api\")`", expr.span())),
     }
+}
+
+fn closed_metric(name: &str, expr: &Expr) -> Result<(String, String), Diagnostic> {
+    let Expr::EnumLit { variant, args, .. } = expr else {
+        return Err(invalid(name, "`metric` must be one closed performance metric", "use a metric such as `.BinarySize` or `.Latency(.P99)`", expr.span()));
+    };
+    if !crate::Syntax::PERF_BUDGET_METRICS.contains(&variant.as_str()) {
+        return Err(invalid(name, format!("`.{variant}` is not a performance metric"), "use one metric from the registered performance-budget vocabulary", expr.span()));
+    }
+    let percentile_metric = matches!(variant.as_str(), "FrameTime" | "Latency" | "BenchTime" | "DrawCalls");
+    if percentile_metric {
+        let [arg] = args.as_slice() else {
+            return Err(invalid(name, format!("`.{variant}` requires exactly one percentile"), "use `.P50`, `.P90`, `.P95`, `.P99`, or `.P999`", expr.span()));
+        };
+        let value = match arg { EnumLitArg::Positional(value) => value, EnumLitArg::Named { expr, .. } => expr };
+        let Some(percentile) = enum_variant(value) else {
+            return Err(invalid(name, format!("`.{variant}` requires a typed percentile"), "use `.P50`, `.P90`, `.P95`, `.P99`, or `.P999`", value.span()));
+        };
+        if !crate::Syntax::PERF_BUDGET_PERCENTILES.contains(&percentile.as_str()) || !enum_args(value).is_empty() {
+            return Err(invalid(name, format!("`.{percentile}` is not a supported percentile"), "use `.P50`, `.P90`, `.P95`, `.P99`, or `.P999`", value.span()));
+        }
+        return Ok((format!("{variant}({percentile})"), variant.clone()));
+    }
+    if !args.is_empty() {
+        return Err(invalid(name, format!("`.{variant}` does not take a percentile or argument"), format!("write `.{variant}`"), expr.span()));
+    }
+    Ok((variant.clone(), variant.clone()))
+}
+
+fn closed_comparison(name: &str, expr: &Expr) -> Result<String, Diagnostic> {
+    let Expr::EnumLit { variant, args, .. } = expr else {
+        return Err(invalid(name, "`comparison` must be `.Absolute`, `.AbsoluteFrom(name)`, or `.RelativeTo(name)`", "use one closed comparison variant", expr.span()));
+    };
+    match (variant.as_str(), args.as_slice()) {
+        ("Absolute", []) => Ok(variant.clone()),
+        ("AbsoluteFrom" | "RelativeTo", [arg]) => {
+            let value = match arg { EnumLitArg::Positional(value) => value, EnumLitArg::Named { expr, .. } => expr };
+            let Some(baseline) = string_value(value) else {
+                return Err(invalid(name, format!("`.{variant}` requires one constant baseline name"), "write a lowercase slash-separated name such as `\"ci/linux-x64\"`", value.span()));
+            };
+            if !baseline_name(&baseline) {
+                return Err(invalid(name, format!("`{baseline}` is not a valid baseline name"), "use nonempty slash-separated lowercase kebab-case segments", value.span()));
+            }
+            Ok(variant.clone())
+        }
+        _ => Err(invalid(name, "`comparison` must be `.Absolute`, `.AbsoluteFrom(name)`, or `.RelativeTo(name)`", "use one closed comparison variant with its exact arguments", expr.span())),
+    }
+}
+
+fn enum_args(expr: &Expr) -> &[EnumLitArg] {
+    match expr { Expr::EnumLit { args, .. } => args, _ => &[] }
+}
+
+fn baseline_name(value: &str) -> bool {
+    !value.is_empty() && value.split('/').all(|segment| {
+        !segment.is_empty()
+            && segment != "."
+            && segment != ".."
+            && !segment.starts_with('-')
+            && !segment.ends_with('-')
+            && !segment.contains("--")
+            && segment.bytes().all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+    })
 }
 
 fn validate_scope_provider_pair(name: &str, metric: &str, scope: &str, provider: &str, span: Span) -> Result<(), Diagnostic> {
@@ -369,13 +437,73 @@ fn parse_axis(name: &str, axis: &str, expr: &Expr) -> Result<BudgetAxis, Diagnos
             if values.is_empty() { return Err(invalid(name, format!("applicability `{axis}` Only list cannot be empty"), "add at least one selector", value.span())); }
             let mut selectors = std::collections::BTreeSet::new();
             for selector in values {
-                let Some(key) = enum_key(selector) else { return Err(invalid(name, format!("applicability `{axis}` contains an invalid selector"), "use a typed target or profile selector", selector.span())); };
+                let key = if axis == "targets" {
+                    target_selector(name, selector)?
+                } else {
+                    profile_selector(name, selector)?
+                };
                 selectors.insert(key);
             }
             Ok(BudgetAxis::Only(selectors))
         }
         _ => Err(invalid(name, format!("applicability `{axis}` must be `.Current`, `.All`, or `.Only([...])`"), "use one closed applicability variant", expr.span())),
     }
+}
+
+fn target_selector(name: &str, expr: &Expr) -> Result<String, Diagnostic> {
+    let Expr::EnumLit { variant, args, .. } = expr else {
+        return Err(invalid(name, "target applicability contains a non-target selector", "use `.Class(.Native)` or `.Triple(\"canonical-triple\")`", expr.span()));
+    };
+    match (variant.as_str(), args.as_slice()) {
+        ("Class", [arg]) => {
+            let value = match arg { EnumLitArg::Positional(value) => value, EnumLitArg::Named { expr, .. } => expr };
+            let Some(class) = enum_variant(value) else {
+                return Err(invalid(name, "target class must be one typed class", "use `.Native`, `.Web`, `.Freestanding`, `.Plugin`, or `.OsImage`", value.span()));
+            };
+            if !crate::Syntax::PERF_BUDGET_TARGET_CLASSES.contains(&class.as_str()) || !enum_args(value).is_empty() {
+                return Err(invalid(name, format!("`.{class}` is not a target class"), "use `.Native`, `.Web`, `.Freestanding`, `.Plugin`, or `.OsImage`", value.span()));
+            }
+            Ok(format!("Class({class})"))
+        }
+        ("Triple", [arg]) => {
+            let value = match arg { EnumLitArg::Positional(value) => value, EnumLitArg::Named { expr, .. } => expr };
+            let Some(triple) = string_value(value) else {
+                return Err(invalid(name, "target triple selector requires constant quoted text", "write `.Triple(\"x86_64-unknown-linux-gnu\")`", value.span()));
+            };
+            if !canonical_triple(&triple) {
+                return Err(invalid(name, format!("`{triple}` is not a canonical target triple"), "use the canonical lowercase target triple", value.span()));
+            }
+            Ok(format!("Triple({triple})"))
+        }
+        _ => Err(invalid(name, "target applicability contains a non-target selector", "use `.Class(.Native)` or `.Triple(\"canonical-triple\")`", expr.span())),
+    }
+}
+
+fn profile_selector(name: &str, expr: &Expr) -> Result<String, Diagnostic> {
+    let Expr::EnumLit { variant, args, .. } = expr else {
+        return Err(invalid(name, "profile applicability contains a non-profile selector", "use `.Dev`, `.Release`, `.Small`, `.Test`, `.Bench`, or `.Named(\"profile\")`", expr.span()));
+    };
+    if matches!(variant.as_str(), "Dev" | "Release" | "Small" | "Test" | "Bench") && args.is_empty() {
+        return Ok(variant.clone());
+    }
+    if variant == "Named" && args.len() == 1 {
+        let value = match &args[0] { EnumLitArg::Positional(value) => value, EnumLitArg::Named { expr, .. } => expr };
+        let Some(profile) = string_value(value) else {
+            return Err(invalid(name, "named profile selector requires constant quoted text", "write `.Named(\"lowercase_snake_case\")`", value.span()));
+        };
+        let built_in = ["dev", "release", "small", "test", "bench"];
+        if !snake_case(&profile) || built_in.iter().any(|item| profile.eq_ignore_ascii_case(item)) {
+            return Err(invalid(name, format!("`{profile}` is not a legal named profile"), "use a declared lowercase_snake_case profile distinct from built-ins", value.span()));
+        }
+        return Ok(format!("Named({profile})"));
+    }
+    Err(invalid(name, "profile applicability contains a non-profile selector", "use `.Dev`, `.Release`, `.Small`, `.Test`, `.Bench`, or `.Named(\"profile\")`", expr.span()))
+}
+
+fn canonical_triple(value: &str) -> bool {
+    value.split('-').count() >= 3
+        && value.split('-').all(|part| !part.is_empty())
+        && value.bytes().all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_' || byte == b'-')
 }
 
 fn required<'a>(map: &'a BTreeMap<&str, (&'a Expr, Span)>, field: &str, span: Span) -> Result<(&'a Expr, Span), Diagnostic> {

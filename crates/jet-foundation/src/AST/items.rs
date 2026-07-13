@@ -306,8 +306,26 @@ impl ContribValue {
 /// exact source spans; sema elaborates the captured list into BudgetSpec facts.
 #[derive(Debug, Clone)]
 pub struct PerfLit {
-    pub budgets: Expr,
+    /// Typed declarations captured at the configuration boundary. Field values
+    /// remain ordinary Jet expressions so unit/enum/record nodes keep their
+    /// canonical AST identity and exact spans.
+    pub budgets: Vec<BudgetDecl>,
     pub budgets_span: Span,
+    pub list_span: Span,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct BudgetDecl {
+    pub fields: Vec<BudgetField>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct BudgetField {
+    pub name: String,
+    pub name_span: Span,
+    pub value: Expr,
     pub span: Span,
 }
 

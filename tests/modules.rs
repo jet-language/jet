@@ -36,7 +36,21 @@ fn perf_role_captures_budget_expression_and_spans() {
         panic!("expected typed perf role AST");
     };
     assert_eq!(&src[perf.budgets_span.start..perf.budgets_span.end], "budgets");
-    assert!(matches!(perf.budgets, Expr::ListLit(_, _)));
+    assert_eq!(perf.budgets.len(), 1);
+    assert_eq!(perf.budgets[0].fields.len(), 4);
+    let limit = perf.budgets[0]
+        .fields
+        .iter()
+        .find(|field| field.name == "limit")
+        .expect("typed limit field");
+    let Expr::EnumLit { args, .. } = &limit.value else {
+        panic!("typed limit enum");
+    };
+    let jet::AST::EnumLitArg::Positional(Expr::UnitLit { raw, suffix, suffix_span, .. }) = &args[0] else {
+        panic!("typed unit literal");
+    };
+    assert_eq!((raw.as_str(), suffix.as_str()), ("2", "MiB"));
+    assert_eq!(&src[suffix_span.start..suffix_span.end], "MiB");
     assert_eq!(
         &src[perf.span.start..perf.span.end],
         src[src.find("budgets").unwrap()..].trim_end()
@@ -153,6 +167,74 @@ module perf.release {
     assert_eq!(specs[0].scope, "Service(api)");
     assert_eq!(specs[0].provider, "ServiceProbe(api)");
     assert_eq!(specs[0].enforcement, "Warn");
+}
+
+#[test]
+fn perf_budget_sema_rejects_statistical_budget_without_provider() {
+    let src = r#"module perf.release {
+    budgets: [Budget.{
+        name: "startup",
+        scope: .Target("cli"),
+        metric: .StartupTime,
+        comparison: .AbsoluteFrom("ci/linux-x64"),
+        limit: .AtMost(500ms),
+    }]
+}
+"#;
+    let diagnostics = collect_perf_specs(src).expect_err("statistical provider is required");
+    let diagnostic = diagnostics.last().expect("diagnostic");
+    assert_eq!(diagnostic.code, "E2903");
+    assert_eq!(diagnostic.what, "performance budget startup is not valid");
+    assert!(diagnostic.why.contains("provider"), "{diagnostic:?}");
+}
+
+#[test]
+fn perf_budget_sema_rejects_closed_metric_baseline_and_selector_shapes() {
+    let bad_percentile = r#"module perf.release {
+    budgets: [Budget.{
+        name: "frame",
+        scope: .Scene("menu"),
+        metric: .FrameTime(.P42),
+        provider: .SceneProbe("menu"),
+        comparison: .AbsoluteFrom("ci/linux-x64"),
+        limit: .AtMost(16ms),
+    }]
+}
+"#;
+    assert_eq!(
+        collect_perf_specs(bad_percentile).expect_err("closed percentile")[0].code,
+        "E2903"
+    );
+
+    let bad_baseline = r#"module perf.release {
+    budgets: [Budget.{
+        name: "startup",
+        scope: .Target("cli"),
+        metric: .StartupTime,
+        provider: .BuildArtifact("cli"),
+        comparison: .AbsoluteFrom("CI//linux"),
+        limit: .AtMost(500ms),
+    }]
+}
+"#;
+    assert_eq!(
+        collect_perf_specs(bad_baseline).expect_err("baseline grammar")[0].code,
+        "E2903"
+    );
+
+    let wrong_axis = r#"module perf.release {
+    budgets: [Budget.{
+        name: "binary",
+        metric: .BinarySize,
+        limit: .AtMost(2MiB),
+        applies: BudgetApplies.{ profiles: .Only([.Triple("x86_64-unknown-linux-gnu")]) },
+    }]
+}
+"#;
+    assert_eq!(
+        collect_perf_specs(wrong_axis).expect_err("profile selector family")[0].code,
+        "E2903"
+    );
 }
 
 #[test]

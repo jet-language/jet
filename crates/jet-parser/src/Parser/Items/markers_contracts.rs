@@ -474,7 +474,7 @@ impl<'a> Parser<'a> {
             self.bump(); // `Every`
             self.expect(TokKind::LParen, "after `#Every`")?;
             let arg = match self.peek().kind.clone() {
-                TokKind::UnitNumber { int, float, suffix } => {
+                TokKind::UnitNumber { int, float, suffix, .. } => {
                     let tok_span = self.bump().span;
                     let suffix_span = Span::new(tok_span.end - suffix.len(), tok_span.end);
                     crate::AST::EveryArg::Duration {

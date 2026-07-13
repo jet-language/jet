@@ -321,7 +321,7 @@ impl<'a> Parser<'a> {
                 // reaching here as `UnitNumber` genuinely carries a suffix.
                 TokKind::UnitNumber { .. } => {
                     let tok = self.bump();
-                    let TokKind::UnitNumber { int, float, suffix } = tok.kind else {
+                    let TokKind::UnitNumber { raw, int, float, suffix } = tok.kind else {
                         unreachable!("guarded by the outer match above")
                     };
                     let span = tok.span;
@@ -329,6 +329,7 @@ impl<'a> Parser<'a> {
                     // between the digits and the suffix — the lexer requires that).
                     let suffix_span = Span::new(span.end - suffix.len(), span.end);
                     Ok(Expr::UnitLit {
+                        raw,
                         int,
                         float,
                         suffix,
