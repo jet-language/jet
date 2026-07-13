@@ -4175,6 +4175,9 @@ fn is_encoding_surface_type(name: &str) -> bool {
         base,
         "EncodingLimits"
             | "EncodingError"
+            | "CBOROptions"
+            | "CBORError"
+            | "CBORErrorKind"
             | "EncodingCause"
             | "EncodingFormat"
             | "EncodingErrorKind"

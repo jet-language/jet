@@ -25,7 +25,8 @@ impl<'a> Checker<'a> {
                                 ("core.encoding.jsonl", "JSONLReader" | "JSONLWriter") |
                                 ("core.encoding.csv", "CSVReader" | "CSVWriter") |
                                 ("core.encoding.xml", "XMLReader" | "XMLWriter") |
-                                ("core.encoding.cbor", "CBORReader" | "CBORWriter"))
+                                ("core.encoding.cbor", "CBORReader" | "CBORWriter" |
+                                    "CBOROptions" | "CBORError" | "CBORErrorKind"))
                         })
                     }) => Type::Named(n.split_once('.').unwrap().1.to_string()),
                 // D-EMAIL-SMTP-SURFACE1=A: core.email value annotations may use

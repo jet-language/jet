@@ -49,8 +49,22 @@ impl user_Encode for char {
         jet_std::DataTree::Text(self.to_string())
     }
 }
+impl user_Encode for u8 {
+    fn jet_encode(&self) -> jet_std::DataTree { jet_std::DataTree::Int(*self as i64) }
+}
 impl<T: user_Encode> user_Encode for Vec<T> {
     fn jet_encode(&self) -> jet_std::DataTree {
+        // D-ENC-CBOR-SURFACE1: `[U8]` carries binary identity through the shared
+        // Codable tree. Text codecs already render Bytes as a number list, while
+        // CBOR emits major type 2. No downcast or unsafe code is needed.
+        if std::any::type_name::<T>() == "u8" {
+            let mut bytes = Vec::with_capacity(self.len());
+            for value in self {
+                let jet_std::DataTree::Int(n) = value.jet_encode() else { unreachable!() };
+                bytes.push(n as u8);
+            }
+            return jet_std::DataTree::Bytes(bytes);
+        }
         jet_std::DataTree::Array(self.iter().map(|x| x.jet_encode()).collect())
     }
 }
@@ -148,9 +162,22 @@ impl user_Decode for char {
         }
     }
 }
+impl user_Decode for u8 {
+    fn jet_decode(t: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError> {
+        match t {
+            jet_std::DataTree::Int(n) if (0..=255).contains(n) => Ok(*n as u8),
+            other => Err(jet_std::DecodeError::new(format!("expected U8, found {}", jet_std::datatree_kind(other)))),
+        }
+    }
+}
 impl<T: user_Decode> user_Decode for Vec<T> {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError> {
         match t {
+            jet_std::DataTree::Bytes(bytes) if std::any::type_name::<T>() == "u8" => {
+                let mut out = Vec::with_capacity(bytes.len());
+                for byte in bytes { out.push(T::jet_decode(&jet_std::DataTree::Int(*byte as i64))?); }
+                Ok(out)
+            }
             jet_std::DataTree::Array(items) => {
                 let mut out = Vec::with_capacity(items.len());
                 for (i, item) in items.iter().enumerate() {
@@ -524,4 +551,3 @@ where
 {
     jet_data_group_sum(rows, key, value)
 }
-

@@ -750,6 +750,13 @@ pub(crate) fn method_call_in_subset(
                     }
                 }
             }
+            if leaf == "CBOROptions" {
+                if let Expr::Ident(alias, _) = base.as_ref() {
+                    if cx.core_imports.get(alias).map(String::as_str) == Some("core.encoding.cbor") {
+                        return true;
+                    }
+                }
+            }
         }
     }
     // Shape (j) [c109 Phase 16]: an enum-variant CONSTRUCTION `Enum.Variant(args)`.

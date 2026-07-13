@@ -202,6 +202,9 @@ impl<'a> Checker<'a> {
                         if ns == "core.encoding" && leaf == "EncodingLimits" && method == "safe" {
                             return self.check_static_method("EncodingLimits", method, span, args);
                         }
+                        if ns == "core.encoding.cbor" && leaf == "CBOROptions" && method == "safe" {
+                            return self.check_static_method("CBOROptions", method, span, args);
+                        }
                         if ns == "core.encoding" && leaf == "DataEvent" {
                             let saved: Vec<Expr> = args
                                 .iter_mut()
@@ -380,7 +383,7 @@ impl<'a> Checker<'a> {
                         return Some(ty);
                     }
                 }
-                if (type_name == "EncodingLimits" && method == "safe")
+                if ((type_name == "EncodingLimits" || type_name == "CBOROptions") && method == "safe")
                     || self.registry.method(type_name, method).is_some() {
                     return self.check_static_method(type_name, method, span, args);
                 }

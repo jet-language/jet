@@ -896,8 +896,15 @@ pub(crate) fn emit_tir_core_call(
         ("core.encoding.xml", "to_string") => {
             format!("{}(&({}))", helper("jet_std_xml_render"), arg(0))
         }
-        ("core.encoding.cbor", "encode") => {
-            format!("{}(&({}))", helper("jet_std_cbor_encode"), arg(0))
+        ("core.encoding.cbor", "parse") => {
+            let options = if args.len() > 1 { arg(1) } else { format!("{}jet_std::CBOROptions::safe()", cx.root_prefix) };
+            format!("{}(&({}), {})", helper("jet_enc_cbor_parse"), arg(0), options)
+        }
+        ("core.encoding.cbor", "to_bytes") => {
+            format!("{}(&({}))", helper("jet_enc_cbor_to_bytes"), arg(0))
+        }
+        ("core.encoding.cbor", "to_bytes_canonical") => {
+            format!("{}(&({}))", helper("jet_enc_cbor_to_bytes_canonical"), arg(0))
         }
         ("core.encoding.cbor", "reader") => {
             let limits = if args.len() > 1 { arg(1) } else { format!("{}jet_std::EncodingLimits::safe()", cx.root_prefix) };
@@ -908,7 +915,8 @@ pub(crate) fn emit_tir_core_call(
             format!("{}({}, {})", helper("jet_enc_cbor_writer"), arg(0), limits)
         }
         ("core.encoding.cbor", "decode") => {
-            format!("{}(&({}))", helper("jet_std_cbor_decode"), arg(0))
+            let options = if args.len() > 1 { arg(1) } else { format!("{}jet_std::CBOROptions::safe()", cx.root_prefix) };
+            format!("{}::<{}>(&({}), {})", helper("jet_enc_cbor_decode"), enc_target_rust(ret_ty, cx), arg(0), options)
         }
         // D-UUIDENC1=A: hex and base64 encode/decode.
         ("core.encoding.hex", "encode") => {

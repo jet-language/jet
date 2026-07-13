@@ -41,6 +41,28 @@
         Null, Bool(bool), Int(i64), Float(f64), Text(String), Bytes(Vec<u8>),
         ArrayStart, ArrayEnd, ObjectStart, Key(String), ObjectEnd,
     }
+    // D-ENC-CBOR-SURFACE1=A: whole-value CBOR policy and stable typed errors.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct CBOROptions {
+        pub max_depth: i64,
+        pub max_items: i64,
+        pub max_bytes: i64,
+        pub require_canonical: bool,
+    }
+    impl CBOROptions {
+        pub fn safe() -> Self {
+            Self { max_depth: 256, max_items: 1_000_000, max_bytes: 1_073_741_824, require_canonical: false }
+        }
+    }
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub enum CBORErrorKind { Syntax, Truncated, Unsupported, Limit, TypeMismatch, TrailingData, NonCanonical }
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct CBORError {
+        pub kind: CBORErrorKind,
+        pub byte_offset: i64,
+        pub path: String,
+        pub reason: String,
+    }
     pub struct JSONReader {
         pub(crate) input: super::JetFileReader,
         pub(crate) limits: EncodingLimits,

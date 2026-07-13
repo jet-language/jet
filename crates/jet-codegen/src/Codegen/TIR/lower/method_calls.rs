@@ -1909,6 +1909,18 @@ pub(crate) fn lower_method_call(
                     },
                 };
             }
+            if leaf == "CBOROptions"
+                && core_module_path_from_receiver(base, &cx.core_imports, env).as_deref() == Some("core.encoding.cbor")
+            {
+                return TExpr {
+                    ty: Type::Named("CBOROptions".to_string()),
+                    kind: TExprKind::StaticCall {
+                        type_prefix: format!("{}jet_std::CBOROptions", cx.root_prefix),
+                        method_rust: "safe".to_string(),
+                        args: vec![],
+                    },
+                };
+            }
         }
     }
     // c109 Phase 7: a STATIC method call `Type.make(args)`. The gate

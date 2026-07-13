@@ -143,6 +143,8 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         "EncodingLimits" => matches!(member, "buffer_bytes" | "max_depth" | "max_item_bytes" | "max_total_bytes" | "max_expansion_depth" | "max_expansion_bytes"),
         "EncodingCause" => matches!(member, "kind" | "os_code" | "message"),
         "EncodingError" => matches!(member, "format" | "kind" | "byte_offset" | "line" | "column" | "path" | "reason" | "cause"),
+        "CBOROptions" => matches!(member, "max_depth" | "max_items" | "max_bytes" | "require_canonical"),
+        "CBORError" => matches!(member, "kind" | "byte_offset" | "path" | "reason"),
         "Envelope" => matches!(member, "from" | "recipients"),
         "RecipientReport" => matches!(member, "address" | "accepted" | "code" | "message"),
         "SendReport" => matches!(member, "server" | "accepted" | "rejected" | "response_code" | "response" | "accepted_at"),
@@ -229,6 +231,21 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
             "line" | "column" => Some(Type::Option(Box::new(Type::Int))),
             "path" | "reason" => Some(Type::String),
             "cause" => Some(Type::Option(Box::new(Type::Named("EncodingCause".to_string())))),
+            _ => None,
+        };
+    }
+    if name == "CBOROptions" && !cx.struct_fields.contains_key(name) {
+        return match field {
+            "max_depth" | "max_items" | "max_bytes" => Some(Type::Int),
+            "require_canonical" => Some(Type::Bool),
+            _ => None,
+        };
+    }
+    if name == "CBORError" && !cx.struct_fields.contains_key(name) {
+        return match field {
+            "kind" => Some(Type::Named("CBORErrorKind".to_string())),
+            "byte_offset" => Some(Type::Int),
+            "path" | "reason" => Some(Type::String),
             _ => None,
         };
     }

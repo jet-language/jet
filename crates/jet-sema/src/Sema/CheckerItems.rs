@@ -37,6 +37,12 @@ impl<'a> Checker<'a> {
             }
             return Some(Type::Named("EncodingLimits".to_string()));
         }
+        if type_name == "CBOROptions" && method == "safe" {
+            if !args.is_empty() {
+                self.diags.push(Diagnostic::error("E0101", format!("`CBOROptions.safe` takes 0 arguments, got {}", args.len()), "safe CBOR limits and interoperability defaults are fixed".to_string(), "remove the arguments".to_string(), Some(span)));
+            }
+            return Some(Type::Named("CBOROptions".to_string()));
+        }
         let Some(msig) = self.registry.method(type_name, method).cloned() else {
             self.diags.push(Diagnostic::error(
                 "E0102",

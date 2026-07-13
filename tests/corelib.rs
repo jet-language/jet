@@ -1179,6 +1179,51 @@ fn run() {{
     let _ = fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn cbor_whole_codable_bytes_and_original_wire_canonical_validation() {
+    if !has_rustc() {
+        eprintln!("note: skipping cbor whole-value test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_cbor_whole_{}", std::process::id()));
+    let source = r#"
+use core.encoding as encoding
+use core.encoding.cbor as cbor
+
+@[Codable]
+struct Packet { id: Int, payload: [U8] }
+
+fn run() -> Void ? {
+    packet := Packet.{ id: 7, payload: [222, 173] }
+    wire := cbor.to_bytes(packet)?
+    stable := cbor.to_bytes_canonical(packet)?
+    back: Packet := cbor.decode<Packet>(wire)?
+    raw: [U8] := cbor.decode<[U8]>(cbor.to_bytes([1, 2, 255])?)?
+    print(wire)
+    print(stable == wire)
+    print(back.id)
+    print(back.payload)
+    print(raw)
+
+    strict := cbor.CBOROptions.{
+        max_depth: 256,
+        max_items: 1000000,
+        max_bytes: 1073741824,
+        require_canonical: true,
+    }
+    // 0x18 0x01 is valid CBOR for 1, but not shortest/Core deterministic.
+    rejected := cbor.parse([24, 1], strict) ?? encoding.Data.Int(-1)
+    print(rejected.int() ?? -2)
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "cbor_whole", source, &[], None);
+    assert_eq!(code, 0, "CBOR whole-value program failed: {stderr}");
+    assert_eq!(
+        stdout,
+        "[162, 98, 105, 100, 7, 103, 112, 97, 121, 108, 111, 97, 100, 66, 222, 173]\ntrue\n7\n[222, 173]\n[1, 2, 255]\n-1\n"
+    );
+}
+
 fn compile_temp(name: &str, src: &str) -> jet::CompileOutput {
     let dir = std::env::temp_dir().join(format!("jet_corelib_test_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();

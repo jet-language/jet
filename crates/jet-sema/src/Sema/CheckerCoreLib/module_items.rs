@@ -171,7 +171,10 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "core.encoding.toml" => &["parse", "decode", "decode_traced", "to_string"],
         "core.encoding.yaml" => &["parse", "decode", "decode_traced", "to_string"],
         "core.encoding.xml" => &["parse", "to_string"],
-        "core.encoding.cbor" => &["encode", "decode", "reader", "writer"],
+        "core.encoding.cbor" => &[
+            "CBOROptions", "CBORError", "CBORErrorKind", "parse", "decode",
+            "to_bytes", "to_bytes_canonical", "reader", "writer",
+        ],
         // D-UUIDENC1=A: hex/base64 codecs and UUID generator.
         "core.encoding.hex" => &["encode", "decode"],
         "core.encoding.base64" => &["encode", "decode", "encode_url", "decode_url"],

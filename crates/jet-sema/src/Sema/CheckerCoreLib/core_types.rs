@@ -183,6 +183,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // acquire values only from their format module constructors.
         | "EncodingLimits" | "EncodingError" | "EncodingCause"
         | "EncodingFormat" | "EncodingErrorKind" | "DataEvent"
+        | "CBOROptions" | "CBORError" | "CBORErrorKind"
         | "JSONReader" | "JSONWriter" | "JSONLReader" | "JSONLWriter"
         | "CSVReader" | "CSVWriter" | "XMLReader" | "XMLWriter"
         | "CBORReader" | "CBORWriter"
@@ -260,7 +261,7 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     if type_name == "HttpShutdownReport" && matches!(field, "accepted" | "overloaded" | "completed" | "cancelled") {
         return Some(Type::Int);
     }
-    if matches!(type_name, "EncodingLimits" | "EncodingCause" | "EncodingError" | "AsyncPolicy" | "RecipientReport" | "SendReport") {
+    if matches!(type_name, "EncodingLimits" | "EncodingCause" | "EncodingError" | "CBOROptions" | "CBORError" | "AsyncPolicy" | "RecipientReport" | "SendReport") {
         return core_constructable_fields(type_name)?.into_iter().find(|(name, _)| name == field).map(|(_, ty)| ty);
     }
     if type_name == "Envelope" {
@@ -918,6 +919,18 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             ("reason".to_string(), Type::String),
             ("cause".to_string(), Type::Option(Box::new(Type::Named("EncodingCause".to_string())))),
         ]),
+        "CBOROptions" => Some(vec![
+            ("max_depth".to_string(), Type::Int),
+            ("max_items".to_string(), Type::Int),
+            ("max_bytes".to_string(), Type::Int),
+            ("require_canonical".to_string(), Type::Bool),
+        ]),
+        "CBORError" => Some(vec![
+            ("kind".to_string(), Type::Named("CBORErrorKind".to_string())),
+            ("byte_offset".to_string(), Type::Int),
+            ("path".to_string(), Type::String),
+            ("reason".to_string(), Type::String),
+        ]),
         "RecipientReport" => Some(vec![
             ("address".to_string(), Type::Named("Address".to_string())),
             ("accepted".to_string(), Type::Bool),
@@ -982,6 +995,7 @@ pub(crate) fn core_encoding_variants(
         "EncodingFormat" => &["JSON", "JSONL", "CSV", "XML", "CBOR"],
         "EncodingErrorKind" => &["Syntax", "Truncated", "Unsupported", "Limit", "IO", "State"],
         "DataEvent" => &["Null", "ArrayStart", "ArrayEnd", "ObjectStart", "ObjectEnd"],
+        "CBORErrorKind" => &["Syntax", "Truncated", "Unsupported", "Limit", "TypeMismatch", "TrailingData", "NonCanonical"],
         _ => return None,
     };
     for name in units {

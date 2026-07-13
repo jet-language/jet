@@ -76,6 +76,7 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
                 | "core.encoding.yaml",
                 "to_string" | "to_string_pretty" | "decode" | "decode_traced",
             )
+            | ("core.encoding.cbor", "parse" | "decode" | "to_bytes" | "to_bytes_canonical")
             // D-REACT1=B: the reactive producers return `Signal<T>`/`Derived<T>` whose
             // element type is inferred from the initial value / closure return — not in
             // `core_fixed_sig`, so codegen reads it from resolved_ret (I3).
@@ -619,14 +620,6 @@ pub fn core_fixed_sig(
             Some(result_ty(json.clone(), Type::String)),
         )),
         ("core.encoding.xml", "to_string") => Some((vec![(read, json.clone())], Some(Type::String))),
-        ("core.encoding.cbor", "encode") => Some((
-            vec![(read, json.clone())],
-            Some(Type::List(Box::new(u8_ty()))),
-        )),
-        ("core.encoding.cbor", "decode") => Some((
-            vec![(read, Type::List(Box::new(u8_ty())))],
-            Some(result_ty(json.clone(), Type::String)),
-        )),
         ("core.encoding.cbor", "reader") => Some((
             vec![(moved, Type::Named("FileReader".to_string())), (read, Type::Named("EncodingLimits".to_string()))],
             Some(result_ty(Type::Named("CBORReader".to_string()), encoding_error_ty())),

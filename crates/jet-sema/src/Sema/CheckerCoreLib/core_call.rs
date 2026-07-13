@@ -8,7 +8,7 @@ use crate::Sema::Purity::{e3401, e3403, is_impure_core, is_nondeterministic_core
 use crate::Sema::SendCrossing;
 use crate::Syntax;
 use super::alloc_ptrs::{e3101, io_error_ty, ptr_elem, result_ty};
-use super::core_types::{game_run_label_error, decode_error_ty, unit_ty};
+use super::core_types::{game_run_label_error, decode_error_ty, u8_ty, unit_ty};
 use super::fixed_sigs::core_fixed_sig;
 use super::serde_diags::{
     freestanding_hint, is_freestanding_forbidden, module_short_name, reactive_derived_unit,
@@ -116,6 +116,30 @@ impl<'a> Checker<'a> {
             }
             let sig = core_fixed_sig(module, name);
             match (module, name) {
+                ("core.encoding.cbor", "parse") => {
+                    if !(1..=2).contains(&args.len()) {
+                        self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                    }
+                    if let Some(arg) = args.get_mut(0) { self.expect_core_arg(name, 0, &Type::List(Box::new(u8_ty())), arg); }
+                    if let Some(arg) = args.get_mut(1) { self.expect_core_arg(name, 1, &Type::Named("CBOROptions".to_string()), arg); }
+                    return Some(result_ty(Type::Named("Data".to_string()), Type::Named("CBORError".to_string())));
+                }
+                ("core.encoding.cbor", "to_bytes" | "to_bytes_canonical") => {
+                    if args.len() != 1 { self.diags.push(wrong_core_arity(name, 1, args.len(), span)); }
+                    for arg in args.iter_mut() {
+                        self.borrow_ctx = true;
+                        if let Some(t) = self.infer(&mut arg.expr) { self.check_encodable(&t, arg.expr.span()); }
+                    }
+                    return Some(result_ty(Type::List(Box::new(u8_ty())), Type::Named("CBORError".to_string())));
+                }
+                ("core.encoding.cbor", "decode") if !type_args.is_empty() => {
+                    if !(1..=2).contains(&args.len()) { self.diags.push(wrong_core_arity(name, 1, args.len(), span)); }
+                    if let Some(arg) = args.get_mut(0) { self.expect_core_arg(name, 0, &Type::List(Box::new(u8_ty())), arg); }
+                    if let Some(arg) = args.get_mut(1) { self.expect_core_arg(name, 1, &Type::Named("CBOROptions".to_string()), arg); }
+                    let t = type_args[0].clone();
+                    self.check_decodable(&t, span);
+                    return Some(result_ty(t, Type::Named("CBORError".to_string())));
+                }
                 ("core.encoding.json" | "core.encoding.jsonl" | "core.encoding.csv" | "core.encoding.cbor", "reader" | "writer") => {
                     let max = if module == "core.encoding.json" && name == "writer" { 3 } else { 2 };
                     let (min, max) = (1, max);

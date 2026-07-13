@@ -308,62 +308,95 @@ fn jet_cbor_push_len(out: &mut Vec<u8>, major: u8, n: u64) {
     else if n <= u32::MAX as u64 { out.push((major << 5) | 26); out.extend_from_slice(&(n as u32).to_be_bytes()); }
     else { out.push((major << 5) | 27); out.extend_from_slice(&n.to_be_bytes()); }
 }
-fn jet_cbor_encode_val(v: &jet_std::DataTree, out: &mut Vec<u8>) {
+fn jet_cbor_error(kind: jet_std::CBORErrorKind, offset: usize, path: &str, reason: impl Into<String>) -> jet_std::CBORError {
+    jet_std::CBORError { kind, byte_offset: offset as i64, path: path.to_string(), reason: reason.into() }
+}
+fn jet_cbor_encode_val(v: &jet_std::DataTree, out: &mut Vec<u8>, canonical: bool) -> Result<(), jet_std::CBORError> {
     match v {
         jet_std::DataTree::Null => out.push(0xf6),
         jet_std::DataTree::Bool(false) => out.push(0xf4),
         jet_std::DataTree::Bool(true) => out.push(0xf5),
         jet_std::DataTree::Int(n) if *n >= 0 => jet_cbor_push_len(out, 0, *n as u64),
         jet_std::DataTree::Int(n) => jet_cbor_push_len(out, 1, (-1 - *n) as u64),
-        jet_std::DataTree::Float(f) => { out.push(0xfb); out.extend_from_slice(&f.to_be_bytes()); }
+        jet_std::DataTree::Float(f) => jet_cbor_push_preferred_float(out, *f),
         jet_std::DataTree::Text(s) => { jet_cbor_push_len(out, 3, s.len() as u64); out.extend_from_slice(s.as_bytes()); }
         jet_std::DataTree::Bytes(bs) => { jet_cbor_push_len(out, 2, bs.len() as u64); out.extend_from_slice(bs); }
-        jet_std::DataTree::Array(xs) => { jet_cbor_push_len(out, 4, xs.len() as u64); for x in xs { jet_cbor_encode_val(x, out); } }
+        jet_std::DataTree::Array(xs) => { jet_cbor_push_len(out, 4, xs.len() as u64); for x in xs { jet_cbor_encode_val(x, out, canonical)?; } }
         jet_std::DataTree::Object(es) => {
-            let mut sorted = es.clone();
-            sorted.sort_by(|a, b| a.0.cmp(&b.0));
-            jet_cbor_push_len(out, 5, sorted.len() as u64);
-            for (k, v) in sorted { jet_cbor_encode_val(&jet_std::DataTree::Text(k), out); jet_cbor_encode_val(&v, out); }
+            let mut encoded = Vec::with_capacity(es.len());
+            for (k, v) in es {
+                let mut key = Vec::new();
+                jet_cbor_encode_val(&jet_std::DataTree::Text(k.clone()), &mut key, canonical)?;
+                let mut value = Vec::new();
+                jet_cbor_encode_val(v, &mut value, canonical)?;
+                encoded.push((key, value));
+            }
+            if canonical { encoded.sort_by(|a, b| a.0.cmp(&b.0)); }
+            if encoded.windows(2).any(|pair| pair[0].0 == pair[1].0) {
+                return Err(jet_cbor_error(jet_std::CBORErrorKind::Unsupported, 0, "$", "duplicate encoded CBOR map key"));
+            }
+            jet_cbor_push_len(out, 5, encoded.len() as u64);
+            for (key, value) in encoded { out.extend_from_slice(&key); out.extend_from_slice(&value); }
         }
     }
+    Ok(())
 }
-fn jet_std_cbor_encode(d: &jet_std::DataTree) -> Vec<u8> {
+fn jet_enc_cbor_to_bytes<T: user_Encode>(value: &T) -> Result<Vec<u8>, jet_std::CBORError> {
     let mut out = Vec::new();
-    jet_cbor_encode_val(d, &mut out);
-    out
+    jet_cbor_encode_val(&value.jet_encode(), &mut out, false)?;
+    Ok(out)
 }
-fn jet_cbor_read_len(input: &[u8], i: &mut usize, add: u8) -> Result<u64, String> {
-    let need = match add { n @ 0..=23 => return Ok(n as u64), 24 => 1, 25 => 2, 26 => 4, 27 => 8, _ => return Err("unsupported CBOR indefinite/simple length".to_string()) };
-    if *i + need > input.len() { return Err("truncated CBOR length".to_string()); }
+fn jet_enc_cbor_to_bytes_canonical<T: user_Encode>(value: &T) -> Result<Vec<u8>, jet_std::CBORError> {
+    let mut out = Vec::new();
+    jet_cbor_encode_val(&value.jet_encode(), &mut out, true)?;
+    Ok(out)
+}
+fn jet_cbor_read_len(input: &[u8], i: &mut usize, add: u8, start: usize, canonical: bool, path: &str) -> Result<u64, jet_std::CBORError> {
+    let need = match add { n @ 0..=23 => return Ok(n as u64), 24 => 1, 25 => 2, 26 => 4, 27 => 8, _ => return Err(jet_cbor_error(jet_std::CBORErrorKind::Unsupported, start, path, "indefinite/reserved CBOR length is unsupported by whole-value decoding")) };
+    if *i + need > input.len() { return Err(jet_cbor_error(jet_std::CBORErrorKind::Truncated, input.len(), path, "CBOR length argument is truncated")); }
     let mut n = 0u64;
     for _ in 0..need { n = (n << 8) | input[*i] as u64; *i += 1; }
+    if canonical && ((add == 24 && n < 24) || (add == 25 && n <= u8::MAX as u64) || (add == 26 && n <= u16::MAX as u64) || (add == 27 && n <= u32::MAX as u64)) {
+        return Err(jet_cbor_error(jet_std::CBORErrorKind::NonCanonical, start, path, "CBOR argument does not use its shortest form"));
+    }
     Ok(n)
 }
-fn jet_cbor_decode_val(input: &[u8], i: &mut usize) -> Result<jet_std::DataTree, String> {
-    if *i >= input.len() { return Err("truncated CBOR value".to_string()); }
-    let b = input[*i]; *i += 1;
+fn jet_cbor_decode_val(input: &[u8], i: &mut usize, options: &jet_std::CBOROptions, depth: i64, items: &mut i64, path: &str, allow_bytes: bool) -> Result<jet_std::DataTree, jet_std::CBORError> {
+    if *i >= input.len() { return Err(jet_cbor_error(jet_std::CBORErrorKind::Truncated, input.len(), path, "CBOR value is missing")); }
+    let start = *i; let b = input[*i]; *i += 1;
+    *items = items.checked_add(1).ok_or_else(|| jet_cbor_error(jet_std::CBORErrorKind::Limit, start, path, "max_items counter overflow"))?;
+    if *items > options.max_items { return Err(jet_cbor_error(jet_std::CBORErrorKind::Limit, start, path, format!("max_items {} exceeded", options.max_items))); }
     let major = b >> 5; let add = b & 31;
     match major {
-        0 => Ok(jet_std::DataTree::Int(jet_cbor_read_len(input, i, add)? as i64)),
-        1 => Ok(jet_std::DataTree::Int(-1 - jet_cbor_read_len(input, i, add)? as i64)),
+        0 => i64::try_from(jet_cbor_read_len(input, i, add, start, options.require_canonical, path)?).map(jet_std::DataTree::Int).map_err(|_| jet_cbor_error(jet_std::CBORErrorKind::Unsupported, start, path, "CBOR integer is outside Jet Int")),
+        1 => i64::try_from(jet_cbor_read_len(input, i, add, start, options.require_canonical, path)?).ok().and_then(|n| n.checked_neg()?.checked_sub(1)).map(jet_std::DataTree::Int).ok_or_else(|| jet_cbor_error(jet_std::CBORErrorKind::Unsupported, start, path, "CBOR integer is outside Jet Int")),
         2 | 3 => {
-            let n = jet_cbor_read_len(input, i, add)? as usize;
-            if *i + n > input.len() { return Err("truncated CBOR bytes/text".to_string()); }
+            let n = usize::try_from(jet_cbor_read_len(input, i, add, start, options.require_canonical, path)?).map_err(|_| jet_cbor_error(jet_std::CBORErrorKind::Limit, start, path, "CBOR string length exceeds target capacity"))?;
+            if *i + n > input.len() { return Err(jet_cbor_error(jet_std::CBORErrorKind::Truncated, input.len(), path, "CBOR byte/text string is truncated")); }
             let bytes = input[*i..*i + n].to_vec(); *i += n;
-            if major == 2 { Ok(jet_std::DataTree::Bytes(bytes)) } else { String::from_utf8(bytes).map(jet_std::DataTree::Text).map_err(|_| "CBOR text is not UTF-8".to_string()) }
+            if major == 2 { if allow_bytes { Ok(jet_std::DataTree::Bytes(bytes)) } else { Err(jet_cbor_error(jet_std::CBORErrorKind::Unsupported, start, path, "CBOR byte strings are outside core.encoding.Data; use decode<[U8]>") ) } } else { String::from_utf8(bytes).map(jet_std::DataTree::Text).map_err(|_| jet_cbor_error(jet_std::CBORErrorKind::Syntax, start, path, "CBOR text is not UTF-8")) }
         }
         4 => {
-            let n = jet_cbor_read_len(input, i, add)? as usize;
+            if depth + 1 > options.max_depth { return Err(jet_cbor_error(jet_std::CBORErrorKind::Limit, start, path, format!("max_depth {} exceeded", options.max_depth))); }
+            let n = jet_cbor_read_len(input, i, add, start, options.require_canonical, path)? as usize;
             let mut xs = Vec::with_capacity(n);
-            for _ in 0..n { xs.push(jet_cbor_decode_val(input, i)?); }
+            for index in 0..n { xs.push(jet_cbor_decode_val(input, i, options, depth + 1, items, &format!("{path}[{index}]"), allow_bytes)?); }
             Ok(jet_std::DataTree::Array(xs))
         }
         5 => {
-            let n = jet_cbor_read_len(input, i, add)? as usize;
+            if depth + 1 > options.max_depth { return Err(jet_cbor_error(jet_std::CBORErrorKind::Limit, start, path, format!("max_depth {} exceeded", options.max_depth))); }
+            let n = jet_cbor_read_len(input, i, add, start, options.require_canonical, path)? as usize;
             let mut es = Vec::with_capacity(n);
+            let mut prior_key: Option<Vec<u8>> = None;
             for _ in 0..n {
-                let k = match jet_cbor_decode_val(input, i)? { jet_std::DataTree::Text(s) => s, _ => return Err("CBOR map key must be text".to_string()) };
-                es.push((k, jet_cbor_decode_val(input, i)?));
+                let key_start = *i;
+                let k = match jet_cbor_decode_val(input, i, options, depth + 1, items, path, false)? { jet_std::DataTree::Text(s) => s, _ => return Err(jet_cbor_error(jet_std::CBORErrorKind::Unsupported, key_start, path, "CBOR map key must be text")) };
+                let encoded_key = input[key_start..*i].to_vec();
+                if options.require_canonical && prior_key.as_ref().is_some_and(|old| old >= &encoded_key) { return Err(jet_cbor_error(jet_std::CBORErrorKind::NonCanonical, key_start, path, "CBOR map keys are not in Core deterministic bytewise order")); }
+                if es.iter().any(|(old, _)| old == &k) { return Err(jet_cbor_error(jet_std::CBORErrorKind::Unsupported, key_start, path, "duplicate CBOR text map key")); }
+                prior_key = Some(encoded_key);
+                let key_path = format!("{path}[{:?}]", k);
+                es.push((k, jet_cbor_decode_val(input, i, options, depth + 1, items, &key_path, allow_bytes)?));
             }
             Ok(jet_std::DataTree::Object(es))
         }
@@ -371,17 +404,37 @@ fn jet_cbor_decode_val(input: &[u8], i: &mut usize) -> Result<jet_std::DataTree,
             20 => Ok(jet_std::DataTree::Bool(false)),
             21 => Ok(jet_std::DataTree::Bool(true)),
             22 => Ok(jet_std::DataTree::Null),
-            27 => { if *i + 8 > input.len() { return Err("truncated CBOR float".to_string()); } let mut buf = [0u8; 8]; buf.copy_from_slice(&input[*i..*i+8]); *i += 8; Ok(jet_std::DataTree::Float(f64::from_be_bytes(buf))) }
-            _ => Err("unsupported CBOR simple value".to_string()),
+            25 => { if *i + 2 > input.len() { return Err(jet_cbor_error(jet_std::CBORErrorKind::Truncated, input.len(), path, "CBOR Float16 is truncated")); } let bits=u16::from_be_bytes([input[*i],input[*i+1]]);*i+=2;Ok(jet_std::DataTree::Float(jet_cbor_half_to_f64(bits))) }
+            26 => { if *i + 4 > input.len() { return Err(jet_cbor_error(jet_std::CBORErrorKind::Truncated, input.len(), path, "CBOR Float32 is truncated")); } let mut buf=[0u8;4];buf.copy_from_slice(&input[*i..*i+4]);*i+=4;Ok(jet_std::DataTree::Float(f32::from_be_bytes(buf) as f64)) }
+            27 => { if *i + 8 > input.len() { return Err(jet_cbor_error(jet_std::CBORErrorKind::Truncated, input.len(), path, "CBOR Float64 is truncated")); } let mut buf = [0u8; 8]; buf.copy_from_slice(&input[*i..*i+8]); *i += 8; Ok(jet_std::DataTree::Float(f64::from_be_bytes(buf))) }
+            _ => Err(jet_cbor_error(jet_std::CBORErrorKind::Unsupported, start, path, format!("unsupported CBOR simple value {add}"))),
         },
-        _ => Err("unsupported CBOR major type".to_string()),
+        6 => Err(jet_cbor_error(jet_std::CBORErrorKind::Unsupported, start, path, "CBOR tags are unsupported")),
+        _ => Err(jet_cbor_error(jet_std::CBORErrorKind::Unsupported, start, path, format!("unsupported CBOR major type {major}"))),
     }
 }
-fn jet_std_cbor_decode(bytes: &Vec<u8>) -> Result<jet_std::DataTree, String> {
+fn jet_cbor_validate_options(options: &jet_std::CBOROptions) -> Result<(), jet_std::CBORError> {
+    if !(1..=4096).contains(&options.max_depth) { return Err(jet_cbor_error(jet_std::CBORErrorKind::Limit, 0, "$", "max_depth must be in 1..4096")); }
+    if !(1..=1_000_000_000).contains(&options.max_items) { return Err(jet_cbor_error(jet_std::CBORErrorKind::Limit, 0, "$", "max_items must be in 1..1000000000")); }
+    if !(0..=1_073_741_824).contains(&options.max_bytes) { return Err(jet_cbor_error(jet_std::CBORErrorKind::Limit, 0, "$", "max_bytes must be in 0..1073741824")); }
+    Ok(())
+}
+fn jet_enc_cbor_parse(bytes: &Vec<u8>, options: jet_std::CBOROptions) -> Result<jet_std::DataTree, jet_std::CBORError> {
+    jet_cbor_validate_options(&options)?;
+    if bytes.len() as i64 > options.max_bytes { return Err(jet_cbor_error(jet_std::CBORErrorKind::Limit, 0, "$", format!("input exceeds max_bytes {}", options.max_bytes))); }
     let mut i = 0usize;
-    let v = jet_cbor_decode_val(bytes, &mut i)?;
-    if i != bytes.len() { return Err("trailing CBOR bytes".to_string()); }
+    let mut items = 0i64;
+    let v = jet_cbor_decode_val(bytes, &mut i, &options, 0, &mut items, "$", false)?;
+    if i != bytes.len() { return Err(jet_cbor_error(jet_std::CBORErrorKind::TrailingData, i, "$", "trailing CBOR data after root value")); }
     Ok(v)
+}
+fn jet_enc_cbor_decode<T: user_Decode>(bytes: &Vec<u8>, options: jet_std::CBOROptions) -> Result<T, jet_std::CBORError> {
+    jet_cbor_validate_options(&options)?;
+    if bytes.len() as i64 > options.max_bytes { return Err(jet_cbor_error(jet_std::CBORErrorKind::Limit, 0, "$", format!("input exceeds max_bytes {}", options.max_bytes))); }
+    let mut i=0usize; let mut items=0i64;
+    let tree=jet_cbor_decode_val(bytes,&mut i,&options,0,&mut items,"$",true)?;
+    if i!=bytes.len(){return Err(jet_cbor_error(jet_std::CBORErrorKind::TrailingData,i,"$","trailing CBOR data after root value"));}
+    T::jet_decode_traced(&tree).map(|(value,_)|value).map_err(|error|jet_cbor_error(jet_std::CBORErrorKind::TypeMismatch,0,&error.path,error.reason))
 }
 
 // UUID helpers — pure std, zero deps. CSPRNG via /dev/urandom (POSIX); the
@@ -453,4 +506,3 @@ fn jet_std_uuid_v7(clock: &jet_std::Clock) -> String {
     bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant 10xx
     jet_uuid_format(&bytes)
 }
-
