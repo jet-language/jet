@@ -64,6 +64,7 @@ impl BudgetStore {
     }
 
     pub fn write_report(&self, bytes: &[u8]) -> Result<(String, bool), String> {
+        mutation_supported()?;
         let report = verify_budget_report(bytes).map_err(|e| format!("invalid budget report: {e}"))?;
         let id = report_id(&report)?;
         let dir = self.dir(&[".jet", "perf", "reports"], true, 0o755)?;
@@ -76,6 +77,7 @@ impl BudgetStore {
     }
 
     pub fn plan_update(&self, baseline: &str, report: &[u8], kind: UpdateKind, accepted_at: &str) -> Result<UpdatePlan, String> {
+        mutation_supported()?;
         validate_baseline_name(baseline)?;
         validate_kind(&kind)?;
         validate_timestamp(accepted_at)?;
@@ -95,6 +97,7 @@ impl BudgetStore {
     }
 
     pub fn apply_update(&self, plan: &UpdatePlan) -> Result<AppliedUpdate, String> {
+        mutation_supported()?;
         validate_baseline_name(&plan.baseline)?;
         validate_kind(&plan.kind)?;
         validate_timestamp(&plan.accepted_at)?;
@@ -156,7 +159,7 @@ impl BudgetStore {
         Ok(selected)
     }
 
-    pub fn gc(&self, at:&str)->Result<GcResult,String>{let now=timestamp_seconds(at)?;let locks=self.dir(&[".jet","perf","baselines","locks"],true,0o700)?;let _global=Lock::take(&locks,"global.lock")?;let names=self.dir(&[".jet","perf","baselines","names"],false,0o755)?;let mut referenced=BTreeSet::new();let mut retained=Vec::new();let mut reachability_complete=true;collect_manifest_refs(&names,"",&mut referenced,&mut retained,&mut reachability_complete)?;let objects=self.dir(&[".jet","perf","baselines","objects"],false,0o755)?;let mut removed=Vec::new();for entry in list_dir(&objects)?{if entry.is_dir||entry.is_symlink{retained.push(format!("objects/{}",entry.name));continue}let Some(id)=entry.name.strip_suffix(".json")else{retained.push(format!("objects/{}",entry.name));continue};if !is_hex64(id){retained.push(format!("objects/{}",entry.name));continue}let bytes=match read_regular(&objects,&entry.name){Ok(bytes)=>bytes,Err(error)=>{retained.push(format!("objects/{}: {error}",entry.name));continue}};let report=match verify_budget_report(&bytes){Ok(report)=>report,Err(error)=>{retained.push(format!("objects/{}: {error}",entry.name));continue}};if report_id(&report)?!=id{retained.push(format!("objects/{}: report_id mismatch",entry.name));continue}if !reachability_complete||referenced.contains(id)||now.saturating_sub(entry.modified)<86400{retained.push(format!("objects/{}",entry.name));continue}unlink_checked(&objects,&entry.name)?;removed.push(id.into())}removed.sort();retained.sort();Ok(GcResult{removed,retained})}
+    pub fn gc(&self, at:&str)->Result<GcResult,String>{mutation_supported()?;let now=timestamp_seconds(at)?;let locks=self.dir(&[".jet","perf","baselines","locks"],true,0o700)?;let _global=Lock::take(&locks,"global.lock")?;let names=self.dir(&[".jet","perf","baselines","names"],false,0o755)?;let mut referenced=BTreeSet::new();let mut retained=Vec::new();let mut reachability_complete=true;collect_manifest_refs(&names,"",&mut referenced,&mut retained,&mut reachability_complete)?;let objects=self.dir(&[".jet","perf","baselines","objects"],false,0o755)?;let mut removed=Vec::new();for entry in list_dir(&objects)?{if entry.is_dir||entry.is_symlink{retained.push(format!("objects/{}",entry.name));continue}let Some(id)=entry.name.strip_suffix(".json")else{retained.push(format!("objects/{}",entry.name));continue};if !is_hex64(id){retained.push(format!("objects/{}",entry.name));continue}let bytes=match read_regular(&objects,&entry.name){Ok(bytes)=>bytes,Err(error)=>{retained.push(format!("objects/{}: {error}",entry.name));continue}};let report=match verify_budget_report(&bytes){Ok(report)=>report,Err(error)=>{retained.push(format!("objects/{}: {error}",entry.name));continue}};if report_id(&report)?!=id{retained.push(format!("objects/{}: report_id mismatch",entry.name));continue}if !reachability_complete||referenced.contains(id)||now.saturating_sub(entry.modified)<86400{retained.push(format!("objects/{}",entry.name));continue}unlink_checked(&objects,&entry.name)?;removed.push(id.into())}removed.sort();retained.sort();Ok(GcResult{removed,retained})}
 
     fn validate_update_eligibility(&self,baseline:&str,report:&CanonicalJson,kind:&UpdateKind,current:Option<&CanonicalJson>,at:&str)->Result<(),String>{
         let content=report_content(report)?;let measurements=array(content.get("measurements"),"measurements")?;let mut budget_ids=BTreeSet::new();
@@ -377,8 +380,15 @@ fn boolean(value:Option<&CanonicalJson>,name:&str)->Result<bool,String>{match va
 fn nullable_text<'a>(value:Option<&'a CanonicalJson>,name:&str)->Result<Option<&'a str>,String>{match value{Some(CanonicalJson::Null)=>Ok(None),Some(CanonicalJson::String(v))=>Ok(Some(v)),_=>Err(format!("{name} is not text or null"))}}
 fn require_text(fields:&BTreeMap<String,CanonicalJson>,key:&str,expected:&str)->Result<(),String>{if text(fields.get(key),key)?==expected{Ok(())}else{Err(format!("{key} mismatch"))}}
 
+#[cfg(test)]thread_local!{static FORCE_UNSUPPORTED_MUTATION:std::cell::Cell<bool>=const{std::cell::Cell::new(false)};}
+fn mutation_supported()->Result<(),String>{
+    #[cfg(target_os="linux")]{#[cfg(test)]if FORCE_UNSUPPORTED_MUTATION.with(std::cell::Cell::get){return Err("performance baseline mutation is enabled only on Linux until equivalent umask and durability guarantees are ratified".into())}Ok(())}
+    #[cfg(not(target_os="linux"))]{Err("performance baseline mutation is enabled only on Linux until equivalent umask and durability guarantees are ratified".into())}
+}
+
 #[cfg(unix)]
 fn open_dir_chain(root:&Path,parts:&[&str],create:bool,mode:u32)->Result<File,String>{
+    if create{mutation_supported()?;}
     use std::ffi::CString;use std::os::fd::{AsRawFd,FromRawFd};use std::os::unix::fs::OpenOptionsExt;
     const O_RDONLY:i32=0;const O_CLOEXEC:i32=0o2000000;const O_DIRECTORY:i32=0o200000;const O_NOFOLLOW:i32=0o400000;
     extern "C"{fn openat(fd:i32,path:*const i8,flags:i32,mode:u32)->i32;fn mkdirat(fd:i32,path:*const i8,mode:u32)->i32;}
@@ -393,22 +403,22 @@ fn read_regular(dir:&File,name:&str)->Result<Vec<u8>,String>{use std::ffi::CStri
 
 static NONCE:AtomicU64=AtomicU64::new(0);
 #[cfg(unix)]
-fn temp(dir:&File,bytes:&[u8])->Result<(File,String),String>{use std::ffi::CString;use std::os::fd::{AsRawFd,FromRawFd};const O_WRONLY:i32=1;const O_CREAT:i32=0o100;const O_EXCL:i32=0o200;const O_CLOEXEC:i32=0o2000000;const O_NOFOLLOW:i32=0o400000;extern "C"{fn openat(fd:i32,path:*const i8,flags:i32,mode:u32)->i32;}for _ in 0..32{let name=format!(".tmp-{}-{}",std::process::id(),NONCE.fetch_add(1,Ordering::Relaxed));let cname=CString::new(name.as_str()).unwrap();let fd=unsafe{openat(dir.as_raw_fd(),cname.as_ptr(),O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC,0o600)};if fd<0{if std::io::Error::last_os_error().kind()==ErrorKind::AlreadyExists{continue}return Err(format!("cannot create temp: {}",std::io::Error::last_os_error()));}let mut file=unsafe{File::from_raw_fd(fd)};file.write_all(bytes).map_err(|e|e.to_string())?;file.sync_all().map_err(|e|e.to_string())?;return Ok((file,name));}Err("cannot allocate temp".into())}
+fn temp(dir:&File,bytes:&[u8])->Result<(File,String),String>{mutation_supported()?;use std::ffi::CString;use std::os::fd::{AsRawFd,FromRawFd};const O_WRONLY:i32=1;const O_CREAT:i32=0o100;const O_EXCL:i32=0o200;const O_CLOEXEC:i32=0o2000000;const O_NOFOLLOW:i32=0o400000;extern "C"{fn openat(fd:i32,path:*const i8,flags:i32,mode:u32)->i32;}for _ in 0..32{let name=format!(".tmp-{}-{}",std::process::id(),NONCE.fetch_add(1,Ordering::Relaxed));let cname=CString::new(name.as_str()).unwrap();let fd=unsafe{openat(dir.as_raw_fd(),cname.as_ptr(),O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC,0o600)};if fd<0{if std::io::Error::last_os_error().kind()==ErrorKind::AlreadyExists{continue}return Err(format!("cannot create temp: {}",std::io::Error::last_os_error()));}let mut file=unsafe{File::from_raw_fd(fd)};file.write_all(bytes).map_err(|e|e.to_string())?;file.sync_all().map_err(|e|e.to_string())?;return Ok((file,name));}Err("cannot allocate temp".into())}
 #[cfg(not(unix))]fn temp(_: &File,_:&[u8])->Result<(File,String),String>{Err("secure temp unavailable on this platform".into())}
 
-#[cfg(unix)]fn unlink(dir:&File,name:&str){use std::ffi::CString;use std::os::fd::AsRawFd;extern "C"{fn unlinkat(fd:i32,path:*const i8,flags:i32)->i32;}if let Ok(name)=CString::new(name){unsafe{unlinkat(dir.as_raw_fd(),name.as_ptr(),0)};}}
-#[cfg(unix)]fn unlink_checked(dir:&File,name:&str)->Result<(),String>{use std::ffi::CString;use std::os::fd::AsRawFd;extern "C"{fn unlinkat(fd:i32,path:*const i8,flags:i32)->i32;}let name=CString::new(name).map_err(|_|"NUL in artifact name")?;if unsafe{unlinkat(dir.as_raw_fd(),name.as_ptr(),0)}==0{dir.sync_all().map_err(|e|e.to_string())}else{Err(format!("cannot remove unreferenced object: {}",std::io::Error::last_os_error()))}}
+#[cfg(unix)]fn unlink(dir:&File,name:&str){if mutation_supported().is_err(){return}use std::ffi::CString;use std::os::fd::AsRawFd;extern "C"{fn unlinkat(fd:i32,path:*const i8,flags:i32)->i32;}if let Ok(name)=CString::new(name){unsafe{unlinkat(dir.as_raw_fd(),name.as_ptr(),0)};}}
+#[cfg(unix)]fn unlink_checked(dir:&File,name:&str)->Result<(),String>{mutation_supported()?;use std::ffi::CString;use std::os::fd::AsRawFd;extern "C"{fn unlinkat(fd:i32,path:*const i8,flags:i32)->i32;}let name=CString::new(name).map_err(|_|"NUL in artifact name")?;if unsafe{unlinkat(dir.as_raw_fd(),name.as_ptr(),0)}==0{dir.sync_all().map_err(|e|e.to_string())}else{Err(format!("cannot remove unreferenced object: {}",std::io::Error::last_os_error()))}}
 #[cfg(not(unix))]fn unlink_checked(_: &File,_:&str)->Result<(),String>{Err("secure unlink unavailable on this platform".into())}
 
-fn install_immutable(dir:&File,name:&str,bytes:&[u8],verify:impl Fn(&[u8])->Result<(),String>)->Result<bool,String>{match read_regular(dir,name){Ok(existing)=>{verify(&existing)?;if existing==bytes{return Ok(false)}return Err("immutable artifact differs from candidate".into())},Err(e)if !e.contains("No such file")=>return Err(e),Err(_)=>{}}let (file,tmp)=temp(dir,bytes)?;artifact_permissions(&file)?;#[cfg(unix)]{use std::ffi::CString;use std::os::fd::AsRawFd;extern "C"{fn linkat(oldfd:i32,old:*const i8,newfd:i32,new:*const i8,flags:i32)->i32;}let old=CString::new(tmp.as_str()).unwrap();let new=CString::new(name).unwrap();if unsafe{linkat(dir.as_raw_fd(),old.as_ptr(),dir.as_raw_fd(),new.as_ptr(),0)}!=0{let error=std::io::Error::last_os_error();unlink(dir,&tmp);if error.kind()==ErrorKind::AlreadyExists{let existing=read_regular(dir,name)?;verify(&existing)?;if existing==bytes{return Ok(false)}}return Err(format!("cannot atomically install artifact: {error}"));}unlink(dir,&tmp);dir.sync_all().map_err(|e|e.to_string())?;Ok(true)}#[cfg(not(unix))]{let _=tmp;Err("atomic no-replace unavailable on this platform".into())}}
+fn install_immutable(dir:&File,name:&str,bytes:&[u8],verify:impl Fn(&[u8])->Result<(),String>)->Result<bool,String>{mutation_supported()?;match read_regular(dir,name){Ok(existing)=>{verify(&existing)?;if existing==bytes{return Ok(false)}return Err("immutable artifact differs from candidate".into())},Err(e)if !e.contains("No such file")=>return Err(e),Err(_)=>{}}let (file,tmp)=temp(dir,bytes)?;artifact_permissions(&file)?;#[cfg(unix)]{use std::ffi::CString;use std::os::fd::AsRawFd;extern "C"{fn linkat(oldfd:i32,old:*const i8,newfd:i32,new:*const i8,flags:i32)->i32;}let old=CString::new(tmp.as_str()).unwrap();let new=CString::new(name).unwrap();if unsafe{linkat(dir.as_raw_fd(),old.as_ptr(),dir.as_raw_fd(),new.as_ptr(),0)}!=0{let error=std::io::Error::last_os_error();unlink(dir,&tmp);if error.kind()==ErrorKind::AlreadyExists{let existing=read_regular(dir,name)?;verify(&existing)?;if existing==bytes{return Ok(false)}}return Err(format!("cannot atomically install artifact: {error}"));}unlink(dir,&tmp);dir.sync_all().map_err(|e|e.to_string())?;Ok(true)}#[cfg(not(unix))]{let _=tmp;Err("atomic no-replace unavailable on this platform".into())}}
 
-fn replace_atomic(dir:&File,name:&str,bytes:&[u8])->Result<(),String>{let (file,tmp)=temp(dir,bytes)?;artifact_permissions(&file)?;#[cfg(unix)]{use std::ffi::CString;use std::os::fd::AsRawFd;extern "C"{fn renameat(oldfd:i32,old:*const i8,newfd:i32,new:*const i8)->i32;}let old=CString::new(tmp.as_str()).unwrap();let new=CString::new(name).unwrap();if unsafe{renameat(dir.as_raw_fd(),old.as_ptr(),dir.as_raw_fd(),new.as_ptr())}!=0{let error=std::io::Error::last_os_error();unlink(dir,&tmp);return Err(format!("cannot atomically replace manifest: {error}"));}dir.sync_all().map_err(|e|e.to_string())?;Ok(())}#[cfg(not(unix))]{let _=(dir,name,tmp);Err("atomic replacement unavailable on this platform".into())}}
+fn replace_atomic(dir:&File,name:&str,bytes:&[u8])->Result<(),String>{mutation_supported()?;let (file,tmp)=temp(dir,bytes)?;artifact_permissions(&file)?;#[cfg(unix)]{use std::ffi::CString;use std::os::fd::AsRawFd;extern "C"{fn renameat(oldfd:i32,old:*const i8,newfd:i32,new:*const i8)->i32;}let old=CString::new(tmp.as_str()).unwrap();let new=CString::new(name).unwrap();if unsafe{renameat(dir.as_raw_fd(),old.as_ptr(),dir.as_raw_fd(),new.as_ptr())}!=0{let error=std::io::Error::last_os_error();unlink(dir,&tmp);return Err(format!("cannot atomically replace manifest: {error}"));}dir.sync_all().map_err(|e|e.to_string())?;Ok(())}#[cfg(not(unix))]{let _=(dir,name,tmp);Err("atomic replacement unavailable on this platform".into())}}
 
-#[cfg(target_os="linux")]fn artifact_permissions(file:&File)->Result<(),String>{use std::os::unix::fs::PermissionsExt;let status=std::fs::read_to_string("/proc/self/status").map_err(|e|format!("cannot read process umask: {e}"))?;let raw=status.lines().find_map(|line|line.strip_prefix("Umask:\t")).ok_or("process umask is unavailable")?;let mask=u32::from_str_radix(raw.trim(),8).map_err(|_|"process umask is invalid")?;file.set_permissions(std::fs::Permissions::from_mode(0o644&!mask)).map_err(|e|e.to_string())?;file.sync_all().map_err(|e|e.to_string())}
+#[cfg(target_os="linux")]fn artifact_permissions(file:&File)->Result<(),String>{mutation_supported()?;use std::os::unix::fs::PermissionsExt;let status=std::fs::read_to_string("/proc/self/status").map_err(|e|format!("cannot read process umask: {e}"))?;let raw=status.lines().find_map(|line|line.strip_prefix("Umask:\t")).ok_or("process umask is unavailable")?;let mask=u32::from_str_radix(raw.trim(),8).map_err(|_|"process umask is invalid")?;file.set_permissions(std::fs::Permissions::from_mode(0o644&!mask)).map_err(|e|e.to_string())?;file.sync_all().map_err(|e|e.to_string())}
 #[cfg(not(target_os="linux"))]fn artifact_permissions(_: &File)->Result<(),String>{Err("performance baseline mutation is enabled only on Linux until equivalent umask and durability guarantees are ratified".into())}
 
 #[cfg(unix)]struct Lock{file:File}
-#[cfg(unix)]impl Lock{fn take(dir:&File,name:&str)->Result<Self,String>{use std::ffi::CString;use std::os::fd::{AsRawFd,FromRawFd};use std::os::unix::fs::MetadataExt;const O_RDWR:i32=2;const O_CREAT:i32=0o100;const O_CLOEXEC:i32=0o2000000;const O_NOFOLLOW:i32=0o400000;const LOCK_EX:i32=2;extern "C"{fn openat(fd:i32,path:*const i8,flags:i32,mode:u32)->i32;fn flock(fd:i32,operation:i32)->i32;}let name=CString::new(name).map_err(|_|"NUL in lock")?;let fd=unsafe{openat(dir.as_raw_fd(),name.as_ptr(),O_RDWR|O_CREAT|O_NOFOLLOW|O_CLOEXEC,0o600)};if fd<0{return Err(format!("cannot securely open lock: {}",std::io::Error::last_os_error()));}let file=unsafe{File::from_raw_fd(fd)};let meta=file.metadata().map_err(|e|e.to_string())?;if !meta.is_file()||meta.nlink()!=1{return Err("baseline lock is linked or not regular".into())}if unsafe{flock(file.as_raw_fd(),LOCK_EX)}!=0{return Err(format!("cannot lock baseline: {}",std::io::Error::last_os_error()));}Ok(Self{file})}}
+#[cfg(unix)]impl Lock{fn take(dir:&File,name:&str)->Result<Self,String>{mutation_supported()?;use std::ffi::CString;use std::os::fd::{AsRawFd,FromRawFd};use std::os::unix::fs::MetadataExt;const O_RDWR:i32=2;const O_CREAT:i32=0o100;const O_CLOEXEC:i32=0o2000000;const O_NOFOLLOW:i32=0o400000;const LOCK_EX:i32=2;extern "C"{fn openat(fd:i32,path:*const i8,flags:i32,mode:u32)->i32;fn flock(fd:i32,operation:i32)->i32;}let name=CString::new(name).map_err(|_|"NUL in lock")?;let fd=unsafe{openat(dir.as_raw_fd(),name.as_ptr(),O_RDWR|O_CREAT|O_NOFOLLOW|O_CLOEXEC,0o600)};if fd<0{return Err(format!("cannot securely open lock: {}",std::io::Error::last_os_error()));}let file=unsafe{File::from_raw_fd(fd)};let meta=file.metadata().map_err(|e|e.to_string())?;if !meta.is_file()||meta.nlink()!=1{return Err("baseline lock is linked or not regular".into())}if unsafe{flock(file.as_raw_fd(),LOCK_EX)}!=0{return Err(format!("cannot lock baseline: {}",std::io::Error::last_os_error()));}Ok(Self{file})}}
 #[cfg(unix)]impl Drop for Lock{fn drop(&mut self){use std::os::fd::AsRawFd;const LOCK_UN:i32=8;extern "C"{fn flock(fd:i32,operation:i32)->i32;}unsafe{flock(self.file.as_raw_fd(),LOCK_UN)};}}
 #[cfg(not(unix))]struct Lock;
 #[cfg(not(unix))]impl Lock{fn take(_: &File,_:&str)->Result<Self,String>{Err("advisory lock unavailable on this platform".into())}}
@@ -435,6 +445,15 @@ mod tests {
         assert!(normalize_reason("reviewed regression").is_ok());
         assert!(normalize_reason("e\u{301}").is_err());assert!(normalize_reason("é").is_ok());
         assert!(validate_timestamp("2026-02-31T12:00:00.000000000Z").is_err());assert!(validate_timestamp("2024-02-29T12:00:00.000000000Z").is_ok());
+    }
+
+    #[test]
+    fn unsupported_mutation_fails_before_any_filesystem_change(){
+        struct Reset;impl Drop for Reset{fn drop(&mut self){FORCE_UNSUPPORTED_MUTATION.with(|value|value.set(false));}}
+        FORCE_UNSUPPORTED_MUTATION.with(|value|value.set(true));let _reset=Reset;
+        let root=std::env::temp_dir().join(format!("jet-budget-store-unsupported-{}",std::process::id()));let _=std::fs::remove_dir_all(&root);let store=BudgetStore::new(&root);
+        let plan=UpdatePlan{baseline:"release/linux".into(),report_id:"0".repeat(64),report_bytes:Vec::new(),prior_manifest_id:None,prior_head_report_id:None,accepted_at:"2026-01-01T00:00:00.000000000Z".into(),kind:UpdateKind::Bootstrap{reason:"initial baseline".into()}};
+        assert!(store.write_report(b"invalid").is_err());assert!(store.plan_update("release/linux",b"invalid",UpdateKind::Bootstrap{reason:"initial baseline".into()},"invalid").is_err());assert!(store.apply_update(&plan).is_err());assert!(store.gc("invalid").is_err());assert!(!root.exists());
     }
 
     #[test]
