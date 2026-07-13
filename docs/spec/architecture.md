@@ -205,6 +205,14 @@ must not advertise speculative features.
   core helpers that a checked program can call, and codegen emits only those
   helper templates. A program that imports every core module but calls none
   should stay in hello-world size territory.
+
+  Embedded Core runtime templates under `crates/jet-codegen/src/Prelude/` are
+  the canonical source for compiler-known Core behavior; rebuild `jet` before
+  smoke-testing any change because `include_str!` snapshots them into the
+  binary. A first-party package with a separately buildable source tree must
+  not maintain a copied fallback template. `core.archive` is the concrete
+  model: `corelib/core.archive/pkgs/archive/src/lib.rs` is consumed directly by
+  both CoreProvider and the hidden bridge fallback.
 - **R11 — Generated code re-enters the front end.** Every build-time
   code-generation step — a derive body, a comptime splice, any future
   metaprogram — emits a **typed source fragment** that re-enters

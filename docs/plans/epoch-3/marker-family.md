@@ -93,9 +93,11 @@ sema is separate cards (c8syntaxwave); this card only fixes the spelling + regis
 ### 2c. Stays on `#` (directives — do **not** touch)
 
 `#Unsafe` `#Impure` `#Reactive` `#Test` `#Bench` `#Todo` `#Tainted` `#Sanitizer`
-`#State` `#Transition` `#Caps` `#Grant` `#Transact` `#Target` `#Wasm` `#Js`
-`#WasmExport` `#Html` `#Ref` `#UnitFamily` `#SingleUse` `#Layout`
-`#Suppress` `#Extern` `#Bindgen` `#Caller` `#(effect …)`.
+`#State` `#Transition` `#Caps` `#Grant` `#Transact` `#Target(Wasm|Js)`
+`#WasmExport` `#Html` `#UnitFamily` `#SingleUse` `#Layout`
+`#Extern` `#Bindgen` `#Caller` `#(effect …)`. Bare `#Wasm`/`#Js` retired by
+D-MARK-TARGET1; `#Suppress` retired by D-MARK-DISCARD1; `#Ref` retired by
+D-MEM1/S3.
 (`#Uninit` retired by D-UNINIT-SENTINEL1 — spelling moved to the `uninit`
 contextual keyword, `name: Type := uninit`; the old marker is now a hard
 parse error, E0426.)

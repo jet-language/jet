@@ -112,9 +112,9 @@ const MARKER_PLANE_ROWS: &[(&str, &[&str])] = &[
             "#PubFile",
             "#NoPrelude",
             "#Target(Web)",
+            "#Target(Wasm)",
+            "#Target(Js)",
             "#Html",
-            "#Js",
-            "#Wasm",
             "#WasmExport",
         ],
     ),
@@ -143,7 +143,6 @@ const MARKER_PLANE_ROWS: &[(&str, &[&str])] = &[
         &[
             "@Codable",
             "@[Encode, Decode]",
-            "@Debug",
             "@Summarize",
             "@Comparable",
         ],
@@ -178,7 +177,6 @@ const MARKER_PLANE_ROWS: &[(&str, &[&str])] = &[
             "#Replayable",
             "#State",
             "#Transition",
-            "#Suppress",
             "#Track",
         ],
     ),
@@ -493,6 +491,47 @@ fn marker_plane_matrix_covers_current_marker_families() {
             matrix.contains(decision_anchor) && decisions.contains(decision_anchor),
             "marker-plane matrix must cite syntax decision `{decision_anchor}`"
         );
+    }
+}
+
+#[test]
+fn card_511_census_matches_current_law() {
+    let core = fs::read_to_string("crates/jet-foundation/src/Syntax/core_surface.rs")
+        .expect("read core surface registry");
+    let package = fs::read_to_string("crates/jet-foundation/src/Syntax/package_files.rs")
+        .expect("read package surface registry");
+    let markers = fs::read_to_string("crates/jet-foundation/src/Syntax/markers.rs")
+        .expect("read marker registry");
+    let proposal = fs::read_to_string("docs/proposals/architecture-infra.md")
+        .expect("read architecture audit");
+
+    assert!(
+        !core.contains("pub const KW_VIEW"),
+        "D-MEM1 retired `view` as a keyword"
+    );
+    assert!(
+        package.contains("pub const METHOD_VIEW"),
+        "D-DYNARRAY1 keeps `.view(a..b)` as an ordinary method"
+    );
+    for retired in ["ATTR_WASM,", "ATTR_JS,", "ATTR_SUPPRESS,"] {
+        assert!(
+            !markers.contains(retired),
+            "retired marker remains registered: {retired}"
+        );
+    }
+    for value in ["ATTR_EXPERIMENTAL", "ATTR_TESTED", "ATTR_HARDENED"] {
+        assert!(
+            package.contains(value) && !markers.contains(value),
+            "maturity value `{value}` must remain a #Meta value, not a standalone marker"
+        );
+    }
+    for law in [
+        "synthetic dispatch subject `it`",
+        "`Clock` is the",
+        "D-DET1 injectable type",
+        "`taskgroup` is D-TASKSCOPE1=A",
+    ] {
+        assert!(proposal.contains(law), "census audit omits `{law}`");
     }
 }
 

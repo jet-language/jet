@@ -366,7 +366,6 @@ fn token_kind_name(kind: &TokKind) -> &'static str {
         TokKind::KwFalse => "literal.false",
         TokKind::KwMutate => "keyword.mutate",
         TokKind::KwMove => "keyword.move",
-        TokKind::KwView => "keyword.view",
         TokKind::KwCopy => "keyword.copy",
         TokKind::KwStruct => "keyword.struct",
         TokKind::KwEnum => "keyword.enum",

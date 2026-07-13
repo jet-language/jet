@@ -12,6 +12,25 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+#[test]
+fn archive_bridge_embeds_the_canonical_ring_source() {
+    let ffi = include_str!("../crates/jet-pkg-model/src/FFI.rs");
+    let canonical = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("corelib/core.archive/pkgs/archive/src/lib.rs");
+    let retired_copy = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("crates/jet-pkg-model/src/Prelude/Archive.rs");
+
+    assert!(canonical.is_file(), "canonical archive source is missing");
+    assert!(
+        ffi.contains("../../../corelib/core.archive/pkgs/archive/src/lib.rs"),
+        "the bridge must include the canonical ring-package implementation"
+    );
+    assert!(
+        !retired_copy.exists(),
+        "a second archive runtime source would allow the two build paths to drift"
+    );
+}
+
 mod common;
 use common::have_rustc;
 

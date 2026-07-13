@@ -149,7 +149,7 @@ Contradictions and stale text a weak model will follow off a cliff:
   compiler now lives in `crates/*`; AGENTS.md's rg hint omits `crates/`;
   AGENTS.md references a `pipeline()`/`parallel()` API that doesn't exist.
 - docs/README.md launches the retired dashboard, says "R1–R7", and omits
-  docs/design + docs/reviews. docs/plans/README.md (the "implementing-agent
+  docs/design + docs/proposals. docs/plans/README.md (the "implementing-agent
   protocol") still mandates retired numbered examples and dead paths —
   rewrite or fold into AGENTS.md. docs/reference/errors/README.md names a
   nonexistent script; real command is `UPDATE_DOCS=1 cargo test gen_error_pages`.

@@ -153,8 +153,8 @@ pub const ATTR_INVARIANT: &str = "Invariant";
 
 /// D-MUSTUSE1 (c18iwxqx): `@MustUse` — marks a type, function, or method whose
 /// result cannot be silently ignored as a bare expression statement (E0419).
-/// Explicit discard uses `.drop("reason")` or `#Suppress(MustUse) { … }`
-/// (D-IGNORERET2). Compile-time only; erases in codegen (I3).
+/// Explicit discard uses `.drop("reason")` only (D-IGNORERET2, amended by
+/// D-MARK-DISCARD1=A). Compile-time only; erases in codegen (I3).
 pub const ATTR_MUST_USE: &str = "MustUse"; // D-MUSTUSE1
 
 /// D-MIGRATE1 (ratified 2026-06-22): contextual keyword `migration` — introduces

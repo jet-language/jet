@@ -9,3 +9,7 @@ a sidequest plan.
 
 Only genuinely-unexplored ideas remain here. Anything already carded or
 ratified has been extracted out (the proposal files note where).
+
+Dated `*-review-*` and `*-audit-*` files are preserved evidence for the cards
+they created, not a second source of current status. Tower and the governing
+specs remain authoritative after those snapshots.

@@ -21,17 +21,21 @@ already right.
 - **Surface census**: 62 registered markers (20 `@` / 42 `#`), derived from
   `Syntax::CONTRACT_MARKERS` and `Syntax::DIRECTIVE_MARKERS`; 111 KW_ entries,
   ~70 core modules, 587 diagnostic codes.
-- **Census/law drift in Syntax.rs**: `view` listed as a keyword
-  (D-MEM1 retired it), `it`/`Clock`/`taskgroup` entries of unclear
-  status; `#Wasm`/`#Js`/`#Suppress` removed (D-MARK-TARGET1=A /
-  D-MARK-DISCARD1=A, card #498), maturity
-  trio previously occupied standalone marker arrays but now lives only in
-  `#Meta(maturity: ...)` (D-MARK-META1=B).
-- **Docs**: 72 files / 8 subdirs; `docs/design/` is empty; `reviews/`
-  holds 2 files that are proposals by another name.
-- **Dual agent-config dirs**: `.agents/` (10 files) and
-  `.claude/agents/` (3) — cross-tool intent unverified.
-- Workspace excludes `corelib/core.archive/pkgs/archive` ad hoc.
+- **Census/law drift in Syntax.rs**: `view` remained lexer-reserved after
+  D-MEM1 retired that keyword job. The other questioned entries are live:
+  synthetic dispatch subject `it` is foundational M4 syntax, `Clock` is the
+  D-DET1 injectable type, and `taskgroup` is D-TASKSCOPE1=A. Bare
+  `#Wasm`/`#Js`/`#Suppress` are absent under D-MARK-TARGET1=A and
+  D-MARK-DISCARD1=A. `Experimental`/`Tested`/`Hardened` are closed values of
+  `#Meta(maturity: ...)`, not standalone markers (D-MARK-META1=B).
+- **Docs**: the two dated review documents are proposals/audit records and
+  belong in `docs/proposals/`. `docs/design/` is no longer empty: it contains
+  active frontend design artifacts and remains in place.
+- **Dual agent-config dirs**: intentional. `.agents/` owns tool-neutral shared
+  prompts/skills; `.claude/agents/` owns Claude Code harness definitions.
+- The root workspace excludes `corelib/core.archive/pkgs/archive` because it
+  is independently built first-party package source with external `zip`/`tar`
+  dependencies, not an I6 compiler workspace member.
 
 ## Ballots (card #508)
 
@@ -49,14 +53,16 @@ already right.
   section comments; no behavior change, snapshot-pinned.
 - **Test-file splits**: tests/jetpack.rs (7k) and tests/tir.rs (4.8k)
   split by feature family so targeted `--test` runs stay cheap.
-- **Syntax.rs census-drift sweep**: prune `view` (D-MEM1), resolve
-  `it`/`Clock`/`taskgroup` status against ratified law, move maturity
-  trio to the `@` arrays (D-MATURITY1), drop `#Wasm`/`#Js`/`#Suppress`
-  (rides #498); `jet devtools grammars` + re-bless after.
-- **Docs hygiene**: delete empty `docs/design/`; fold `docs/reviews/`
-  into `docs/proposals/`; verify `.agents/` vs `.claude/agents/` intent
-  and de-duplicate or document why both exist; document the
-  `corelib/...` workspace exclusion or remove it.
+- **Syntax.rs census-drift sweep**: unreserve retired `view`; record the live
+  law for `it`/`Clock`/`taskgroup`; reconcile the marker-plane matrix with
+  D-MARK-META1=B and card #498; regenerate editor grammars.
+- **Docs hygiene**: fold the two unique review/audit records into
+  `docs/proposals/`; preserve the now-populated `docs/design/`; document the
+  two agent-config roles and the `core.archive` workspace exclusion.
+- **Prelude source audit**: the vendored
+  `corelib/core.archive/pkgs/archive/src/lib.rs` is the sole archive runtime
+  source. Both CoreProvider's standalone build and the hidden FFI bridge consume
+  it; no copied embedded runtime is maintained.
 
 ## Already right (no action)
 

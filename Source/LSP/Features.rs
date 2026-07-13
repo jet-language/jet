@@ -420,8 +420,7 @@ fn semantic_token_type_for(tokens: &[Token], idx: usize, src: &str) -> Option<(u
         | TokKind::KwFor
         | TokKind::KwSwitch
         | TokKind::KwMutate
-        | TokKind::KwMove
-        | TokKind::KwView => None,
+        | TokKind::KwMove => None,
 
         TokKind::Ident(name) => {
             if is_live_teaching_semantic_word(name) {

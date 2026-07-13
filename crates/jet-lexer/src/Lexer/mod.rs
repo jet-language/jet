@@ -42,7 +42,6 @@ fn keyword(name: &str) -> Option<TokKind> {
         s if s == Syntax::LIT_FALSE => Some(TokKind::KwFalse),
         s if s == Syntax::KW_MUTATE => Some(TokKind::KwMutate),
         s if s == Syntax::KW_MOVE => Some(TokKind::KwMove),
-        s if s == Syntax::KW_VIEW => Some(TokKind::KwView),
         s if s == Syntax::KW_COPY => Some(TokKind::KwCopy),
         s if s == Syntax::KW_STRUCT => Some(TokKind::KwStruct),
         s if s == Syntax::KW_ENUM => Some(TokKind::KwEnum),

@@ -57,6 +57,12 @@ as skills, every other agent reads them as files:
 - `.claude/skills/tower-ballot/SKILL.md` — ballot standard + how the owner
   decides. Read before raising any owner-facing choice.
 
+The two agent-config directories are intentional. `.agents/` is the
+tool-neutral home for shared prompts and skills. `.claude/agents/` contains
+Claude Code's three harness-specific agent definitions (`jet-impl`,
+`jet-verify`, `jet-ballot`); they adapt this manual and do not duplicate the
+shared skill implementations.
+
 ## Invariants (violating one = stop and fix)
 
 - **I1** Safe by default, expert tier first-class: all Jet code is memory-safe

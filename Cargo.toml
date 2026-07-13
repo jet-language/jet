@@ -23,6 +23,10 @@ members = [
 # (were thin root-package shims) — list them so a bare `cargo build` still
 # produces all three binaries, matching the pre-split behavior.
 default-members = [".", "crates/jet-driver", "crates/jetpack", "crates/jetos"]
+# This is first-party package source, not a compiler workspace member. It has
+# its own `[workspace]` and external `zip`/`tar` dependencies so CoreProvider
+# can build it into the hangar without importing those dependencies into the
+# I6-governed compiler workspace. `jet run` embeds the same canonical src/lib.rs.
 exclude = ["corelib/core.archive/pkgs/archive"]
 resolver = "2"
 

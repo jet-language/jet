@@ -1870,6 +1870,21 @@ fn run() {
 }
 
 #[test]
+fn retired_view_keyword_is_an_ordinary_identifier() {
+    // D-MEM1 retired `view` as a keyword. D-DYNARRAY1's `.view(a..b)` is an
+    // ordinary method name and must not reserve the word everywhere else.
+    let src = "\
+fn run() {
+    view :: 7
+    values: [Int] := [1, 2, 3]
+    window :: values.view(0..2)
+    print(view + window.len())
+}
+";
+    assert_fmt_stable(src, "retired view keyword as ordinary identifier");
+}
+
+#[test]
 fn fmt_preserves_uninit_sentinel() {
     // D-UNINIT-SENTINEL1: `name: Type := uninit` — the binding's `init` AST
     // node is a harmless never-evaluated placeholder, so the formatter must

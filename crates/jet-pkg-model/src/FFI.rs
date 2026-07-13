@@ -67,9 +67,9 @@ fn extern_entry(ef: &ExternFn, block: &ExternRustBlock, _file: &str) -> ExternEn
 /// `core.archive` (zip/tar; D-CORE-COMPRESS1), `jet.db` (D-DEP-DB1), and
 /// `core.compress` (gzip/zstd; D-CORE-COMPRESS1) are delivered through this
 /// same hidden-cargo bridge: when a program imports any of them, the bridge
-/// crate gains the matching dependency and a hand-written runtime
-/// (`Source/Prelude/Archive.rs`, `Source/Prelude/Db.rs`,
-/// `Source/Prelude/Compress.rs`). The compiler crate
+/// crate gains the matching dependency and a hand-written runtime. Archive
+/// embeds the canonical vendored package source; the other bridges live under
+/// `crates/jet-pkg-model/src/Prelude/`. The compiler crate
 /// (`Source/`) stays zero-dependency (I6). These are the owner-approved I6
 /// bootstrap exceptions, to be native-ized before the end of Epoch 3.
 pub fn prepare(bundle: &ProgramBundle) -> Result<Option<FfiLink>, Vec<Diagnostic>> {
@@ -268,9 +268,11 @@ const FEATURED_DEPS: &[(&str, &str)] = &[
     ),
 ];
 
-/// Hand-written archive runtime emitted into the bridge crate when `core.archive`
-/// is used. This is the only code that touches the `zip` and `tar` crates.
-const ARCHIVE_RUNTIME: &str = include_str!("Prelude/Archive.rs");
+/// Canonical vendored `core.archive` implementation, compiled both by
+/// `CoreProvider` and as the hidden bridge fallback. Keeping one source prevents
+/// the offline ring package and direct `jet run` path from drifting apart.
+const ARCHIVE_RUNTIME: &str =
+    include_str!("../../../corelib/core.archive/pkgs/archive/src/lib.rs");
 
 /// Hand-written database runtime emitted into the bridge crate when `jet.db`
 /// is used. This is the only code that touches the `rusqlite` crate.

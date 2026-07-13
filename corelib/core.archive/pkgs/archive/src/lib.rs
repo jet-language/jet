@@ -4,9 +4,8 @@
 // During `jetpack build core.archive`, CoreProvider::realize() compiles this
 // crate to an rlib and caches it in the hangar (D-BFS1).
 //
-// For `jet build` / `jet run`, the same functions are also available through
-// the hidden FFI bridge (Source/FFI.rs → Source/Prelude/Archive.rs), using
-// the same zip/tar implementations. Stream codecs live only in core.compress.
+// `jet build` / `jet run` embeds this exact file in the hidden FFI bridge via
+// crates/jet-pkg-model/src/FFI.rs. Stream codecs live only in core.compress.
 
 use std::io::{Read, Write};
 

@@ -114,15 +114,6 @@ impl<'a> Parser<'a> {
                 self.bump();
                 return Ok((Syntax::KW_MOVE.to_string(), span));
             }
-            // D-DYNARRAY1: `view` is `KwView` in the lexer (reserved for the E2-M5
-            // `-> view T` teaching-error recovery, Items.rs:2770) but is also the
-            // `.view(a..b)` window-constructor method name — same carve-out shape
-            // as `take`/`KwMove` above.
-            if matches!(self.peek().kind, TokKind::KwView) {
-                let span = self.peek().span;
-                self.bump();
-                return Ok((Syntax::KW_VIEW.to_string(), span));
-            }
             // U20: `Recipe.copy()` uses the ordinary dot-member form, while `copy`
             // is also Jet's explicit copy keyword in value position. Keep the
             // keyword reserved everywhere else; permit it only after `.`.

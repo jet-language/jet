@@ -117,7 +117,7 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// claim.discard-control / audited-discard — D-IGNORERET2=A + D-MUSTUSE1.
+/// claim.discard-control / audited-discard — D-IGNORERET2=A + D-MARK-DISCARD1=A.
 #[test]
 fn audited_discard() {
     // CAPABILITY_CLAIM: claim.discard-control / audited-discard
@@ -127,14 +127,14 @@ fn audited_discard() {
         "Syntax must register the `.drop` discard terminal"
     );
     assert!(
-        syntax.contains("ATTR_SUPPRESS") || syntax.contains("\"Suppress\""),
-        "Syntax must register `#Suppress(MustUse)`"
+        !syntax.contains("pub const ATTR_SUPPRESS"),
+        "D-MARK-DISCARD1 retired `#Suppress(MustUse)`"
     );
 
     let example = read("examples/features/errors/discard_fallible.jet");
     assert!(
-        example.contains(".drop(\"") && example.contains("#Suppress(MustUse)"),
-        "I5 example must exercise both discard channels"
+        example.contains(".drop(\"") && !example.contains("#Suppress(MustUse) {"),
+        "I5 example must exercise the sole discard channel"
     );
     let expected = read("examples/features/expected/errors/discard_fallible.out");
     let got = run_example("examples/features/errors/discard_fallible.jet");

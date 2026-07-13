@@ -1717,7 +1717,6 @@ fn is_keyword_token(tok: &Token, text: &str) -> bool {
             | TokKind::KwSwitch
             | TokKind::KwMutate
             | TokKind::KwMove
-            | TokKind::KwView
     )
 }
 

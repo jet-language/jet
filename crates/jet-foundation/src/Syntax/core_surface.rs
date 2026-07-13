@@ -164,13 +164,6 @@ pub const KW_MUTATE: &str = "mut";
 /// name in dot position; `take(names)` stays the lambda capture prefix.)
 pub const KW_MOVE: &str = "take";
 
-/// D-DYNARRAY1: reserved so `.view(a..b)` reads as a keyword-shaped method
-/// name (carve-out in `expect_field_name`, same shape as `take`/`KwMove`).
-/// D-MEM1/S3: no longer doubles as the view-return teaching keyword — `-> &T`
-/// return types are deleted from the grammar outright, so this token has no
-/// other job.
-pub const KW_VIEW: &str = "view";
-
 /// M2: struct definition keyword (construction spelling: S29).
 pub const KW_STRUCT: &str = "struct";
 
