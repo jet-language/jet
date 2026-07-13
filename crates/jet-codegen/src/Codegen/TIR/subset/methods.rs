@@ -799,6 +799,7 @@ pub(crate) fn method_call_in_subset(
             | (Some("VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey" | "Digest256" | "Digest512"), "bytes", 0)
             | (Some("Digest256" | "Digest512"), "hex", 0)
             | (Some("PasswordHash"), "text", 0)
+            | (Some("X25519PublicKey"), "text", 0)
     ) {
         return expr_in_subset(receiver, cx, locals);
     }
@@ -994,6 +995,7 @@ pub(crate) fn static_method_call_in_subset(
         ("Secret", "from_text" | "from_bytes", 1)
             | ("SigningKey" | "X25519SecretKey", "generate", 0)
             | ("VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey", "from_bytes", 1)
+            | ("X25519PublicKey", "from_text", 1)
             | ("PasswordHash", "parse", 1)
     ) {
         return args.iter().all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));

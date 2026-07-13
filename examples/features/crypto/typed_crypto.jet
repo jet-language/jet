@@ -8,6 +8,9 @@ fn run() {
     sealed :: crypto.seal([recipient.public_key()], plaintext, aad) ?? panic("seal")
     opened :: crypto.open(recipient, sealed, aad) ?? panic("open")
     print(opened == plaintext)
+    recipient_text :: recipient.public_key().text()
+    parsed_recipient :: crypto.X25519PublicKey.from_text(recipient_text) ?? panic("public key text")
+    print(parsed_recipient.bytes() == recipient.public_key().bytes())
 
     signing :: crypto.SigningKey.generate() ?? panic("signing key")
     signature :: crypto.sign(signing, plaintext) ?? panic("sign")

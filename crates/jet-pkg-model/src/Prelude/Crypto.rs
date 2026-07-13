@@ -76,6 +76,21 @@ pub fn jet_crypto_x25519_public_from_bytes_impl(bytes: Vec<u8>) -> Result<JetX25
     Ok(JetX25519PublicKey(array32(&bytes, "X25519PublicKey.from_bytes", "bytes")?))
 }
 pub fn jet_crypto_x25519_public_bytes_impl(key: &JetX25519PublicKey) -> Vec<u8> { key.0.to_vec() }
+const BECH32_CHARSET: &[u8; 32] = b"qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+fn bech32_polymod(values: impl IntoIterator<Item = u8>) -> u32 {
+    let mut chk = 1u32;
+    for value in values {
+        let top = chk >> 25; chk = (chk & 0x1ff_ffff) << 5 ^ value as u32;
+        for (i, generator) in [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3].iter().enumerate() { if (top >> i) & 1 != 0 { chk ^= generator; } }
+    }
+    chk
+}
+fn bech32_hrp_expand(hrp: &str) -> Vec<u8> { hrp.bytes().map(|b| b >> 5).chain(std::iter::once(0)).chain(hrp.bytes().map(|b| b & 31)).collect() }
+fn convert_bits(data: &[u8], from: u32, to: u32, pad: bool) -> Option<Vec<u8>> {
+    let mut acc=0u32;let mut bits=0u32;let maxv=(1u32<<to)-1;let mut out=Vec::new();for value in data{if(*value as u32)>>from!=0{return None}acc=(acc<<from)|*value as u32;bits+=from;while bits>=to{bits-=to;out.push(((acc>>bits)&maxv)as u8)}}if pad{if bits!=0{out.push(((acc<<(to-bits))&maxv)as u8)}}else if bits>=from||((acc<<(to-bits))&maxv)!=0{return None}Some(out)
+}
+pub fn jet_crypto_x25519_public_text_impl(key:&JetX25519PublicKey)->String{let hrp="jetx25519";let data=convert_bits(&key.0,8,5,true).expect("fixed conversion");let mut input=bech32_hrp_expand(hrp);input.extend_from_slice(&data);input.extend_from_slice(&[0;6]);let polymod=bech32_polymod(input)^0x2bc830a3;let mut out=format!("{hrp}1");for value in data{out.push(BECH32_CHARSET[value as usize]as char)}for shift in(0..6).rev(){out.push(BECH32_CHARSET[((polymod>>(shift*5))&31)as usize]as char)}out}
+pub fn jet_crypto_x25519_public_from_text_impl(text:String)->Result<JetX25519PublicKey,JetCryptoError>{if text.bytes().any(|b|b.is_ascii_uppercase())||!text.starts_with("jetx255191"){return Err(JetCryptoError::InvalidEncoding{operation:"X25519PublicKey.from_text",value_kind:"Bech32m public key"})}let pos=text.rfind('1').ok_or(JetCryptoError::InvalidEncoding{operation:"X25519PublicKey.from_text",value_kind:"Bech32m public key"})?;let encoded=text.as_bytes().get(pos+1..).filter(|s|s.len()>=6).ok_or(JetCryptoError::InvalidEncoding{operation:"X25519PublicKey.from_text",value_kind:"Bech32m public key"})?;let mut values=Vec::with_capacity(encoded.len());for byte in encoded{values.push(BECH32_CHARSET.iter().position(|c|c==byte).ok_or(JetCryptoError::InvalidEncoding{operation:"X25519PublicKey.from_text",value_kind:"Bech32m public key"})?as u8)}let mut check=bech32_hrp_expand(&text[..pos]);check.extend_from_slice(&values);if bech32_polymod(check)!=0x2bc830a3{return Err(JetCryptoError::InvalidEncoding{operation:"X25519PublicKey.from_text",value_kind:"Bech32m checksum"})}let decoded=convert_bits(&values[..values.len()-6],5,8,false).ok_or(JetCryptoError::InvalidEncoding{operation:"X25519PublicKey.from_text",value_kind:"Bech32m public key"})?;Ok(JetX25519PublicKey(array32(&decoded,"X25519PublicKey.from_text","decoded key")?))}
 pub fn jet_crypto_signing_generate_impl() -> Result<JetSigningKey, JetCryptoError> {
     let mut bytes = vec![0; 32];
     jet_crypto_entropy_fill(&mut bytes).map_err(|_| JetCryptoError::EntropyUnavailable)?;
