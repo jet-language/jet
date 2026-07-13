@@ -128,7 +128,68 @@ fn budget_check_uses_real_compiler_fact_and_writes_verified_report() {
     assert_eq!(reports.len(), 1);
     let bytes = fs::read(reports[0].path()).unwrap();
     jet_foundation::PerformanceBudget::verify_budget_report(&bytes).unwrap();
-    drop(value);
+    let command = match &value { jet_foundation::PerformanceBudget::CanonicalJson::Object(value) => value, _ => panic!("command JSON is not an object") };
+    let report = match &command["report"] { jet_foundation::PerformanceBudget::CanonicalJson::Object(value) => value, _ => panic!("report is not an object") };
+    let content = match &report["content"] { jet_foundation::PerformanceBudget::CanonicalJson::Object(value) => value, _ => panic!("content is not an object") };
+    let tool = match &content["toolchain"] { jet_foundation::PerformanceBudget::CanonicalJson::Object(value) => value, _ => panic!("toolchain is not an object") };
+    for key in ["compiler_build_id", "stdlib_id", "runner_id"] {
+        let jet_foundation::PerformanceBudget::CanonicalJson::String(id) = &tool[key] else { panic!("{key} is not text") };
+        assert_eq!(id.len(), 64, "{key} must identify real executable bytes");
+        assert!(id.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        assert!(!matches!(id.as_str(), "jet" | "stdlib" | "compiler"));
+    }
+    let subject = match &content["subject"] { jet_foundation::PerformanceBudget::CanonicalJson::Object(value) => value, _ => panic!("subject is not an object") };
+    let jet_foundation::PerformanceBudget::CanonicalJson::String(triple) = &subject["target_triple"] else { panic!("target triple is not text") };
+    assert!(triple.split('-').count() >= 3, "target triple must be canonical: {triple}");
+    let measurements = match &content["measurements"] { jet_foundation::PerformanceBudget::CanonicalJson::Array(value) => value, _ => panic!("measurements is not an array") };
+    let measurement = match &measurements[0] { jet_foundation::PerformanceBudget::CanonicalJson::Object(value) => value, _ => panic!("measurement is not an object") };
+    let provider = match &measurement["provider"] { jet_foundation::PerformanceBudget::CanonicalJson::Object(value) => value, _ => panic!("provider is not an object") };
+    for key in ["cpu_model", "kernel", "power_governor"] {
+        let jet_foundation::PerformanceBudget::CanonicalJson::String(value) = &provider[key] else { panic!("{key} is not text") };
+        assert!(!value.is_empty() && !matches!(value.as_str(), "compiler" | "unknown"));
+    }
+}
+
+#[test]
+fn budget_effect_count_uses_solved_effects_not_import_count() {
+    let dir = budget_project("budget_effect_truth", 10);
+    fs::write(dir.join("src/main.jet"), r#"use core.files as files
+module perf.package {
+    budgets: [Budget.{ name: "effects", scope: .Package, metric: .EffectCount, comparison: .Absolute, limit: .AtMost(0) }],
+}
+fn run() {}
+"#).unwrap();
+    let out = Command::new(jet()).args(["budget", "check", "--json"]).current_dir(&dir).output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    let json = String::from_utf8(out.stdout).unwrap();
+    assert!(json.contains("\"budget_id\":\"package:effects\""));
+    assert!(json.contains("\"point\":{\"den\":1,\"num\":0}"), "unused core import must not fabricate an effect: {json}");
+}
+
+#[test]
+fn budget_generated_unsafe_rejects_proxy_before_artifact() {
+    let dir = budget_project("budget_unsafe_truth", 10);
+    fs::write(dir.join("src/main.jet"), r#"use core.mem as mem
+module perf.package {
+    budgets: [Budget.{ name: "unsafe", scope: .Package, metric: .GeneratedUnsafe, comparison: .Absolute, limit: .AtMost(0) }],
+}
+fn run() {}
+"#).unwrap();
+    let out = Command::new(jet()).args(["budget", "check"]).current_dir(&dir).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(stderr.contains("has no exact checked front-end fact; refusing proxy measurement"), "{stderr}");
+    assert!(!dir.join(".jet").exists(), "unsupported fact emitted an artifact");
+}
+
+#[test]
+fn budget_missing_host_identity_rejects_before_artifact() {
+    let dir = budget_project("budget_host_identity", 10);
+    let out = Command::new(jet()).args(["budget", "check"]).env("PATH", "").current_dir(&dir).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(stderr.contains("cannot resolve host target triple"), "{stderr}");
+    assert!(!dir.join(".jet").exists(), "missing host identity emitted an artifact");
 }
 
 #[test]
