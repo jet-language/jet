@@ -960,7 +960,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     };
                 }
                 if cx.core_imports.get(alias).map(String::as_str) == Some(crate::Syntax::CORE_EMAIL_MODULE)
-                    && matches!(type_name.as_str(), "RecipientReport" | "SendReport" | "Limits")
+                    && matches!(type_name.as_str(), "RecipientReport" | "SendReport" | "Limits" | "SmtpConfig")
                 {
                     let tfields = fields
                         .iter()
@@ -969,7 +969,10 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     return TExpr {
                         ty: Type::Named(type_name.clone()),
                         kind: TExprKind::StructLit {
-                            rust_type: format!("{}jet_email::{}", cx.root_prefix, type_name),
+                            rust_type: if type_name == "SmtpConfig" {
+                                format!("{}jet_email::SmtpConfig::<{}::Secret>", cx.root_prefix,
+                                    cx.ffi_crate.as_deref().unwrap_or("jet_ffi"))
+                            } else { cx.rust_type(&Type::Named(type_name.clone())) },
                             fields: tfields,
                             extra: None,
                             as_trait: None,
@@ -1104,7 +1107,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     },
                 };
             }
-            if matches!(type_name.as_str(), "RecipientReport" | "SendReport" | "Limits") {
+            if matches!(type_name.as_str(), "RecipientReport" | "SendReport" | "Limits" | "SmtpConfig") {
                 let tfields = fields
                     .iter()
                     .map(|(name, _, value)| (name.clone(), lower_expr(value, cx, env), false))
@@ -1112,7 +1115,10 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 return TExpr {
                     ty: Type::Named(type_name.clone()),
                     kind: TExprKind::StructLit {
-                        rust_type: format!("{}jet_email::{}", cx.root_prefix, type_name),
+                        rust_type: if type_name == "SmtpConfig" {
+                            format!("{}jet_email::SmtpConfig::<{}::Secret>", cx.root_prefix,
+                                cx.ffi_crate.as_deref().unwrap_or("jet_ffi"))
+                        } else { cx.rust_type(&Type::Named(type_name.clone())) },
                         fields: tfields,
                         extra: None,
                         as_trait: None,
@@ -1246,9 +1252,11 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     };
                 }
                 if env.ty_of(enum_name).is_none()
-                    && matches!(resolved_enum, "SmtpSecurity" | "RecipientPolicy")
+                    && matches!(resolved_enum, "SmtpSecurity" | "RecipientPolicy" | "SmtpAuth" | "TlsTrust")
                     && ((resolved_enum == "SmtpSecurity" && matches!(member.as_str(), "StartTls" | "Tls"))
-                        || (resolved_enum == "RecipientPolicy" && matches!(member.as_str(), "RequireAll" | "DeliverAccepted")))
+                        || (resolved_enum == "RecipientPolicy" && matches!(member.as_str(), "RequireAll" | "DeliverAccepted"))
+                        || (resolved_enum == "SmtpAuth" && member == "None")
+                        || (resolved_enum == "TlsTrust" && member == "System"))
                 {
                     return TExpr {
                         ty: Type::Named(resolved_enum.to_string()),
@@ -1480,7 +1488,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         EnumLitArg::Named { label, expr } => {
                             let edge = format!("{}.{}", variant, label);
                             (
-                                if resolved_type == "EmailError" { label.clone() } else { mangle(label) },
+                                if matches!(resolved_type, "EmailError" | "SmtpAuth" | "TlsTrust") { label.clone() } else { mangle(label) },
                                 lower_enum_arg(resolved_type, variant, &edge, expr, cx, env),
                             )
                         }

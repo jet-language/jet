@@ -425,6 +425,44 @@ fn run() {
 }
 
 #[test]
+fn core_email_mailer_surface_constructs_with_real_secret() {
+    let dir = std::env::temp_dir().join(format!("jet_email_mailer_surface_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(&dir, "email_mailer_surface", r#"
+use core.email as email
+use core.crypto as crypto
+
+fn run() {
+    password :: crypto.Secret.from_text("not-logged")
+    auth: email.SmtpAuth := .Password.{ username: "mailer", password: password }
+    config := email.SmtpConfig.{
+        host: "localhost",
+        port: 465,
+        security: .Tls,
+        auth: auth,
+        recipient_policy: .RequireAll,
+        trust: .System,
+        limits: email.Limits.safe(),
+    }
+    mailer := email.smtp(config) ?? panic("mailer config")
+    env_mailer := email.smtp_from_env() ?? panic("environment mailer config")
+    sender :: email.address("sender@example.com") ?? panic("sender")
+    recipient :: email.address("recipient@example.net") ?? panic("recipient")
+    message :: email.message(sender, [recipient], [], "subject", "body", "", []) ?? panic("message")
+    if false {
+        report :: mailer.send(message) ?? panic("send")
+        print(report.response_code)
+    }
+    print("mailer-ready")
+}
+"#, &[("SMTP_HOST", "localhost"), ("SMTP_SECURITY", "tls"), ("SMTP_PORT", "465")], None);
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "mailer-ready\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn encoding_stream_foundation_types_are_real_jet_values() {
     let dir = std::env::temp_dir().join(format!("jet_encoding_foundation_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();

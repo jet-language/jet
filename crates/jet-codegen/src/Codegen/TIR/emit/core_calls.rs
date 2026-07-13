@@ -26,6 +26,19 @@ pub(crate) fn emit_tir_core_call(
         let crate_name = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
         format!("{}::{}", crate_name, name)
     };
+    let email_runtime = || format!(
+        "{}jet_email::RuntimeFns {{ tls_begin: {}, tls_begin_ca: {}, tls_handshake_step: {}, tls_set_poll_timeout: {}, tls_read: {}, tls_write_all: {}, tls_close: {}, wipe: {}, cancelled: jet_scheduler_task_cancelled, remaining_ms: jet_deadline_remaining_ms, accepted_at: {}jet_email::runtime_now }}",
+        cx.root_prefix,
+        regex_fn("jet_net_tls_begin_impl"),
+        regex_fn("jet_net_tls_begin_with_ca_impl"),
+        regex_fn("jet_net_tls_handshake_step_impl"),
+        regex_fn("jet_net_tls_set_poll_timeout_impl"),
+        regex_fn("jet_net_tls_read_bytes_impl"),
+        regex_fn("jet_net_tls_write_all_bytes_impl"),
+        regex_fn("jet_net_tls_close_impl"),
+        regex_fn("jet_crypto_zeroize_email_impl"),
+        cx.root_prefix,
+    );
     let normalized_module =
         crate::Syntax::normalize_core_module(module).unwrap_or_else(|| module.to_string());
     let module = normalized_module.as_str();
@@ -1008,6 +1021,13 @@ pub(crate) fn emit_tir_core_call(
             "{}jet_email::envelope(&({}), &({}))", cx.root_prefix, arg(0), arg(1)
         ),
         ("core.email", "serialize") => format!("{}jet_email::serialize(&({}))", cx.root_prefix, arg(0)),
+        ("core.email", "smtp") => format!(
+            "{}jet_email::smtp({}, {}, {})",
+            cx.root_prefix, format!("&({})", arg(0)), regex_fn("jet_crypto_secret_copy_for_smtp_impl"), email_runtime(),
+        ),
+        ("core.email", "smtp_from_env") => format!(
+            "{}jet_email::smtp_from_env({})", cx.root_prefix, email_runtime(),
+        ),
         // D-TEXTUNICODE1: std-only Unicode scalar helpers.
         ("core.text.unicode", "scalar_count") => {
             format!("{}(&({}))", helper("jet_text_unicode_scalar_count"), arg(0))

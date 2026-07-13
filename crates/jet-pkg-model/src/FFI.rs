@@ -109,13 +109,16 @@ pub fn prepare(bundle: &ProgramBundle) -> Result<Option<FfiLink>, Vec<Diagnostic
     let needs_net_tls = bundle
         .used_core
         .iter()
-        .any(|u| u == "core.net::tls_connect" || u == "core.tls" || u.starts_with("core.tls::"));
+        .any(|u| u == "core.net::tls_connect" || u == "core.tls" || u.starts_with("core.tls::")
+            || u == "core.email" || u.starts_with("core.email::"));
     // D-DEP-CRYPTO1=A: RustCrypto AEAD + Ed25519 for core.crypto envelope APIs.
     let needs_crypto = bundle.used_core.iter().any(|u| {
         u == "jet.crypto"
             || u.starts_with("jet.crypto::")
             || u == "core.crypto.expert"
             || u.starts_with("core.crypto.expert::")
+            || u == "core.email"
+            || u.starts_with("core.email::")
     });
     // D-DEP-WASM1=A (c81): `core.plugin` — the sandboxed WASM Component Model
     // plugin loader (`Plugin.load`/`.call`).
@@ -297,6 +300,224 @@ mod net_tls_close_tests {
         assert!(error.contains("TLS handshake with `example.com` failed"), "{error}");
         assert!(error.to_ascii_lowercase().contains("not valid for name"), "{error}");
         server.join().unwrap();
+    }
+
+    mod smtp_adapter {
+        fn jet_sha256_raw(data: &[u8]) -> [u8; 32] {
+            let mut out = [0u8; 32];
+            for (index, byte) in data.iter().enumerate() {
+                out[index % 32] = out[index % 32].wrapping_mul(31).wrapping_add(*byte);
+            }
+            out
+        }
+        include!("../../jet-codegen/src/Prelude/CoreLib/Email.rs");
+    }
+
+    static SMTP_CANCELLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    static SMTP_DEADLINE_MS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(i64::MAX);
+
+    fn smtp_now_ms() -> i64 {
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+            .unwrap().as_millis().min(i64::MAX as u128) as i64
+    }
+    fn smtp_cancelled() -> bool { SMTP_CANCELLED.load(std::sync::atomic::Ordering::SeqCst) }
+    fn smtp_remaining() -> Option<i64> {
+        let deadline = SMTP_DEADLINE_MS.load(std::sync::atomic::Ordering::SeqCst);
+        (deadline != i64::MAX).then(|| deadline.saturating_sub(smtp_now_ms()))
+    }
+    fn smtp_wipe(bytes: &mut Vec<u8>) { bytes.fill(0); bytes.clear(); }
+
+    fn smtp_runtime() -> smtp_adapter::jet_email::RuntimeFns {
+        smtp_adapter::jet_email::RuntimeFns {
+            tls_begin: jet_net_tls_begin_impl,
+            tls_begin_ca: jet_net_tls_begin_with_ca_impl,
+            tls_handshake_step: jet_net_tls_handshake_step_impl,
+            tls_set_poll_timeout: jet_net_tls_set_poll_timeout_impl,
+            tls_read: jet_net_tls_read_bytes_impl,
+            tls_write_all: jet_net_tls_write_all_bytes_impl,
+            tls_close: jet_net_tls_close_impl,
+            wipe: smtp_wipe,
+            cancelled: smtp_cancelled,
+            remaining_ms: smtp_remaining,
+            accepted_at: smtp_adapter::jet_email::runtime_now,
+        }
+    }
+
+    fn smtp_server_config() -> std::sync::Arc<rustls::ServerConfig> {
+        let certs = jet_net_tls_pem_certificates(include_bytes!("../../../tests/fixtures/tls/smtp.server.cert.pem")).unwrap();
+        let key_text = std::str::from_utf8(include_bytes!("../../../tests/fixtures/tls/smtp.server.key.pem")).unwrap();
+        let body = key_text.strip_prefix("-----BEGIN PRIVATE KEY-----").unwrap()
+            .strip_suffix("-----END PRIVATE KEY-----\n").unwrap();
+        let key = rustls::pki_types::PrivateKeyDer::Pkcs8(
+            rustls::pki_types::PrivatePkcs8KeyDer::from(jet_net_tls_pem_base64(body).unwrap()),
+        );
+        std::sync::Arc::new(rustls::ServerConfig::builder().with_no_client_auth()
+            .with_single_cert(certs, key).unwrap())
+    }
+
+    fn smtp_read_line<T: std::io::Read>(io: &mut T) -> String {
+        let mut bytes = Vec::new();
+        loop {
+            let mut byte = [0u8; 1];
+            if io.read(&mut byte).unwrap_or(0) == 0 { break; }
+            bytes.push(byte[0]);
+            if bytes.ends_with(b"\r\n") { break; }
+        }
+        String::from_utf8(bytes).unwrap()
+    }
+
+    #[derive(Clone, Copy)]
+    enum SmtpFixture { Success, CloseAfterData, RejectAuth, StallGreeting }
+
+    fn smtp_tls_session<T: std::io::Read + std::io::Write>(
+        io: &mut T,
+        greeting: bool,
+        fixture: SmtpFixture,
+        transcript: &std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    ) {
+        if greeting {
+            if matches!(fixture, SmtpFixture::StallGreeting) {
+                let mut byte = [0u8; 1];
+                let _ = io.read(&mut byte);
+                return;
+            }
+            io.write_all(b"220 relay ready\r\n").unwrap(); io.flush().unwrap();
+        }
+        let ehlo = smtp_read_line(io); transcript.lock().unwrap().push(ehlo.clone());
+        assert_eq!(ehlo, "EHLO localhost\r\n");
+        io.write_all(b"250-relay\r\n250 AUTH PLAIN LOGIN\r\n").unwrap(); io.flush().unwrap();
+        let auth = smtp_read_line(io); transcript.lock().unwrap().push(auth.clone());
+        assert!(auth.starts_with("AUTH PLAIN ")); assert!(!auth.contains("swordfish"));
+        if matches!(fixture, SmtpFixture::RejectAuth) {
+            io.write_all(b"535 bad credentials\r\n").unwrap(); io.flush().unwrap();
+            return;
+        }
+        io.write_all(b"235 authenticated\r\n").unwrap(); io.flush().unwrap();
+        let mail = smtp_read_line(io); transcript.lock().unwrap().push(mail.clone());
+        assert!(mail.starts_with("MAIL FROM:<sender@example.com>"));
+        io.write_all(b"250 sender ok\r\n").unwrap(); io.flush().unwrap();
+        let rcpt = smtp_read_line(io); transcript.lock().unwrap().push(rcpt.clone());
+        assert!(rcpt.starts_with("RCPT TO:<recipient@example.net>"));
+        io.write_all(b"250 recipient ok\r\n").unwrap(); io.flush().unwrap();
+        let data = smtp_read_line(io); transcript.lock().unwrap().push(data.clone());
+        assert_eq!(data, "DATA\r\n");
+        io.write_all(b"354 continue\r\n").unwrap(); io.flush().unwrap();
+        let mut body = Vec::new();
+        loop {
+            let mut byte = [0u8; 1];
+            if io.read(&mut byte).unwrap_or(0) == 0 { return; }
+            body.push(byte[0]);
+            if body.ends_with(b"\r\n.\r\n") { break; }
+        }
+        transcript.lock().unwrap().push(String::from_utf8_lossy(&body).into_owned());
+        if matches!(fixture, SmtpFixture::CloseAfterData) { return; }
+        io.write_all(b"250 queued q-1\r\n").unwrap(); io.flush().unwrap();
+        let quit = smtp_read_line(io); transcript.lock().unwrap().push(quit);
+        let _ = io.write_all(b"221 bye\r\n"); let _ = io.flush();
+    }
+
+    fn spawn_smtp_server(
+        starttls: bool,
+        fixture: SmtpFixture,
+    ) -> (std::net::SocketAddr, std::sync::Arc<std::sync::Mutex<Vec<String>>>, std::thread::JoinHandle<()>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let transcript = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let server_transcript = transcript.clone();
+        let config = smtp_server_config();
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            if starttls {
+                socket.write_all(b"220 relay ready\r\n").unwrap(); socket.flush().unwrap();
+                let ehlo = smtp_read_line(&mut socket); server_transcript.lock().unwrap().push(ehlo);
+                socket.write_all(b"250-relay\r\n250-STARTTLS\r\n250 AUTH PLAIN LOGIN\r\n").unwrap(); socket.flush().unwrap();
+                let command = smtp_read_line(&mut socket); server_transcript.lock().unwrap().push(command.clone());
+                assert_eq!(command, "STARTTLS\r\n");
+                socket.write_all(b"220 begin TLS\r\n").unwrap(); socket.flush().unwrap();
+            }
+            let conn = rustls::ServerConnection::new(config).unwrap();
+            let mut tls = rustls::StreamOwned::new(conn, socket);
+            while tls.conn.is_handshaking() {
+                if tls.conn.complete_io(&mut tls.sock).is_err() { return; }
+            }
+            smtp_tls_session(&mut tls, !starttls, fixture, &server_transcript);
+        });
+        (address, transcript, server)
+    }
+
+    fn smtp_message() -> smtp_adapter::jet_email::Message {
+        use smtp_adapter::jet_email as email;
+        let from = email::address(&"sender@example.com".to_string()).unwrap();
+        let to = email::address(&"recipient@example.net".to_string()).unwrap();
+        email::message(&from, &vec![to], &vec![], &"subject".to_string(),
+            &"first\r\n.second".to_string(), &String::new(), &vec![]).unwrap()
+    }
+
+    fn smtp_config(port: u16, starttls: bool) -> smtp_adapter::jet_email::SmtpConfig<Vec<u8>> {
+        use smtp_adapter::jet_email as email;
+        email::SmtpConfig {
+            host: "localhost".to_string(), port: port as i64,
+            security: if starttls { email::SmtpSecurity::StartTls } else { email::SmtpSecurity::Tls },
+            auth: email::SmtpAuth::Password { username: "mailer".to_string(), password: b"swordfish".to_vec() },
+            recipient_policy: email::RecipientPolicy::RequireAll,
+            trust: email::TlsTrust::SystemPlusCa {
+                pem: include_bytes!("../../../tests/fixtures/tls/smtp.ca.cert.pem").to_vec(),
+            },
+            limits: email::Limits::safe(),
+        }
+    }
+
+    #[test]
+    fn mailer_real_tls_starttls_cancellation_deadline_and_unknown_boundaries() {
+        use smtp_adapter::jet_email as email;
+        SMTP_CANCELLED.store(false, std::sync::atomic::Ordering::SeqCst);
+        SMTP_DEADLINE_MS.store(i64::MAX, std::sync::atomic::Ordering::SeqCst);
+        for starttls in [false, true] {
+            let (address, transcript, server) = spawn_smtp_server(starttls, SmtpFixture::Success);
+            let config = smtp_config(address.port(), starttls);
+            let mut mailer = email::smtp(&config, |secret| secret.clone(), smtp_runtime()).unwrap();
+            let report = mailer.send(smtp_message()).unwrap();
+            assert_eq!((report.response_code, report.accepted.len(), report.rejected.len()), (250, 1, 0));
+            server.join().unwrap();
+            let transcript = transcript.lock().unwrap().join("");
+            assert_eq!(transcript.matches("DATA\r\n").count(), 1);
+            assert!(!transcript.contains("swordfish"));
+            if starttls { assert!(transcript.contains("STARTTLS\r\nEHLO localhost\r\n")); }
+        }
+
+        let (address, transcript, server) = spawn_smtp_server(false, SmtpFixture::CloseAfterData);
+        let config = smtp_config(address.port(), false);
+        let mut mailer = email::smtp(&config, |secret| secret.clone(), smtp_runtime()).unwrap();
+        assert!(matches!(mailer.send(smtp_message()), Err(email::Error::DeliveryUnknown { .. })));
+        server.join().unwrap();
+        assert_eq!(transcript.lock().unwrap().join("").matches("DATA\r\n").count(), 1);
+
+        let (address, _, server) = spawn_smtp_server(false, SmtpFixture::RejectAuth);
+        let config = smtp_config(address.port(), false);
+        let mut mailer = email::smtp(&config, |secret| secret.clone(), smtp_runtime()).unwrap();
+        let auth_error = mailer.send(smtp_message()).unwrap_err();
+        assert!(matches!(auth_error, email::Error::Auth { .. }));
+        assert!(!format!("{auth_error:?}").contains("swordfish"));
+        server.join().unwrap();
+
+        let (address, _, server) = spawn_smtp_server(false, SmtpFixture::StallGreeting);
+        let config = smtp_config(address.port(), false);
+        let mut mailer = email::smtp(&config, |secret| secret.clone(), smtp_runtime()).unwrap();
+        let cancel = std::thread::spawn(|| {
+            std::thread::sleep(std::time::Duration::from_millis(60));
+            SMTP_CANCELLED.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+        assert!(matches!(mailer.send(smtp_message()), Err(email::Error::Cancelled { .. })));
+        cancel.join().unwrap(); server.join().unwrap();
+        SMTP_CANCELLED.store(false, std::sync::atomic::Ordering::SeqCst);
+
+        let (address, _, server) = spawn_smtp_server(false, SmtpFixture::StallGreeting);
+        SMTP_DEADLINE_MS.store(smtp_now_ms() + 60, std::sync::atomic::Ordering::SeqCst);
+        let config = smtp_config(address.port(), false);
+        let mut mailer = email::smtp(&config, |secret| secret.clone(), smtp_runtime()).unwrap();
+        assert!(matches!(mailer.send(smtp_message()), Err(email::Error::TimedOut { .. })));
+        server.join().unwrap();
+        SMTP_DEADLINE_MS.store(i64::MAX, std::sync::atomic::Ordering::SeqCst);
     }
 }
 

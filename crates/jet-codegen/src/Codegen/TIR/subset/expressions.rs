@@ -274,7 +274,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
         } => {
             let core_email_struct = import_ns.as_deref().is_some_and(|alias| {
                 cx.core_imports.get(alias).map(String::as_str) == Some(crate::Syntax::CORE_EMAIL_MODULE)
-                    && matches!(type_name.as_str(), "RecipientReport" | "SendReport" | "Limits")
+                    && matches!(type_name.as_str(), "RecipientReport" | "SendReport" | "Limits" | "SmtpConfig")
             });
             let core_cbor_struct = import_ns.as_deref().is_some_and(|alias| {
                 cx.core_imports.get(alias).map(String::as_str) == Some("core.encoding.cbor")
@@ -382,7 +382,9 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                     .unwrap_or(enum_name.as_str());
                 if !locals.contains(enum_name)
                     && ((resolved_enum == "SmtpSecurity" && matches!(member.as_str(), "StartTls" | "Tls"))
-                        || (resolved_enum == "RecipientPolicy" && matches!(member.as_str(), "RequireAll" | "DeliverAccepted")))
+                        || (resolved_enum == "RecipientPolicy" && matches!(member.as_str(), "RequireAll" | "DeliverAccepted"))
+                        || (resolved_enum == "SmtpAuth" && member == "None")
+                        || (resolved_enum == "TlsTrust" && member == "System"))
                 {
                     return true;
                 }
@@ -471,6 +473,14 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                 || (resolved_type == "RecipientPolicy" && matches!(variant.as_str(), "RequireAll" | "DeliverAccepted"))
             {
                 return args.is_empty();
+            }
+            if (resolved_type == "SmtpAuth" && matches!(variant.as_str(), "None" | "Password"))
+                || (resolved_type == "TlsTrust" && matches!(variant.as_str(), "System" | "SystemPlusCa"))
+            {
+                return args.iter().all(|arg| match arg {
+                    EnumLitArg::Positional(expr) => expr_in_subset(expr, cx, locals),
+                    EnumLitArg::Named { expr, .. } => expr_in_subset(expr, cx, locals),
+                });
             }
             // D-TERM1 (ratified 2026-06-22): `Key` is a core prelude enum, not in
             // the user registry, but is always covered — all payloads are scalar/Char.

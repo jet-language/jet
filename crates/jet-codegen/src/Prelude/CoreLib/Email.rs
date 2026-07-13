@@ -124,6 +124,113 @@ pub mod jet_email {
         pub limits: Limits,
     }
 
+    #[derive(Clone, Copy)]
+    pub struct RuntimeFns {
+        pub tls_begin: fn(std::net::TcpStream, &String) -> Result<i64, String>,
+        pub tls_begin_ca: fn(std::net::TcpStream, &String, &Vec<u8>) -> Result<i64, String>,
+        pub tls_handshake_step: fn(i64) -> Result<bool, String>,
+        pub tls_set_poll_timeout: fn(i64, i64) -> Result<(), String>,
+        pub tls_read: fn(i64, i64) -> Result<Vec<u8>, String>,
+        pub tls_write_all: fn(i64, &Vec<u8>) -> Result<(), String>,
+        pub tls_close: fn(i64) -> Result<(), String>,
+        pub wipe: fn(&mut Vec<u8>),
+        pub cancelled: fn() -> bool,
+        pub remaining_ms: fn() -> Option<i64>,
+        pub accepted_at: fn() -> String,
+    }
+
+    pub fn runtime_now() -> String {
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+            .map(|value| value.as_secs().to_string()).unwrap_or_else(|_| "0".to_string())
+    }
+
+    pub struct Mailer {
+        config: SmtpConfig<Vec<u8>>,
+        runtime: RuntimeFns,
+    }
+
+    impl Drop for Mailer {
+        fn drop(&mut self) {
+            if let SmtpAuth::Password { password, .. } = &mut self.config.auth {
+                (self.runtime.wipe)(password);
+            }
+        }
+    }
+
+    pub fn smtp<S>(
+        config: &SmtpConfig<S>,
+        extract: fn(&S) -> Vec<u8>,
+        runtime: RuntimeFns,
+    ) -> Result<Mailer, Error> {
+        let auth = match &config.auth {
+            SmtpAuth::None => SmtpAuth::None,
+            SmtpAuth::Password { username, password } => SmtpAuth::Password {
+                username: username.clone(),
+                password: extract(password),
+            },
+        };
+        smtp_bytes(SmtpConfig {
+            host: config.host.clone(), port: config.port, security: config.security.clone(), auth,
+            recipient_policy: config.recipient_policy.clone(), trust: config.trust.clone(), limits: config.limits.clone(),
+        }, runtime)
+    }
+
+    fn smtp_bytes(mut config: SmtpConfig<Vec<u8>>, runtime: RuntimeFns) -> Result<Mailer, Error> {
+        if let Err(error) = validate_smtp_config(&config) {
+            if let SmtpAuth::Password { password, .. } = &mut config.auth { (runtime.wipe)(password); }
+            return Err(error);
+        }
+        if let SmtpAuth::Password { password, .. } = &config.auth {
+            if std::str::from_utf8(password).is_err() {
+                if let SmtpAuth::Password { password, .. } = &mut config.auth { (runtime.wipe)(password); }
+                return Err(error("auth", "SMTP password must be UTF-8"));
+            }
+        }
+        Ok(Mailer { config, runtime })
+    }
+
+    pub fn smtp_from_env(runtime: RuntimeFns) -> Result<Mailer, Error> {
+        let host = std::env::var("SMTP_HOST")
+            .map_err(|_| error("smtp_from_env", "SMTP_HOST is required"))?;
+        let security_text = std::env::var("SMTP_SECURITY").unwrap_or_else(|_| "starttls".to_string());
+        let security = match security_text.to_ascii_lowercase().as_str() {
+            "starttls" => SmtpSecurity::StartTls,
+            "tls" => SmtpSecurity::Tls,
+            _ => return Err(error("smtp_from_env", "SMTP_SECURITY must be `starttls` or `tls`")),
+        };
+        let default_port = if security == SmtpSecurity::Tls { 465 } else { 587 };
+        let port = match std::env::var("SMTP_PORT") {
+            Ok(value) => value.parse::<i64>().map_err(|_| error("smtp_from_env", "SMTP_PORT must be an integer"))?,
+            Err(_) => default_port,
+        };
+        let recipient_policy = match std::env::var("SMTP_RECIPIENT_POLICY")
+            .unwrap_or_else(|_| "require_all".to_string()).to_ascii_lowercase().as_str() {
+            "require_all" => RecipientPolicy::RequireAll,
+            "deliver_accepted" => RecipientPolicy::DeliverAccepted,
+            _ => return Err(error("smtp_from_env", "SMTP_RECIPIENT_POLICY must be `require_all` or `deliver_accepted`")),
+        };
+        let trust = match std::env::var("SMTP_CA_PEM") {
+            Ok(mut pem) => TlsTrust::SystemPlusCa { pem: std::mem::take(&mut pem).into_bytes() },
+            Err(_) => TlsTrust::System,
+        };
+        let username = std::env::var("SMTP_USERNAME").ok();
+        let password = std::env::var("SMTP_PASSWORD").ok();
+        let auth = match (username, password) {
+            (None, None) => SmtpAuth::None,
+            (Some(username), Some(mut password)) => {
+                let bytes = std::mem::take(&mut password).into_bytes();
+                SmtpAuth::Password { username, password: bytes }
+            }
+            (None, Some(mut password)) => {
+                let mut bytes = std::mem::take(&mut password).into_bytes();
+                (runtime.wipe)(&mut bytes);
+                return Err(error("smtp_from_env", "SMTP_USERNAME and SMTP_PASSWORD must be set together"));
+            }
+            (Some(_), None) => return Err(error("smtp_from_env", "SMTP_USERNAME and SMTP_PASSWORD must be set together")),
+        };
+        smtp_bytes(SmtpConfig { host, port, security, auth, recipient_policy, trust, limits: Limits::safe() }, runtime)
+    }
+
     pub fn validate_smtp_config<S>(config: &SmtpConfig<S>) -> Result<(), Error> {
         config.limits.validate()?;
         if config.host.is_empty() || config.host.len() > 253 || !config.host.is_ascii()
@@ -390,6 +497,7 @@ pub mod jet_email {
         fn verified_tls(&self) -> bool;
         fn start_tls(&mut self, server: &str, trust: &TlsTrust) -> Result<(), String>;
         fn close(&mut self);
+        fn take_stop(&mut self) -> Option<SmtpStop> { None }
     }
 
     #[derive(Clone, Copy, Debug, PartialEq)]
@@ -398,6 +506,7 @@ pub mod jet_email {
     pub trait SmtpControl {
         fn checkpoint(&self, operation: &str) -> Result<(), SmtpStop>;
         fn accepted_at(&self) -> String;
+        fn wipe(&self, bytes: &mut Vec<u8>) { bytes.fill(0); }
     }
 
     pub struct NoopSmtpControl;
@@ -410,6 +519,185 @@ pub mod jet_email {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|value| value.as_secs().to_string())
                 .unwrap_or_else(|_| "0".to_string())
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    struct AmbientSmtpControl(RuntimeFns);
+
+    impl SmtpControl for AmbientSmtpControl {
+        fn checkpoint(&self, _operation: &str) -> Result<(), SmtpStop> {
+            if (self.0.cancelled)() { return Err(SmtpStop::Cancelled); }
+            if matches!((self.0.remaining_ms)(), Some(value) if value <= 0) {
+                return Err(SmtpStop::TimedOut);
+            }
+            Ok(())
+        }
+
+        fn accepted_at(&self) -> String { (self.0.accepted_at)() }
+
+        fn wipe(&self, bytes: &mut Vec<u8>) { (self.0.wipe)(bytes); }
+    }
+
+    enum RuntimeStream {
+        Plain(Option<std::net::TcpStream>),
+        Tls(i64),
+        Closed,
+    }
+
+    struct RuntimeTransport {
+        stream: RuntimeStream,
+        runtime: RuntimeFns,
+        control: AmbientSmtpControl,
+        stopped: Option<SmtpStop>,
+    }
+
+    impl RuntimeTransport {
+        fn connect(config: &SmtpConfig<Vec<u8>>, runtime: RuntimeFns) -> Result<Self, Error> {
+            use std::net::ToSocketAddrs;
+            let control = AmbientSmtpControl(runtime);
+            control.checkpoint("connect").map_err(|stop| stop_error(stop, "connect", &config.host, false))?;
+            let addresses = (config.host.as_str(), config.port as u16).to_socket_addrs()
+                .map_err(|reason| smtp_error(ErrorKind::Dns, "dns", &config.host, None, format!("SMTP DNS lookup failed: {reason}")))?
+                .collect::<Vec<_>>();
+            if addresses.is_empty() {
+                return Err(smtp_error(ErrorKind::Dns, "dns", &config.host, None, "SMTP DNS lookup returned no addresses"));
+            }
+            let mut last = None;
+            let mut connected = None;
+            for address in addresses {
+                let budget = (runtime.remaining_ms)().map(|ms| ms.max(1) as u64).unwrap_or(30_000);
+                let deadline = std::time::Instant::now() + std::time::Duration::from_millis(budget);
+                loop {
+                    control.checkpoint("connect").map_err(|stop| stop_error(stop, "connect", &config.host, false))?;
+                    let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+                    if remaining.is_zero() { break; }
+                    match std::net::TcpStream::connect_timeout(&address, remaining.min(std::time::Duration::from_millis(100))) {
+                        Ok(stream) => { connected = Some(stream); break; }
+                        Err(reason) if matches!(reason.kind(), std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock) => last = Some(reason),
+                        Err(reason) => { last = Some(reason); break; }
+                    }
+                }
+                if connected.is_some() { break; }
+            }
+            let stream = connected.ok_or_else(|| smtp_error(
+                ErrorKind::Connect, "connect", &config.host, None,
+                format!("SMTP connection failed: {}", last.map(|e| e.to_string()).unwrap_or_else(|| "no address accepted the connection".to_string())),
+            ))?;
+            stream.set_nodelay(true).map_err(|reason| smtp_error(
+                ErrorKind::Connect, "connect", &config.host, None, format!("SMTP socket setup failed: {reason}"),
+            ))?;
+            let poll = Some(std::time::Duration::from_millis(25));
+            stream.set_read_timeout(poll).map_err(|reason| smtp_error(ErrorKind::Connect, "connect", &config.host, None, format!("SMTP read timeout setup failed: {reason}")))?;
+            stream.set_write_timeout((runtime.remaining_ms)().map(|ms| std::time::Duration::from_millis(ms.max(1) as u64)))
+                .map_err(|reason| smtp_error(ErrorKind::Connect, "connect", &config.host, None, format!("SMTP write timeout setup failed: {reason}")))?;
+            let mut transport = RuntimeTransport {
+                stream: RuntimeStream::Plain(Some(stream)), runtime, control, stopped: None,
+            };
+            if config.security == SmtpSecurity::Tls {
+                transport.upgrade(&config.host, &config.trust).map_err(|reason| {
+                    if let Some(stop) = transport.take_stop() { stop_error(stop, "connect_tls", &config.host, false) }
+                    else { smtp_error(ErrorKind::Tls, "connect_tls", &config.host, None, reason) }
+                })?;
+            }
+            Ok(transport)
+        }
+
+        fn poll_stop(&mut self) -> bool {
+            match self.control.checkpoint("smtp_io") {
+                Ok(()) => false,
+                Err(stop) => { self.stopped = Some(stop); true }
+            }
+        }
+
+        fn upgrade(&mut self, server: &str, trust: &TlsTrust) -> Result<(), String> {
+            let RuntimeStream::Plain(slot) = &mut self.stream else {
+                return Err("SMTP transport is not a plaintext stream".to_string());
+            };
+            let stream = slot.take().ok_or_else(|| "SMTP transport is closed".to_string())?;
+            stream.set_read_timeout(None).map_err(|e| format!("TLS socket setup failed: {e}"))?;
+            stream.set_write_timeout(None).map_err(|e| format!("TLS socket setup failed: {e}"))?;
+            let id = match trust {
+                TlsTrust::System => (self.runtime.tls_begin)(stream, &server.to_string()),
+                TlsTrust::SystemPlusCa { pem } => (self.runtime.tls_begin_ca)(stream, &server.to_string(), pem),
+            }?;
+            self.stream = RuntimeStream::Tls(id);
+            loop {
+                if self.poll_stop() {
+                    let _ = (self.runtime.tls_close)(id);
+                    self.stream = RuntimeStream::Closed;
+                    return Err("SMTP TLS handshake stopped".to_string());
+                }
+                if (self.runtime.tls_handshake_step)(id)? { break; }
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+            (self.runtime.tls_set_poll_timeout)(id, 25)?;
+            Ok(())
+        }
+    }
+
+    fn io_poll_timeout(reason: &str) -> bool {
+        let lower = reason.to_ascii_lowercase();
+        lower.contains("timed out") || lower.contains("would block") || lower.contains("temporarily unavailable")
+    }
+
+    impl std::io::Read for RuntimeTransport {
+        fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+            loop {
+                let result = match &mut self.stream {
+                    RuntimeStream::Plain(Some(stream)) => std::io::Read::read(stream, out),
+                    RuntimeStream::Tls(id) => (self.runtime.tls_read)(*id, out.len() as i64)
+                        .map(|bytes| { let count = bytes.len(); out[..count].copy_from_slice(&bytes); count })
+                        .map_err(std::io::Error::other),
+                    _ => return Ok(0),
+                };
+                match result {
+                    Err(error) if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut)
+                        || io_poll_timeout(&error.to_string()) => {
+                        if self.poll_stop() { return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, "SMTP operation stopped")); }
+                    }
+                    other => return other,
+                }
+            }
+        }
+    }
+
+    impl std::io::Write for RuntimeTransport {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            match &mut self.stream {
+                RuntimeStream::Plain(Some(stream)) => std::io::Write::write(stream, bytes),
+                RuntimeStream::Tls(id) => {
+                    let owned = bytes.to_vec();
+                    (self.runtime.tls_write_all)(*id, &owned).map(|_| bytes.len()).map_err(std::io::Error::other)
+                }
+                _ => Err(std::io::Error::new(std::io::ErrorKind::NotConnected, "SMTP transport is closed")),
+            }
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            match &mut self.stream {
+                RuntimeStream::Plain(Some(stream)) => std::io::Write::flush(stream),
+                RuntimeStream::Tls(_) => Ok(()),
+                _ => Err(std::io::Error::new(std::io::ErrorKind::NotConnected, "SMTP transport is closed")),
+            }
+        }
+    }
+
+    impl SmtpTransport for RuntimeTransport {
+        fn verified_tls(&self) -> bool { matches!(self.stream, RuntimeStream::Tls(_)) }
+        fn start_tls(&mut self, server: &str, trust: &TlsTrust) -> Result<(), String> { self.upgrade(server, trust) }
+        fn close(&mut self) {
+            let old = std::mem::replace(&mut self.stream, RuntimeStream::Closed);
+            if let RuntimeStream::Tls(id) = old { let _ = (self.runtime.tls_close)(id); }
+        }
+        fn take_stop(&mut self) -> Option<SmtpStop> { self.stopped.take() }
+    }
+
+    impl Mailer {
+        pub fn send(&mut self, message: Message) -> Result<SendReport, Error> {
+            let control = AmbientSmtpControl(self.runtime);
+            let mut transport = RuntimeTransport::connect(&self.config, self.runtime)?;
+            smtp_transaction(&mut transport, &self.config, &message, &control)
         }
     }
 
@@ -470,9 +758,9 @@ pub mod jet_email {
             let reply = read_reply(transport, config, "starttls", false)?;
             expect_code(&reply, 220, "starttls", &config.host)?;
             checkpoint(control, "tls_handshake", &config.host, false)?;
-            transport.start_tls(&config.host, &config.trust).map_err(|reason| smtp_error(
-                ErrorKind::Tls, "starttls", &config.host, None, reason,
-            ))?;
+            if let Err(reason) = transport.start_tls(&config.host, &config.trust) {
+                return Err(transport_failure(transport, "starttls", &config.host, false, ErrorKind::Tls, reason));
+            }
             if !transport.verified_tls() {
                 return Err(smtp_error(
                     ErrorKind::Tls, "starttls", &config.host, None,
@@ -524,14 +812,14 @@ pub mod jet_email {
         expect_code(&data_reply, 354, "data", &config.host)?;
         checkpoint(control, "data_body", &config.host, false)?;
         let wire = dot_stuff(&mime, config.limits.max_message_bytes as usize)?;
-        transport.write_all(&wire).map_err(|reason| smtp_error(
-            ErrorKind::DeliveryUnknown, "data_body", &config.host, None,
-            format!("connection failed after DATA began: {reason}"),
-        ))?;
-        transport.flush().map_err(|reason| smtp_error(
-            ErrorKind::DeliveryUnknown, "data_body", &config.host, None,
-            format!("connection failed while flushing DATA: {reason}"),
-        ))?;
+        if let Err(reason) = transport.write_all(&wire) {
+            return Err(transport_failure(transport, "data_body", &config.host, true, ErrorKind::DeliveryUnknown,
+                format!("connection failed after DATA began: {reason}")));
+        }
+        if let Err(reason) = transport.flush() {
+            return Err(transport_failure(transport, "data_body", &config.host, true, ErrorKind::DeliveryUnknown,
+                format!("connection failed while flushing DATA: {reason}")));
+        }
         checkpoint(control, "data_response", &config.host, true)?;
         let final_reply = read_reply(transport, config, "data_response", true)?;
         expect_success(&final_reply, "data_response", &config.host)?;
@@ -586,8 +874,15 @@ pub mod jet_email {
             payload.extend_from_slice(username.as_bytes());
             payload.push(0);
             payload.extend_from_slice(password);
-            let line = format!("AUTH PLAIN {}\r\n", base64(&payload));
-            command(transport, control, config, "auth", line.as_bytes(), false)?;
+            let mut line = b"AUTH PLAIN ".to_vec();
+            let mut encoded = base64(&payload).into_bytes();
+            line.extend_from_slice(&encoded);
+            line.extend_from_slice(b"\r\n");
+            let sent = command(transport, control, config, "auth", &line, false);
+            control.wipe(&mut payload);
+            control.wipe(&mut encoded);
+            control.wipe(&mut line);
+            sent?;
             let reply = read_reply(transport, config, "auth", false)?;
             expect_auth_success(&reply, config)
         } else {
@@ -598,8 +893,11 @@ pub mod jet_email {
             command(transport, control, config, "auth_username", line.as_bytes(), false)?;
             let password_challenge = read_reply(transport, config, "auth_password", false)?;
             expect_auth_challenge(&password_challenge, config)?;
-            let line = format!("{}\r\n", base64(password));
-            command(transport, control, config, "auth_password", line.as_bytes(), false)?;
+            let mut line = base64(password).into_bytes();
+            line.extend_from_slice(b"\r\n");
+            let sent = command(transport, control, config, "auth_password", &line, false);
+            control.wipe(&mut line);
+            sent?;
             let reply = read_reply(transport, config, "auth", false)?;
             expect_auth_success(&reply, config)
         }
@@ -638,14 +936,17 @@ pub mod jet_email {
         ambiguous: bool,
     ) -> Result<(), Error> {
         checkpoint(control, operation, &config.host, ambiguous)?;
-        transport.write_all(bytes).map_err(|reason| smtp_error(
-            if ambiguous { ErrorKind::DeliveryUnknown } else { ErrorKind::Connect },
-            operation, &config.host, None, format!("SMTP write failed: {reason}"),
-        ))?;
-        transport.flush().map_err(|reason| smtp_error(
-            if ambiguous { ErrorKind::DeliveryUnknown } else { ErrorKind::Connect },
-            operation, &config.host, None, format!("SMTP flush failed: {reason}"),
-        ))
+        if let Err(reason) = transport.write_all(bytes) {
+            return Err(transport_failure(transport, operation, &config.host, ambiguous,
+                if ambiguous { ErrorKind::DeliveryUnknown } else { ErrorKind::Connect },
+                format!("SMTP write failed: {reason}")));
+        }
+        if let Err(reason) = transport.flush() {
+            return Err(transport_failure(transport, operation, &config.host, ambiguous,
+                if ambiguous { ErrorKind::DeliveryUnknown } else { ErrorKind::Connect },
+                format!("SMTP flush failed: {reason}")));
+        }
+        Ok(())
     }
 
     fn read_reply<T: SmtpTransport>(
@@ -655,6 +956,9 @@ pub mod jet_email {
         ambiguous: bool,
     ) -> Result<SmtpReply, Error> {
         read_smtp_reply(transport, &config.limits).map_err(|error| {
+            if let Some(stop) = transport.take_stop() {
+                return stop_error(stop, operation, &config.host, ambiguous);
+            }
             if ambiguous {
                 smtp_error(
                     ErrorKind::DeliveryUnknown, operation, &config.host, None,
@@ -697,20 +1001,32 @@ pub mod jet_email {
         server: &str,
         ambiguous: bool,
     ) -> Result<(), Error> {
-        control.checkpoint(operation).map_err(|stop| {
-            if ambiguous {
-                smtp_error(
-                    ErrorKind::DeliveryUnknown, operation, server, None,
-                    "operation stopped after DATA was transmitted; relay acceptance is unknown",
-                )
-            } else {
-                smtp_error(
-                    match stop { SmtpStop::Cancelled => ErrorKind::Cancelled, SmtpStop::TimedOut => ErrorKind::TimedOut },
-                    operation, server, None,
-                    match stop { SmtpStop::Cancelled => "SMTP operation cancelled", SmtpStop::TimedOut => "SMTP operation timed out" },
-                )
-            }
-        })
+        control.checkpoint(operation).map_err(|stop| stop_error(stop, operation, server, ambiguous))
+    }
+
+    fn stop_error(stop: SmtpStop, operation: &str, server: &str, ambiguous: bool) -> Error {
+        if ambiguous {
+            smtp_error(ErrorKind::DeliveryUnknown, operation, server, None,
+                "operation stopped after DATA was transmitted; relay acceptance is unknown")
+        } else {
+            smtp_error(
+                match stop { SmtpStop::Cancelled => ErrorKind::Cancelled, SmtpStop::TimedOut => ErrorKind::TimedOut },
+                operation, server, None,
+                match stop { SmtpStop::Cancelled => "SMTP operation cancelled", SmtpStop::TimedOut => "SMTP operation timed out" },
+            )
+        }
+    }
+
+    fn transport_failure<T: SmtpTransport>(
+        transport: &mut T,
+        operation: &str,
+        server: &str,
+        ambiguous: bool,
+        fallback: ErrorKind,
+        reason: impl Into<String>,
+    ) -> Error {
+        if let Some(stop) = transport.take_stop() { stop_error(stop, operation, server, ambiguous) }
+        else { smtp_error(fallback, operation, server, None, reason) }
     }
 
     fn expect_success(reply: &SmtpReply, operation: &str, server: &str) -> Result<(), Error> {

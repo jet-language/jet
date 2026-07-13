@@ -1960,6 +1960,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::EmailMethod { method } => match method.as_str() {
                     "envelope" => format!("({}).envelope().clone()", recv),
                     "with_envelope" => format!("({}).with_envelope(&({}))", recv, a(0)),
+                    "send" => format!("({}).send({})", recv, a(0)),
                     _ => unreachable!("unknown email method"),
                 },
                 THandleOp::RegexMethod { kind: _, method } => match method.as_str() {

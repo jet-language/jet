@@ -446,6 +446,10 @@ impl Cx {
             (Some("core.email"), "RecipientReport") => Some("RecipientReport"),
             (Some("core.email"), "SendReport") => Some("SendReport"),
             (Some("core.email"), "EmailError") => Some("EmailError"),
+            (Some("core.email"), "SmtpAuth") => Some("SmtpAuth"),
+            (Some("core.email"), "TlsTrust") => Some("TlsTrust"),
+            (Some("core.email"), "SmtpConfig") => Some("SmtpConfig"),
+            (Some("core.email"), "Mailer") => Some("Mailer"),
             (Some("core.encoding.json"), "JSONReader") => Some("JSONReader"),
             (Some("core.encoding.json"), "JSONWriter") => Some("JSONWriter"),
             (Some("core.encoding.jsonl"), "JSONLReader") => Some("JSONLReader"),
@@ -669,6 +673,17 @@ impl Cx {
                 };
                 format!("{}jet_email::{rust}", self.root_prefix)
             }
+            Type::Named(name) if name == "SmtpAuth" => {
+                let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
+                format!("{}jet_email::SmtpAuth<{}::Secret>", self.root_prefix, ffi)
+            }
+            Type::Named(name) if name == "SmtpConfig" => {
+                let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
+                format!("{}jet_email::SmtpConfig<{}::Secret>", self.root_prefix, ffi)
+            }
+            Type::Named(name) if matches!(name.as_str(), "TlsTrust" | "Mailer") => {
+                format!("{}jet_email::{}", self.root_prefix, name)
+            }
             // D-NETDEP1=A / D-HTTPLIB1=A: HTTP types → opaque Rust structs.
             Type::Named(name) if name == "HttpClientReq" => "JetHttpClientReq".to_string(),
             Type::Named(name) if name == "HttpClientResp" => "JetHttpClientResp".to_string(),
@@ -862,6 +877,13 @@ impl Cx {
                 ) {
                     let rust = if resolved == "EmailError" { "Error" } else { resolved };
                     return format!("{}jet_email::{rust}", self.root_prefix);
+                }
+                if resolved == "SmtpAuth" || resolved == "SmtpConfig" {
+                    let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
+                    return format!("{}jet_email::{}<{}::Secret>", self.root_prefix, resolved, ffi);
+                }
+                if resolved == "TlsTrust" || resolved == "Mailer" {
+                    return format!("{}jet_email::{}", self.root_prefix, resolved);
                 }
                 format!(
                     "{}jet_std::{}",
@@ -1297,6 +1319,20 @@ pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
     for (name, variants) in [
         ("SmtpSecurity", vec![("StartTls".to_string(), VariantPayload::Unit), ("Tls".to_string(), VariantPayload::Unit)]),
         ("RecipientPolicy", vec![("RequireAll".to_string(), VariantPayload::Unit), ("DeliverAccepted".to_string(), VariantPayload::Unit)]),
+        ("SmtpAuth", vec![
+            ("None".to_string(), VariantPayload::Unit),
+            ("Password".to_string(), VariantPayload::Named(vec![
+                VariantField { name: "username".to_string(), name_span: zero, ty: Type::String, ty_span: zero },
+                VariantField { name: "password".to_string(), name_span: zero, ty: Type::Named("Secret".to_string()), ty_span: zero },
+            ])),
+        ]),
+        ("TlsTrust", vec![
+            ("System".to_string(), VariantPayload::Unit),
+            ("SystemPlusCa".to_string(), VariantPayload::Named(vec![
+                VariantField { name: "pem".to_string(), name_span: zero,
+                    ty: Type::List(Box::new(Type::IntN { signed: false, bits: 8 })), ty_span: zero },
+            ])),
+        ]),
     ] {
         for (variant, _) in &variants { cx.variant_owner.insert(variant.clone(), name.to_string()); }
         cx.enum_variants.insert(name.to_string(), variants);
@@ -1340,6 +1376,14 @@ pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
         ("max_recipients".to_string(), Type::Int),
         ("max_message_bytes".to_string(), Type::Int),
         ("max_auth_challenge_bytes".to_string(), Type::Int),
+    ]);
+    cx.struct_fields.insert("SmtpConfig".to_string(), vec![
+        ("host".to_string(), Type::String), ("port".to_string(), Type::Int),
+        ("security".to_string(), Type::Named("SmtpSecurity".to_string())),
+        ("auth".to_string(), Type::Named("SmtpAuth".to_string())),
+        ("recipient_policy".to_string(), Type::Named("RecipientPolicy".to_string())),
+        ("trust".to_string(), Type::Named("TlsTrust".to_string())),
+        ("limits".to_string(), Type::Named("Limits".to_string())),
     ]);
     cx.cloneable.extend(["Envelope".to_string(), "RecipientReport".to_string(), "SendReport".to_string(), "Limits".to_string()]);
 }

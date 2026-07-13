@@ -37,7 +37,8 @@ impl<'a> Checker<'a> {
                             module == "core.email" && matches!(leaf,
                                 "Address" | "Message" | "Attachment" | "Envelope" |
                                 "SmtpSecurity" | "RecipientPolicy" | "RecipientReport" |
-                                "SendReport" | "EmailError" | "Limits")
+                                "SendReport" | "EmailError" | "Limits" | "SmtpAuth" |
+                                "TlsTrust" | "SmtpConfig" | "Mailer")
                         })
                     }) => Type::Named(n.split_once('.').unwrap().1.to_string()),
                 // D-ENV-MUTATE1=A: Core docs spell the exported error through

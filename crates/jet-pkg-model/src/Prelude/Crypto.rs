@@ -63,6 +63,15 @@ pub fn jet_crypto_secret_from_text_impl(mut text: String) -> Secret {
 pub fn jet_crypto_secret_from_bytes_impl(mut bytes: Vec<u8>) -> Secret {
     Secret(std::mem::take(&mut bytes))
 }
+/// D-EMAIL-SMTP-CONFIG1=A: sole SMTP extraction boundary. Returned bytes are
+/// owned by Mailer and zeroized on every construction failure and Drop path.
+pub fn jet_crypto_secret_copy_for_smtp_impl(secret: &Secret) -> Vec<u8> {
+    secret.0.clone()
+}
+pub fn jet_crypto_zeroize_email_impl(bytes: &mut Vec<u8>) {
+    zeroize(bytes);
+    bytes.clear();
+}
 pub fn jet_crypto_x25519_generate_impl() -> Result<JetX25519SecretKey, JetCryptoError> {
     let mut bytes = vec![0; 32];
     jet_crypto_entropy_fill(&mut bytes).map_err(|_| JetCryptoError::EntropyUnavailable)?;

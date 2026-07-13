@@ -351,17 +351,37 @@ fn run() {
 }
 ```
 
-The native surface ships `address`, `attachment`, `message`, `envelope`, and
-`serialize`. `Message.with_envelope` replaces SMTP routing without changing MIME
-headers. `SmtpSecurity`, `RecipientPolicy`, `RecipientReport`, `SendReport`, and
-the closed `EmailError` variants are real values. Bcc enters the default
-envelope but never serialized headers.
+The native surface ships `address`, `attachment`, `message`, `envelope`,
+`serialize`, `smtp_from_env`, and `smtp`. `Message.with_envelope` replaces SMTP
+routing without changing MIME headers. Bcc enters the default envelope but
+never serialized headers.
 
-`SmtpConfig`, authentication, custom certificate roots, `Mailer`, and `send`
-remain unavailable while D-EMAIL-SMTP-CONFIG1 fixes the missing limit names,
-password-secret representation, and verified custom-root bridge. No
-send-shaped placeholder is exported. Relay acceptance, cancellation, DKIM, and
-D-AUTH1 injection remain transport follow-up work.
+`smtp_from_env()` reads `SMTP_HOST`, optional `SMTP_PORT` and `SMTP_SECURITY`
+(`starttls` by default, or `tls`), paired `SMTP_USERNAME`/`SMTP_PASSWORD`,
+optional `SMTP_CA_PEM`, and optional `SMTP_RECIPIENT_POLICY` (`require_all` by
+default, or `deliver_accepted`). It constructs the same `SmtpConfig` accepted
+by `smtp(config)`; missing or unsafe values are configuration errors.
+
+`Mailer.send(message)` is the only submission call. Port 587 requires verified
+STARTTLS; port 465 requires TLS from connect. Custom CA PEM extends system roots
+without disabling hostname verification. Password bytes leave `Secret` only in
+the private authentication boundary and are zeroized with every temporary and
+Mailer drop. Ambient task cancellation and `#Context` deadlines interrupt DNS,
+connect, TLS, and SMTP wait checkpoints. Cancellation after DATA becomes
+`DeliveryUnknown`; Jet never retries automatically. `SendReport` means relay
+acceptance, not inbox delivery.
+
+```jet
+password :: crypto.Secret.from_text(env.get("SMTP_PASSWORD") ?? return)
+config := email.SmtpConfig.{
+    host: "smtp.example.com", port: 587, security: .StartTls,
+    auth: .Password.{ username: "mailer", password: password },
+    recipient_policy: .RequireAll, trust: .System,
+    limits: email.Limits.safe(),
+}
+mailer := email.smtp(config) ?? return
+report :: mailer.send(message) ?? return
+```
 
 ### `core.http` — HTTP client and server
 

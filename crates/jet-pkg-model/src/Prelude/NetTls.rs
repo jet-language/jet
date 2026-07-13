@@ -117,6 +117,18 @@ fn jet_net_tls_connect_inner(
     server_name: &String,
     custom_ca_pem: Option<&[u8]>,
 ) -> Result<i64, String> {
+    let id = jet_net_tls_begin_inner(stream, server_name, custom_ca_pem)?;
+    loop {
+        if jet_net_tls_handshake_step_impl(id)? { return Ok(id); }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
+
+fn jet_net_tls_begin_inner(
+    stream: TcpStream,
+    server_name: &String,
+    custom_ca_pem: Option<&[u8]>,
+) -> Result<i64, String> {
     static RUSTLS_PROVIDER: std::sync::Once = std::sync::Once::new();
     RUSTLS_PROVIDER.call_once(|| {
         let _ = rustls::crypto::ring::default_provider().install_default();
@@ -124,21 +136,65 @@ fn jet_net_tls_connect_inner(
     let name = rustls::pki_types::ServerName::try_from(server_name.clone())
         .map_err(|_| format!("invalid TLS server name `{}`", server_name))?;
     stream
-        .set_nonblocking(false)
+        .set_nonblocking(true)
         .map_err(|e| format!("TLS could not configure the TCP stream: {}", e))?;
     let conn = rustls::ClientConnection::new(jet_net_tls_config(custom_ca_pem)?, name)
         .map_err(|e| format!("TLS handshake with `{}` failed: {}", server_name, e))?;
-    let mut tls = rustls::StreamOwned::new(conn, stream);
-    while tls.conn.is_handshaking() {
-        tls.conn
-            .complete_io(&mut tls.sock)
-            .map_err(|e| format!("TLS handshake with `{}` failed: {}", server_name, e))?;
-    }
+    let tls = rustls::StreamOwned::new(conn, stream);
     let id = JET_NET_TLS_NEXT.fetch_add(1, Ordering::Relaxed);
     JET_NET_TLS_STREAMS.with(|cell| {
         cell.borrow_mut().insert(id, tls);
     });
     Ok(id)
+}
+
+/// Email runtime handshake seam: caller polls this between ambient cancellation
+/// and deadline checks. No bridge worker or hidden retry exists.
+pub fn jet_net_tls_begin_impl(stream: TcpStream, server_name: &String) -> Result<i64, String> {
+    jet_net_tls_begin_inner(stream, server_name, None)
+}
+
+pub fn jet_net_tls_begin_with_ca_impl(
+    stream: TcpStream,
+    server_name: &String,
+    custom_ca_pem: &Vec<u8>,
+) -> Result<i64, String> {
+    jet_net_tls_begin_inner(stream, server_name, Some(custom_ca_pem))
+}
+
+pub fn jet_net_tls_handshake_step_impl(id: i64) -> Result<bool, String> {
+    JET_NET_TLS_STREAMS.with(|cell| {
+        let mut streams = cell.borrow_mut();
+        let tls = streams.get_mut(&id).ok_or_else(|| "TLS stream is closed".to_string())?;
+        if !tls.conn.is_handshaking() {
+            tls.sock.set_nonblocking(false)
+                .map_err(|e| format!("TLS could not configure the TCP stream: {}", e))?;
+            return Ok(true);
+        }
+        match tls.conn.complete_io(&mut tls.sock) {
+            Ok(_) if tls.conn.is_handshaking() => Ok(false),
+            Ok(_) => {
+                tls.sock.set_nonblocking(false)
+                    .map_err(|e| format!("TLS could not configure the TCP stream: {}", e))?;
+                Ok(true)
+            }
+            Err(error) if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => Ok(false),
+            Err(error) => Err(format!("TLS handshake failed: {}", error)),
+        }
+    })
+}
+
+pub fn jet_net_tls_set_poll_timeout_impl(id: i64, millis: i64) -> Result<(), String> {
+    if !(1..=1000).contains(&millis) {
+        return Err("TLS poll timeout must be between 1 and 1000 milliseconds".to_string());
+    }
+    JET_NET_TLS_STREAMS.with(|cell| {
+        let mut streams = cell.borrow_mut();
+        let tls = streams.get_mut(&id).ok_or_else(|| "TLS stream is closed".to_string())?;
+        let timeout = Some(std::time::Duration::from_millis(millis as u64));
+        tls.sock.set_read_timeout(timeout).map_err(|e| format!("TLS could not set read timeout: {}", e))?;
+        tls.sock.set_write_timeout(timeout).map_err(|e| format!("TLS could not set write timeout: {}", e))
+    })
 }
 
 pub fn jet_net_tls_connect_impl(stream: TcpStream, server_name: &String) -> Result<i64, String> {

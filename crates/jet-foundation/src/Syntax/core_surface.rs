@@ -419,8 +419,7 @@ pub const CORE_MEM_ALLOC_MODULE: &str = "core.mem.alloc";
 pub const CORE_ARGS_MODULE: &str = "core.args";
 
 // D-EMAIL1=A / D-EMAIL-SMTP-SURFACE1=A / D-EMAIL-SMTP-CONFIG1=A: bounded
-// message/MIME plus exact SMTP policy values. Mailer stays unexported until its
-// verified TLS transport is wired end to end.
+// message/MIME plus exact SMTP policy values and one verified transport.
 pub const CORE_EMAIL_MODULE: &str = "core.email";
 pub const TYPE_EMAIL_ADDRESS: &str = "Address";
 pub const TYPE_EMAIL_MESSAGE: &str = "Message";
@@ -435,12 +434,15 @@ pub const TYPE_EMAIL_LIMITS: &str = "Limits";
 pub const TYPE_EMAIL_SMTP_AUTH: &str = "SmtpAuth";
 pub const TYPE_EMAIL_TLS_TRUST: &str = "TlsTrust";
 pub const TYPE_EMAIL_SMTP_CONFIG: &str = "SmtpConfig";
+pub const TYPE_EMAIL_MAILER: &str = "Mailer";
 pub const EMAIL_LIMITS_SAFE_METHOD: &str = "safe";
 pub const CORE_EMAIL_ADDRESS_FN: &str = "address";
 pub const CORE_EMAIL_ATTACHMENT_FN: &str = "attachment";
 pub const CORE_EMAIL_MESSAGE_FN: &str = "message";
 pub const CORE_EMAIL_ENVELOPE_FN: &str = "envelope";
 pub const CORE_EMAIL_SERIALIZE_FN: &str = "serialize";
+pub const CORE_EMAIL_SMTP_FN: &str = "smtp";
+pub const CORE_EMAIL_SMTP_FROM_ENV_FN: &str = "smtp_from_env";
 
 /// D-REGION1 (ratified 2026-06-21, opt B): explicit allocation-region block
 /// `region r { … }`. A lowercase contextual block keyword (D-CASING1) that

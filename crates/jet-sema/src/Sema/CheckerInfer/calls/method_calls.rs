@@ -1466,8 +1466,10 @@ impl<'a> Checker<'a> {
             if let Some(ret) = email_method_return(&recv_ty, method, args.len()) {
                 if method == "with_envelope" {
                     self.expect_core_arg(method, 0, &Type::Named("Envelope".to_string()), &mut args[0]);
+                } else if method == "send" {
+                    self.expect_core_arg(method, 0, &Type::Named("Message".to_string()), &mut args[0]);
                 }
-                *recv_type_out = Some("Message".to_string());
+                *recv_type_out = Some(match &recv_ty { Type::Named(name) => name.clone(), _ => "Message".to_string() });
                 return ret;
             }
             // D-REGEXENGINE1=A: method calls on compiled Regex and Match values.

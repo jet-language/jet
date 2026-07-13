@@ -44,6 +44,9 @@ pub fn email_method_return(ty: &Type, method: &str, argc: usize) -> Option<Optio
         (Type::Named(name), "with_envelope", 1) if name == "Message" => Some(Some(result_ty(
             Type::Named("Message".to_string()), Type::Named("EmailError".to_string()),
         ))),
+        (Type::Named(name), "send", 1) if name == "Mailer" => Some(Some(result_ty(
+            Type::Named("SendReport".to_string()), Type::Named("EmailError".to_string()),
+        ))),
         _ => None,
     }
 }
@@ -223,7 +226,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-EMAIL1=A / D-EMAIL-SMTP-SURFACE1=A: exact ungated email values.
         | "Address" | "Message" | "Attachment" | "Envelope" | "EmailError"
         | "SmtpSecurity" | "RecipientPolicy" | "RecipientReport" | "SendReport"
-        | "Limits"
+        | "Limits" | "SmtpAuth" | "TlsTrust" | "SmtpConfig" | "Mailer"
         // D-REGEXENGINE1=A: std-only linear regex values.
         | "Regex" | "RegexFlags" | "Match"
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP types.
@@ -261,7 +264,7 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     if type_name == "HttpShutdownReport" && matches!(field, "accepted" | "overloaded" | "completed" | "cancelled") {
         return Some(Type::Int);
     }
-    if matches!(type_name, "EncodingLimits" | "EncodingCause" | "EncodingError" | "CBOROptions" | "CBORError" | "AsyncPolicy" | "RecipientReport" | "SendReport" | "Limits") {
+    if matches!(type_name, "EncodingLimits" | "EncodingCause" | "EncodingError" | "CBOROptions" | "CBORError" | "AsyncPolicy" | "RecipientReport" | "SendReport" | "Limits" | "SmtpConfig") {
         return core_constructable_fields(type_name)?.into_iter().find(|(name, _)| name == field).map(|(_, ty)| ty);
     }
     if type_name == "Envelope" {
@@ -911,6 +914,15 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             ("max_message_bytes".to_string(), Type::Int),
             ("max_auth_challenge_bytes".to_string(), Type::Int),
         ]),
+        "SmtpConfig" => Some(vec![
+            ("host".to_string(), Type::String),
+            ("port".to_string(), Type::Int),
+            ("security".to_string(), Type::Named("SmtpSecurity".to_string())),
+            ("auth".to_string(), Type::Named("SmtpAuth".to_string())),
+            ("recipient_policy".to_string(), Type::Named("RecipientPolicy".to_string())),
+            ("trust".to_string(), Type::Named("TlsTrust".to_string())),
+            ("limits".to_string(), Type::Named("Limits".to_string())),
+        ]),
         "EncodingCause" => Some(vec![
             ("kind".to_string(), Type::String),
             ("os_code".to_string(), Type::Option(Box::new(Type::Int))),
@@ -965,7 +977,7 @@ pub(crate) fn core_email_variants(
     let units: &[&str] = match enum_name {
         "SmtpSecurity" => &["StartTls", "Tls"],
         "RecipientPolicy" => &["RequireAll", "DeliverAccepted"],
-        "EmailError" => &[],
+        "EmailError" | "SmtpAuth" | "TlsTrust" => &[],
         _ => return None,
     };
     for name in units {
@@ -986,6 +998,18 @@ pub(crate) fn core_email_variants(
             }).collect();
             variants.insert(name.to_string(), (zero, VariantPayload::Named(fields)));
         }
+    } else if enum_name == "SmtpAuth" {
+        variants.insert("None".to_string(), (zero, VariantPayload::Unit));
+        variants.insert("Password".to_string(), (zero, VariantPayload::Named(vec![
+            VariantField { name: "username".to_string(), name_span: zero, ty: Type::String, ty_span: zero },
+            VariantField { name: "password".to_string(), name_span: zero, ty: Type::Named("Secret".to_string()), ty_span: zero },
+        ])));
+    } else if enum_name == "TlsTrust" {
+        variants.insert("System".to_string(), (zero, VariantPayload::Unit));
+        variants.insert("SystemPlusCa".to_string(), (zero, VariantPayload::Named(vec![
+            VariantField { name: "pem".to_string(), name_span: zero,
+                ty: Type::List(Box::new(Type::IntN { signed: false, bits: 8 })), ty_span: zero },
+        ])));
     }
     Some(variants)
 }
