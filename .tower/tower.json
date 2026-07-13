@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 527,
-    "rev": 4927,
+    "rev": 4944,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -6146,6 +6146,11 @@
         {
           "at": "2026-07-13",
           "by": "terra-358-reviewer",
+          "text": "[criteria 7-8 verified] Independent review accepted 21b7f3c9 hybrid UI and terminal matrix. Arbitrary controls, truthful cooked ids, retained-data pager navigation, live bindings pane, highlighting, NO_COLOR ghost suppression, and bounded raw/cooked Linux PTY/stdio/control matrix are real. Fresh repl target: 113 passed, 0 failed, 1 ignored. Criterion 5 remains open."
+        },
+        {
+          "at": "2026-07-13",
+          "by": "terra-358-reviewer",
           "text": "[criterion 6 verified] Independent rerun audit accepted 99fde681 + fe6b7940. Raw/cooked arbitrary edit, preserved project baseline, semantic effect tracking, downstream replay, per-effect replay/skip, stale suffix, no duplicate effects, and bounded Linux PTY are real. Fresh repl target: 104 passed, 0 failed, 1 ignored."
         },
         {
@@ -6288,20 +6293,20 @@
         {
           "n": 7,
           "text": "Hybrid UI provides addressable arbitrary-turn pin/fold/unfold/rerun, truthful cooked turn ids, real long-output pager/table behavior, live bindings side pane, syntax highlighting, and no fake ghost text under NO_COLOR.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-12T06:59:32.078Z"
+          "status": "verified",
+          "metBy": "terra-358-hybrid",
+          "verifiedBy": "terra-358-reviewer",
+          "evidence": "Independent code and PTY audit accepted 21b7f3c9: selector functions validate requested ids before mutating pin/fold/rerun state; cooked ids derive from live turn count; pager owns the full pending_unfold payload and provides indexed navigation; visible bindings pane is regenerated after successful turns from current session scope with changed marker; live input token coloring is asserted by numeric ANSI; NO_COLOR gates ghost to None and PTY rejects historical suggestion bytes as typed text. Full repl target green 113/0/1.",
+          "at": "2026-07-13T01:21:17.652Z"
         },
         {
           "n": 8,
           "text": "Automated terminal matrix proves raw and cooked behavior over real PTYs across color/NO_COLOR, widths, stdin/stdout modes, missing stty, EOF, Ctrl-D, and every keyboard/text fallback before owner-environment acceptance.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-12T06:59:32.398Z"
+          "status": "verified",
+          "metBy": "terra-358-hybrid",
+          "verifiedBy": "terra-358-reviewer",
+          "evidence": "Independent false-green audit accepted matrix: every PTY command is timeout-bounded; raw rows require raw-only Tab/F3 discovery and actual evaluation, narrow/wide and color/NO_COLOR have distinct output oracles, EOF/Ctrl-D exit successfully; cooked rows require fallback hint, forbid raw key advertising, and prove result on the correct stdout channel; missing PATH removes stty while absolute jet path remains reachable; keyboard and text rows assert each control-specific marker. Fresh full repl target green 113 passed, 0 failed, 1 ignored in 2.06s.",
+          "at": "2026-07-13T01:21:17.906Z"
         }
       ],
       "needsAcceptance": false,
@@ -10850,65 +10855,65 @@
         {
           "n": 1,
           "text": "Syntax.rs entry updated",
-          "status": "met",
+          "status": "verified",
           "metBy": "grok-476-builder",
-          "verifiedBy": null,
-          "evidence": "KW_TASK + TASK_RESERVED_LIFECYCLE in Syntax/math_layout.rs (D-JPK-TASKRUN1)",
-          "at": "2026-07-12T20:05:41.495Z"
+          "verifiedBy": "jet-verify-close",
+          "evidence": "Syntax/math_layout.rs:557,562 KW_TASK+TASK_RESERVED_LIFECYCLE cite D-JPK-TASKRUN1 (KW_TASK also cites card #505/D-SCHEDULE1, correctly the same #Task surface); confirmed on master a28dd8b2",
+          "at": "2026-07-13T01:28:28.690Z"
         },
         {
           "n": 2,
           "text": "syntax-decisions.md log entry",
-          "status": "met",
+          "status": "verified",
           "metBy": "grok-476-builder",
-          "verifiedBy": null,
-          "evidence": "syntax-decisions.md D-JPK-TASKRUN1 shipped note for card #476",
-          "at": "2026-07-12T20:05:41.588Z"
+          "verifiedBy": "jet-verify-close",
+          "evidence": "docs/spec/syntax-decisions.md:3252 D-JPK-TASKRUN1=A entry + :3270 shipped log for card #476, confirmed on master",
+          "at": "2026-07-13T01:28:50.741Z"
         },
         {
           "n": 3,
           "text": "jet devtools grammars regenerated",
-          "status": "met",
+          "status": "verified",
           "metBy": "grok-476-builder",
-          "verifiedBy": null,
-          "evidence": "jet devtools grammars regenerated (KW_TASK already present from #505)",
-          "at": "2026-07-12T20:05:41.674Z"
+          "verifiedBy": "jet-verify-close",
+          "evidence": "nix develop -c jet self devtools grammars --check on master: wrote 3 files, git diff -- editors/ empty (zero drift)",
+          "at": "2026-07-13T01:29:06.510Z"
         },
         {
           "n": 4,
           "text": "snapshots re-blessed",
-          "status": "met",
+          "status": "verified",
           "metBy": "grok-476-builder",
-          "verifiedBy": null,
-          "evidence": "tests/ui/task_reserved_lifecycle.stderr (E0928)",
-          "at": "2026-07-12T20:05:41.766Z"
+          "verifiedBy": "jet-verify-close",
+          "evidence": "cargo test --test diagnostic_snapshots ui_snapshots (JET_UI_FILTER=tests/ui/task_reserved_lifecycle.jet): 1 passed, green on master",
+          "at": "2026-07-13T01:29:27.028Z"
         },
         {
           "n": 5,
           "text": "E0928 reserved lifecycle #Task names + ui snapshot",
-          "status": "met",
+          "status": "verified",
           "metBy": "grok-476-builder",
-          "verifiedBy": null,
-          "evidence": "CheckerSchedule E0928 + tests/ui/task_reserved_lifecycle",
-          "at": "2026-07-12T20:05:41.857Z"
+          "verifiedBy": "jet-verify-close",
+          "evidence": "tests/ui/task_reserved_lifecycle.jet+.stderr present, E0928 in diagnostics.md:473,1721; ui snapshot green (see crit 4)",
+          "at": "2026-07-13T01:29:52.871Z"
         },
         {
           "n": 6,
           "text": "jetpack run <task> + jet run --task dispatch; E1294 unknown lists declared",
-          "status": "met",
+          "status": "verified",
           "metBy": "grok-476-builder",
-          "verifiedBy": null,
-          "evidence": "jetpack cmd_run + jet run --task; tests/jetpack_tasks.rs 4 ok",
-          "at": "2026-07-12T20:05:41.946Z"
+          "verifiedBy": "jet-verify-close",
+          "evidence": "reproduced independently via target/debug binaries in scratch dir: jetpack run greet -> 'hello from task' exit0; jetpack run bogus -> E1294 'declared tasks: greet, seed' exit2; jet run --task=seed main.jet -> 'hello from task\\nseeded' exit0. cargo test --test jetpack_tasks: 5/5 ok",
+          "at": "2026-07-13T01:30:10.153Z"
         },
         {
           "n": 7,
           "text": "example+golden task_runner; jetpack_tasks focused tests",
-          "status": "met",
+          "status": "verified",
           "metBy": "grok-476-builder",
-          "verifiedBy": null,
-          "evidence": "examples/features/jetpack/task_runner.jet + expected; jetpack_tasks ok",
-          "at": "2026-07-12T20:05:42.039Z"
+          "verifiedBy": "jet-verify-close",
+          "evidence": "examples/features/jetpack/task_runner.jet + expected/*.out present; JET_GOLDEN_FILTER=examples/features/jetpack/task_runner.jet cargo test --test golden: 1 passed on master",
+          "at": "2026-07-13T01:30:25.881Z"
         }
       ],
       "refs": [],
@@ -10932,6 +10937,11 @@
       "blockedBy": [],
       "assignee": "grok-477-builder",
       "log": [
+        {
+          "at": "2026-07-13",
+          "by": "jet-verify-close",
+          "text": "RE-VERIFY (jet-verify-close): prior verify (grok-477-verify) was recorded against unmerged branch grok/card-477, not master -- per card's own jet-verify-sweep log entry, false at time recorded. Merges 339b848b+6e661305 now landed on master a28dd8b2. Re-confirmed all 4 criteria independently against master: (1) jetpack help lists tool run/install/list/uninstall + cargo test --test jetpack_tool 6/6 ok; (2) tool run npm:prettier -> E1298 exit2 reproduced via target/debug/jetpack in scratch dir; (3) tool install real symlink+generation metadata test ok; (4) tool install nixpkgs:serve vs project #Task fn serve -> E1297 exit2 reproduced live, snapshot tests/fixtures/jetpack-diagnostics/tool_task_collide.stderr + diagnostics.md E1297/E1298 entries present. All green on master, not branch. Verdict SOLID."
+        },
         {
           "at": "2026-07-13",
           "by": "fable-impl-477",
@@ -10969,36 +10979,36 @@
           "text": "jetpack tool run|install|list|uninstall verb surface exists and is documented in help",
           "status": "verified",
           "metBy": "grok-477-builder",
-          "verifiedBy": "grok-477-verify",
-          "evidence": "verify: tip d7f21193+; cargo build -p jetpack; cargo test --test jetpack tool_ 6 ok (tool_help)",
-          "at": "2026-07-12T23:36:56.491Z"
+          "verifiedBy": "jet-verify-close",
+          "evidence": "re-confirmed on master a28dd8b2 (prior verify was against unmerged branch, per card's own jet-verify-sweep log): jetpack help lists tool run/install/list/uninstall; cargo test --test jetpack_tool tool_help_lists_run_install_list_uninstall ok",
+          "at": "2026-07-13T01:30:47.954Z"
         },
         {
           "n": 2,
           "text": "tool run realizes+execs refs across built-in providers (nixpkgs/github/path); unavailable external providers emit clear diagnostic (not silent skip)",
           "status": "verified",
           "metBy": "grok-477-builder",
-          "verifiedBy": "grok-477-verify",
-          "evidence": "verify: tool_run_unavailable_provider_is_e1298 ok; E1298 fixture; E1295/E1296 stay selectors",
-          "at": "2026-07-12T23:36:56.576Z"
+          "verifiedBy": "jet-verify-close",
+          "evidence": "re-confirmed on master: jetpack tool run npm:prettier -> E1298 exit2 reproduced via target/debug binary in scratch dir; cargo test --test jetpack_tool tool_run_unavailable_provider_is_e1298_not_silent + tool_run_ephemeral_execs_builtin_provider_fixture ok (6/6 total)",
+          "at": "2026-07-13T01:31:03.785Z"
         },
         {
           "n": 3,
           "text": "tool install projects bins onto ~/.jet/bin with generation metadata (real PATH projection)",
           "status": "verified",
           "metBy": "grok-477-builder",
-          "verifiedBy": "grok-477-verify",
-          "evidence": "verify: tool_install_projects_real_bin_symlink_with_generation ok; tool.rs real symlink+gen meta",
-          "at": "2026-07-12T23:36:56.663Z"
+          "verifiedBy": "jet-verify-close",
+          "evidence": "re-confirmed on master: cargo test --test jetpack_tool tool_install_projects_real_bin_symlink_with_generation ok (real symlink+gen metadata assertion in tool.rs)",
+          "at": "2026-07-13T01:31:24.810Z"
         },
         {
           "n": 4,
           "text": "JPK-TOOL-COLLIDE fires when install bin name collides with project #Task fn; I4 snapshot + diagnostics.md",
           "status": "verified",
           "metBy": "grok-477-builder",
-          "verifiedBy": "grok-477-verify",
-          "evidence": "verify: tool_install_task_collision_is_e1297 ok; no E1294 tool; codes E1297/E1298",
-          "at": "2026-07-12T23:36:56.757Z"
+          "verifiedBy": "jet-verify-close",
+          "evidence": "re-confirmed on master: jetpack tool install nixpkgs:serve vs project #Task fn serve -> E1297 exit2 reproduced via target/debug binary; snapshot tests/fixtures/jetpack-diagnostics/tool_task_collide.stderr (same convention as existing E1295/E1296); diagnostics.md:642-643,1459-1460 what/why/fix for E1297/E1298",
+          "at": "2026-07-13T01:31:40.623Z"
         }
       ],
       "refs": [],
@@ -30996,6 +31006,125 @@
   ],
   "events": [
     {
+      "at": "2026-07-13T01:32:04.206Z",
+      "by": "jet-verify-close",
+      "action": "card.update",
+      "ref": "c0fchu51",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T01:31:40.624Z",
+      "by": "jet-verify-close",
+      "action": "card.criteria-verify",
+      "ref": "c0fchu51",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-13T01:31:24.810Z",
+      "by": "jet-verify-close",
+      "action": "card.criteria-verify",
+      "ref": "c0fchu51",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-13T01:31:03.786Z",
+      "by": "jet-verify-close",
+      "action": "card.criteria-verify",
+      "ref": "c0fchu51",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-13T01:30:47.955Z",
+      "by": "jet-verify-close",
+      "action": "card.criteria-verify",
+      "ref": "c0fchu51",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-13T01:30:25.881Z",
+      "by": "jet-verify-close",
+      "action": "card.criteria-verify",
+      "ref": "c0qwckht",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-13T01:30:10.154Z",
+      "by": "jet-verify-close",
+      "action": "card.criteria-verify",
+      "ref": "c0qwckht",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-13T01:29:52.871Z",
+      "by": "jet-verify-close",
+      "action": "card.criteria-verify",
+      "ref": "c0qwckht",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-13T01:29:27.028Z",
+      "by": "jet-verify-close",
+      "action": "card.criteria-verify",
+      "ref": "c0qwckht",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-13T01:29:06.510Z",
+      "by": "jet-verify-close",
+      "action": "card.criteria-verify",
+      "ref": "c0qwckht",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-13T01:28:50.741Z",
+      "by": "jet-verify-close",
+      "action": "card.criteria-verify",
+      "ref": "c0qwckht",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-13T01:28:28.690Z",
+      "by": "jet-verify-close",
+      "action": "card.criteria-verify",
+      "ref": "c0qwckht",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-13T01:21:18.085Z",
+      "by": "terra-358-reviewer",
+      "action": "card.update",
+      "ref": "c0gk8k3t",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T01:21:17.906Z",
+      "by": "terra-358-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0gk8k3t",
+      "note": "#8"
+    },
+    {
+      "at": "2026-07-13T01:21:17.769Z",
+      "by": "terra-358-hybrid",
+      "action": "card.criteria-meet",
+      "ref": "c0gk8k3t",
+      "note": "#8"
+    },
+    {
+      "at": "2026-07-13T01:21:17.652Z",
+      "by": "terra-358-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0gk8k3t",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-13T01:21:17.532Z",
+      "by": "terra-358-hybrid",
+      "action": "card.criteria-meet",
+      "ref": "c0gk8k3t",
+      "note": "#7"
+    },
+    {
       "at": "2026-07-13T01:18:34.912Z",
       "by": "fable-impl-477",
       "action": "card.update",
@@ -34374,125 +34503,6 @@
       "by": "terra-296-builder",
       "action": "card.release",
       "ref": "c0uxsyns",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-12T13:13:38.949Z",
-      "by": "terra-296-builder",
-      "action": "card.update",
-      "ref": "c0uxsyns",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T13:06:33.583Z",
-      "by": "terra-296-builder",
-      "action": "card.claim",
-      "ref": "c0uxsyns",
-      "note": ""
-    },
-    {
-      "at": "2026-07-12T13:04:21.782Z",
-      "by": "claude-main",
-      "action": "card.activate",
-      "ref": "c0zpoz3m",
-      "note": "by claude-main, quoting owner: \"No more green lights, remove that aspect. It should be a ballot if I need to confirm, the green lighting is duplicative and blocks work more than it helps\""
-    },
-    {
-      "at": "2026-07-12T13:04:21.583Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0zpoz3m",
-      "note": "Tower: remove greenlight/activate gate — ballots are the only owner confirmation"
-    },
-    {
-      "at": "2026-07-12T13:02:28.569Z",
-      "by": "owner",
-      "action": "card.activate",
-      "ref": "c0nqsqn5",
-      "note": ""
-    },
-    {
-      "at": "2026-07-12T13:02:26.386Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0nqsqn5",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T13:02:26.283Z",
-      "by": "claude-main",
-      "action": "card.activate",
-      "ref": "c0nqsqn5",
-      "note": "by claude-main, quoting owner: \"Any cards that need owner verification to close should show up in the now page for me to check... Implement this with a subagent. This should be tied into a card so the card is closed once owner acceptance is provided as confirmation\""
-    },
-    {
-      "at": "2026-07-12T13:01:55.059Z",
-      "by": "claude-main",
-      "action": "card.claim",
-      "ref": "c0nqsqn5",
-      "note": ""
-    },
-    {
-      "at": "2026-07-12T13:01:15.950Z",
-      "by": "codex-orchestrator",
-      "action": "card.release",
-      "ref": "c0qi7dc2",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-12T13:01:14.006Z",
-      "by": "claude-main",
-      "action": "card.claim",
-      "ref": "c0nqsqn5",
-      "note": ""
-    },
-    {
-      "at": "2026-07-12T13:01:13.907Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0nqsqn5",
-      "note": "needsAcceptance"
-    },
-    {
-      "at": "2026-07-12T13:01:10.335Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0qi7dc2",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-12T13:01:02.090Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-verify",
-      "ref": "c0qi7dc2",
-      "note": "#8"
-    },
-    {
-      "at": "2026-07-12T13:01:01.997Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-verify",
-      "ref": "c0qi7dc2",
-      "note": "#7"
-    },
-    {
-      "at": "2026-07-12T13:00:17.060Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0nqsqn5",
-      "note": "Tower Now page: owner-verification queue with acceptance flow"
-    },
-    {
-      "at": "2026-07-12T12:58:17.185Z",
-      "by": "codex-orchestrator",
-      "action": "card.claim",
-      "ref": "c0qi7dc2",
-      "note": ""
-    },
-    {
-      "at": "2026-07-12T12:58:05.018Z",
-      "by": "terra-302-builder",
-      "action": "card.release",
-      "ref": "c0184j6s",
       "note": "[handoff] logged"
     }
   ],
