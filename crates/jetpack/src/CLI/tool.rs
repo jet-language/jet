@@ -10,12 +10,12 @@
 use super::parse::Parsed;
 use super::realize::{classify_or_report, RunPlan};
 use super::trust_env_build::compose_env;
-use crate::ModuleEval;
 use crate::Output::Theme;
 use crate::RefSpec;
 use crate::Shell;
 use crate::Store;
 use crate::Syntax;
+use jet_env_model::ModuleEval;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
