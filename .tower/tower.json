@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 531,
-    "rev": 5279,
+    "rev": 5283,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -4101,8 +4101,18 @@
       "priority": "P1",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-ENCSTREAM1=A: Hybrid: same codec modules, tree and stream modes. Every codec module keeps one adapter identity: parse/to_string/decode<T> for whole values and reader/writer event streams for large inputs. XML, JSONL, canonical JSON, and CBOR all flow through Data/DataTree and Codable, so streaming is a mode of the same codec, not a second library.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: corelib audit: core.encoding — format breadth (XML, binary interchange, streaming)\n\nCurrent law: Existing linked decisions: D-ENCBIN1=ratified/A. D-CORENS1 keeps all first-party modules under core.*; I6 forbids compiler deps; D-STDRUBRIC1 requires mechanical core API laws.\n\nBuild order: Audit current Core/API/prelude/docs/tests first; write failing UI/golden/unit fixtures; implement std-only or approved bridge code; update docs/reference and syntax-decisions when law changes; run targeted tests, then full nix develop -c cargo test before close.\n\nAcceptance: Examples/goldens or UI snapshots prove each shipped behavior; stdlib map records shipped/carded/declined rows; no rustc/user-hostile errors; no compiler external deps.\n\nDependencies/collisions: Respect neighboring core cards: io/args/process separate; text before regex; net/url before http; encoding before data/db; random never owns secrets.",
       "blockedBy": [],
-      "assignee": "terra-296-cbor",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-13",
+          "by": "terra-296-cbor",
+          "text": "[handoff] Integrated bounded JSON, JSONL, CSV, and now CBOR streams through 5636751f; independent review and parent targeted gates green. Resume CBOR Float16/preferred-float/NaN plus explicit canonical validator/options only under current ratified surface, then XML corpus/lifecycle and allocator/parity/docs closure. No #296 worktree should remain after cleanup."
+        },
+        {
+          "at": "2026-07-13",
+          "by": "agent",
+          "text": "[integrated-progress] Real bounded CBOR event streams landed at 317c61ca..5636751f after independent P1 remediation. Byte-at-time reader handles definite/indefinite supported values, ordinary non-shortest interoperability, exact hostile path/offset/type/IO terminal latching; writer uses prospective replacement accounting, encoded-key order, bounded frames, lifecycle/Drop, and whole/stream byte equivalence. Parent CBOR stream 3/3, foundation 1/1, whole codec 1/1 green. Broad criteria remain open: Float16/preferred float/NaN and explicit canonical validator/options, fuller RFC corpus, allocator harness, stronger path escaping and complete parity/docs."
+        },
         {
           "at": "2026-07-13",
           "text": "[handoff] Integrated bounded incremental JSON, JSONL, and CSV streams through 7ef9151e; all independently reviewed and parent targeted green. Resume criterion 3 with XML or CBOR real bounded lifecycle; preserve shared EncodingLimits/typed terminal/prospective allocation law. CSV still needs dedicated counting-allocator and cross-tier parity proof; broad criteria stay open. No #296 source worktree remains."
@@ -4298,8 +4308,7 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
-      "claimedAt": "2026-07-13T15:30:40.880Z"
+      "refs": []
     },
     {
       "id": "c0wx96s2",
@@ -14744,7 +14753,7 @@
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
-      "assignee": "terra-530-smtp",
+      "assignee": null,
       "log": [
         {
           "at": "2026-07-13",
@@ -14761,8 +14770,7 @@
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-13T11:38:37.154Z",
-      "updated": "2026-07-13",
-      "claimedAt": "2026-07-13T16:23:34.213Z"
+      "updated": "2026-07-13"
     }
   ],
   "decisions": [
@@ -31211,6 +31219,98 @@
       "draft": false,
       "status": "open",
       "created": "2026-07-13T15:26:59.215Z"
+    },
+    {
+      "id": "D-EMAIL-SMTP-SURFACE1",
+      "cardId": "c0aadf2p",
+      "group": "stdlib",
+      "title": "What exact SMTP configuration, send, report, and trust surface should Jet expose?",
+      "gist": "Fix the constructible types and method signatures needed to implement D-EMAIL1 without inventing SMTP spellings in code.",
+      "lesson": "D-EMAIL1 already chose one native Mailer, secure STARTTLS or TLS-from-connect, honest relay-acceptance reports, no hidden retry, and task-aware cancellation. Implementation still needs exact public shapes. A configuration must say where to connect, how TLS starts, how credentials are supplied, how partial recipient rejection is handled, and which certificate authorities are trusted.\n\nCertificate trust and encryption are separate. A custom CA is useful for private relays and local tests, but it must extend trusted roots while preserving hostname verification. A trust-all switch would make encryption unauthenticated and must not exist. Deadlines and cancellation already belong to Jet's ambient task context; duplicating timeout fields in SMTP config would create two competing authorities.\n\nSMTP envelope recipients are separate from visible headers. Bcc must reach RCPT TO but never MIME headers. Relay acceptance is also not inbox delivery, so SendReport must describe server acceptance and rejection without claiming delivery. A disconnect after DATA may be DeliveryUnknown: retrying automatically could send a duplicate.",
+      "explainer": "",
+      "story": "Mara starts with smtp_from_env and mailer.send(message). Her production team later uses a private relay with a company CA, requires every recipient to be accepted before DATA, and cancels through a request context. The same Mailer must expose those controls without a second expert transport or an insecure test mode.",
+      "inWild": "config := email.SmtpConfig.{\n    host: \"smtp.example.com\",\n    port: 587,\n    security: .StartTls,\n    auth: .Password(username: \"mailer\", password: smtp_password),\n    recipient_policy: .RequireAll,\n    trust: .System,\n    limits: email.Limits.safe(),\n}\nmailer := email.smtp(config)?\nreport := mailer.send(message)?\nprint(\"relay accepted {report.accepted.len()} recipients\")",
+      "detail": "Acceptance: every public type, variant, field, constructor, and method below is registered with decision adjacency; smtp_from_env and smtp(config) create the same Mailer mechanism; STARTTLS never downgrades and password auth never occurs before verified TLS; custom CA input extends roots and retains hostname verification; no trust-all option exists; Message owns the default envelope and expert envelope replacement preserves Bcc/header separation; Mailer.send has one signature and inherits the earliest ambient task deadline/cancellation; reports distinguish accepted/rejected recipients and relay acceptance without claiming delivery; EmailError has stable typed variants including DeliveryUnknown; no automatic retry; hostile real-socket/TLS tests cover reply bounds, capability parsing, downgrade, auth order, partial recipients, DATA ambiguity, cancellation, and drop.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Closed records plus one send method",
+          "detail": "Use constructible records and closed enums for expert policy, while smtp_from_env and message defaults keep beginner use short. Mailer.send(message) is the only send mechanism.",
+          "technical": "SmtpConfig fields: host:String, port:Int, security:SmtpSecurity(.StartTls|.Tls), auth:SmtpAuth(.None|.Password{username:String,password:Secret<String>}), recipient_policy:RecipientPolicy(.RequireAll|.DeliverAccepted), trust:TlsTrust(.System|.SystemPlusCa{pem:[U8]}), limits:Limits. Custom CA never disables hostname verification. Limits is a constructible record for reply-line/reply-count/capability/recipient/message/auth-challenge bounds and Limits.safe() supplies defaults. Message contains its default Envelope. Envelope fields are from:Address and recipients:[Address]; email.envelope validates it; message.with_envelope(envelope) is the expert override and still cannot add headers. Mailer uses a write receiver and `send(message: Message) -> SendReport ? EmailError`; ambient #Context is the sole deadline/cancellation authority. SendReport fields: server:String, accepted:[RecipientReport], rejected:[RecipientReport], response_code:Int, response:String, accepted_at:String. RecipientReport fields: address:Address, accepted:Bool, code:Int, message:String. EmailError variants: Configuration, Dns, Connect, Tls, Auth, Protocol, Rejected, Transient, TimedOut, Cancelled, DeliveryUnknown; each carries operation:String, server:String?, code:Int?, and reason:String. smtp_from_env maps environment into the same SmtpConfig and rejects missing/unsafe values.",
+          "code": "mailer := email.smtp_from_env()?\nreport := mailer.send(message)?\n\ncustom := message.with_envelope(email.envelope(from, audit_recipients)?)?\nreport := email.smtp(config)?.send(custom)?"
+        },
+        {
+          "key": "B",
+          "name": "Fluent builders",
+          "detail": "Keep config and message internals opaque; expose chained with_host, with_tls, with_auth, with_policy, with_ca, and with_envelope methods before send.",
+          "technical": "Every policy becomes a method call returning a new opaque value. Mailer.send remains singular and ambient context still owns cancellation. This avoids public record fields but creates a larger method vocabulary and makes configuration serialization/audit less direct.",
+          "code": "mailer := email.smtp_builder(\"smtp.example.com\")\n    .start_tls()\n    .password(username, smtp_password)\n    .require_all()\n    .system_plus_ca(company_ca)?\n    .build()?\nreport := mailer.send(message)?"
+        },
+        {
+          "key": "C",
+          "name": "Environment-only Mailer",
+          "detail": "Expose only smtp_from_env and mailer.send(message). Configuration, trust, envelope, and report policy remain opaque environment conventions.",
+          "technical": "Beginners get the shortest path, but private CA roots, explicit recipient policy, reproducible tests, audited configuration, and programmatic multi-relay use cannot be expressed through typed Jet values.",
+          "code": "mailer := email.smtp_from_env()?\nreport := mailer.send(message)?"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust SMTP libraries commonly use typed transport builders and TLS parameter objects. A keeps typed policy while using one inspectable record and Jet ambient cancellation.",
+          "code": "SmtpTransport::starttls_relay(host)?.credentials(creds).build()"
+        },
+        {
+          "lang": "Go",
+          "note": "Go exposes tls.Config with RootCAs and ServerName, but net/smtp leaves protocol policy low-level. A preserves verified root extension and hostname checks behind a smaller safe enum.",
+          "code": "tls.Config{RootCAs: roots, ServerName: host}"
+        },
+        {
+          "lang": "Node.js",
+          "note": "Nodemailer uses a dynamic transport object and sendMail. A keeps the approachable one-transporter/one-send shape with closed typed fields and explicit acceptance states.",
+          "code": "await transporter.sendMail(message)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A supplies the missing expert controls while preserving one beginner path and one send mechanism. Records are auditable and serializable; closed enums prevent downgrade/trust ambiguity; ambient context avoids a second timeout model.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It multiplies configuration methods for fields that form one coherent value, making policy discovery, diffing, and audit less direct."
+          },
+          {
+            "key": "C",
+            "reason": "It denies explicit private-CA trust, envelope control, recipient policy, reproducible fixtures, and multi-relay configuration to expert users."
+          }
+        ],
+        "tradeoff": "A exposes several small records and enums. They are the one canonical typed policy surface and replace environment-string conventions rather than adding a parallel mechanism."
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "Use A as the canonical mechanism. Keep C's smtp_from_env as beginner sugar that constructs A, and harvest B's discoverability through docs/completion rather than duplicate builder methods.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "Typed audited policy",
+            "use": "Canonical configuration, envelope, reports, errors, and trust."
+          },
+          {
+            "key": "B",
+            "aspect": "Discoverability",
+            "use": "Completion and examples explain each record field and enum variant."
+          },
+          {
+            "key": "C",
+            "aspect": "Beginner setup",
+            "use": "smtp_from_env constructs the same SmtpConfig and Mailer."
+          }
+        ]
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-13T16:32:46.352Z"
     }
   ],
   "questions": [
@@ -31993,6 +32093,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-13T16:33:19.840Z",
+      "by": "terra-530-smtp",
+      "action": "card.release",
+      "ref": "c0aadf2p",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-13T16:32:46.353Z",
+      "by": "codex-orchestrator",
+      "action": "decision.add",
+      "ref": "D-EMAIL-SMTP-SURFACE1",
+      "note": "What exact SMTP configuration, send, report, and trust surface should Jet expose?"
+    },
+    {
+      "at": "2026-07-13T16:30:42.605Z",
+      "by": "terra-296-cbor",
+      "action": "card.release",
+      "ref": "c0uxsyns",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-13T16:29:58.281Z",
+      "by": "agent",
+      "action": "card.update",
+      "ref": "c0uxsyns",
+      "note": "logEntry"
+    },
     {
       "at": "2026-07-13T16:24:07.474Z",
       "by": "terra-241-providers",
@@ -35464,34 +35592,6 @@
       "action": "card.update",
       "ref": "c0rfeel3",
       "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T20:47:10.933Z",
-      "by": "grok-478-verify2",
-      "action": "card.criteria-verify",
-      "ref": "c0rfeel3",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-12T20:47:10.839Z",
-      "by": "grok-478-verify2",
-      "action": "card.criteria-verify",
-      "ref": "c0rfeel3",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-12T20:47:10.751Z",
-      "by": "grok-478-verify2",
-      "action": "card.criteria-verify",
-      "ref": "c0rfeel3",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-12T20:41:46.223Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-verify",
-      "ref": "c1jixkit",
-      "note": "#3"
     }
   ],
   "nextNum": 368,
