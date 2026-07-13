@@ -178,6 +178,30 @@ impl BuildPlan {
         self.action_key_with_inputs(action, &[])
     }
 
+    /// Stable fingerprint over every action key in this plan — the complete
+    /// recipe identity for Hangar `CacheIdentity.recipe_fingerprint` (E4-JP2).
+    pub fn complete_recipe_fingerprint(&self) -> Result<String, BuildError> {
+        let mut keys = Vec::new();
+        for action in &self.actions {
+            let key = self.action_key(ActionHandle {
+                id: action.id,
+                context: self.context,
+            })?;
+            keys.push(key.as_str().to_string());
+        }
+        keys.sort();
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"jet.plan-fingerprint.v1\0");
+        for key in keys {
+            bytes.extend_from_slice(key.as_bytes());
+            bytes.push(0);
+        }
+        Ok(format!(
+            "plan-sha256:{}",
+            crate::SHA256::sha256_hex(&bytes)
+        ))
+    }
+
     pub fn action_key_with_inputs(
         &self,
         action: ActionHandle,
@@ -282,6 +306,7 @@ impl BuildPlan {
                 .map(|action| BuildGraphAction {
                     id: action.id,
                     name: action.name.clone(),
+                    kind: action.kind,
                     inputs: action
                         .inputs
                         .iter()

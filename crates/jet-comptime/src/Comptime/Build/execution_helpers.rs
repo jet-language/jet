@@ -44,6 +44,9 @@ pub(super) fn cache_status_reason(status: ActionCacheStatus) -> &'static str {
         }
         ActionCacheStatus::Miss(CacheMissReason::RemoteDenied) => "remote cache denied by policy",
         ActionCacheStatus::Miss(CacheMissReason::UncachedAction) => "action is uncached",
+        ActionCacheStatus::Miss(CacheMissReason::FrontEndIncomplete) => {
+            "cache lookup blocked until parser, sema, policy, and diagnostics complete"
+        }
     }
 }
 

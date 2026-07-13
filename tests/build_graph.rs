@@ -1240,3 +1240,295 @@ fn wasm_build_plugins_handshake_grants_policy_and_return_plan_contributions() {
         BuildError::PolicyDenied(_)
     ));
 }
+
+#[test]
+fn action_kinds_have_distinct_identities() {
+    use jet::Comptime::Build::ActionKind;
+    fn key(kind: ActionKind) -> String {
+        let mut b = BuildContext::new();
+        let action = b
+            .action(
+                "same",
+                ActionSpec::cached(["jetc", "src/main.jet"])
+                    .with_kind(kind)
+                    .with_inputs(["src/main.jet"])
+                    .with_outputs(["build/out"]),
+            )
+            .unwrap();
+        b.plan()
+            .unwrap()
+            .action_key(action)
+            .unwrap()
+            .as_str()
+            .to_string()
+    }
+    let compile = key(ActionKind::Compile);
+    let docs = key(ActionKind::Docs);
+    let debug = key(ActionKind::Debug);
+    let archive = key(ActionKind::SourceArchive);
+    assert_ne!(compile, docs);
+    assert_ne!(compile, debug);
+    assert_ne!(compile, archive);
+    assert_ne!(docs, debug);
+    assert_ne!(docs, archive);
+    assert_ne!(debug, archive);
+}
+
+#[test]
+fn complete_action_key_covers_dep_outputs_env_allowlist_helpers_and_exact_source() {
+    use jet::Comptime::Build::{ActionInputSnapshot, ActionKind, ContentDigest};
+
+    let mut b = BuildContext::new();
+    let dep_action = b
+        .action(
+            "dep-compile",
+            ActionSpec::cached(["jetc", "lib.jet"])
+                .with_kind(ActionKind::Compile)
+                .with_outputs(["build/lib.o"]),
+        )
+        .unwrap();
+    let dep = b
+        .add_library(
+            "lib",
+            TargetSpec::new()
+                .with_source("lib.jet")
+                .with_action(dep_action)
+                .with_output("build/lib.o"),
+        )
+        .unwrap();
+    let main = b
+        .action(
+            "main-compile",
+            ActionSpec::cached(["jetc", "main.jet"])
+                .with_kind(ActionKind::Compile)
+                .with_inputs(["main.jet"])
+                .with_outputs(["build/main"])
+                .with_env("JET_PROFILE", "release")
+                .with_env("HOME", "/tmp/leak")
+                .with_env_allowlist(["JET_PROFILE"])
+                .with_helper_version("docgen", "1.2.3")
+                .with_label("profile", "release"),
+        )
+        .unwrap();
+    b.add_executable(
+        "app",
+        TargetSpec::new()
+            .with_source("main.jet")
+            .with_dep(dep)
+            .with_action(main)
+            .with_metadata("profile", "release"),
+    )
+    .unwrap();
+    let plan = b.plan().unwrap();
+    let snap = [ActionInputSnapshot {
+        path: jet::Comptime::Build::BuildPath::new("main.jet").unwrap(),
+        digest: ContentDigest::from_bytes(b"fn run() {}"),
+        byte_len: 11,
+    }];
+    let base = plan.action_key_with_inputs(main, &snap).unwrap();
+
+    // Ambient HOME is outside allowlist — changing declared HOME must not
+    // affect the key once allowlist filters it.
+    let mut b2 = BuildContext::new();
+    let dep2 = {
+        let dep_action = b2
+            .action(
+                "dep-compile",
+                ActionSpec::cached(["jetc", "lib.jet"])
+                    .with_kind(ActionKind::Compile)
+                    .with_outputs(["build/lib.o"]),
+            )
+            .unwrap();
+        b2.add_library(
+            "lib",
+            TargetSpec::new()
+                .with_source("lib.jet")
+                .with_action(dep_action)
+                .with_output("build/lib.o"),
+        )
+        .unwrap()
+    };
+    let main2 = b2
+        .action(
+            "main-compile",
+            ActionSpec::cached(["jetc", "main.jet"])
+                .with_kind(ActionKind::Compile)
+                .with_inputs(["main.jet"])
+                .with_outputs(["build/main"])
+                .with_env("JET_PROFILE", "release")
+                .with_env("HOME", "/other/home")
+                .with_env_allowlist(["JET_PROFILE"])
+                .with_helper_version("docgen", "1.2.3")
+                .with_label("profile", "release"),
+        )
+        .unwrap();
+    b2.add_executable(
+        "app",
+        TargetSpec::new()
+            .with_source("main.jet")
+            .with_dep(dep2)
+            .with_action(main2)
+            .with_metadata("profile", "release"),
+    )
+    .unwrap();
+    assert_eq!(
+        base,
+        b2.plan()
+            .unwrap()
+            .action_key_with_inputs(main2, &snap)
+            .unwrap()
+    );
+
+    // Helper version change flips key.
+    let mut b3 = BuildContext::new();
+    let dep3 = {
+        let dep_action = b3
+            .action(
+                "dep-compile",
+                ActionSpec::cached(["jetc", "lib.jet"])
+                    .with_kind(ActionKind::Compile)
+                    .with_outputs(["build/lib.o"]),
+            )
+            .unwrap();
+        b3.add_library(
+            "lib",
+            TargetSpec::new()
+                .with_source("lib.jet")
+                .with_action(dep_action)
+                .with_output("build/lib.o"),
+        )
+        .unwrap()
+    };
+    let main3 = b3
+        .action(
+            "main-compile",
+            ActionSpec::cached(["jetc", "main.jet"])
+                .with_kind(ActionKind::Compile)
+                .with_inputs(["main.jet"])
+                .with_outputs(["build/main"])
+                .with_env("JET_PROFILE", "release")
+                .with_env_allowlist(["JET_PROFILE"])
+                .with_helper_version("docgen", "9.9.9")
+                .with_label("profile", "release"),
+        )
+        .unwrap();
+    b3.add_executable(
+        "app",
+        TargetSpec::new()
+            .with_source("main.jet")
+            .with_dep(dep3)
+            .with_action(main3)
+            .with_metadata("profile", "release"),
+    )
+    .unwrap();
+    assert_ne!(
+        base,
+        b3.plan()
+            .unwrap()
+            .action_key_with_inputs(main3, &snap)
+            .unwrap()
+    );
+
+    // Exact source byte change flips key for observing kinds.
+    let snap2 = [ActionInputSnapshot {
+        path: jet::Comptime::Build::BuildPath::new("main.jet").unwrap(),
+        digest: ContentDigest::from_bytes(b"fn run() { print(1) }"),
+        byte_len: 20,
+    }];
+    assert_ne!(base, plan.action_key_with_inputs(main, &snap2).unwrap());
+
+    // Dep output path change flips key.
+    let mut b4 = BuildContext::new();
+    let dep4 = {
+        let dep_action = b4
+            .action(
+                "dep-compile",
+                ActionSpec::cached(["jetc", "lib.jet"])
+                    .with_kind(ActionKind::Compile)
+                    .with_outputs(["build/lib-renamed.o"]),
+            )
+            .unwrap();
+        b4.add_library(
+            "lib",
+            TargetSpec::new()
+                .with_source("lib.jet")
+                .with_action(dep_action)
+                .with_output("build/lib-renamed.o"),
+        )
+        .unwrap()
+    };
+    let main4 = b4
+        .action(
+            "main-compile",
+            ActionSpec::cached(["jetc", "main.jet"])
+                .with_kind(ActionKind::Compile)
+                .with_inputs(["main.jet"])
+                .with_outputs(["build/main"])
+                .with_env("JET_PROFILE", "release")
+                .with_env_allowlist(["JET_PROFILE"])
+                .with_helper_version("docgen", "1.2.3")
+                .with_label("profile", "release"),
+        )
+        .unwrap();
+    b4.add_executable(
+        "app",
+        TargetSpec::new()
+            .with_source("main.jet")
+            .with_dep(dep4)
+            .with_action(main4)
+            .with_metadata("profile", "release"),
+    )
+    .unwrap();
+    assert_ne!(
+        base,
+        b4.plan()
+            .unwrap()
+            .action_key_with_inputs(main4, &snap)
+            .unwrap()
+    );
+}
+
+#[test]
+fn front_end_completion_gates_cache_lookup() {
+    use jet::Comptime::Build::{CacheBypassDenied, FrontEndCompletion};
+
+    assert!(FrontEndCompletion::all_complete()
+        .authorize_cache_lookup()
+        .is_ok());
+    assert_eq!(
+        FrontEndCompletion {
+            parsed: false,
+            ..FrontEndCompletion::all_complete()
+        }
+        .authorize_cache_lookup()
+        .unwrap_err(),
+        CacheBypassDenied::Parser
+    );
+    assert_eq!(
+        FrontEndCompletion {
+            sema_checked: false,
+            ..FrontEndCompletion::all_complete()
+        }
+        .authorize_cache_lookup()
+        .unwrap_err(),
+        CacheBypassDenied::Sema
+    );
+    assert_eq!(
+        FrontEndCompletion {
+            policy_checked: false,
+            ..FrontEndCompletion::all_complete()
+        }
+        .authorize_cache_lookup()
+        .unwrap_err(),
+        CacheBypassDenied::Policy
+    );
+    assert_eq!(
+        FrontEndCompletion {
+            diagnostics_complete: false,
+            ..FrontEndCompletion::all_complete()
+        }
+        .authorize_cache_lookup()
+        .unwrap_err(),
+        CacheBypassDenied::Diagnostics
+    );
+}

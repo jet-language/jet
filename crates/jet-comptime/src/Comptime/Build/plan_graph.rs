@@ -40,6 +40,7 @@ pub struct BuildGraphTarget {
 pub struct BuildGraphAction {
     pub id: ActionId,
     pub name: String,
+    pub kind: super::actions_policy::ActionKind,
     pub inputs: Vec<String>,
     pub outputs: Vec<String>,
     pub target: Option<TargetId>,

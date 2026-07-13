@@ -62,6 +62,63 @@ pub enum CacheMissReason {
     CacheRestoreFailed,
     RemoteDenied,
     UncachedAction,
+    FrontEndIncomplete,
+}
+
+/// Stages that must finish before any action-cache lookup (E4-JP2 / #419).
+/// Cache hits never skip parser, sema, policy, or diagnostics emission.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct FrontEndCompletion {
+    pub parsed: bool,
+    pub sema_checked: bool,
+    pub policy_checked: bool,
+    pub diagnostics_complete: bool,
+}
+
+impl FrontEndCompletion {
+    pub fn all_complete() -> Self {
+        FrontEndCompletion {
+            parsed: true,
+            sema_checked: true,
+            policy_checked: true,
+            diagnostics_complete: true,
+        }
+    }
+
+    pub fn authorize_cache_lookup(self) -> Result<(), CacheBypassDenied> {
+        if !self.parsed {
+            return Err(CacheBypassDenied::Parser);
+        }
+        if !self.sema_checked {
+            return Err(CacheBypassDenied::Sema);
+        }
+        if !self.policy_checked {
+            return Err(CacheBypassDenied::Policy);
+        }
+        if !self.diagnostics_complete {
+            return Err(CacheBypassDenied::Diagnostics);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CacheBypassDenied {
+    Parser,
+    Sema,
+    Policy,
+    Diagnostics,
+}
+
+impl CacheBypassDenied {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CacheBypassDenied::Parser => "parser",
+            CacheBypassDenied::Sema => "sema",
+            CacheBypassDenied::Policy => "policy",
+            CacheBypassDenied::Diagnostics => "diagnostics",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

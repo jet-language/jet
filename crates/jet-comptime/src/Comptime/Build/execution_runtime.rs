@@ -1,8 +1,8 @@
 use super::actions_policy::{ActionCache, BuildAction, BuildCapability, BuildResourcePool};
 use super::cache_cas::{
     ActionCacheProvenance, ActionCacheStatus, ActionKey, ActionOutcome, ActionOutputRecord,
-    ActionResultRecord, CacheHitReason, CacheMissReason, ContentDigest, LocalCas,
-    atomic_restore_file, secure_read_file,
+    ActionResultRecord, CacheHitReason, CacheMissReason, ContentDigest, FrontEndCompletion,
+    LocalCas, atomic_restore_file, secure_read_file,
 };
 use super::errors_keys::BuildError;
 use super::execution_helpers::action_pools;
@@ -47,6 +47,22 @@ pub fn execute_build_plan(
     plan: &BuildPlan,
     project_root: &Path,
     grants: &BTreeSet<BuildCapability>,
+) -> Result<BuildExecutionResult, BuildExecutionError> {
+    execute_build_plan_with_front_end(
+        plan,
+        project_root,
+        grants,
+        FrontEndCompletion::all_complete(),
+    )
+}
+
+/// Same as [`execute_build_plan`], but cache lookup requires a complete
+/// parser/sema/policy/diagnostics front end (E4-JP2 / #419).
+pub fn execute_build_plan_with_front_end(
+    plan: &BuildPlan,
+    project_root: &Path,
+    grants: &BTreeSet<BuildCapability>,
+    front_end: FrontEndCompletion,
 ) -> Result<BuildExecutionResult, BuildExecutionError> {
     let selected_actions = plan.selected_action_ids().map_err(BuildExecutionError::InvalidGraph)?;
     for action in plan.actions.iter().filter(|action| selected_actions.contains(&action.id)) {
@@ -96,7 +112,17 @@ pub fn execute_build_plan(
                         let action = &plan.actions[action_id.0];
                         let handle = ActionHandle { id: action.id, context: plan.context };
                         (handle, scope.spawn(move || {
-                            execute_one_action(plan, action, handle, project_root, cas, records, grants, probe_facts)
+                            execute_one_action(
+                                plan,
+                                action,
+                                handle,
+                                project_root,
+                                cas,
+                                records,
+                                grants,
+                                probe_facts,
+                                front_end,
+                            )
                         }))
                     })
                     .collect::<Vec<_>>();
@@ -152,6 +178,7 @@ fn execute_one_action(
     records: &Path,
     grants: &BTreeSet<BuildCapability>,
     probe_facts: &[BuildProbeFact],
+    front_end: FrontEndCompletion,
 ) -> Result<ActionOutcome, BuildExecutionError> {
     let snapshots = cas.snapshot_declared_inputs(project_root, action).map_err(|e| io_action(action, e))?;
     let executable = find_program_path(&action.argv[0]).ok_or_else(|| BuildExecutionError::Io {
@@ -175,24 +202,30 @@ fn execute_one_action(
         .map(|record| record.key);
     let mut restore_failure = None;
     if action.cache == ActionCache::Cached {
-        match read_action_record(records, &record_path, key.clone()) {
-            Ok(Some(record)) => match cas.restore_action_outputs(project_root, action, &record) {
-                Ok(()) => {
-                    write_last_rebuild_record(
-                        project_root,
-                        action,
-                        &key,
-                        ActionCacheStatus::Hit(CacheHitReason::LocalActionRecordMatched),
-                        None,
-                    )?;
-                    return Ok(ActionOutcome::RestoredFromCache);
-                }
-                Err(error) => {
-                    restore_failure = Some(cache_restore_miss_reason(&error));
-                }
+        // E4-JP2: no cache lookup may bypass parser/sema/policy/diagnostics.
+        match front_end.authorize_cache_lookup() {
+            Ok(()) => match read_action_record(records, &record_path, key.clone()) {
+                Ok(Some(record)) => match cas.restore_action_outputs(project_root, action, &record) {
+                    Ok(()) => {
+                        write_last_rebuild_record(
+                            project_root,
+                            action,
+                            &key,
+                            ActionCacheStatus::Hit(CacheHitReason::LocalActionRecordMatched),
+                            None,
+                        )?;
+                        return Ok(ActionOutcome::RestoredFromCache);
+                    }
+                    Err(error) => {
+                        restore_failure = Some(cache_restore_miss_reason(&error));
+                    }
+                },
+                Ok(None) => {}
+                Err(error) => restore_failure = Some(cache_restore_miss_reason(&error)),
             },
-            Ok(None) => {}
-            Err(error) => restore_failure = Some(cache_restore_miss_reason(&error)),
+            Err(_) => {
+                restore_failure = Some(CacheMissReason::FrontEndIncomplete);
+            }
         }
     }
 
@@ -291,6 +324,7 @@ fn rebuild_status_code(status: ActionCacheStatus) -> &'static str {
         ActionCacheStatus::Miss(CacheMissReason::CacheRestoreFailed) => "miss-restore",
         ActionCacheStatus::Miss(CacheMissReason::RemoteDenied) => "miss-remote",
         ActionCacheStatus::Miss(CacheMissReason::UncachedAction) => "miss-uncached",
+        ActionCacheStatus::Miss(CacheMissReason::FrontEndIncomplete) => "miss-frontend",
     }
 }
 
@@ -305,6 +339,7 @@ fn parse_rebuild_status(code: &str) -> Option<ActionCacheStatus> {
         "miss-restore" => ActionCacheStatus::Miss(CacheMissReason::CacheRestoreFailed),
         "miss-remote" => ActionCacheStatus::Miss(CacheMissReason::RemoteDenied),
         "miss-uncached" => ActionCacheStatus::Miss(CacheMissReason::UncachedAction),
+        "miss-frontend" => ActionCacheStatus::Miss(CacheMissReason::FrontEndIncomplete),
         _ => return None,
     })
 }

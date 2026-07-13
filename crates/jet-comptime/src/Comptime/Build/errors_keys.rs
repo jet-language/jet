@@ -83,16 +83,30 @@ pub(super) fn canonical_action_key(
     inputs: &[ActionInputSnapshot],
 ) -> ActionKey {
     let mut w = KeyWriter::new();
-    w.str("jet.action-key.v1");
+    w.str("jet.action-key.v2");
+    w.str("kind");
+    w.str(action.kind.as_str());
+    w.str("observe-exact-source");
+    w.bool(action.kind.observes_exact_source());
     w.str("argv");
     w.vec_str(action.argv.iter().map(String::as_str));
-    w.str("env");
-    w.map_str(&action.env);
+    w.str("env-allowlist");
+    let allowlisted_env = allowlisted_env(action);
+    w.map_str(&allowlisted_env);
     w.str("inputs");
     w.vec_str(action.inputs.iter().map(BuildPath::as_str));
     w.str("input-snapshots");
     let mut snapshots = inputs.iter().collect::<Vec<_>>();
     snapshots.sort_by(|a, b| a.path.cmp(&b.path));
+    if action.kind.observes_exact_source() {
+        // Exact source bytes stay identity inputs: every declared input must
+        // contribute a content digest when the action surface can observe source.
+        for path in &action.inputs {
+            let present = snapshots.iter().any(|s| s.path.as_str() == path.as_str());
+            w.str(path.as_str());
+            w.bool(present);
+        }
+    }
     w.bytes
         .extend_from_slice(&(snapshots.len() as u64).to_be_bytes());
     for snapshot in snapshots {
@@ -102,6 +116,9 @@ pub(super) fn canonical_action_key(
     }
     w.str("outputs");
     w.vec_str(action.outputs.iter().map(BuildPath::as_str));
+    w.str("dep-outputs");
+    let dep_outputs = declared_dep_outputs(plan, action);
+    w.vec_str(dep_outputs.iter().map(String::as_str));
     w.str("caps");
     for cap in &action.caps {
         encode_capability(&mut w, cap);
@@ -110,12 +127,19 @@ pub(super) fn canonical_action_key(
     encode_action_cache(&mut w, action.cache);
     w.str("compiler-version");
     w.str(env!("CARGO_PKG_VERSION"));
+    w.str("helper-versions");
+    w.map_str(&action.helper_versions);
     w.str("generated-modules");
     let mut generated = plan.generated_modules.iter().collect::<Vec<_>>();
     generated.sort_by(|a, b| a.path.cmp(&b.path));
     for module in generated {
         w.str(module.path.as_str());
         w.str(module.source_digest.as_str());
+        // Exact generated source remains an input when any observing action
+        // can surface it through diagnostics / docs / publication.
+        if action.kind.observes_exact_source() {
+            w.str(&module.source);
+        }
     }
     w.str("target");
     if let Some(target) = plan
@@ -126,6 +150,8 @@ pub(super) fn canonical_action_key(
         w.bool(true);
         w.str(&target.name);
         w.str(&format!("{:?}", target.kind));
+        w.map_str(&target.metadata);
+        w.vec_str(target.sources.iter().map(BuildPath::as_str));
     } else {
         w.bool(false);
     }
@@ -173,6 +199,48 @@ pub(super) fn canonical_action_key(
         None => w.bool(false),
     }
     ActionKey(format!("act-sha256:{}", SHA256::sha256_hex(&w.bytes)))
+}
+
+fn allowlisted_env(action: &BuildAction) -> BTreeMap<String, String> {
+    if action.env_allowlist.is_empty() {
+        return action.env.clone();
+    }
+    action
+        .env
+        .iter()
+        .filter(|(key, _)| action.env_allowlist.contains(*key))
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect()
+}
+
+fn declared_dep_outputs(plan: &BuildPlan, action: &BuildAction) -> Vec<String> {
+    let Some(target_id) = plan.action_targets().get(&action.id).copied() else {
+        return Vec::new();
+    };
+    let Some(target) = plan.targets.get(target_id.0) else {
+        return Vec::new();
+    };
+    let mut outs = BTreeSet::new();
+    for dep in &target.deps {
+        let Some(dep_target) = plan.targets.get(dep.id.0) else {
+            continue;
+        };
+        for path in dep_target
+            .outputs
+            .iter()
+            .chain(dep_target.inputs.iter())
+        {
+            outs.insert(path.as_str().to_string());
+        }
+        for dep_action in &dep_target.actions {
+            if let Some(dep_action) = plan.actions.get(dep_action.id.0) {
+                for path in &dep_action.outputs {
+                    outs.insert(path.as_str().to_string());
+                }
+            }
+        }
+    }
+    outs.into_iter().collect()
 }
 
 pub(super) fn canonical_effective_action_key(

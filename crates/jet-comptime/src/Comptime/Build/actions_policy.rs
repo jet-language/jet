@@ -67,18 +67,62 @@ pub enum ActionCache {
     UncachedPhony,
 }
 
+/// Distinct executable identities under one BuildPlan (E4-JP2 / #419).
+/// Compile / docs / debug / source-archive never share a cache key even when
+/// argv and declared paths match — each surface observes different outputs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ActionKind {
+    Compile,
+    Docs,
+    Debug,
+    SourceArchive,
+    Generic,
+}
+
+impl ActionKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ActionKind::Compile => "compile",
+            ActionKind::Docs => "docs",
+            ActionKind::Debug => "debug",
+            ActionKind::SourceArchive => "source-archive",
+            ActionKind::Generic => "generic",
+        }
+    }
+
+    /// Exact source bytes remain identity inputs when these surfaces can
+    /// observe them (docs, doctests, diagnostics/line maps, debug info,
+    /// publication / source archives).
+    pub fn observes_exact_source(self) -> bool {
+        matches!(
+            self,
+            ActionKind::Compile
+                | ActionKind::Docs
+                | ActionKind::Debug
+                | ActionKind::SourceArchive
+        )
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActionSpec {
     pub inputs: Vec<BuildPath>,
     pub outputs: Vec<BuildPath>,
     pub argv: Vec<String>,
     pub env: BTreeMap<String, String>,
+    /// Only allowlisted env keys enter the action identity. Empty means the
+    /// declared `env` map itself is the allowlist (no ambient leakage).
+    pub env_allowlist: BTreeSet<String>,
     pub caps: BTreeSet<BuildCapability>,
     pub cache: ActionCache,
+    pub kind: ActionKind,
     pub toolchain: Option<ToolchainHandle>,
     pub probes: Vec<ProbeHandle>,
     pub signing_identity: Option<SigningIdentityHandle>,
     pub labels: BTreeMap<String, String>,
+    /// Helper tool versions (formatter, docgen, archive helper, …) keyed into
+    /// the complete CAS identity.
+    pub helper_versions: BTreeMap<String, String>,
     pub resource_pools: BTreeSet<BuildResourcePool>,
     pub legacy_wrapper: Option<LegacyWrapperKind>,
 }
@@ -94,12 +138,15 @@ impl ActionSpec {
             outputs: Vec::new(),
             argv: argv.into_iter().map(Into::into).collect(),
             env: BTreeMap::new(),
+            env_allowlist: BTreeSet::new(),
             caps: BTreeSet::new(),
             cache: ActionCache::Cached,
+            kind: ActionKind::Generic,
             toolchain: None,
             probes: Vec::new(),
             signing_identity: None,
             labels: BTreeMap::new(),
+            helper_versions: BTreeMap::new(),
             resource_pools: BTreeSet::new(),
             legacy_wrapper: None,
         }
@@ -138,6 +185,30 @@ impl ActionSpec {
 
     pub fn with_env(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.env.insert(key.into(), value.into());
+        self
+    }
+
+    pub fn with_env_allowlist<I, S>(mut self, keys: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.env_allowlist
+            .extend(keys.into_iter().map(Into::into));
+        self
+    }
+
+    pub fn with_kind(mut self, kind: ActionKind) -> Self {
+        self.kind = kind;
+        self
+    }
+
+    pub fn with_helper_version(
+        mut self,
+        helper: impl Into<String>,
+        version: impl Into<String>,
+    ) -> Self {
+        self.helper_versions.insert(helper.into(), version.into());
         self
     }
 
@@ -180,12 +251,15 @@ pub struct BuildAction {
     pub outputs: Vec<BuildPath>,
     pub argv: Vec<String>,
     pub env: BTreeMap<String, String>,
+    pub env_allowlist: BTreeSet<String>,
     pub caps: BTreeSet<BuildCapability>,
     pub cache: ActionCache,
+    pub kind: ActionKind,
     pub toolchain: ToolchainHandle,
     pub probes: Vec<ProbeHandle>,
     pub signing_identity: Option<SigningIdentityHandle>,
     pub labels: BTreeMap<String, String>,
+    pub helper_versions: BTreeMap<String, String>,
     pub resource_pools: BTreeSet<BuildResourcePool>,
     pub legacy_wrapper: Option<LegacyWrapperKind>,
     pub plugin: Option<PluginHandle>,
@@ -406,12 +480,15 @@ impl LegacyWrapperSpec {
             outputs: self.outputs,
             argv: self.argv,
             env: self.env,
+            env_allowlist: BTreeSet::new(),
             caps: self.caps,
             cache: ActionCache::Cached,
+            kind: ActionKind::Generic,
             toolchain: None,
             probes: Vec::new(),
             signing_identity: None,
             labels,
+            helper_versions: BTreeMap::new(),
             resource_pools: BTreeSet::new(),
             legacy_wrapper: Some(self.kind),
         })

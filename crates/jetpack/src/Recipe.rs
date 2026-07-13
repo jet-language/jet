@@ -104,6 +104,136 @@ pub fn validate(recipe: &BuildRecipe, ctx: &BuildContext) -> Result<(), Diagnost
     Ok(())
 }
 
+/// Lower a `BuildRecipe` into the one executable BuildPlan IR (E4-JP2 / #419).
+///
+/// Fetch / exec / install / install-tree steps become typed actions under one
+/// package target. Toolchain, capability, and env allowlists are declared on
+/// each action so `ActionKey` is the complete CAS identity. Callers still run
+/// parser/sema/policy/diagnostics before any cache lookup.
+pub fn lower_to_plan(
+    recipe: &BuildRecipe,
+    package: &str,
+    tools: &HashMap<String, PathBuf>,
+) -> Result<crate::Comptime::Build::BuildPlan, Diagnostic> {
+    use crate::Comptime::Build::{
+        ActionKind, ActionSpec, BuildCapability, BuildContext as PlanContext, TargetSpec,
+    };
+
+    let mut plan_ctx = PlanContext::new();
+    let mut action_handles = Vec::new();
+    for (idx, step) in recipe.steps.iter().enumerate() {
+        let name = format!("recipe-{package}-{idx}");
+        let spec = match step {
+            BuildStep::Fetch { url, sha256 } => ActionSpec::cached([
+                "jet-fetch",
+                url.as_str(),
+                sha256.as_str(),
+            ])
+            .with_kind(ActionKind::Generic)
+            .with_outputs([format!(".jet/fetch/{sha256}")])
+            .with_cap(BuildCapability::Net)
+            .with_env_allowlist(["SOURCE_DATE_EPOCH"])
+            .with_helper_version("jet-fetch", env!("CARGO_PKG_VERSION"))
+            .with_label("recipe.step", "fetch")
+            .with_label("fetch.url", url.clone())
+            .with_label("fetch.sha256", sha256.clone()),
+            BuildStep::Exec { tool, args } => {
+                let tool_path = tools.get(tool).ok_or_else(|| e1238(tool))?;
+                let mut argv = vec![tool_path.to_string_lossy().into_owned()];
+                argv.extend(args.iter().cloned());
+                ActionSpec::cached(argv)
+                    .with_kind(ActionKind::Compile)
+                    .with_outputs([format!(".jet/recipe/{package}/exec-{idx}.stamp")])
+                    .with_cap(BuildCapability::Exec)
+                    .with_env_allowlist(["SOURCE_DATE_EPOCH", "JET_PROFILE"])
+                    .with_helper_version(tool, "declared")
+                    .with_label("recipe.step", "exec")
+                    .with_label("recipe.tool", tool.clone())
+            }
+            BuildStep::Install { src, dest } => ActionSpec::cached([
+                "jet-install",
+                src.as_str(),
+                dest.as_str(),
+            ])
+            .with_kind(ActionKind::SourceArchive)
+            .with_inputs([src.clone()])
+            .with_outputs([format!(".jet/recipe/{package}/install-{idx}.stamp")])
+            .with_cap(BuildCapability::Fs)
+            .with_env_allowlist(["SOURCE_DATE_EPOCH"])
+            .with_helper_version("jet-install", env!("CARGO_PKG_VERSION"))
+            .with_label("recipe.step", "install")
+            .with_label("install.dest", dest.clone()),
+            BuildStep::InstallTree { src, dest } => ActionSpec::cached([
+                "jet-install-tree",
+                src.as_str(),
+                dest.as_str(),
+            ])
+            .with_kind(ActionKind::SourceArchive)
+            .with_inputs([src.clone()])
+            .with_outputs([format!(".jet/recipe/{package}/install-tree-{idx}.stamp")])
+            .with_cap(BuildCapability::Fs)
+            .with_env_allowlist(["SOURCE_DATE_EPOCH"])
+            .with_helper_version("jet-install-tree", env!("CARGO_PKG_VERSION"))
+            .with_label("recipe.step", "install-tree")
+            .with_label("install.dest", dest.clone()),
+        };
+        let handle = plan_ctx.action(name, spec).map_err(|err| {
+            Diagnostic::error(
+                "E1238",
+                "recipe step could not lower into BuildPlan".to_string(),
+                format!("{err:?}"),
+                "fix the recipe step so it declares a valid action.".to_string(),
+                None,
+            )
+        })?;
+        action_handles.push(handle);
+    }
+
+    let mut package_spec = TargetSpec::new().with_metadata("profile", "default");
+    for handle in action_handles {
+        package_spec = package_spec.with_action(handle);
+    }
+    let package_target = plan_ctx
+        .add_package(package, package_spec)
+        .map_err(|err| {
+            Diagnostic::error(
+                "E1238",
+                format!("recipe package `{package}` could not lower into BuildPlan"),
+                format!("{err:?}"),
+                "choose a unique package name for the recipe target.".to_string(),
+                None,
+            )
+        })?;
+    plan_ctx
+        .plan_with_default(package_target)
+        .map_err(|err| {
+            Diagnostic::error(
+                "E1238",
+                "recipe BuildPlan failed validation".to_string(),
+                format!("{err:?}"),
+                "resolve duplicate outputs or empty steps before caching.".to_string(),
+                None,
+            )
+        })
+}
+
+/// Hangar cache-identity hook: recipe fingerprint is the complete plan key
+/// (E4-JP2). Does not redesign Store ingest — only produces the fingerprint
+/// string consumers already write into `CacheIdentity.recipe_fingerprint`.
+pub fn plan_recipe_fingerprint(
+    plan: &crate::Comptime::Build::BuildPlan,
+) -> Result<String, Diagnostic> {
+    plan.complete_recipe_fingerprint().map_err(|err| {
+        Diagnostic::error(
+            "E1238",
+            "could not fingerprint lowered BuildPlan".to_string(),
+            format!("{err:?}"),
+            "ensure every recipe action is present in the plan.".to_string(),
+            None,
+        )
+    })
+}
+
 /// Run a recipe under the sandbox. Validates first (so a violation never gets to
 /// execute), then performs each step. Returns the build provenance on success.
 pub fn run(
@@ -112,6 +242,9 @@ pub fn run(
     transport: Option<Transport>,
 ) -> Result<RunReport, Diagnostic> {
     validate(recipe, ctx)?;
+    // E4-JP2: every recipe run lowers through the one BuildPlan IR before
+    // sandbox steps execute (cache identity consumers use the fingerprint).
+    let _plan = lower_to_plan(recipe, "pkg", &ctx.tools)?;
     std::fs::create_dir_all(ctx.output_root).ok();
     let mut report = RunReport::default();
     for step in &recipe.steps {
@@ -173,6 +306,7 @@ pub fn run_logged(
     attempt: &mut super::BuildDebug::Attempt,
 ) -> Result<RunReport, Diagnostic> {
     validate(recipe, ctx)?;
+    let _plan = lower_to_plan(recipe, "pkg", &ctx.tools)?;
     std::fs::create_dir_all(ctx.output_root).ok();
     let mut report = RunReport::default();
     let total = recipe.steps.len();
@@ -810,5 +944,49 @@ mod tests {
         };
         assert_eq!(validate(&recipe, &ctx).unwrap_err().code, "E1238");
         std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn recipe_lowers_to_one_build_plan_with_complete_fingerprint() {
+        let mut tools = HashMap::new();
+        tools.insert("cc".to_string(), PathBuf::from("/hangar/bin/cc"));
+        let recipe = BuildRecipe {
+            steps: vec![
+                BuildStep::Fetch {
+                    url: "file:///src.tgz".to_string(),
+                    sha256: "abc123".to_string(),
+                },
+                BuildStep::Exec {
+                    tool: "cc".to_string(),
+                    args: vec!["-c".to_string(), "main.c".to_string()],
+                },
+                BuildStep::Install {
+                    src: "main.o".to_string(),
+                    dest: "lib/main.o".to_string(),
+                },
+            ],
+        };
+        let plan = lower_to_plan(&recipe, "demo", &tools).expect("lower");
+        assert_eq!(plan.actions().len(), 3);
+        assert_eq!(plan.targets().len(), 1);
+        assert_eq!(plan.targets()[0].kind, crate::Comptime::Build::TargetKind::Package);
+        let kinds: Vec<_> = plan.actions().iter().map(|a| a.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                crate::Comptime::Build::ActionKind::Generic,
+                crate::Comptime::Build::ActionKind::Compile,
+                crate::Comptime::Build::ActionKind::SourceArchive,
+            ]
+        );
+        let fp = plan_recipe_fingerprint(&plan).expect("fingerprint");
+        assert!(fp.starts_with("plan-sha256:"));
+        assert_eq!(fp, plan.complete_recipe_fingerprint().unwrap());
+        // Distinct from a different package name / step set.
+        let other = lower_to_plan(&recipe, "other", &tools).unwrap();
+        assert_ne!(
+            plan_recipe_fingerprint(&plan).unwrap(),
+            plan_recipe_fingerprint(&other).unwrap()
+        );
     }
 }
