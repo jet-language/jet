@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 527,
-    "rev": 4944,
+    "rev": 4946,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -6141,8 +6141,13 @@
       "priority": "P1",
       "plan": "# Plan: hybrid REPL with notebook controls\n\nRatified inputs:\n- D-FE-REPL1 outcome D, with explicit owner request for notebook-style rerun/fold/unfold/pin controls.\n\nBlocking decisions raised by this plan:\n- D-FE-REPL-DOCS1 chooses the ?name docs surface.\n- D-FE-REPL-RERUN1 chooses rerun/downstream semantics.\n\nScope after decisions clear:\n- Source/REPL.rs, tests/repl.rs, tests/repl/*.txt, tests/cli/no_args_repl_banner.txt if banner/prompt output changes.\n- No diagnostic wording changes unless a new diagnostic is separately registered and snapshotted.\n\nImplementation steps:\n1. Preserve current REPL semantics and transcript compatibility as the floor. Non-TTY and NO_COLOR keep plain line transcripts.\n2. Add turn ids to interactive TTY output. Each turn stores input, output summary, status, duration when available, folded state, pin state, and binding changes.\n3. Add controls: rerun, fold, unfold, pin/unpin. Controls must have keyboard commands and textual fallbacks, not icon-only behavior.\n4. Add pinned value/turn area that stays visible without changing evaluation semantics.\n5. Add folded output rendering for long values/errors and unfold in place.\n6. Implement docs and rerun behavior exactly per the ratified follow-up decisions.\n7. Keep diagnostics verbatim; frame/styling may change, words/codes may not.\n\nAcceptance:\n- Interactive REPL shows addressable turns with notebook controls.\n- Pin/fold/unfold/rerun work in TTY mode and degrade cleanly in plain transcripts.\n- Large output folds without losing data.\n- Bindings remain truthful after rerun according to the ratified rerun policy.\n\nVerification:\n- nix develop -c cargo test --test repl\n- nix develop -c cargo test --test diagnostic_snapshots ui_snapshots -- --exact if any diagnostic frame fixture changes\n- nix develop -c cargo test --test cli question_mark_help -- --exact if CLI startup/help paths are touched\n- Full nix develop -c cargo test before done.",
       "blockedBy": [],
-      "assignee": "codex-main",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-13",
+          "by": "terra-358-symbols",
+          "text": "[handoff] Criterion 5 met in 9f70328b; independent verifier must review shared catalog consumption and rerun repl/lsp plus focused CLI. Criteria 1-4 and 6-8 already verified. Full CLI has three unrelated live golden drifts documented in c5 evidence; do not attribute them to semantic-symbol code."
+        },
         {
           "at": "2026-07-13",
           "by": "terra-358-reviewer",
@@ -6275,11 +6280,11 @@
         {
           "n": 5,
           "text": "REPL docs and completion consume one shared semantic symbol index with signatures, summaries, examples, provenance, module/member identity, and selectable completion UI shared with LSP and jet question-mark help.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "terra-358-symbols",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-12T06:59:31.417Z"
+          "evidence": "Builder proof 9f70328b: one Source/SemanticSymbols.rs catalog supplies identity, module/member, signature, summary, example, provenance to REPL ?name/member completion, LSP member completion detail, and jet ? exact symbol help. Selectable raw PTY Up/Down/Enter menu is real. Fresh targets: repl 115 passed/1 ignored; lsp 41/41; focused CLI shared-symbol test green. Full CLI 65/68; three unrelated existing golden drifts remain (man/completions inventory, numbered cooked prompt). Independent verification required.",
+          "at": "2026-07-13T01:33:07.562Z"
         },
         {
           "n": 6,
@@ -6310,8 +6315,7 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
-      "claimedAt": "2026-07-12T07:53:04.298Z"
+      "refs": []
     },
     {
       "id": "c0iyfhaf",
@@ -31006,6 +31010,20 @@
   ],
   "events": [
     {
+      "at": "2026-07-13T01:33:14.559Z",
+      "by": "terra-358-symbols",
+      "action": "card.release",
+      "ref": "c0gk8k3t",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-13T01:33:07.562Z",
+      "by": "terra-358-symbols",
+      "action": "card.criteria-meet",
+      "ref": "c0gk8k3t",
+      "note": "#5"
+    },
+    {
       "at": "2026-07-13T01:32:04.206Z",
       "by": "jet-verify-close",
       "action": "card.update",
@@ -34490,20 +34508,6 @@
       "action": "card.criteria-add",
       "ref": "c0075iyb",
       "note": "#1 Shared Request, Response, Headers, streaming Body, and close"
-    },
-    {
-      "at": "2026-07-12T13:13:51.790Z",
-      "by": "terra-301-builder",
-      "action": "card.claim",
-      "ref": "c0075iyb",
-      "note": ""
-    },
-    {
-      "at": "2026-07-12T13:13:42.680Z",
-      "by": "terra-296-builder",
-      "action": "card.release",
-      "ref": "c0uxsyns",
-      "note": "[handoff] logged"
     }
   ],
   "nextNum": 368,
