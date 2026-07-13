@@ -4,6 +4,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command};
+use std::sync::OnceLock;
 
 use jet::ExitCodes;
 
@@ -1798,6 +1799,65 @@ fn native_cache_salt(
     format!("{toolchain}\u{1}{dependency_fingerprint}\u{1}{mode}\u{1}{target}\u{1}{}", instances.join(","))
 }
 
+const NATIVE_CACHE_COMPILER_ABI: &str = "jet.native-cache-abi.v2";
+
+fn command_identity(program: &str, args: &[&str]) -> String {
+    match Command::new(program).args(args).output() {
+        Ok(output) => {
+            let mut bytes = Vec::new();
+            bytes.extend_from_slice(&(output.status.code().unwrap_or(-1) as i64).to_be_bytes());
+            bytes.extend_from_slice(&output.stdout);
+            bytes.extend_from_slice(&output.stderr);
+            jet::SHA256::sha256_hex(&bytes)
+        }
+        Err(error) => format!("unavailable:{:?}", error.kind()),
+    }
+}
+
+fn rustc_identity() -> (String, String) {
+    match Command::new("rustc").arg("-vV").output() {
+        Ok(output) => {
+            let mut bytes = Vec::new();
+            bytes.extend_from_slice(&(output.status.code().unwrap_or(-1) as i64).to_be_bytes());
+            bytes.extend_from_slice(&output.stdout);
+            bytes.extend_from_slice(&output.stderr);
+            let verbose = String::from_utf8_lossy(&output.stdout);
+            let backend = verbose.lines().find(|line| line.starts_with("LLVM version:"))
+                .unwrap_or("LLVM version: unavailable").to_string();
+            (jet::SHA256::sha256_hex(&bytes), backend)
+        }
+        Err(error) => {
+            let unavailable = format!("unavailable:{:?}", error.kind());
+            (unavailable.clone(), unavailable)
+        }
+    }
+}
+
+/// Identity of every executable/backend that can change emitted native code.
+/// Compiler build bytes make local/dev compilers distinct even when package
+/// SemVer is unchanged; rustc `-vV` includes its LLVM backend revision.
+fn native_toolchain_identity() -> &'static str {
+    static IDENTITY: OnceLock<String> = OnceLock::new();
+    IDENTITY.get_or_init(|| {
+        let compiler_build = std::env::current_exe().ok()
+            .and_then(|path| fs::read(path).ok())
+            .map(|bytes| jet::SHA256::sha256_hex(&bytes))
+            .unwrap_or_else(|| "unavailable".into());
+        let (rustc, backend) = rustc_identity();
+        let linker_name = Command::new("rustc").args(["--print", "linker"])
+            .output().ok().filter(|output| output.status.success())
+            .and_then(|output| String::from_utf8(output.stdout).ok())
+            .map(|value| value.trim().to_string()).filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "cc".into());
+        let linker = command_identity(&linker_name, &["--version"]);
+        format!(
+            "abi={NATIVE_CACHE_COMPILER_ABI}\u{1}build={compiler_build}\u{1}version={}\u{1}semindex={}\u{1}rustc={rustc}\u{1}backend={backend}\u{1}linker-name={linker_name}\u{1}linker={linker}",
+            jet::Manifest::COMPILER_VERSION,
+            jet_semindex::SCHEMA_VERSION,
+        )
+    })
+}
+
 fn dependency_interface_fingerprint(bundle: &jet::AST::ProgramBundle) -> String {
     let mut interfaces = Vec::new();
     for (dependency, root) in &bundle.dep_roots {
@@ -1847,6 +1907,15 @@ fn dependency_interface_fingerprint(bundle: &jet::AST::ProgramBundle) -> String 
 /// separate key spaces (a `jet test` harness binary can never be served for a
 /// `jet run`). The toolchain version and `pkg.jet` fingerprint ride the salt.
 fn native_cache_key(file: &str, profile_tag: &str, mode_tag: &str) -> Option<String> {
+    native_cache_key_with_toolchain(file, profile_tag, mode_tag, native_toolchain_identity())
+}
+
+fn native_cache_key_with_toolchain(
+    file: &str,
+    profile_tag: &str,
+    mode_tag: &str,
+    toolchain_identity: &str,
+) -> Option<String> {
     // `jet prove` consumes a compiler-private structured harness protocol. A
     // dirty/development compiler must never receive an older cached harness
     // that predates or mismatches that protocol.
@@ -1874,9 +1943,8 @@ fn native_cache_key(file: &str, profile_tag: &str, mode_tag: &str) -> Option<Str
         cm.instance_identity.as_ref().map(|identity| identity.fingerprint.clone())
     })).collect();
     let dependency_interfaces = dependency_interface_fingerprint(&bundle);
-    let toolchain_identity = format!("{}:semindex-v{}:genmod-v1", jet::Manifest::COMPILER_VERSION, jet_semindex::SCHEMA_VERSION);
     let salt = native_cache_salt(
-        &toolchain_identity,
+        toolchain_identity,
         &format!("{}:{dependency_interfaces}", manifest_fingerprint(file)),
         mode_tag,
         &format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
@@ -2623,7 +2691,7 @@ fn missing_linker(stderr: &str) -> Option<String> {
 
 #[cfg(test)]
 mod missing_c_lib_tests {
-    use super::{missing_c_lib, missing_linker, native_cache_key, native_cache_salt};
+    use super::{missing_c_lib, missing_linker, native_cache_key, native_cache_key_with_toolchain, native_cache_salt};
 
     struct ScratchProject(std::path::PathBuf);
 
@@ -2680,6 +2748,9 @@ mod missing_c_lib_tests {
         project.write("pkg.jet", manifest_v1);
 
         let base = native_cache_key(&project.main(), "default", "run").expect("base cache key");
+        let toolchain_a = native_cache_key_with_toolchain(&project.main(), "default", "run", "compiler-build-a/rustc-a/linker-a/backend-a").expect("toolchain A cache key");
+        let toolchain_b = native_cache_key_with_toolchain(&project.main(), "default", "run", "compiler-build-b/rustc-a/linker-a/backend-a").expect("toolchain B cache key");
+        assert_ne!(toolchain_a, toolchain_b, "production native-cache key seam must include compiler/toolchain identity");
 
         project.write(
             "main.jet",

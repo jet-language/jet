@@ -33,6 +33,11 @@ impl<'a> Checker<'a> {
                 return None;
             };
             self.record_current_function_reference(mangled, span);
+            if let Some(identity) = self.code_module_identities.get(alias).cloned() {
+                self.record_semantic_reference(alias_span, identity.clone());
+                let method = mangled.strip_prefix(&format!("{alias}__")).unwrap_or(mangled);
+                self.record_semantic_reference(span, format!("fn:{identity}::{method}"));
+            }
             // D-MOD2/3: a qualified `M.item` call from outside the module reaches only
             // its `pub` items — a bare private item escapes its module otherwise.
             if !self.func_pub.get(mangled).copied().unwrap_or(false)

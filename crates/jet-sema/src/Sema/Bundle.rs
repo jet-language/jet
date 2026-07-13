@@ -1159,25 +1159,131 @@ fn definition_full_key(package_identity: &str, module_path: &str, lexical_path: 
     out
 }
 
-fn package_identity(root: &Path) -> String {
-    fn quoted_field(text: &str, field: &str) -> Option<String> {
-        let needle = format!("{field}:");
-        text.match_indices(&needle).find_map(|(offset, _)| {
-            let boundary = text[..offset].chars().next_back();
-            if boundary.is_some_and(|ch| ch.is_alphanumeric() || ch == '_') { return None; }
-            let rest = text[offset + needle.len()..].trim_start().strip_prefix('"')?;
-            Some(rest.split('"').next()?.to_string())
-        })
+fn quoted_field(text: &str, field: &str) -> Option<String> {
+    let needle = format!("{field}:");
+    text.match_indices(&needle).find_map(|(offset, _)| {
+        let boundary = text[..offset].chars().next_back();
+        if boundary.is_some_and(|ch| ch.is_alphanumeric() || ch == '_') { return None; }
+        let rest = text[offset + needle.len()..].trim_start().strip_prefix('"')?;
+        Some(rest.split('"').next()?.to_string())
+    })
+}
+
+fn canonical_semver(version: &str) -> String {
+    let (core_pre, build) = version.split_once('+').map_or((version, None), |(core, build)| (core, Some(build)));
+    let (core, pre) = core_pre.split_once('-').map_or((core_pre, None), |(core, pre)| (core, Some(pre)));
+    let parts: Vec<_> = core.split('.').collect();
+    if parts.len() != 3 || parts.iter().any(|part| part.is_empty()
+        || !part.bytes().all(|byte| byte.is_ascii_digit())
+        || (part.len() > 1 && part.starts_with('0')))
+    {
+        return version.trim().to_string();
     }
+    let mut canonical = parts.iter().map(|part| part.parse::<u64>().unwrap_or(0).to_string()).collect::<Vec<_>>().join(".");
+    if let Some(pre) = pre { canonical.push('-'); canonical.push_str(pre); }
+    if let Some(build) = build { canonical.push('+'); canonical.push_str(build); }
+    canonical
+}
+
+fn lock_value(line: &str, field: &str) -> Option<String> {
+    let (key, value) = line.split_once('=')?;
+    (key.trim() == field).then(|| value.trim().trim_matches('"').to_string())
+}
+
+fn inline_lock_value(table: &str, field: &str) -> Option<String> {
+    let table = table.trim().trim_start_matches('{').trim_end_matches('}');
+    table.split(',').find_map(|part| {
+        let (key, value) = part.split_once('=')?;
+        (key.trim() == field).then(|| value.trim().trim_matches('"').to_string())
+    })
+}
+
+fn credential_free_git_url(url: &str) -> String {
+    let without_fragment = url.split(['?', '#']).next().unwrap_or(url);
+    let Some((scheme, authority_path)) = without_fragment.split_once("://") else {
+        return without_fragment.to_string();
+    };
+    let (authority, path) = authority_path.split_once('/').unwrap_or((authority_path, ""));
+    let clean_authority = authority.rsplit_once('@').map_or(authority, |(_, clean)| clean);
+    format!("{}://{}{}{}", scheme.to_ascii_lowercase(), clean_authority, if path.is_empty() { "" } else { "/" }, path)
+}
+
+fn canonical_lock_source(
+    project_root: &Path,
+    package_root: &Path,
+    dependency_name: Option<&str>,
+    package_name: &str,
+) -> String {
+    if dependency_name.is_none() { return "workspace".into(); }
+    let raw = std::fs::read_to_string(project_root.join(crate::Syntax::UNIFIED_LOCK_FILE)).unwrap_or_default();
+    let wanted = dependency_name.unwrap_or(package_name);
+    let mut current = false;
+    let mut name = String::new();
+    let mut version = String::new();
+    let mut source = String::new();
+    let mut locked = String::new();
+    let mut content_hash = String::new();
+    let mut records = Vec::new();
+    for line in raw.lines().map(str::trim).filter(|line| !line.is_empty() && !line.starts_with('#')) {
+        if line.starts_with('[') {
+            if current { records.push((std::mem::take(&mut name), std::mem::take(&mut version), std::mem::take(&mut source), std::mem::take(&mut locked), std::mem::take(&mut content_hash))); }
+            current = line == "[[package]]";
+            continue;
+        }
+        if !current { continue; }
+        if let Some(value) = lock_value(line, "name") { name = value; }
+        else if let Some(value) = lock_value(line, "version") { version = value; }
+        else if let Some(value) = lock_value(line, "source") { source = value; }
+        else if let Some(value) = lock_value(line, "locked") { locked = value; }
+        else if let Some(value) = lock_value(line, "content-hash") { content_hash = value; }
+    }
+    if current { records.push((name, version, source, locked, content_hash)); }
+    if let Some((_, locked_version, source, locked, content_hash)) = records.into_iter()
+        .find(|(name, ..)| name == wanted || name == package_name)
+    {
+        if let Some(path) = inline_lock_value(&source, "path") {
+            if let Some(registry) = path.strip_prefix("registry:") {
+                return format!("registry:{registry}@{}#{content_hash}", canonical_semver(&locked_version));
+            }
+            let canonical = if Path::new(&path).is_absolute() {
+                wanted.to_string()
+            } else {
+                path.replace('\\', "/").split('/').filter(|part| !part.is_empty() && *part != ".").collect::<Vec<_>>().join("/")
+            };
+            return format!("path:{canonical}");
+        }
+        if let Some(url) = inline_lock_value(&source, "git") {
+            let rev = inline_lock_value(&locked, "rev").unwrap_or_default();
+            let tree = inline_lock_value(&locked, "tree-hash").unwrap_or(content_hash);
+            return format!("git:{}@{rev}#{tree}", credential_free_git_url(&url));
+        }
+    }
+    let relative = package_root.strip_prefix(project_root).ok()
+        .and_then(|path| path.to_str()).filter(|path| !path.is_empty())
+        .map(|path| path.replace('\\', "/"))
+        .unwrap_or_else(|| wanted.to_string());
+    format!("path:{relative}")
+}
+
+fn owning_package<'a>(bundle: &'a ProgramBundle, module_path: &Path) -> (&'a Path, Option<&'a str>) {
+    bundle.dep_roots.iter()
+        .filter(|(_, root)| module_path.starts_with(root))
+        .max_by_key(|(_, root)| root.components().count())
+        .map(|(name, root)| (root.as_path(), Some(name.as_str())))
+        .unwrap_or((bundle.project_root.as_path(), None))
+}
+
+fn package_identity(bundle: &ProgramBundle, root: &Path, dependency_name: Option<&str>) -> String {
     let manifest = std::fs::read_to_string(root.join(crate::Syntax::PAYLOAD_FILE)).unwrap_or_default();
-    let name = quoted_field(&manifest, "name").or_else(|| root.file_name().and_then(|v| v.to_str()).map(str::to_string)).unwrap_or_else(|| "workspace".into());
-    let version = quoted_field(&manifest, "version").unwrap_or_else(|| "0.0.0+workspace".into());
-    let lock = std::fs::read_to_string(root.join(".jet/lock")).unwrap_or_default();
-    let mut locked_sources: Vec<_> = lock.lines().map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with('#'))
-        .collect();
-    locked_sources.sort_unstable();
-    format!("jet.package.v1\u{1}{name}\u{1}{version}\u{1}{}", crate::SHA256::sha256_hex(locked_sources.join("\n").as_bytes()))
+    let name = quoted_field(&manifest, "name").or_else(|| dependency_name.map(str::to_string)).unwrap_or_else(|| "workspace".into());
+    let version = canonical_semver(&quoted_field(&manifest, "version").unwrap_or_else(|| "0.0.0+workspace".into()));
+    let source = canonical_lock_source(&bundle.project_root, root, dependency_name, &name);
+    let mut bytes = Vec::new();
+    frame_bytes(&mut bytes, b"jet.package.identity.v2");
+    frame_text(&mut bytes, &name);
+    frame_text(&mut bytes, &version);
+    frame_text(&mut bytes, &source);
+    crate::SHA256::sha256_hex(&bytes)
 }
 
 fn instance_identity(
@@ -1923,10 +2029,6 @@ pub(crate) fn expand_generic_module_aliases(
     bundle: &mut ProgramBundle,
     diags: &mut Vec<Diagnostic>,
 ) {
-    // Host-absolute roots never enter language identity. Package source/version
-    // identity is currently represented by the loader's stable root basename;
-    // module paths below remain workspace-relative.
-    let package_identity = package_identity(&bundle.project_root);
     let template_snapshots: Vec<HashMap<String, TemplateInfo>> = bundle
         .modules
         .iter()
@@ -1989,7 +2091,9 @@ pub(crate) fn expand_generic_module_aliases(
                 .iter()
                 .filter_map(|item| match item {
                     Item::GenericModule(gm) => {
-                        let module_path = module.path.strip_prefix(&bundle.project_root).unwrap_or(&module.path).to_string_lossy().replace('\\', "/");
+                        let (package_root, dependency_name) = owning_package(bundle, &module.path);
+                        let package_identity = package_identity(bundle, package_root, dependency_name);
+                        let module_path = module.path.strip_prefix(package_root).unwrap_or(&module.path).to_string_lossy().replace('\\', "/");
                         let full_key = definition_full_key(&package_identity, &module_path, "", &gm.name);
                         Some((
                             gm.name.clone(),
@@ -2643,6 +2747,7 @@ pub(crate) fn check_bundle_opts(
             tests: HashMap::new(),
             trait_reg: TraitRegistry::default(),
             code_modules: HashMap::new(),
+            code_module_identities: HashMap::new(),
             unqualified: HashMap::new(),
             unqualified_file: HashMap::new(),
             reexports: HashMap::new(),
@@ -2949,6 +3054,12 @@ pub(crate) fn check_bundle_opts(
                         // D-MOD2: register inline module functions under mangled names
                         // (`math__double`) so call-site sema can check them.
                         st.code_modules.insert(cm.name.clone(), cm.name.clone());
+                        st.code_module_identities.insert(
+                            cm.name.clone(),
+                            cm.instance_identity.as_ref()
+                                .map(|identity| format!("instance:{}", identity.fingerprint))
+                                .unwrap_or_else(|| format!("module:{}::{}", st.module_path, cm.name)),
+                        );
                         for inner in body {
                             if let Item::Func(f) = inner {
                                 let mangled = format!("{}__{}", cm.name, f.name);
@@ -5125,6 +5236,7 @@ pub(crate) fn check_func_body_bundle(
         imports: &st.imports,
         core_imports: &st.core_imports,
         code_modules: &st.code_modules,
+        code_module_identities: &st.code_module_identities,
         unqualified: &st.unqualified,
         unqualified_file: &st.unqualified_file,
         func_pub: &st.func_pub,
@@ -5323,6 +5435,68 @@ fn property_param_unsupported(ty: &Type, span: Span) -> Option<Diagnostic> {
 #[cfg(test)]
 mod instance_collision_tests {
     use super::*;
+
+    fn identity_bundle(project_root: PathBuf) -> ProgramBundle {
+        ProgramBundle {
+            entry: 0,
+            project_root,
+            modules: Vec::new(),
+            parse_teaching: Vec::new(),
+            used_core: HashSet::new(),
+            ffi_callback_fns: HashSet::new(),
+            cffi: crate::AST::CFfi::default(),
+            comptime_inputs: Vec::new(),
+            import_targets: HashMap::new(),
+            layer_ceiling: None,
+            inferred_layer: crate::Syntax::RuntimeLayer::Core,
+            web_partitions: HashMap::new(),
+            web_partition_enforced: false,
+            web_partition_report: None,
+            dep_roots: HashMap::new(),
+            active_os: crate::Syntax::OsTarget::host(),
+        }
+    }
+
+    #[test]
+    fn package_identity_uses_canonical_source_not_credentials_paths_or_formatting() {
+        let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let base = std::env::temp_dir().join(format!("jet_package_identity_{nonce}"));
+        let project_a = base.join("checkout-a/project");
+        let project_b = base.join("checkout-b/project");
+        let dep_a = base.join("private-a/dependency");
+        let dep_b = base.join("private-b/dependency");
+        for path in [&project_a, &project_b, &dep_a, &dep_b] { std::fs::create_dir_all(path).unwrap(); }
+        std::fs::create_dir_all(project_a.join(".jet")).unwrap();
+        std::fs::create_dir_all(project_b.join(".jet")).unwrap();
+        std::fs::write(dep_a.join(crate::Syntax::PAYLOAD_FILE), "payload: { name: \"demo\", version: \"1.2.3\" }").unwrap();
+        std::fs::write(dep_b.join(crate::Syntax::PAYLOAD_FILE), "payload: {\n  version: \"1.2.3\",\n  name: \"demo\"\n}\n").unwrap();
+        std::fs::write(project_a.join(crate::Syntax::UNIFIED_LOCK_FILE), "version=1\n[[package]]\nname=\"demo\"\nversion=\"1.2.3\"\nsource={ git=\"https://alice:secret@example.com/acme/demo.git?token=one\", rev=\"main\" }\nlocked={ rev=\"abc\", tree-hash=\"tree\", last-modified=1 }\n").unwrap();
+        std::fs::write(project_b.join(crate::Syntax::UNIFIED_LOCK_FILE), "version = 1\n\n[[package]]\nsource = { git = \"https://bob:other@example.com/acme/demo.git#credential\", rev = \"main\" }\nname = \"demo\"\nlocked = { tree-hash = \"tree\", rev = \"abc\", last-modified = 99 }\nversion = \"1.2.3\"\n").unwrap();
+        let a = package_identity(&identity_bundle(project_a.clone()), &dep_a, Some("demo"));
+        let b = package_identity(&identity_bundle(project_b.clone()), &dep_b, Some("demo"));
+        assert_eq!(a, b, "formatting, credentials, timestamps, and host paths are non-semantic");
+        std::fs::write(project_b.join(crate::Syntax::UNIFIED_LOCK_FILE), "version=1\n[[package]]\nname=\"demo\"\nversion=\"1.2.3\"\nsource={ git=\"https://example.com/acme/demo.git\", rev=\"main\" }\nlocked={ rev=\"different\", tree-hash=\"tree\" }\n").unwrap();
+        let changed = package_identity(&identity_bundle(project_b), &dep_b, Some("demo"));
+        assert_ne!(a, changed, "locked git revision is semantic package source identity");
+        let _ = std::fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn same_template_path_in_different_packages_has_distinct_definition_identity() {
+        let root = std::env::temp_dir().join(format!("jet_package_nominal_{}", std::process::id()));
+        let first = root.join("first");
+        let second = root.join("second");
+        std::fs::create_dir_all(&first).unwrap();
+        std::fs::create_dir_all(&second).unwrap();
+        std::fs::write(first.join(crate::Syntax::PAYLOAD_FILE), "payload: { name: \"first\", version: \"1.0.0\" }").unwrap();
+        std::fs::write(second.join(crate::Syntax::PAYLOAD_FILE), "payload: { name: \"second\", version: \"1.0.0\" }").unwrap();
+        let bundle = identity_bundle(root.clone());
+        let a = definition_full_key(&package_identity(&bundle, &first, Some("first")), "src/template.jet", "", "Boxed");
+        let b = definition_full_key(&package_identity(&bundle, &second, Some("second")), "src/template.jet", "", "Boxed");
+        assert_ne!(a, b);
+        assert!(!String::from_utf8_lossy(&a).contains(&root.to_string_lossy().as_ref()));
+        let _ = std::fs::remove_dir_all(root);
+    }
 
     #[test]
     #[should_panic(expected = "internal compiler error: E0859 generic module instance fingerprint collision")]

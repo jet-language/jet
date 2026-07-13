@@ -658,6 +658,9 @@ pub(crate) struct ModuleState {
     /// D-MOD2: inline code module aliases present in this file (alias → module name).
     /// `math.double(x)` resolves to `user_math__double(x)` when `math` is in here.
     code_modules: HashMap<String, String>,
+    /// Inline module spelling -> compiler semantic identity. Ordinary modules
+    /// use their module identity; generic instances use `instance:<digest>`.
+    code_module_identities: HashMap<String, String>,
     /// D-MOD3: unqualified items imported via `use alias.Item` (inline modules).
     /// Maps unqualified name → mangled name (e.g. "clamp" → "math__clamp").
     unqualified: HashMap<String, String>,
@@ -682,6 +685,7 @@ pub(crate) struct Checker<'a> {
     core_imports: &'a HashMap<String, String>,
     /// D-MOD2: inline code module aliases in scope (alias → module name).
     code_modules: &'a HashMap<String, String>,
+    code_module_identities: &'a HashMap<String, String>,
     /// D-MOD3: unqualified inline-module items in scope (name → mangled name).
     unqualified: &'a HashMap<String, String>,
     /// D-MOD3: unqualified file-module items in scope (name → (fn_name, module_idx)).

@@ -195,6 +195,7 @@ pub struct DefinitionAnchor {
     pub module_path: String,
     pub kind: String,
     pub def_span: SourceSpan,
+    pub semantic_identity: Option<String>,
 }
 
 /// One use-site reference (identifier occurrence).

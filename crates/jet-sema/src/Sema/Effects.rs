@@ -445,6 +445,9 @@ pub struct DefinitionAnchorFact {
     pub module_path: String,
     pub kind: String,
     pub def_span: Span,
+    /// Resolved semantic identity when source lowering makes module/span
+    /// insufficient (notably applicative generic-module projections).
+    pub semantic_identity: Option<String>,
 }
 
 /// D-EFF2 (callback param bound): one obligation that a callback argument passed

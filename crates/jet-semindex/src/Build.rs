@@ -321,6 +321,7 @@ fn scoped_ref(name: String, span: Span, mp: &str, ctx: &WalkCtx<'_>) -> SymRef {
             module_path: fact.module_path.clone(),
             kind: fact.kind.clone(),
             def_span: fact.def_span.into(),
+            semantic_identity: fact.semantic_identity.clone(),
         });
     SymRef {
         name,

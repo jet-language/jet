@@ -2912,6 +2912,7 @@ pub(crate) fn check_func_body(
     let empty_imports = HashMap::new();
     let empty_core_imports = HashMap::new();
     let empty_code_modules = HashMap::new();
+    let empty_code_module_identities = HashMap::new();
     let empty_unqualified: HashMap<String, String> = HashMap::new();
     let empty_unqualified_file: HashMap<String, (String, usize)> = HashMap::new();
     let empty_func_pub: HashMap<String, bool> = HashMap::new();
@@ -2927,6 +2928,7 @@ pub(crate) fn check_func_body(
         imports: &empty_imports,
         core_imports: &empty_core_imports,
         code_modules: &empty_code_modules,
+        code_module_identities: &empty_code_module_identities,
         unqualified: &empty_unqualified,
         unqualified_file: &empty_unqualified_file,
         func_pub: &empty_func_pub,

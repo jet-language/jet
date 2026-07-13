@@ -16,6 +16,19 @@ impl<'a> Checker<'a> {
                 module_path: module_path.to_string(),
                 kind: kind.to_string(),
                 def_span,
+                semantic_identity: None,
+            },
+        );
+    }
+
+    pub(crate) fn record_semantic_reference(&mut self, span: Span, semantic_identity: String) {
+        self.reference_anchors.insert(
+            (self.module_path.to_string(), span.start, span.end),
+            DefinitionAnchorFact {
+                module_path: self.module_path.to_string(),
+                kind: "semantic".to_string(),
+                def_span: span,
+                semantic_identity: Some(semantic_identity),
             },
         );
     }

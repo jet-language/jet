@@ -1586,6 +1586,7 @@ fn definition_anchor(definition: &jet_semindex::SymbolDef) -> DefinitionAnchor {
         module_path: definition.module_path.clone(),
         kind: kind.to_string(),
         def_span: definition.def_span,
+        semantic_identity: Some(definition.identity.clone()),
     }
 }
 fn read_fingerprint(path: &Path, inputs: &mut BTreeMap<PathBuf, String>) -> Vec<u8> {

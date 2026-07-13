@@ -123,9 +123,10 @@ fn json_ref(r: &SymbolRef) -> String {
     };
     let target_json = match &r.target {
         Some(target) => format!(
-            "{{\"module\":{},\"kind\":{},\"span\":{}}}",
+            "{{\"module\":{},\"kind\":{},\"semantic_identity\":{},\"span\":{}}}",
             json_str(&target.module_path),
             json_str(&target.kind),
+            target.semantic_identity.as_ref().map_or_else(|| "null".to_string(), |identity| json_str(identity)),
             json_span(target.def_span)
         ),
         None => "null".to_string(),

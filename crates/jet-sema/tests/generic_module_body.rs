@@ -177,7 +177,7 @@ fn instance_fingerprint_is_nominal_and_ignores_body_shape() {
 }
 
 #[test]
-fn instance_definition_identity_tracks_manifest_version_and_locked_source() {
+fn instance_definition_identity_tracks_manifest_semver_not_formatting_or_workspace_lock_noise() {
     let base = std::env::temp_dir().join(format!("jet_genmod_identity_{}", std::process::id()));
     let a = base.join("a");
     let b = base.join("b");
@@ -190,7 +190,7 @@ fn instance_definition_identity_tracks_manifest_version_and_locked_source() {
     let src = "module Boxed<T> { fn value(v: T) -> T { return v } }\nmodule Use = Boxed<Int>\nfn run() {}";
     assert_ne!(only_instance_fingerprint(src, a.to_str().unwrap()), only_instance_fingerprint(src, b.to_str().unwrap()));
     std::fs::write(b.join("pkg.jet"), "payload: { name: \"demo\", version: \"1.0.0\" }").unwrap();
-    assert_ne!(only_instance_fingerprint(src, a.to_str().unwrap()), only_instance_fingerprint(src, b.to_str().unwrap()));
+    assert_eq!(only_instance_fingerprint(src, a.to_str().unwrap()), only_instance_fingerprint(src, b.to_str().unwrap()));
     std::fs::write(b.join(".jet/lock"), "source = a\n").unwrap();
     assert_eq!(only_instance_fingerprint(src, a.to_str().unwrap()), only_instance_fingerprint(src, b.to_str().unwrap()));
     let _ = std::fs::remove_dir_all(base);

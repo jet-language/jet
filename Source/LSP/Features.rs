@@ -195,19 +195,19 @@ pub(crate) fn compute_references(
     include_declaration: bool,
 ) -> Vec<(String, Span)> {
     let anchor_identity = |anchor: &jet_semindex::DefinitionAnchor| {
-        db.defs.iter().find(|definition| {
+        anchor.semantic_identity.clone().or_else(|| db.defs.iter().find(|definition| {
             definition.module_path == anchor.module_path
                 && definition.def_span.start == anchor.def_span.start
                 && definition.def_span.end == anchor.def_span.end
-        }).map(|definition| definition.identity.as_str())
+        }).map(|definition| definition.identity.clone()))
     };
     let identity = db.index.instances().iter().flat_map(|instance| &instance.applications)
         .find(|application| application.module_path == path
             && application.span.start <= offset && offset <= application.span.end)
-        .map(|application| application.semantic_identity.as_str())
+        .map(|application| application.semantic_identity.clone())
         .or_else(|| db.defs.iter().find(|definition| definition.module_path == path
             && definition.def_span.start <= offset && offset <= definition.def_span.end)
-            .map(|definition| definition.identity.as_str()))
+            .map(|definition| definition.identity.clone()))
         .or_else(|| db.refs.iter().find(|reference| reference.module_path == path
             && reference.span.start <= offset && offset <= reference.span.end)
             .and_then(|reference| reference.target.as_ref())
@@ -254,6 +254,35 @@ mod generic_instance_tests {
         let spellings: Vec<_> = references.iter().map(|(_, span)| &source[span.start..span.end]).collect();
         assert!(spellings.iter().any(|spelling| *spelling == "A"), "{spellings:?}");
         assert!(spellings.iter().any(|spelling| *spelling == "B"), "{spellings:?}");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn references_never_join_same_alias_spelling_across_distinct_instances() {
+        let root = std::env::temp_dir().join(format!("jet_lsp_genmod_hostile_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let main = root.join("main.jet");
+        let left = root.join("left.jet");
+        let right = root.join("right.jet");
+        let left_source = "module Value<n: Int> { pub fn get() -> Int { return n } }\nmodule Same = Value<3>\nfn left_value() -> Int { return Same.get() }\n";
+        let right_source = "module Value<n: Int> { pub fn get() -> Int { return n } }\nmodule Same = Value<4>\nfn right_value() -> Int { return Same.get() }\n";
+        std::fs::write(&main, "module left\nmodule right\nfn run() {}\n").unwrap();
+        std::fs::write(&left, left_source).unwrap();
+        std::fs::write(&right, right_source).unwrap();
+        let shown_main = main.to_string_lossy().into_owned();
+        let shown_left = "left.jet".to_string();
+        let shown_right = "right.jet".to_string();
+        let mut bundle = crate::Loader::load_entry(&shown_main).unwrap();
+        let (diagnostics, facts) = crate::Sema::check_bundle_with_effect_facts(&mut bundle, crate::Sema::CompileMode::Check);
+        assert!(diagnostics.iter().all(|diagnostic| diagnostic.severity != crate::Diagnostics::Severity::Error), "{diagnostics:#?}");
+        let db = jet_semindex::build_symbol_db(&bundle, &facts);
+        let (tokens, lex_diagnostics) = crate::Lexer::lex(left_source);
+        assert!(lex_diagnostics.is_empty());
+        let offset = left_source.find("Same =").unwrap();
+        let references = compute_references(&db, &tokens, &shown_left, offset, true);
+        assert!(references.iter().any(|(path, span)| path == &shown_left && &left_source[span.start..span.end] == "Same"), "refs={references:?} defs={:#?} instances={:#?}", db.defs, db.index.instances());
+        assert!(!references.iter().any(|(path, _)| path == &shown_right), "distinct Value<4> instance joined by alias spelling: {references:?}");
         let _ = std::fs::remove_dir_all(root);
     }
 }
