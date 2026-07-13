@@ -1,4 +1,4 @@
-use crate::AST::{AccessConvention, EnumLitArg, Expr, Type};
+use crate::AST::{AccessConvention, EnumLitArg, Expr, StrPart, Type};
 use crate::Collections;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::e0901;
@@ -266,6 +266,25 @@ impl<'a> Checker<'a> {
                                     }
                                     if let Some(arg) = args.get_mut(0) {
                                         self.expect_core_arg("Replay.record", 0, &Type::String, arg);
+                                        if let Expr::Str(parts, literal_span) = &arg.expr {
+                                            if let [StrPart::Lit(path)] = parts.as_slice() {
+                                                if crate::Syntax::artifact_kind(path) != Some(crate::Syntax::ArtifactKind::GameReplay) {
+                                                    let actual = crate::Syntax::artifact_kind(path);
+                                                    let why = match actual {
+                                                        Some(crate::Syntax::ArtifactKind::ProofReplay) => "that suffix identifies a proof replay, not a game input replay".to_string(),
+                                                        Some(kind) => format!("that suffix identifies a {kind:?} artifact, not a game input replay"),
+                                                        None => format!("game input replay paths end in `{}`", crate::Syntax::ARTIFACT_EXT_GAME_REPLAY),
+                                                    };
+                                                    self.diags.push(Diagnostic::error(
+                                                        "E0103",
+                                                        format!("`Replay.record` needs a `{}` game replay path", crate::Syntax::ARTIFACT_EXT_GAME_REPLAY),
+                                                        why,
+                                                        format!("rename the path to end in `{}`", crate::Syntax::ARTIFACT_EXT_GAME_REPLAY),
+                                                        Some(*literal_span),
+                                                    ));
+                                                }
+                                            }
+                                        }
                                     }
                                     *recv_type_out = Some("GameReplayType".to_string());
                                     return Some(Type::Named("GameReplay".to_string()));

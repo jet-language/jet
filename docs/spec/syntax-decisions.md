@@ -1639,7 +1639,7 @@ D-GAME-BACKEND1 / D-GAME-BUDGET1 — Stable `core.game` substrate** *(ratified
 asset registries (`scene.assets.image`, `scene.assets.sound`), struct-marker
 components (`scene.component<T>()`) plus typed queries (`scene.query<T...>()`),
 scene input bindings with per-frame snapshots (`scene.input.bind`,
-`frame.input.pressed`), `game.Replay.record(".jreplay")`, an explicit
+`frame.input.pressed`), `game.Replay.record(".jetreplay")`, an explicit
 `game.Backend.headless()` default. D-PERFBUDGET-GAMEMIGRATE1 supersedes the
 former scene-budget value/setter with typed `perf` role declarations.
 `game.run(scene, replay: replay)` produces a deterministic transcript without
@@ -2089,7 +2089,7 @@ v4/v7 (D-UUIDENC1).
 
 **D-PRELUDE-LAW1=A — ambient-surface registry** *(ratified by owner 2026-07-12, card #514)*: the no-prefix surface is one closed list — always ambient: `print`, `input`, `panic`, `require`; comptime-gated ambient: `embed_file`, `embed_bytes`, `find`, `fetch`. User shadowing wins; libraries never inject (D-PRELUDEX1). Any addition or removal is a ballot.
 
-**D-ARTIFACT-EXT1=A — one artifact-extension family** *(ratified by owner 2026-07-12, card #514)*: every Jet tool artifact is `.jet<kind>`: `.jetmap`, `.jetnb`, `.jetproof` (was .jproof), `.jettrace` (was .jtrace), `.jetreplay` (game input replays), `.jetproof-replay` (proof replays — the .jreplay collision between D-GAME-REPLAY1 and D-JREPLAY1 is resolved). Closed family; new artifact kinds need a ballot. Amends D-JPROOF1/D-JREPLAY1/D-PERFSESSION1/D-GAME-REPLAY1 spellings.
+**D-ARTIFACT-EXT1=A — one artifact-extension family** *(ratified by owner 2026-07-12, card #514)*: every Jet tool artifact is `.jet<kind>`: `.jetmap`, `.jetnb`, `.jetproof`, `.jettrace`, `.jetreplay` (game input replays), and `.jetproof-replay` (proof replays). The former short-prefix family and replay collision are retired without aliases. Closed family; new artifact kinds need a ballot. Amends D-JPROOF1/D-JREPLAY1/D-PERFSESSION1/D-GAME-REPLAY1 spellings.
 
 **D-API-STORE1=A — one storage verb: add / add_new** *(ratified 2026-07-12, card #513; shape set by owner question q2zvcuql)*: `insert` and `put` die. Keyed containers: `add(key, value) -> T?` upserts and returns the displaced old value (`None` = fresh key); `add_new(key, value) -> Bool` stores only if absent — `false` means the key existed and the value is untouched (the race-safe claim). Element containers: `add(value) -> Bool` (`Set`/`SortedSet`: true if newly added; `Bag`: always true). `m[k] = v` index-write stays the literal upsert (S39). Enters Law 1; amends the map/`Lru`/D-COLLBREADTH1 method lists.
 
@@ -2871,7 +2871,7 @@ deferred until the owner explicitly reopens documentation build work.
 D-PROVE-SOLVER1=A / D-PROVE-LENS1=A**: `jet prove` is the single progressive
 proof/replay command. It owns deterministic target resolution and producer
 order, evidence policy, results/exits, stable complete JSON, typed versioned
-`.jproof`/`.jreplay` artifacts, opt-in deterministic native Presburger proof,
+`.jetproof`/`.jetproof-replay` artifacts, opt-in deterministic native Presburger proof,
 and presentation-only evidence lenses. Raw solver/runtime text never reaches
 users. Exact resources, canonical hashes/bytes, errors, privacy/security,
 artifact lifecycle, migration/version law, fixtures, and failure precedence are
@@ -3172,7 +3172,7 @@ endpoint addresses, not canonical Jetpack vocabulary.
 are `conservative`, `latest`, `lowest`, and `lowest-direct`; named source
 profiles may bundle these with platform matrices. `jet update <pkg>` defaults
 conservative, moves only the named subtree, and records rationale. Realize verbs
-never resolve. `jet prove --lens dependencies` emits non-mutating `.jproof`
+never resolve. `jet prove --lens dependencies` emits non-mutating `.jetproof`
 matrix artifacts; unrelated lock records remain byte-identical.
 
 **D-JPK-REPROCACHE1=D — preserve divergence as untrusted evidence**: trusted
@@ -3287,9 +3287,9 @@ and 2 means usage/parse/I/O failure. Preflight finds all failures before a
 zero-write abort. `jet fmt - --stdin-path=...` gives editor-equivalent stdin
 diagnostics. CLI, LSP, Canvas, and CI output is one byte-identical fixpoint.
 
-**D-PERFSESSION1=D — one `.jtrace` truth**: `jet perf run/test/bench` preserves
+**D-PERFSESSION1=D / D-ARTIFACT-EXT1=A — one `.jettrace` truth**: `jet perf run/test/bench` preserves
 the exact base-command argument surface and driver path; `attach/view/compare/
-export` complete the family. `.jtrace` embeds schema/toolchain/source/source-map
+export` complete the family. `.jettrace` embeds schema/toolchain/source/source-map
 identity and capture policy. Compare enforces hardware/toolchain baseline
 identity. pprof/OTel/Chrome and profile maps are projections only; generated
 Rust frames stay hidden unless explicitly requested.

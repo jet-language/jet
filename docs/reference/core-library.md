@@ -1116,7 +1116,7 @@ fn run() {
             print("jump {frame.index}")
         }
     })
-    replay :: game.Replay.record("runs/demo.jreplay")
+    replay :: game.Replay.record("runs/demo.jetreplay")
     print(game.run(scene, replay: replay))
 }
 ```
@@ -1130,7 +1130,7 @@ fn run() {
 | `frame.input.pressed(action)` | `Bool` | Read the deterministic per-frame input snapshot |
 | `scene.component<T>()` | nothing | Register a struct-marker component type on the scene |
 | `scene.query<T...>()` | `[String]` | Query registered component markers as a deterministic scene view |
-| `game.Replay.record(path)` | `GameReplay` | Name a `.jreplay` artifact for transcript recording |
+| `game.Replay.record(path)` | `GameReplay` | Name a `.jetreplay` game-input artifact for transcript recording; proof replays use `.jetproof-replay` |
 | `game.Backend.headless()` | `GameBackend` | Explicit no-renderer/no-audio/no-editor backend value |
 | `game.run(scene, replay: replay)` | `String` | Run three deterministic headless frames and return a transcript |
 

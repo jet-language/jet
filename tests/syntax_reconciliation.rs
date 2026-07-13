@@ -740,6 +740,38 @@ fn scan_lines<'a>(path: &Path, text: &'a str) -> Vec<(usize, &'a str)> {
         .collect()
 }
 
+#[test]
+fn artifact_extensions_are_one_closed_kind_specific_family() {
+    use jet_foundation::Syntax::{self, ArtifactKind};
+    assert_eq!(Syntax::ARTIFACT_KINDS, &[
+        (ArtifactKind::SourceMap, ".jetmap"),
+        (ArtifactKind::Notebook, ".jetnb"),
+        (ArtifactKind::Proof, ".jetproof"),
+        (ArtifactKind::Trace, ".jettrace"),
+        (ArtifactKind::GameReplay, ".jetreplay"),
+        (ArtifactKind::ProofReplay, ".jetproof-replay"),
+    ]);
+    for (kind, suffix) in Syntax::ARTIFACT_KINDS {
+        assert_eq!(Syntax::artifact_kind(&format!("artifact{suffix}")), Some(*kind));
+    }
+    assert_eq!(Syntax::artifact_kind("run.jetproof-replay"), Some(ArtifactKind::ProofReplay));
+    assert_ne!(Syntax::artifact_kind("run.jetproof-replay"), Some(ArtifactKind::GameReplay));
+
+    for root in ["Source", "crates", "examples", "tests", "docs"] {
+        for path in files(Path::new(root)) {
+            if path.ends_with("tests/syntax_reconciliation.rs") { continue; }
+            let Ok(text) = fs::read_to_string(&path) else { continue };
+            for (line_no, line) in text.lines().enumerate() {
+                for retired in [".jproof", ".jtrace", ".jreplay"] {
+                    if line.contains(retired) && !line.contains("jet.jproof") {
+                        panic!("{}:{} retains retired artifact suffix `{retired}`", path.display(), line_no + 1);
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn forbidden_for_path(path: &Path) -> Vec<&'static str> {
     if path.extension().and_then(|x| x.to_str()) != Some("rs") {
         return FORBIDDEN.to_vec();

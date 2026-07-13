@@ -255,12 +255,13 @@ Layers swept: the M1 lexical/grammar core (EBNF, precedence table,
 terminator rules), the ambient prelude surface, the artifact-extension
 namespace, the env-var namespace.
 
-### H1. Artifact-extension law + `.jreplay` collision — D-ARTIFACT-EXT1 (card #514)
+### H1. Artifact-extension law + replay collision — D-ARTIFACT-EXT1 (card #514)
 
-Two extension families ship (`.jetmap`/`.jetnb` vs
-`.jproof`/`.jtrace`/`.jreplay`) and `.jreplay` names two different
-ratified formats: game input replays (D-GAME-REPLAY1) and proof replays
-(D-JREPLAY1). One family law + collision fix.
+The audit found a short-prefix artifact family beside `.jetmap`/`.jetnb`,
+plus one replay suffix naming two different ratified formats: game input
+replays (D-GAME-REPLAY1) and proof replays (D-JREPLAY1). D-ARTIFACT-EXT1=A
+closes the family as `.jet<kind>` and separates `.jetreplay` from
+`.jetproof-replay`.
 
 ### H2. Ambient-surface registry — D-PRELUDE-LAW1 (card #514)
 

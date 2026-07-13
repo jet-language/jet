@@ -6632,7 +6632,7 @@ use core.game as game
 
 fn run() {
     scene := game.Scene.new("arcade")
-    replay :: game.Replay.record("runs/demo.jreplay")
+    replay :: game.Replay.record("runs/demo.jetreplay")
     backend :: game.Backend.headless()
     print(game.run(scene, backend: backend, replay))
 }
@@ -6681,7 +6681,7 @@ fn run() {
             print("hook jump {frame.index}")
         }
     })
-    replay :: game.Replay.record("runs/demo.jreplay")
+    replay :: game.Replay.record("runs/demo.jetreplay")
     print(game.run(scene, replay: replay))
 }
 "#,
@@ -6691,7 +6691,7 @@ fn run() {
     assert_eq!(code, 0, "stderr: {stderr}");
     assert_eq!(
         stdout,
-        "query 1\nhook jump 1\nscene:arcade\nbackend:headless/none/none\nreplay:runs/demo.jreplay\nassets:image:assets/player.png,sound:assets/jump.wav\ninput:jump=Space\ncomponents:Position,Velocity\nframe:0 input:none\nframe:1 input:jump\nframe:2 input:none\n"
+        "query 1\nhook jump 1\nscene:arcade\nbackend:headless/none/none\nreplay:runs/demo.jetreplay\nassets:image:assets/player.png,sound:assets/jump.wav\ninput:jump=Space\ncomponents:Position,Velocity\nframe:0 input:none\nframe:1 input:jump\nframe:2 input:none\n"
     );
     assert_eq!(stderr, "");
     let _ = fs::remove_dir_all(&dir);

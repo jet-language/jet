@@ -134,13 +134,20 @@ expr     = precedence climbing over:
   `..` is already inclusive — write `lo..hi`), `step` in an arm head is
   **E0319** (`step` is a loop modifier, not a band), and an inverted/empty band
   `hi..lo` is **E0316**.
-- **Prelude (D-PRELUDE1 = B):** `print` and `input` are ambient — usable in
-  any Jet file with no `use` line. `eprint`, `args`, and `read_all_input`
-  stay qualified behind `use core.io`. A user-defined function named `print`
-  or `input` shadows the prelude one in that scope (prelude is lowest-priority).
+- **Ambient surface (D-PRELUDE-LAW1=A):** this registry is closed. Always
+  ambient: `print`, `input`, `panic`, `require`. Comptime-gated ambient:
+  `embed_file`, `embed_bytes`, `find`, `fetch`. A user declaration shadows an
+  ambient name in its scope; libraries cannot inject names; any addition or
+  removal needs an owner ballot. `eprint`, `args`, and `read_all_input` stay
+  qualified behind `use core.io`.
   **`#NoPrelude` (D-PRELUDEX1=A)** opts a file out of those ambient names —
   call `io.print` / `io.input` after `use core.io as io`, or remove the marker.
-  Libraries cannot inject into the no-prefix surface.
+  Its existing opt-out scope is the interactive I/O pair `print`/`input`.
+- **Tool artifact extensions (D-ARTIFACT-EXT1=A):** the closed family is
+  `.jetmap` (source maps), `.jetnb` (notebooks), `.jetproof` (proof evidence),
+  `.jettrace` (performance traces), `.jetreplay` (game input replays), and
+  `.jetproof-replay` (proof replays). Consumers reject a different family
+  member by artifact kind; retired suffixes have no compatibility aliases.
 - `print(x)` is built in (S9); takes exactly one printable argument
   (E0103, E0112) and writes it with a trailing newline. `Float` always
   prints a decimal part (S21): `-5.0`, not `-5`.

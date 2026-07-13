@@ -70,11 +70,11 @@ the umbrella's provisional examples.
 `D-PROVE-REPLAY1=A`: `jet prove` is the umbrella proof and replay command.
 
 - `jet prove <target>` renders the beginner pass/fail report.
-- `jet prove <target> --replay trace.jreplay` replays a typed trace against the
+- `jet prove <target> --replay trace.jetproof-replay` replays a typed trace against the
   target.
 - repeated `--lens all|refinements|effects|taint|contracts|tests|budgets|replay|solver`
   selects presentation-only views; the full producer run and complete machine
   report remain unchanged.
-- `jet prove <target> --json` emits stable `.jproof`-shaped data for CI.
-- `.jreplay` and `.jproof` use the exact typed/versioned/security/migration law
+- `jet prove <target> --json` emits stable `.jetproof`-shaped data for CI.
+- `.jetproof-replay` and `.jetproof` use the exact typed/versioned/security/migration law
   linked above; raw solver/runtime text never reaches users.

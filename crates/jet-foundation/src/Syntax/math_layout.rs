@@ -534,6 +534,8 @@ pub const BUILTIN_REQUIRE_EQ: &str = "require_eq";
 /// records each matched file hash for `.jet/lock`.
 pub const BUILTIN_EMBED_FILE: &str = "embed_file";
 pub const BUILTIN_EMBED_BYTES: &str = "embed_bytes";
+/// D-CTEFFECT1 / D-PRELUDE-LAW1=A: gated build-time network fetch.
+pub const BUILTIN_FETCH: &str = "fetch";
 
 /// S43 (ratified M6; PascalCase marker D-CASING1 follow-on 2026-06-21):
 /// top-level test-declaration block, written as the marker `#Test("name") { … }`.

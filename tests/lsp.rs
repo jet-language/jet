@@ -2772,25 +2772,21 @@ fn c44_impure_builtins_complete() {
     }
 }
 
-/// PRELUDE_IDENTS must contain exactly the prelude builtins and match
-/// BUILTIN_PRINT + BUILTIN_INPUT so it can substitute for the inline pair.
+/// D-PRELUDE-LAW1=A: one exact closed registry drives every no-prefix consumer.
 #[test]
 fn c44_prelude_idents_canonical() {
     use jet::Syntax;
-    assert!(
-        Syntax::PRELUDE_IDENTS.contains(&Syntax::BUILTIN_PRINT),
-        "PRELUDE_IDENTS missing BUILTIN_PRINT"
-    );
-    assert!(
-        Syntax::PRELUDE_IDENTS.contains(&Syntax::BUILTIN_INPUT),
-        "PRELUDE_IDENTS missing BUILTIN_INPUT"
-    );
-    // The prelude is exactly {print, input} per D-PRELUDE1 = B.
     assert_eq!(
-        Syntax::PRELUDE_IDENTS.len(),
-        2,
-        "PRELUDE_IDENTS must have exactly 2 members (D-PRELUDE1 = B): {:?}",
-        Syntax::PRELUDE_IDENTS
+        Syntax::PRELUDE_ALWAYS_IDENTS,
+        &["print", "input", "panic", "require"]
+    );
+    assert_eq!(
+        Syntax::PRELUDE_COMPTIME_IDENTS,
+        &["embed_file", "embed_bytes", "find", "fetch"]
+    );
+    assert_eq!(
+        Syntax::PRELUDE_IDENTS,
+        &["print", "input", "panic", "require", "embed_file", "embed_bytes", "find", "fetch"]
     );
 }
 

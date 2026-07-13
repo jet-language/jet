@@ -7,6 +7,31 @@ pub const BINARY_NAME: &str = "jet";
 /// N2 (ratified): source file extension (without the dot).
 pub const FILE_EXT: &str = "jet";
 
+/// D-ARTIFACT-EXT1=A: closed product-named artifact family. New kinds require
+/// an owner ballot; consumers compare against these exact suffixes.
+pub const ARTIFACT_EXT_SOURCE_MAP: &str = ".jetmap";
+pub const ARTIFACT_EXT_NOTEBOOK: &str = ".jetnb";
+pub const ARTIFACT_EXT_PROOF: &str = ".jetproof";
+pub const ARTIFACT_EXT_TRACE: &str = ".jettrace";
+pub const ARTIFACT_EXT_GAME_REPLAY: &str = ".jetreplay";
+pub const ARTIFACT_EXT_PROOF_REPLAY: &str = ".jetproof-replay";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ArtifactKind { SourceMap, Notebook, Proof, Trace, GameReplay, ProofReplay }
+
+pub const ARTIFACT_KINDS: &[(ArtifactKind, &str)] = &[
+    (ArtifactKind::SourceMap, ARTIFACT_EXT_SOURCE_MAP),
+    (ArtifactKind::Notebook, ARTIFACT_EXT_NOTEBOOK),
+    (ArtifactKind::Proof, ARTIFACT_EXT_PROOF),
+    (ArtifactKind::Trace, ARTIFACT_EXT_TRACE),
+    (ArtifactKind::GameReplay, ARTIFACT_EXT_GAME_REPLAY),
+    (ArtifactKind::ProofReplay, ARTIFACT_EXT_PROOF_REPLAY),
+];
+
+pub fn artifact_kind(path: &str) -> Option<ArtifactKind> {
+    ARTIFACT_KINDS.iter().find_map(|(kind, suffix)| path.ends_with(suffix).then_some(*kind))
+}
+
 /// S1 (ratified): keyword that starts a function definition.
 pub const KW_FN: &str = "fn";
 
@@ -103,13 +128,20 @@ pub const INTERP_CLOSE: &str = "}";
 pub const BUILTIN_PRINT: &str = "print";
 
 /// D-PRELUDE1 option B (ratified): `input` is ambient (no `use core.io` required).
-/// Both `print` and `input` form the prelude set — the two symbols a first interactive
-/// program reaches for. All other core.io members stay qualified behind `use core.io`.
+/// Both `print` and `input` form the interactive I/O subset. All other core.io
+/// members stay qualified behind `use core.io`.
 pub const BUILTIN_INPUT: &str = "input";
 
-/// The full prelude set (D-PRELUDE1 = B). Kept as a constant slice so sema and
-/// codegen can agree on membership without drifting from each other.
-pub const PRELUDE_IDENTS: &[&str] = &["print", "input"];
+/// D-PRELUDE-LAW1=A: complete closed no-prefix registry. The first group is
+/// always ambient; the second exists only under its ratified comptime gates.
+/// User declarations shadow these names and libraries cannot inject new ones.
+pub const PRELUDE_ALWAYS_IDENTS: &[&str] =
+    &["print", "input", "panic", "require"];
+pub const PRELUDE_COMPTIME_IDENTS: &[&str] =
+    &["embed_file", "embed_bytes", "find", "fetch"];
+pub const PRELUDE_IDENTS: &[&str] = &[
+    "print", "input", "panic", "require", "embed_file", "embed_bytes", "find", "fetch",
+];
 
 /// S11 (ratified): built-in type names (M1).
 pub const TYPE_INT: &str = "Int";

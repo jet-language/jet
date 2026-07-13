@@ -54,7 +54,7 @@ Owner decisions D-GAME-ASSET1, D-GAME-ECS1, D-GAME-INPUT1, D-GAME-REPLAY1, D-GAM
 - D-GAME-ASSET1=A: scene asset registry with typed handles.
 - D-GAME-ECS1=B: struct marker components.
 - D-GAME-INPUT1=A with typed-action direction: scene bindings plus frame snapshot, compatible with future typed action enums.
-- D-GAME-REPLAY1=A: `game.Replay` API plus `.jreplay` artifact contract.
+- D-GAME-REPLAY1=A as amended by D-ARTIFACT-EXT1=A: `game.Replay` API plus `.jetreplay` artifact contract.
 - D-GAME-BACKEND1=A: typed `game.Backend` value, default headless path.
 - D-GAME-BUDGET1=A with runtime watcher direction: scene/package budgets as one fact model plus runtime visibility.
 

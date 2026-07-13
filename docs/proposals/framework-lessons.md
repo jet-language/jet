@@ -254,7 +254,7 @@ Erlang ships a live view of every process, mailbox, and memory cell.
 Jet's scheduler/tasks/channels are opaque at runtime. Transplant:
 `jet inspect live <pid|--attach>` — live task tree, channel depths,
 deadlines, effect activity, GC/arena stats; the dev-server variant feeds
-the same facts to Canvas's proof rail. Rides `.jtrace`/observability
+the same facts to Canvas's proof rail. Rides `.jettrace`/observability
 rails (D-PERFSESSION1, D-OBS1) — a viewer, not a new fact producer.
 
 ## v2 rejections (recorded, with the reason)
