@@ -61,10 +61,11 @@ rejects unknown classes, and requires non-live rows to name an active successor.
 | #330 | compatibility-only | `crates/jetpack/src/Overlay.rs` | #424/#428 own lock invalidation and provider conformance. |
 | #418 | live | `tests/jetpack_truth.rs` | Truth stop-line only; downstream cards still own breadth. |
 | #479 | live | `crates/jetpack/src/Doctor.rs` | Read-only local health diagnosis only; no repair or broad registry-availability claim. |
+| #359 | live | `crates/jetpack/src/Shell.rs` | Hybrid `jet env` prompt (D-FE-PROMPT1): label + path defaults, Prompt.{label,path,strip}, bash/zsh/fish rc; not package-manager parity. |
 | #361 | live | `crates/jetpack/src/Output.rs` | Hybrid CLI output surface (D-FE-CLI1): color/plan symbols, NO_COLOR, -y apply, live-region erase; not package-manager parity. |
 | #476 | live | `examples/features/jetpack/task_runner.jet` | `#Task` entry dispatch (D-JPK-TASKRUN1) across AOT and interpreter tiers; not scheduling or remote run. |
 | #477 | live | `crates/jetpack/src/CLI/tool.rs` | On-demand `jetpack tool` run/install for built-in providers (D-JPK-TOOLRUN1); external-provider realization (E1298) not yet live. |
-| #478 | live | `crates/jetpack/src/CLI/run_enter_dev.rs` | Monorepo `--filter`/`-p` package selection (D-JPK-SELECTOR1) for local dev/run; narrow workspace-local selector only. |
+| #478 | live | `crates/jetpack/src/CLI/run_enter_dev.rs` | Monorepo `-p`/`--affected` package selection (D-JPK-SELECTOR1) for local dev/run; narrow workspace-local selector only. |
 | #419 | live | `tests/build_graph.rs` | One BuildPlan IR + complete ActionKey (recipe lower, action kinds, dep outputs, env allowlist, helper versions, exact source, FrontEndCompletion gate); Store ingest still #393. |
 
 ## Stop-line consequences
