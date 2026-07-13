@@ -3872,6 +3872,123 @@ pub(crate) fn register_func_item(f: &Func, st: &mut ModuleState, diags: &mut Vec
     st.funcs.insert(f.name.clone(), func_to_sig(f));
 }
 
+/// D-ENCSTREAM-SURFACE1=A: the shared value + opaque-handle type names
+/// `core.encoding` exports. Naming one in an annotation needs the Core prelude
+/// even without a method call for the expression walker to observe.
+fn is_encoding_surface_type(name: &str) -> bool {
+    // Annotations may spell the type module-qualified (`encoding.EncodingError`,
+    // `json.JSONReader`); match on the final path segment.
+    let base = name.rsplit('.').next().unwrap_or(name);
+    matches!(
+        base,
+        "EncodingLimits"
+            | "EncodingError"
+            | "EncodingCause"
+            | "EncodingFormat"
+            | "EncodingErrorKind"
+            | "DataEvent"
+            | "JSONReader"
+            | "JSONWriter"
+            | "JSONLReader"
+            | "JSONLWriter"
+            | "CSVReader"
+            | "CSVWriter"
+            | "XMLReader"
+            | "XMLWriter"
+            | "CBORReader"
+            | "CBORWriter"
+    )
+}
+
+/// True when `ty` (or any type nested inside it) names a `core.encoding` surface
+/// type. Recurses through every type-carrying `Type` variant.
+fn type_mentions_encoding_surface(ty: &Type) -> bool {
+    match ty {
+        Type::Named(name) => is_encoding_surface_type(name),
+        Type::Apply { name, args } => {
+            is_encoding_surface_type(name) || args.iter().any(type_mentions_encoding_surface)
+        }
+        Type::TraitObject(names) => names.iter().any(|n| is_encoding_surface_type(n)),
+        Type::List(inner)
+        | Type::Shared(inner)
+        | Type::Option(inner)
+        | Type::Tagged { inner, .. } => type_mentions_encoding_surface(inner),
+        Type::FixedList { elem, .. } => type_mentions_encoding_surface(elem),
+        Type::Map { key, value, .. } => {
+            type_mentions_encoding_surface(key) || type_mentions_encoding_surface(value)
+        }
+        Type::Result { ok, err } => {
+            type_mentions_encoding_surface(ok) || type_mentions_encoding_surface(err)
+        }
+        Type::Fn { params, ret, .. } => {
+            params.iter().any(type_mentions_encoding_surface)
+                || ret.as_deref().is_some_and(type_mentions_encoding_surface)
+        }
+        Type::Tuple(fields) => fields.iter().any(|(_, t)| type_mentions_encoding_surface(t)),
+        Type::Int
+        | Type::Float
+        | Type::Bool
+        | Type::String
+        | Type::Char
+        | Type::IntN { .. }
+        | Type::Float32 => false,
+    }
+}
+
+/// A function/method signature (params + return) names an encoding surface type.
+fn func_sig_mentions_encoding_surface(f: &Func) -> bool {
+    f.params.iter().any(|p| type_mentions_encoding_surface(&p.ty))
+        || f.return_type
+            .as_ref()
+            .is_some_and(type_mentions_encoding_surface)
+}
+
+/// Scan every annotation position in a module for a `core.encoding` surface type
+/// (struct fields, enum payloads, function/method/trait signatures, type-alias
+/// targets, associated-type impls). Runtime usage always constructs handles via
+/// a format-module call the expression walker already sees; this only covers the
+/// annotation-only case (a signature that names a handle constructed elsewhere).
+fn module_annotations_mention_encoding_surface(module: &crate::AST::LoadedModule) -> bool {
+    fn variant_payload_mentions(payload: &VariantPayload) -> bool {
+        match payload {
+            VariantPayload::Unit => false,
+            VariantPayload::Single(ty, _) => type_mentions_encoding_surface(ty),
+            VariantPayload::Named(fields) => {
+                fields.iter().any(|f| type_mentions_encoding_surface(&f.ty))
+            }
+        }
+    }
+    module.items.iter().any(|item| match item {
+        Item::Func(f) => func_sig_mentions_encoding_surface(f),
+        Item::Struct(s) => {
+            s.fields.iter().any(|f| type_mentions_encoding_surface(&f.ty))
+                || s.methods.iter().any(func_sig_mentions_encoding_surface)
+                || s.trait_impls
+                    .iter()
+                    .any(|b| b.methods.iter().any(func_sig_mentions_encoding_surface))
+        }
+        Item::Enum(e) => {
+            e.variants.iter().any(|v| variant_payload_mentions(&v.payload))
+                || e.methods.iter().any(func_sig_mentions_encoding_surface)
+                || e.trait_impls
+                    .iter()
+                    .any(|b| b.methods.iter().any(func_sig_mentions_encoding_surface))
+        }
+        Item::Impl(i) => {
+            i.methods.iter().any(func_sig_mentions_encoding_surface)
+                || i.assoc_type_impls
+                    .iter()
+                    .any(|(_, _, ty)| type_mentions_encoding_surface(ty))
+        }
+        Item::Trait(t) => t.methods.iter().any(|m| {
+            m.params.iter().any(|p| type_mentions_encoding_surface(&p.ty))
+                || m.return_type.as_ref().is_some_and(type_mentions_encoding_surface)
+        }),
+        Item::TypeAlias(a) => type_mentions_encoding_surface(&a.target),
+        _ => false,
+    })
+}
+
 pub(crate) fn collect_used_core(
     bundle: &ProgramBundle,
     states: &[ModuleState],
@@ -3881,10 +3998,17 @@ pub(crate) fn collect_used_core(
     for (idx, module) in bundle.modules.iter().enumerate() {
         let imports = &states[idx].core_imports;
         // D-ENCSTREAM-SURFACE1=A: core.encoding now exports runtime value and
-        // opaque handle types. A program may use those solely in annotations,
-        // without a core method call for the expression walker to observe; the
-        // generated Rust still needs the Core prelude that defines them.
-        if imports.values().any(|module| module == "core.encoding" || module.starts_with("core.encoding.")) {
+        // opaque handle types. A program may name those in an annotation without
+        // a core method call for the expression walker to observe; the generated
+        // Rust then still needs the Core prelude that defines them. Only mark the
+        // prelude needed when such a type actually appears in an annotation — a
+        // bare `use core.encoding.json` with no call and no annotation must stay
+        // free of the Core prelude (importing_core_without_calls_is_free_in_codegen).
+        if imports
+            .values()
+            .any(|module| module == "core.encoding" || module.starts_with("core.encoding."))
+            && module_annotations_mention_encoding_surface(module)
+        {
             used.insert("core.encoding::types".to_string());
         }
         for item in &module.items {

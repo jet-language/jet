@@ -409,7 +409,11 @@ fn core_os_interrupt_runtime_failures_use_the_boundary_aware_helpers() {
     assert!(!time.contains("process::exit(70)"));
     assert_eq!(scheduler.matches("process::exit(70)").count(), 1);
     assert!(task_mem.contains("super::jet_panic(\"<core.tasks>\""));
-    assert!(time.contains("jet_runtime_diagnostic(format!"));
+    // The deadline helper binds the rendered E3003 to a local so it can feed
+    // both the interrupt-handler unwind branch and the boundary-aware diagnostic
+    // (D-fatal-waits containment, commit 40a9fca8); it still routes its fatal
+    // path through `jet_runtime_diagnostic`, never `process::exit`.
+    assert!(time.contains("jet_runtime_diagnostic(rendered)"));
     assert!(scheduler.contains("fn jet_scheduler_fatal(msg: &str) -> !"));
     let core = include_str!("../crates/jet-codegen/src/Prelude/Core.rs");
     assert!(core.contains("fn jet_runtime_should_unwind() -> bool"));
