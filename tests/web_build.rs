@@ -606,6 +606,52 @@ fn run() {}
 }
 
 #[test]
+fn web_inline_modules_keep_qualified_function_identity() {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web module identity test");
+        return;
+    }
+    let src = r#"#Target(Web)
+module Left {
+    #Target(Js)
+    pub fn value() -> Int { return 1 }
+}
+module Right {
+    #Target(Js)
+    pub fn value() -> Int { return 2 }
+}
+#Target(Js)
+fn run() { print(Left.value() + Right.value()) }
+"#;
+    let dir = build_web_fixture("module_identity", src, "tests/fixtures/web_module_identity.jet");
+    let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
+    assert!(js.contains("function Left__value()"), "left module identity was dropped:\n{js}");
+    assert!(js.contains("function Right__value()"), "right module identity was dropped:\n{js}");
+    assert_eq!(run_web_app(&dir), "3\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn web_wasm_inline_modules_emit_distinct_qualified_calls() {
+    if !have_tool("rustc") {
+        eprintln!("note: skipping web Wasm module identity test");
+        return;
+    }
+    let src = r#"#Target(Web)
+module Left { pub fn value() -> Int { return 1 } }
+module Right { pub fn value() -> Int { return 2 } }
+fn run() { print(Left.value() + Right.value()) }
+"#;
+    let dir = build_web_fixture("wasm_module_identity", src, "tests/fixtures/web_wasm_module_identity.jet");
+    let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
+    assert!(wasm.contains("fn jet_wasm_Left__value() -> i64"), "left Wasm identity was dropped:\n{wasm}");
+    assert!(wasm.contains("fn jet_wasm_Right__value() -> i64"), "right Wasm identity was dropped:\n{wasm}");
+    assert!(wasm.contains("jet_wasm_Left__value()"), "left qualified call was dropped:\n{wasm}");
+    assert!(wasm.contains("jet_wasm_Right__value()"), "right qualified call was dropped:\n{wasm}");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn web_missing_return_is_a_preflight_diagnostic() {
     let src = "#Target(Web)\n#Target(Js)\nfn missing() -> Int { n :: 1 }\nfn run() {}\n";
     let diags = jet::compile_web_with_path(src, "tests/fixtures/web_missing_return.jet")
@@ -675,7 +721,7 @@ fn run() { print("hello, web") }
         .expect("host dev entry and web run body must compile through their own execution paths");
     let web = out.web.expect("web artifacts");
     let wasm = &web.wasm_rust;
-    assert!(wasm.contains("fn jet_wasm_dev() -> i64"), "module Tools.dev was not emitted:\n{wasm}");
+    assert!(wasm.contains("fn jet_wasm_Tools__dev() -> i64"), "module Tools.dev was not emitted:\n{wasm}");
     assert!(wasm.contains("println!(\"{}\", \"hello, web\")"), "literal TIR print was not emitted:\n{wasm}");
     let js = &web.js_app;
     assert!(!js.contains("function dev("), "top-level host dev leaked into JS runtime:\n{js}");

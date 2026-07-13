@@ -240,6 +240,10 @@ fn web_wasm_expr_supported(
         }
         TIR::TExprKind::Call { name, args } => wasm_callee_bucket(bundle, web_name(name)) == Some(WebBucket::Wasm)
             && args.iter().all(|a| web_wasm_expr_supported(&a.value, bundle, reconstructions)),
+        TIR::TExprKind::ModuleCall { form: TIR::TModuleCallForm::InlineMangled { mangled }, args } => {
+            bundle.web_partitions.get(mangled).copied() == Some(WebBucket::Wasm)
+                && args.iter().all(|a| web_wasm_expr_supported(&a.value, bundle, reconstructions))
+        }
         _ => false,
     }
 }
@@ -305,6 +309,7 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
         E::Field { recv, .. } => web_expr_supported(recv),
         E::StructLit { fields, .. } => fields.iter().all(|(_, e, _)| web_expr_supported(e)),
         E::Call { args, .. } | E::MethodCall { args, .. } => args.iter().all(|a| web_expr_supported(&a.value)),
+        E::ModuleCall { form: TIR::TModuleCallForm::InlineMangled { .. }, args } => args.iter().all(|a| web_expr_supported(&a.value)),
         E::CoreCall { module, method, args } => web_core_arity(module, method) == Some(args.len()) && args.iter().all(web_expr_supported),
         E::HandleMethod { recv, op, args } => matches!(op, TIR::THandleOp::UiBackendMethod { .. } | TIR::THandleOp::ReactiveGet | TIR::THandleOp::ReactiveSet) && web_expr_supported(recv) && args.iter().all(web_expr_supported),
         E::NumericMethod { recv, op: TIR::TNumericOp::CastAs { .. } } => web_expr_supported(recv),
@@ -453,7 +458,7 @@ fn emit_manifest(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> String {
     for f in funcs {
         partition_lines.push(format!(
             "    {}: {}",
-            json_quote(&f.name),
+            json_quote(&f.key),
             json_quote(f.bucket.name())
         ));
     }
@@ -477,8 +482,8 @@ fn emit_manifest(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> String {
                 .unwrap_or_default();
             format!(
                 "    {{ \"name\": {}, \"symbol\": {}, \"params\": [{}]{ret} }}",
-                json_quote(&f.name),
-                json_quote(&wasm_export_symbol(&f.name)),
+                json_quote(&f.key),
+                json_quote(&wasm_export_symbol(&f.key)),
                 params.join(", ")
             )
         })
@@ -640,7 +645,7 @@ fn emit_wasm_fn(_bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut St
     if reconstructed_export {
         out.push_str(&format!(
             "#[no_mangle]\npub extern \"C\" fn {}(",
-            wasm_export_symbol(&f.name)
+            wasm_export_symbol(&f.key)
         ));
         let flat = flattened_web_params(&f.tir);
         let params: Vec<String> = flat
@@ -674,9 +679,9 @@ fn emit_wasm_fn(_bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut St
             .collect::<Vec<_>>()
             .join(", ");
         if f.return_type.is_some() {
-            out.push_str(&format!("    return jet_wasm_{}({args});\n", f.name));
+            out.push_str(&format!("    return jet_wasm_{}({args});\n", f.key));
         } else {
-            out.push_str(&format!("    jet_wasm_{}({args});\n", f.name));
+            out.push_str(&format!("    jet_wasm_{}({args});\n", f.key));
         }
         out.push_str("}\n\n");
     }
@@ -684,10 +689,10 @@ fn emit_wasm_fn(_bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut St
     if export && !reconstructed_export {
         out.push_str(&format!(
             "#[no_mangle]\npub extern \"C\" fn {}(",
-            wasm_export_symbol(&f.name)
+            wasm_export_symbol(&f.key)
         ));
     } else {
-        out.push_str(&format!("fn jet_wasm_{}(", f.name));
+        out.push_str(&format!("fn jet_wasm_{}(", f.key));
     }
     let params: Vec<String> = f.tir.params
         .iter()
@@ -816,6 +821,12 @@ fn wasm_emit_expr(
             let symbol = format!("jet_wasm_{source}");
             format!("{symbol}({})", args.iter().map(|a| wasm_emit_expr(&a.value, funcs, reconstructions)).collect::<Result<Vec<_>, _>>()?.join(", "))
         }
+        TIR::TExprKind::ModuleCall { form: TIR::TModuleCallForm::InlineMangled { mangled }, args } => {
+            let mut callees = funcs.iter().filter(|f| f.key == *mangled && f.bucket == WebBucket::Wasm);
+            callees.next().ok_or(())?;
+            if callees.next().is_some() { return Err(()); }
+            format!("jet_wasm_{mangled}({})", args.iter().map(|a| wasm_emit_expr(&a.value, funcs, reconstructions)).collect::<Result<Vec<_>, _>>()?.join(", "))
+        }
         _ => return Err(()),
     })
 }
@@ -845,11 +856,11 @@ fn emit_js_app(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<Strin
             let args: Vec<String> = f.params.iter().map(|(n, _)| n.clone()).collect();
             out.push_str(&format!(
                 "async function bridge_{}({}) {{\n",
-                f.name,
+                f.key,
                 args.join(", ")
             ));
             out.push_str("  const wasm = await loadWasm();\n");
-            let sym = wasm_export_symbol(&f.name);
+            let sym = wasm_export_symbol(&f.key);
             let mut prelude = String::new();
             let call_args: Vec<String> = f
                 .params
@@ -926,12 +937,12 @@ fn emit_js_fn(f: &FuncWeb, out: &mut String, all: &[FuncWeb]) -> WebEmitResult<(
     // (197_ui_showcase.jet's `initApp`) gets one distinct key per node.
     out.push_str(&format!(
         "export function {}({}) {{\n",
-        f.name,
+        f.key,
         param_names(&f.params)
     ));
     out.push_str(&format!(
         "  jetDom.enterRenderScope({});\n",
-        json_quote(&f.name)
+        json_quote(&f.key)
     ));
     out.push_str("  try {\n");
     emit_tir_js_body(&f.tir.body, out, all, 2).map_err(|()| web_emit_error(f))?;
@@ -1028,6 +1039,11 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb]) -> Result<String, ()> {
             if name == "print" { format!("jetDom.print({args})") }
             else if is_wasm_export(name, funcs) { format!("await bridge_{name}({args})") }
             else { format!("{name}({args})") }
+        }
+        E::ModuleCall { form: TIR::TModuleCallForm::InlineMangled { mangled }, args } => {
+            let args = tir_call_args(args, funcs)?;
+            if is_wasm_export(mangled, funcs) { format!("await bridge_{mangled}({args})") }
+            else { format!("{mangled}({args})") }
         }
         E::Print(value) => format!("jetDom.print({})", tir_js_expr(value, funcs)?),
         E::MethodCall { recv, method_rust, args } => format!("{}.{}({})", tir_js_expr(recv, funcs)?, web_name(method_rust), tir_call_args(args, funcs)?),
@@ -1141,7 +1157,7 @@ fn web_core_arity(module: &str, method: &str) -> Option<usize> {
 }
 
 fn is_wasm_export(name: &str, funcs: &[FuncWeb]) -> bool {
-    funcs.iter().any(|f| f.name == name && f.marker == Some(WebPartitionMarker::WasmExport))
+    funcs.iter().any(|f| f.key == name && f.marker == Some(WebPartitionMarker::WasmExport))
 }
 
 fn binop(op: &crate::AST::BinOp) -> &'static str {
