@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 
 mod common;
 use common::{have_rustc, panic_message, test_worker_count, FfiBridgeLock};
-use jet::Interpreter::{dev_iteration, RunOutcome};
+use jet::Interpreter::{dev_iteration, run_named_task, RunOutcome};
 use jet::JitBackend::{InterpreterBackend, JitBackend};
 use jet_jit::CraneliftBackend;
 
@@ -895,6 +895,37 @@ fn interpreter_matches_expected_golden() {
     let mut checked = 0usize;
     for stem in all_example_stems() {
         let file = example_path(&stem);
+        // D-JPK-TASKRUN1 / R12 (card #476): task_runner's meaningful entries are
+        // its `#Task` fns, not the `fn run()` usage hint. Mirror golden.rs's
+        // AOT `--task` battery on the interpreter tier via `run_named_task`,
+        // proving the same TIR dispatches each task identically. The bare
+        // `fn run()` output is not a golden.
+        if stem == "jetpack/task_runner" {
+            let mut bundle = jet::Loader::load_entry(&file).expect("task_runner loads");
+            let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+                .into_iter()
+                .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+                .collect();
+            assert!(errors.is_empty(), "task_runner front end: {errors:?}");
+            for (task, expected_name) in [("greet", "task_runner.greet"), ("seed", "task_runner.seed")] {
+                let expected = fs::read_to_string(
+                    root.join(format!("examples/features/expected/jetpack/{expected_name}.out")),
+                )
+                .unwrap_or_else(|_| panic!("missing expected/jetpack/{expected_name}.out"));
+                match run_named_task(&bundle, task, false) {
+                    RunOutcome::Ran { stdout, .. } => assert_eq!(
+                        stdout, expected,
+                        "interpreter --task={task} differs from golden"
+                    ),
+                    RunOutcome::Problems(diags) => panic!(
+                        "interpreter --task={task} did not run: {:?}",
+                        diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
+                    ),
+                }
+                checked += 1;
+            }
+            continue;
+        }
         let expected_path = root.join(format!("examples/features/expected/{}.out", stem));
         match dev_iteration_with_timeout(&stem, &file, true) {
             RunOutcome::Ran { stdout, .. } => {
