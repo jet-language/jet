@@ -1159,11 +1159,36 @@ fn definition_full_key(package_identity: &str, module_path: &str, lexical_path: 
     out
 }
 
-fn instance_identity(key: &ModuleInstanceKey) -> crate::AST::ModuleInstanceIdentity {
+fn package_identity(root: &Path) -> String {
+    fn quoted_field(text: &str, field: &str) -> Option<String> {
+        let needle = format!("{field}:");
+        text.match_indices(&needle).find_map(|(offset, _)| {
+            let boundary = text[..offset].chars().next_back();
+            if boundary.is_some_and(|ch| ch.is_alphanumeric() || ch == '_') { return None; }
+            let rest = text[offset + needle.len()..].trim_start().strip_prefix('"')?;
+            Some(rest.split('"').next()?.to_string())
+        })
+    }
+    let manifest = std::fs::read_to_string(root.join(crate::Syntax::PAYLOAD_FILE)).unwrap_or_default();
+    let name = quoted_field(&manifest, "name").or_else(|| root.file_name().and_then(|v| v.to_str()).map(str::to_string)).unwrap_or_else(|| "workspace".into());
+    let version = quoted_field(&manifest, "version").unwrap_or_else(|| "0.0.0+workspace".into());
+    let lock = std::fs::read_to_string(root.join(".jet/lock")).unwrap_or_default();
+    let mut locked_sources: Vec<_> = lock.lines().map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .collect();
+    locked_sources.sort_unstable();
+    format!("jet.package.v1\u{1}{name}\u{1}{version}\u{1}{}", crate::SHA256::sha256_hex(locked_sources.join("\n").as_bytes()))
+}
+
+fn instance_identity(key: &ModuleInstanceKey, template: &TemplateInfo, alias: &ModuleAliasDef) -> crate::AST::ModuleInstanceIdentity {
     let full_key = key.bytes();
     crate::AST::ModuleInstanceIdentity {
         fingerprint: crate::SHA256::sha256_hex(&full_key),
         full_key,
+        definition_id: template.definition_id.clone(),
+        argument_keys: key.args.clone(),
+        template_span: template.def.span,
+        applications: vec![(alias.name.clone(), alias.name_span)],
     }
 }
 
@@ -1890,7 +1915,7 @@ pub(crate) fn expand_generic_module_aliases(
     // Host-absolute roots never enter language identity. Package source/version
     // identity is currently represented by the loader's stable root basename;
     // module paths below remain workspace-relative.
-    let package_identity = bundle.project_root.file_name().and_then(|name| name.to_str()).unwrap_or("workspace").to_string();
+    let package_identity = package_identity(&bundle.project_root);
     let template_snapshots: Vec<HashMap<String, TemplateInfo>> = bundle
         .modules
         .iter()
@@ -1999,6 +2024,7 @@ pub(crate) fn expand_generic_module_aliases(
     let mut bundle_instances: HashMap<ModuleInstanceKey, String> = HashMap::new();
     let mut bundle_instance_nominals: HashMap<String, Vec<String>> = HashMap::new();
     let mut fingerprint_keys: HashMap<String, Vec<u8>> = HashMap::new();
+    let mut instance_applications: HashMap<String, Vec<(String, Span)>> = HashMap::new();
 
     // Snapshot aliases up front — the mut loop below can't re-borrow `bundle.modules`
     // for an E0609 message that names the source module.
@@ -2135,12 +2161,14 @@ pub(crate) fn expand_generic_module_aliases(
                     continue;
                 };
                 let key = instance_key(info, &args, &type_aliases);
+                instance_applications.entry(crate::SHA256::sha256_hex(&key.bytes()))
+                    .or_default().push((resolved.name.clone(), resolved.name_span));
                 if let Some(canonical) = bundle_instances.get(&key) {
                     projections.insert(alias.name.clone(), canonical.clone());
                     continue;
                 }
                 if let Some(mut cm) = expand_alias(&resolved, module_idx, &templates, diags,&traits,&funcs,&globals,&enums, Some(args)) {
-                    let identity = instance_identity(&key);
+                    let identity = instance_identity(&key, info, &resolved);
                     register_instance_fingerprint(&mut fingerprint_keys, &identity, alias.span);
                     cm.module.instance_identity = Some(identity);
                     bundle_instance_nominals.insert(alias.name.clone(), cm.declarations.iter().filter_map(|item| match item {
@@ -2211,6 +2239,15 @@ pub(crate) fn expand_generic_module_aliases(
             .retain(|i| !matches!(i, Item::GenericModule(_) | Item::ModuleAlias(_)));
         module.items.extend(declarations);
         debug_assert!(!module.items.iter().any(|item| matches!(item, Item::ModuleAlias(_))));
+    }
+    for module in &mut bundle.modules {
+        for item in &mut module.items {
+            let Item::CodeModule(instance) = item else { continue };
+            let Some(identity) = &mut instance.instance_identity else { continue };
+            if let Some(applications) = instance_applications.get(&identity.fingerprint) {
+                identity.applications = applications.clone();
+            }
+        }
     }
 }
 
@@ -5274,8 +5311,9 @@ mod instance_collision_tests {
     #[should_panic(expected = "internal compiler error: E0859 generic module instance fingerprint collision")]
     fn different_full_keys_with_same_digest_fail_closed_before_codegen() {
         let mut registry = HashMap::new();
-        let first = crate::AST::ModuleInstanceIdentity { full_key: vec![1], fingerprint: "forced-digest".into() };
-        let second = crate::AST::ModuleInstanceIdentity { full_key: vec![2], fingerprint: "forced-digest".into() };
+        let make = |full_key| crate::AST::ModuleInstanceIdentity { full_key, fingerprint: "forced-digest".into(), definition_id: "def".into(), argument_keys: Vec::new(), template_span: Span::new(0, 0), applications: Vec::new() };
+        let first = make(vec![1]);
+        let second = make(vec![2]);
         register_instance_fingerprint(&mut registry, &first, Span::new(1, 2));
         register_instance_fingerprint(&mut registry, &second, Span::new(3, 4));
     }

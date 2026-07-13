@@ -146,7 +146,7 @@ mod tests {
 
     #[test]
     fn schema_version_constant() {
-        assert_eq!(SCHEMA_VERSION, 5);
+        assert_eq!(SCHEMA_VERSION, 6);
     }
 
     #[test]
@@ -179,7 +179,7 @@ mod tests {
         let path = fixture("basics/hello.jet");
         let idx = open(&path).expect("hello example should index");
         let json = idx.to_json();
-        assert!(json.contains("\"schema_version\":5"));
+        assert!(json.contains("\"schema_version\":6"));
         assert!(json.contains("\"definitions\""));
         assert!(json.contains("\"identity\""));
         assert!(json.contains("\"references\""));
@@ -209,12 +209,22 @@ mod tests {
         let instance = &index.instances()[0];
         assert_eq!(instance.fingerprint.len(), 64);
         assert!(!instance.full_key_hex.is_empty());
+        assert_eq!(instance.applications.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(), vec!["A", "B"]);
+        assert_eq!(instance.arguments.len(), 2);
+        assert_eq!(instance.exported_members, vec!["value"]);
+        assert_eq!(instance.template_definition_id.len(), 64);
+        let alias_defs: Vec<_> = index.definitions().iter()
+            .filter(|definition| definition.identity == format!("instance:{}", instance.fingerprint))
+            .map(|definition| definition.name.as_str())
+            .collect();
+        assert_eq!(alias_defs, vec!["A", "B"]);
         assert!(index.definitions().iter().any(|definition| {
             definition.identity == format!("instance:{}", instance.fingerprint)
         }));
         let json = index.to_json();
         assert!(json.contains(&instance.fingerprint));
         assert!(json.contains(&instance.full_key_hex));
+        assert!(json.contains("\"applications\":[{\"name\":\"A\""));
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -97,6 +97,10 @@ pub struct CodeModule {
 pub struct ModuleInstanceIdentity {
     pub full_key: Vec<u8>,
     pub fingerprint: String,
+    pub definition_id: String,
+    pub argument_keys: Vec<Vec<u8>>,
+    pub template_span: Span,
+    pub applications: Vec<(String, Span)>,
 }
 
 /// D-GENMOD2=A: one parameter of a generic module — `module Lru<K: Hash, capacity: Int>`.

@@ -198,18 +198,53 @@ pub(crate) fn compute_references(
         Some(n) => n,
         None => return Vec::new(),
     };
+    let aliases = db.index.instances().iter().find_map(|instance| {
+        instance.applications.iter().any(|(alias, _)| alias == &name).then(|| {
+            instance.applications.iter().map(|(alias, _)| alias.as_str()).collect::<std::collections::HashSet<_>>()
+        })
+    });
+    let same_instance = |candidate: &str| aliases.as_ref().is_some_and(|aliases| aliases.contains(candidate));
     let mut result: Vec<(String, Span)> = db
         .refs
         .iter()
-        .filter(|r| r.name == name)
+        .filter(|r| r.name == name || same_instance(&r.name))
         .map(|r| (r.module_path.clone(), r.span))
         .collect();
     if include_declaration {
-        for def in db.defs.iter().filter(|d| d.name == name) {
+        for def in db.defs.iter().filter(|d| d.name == name || same_instance(&d.name)) {
             result.push((def.module_path.clone(), def.def_span));
         }
     }
+    result.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.start.cmp(&b.1.start)).then(a.1.end.cmp(&b.1.end)));
+    result.dedup();
     result
+}
+
+#[cfg(test)]
+mod generic_instance_tests {
+    use super::compute_references;
+
+    #[test]
+    fn references_join_applicative_generic_module_aliases() {
+        let root = std::env::temp_dir().join(format!("jet_lsp_genmod_identity_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("main.jet");
+        let source = "module Value<n: Int> { pub fn get() -> Int { return n } }\nmodule A = Value<3>\nmodule B = Value<3>\nfn run() { print(A.get()); print(B.get()) }\n";
+        std::fs::write(&path, source).unwrap();
+        let shown = path.to_string_lossy().into_owned();
+        let mut bundle = crate::Loader::load_entry(&shown).unwrap();
+        let (diagnostics, facts) = crate::Sema::check_bundle_with_effect_facts(&mut bundle, crate::Sema::CompileMode::Check);
+        assert!(diagnostics.iter().all(|diagnostic| diagnostic.severity != crate::Diagnostics::Severity::Error), "{diagnostics:#?}");
+        let db = jet_semindex::build_symbol_db(&bundle, &facts);
+        let (tokens, lex_diagnostics) = crate::Lexer::lex(source);
+        assert!(lex_diagnostics.is_empty());
+        let references = compute_references(&db, &tokens, &shown, source.find("A.get").unwrap(), true);
+        let spellings: Vec<_> = references.iter().map(|(_, span)| &source[span.start..span.end]).collect();
+        assert!(spellings.iter().any(|spelling| *spelling == "A"), "{spellings:?}");
+        assert!(spellings.iter().any(|spelling| *spelling == "B"), "{spellings:?}");
+        let _ = std::fs::remove_dir_all(root);
+    }
 }
 
 // ── Rename ────────────────────────────────────────────────────────────────────

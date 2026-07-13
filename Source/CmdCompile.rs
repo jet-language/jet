@@ -1798,6 +1798,38 @@ fn native_cache_salt(
     format!("{toolchain}\u{1}{dependency_fingerprint}\u{1}{mode}\u{1}{target}\u{1}{}", instances.join(","))
 }
 
+fn dependency_interface_fingerprint(bundle: &jet::AST::ProgramBundle) -> String {
+    let mut interfaces = Vec::new();
+    for (dependency, root) in &bundle.dep_roots {
+        for module in &bundle.modules {
+            if !module.path.starts_with(root) { continue; }
+            for item in &module.items {
+                let public = match item {
+                    jet::AST::Item::Func(def) => def.is_pub || def.is_package_pub,
+                    jet::AST::Item::Struct(def) => def.is_pub || def.is_package_pub,
+                    jet::AST::Item::Enum(def) => def.is_pub || def.is_package_pub,
+                    jet::AST::Item::Trait(def) => def.is_pub || def.is_package_pub,
+                    jet::AST::Item::Tag(def) => def.is_pub || def.is_package_pub,
+                    jet::AST::Item::CodeModule(def) => def.is_pub || def.is_package_pub,
+                    _ => false,
+                };
+                if public {
+                    interfaces.push((dependency.clone(), module.display.clone(), jet::CanonicalAST::canonical_fragment(item)));
+                }
+            }
+        }
+    }
+    interfaces.sort_by(|a, b| (&a.0, &a.1, &a.2).cmp(&(&b.0, &b.1, &b.2)));
+    let mut bytes = Vec::new();
+    for (dependency, module, interface) in interfaces {
+        for value in [dependency.as_bytes(), module.as_bytes(), interface.as_slice()] {
+            bytes.extend_from_slice(&(value.len() as u64).to_be_bytes());
+            bytes.extend_from_slice(value);
+        }
+    }
+    jet::SHA256::sha256_hex(&bytes)
+}
+
 /// D-BUILDNORM1=A (Tower #85): the content-cache key for building `file` under
 /// `mode_tag` (`"run"`, `"test"`, `"testcov"`, `"bench"`, `"dev"`, …), computed
 /// from the *pre-sema* canonical AST of the whole program (entry + every module
@@ -1841,9 +1873,11 @@ fn native_cache_key(file: &str, profile_tag: &str, mode_tag: &str) -> Option<Str
         let jet::AST::Item::CodeModule(cm) = item else { return None };
         cm.instance_identity.as_ref().map(|identity| identity.fingerprint.clone())
     })).collect();
+    let dependency_interfaces = dependency_interface_fingerprint(&bundle);
+    let toolchain_identity = format!("{}:semindex-v{}:genmod-v1", jet::Manifest::COMPILER_VERSION, jet_semindex::SCHEMA_VERSION);
     let salt = native_cache_salt(
-        jet::Manifest::COMPILER_VERSION,
-        &manifest_fingerprint(file),
+        &toolchain_identity,
+        &format!("{}:{dependency_interfaces}", manifest_fingerprint(file)),
         mode_tag,
         &format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
         &instances,
@@ -2589,7 +2623,39 @@ fn missing_linker(stderr: &str) -> Option<String> {
 
 #[cfg(test)]
 mod missing_c_lib_tests {
-    use super::{missing_c_lib, missing_linker, native_cache_salt};
+    use super::{missing_c_lib, missing_linker, native_cache_key, native_cache_salt};
+
+    struct ScratchProject(std::path::PathBuf);
+
+    impl ScratchProject {
+        fn new() -> Self {
+            let nonce = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock after epoch")
+                .as_nanos();
+            let root = std::env::temp_dir().join(format!(
+                "jet_genmod_cache_{}_{}",
+                std::process::id(),
+                nonce
+            ));
+            std::fs::create_dir_all(&root).expect("create generic-module cache fixture");
+            Self(root)
+        }
+
+        fn write(&self, name: &str, source: &str) {
+            std::fs::write(self.0.join(name), source).expect("write generic-module cache fixture");
+        }
+
+        fn main(&self) -> String {
+            self.0.join("main.jet").to_string_lossy().into_owned()
+        }
+    }
+
+    impl Drop for ScratchProject {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
 
     #[test]
     fn generic_instance_cache_salt_tracks_every_downstream_input() {
@@ -2601,6 +2667,54 @@ mod missing_c_lib_tests {
         assert_ne!(base, native_cache_salt("tool-a", "deps-a", "run", "macos-aarch64", &instances));
         assert_ne!(base, native_cache_salt("tool-a", "deps-a", "run", "linux-x86_64", &["instance-c".into()]));
         assert_eq!(base, native_cache_salt("tool-a", "deps-a", "run", "linux-x86_64", &["instance-b".into(), "instance-a".into()]));
+    }
+
+    #[test]
+    fn generic_instance_native_cache_key_invalidates_on_program_dependency_arg_package_and_profile_edits() {
+        let project = ScratchProject::new();
+        let main = "use defs.Box\nmodule defs\n\nmodule Selected = Box<Int, 3>\nfn run() { print(Selected.value()) }\n";
+        let dependency = "pub module Box<T, n: Int> { pub fn value() -> Int { return n } }\n";
+        let manifest_v1 = "payload: { name: \"cache-proof\", version: \"1.0.0\" }\n";
+        project.write("main.jet", main);
+        project.write("defs.jet", dependency);
+        project.write("pkg.jet", manifest_v1);
+
+        let base = native_cache_key(&project.main(), "default", "run").expect("base cache key");
+
+        project.write(
+            "main.jet",
+            "use defs.Box\nmodule defs\n\nmodule Selected = Box<Int, 3>\nfn run() { print(Selected.value() + 1) }\n",
+        );
+        let program_body = native_cache_key(&project.main(), "default", "run").expect("program body cache key");
+        assert_ne!(base, program_body, "entry-body edit must invalidate native cache");
+
+        project.write("main.jet", main);
+        project.write(
+            "defs.jet",
+            "pub module Box<T, n: Int> { pub fn value() -> Int { return n + 1 } }\n",
+        );
+        let dependency_body = native_cache_key(&project.main(), "default", "run").expect("dependency cache key");
+        assert_ne!(base, dependency_body, "imported template-body edit must invalidate native cache");
+
+        project.write("defs.jet", dependency);
+        project.write(
+            "main.jet",
+            "use defs.Box\nmodule defs\n\nmodule Selected = Box<Int, 4>\nfn run() { print(Selected.value()) }\n",
+        );
+        let argument = native_cache_key(&project.main(), "default", "run").expect("argument cache key");
+        assert_ne!(base, argument, "normalized instance-argument edit must invalidate native cache");
+
+        project.write("main.jet", main);
+        project.write(
+            "pkg.jet",
+            "payload: { name: \"cache-proof\", version: \"2.0.0\" }\n",
+        );
+        let package = native_cache_key(&project.main(), "default", "run").expect("package cache key");
+        assert_ne!(base, package, "package manifest edit must invalidate native cache");
+
+        project.write("pkg.jet", manifest_v1);
+        let profile = native_cache_key(&project.main(), "small", "run").expect("profile cache key");
+        assert_ne!(base, profile, "build-profile edit must invalidate native cache");
     }
 
     #[test]

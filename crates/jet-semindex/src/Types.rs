@@ -4,7 +4,7 @@ use jet_foundation::Diagnostics::Span;
 
 /// Schema version for JSON snapshots and API consumers. Bump when the exported
 /// fact shape changes incompatibly.
-pub const SCHEMA_VERSION: u32 = 5;
+pub const SCHEMA_VERSION: u32 = 6;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstanceFact {
@@ -12,6 +12,11 @@ pub struct InstanceFact {
     pub module_path: String,
     pub fingerprint: String,
     pub full_key_hex: String,
+    pub template_definition_id: String,
+    pub template_span: SourceSpan,
+    pub arguments: Vec<String>,
+    pub applications: Vec<(String, SourceSpan)>,
+    pub exported_members: Vec<String>,
 }
 
 /// Byte span in a source file (same coordinates as diagnostics).

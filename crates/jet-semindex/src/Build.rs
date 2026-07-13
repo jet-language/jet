@@ -129,6 +129,29 @@ impl SymbolDB {
     }
 
     fn finalize_index(&mut self, facts: &SemIndexEffectFacts, bundle: &ProgramBundle) {
+        for module in &bundle.modules {
+            for item in &module.items {
+                let Item::CodeModule(instance) = item else { continue };
+                let Some(identity) = &instance.instance_identity else { continue };
+                let semantic_identity = format!("instance:{}", identity.fingerprint);
+                for (name, span) in &identity.applications {
+                    if self.defs.iter().any(|definition| {
+                        definition.identity == semantic_identity
+                            && definition.name == *name
+                            && definition.module_path == module.display
+                    }) {
+                        continue;
+                    }
+                    self.defs.push(SymDef {
+                        identity: semantic_identity.clone(),
+                        name: name.clone(),
+                        def_span: *span,
+                        module_path: module.display.clone(),
+                        kind: SymKind::Module,
+                    });
+                }
+            }
+        }
         let defs = convert_defs(&self.defs);
         let refs = convert_refs(&self.refs);
         let effects = convert_effects(facts);
@@ -150,6 +173,18 @@ impl SymbolDB {
                 name: cm.name.clone(), module_path: module.display.clone(),
                 fingerprint: identity.fingerprint.clone(),
                 full_key_hex: identity.full_key.iter().map(|byte| format!("{byte:02x}")).collect(),
+                template_definition_id: identity.definition_id.clone(),
+                template_span: identity.template_span.into(),
+                arguments: identity.argument_keys.iter().map(|key| key.iter().map(|byte| format!("{byte:02x}")).collect()).collect(),
+                applications: identity.applications.iter().map(|(name, span)| (name.clone(), (*span).into())).collect(),
+                exported_members: cm.body.as_deref().unwrap_or_default().iter().filter_map(|item| match item {
+                    Item::Func(def) if def.is_pub || def.is_package_pub => Some(def.name.clone()),
+                    Item::Struct(def) if def.is_pub || def.is_package_pub => Some(def.name.clone()),
+                    Item::Enum(def) if def.is_pub || def.is_package_pub => Some(def.name.clone()),
+                    Item::Trait(def) if def.is_pub || def.is_package_pub => Some(def.name.clone()),
+                    Item::Tag(def) if def.is_pub || def.is_package_pub => Some(def.name.clone()),
+                    _ => None,
+                }).collect(),
             })
         })).collect());
     }

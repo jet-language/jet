@@ -177,6 +177,26 @@ fn instance_fingerprint_is_nominal_and_ignores_body_shape() {
 }
 
 #[test]
+fn instance_definition_identity_tracks_manifest_version_and_locked_source() {
+    let base = std::env::temp_dir().join(format!("jet_genmod_identity_{}", std::process::id()));
+    let a = base.join("a");
+    let b = base.join("b");
+    std::fs::create_dir_all(a.join(".jet")).unwrap();
+    std::fs::create_dir_all(b.join(".jet")).unwrap();
+    std::fs::write(a.join("pkg.jet"), "payload: {\n name: \"demo\",\n version: \"1.0.0\"\n}").unwrap();
+    std::fs::write(b.join("pkg.jet"), "payload: {\n name: \"demo\",\n version: \"2.0.0\"\n}").unwrap();
+    std::fs::write(a.join(".jet/lock"), "source = a").unwrap();
+    std::fs::write(b.join(".jet/lock"), "source = b").unwrap();
+    let src = "module Boxed<T> { fn value(v: T) -> T { return v } }\nmodule Use = Boxed<Int>\nfn run() {}";
+    assert_ne!(only_instance_fingerprint(src, a.to_str().unwrap()), only_instance_fingerprint(src, b.to_str().unwrap()));
+    std::fs::write(b.join("pkg.jet"), "payload: { name: \"demo\", version: \"1.0.0\" }").unwrap();
+    assert_ne!(only_instance_fingerprint(src, a.to_str().unwrap()), only_instance_fingerprint(src, b.to_str().unwrap()));
+    std::fs::write(b.join(".jet/lock"), "source = a\n").unwrap();
+    assert_eq!(only_instance_fingerprint(src, a.to_str().unwrap()), only_instance_fingerprint(src, b.to_str().unwrap()));
+    let _ = std::fs::remove_dir_all(base);
+}
+
+#[test]
 fn trait_impl_and_error_conversion_are_specialized_as_one_local_identity_graph() {
     let src = r#"
 module Laws<T> {
