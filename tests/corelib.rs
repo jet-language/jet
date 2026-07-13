@@ -1186,6 +1186,7 @@ fn cbor_whole_codable_bytes_and_original_wire_canonical_validation() {
         return;
     }
     let dir = std::env::temp_dir().join(format!("jet_cbor_whole_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
     let source = r#"
 use core.encoding as encoding
 use core.encoding.cbor as cbor
@@ -1193,12 +1194,13 @@ use core.encoding.cbor as cbor
 @[Codable]
 struct Packet { id: Int, payload: [U8] }
 
-fn run() -> Void ? {
+fn run() {
     packet := Packet.{ id: 7, payload: [222, 173] }
-    wire := cbor.to_bytes(packet)?
-    stable := cbor.to_bytes_canonical(packet)?
-    back: Packet := cbor.decode<Packet>(wire)?
-    raw: [U8] := cbor.decode<[U8]>(cbor.to_bytes([1, 2, 255])?)?
+    wire := cbor.to_bytes(packet) ?? panic("encode")
+    stable := cbor.to_bytes_canonical(packet) ?? panic("canonical encode")
+    back: Packet := cbor.decode<Packet>(wire) ?? panic("decode")
+    raw_wire := cbor.to_bytes([1, 2, 255]) ?? panic("byte encode")
+    raw: [U8] := cbor.decode<[U8]>(raw_wire) ?? panic("byte decode")
     print(wire)
     print(stable == wire)
     print(back.id)
@@ -1212,7 +1214,7 @@ fn run() -> Void ? {
         require_canonical: true,
     }
     // 0x18 0x01 is valid CBOR for 1, but not shortest/Core deterministic.
-    rejected := cbor.parse([24, 1], strict) ?? encoding.Data.Int(-1)
+    rejected := cbor.parse([24, 1], strict) ?? DataTree.Int(-1)
     print(rejected.int() ?? -2)
 }
 "#;

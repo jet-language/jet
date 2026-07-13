@@ -122,7 +122,7 @@ impl<'a> Checker<'a> {
                     }
                     if let Some(arg) = args.get_mut(0) { self.expect_core_arg(name, 0, &Type::List(Box::new(u8_ty())), arg); }
                     if let Some(arg) = args.get_mut(1) { self.expect_core_arg(name, 1, &Type::Named("CBOROptions".to_string()), arg); }
-                    return Some(result_ty(Type::Named("Data".to_string()), Type::Named("CBORError".to_string())));
+                    return Some(result_ty(Type::Named("DataTree".to_string()), Type::Named("CBORError".to_string())));
                 }
                 ("core.encoding.cbor", "to_bytes" | "to_bytes_canonical") => {
                     if args.len() != 1 { self.diags.push(wrong_core_arity(name, 1, args.len(), span)); }
