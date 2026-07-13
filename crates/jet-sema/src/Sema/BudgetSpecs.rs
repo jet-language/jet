@@ -69,6 +69,22 @@ pub fn collect_budget_specs(program: &Program) -> Result<Vec<BudgetSpec>, Vec<Di
     if diags.is_empty() { Ok(specs) } else { Err(diags) }
 }
 
+/// Collect the canonical budget facts from a fully loaded package bundle.
+///
+/// Budget commands consume this after the ordinary front-end check, so command
+/// execution cannot grow a second parser or semantic interpretation.
+pub fn collect_budget_specs_bundle(bundle: &ProgramBundle) -> Result<Vec<BudgetSpec>, Vec<Diagnostic>> {
+    let mut specs = Vec::new();
+    let mut diags = Vec::new();
+    for module in &bundle.modules {
+        let (mut module_specs, mut module_diags) = validate_items(&module.items);
+        specs.append(&mut module_specs);
+        diags.append(&mut module_diags);
+    }
+    validate_collisions(&specs, &mut diags);
+    if diags.is_empty() { Ok(specs) } else { Err(diags) }
+}
+
 pub fn validate_program(program: &Program) -> Vec<Diagnostic> {
     validate_items(&program.items).1
 }

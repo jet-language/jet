@@ -495,6 +495,11 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
     },
     CommandSpec {
+        name: "budget",
+        summary: "check performance budgets or explicitly update a baseline",
+        headline: false,
+    },
+    CommandSpec {
         name: "bench",
         summary: "benchmark a Jet program with honest stats",
         headline: false,
@@ -636,6 +641,13 @@ pub const FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--seed", help: "with fuzz: base PRNG seed --seed=<n> (default: fixed, reproducible)" },
     FlagSpec { long: "--corpus", help: "with fuzz: corpus directory --corpus=<dir> (default: .jet/fuzz/<test>)" },
     FlagSpec { long: "--lens", help: "with prove: project the human report by an exact evidence facet" },
+    FlagSpec { long: "--annotations", help: "with budget: CI annotations auto, none, or github" },
+    FlagSpec { long: "--baseline", help: "with budget update: selected baseline name" },
+    FlagSpec { long: "--bootstrap", help: "with budget update: create absent or stale baseline history" },
+    FlagSpec { long: "--accept-regression", help: "with budget update: explicitly accept a regression" },
+    FlagSpec { long: "--reason", help: "with exceptional budget update: checked-in reason" },
+    FlagSpec { long: "--yes", help: "with budget update: apply a valid non-interactive plan" },
+    FlagSpec { long: "-y", help: "short form of --yes" },
 ];
 
 /// Is `name` a built-in command?
@@ -694,6 +706,7 @@ pub fn owns_flag_vocabulary(name: &str) -> bool {
             | "diff"
             | "merge"
             | "prove"
+            | "budget"
     )
 }
 

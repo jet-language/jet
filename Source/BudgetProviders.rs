@@ -127,6 +127,15 @@ enum Provider { InProcess(InProcessProvider), Subprocess(PathBuf), File(PathBuf)
 #[derive(Default)]
 pub struct ProviderRegistry { providers: BTreeMap<String, Provider> }
 impl ProviderRegistry {
+    /// Registry used by `jet budget` for compiler-owned deterministic facts.
+    /// Values travel through the same typed request/stream validation as every
+    /// other provider; the registry never consults PATH.
+    pub fn with_compiler_facts() -> Self {
+        let mut registry = Self::default();
+        registry.register_in_process("CompilerFacts", compiler_facts_provider)
+            .expect("fixed compiler provider identity");
+        registry
+    }
     /// Provider runs in an isolated process group; collection terminates the
     /// entire group at the deadline without waiting on a blocked worker.
     pub fn register_in_process(&mut self, identity: impl Into<String>, provider: InProcessProvider) -> Result<(), String> { self.insert(identity.into(), Provider::InProcess(provider)) }
@@ -153,6 +162,25 @@ impl ProviderRegistry {
         };
         validate_events(events, request)
     }
+}
+
+fn compiler_facts_provider(request: &ProviderRequest, _: &ProviderCancellation) -> Result<Vec<ProviderEvent>, ProviderFailure> {
+    let CanonicalJson::Array(values) = &request.workload else {
+        return Err(ProviderFailure::malformed("CompilerFacts workload is not an ordered sample array"));
+    };
+    if values.len() != request.specs.len() {
+        return Err(ProviderFailure::malformed("CompilerFacts workload/spec count differs"));
+    }
+    let mut events = Vec::with_capacity(values.len() + 1);
+    for (index, value) in values.iter().enumerate() {
+        let CanonicalJson::Integer(value) = value else {
+            return Err(ProviderFailure::malformed("CompilerFacts sample is not an integer"));
+        };
+        let value = Rational::parse(value, "1").map_err(ProviderFailure::malformed)?;
+        events.push(ProviderEvent::Sample { spec: index as u32, metric: request.specs[index].metric.clone(), value });
+    }
+    events.push(ProviderEvent::Complete { request_id: request.request_id.clone(), samples: values.len() as u64 });
+    Ok(events)
 }
 
 fn run_in_process(function: InProcessProvider, request: &ProviderRequest, timeout: Duration, identity: &str) -> Result<Vec<ProviderEvent>, ProviderFailure> {

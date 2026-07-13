@@ -920,7 +920,7 @@ mod SchemaMigration;
 mod ScopeMembers;
 mod PolicyFacts;
 mod BudgetSpecs;
-pub use BudgetSpecs::{collect_budget_specs, BudgetApplicability, BudgetAxis, BudgetComparisonFact, BudgetLimitFact, BudgetQuantity, BudgetRawQuantity, BudgetSpec};
+pub use BudgetSpecs::{collect_budget_specs, collect_budget_specs_bundle, BudgetApplicability, BudgetAxis, BudgetComparisonFact, BudgetLimitFact, BudgetQuantity, BudgetRawQuantity, BudgetSpec};
 mod CheckerReferences;
 mod State;
 mod Taint;

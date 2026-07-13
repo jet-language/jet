@@ -17,6 +17,7 @@ use jet::Diagnostics::ColorChoice;
 use jet::ExitCodes;
 
 mod CmdCodemod;
+mod CmdBudget;
 mod CmdCompile;
 mod CmdDevTools;
 mod CmdDevWeb;
@@ -1013,6 +1014,9 @@ fn main() {
 
     // Commands with no required positional target.
     match cmd {
+        "budget" => {
+            exit(CmdBudget::run(&raw));
+        }
         "prove" => {
             let prove_args: Vec<String> = raw.iter().skip(1).cloned().collect();
             run_prove(&prove_args, mode.json);

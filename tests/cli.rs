@@ -70,6 +70,110 @@ fn isolated_cwd(tag: &str) -> PathBuf {
     dir
 }
 
+fn budget_project(tag: &str, limit: u64) -> PathBuf {
+    let dir = isolated_cwd(tag);
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(
+        dir.join("pkg.jet"),
+        "payload: { name: \"app\", version: \"0.1.0\" }\n",
+    ).unwrap();
+    fs::write(
+        dir.join("src/main.jet"),
+        format!(r#"module perf.package {{
+    budgets: [Budget.{{
+        name: "public-api",
+        scope: .Package,
+        metric: .PublicApiItems,
+        comparison: .Absolute,
+        limit: .AtMost({limit}),
+    }}],
+}}
+pub fn api() {{}}
+fn run() {{}}
+"#),
+    ).unwrap();
+    dir
+}
+
+#[test]
+fn budget_usage_and_preflight_fail_without_artifacts() {
+    let dir = budget_project("budget_no_artifact", 10);
+    for argv in [
+        vec!["budget", "check", "--unknown"],
+        vec!["budget", "update", "--baseline", "ci/linux", "--reason", "no gate"],
+    ] {
+        let out = Command::new(jet()).args(argv).current_dir(&dir).output().unwrap();
+        assert_eq!(out.status.code(), Some(2));
+        assert!(out.stdout.is_empty());
+        assert!(!dir.join(".jet").exists(), "usage failure created an artifact");
+    }
+    fs::write(dir.join("src/main.jet"), "fn run( {\n").unwrap();
+    let out = Command::new(jet()).args(["budget", "check"]).current_dir(&dir).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(!dir.join(".jet").exists(), "compiler preflight created an artifact");
+}
+
+#[test]
+fn budget_check_uses_real_compiler_fact_and_writes_verified_report() {
+    let dir = budget_project("budget_check", 10);
+    let out = Command::new(jet()).args(["budget", "check", "--json"]).current_dir(&dir).output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(out.stderr.is_empty());
+    let value = jet_foundation::PerformanceBudget::CanonicalJson::parse_canonical(&out.stdout).unwrap();
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.contains("\"schema\":\"jet.budget-command\""));
+    assert!(text.contains("\"budget_id\":\"package:public-api\""));
+    assert!(text.contains("\"num\":1"), "public API count must be measured: {text}");
+    let reports = fs::read_dir(dir.join(".jet/perf/reports")).unwrap().collect::<Result<Vec<_>,_>>().unwrap();
+    assert_eq!(reports.len(), 1);
+    let bytes = fs::read(reports[0].path()).unwrap();
+    jet_foundation::PerformanceBudget::verify_budget_report(&bytes).unwrap();
+    drop(value);
+}
+
+#[test]
+fn budget_failure_has_human_github_projection_and_exit_one() {
+    let dir = budget_project("budget_failure", 0);
+    let out = Command::new(jet()).args(["budget", "check", "--annotations", "github"]).current_dir(&dir).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(out.stdout.is_empty());
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(stderr.contains("Error [E2907]: performance budget public-api regressed"), "{stderr}");
+    assert!(stderr.contains("::error file=src/main.jet"), "{stderr}");
+    assert!(stderr.contains("budgets failed: 1 budget failed · report "), "{stderr}");
+}
+
+#[test]
+fn budget_update_is_plan_first_and_yes_applies_once() {
+    let dir = budget_project("budget_update", 10);
+    let args = ["budget", "update", "--baseline", "ci/linux", "--bootstrap", "--reason", "initial evidence", "--json"];
+    let plan = Command::new(jet()).args(args).current_dir(&dir).output().unwrap();
+    assert_eq!(plan.status.code(), Some(0), "{}", String::from_utf8_lossy(&plan.stderr));
+    let plan = String::from_utf8(plan.stdout).unwrap();
+    assert!(plan.contains("\"applied\":false"));
+    assert!(!dir.join(".jet/perf/baselines/names/ci/linux.json").exists());
+
+    let applied = Command::new(jet()).args(args).arg("--yes").current_dir(&dir).output().unwrap();
+    assert_eq!(applied.status.code(), Some(0), "{}", String::from_utf8_lossy(&applied.stderr));
+    let applied = String::from_utf8(applied.stdout).unwrap();
+    assert!(applied.contains("\"applied\":true"));
+    assert!(dir.join(".jet/perf/baselines/names/ci/linux.json").is_file());
+}
+
+#[test]
+fn budget_surface_is_generated_into_help_completions_and_man() {
+    let help = Command::new(jet()).arg("help").output().unwrap();
+    assert!(String::from_utf8(help.stdout).unwrap().contains("budget"));
+    let completions = Command::new(jet()).args(["self", "completions", "bash"]).output().unwrap();
+    let completions = String::from_utf8(completions.stdout).unwrap();
+    assert!(completions.contains("budget"));
+    assert!(completions.contains("--baseline"));
+    let man = Command::new(jet()).args(["self", "man"]).output().unwrap();
+    let man = String::from_utf8(man.stdout).unwrap();
+    assert!(man.contains("budget"));
+    assert!(man.contains("--accept-regression"));
+}
+
 // ── Exit-code table ────────────────────────────────────────────────
 
 #[test]
