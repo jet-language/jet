@@ -224,6 +224,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-EMAIL1=A / D-EMAIL-SMTP-SURFACE1=A: exact ungated email values.
         | "Address" | "Message" | "Attachment" | "Envelope" | "EmailError"
         | "SmtpSecurity" | "RecipientPolicy" | "RecipientReport" | "SendReport"
+        | "Limits"
         // D-REGEXENGINE1=A: std-only linear regex values.
         | "Regex" | "RegexFlags" | "Match"
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP types.
@@ -261,7 +262,7 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     if type_name == "HttpShutdownReport" && matches!(field, "accepted" | "overloaded" | "completed" | "cancelled") {
         return Some(Type::Int);
     }
-    if matches!(type_name, "EncodingLimits" | "EncodingCause" | "EncodingError" | "CBOROptions" | "CBORError" | "AsyncPolicy" | "RecipientReport" | "SendReport") {
+    if matches!(type_name, "EncodingLimits" | "EncodingCause" | "EncodingError" | "CBOROptions" | "CBORError" | "AsyncPolicy" | "RecipientReport" | "SendReport" | "Limits") {
         return core_constructable_fields(type_name)?.into_iter().find(|(name, _)| name == field).map(|(_, ty)| ty);
     }
     if type_name == "Envelope" {
@@ -903,6 +904,14 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             ("max_total_bytes".to_string(), Type::Option(Box::new(Type::Int))),
             ("max_expansion_depth".to_string(), Type::Int),
             ("max_expansion_bytes".to_string(), Type::Int),
+        ]),
+        "Limits" => Some(vec![
+            ("max_reply_line_bytes".to_string(), Type::Int),
+            ("max_reply_lines".to_string(), Type::Int),
+            ("max_capabilities".to_string(), Type::Int),
+            ("max_recipients".to_string(), Type::Int),
+            ("max_message_bytes".to_string(), Type::Int),
+            ("max_auth_challenge_bytes".to_string(), Type::Int),
         ]),
         "EncodingCause" => Some(vec![
             ("kind".to_string(), Type::String),

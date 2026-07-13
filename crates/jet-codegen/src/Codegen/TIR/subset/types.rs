@@ -333,7 +333,7 @@ pub(crate) fn is_prelude_struct_name(name: &str) -> bool {
         name,
         "HttpRequest" | "HttpResponse" | "TextWidth" | "AsyncPolicy" | "DecodeError" | "FieldError"
             | "CBOROptions" | "CBORError"
-            | "RecipientReport" | "SendReport"
+            | "RecipientReport" | "SendReport" | "Limits"
     )
 }
 

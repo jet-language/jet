@@ -43,6 +43,13 @@ impl<'a> Checker<'a> {
             }
             return Some(Type::Named("CBOROptions".to_string()));
         }
+        if type_name == "Limits" && method == "safe" {
+            if !args.is_empty() {
+                self.diags.push(Diagnostic::error("E0101", format!("`Limits.safe` takes 0 arguments, got {}", args.len()), "safe SMTP limits are fixed defaults".to_string(), "remove the arguments".to_string(), Some(span)));
+                for arg in args { self.infer(&mut arg.expr); }
+            }
+            return Some(Type::Named("Limits".to_string()));
+        }
         let Some(msig) = self.registry.method(type_name, method).cloned() else {
             self.diags.push(Diagnostic::error(
                 "E0102",

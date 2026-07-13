@@ -443,6 +443,7 @@ impl Cx {
             (Some("core.email"), "Attachment") => Some("Attachment"),
             (Some("core.email"), "Envelope") => Some("Envelope"),
             (Some("core.email"), "SmtpSecurity") => Some("SmtpSecurity"),
+            (Some("core.email"), "Limits") => Some("Limits"),
             (Some("core.email"), "RecipientPolicy") => Some("RecipientPolicy"),
             (Some("core.email"), "RecipientReport") => Some("RecipientReport"),
             (Some("core.email"), "SendReport") => Some("SendReport"),
@@ -660,13 +661,13 @@ impl Cx {
             }
             Type::Named(name) if matches!(name.as_str(),
                 "Address" | "Message" | "Attachment" | "Envelope" | "SmtpSecurity"
-                | "RecipientPolicy" | "RecipientReport" | "SendReport" | "EmailError"
+                | "RecipientPolicy" | "RecipientReport" | "SendReport" | "EmailError" | "Limits"
             ) => {
                 let rust = match name.as_str() {
                     "Address" => "Address", "Message" => "Message", "Attachment" => "Attachment",
                     "Envelope" => "Envelope", "SmtpSecurity" => "SmtpSecurity",
                     "RecipientPolicy" => "RecipientPolicy", "RecipientReport" => "RecipientReport",
-                    "SendReport" => "SendReport", _ => "Error",
+                    "SendReport" => "SendReport", "Limits" => "Limits", _ => "Error",
                 };
                 format!("{}jet_email::{rust}", self.root_prefix)
             }
@@ -859,7 +860,7 @@ impl Cx {
                 let resolved = self.core_qualified_rust_type_name(name).unwrap();
                 if matches!(resolved,
                     "Address" | "Message" | "Attachment" | "Envelope" | "SmtpSecurity"
-                    | "RecipientPolicy" | "RecipientReport" | "SendReport" | "EmailError"
+                    | "RecipientPolicy" | "RecipientReport" | "SendReport" | "EmailError" | "Limits"
                 ) {
                     let rust = if resolved == "EmailError" { "Error" } else { resolved };
                     return format!("{}jet_email::{rust}", self.root_prefix);
@@ -1334,7 +1335,15 @@ pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
         ("response_code".to_string(), Type::Int), ("response".to_string(), Type::String),
         ("accepted_at".to_string(), Type::String),
     ]);
-    cx.cloneable.extend(["Envelope".to_string(), "RecipientReport".to_string(), "SendReport".to_string()]);
+    cx.struct_fields.insert("Limits".to_string(), vec![
+        ("max_reply_line_bytes".to_string(), Type::Int),
+        ("max_reply_lines".to_string(), Type::Int),
+        ("max_capabilities".to_string(), Type::Int),
+        ("max_recipients".to_string(), Type::Int),
+        ("max_message_bytes".to_string(), Type::Int),
+        ("max_auth_challenge_bytes".to_string(), Type::Int),
+    ]);
+    cx.cloneable.extend(["Envelope".to_string(), "RecipientReport".to_string(), "SendReport".to_string(), "Limits".to_string()]);
 }
 
 pub(crate) fn build_cx_items(

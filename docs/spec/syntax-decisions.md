@@ -1821,9 +1821,19 @@ index, not a substitute for that law.
   Tls, Auth, Protocol, Rejected, Transient, TimedOut, Cancelled, and
   DeliveryUnknown set, each with operation, optional server/code, and reason.
   No trust-all mode, TLS downgrade, plaintext password auth, or automatic retry
-  exists. Exact `Limits`, password-secret, and custom-root bridge completion is
-  owner-gated by D-EMAIL-SMTP-CONFIG1; config, Mailer, and send remain unexported
-  until that gate is ratified and implemented.
+  exists.
+- **D-EMAIL-SMTP-CONFIG1=A**: SMTP passwords use the existing move-only,
+  redacted `Secret`. `Limits` has `max_reply_line_bytes`, `max_reply_lines`,
+  `max_capabilities`, `max_recipients`, `max_message_bytes`, and
+  `max_auth_challenge_bytes`; `Limits.safe()` returns 512, 100, 100, 100,
+  33554432, and 4096. Valid ranges, checked in that field order, are
+  64..65536, 1..1000, 1..1000, 1..10000, 1..1073741824, and 1..65536; the
+  first failure is `EmailError.Configuration`. `.SystemPlusCa(pem:[U8])`
+  extends system roots with parsed PEM certificates while retaining DNS-name
+  verification. Empty, malformed, or certificate-free PEM is rejected before
+  credentials can be sent. There is no trust-all mode. SMTP interprets secret
+  bytes as UTF-8 only inside authentication and rejects invalid UTF-8 as
+  configuration.
 - **D-ENCSTREAM1=A**: each `core.encoding` codec has one adapter identity with
   whole-value and reader/writer stream modes over the shared `DataTree`
   and `Codable` machinery. Streaming is a mode of that adapter, never a second

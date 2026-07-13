@@ -147,6 +147,9 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         "CBORError" => matches!(member, "kind" | "byte_offset" | "path" | "reason"),
         "Envelope" => matches!(member, "from" | "recipients"),
         "RecipientReport" => matches!(member, "address" | "accepted" | "code" | "message"),
+        "Limits" => matches!(member,
+            "max_reply_line_bytes" | "max_reply_lines" | "max_capabilities" |
+            "max_recipients" | "max_message_bytes" | "max_auth_challenge_bytes"),
         "SendReport" => matches!(member, "server" | "accepted" | "rejected" | "response_code" | "response" | "accepted_at"),
         _ => false,
     };

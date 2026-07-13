@@ -418,9 +418,9 @@ pub const CORE_MEM_ALLOC_MODULE: &str = "core.mem.alloc";
 /// D-ARGS1 (ratified 2026-06-22): declarative CLI argument parsing module.
 pub const CORE_ARGS_MODULE: &str = "core.args";
 
-// D-EMAIL1=A / D-EMAIL-SMTP-SURFACE1=A: bounded message/MIME plus exact
-// ungated envelope, policy, report, and error values. D-EMAIL-SMTP-CONFIG1
-// gates config/auth/trust/Mailer transport spellings and remains unexported.
+// D-EMAIL1=A / D-EMAIL-SMTP-SURFACE1=A / D-EMAIL-SMTP-CONFIG1=A: bounded
+// message/MIME plus exact SMTP policy values. Mailer stays unexported until its
+// verified TLS transport is wired end to end.
 pub const CORE_EMAIL_MODULE: &str = "core.email";
 pub const TYPE_EMAIL_ADDRESS: &str = "Address";
 pub const TYPE_EMAIL_MESSAGE: &str = "Message";
@@ -431,6 +431,11 @@ pub const TYPE_EMAIL_RECIPIENT_POLICY: &str = "RecipientPolicy";
 pub const TYPE_EMAIL_RECIPIENT_REPORT: &str = "RecipientReport";
 pub const TYPE_EMAIL_SEND_REPORT: &str = "SendReport";
 pub const TYPE_EMAIL_ERROR: &str = "EmailError";
+pub const TYPE_EMAIL_LIMITS: &str = "Limits";
+pub const TYPE_EMAIL_SMTP_AUTH: &str = "SmtpAuth";
+pub const TYPE_EMAIL_TLS_TRUST: &str = "TlsTrust";
+pub const TYPE_EMAIL_SMTP_CONFIG: &str = "SmtpConfig";
+pub const EMAIL_LIMITS_SAFE_METHOD: &str = "safe";
 pub const CORE_EMAIL_ADDRESS_FN: &str = "address";
 pub const CORE_EMAIL_ATTACHMENT_FN: &str = "attachment";
 pub const CORE_EMAIL_MESSAGE_FN: &str = "message";

@@ -274,7 +274,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
         } => {
             let core_email_struct = import_ns.as_deref().is_some_and(|alias| {
                 cx.core_imports.get(alias).map(String::as_str) == Some(crate::Syntax::CORE_EMAIL_MODULE)
-                    && matches!(type_name.as_str(), "RecipientReport" | "SendReport")
+                    && matches!(type_name.as_str(), "RecipientReport" | "SendReport" | "Limits")
             });
             let core_cbor_struct = import_ns.as_deref().is_some_and(|alias| {
                 cx.core_imports.get(alias).map(String::as_str) == Some("core.encoding.cbor")

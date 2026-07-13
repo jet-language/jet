@@ -4024,6 +4024,15 @@ pub(crate) fn check_bundle_opts(
     }) {
         used_core.insert("core.validate::field_error".to_string());
     }
+    // D-EMAIL-SMTP-CONFIG1=A: sema canonicalizes `email.Limits.safe()` to a
+    // static `Limits.safe()` call before this late usage walk. Preserve CoreLib
+    // reachability for type-only SMTP policy programs.
+    if bundle.modules.iter().zip(states.iter()).any(|(module, state)| {
+        module.source.contains(".Limits")
+            && state.core_imports.values().any(|path| path == "core.email")
+    }) {
+        used_core.insert("core.email::Limits.safe".to_string());
+    }
     bundle.used_core = used_core;
     bundle.ffi_callback_fns = ffi_callback_fns;
     apply_helper_layer_inference(bundle, &states, &usage_spans, &mut diags);
@@ -4699,6 +4708,17 @@ pub(crate) fn collect_core_expr(
                                 used,
                                 spans,
                                 format!("{submodule}::{method}"),
+                                Some(*method_span),
+                            );
+                        } else if crate::Sema::CheckerCoreLib::core_module_type_item(ns, leaf) {
+                            // Qualified Core type constructor, e.g.
+                            // `email.Limits.safe()`: it still needs CoreLib's
+                            // runtime prelude even though `<ns>.<leaf>` is a
+                            // type, not a nested module.
+                            note_core_usage(
+                                used,
+                                spans,
+                                format!("{ns}::{leaf}.{method}"),
                                 Some(*method_span),
                             );
                         }

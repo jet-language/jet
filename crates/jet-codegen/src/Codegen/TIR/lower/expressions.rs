@@ -960,7 +960,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     };
                 }
                 if cx.core_imports.get(alias).map(String::as_str) == Some(crate::Syntax::CORE_EMAIL_MODULE)
-                    && matches!(type_name.as_str(), "RecipientReport" | "SendReport")
+                    && matches!(type_name.as_str(), "RecipientReport" | "SendReport" | "Limits")
                 {
                     let tfields = fields
                         .iter()
@@ -1104,7 +1104,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     },
                 };
             }
-            if matches!(type_name.as_str(), "RecipientReport" | "SendReport") {
+            if matches!(type_name.as_str(), "RecipientReport" | "SendReport" | "Limits") {
                 let tfields = fields
                     .iter()
                     .map(|(name, _, value)| (name.clone(), lower_expr(value, cx, env), false))

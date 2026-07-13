@@ -62,6 +62,294 @@ pub mod jet_email {
     pub enum RecipientPolicy { RequireAll, DeliverAccepted }
 
     #[derive(Clone, Debug, PartialEq)]
+    pub struct Limits {
+        pub max_reply_line_bytes: i64,
+        pub max_reply_lines: i64,
+        pub max_capabilities: i64,
+        pub max_recipients: i64,
+        pub max_message_bytes: i64,
+        pub max_auth_challenge_bytes: i64,
+    }
+
+    impl Limits {
+        pub fn safe() -> Limits {
+            Limits {
+                max_reply_line_bytes: 512,
+                max_reply_lines: 100,
+                max_capabilities: 100,
+                max_recipients: 100,
+                max_message_bytes: 33_554_432,
+                max_auth_challenge_bytes: 4096,
+            }
+        }
+
+        pub fn validate(&self) -> Result<(), Error> {
+            for (field, value, min, max) in [
+                ("max_reply_line_bytes", self.max_reply_line_bytes, 64, 65_536),
+                ("max_reply_lines", self.max_reply_lines, 1, 1000),
+                ("max_capabilities", self.max_capabilities, 1, 1000),
+                ("max_recipients", self.max_recipients, 1, 10_000),
+                ("max_message_bytes", self.max_message_bytes, 1, 1_073_741_824),
+                ("max_auth_challenge_bytes", self.max_auth_challenge_bytes, 1, 65_536),
+            ] {
+                if value < min || value > max {
+                    return Err(error("smtp", format!(
+                        "{field} must be between {min} and {max}; got {value}"
+                    )));
+                }
+            }
+            Ok(())
+        }
+    }
+
+    // Hidden Rust generic preserves Jet's single canonical Secret type.
+    pub enum SmtpAuth<S> {
+        None,
+        Password { username: String, password: S },
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub enum TlsTrust {
+        System,
+        SystemPlusCa { pem: Vec<u8> },
+    }
+
+    pub struct SmtpConfig<S> {
+        pub host: String,
+        pub port: i64,
+        pub security: SmtpSecurity,
+        pub auth: SmtpAuth<S>,
+        pub recipient_policy: RecipientPolicy,
+        pub trust: TlsTrust,
+        pub limits: Limits,
+    }
+
+    pub fn validate_smtp_config<S>(config: &SmtpConfig<S>) -> Result<(), Error> {
+        config.limits.validate()?;
+        if config.host.is_empty() || config.host.len() > 253 || !config.host.is_ascii()
+            || config.host.bytes().any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace())
+        {
+            return Err(error("smtp", "host must contain 1 to 253 non-whitespace ASCII bytes"));
+        }
+        if !(1..=65_535).contains(&config.port) {
+            return Err(error("smtp", "port must be between 1 and 65535"));
+        }
+        if config.port == 587 && config.security != SmtpSecurity::StartTls {
+            return Err(error("smtp", "port 587 requires verified STARTTLS"));
+        }
+        if config.port == 465 && config.security != SmtpSecurity::Tls {
+            return Err(error("smtp", "port 465 requires TLS from connect"));
+        }
+        if let SmtpAuth::Password { username, .. } = &config.auth {
+            if username.is_empty() || username.len() > 512
+                || username.bytes().any(|byte| byte.is_ascii_control())
+            {
+                return Err(error("smtp", "SMTP username must contain 1 to 512 bytes without controls"));
+            }
+        }
+        if let TlsTrust::SystemPlusCa { pem } = &config.trust {
+            validate_ca_pem(pem)?;
+        }
+        Ok(())
+    }
+
+    fn validate_ca_pem(pem: &[u8]) -> Result<(), Error> {
+        if pem.is_empty() {
+            return Err(error("smtp", "custom CA PEM must not be empty"));
+        }
+        let text = std::str::from_utf8(pem)
+            .map_err(|_| error("smtp", "custom CA PEM must be UTF-8 text"))?;
+        let begin = "-----BEGIN CERTIFICATE-----";
+        let end = "-----END CERTIFICATE-----";
+        let mut rest = text;
+        let mut certificates = 0usize;
+        while let Some(start) = rest.find(begin) {
+            if !rest[..start].trim().is_empty() {
+                return Err(error("smtp", "custom CA PEM contains data outside certificate blocks"));
+            }
+            rest = &rest[start + begin.len()..];
+            let stop = rest.find(end)
+                .ok_or_else(|| error("smtp", "custom CA PEM has an unterminated certificate"))?;
+            let der = decode_pem_base64(&rest[..stop])?;
+            if der.len() < 4 || der[0] != 0x30 {
+                return Err(error("smtp", "custom CA PEM does not contain an X.509 DER certificate"));
+            }
+            certificates = certificates.checked_add(1)
+                .ok_or_else(|| error("smtp", "custom CA certificate count overflow"))?;
+            rest = &rest[stop + end.len()..];
+        }
+        if certificates == 0 || !rest.trim().is_empty() {
+            return Err(error("smtp", "custom CA PEM must contain only certificate blocks"));
+        }
+        Ok(())
+    }
+
+    fn decode_pem_base64(text: &str) -> Result<Vec<u8>, Error> {
+        let mut out = Vec::new();
+        let mut quartet = [0u8; 4];
+        let mut used = 0usize;
+        let mut padded = false;
+        for byte in text.bytes().filter(|byte| !byte.is_ascii_whitespace()) {
+            if padded {
+                return Err(error("smtp", "custom CA PEM has data after base64 padding"));
+            }
+            quartet[used] = byte;
+            used += 1;
+            if used == 4 {
+                let mut values = [0u8; 4];
+                let mut pads = 0usize;
+                for index in 0..4 {
+                    if quartet[index] == b'=' {
+                        pads += 1;
+                    } else {
+                        if pads != 0 {
+                            return Err(error("smtp", "custom CA PEM has invalid base64 padding"));
+                        }
+                        values[index] = base64_value(quartet[index])
+                            .ok_or_else(|| error("smtp", "custom CA PEM contains invalid base64"))?;
+                    }
+                }
+                if pads > 2 {
+                    return Err(error("smtp", "custom CA PEM has invalid base64 padding"));
+                }
+                out.push(values[0] << 2 | values[1] >> 4);
+                if pads < 2 { out.push(values[1] << 4 | values[2] >> 2); }
+                if pads == 0 { out.push(values[2] << 6 | values[3]); }
+                padded = pads != 0;
+                used = 0;
+            }
+        }
+        if used != 0 || out.is_empty() {
+            return Err(error("smtp", "custom CA PEM contains incomplete base64"));
+        }
+        Ok(out)
+    }
+
+    fn base64_value(byte: u8) -> Option<u8> {
+        match byte {
+            b'A'..=b'Z' => Some(byte - b'A'),
+            b'a'..=b'z' => Some(byte - b'a' + 26),
+            b'0'..=b'9' => Some(byte - b'0' + 52),
+            b'+' => Some(62),
+            b'/' => Some(63),
+            _ => None,
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct SmtpReply { pub code: i64, pub lines: Vec<String> }
+
+    // Byte-at-a-time CRLF reading keeps the configured line bound prospective.
+    pub fn read_smtp_reply<R: std::io::Read>(reader: &mut R, limits: &Limits) -> Result<SmtpReply, Error> {
+        limits.validate()?;
+        let mut lines = Vec::new();
+        let mut expected = None;
+        loop {
+            if lines.len() == limits.max_reply_lines as usize {
+                return Err(protocol_error("reply exceeds max_reply_lines"));
+            }
+            let mut line = Vec::new();
+            loop {
+                let mut byte = [0u8; 1];
+                match reader.read(&mut byte) {
+                    Ok(0) => return Err(protocol_error("connection closed inside SMTP reply")),
+                    Ok(_) => {
+                        if line.len() == limits.max_reply_line_bytes as usize {
+                            return Err(protocol_error("reply line exceeds max_reply_line_bytes"));
+                        }
+                        line.push(byte[0]);
+                        if line.ends_with(b"\r\n") { break; }
+                    }
+                    Err(err) => return Err(protocol_error(format!("failed reading SMTP reply: {err}"))),
+                }
+            }
+            if line.len() < 5 || !line[..3].iter().all(u8::is_ascii_digit)
+                || !matches!(line[3], b'-' | b' ')
+            {
+                return Err(protocol_error("SMTP reply must start with three digits and space or hyphen"));
+            }
+            let code = ((line[0] - b'0') as i64) * 100
+                + ((line[1] - b'0') as i64) * 10 + (line[2] - b'0') as i64;
+            if expected.replace(code).is_some_and(|value| value != code) {
+                return Err(protocol_error("multiline SMTP reply changed response code"));
+            }
+            let continued = line[3] == b'-';
+            let body = std::str::from_utf8(&line[4..line.len() - 2])
+                .map_err(|_| protocol_error("SMTP reply is not UTF-8"))?;
+            lines.push(body.to_string());
+            if !continued { return Ok(SmtpReply { code, lines }); }
+        }
+    }
+
+    fn protocol_error(reason: impl Into<String>) -> Error {
+        Error::Protocol { operation: "smtp_reply".to_string(), server: None, code: None, reason: reason.into() }
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct SmtpCapabilities { pub names: Vec<String> }
+
+    pub fn smtp_capabilities(reply: &SmtpReply, limits: &Limits) -> Result<SmtpCapabilities, Error> {
+        limits.validate()?;
+        if reply.code != 250 { return Err(protocol_error("EHLO requires a 250 reply")); }
+        let mut names = Vec::new();
+        for line in reply.lines.iter().skip(1) {
+            let name = line.split_ascii_whitespace().next().unwrap_or("");
+            if name.is_empty() || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
+                return Err(protocol_error("EHLO capability name is invalid"));
+            }
+            let name = name.to_ascii_uppercase();
+            if !names.contains(&name) {
+                if names.len() == limits.max_capabilities as usize {
+                    return Err(protocol_error("EHLO exceeds max_capabilities"));
+                }
+                names.push(name);
+            }
+        }
+        Ok(SmtpCapabilities { names })
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct SmtpState { greeted: bool, ehlo: bool, verified_tls: bool, authenticated: bool }
+
+    impl SmtpState {
+        pub fn new() -> SmtpState {
+            SmtpState { greeted: false, ehlo: false, verified_tls: false, authenticated: false }
+        }
+        pub fn greeting(&mut self, reply: &SmtpReply) -> Result<(), Error> {
+            if self.greeted || reply.code != 220 { return Err(protocol_error("expected one SMTP 220 greeting")); }
+            self.greeted = true; Ok(())
+        }
+        pub fn ehlo(&mut self, reply: &SmtpReply, limits: &Limits) -> Result<SmtpCapabilities, Error> {
+            if !self.greeted { return Err(protocol_error("EHLO cannot precede greeting")); }
+            let caps = smtp_capabilities(reply, limits)?;
+            self.ehlo = true; Ok(caps)
+        }
+        pub fn start_tls(&mut self, caps: &SmtpCapabilities) -> Result<(), Error> {
+            if !self.ehlo || self.verified_tls || !caps.names.iter().any(|name| name == "STARTTLS") {
+                return Err(Error::Tls { operation: "starttls".to_string(), server: None, code: None,
+                    reason: "verified STARTTLS requires an advertised capability after EHLO".to_string() });
+            }
+            self.ehlo = false; Ok(())
+        }
+        pub fn verified_tls(&mut self) { self.verified_tls = true; }
+        pub fn authenticate(&mut self, auth: &str, challenge_bytes: usize, limits: &Limits) -> Result<(), Error> {
+            if !self.verified_tls || !self.ehlo {
+                return Err(Error::Auth { operation: "auth".to_string(), server: None, code: None,
+                    reason: "password authentication requires verified TLS and post-TLS EHLO".to_string() });
+            }
+            if challenge_bytes > limits.max_auth_challenge_bytes as usize {
+                return Err(Error::Auth { operation: "auth".to_string(), server: None, code: None,
+                    reason: "authentication challenge exceeds max_auth_challenge_bytes".to_string() });
+            }
+            if auth != "PLAIN" && auth != "LOGIN" {
+                return Err(Error::Auth { operation: "auth".to_string(), server: None, code: None,
+                    reason: "relay does not offer supported password authentication".to_string() });
+            }
+            self.authenticated = true; Ok(())
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
     pub struct RecipientReport {
         pub address: Address,
         pub accepted: bool,

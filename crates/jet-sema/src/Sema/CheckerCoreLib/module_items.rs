@@ -308,6 +308,7 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             Syntax::TYPE_EMAIL_ENVELOPE, Syntax::TYPE_EMAIL_SMTP_SECURITY,
             Syntax::TYPE_EMAIL_RECIPIENT_POLICY, Syntax::TYPE_EMAIL_RECIPIENT_REPORT,
             Syntax::TYPE_EMAIL_SEND_REPORT, Syntax::TYPE_EMAIL_ERROR,
+            Syntax::TYPE_EMAIL_LIMITS,
             Syntax::CORE_EMAIL_ADDRESS_FN, Syntax::CORE_EMAIL_ATTACHMENT_FN,
             Syntax::CORE_EMAIL_MESSAGE_FN, Syntax::CORE_EMAIL_ENVELOPE_FN,
             Syntax::CORE_EMAIL_SERIALIZE_FN,

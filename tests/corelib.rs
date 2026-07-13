@@ -148,6 +148,108 @@ fn core_email_envelope_reports_and_errors_follow_smtp_law() {
 }
 
 #[test]
+fn core_email_smtp_config_limits_and_trust_follow_ratified_law() {
+    use email_native::jet_email;
+    let safe = jet_email::Limits::safe();
+    assert_eq!(
+        (
+            safe.max_reply_line_bytes,
+            safe.max_reply_lines,
+            safe.max_capabilities,
+            safe.max_recipients,
+            safe.max_message_bytes,
+            safe.max_auth_challenge_bytes,
+        ),
+        (512, 100, 100, 100, 33_554_432, 4096),
+    );
+    let mut invalid = safe.clone();
+    invalid.max_reply_line_bytes = 63;
+    invalid.max_reply_lines = 0;
+    let first = invalid.validate().unwrap_err();
+    assert!(matches!(first, jet_email::Error::Configuration { reason, .. }
+        if reason.starts_with("max_reply_line_bytes")));
+
+    let pem = b"-----BEGIN CERTIFICATE-----\nMAMCAQE=\n-----END CERTIFICATE-----\n".to_vec();
+    let config: jet_email::SmtpConfig<()> = jet_email::SmtpConfig {
+        host: "smtp.example.com".to_string(),
+        port: 587,
+        security: jet_email::SmtpSecurity::StartTls,
+        auth: jet_email::SmtpAuth::None,
+        recipient_policy: jet_email::RecipientPolicy::RequireAll,
+        trust: jet_email::TlsTrust::SystemPlusCa { pem },
+        limits: safe.clone(),
+    };
+    jet_email::validate_smtp_config(&config).unwrap();
+
+    let malformed: jet_email::SmtpConfig<()> = jet_email::SmtpConfig {
+        host: "smtp.example.com".to_string(),
+        port: 465,
+        security: jet_email::SmtpSecurity::Tls,
+        auth: jet_email::SmtpAuth::None,
+        recipient_policy: jet_email::RecipientPolicy::DeliverAccepted,
+        trust: jet_email::TlsTrust::SystemPlusCa {
+            pem: b"-----BEGIN PRIVATE KEY-----\nAA==\n-----END PRIVATE KEY-----".to_vec(),
+        },
+        limits: safe,
+    };
+    assert!(matches!(jet_email::validate_smtp_config(&malformed),
+        Err(jet_email::Error::Configuration { reason, .. }) if reason.contains("certificate")));
+}
+
+#[test]
+fn core_email_smtp_reply_parser_bounds_and_tls_auth_order_are_real() {
+    use email_native::jet_email;
+    let limits = jet_email::Limits::safe();
+    let mut wire = &b"250-smtp.example\r\n250-STARTTLS\r\n250 AUTH PLAIN LOGIN\r\n"[..];
+    let reply = jet_email::read_smtp_reply(&mut wire, &limits).unwrap();
+    let caps = jet_email::smtp_capabilities(&reply, &limits).unwrap();
+    assert_eq!(caps.names, vec!["STARTTLS", "AUTH"]);
+
+    let mut state = jet_email::SmtpState::new();
+    state.greeting(&jet_email::SmtpReply { code: 220, lines: vec!["ready".to_string()] }).unwrap();
+    let caps = state.ehlo(&reply, &limits).unwrap();
+    assert!(state.authenticate("PLAIN", 10, &limits).is_err());
+    state.start_tls(&caps).unwrap();
+    state.verified_tls();
+    assert!(state.authenticate("PLAIN", 10, &limits).is_err());
+    state.ehlo(&reply, &limits).unwrap();
+    state.authenticate("PLAIN", 10, &limits).unwrap();
+    assert!(state.authenticate("PLAIN", 4097, &limits).is_err());
+
+    let mut tight = limits;
+    tight.max_reply_line_bytes = 64;
+    let oversized = format!("250 {}\r\n", "x".repeat(61));
+    assert!(jet_email::read_smtp_reply(&mut oversized.as_bytes(), &tight).is_err());
+    let mut changed = &b"250-first\r\n251 final\r\n"[..];
+    assert!(jet_email::read_smtp_reply(&mut changed, &tight).is_err());
+}
+
+#[test]
+fn core_email_limits_are_constructible_real_jet_values() {
+    let dir = std::env::temp_dir().join(format!("jet_email_limits_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(&dir, "email_limits", r#"
+use core.email as email
+
+fn run() {
+    safe: email.Limits := email.Limits.safe()
+    print("{safe.max_reply_line_bytes},{safe.max_reply_lines},{safe.max_capabilities},{safe.max_recipients},{safe.max_message_bytes},{safe.max_auth_challenge_bytes}")
+    strict: email.Limits := email.Limits.{
+        max_reply_line_bytes: 64,
+        max_reply_lines: 1,
+        max_capabilities: 2,
+        max_recipients: 3,
+        max_message_bytes: 4,
+        max_auth_challenge_bytes: 5,
+    }
+    print("{strict.max_reply_line_bytes},{strict.max_auth_challenge_bytes}")
+}
+"#, &[], None);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(stdout, "512,100,100,100,33554432,4096\n64,5\n");
+}
+
+#[test]
 fn encoding_stream_foundation_types_are_real_jet_values() {
     let dir = std::env::temp_dir().join(format!("jet_encoding_foundation_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
