@@ -818,11 +818,11 @@ fn web_file_module_same_leaf_partitions_ignore_load_order() {
                 ("main.jet", &main),
                 (
                     "left.jet",
-                    "#Target(Js)\npub fn value() -> Int { return 1 }\n",
+                    "#Target(Js)\nfn helper() -> Int { return 1 }\n#Target(Js)\npub fn value() -> Int { return helper() }\n",
                 ),
                 (
                     "right.jet",
-                    "#WasmExport\npub fn value() -> Int { return 2 }\n",
+                    "fn helper() -> Int { return 2 }\n#WasmExport\npub fn value() -> Int { return helper() }\n",
                 ),
             ],
         );
@@ -832,8 +832,17 @@ fn web_file_module_same_leaf_partitions_ignore_load_order() {
             "JS sibling inherited Wasm bucket under {stem}:\n{js}"
         );
         assert!(
+            js.contains("function left__helper()"),
+            "JS local helper lost caller identity under {stem}:\n{js}"
+        );
+        assert!(
             js.contains("await bridge_right__value()"),
             "Wasm sibling inherited JS bucket under {stem}:\n{js}"
+        );
+        let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
+        assert!(
+            wasm.contains("jet_wasm_right__helper()"),
+            "Wasm local helper lost caller identity under {stem}:\n{wasm}"
         );
         assert_eq!(run_web_app(&dir), "3\n", "load order changed behavior");
         let _ = fs::remove_dir_all(&dir);

@@ -45,6 +45,7 @@ pub type WebEmitResult<T> = Result<T, WebTirUnsupported>;
 struct FuncWeb {
     name: String,
     key: String,
+    file_prefix: Option<String>,
     bucket: WebBucket,
     marker: Option<WebPartitionMarker>,
     span: Span,
@@ -97,6 +98,7 @@ pub fn validate_web_tir_support(
             &cx,
             bundle,
             None,
+            (i != bundle.entry).then_some(module.alias.as_str()),
             bundle.modules[bundle.entry].html_path.is_some(),
             &mut diags,
         );
@@ -109,24 +111,36 @@ fn validate_web_items_tir(
     cx: &Cx,
     bundle: &ProgramBundle,
     module_prefix: Option<&str>,
+    file_prefix: Option<&str>,
     explicit_html: bool,
     diags: &mut Vec<WebTirUnsupported>,
 ) {
     for item in items {
         match item {
             Item::Func(f) => {
-                let key = module_prefix.map(|m| format!("{m}__{}", f.name)).unwrap_or_else(|| f.name.clone());
+                let key = module_prefix
+                    .map(|m| format!("{m}__{}", f.name))
+                    .or_else(|| file_prefix.map(|m| format!("{m}__{}", f.name)))
+                    .unwrap_or_else(|| f.name.clone());
                 let bucket = bundle.web_partitions.get(&key).copied().unwrap_or(WebBucket::Wasm);
                 let has_wasm_export = bundle.modules.iter().any(|m| items_have_wasm_export(&m.items));
                 // `dev()` is the host-side programmable dev-server entry. It
                 // executes before the web build and is never web-runtime code.
                 let emitted = key != "dev"
                     && (bucket == WebBucket::Js || !explicit_html || has_wasm_export);
-                validate_web_func_tir(f, cx, bundle, bucket, emitted, diags);
+                validate_web_func_tir(f, cx, bundle, file_prefix, bucket, emitted, diags);
             }
             Item::CodeModule(cm) => {
                 if let Some(body) = &cm.body {
-                    validate_web_items_tir(body, cx, bundle, Some(&cm.name), explicit_html, diags);
+                    validate_web_items_tir(
+                        body,
+                        cx,
+                        bundle,
+                        Some(&cm.name),
+                        file_prefix,
+                        explicit_html,
+                        diags,
+                    );
                 }
             }
             _ => {}
@@ -146,6 +160,7 @@ fn validate_web_func_tir(
     f: &Func,
     cx: &Cx,
     bundle: &ProgramBundle,
+    file_prefix: Option<&str>,
     bucket: WebBucket,
     require_web_emit: bool,
     diags: &mut Vec<WebTirUnsupported>,
@@ -160,7 +175,12 @@ fn validate_web_func_tir(
             web_stmts_supported(&tir.body)
                 && (tir.ret.is_none() || web_stmts_guarantee_return(&tir.body))
         } else {
-            web_wasm_stmts_supported(&tir.body, bundle, &tir.web_param_reconstructions)
+            web_wasm_stmts_supported(
+                &tir.body,
+                bundle,
+                file_prefix,
+                &tir.web_param_reconstructions,
+            )
                 && (tir.ret.is_none() || web_stmts_guarantee_return(&tir.body))
                 && web_wasm_abi_supported(f, &tir)
         };
@@ -205,16 +225,17 @@ fn web_wasm_abi_supported(f: &Func, tir: &TIR::TFunc) -> bool {
 fn web_wasm_stmts_supported(
     stmts: &[TIR::TStmt],
     bundle: &ProgramBundle,
+    file_prefix: Option<&str>,
     reconstructions: &[TIR::TWebParamReconstruction],
 ) -> bool {
     stmts.iter().all(|stmt| match stmt {
         TIR::TStmt::LineMarker(_) | TIR::TStmt::Return(None) => true,
-        TIR::TStmt::Let { init, .. } | TIR::TStmt::ExprStmt(init) | TIR::TStmt::Return(Some(init)) => web_wasm_expr_supported(init, bundle, reconstructions),
-        TIR::TStmt::Assign { value, .. } => web_wasm_expr_supported(value, bundle, reconstructions),
+        TIR::TStmt::Let { init, .. } | TIR::TStmt::ExprStmt(init) | TIR::TStmt::Return(Some(init)) => web_wasm_expr_supported(init, bundle, file_prefix, reconstructions),
+        TIR::TStmt::Assign { value, .. } => web_wasm_expr_supported(value, bundle, file_prefix, reconstructions),
         TIR::TStmt::If { cond: TIR::TIfCond::Plain(cond), then_body, else_body, .. } => {
-            web_wasm_expr_supported(cond, bundle, reconstructions)
-                && web_wasm_stmts_supported(then_body, bundle, reconstructions)
-                && else_body.as_deref().map(|body| web_wasm_stmts_supported(body, bundle, reconstructions)).unwrap_or(true)
+            web_wasm_expr_supported(cond, bundle, file_prefix, reconstructions)
+                && web_wasm_stmts_supported(then_body, bundle, file_prefix, reconstructions)
+                && else_body.as_deref().map(|body| web_wasm_stmts_supported(body, bundle, file_prefix, reconstructions)).unwrap_or(true)
         }
         _ => false,
     })
@@ -223,14 +244,15 @@ fn web_wasm_stmts_supported(
 fn web_wasm_expr_supported(
     expr: &TIR::TExpr,
     bundle: &ProgramBundle,
+    file_prefix: Option<&str>,
     reconstructions: &[TIR::TWebParamReconstruction],
 ) -> bool {
     match &expr.kind {
         TIR::TExprKind::IntLit(..) | TIR::TExprKind::FloatLit(_) | TIR::TExprKind::BoolLit(_) | TIR::TExprKind::Local(_) => true,
         TIR::TExprKind::StrLit(parts) => parts.iter().all(|part| matches!(part, TIR::TStrPart::Lit(_))),
-        TIR::TExprKind::Binary { lhs, rhs, .. } => web_wasm_expr_supported(lhs, bundle, reconstructions) && web_wasm_expr_supported(rhs, bundle, reconstructions),
+        TIR::TExprKind::Binary { lhs, rhs, .. } => web_wasm_expr_supported(lhs, bundle, file_prefix, reconstructions) && web_wasm_expr_supported(rhs, bundle, file_prefix, reconstructions),
         TIR::TExprKind::Unary { operand, .. } | TIR::TExprKind::Clone(operand) | TIR::TExprKind::Print(operand) => {
-            web_wasm_expr_supported(operand, bundle, reconstructions)
+            web_wasm_expr_supported(operand, bundle, file_prefix, reconstructions)
         }
         TIR::TExprKind::Field { recv, field_rust, boxed: false } => {
             let TIR::TExprKind::Local(local) = &recv.kind else { return false };
@@ -238,8 +260,8 @@ fn web_wasm_expr_supported(
                 r.local_rust == *local && r.fields.iter().any(|(field, _, _)| field == field_rust)
             })
         }
-        TIR::TExprKind::Call { name, args } => wasm_callee_bucket(bundle, web_name(name)) == Some(WebBucket::Wasm)
-            && args.iter().all(|a| web_wasm_expr_supported(&a.value, bundle, reconstructions)),
+        TIR::TExprKind::Call { name, args } => wasm_callee_bucket(bundle, &local_web_key(file_prefix, name)) == Some(WebBucket::Wasm)
+            && args.iter().all(|a| web_wasm_expr_supported(&a.value, bundle, file_prefix, reconstructions)),
         TIR::TExprKind::ModuleCall { form, args } => {
             let key = match form {
                 TIR::TModuleCallForm::Qualified { rust_mod, rust_fn } => {
@@ -254,41 +276,14 @@ fn web_wasm_expr_supported(
                 == Some(WebBucket::Wasm)
                 && args
                     .iter()
-                    .all(|a| web_wasm_expr_supported(&a.value, bundle, reconstructions))
+                    .all(|a| web_wasm_expr_supported(&a.value, bundle, file_prefix, reconstructions))
         }
         _ => false,
     }
 }
 
 fn wasm_callee_bucket(bundle: &ProgramBundle, name: &str) -> Option<WebBucket> {
-    let mut matches = Vec::new();
-    for module in &bundle.modules {
-        collect_named_web_buckets(&module.items, None, bundle, name, &mut matches);
-    }
-    if matches.len() == 1 { matches.pop() } else { None }
-}
-
-fn collect_named_web_buckets(
-    items: &[Item],
-    prefix: Option<&str>,
-    bundle: &ProgramBundle,
-    wanted: &str,
-    out: &mut Vec<WebBucket>,
-) {
-    for item in items {
-        match item {
-            Item::Func(f) if f.name == wanted => {
-                let key = prefix.map(|p| format!("{p}__{}", f.name)).unwrap_or_else(|| f.name.clone());
-                out.push(bundle.web_partitions.get(&key).copied().unwrap_or(WebBucket::Wasm));
-            }
-            Item::CodeModule(cm) => {
-                if let Some(body) = &cm.body {
-                    collect_named_web_buckets(body, Some(&cm.name), bundle, wanted, out);
-                }
-            }
-            _ => {}
-        }
-    }
+    bundle.web_partitions.get(name).copied()
 }
 
 fn web_stmts_supported(stmts: &[TIR::TStmt]) -> bool {
@@ -416,6 +411,7 @@ fn collect_module_funcs(
                 out.push(FuncWeb {
                     name: f.name.clone(),
                     key,
+                    file_prefix: file_prefix.map(str::to_string),
                     bucket,
                     marker: f.web_marker,
                     span: f.name_span,
@@ -736,6 +732,7 @@ fn emit_wasm_fn(_bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut St
         out,
         1,
         funcs,
+        f.file_prefix.as_deref(),
         &f.tir.web_param_reconstructions,
     )
     .map_err(|()| web_emit_error(f))?;
@@ -766,21 +763,22 @@ fn emit_wasm_body(
     out: &mut String,
     indent: usize,
     funcs: &[FuncWeb],
+    file_prefix: Option<&str>,
     reconstructions: &[TIR::TWebParamReconstruction],
 ) -> Result<(), ()> {
     let pad = "    ".repeat(indent);
     for stmt in body {
         match stmt {
-            TIR::TStmt::Return(Some(expr)) => out.push_str(&format!("{pad}return {};\n", wasm_emit_expr(expr, funcs, reconstructions)?)),
-            TIR::TStmt::ExprStmt(expr) => out.push_str(&format!("{pad}{};\n", wasm_emit_expr(expr, funcs, reconstructions)?)),
-            TIR::TStmt::Let { name, init, .. } => out.push_str(&format!("{pad}let mut {} = {};\n", mangle(name), wasm_emit_expr(init, funcs, reconstructions)?)),
-            TIR::TStmt::Assign { place, op, value, .. } => out.push_str(&format!("{pad}{place} {}= {};\n", op.as_ref().map(binop).unwrap_or(""), wasm_emit_expr(value, funcs, reconstructions)?)),
+            TIR::TStmt::Return(Some(expr)) => out.push_str(&format!("{pad}return {};\n", wasm_emit_expr(expr, funcs, file_prefix, reconstructions)?)),
+            TIR::TStmt::ExprStmt(expr) => out.push_str(&format!("{pad}{};\n", wasm_emit_expr(expr, funcs, file_prefix, reconstructions)?)),
+            TIR::TStmt::Let { name, init, .. } => out.push_str(&format!("{pad}let mut {} = {};\n", mangle(name), wasm_emit_expr(init, funcs, file_prefix, reconstructions)?)),
+            TIR::TStmt::Assign { place, op, value, .. } => out.push_str(&format!("{pad}{place} {}= {};\n", op.as_ref().map(binop).unwrap_or(""), wasm_emit_expr(value, funcs, file_prefix, reconstructions)?)),
             TIR::TStmt::If { cond: TIR::TIfCond::Plain(cond), then_body, else_body, .. } => {
-                out.push_str(&format!("{pad}if {} {{\n", wasm_emit_expr(cond, funcs, reconstructions)?));
-                emit_wasm_body(then_body, out, indent + 1, funcs, reconstructions)?;
+                out.push_str(&format!("{pad}if {} {{\n", wasm_emit_expr(cond, funcs, file_prefix, reconstructions)?));
+                emit_wasm_body(then_body, out, indent + 1, funcs, file_prefix, reconstructions)?;
                 if let Some(else_body) = else_body {
                     out.push_str(&format!("{pad}}} else {{\n"));
-                    emit_wasm_body(else_body, out, indent + 1, funcs, reconstructions)?;
+                    emit_wasm_body(else_body, out, indent + 1, funcs, file_prefix, reconstructions)?;
                 }
                 out.push_str(&format!("{pad}}}\n"));
             }
@@ -795,6 +793,7 @@ fn emit_wasm_body(
 fn wasm_emit_expr(
     expr: &TIR::TExpr,
     funcs: &[FuncWeb],
+    file_prefix: Option<&str>,
     reconstructions: &[TIR::TWebParamReconstruction],
 ) -> Result<String, ()> {
     Ok(match &expr.kind {
@@ -812,13 +811,13 @@ fn wasm_emit_expr(
         TIR::TExprKind::Local(name) => name.clone(),
         TIR::TExprKind::Binary { op, lhs, rhs, .. } => format!(
             "({} {} {})",
-            wasm_emit_expr(lhs, funcs, reconstructions)?,
+            wasm_emit_expr(lhs, funcs, file_prefix, reconstructions)?,
             binop(op),
-            wasm_emit_expr(rhs, funcs, reconstructions)?
+            wasm_emit_expr(rhs, funcs, file_prefix, reconstructions)?
         ),
-        TIR::TExprKind::Unary { op, operand } => format!("({}{})", unop(op), wasm_emit_expr(operand, funcs, reconstructions)?),
-        TIR::TExprKind::Clone(inner) => wasm_emit_expr(inner, funcs, reconstructions)?,
-        TIR::TExprKind::Print(inner) => format!("println!(\"{{}}\", {})", wasm_emit_expr(inner, funcs, reconstructions)?),
+        TIR::TExprKind::Unary { op, operand } => format!("({}{})", unop(op), wasm_emit_expr(operand, funcs, file_prefix, reconstructions)?),
+        TIR::TExprKind::Clone(inner) => wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?,
+        TIR::TExprKind::Print(inner) => format!("println!(\"{{}}\", {})", wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?),
         TIR::TExprKind::Field { recv, field_rust, boxed: false } => {
             let TIR::TExprKind::Local(local) = &recv.kind else { return Err(()) };
             if !reconstructions.iter().any(|r| {
@@ -826,17 +825,17 @@ fn wasm_emit_expr(
             }) {
                 return Err(());
             }
-            format!("({}).{}", wasm_emit_expr(recv, funcs, reconstructions)?, field_rust)
+            format!("({}).{}", wasm_emit_expr(recv, funcs, file_prefix, reconstructions)?, field_rust)
         }
         TIR::TExprKind::Call { name, args } => {
-            let source = web_name(name);
-            let mut callees = funcs.iter().filter(|f| f.name == source && f.bucket == WebBucket::Wasm);
+            let key = local_web_key(file_prefix, name);
+            let mut callees = funcs.iter().filter(|f| f.key == key && f.bucket == WebBucket::Wasm);
             callees.next().ok_or(())?;
             if callees.next().is_some() {
                 return Err(());
             }
-            let symbol = format!("jet_wasm_{source}");
-            format!("{symbol}({})", args.iter().map(|a| wasm_emit_expr(&a.value, funcs, reconstructions)).collect::<Result<Vec<_>, _>>()?.join(", "))
+            let symbol = format!("jet_wasm_{key}");
+            format!("{symbol}({})", args.iter().map(|a| wasm_emit_expr(&a.value, funcs, file_prefix, reconstructions)).collect::<Result<Vec<_>, _>>()?.join(", "))
         }
         TIR::TExprKind::ModuleCall { form, args } => {
             let key = match form {
@@ -848,7 +847,7 @@ fn wasm_emit_expr(
             let mut callees = funcs.iter().filter(|f| f.key == key && f.bucket == WebBucket::Wasm);
             callees.next().ok_or(())?;
             if callees.next().is_some() { return Err(()); }
-            format!("jet_wasm_{key}({})", args.iter().map(|a| wasm_emit_expr(&a.value, funcs, reconstructions)).collect::<Result<Vec<_>, _>>()?.join(", "))
+            format!("jet_wasm_{key}({})", args.iter().map(|a| wasm_emit_expr(&a.value, funcs, file_prefix, reconstructions)).collect::<Result<Vec<_>, _>>()?.join(", "))
         }
         _ => return Err(()),
     })
@@ -916,7 +915,13 @@ fn emit_js_app(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<Strin
                 json_quote("run")
             ));
             out.push_str("  try {\n");
-            emit_tir_js_body(&main_fn.tir.body, &mut out, funcs, 2)
+            emit_tir_js_body(
+                &main_fn.tir.body,
+                &mut out,
+                funcs,
+                main_fn.file_prefix.as_deref(),
+                2,
+            )
                 .map_err(|()| web_emit_error(main_fn))?;
             out.push_str("  } finally {\n    jetDom.exitRenderScope();\n  }\n");
             out.push_str("}\n\n");
@@ -968,7 +973,8 @@ fn emit_js_fn(f: &FuncWeb, out: &mut String, all: &[FuncWeb]) -> WebEmitResult<(
         json_quote(&f.key)
     ));
     out.push_str("  try {\n");
-    emit_tir_js_body(&f.tir.body, out, all, 2).map_err(|()| web_emit_error(f))?;
+    emit_tir_js_body(&f.tir.body, out, all, f.file_prefix.as_deref(), 2)
+        .map_err(|()| web_emit_error(f))?;
     out.push_str("  } finally {\n    jetDom.exitRenderScope();\n  }\n");
     out.push_str("}\n\n");
     Ok(())
@@ -990,6 +996,13 @@ fn qualified_web_key(rust_mod: &str, rust_fn: &str) -> String {
     format!("{}__{}", web_name(rust_mod), web_name(rust_fn))
 }
 
+fn local_web_key(file_prefix: Option<&str>, rust_fn: &str) -> String {
+    let name = web_name(rust_fn);
+    file_prefix
+        .map(|prefix| format!("{prefix}__{name}"))
+        .unwrap_or_else(|| name.to_string())
+}
+
 fn web_place(name: &str) -> String {
     let name = name.strip_prefix("(*").and_then(|s| s.strip_suffix(')')).unwrap_or(name);
     if let Some(source) = name.strip_prefix("_jet_cap_user_") {
@@ -997,74 +1010,80 @@ fn web_place(name: &str) -> String {
     }
     web_name(name).to_string()
 }
-fn emit_tir_js_body(body: &[TIR::TStmt], out: &mut String, funcs: &[FuncWeb], indent: usize) -> Result<(), ()> {
+fn emit_tir_js_body(
+    body: &[TIR::TStmt],
+    out: &mut String,
+    funcs: &[FuncWeb],
+    file_prefix: Option<&str>,
+    indent: usize,
+) -> Result<(), ()> {
     let pad = "  ".repeat(indent);
     for stmt in body {
         match stmt {
             TIR::TStmt::LineMarker(_) => {}
-            TIR::TStmt::Let { name, init, .. } => out.push_str(&format!("{pad}let {} = {};\n", web_name(name), tir_js_expr(init, funcs)?)),
+            TIR::TStmt::Let { name, init, .. } => out.push_str(&format!("{pad}let {} = {};\n", web_name(name), tir_js_expr(init, funcs, file_prefix)?)),
             TIR::TStmt::Assign { place, op, value, .. } => {
                 let assign = op.as_ref().map(|o| format!("{}=", binop(o))).unwrap_or_else(|| "=".to_string());
-                out.push_str(&format!("{pad}{} {assign} {};\n", web_name(place), tir_js_expr(value, funcs)?));
+                out.push_str(&format!("{pad}{} {assign} {};\n", web_name(place), tir_js_expr(value, funcs, file_prefix)?));
             }
-            TIR::TStmt::Return(Some(expr)) => out.push_str(&format!("{pad}return {};\n", tir_js_expr(expr, funcs)?)),
+            TIR::TStmt::Return(Some(expr)) => out.push_str(&format!("{pad}return {};\n", tir_js_expr(expr, funcs, file_prefix)?)),
             TIR::TStmt::Return(None) => out.push_str(&format!("{pad}return;\n")),
-            TIR::TStmt::ExprStmt(expr) => out.push_str(&format!("{pad}{};\n", tir_js_expr(expr, funcs)?)),
+            TIR::TStmt::ExprStmt(expr) => out.push_str(&format!("{pad}{};\n", tir_js_expr(expr, funcs, file_prefix)?)),
             TIR::TStmt::If { cond: TIR::TIfCond::Plain(cond), then_body, else_body, .. } => {
-                out.push_str(&format!("{pad}if ({}) {{\n", tir_js_expr(cond, funcs)?));
-                emit_tir_js_body(then_body, out, funcs, indent + 1)?;
+                out.push_str(&format!("{pad}if ({}) {{\n", tir_js_expr(cond, funcs, file_prefix)?));
+                emit_tir_js_body(then_body, out, funcs, file_prefix, indent + 1)?;
                 if let Some(else_body) = else_body {
                     out.push_str(&format!("{pad}}} else {{\n"));
-                    emit_tir_js_body(else_body, out, funcs, indent + 1)?;
+                    emit_tir_js_body(else_body, out, funcs, file_prefix, indent + 1)?;
                 }
                 out.push_str(&format!("{pad}}}\n"));
             }
             TIR::TStmt::Range { var, start, end, step, body, .. } => {
-                let step = match step { Some(e) => tir_js_expr(e, funcs)?, None => "1".to_string() };
-                out.push_str(&format!("{pad}for (let {} = {}; {} <= {}; {} += {step}) {{\n", web_name(var), tir_js_expr(start, funcs)?, web_name(var), tir_js_expr(end, funcs)?, web_name(var)));
-                emit_tir_js_body(body, out, funcs, indent + 1)?;
+                let step = match step { Some(e) => tir_js_expr(e, funcs, file_prefix)?, None => "1".to_string() };
+                out.push_str(&format!("{pad}for (let {} = {}; {} <= {}; {} += {step}) {{\n", web_name(var), tir_js_expr(start, funcs, file_prefix)?, web_name(var), tir_js_expr(end, funcs, file_prefix)?, web_name(var)));
+                emit_tir_js_body(body, out, funcs, file_prefix, indent + 1)?;
                 out.push_str(&format!("{pad}}}\n"));
             }
             TIR::TStmt::ForIn { var, var2: None, collection, body, .. } => {
-                out.push_str(&format!("{pad}for (const {} of {}) {{\n", web_name(var), tir_js_expr(collection, funcs)?));
-                emit_tir_js_body(body, out, funcs, indent + 1)?;
+                out.push_str(&format!("{pad}for (const {} of {}) {{\n", web_name(var), tir_js_expr(collection, funcs, file_prefix)?));
+                emit_tir_js_body(body, out, funcs, file_prefix, indent + 1)?;
                 out.push_str(&format!("{pad}}}\n"));
             }
-            TIR::TStmt::Inline(inner) | TIR::TStmt::Region(inner) => emit_tir_js_body(inner, out, funcs, indent)?,
+            TIR::TStmt::Inline(inner) | TIR::TStmt::Region(inner) => emit_tir_js_body(inner, out, funcs, file_prefix, indent)?,
             _ => return Err(()),
         }
     }
     Ok(())
 }
 
-fn tir_call_args(args: &[TIR::TCallArg], funcs: &[FuncWeb]) -> Result<String, ()> {
-    Ok(args.iter().map(|a| tir_js_expr(&a.value, funcs)).collect::<Result<Vec<_>, _>>()?.join(", "))
+fn tir_call_args(args: &[TIR::TCallArg], funcs: &[FuncWeb], file_prefix: Option<&str>) -> Result<String, ()> {
+    Ok(args.iter().map(|a| tir_js_expr(&a.value, funcs, file_prefix)).collect::<Result<Vec<_>, _>>()?.join(", "))
 }
 
-fn tir_plain_args(args: &[TIR::TExpr], funcs: &[FuncWeb]) -> Result<Vec<String>, ()> {
-    args.iter().map(|a| tir_js_expr(a, funcs)).collect()
+fn tir_plain_args(args: &[TIR::TExpr], funcs: &[FuncWeb], file_prefix: Option<&str>) -> Result<Vec<String>, ()> {
+    args.iter().map(|a| tir_js_expr(a, funcs, file_prefix)).collect()
 }
 
-fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb]) -> Result<String, ()> {
+fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) -> Result<String, ()> {
     use TIR::TExprKind as E;
     Ok(match &expr.kind {
         E::IntLit(n, _) => n.to_string(),
         E::FloatLit(n) => n.to_string(),
         E::BoolLit(b) => b.to_string(),
         E::CharLit(c) => json_quote(&c.to_string()),
-        E::StrLit(parts) => tir_js_string(parts, funcs)?,
+        E::StrLit(parts) => tir_js_string(parts, funcs, file_prefix)?,
         E::Local(name) => web_place(name),
         E::ConstInline(value) => value.clone(),
-        E::Binary { op, lhs, rhs, .. } => format!("({} {} {})", tir_js_expr(lhs, funcs)?, binop(op), tir_js_expr(rhs, funcs)?),
-        E::Unary { op, operand } => format!("({}{})", unop(op), tir_js_expr(operand, funcs)?),
-        E::Clone(inner) | E::MaterializeView(inner) | E::DistinctRaw(inner) => tir_js_expr(inner, funcs)?,
-        E::Field { recv, field_rust, .. } => format!("{}.{}", tir_js_expr(recv, funcs)?, web_name(field_rust)),
-        E::StructLit { fields, .. } => format!("({{ {} }})", fields.iter().map(|(n, v, _)| Ok(format!("{}: {}", web_name(n), tir_js_expr(v, funcs)?))).collect::<Result<Vec<_>, ()>>()?.join(", ")),
+        E::Binary { op, lhs, rhs, .. } => format!("({} {} {})", tir_js_expr(lhs, funcs, file_prefix)?, binop(op), tir_js_expr(rhs, funcs, file_prefix)?),
+        E::Unary { op, operand } => format!("({}{})", unop(op), tir_js_expr(operand, funcs, file_prefix)?),
+        E::Clone(inner) | E::MaterializeView(inner) | E::DistinctRaw(inner) => tir_js_expr(inner, funcs, file_prefix)?,
+        E::Field { recv, field_rust, .. } => format!("{}.{}", tir_js_expr(recv, funcs, file_prefix)?, web_name(field_rust)),
+        E::StructLit { fields, .. } => format!("({{ {} }})", fields.iter().map(|(n, v, _)| Ok(format!("{}: {}", web_name(n), tir_js_expr(v, funcs, file_prefix)?))).collect::<Result<Vec<_>, ()>>()?.join(", ")),
         E::Call { name, args } => {
-            let name = web_name(name);
-            let args = tir_call_args(args, funcs)?;
+            let name = local_web_key(file_prefix, name);
+            let args = tir_call_args(args, funcs, file_prefix)?;
             if name == "print" { format!("jetDom.print({args})") }
-            else if is_wasm_export(name, funcs) { format!("await bridge_{name}({args})") }
+            else if is_wasm_export(&name, funcs) { format!("await bridge_{name}({args})") }
             else { format!("{name}({args})") }
         }
         E::ModuleCall { form, args } => {
@@ -1074,16 +1093,16 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb]) -> Result<String, ()> {
                 }
                 TIR::TModuleCallForm::InlineMangled { mangled } => mangled.clone(),
             };
-            let args = tir_call_args(args, funcs)?;
+            let args = tir_call_args(args, funcs, file_prefix)?;
             if is_wasm_export(&key, funcs) { format!("await bridge_{key}({args})") }
             else { format!("{key}({args})") }
         }
-        E::Print(value) => format!("jetDom.print({})", tir_js_expr(value, funcs)?),
-        E::MethodCall { recv, method_rust, args } => format!("{}.{}({})", tir_js_expr(recv, funcs)?, web_name(method_rust), tir_call_args(args, funcs)?),
-        E::CoreCall { module, method, args } => tir_core_call(module, method, args, funcs)?,
+        E::Print(value) => format!("jetDom.print({})", tir_js_expr(value, funcs, file_prefix)?),
+        E::MethodCall { recv, method_rust, args } => format!("{}.{}({})", tir_js_expr(recv, funcs, file_prefix)?, web_name(method_rust), tir_call_args(args, funcs, file_prefix)?),
+        E::CoreCall { module, method, args } => tir_core_call(module, method, args, funcs, file_prefix)?,
         E::HandleMethod { recv, op: TIR::THandleOp::UiBackendMethod { method }, args } => {
-            let recv = tir_js_expr(recv, funcs)?;
-            let a = tir_plain_args(args, funcs)?;
+            let recv = tir_js_expr(recv, funcs, file_prefix)?;
+            let a = tir_plain_args(args, funcs, file_prefix)?;
             match (method.as_str(), a.len()) {
                 ("measure", 2) => format!("jetDom.measure({}, {})", a[0], a[1]),
                 ("layout", 2) => format!("jetDom.layout({recv}, {}, {})", a[0], a[1]),
@@ -1093,50 +1112,64 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb]) -> Result<String, ()> {
                 _ => return Err(()),
             }
         }
-        E::HandleMethod { recv, op: TIR::THandleOp::ReactiveGet, args } if args.is_empty() => format!("{}.get()", tir_js_expr(recv, funcs)?),
-        E::HandleMethod { recv, op: TIR::THandleOp::ReactiveSet, args } if args.len() == 1 => format!("{}.set({})", tir_js_expr(recv, funcs)?, tir_js_expr(&args[0], funcs)?),
+        E::HandleMethod { recv, op: TIR::THandleOp::ReactiveGet, args } if args.is_empty() => format!("{}.get()", tir_js_expr(recv, funcs, file_prefix)?),
+        E::HandleMethod { recv, op: TIR::THandleOp::ReactiveSet, args } if args.len() == 1 => format!("{}.set({})", tir_js_expr(recv, funcs, file_prefix)?, tir_js_expr(&args[0], funcs, file_prefix)?),
         E::NumericMethod { recv, op } => match op {
-            TIR::TNumericOp::CastAs { dst_rust } if dst_rust.contains("i") || dst_rust.contains("u") => format!("Math.trunc({})", tir_js_expr(recv, funcs)?),
-            TIR::TNumericOp::CastAs { .. } => tir_js_expr(recv, funcs)?,
+            TIR::TNumericOp::CastAs { dst_rust } if dst_rust.contains("i") || dst_rust.contains("u") => format!("Math.trunc({})", tir_js_expr(recv, funcs, file_prefix)?),
+            TIR::TNumericOp::CastAs { .. } => tir_js_expr(recv, funcs, file_prefix)?,
             _ => return Err(()),
         },
-        E::OrFallback { value, fallback: TIR::TOrFallback::Value(fallback), .. } => format!("({} ?? {})", tir_js_expr(value, funcs)?, tir_js_expr(fallback, funcs)?),
+        E::OrFallback { value, fallback: TIR::TOrFallback::Value(fallback), .. } => format!("({} ?? {})", tir_js_expr(value, funcs, file_prefix)?, tir_js_expr(fallback, funcs, file_prefix)?),
         E::Lambda(lam) => {
             let params = lam.source_params.join(", ");
             match &lam.executable {
-                TIR::TLambdaBody::Expr(body) => format!("({params}) => ({})", tir_js_expr(body, funcs)?),
-                TIR::TLambdaBody::Block(body) => { let mut rendered = String::new(); emit_tir_js_body(body, &mut rendered, funcs, 1)?; format!("({params}) => {{\n{rendered}}}") }
+                TIR::TLambdaBody::Expr(body) => format!("({params}) => ({})", tir_js_expr(body, funcs, file_prefix)?),
+                TIR::TLambdaBody::Block(body) => { let mut rendered = String::new(); emit_tir_js_body(body, &mut rendered, funcs, file_prefix, 1)?; format!("({params}) => {{\n{rendered}}}") }
             }
         }
-        E::CoreClosureCall { kind: TIR::TCoreClosureKind::UiReactiveRender { executable, .. } } => format!("jetDom.reactiveRender({})", tir_js_lambda(executable, funcs)?),
+        E::CoreClosureCall { kind: TIR::TCoreClosureKind::UiReactiveRender { executable, .. } } => format!("jetDom.reactiveRender({})", tir_js_lambda(executable, funcs, file_prefix)?),
         _ => return Err(()),
     })
 }
 
-fn tir_js_lambda(lam: &TIR::TLambda, funcs: &[FuncWeb]) -> Result<String, ()> {
+fn tir_js_lambda(
+    lam: &TIR::TLambda,
+    funcs: &[FuncWeb],
+    file_prefix: Option<&str>,
+) -> Result<String, ()> {
     let params = lam.source_params.join(", ");
     match &lam.executable {
-        TIR::TLambdaBody::Expr(body) => Ok(format!("({params}) => ({})", tir_js_expr(body, funcs)?)),
+        TIR::TLambdaBody::Expr(body) => Ok(format!("({params}) => ({})", tir_js_expr(body, funcs, file_prefix)?)),
         TIR::TLambdaBody::Block(body) => {
             let mut rendered = String::new();
-            emit_tir_js_body(body, &mut rendered, funcs, 1)?;
+            emit_tir_js_body(body, &mut rendered, funcs, file_prefix, 1)?;
             Ok(format!("({params}) => {{\n{rendered}}}"))
         }
     }
 }
 
-fn tir_js_string(parts: &[TIR::TStrPart], funcs: &[FuncWeb]) -> Result<String, ()> {
+fn tir_js_string(
+    parts: &[TIR::TStrPart],
+    funcs: &[FuncWeb],
+    file_prefix: Option<&str>,
+) -> Result<String, ()> {
     if parts.iter().any(|p| matches!(p, TIR::TStrPart::Interp(_, _))) {
         let mut out = String::from("`");
-        for part in parts { match part { TIR::TStrPart::Lit(s) => out.push_str(s), TIR::TStrPart::Interp(e, _) => out.push_str(&format!("${{{}}}", tir_js_expr(e, funcs)?)) } }
+        for part in parts { match part { TIR::TStrPart::Lit(s) => out.push_str(s), TIR::TStrPart::Interp(e, _) => out.push_str(&format!("${{{}}}", tir_js_expr(e, funcs, file_prefix)?)) } }
         out.push('`'); Ok(out)
     } else {
         Ok(json_quote(&parts.iter().filter_map(|p| if let TIR::TStrPart::Lit(s) = p { Some(s.as_str()) } else { None }).collect::<String>()))
     }
 }
 
-fn tir_core_call(module: &str, method: &str, args: &[TIR::TExpr], funcs: &[FuncWeb]) -> Result<String, ()> {
-    let a = tir_plain_args(args, funcs)?;
+fn tir_core_call(
+    module: &str,
+    method: &str,
+    args: &[TIR::TExpr],
+    funcs: &[FuncWeb],
+    file_prefix: Option<&str>,
+) -> Result<String, ()> {
+    let a = tir_plain_args(args, funcs, file_prefix)?;
     let module = module.strip_prefix("core.").unwrap_or(module);
     let storage = if module.ends_with("storage.local") {
         Some("local")
