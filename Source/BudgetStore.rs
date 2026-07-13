@@ -1,6 +1,6 @@
 //! D-PERFBUDGET-REPORT1 durable report/baseline store.
 //!
-//! POSIX mutation uses descriptor-relative, no-follow operations, advisory
+//! Linux mutation uses descriptor-relative, no-follow operations, advisory
 //! locks, create-new immutable objects, atomic manifest replacement, and file
 //! plus directory durability. Other platforms stay read-only until they gain
 //! equivalent primitives.
@@ -404,8 +404,8 @@ fn install_immutable(dir:&File,name:&str,bytes:&[u8],verify:impl Fn(&[u8])->Resu
 
 fn replace_atomic(dir:&File,name:&str,bytes:&[u8])->Result<(),String>{let (file,tmp)=temp(dir,bytes)?;artifact_permissions(&file)?;#[cfg(unix)]{use std::ffi::CString;use std::os::fd::AsRawFd;extern "C"{fn renameat(oldfd:i32,old:*const i8,newfd:i32,new:*const i8)->i32;}let old=CString::new(tmp.as_str()).unwrap();let new=CString::new(name).unwrap();if unsafe{renameat(dir.as_raw_fd(),old.as_ptr(),dir.as_raw_fd(),new.as_ptr())}!=0{let error=std::io::Error::last_os_error();unlink(dir,&tmp);return Err(format!("cannot atomically replace manifest: {error}"));}dir.sync_all().map_err(|e|e.to_string())?;Ok(())}#[cfg(not(unix))]{let _=(dir,name,tmp);Err("atomic replacement unavailable on this platform".into())}}
 
-#[cfg(unix)]fn artifact_permissions(file:&File)->Result<(),String>{use std::os::unix::fs::PermissionsExt;let status=std::fs::read_to_string("/proc/self/status").map_err(|e|format!("cannot read process umask: {e}"))?;let raw=status.lines().find_map(|line|line.strip_prefix("Umask:\t")).ok_or("process umask is unavailable")?;let mask=u32::from_str_radix(raw.trim(),8).map_err(|_|"process umask is invalid")?;file.set_permissions(std::fs::Permissions::from_mode(0o644&!mask)).map_err(|e|e.to_string())?;file.sync_all().map_err(|e|e.to_string())}
-#[cfg(not(unix))]fn artifact_permissions(_: &File)->Result<(),String>{Err("artifact permissions unavailable on this platform".into())}
+#[cfg(target_os="linux")]fn artifact_permissions(file:&File)->Result<(),String>{use std::os::unix::fs::PermissionsExt;let status=std::fs::read_to_string("/proc/self/status").map_err(|e|format!("cannot read process umask: {e}"))?;let raw=status.lines().find_map(|line|line.strip_prefix("Umask:\t")).ok_or("process umask is unavailable")?;let mask=u32::from_str_radix(raw.trim(),8).map_err(|_|"process umask is invalid")?;file.set_permissions(std::fs::Permissions::from_mode(0o644&!mask)).map_err(|e|e.to_string())?;file.sync_all().map_err(|e|e.to_string())}
+#[cfg(not(target_os="linux"))]fn artifact_permissions(_: &File)->Result<(),String>{Err("performance baseline mutation is enabled only on Linux until equivalent umask and durability guarantees are ratified".into())}
 
 #[cfg(unix)]struct Lock{file:File}
 #[cfg(unix)]impl Lock{fn take(dir:&File,name:&str)->Result<Self,String>{use std::ffi::CString;use std::os::fd::{AsRawFd,FromRawFd};use std::os::unix::fs::MetadataExt;const O_RDWR:i32=2;const O_CREAT:i32=0o100;const O_CLOEXEC:i32=0o2000000;const O_NOFOLLOW:i32=0o400000;const LOCK_EX:i32=2;extern "C"{fn openat(fd:i32,path:*const i8,flags:i32,mode:u32)->i32;fn flock(fd:i32,operation:i32)->i32;}let name=CString::new(name).map_err(|_|"NUL in lock")?;let fd=unsafe{openat(dir.as_raw_fd(),name.as_ptr(),O_RDWR|O_CREAT|O_NOFOLLOW|O_CLOEXEC,0o600)};if fd<0{return Err(format!("cannot securely open lock: {}",std::io::Error::last_os_error()));}let file=unsafe{File::from_raw_fd(fd)};let meta=file.metadata().map_err(|e|e.to_string())?;if !meta.is_file()||meta.nlink()!=1{return Err("baseline lock is linked or not regular".into())}if unsafe{flock(file.as_raw_fd(),LOCK_EX)}!=0{return Err(format!("cannot lock baseline: {}",std::io::Error::last_os_error()));}Ok(Self{file})}}
