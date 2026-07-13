@@ -1121,7 +1121,7 @@ pub(crate) fn is_intercepted_method_name(method: &str) -> bool {
         | "peer_addr" | "close" | "method" | "path" | "body" | "header" | "param"
         | "status" | "group"
         // D-COLLBREADTH1=A: Set<T> and Deque<T> methods.
-        | "add" | "union" | "to_list" | "has" | "count"
+        | "union" | "to_list" | "count"
         | "push_front" | "push_back" | "pop_front" | "pop_back" | "peek_front" | "peek_back"
         // `from` is the static constructor for Set — admitted here so the static-call
         // shape below can claim it before `is_intercepted_method_name` blocks it.
