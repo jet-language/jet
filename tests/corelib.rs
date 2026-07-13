@@ -694,6 +694,7 @@ fn cbor_stream_is_incremental_bounded_deterministic_and_terminal() {
     let dir = std::env::temp_dir().join(format!("jet_cbor_stream_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
     let output = dir.join("output.cbor");
+    let float_output = dir.join("float.cbor");
     let indefinite = dir.join("indefinite.cbor");
     let truncated = dir.join("truncated.cbor");
     let half = dir.join("half.cbor");
@@ -705,6 +706,7 @@ fn cbor_stream_is_incremental_bounded_deterministic_and_terminal() {
     fs::write(&non_shortest, [0x18, 0x01]).unwrap();
     fs::write(&nested, [0x81, 0x80]).unwrap();
     let output_text = output.to_string_lossy().replace('\\', "\\\\");
+    let float_output_text = float_output.to_string_lossy().replace('\\', "\\\\");
     let indefinite_text = indefinite.to_string_lossy().replace('\\', "\\\\");
     let truncated_text = truncated.to_string_lossy().replace('\\', "\\\\");
     let half_text = half.to_string_lossy().replace('\\', "\\\\");
@@ -727,6 +729,16 @@ fn run() {{
     writer.flush() ?? panic("flush")
     writer.finish() ?? panic("finish")
     writer.finish() ?? panic("finish twice")
+    float_file :: files.create("{float_output_text}") ?? panic("float create")
+    float_writer :: cbor.writer(^float_file) ?? panic("float writer")
+    float_writer.write(encoding.DataEvent.ArrayStart) ?? panic("float array")
+    float_writer.write(encoding.DataEvent.Float(1.0)) ?? panic("float write")
+    float_writer.write(encoding.DataEvent.Float(100000.0)) ?? panic("float32 write")
+    float_writer.write(encoding.DataEvent.Float(1.1)) ?? panic("float64 write")
+    float_writer.write(encoding.DataEvent.Float(0.0 / 0.0)) ?? panic("nan write")
+    float_writer.write(encoding.DataEvent.Float(-0.0)) ?? panic("negative zero write")
+    float_writer.write(encoding.DataEvent.ArrayEnd) ?? panic("float array end")
+    float_writer.finish() ?? panic("float finish")
     whole_tree :: DataTree.Object(["b": DataTree.Text("xy"), "a": DataTree.Int(1)])
     expected_whole: [U8] :: [162, 97, 97, 1, 97, 98, 98, 120, 121]
     print(cbor.encode(whole_tree) == expected_whole)
@@ -773,8 +785,8 @@ fn run() {{
     half_input :: files.open("{half_text}") ?? panic("half open")
     half_reader :: cbor.reader(^half_input) ?? panic("half reader")
     if half_reader.next() == {{
-        ok(_) -> print(false)
-        err(half_error) -> print(half_error.reason == "unsupported CBOR simple value 25")
+        ok(_) -> print(true)
+        err(_) -> print(false)
     }}
 
     short_input :: files.open("{non_shortest_text}") ?? panic("short open")
@@ -817,7 +829,20 @@ fn run() {{
     assert_eq!(code, 0, "stderr: {stderr}");
     assert_eq!(stdout, "true\ntrue\n6\n5\ntrue\ntrue\ntrue\n2\n$\ntrue\n");
     assert_eq!(fs::read(&output).unwrap(), [0xa2, 0x61, b'a', 0x01, 0x61, b'b', 0x62, b'x', b'y']);
+    assert_eq!(fs::read(&float_output).unwrap(), [
+        0x85, 0xf9, 0x3c, 0x00, 0xfa, 0x47, 0xc3, 0x50, 0x00,
+        0xfb, 0x3f, 0xf1, 0x99, 0x99, 0x99, 0x99, 0x99, 0x9a,
+        0xf9, 0x7e, 0x00, 0xf9, 0x80, 0x00,
+    ]);
     assert_eq!(stderr, "");
+    let dev_path = dir.join("cbor_stream.jet");
+    fs::write(&dev_path, &source).unwrap();
+    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+        jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
+            assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
+        }
+        other => panic!("CBOR stream default-dev failed: {other:?}"),
+    }
     let _ = fs::remove_dir_all(&dir);
 }
 
