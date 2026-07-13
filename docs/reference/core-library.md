@@ -1964,6 +1964,11 @@ fn run() {
 intervention points before/during/after an operation. Default dispatch is sync,
 priority-descending, then registration order. `EventScope` is the beginner-safe
 lifetime owner; explicit `Subscription` handles give experts manual control.
+`EventScope.cancel()` is terminal and idempotent: it removes all owned listeners,
+and later registration through that scope returns an inactive subscription.
+During synchronous dispatch, removals before a listener's turn take effect,
+additions wait for a later or nested dispatch, reentrant emissions run
+depth-first, and `once` deactivates before calling its handler.
 
 ---
 

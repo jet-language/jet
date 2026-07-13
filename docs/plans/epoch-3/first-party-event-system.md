@@ -85,6 +85,14 @@ subscriptions. `with_policy<T>(policy_async(n))` exposes the explicit queued
 entrypoint. Canvas/debugger projection should consume these compiler-known
 types rather than inventing a separate graph model.
 
+The synchronous law is snapshot-based and depth-first. A listener removed
+before its turn is skipped; one added during delivery enters only a later or
+nested snapshot. `once` deactivates before invocation. Owner cancellation is
+terminal and idempotent: tracked listeners are removed, retained inactive
+handles are released, and later registrations through that owner are inactive.
+D-EVENT2=A scopes typed handler failure aggregation to `AsyncEvent<T, E>`;
+`Event<T>` stays the infallible beginner path.
+
 ## Best Hybrid
 
 One core semantic family:

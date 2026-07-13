@@ -248,25 +248,37 @@
     #[derive(Clone)]
     pub struct JetEventScope {
         subs: Rc<RefCell<Vec<JetSubscription>>>,
+        cancelled: Rc<Cell<bool>>,
     }
 
     impl JetEventScope {
         pub fn new() -> Self {
             JetEventScope {
                 subs: Rc::new(RefCell::new(Vec::new())),
+                cancelled: Rc::new(Cell::new(false)),
             }
         }
         pub fn track(&self, sub: JetSubscription) -> JetSubscription {
-            self.subs.borrow_mut().push(sub.clone());
+            if self.cancelled.get() {
+                sub.unsubscribe();
+                return sub;
+            }
+            let mut subs = self.subs.borrow_mut();
+            subs.retain(|tracked| tracked.active());
+            subs.push(sub.clone());
             sub
         }
         pub fn cancel(&self) {
-            for sub in self.subs.borrow().iter() {
+            self.cancelled.set(true);
+            let subs = std::mem::take(&mut *self.subs.borrow_mut());
+            for sub in subs {
                 sub.unsubscribe();
             }
         }
         pub fn active_count(&self) -> i64 {
-            self.subs.borrow().iter().filter(|s| s.active()).count() as i64
+            let mut subs = self.subs.borrow_mut();
+            subs.retain(|sub| sub.active());
+            subs.len() as i64
         }
     }
 

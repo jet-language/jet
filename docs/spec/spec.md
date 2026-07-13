@@ -939,13 +939,23 @@ ordinary Core values. There is no `event` declaration syntax in this slice.
   point. `.run(payload, fallback)` returns the last active handler result, or
   the call-site fallback when no handler is active.
 - `event.scope() -> EventScope` owns subscriptions. `scope.cancel()` unsubscribes
-  all owned subscriptions; `scope.active_count()` reports currently active
-  subscriptions.
+  all owned subscriptions and permanently closes that owner. Cancellation is
+  idempotent; a later subscription attempt through the cancelled scope returns
+  an inactive `Subscription` and installs no listener. `scope.active_count()`
+  reports currently active subscriptions.
 - `Event<T>.on(scope, handler)`, `.once(scope, handler)`, and
   `.on_priority(scope, priority, handler)` return `Subscription`. Priority sorts
   before source order; `once` auto-unsubscribes after first delivery.
 - `Event<T>.emit(payload)` and `.emit_async(payload)` return `EventTrace`.
   `EventTrace.summary()` prints delivered/queued/dropped counts.
+
+Synchronous emission snapshots active listeners at dispatch start, sorts by
+priority descending then registration order, and invokes that snapshot
+depth-first. Unsubscribing before a listener's turn skips it; subscribing during
+delivery affects only a later or explicitly nested emission. A `once` listener
+is deactivated before its handler runs, so reentrant emission cannot deliver it
+twice. D-EVENT2=A keeps this beginner `Event<T>` handler path infallible; typed
+failure aggregation is outside this synchronous API.
 
 ```jet
 use core.event as event

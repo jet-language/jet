@@ -4046,6 +4046,32 @@ fn run() {
         owned.on(owner, (n) => { print("leaked {n}") })
     }
     print(owned.emit(9).summary())
+
+    cancelled :: event.scope()
+    stopped :: event.new<Int>()
+    cancelled.cancel()
+    stopped_sub :: stopped.on(cancelled, (n) => { print("cancelled event {n}") })
+    print("cancelled-active={stopped_sub.active()}")
+    print(stopped.emit(10).summary())
+    stopped_hook :: event.hook<Int, String>("base")
+    stopped_hook.on(cancelled, (n) => "cancelled hook {n}")
+    print(stopped_hook.run(10, "fallback"))
+
+    order_scope :: event.scope()
+    ordered :: event.new<Int>()
+    ordered.on_priority(order_scope, 5, (n) => { print("first {n}") })
+    ordered.on_priority(order_scope, 5, (n) => { print("second {n}") })
+    ordered.on(order_scope, (n) => { print("low {n}") })
+    print(ordered.emit(3).summary())
+
+    depth_scope :: event.scope()
+    depth :: event.new<Int>()
+    depth.on_priority(depth_scope, 5, (n) => {
+        print("enter {n}")
+        if n == 1 { print(depth.emit(2).summary()) }
+    })
+    depth.on(depth_scope, (n) => { print("leave {n}") })
+    print(depth.emit(1).summary())
 }
 "#,
         &[],
@@ -4054,7 +4080,7 @@ fn run() {
     assert_eq!(code, 0, "hostile event runtime failed: {stderr}");
     assert_eq!(
         stdout,
-        "killer 1\nevent delivered=1 queued=0 dropped=0\nlisteners=1\nroot 1\nevent delivered=1 queued=0 dropped=0\nroot 2\nadded 2\nevent delivered=2 queued=0 dropped=0\nonce 1\nevent delivered=1 queued=0 dropped=0\nnested-listeners=0\nevent delivered=0 queued=0 dropped=0\n"
+        "killer 1\nevent delivered=1 queued=0 dropped=0\nlisteners=1\nroot 1\nevent delivered=1 queued=0 dropped=0\nroot 2\nadded 2\nevent delivered=2 queued=0 dropped=0\nonce 1\nevent delivered=1 queued=0 dropped=0\nnested-listeners=0\nevent delivered=0 queued=0 dropped=0\ncancelled-active=false\nevent delivered=0 queued=0 dropped=0\nfallback\nfirst 3\nsecond 3\nlow 3\nevent delivered=3 queued=0 dropped=0\nenter 1\nenter 2\nleave 2\nevent delivered=2 queued=0 dropped=0\nleave 1\nevent delivered=2 queued=0 dropped=0\n"
     );
     let _ = fs::remove_dir_all(&dir);
 }
