@@ -1906,8 +1906,10 @@ pub enum TBuiltinOp {
     Push,
     /// `pop()` → `(recv).pop()`.
     Pop,
-    /// `insert(k, v)` on a map → `(recv).insert((a0).clone(), a1)`.
+    /// `add(k, v)` on a map → displaced value, if any.
     InsertMap,
+    /// `add_new(k, v)` on a map → false without overwriting an existing key.
+    AddNewMap,
     /// `insert(i, v)` on a list → `(recv).insert(a0 as usize, a1)`.
     InsertList,
     /// `remove(k)` on a map → `(recv).remove(&(a0).clone())`.
@@ -2054,6 +2056,7 @@ pub enum TBuiltinOp {
     PriorityQueuePeek,
     PriorityQueueToSortedList,
     LruPut,
+    LruAddNew,
     LruGet,
     LruCapacity,
     LruKeys,

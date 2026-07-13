@@ -520,7 +520,7 @@ expected-type literals; user-defined prefixes deferred to E4.
 Jai `shift` idiom lands as a core cursor surface, not an operator (option C —
 `r >> U32` punctuation — rejected). `Reader.over(bytes)` wraps a `[U8]` with a
 position: `read_u8`/`read_u16_le|be`/`read_u32_le|be`/`read_u64_le|be`,
-`take(n: Int)`, `remaining()`, `at_end()`; every read advances and is
+`take(n: Int)`, `remaining()`, `is_at_end()`; every read advances and is
 fallible (`T ? String`) — a bounds miss is an ordinary error value.
 `Cursor.over(s)` is the text sibling: `take_until(delim)`, `skip_ws()`, and
 `take_pattern("…{hole:Type}…")`, which reuses the D-PARSESTR1 pattern grammar

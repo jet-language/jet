@@ -144,13 +144,9 @@ pub(crate) fn resolve_builtin_op(
         ("is_empty", 0) => TBuiltinOp::IsEmpty,
         ("push", 1) => TBuiltinOp::Push,
         ("pop", 0) => TBuiltinOp::Pop,
-        ("insert", 2) => {
-            if is_map {
-                TBuiltinOp::InsertMap
-            } else {
-                TBuiltinOp::InsertList
-            }
-        }
+        ("insert", 2) => TBuiltinOp::InsertList,
+        ("add", 2) if is_map => TBuiltinOp::InsertMap,
+        ("add_new", 2) if is_map => TBuiltinOp::AddNewMap,
         ("remove", 1) => {
             if is_set {
                 TBuiltinOp::SetRemove
@@ -185,6 +181,7 @@ pub(crate) fn resolve_builtin_op(
         ("first", 0) => TBuiltinOp::First,
         ("last", 0) => TBuiltinOp::Last,
         ("contains", 1) => TBuiltinOp::Contains,
+        ("has", 1) if is_set || is_sorted_set || is_bit_set => TBuiltinOp::Contains,
         ("index_of", 1) => TBuiltinOp::IndexOf,
         ("reverse", 0) => TBuiltinOp::Reverse,
         ("sort", 0) => TBuiltinOp::Sort,
@@ -234,7 +231,7 @@ pub(crate) fn resolve_builtin_op(
         ("keys", 0) if is_lru => TBuiltinOp::LruKeys,
         ("keys", 0) => TBuiltinOp::Keys,
         ("values", 0) => TBuiltinOp::Values,
-        ("contains_key", 1) => TBuiltinOp::ContainsKey,
+        ("has_key", 1) => TBuiltinOp::ContainsKey,
         ("to_string", 0) => TBuiltinOp::ToString,
         // D-ITER1: non-closure list adapters.
         ("take", 1) => TBuiltinOp::Take,
@@ -343,7 +340,8 @@ pub(crate) fn resolve_builtin_op(
         ("to_list", 0) => TBuiltinOp::SetToList,
         ("union", 1) if is_sorted_set => TBuiltinOp::SortedSetUnion,
         ("union", 1) => TBuiltinOp::SetUnion,
-        ("put", 2) if is_lru => TBuiltinOp::LruPut,
+        ("add", 2) if is_lru => TBuiltinOp::LruPut,
+        ("add_new", 2) if is_lru => TBuiltinOp::LruAddNew,
         ("capacity", 0) if is_lru => TBuiltinOp::LruCapacity,
         ("count", 0) if is_bit_set => TBuiltinOp::BitSetCount,
         (

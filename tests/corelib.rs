@@ -6470,7 +6470,7 @@ fn run() {
     stopped :: event.new<Int>()
     cancelled.cancel()
     stopped_sub :: stopped.on(cancelled, (n) => { print("cancelled event {n}") })
-    print("cancelled-active={stopped_sub.active()}")
+    print("cancelled-active={stopped_sub.is_active()}")
     print(stopped.emit(10).summary())
     stopped_hook :: event.hook<Int, String>("base")
     stopped_hook.on(cancelled, (n) => "cancelled hook {n}")

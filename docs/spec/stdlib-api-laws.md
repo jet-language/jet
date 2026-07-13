@@ -12,6 +12,9 @@ existing drift found during review.
   Blessed exceptions (closed list, D-API-LEN1=A; ballot to extend): `len`,
   and the module names `fmt`, `args`, `env`, `mem`.
 - Membership predicates are `has(value)` / `has_key(key)` (D-API-CONTAINS1=B).
+- Storage uses `add`: keyed `add(key, value)` returns the displaced value, keyed
+  `add_new(key, value)` never overwrites and returns whether it stored, and element
+  `add(value)` returns whether it added a new element (D-API-STORE1=A).
 - Boolean predicates are verb-prefixed: `is_empty`, `has_prefix`, `contains`.
 - Fallible variants add no suffix; the `?` return type signals fallibility.
 - Constructor idioms (D-API-CTOR1=A): bare `Type(args)` when the args are the value's
@@ -111,6 +114,5 @@ Tower card tracking the fix; this list is the authoritative inventory.
 |-----|-----|-----|-----------|
 | L1 | `core.files.read` / `core.files.write` use short names | 1 | c44-follow-1 |
 | L6 | Several `core.math` functions lack UI snapshots for type mismatch | 6 | c44-follow-2 |
-| L7 | `core.encoding.json` functions have no standalone golden example | 7 | c44-follow-3 |
 
 *When a gap is resolved, remove the row and close the follow-up card.*

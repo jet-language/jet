@@ -1907,17 +1907,27 @@ impl<K: Eq + Clone, V: Clone> JetLru<K, V> {
             entries: Vec::new(),
         }
     }
-    fn put(&mut self, key: K, value: V) {
+    fn put(&mut self, key: K, value: V) -> Option<V> {
         if self.cap == 0 {
-            return;
+            return None;
         }
-        if let Some(i) = self.entries.iter().position(|(k, _)| *k == key) {
-            self.entries.remove(i);
+        let displaced = self.entries.iter().position(|(k, _)| *k == key)
+            .map(|i| self.entries.remove(i).1);
+        self.entries.insert(0, (key, value));
+        if self.entries.len() > self.cap {
+            self.entries.pop();
+        }
+        displaced
+    }
+    fn add_new(&mut self, key: K, value: V) -> bool {
+        if self.cap == 0 || self.entries.iter().any(|(k, _)| *k == key) {
+            return false;
         }
         self.entries.insert(0, (key, value));
         if self.entries.len() > self.cap {
             self.entries.pop();
         }
+        true
     }
     fn get(&mut self, key: &K) -> Option<V> {
         let i = self.entries.iter().position(|(k, _)| k == key)?;
@@ -1991,9 +2001,11 @@ impl JetBitSet {
             bits: std::collections::BTreeSet::new(),
         }
     }
-    fn add(&mut self, bit: i64) {
+    fn add(&mut self, bit: i64) -> bool {
         if bit >= 0 {
-            self.bits.insert(bit);
+            self.bits.insert(bit)
+        } else {
+            false
         }
     }
     fn remove(&mut self, bit: &i64) {

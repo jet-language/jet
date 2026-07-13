@@ -432,7 +432,7 @@ pub fn binary_reader_method_return(
         ("read_u64_le" | "read_u64_be", 0) => Some(Some(result_ty(uintn_ty(64), Type::String))),
         ("take", 1) => Some(Some(result_ty(bytes(), Type::String))),
         ("remaining", 0) => Some(Some(Type::Int)),
-        ("at_end", 0) => Some(Some(Type::Bool)),
+        ("is_at_end", 0) => Some(Some(Type::Bool)),
         _ => None,
     }
 }

@@ -787,7 +787,7 @@ impl<'a> Checker<'a> {
                 // List/Map's backing heap allocation — capacity headroom isn't
                 // statically provable in general, so ANY call of this shape is
                 // flagged, full stop (no receiver-type check needed).
-                if self.no_alloc && matches!(method.as_str(), "push" | "insert") {
+                if self.no_alloc && matches!(method.as_str(), "push" | "insert" | "add" | "add_new") {
                     self.diags.push(no_alloc_violation(
                         format!(
                             "`.{}` may allocate to grow this collection's heap allocation",

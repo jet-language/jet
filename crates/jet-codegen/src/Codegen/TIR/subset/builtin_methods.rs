@@ -23,11 +23,11 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         | ("push", 1) | ("pop", 0) | ("first", 0) | ("last", 0)
         | ("index_of", 1) | ("reverse", 0) | ("sort", 0) | ("join", 1)
         // List + map: insert/remove/get (the Map vs List branch resolves at lowering).
-        | ("insert", 2) | ("remove", 1) | ("get", 1)
+        | ("insert", 2) | ("add", 2) | ("add_new", 2) | ("remove", 1) | ("get", 1)
         // List + string: contains.
         | ("contains", 1)
         // Map-only.
-        | ("keys", 0) | ("values", 0) | ("contains_key", 1)
+        | ("keys", 0) | ("values", 0) | ("has_key", 1)
         // String-only.
         | ("chars", 0) | ("bytes", 0) | ("trim", 0) | ("split", 1)
         | ("starts_with", 1) | ("ends_with", 1) | ("replace", 2)
@@ -49,7 +49,7 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         | ("flatten", 0) | ("intersperse", 1) | ("unzip", 0)
         // D-COLLBREADTH1=A: Set<T> instance methods.
         | ("add", 1) | ("union", 1) | ("to_list", 0)
-        | ("peek", 0) | ("to_sorted_list", 0) | ("put", 2)
+        | ("peek", 0) | ("to_sorted_list", 0)
         | ("capacity", 0) | ("count", 0) | ("to_bytes", 0)
         | ("write_u8", 1) | ("write_u16_le", 1) | ("write_u16_be", 1)
         | ("write_u32_le", 1) | ("write_u32_be", 1)
@@ -119,7 +119,7 @@ pub(crate) fn is_event_method_name(method: &str, nargs: usize) -> bool {
             | ("on_priority", 3)
             | ("emit" | "emit_async", 1)
             | ("run", 2)
-            | ("unsubscribe" | "active" | "cancel" | "active_count", 0)
+            | ("unsubscribe" | "is_active" | "cancel" | "active_count", 0)
             | ("trace" | "listener_count" | "queued_count", 0)
             | ("summary" | "delivered" | "queued" | "dropped", 0)
             | ("close" | "running_count" | "blocked_count" | "accepted" | "delivered_handlers" | "state" | "failures", 0)
@@ -134,7 +134,7 @@ pub(crate) fn is_watch_method_name(method: &str, nargs: usize) -> bool {
     matches!(
         (method, nargs),
         ("poll" | "events" | "summary", 0)
-            | ("active" | "cancel", 0)
+            | ("is_active" | "cancel", 0)
             | ("on" | "once", 2)
             | ("add", 1)
     )

@@ -598,9 +598,11 @@ fn map_method_return(key: &Type, value: &Type, method: &str, nargs: usize) -> Op
     match (method, nargs) {
         ("len", 0) => Some(Some(Type::Int)),
         ("is_empty", 0) => Some(Some(Type::Bool)),
-        ("insert" | "clear", _) => Some(None),
+        ("clear", 0) => Some(None),
+        ("add", 2) => Some(Some(Type::Option(Box::new(value.clone())))),
+        ("add_new", 2) => Some(Some(Type::Bool)),
         ("get" | "remove", 1) => Some(Some(Type::Option(Box::new(value.clone())))),
-        ("contains_key", 1) => Some(Some(Type::Bool)),
+        ("has_key", 1) => Some(Some(Type::Bool)),
         ("keys", 0) => Some(Some(Type::List(Box::new(key.clone())))),
         ("values", 0) => Some(Some(Type::List(Box::new(value.clone())))),
         ("each", 1) => Some(None),
@@ -851,7 +853,7 @@ fn hook_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Optio
 fn subscription_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
     match (method, nargs) {
         ("unsubscribe", 0) => Some(None),
-        ("active", 0) => Some(Some(Type::Bool)),
+        ("is_active", 0) => Some(Some(Type::Bool)),
         _ => None,
     }
 }
@@ -896,7 +898,7 @@ fn watch_handle_method_return(method: &str, nargs: usize) -> Option<Option<Type>
             crate::Syntax::TYPE_SUBSCRIPTION.to_string(),
         ))),
         ("summary", 0) => Some(Some(Type::String)),
-        ("active", 0) => Some(Some(Type::Bool)),
+        ("is_active", 0) => Some(Some(Type::Bool)),
         ("cancel", 0) => Some(None),
         _ => None,
     }
@@ -922,8 +924,9 @@ fn set_method_return(elem: &Type, method: &str, nargs: usize) -> Option<Option<T
     match (method, nargs) {
         ("len", 0) => Some(Some(Type::Int)),
         ("is_empty", 0) => Some(Some(Type::Bool)),
-        ("add" | "remove" | "clear", _) => Some(None),
-        ("contains", 1) => Some(Some(Type::Bool)),
+        ("add", 1) => Some(Some(Type::Bool)),
+        ("remove" | "clear", _) => Some(None),
+        ("has", 1) => Some(Some(Type::Bool)),
         ("union", 1) => Some(Some(set_of_elem())),
         ("to_list", 0) => Some(Some(Type::List(Box::new(elem.clone())))),
         _ => None,
@@ -939,8 +942,9 @@ fn sorted_set_method_return(elem: &Type, method: &str, nargs: usize) -> Option<O
     match (method, nargs) {
         ("len", 0) => Some(Some(Type::Int)),
         ("is_empty", 0) => Some(Some(Type::Bool)),
-        ("add" | "remove" | "clear", _) => Some(None),
-        ("contains", 1) => Some(Some(Type::Bool)),
+        ("add", 1) => Some(Some(Type::Bool)),
+        ("remove" | "clear", _) => Some(None),
+        ("has", 1) => Some(Some(Type::Bool)),
         ("union", 1) => Some(Some(set_of_elem())),
         ("to_list", 0) => Some(Some(Type::List(Box::new(elem.clone())))),
         ("first" | "last", 0) => Some(Some(Type::Option(Box::new(elem.clone())))),
@@ -965,9 +969,11 @@ fn lru_method_return(key: &Type, value: &Type, method: &str, nargs: usize) -> Op
     match (method, nargs) {
         ("len" | "capacity", 0) => Some(Some(Type::Int)),
         ("is_empty", 0) => Some(Some(Type::Bool)),
-        ("put" | "clear", _) => Some(None),
+        ("clear", 0) => Some(None),
+        ("add", 2) => Some(Some(Type::Option(Box::new(value.clone())))),
+        ("add_new", 2) => Some(Some(Type::Bool)),
         ("get" | "remove", 1) => Some(Some(Type::Option(Box::new(value.clone())))),
-        ("contains_key", 1) => Some(Some(Type::Bool)),
+        ("has_key", 1) => Some(Some(Type::Bool)),
         ("keys", 0) => Some(Some(Type::List(Box::new(key.clone())))),
         _ => None,
     }
@@ -978,8 +984,9 @@ fn bit_set_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
     match (method, nargs) {
         ("len" | "count", 0) => Some(Some(Type::Int)),
         ("is_empty", 0) => Some(Some(Type::Bool)),
-        ("add" | "remove" | "clear", _) => Some(None),
-        ("contains", 1) => Some(Some(Type::Bool)),
+        ("add", 1) => Some(Some(Type::Bool)),
+        ("remove" | "clear", _) => Some(None),
+        ("has", 1) => Some(Some(Type::Bool)),
         ("to_list", 0) => Some(Some(Type::List(Box::new(Type::Int)))),
         _ => None,
     }
@@ -1006,7 +1013,8 @@ fn bag_method_return(_elem: &Type, method: &str, nargs: usize) -> Option<Option<
     match (method, nargs) {
         ("len", 0) => Some(Some(Type::Int)),
         ("is_empty", 0) => Some(Some(Type::Bool)),
-        ("add" | "remove", 1) => Some(None),
+        ("add", 1) => Some(Some(Type::Bool)),
+        ("remove", 1) => Some(None),
         ("has", 1) => Some(Some(Type::Bool)),
         ("count", 1) => Some(Some(Type::Int)),
         ("any", 1) => Some(Some(Type::Bool)),
@@ -1034,7 +1042,7 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
             method,
             "push" | "pop" | "insert" | "remove" | "reverse" | "sort" | "sort_by" | "clear"
         ),
-        Type::Map { .. } => matches!(method, "insert" | "remove" | "clear"),
+        Type::Map { .. } => matches!(method, "add" | "add_new" | "remove" | "clear"),
         // D-COLLBREADTH1=A: Set mutating methods.
         Type::Apply { name, .. } if name == "Set" => {
             matches!(method, "add" | "remove" | "clear")
@@ -1046,7 +1054,7 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
             matches!(method, "push" | "pop" | "clear")
         }
         Type::Apply { name, .. } if name == Syntax::TYPE_LRU => {
-            matches!(method, "put" | "get" | "remove" | "clear")
+            matches!(method, "add" | "add_new" | "get" | "remove" | "clear")
         }
         Type::Named(n) if n == Syntax::TYPE_BIT_SET => {
             matches!(method, "add" | "remove" | "clear")
@@ -1235,8 +1243,8 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             _ => Some(vec![]),
         },
         Type::Map { key, value, .. } => match method {
-            "insert" => Some(vec![(**key).clone(), (**value).clone()]),
-            "get" | "remove" | "contains_key" => Some(vec![(**key).clone()]),
+            "add" | "add_new" => Some(vec![(**key).clone(), (**value).clone()]),
+            "get" | "remove" | "has_key" => Some(vec![(**key).clone()]),
             "each" => Some(vec![Type::Fn {
                 params: vec![(**key).clone(), (**value).clone()],
                 ret: None,
@@ -1272,7 +1280,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         },
         Type::Apply { name, .. } if name == "Task" || name == "Channel" => Some(vec![]),
         Type::Apply { name, args } if name == Syntax::TYPE_SORTED_SET => match method {
-            "add" | "remove" | "contains" => Some(vec![args.first().cloned().unwrap_or(Type::Int)]),
+            "add" | "remove" | "has" => Some(vec![args.first().cloned().unwrap_or(Type::Int)]),
             "union" => Some(vec![Type::Apply {
                 name: Syntax::TYPE_SORTED_SET.to_string(),
                 args: vec![args.first().cloned().unwrap_or(Type::Int)],
@@ -1284,12 +1292,12 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             _ => Some(vec![]),
         },
         Type::Apply { name, args } if name == Syntax::TYPE_LRU && args.len() >= 2 => match method {
-            "put" => Some(vec![args[0].clone(), args[1].clone()]),
-            "get" | "remove" | "contains_key" => Some(vec![args[0].clone()]),
+            "add" | "add_new" => Some(vec![args[0].clone(), args[1].clone()]),
+            "get" | "remove" | "has_key" => Some(vec![args[0].clone()]),
             _ => Some(vec![]),
         },
         Type::Named(n) if n == Syntax::TYPE_BIT_SET => match method {
-            "add" | "remove" | "contains" => Some(vec![Type::Int]),
+            "add" | "remove" | "has" => Some(vec![Type::Int]),
             _ => Some(vec![]),
         },
         Type::Named(n) if n == Syntax::TYPE_BYTE_BUFFER => match method {
@@ -1414,7 +1422,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         Type::Apply { name, args } if name == "Set" => {
             let elem = args.first().cloned().unwrap_or(Type::Int);
             match method {
-                "add" | "contains" | "remove" => Some(vec![elem]),
+                "add" | "has" | "remove" => Some(vec![elem]),
                 "union" => Some(vec![Type::Apply {
                     name: "Set".to_string(),
                     args: vec![elem],

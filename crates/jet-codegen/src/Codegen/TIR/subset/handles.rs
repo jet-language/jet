@@ -379,7 +379,7 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("Reader", "read_u64_be", 0) => THandleOp::ReaderReadU64Be,
         ("Reader", "take", 1) => THandleOp::ReaderTake,
         ("Reader", "remaining", 0) => THandleOp::ReaderRemaining,
-        ("Reader", "at_end", 0) => THandleOp::ReaderAtEnd,
+        ("Reader", "is_at_end", 0) => THandleOp::ReaderAtEnd,
         // D-SHIFT1: `Cursor` instance methods (excluding `take_pattern`).
         ("Cursor", "take_until", 1) => THandleOp::CursorTakeUntil,
         ("Cursor", "skip_ws", 0) => THandleOp::CursorSkipWs,

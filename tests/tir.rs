@@ -1056,7 +1056,7 @@ fn run() {
     assert_eq!(stdout, "jet.dev\nnate\nno-separator\nno-separator\n");
 }
 
-/// Map methods: insert, get, contains_key, keys, values, len, clear. BTreeMap
+/// Map methods: add, add_new, get, has_key, keys, values, len, clear. BTreeMap
 /// iterates/collects in sorted key order, so output is deterministic.
 #[test]
 fn map_builtin_methods() {
@@ -1066,10 +1066,13 @@ fn map_builtin_methods() {
     let src = "\
 fn run() {
     m: [String: Int] := []
-    m.insert(\"banana\", 3)
-    m.insert(\"apple\", 5)
+    print(m.add(\"banana\", 3) ?? 0)
+    print(m.add(\"apple\", 5) ?? 0)
+    print(m.add(\"apple\", 7) ?? 0)
+    print(m.add_new(\"apple\", 9))
+    print(m.add_new(\"cherry\", 11))
     print(m.len())
-    print(m.contains_key(\"apple\"))
+    print(m.has_key(\"apple\"))
     v := m.get(\"apple\")
     print(v ?? 0)
     ks := m.keys()
@@ -1080,7 +1083,7 @@ fn run() {
 ";
     let (code, stdout) = build_and_run("tir_map_builtins", src);
     assert_eq!(code, 0);
-    assert_eq!(stdout, "2\ntrue\n5\n2\n2\n");
+    assert_eq!(stdout, "0\n0\n5\nfalse\ntrue\n3\ntrue\n7\n3\n3\n");
 }
 
 /// `remove` on both a list (the `jet_list_remove` panic-framed helper) and a map

@@ -1054,7 +1054,7 @@ pub(crate) fn lower_method_call(
                 "listener_count" | "queued_count" | "active_count" | "delivered" | "queued"
                 | "dropped" | "running_count" | "blocked_count" | "delivered_handlers",
             ) => Type::Int,
-            (_, "active" | "accepted") => Type::Bool,
+            (_, "is_active" | "accepted") => Type::Bool,
             (Some("DispatchReport"), "state") => Type::Named("DispatchState".to_string()),
             _ => unit,
         };
@@ -1114,7 +1114,7 @@ pub(crate) fn lower_method_call(
             (_, "poll" | "events") => Type::List(Box::new(Type::Named("WatchEvent".to_string()))),
             (Some("WatchHandle"), "on" | "once") => Type::Named("Subscription".to_string()),
             (_, "summary") => Type::String,
-            (_, "active") => Type::Bool,
+            (_, "is_active") => Type::Bool,
             _ => unit_type(),
         };
         let targs: Vec<TExpr> = args

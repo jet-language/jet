@@ -1099,10 +1099,10 @@ pub(crate) fn is_intercepted_method_name(method: &str) -> bool {
         // String / list / map / collection builtins (`emit_builtin_method`).
         | "parse" | "from_bytes" | "len" | "is_empty" | "push" | "pop" | "insert"
         | "remove" | "get" | "post" | "put" | "delete" | "first" | "last"
-        | "contains" | "index_of" | "reverse" | "sort" | "join" | "detach"
+        | "contains" | "has" | "index_of" | "reverse" | "sort" | "join" | "detach"
         | "receive" | "sender" | "send" | "clear" | "chars" | "bytes" | "trim"
         | "split" | "starts_with" | "ends_with" | "replace" | "to_upper"
-        | "to_lower" | "repeat" | "slice" | "keys" | "values" | "contains_key"
+        | "to_lower" | "repeat" | "slice" | "keys" | "values" | "has_key" | "add" | "add_new"
         | "to_string" | "map" | "filter" | "each" | "find" | "any" | "all"
         | "sort_by" | "reduce"
         // D-ITER1: lazy iterator adapters.

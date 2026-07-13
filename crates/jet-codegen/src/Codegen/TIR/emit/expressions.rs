@@ -240,6 +240,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::InsertMap => {
                     format!("({}).insert(({}).clone(), {})", recv, a(0), a(1))
                 }
+                TBuiltinOp::AddNewMap => format!(
+                    "match ({}).entry(({}).clone()) {{ std::collections::btree_map::Entry::Vacant(e) => {{ e.insert({}); true }}, std::collections::btree_map::Entry::Occupied(_) => false }}",
+                    recv, a(0), a(1)
+                ),
                 TBuiltinOp::InsertList => {
                     format!("({}).insert({} as usize, {})", recv, a(0), a(1))
                 }
@@ -378,6 +382,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     format!("({}).clone().into_sorted_vec().into_iter().rev().collect::<Vec<_>>()", recv)
                 }
                 TBuiltinOp::LruPut => format!("({}).put({}, {})", recv, a(0), a(1)),
+                TBuiltinOp::LruAddNew => format!("({}).add_new({}, {})", recv, a(0), a(1)),
                 TBuiltinOp::LruGet => format!("({}).get(&{})", recv, a(0)),
                 TBuiltinOp::LruCapacity => format!("({}).capacity()", recv),
                 TBuiltinOp::LruKeys => format!("({}).keys()", recv),
@@ -398,7 +403,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::ByteBufferToBytes => format!("({}).to_bytes()", recv),
                 // D-TAG1: Bag<T> counted multiset.
                 TBuiltinOp::BagAdd => format!(
-                    "{{ *({}).entry({}).or_insert(0) += 1; }}",
+                    "{{ *({}).entry({}).or_insert(0) += 1; true }}",
                     recv,
                     a(0)
                 ),
@@ -1636,7 +1641,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     "on_priority" => {
                         format!("({}).on_priority(&({}), {}, {})", recv, a(0), a(1), a(2))
                     }
-                    "emit" | "emit_async" | "cancel" | "unsubscribe" | "active" | "active_count"
+                    "emit" | "emit_async" | "cancel" | "unsubscribe" | "active_count"
                     | "trace" | "listener_count" | "queued_count" | "summary" | "delivered"
                     | "queued" | "dropped" | "close" | "running_count" | "blocked_count"
                     | "accepted" | "delivered_handlers" | "state" | "failures" => {
@@ -1646,6 +1651,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             format!("({}).{}({})", recv, method, a(0))
                         }
                     }
+                    "is_active" => format!("({}).active()", recv),
                     "run" => format!("({}).run({}, {})", recv, a(0), a(1)),
                     _ => format!("({}).{}()", recv, method),
                 },
@@ -1653,13 +1659,14 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::WatchMethod { method } => match method.as_str() {
                     "on" | "once" => format!("({}).{}(&({}), {})", recv, method, a(0), a(1)),
                     "add" => format!("({}).add({})", recv, a(0)),
-                    "poll" | "events" | "summary" | "active" | "cancel" => {
+                    "poll" | "events" | "summary" | "cancel" => {
                         if args.is_empty() {
                             format!("({}).{}()", recv, method)
                         } else {
                             format!("({}).{}({})", recv, method, a(0))
                         }
                     }
+                    "is_active" => format!("({}).active()", recv),
                     _ => format!("({}).{}()", recv, method),
                 },
                 // D-HONESTNUM1=A: Measurement<Float> arithmetic + accessors.

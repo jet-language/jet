@@ -154,14 +154,14 @@ default ordered map, and named types for specialized behavior.
 | Type | Constructors | Main methods |
 | --- | --- | --- |
 | `[T]` | list literal `[a, b]` | `map`, `filter`, `each`, `find`, `any`, `all`, `sort_by`, `reduce`, `take`, `skip`, `step_by`, `dedup`, `chunks`, `windows`, `enumerate`, `zip`, `unzip`, `take_while`, `skip_while`, `flat_map`, `filter_map`, `scan`, `fold`, `sum`, `product`, `min`, `max`, `min_by`, `max_by`, `group_by`, `count_by`, `partition`, `flatten`, `intersperse` |
-| `[K: V]` | map literal `["a": 1]` | `keys`, `values`, `contains_key`, `get`, `insert`, `remove`, `len`, `is_empty`, `clear` |
-| `Set<T>` | `Set.new()`, `Set.from(xs)` | `add`, `remove`, `contains`, `union`, `to_list`, `len`, `is_empty`, `clear` |
-| `SortedSet<T>` | `SortedSet.new()`, `SortedSet.from(xs)` | `add`, `remove`, `contains`, `first`, `last`, `union`, `to_list`, `len`, `is_empty`, `clear` |
+| `[K: V]` | map literal `["a": 1]` | `keys`, `values`, `has_key`, `get`, `add`, `add_new`, `remove`, `len`, `is_empty`, `clear` |
+| `Set<T>` | `Set.new()`, `Set.from(xs)` | `add`, `remove`, `has`, `union`, `to_list`, `len`, `is_empty`, `clear` |
+| `SortedSet<T>` | `SortedSet.new()`, `SortedSet.from(xs)` | `add`, `remove`, `has`, `first`, `last`, `union`, `to_list`, `len`, `is_empty`, `clear` |
 | `Deque<T>` | `Deque.new()`, `Deque.from(xs)` | `push_front`, `push_back`, `pop_front`, `pop_back`, `peek_front`, `peek_back`, `to_list`, `len`, `is_empty`, `clear` |
 | `PriorityQueue<T>` | `PriorityQueue.new()`, `PriorityQueue.from(xs)` | `push`, `pop`, `peek`, `to_sorted_list`, `len`, `is_empty`, `clear` |
-| `Lru<K,V>` | `Lru.new(capacity)` | `put`, `get`, `remove`, `contains_key`, `keys`, `capacity`, `len`, `is_empty`, `clear` |
+| `Lru<K,V>` | `Lru.new(capacity)` | `add`, `add_new`, `get`, `remove`, `has_key`, `keys`, `capacity`, `len`, `is_empty`, `clear` |
 | `Bag<T>` | `Bag.new()`, `Bag.from(xs)` | `add`, `remove`, `has`, `count`, `to_list`, `len`, `is_empty`, `clear` |
-| `BitSet` | `BitSet.new()` | `add`, `remove`, `contains`, `count`, `to_list`, `len`, `clear` |
+| `BitSet` | `BitSet.new()` | `add`, `remove`, `has`, `count`, `to_list`, `len`, `clear` |
 | `ByteBuffer` | `ByteBuffer.new()`, `ByteBuffer.from(bytes)` | `write_u8`, `write_u16_le`, `write_u16_be`, `write_u32_le`, `write_u32_be`, `write_u64_le`, `write_u64_be`, `write_bytes`, `to_bytes`, `len`, `is_empty`, `clear` |
 
 Example: `examples/features/collections/iter_tools_audit.jet` covers the
@@ -539,7 +539,7 @@ fn run() {
 | `watcher.set()` | `WatchSet` | Create a multiplexer for handles |
 | `handle.poll()` / `handle.events()` | `[WatchEvent]` | Drain newly observed events |
 | `handle.on(scope, f)` / `.once(scope, f)` | `Subscription` | Run callback on future `poll()` events |
-| `handle.cancel()` / `.active()` / `.summary()` | mixed | Stop/query a handle |
+| `handle.cancel()` / `.is_active()` / `.summary()` | mixed | Stop/query a handle |
 | `set.add(handle)` | nothing | Add a handle to a set |
 | `set.poll()` / `set.events()` | `[WatchEvent]` | Poll all handles |
 
@@ -2010,7 +2010,7 @@ fn run() {
 | `ev.on_priority(scope, priority, handler)` | `Subscription` | subscribe with higher priority before source order |
 | `ev.emit(payload)` / `ev.emit_async(payload)` | `EventTrace` | dispatch and return delivered/queued/dropped counts |
 | `hook.run(payload, fallback)` | `R` | run active hook handlers or return fallback |
-| `sub.unsubscribe()` / `sub.active()` | — / `Bool` | manage an explicit subscription |
+| `sub.unsubscribe()` / `sub.is_active()` | — / `Bool` | manage an explicit subscription |
 | `scope.cancel()` / `scope.active_count()` | — / `Int` | cancel all owned subscriptions and count active ones |
 | `trace.summary()` | `String` | compact delivery trace for logs/tests |
 
@@ -2208,7 +2208,7 @@ fn run() {
     r :: Reader.over(packet)
     magic :: r.read_u32_le() ?? panic("short")   // 42
     count :: r.read_u16_le() ?? panic("short")   // 3
-    print("{magic} {count} {r.remaining()} {r.at_end()}")
+    print("{magic} {count} {r.remaining()} {r.is_at_end()}")
 }
 ```
 
@@ -2237,7 +2237,7 @@ fn run() {
 | `r.take(n)` | `[U8] ? String` | Next `n` bytes (`n: Int`; sized ints widen with `.to_int()`) |
 | `r.take_pattern(b"…{h:U<w>}…")` | `(holes…) ? String` | Match + consume a prefix; literal pattern only |
 | `r.remaining()` | `Int` | Bytes left |
-| `r.at_end()` | `Bool` | Position at buffer end |
+| `r.is_at_end()` | `Bool` | Position at buffer end |
 
 `examples/features/parsing/binary-reader.jet` is the golden example.
 

@@ -468,7 +468,7 @@ impl<'a> Checker<'a> {
     /// c26 / arena-inference lint: heap growth in a loop after `use core.mem`.
     /// c26 / allocation-boundary lint: growable calls inside `#Context` without allocator.
     pub(crate) fn lint_allocation_hints(&mut self, method: &str, span: Span) {
-        let grows_heap = matches!(method, "push" | "append" | "insert");
+        let grows_heap = matches!(method, "push" | "append" | "insert" | "add" | "add_new");
         if !grows_heap {
             return;
         }
