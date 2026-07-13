@@ -11,6 +11,7 @@
 //! Jetpack's realization engine.
 
 use crate::JSON::{self, Json};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -92,6 +93,10 @@ pub struct StoreEntry {
     pub envelope: crate::Envelope::Envelope,
     /// JP0 cache identity. Legacy records have empty fields and can never hit.
     pub cache_identity: CacheIdentity,
+    /// Content digests this object references (runtime/build closure edges).
+    pub references: Vec<String>,
+    /// Named outputs → content digests (`out` is the primary).
+    pub named_outputs: BTreeMap<String, String>,
     /// Unix seconds when this hangar object was first realized.
     pub realized_at: u64,
     /// Unix seconds when Jetpack last reused/refreshed this object.
@@ -104,25 +109,84 @@ impl StoreEntry {
     pub fn meta_json(&self) -> String {
         let realized_at = self.realized_at.to_string();
         let last_used_at = self.last_used_at.to_string();
-        JSON::object_of(&[
-            ("name", &self.name),
-            ("version", &self.version),
-            ("ref", &self.reference),
-            ("out", &self.out),
-            ("bin", &self.bin),
-            ("rlib", &self.rlib),
-            ("output_hash", &self.envelope.output_hash),
-            ("platform", &self.envelope.platform),
-            ("signature", &self.envelope.signature),
-            ("provenance", &self.envelope.provenance),
-            ("source_fingerprint", &self.cache_identity.source_fingerprint),
-            ("recipe_fingerprint", &self.cache_identity.recipe_fingerprint),
-            ("policy_fingerprint", &self.cache_identity.policy_fingerprint),
-            ("identity_platform", &self.cache_identity.platform),
-            ("realized_at", &realized_at),
-            ("last_used_at", &last_used_at),
-        ])
+        let references = json_string_array(&self.references);
+        let named_outputs = json_string_object(&self.named_outputs);
+        let mut out = String::from("{\n");
+        let mut field = |key: &str, value: &str, raw: bool| {
+            out.push_str("  ");
+            out.push_str(&JSON::quote(key));
+            out.push_str(": ");
+            if raw {
+                out.push_str(value);
+            } else {
+                out.push_str(&JSON::quote(value));
+            }
+            out.push_str(",\n");
+        };
+        field("name", &self.name, false);
+        field("version", &self.version, false);
+        field("ref", &self.reference, false);
+        field("out", &self.out, false);
+        field("bin", &self.bin, false);
+        field("rlib", &self.rlib, false);
+        field("output_hash", &self.envelope.output_hash, false);
+        field("platform", &self.envelope.platform, false);
+        field("signature", &self.envelope.signature, false);
+        field("provenance", &self.envelope.provenance, false);
+        field(
+            "source_fingerprint",
+            &self.cache_identity.source_fingerprint,
+            false,
+        );
+        field(
+            "recipe_fingerprint",
+            &self.cache_identity.recipe_fingerprint,
+            false,
+        );
+        field(
+            "policy_fingerprint",
+            &self.cache_identity.policy_fingerprint,
+            false,
+        );
+        field("identity_platform", &self.cache_identity.platform, false);
+        field("references", &references, true);
+        field("named_outputs", &named_outputs, true);
+        field("realized_at", &realized_at, false);
+        // last field — no trailing comma
+        out.push_str("  ");
+        out.push_str(&JSON::quote("last_used_at"));
+        out.push_str(": ");
+        out.push_str(&JSON::quote(&last_used_at));
+        out.push('\n');
+        out.push('}');
+        out
     }
+}
+
+fn json_string_array(items: &[String]) -> String {
+    let mut out = String::from("[");
+    for (i, item) in items.iter().enumerate() {
+        if i > 0 {
+            out.push_str(", ");
+        }
+        out.push_str(&JSON::quote(item));
+    }
+    out.push(']');
+    out
+}
+
+fn json_string_object(map: &BTreeMap<String, String>) -> String {
+    let mut out = String::from("{");
+    for (i, (k, v)) in map.iter().enumerate() {
+        if i > 0 {
+            out.push_str(", ");
+        }
+        out.push_str(&JSON::quote(k));
+        out.push_str(": ");
+        out.push_str(&JSON::quote(v));
+    }
+    out.push('}');
+    out
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -156,6 +220,8 @@ pub fn list(roots: &Roots) -> Vec<StoreEntry> {
                 rlib: parsed.rlib,
                 envelope: parsed.envelope,
                 cache_identity: parsed.cache_identity,
+                references: parsed.references,
+                named_outputs: parsed.named_outputs,
                 realized_at: parsed.realized_at.unwrap_or(0),
                 last_used_at: parsed.last_used_at.unwrap_or(0),
             });
@@ -178,6 +244,8 @@ pub struct ParsedMeta {
     pub rlib: String,
     pub envelope: crate::Envelope::Envelope,
     pub cache_identity: CacheIdentity,
+    pub references: Vec<String>,
+    pub named_outputs: BTreeMap<String, String>,
     pub realized_at: Option<u64>,
     pub last_used_at: Option<u64>,
 }
@@ -189,6 +257,26 @@ pub fn parse_meta(text: &str) -> Option<ParsedMeta> {
     let reference = get("ref")?;
     let out = get("out")?;
     let bin = get("bin")?;
+    let references = j
+        .get("references")
+        .ok()
+        .and_then(|v| v.as_array().ok())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|item| item.as_str().ok().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    let named_outputs = j
+        .get("named_outputs")
+        .ok()
+        .and_then(|v| v.as_object().ok())
+        .map(|obj| {
+            obj.iter()
+                .filter_map(|(k, v)| v.as_str().ok().map(|s| (k.clone(), s.to_string())))
+                .collect()
+        })
+        .unwrap_or_default();
     Some(ParsedMeta {
         name,
         version: get("version").unwrap_or_default(),
@@ -208,6 +296,8 @@ pub fn parse_meta(text: &str) -> Option<ParsedMeta> {
             policy_fingerprint: get("policy_fingerprint").unwrap_or_default(),
             platform: get("identity_platform").unwrap_or_default(),
         },
+        references,
+        named_outputs,
         realized_at: get("realized_at").and_then(|s| s.parse().ok()),
         last_used_at: get("last_used_at").and_then(|s| s.parse().ok()),
     })

@@ -53,7 +53,7 @@ rejects unknown classes, and requires non-live rows to name an active successor.
 | #207 | model-only | `crates/jetpack/src/RuntimePolicy.rs` | #398 owns enforced OS sandbox. |
 | #208 | fixture-only | `tests/jetpack_offline.rs` | #395/#433 own syscall denial and live closure proof. |
 | #6 | compatibility-only | `tests/pkg.rs` | #423 owns live registry consumption and delivery. |
-| #139 | schema-only | `Source/Publish/Schema.rs` | #393 owns canonical Store v2. |
+| #139 | schema-only | `Source/Publish/Schema.rs` | #393 owns canonical Store v2 (`crates/jet-pkg-model/src/Envelope.rs`, `crates/jetpack/src/Store.rs`, `tests/jetpack_hangar_store_v2.rs`). |
 | #187 | live | `tests/decisions.rs` | Language memory model; not Jetpack parity. |
 | #188 | live | `tests/syntax_reconciliation.rs` | Companion syntax law only. |
 | #214 | live | `crates/jetpack/src/CLI.rs` | `nixpkgs:` spelling only. |

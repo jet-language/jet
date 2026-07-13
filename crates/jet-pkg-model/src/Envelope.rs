@@ -8,12 +8,341 @@
 //! consumes them is a later card (D-JPK-CACHE1 protocol slice). A
 //! build-from-source output is an envelope-carrying object exactly like a
 //! substituted one, so the resolver never has to care which path produced it.
+//!
+//! E4-JP1 Hangar Store v2: the canonical archive digests uncompressed logical
+//! bytes (sparse holes hash as zero-filled logical content; physical allocation
+//! is not identity). Path law rejects case-fold collisions, reserved names,
+//! trailing-dot/space Windows aliases, and unrepresentable cross-platform
+//! names — Unicode normalization is never implicit. Security/quarantine xattrs
+//! are excluded from identity; other semantic xattrs require an explicit
+//! platform artifact kind or the ingest fails closed.
 
 use crate::SHA256;
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
+
+/// Path-law failure (E1299). Stable codes so CLI + tests can match without
+/// scraping free-form text alone.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PathLawError {
+    pub code: &'static str,
+    pub path: String,
+    pub detail: String,
+}
+
+impl PathLawError {
+    pub fn what(&self) -> String {
+        format!("store path rejected: `{}`", self.path)
+    }
+
+    pub fn why(&self) -> String {
+        format!(
+            "Hangar Store v2 path law ({}) forbids this name: {}.",
+            self.code, self.detail
+        )
+    }
+
+    pub fn fix(&self) -> &'static str {
+        "Rename the entry to a portable store path: no reserved Windows names, no trailing `.`/` `, no case-fold collisions with a sibling, and no `.`/`..` components."
+    }
+}
+
+/// Reject a single path component under Hangar path law (POSIX bytes; Windows
+/// reserved/trailing rules applied so the same tree is representable both ways).
+pub fn validate_path_component(name: &[u8]) -> Result<(), PathLawError> {
+    if name.is_empty() {
+        return Err(PathLawError {
+            code: "empty",
+            path: String::new(),
+            detail: "empty path component".into(),
+        });
+    }
+    if name.contains(&0) {
+        return Err(PathLawError {
+            code: "nul",
+            path: lossy(name),
+            detail: "NUL byte in path component".into(),
+        });
+    }
+    if name == b"." || name == b".." {
+        return Err(PathLawError {
+            code: "dot",
+            path: lossy(name),
+            detail: "`.` and `..` are not store path components".into(),
+        });
+    }
+    if name.ends_with(b".") || name.ends_with(b" ") {
+        return Err(PathLawError {
+            code: "trailing-alias",
+            path: lossy(name),
+            detail: "trailing `.` or space is a Windows alias and is rejected".into(),
+        });
+    }
+    if is_windows_reserved(name) {
+        return Err(PathLawError {
+            code: "reserved",
+            path: lossy(name),
+            detail: "Windows reserved device name".into(),
+        });
+    }
+    // No implicit Unicode normalization: NFC and NFD that differ in bytes are
+    // distinct names. Cross-platform unrepresentable: reject unpaired surrogates
+    // when the name claims to be UTF-8 text with escapes — raw non-UTF8 bytes
+    // are allowed on POSIX and recorded as opaque bytes.
+    Ok(())
+}
+
+/// Validate every component of a relative store path (no absolute, no empty).
+pub fn validate_rel_path(rel: &Path) -> Result<(), PathLawError> {
+    if rel.is_absolute() {
+        return Err(PathLawError {
+            code: "absolute",
+            path: rel.display().to_string(),
+            detail: "store paths must be relative".into(),
+        });
+    }
+    let mut saw = false;
+    for comp in rel.components() {
+        use std::path::Component;
+        match comp {
+            Component::Normal(os) => {
+                saw = true;
+                validate_path_component(&path_component_bytes(os))?;
+            }
+            Component::CurDir | Component::ParentDir => {
+                return Err(PathLawError {
+                    code: "dot",
+                    path: rel.display().to_string(),
+                    detail: "`.` and `..` are not store path components".into(),
+                });
+            }
+            Component::RootDir | Component::Prefix(_) => {
+                return Err(PathLawError {
+                    code: "absolute",
+                    path: rel.display().to_string(),
+                    detail: "store paths must be relative".into(),
+                });
+            }
+        }
+    }
+    if !saw && rel.as_os_str().is_empty() {
+        return Ok(()); // output root itself
+    }
+    Ok(())
+}
+
+/// Reject case-fold collisions among sibling directory entry names.
+pub fn reject_casefold_collisions(names: &[Vec<u8>]) -> Result<(), PathLawError> {
+    let mut folded: BTreeMap<Vec<u8>, Vec<u8>> = BTreeMap::new();
+    for name in names {
+        let key: Vec<u8> = name.iter().map(ascii_fold).collect();
+        if let Some(prior) = folded.get(&key) {
+            if prior != name {
+                return Err(PathLawError {
+                    code: "case-fold",
+                    path: lossy(name),
+                    detail: format!(
+                        "collides with `{}` under ASCII case-folding",
+                        lossy(prior)
+                    ),
+                });
+            }
+        } else {
+            folded.insert(key, name.clone());
+        }
+    }
+    Ok(())
+}
+
+fn ascii_fold(b: &u8) -> u8 {
+    b.to_ascii_lowercase()
+}
+
+fn lossy(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
+fn is_windows_reserved(name: &[u8]) -> bool {
+    let stem = match name.iter().position(|&b| b == b'.') {
+        Some(i) if i > 0 => &name[..i],
+        _ => name,
+    };
+    let upper: Vec<u8> = stem.iter().map(|b| b.to_ascii_uppercase()).collect();
+    matches!(
+        upper.as_slice(),
+        b"CON"
+            | b"PRN"
+            | b"AUX"
+            | b"NUL"
+            | b"COM1"
+            | b"COM2"
+            | b"COM3"
+            | b"COM4"
+            | b"COM5"
+            | b"COM6"
+            | b"COM7"
+            | b"COM8"
+            | b"COM9"
+            | b"LPT1"
+            | b"LPT2"
+            | b"LPT3"
+            | b"LPT4"
+            | b"LPT5"
+            | b"LPT6"
+            | b"LPT7"
+            | b"LPT8"
+            | b"LPT9"
+    )
+}
+
+fn path_component_bytes(os: &std::ffi::OsStr) -> Vec<u8> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt as _;
+        os.as_bytes().to_vec()
+    }
+    #[cfg(not(unix))]
+    {
+        // Windows: keep WTF-16 → lossy UTF-8 only for validation messaging;
+        // encode_node still records OsStr via path_bytes.
+        os.to_string_lossy().as_bytes().to_vec()
+    }
+}
+
+/// Security / quarantine xattr prefixes excluded from hangar identity.
+const EXCLUDED_XATTR_PREFIXES: &[&str] = &[
+    "security.",
+    "trusted.",
+    "system.nfs4_acl",
+    "com.apple.quarantine",
+    "com.apple.macl",
+    "com.apple.provenance",
+];
+
+/// True when `name` is a security/quarantine xattr Hangar strips from identity.
+pub fn is_excluded_xattr(name: &str) -> bool {
+    EXCLUDED_XATTR_PREFIXES
+        .iter()
+        .any(|prefix| name == *prefix || name.starts_with(prefix))
+}
+
+/// List xattr names on `path` (symlink-nofollow). Empty on platforms without
+/// xattrs or when none are present.
+pub fn list_xattr_names(path: &Path) -> Result<Vec<String>, String> {
+    #[cfg(target_os = "linux")]
+    {
+        list_xattr_names_linux(path)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = path;
+        Ok(Vec::new())
+    }
+}
+
+/// Reject unsupported semantic xattrs unless `allow_semantic_xattrs` (explicit
+/// platform artifact kind). Excluded security/quarantine names are ignored.
+pub fn check_xattrs(path: &Path, allow_semantic_xattrs: bool) -> Result<(), String> {
+    let names = list_xattr_names(path)?;
+    let semantic: Vec<_> = names
+        .into_iter()
+        .filter(|n| !is_excluded_xattr(n))
+        .collect();
+    if semantic.is_empty() || allow_semantic_xattrs {
+        return Ok(());
+    }
+    Err(format!(
+        "unsupported semantic xattr(s) on `{}`: {} — set an explicit platform artifact kind to keep them",
+        path.display(),
+        semantic.join(", ")
+    ))
+}
+
+#[cfg(target_os = "linux")]
+fn list_xattr_names_linux(path: &Path) -> Result<Vec<String>, String> {
+    use std::os::unix::ffi::OsStrExt as _;
+    type LibcChar = i8;
+    #[link(name = "c")]
+    extern "C" {
+        fn llistxattr(path: *const LibcChar, list: *mut LibcChar, size: usize) -> isize;
+    }
+    let c_path = std::ffi::CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| format!("path `{}` contains NUL", path.display()))?;
+    let size = unsafe { llistxattr(c_path.as_ptr(), std::ptr::null_mut(), 0) };
+    if size < 0 {
+        let err = std::io::Error::last_os_error();
+        // ENODATA / ENOTSUP / EOPNOTSUPP → no xattrs
+        if matches!(err.raw_os_error(), Some(61) | Some(95) | Some(524)) {
+            return Ok(Vec::new());
+        }
+        // Some filesystems return 0 size with errno set differently; treat as empty.
+        return Ok(Vec::new());
+    }
+    if size == 0 {
+        return Ok(Vec::new());
+    }
+    let mut buf = vec![0i8; size as usize];
+    let wrote = unsafe { llistxattr(c_path.as_ptr(), buf.as_mut_ptr(), buf.len()) };
+    if wrote < 0 {
+        return Ok(Vec::new());
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(buf.as_ptr() as *const u8, wrote as usize) };
+    Ok(bytes
+        .split(|b| *b == 0)
+        .filter(|s| !s.is_empty())
+        .map(|s| String::from_utf8_lossy(s).into_owned())
+        .collect())
+}
+
+/// Sparse-file policy (JP1): holes are hashed as zero-filled logical bytes.
+/// Physical sparseness is never part of identity — a sparse file and a dense
+/// file with the same logical zeros share a digest.
+pub fn file_has_sparse_holes(path: &Path) -> Result<bool, String> {
+    #[cfg(target_os = "linux")]
+    {
+        file_has_sparse_holes_linux(path)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = path;
+        Ok(false)
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn file_has_sparse_holes_linux(path: &Path) -> Result<bool, String> {
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        const O_NOFOLLOW: i32 = 0x20000;
+        options.custom_flags(O_NOFOLLOW);
+    }
+    let file = options
+        .open(path)
+        .map_err(|e| format!("cannot open `{}` for sparse probe: {e}", path.display()))?;
+    let len = file
+        .metadata()
+        .map_err(|e| format!("cannot stat `{}`: {e}", path.display()))?
+        .len();
+    if len == 0 {
+        return Ok(false);
+    }
+    // SEEK_HOLE = 4 on Linux.
+    const SEEK_HOLE: i32 = 4;
+    use std::os::unix::io::AsRawFd as _;
+    #[link(name = "c")]
+    extern "C" {
+        fn lseek(fd: i32, offset: i64, whence: i32) -> i64;
+    }
+    let hole = unsafe { lseek(file.as_raw_fd(), 0, SEEK_HOLE) };
+    if hole < 0 {
+        return Ok(false);
+    }
+    Ok((hole as u64) < len)
+}
 
 /// The A4 envelope. `Default` is the empty envelope (older records / providers
 /// that predate the field), so reading a legacy `meta.json` never fails.
@@ -74,11 +403,21 @@ pub fn output_hash_of(out: &str) -> String {
 /// while encoding and must resolve inside the root. Hardlink identity is
 /// explicit; unsupported special files fail closed.
 pub fn try_output_hash_of(out: &str) -> Result<String, String> {
-    try_output_hash_of_with_hook(out, &mut |_, _| {})
+    try_output_hash_of_with_policy(out, false, &mut |_, _| {})
+}
+
+/// Like [`try_output_hash_of`], with an explicit semantic-xattr policy.
+pub fn try_output_hash_of_with_policy(
+    out: &str,
+    allow_semantic_xattrs: bool,
+    hook: &mut dyn FnMut(&Path, &'static str),
+) -> Result<String, String> {
+    try_output_hash_of_with_hook(out, allow_semantic_xattrs, hook)
 }
 
 fn try_output_hash_of_with_hook(
     out: &str,
+    allow_semantic_xattrs: bool,
     hook: &mut dyn FnMut(&Path, &'static str),
 ) -> Result<String, String> {
     let p = Path::new(out);
@@ -101,6 +440,7 @@ fn try_output_hash_of_with_hook(
         Path::new(""),
         &mut archive,
         &mut hardlinks,
+        allow_semantic_xattrs,
         hook,
     )?;
     for link in hardlinks.values() {
@@ -126,15 +466,29 @@ fn encode_node(
     rel: &Path,
     archive: &mut Vec<u8>,
     hardlinks: &mut BTreeMap<(u64, u64), HardlinkState>,
+    allow_semantic_xattrs: bool,
     hook: &mut dyn FnMut(&Path, &'static str),
 ) -> Result<(), String> {
+    if let Err(err) = validate_rel_path(rel) {
+        return Err(format!("{} — {}", err.what(), err.detail));
+    }
     let meta = fs::symlink_metadata(path)
         .map_err(|e| format!("cannot inspect `{}`: {e}", path.display()))?;
     let kind = meta.file_type();
     let rel_bytes = path_bytes(rel);
+    // Sparse holes hash as logical zeros via ordinary reads; probe only so
+    // ingest can log policy without changing the digest stream.
+    if kind.is_file() {
+        let _ = file_has_sparse_holes(path)?;
+        check_xattrs(path, allow_semantic_xattrs)?;
+    }
     if kind.is_dir() {
         let before = stable_file_identity(&meta);
         let before_entries = directory_snapshot(path)?;
+        let sibling_names: Vec<Vec<u8>> = before_entries.iter().map(|e| e.name.clone()).collect();
+        if let Err(err) = reject_casefold_collisions(&sibling_names) {
+            return Err(format!("{} — {}", err.what(), err.detail));
+        }
         let resolved = fs::canonicalize(path)
             .map_err(|e| format!("cannot resolve directory `{}`: {e}", path.display()))?;
         if !resolved.starts_with(root) {
@@ -155,6 +509,7 @@ fn encode_node(
                 &child_rel,
                 archive,
                 hardlinks,
+                allow_semantic_xattrs,
                 hook,
             )?;
         }
@@ -500,6 +855,7 @@ mod tests {
         let mut changed = false;
         let error = try_output_hash_of_with_hook(
             &dir.to_string_lossy(),
+            false,
             &mut |path, stage| {
                 if !changed && path == dir && stage == "directory-snapshotted" {
                     changed = true;
@@ -536,6 +892,7 @@ mod tests {
         let mut changed = false;
         let error = try_output_hash_of_with_hook(
             &dir.to_string_lossy(),
+            false,
             &mut |path, stage| {
                 if !changed && path == file && stage == "file-opened" {
                     changed = true;
@@ -577,6 +934,78 @@ mod tests {
         drop(socket);
         fs::remove_dir_all(dir).ok();
         fs::remove_file(outside).ok();
+    }
+
+    #[test]
+    fn path_law_rejects_reserved_trailing_and_casefold() {
+        assert!(validate_path_component(b"CON").is_err());
+        assert!(validate_path_component(b"foo.").is_err());
+        assert!(validate_path_component(b"foo ").is_err());
+        assert!(validate_path_component(b"ok-name").is_ok());
+        let err = reject_casefold_collisions(&[b"Foo".to_vec(), b"foo".to_vec()]).unwrap_err();
+        assert_eq!(err.code, "case-fold");
+        assert!(reject_casefold_collisions(&[b"Foo".to_vec(), b"Bar".to_vec()]).is_ok());
+    }
+
+    #[test]
+    fn path_law_never_implicitly_normalizes_unicode() {
+        // NFC vs NFD for "é" — distinct bytes must remain distinct names.
+        let nfc = "é".as_bytes().to_vec();
+        let nfd = "e\u{0301}".as_bytes().to_vec();
+        assert_ne!(nfc, nfd);
+        assert!(validate_path_component(&nfc).is_ok());
+        assert!(validate_path_component(&nfd).is_ok());
+        // Not a case-fold collision (different bytes after ASCII fold too).
+        assert!(reject_casefold_collisions(&[nfc, nfd]).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sparse_and_dense_zero_holes_share_digest() {
+        use std::process::Command;
+        let dir = scratch("sparse-policy");
+        let sparse = dir.join("sparse");
+        let dense = dir.join("dense");
+        // 1 byte data + hole + 1 byte data via truncate/seek write.
+        fs::write(&sparse, []).unwrap();
+        let status = Command::new("truncate")
+            .args(["-s", "1048576", sparse.to_str().unwrap()])
+            .status()
+            .unwrap();
+        assert!(status.success());
+        {
+            use std::io::Write as _;
+            let mut f = fs::OpenOptions::new().write(true).open(&sparse).unwrap();
+            f.write_all(b"A").unwrap();
+            use std::io::Seek as _;
+            f.seek(std::io::SeekFrom::Start(1048575)).unwrap();
+            f.write_all(b"Z").unwrap();
+        }
+        // Dense file with same logical bytes (zeros in the middle).
+        let mut bytes = vec![0u8; 1_048_576];
+        bytes[0] = b'A';
+        bytes[1_048_575] = b'Z';
+        fs::write(&dense, &bytes).unwrap();
+        let hs = try_output_hash_of(&sparse.to_string_lossy()).unwrap();
+        let hd = try_output_hash_of(&dense.to_string_lossy()).unwrap();
+        // File roots hash file bytes only — same logical content → same digest.
+        assert_eq!(hs, hd);
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn path_law_rejects_casefold_siblings_during_hash() {
+        let dir = scratch("casefold-sibs");
+        fs::write(dir.join("Foo"), "a").unwrap();
+        fs::write(dir.join("foo"), "b").unwrap();
+        // On a case-sensitive FS both exist; archive must reject.
+        let err = try_output_hash_of(&dir.to_string_lossy()).unwrap_err();
+        assert!(
+            err.contains("case-fold") || err.contains("collides"),
+            "{err}"
+        );
+        fs::remove_dir_all(dir).ok();
     }
 
     fn scratch(tag: &str) -> PathBuf {

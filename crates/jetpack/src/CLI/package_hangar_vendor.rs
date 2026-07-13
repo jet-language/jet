@@ -47,6 +47,12 @@ pub(super) fn cmd_list(theme: &Theme) -> i32 {
 
 /// `jetpack hangar du` — honest per-object disk usage (U22 / D-JPK-GC1).
 /// Source-built objects are counted like any other, so `du` never hides them.
+///
+/// Hangar Store v2 also exposes:
+/// - `hangar ingest <dir> --name <n> [--version <v>] [--ref <r>]`
+/// - `hangar verify <digest-or-id>`
+/// - `hangar referrers <digest>`
+/// - `hangar recover` — sweep crashed staging / `.partial` objects
 pub(super) fn cmd_hangar(theme: &Theme, parsed: &Parsed) -> i32 {
     let sub = parsed.positional.first().map(String::as_str);
     match sub {
@@ -80,15 +86,223 @@ pub(super) fn cmd_hangar(theme: &Theme, parsed: &Parsed) -> i32 {
             ));
             0
         }
+        Some("ingest") => cmd_hangar_ingest(theme, parsed),
+        Some("verify") => cmd_hangar_verify(theme, parsed),
+        Some("referrers") => cmd_hangar_referrers(theme, parsed),
+        Some("recover") => {
+            let roots = Store::resolve();
+            match Store::recover_hangar_staging(&roots) {
+                Ok(n) => {
+                    theme.status(&format!("recovered {n} abandoned stage/partial item(s)"));
+                    0
+                }
+                Err(e) => {
+                    theme.error(
+                        "could not recover hangar staging",
+                        &e.to_string(),
+                        "check permissions on the hangar root.",
+                    );
+                    2
+                }
+            }
+        }
         Some(other) => {
             theme.error(
                 &format!("`hangar {other}` is not a hangar command"),
-                "the hangar subcommand is `du` (honest disk usage).",
+                "hangar subcommands: `du`, `ingest`, `verify`, `referrers`, `recover`.",
                 "run `jetpack hangar du`.",
             );
             2
         }
     }
+}
+
+fn cmd_hangar_ingest(theme: &Theme, parsed: &Parsed) -> i32 {
+    let name = match parsed
+        .flags
+        .os_name
+        .clone()
+        .or_else(|| flag_value(parsed, "--name"))
+    {
+        Some(n) if !n.is_empty() => n,
+        _ => {
+            theme.error(
+                "`hangar ingest` needs `--name`",
+                "every hangar object has a package name in its record.",
+                "pass `--name <pkg>`.",
+            );
+            return 2;
+        }
+    };
+    let version = flag_value(parsed, "--version").unwrap_or_default();
+    let dir = match positional_path_after(parsed, "ingest") {
+        Some(p) => p,
+        None => {
+            theme.error(
+                "`hangar ingest` needs a source directory",
+                "atomic staged ingest copies a local tree into the hangar.",
+                "run `jetpack hangar ingest <dir> --name <pkg>`.",
+            );
+            return 2;
+        }
+    };
+    let reference =
+        flag_value(parsed, "--ref").unwrap_or_else(|| format!("path:{}", dir.display()));
+    let mut outputs = std::collections::BTreeMap::new();
+    outputs.insert("out".to_string(), dir.clone());
+    if let Some(dev) = flag_value(parsed, "--output-dev") {
+        outputs.insert("dev".to_string(), PathBuf::from(dev));
+    }
+    let roots = Store::resolve();
+    let req = Store::IngestRequest {
+        name,
+        version,
+        reference,
+        cache_identity: Store::CacheIdentity::default(),
+        references: Vec::new(),
+        outputs,
+        signature: String::new(),
+        provenance: String::new(),
+        allow_semantic_xattrs: false,
+    };
+    match Store::ingest_tree(&roots, &req) {
+        Ok(ingested) => {
+            let tag = if ingested.deduplicated {
+                " (deduplicated)"
+            } else {
+                ""
+            };
+            theme.status(&format!(
+                "ingested {} → {}{}",
+                theme.bold(&ingested.entry.id),
+                ingested.entry.envelope.output_hash,
+                tag
+            ));
+            0
+        }
+        Err(err) => {
+            err.report(theme);
+            2
+        }
+    }
+}
+
+fn cmd_hangar_verify(theme: &Theme, parsed: &Parsed) -> i32 {
+    let target = match positional_path_after(parsed, "verify") {
+        Some(t) => t.to_string_lossy().into_owned(),
+        None => {
+            theme.error(
+                "`hangar verify` needs an id or output digest",
+                "verification re-hashes the hangar object and compares the envelope.",
+                "run `jetpack hangar verify <id-or-sha256-…>`.",
+            );
+            return 2;
+        }
+    };
+    let roots = Store::resolve();
+    let entries = Store::list(&roots);
+    let Some(entry) = entries
+        .iter()
+        .find(|e| e.id == target || e.envelope.output_hash == target)
+    else {
+        theme.error(
+            &format!("no hangar object `{target}`"),
+            "verify only checks realized hangar records.",
+            "run `jetpack list` to see ids.",
+        );
+        return 2;
+    };
+    match crate::Envelope::try_output_hash_of(&entry.out) {
+        Ok(digest) if digest == entry.envelope.output_hash => {
+            theme.status(&format!("verified {}", entry.envelope.output_hash));
+            0
+        }
+        Ok(digest) => {
+            theme.error_coded(
+                "E1315",
+                &format!("hangar object `{}` digest mismatch", entry.id),
+                &format!(
+                    "envelope records `{}`, re-hash produced `{digest}`.",
+                    entry.envelope.output_hash
+                ),
+                "quarantine the object with a clean re-ingest from a trusted source.",
+            );
+            2
+        }
+        Err(e) => {
+            theme.error_coded(
+                "E1315",
+                &format!("hangar object `{}` could not be hashed", entry.id),
+                &e,
+                "inspect the object tree or recover staging with `jetpack hangar recover`.",
+            );
+            2
+        }
+    }
+}
+
+fn cmd_hangar_referrers(theme: &Theme, parsed: &Parsed) -> i32 {
+    let digest = match positional_path_after(parsed, "referrers") {
+        Some(d) => d.to_string_lossy().into_owned(),
+        None => {
+            theme.error(
+                "`hangar referrers` needs an output digest",
+                "referrers lists objects that declare a dependency on this digest.",
+                "run `jetpack hangar referrers sha256-…`.",
+            );
+            return 2;
+        }
+    };
+    let roots = Store::resolve();
+    let refs = Store::referrers_of(&roots, &digest);
+    if refs.is_empty() {
+        theme.status("no referrers.");
+        return 0;
+    }
+    for r in refs {
+        theme.detail(&r);
+    }
+    0
+}
+
+fn flag_value(parsed: &Parsed, name: &str) -> Option<String> {
+    let args = &parsed.positional;
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == name {
+            return args.get(i + 1).cloned();
+        }
+        if let Some(rest) = args[i].strip_prefix(&format!("{name}=")) {
+            return Some(rest.to_string());
+        }
+        i += 1;
+    }
+    None
+}
+
+fn positional_path_after(parsed: &Parsed, sub: &str) -> Option<PathBuf> {
+    let mut seen_sub = false;
+    let mut skip_next = false;
+    for arg in &parsed.positional {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if !seen_sub {
+            if arg == sub {
+                seen_sub = true;
+            }
+            continue;
+        }
+        if arg.starts_with("--") {
+            if !arg.contains('=') {
+                skip_next = true;
+            }
+            continue;
+        }
+        return Some(PathBuf::from(arg));
+    }
+    None
 }
 
 /// Render a byte count as a short human string (B/K/M/G).
