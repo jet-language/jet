@@ -639,6 +639,15 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
                 args: vec![Type::Named("Unknown".to_string())],
             }
         }
+        ("core.event", "async_result") => {
+            return Type::Result {
+                ok: Box::new(Type::Apply {
+                    name: "AsyncEvent".to_string(),
+                    args: vec![Type::Named("Unknown".to_string()), Type::Named("Unknown".to_string())],
+                }),
+                err: Box::new(Type::Named("EventConfigError".to_string())),
+            }
+        }
         ("core.event", "hook") => {
             return Type::Apply {
                 name: "Hook".to_string(),

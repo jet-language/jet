@@ -164,7 +164,8 @@ pub(super) fn is_binding_free_user_variant_pattern_test(pattern: &Pattern, cx: &
             bindings.is_empty()
                 && !is_json_variant(variant)
                 && !is_key_variant(variant)
-                && cx.variant_owner.contains_key(variant)
+                && (cx.variant_owner.contains_key(variant)
+                    || matches!(variant.as_str(), "Delivered" | "HandlerFailed" | "DroppedNewest" | "DroppedOldest" | "Closed" | "Cancelled" | "DeadlineExceeded"))
         }
         _ => false,
     }
@@ -178,10 +179,16 @@ pub(super) fn lower_binding_free_variant_pattern_test(
 ) -> TExpr {
     let subj = lower_expr(subject, cx, env);
     let enum_type = match pattern {
+        Pattern::Variant { variant, .. }
+            if matches!(variant.as_str(), "Delivered" | "HandlerFailed" | "DroppedNewest" | "DroppedOldest" | "Closed" | "Cancelled" | "DeadlineExceeded") => Some("DispatchState"),
         Pattern::Variant { variant, .. } => cx.variant_owner.get(variant).map(String::as_str),
         _ => None,
     };
-    let pat_str = emit_match_pattern(cx, pattern, enum_type);
+    let pat_str = match (enum_type, pattern) {
+        (Some("DispatchState"), Pattern::Variant { variant, .. }) =>
+            crate::Codegen::TIR::tir_enum_lit_prefix(cx, "DispatchState", variant),
+        _ => emit_match_pattern(cx, pattern, enum_type),
+    };
     TExpr {
         ty: Type::Bool,
         kind: TExprKind::PatternMatches {

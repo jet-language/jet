@@ -1885,6 +1885,34 @@ impl<'a> Checker<'a> {
                         args: vec![type_args[0].clone()],
                     });
                 }
+                ("core.event", "async_result") => {
+                    if args.len() != 2 {
+                        self.diags.push(wrong_core_arity("async_result", 2, args.len(), span));
+                        for arg in args.iter_mut() { self.infer(&mut arg.expr); }
+                        return None;
+                    }
+                    if type_args.len() != 2 {
+                        self.diags.push(Diagnostic::error(
+                            "E0904",
+                            "`event.async_result` needs payload and error types".to_string(),
+                            "`AsyncEvent<T, E>` dispatches typed payloads and preserves typed handler failures".to_string(),
+                            "call it with explicit type arguments: `event.async_result<Job, JobError>(policy, failures)`".to_string(),
+                            Some(span),
+                        ));
+                        return None;
+                    }
+                    self.check_declared_type(&type_args[0], span);
+                    self.check_declared_type(&type_args[1], span);
+                    self.expect_core_arg("async_result", 0, &Type::Named(crate::Syntax::TYPE_ASYNC_POLICY.to_string()), &mut args[0]);
+                    self.expect_core_arg("async_result", 1, &Type::Named(crate::Syntax::TYPE_FAILURE_POLICY.to_string()), &mut args[1]);
+                    return Some(Type::Result {
+                        ok: Box::new(Type::Apply {
+                            name: crate::Syntax::TYPE_ASYNC_EVENT.to_string(),
+                            args: vec![type_args[0].clone(), type_args[1].clone()],
+                        }),
+                        err: Box::new(Type::Named(crate::Syntax::TYPE_EVENT_CONFIG_ERROR.to_string())),
+                    });
+                }
                 ("core.event", "hook") => {
                     if args.len() != 1 {
                         self.diags

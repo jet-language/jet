@@ -1649,7 +1649,8 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     }
                     "emit" | "emit_async" | "cancel" | "unsubscribe" | "active" | "active_count"
                     | "trace" | "listener_count" | "queued_count" | "summary" | "delivered"
-                    | "queued" | "dropped" => {
+                    | "queued" | "dropped" | "close" | "running_count" | "blocked_count"
+                    | "accepted" | "failure_count" | "state" | "failures" => {
                         if args.is_empty() {
                             format!("({}).{}()", recv, method)
                         } else {

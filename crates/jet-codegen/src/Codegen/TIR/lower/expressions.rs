@@ -1006,6 +1006,21 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     },
                 };
             }
+            if type_name == "AsyncPolicy" {
+                let tfields = fields
+                    .iter()
+                    .map(|(name, _, value)| (name.clone(), lower_expr(value, cx, env), false))
+                    .collect();
+                return TExpr {
+                    ty: Type::Named(type_name.clone()),
+                    kind: TExprKind::StructLit {
+                        rust_type: format!("{}jet_std::JetAsyncPolicy", cx.root_prefix),
+                        fields: tfields,
+                        extra: None,
+                        as_trait: None,
+                    },
+                };
+            }
             // D-SERDE2 / D-SERDE14=A: the public DecodeError dot constructor is a
             // core struct literal with plain fields and a jet_std Rust head.
             if type_name == "DecodeError" {
@@ -1140,6 +1155,17 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // not rewrite the node). The gate proved this is a covered enum + unit
             // variant; emit `user_<Enum>::user_<variant>` (the AST path's form).
             if let Expr::Ident(enum_name, _) = receiver.as_ref() {
+                if env.ty_of(enum_name).is_none()
+                    && matches!(enum_name.as_str(), "Overflow" | "FailurePolicy" | "DispatchState")
+                {
+                    return TExpr {
+                        ty: Type::Named(enum_name.clone()),
+                        kind: TExprKind::EnumLit {
+                            prefix: tir_enum_lit_prefix(cx, enum_name, member),
+                            payload: TEnumPayload::Unit,
+                        },
+                    };
+                }
                 if env.ty_of(enum_name).is_none()
                     && enum_name == "DataEvent"
                     && matches!(member.as_str(), "Null" | "ArrayStart" | "ArrayEnd" | "ObjectStart" | "ObjectEnd")

@@ -183,6 +183,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "Signal" | "Derived" | "Computed"
         // D-EVENT1=D: first-party typed Event/Hook family.
         | "Event" | "Hook" | "Subscription" | "EventScope" | "EventPolicy" | "EventTrace"
+        | "AsyncEvent" | "AsyncPolicy" | "Overflow" | "FailurePolicy" | "DispatchReport" | "DispatchFailure" | "DispatchState" | "EventConfigError"
         // D-HONESTNUM1=A: Measurement<T> value ± uncertainty.
         | "Measurement"
         // D-PENDING1=B: async UI state machine.
@@ -245,7 +246,7 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     if type_name == "HttpShutdownReport" && matches!(field, "accepted" | "overloaded" | "completed" | "cancelled") {
         return Some(Type::Int);
     }
-    if matches!(type_name, "EncodingLimits" | "EncodingCause" | "EncodingError") {
+    if matches!(type_name, "EncodingLimits" | "EncodingCause" | "EncodingError" | "AsyncPolicy") {
         return core_constructable_fields(type_name)?.into_iter().find(|(name, _)| name == field).map(|(_, ty)| ty);
     }
     if type_name == Syntax::TYPE_BUILD_CONTEXT && field == "program" {
@@ -651,6 +652,21 @@ pub(crate) fn core_text_width_variants(
     Some(m)
 }
 
+pub(crate) fn core_event_variants(
+    enum_name: &str,
+) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>> {
+    use crate::AST::VariantPayload;
+    use crate::Diagnostics::Span;
+    let names: &[&str] = match enum_name {
+        "Overflow" => &["Block", "DropNewest", "DropOldest"],
+        "FailurePolicy" => &["StopFirst", "Collect", "Log", "Ignore"],
+        "DispatchState" => &["Delivered", "HandlerFailed", "DroppedNewest", "DroppedOldest", "Closed", "Cancelled", "DeadlineExceeded"],
+        _ => return None,
+    };
+    let zero = Span::new(0, 0);
+    Some(names.iter().map(|name| ((*name).to_string(), (zero, VariantPayload::Unit))).collect())
+}
+
 /// D-TERM1 (ratified 2026-06-22): synthesised variant table for the `Key` enum.
 /// Used by `resolve_enum_variants_cloned` so `Key.Char(c)` / `Key.Enter` literals
 /// pass type-checking without `Key` being in the user type registry.
@@ -838,6 +854,10 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             ("resource".to_string(), Type::Option(Box::new(Type::String))),
             ("os_code".to_string(), Type::Option(Box::new(Type::Int))),
             ("cause".to_string(), Type::Option(Box::new(Type::String))),
+        ]),
+        "AsyncPolicy" => Some(vec![
+            ("capacity".to_string(), Type::Int),
+            ("overflow".to_string(), Type::Named("Overflow".to_string())),
         ]),
         // D-SERDE2 / D-SERDE14=A: a hand `decode` builds its own rejection with
         // `DecodeError.{ path: …, reason: … }` and returns it via `err(…)`. Both

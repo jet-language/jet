@@ -134,6 +134,23 @@ pub(crate) fn emit_tir_core_call(
                 arg(0)
             )
         }
+        ("core.event", "async_result") => {
+            let (payload, error) = match ret_ty {
+                Type::Result { ok, .. } => match ok.as_ref() {
+                    Type::Apply { args, .. } if args.len() >= 2 => (args[0].clone(), args[1].clone()),
+                    _ => (Type::Int, Type::String),
+                },
+                _ => (Type::Int, Type::String),
+            };
+            format!(
+                "{}jet_std::JetAsyncEvent::<{}, {}>::new({}, {})",
+                cx.root_prefix,
+                cx.rust_type(&payload),
+                cx.rust_type(&error),
+                arg(0),
+                arg(1)
+            )
+        }
         ("core.event", "hook") => {
             let (payload, result) = match ret_ty {
                 Type::Apply { args, .. } if args.len() >= 2 => (args[0].clone(), args[1].clone()),

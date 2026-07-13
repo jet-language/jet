@@ -5324,6 +5324,7 @@ fn run() {
     scope.cancel()
     print(hook.run(8, "fallback"))
 }
+
 "#,
         &[],
         None,
@@ -5333,6 +5334,59 @@ fn run() {
         stdout,
         "high 1\nlow 1\nonce 1\nevent delivered=3 queued=1 dropped=0\nhigh 2\nevent delivered=1 queued=1 dropped=0\n1\nseen 7\nfallback\n"
     );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn async_event_scheduler_dispatch_and_invalid_capacity() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc { return; }
+    let dir = std::env::temp_dir().join(format!("jet_corelib_async_event_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "async_event_scheduler",
+        r#"
+use core.event as event
+use core.tasks as tasks
+
+fn run() {
+    bad :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 0, overflow: .Block }, .Collect)
+    if bad == {
+        ok(_) -> print("bad accepted")
+        err(_) -> print("invalid capacity")
+    }
+    scope :: event.scope()
+    ev :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    (started_tx, started_rx) :: tasks.channel<Int>()
+    (release_tx, release_rx) :: tasks.channel<Int>()
+    ev.on(scope, (n: Int) => {
+        started_tx.send(copy n)
+        released :: release_rx.receive() ?? panic("release")
+    })
+    first :: ev.emit_async(1)
+    started_first :: started_rx.receive() ?? panic("started")
+    second :: ev.emit_async(2)
+    third :: ev.emit_async(3)
+    print("queued={ev.queued_count()} running={ev.running_count()} blocked={ev.blocked_count()}")
+    ev.close()
+    release_tx.send(1)
+    started_second :: started_rx.receive() ?? panic("second started")
+    release_tx.send(2)
+    first_report :: first.join()
+    second_report :: second.join()
+    third_report :: third.join()
+    print("delivered={first_report.delivered() + second_report.delivered()}")
+    print("delivered state={first_report.state() == .Delivered}")
+    print("closed={!third_report.accepted() && third_report.state() == .Closed}")
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "async event runtime failed: {stderr}");
+    assert_eq!(stdout, "invalid capacity\nqueued=1 running=1 blocked=1\ndelivered=2\ndelivered state=true\nclosed=true\n");
     let _ = fs::remove_dir_all(&dir);
 }
 

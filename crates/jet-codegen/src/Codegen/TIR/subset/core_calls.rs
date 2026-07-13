@@ -115,7 +115,7 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     if module == "core.event"
         && matches!(
             method,
-            "new" | "with_policy" | "hook" | "scope" | "policy_sync" | "policy_async"
+            "new" | "with_policy" | "hook" | "scope" | "policy_sync" | "policy_async" | "async_result"
         )
     {
         return true;

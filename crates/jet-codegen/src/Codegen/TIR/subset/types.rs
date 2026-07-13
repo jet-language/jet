@@ -43,6 +43,11 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
     if matches!(&ty, Type::Named(n) if n == "HttpHandler") {
         return true;
     }
+    if matches!(&ty, Type::Named(n) if matches!(n.as_str(),
+        "Subscription" | "EventScope" | "EventPolicy" | "EventTrace" | "AsyncPolicy"
+        | "Overflow" | "FailurePolicy" | "DispatchState" | "EventConfigError")) {
+        return true;
+    }
     ty.is_scalar()
         || matches!(&ty, Type::Char | Type::String)
         || is_type_var_param_ty(&ty, cx)
@@ -59,9 +64,19 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
         || is_covered_generic_struct_ty(&ty, cx)
         || is_covered_concurrency_ty(&ty, cx)
         || is_covered_reactive_ty(&ty, cx)
+        || is_covered_event_ty(&ty, cx)
         || is_covered_shared_ty(&ty, cx)
         || is_covered_pool_ty(&ty, cx)
         || is_covered_data_ty(&ty, cx)
+}
+
+pub(crate) fn is_covered_event_ty(ty: &Type, cx: &Cx) -> bool {
+    let Type::Apply { name, args } = ty else { return false; };
+    match name.as_str() {
+        "Event" | "DispatchReport" | "DispatchFailure" => args.len() == 1 && is_subset_param_ty(&args[0], cx),
+        "Hook" | "AsyncEvent" => args.len() == 2 && args.iter().all(|arg| is_subset_param_ty(arg, cx)),
+        _ => false,
+    }
 }
 
 /// D-DATAFRAME1=A: core.data value containers. They are plain owned prelude
@@ -316,7 +331,7 @@ pub(crate) fn is_prelude_struct_name(name: &str) -> bool {
     // on `type_name == "TextWidth"` in `lower_expr`'s StructLit arm.
     matches!(
         name,
-        "HttpRequest" | "HttpResponse" | "TextWidth" | "DecodeError" | "FieldError"
+        "HttpRequest" | "HttpResponse" | "TextWidth" | "AsyncPolicy" | "DecodeError" | "FieldError"
     )
 }
 

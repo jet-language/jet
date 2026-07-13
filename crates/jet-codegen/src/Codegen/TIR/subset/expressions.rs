@@ -58,7 +58,8 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
         } if bindings.is_empty()
             && !is_json_variant(variant)
             && !is_key_variant(variant)
-            && cx.variant_owner.contains_key(variant) =>
+            && (cx.variant_owner.contains_key(variant)
+                || matches!(variant.as_str(), "Delivered" | "HandlerFailed" | "DroppedNewest" | "DroppedOldest" | "Closed" | "Cancelled" | "DeadlineExceeded")) =>
         {
             expr_in_subset(subject, cx, locals)
         }
@@ -379,6 +380,12 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                 {
                     return true;
                 }
+                if !locals.contains(enum_name) && match enum_name.as_str() {
+                    "Overflow" => matches!(member.as_str(), "Block" | "DropNewest" | "DropOldest"),
+                    "FailurePolicy" => matches!(member.as_str(), "StopFirst" | "Collect" | "Log" | "Ignore"),
+                    "DispatchState" => matches!(member.as_str(), "Delivered" | "HandlerFailed" | "DroppedNewest" | "DroppedOldest" | "Closed" | "Cancelled" | "DeadlineExceeded"),
+                    _ => false,
+                } { return true; }
                 // c109 Phase 24: the `JSON.Null` unit construction reaches codegen as a
                 // `Field` (the AST `emit_expr` Field arm emits `{root}jet_std::Json::Null`,
                 // Expression.rs ~L222). Cover it (the only no-arg JSON variant).
@@ -465,6 +472,15 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             }
             if type_name == "TextWidthControls" {
                 return matches!(variant.as_str(), "Zero" | "Reject");
+            }
+            if type_name == "Overflow" {
+                return matches!(variant.as_str(), "Block" | "DropNewest" | "DropOldest");
+            }
+            if type_name == "FailurePolicy" {
+                return matches!(variant.as_str(), "StopFirst" | "Collect" | "Log" | "Ignore");
+            }
+            if type_name == "DispatchState" {
+                return matches!(variant.as_str(), "Delivered" | "HandlerFailed" | "DroppedNewest" | "DroppedOldest" | "Closed" | "Cancelled" | "DeadlineExceeded");
             }
             if type_name == "NetShutdown" {
                 return matches!(variant.as_str(), "Read" | "Write" | "Both");

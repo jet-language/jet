@@ -95,6 +95,15 @@ pub const TYPE_SUBSCRIPTION: &str = "Subscription";
 pub const TYPE_EVENT_SCOPE: &str = "EventScope";
 pub const TYPE_EVENT_POLICY: &str = "EventPolicy";
 pub const TYPE_EVENT_TRACE: &str = "EventTrace";
+/// D-EVENT2=A (ratified 2026-07-11): scheduler-backed typed async event family.
+pub const TYPE_ASYNC_EVENT: &str = "AsyncEvent";
+pub const TYPE_ASYNC_POLICY: &str = "AsyncPolicy";
+pub const TYPE_EVENT_OVERFLOW: &str = "Overflow";
+pub const TYPE_FAILURE_POLICY: &str = "FailurePolicy";
+pub const TYPE_DISPATCH_REPORT: &str = "DispatchReport";
+pub const TYPE_DISPATCH_FAILURE: &str = "DispatchFailure";
+pub const TYPE_DISPATCH_STATE: &str = "DispatchState";
+pub const TYPE_EVENT_CONFIG_ERROR: &str = "EventConfigError";
 /// D-WATCH-SCOPE1 (ratified 2026-07-07): unified file/process/port watcher values.
 pub const WATCHER_MODULE: &str = "core.watcher";
 pub const TYPE_WATCH_HANDLE: &str = "WatchHandle";

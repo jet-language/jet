@@ -108,7 +108,7 @@ pub(crate) fn is_reactive_method_name(method: &str, nargs: usize) -> bool {
 pub(crate) fn is_event_handle_type(name: Option<&str>) -> bool {
     matches!(
         name,
-        Some("Event" | "Hook" | "Subscription" | "EventScope" | "EventTrace")
+        Some("Event" | "AsyncEvent" | "Hook" | "Subscription" | "EventScope" | "EventTrace" | "DispatchReport")
     )
 }
 
@@ -122,6 +122,7 @@ pub(crate) fn is_event_method_name(method: &str, nargs: usize) -> bool {
             | ("unsubscribe" | "active" | "cancel" | "active_count", 0)
             | ("trace" | "listener_count" | "queued_count", 0)
             | ("summary" | "delivered" | "queued" | "dropped", 0)
+            | ("close" | "running_count" | "blocked_count" | "accepted" | "failure_count" | "state" | "failures", 0)
     )
 }
 

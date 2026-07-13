@@ -217,6 +217,11 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "TextWidthAmbiguous" => Some("TextWidthAmbiguous"),
         "TextWidthControls" => Some("TextWidthControls"),
         "TextError" => Some("TextError"),
+        "AsyncPolicy" => Some("JetAsyncPolicy"),
+        "Overflow" => Some("JetEventOverflow"),
+        "FailurePolicy" => Some("JetFailurePolicy"),
+        "DispatchState" => Some("JetDispatchState"),
+        "EventConfigError" => Some("JetEventConfigError"),
         "Stopwatch" => Some("Stopwatch"),
         // D-DET1: deterministic injected capability handles.
         "Clock" => Some("Clock"),
@@ -921,6 +926,28 @@ impl Cx {
             Type::Apply { name, args } if name == Syntax::TYPE_EVENT && !args.is_empty() => {
                 format!(
                     "{}jet_std::JetEvent<{}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0])
+                )
+            }
+            Type::Apply { name, args } if name == Syntax::TYPE_ASYNC_EVENT && args.len() == 2 => {
+                format!(
+                    "{}jet_std::JetAsyncEvent<{}, {}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0]),
+                    self.rust_type(&args[1])
+                )
+            }
+            Type::Apply { name, args } if name == Syntax::TYPE_DISPATCH_REPORT && !args.is_empty() => {
+                format!(
+                    "{}jet_std::JetDispatchReport<{}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0])
+                )
+            }
+            Type::Apply { name, args } if name == Syntax::TYPE_DISPATCH_FAILURE && !args.is_empty() => {
+                format!(
+                    "{}jet_std::JetDispatchFailure<{}>",
                     self.root_prefix,
                     self.rust_type(&args[0])
                 )

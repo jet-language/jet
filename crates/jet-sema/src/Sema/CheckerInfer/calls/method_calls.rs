@@ -1904,7 +1904,10 @@ impl<'a> Checker<'a> {
             if let Type::Apply { name, .. } = &recv_ty {
                 if matches!(
                     name.as_str(),
-                    crate::Syntax::TYPE_EVENT | crate::Syntax::TYPE_HOOK
+                    crate::Syntax::TYPE_EVENT
+                        | crate::Syntax::TYPE_ASYNC_EVENT
+                        | crate::Syntax::TYPE_HOOK
+                        | crate::Syntax::TYPE_DISPATCH_REPORT
                 ) {
                     if let Some(ret) =
                         Collections::builtin_method_return(&recv_ty, method, args.len(), false)

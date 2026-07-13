@@ -594,6 +594,15 @@ pub(crate) fn tir_enum_lit_prefix(cx: &Cx, type_name: &str, variant: &str) -> St
     if matches!(type_name, "TextWidthAmbiguous" | "TextWidthControls") {
         return format!("{}jet_std::{}::{}", cx.root_prefix, type_name, variant);
     }
+    if type_name == "Overflow" {
+        return format!("{}jet_std::JetEventOverflow::{}", cx.root_prefix, variant);
+    }
+    if type_name == "FailurePolicy" {
+        return format!("{}jet_std::JetFailurePolicy::{}", cx.root_prefix, variant);
+    }
+    if type_name == "DispatchState" {
+        return format!("{}jet_std::JetDispatchState::{}", cx.root_prefix, variant);
+    }
     if matches!(type_name, "NetShutdown" | "NetReadyInterest") {
         return format!("{}Jet{}::{}", cx.root_prefix, type_name, variant);
     }

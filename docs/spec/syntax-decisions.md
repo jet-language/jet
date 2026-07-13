@@ -1660,6 +1660,24 @@ and `with_policy<T>(policy_async(n))` gives an explicit queued/backpressure
 entrypoint. Hooks combine by "last active handler result wins" in this first
 slice, with the call-site fallback used when no handler is active.
 
+**D-EVENT2=A — Typed async events (scheduler tranche)** *(ratified 2026-07-11,
+card #286)*: `Event<T>` and `Hook<T,R>` stay synchronous. `core.event`
+`async_result<T,E>(AsyncPolicy.{ capacity, overflow }, FailurePolicy)` creates
+one `AsyncEvent<T,E>` queue; capacity must be positive. Overflow is exactly
+`Block`, `DropNewest`, or `DropOldest`. `emit_async` returns
+`Task<DispatchReport<E>>`; reports expose terminal state, acceptance,
+delivered-handler count, and ordered failures. This scheduler tranche implements
+Pending, Queued, Running, Delivered, HandlerFailed, DroppedNewest,
+DroppedOldest, Closed, Cancelled, and DeadlineExceeded. Capacity counts Queued only; `queued_count`,
+`running_count`, and `blocked_count` expose those exact states. `close()`
+gracefully rejects new and blocked producers while draining accepted work.
+Ambient task cancellation and inherited deadlines produce the matching terminal
+report with acceptance preserved. EventScope owner-wake coupling remains
+unexposed until complete. Failure policy is
+`StopFirst`, `Collect`, `Log`, or `Ignore`; panics are
+typed task-panic dispatch failures, never `E`. The ratified `DecisionHook`
+fold is tracked separately from this scheduler tranche and is not exposed yet.
+
 **D-FILES-WRITE1 — `core.fs`/`core.files` merge** *(ratified/shipped
 2026-07-04, cv5syntaxdecrees)*: one `core.files` module for both whole-file
 convenience helpers (`read`/`read_bytes`/`write`/`append_all`/`exists`/

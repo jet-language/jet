@@ -172,6 +172,12 @@ pub fn builtin_method_return(
         Type::Apply { name, args } if name == crate::Syntax::TYPE_EVENT => {
             event_method_return(args, method, arg_count)
         }
+        Type::Apply { name, args } if name == crate::Syntax::TYPE_ASYNC_EVENT => {
+            async_event_method_return(args, method, arg_count)
+        }
+        Type::Apply { name, args } if name == crate::Syntax::TYPE_DISPATCH_REPORT => {
+            dispatch_report_method_return(args, method, arg_count)
+        }
         Type::Apply { name, args } if name == crate::Syntax::TYPE_HOOK => {
             hook_method_return(args, method, arg_count)
         }
@@ -809,6 +815,25 @@ fn event_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Opti
     }
 }
 
+fn async_event_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Option<Type>> {
+    let error = args.get(1).cloned().unwrap_or(Type::String);
+    match (method, nargs) {
+        ("on" | "once", 2) | ("on_priority", 3) => Some(Some(Type::Named(
+            crate::Syntax::TYPE_SUBSCRIPTION.to_string(),
+        ))),
+        ("emit_async", 1) => Some(Some(Type::Apply {
+            name: "Task".to_string(),
+            args: vec![Type::Apply {
+                name: crate::Syntax::TYPE_DISPATCH_REPORT.to_string(),
+                args: vec![error],
+            }],
+        })),
+        ("close", 0) => Some(None),
+        ("listener_count" | "queued_count" | "running_count" | "blocked_count", 0) => Some(Some(Type::Int)),
+        _ => None,
+    }
+}
+
 fn hook_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Option<Type>> {
     let _payload = args.first().cloned().unwrap_or(Type::Int);
     let result = args.get(1).cloned().unwrap_or(Type::Int);
@@ -843,6 +868,20 @@ fn event_trace_method_return(method: &str, nargs: usize) -> Option<Option<Type>>
     match (method, nargs) {
         ("summary", 0) => Some(Some(Type::String)),
         ("delivered", 0) | ("queued", 0) | ("dropped", 0) => Some(Some(Type::Int)),
+        _ => None,
+    }
+}
+
+fn dispatch_report_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Option<Type>> {
+    let error = args.first().cloned().unwrap_or(Type::String);
+    match (method, nargs) {
+        ("accepted", 0) => Some(Some(Type::Bool)),
+        ("delivered" | "failure_count", 0) => Some(Some(Type::Int)),
+        ("state", 0) => Some(Some(Type::Named(crate::Syntax::TYPE_DISPATCH_STATE.to_string()))),
+        ("failures", 0) => Some(Some(Type::List(Box::new(Type::Apply {
+            name: crate::Syntax::TYPE_DISPATCH_FAILURE.to_string(),
+            args: vec![error],
+        })))),
         _ => None,
     }
 }
@@ -1297,6 +1336,27 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                     },
                 ]),
                 "emit" | "emit_async" => Some(vec![payload]),
+                _ => Some(vec![]),
+            }
+        }
+        Type::Apply { name, args } if name == crate::Syntax::TYPE_ASYNC_EVENT => {
+            let payload = args.first().cloned().unwrap_or(Type::Int);
+            let error = args.get(1).cloned().unwrap_or(Type::String);
+            let handler_ret = Type::Result {
+                ok: Box::new(Type::Named("Unit".to_string())),
+                err: Box::new(error),
+            };
+            match method {
+                "on" | "once" => Some(vec![
+                    Type::Named(crate::Syntax::TYPE_EVENT_SCOPE.to_string()),
+                    Type::Fn { params: vec![payload], ret: Some(Box::new(handler_ret)), effect_bound: None },
+                ]),
+                "on_priority" => Some(vec![
+                    Type::Named(crate::Syntax::TYPE_EVENT_SCOPE.to_string()),
+                    Type::Int,
+                    Type::Fn { params: vec![payload], ret: Some(Box::new(handler_ret)), effect_bound: None },
+                ]),
+                "emit_async" => Some(vec![payload]),
                 _ => Some(vec![]),
             }
         }
