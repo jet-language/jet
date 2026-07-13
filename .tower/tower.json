@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 523,
-    "rev": 4837,
+    "nextNum": 526,
+    "rev": 4880,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -25,7 +25,7 @@
         "radar:e5"
       ]
     },
-    "digestCursor": "2026-07-13T00:08:07.862Z"
+    "digestCursor": "2026-07-13T00:14:35.398Z"
   },
   "epochs": [
     {
@@ -3636,12 +3636,27 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
-      "plan": "No owner gate: D-OSFACTS1=A fixes core.os.on_interrupt. Failing tests first. Replace one-thread-per-registration and non-Windows no-op with one process-lifetime dispatcher: additive ordered handlers, platform callback only increments an atomic counter, dispatcher drains events and invokes all handlers outside locks; registration acknowledged before return and one handler panic cannot kill later handlers. Unix keeps vetted signal FFI; Windows uses SetConsoleCtrlHandler for CTRL_C_EVENT under a vetted generated-runtime boundary. Unsupported targets fail honestly, never silently discard. Generated interrupt machinery strips entirely when unused. Add structural emission/stripping tests, real multi-handler lifecycle proof, native Windows console proof in CI, and process-lifetime docs. No external deps. Parent full suite.",
+      "plan": "Owner verdict D-VERDICT-292-1 narrows Epoch 3 acceptance to language behavior plus native Linux. macOS/Windows runtime matrix is preserved on #523 (Epoch 8), not discarded. Verify production core.env overlay/child behavior and core.os facts/ordered panic-isolated SIGINT lifecycle on Linux with bounded real runtime tests; retain structural stripping, diagnostics, docs/example/golden, and no-dependency checks. Targeted tests here; parent full suite.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-13",
+          "by": "terra-301-builder",
+          "text": "Done under owner-ratified Linux Epoch 3 scope. No macOS/Windows claim: deferred native proof remains explicit on #523."
+        },
+        {
+          "at": "2026-07-13",
+          "by": "terra-301-builder",
+          "text": "Owner verdict D-VERDICT-292-1 reconciled without evidence loss: Epoch 3 is language plus Linux; native macOS/Windows matrix moved intact to #523 in Epoch 8. Independent Linux review green: jet-codegen check; os_native 2/2; core_os 5/5; env_overlay 7/7; core.process 1/1; dev env fallback 1/1; os_facts golden 1/1; diff check. All ten Linux-scoped criteria verified by reviewer distinct from builders."
+        },
+        {
+          "at": "2026-07-13",
+          "by": "owner",
+          "text": "Verdict recorded (D-VERDICT-292-1): Epoch 3 accepts language and Linux support; move macOS and Windows core.os runtime proof to Epoch 8."
+        },
         {
           "at": "2026-07-13",
           "by": "terra-292-builder",
@@ -3739,12 +3754,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Windows console Ctrl-C invokes every registered core.os.on_interrupt handler through a real SetConsoleCtrlHandler runtime proof.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-10T20:44:20.460Z"
+          "text": "Native Linux SIGINT invokes every registered core.os.on_interrupt handler through a bounded real runtime proof; macOS/Windows proof is deferred intact to #523 by D-VERDICT-292-1.",
+          "status": "verified",
+          "metBy": "terra-292-builder",
+          "verifiedBy": "terra-301-builder",
+          "evidence": "Independent terra-301-builder reran native Linux os_native: 2/2 green, including real SIGINT, ordered additive handlers, first-handler panic survival, bounded readiness/completion and kill/reap failure paths.",
+          "at": "2026-07-13T00:27:03.184Z"
         },
         {
           "n": 2,
@@ -3784,12 +3799,12 @@
         },
         {
           "n": 6,
-          "text": "Focused jet-codegen, corelib lifecycle/stripping, native Windows, docs, example, golden, and diff checks pass.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-10T20:44:21.228Z"
+          "text": "Focused jet-codegen, corelib lifecycle/stripping, native Linux, docs, example, golden, and diff checks pass; deferred macOS/Windows checks live on #523.",
+          "status": "verified",
+          "metBy": "terra-292-builder",
+          "verifiedBy": "terra-301-builder",
+          "evidence": "Independent rerun green: cargo check -p jet-codegen; core_os 5/5; os_native 2/2; os_facts golden 1/1; git diff --check. Reviewed docs and production stripping/lifecycle paths.",
+          "at": "2026-07-13T00:27:03.370Z"
         },
         {
           "n": 7,
@@ -3811,21 +3826,21 @@
         },
         {
           "n": 9,
-          "text": "Native Linux/macOS/Windows facts and interrupt lifecycle use bounded real runtime proofs; Windows CTRL_C_EVENT cannot hang CI and both ordered handlers survive first-handler panic.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-11T23:22:06.356Z"
+          "text": "Native Linux facts and SIGINT lifecycle use bounded real runtime proof; both ordered handlers survive first-handler panic. Deferred macOS/Windows matrix is tracked by #523.",
+          "status": "verified",
+          "metBy": "terra-292-builder",
+          "verifiedBy": "terra-301-builder",
+          "evidence": "Independent native Linux run passes 2/2: host facts match, values nonempty, real SIGINT dispatches both ordered handlers despite first panic, child terminates within bound.",
+          "at": "2026-07-13T00:27:03.556Z"
         },
         {
           "n": 10,
-          "text": "Independent reviewer verifies hostile input, concurrency, child inheritance, host getenv isolation, old/new edition diagnostics, native matrix, docs/examples/goldens, and focused env/process/dev tests without static-only proof.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-11T23:22:06.476Z"
+          "text": "Independent reviewer verifies hostile input, concurrency, child inheritance, host getenv isolation, old/new edition diagnostics, native Linux facts/SIGINT, docs/examples/goldens, and focused env/process/dev tests without static-only proof; macOS/Windows review is #523.",
+          "status": "verified",
+          "metBy": "terra-292-builder",
+          "verifiedBy": "terra-301-builder",
+          "evidence": "Independent reviewer ran production-focused matrix: env_overlay 7/7 hostile/concurrency/raw/host-isolation/edition/child proofs; core_os 5/5; os_native 2/2; core.process child env 1/1; dev ambient-env AOT fallback 1/1; os_facts golden 1/1; jet-codegen check and diff check green. No static-only platform inference.",
+          "at": "2026-07-13T00:27:03.743Z"
         }
       ],
       "needsAcceptance": false,
@@ -4298,6 +4313,21 @@
       "blockedBy": [],
       "assignee": "terra-301-builder",
       "log": [
+        {
+          "at": "2026-07-13",
+          "by": "terra-301-reviewer",
+          "text": "[review] Narrow route-lock remediation clean: dispatch clones an owned route snapshot under the registry lock, drops the guard before middleware/user code, and preserves method/Allow selection. Barrier overlap and bounded same-mux route-registration regressions exercise the former serialization/deadlock failure; focused lifecycle test passes 1/1. Broad server criterion 3 remains open."
+        },
+        {
+          "at": "2026-07-13",
+          "by": "terra-301-builder",
+          "text": "Independent review found dispatch retained the route-registry MutexGuard through middleware composition and handler execution, serializing requests and deadlocking route registration from user code. Fixed by cloning the selected route handler plus matched params into an owned lookup snapshot inside a short lock scope; middleware snapshot and all user code now run after the guard drops. Added bounded regression proving two same-route handlers overlap at a Barrier and a handler can register then serve a route on its own mux without deadlock. nix develop -c cargo test --test http_server_lifecycle -- --nocapture passes 7/7; focused real-Jet middleware golden passes 1/1. Broad criterion 3 remains open."
+        },
+        {
+          "at": "2026-07-13",
+          "by": "terra-301-review",
+          "text": "[review] Middleware vertical has one material false-green: jet_http_mux_dispatch holds mux.0 route MutexGuard across middleware construction and handler execution (HttpServer.rs:543-574). All requests on one mux therefore serialize; a handler that re-enters route registration can deadlock. The 16-thread lifecycle assertion checks only returned bodies, so it passes while providing no overlap/isolation proof; focused test passed 1/1 and confirmed coverage gap. Fix by selecting/cloning owned handler+params under route lock, dropping guard before middleware/user code, then add barrier-based overlap test plus re-entrant/deadlock-bounded proof. Tail-expression fixture is valid and exercises the same function-call tail shape used by public middleware golden; normal and short-circuit response unwind outputs are credible. Criterion 3 correctly remains open."
+        },
         {
           "at": "2026-07-13",
           "by": "terra-301-builder",
@@ -6458,6 +6488,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-07-13",
+          "by": "terra-360-builder",
+          "text": "[handoff] Linux shell-prefill slice complete in f9f41157. Criteria 3-4 met with actual jet captured-stdout PTY proof and generated bash/zsh/fish RC real-PTY proof (fish Ghostty host env); selection replaces editable parent buffer and never accepts/executes. Focused green: help_pty 6/6, jetpack Shell 13/13, CLI question_mark 4/4; diff check clean. Criterion 5 remains open for parent full-suite plus independent verifier. Card remains blocked by #359 owner acceptance."
+        },
+        {
           "at": "2026-07-11",
           "by": "codex-main",
           "text": "blocker ref normalized to live card id c0iyfhaf (#359)."
@@ -6548,7 +6583,7 @@
         }
       ],
       "created": "2026-07-08T13:10:17.096Z",
-      "updated": "2026-07-11",
+      "updated": "2026-07-13",
       "workOrder": 12,
       "criteria": [
         {
@@ -6572,20 +6607,20 @@
         {
           "n": 3,
           "text": "Enter inserts the selected command into the editable parent shell line without executing it in bash, zsh, and fish through the shared #359 RC surface; bare jet ? prints one composable fallback line.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "terra-360-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-11T02:10:09.510Z"
+          "evidence": "Commit f9f41157 adds one #359 RC surface for bash READLINE_LINE, zsh BUFFER, and fish commandline replacement. Real script(1) PTY test invokes Alt-?, receives a malicious-looking selected line, cancels it, regains each shell prompt, and proves marker never executes. Actual jet Help PTY test proves Enter emits the selected command through captured stdout while UI stays on terminal stderr and never runs it.",
+          "at": "2026-07-13T00:27:24.746Z"
         },
         {
           "n": 4,
           "text": "Every row from D-FE-HELP1, the hybrid mock, owner ratification comments, and both bounce logs is evidenced in a real PTY and the owner's Ghostty/fish host-wrapper environment.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "terra-360-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-11T02:10:09.724Z"
+          "evidence": "Linux host-wrapper matrix is executable proof in crates/jetpack Shell tests: bash, zsh, and fish each run generated RC inside a real util-linux script(1) PTY; fish runs with TERM_PROGRAM=ghostty. All return to editable prompt after cancellation and do not execute the inserted selection. Owner directive excludes Mac/Windows proof from this tranche.",
+          "at": "2026-07-13T00:27:31.579Z"
         },
         {
           "n": 5,
@@ -8994,13 +9029,33 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P0",
-      "plan": "docs/plans/epoch-3/universal-language-core.md#ul1--p0-semantic-and-security-stop-line",
+      "plan": "Owner verdict D-VERDICT-436-1 narrows Epoch 3 platform acceptance to Linux. Ship one required non-skipping production-generated Jet+C runtime matrix on Linux x64 and Linux aarch64/QEMU covering exact layout, callback symbols/concurrency/reentrancy, raw status/out-pointer safety, and supported calling conventions. macOS and Windows runtime matrices move intact to Epoch 8 follow-up cards.",
       "blockedBy": [],
       "workOrder": 30,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-13",
+          "by": "terra-436-builder",
+          "text": "[handoff] Integrate commit be93c9fd from branch card-436-matrix. Parent runs/pushes CI. Do not meet criterion 10 until both required jobs are green: C ABI native (linux-x64) and C ABI native (linux-aarch64-qemu). Then independent verifier records literal run evidence. Epoch 8 follow-ups: #524 macOS, #525 Windows."
+        },
+        {
+          "at": "2026-07-13",
+          "by": "terra-436-builder",
+          "text": "[build] Linux-only native C ABI matrix committed on isolated branch card-436-matrix at be93c9fd. Required harness never skips and compiles production-generated Jet Rust plus real C, links, and executes exact Coord/fieldless Status/payload Packet 24-byte size/8-byte alignment/8-byte payload offset, stable callbacks under nested and four pthread calls, poison status/out-pointer safety, and C/sysv64 rules. Linux x64 targeted run green 1/1. CI adds separate Linux x64 and Linux aarch64/QEMU jobs; aarch64 remains honestly unverified until remote execution."
+        },
+        {
+          "at": "2026-07-13",
+          "by": "terra-436-builder",
+          "text": "[scope] Applied owner verdict D-VERDICT-436-1: criterion 10 now requires Linux x64 + Linux aarch64/QEMU only. macOS and Windows native C ABI runtime proof deferred intact to Epoch 8 cards."
+        },
+        {
+          "at": "2026-07-13",
+          "by": "owner",
+          "text": "Verdict recorded (D-VERDICT-436-1): Epoch 3 accepts language and Linux C ABI correctness; move macOS and Windows native ABI matrix work to Epoch 8."
+        },
         {
           "at": "2026-07-11",
           "by": "codex-main",
@@ -9042,7 +9097,7 @@
         }
       ],
       "created": "2026-07-09T23:22:08.609Z",
-      "updated": "2026-07-12",
+      "updated": "2026-07-13",
       "criteria": [
         {
           "n": 1,
@@ -9127,7 +9182,7 @@
         },
         {
           "n": 10,
-          "text": "Required non-skipping native C ABI matrix passes on Ubuntu, macOS, Windows x64/x86, and Linux aarch64/QEMU with exact symbols, layouts, callbacks, raw out pointers, and calling conventions.",
+          "text": "Required non-skipping native C ABI matrix passes on Linux x64 and Linux aarch64/QEMU with exact symbols, layouts, callbacks, raw out pointers, and calling conventions.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -11080,8 +11135,23 @@
       "priority": "P1",
       "plan": "Implement docs/plans/epoch-3/mobile-native-ui.md in seven test-first vertical slices: target/artifact contracts; shared lifecycle; UIKit plus Android JNI View default and Compose adapter; unified NativeDevHost app/preview loop; local signing; direct store APIs; real cross-platform flagship proof. D-NATIVEUI3=A, D-NATIVEUI-ANDROID1=C, D-NATIVEUI-DEV1=C bind all choices.",
       "blockedBy": [],
-      "assignee": "terra-480-planner",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-13",
+          "by": "owner",
+          "text": "Verdict recorded (D-VERDICT-480-1): Defer mobile-native platform work; current burndown focuses the Jet language and Linux support."
+        },
+        {
+          "at": "2026-07-13",
+          "by": "terra-480-builder",
+          "text": "[handoff correction] Owner requested no incomplete slice remain. Removed only terra slice-1 failing tests and placeholder snapshots. No #480 source/test/doc implementation landed; durable plan remains. Card released for later."
+        },
+        {
+          "at": "2026-07-13",
+          "by": "terra-480-builder",
+          "text": "[handoff] Owner priority pivot stopped slice 1 before implementation. Added failing CLI tests in tests/cli.rs for --target=ios honest non-Mac Apple SDK gate, --target=android missing-NDK gate, and pkg.jet target: android parity; placeholder snapshots tests/cli/{ios,android}_target_e3302.txt. First targeted Nix test was interrupted before result. No Source/compiler code changed. Next builder should run failing tests, implement canonical ios/android alias-to-triple resolution plus E3302 host/toolchain gates, then bless reviewed snapshots. Preserve shared dirty tree."
+        },
         {
           "at": "2026-07-13",
           "by": "terra-480-planner",
@@ -11100,8 +11170,7 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-10T21:04:57.727Z",
-      "updated": "2026-07-13",
-      "claimedAt": "2026-07-13T00:07:16.182Z"
+      "updated": "2026-07-13"
     },
     {
       "id": "c0tfsrts",
@@ -12912,12 +12981,17 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
       "assignee": "claude-main",
       "log": [
+        {
+          "at": "2026-07-13",
+          "by": "owner",
+          "text": "Accepted — D-ACCEPT-515 resolved through owner verification UI."
+        },
         {
           "at": "2026-07-12",
           "by": "codex-orchestrator",
@@ -13016,7 +13090,7 @@
       "refs": [],
       "needsAcceptance": true,
       "created": "2026-07-12T13:00:17.059Z",
-      "updated": "2026-07-12",
+      "updated": "2026-07-13",
       "claimedAt": "2026-07-12T13:01:55.059Z"
     },
     {
@@ -13028,12 +13102,17 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
       "assignee": "terra-516-builder",
       "log": [
+        {
+          "at": "2026-07-13",
+          "by": "owner",
+          "text": "Accepted — D-ACCEPT-516 resolved through owner verification UI."
+        },
         {
           "at": "2026-07-12",
           "by": "codex-orchestrator",
@@ -13109,7 +13188,7 @@
       "refs": [],
       "needsAcceptance": true,
       "created": "2026-07-12T13:04:21.583Z",
-      "updated": "2026-07-12",
+      "updated": "2026-07-13",
       "claimedAt": "2026-07-12T13:48:40.977Z"
     },
     {
@@ -13198,12 +13277,17 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P0",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-13",
+          "by": "owner",
+          "text": "Accepted — D-ACCEPT-519 resolved through owner verification UI."
+        },
         {
           "at": "2026-07-12",
           "by": "codex-orchestrator",
@@ -13275,7 +13359,7 @@
       ],
       "needsAcceptance": true,
       "created": "2026-07-12T14:46:37.170Z",
-      "updated": "2026-07-12"
+      "updated": "2026-07-13"
     },
     {
       "id": "c0u1yr3z",
@@ -13350,6 +13434,106 @@
       "needsAcceptance": false,
       "created": "2026-07-12T23:39:41.196Z",
       "updated": "2026-07-12"
+    },
+    {
+      "id": "c0h1r3b8",
+      "num": 523,
+      "title": "Epoch 8 core.os native macOS/Windows runtime matrix",
+      "body": "Deferred from #292 by owner verdict D-VERDICT-292-1. Preserve and complete native macOS and Windows core.os facts and interrupt lifecycle proof. macOS must compile/run facts plus real SIGINT ordered-handler and panic-survival lifecycle. Windows must compile/run facts plus real SetConsoleCtrlHandler/GenerateConsoleCtrlEvent CTRL_C_EVENT proof with bounded readiness/completion, kill/reap on timeout, ordered additive handlers, and first-handler panic survival. CI matrix must actually invoke both native tests; no cross-compiled or static-only substitute.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e8",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "Reuse existing tests/os_native.rs, tests/os_interrupt_windows.rs, and platform CI lanes. Review against live production core.os runtime. Require actual native macOS and windows-latest executions with durable run evidence; preserve bounded timeout/kill/reap behavior. No new surface or dependency.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Native macOS compiles and runs core.os facts plus real SIGINT lifecycle; every registered handler runs in order and a panicking first handler does not prevent later handlers.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-13T00:23:54.597Z"
+        },
+        {
+          "n": 2,
+          "text": "Native Windows compiles and runs core.os facts plus real SetConsoleCtrlHandler and GenerateConsoleCtrlEvent CTRL_C_EVENT lifecycle; every registered handler runs in order and a panicking first handler does not prevent later handlers.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-13T00:23:54.688Z"
+        },
+        {
+          "n": 3,
+          "text": "All readiness and completion waits are bounded; timeout kills and reaps children; native macOS and windows-latest CI lanes actually invoke the production-runtime tests and retain durable green run evidence.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-13T00:23:54.787Z"
+        },
+        {
+          "n": 4,
+          "text": "Independent reviewer checks platform cfg/compiler compatibility, false-green fallbacks, CI invocation, docs, and the focused native matrix without inferring one platform from another.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-13T00:23:54.877Z"
+        }
+      ],
+      "refs": [],
+      "needsAcceptance": false,
+      "created": "2026-07-13T00:23:47.234Z",
+      "updated": "2026-07-13"
+    },
+    {
+      "id": "c0cq3bd4",
+      "num": 524,
+      "title": "macOS native C ABI runtime matrix",
+      "body": "Deferred from #436 by D-VERDICT-436-1. Required non-skipping native macOS C ABI matrix must execute production-generated Jet Rust linked to real C. Prove exact symbols; struct/fieldless+payload enum size, alignment, offsets, and discriminants; capture-free pure callbacks under reentrant and concurrent foreign-thread calls; raw status/out-pointer poison-byte safety; borrowed non-null UTF-8 string returns; default C/system and supported macOS calling conventions. No static-only proof, silent skips, cross-target inference, or fake compiler fixture. Preserve #436 parser/sema/codegen exhaustiveness and hostile negative gates.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e8",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "needsAcceptance": false,
+      "created": "2026-07-13T00:25:40.165Z",
+      "updated": "2026-07-13"
+    },
+    {
+      "id": "c0eaqe17",
+      "num": 525,
+      "title": "Windows x64/x86 native C ABI runtime matrix",
+      "body": "Deferred from #436 by D-VERDICT-436-1. Required non-skipping native Windows x64 and x86 C ABI matrix must execute production-generated Jet Rust linked to real MSVC-compatible C. Prove exact undecorated/decorated symbols; struct/fieldless+payload enum size, alignment, offsets, and discriminants; capture-free pure callbacks under reentrant and concurrent foreign-thread calls; raw status/out-pointer poison-byte safety; borrowed non-null UTF-8 string returns; Win64 plus x86 cdecl/stdcall/fastcall/system rules and exact symbol spelling. No static-only proof, silent skips, cross-target inference, or fake compiler fixture. Preserve #436 parser/sema/codegen exhaustiveness and hostile negative gates.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e8",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "needsAcceptance": false,
+      "created": "2026-07-13T00:25:40.260Z",
+      "updated": "2026-07-13"
     }
   ],
   "decisions": [
@@ -16177,60 +16361,6 @@
       "status": "ratified",
       "created": "2026-07-07T17:38:00.287Z",
       "outcome": "B",
-      "ratifiedAt": "2026-07-07",
-      "draft": false
-    },
-    {
-      "id": "D-OSFACTS1",
-      "cardId": "c0qi7dc2",
-      "group": "stdlib",
-      "title": "Home for system facts and signal handling",
-      "gist": "Which module owns hostname/os/arch/cpu-count and interrupt handling.",
-      "explainer": "A: one obvious module name for \"facts about this machine/process\" plus the safe interrupt hook; keeps core.env honest. Exact signal breadth beyond interrupt stays expert opt-in inside the same module.",
-      "story": "Sam writes a build tool in Jet. It wants parallelism = cpu count, a cache dir under the right OS convention, the hostname for log stamps, and a clean ctrl-c that flushes the cache index before exit. None of those are environment variables, but core.env is the only place that sounds close.",
-      "inWild": "use core.env as env\n\nfn run() {\n    // today: none of these exist anywhere\n    workers :: ???           // logical cpu count\n    host :: ???              // hostname for the log line\n    // ctrl-c mid-build corrupts the half-written cache index\n}",
-      "detail": "",
-      "options": [
-        {
-          "key": "A",
-          "name": "New core.os module",
-          "detail": "os.name()/arch()/hostname()/cpu_count()/temp_dir()/username()/pid(), plus the beginner-safe interrupt hook os.on_interrupt(handler). core.env keeps only environment variables + cwd/home. Matches Go/Python naming instincts.",
-          "code": "use core.os as os\n\nworkers :: os.cpu_count()\nprint(\"[{os.hostname()}] building with {workers} workers\")\nos.on_interrupt(() => { flush_cache(); process.exit(130) })"
-        },
-        {
-          "key": "B",
-          "name": "Extend core.env",
-          "detail": "Everything lands on the module people already import: env.cpu_count(), env.hostname(), env.on_interrupt(...). No new name to learn, but \"env\" stops meaning environment variables and the module becomes a junk drawer.",
-          "code": "use core.env as env\n\nworkers :: env.cpu_count()\nenv.on_interrupt(() => flush_cache())"
-        },
-        {
-          "key": "C",
-          "name": "Split: facts in core.env, signals in core.process",
-          "detail": "Read-only facts join env; interrupt/signal handling joins core.process (which already owns exit). Each piece lands near a neighbor, but the \"where do I look\" answer becomes two modules.",
-          "code": "use core.env as env\nuse core.process as process\n\nworkers :: env.cpu_count()\nprocess.on_interrupt(() => flush_cache())"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Go",
-          "note": "os + runtime own this; env vars are one corner of os, not the container.",
-          "code": "runtime.NumCPU(); os.Hostname(); signal.Notify(c, os.Interrupt)"
-        },
-        {
-          "lang": "Python",
-          "note": "os/platform/signal split — three modules for one question is the anti-pattern to avoid.",
-          "code": "os.cpu_count(); platform.node(); signal.signal(signal.SIGINT, h)"
-        },
-        {
-          "lang": "Rust",
-          "note": "std::env has vars, std::thread::available_parallelism has cpus, hostname needs a crate — famously scattered.",
-          "code": "std::thread::available_parallelism()"
-        }
-      ],
-      "rec": "A",
-      "status": "ratified",
-      "created": "2026-07-07T17:38:00.354Z",
-      "outcome": "A",
       "ratifiedAt": "2026-07-07",
       "draft": false
     },
@@ -28913,8 +29043,28 @@
         "visualCheck": null
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-07-12T13:28:27.601Z"
+      "status": "ratified",
+      "created": "2026-07-12T13:28:27.601Z",
+      "outcome": "accept",
+      "ratifiedAt": "2026-07-13",
+      "provenance": {
+        "kind": "owner-ui",
+        "session": "LPGk_TyeTe0",
+        "challenge": "uORpPBSK7GE",
+        "issuedFor": "D-ACCEPT-515",
+        "outcome": "accept",
+        "resolvedAt": "2026-07-13T00:14:32.334Z"
+      },
+      "provenanceHistory": [
+        {
+          "kind": "owner-ui",
+          "session": "LPGk_TyeTe0",
+          "challenge": "uORpPBSK7GE",
+          "issuedFor": "D-ACCEPT-515",
+          "outcome": "accept",
+          "resolvedAt": "2026-07-13T00:14:32.334Z"
+        }
+      ]
     },
     {
       "id": "D-ACCEPT-516",
@@ -28952,8 +29102,28 @@
         "visualCheck": null
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-07-12T13:54:28.211Z"
+      "status": "ratified",
+      "created": "2026-07-12T13:54:28.211Z",
+      "outcome": "accept",
+      "ratifiedAt": "2026-07-13",
+      "provenance": {
+        "kind": "owner-ui",
+        "session": "LPGk_TyeTe0",
+        "challenge": "IoIp__rkc9A",
+        "issuedFor": "D-ACCEPT-516",
+        "outcome": "accept",
+        "resolvedAt": "2026-07-13T00:14:26.601Z"
+      },
+      "provenanceHistory": [
+        {
+          "kind": "owner-ui",
+          "session": "LPGk_TyeTe0",
+          "challenge": "IoIp__rkc9A",
+          "issuedFor": "D-ACCEPT-516",
+          "outcome": "accept",
+          "resolvedAt": "2026-07-13T00:14:26.601Z"
+        }
+      ]
     },
     {
       "id": "D-CLI-OSIMAGE1",
@@ -29085,8 +29255,28 @@
         ]
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-07-12T14:59:51.845Z"
+      "status": "ratified",
+      "created": "2026-07-12T14:59:51.845Z",
+      "outcome": "accept",
+      "ratifiedAt": "2026-07-13",
+      "provenance": {
+        "kind": "owner-ui",
+        "session": "LPGk_TyeTe0",
+        "challenge": "lXVs-SRkBfY",
+        "issuedFor": "D-ACCEPT-519",
+        "outcome": "accept",
+        "resolvedAt": "2026-07-13T00:14:21.411Z"
+      },
+      "provenanceHistory": [
+        {
+          "kind": "owner-ui",
+          "session": "LPGk_TyeTe0",
+          "challenge": "lXVs-SRkBfY",
+          "issuedFor": "D-ACCEPT-519",
+          "outcome": "accept",
+          "resolvedAt": "2026-07-13T00:14:21.411Z"
+        }
+      ]
     },
     {
       "id": "D-EFFDBREAD1",
@@ -29817,6 +30007,75 @@
       "status": "ratified",
       "created": "2026-07-13T00:10:12.853Z",
       "outcome": "C",
+      "ratifiedAt": "2026-07-13"
+    },
+    {
+      "id": "D-VERDICT-292-1",
+      "cardId": "c0qi7dc2",
+      "group": "verdict",
+      "title": "Platform scope: Linux now, macOS and Windows later",
+      "gist": "",
+      "lesson": "",
+      "explainer": "",
+      "story": "",
+      "inWild": "",
+      "detail": "",
+      "options": [],
+      "comparisons": [],
+      "rec": null,
+      "recommendation": null,
+      "hybrid": null,
+      "draft": false,
+      "status": "ratified",
+      "outcome": "Epoch 3 accepts language and Linux support; move macOS and Windows core.os runtime proof to Epoch 8.",
+      "comment": "Epoch 3 accepts language and Linux support; move macOS and Windows core.os runtime proof to Epoch 8.",
+      "created": "2026-07-13T00:22:55.818Z",
+      "ratifiedAt": "2026-07-13"
+    },
+    {
+      "id": "D-VERDICT-436-1",
+      "cardId": "c0ai04g0",
+      "group": "verdict",
+      "title": "C ABI platform matrix: Linux now, macOS and Windows later",
+      "gist": "",
+      "lesson": "",
+      "explainer": "",
+      "story": "",
+      "inWild": "",
+      "detail": "",
+      "options": [],
+      "comparisons": [],
+      "rec": null,
+      "recommendation": null,
+      "hybrid": null,
+      "draft": false,
+      "status": "ratified",
+      "outcome": "Epoch 3 accepts language and Linux C ABI correctness; move macOS and Windows native ABI matrix work to Epoch 8.",
+      "comment": "Epoch 3 accepts language and Linux C ABI correctness; move macOS and Windows native ABI matrix work to Epoch 8.",
+      "created": "2026-07-13T00:22:55.909Z",
+      "ratifiedAt": "2026-07-13"
+    },
+    {
+      "id": "D-VERDICT-480-1",
+      "cardId": "c0wqwqaq",
+      "group": "verdict",
+      "title": "Mobile platform work deferred",
+      "gist": "",
+      "lesson": "",
+      "explainer": "",
+      "story": "",
+      "inWild": "",
+      "detail": "",
+      "options": [],
+      "comparisons": [],
+      "rec": null,
+      "recommendation": null,
+      "hybrid": null,
+      "draft": false,
+      "status": "ratified",
+      "outcome": "Defer mobile-native platform work; current burndown focuses the Jet language and Linux support.",
+      "comment": "Defer mobile-native platform work; current burndown focuses the Jet language and Linux support.",
+      "created": "2026-07-13T00:22:55.999Z",
       "ratifiedAt": "2026-07-13"
     }
   ],
@@ -30600,6 +30859,300 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-13T00:27:36.364Z",
+      "by": "terra-360-builder",
+      "action": "card.release",
+      "ref": "c0l5fmyy",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-13T00:27:31.579Z",
+      "by": "terra-360-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0l5fmyy",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-13T00:27:24.746Z",
+      "by": "terra-360-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0l5fmyy",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-13T00:27:10.998Z",
+      "by": "terra-301-builder",
+      "action": "card.update",
+      "ref": "c0qi7dc2",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T00:27:10.886Z",
+      "by": "terra-301-builder",
+      "action": "card.update",
+      "ref": "c0qi7dc2",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T00:27:03.743Z",
+      "by": "terra-301-builder",
+      "action": "card.criteria-verify",
+      "ref": "c0qi7dc2",
+      "note": "#10"
+    },
+    {
+      "at": "2026-07-13T00:27:03.649Z",
+      "by": "terra-292-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0qi7dc2",
+      "note": "#10"
+    },
+    {
+      "at": "2026-07-13T00:27:03.557Z",
+      "by": "terra-301-builder",
+      "action": "card.criteria-verify",
+      "ref": "c0qi7dc2",
+      "note": "#9"
+    },
+    {
+      "at": "2026-07-13T00:27:03.467Z",
+      "by": "terra-292-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0qi7dc2",
+      "note": "#9"
+    },
+    {
+      "at": "2026-07-13T00:27:03.370Z",
+      "by": "terra-301-builder",
+      "action": "card.criteria-verify",
+      "ref": "c0qi7dc2",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-13T00:27:03.278Z",
+      "by": "terra-292-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0qi7dc2",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-13T00:27:03.184Z",
+      "by": "terra-301-builder",
+      "action": "card.criteria-verify",
+      "ref": "c0qi7dc2",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-13T00:27:03.094Z",
+      "by": "terra-292-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0qi7dc2",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-13T00:26:58.451Z",
+      "by": "terra-436-builder",
+      "action": "card.release",
+      "ref": "c0ai04g0",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-13T00:26:58.365Z",
+      "by": "terra-436-builder",
+      "action": "card.update",
+      "ref": "c0ai04g0",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T00:25:40.260Z",
+      "by": "terra-436-builder",
+      "action": "card.add",
+      "ref": "c0eaqe17",
+      "note": "Windows x64/x86 native C ABI runtime matrix"
+    },
+    {
+      "at": "2026-07-13T00:25:40.165Z",
+      "by": "terra-436-builder",
+      "action": "card.add",
+      "ref": "c0cq3bd4",
+      "note": "macOS native C ABI runtime matrix"
+    },
+    {
+      "at": "2026-07-13T00:25:40.077Z",
+      "by": "terra-436-builder",
+      "action": "card.update",
+      "ref": "c0ai04g0",
+      "note": "phase,plan,logEntry"
+    },
+    {
+      "at": "2026-07-13T00:25:39.963Z",
+      "by": "terra-436-builder",
+      "action": "card.update",
+      "ref": "c0ai04g0",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-07-13T00:24:16.398Z",
+      "by": "terra-301-builder",
+      "action": "card.update",
+      "ref": "c0qi7dc2",
+      "note": "plan,criteria"
+    },
+    {
+      "at": "2026-07-13T00:23:54.877Z",
+      "by": "terra-301-builder",
+      "action": "card.criteria-add",
+      "ref": "c0h1r3b8",
+      "note": "#4 Independent reviewer checks platform cfg/compiler compatibil"
+    },
+    {
+      "at": "2026-07-13T00:23:54.787Z",
+      "by": "terra-301-builder",
+      "action": "card.criteria-add",
+      "ref": "c0h1r3b8",
+      "note": "#3 All readiness and completion waits are bounded; timeout kill"
+    },
+    {
+      "at": "2026-07-13T00:23:54.689Z",
+      "by": "terra-301-builder",
+      "action": "card.criteria-add",
+      "ref": "c0h1r3b8",
+      "note": "#2 Native Windows compiles and runs core.os facts plus real Set"
+    },
+    {
+      "at": "2026-07-13T00:23:54.598Z",
+      "by": "terra-301-builder",
+      "action": "card.criteria-add",
+      "ref": "c0h1r3b8",
+      "note": "#1 Native macOS compiles and runs core.os facts plus real SIGIN"
+    },
+    {
+      "at": "2026-07-13T00:23:47.234Z",
+      "by": "terra-301-builder",
+      "action": "card.add",
+      "ref": "c0h1r3b8",
+      "note": "Epoch 8 core.os native macOS/Windows runtime matrix"
+    },
+    {
+      "at": "2026-07-13T00:23:11.744Z",
+      "by": "terra-436-builder",
+      "action": "card.claim",
+      "ref": "c0ai04g0",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T00:22:55.999Z",
+      "by": "owner",
+      "action": "decision.verdict",
+      "ref": "D-VERDICT-480-1",
+      "note": "Defer mobile-native platform work; current burndown focuses the Jet language and Linux support."
+    },
+    {
+      "at": "2026-07-13T00:22:55.909Z",
+      "by": "owner",
+      "action": "decision.verdict",
+      "ref": "D-VERDICT-436-1",
+      "note": "Epoch 3 accepts language and Linux C ABI correctness; move macOS and Windows native ABI matrix work to Epoch 8."
+    },
+    {
+      "at": "2026-07-13T00:22:55.818Z",
+      "by": "owner",
+      "action": "decision.verdict",
+      "ref": "D-VERDICT-292-1",
+      "note": "Epoch 3 accepts language and Linux support; move macOS and Windows core.os runtime proof to Epoch 8."
+    },
+    {
+      "at": "2026-07-13T00:19:21.517Z",
+      "by": "terra-436-builder",
+      "action": "card.claim",
+      "ref": "c0ai04g0",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T00:18:12.128Z",
+      "by": "terra-480-builder",
+      "action": "card.update",
+      "ref": "c0wqwqaq",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T00:17:53.893Z",
+      "by": "terra-301-reviewer",
+      "action": "card.update",
+      "ref": "c0075iyb",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T00:16:33.595Z",
+      "by": "terra-301-builder",
+      "action": "card.update",
+      "ref": "c0075iyb",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T00:14:49.894Z",
+      "by": "terra-360-builder",
+      "action": "card.claim",
+      "ref": "c0l5fmyy",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T00:14:47.063Z",
+      "by": "terra-480-builder",
+      "action": "card.release",
+      "ref": "c0wqwqaq",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-13T00:14:46.976Z",
+      "by": "terra-480-builder",
+      "action": "card.update",
+      "ref": "c0wqwqaq",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T00:14:32.344Z",
+      "by": "owner",
+      "action": "acceptance.resolve",
+      "ref": "D-ACCEPT-515",
+      "note": "owner-ui session=LPGk_TyeTe0 challenge=uORpPBSK7GE outcome=accept"
+    },
+    {
+      "at": "2026-07-13T00:14:26.609Z",
+      "by": "owner",
+      "action": "acceptance.resolve",
+      "ref": "D-ACCEPT-516",
+      "note": "owner-ui session=LPGk_TyeTe0 challenge=IoIp__rkc9A outcome=accept"
+    },
+    {
+      "at": "2026-07-13T00:14:21.422Z",
+      "by": "owner",
+      "action": "acceptance.resolve",
+      "ref": "D-ACCEPT-519",
+      "note": "owner-ui session=LPGk_TyeTe0 challenge=lXVs-SRkBfY outcome=accept"
+    },
+    {
+      "at": "2026-07-13T00:14:07.785Z",
+      "by": "terra-301-review",
+      "action": "card.update",
+      "ref": "c0075iyb",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T00:13:06.658Z",
+      "by": "terra-480-builder",
+      "action": "card.claim",
+      "ref": "c0wqwqaq",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T00:12:33.764Z",
+      "by": "terra-480-planner",
+      "action": "card.release",
+      "ref": "c0wqwqaq",
+      "note": "[handoff] logged"
+    },
     {
       "at": "2026-07-13T00:12:22.851Z",
       "by": "terra-292-builder",
@@ -33805,300 +34358,6 @@
       "action": "card.update",
       "ref": "c0yxdqju",
       "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-07-12T11:44:28.311Z",
-      "by": "cursor-e4-burn",
-      "action": "card.update",
-      "ref": "c0to4gms",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-07-12T11:44:08.054Z",
-      "by": "codex-orchestrator",
-      "action": "card.release",
-      "ref": "c2sj0bd9",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-12T11:44:07.764Z",
-      "by": "terra-136-review",
-      "action": "card.criteria-meet",
-      "ref": "c2sj0bd9",
-      "note": "#6"
-    },
-    {
-      "at": "2026-07-12T11:34:55.637Z",
-      "by": "terra-136-review",
-      "action": "card.claim",
-      "ref": "c2sj0bd9",
-      "note": ""
-    },
-    {
-      "at": "2026-07-12T11:34:55.464Z",
-      "by": "codex-orchestrator",
-      "action": "card.release",
-      "ref": "c2sj0bd9",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-12T11:34:35.348Z",
-      "by": "codex-orchestrator",
-      "action": "card.release",
-      "ref": "c2zj0p7p",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-12T11:34:35.062Z",
-      "by": "terra-143-review",
-      "action": "card.criteria-meet",
-      "ref": "c2zj0p7p",
-      "note": "#8"
-    },
-    {
-      "at": "2026-07-12T11:28:54.355Z",
-      "by": "terra-143-review",
-      "action": "card.claim",
-      "ref": "c2zj0p7p",
-      "note": ""
-    },
-    {
-      "at": "2026-07-12T11:28:54.190Z",
-      "by": "codex-orchestrator",
-      "action": "card.release",
-      "ref": "c2zj0p7p",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-12T11:28:29.705Z",
-      "by": "codex-orchestrator",
-      "action": "card.release",
-      "ref": "c0qi7dc2",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-12T11:28:29.429Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0qi7dc2",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T11:10:19.000Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c2zj0p7p",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T11:02:06.652Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0qi7dc2",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T11:02:06.298Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c2sj0bd9",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T10:56:07.444Z",
-      "by": "sol-143-builder",
-      "action": "card.criteria-meet",
-      "ref": "c2zj0p7p",
-      "note": "#7"
-    },
-    {
-      "at": "2026-07-12T10:56:07.089Z",
-      "by": "sol-143-builder",
-      "action": "card.criteria-meet",
-      "ref": "c2zj0p7p",
-      "note": "#6"
-    },
-    {
-      "at": "2026-07-12T10:56:06.732Z",
-      "by": "sol-143-builder",
-      "action": "card.criteria-meet",
-      "ref": "c2zj0p7p",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-12T10:56:06.379Z",
-      "by": "sol-143-builder",
-      "action": "card.criteria-meet",
-      "ref": "c2zj0p7p",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-12T10:56:06.024Z",
-      "by": "sol-143-builder",
-      "action": "card.criteria-meet",
-      "ref": "c2zj0p7p",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-12T10:56:05.657Z",
-      "by": "sol-143-builder",
-      "action": "card.criteria-meet",
-      "ref": "c2zj0p7p",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-12T10:56:05.307Z",
-      "by": "sol-143-builder",
-      "action": "card.criteria-meet",
-      "ref": "c2zj0p7p",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-12T10:55:34.769Z",
-      "by": "sol-292-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0qi7dc2",
-      "note": "#8"
-    },
-    {
-      "at": "2026-07-12T10:55:34.427Z",
-      "by": "sol-292-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0qi7dc2",
-      "note": "#7"
-    },
-    {
-      "at": "2026-07-12T10:55:34.071Z",
-      "by": "sol-136-builder",
-      "action": "card.criteria-meet",
-      "ref": "c2sj0bd9",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-12T10:55:33.711Z",
-      "by": "sol-136-builder",
-      "action": "card.criteria-meet",
-      "ref": "c2sj0bd9",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-12T10:55:33.361Z",
-      "by": "sol-136-builder",
-      "action": "card.criteria-meet",
-      "ref": "c2sj0bd9",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-12T10:55:33.015Z",
-      "by": "sol-136-builder",
-      "action": "card.criteria-meet",
-      "ref": "c2sj0bd9",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-12T10:55:32.679Z",
-      "by": "sol-136-builder",
-      "action": "card.criteria-meet",
-      "ref": "c2sj0bd9",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-12T10:53:42.240Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c02wa1dn",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T10:51:24.967Z",
-      "by": "claude-main",
-      "action": "card.claim",
-      "ref": "c02wa1dn",
-      "note": ""
-    },
-    {
-      "at": "2026-07-12T10:50:59.886Z",
-      "by": "claude-main",
-      "action": "card.release",
-      "ref": "c0t4root",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-12T10:50:24.672Z",
-      "by": "claude-main",
-      "action": "card.claim",
-      "ref": "c0t4root",
-      "note": ""
-    },
-    {
-      "at": "2026-07-12T10:41:56.790Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0n6vj96",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T10:41:56.684Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0y0m8yx",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T10:40:53.592Z",
-      "by": "claude-main",
-      "action": "decision.ratify",
-      "ref": "D-VALIDATE1",
-      "note": "A (by claude-main, quoting owner: \"ratify the decisions (owner, 2026-07-12 chat; shape set by his direction: validator specified in the struct definition, in-situ methods only where the definition cannot express it)\")"
-    },
-    {
-      "at": "2026-07-12T10:40:53.493Z",
-      "by": "claude-main",
-      "action": "decision.ratify",
-      "ref": "D-API-STORE1",
-      "note": "A (by claude-main, quoting owner: \"ratify the decisions (owner, 2026-07-12 chat; shape set by his q2zvcuql direction: add with both collision behaviors)\")"
-    },
-    {
-      "at": "2026-07-12T10:40:10.741Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-VALIDATE1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-12T10:36:41.039Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0n6vj96",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-12T10:36:40.941Z",
-      "by": "claude-main",
-      "action": "decision.update",
-      "ref": "D-VALIDATE1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-12T10:35:46.528Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c2zj0p7p",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T10:35:46.168Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c2sj0bd9",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T10:35:45.814Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0qi7dc2",
-      "note": "phase,logEntry"
     }
   ],
   "nextNum": 368,

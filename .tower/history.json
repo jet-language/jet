@@ -19707,6 +19707,61 @@
       "outcome": "C",
       "ratifiedAt": "2026-07-10",
       "retiredAt": "2026-07-13T00:06:39.726Z"
+    },
+    {
+      "id": "D-OSFACTS1",
+      "cardId": "c0qi7dc2",
+      "group": "stdlib",
+      "title": "Home for system facts and signal handling",
+      "gist": "Which module owns hostname/os/arch/cpu-count and interrupt handling.",
+      "explainer": "A: one obvious module name for \"facts about this machine/process\" plus the safe interrupt hook; keeps core.env honest. Exact signal breadth beyond interrupt stays expert opt-in inside the same module.",
+      "story": "Sam writes a build tool in Jet. It wants parallelism = cpu count, a cache dir under the right OS convention, the hostname for log stamps, and a clean ctrl-c that flushes the cache index before exit. None of those are environment variables, but core.env is the only place that sounds close.",
+      "inWild": "use core.env as env\n\nfn run() {\n    // today: none of these exist anywhere\n    workers :: ???           // logical cpu count\n    host :: ???              // hostname for the log line\n    // ctrl-c mid-build corrupts the half-written cache index\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "New core.os module",
+          "detail": "os.name()/arch()/hostname()/cpu_count()/temp_dir()/username()/pid(), plus the beginner-safe interrupt hook os.on_interrupt(handler). core.env keeps only environment variables + cwd/home. Matches Go/Python naming instincts.",
+          "code": "use core.os as os\n\nworkers :: os.cpu_count()\nprint(\"[{os.hostname()}] building with {workers} workers\")\nos.on_interrupt(() => { flush_cache(); process.exit(130) })"
+        },
+        {
+          "key": "B",
+          "name": "Extend core.env",
+          "detail": "Everything lands on the module people already import: env.cpu_count(), env.hostname(), env.on_interrupt(...). No new name to learn, but \"env\" stops meaning environment variables and the module becomes a junk drawer.",
+          "code": "use core.env as env\n\nworkers :: env.cpu_count()\nenv.on_interrupt(() => flush_cache())"
+        },
+        {
+          "key": "C",
+          "name": "Split: facts in core.env, signals in core.process",
+          "detail": "Read-only facts join env; interrupt/signal handling joins core.process (which already owns exit). Each piece lands near a neighbor, but the \"where do I look\" answer becomes two modules.",
+          "code": "use core.env as env\nuse core.process as process\n\nworkers :: env.cpu_count()\nprocess.on_interrupt(() => flush_cache())"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "os + runtime own this; env vars are one corner of os, not the container.",
+          "code": "runtime.NumCPU(); os.Hostname(); signal.Notify(c, os.Interrupt)"
+        },
+        {
+          "lang": "Python",
+          "note": "os/platform/signal split — three modules for one question is the anti-pattern to avoid.",
+          "code": "os.cpu_count(); platform.node(); signal.signal(signal.SIGINT, h)"
+        },
+        {
+          "lang": "Rust",
+          "note": "std::env has vars, std::thread::available_parallelism has cpus, hostname needs a crate — famously scattered.",
+          "code": "std::thread::available_parallelism()"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "created": "2026-07-07T17:38:00.354Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-07",
+      "draft": false,
+      "retiredAt": "2026-07-13T00:27:11.010Z"
     }
   ],
   "cards": [
@@ -66076,6 +66131,300 @@
       "action": "card.criteria-add",
       "ref": "c2zj0p7p",
       "note": "#8 Independent reviewer attacks identity collisions, unsound au"
+    },
+    {
+      "at": "2026-07-12T10:35:45.814Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0qi7dc2",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T10:35:46.168Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c2sj0bd9",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T10:35:46.528Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c2zj0p7p",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T10:36:40.941Z",
+      "by": "claude-main",
+      "action": "decision.update",
+      "ref": "D-VALIDATE1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T10:36:41.039Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0n6vj96",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-12T10:40:10.741Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-VALIDATE1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-12T10:40:53.493Z",
+      "by": "claude-main",
+      "action": "decision.ratify",
+      "ref": "D-API-STORE1",
+      "note": "A (by claude-main, quoting owner: \"ratify the decisions (owner, 2026-07-12 chat; shape set by his q2zvcuql direction: add with both collision behaviors)\")"
+    },
+    {
+      "at": "2026-07-12T10:40:53.592Z",
+      "by": "claude-main",
+      "action": "decision.ratify",
+      "ref": "D-VALIDATE1",
+      "note": "A (by claude-main, quoting owner: \"ratify the decisions (owner, 2026-07-12 chat; shape set by his direction: validator specified in the struct definition, in-situ methods only where the definition cannot express it)\")"
+    },
+    {
+      "at": "2026-07-12T10:41:56.684Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0y0m8yx",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T10:41:56.790Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0n6vj96",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T10:50:24.672Z",
+      "by": "claude-main",
+      "action": "card.claim",
+      "ref": "c0t4root",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T10:50:59.886Z",
+      "by": "claude-main",
+      "action": "card.release",
+      "ref": "c0t4root",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-12T10:51:24.967Z",
+      "by": "claude-main",
+      "action": "card.claim",
+      "ref": "c02wa1dn",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T10:53:42.240Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c02wa1dn",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T10:55:32.679Z",
+      "by": "sol-136-builder",
+      "action": "card.criteria-meet",
+      "ref": "c2sj0bd9",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-12T10:55:33.015Z",
+      "by": "sol-136-builder",
+      "action": "card.criteria-meet",
+      "ref": "c2sj0bd9",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-12T10:55:33.361Z",
+      "by": "sol-136-builder",
+      "action": "card.criteria-meet",
+      "ref": "c2sj0bd9",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-12T10:55:33.711Z",
+      "by": "sol-136-builder",
+      "action": "card.criteria-meet",
+      "ref": "c2sj0bd9",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-12T10:55:34.071Z",
+      "by": "sol-136-builder",
+      "action": "card.criteria-meet",
+      "ref": "c2sj0bd9",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-12T10:55:34.427Z",
+      "by": "sol-292-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0qi7dc2",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-12T10:55:34.769Z",
+      "by": "sol-292-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0qi7dc2",
+      "note": "#8"
+    },
+    {
+      "at": "2026-07-12T10:56:05.307Z",
+      "by": "sol-143-builder",
+      "action": "card.criteria-meet",
+      "ref": "c2zj0p7p",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-12T10:56:05.657Z",
+      "by": "sol-143-builder",
+      "action": "card.criteria-meet",
+      "ref": "c2zj0p7p",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-12T10:56:06.024Z",
+      "by": "sol-143-builder",
+      "action": "card.criteria-meet",
+      "ref": "c2zj0p7p",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-12T10:56:06.379Z",
+      "by": "sol-143-builder",
+      "action": "card.criteria-meet",
+      "ref": "c2zj0p7p",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-12T10:56:06.732Z",
+      "by": "sol-143-builder",
+      "action": "card.criteria-meet",
+      "ref": "c2zj0p7p",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-12T10:56:07.089Z",
+      "by": "sol-143-builder",
+      "action": "card.criteria-meet",
+      "ref": "c2zj0p7p",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-12T10:56:07.444Z",
+      "by": "sol-143-builder",
+      "action": "card.criteria-meet",
+      "ref": "c2zj0p7p",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-12T11:02:06.298Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c2sj0bd9",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T11:02:06.652Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0qi7dc2",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T11:10:19.000Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c2zj0p7p",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T11:28:29.429Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0qi7dc2",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T11:28:29.705Z",
+      "by": "codex-orchestrator",
+      "action": "card.release",
+      "ref": "c0qi7dc2",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-12T11:28:54.190Z",
+      "by": "codex-orchestrator",
+      "action": "card.release",
+      "ref": "c2zj0p7p",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-12T11:28:54.355Z",
+      "by": "terra-143-review",
+      "action": "card.claim",
+      "ref": "c2zj0p7p",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T11:34:35.062Z",
+      "by": "terra-143-review",
+      "action": "card.criteria-meet",
+      "ref": "c2zj0p7p",
+      "note": "#8"
+    },
+    {
+      "at": "2026-07-12T11:34:35.348Z",
+      "by": "codex-orchestrator",
+      "action": "card.release",
+      "ref": "c2zj0p7p",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-12T11:34:55.464Z",
+      "by": "codex-orchestrator",
+      "action": "card.release",
+      "ref": "c2sj0bd9",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-12T11:34:55.637Z",
+      "by": "terra-136-review",
+      "action": "card.claim",
+      "ref": "c2sj0bd9",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T11:44:07.764Z",
+      "by": "terra-136-review",
+      "action": "card.criteria-meet",
+      "ref": "c2sj0bd9",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-12T11:44:08.054Z",
+      "by": "codex-orchestrator",
+      "action": "card.release",
+      "ref": "c2sj0bd9",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-12T11:44:28.311Z",
+      "by": "cursor-e4-burn",
+      "action": "card.update",
+      "ref": "c0to4gms",
+      "note": "logEntry,blockedBy"
     }
   ]
 }
