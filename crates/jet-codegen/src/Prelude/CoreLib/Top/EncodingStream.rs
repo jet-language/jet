@@ -598,6 +598,41 @@ enum JetJsonlFoldFrame {
     },
 }
 
+struct JetJsonlHeapBudget {
+    used: usize,
+    limit: usize,
+}
+
+impl JetJsonlHeapBudget {
+    fn charge(&mut self, bytes: usize) -> bool {
+        let Some(next) = self.used.checked_add(bytes) else { return false };
+        if next > self.limit { return false; }
+        self.used = next;
+        true
+    }
+}
+
+// Charge capacity growth before asking the allocator. `reserve_exact` makes
+// the prospective geometric capacity deterministic, with no
+// allocate-then-check window. Existing spare capacity was charged when it was
+// created, so pushes inside it need no new charge.
+fn jet_jsonl_reserve_push<T>(heap: &mut JetJsonlHeapBudget, values: &mut Vec<T>) -> bool {
+    if values.len() < values.capacity() { return true; }
+    let Some(minimum) = values.len().checked_add(1) else { return false };
+    let next_capacity = if values.capacity() == 0 {
+        1
+    } else {
+        let Some(doubled) = values.capacity().checked_mul(2) else { return false };
+        doubled.max(minimum)
+    };
+    let Some(old_bytes) = values.capacity().checked_mul(std::mem::size_of::<T>()) else { return false };
+    let Some(next_bytes) = next_capacity.checked_mul(std::mem::size_of::<T>()) else { return false };
+    if !heap.charge(next_bytes - old_bytes) { return false; }
+    if values.try_reserve_exact(next_capacity - values.len()).is_err() { return false; }
+    debug_assert_eq!(values.capacity(), next_capacity);
+    true
+}
+
 fn jet_jsonl_project_error(
     mut error: jet_std::EncodingError,
     record_index: Option<i64>,
@@ -660,37 +695,38 @@ impl jet_std::JSONLReader {
         }
     }
 
-    fn charge(&mut self, retained: &mut usize, amount: usize) -> Result<(), jet_std::EncodingError> {
-        let limit = self.json.limits.max_item_bytes as usize;
-        *retained = retained.checked_add(amount).ok_or_else(|| {
-            jet_encoding_error(
-                jet_std::EncodingErrorKind::Limit,
-                self.json.offset,
-                self.json.line,
-                self.json.column,
-                format!("max_item_bytes {} exceeded", self.json.limits.max_item_bytes),
-            )
-        })?;
-        if *retained > limit {
-            return Err(jet_encoding_error(
-                jet_std::EncodingErrorKind::Limit,
-                self.json.offset,
-                self.json.line,
-                self.json.column,
-                format!("max_item_bytes {} exceeded", self.json.limits.max_item_bytes),
-            ));
-        }
-        Ok(())
+    fn heap_limit_error(&self) -> jet_std::EncodingError {
+        let mut error = jet_encoding_error(
+            jet_std::EncodingErrorKind::Limit,
+            self.json.offset,
+            self.json.line,
+            self.json.column,
+            format!("max_item_bytes {} exceeded by retained JSONL record heap", self.json.limits.max_item_bytes),
+        );
+        error.path = self.json.path();
+        error
+    }
+
+    fn admit_string(
+        &self,
+        heap: &mut JetJsonlHeapBudget,
+        value: &String,
+    ) -> Result<(), jet_std::EncodingError> {
+        if heap.charge(value.capacity()) { Ok(()) } else { Err(self.heap_limit_error()) }
     }
 
     fn push_value(
         &mut self,
+        heap: &mut JetJsonlHeapBudget,
         root: &mut Option<jet_std::DataTree>,
         frames: &mut Vec<JetJsonlFoldFrame>,
         value: jet_std::DataTree,
     ) -> Result<(), jet_std::EncodingError> {
         match frames.last_mut() {
-            Some(JetJsonlFoldFrame::Array(items)) => items.push(value),
+            Some(JetJsonlFoldFrame::Array(items)) => {
+                if !jet_jsonl_reserve_push(heap, items) { return Err(self.heap_limit_error()); }
+                items.push(value);
+            }
             Some(JetJsonlFoldFrame::Object { entries, key }) => {
                 let Some(key) = key.take() else {
                     return Err(jet_encoding_error(
@@ -701,6 +737,7 @@ impl jet_std::JSONLReader {
                         "JSON event stream produced an object value without a key",
                     ));
                 };
+                if !jet_jsonl_reserve_push(heap, entries) { return Err(self.heap_limit_error()); }
                 entries.push((key, value));
             }
             None if root.is_none() => *root = Some(value),
@@ -733,7 +770,10 @@ impl jet_std::JSONLReader {
 
         let mut root = None;
         let mut frames = Vec::new();
-        let mut retained = 0usize;
+        let mut heap = JetJsonlHeapBudget {
+            used: 0,
+            limit: self.json.limits.max_item_bytes as usize,
+        };
         loop {
             let event = match self.json.next_event() {
                 Ok(event) => event,
@@ -763,24 +803,20 @@ impl jet_std::JSONLReader {
             };
             let result = (|| -> Result<(), jet_std::EncodingError> { match event {
                 jet_std::DataEvent::Null => {
-                    self.charge(&mut retained, 1)?;
-                    self.push_value(&mut root, &mut frames, jet_std::DataTree::Null)
+                    self.push_value(&mut heap, &mut root, &mut frames, jet_std::DataTree::Null)
                 }
                 jet_std::DataEvent::Bool(value) => {
-                    self.charge(&mut retained, 1)?;
-                    self.push_value(&mut root, &mut frames, jet_std::DataTree::Bool(value))
+                    self.push_value(&mut heap, &mut root, &mut frames, jet_std::DataTree::Bool(value))
                 }
                 jet_std::DataEvent::Int(value) => {
-                    self.charge(&mut retained, 8)?;
-                    self.push_value(&mut root, &mut frames, jet_std::DataTree::Int(value))
+                    self.push_value(&mut heap, &mut root, &mut frames, jet_std::DataTree::Int(value))
                 }
                 jet_std::DataEvent::Float(value) => {
-                    self.charge(&mut retained, 8)?;
-                    self.push_value(&mut root, &mut frames, jet_std::DataTree::Float(value))
+                    self.push_value(&mut heap, &mut root, &mut frames, jet_std::DataTree::Float(value))
                 }
                 jet_std::DataEvent::Text(value) => {
-                    self.charge(&mut retained, value.len())?;
-                    self.push_value(&mut root, &mut frames, jet_std::DataTree::Text(value))
+                    self.admit_string(&mut heap, &value)?;
+                    self.push_value(&mut heap, &mut root, &mut frames, jet_std::DataTree::Text(value))
                 }
                 jet_std::DataEvent::Bytes(_) => Err(jet_encoding_error(
                     jet_std::EncodingErrorKind::State,
@@ -790,19 +826,23 @@ impl jet_std::JSONLReader {
                     "JSON tokenizer produced Bytes",
                 )),
                 jet_std::DataEvent::ArrayStart => {
-                    self.charge(&mut retained, 1)?;
+                    if !jet_jsonl_reserve_push(&mut heap, &mut frames) {
+                        return Err(self.heap_limit_error());
+                    }
                     frames.push(JetJsonlFoldFrame::Array(Vec::new()));
                     Ok(())
                 }
                 jet_std::DataEvent::ObjectStart => {
-                    self.charge(&mut retained, 1)?;
+                    if !jet_jsonl_reserve_push(&mut heap, &mut frames) {
+                        return Err(self.heap_limit_error());
+                    }
                     frames.push(JetJsonlFoldFrame::Object { entries: Vec::new(), key: None });
                     Ok(())
                 }
                 jet_std::DataEvent::Key(value) => {
-                    self.charge(&mut retained, value.len())?;
                     match frames.last_mut() {
                         Some(JetJsonlFoldFrame::Object { key, .. }) if key.is_none() => {
+                            self.admit_string(&mut heap, &value)?;
                             *key = Some(value);
                             Ok(())
                         }
@@ -817,6 +857,7 @@ impl jet_std::JSONLReader {
                 }
                 jet_std::DataEvent::ArrayEnd => match frames.pop() {
                     Some(JetJsonlFoldFrame::Array(items)) => self.push_value(
+                        &mut heap,
                         &mut root,
                         &mut frames,
                         jet_std::DataTree::Array(items),
@@ -831,6 +872,7 @@ impl jet_std::JSONLReader {
                 },
                 jet_std::DataEvent::ObjectEnd => match frames.pop() {
                     Some(JetJsonlFoldFrame::Object { entries, key: None }) => self.push_value(
+                        &mut heap,
                         &mut root,
                         &mut frames,
                         jet_std::DataTree::Object(entries),

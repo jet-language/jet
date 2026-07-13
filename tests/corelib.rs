@@ -320,6 +320,80 @@ fn run() {{
     let _ = fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn jsonl_fold_heap_budget_rejects_growth_before_large_record_allocation() {
+    let dir = std::env::temp_dir().join(format!("jet_jsonl_heap_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let array_path = dir.join("array.jsonl");
+    let object_path = dir.join("object.jsonl");
+    let array = format!("[{}]\n", std::iter::repeat("0").take(256).collect::<Vec<_>>().join(","));
+    let object = format!(
+        "{{{}}}\n",
+        (0..256)
+            .map(|index| format!(r#""key{index:04}":"""#))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    fs::write(&array_path, array).unwrap();
+    fs::write(&object_path, object).unwrap();
+    let array_path = array_path.to_string_lossy().replace('\\', "\\\\");
+    let object_path = object_path.to_string_lossy().replace('\\', "\\\\");
+    let source = format!(
+        r#"
+use core.encoding as encoding
+use core.encoding.jsonl as jsonl
+use core.files as files
+
+fn run() {{
+    array_limits := encoding.EncodingLimits.safe()
+    array_limits.max_item_bytes = 512
+    array_input :: files.open("{array_path}") ?? panic("array open")
+    array_reader :: jsonl.reader(^array_input, array_limits) ?? panic("array reader")
+    array_result :: array_reader.next()
+    if array_result == {{
+        ok(_) -> {{ print("array-limit-missed") }}
+        err(first) -> {{
+            array_again :: array_reader.next()
+            if array_again == {{
+                ok(_) -> {{ print("array-terminal-missed") }}
+                err(second) -> {{
+                    print(first.byte_offset < 64)
+                    print(first.path)
+                    print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason)
+                }}
+            }}
+        }}
+    }}
+
+    object_limits := encoding.EncodingLimits.safe()
+    object_limits.max_item_bytes = 512
+    object_input :: files.open("{object_path}") ?? panic("object open")
+    object_reader :: jsonl.reader(^object_input, object_limits) ?? panic("object reader")
+    object_result :: object_reader.next()
+    if object_result == {{
+        ok(_) -> {{ print("object-limit-missed") }}
+        err(first) -> {{
+            object_again :: object_reader.next()
+            if object_again == {{
+                ok(_) -> {{ print("object-terminal-missed") }}
+                err(second) -> {{
+                    print(first.byte_offset < 200)
+                    print(first.path)
+                    print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason)
+                }}
+            }}
+        }}
+    }}
+}}
+"#
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "jsonl_heap", &source, &[], None);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(stdout, "true\n$[0][8]\ntrue\ntrue\n$[0][\"key0004\"]\ntrue\n");
+    assert_eq!(stderr, "");
+    let _ = fs::remove_dir_all(&dir);
+}
+
 fn compile_temp(name: &str, src: &str) -> jet::CompileOutput {
     let dir = std::env::temp_dir().join(format!("jet_corelib_test_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
