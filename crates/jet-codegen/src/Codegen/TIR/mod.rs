@@ -2119,6 +2119,10 @@ pub enum THandleOp {
     JSONWriterWrite,
     JSONWriterFlush,
     JSONWriterFinish,
+    JSONLReaderNext,
+    JSONLWriterWrite,
+    JSONLWriterFlush,
+    JSONLWriterFinish,
     /// StdinHandle: `read_line()` → `{root}jet_std_io_stdin_read_line(&mut (recv))`.
     StdinReadLine,
     /// Stdout/Stderr: stream writes and facts (D-COREIO1=A).

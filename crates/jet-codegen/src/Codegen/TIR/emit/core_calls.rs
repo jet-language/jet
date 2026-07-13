@@ -607,6 +607,14 @@ pub(crate) fn emit_tir_core_call(
             let canonical = if args.len() > 2 { arg(2) } else { "false".to_string() };
             format!("{}({}, {}, {})", helper("jet_enc_json_writer"), arg(0), limits, canonical)
         }
+        ("core.encoding.jsonl", "reader") => {
+            let limits = if args.len() > 1 { arg(1) } else { format!("{}jet_std::EncodingLimits::safe()", cx.root_prefix) };
+            format!("{}({}, {})", helper("jet_enc_jsonl_reader"), arg(0), limits)
+        }
+        ("core.encoding.jsonl", "writer") => {
+            let limits = if args.len() > 1 { arg(1) } else { format!("{}jet_std::EncodingLimits::safe()", cx.root_prefix) };
+            format!("{}({}, {})", helper("jet_enc_jsonl_writer"), arg(0), limits)
+        }
         ("core.encoding.json", "decode") => {
             if enc_ok_is_json(ret_ty) {
                 format!("{}(&({}))", helper("jet_std_json_decode_lenient"), arg(0))

@@ -515,6 +515,20 @@ pub fn core_fixed_sig(
             vec![(read, Type::List(Box::new(json.clone())))],
             Some(Type::String),
         )),
+        ("core.encoding.jsonl", "reader") => Some((
+            vec![
+                (moved, Type::Named("FileReader".to_string())),
+                (read, Type::Named("EncodingLimits".to_string())),
+            ],
+            Some(result_ty(Type::Named("JSONLReader".to_string()), encoding_error_ty())),
+        )),
+        ("core.encoding.jsonl", "writer") => Some((
+            vec![
+                (moved, Type::Named("FileWriter".to_string())),
+                (read, Type::Named("EncodingLimits".to_string())),
+            ],
+            Some(result_ty(Type::Named("JSONLWriter".to_string()), encoding_error_ty())),
+        )),
         // jet.csv → core.encoding.csv: parse text into a list of rows (list of fields).
         ("core.encoding.csv", "parse") => Some((
             vec![(read, Type::String)],

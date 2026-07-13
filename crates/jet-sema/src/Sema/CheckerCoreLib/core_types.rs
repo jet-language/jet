@@ -750,6 +750,13 @@ pub fn encoding_handle_method_return(
         ("JSONWriter", "write", 1) | ("JSONWriter", "flush" | "finish", 0) => {
             Some(Some(result_ty(unit, error)))
         }
+        ("JSONLReader", "next", 0) => Some(Some(result_ty(
+            Type::Option(Box::new(Type::Named("DataTree".to_string()))),
+            error,
+        ))),
+        ("JSONLWriter", "write", 1) | ("JSONLWriter", "flush" | "finish", 0) => {
+            Some(Some(result_ty(unit, error)))
+        }
         _ => None,
     }
 }

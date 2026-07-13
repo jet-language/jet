@@ -208,6 +208,118 @@ fn run() {{
     let _ = fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn jsonl_stream_records_are_incremental_bounded_and_terminal() {
+    let dir = std::env::temp_dir().join(format!("jet_jsonl_stream_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let output_path = dir.join("out.jsonl");
+    let limited_path = dir.join("limited.jsonl");
+    let input_path = dir.join("input.jsonl");
+    let malformed_path = dir.join("malformed.jsonl");
+    fs::write(&input_path, "\r\n  \r\n\"first\"\r\n[2,\"second\"]\n").unwrap();
+    fs::write(&malformed_path, "{\"ok\":1}\n{\"bad\":[2,]}\n").unwrap();
+    let output = output_path.to_string_lossy().replace('\\', "\\\\");
+    let limited = limited_path.to_string_lossy().replace('\\', "\\\\");
+    let input = input_path.to_string_lossy().replace('\\', "\\\\");
+    let malformed = malformed_path.to_string_lossy().replace('\\', "\\\\");
+    let source = format!(
+        r#"
+use core.encoding as encoding
+use core.encoding.jsonl as jsonl
+use core.files as files
+
+fn run() {{
+    output :: files.create("{output}") ?? panic("create")
+    writer :: jsonl.writer(^output) ?? panic("writer")
+    writer.write(DataTree.Text("alpha")) ?? panic("write")
+    writer.write(DataTree.Array([DataTree.Int(1), DataTree.Text("beta")])) ?? panic("write")
+    writer.flush() ?? panic("flush")
+    writer.finish() ?? panic("finish")
+    writer.finish() ?? panic("finish twice")
+    after_finish :: writer.write(DataTree.Null)
+    if after_finish == {{
+        ok(_) -> {{ print("write-after-finish-missed") }}
+        err(first) -> {{
+            after_terminal :: writer.flush()
+            if after_terminal == {{
+                ok(_) -> {{ print("terminal-not-latched") }}
+                err(second) -> {{ print(first.byte_offset == second.byte_offset && first.reason == second.reason) }}
+            }}
+        }}
+    }}
+
+    input :: files.open("{input}") ?? panic("open")
+    reader :: jsonl.reader(^input) ?? panic("reader")
+    first_result :: reader.next() ?? panic("first")
+    if first_result == {{
+        Val(value) -> {{ print(value.text() ?? "bad") }}
+        None -> {{ print("missing-first") }}
+    }}
+    second_result :: reader.next() ?? panic("second")
+    if second_result == {{
+        Val(value) -> {{
+            first :: value.at(0) ?? DataTree.Int(-1)
+            second :: value.at(1) ?? DataTree.Text("bad")
+            print(first.int() ?? -1)
+            print(second.text() ?? "bad")
+        }}
+        None -> {{ print("missing-second") }}
+    }}
+    eof_result :: reader.next() ?? panic("eof")
+    if eof_result == None {{ print("eof") }} else {{ print("bad-eof") }}
+    eof_again :: reader.next() ?? panic("eof again")
+    if eof_again == None {{ print("eof-again") }} else {{ print("bad-eof-again") }}
+
+    malformed_input :: files.open("{malformed}") ?? panic("open malformed")
+    malformed_reader :: jsonl.reader(^malformed_input) ?? panic("reader malformed")
+    first_malformed :: malformed_reader.next() ?? panic("first malformed record")
+    malformed_result :: malformed_reader.next()
+    if malformed_result == {{
+        ok(_) -> {{ print("malformed-missed") }}
+        err(first) -> {{
+            malformed_again :: malformed_reader.next()
+            if malformed_again == {{
+                ok(_) -> {{ print("malformed-not-latched") }}
+                err(second) -> {{
+                    print(first.line ?? -1)
+                    print(first.path)
+                    print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason)
+                }}
+            }}
+        }}
+    }}
+
+    limits := encoding.EncodingLimits.safe()
+    limits.max_item_bytes = 2
+    limited_output :: files.create("{limited}") ?? panic("limited create")
+    limited_writer :: jsonl.writer(^limited_output, limits) ?? panic("limited writer")
+    limited_result :: limited_writer.write(DataTree.Text("three"))
+    if limited_result == {{
+        ok(_) -> {{ print("limit-missed") }}
+        err(first) -> {{
+            limited_again :: limited_writer.finish()
+            if limited_again == {{
+                ok(_) -> {{ print("limit-not-latched") }}
+                err(second) -> {{
+                    print(first.byte_offset == second.byte_offset && first.reason == second.reason)
+                }}
+            }}
+        }}
+    }}
+}}
+"#
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "jsonl_stream", &source, &[], None);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(
+        stdout,
+        "true\nfirst\n2\nsecond\neof\neof-again\n2\n$[1][\"bad\"][1]\ntrue\ntrue\n"
+    );
+    assert_eq!(fs::read_to_string(&output_path).unwrap(), "\"alpha\"\n[1,\"beta\"]\n");
+    assert_eq!(stderr, "");
+    let _ = fs::remove_dir_all(&dir);
+}
+
 fn compile_temp(name: &str, src: &str) -> jet::CompileOutput {
     let dir = std::env::temp_dir().join(format!("jet_corelib_test_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();

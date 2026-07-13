@@ -110,6 +110,7 @@ fn jet_enc_json_reader(
         root_done: false,
         terminal: None,
         eof: false,
+        record_mode: false,
     })
 }
 
@@ -222,7 +223,11 @@ impl jet_std::JSONReader {
     }
 
     fn skip_ws(&mut self) -> Result<(), jet_std::EncodingError> {
-        while matches!(self.fill()?, Some(b' ' | b'\n' | b'\r' | b'\t')) {
+        while if self.record_mode {
+            matches!(self.fill()?, Some(b' ' | b'\t'))
+        } else {
+            matches!(self.fill()?, Some(b' ' | b'\n' | b'\r' | b'\t'))
+        } {
             self.take()?;
         }
         Ok(())
@@ -434,6 +439,26 @@ impl jet_std::JSONReader {
                     self.root_done = true;
                     return self.parse_value().map(Some).or_else(|e| self.fail(e));
                 }
+                None if self.record_mode => match self.fill()? {
+                    Some(b'\n') => {
+                        self.take()?;
+                        self.root_started = false;
+                        self.root_done = false;
+                        return Ok(None);
+                    }
+                    Some(b'\r') => {
+                        self.take()?;
+                        if self.fill()? != Some(b'\n') {
+                            return self.fail(jet_encoding_error(jet_std::EncodingErrorKind::Syntax, self.offset - 1, self.line, self.column.saturating_sub(1), "JSONL records use LF or CRLF; bare CR is not a record ending"));
+                        }
+                        self.take()?;
+                        self.root_started = false;
+                        self.root_done = false;
+                        return Ok(None);
+                    }
+                    None => { self.eof = true; return Ok(None); }
+                    Some(_) => return self.fail(jet_encoding_error(jet_std::EncodingErrorKind::Syntax, self.offset, self.line, self.column, "trailing input after JSONL record value")),
+                },
                 None => match self.fill()? {
                     None => { self.eof = true; return Ok(None); }
                     Some(_) => return self.fail(jet_encoding_error(jet_std::EncodingErrorKind::Syntax, self.offset, self.line, self.column, "trailing input after JSON root")),
@@ -561,3 +586,465 @@ impl jet_std::JSONWriter {
 fn jet_enc_json_writer_write(writer: &mut jet_std::JSONWriter, event: jet_std::DataEvent) -> Result<(), jet_std::EncodingError> { writer.write_event(event) }
 fn jet_enc_json_writer_flush(writer: &mut jet_std::JSONWriter) -> Result<(), jet_std::EncodingError> { writer.flush_output() }
 fn jet_enc_json_writer_finish(writer: &mut jet_std::JSONWriter) -> Result<(), jet_std::EncodingError> { writer.finish_output() }
+
+// D-ENCSTREAM-SURFACE1=A: JSONL shares the byte-at-a-time JSON tokenizer and
+// event writer above. Only record framing and DataEvent<->DataTree folding are
+// format-specific; no line buffer or second JSON parser exists here.
+enum JetJsonlFoldFrame {
+    Array(Vec<jet_std::DataTree>),
+    Object {
+        entries: Vec<(String, jet_std::DataTree)>,
+        key: Option<String>,
+    },
+}
+
+fn jet_jsonl_project_error(
+    mut error: jet_std::EncodingError,
+    record_index: Option<i64>,
+) -> jet_std::EncodingError {
+    error.format = jet_std::EncodingFormat::JSONL;
+    if let Some(index) = record_index {
+        let suffix = error.path.strip_prefix('$').unwrap_or(&error.path);
+        error.path = format!("$[{index}]{suffix}");
+    }
+    error
+}
+
+fn jet_enc_jsonl_reader(
+    input: JetFileReader,
+    limits: jet_std::EncodingLimits,
+) -> Result<jet_std::JSONLReader, jet_std::EncodingError> {
+    let mut json = jet_enc_json_reader(input, limits)
+        .map_err(|error| jet_jsonl_project_error(error, None))?;
+    json.record_mode = true;
+    Ok(jet_std::JSONLReader {
+        json,
+        terminal: None,
+        record_index: 0,
+    })
+}
+
+impl jet_std::JSONLReader {
+    fn fail<T>(&mut self, error: jet_std::EncodingError) -> Result<T, jet_std::EncodingError> {
+        let error = jet_jsonl_project_error(error, Some(self.record_index));
+        self.terminal = Some(error.clone());
+        Err(error)
+    }
+
+    fn skip_blank_records(&mut self) -> Result<(), jet_std::EncodingError> {
+        loop {
+            self.json.skip_ws()?;
+            match self.json.fill()? {
+                Some(b'\n') => {
+                    self.json.take()?;
+                }
+                Some(b'\r') => {
+                    self.json.take()?;
+                    if self.json.fill()? != Some(b'\n') {
+                        return Err(jet_encoding_error(
+                            jet_std::EncodingErrorKind::Syntax,
+                            self.json.offset - 1,
+                            self.json.line,
+                            self.json.column.saturating_sub(1),
+                            "JSONL records use LF or CRLF; bare CR is not a record ending",
+                        ));
+                    }
+                    self.json.take()?;
+                }
+                None => {
+                    self.json.eof = true;
+                    return Ok(());
+                }
+                Some(_) => return Ok(()),
+            }
+        }
+    }
+
+    fn charge(&mut self, retained: &mut usize, amount: usize) -> Result<(), jet_std::EncodingError> {
+        let limit = self.json.limits.max_item_bytes as usize;
+        *retained = retained.checked_add(amount).ok_or_else(|| {
+            jet_encoding_error(
+                jet_std::EncodingErrorKind::Limit,
+                self.json.offset,
+                self.json.line,
+                self.json.column,
+                format!("max_item_bytes {} exceeded", self.json.limits.max_item_bytes),
+            )
+        })?;
+        if *retained > limit {
+            return Err(jet_encoding_error(
+                jet_std::EncodingErrorKind::Limit,
+                self.json.offset,
+                self.json.line,
+                self.json.column,
+                format!("max_item_bytes {} exceeded", self.json.limits.max_item_bytes),
+            ));
+        }
+        Ok(())
+    }
+
+    fn push_value(
+        &mut self,
+        root: &mut Option<jet_std::DataTree>,
+        frames: &mut Vec<JetJsonlFoldFrame>,
+        value: jet_std::DataTree,
+    ) -> Result<(), jet_std::EncodingError> {
+        match frames.last_mut() {
+            Some(JetJsonlFoldFrame::Array(items)) => items.push(value),
+            Some(JetJsonlFoldFrame::Object { entries, key }) => {
+                let Some(key) = key.take() else {
+                    return Err(jet_encoding_error(
+                        jet_std::EncodingErrorKind::State,
+                        self.json.offset,
+                        self.json.line,
+                        self.json.column,
+                        "JSON event stream produced an object value without a key",
+                    ));
+                };
+                entries.push((key, value));
+            }
+            None if root.is_none() => *root = Some(value),
+            None => {
+                return Err(jet_encoding_error(
+                    jet_std::EncodingErrorKind::State,
+                    self.json.offset,
+                    self.json.line,
+                    self.json.column,
+                    "JSON event stream produced two roots for one JSONL record",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn next_record(&mut self) -> Result<Option<jet_std::DataTree>, jet_std::EncodingError> {
+        if let Some(error) = &self.terminal {
+            return Err(error.clone());
+        }
+        if self.json.eof {
+            return Ok(None);
+        }
+        if let Err(error) = self.skip_blank_records() {
+            return self.fail(error);
+        }
+        if self.json.eof {
+            return Ok(None);
+        }
+
+        let mut root = None;
+        let mut frames = Vec::new();
+        let mut retained = 0usize;
+        loop {
+            let event = match self.json.next_event() {
+                Ok(event) => event,
+                Err(error) => return self.fail(error),
+            };
+            let Some(event) = event else {
+                let Some(value) = root else {
+                    return self.fail(jet_encoding_error(
+                        jet_std::EncodingErrorKind::Truncated,
+                        self.json.offset,
+                        self.json.line,
+                        self.json.column,
+                        "JSONL record ended before a complete value",
+                    ));
+                };
+                if !frames.is_empty() {
+                    return self.fail(jet_encoding_error(
+                        jet_std::EncodingErrorKind::Truncated,
+                        self.json.offset,
+                        self.json.line,
+                        self.json.column,
+                        "JSONL record ended before its value was closed",
+                    ));
+                }
+                self.record_index += 1;
+                return Ok(Some(value));
+            };
+            let result = (|| -> Result<(), jet_std::EncodingError> { match event {
+                jet_std::DataEvent::Null => {
+                    self.charge(&mut retained, 1)?;
+                    self.push_value(&mut root, &mut frames, jet_std::DataTree::Null)
+                }
+                jet_std::DataEvent::Bool(value) => {
+                    self.charge(&mut retained, 1)?;
+                    self.push_value(&mut root, &mut frames, jet_std::DataTree::Bool(value))
+                }
+                jet_std::DataEvent::Int(value) => {
+                    self.charge(&mut retained, 8)?;
+                    self.push_value(&mut root, &mut frames, jet_std::DataTree::Int(value))
+                }
+                jet_std::DataEvent::Float(value) => {
+                    self.charge(&mut retained, 8)?;
+                    self.push_value(&mut root, &mut frames, jet_std::DataTree::Float(value))
+                }
+                jet_std::DataEvent::Text(value) => {
+                    self.charge(&mut retained, value.len())?;
+                    self.push_value(&mut root, &mut frames, jet_std::DataTree::Text(value))
+                }
+                jet_std::DataEvent::Bytes(_) => Err(jet_encoding_error(
+                    jet_std::EncodingErrorKind::State,
+                    self.json.offset,
+                    self.json.line,
+                    self.json.column,
+                    "JSON tokenizer produced Bytes",
+                )),
+                jet_std::DataEvent::ArrayStart => {
+                    self.charge(&mut retained, 1)?;
+                    frames.push(JetJsonlFoldFrame::Array(Vec::new()));
+                    Ok(())
+                }
+                jet_std::DataEvent::ObjectStart => {
+                    self.charge(&mut retained, 1)?;
+                    frames.push(JetJsonlFoldFrame::Object { entries: Vec::new(), key: None });
+                    Ok(())
+                }
+                jet_std::DataEvent::Key(value) => {
+                    self.charge(&mut retained, value.len())?;
+                    match frames.last_mut() {
+                        Some(JetJsonlFoldFrame::Object { key, .. }) if key.is_none() => {
+                            *key = Some(value);
+                            Ok(())
+                        }
+                        _ => Err(jet_encoding_error(
+                            jet_std::EncodingErrorKind::State,
+                            self.json.offset,
+                            self.json.line,
+                            self.json.column,
+                            "JSON event stream produced a key outside an object",
+                        )),
+                    }
+                }
+                jet_std::DataEvent::ArrayEnd => match frames.pop() {
+                    Some(JetJsonlFoldFrame::Array(items)) => self.push_value(
+                        &mut root,
+                        &mut frames,
+                        jet_std::DataTree::Array(items),
+                    ),
+                    _ => Err(jet_encoding_error(
+                        jet_std::EncodingErrorKind::State,
+                        self.json.offset,
+                        self.json.line,
+                        self.json.column,
+                        "JSON event stream closed the wrong container",
+                    )),
+                },
+                jet_std::DataEvent::ObjectEnd => match frames.pop() {
+                    Some(JetJsonlFoldFrame::Object { entries, key: None }) => self.push_value(
+                        &mut root,
+                        &mut frames,
+                        jet_std::DataTree::Object(entries),
+                    ),
+                    _ => Err(jet_encoding_error(
+                        jet_std::EncodingErrorKind::State,
+                        self.json.offset,
+                        self.json.line,
+                        self.json.column,
+                        "JSON event stream closed an incomplete object",
+                    )),
+                },
+            } })();
+            if let Err(error) = result {
+                return self.fail(error);
+            }
+        }
+    }
+}
+
+fn jet_enc_jsonl_reader_next(
+    reader: &mut jet_std::JSONLReader,
+) -> Result<Option<jet_std::DataTree>, jet_std::EncodingError> {
+    reader.next_record()
+}
+
+fn jet_enc_jsonl_writer(
+    output: JetFileWriter,
+    limits: jet_std::EncodingLimits,
+) -> Result<jet_std::JSONLWriter, jet_std::EncodingError> {
+    let json = jet_enc_json_writer(output, limits, false)
+        .map_err(|error| jet_jsonl_project_error(error, None))?;
+    Ok(jet_std::JSONLWriter {
+        json,
+        terminal: None,
+        record_index: 0,
+        finished: false,
+    })
+}
+
+fn jet_jsonl_tree_size(
+    value: &jet_std::DataTree,
+    depth: i64,
+    path: &str,
+    limits: &jet_std::EncodingLimits,
+) -> Result<usize, jet_std::EncodingError> {
+    let is_container = matches!(
+        value,
+        jet_std::DataTree::Array(_) | jet_std::DataTree::Object(_)
+    );
+    if is_container && depth >= limits.max_depth {
+        let mut error = jet_encoding_error(
+            jet_std::EncodingErrorKind::Limit,
+            0,
+            1,
+            1,
+            format!("max_depth {} exceeded", limits.max_depth),
+        );
+        error.path = path.to_string();
+        return Err(error);
+    }
+    let size = match value {
+        jet_std::DataTree::Null | jet_std::DataTree::Bool(_) => 1,
+        jet_std::DataTree::Int(_) | jet_std::DataTree::Float(_) => 8,
+        jet_std::DataTree::Text(text) => text.len(),
+        jet_std::DataTree::Bytes(_) => {
+            let mut error = jet_encoding_error(
+                jet_std::EncodingErrorKind::Unsupported,
+                0,
+                1,
+                1,
+                "JSON cannot encode Bytes; encode bytes as Text explicitly",
+            );
+            error.path = path.to_string();
+            return Err(error);
+        }
+        jet_std::DataTree::Array(items) => {
+            let mut size = 1usize;
+            for (index, item) in items.iter().enumerate() {
+                size = size.checked_add(jet_jsonl_tree_size(
+                    item,
+                    depth + 1,
+                    &format!("{path}[{index}]"),
+                    limits,
+                )?).ok_or_else(|| jet_encoding_error(jet_std::EncodingErrorKind::Limit, 0, 1, 1, format!("max_item_bytes {} exceeded", limits.max_item_bytes)))?;
+            }
+            size
+        }
+        jet_std::DataTree::Object(entries) => {
+            let mut size = 1usize;
+            for (key, item) in entries {
+                let child = jet_jsonl_tree_size(
+                    item,
+                    depth + 1,
+                    &format!("{path}[{:?}]", key),
+                    limits,
+                )?;
+                size = size
+                    .checked_add(key.len())
+                    .and_then(|n| n.checked_add(child))
+                    .ok_or_else(|| jet_encoding_error(jet_std::EncodingErrorKind::Limit, 0, 1, 1, format!("max_item_bytes {} exceeded", limits.max_item_bytes)))?;
+            }
+            size
+        }
+    };
+    if size > limits.max_item_bytes as usize {
+        let mut error = jet_encoding_error(
+            jet_std::EncodingErrorKind::Limit,
+            0,
+            1,
+            1,
+            format!("max_item_bytes {} exceeded", limits.max_item_bytes),
+        );
+        error.path = path.to_string();
+        return Err(error);
+    }
+    Ok(size)
+}
+
+fn jet_jsonl_write_tree(
+    writer: &mut jet_std::JSONWriter,
+    value: &jet_std::DataTree,
+) -> Result<(), jet_std::EncodingError> {
+    match value {
+        jet_std::DataTree::Null => writer.write_event(jet_std::DataEvent::Null),
+        jet_std::DataTree::Bool(value) => writer.write_event(jet_std::DataEvent::Bool(*value)),
+        jet_std::DataTree::Int(value) => writer.write_event(jet_std::DataEvent::Int(*value)),
+        jet_std::DataTree::Float(value) => writer.write_event(jet_std::DataEvent::Float(*value)),
+        jet_std::DataTree::Text(value) => writer.write_event(jet_std::DataEvent::Text(value.clone())),
+        jet_std::DataTree::Bytes(value) => writer.write_event(jet_std::DataEvent::Bytes(value.clone())),
+        jet_std::DataTree::Array(items) => {
+            writer.write_event(jet_std::DataEvent::ArrayStart)?;
+            for item in items {
+                jet_jsonl_write_tree(writer, item)?;
+            }
+            writer.write_event(jet_std::DataEvent::ArrayEnd)
+        }
+        jet_std::DataTree::Object(entries) => {
+            writer.write_event(jet_std::DataEvent::ObjectStart)?;
+            for (key, value) in entries {
+                writer.write_event(jet_std::DataEvent::Key(key.clone()))?;
+                jet_jsonl_write_tree(writer, value)?;
+            }
+            writer.write_event(jet_std::DataEvent::ObjectEnd)
+        }
+    }
+}
+
+impl jet_std::JSONLWriter {
+    fn fail<T>(&mut self, error: jet_std::EncodingError) -> Result<T, jet_std::EncodingError> {
+        let error = jet_jsonl_project_error(error, Some(self.record_index));
+        self.terminal = Some(error.clone());
+        Err(error)
+    }
+
+    fn write_record(&mut self, value: jet_std::DataTree) -> Result<(), jet_std::EncodingError> {
+        if let Some(error) = &self.terminal {
+            return Err(error.clone());
+        }
+        if self.finished {
+            return self.fail(self.json.state_error("write called after finish"));
+        }
+        if let Err(mut error) = jet_jsonl_tree_size(&value, 0, "$", &self.json.limits) {
+            error.byte_offset = self.json.total;
+            error.line = Some(self.record_index + 1);
+            error.column = Some(1);
+            return self.fail(error);
+        }
+        if let Err(error) = jet_jsonl_write_tree(&mut self.json, &value) {
+            return self.fail(error);
+        }
+        if !self.json.frames.is_empty() {
+            return self.fail(self.json.state_error("JSONL record writer left an open container"));
+        }
+        if let Err(error) = self.json.write_bytes(b"\n") {
+            return self.fail(error);
+        }
+        self.json.root_written = false;
+        self.record_index += 1;
+        Ok(())
+    }
+
+    fn flush_output(&mut self) -> Result<(), jet_std::EncodingError> {
+        if let Some(error) = &self.terminal {
+            return Err(error.clone());
+        }
+        if let Err(error) = self.json.flush_output() {
+            return self.fail(error);
+        }
+        Ok(())
+    }
+
+    fn finish_output(&mut self) -> Result<(), jet_std::EncodingError> {
+        if let Some(error) = &self.terminal {
+            return Err(error.clone());
+        }
+        if self.finished {
+            return Ok(());
+        }
+        self.flush_output()?;
+        self.finished = true;
+        Ok(())
+    }
+}
+
+fn jet_enc_jsonl_writer_write(
+    writer: &mut jet_std::JSONLWriter,
+    value: jet_std::DataTree,
+) -> Result<(), jet_std::EncodingError> {
+    writer.write_record(value)
+}
+fn jet_enc_jsonl_writer_flush(writer: &mut jet_std::JSONLWriter) -> Result<(), jet_std::EncodingError> {
+    writer.flush_output()
+}
+fn jet_enc_jsonl_writer_finish(writer: &mut jet_std::JSONLWriter) -> Result<(), jet_std::EncodingError> {
+    writer.finish_output()
+}

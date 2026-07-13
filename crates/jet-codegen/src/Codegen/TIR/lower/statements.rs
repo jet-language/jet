@@ -312,6 +312,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 &ty,
                 Type::Named(n) if n == "FileReader" || n == "FileWriter"
                     || n == "JSONReader" || n == "JSONWriter"
+                    || n == "JSONLReader" || n == "JSONLWriter"
                     || n == "Stdout" || n == "Stderr"
                     || n == "TcpStream" || n == "UnixStream" || n == "HttpRouter"
                     || n == "Arena" || n == "Bump" || n == "Pool" || n == "Fixed"

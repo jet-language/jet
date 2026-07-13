@@ -54,6 +54,7 @@
         pub(crate) root_done: bool,
         pub(crate) terminal: Option<EncodingError>,
         pub(crate) eof: bool,
+        pub(crate) record_mode: bool,
     }
     pub struct JSONWriter {
         pub(crate) output: super::JetFileWriter,
@@ -65,7 +66,17 @@
         pub(crate) total: i64,
         pub(crate) canonical: bool,
     }
-    pub struct JSONLReader { _private: () } pub struct JSONLWriter { _private: () }
+    pub struct JSONLReader {
+        pub(crate) json: JSONReader,
+        pub(crate) terminal: Option<EncodingError>,
+        pub(crate) record_index: i64,
+    }
+    pub struct JSONLWriter {
+        pub(crate) json: JSONWriter,
+        pub(crate) terminal: Option<EncodingError>,
+        pub(crate) record_index: i64,
+        pub(crate) finished: bool,
+    }
     pub struct CSVReader { _private: () } pub struct CSVWriter { _private: () }
     pub struct XMLReader { _private: () } pub struct XMLWriter { _private: () }
     pub struct CBORReader { _private: () } pub struct CBORWriter { _private: () }

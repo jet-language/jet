@@ -1202,6 +1202,15 @@ impl<'a> Checker<'a> {
                                 arg,
                             );
                         }
+                    } else if handle_ty == "JSONLWriter" && method == "write" {
+                        if let Some(arg) = args.first_mut() {
+                            self.expect_core_arg(
+                                "write",
+                                0,
+                                &Type::Named("DataTree".to_string()),
+                                arg,
+                            );
+                        }
                     } else {
                         for a in args.iter_mut() { self.infer(&mut a.expr); }
                     }

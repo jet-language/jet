@@ -163,7 +163,7 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "reader",
             "writer",
         ],
-        "core.encoding.jsonl" => &["parse", "to_string"],
+        "core.encoding.jsonl" => &["parse", "to_string", "reader", "writer"],
         // D-SERDE6: typed `decode<T>` rides every format submodule alongside `parse`.
         "core.encoding.csv" => &["parse", "decode", "decode_traced", "to_string"],
         "core.encoding.toml" => &["parse", "decode", "decode_traced", "to_string"],
