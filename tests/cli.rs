@@ -11,6 +11,7 @@
 //! Snapshots live in `tests/cli/*.txt`; bless with `UPDATE_EXPECT=1`.
 
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -369,6 +370,45 @@ fn budget_bench_measurement_bootstraps_then_consumes_compatible_history() {
     assert_eq!(result["baseline_report_ids"],CanonicalJson::Array(vec![CanonicalJson::String(first_id)]));
     assert_eq!(result["metric"],measurement["metric"]);
     assert_eq!(result["lower95"],decision["lower95"]);assert_eq!(result["upper95"],decision["upper95"]);assert_eq!(result["trend"],decision["trend"]);assert_eq!(result["reason"],decision["reason"]);
+}
+
+#[test]
+fn bench_owns_canonical_refresh_and_dossier_only_projects_it() {
+    use jet_foundation::PerformanceBudget::CanonicalJson;
+    let dir = benchmark_budget_project("bench_owned_budget_refresh");
+    let run = || Command::new(jet()).args(["bench", "src/main.jet"]).current_dir(&dir).output().unwrap();
+    let first = run();
+    assert_eq!(first.status.code(), Some(0), "stdout: {}\nstderr: {}", String::from_utf8_lossy(&first.stdout), String::from_utf8_lossy(&first.stderr));
+    assert!(String::from_utf8_lossy(&first.stderr).contains("report "));
+    let reports = dir.join(".jet/perf/reports");
+    let report_paths = || fs::read_dir(&reports).unwrap().map(|entry| entry.unwrap().path()).collect::<Vec<_>>();
+    let initial = report_paths();
+    assert_eq!(initial.len(), 1);
+    let bytes = fs::read(&initial[0]).unwrap();
+    jet_foundation::PerformanceBudget::verify_budget_report(&bytes).unwrap();
+    let CanonicalJson::Object(report) = CanonicalJson::parse_canonical(&bytes).unwrap() else { panic!("report") };
+    let CanonicalJson::Object(content) = &report["content"] else { panic!("content") };
+    let CanonicalJson::Object(subject) = &content["subject"] else { panic!("subject") };
+    assert_eq!(subject["profile"], CanonicalJson::String("bench".into()));
+
+    let second = run();
+    assert_eq!(second.status.code(), Some(0));
+    assert!(!String::from_utf8_lossy(&second.stdout).contains("ns/iter"), "unchanged relevant identity reran measurement harness");
+    assert_eq!(report_paths(), initial, "unchanged relevant identity must reuse report");
+
+    let before = fs::read_dir(&reports).unwrap().map(|entry| { let path=entry.unwrap().path();(path.clone(),fs::metadata(&path).unwrap().modified().unwrap()) }).collect::<Vec<_>>();
+    let dossier = Command::new(jet()).args(["inspect", "dossier", "src/main.jet", "run", "--json"]).current_dir(&dir).output().unwrap();
+    assert_eq!(dossier.status.code(), Some(0), "{}", String::from_utf8_lossy(&dossier.stderr));
+    let dossier = String::from_utf8(dossier.stdout).unwrap();
+    assert!(dossier.contains("\"performance_budgets\":{\"mode\":\"read_only\""), "{dossier}");
+    assert!(dossier.contains("\"budget_id\":\"package:parse\""), "{dossier}");
+    let after = fs::read_dir(&reports).unwrap().map(|entry| { let path=entry.unwrap().path();(path.clone(),fs::metadata(&path).unwrap().modified().unwrap()) }).collect::<Vec<_>>();
+    assert_eq!(before, after, "dossier projection must not rewrite reports");
+
+    fs::OpenOptions::new().append(true).open(dir.join("src/main.jet")).unwrap().write_all(b"\n// relevant source digest change\n").unwrap();
+    let third = run();
+    assert_eq!(third.status.code(), Some(0), "{}", String::from_utf8_lossy(&third.stderr));
+    assert_eq!(report_paths().len(), 2, "source digest change must refresh canonical report");
 }
 
 fn age_budget_baseline(dir: &Path, baseline: &str) -> (String, String) {

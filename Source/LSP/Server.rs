@@ -441,7 +441,7 @@ fn initialize_response(id: &JsonValue) -> String {
     "callHierarchyProvider": true,
     "typeHierarchyProvider": true,
     "executeCommandProvider": {
-      "commands": ["jet.impact"]
+      "commands": ["jet.impact", "jet.budgetReports"]
     }
   },
   "serverInfo": { "name": "jet", "version": "0.2.0" }
@@ -1342,6 +1342,23 @@ fn execute_command_response(
 ) -> Option<String> {
     let params = params?;
     let command = json_get(params, "command").and_then(json_str)?;
+    if command == "jet.budgetReports" {
+        let args = match json_get(params, "arguments") {
+            Some(JsonValue::Array(args)) => args,
+            _ => return Some(error_response(id, -32602, "jet.budgetReports expects arguments [uri]")),
+        };
+        let Some(uri) = args.first().and_then(|value| match value { JsonValue::String(value) => Some(value.as_str()), _ => None }) else {
+            return Some(error_response(id, -32602, "jet.budgetReports expects arguments [uri]"));
+        };
+        let Some(doc) = server.docs.get(uri) else { return Some(error_response(id, -32602, "document not open in LSP session")) };
+        let root = workspace_root_for_path(server, &doc.path).unwrap_or_else(|| normalize_path_buf(std::path::Path::new(&doc.path).parent().unwrap_or(std::path::Path::new("."))));
+        let sources = workspace_sources(server, Some(&doc.path)).into_iter().map(|(path, source)| {
+            let path = std::path::Path::new(&path).strip_prefix(&root).unwrap_or(std::path::Path::new(&path)).to_string_lossy().replace('\\', "/");
+            (path, crate::SHA256::sha256_hex(source.as_bytes()))
+        }).collect::<Vec<_>>();
+        let projection = crate::BudgetView::read_compatible(std::path::Path::new(&root), &sources);
+        return Some(response(id, &projection.to_json()));
+    }
     if command != "jet.impact" {
         return Some(error_response(id, -32601, "unknown executeCommand"));
     }

@@ -26,6 +26,30 @@ pub struct BudgetProjection {
     pub rejected: Vec<String>,
 }
 
+impl BudgetProjection {
+    /// Stable read-only wire used by dossier, Canvas, and LSP. Projection
+    /// never invents a second decision: every row retains report/evidence ids.
+    pub fn to_json(&self) -> String {
+        let facts = self.facts.iter().map(|fact| format!(
+            "{{\"budget_id\":{},\"enforcement\":{},\"evidence\":{},\"evidence_id\":{},\"outcome\":{},\"report_id\":{},\"statistical\":{}}}",
+            json(&fact.budget_id), json(&fact.enforcement), json(&fact.evidence),
+            json(&fact.evidence_id), json(&fact.outcome), json(&fact.report_id), fact.statistical,
+        )).collect::<Vec<_>>().join(",");
+        let rejected = self.rejected.iter().map(|reason| json(reason)).collect::<Vec<_>>().join(",");
+        format!("{{\"mode\":\"read_only\",\"rejected\":[{rejected}],\"reports\":[{facts}]}}")
+    }
+
+    pub fn render_text(&self) -> String {
+        let mut out = String::from("Performance budgets (read-only)\n");
+        if self.facts.is_empty() { out.push_str("  no compatible canonical report\n"); }
+        for fact in &self.facts {
+            out.push_str(&format!("  {}  {} ({})  report {}  evidence {}\n", fact.budget_id, fact.outcome, fact.evidence, &fact.report_id[..12], &fact.evidence_id[..12]));
+        }
+        for reason in &self.rejected { out.push_str(&format!("  rejected: {reason}\n")); }
+        out
+    }
+}
+
 /// Reads canonical reports without creating, refreshing, or rewriting any file.
 /// Newest compatible report wins per budget id; identity remains report-owned.
 pub fn read_compatible(root: &Path, sources: &[(String, String)]) -> BudgetProjection {
@@ -38,6 +62,9 @@ pub fn read_compatible(root: &Path, sources: &[(String, String)]) -> BudgetProje
     let mut rejected = Vec::new();
     for path in paths {
         let label = path.file_name().and_then(|name| name.to_str()).unwrap_or("report").to_string();
+        let metadata = match fs::symlink_metadata(&path) { Ok(metadata) => metadata, Err(error) => { rejected.push(format!("{label}: unreadable: {error}")); continue; } };
+        if metadata.file_type().is_symlink() || !metadata.is_file() { rejected.push(format!("{label}: not a regular no-follow report")); continue; }
+        if metadata.len() > 16 * 1024 * 1024 { rejected.push(format!("{label}: report exceeds 16 MiB projection limit")); continue; }
         let bytes = match fs::read(&path) { Ok(bytes) => bytes, Err(error) => { rejected.push(format!("{label}: unreadable: {error}")); continue; } };
         let report = match verify_budget_report(&bytes) { Ok(report) => report, Err(error) => { rejected.push(format!("{label}: {error}")); continue; } };
         let Ok((report_id, evidence_id, members, measurements)) = report_parts(&report) else { rejected.push(format!("{label}: report projection fields are invalid")); continue; };
@@ -82,3 +109,4 @@ fn object(value: &CanonicalJson) -> Result<&BTreeMap<String, CanonicalJson>, ()>
 fn array(value: Option<&CanonicalJson>) -> Result<&[CanonicalJson], ()> { if let Some(CanonicalJson::Array(value)) = value { Ok(value) } else { Err(()) } }
 fn text(value: Option<&CanonicalJson>) -> Result<&str, ()> { if let Some(CanonicalJson::String(value)) = value { Ok(value) } else { Err(()) } }
 fn normalize(path: &str) -> String { path.trim_start_matches("./").replace('\\', "/") }
+fn json(value: &str) -> String { format!("\"{}\"", value.replace('\\', "\\\\").replace('\"', "\\\"").replace('\n', "\\n").replace('\r', "\\r").replace('\t', "\\t")) }

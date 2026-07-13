@@ -995,6 +995,46 @@ fn lsp_execute_command_impact_returns_report() {
 }
 
 #[test]
+fn lsp_budget_reports_projects_canonical_report_without_measuring() {
+    let jet = jet_bin();
+    if !jet.exists() { return; }
+    let _guard = lsp_process_lock().lock().unwrap();
+    let root = std::env::temp_dir().join(format!("lsp_budget_projection_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(root.join("pkg.jet"), "payload: { name: \"app\", version: \"0.1.0\" }\n").unwrap();
+    let source = r#"module perf.package {
+    budgets: [Budget.{ name: "api", scope: .Package, metric: .PublicApiItems, comparison: .Absolute, limit: .AtMost(10) }]
+}
+pub fn api() {}
+fn run() {}
+"#;
+    let path = root.join("src/main.jet");
+    std::fs::write(&path, source).unwrap();
+    let measured = Command::new(&jet).args(["budget", "check", "--json"]).current_dir(&root).output().unwrap();
+    assert_eq!(measured.status.code(), Some(0), "{}", String::from_utf8_lossy(&measured.stderr));
+    let reports = root.join(".jet/perf/reports");
+    let before = std::fs::read_dir(&reports).unwrap().map(|entry| { let path=entry.unwrap().path();(path.clone(),std::fs::metadata(&path).unwrap().modified().unwrap()) }).collect::<Vec<_>>();
+
+    let uri = format!("file://{}", path.display());
+    let mut child = Command::new(&jet).args(["self", "lsp"]).current_dir(&root).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
+    let mut stdin = child.stdin.take().unwrap();let mut stdout = child.stdout.take().unwrap();
+    send_msg(&mut stdin, r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#);
+    assert!(read_msg(&mut stdout).contains("jet.budgetReports"));
+    send_msg(&mut stdin, r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#);
+    send_msg(&mut stdin, &format!(r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"jet","version":1,"text":{}}}}}}}"#,uri,json_string(source)));
+    assert!(read_msg(&mut stdout).contains("publishDiagnostics"));
+    send_msg(&mut stdin, &format!(r#"{{"jsonrpc":"2.0","id":2,"method":"workspace/executeCommand","params":{{"command":"jet.budgetReports","arguments":["{}"]}}}}"#,uri));
+    let response = read_msg(&mut stdout);
+    assert!(response.contains("\"mode\":\"read_only\""), "{response}");
+    assert!(response.contains("\"budget_id\":\"package:api\""), "{response}");
+    send_msg(&mut stdin, r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#);let _=read_msg(&mut stdout);drop(stdin);let _=child.wait();
+    let after = std::fs::read_dir(&reports).unwrap().map(|entry| { let path=entry.unwrap().path();(path.clone(),std::fs::metadata(&path).unwrap().modified().unwrap()) }).collect::<Vec<_>>();
+    assert_eq!(before, after, "LSP projection must not rewrite reports");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn lsp_c_style_snippet_autocorrects() {
     let src = r#"fn greet() {
     println("ok");

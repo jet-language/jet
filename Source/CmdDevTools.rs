@@ -1944,14 +1944,23 @@ pub(crate) fn run_bench(file: &str, mode: OutputMode) {
 /// per region (ns/iter + ops/sec), so this just compiles, runs it once, and
 /// relays its output.
 fn run_bench_regions(file: &str, src: &str, mode: OutputMode) {
+    if let Some(status) = crate::CmdBudget::reuse_bench_report(file) {
+        if status != 0 {
+            exit(ExitCodes::USER_ERROR);
+        }
+        return;
+    }
     let evidence = collect_bench_evidence(file, src, mode, true);
-    for bench in evidence {
+    for bench in &evidence {
         let samples = bench.samples.iter().map(|(elapsed, iters)| *elapsed as f64 / *iters as f64).collect::<Vec<_>>();
         let n = samples.len() as f64;
         let mean = samples.iter().sum::<f64>() / n;
         let variance = samples.iter().map(|sample| (sample - mean) * (sample - mean)).sum::<f64>() / n;
         let ops = if mean > 0.0 { 1.0e9 / mean } else { 0.0 };
         println!("{}  {:.1} ns/iter (\u{00b1}{:.1})  {:.0} ops/sec", bench.name, mean, variance.sqrt(), ops);
+    }
+    if crate::CmdBudget::run_bench_refresh(file, &evidence) != 0 {
+        exit(ExitCodes::USER_ERROR);
     }
 }
 

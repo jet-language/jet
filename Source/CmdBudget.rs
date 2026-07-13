@@ -58,7 +58,7 @@ pub(crate) fn run(raw: &[String]) -> i32 {
     };
     let active: Vec<_> = specs.into_iter().filter(|located| applicable(&located.spec, "native", "dev")).collect();
     let store = BudgetStore::new(&root);
-    let built = match build_report(&root, &store, &bundle, &effect_facts, &active, &measured_start, "native", "dev", None) {
+    let built = match build_report(&root, &store, &bundle, &effect_facts, &active, &measured_start, "native", "dev", None, None) {
         Ok(report) => report,
         Err(error) => return tool_failure(&options, &error),
     };
@@ -155,13 +155,13 @@ pub(crate) fn run_build_gates(entry:&str, artifact_path:&Path, target:&str, prof
     let needs_artifact=active.iter().any(|located|provider_kind(&located.spec.provider)=="BuildArtifact");
     let artifact=if needs_artifact{match artifact_identity(artifact_path){Ok(artifact)=>Some(artifact),Err(error)=>return build_gate_tool_failure(&error)}}else{None};
     let store=BudgetStore::new(&root);
-    match compatible_build_report(&root,&bundle,&active,target,profile,artifact.as_ref()){
+    match compatible_report(&root,&bundle,&active,target,profile,artifact.as_ref()){
         Ok(Some(stored))=>return emit_stored_build_gates(&stored),
         Ok(None)=>{}
         Err(error)=>return build_gate_tool_failure(&error),
     }
     let started=timestamp_now();
-    let built=match build_report(&root,&store,&bundle,&effect_facts,&active,&started,target,profile,artifact){Ok(report)=>report,Err(error)=>return build_gate_tool_failure(&error)};
+    let built=match build_report(&root,&store,&bundle,&effect_facts,&active,&started,target,profile,artifact,None){Ok(report)=>report,Err(error)=>return build_gate_tool_failure(&error)};
     let report_id=text_field(&built.value,"report_id").expect("verified report id").to_string();
     let path=format!(".jet/perf/reports/{report_id}.json");
     let created=match store.write_report(&built.bytes){Ok((_,created))=>created,Err(error)=>return build_gate_tool_failure(&format!("report write refused: {error}"))};
@@ -176,19 +176,21 @@ struct StoredBuildReport{report_id:String,facts:Vec<StoredBuildFact>}
 
 fn artifact_identity(path:&Path)->Result<ArtifactIdentity,String>{let path=if path.is_absolute(){path.to_path_buf()}else{std::env::current_dir().map_err(|error|format!("cannot resolve build output directory: {error}"))?.join(path)};let metadata=std::fs::symlink_metadata(&path).map_err(|error|format!("built artifact is unavailable: {error}"))?;if metadata.file_type().is_symlink()||!metadata.is_file(){return Err("built artifact is not a regular file".into())}let digest=jet::SHA256::sha256_file_hex(&path).map_err(|error|format!("cannot hash built artifact: {error}"))?;Ok((path,metadata.len(),digest))}
 
-fn compatible_build_report(root:&Path,bundle:&jet::AST::ProgramBundle,specs:&[LocatedBudgetSpec],target:&str,profile:&str,artifact:Option<&ArtifactIdentity>)->Result<Option<StoredBuildReport>,String>{
+fn compatible_report(root:&Path,bundle:&jet::AST::ProgramBundle,specs:&[LocatedBudgetSpec],target:&str,profile:&str,artifact:Option<&ArtifactIdentity>)->Result<Option<StoredBuildReport>,String>{
     let needs_artifact=specs.iter().any(|located|provider_kind(&located.spec.provider)=="BuildArtifact");
     let expected_subject=subject(root,bundle,"identity","identity",target,profile,if needs_artifact{artifact}else{None})?;
     let expected_subject=as_object(&expected_subject)?;
-    let expected_tool=toolchain()?;let expected_tool=as_object(&expected_tool)?;
+    let expected_tool_value=toolchain()?;let expected_tool=as_object(&expected_tool_value)?;
     let expected_ids=specs.iter().map(|located|format!("{}:{}",located.spec.role,located.spec.name)).collect::<std::collections::BTreeSet<_>>();
+    let mut expected=std::collections::BTreeMap::new();
+    for located in specs { let provider=provider(provider_kind(&located.spec.provider),provider_identity(&located.spec.provider))?;let(base,hash,context)=measurement_base_truthful(root,bundle,located,&CanonicalJson::Object(expected_subject.clone()),&expected_tool_value,&provider,target,profile)?;let _=base;expected.insert(format!("{}:{}",located.spec.role,located.spec.name),(hash,context,provider)); }
     let dir=root.join(".jet/perf/reports");let Ok(entries)=std::fs::read_dir(dir)else{return Ok(None)};
     let mut paths=entries.filter_map(Result::ok).map(|entry|entry.path()).filter(|path|path.extension().and_then(|ext|ext.to_str())==Some("json")).collect::<Vec<_>>();paths.sort();paths.reverse();
     for path in paths{
         let Ok(bytes)=std::fs::read(path)else{continue};let Ok(report)=verify_budget_report(&bytes)else{continue};let Ok(wrapper)=as_object(&report)else{continue};let Ok(report_id)=text_map(wrapper,"report_id")else{continue};let Some(content)=wrapper.get("content")else{continue};let Ok(content)=as_object(content)else{continue};let Some(actual_subject)=content.get("subject")else{continue};let Ok(actual_subject)=as_object(actual_subject)else{continue};let Some(actual_tool)=content.get("toolchain")else{continue};let Ok(actual_tool)=as_object(actual_tool)else{continue};
         if actual_subject.get("member_sources")!=expected_subject.get("member_sources")||actual_subject.get("artifact")!=expected_subject.get("artifact")||actual_subject.get("target_class")!=expected_subject.get("target_class")||actual_subject.get("target_triple")!=expected_subject.get("target_triple")||actual_subject.get("profile")!=expected_subject.get("profile")||actual_tool.get("digest")!=expected_tool.get("digest"){continue}
         let Some(CanonicalJson::Array(measurements))=content.get("measurements")else{continue};let mut facts=Vec::new();let mut ids=std::collections::BTreeSet::new();let mut valid=true;
-        for measurement in measurements{let Ok(measurement)=as_object(measurement)else{valid=false;break};let Ok(budget_id)=text_map(measurement,"budget_id")else{valid=false;break};let Ok(enforcement)=text_map(measurement,"enforcement")else{valid=false;break};let Some(comparison)=measurement.get("comparison")else{valid=false;break};let Ok(comparison)=as_object(comparison)else{valid=false;break};let Ok(kind)=text_map(comparison,"kind")else{valid=false;break};let Some(decision)=measurement.get("decision")else{valid=false;break};let Ok(decision)=as_object(decision)else{valid=false;break};let(Ok(evidence),Ok(outcome),Ok(reason),Ok(source))=(text_map(decision,"evidence"),text_map(decision,"policy_outcome"),text_map(decision,"reason"),text_map(measurement,"source"))else{valid=false;break};if enforcement!="fail"||kind!="absolute"||!expected_ids.contains(budget_id){valid=false;break}ids.insert(budget_id.to_string());let name=measurement.get("budget_spec").and_then(|value|as_object(value).ok()).and_then(|spec|text_map(spec,"name").ok()).unwrap_or_else(||budget_id.rsplit_once(':').map(|(_,name)|name).unwrap_or(budget_id));facts.push(StoredBuildFact{name:name.into(),source:source.into(),evidence:evidence.into(),outcome:outcome.into(),reason:reason.into()});}
+        for measurement in measurements{let Ok(measurement)=as_object(measurement)else{valid=false;break};let Ok(budget_id)=text_map(measurement,"budget_id")else{valid=false;break};let Some((hash,context,expected_provider))=expected.get(budget_id)else{valid=false;break};if measurement.get("budget_spec_sha256")!=Some(&CanonicalJson::String(hash.clone()))||measurement.get("context_key")!=Some(&CanonicalJson::String(context.clone()))||measurement.get("provider")!=Some(expected_provider){valid=false;break}let Some(decision)=measurement.get("decision")else{valid=false;break};let Ok(decision)=as_object(decision)else{valid=false;break};let(Ok(evidence),Ok(outcome),Ok(reason),Ok(source))=(text_map(decision,"evidence"),text_map(decision,"policy_outcome"),text_map(decision,"reason"),text_map(measurement,"source"))else{valid=false;break};if !expected_ids.contains(budget_id){valid=false;break}ids.insert(budget_id.to_string());let name=measurement.get("budget_spec").and_then(|value|as_object(value).ok()).and_then(|spec|text_map(spec,"name").ok()).unwrap_or_else(||budget_id.rsplit_once(':').map(|(_,name)|name).unwrap_or(budget_id));facts.push(StoredBuildFact{name:name.into(),source:source.into(),evidence:evidence.into(),outcome:outcome.into(),reason:reason.into()});}
         if valid&&ids==expected_ids{return Ok(Some(StoredBuildReport{report_id:report_id.into(),facts}))}
     }
     Ok(None)
@@ -196,6 +198,40 @@ fn compatible_build_report(root:&Path,bundle:&jet::AST::ProgramBundle,specs:&[Lo
 
 fn emit_stored_build_gates(stored:&StoredBuildReport)->i32{let mut failed=0;for fact in &stored.facts{if fact.outcome=="fail"{failed+=1;let code=if fact.evidence=="unavailable"{"E2906"}else{"E2907"};let state=if fact.evidence=="unavailable"{"has no usable evidence"}else if fact.evidence=="inconclusive"{"is inconclusive"}else{"regressed"};eprintln!("Error [{code}]: performance budget {} {state}\n --> {}\n Why: {}\n Fix: {}",fact.name,fact.source,fact.reason,if code=="E2906"{"correct the provider evidence or bootstrap only when absent or stale evidence is eligible"}else{"improve the measured behavior, inspect `jet budget check --verbose`, or record an explicit exception"});}}let short=&stored.report_id[..12];if failed>0{eprintln!("budgets failed: {} · report {short}",count(failed,"budget failed","budgets failed"));1}else{eprintln!("budgets: {} passed · report {short}",count(stored.facts.len(),"budget","budgets"));0}}
 fn build_gate_tool_failure(why:&str)->i32{eprintln!("Error [E2908]: performance budget operation failed\n Why: {why}\n Fix: correct the named failure and retry");1}
+
+/// `jet bench` is sole owner of BenchMeasurement refresh. Evidence comes from
+/// same harness invocation rendered to user; no second timing pass exists.
+pub(crate) fn reuse_bench_report(entry:&str)->Option<i32>{
+    let entry=match std::path::Path::new(entry).canonicalize(){Ok(path)=>path,Err(error)=>return Some(build_gate_tool_failure(&format!("cannot resolve benchmark entry: {error}")))};
+    let root=jet::Loader::find_manifest_root(entry.parent().unwrap_or(Path::new("."))).unwrap_or_else(||entry.parent().unwrap_or(Path::new(".")).to_path_buf());
+    let entry_text=entry.to_string_lossy();
+    let(diagnostics,bundle,_)=jet::Driver::check_file_with_effect_facts(&entry_text,None,false);
+    if diagnostics.iter().any(|diagnostic|diagnostic.severity==jet::Diagnostics::Severity::Error){return None}
+    let bundle=bundle?;
+    let specs=jet::Sema::collect_located_budget_specs_bundle(&bundle).ok()?;
+    let active=specs.into_iter().filter(|located|provider_kind(&located.spec.provider)=="BenchMeasurement"&&applicable(&located.spec,"native","bench")).collect::<Vec<_>>();
+    if active.is_empty(){return None}
+    match compatible_report(&root,&bundle,&active,"native","bench",None){Ok(Some(stored))=>Some(emit_stored_build_gates(&stored)),Ok(None)=>None,Err(error)=>Some(build_gate_tool_failure(&error))}
+}
+
+pub(crate) fn run_bench_refresh(entry:&str,evidence:&[crate::CmdDevTools::BenchEvidence])->i32{
+    let entry=match std::path::Path::new(entry).canonicalize(){Ok(path)=>path,Err(error)=>return build_gate_tool_failure(&format!("cannot resolve benchmark entry: {error}"))};
+    let root=jet::Loader::find_manifest_root(entry.parent().unwrap_or(Path::new("."))).unwrap_or_else(||entry.parent().unwrap_or(Path::new(".")).to_path_buf());
+    let entry_text=entry.to_string_lossy();
+    let(diagnostics,bundle,effect_facts)=jet::Driver::check_file_with_effect_facts(&entry_text,None,false);
+    if diagnostics.iter().any(|diagnostic|diagnostic.severity==jet::Diagnostics::Severity::Error){eprint!("{}",jet::render_all_colored(&entry_text,&std::fs::read_to_string(&entry).unwrap_or_default(),&diagnostics,false));return 1}
+    let Some(bundle)=bundle else{return build_gate_tool_failure("front-end produced no checked benchmark program")};
+    let specs=match jet::Sema::collect_located_budget_specs_bundle(&bundle){Ok(specs)=>specs,Err(diagnostics)=>{eprint!("{}",jet::render_all_colored(&entry_text,&std::fs::read_to_string(&entry).unwrap_or_default(),&diagnostics,false));return 1}};
+    let active=specs.into_iter().filter(|located|provider_kind(&located.spec.provider)=="BenchMeasurement"&&applicable(&located.spec,"native","bench")).collect::<Vec<_>>();
+    if active.is_empty(){return 0}
+    match compatible_report(&root,&bundle,&active,"native","bench",None){Ok(Some(stored))=>return emit_stored_build_gates(&stored),Ok(None)=>{},Err(error)=>return build_gate_tool_failure(&error)}
+    let store=BudgetStore::new(&root);let started=timestamp_now();
+    let built=match build_report(&root,&store,&bundle,&effect_facts,&active,&started,"native","bench",None,Some(evidence)){Ok(report)=>report,Err(error)=>return build_gate_tool_failure(&error)};
+    let report_id=text_field(&built.value,"report_id").expect("verified report id").to_string();let path=format!(".jet/perf/reports/{report_id}.json");
+    let created=match store.write_report(&built.bytes){Ok((_,created))=>created,Err(error)=>return build_gate_tool_failure(&format!("report write refused: {error}"))};
+    let options=Options{command:"check",baseline:None,bootstrap:false,accept_regression:false,reason:None,yes:false,json:false,verbose:false,annotations:Annotations::None};emit_check(&options,&built,&report_id,&path,created);
+    if built.fail>0{1}else{0}
+}
 
 fn confirm_update() -> bool {
     eprint!("Apply? [y/N] ");
@@ -255,7 +291,7 @@ struct ResultRow { id:String, name:String, source:String, line:usize, column:usi
 
 type ArtifactIdentity = (PathBuf, u64, String);
 
-fn build_report(root:&Path, store:&BudgetStore, bundle:&jet::AST::ProgramBundle, effect_facts:&jet::Sema::SemIndexEffectFacts, specs:&[LocatedBudgetSpec], at:&str, target:&str, profile:&str, supplied_artifact:Option<ArtifactIdentity>)->Result<BuiltReport,String>{
+fn build_report(root:&Path, store:&BudgetStore, bundle:&jet::AST::ProgramBundle, effect_facts:&jet::Sema::SemIndexEffectFacts, specs:&[LocatedBudgetSpec], at:&str, target:&str, profile:&str, supplied_artifact:Option<ArtifactIdentity>, bench_evidence:Option<&[crate::CmdDevTools::BenchEvidence]>)->Result<BuiltReport,String>{
     for located in specs { let spec=&located.spec; if !matches!(provider_kind(&spec.provider),"CompilerFacts"|"BuildArtifact"|"BenchMeasurement") { return Err(format!("provider `{}` for budget `{}` has no command-owned measurement implementation",spec.provider,spec.name)); } }
     let mut ordered=specs.iter().collect::<Vec<_>>();ordered.sort_by(|a,b|a.spec.name.cmp(&b.spec.name));
     let needs_artifact=ordered.iter().any(|located|provider_kind(&located.spec.provider)=="BuildArtifact");
@@ -271,6 +307,17 @@ fn build_report(root:&Path, store:&BudgetStore, bundle:&jet::AST::ProgramBundle,
     let mut samples=vec![Vec::new();ordered.len()];
     for (provider_name,indices) in groups {
         let kind=provider_kind(&provider_name);
+        if kind=="BenchMeasurement" {
+            if let Some(evidence)=bench_evidence {
+                let name=provider_identity(&provider_name);
+                let bench=evidence.iter().find(|bench|bench.name==name).ok_or_else(||format!("#Bench `{name}` was not emitted by its selected benchmark target"))?;
+                for index in indices {
+                    if !ordered[index].spec.metric.starts_with("BenchTime("){return Err(format!("BenchMeasurement does not support metric `{}`",ordered[index].spec.metric))}
+                    samples[index]=bench.samples.iter().map(|(elapsed,iters)|Rational::parse(&elapsed.to_string(),&iters.to_string())).collect::<Result<Vec<_>,_>>()?;
+                }
+                continue;
+            }
+        }
         let provider=&providers[indices[0]];
         let workload=if kind=="BuildArtifact"{
             CanonicalJson::object([("path".into(),CanonicalJson::String(artifact.as_ref().expect("built artifact").0.to_string_lossy().into_owned()))])?

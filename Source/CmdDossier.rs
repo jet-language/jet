@@ -36,10 +36,19 @@ pub(crate) fn run_dossier(args: &[String], json: bool) {
                     .unwrap_or("run")
             });
             let dossier = idx.dossier(target);
+            let budgets = budget_projection(&abs);
             if json {
-                println!("{}", dossier.to_json());
+                let mut value = dossier.to_json();
+                if value.ends_with('}') {
+                    value.pop();
+                    value.push_str(",\"performance_budgets\":");
+                    value.push_str(&budgets.to_json());
+                    value.push('}');
+                }
+                println!("{value}");
             } else {
                 print!("{}", dossier.render_text());
+                print!("{}", budgets.render_text());
             }
             if dossier.definition.is_none() {
                 exit(ExitCodes::USER_ERROR);
@@ -59,6 +68,22 @@ pub(crate) fn run_dossier(args: &[String], json: bool) {
             exit(ExitCodes::USER_ERROR);
         }
     }
+}
+
+fn budget_projection(entry: &Path) -> jet::BudgetView::BudgetProjection {
+    let entry_text = entry.to_string_lossy();
+    let (diagnostics, bundle, _) = jet::Driver::check_file_with_effect_facts(&entry_text, None, false);
+    if diagnostics.iter().any(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error) {
+        return jet::BudgetView::BudgetProjection::default();
+    }
+    let Some(bundle) = bundle else { return jet::BudgetView::BudgetProjection::default() };
+    let root = jet::Loader::find_manifest_root(entry.parent().unwrap_or(Path::new(".")))
+        .unwrap_or_else(|| entry.parent().unwrap_or(Path::new(".")).to_path_buf());
+    let sources = bundle.modules.iter().map(|module| {
+        let path = module.path.strip_prefix(&root).unwrap_or(&module.path).to_string_lossy().replace('\\', "/");
+        (path, jet::SHA256::sha256_hex(module.source.as_bytes()))
+    }).collect::<Vec<_>>();
+    jet::BudgetView::read_compatible(&root, &sources)
 }
 
 fn absolutize(path: &str) -> PathBuf {
