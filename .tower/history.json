@@ -19762,6 +19762,305 @@
       "ratifiedAt": "2026-07-07",
       "draft": false,
       "retiredAt": "2026-07-13T00:27:11.010Z"
+    },
+    {
+      "id": "D-FE-REPL1",
+      "cardId": "c0gk8k3t",
+      "group": "tooling",
+      "title": "Jet REPL — pick the UX archetype",
+      "gist": "Which interaction model the REPL is built around — enhanced line, living blocks, or a pane workspace.",
+      "explainer": "Hybrid — the line REPL's mental model with every liked layer one keystroke away: pin/fold/rerun from notebook, live bindings from workspace, none of it standing noise. Built from the pieces you flagged across A/B/C.",
+      "story": "Priya keeps a REPL open all day: she probes values, pastes functions, reads the occasional type error. Three genuinely different sessions compete: a classic line loop with modern editing, a notebook of blocks she can fold/rerun/pin, or a split workspace where every binding stays visible as it evolves. One shared theme; the archetypes differ in what a session IS. All show the verbatim E0112 diagnostic and the pinned `value : Type` echo. Browse: file:///home/nate/Projects/Github/jet/docs/design/frontends/index.html#repl (←/→ switches, c compares).",
+      "inWild": "$ jet repl\nJet 0.1.0 — interactive REPL  (type :quit to exit, :help for commands)\n\nuser> nums :: [1, 2, 3, 4, 5]\n[1, 2, 3, 4, 5] : List\nuser> nums.map((n: Int) => (n * n))\n[1, 4, 9, 16, 25] : List",
+      "detail": "Owner modification (2026-07-08): ratify hybrid REPL. Keep the line REPL foundation and layered depth, but include notebook-style controls for every addressable turn: rerun, fold, unfold, and pin. Turns stay lightweight by default; big outputs can fold; pinned values/turns remain visible; rerun semantics must keep downstream bindings honest or stale-mark them.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Line — classic loop, modern editing",
+          "detail": "Core loop: type an expression, read its value, keep typing — one line at a time. Adds ghost autosuggest from history, a completion menu with signatures, inline ?name docs, and live highlight WITHOUT changing the mental model; scrollback stays plain text, so pipes and logs stay clean. Lowest ceremony, obvious default. Note: the ?name docs mode is new behavior (not in REPL.rs) — if A wins it gets its own ballot row before implementation. NO_COLOR: ghost suggest simply not shown (up-arrow history remains).\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/repl/line.html",
+          "code": "Jet 0.1.0 — interactive REPL  (type :quit to exit, :help for commands)\n\nuser> nums :: [1, 2, 3, 4, 5]\n[1, 2, 3, 4, 5] : List\nuser> nums.fil\n      ┌──────────────────────────────────────────────┐\n      > filter      (f: Fn) -> List   keep items where\n      │ filter_map  (f: Fn) -> List   map, drop None  │\n      └──────────────────────────────────────────────┘\n      Tab accept · up/down move · ? docs for selected\nuser> show(\"hi\")\nError [E0112]: `show` wants Int (a whole number) for argument 1, but this is String (text)\n  --> tests/ui/arg_type_mismatch.jet:5:10\n    |\n  5 |     show(\"hi\")\n    |          ^^^^\n Why: every argument must match its parameter's type\n Fix: use Int (a whole number) here\nuser> _"
+        },
+        {
+          "key": "B",
+          "name": "Notebook — a session of living blocks",
+          "detail": "Core loop: build up a session of blocks you fold, rerun, edit in place, and pin — revisit, don't scroll away. Every turn is command+output+status+timing in one addressable block (Warp model); pin a value to keep it on screen; big outputs page inside the block as a browsable table instead of flooding the screen. The session becomes reproducible, not append-only. Note: edit-in-place rerun must recompute or stale-mark downstream bindings — real semantics work that gets its own ballot row if B wins. NO_COLOR: status words (ok/error/edited/folded) already textual.\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/repl/notebook.html",
+          "code": "╭─ 1 · ok · 2ms ────────────────────────── fold  rerun  pin\n│ nums :: [1, 2, 3, 4, 5]\n│ [1, 2, 3, 4, 5] : List\n╰───────────────────────────────────────────────────────\n📌 ╭─ 1 · ok · pinned ────────────────────────────────────\n│ nums : List = [1, 2, 3, 4, 5]\n╰───────────────────────────────────────────────────────\n╭─ 2 · ok · folded ── nums.map(…) → [1,4,9,16,25] ─ unfold\n╭─ 4 · ok · 1ms ────────────────────────── fold  rerun  pin\n│ nums.map((n: Int) => (n * n))\n│ idx  value        5 items\n│  0    1     <- selected row · j/k scroll · → expand\n│  1    4\n╰───────────────────────────────────────────────────────\n╭─ 5 · error · E0112 ──────────────────────── edit  rerun\n│ Error [E0112]: `show` wants Int (a whole number) ...\n│  Fix: use Int (a whole number) here\n╰───────────────────────────────────────────────────────"
+        },
+        {
+          "key": "C",
+          "name": "Workspace — session left, live bindings right",
+          "detail": "Core loop: evaluate on the left; watch state evolve in a live bindings inspector on the right, docs on demand. Alt-screen split (lazygit panes): every binding shown as `name : Type = value`, updated the instant a step lands, changed row marked — kills :type round-trips and surfaces the memory model (moved/owned) live. ? splits the right column for docs without covering the session. Non-TTY falls back to the line archetype's plain transcript. NO_COLOR: box-drawing panes + a `◂ new this step` glyph carry everything.\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/repl/workspace.html",
+          "code": "jet repl · workspace ──────────────────── ? docs  :help  :quit\n┌─ session ───────────────────────────┬─ bindings ──────────────┐\n│ user> doubled := nums.map(          │ nums    : List = [1,2,3,│\n│   (n: Int) => (n * 2))              │                    4,5] │\n│ [2, 4, 6, 8, 10] : List             │ total   : Int  = 15     │\n│ user> _                             │ doubled : List = [2,4,6,│\n│                                     │                    8,10]│\n│                                     │ ◂ new this step         │\n│                                     │ 3 bindings · 0 moved    │\n└─────────────────────────────────────┴─────────────────────────┘\n⏎ eval   ⇥ complete   ^L clear session   ^B focus bindings"
+        },
+        {
+          "key": "D",
+          "name": "Hybrid — line REPL with layered depth",
+          "detail": "Core loop: type an expression, read its value, keep typing — and every turn stays quietly addressable, so you can pin, fold, or rerun any of them, or press ^B for live bindings, without leaving the line. Takes: line's foundation (plain scrollback, ghost autosuggest, completion, ?name docs) + notebook's addressable turn as a one-character dim gutter with ^P pin / ^F fold / ^R rerun and in-place paging for big outputs + workspace's bindings inspector behind ^B. Left out: notebook's heavy block frames (fight the flat scroll), structured tables as default output, the always-docked split — the default surface stays one clean column. Carries the same two follow-up ballots (?name docs, rerun semantics).\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/repl/hybrid.html",
+          "code": "Jet 0.1.0 — interactive REPL  (:quit, :help, ^B bindings)\n\n1 user> nums :: [1, 2, 3, 4, 5]\n  [1, 2, 3, 4, 5] : List\n2 user> nums.map((n: Int) => (n * n))\n  [1, 4, 9, 16, 25] : List\n📌 total : Int = 15                          turn 3 · unpin ^P\n────────────────────────────────────────────────────────────\n4 user> data.rows()\n  ⋯ 42 rows folded · [Row] · unfold ⏎\n5 user> _\n\n^B opens the bindings pane on the right:\n┌─ session ──────────────────┬─ bindings ───────────────┐\n│ 5 user> _                  │ nums    : List = [1,2,3…] │\n│                            │ total   : Int  = 15       │\n│                            │ ◂ new this step           │\n└────────────────────────────┴───────────────────────────┘\nNO_COLOR / non-TTY → plain line transcript, turn digits stay."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "ipython / ptpython",
+          "note": "A's editing kit: ghost autosuggest from history, completion menu with signatures, ?-style docs.",
+          "code": "In [2]: nums.fil<TAB>  →  filter  filter_map  (menu w/ signatures)"
+        },
+        {
+          "lang": "Warp",
+          "note": "B's block model: every command+output is an addressable card with status/duration — bookmark becomes pin, rerun is one key.",
+          "code": "[block 4 · ok · 1ms]  rerun ↻ · pin 📌 · fold ▾"
+        },
+        {
+          "lang": "lazygit / debugger variables pane",
+          "note": "C's layout: fixed panes with focus keys; the bindings pane is a debugger's variables view kept live for a REPL session.",
+          "code": "┌ session ┬ bindings ┐  ^B focus · values update per step"
+        }
+      ],
+      "rec": "D",
+      "status": "ratified",
+      "created": "2026-07-08T13:10:16.894Z",
+      "outcome": "D",
+      "comment": "Hybrid REPL, with notebook-style rerun/fold/unfold/pin controls on addressable turns.",
+      "ratifiedAt": "2026-07-08",
+      "draft": false,
+      "retiredAt": "2026-07-13T01:38:34.847Z"
+    },
+    {
+      "id": "D-FE-REPL-DOCS1",
+      "cardId": "c0gk8k3t",
+      "group": "tooling",
+      "title": "REPL inline docs surface",
+      "gist": "How the REPL opens docs for a name.",
+      "explainer": "D-FE-REPL1 ratified hybrid REPL depth, but the original ballot explicitly left ?name docs as a follow-up gate. This decides whether docs are a REPL expression-like shortcut, a colon command, or absent from v1 REPL. The goal is one clear docs path, not two rival help systems.",
+      "story": "Betty is exploring a library in jet repl. She has a value named `server` and sees a completion for `listen`. She wants the shortest way to ask what `listen` expects without leaving the REPL or searching the website.",
+      "inWild": "$ jet repl\nuser> server.listen\n# completion shows listen(port: Int) -> Result\nuser> ?server.listen\n# docs open inline, then the prompt returns\nuser> _",
+      "detail": "Beginner pass: docs should be discoverable from the place where the question appears. Expert pass: docs need exact symbol identity, signatures, and source/provenance where available. Hybrid pass: the REPL should call the same docs index as jet ? / LSP hover, not maintain separate prose.",
+      "options": [
+        {
+          "key": "A",
+          "name": "No ?name docs; use jet ? and completion only",
+          "detail": "The REPL keeps completion/signature help but no docs command. Users open jet ? or editor hover for deeper docs. Smallest REPL surface, but breaks the hybrid ballot promise that docs are one keystroke away in the REPL.",
+          "code": "user> nums.fil<Tab>\nfilter (f: Fn) -> List\n\nuser> :help\n# points to jet ? filter"
+        },
+        {
+          "key": "B",
+          "name": "?name inline docs over the shared docs index (recommended)",
+          "detail": "?name is a REPL-only query form, not Jet source syntax. It resolves names exactly like completion/LSP hover, renders signature, short docs, source/module, examples when present, and returns to the same prompt. It preserves one docs index across REPL, jet ?, and editor tooling.",
+          "code": "user> ?List.filter\nList.filter(f: fn(T) -> Bool) -> List<T>\nKeeps items where f(item) is true.\nSource: core.collections\n\nuser> _"
+        },
+        {
+          "key": "C",
+          "name": "Colon command only: :doc name",
+          "detail": "Docs are explicit commands, not punctuation. This avoids confusion with Jet source, but is slower than the ratified REPL mockup and creates a separate docs spelling from the ?name convention many REPL users know.",
+          "code": "user> :doc List.filter\nList.filter(f: fn(T) -> Bool) -> List<T>\n\nuser> _"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "IPython",
+          "note": "Uses ?name and name? to inspect Python objects inline.",
+          "code": "In [1]: list.append?"
+        },
+        {
+          "lang": "Julia",
+          "note": "Help mode is entered with ?, then a name queries docs.",
+          "code": "julia> ?\nhelp?> map"
+        },
+        {
+          "lang": "Rust tooling",
+          "note": "rustdoc/IDE hover are shared docs surfaces; REPL-like tools should not fork docs text.",
+          "code": "hover Vec::push -> rustdoc item"
+        }
+      ],
+      "rec": "B",
+      "status": "ratified",
+      "created": "2026-07-08T15:43:37.222Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-07-08",
+      "draft": false,
+      "retiredAt": "2026-07-13T01:38:34.847Z"
+    },
+    {
+      "id": "D-FE-REPL-RERUN1",
+      "cardId": "c0gk8k3t",
+      "group": "tooling",
+      "title": "REPL rerun semantics",
+      "gist": "What rerunning an old REPL turn does to later state.",
+      "explainer": "D-FE-REPL1 ratified notebook-style rerun controls, but rerun affects truth: later bindings may depend on the old value, and turns may have effects. This decision chooses the one rerun model so the REPL never shows stale values as current.",
+      "story": "Hank defines `rate`, computes `invoice_total`, then notices `rate` was wrong. He hits rerun on turn 1. He needs to know whether `invoice_total` changed, stayed stale, or needs a manual rerun before he trusts the session.",
+      "inWild": "1 user> rate :: 0.07\n  0.07 : Float\n2 user> invoice_total :: subtotal * (1.0 + rate)\n  107.0 : Float\n# Hank edits turn 1 to rate :: 0.08 and presses rerun. What happens to turn 2?",
+      "detail": "Beginner pass: never make stale state look current. Expert pass: side effects and expensive turns need explicit control. Hybrid pass: one replay model can handle both by replaying pure/dependent turns automatically and requiring confirmation for effectful replay.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Replay from the edited turn forward with effect confirmation (recommended)",
+          "detail": "Rerun rebuilds session state from the selected turn forward, recomputing dependent later turns in order. Pure/binding turns replay automatically. Effectful turns pause with a replay plan and require confirmation or skip/stale-mark. This keeps current state truthful while protecting side effects.",
+          "code": "rerun turn 1\nReplay plan:\n  1 rate :: 0.08        auto\n  2 invoice_total ...   auto\n  3 write_file(...)     confirm effect\nApply? [y/N]"
+        },
+        {
+          "key": "B",
+          "name": "Rerun one turn only; stale-mark dependents",
+          "detail": "Only the selected turn reruns. Later turns that read changed bindings are marked stale and excluded from current binding truth until manually rerun. Safer for effects, but beginners must understand stale state and manually repair the session.",
+          "code": "1 rate :: 0.08  ok\n2 invoice_total  stale: depends on old rate\ncurrent bindings: rate only; invoice_total hidden until rerun"
+        },
+        {
+          "key": "C",
+          "name": "Scratch rerun; does not change session state",
+          "detail": "Rerun evaluates the old input in a temporary scratch scope and prints the result, leaving every binding untouched. Safe, but the button is not a real notebook rerun and does not help fix a session.",
+          "code": "rerun turn 1 as scratch\n0.08 : Float\n# session still has rate = 0.07"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Jupyter",
+          "note": "Cells can be rerun out of order, which often leaves hidden stale state. Jet should avoid that footgun.",
+          "code": "Run cell 1, skip cell 2 -> displayed outputs can disagree with kernel state."
+        },
+        {
+          "lang": "Observable",
+          "note": "Reactive dependency graph recomputes downstream cells when an input changes.",
+          "code": "change input -> dependent cells update"
+        },
+        {
+          "lang": "Warp blocks",
+          "note": "Command blocks can be rerun, but shell side effects are real; Jet needs stronger state truth because bindings are typed session state.",
+          "code": "rerun command block"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "created": "2026-07-08T15:43:37.222Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-08",
+      "draft": false,
+      "retiredAt": "2026-07-13T01:38:34.847Z"
+    },
+    {
+      "id": "D-JPK-TASKRUN1",
+      "cardId": "c0qwckht",
+      "group": "syntax",
+      "title": "How a project declares and invokes named tasks",
+      "gist": "Pick how a Jet project declares its own named commands (lint, migrate, seed, deploy) and how you run them, without adding a second way to mean \"run something.\"",
+      "explainer": "Option A ranks first on the priorities that decide: one-path (I8) — a task is the existing `fn run()`/`fn build()` entry-point mechanism given a user-chosen name, not a second command language, so Jet never has two unrelated ways to 'run something'; safety/beginner — `#Task` is an explicit opt-in (no accidental exposure like D), and a beginner writes one ordinary function and types `jetpack run lint`; expert composability and anti-repetition — typed arguments come free from D-CLIFLAG1, and a cross-task dependency is just a function call, so turbo/just's headline feature (ordered dependencies) needs no DAG DSL and nothing is ever restated (B's failure). C is the strongest runner-up if the owner wants a declarative, greppable graph in `pkg.jet`, and could layer on top of A later (a `tasks:` block whose `run:` references a `#Task fn`) — but on its own it reintroduces untyped shell strings for the common case. Two sub-picks ride on A and need the owner's word: (1) the marker word — `#Task` overloads Jet's concurrency `Task<T>`/task groups (D-TASKRUNTIME1); aviation-family alternatives that avoid the clash: `#Command`, `#Verb`, `#Chore`, `#Recipe`, `#Runbook`, `#Checklist`, `#Preflight`, `#Taxi`, `#Sortie`, `#Waypoint`. (2) the invocation verb — recommend `jetpack run <name>` (reuses the existing `run` verb; `jetpack lint` as unambiguous-name sugar) over a new `jetpack do <name>`.",
+      "story": "Priya clones a teammate's Jet web service, `orbit`. She wants to lint it, apply the pending database migrations, seed dev fixtures, and deploy. Today Jet only recognizes the four fixed lifecycle entry points `fn run()`, `fn dev()`, `fn build()`, `fn test()`; anything else the project needs lives in a README as a copy-paste shell incantation. Every rival she has used solves this: `npm run lint`, `cargo xtask`, `pnpm deploy`, `just migrate`, `uv run seed`. Priya wants to type `jetpack <tab>` and see the project's own verbs, run one, and have a wrong name tell her what the real names are — not grep a README. The choice: what does the project author write to declare `lint`/`migrate`/`seed`/`deploy`, and does declaring them fight Jet's existing `fn run()` mechanism or reuse it.",
+      "inWild": "The `orbit` package needs four project commands. `lint` shells out to a formatter. `migrate` applies DB migrations and takes a `--to` version. `seed` must run `migrate` first, then load `fixtures/dev.jet`. `deploy` must run `build` and `test` first, then push, with `STAGE=prod` set. A first-class task surface has to cover: a name, an action, typed arguments, environment/working-dir, and one task depending on another — while colliding cleanly when someone names a task `build` (a reserved lifecycle verb) or runs a task that doesn't exist.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Tasks are functions (`#Task fn`)",
+          "detail": "A task is an ordinary Jet function marked `#Task`, living beside `fn run()` in the package's definition file (same home as `fn build(b)` today). It reuses everything functions already have: types, `?` fallibility, typed-argument CLI parsing (D-CLIFLAG1: `fn migrate(args: MigrateArgs)` derives `--to`), and `@[Doc(\"...\")]` help. A cross-task dependency is just a function call — no separate dependency DSL, nothing restated. `#Task` is an explicit opt-in, so only marked functions become verbs (no accidental exposure). This is the one-path (I8) answer: a task is not a new kind of thing, it is the `fn run()` mechanism generalized to a user-chosen name.",
+          "code": "// orbit.jet — beside fn run()\n#Task\nfn lint() -> Void ? {\n    shell(\"ruff check .\")?\n}\n\n#Task(\"apply pending migrations\")\nfn migrate(args: MigrateArgs) -> Void ? {\n    db.migrate(to: args.to)?\n}\n\n#Task\nfn seed() -> Void ? {\n    migrate(MigrateArgs.{ to: \"latest\" })?   // dependency = a plain call\n    db.seed(\"fixtures/dev.jet\")?\n}\n\n----- run it -----\n$ jetpack run seed\nmigrate: 3 applied\nseed: loaded fixtures/dev.jet\n\n$ jetpack run migrate --to 004\nmigrate: 1 applied (now at 004)\n\n$ jetpack run migrate --help\nmigrate — apply pending migrations\n  --to <version>   target migration (default: latest)\n\n----- undeclared task -----\n$ jetpack run deploy\nerror[E1234]: no task named `deploy`\n --> orbit.jet\n  = declared tasks: lint, migrate, seed\n  help: mark a function `#Task` to make it runnable\n\n----- collision with a reserved lifecycle verb -----\n#Task\nfn build() { ... }\nerror[E1235]: `build` is a built-in lifecycle verb, not a task name\n --> orbit.jet:12\n  = reserved: run, dev, build, test\n  help: rename it, e.g. `#Task fn build_assets()`"
+        },
+        {
+          "key": "B",
+          "name": "Shell-string map (`tasks:` in pkg.jet)",
+          "detail": "A `tasks:` field in `pkg.jet` maps a name to a shell-command string, exactly like npm `scripts` or a bare `just` recipe. Zero Jet code, instantly familiar. But: the value is an opaque string (no types, no `--flag` parsing, typos surface only at runtime), it shells out for everything, and it is a SECOND way to \"run something\" alongside `fn run()` — the project now has two unrelated command surfaces. Dependencies aren't expressible except by re-typing a command inside another, which is exactly the repetition the owner cuts.",
+          "code": "// pkg.jet\ntasks: {\n    lint:    \"ruff check .\",\n    migrate: \"orbit-db migrate --to latest\",\n    seed:    \"orbit-db migrate --to latest && orbit-db seed fixtures/dev.jet\",\n}\n\n----- run it -----\n$ jetpack run seed\n+ orbit-db migrate --to latest\n+ orbit-db seed fixtures/dev.jet\n\n----- the repetition problem -----\n// `seed` restates the whole `migrate` command because a string\n// can't say \"needs: migrate\". Change migrate's flags and you must\n// remember to edit seed too. A typo like `orbti-db` is caught only\n// when the task runs.\n\n----- undeclared task -----\n$ jetpack run deploy\nerror[E1234]: no task `deploy` in pkg.jet\n  = tasks: lint, migrate, seed"
+        },
+        {
+          "key": "C",
+          "name": "Structured recipe entries with `needs:` (just/turbo style)",
+          "detail": "A `tasks:` field in `pkg.jet` maps a name to a typed struct — the same manifest-data shape as `deps:`/`targets:` — carrying `run:`, a declared `needs:` dependency list, plus optional `env:`/`cwd:`. `run:` is a shell string (or a reference to a `#Task fn`). This gives a real, ordered dependency DAG the runner can print and parallelize, and keeps command config declarative and greppable. Cost: it is still a data-DSL distinct from `fn run()` (a second command surface), and `run:` as a string reintroduces the untyped/no-flag-parsing limits of B for the common case.",
+          "code": "// pkg.jet\ntasks: {\n    lint:    { run: \"ruff check .\" },\n    migrate: { run: \"orbit-db migrate --to latest\" },\n    seed:    { run: \"orbit-db seed fixtures/dev.jet\", needs: [migrate] },\n    deploy:  { run: \"orbit-db deploy\",\n               needs: [build, test],\n               env:  { STAGE: \"prod\" } },\n}\n\n----- run it (DAG is shown) -----\n$ jetpack run seed\n» migrate   (needed by seed)\n» seed\n\n----- unknown dependency -----\n$ jetpack run seed\nerror[E1236]: task `seed` needs `migrat`, which isn't a task\n --> pkg.jet\n  help: did you mean `migrate`?\n\n----- collision with a reserved lifecycle verb -----\ntasks: { build: { run: \"...\" } }\nerror[E1235]: `build` is a built-in lifecycle verb, not a task name"
+        },
+        {
+          "key": "D",
+          "name": "Convention dispatch (any `pub fn` is a verb)",
+          "detail": "No marker and no manifest field: any top-level `pub fn` in the package's definition file automatically becomes an invokable verb; private functions stay internal; dependencies are plain calls. Maximum ceremony-free — write a function, make it `pub`, run it. But visibility now does double duty: a helper you export for code reuse silently becomes a CLI command, renaming a `pub fn` is a breaking CLI change, and `pub fn run` collides with the entry point. It makes the footgun the default (I8/kill-criteria) — exposure is implicit, the opposite of a safe opt-in.",
+          "code": "// orbit.jet\npub fn lint() -> Void ? { shell(\"ruff check .\")? }\npub fn seed() -> Void ? { migrate()?; db.seed(\"fixtures/dev.jet\")? }\nfn migrate() -> Void ? { db.migrate(to: \"latest\")? }   // private → not a verb\n\n----- run it -----\n$ jetpack run lint\nlint: ok\n\n----- the footgun -----\n// You export a helper for another module to reuse:\npub fn format_report(r: Report) -> Text { ... }\n// It is now also a CLI verb `jetpack run format_report` that takes a\n// Report it can't build from argv. Visibility and \"is a command\" are\n// fused, so you can't have one without the other."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "npm scripts",
+          "note": "String map in package.json; the familiar baseline (option B). No types, no arg parsing, dependencies via `&&`/`pre`/`post` string chaining.",
+          "code": "\"scripts\": { \"lint\": \"eslint .\", \"seed\": \"npm run migrate && node seed.js\" }"
+        },
+        {
+          "lang": "just",
+          "note": "Dedicated recipe file with first-class dependencies (informs option C's `needs:`). Recipes are shell by default; deps are named, not restated.",
+          "code": "seed: migrate\n\tnode seed.js"
+        },
+        {
+          "lang": "cargo xtask",
+          "note": "The Rust ecosystem's answer to 'tasks should be real typed code, not shell strings' — a normal binary with typed args (informs option A). No bespoke DSL; automation is just the language.",
+          "code": "cargo xtask deploy --stage prod"
+        },
+        {
+          "lang": "turbo",
+          "note": "Declares a task dependency graph (`dependsOn`) and runs it in order/parallel — the value option C/A's dependency modeling captures.",
+          "code": "\"deploy\": { \"dependsOn\": [\"build\", \"test\"] }"
+        }
+      ],
+      "rec": "A",
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-07-10T21:14:28.965Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-10",
+      "retiredAt": "2026-07-13T01:51:29.228Z"
+    },
+    {
+      "id": "D-JPK-TOOLRUN1",
+      "cardId": "c0fchu51",
+      "group": "tooling",
+      "title": "On-demand tool execution: ephemeral run + persistent global install surface",
+      "gist": "How a user runs a package's binary without adding it as a project dependency — one-off (npx/uvx-style) and installed-globally-on-PATH (pipx/cargo-install/uv-tool-style) — and what verb surface both live under.",
+      "explainer": "Option A - a unified jetpack tool run|install|list|uninstall noun. It gives the beginner one discoverable place (jetpack tool <tab> reveals both surfaces, so nobody has to know the npx-vs-pipx-vs-cargo-install split), and it gives the expert a hard isolation guarantee for free by making install an ergonomic entrypoint over the ratified profile engine (D-JPK-PROFILE1): every installed tool is its own atomic generation with rollback and an exact environment, never a host-PATH overlay and never a second store. It is one canonical path (I8) and it disentangles the jetpack run overload instead of deepening it (which is B's and especially D's cost); C leaves the filed beginner hole open. The choice is grounded in discoverability and isolation, not in how much work each surface is.",
+      "story": "Priya clones a Jet repo on a fresh machine. She wants to format it with prettier once, without polluting the project's manifest — the npx reflex. She also wants ripgrep and ruff on PATH on every machine she touches, the pipx/cargo-install reflex. Coming from npm/pip she expects one obvious command for each, and she expects jetpack <tab> to show her the way rather than reading docs to learn which of four bespoke tools (npx? pipx? brew? cargo install?) applies. Nothing in jetpack answers her today beyond the nix-only one-shot.",
+      "inWild": "# inside a Jet project that already declares tasks in pkg.jet (#476):\n#   tasks: { fmt: \"...\", serve: \"...\" }\n#\n# Priya wants three things, none of which should touch pkg.jet:\n#   1. run prettier once over src/\n#   2. put ripgrep + ruff on PATH for good\n#   3. NOT accidentally clobber the project's own `serve` task with a global tool named serve",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Unified `jetpack tool` noun: run / install / list / uninstall (uv-style)",
+          "detail": "One noun groups both surfaces. jetpack tool run <ref> executes a package's binary ephemerally across ALL providers (generalizing today's nix-only jetpack run); jetpack tool install <ref> adds the package to the user's default profile (D-JPK-PROFILE1) and projects its bins onto PATH as its own generation; jetpack tool list / uninstall manage them. One mental model replaces npx+pipx+cargo-install+brew. It also cleanly separates the two meanings that jetpack run overloads today: jetpack run = run THIS project, jetpack tool run = run an external tool. Fits the grouped-surface direction raised on #468 (D-CLI-SURFACE1). Naming sub-menu for the noun if 'tool' is not preferred (aviation family, all keep the same run/install/list verbs): tool (plain, uv parity) | kit | sortie (a single mission — evocative for the ephemeral half) | taxi | apron. Short ephemeral alias optional: jetpack tool run could also answer to jetpack x as a documented shorthand without adding a second concept.",
+          "code": "# 1. ephemeral - nothing installed, runs once, then gone\n$ jetpack tool run npm:prettier -- --write src/\nprettier 3.3.0  (ephemeral; cached in hangar, not on PATH)\nsrc/app.jet  41ms\n\n# 2. persistent global - isolated, on PATH, its own generation\n$ jetpack tool install cargo:ripgrep\ninstalled ripgrep 14.1.0  ->  ~/.jet/bin/rg   (profile \"tools\", generation 7)\n$ jetpack tool install pypi:ruff\ninstalled ruff 0.5.0  ->  ~/.jet/bin/ruff     (profile \"tools\", generation 8)\n\n$ rg --version\nripgrep 14.1.0\n\n$ jetpack tool list\nTOOL     VERSION  SOURCE  BIN\nripgrep  14.1.0   cargo   rg\nruff     0.5.0    pypi    ruff\n\n# 3. error - a global tool's bin would shadow this project's task (#476)\n$ jetpack tool install npm:serve\nerror[JPK-TOOL-COLLIDE]: 'serve' is already a task in ./pkg.jet\n  the project task wins in this directory, so the global tool would be shadowed here\n  fix: install under a different bin name  ->  jetpack tool install npm:serve --as gserve\n     or just run it once                  ->  jetpack tool run npm:serve\n\n# rollback is free because install rode the ratified profile engine:\n$ jet profile rollback tools\nreverted profile \"tools\" to generation 7  (ruff removed from PATH)"
+        },
+        {
+          "key": "B",
+          "name": "Two flat verbs: `jetpack x <ref>` (ephemeral) + `jetpack global add/rm/list` (persistent)",
+          "detail": "Two separate top-level verbs, each matching a specific reflex. jetpack x is the short npx/bunx muscle-memory verb for one-off runs; jetpack global is the pipx/cargo-install verb for on-PATH installs. Persistent installs still ride the ratified profile engine underneath (default profile), so rollback/isolation are identical to A - only the surface differs. Wins on the shortest possible ephemeral keystroke (jetpack x prettier). Costs: two unrelated verbs for one concept (on-demand external tools), which pushes AGAINST the #468 grouped-surface direction, and x is opaque to a reader who does not already know npx.",
+          "code": "# ephemeral - shortest keystroke\n$ jetpack x npm:prettier -- --write src/\nprettier 3.3.0  (ephemeral)  41ms\n\n# persistent global\n$ jetpack global add cargo:ripgrep\ninstalled ripgrep 14.1.0  ->  ~/.jet/bin/rg   (profile \"tools\", generation 7)\n$ jetpack global add pypi:ruff\ninstalled ruff 0.5.0  ->  ~/.jet/bin/ruff\n\n$ jetpack global list\nripgrep  14.1.0  cargo\nruff     0.5.0   pypi\n\n# same collision, but the answer is split across two unrelated verbs\n$ jetpack global add npm:serve\nerror[JPK-TOOL-COLLIDE]: 'serve' is already a task in ./pkg.jet\n  fix: jetpack global add npm:serve --as gserve\n     or run once: jetpack x npm:serve\n\n$ jetpack global rm ruff\nremoved ruff  (profile \"tools\", generation 9)"
+        },
+        {
+          "key": "C",
+          "name": "Ephemeral now; defer global install to the existing profile engine",
+          "detail": "Ship only the ephemeral half now (jetpack tool run <ref>, all providers), and give NO new install verb - 'install a tool globally' is served by the already-ratified profile engine directly: the user declares a profile.tools and switches to it. A defensible 'ship half now' because global install genuinely already has a home (D-JPK-PROFILE1). Cost: the beginner reflex 'just install this one tool on PATH' has no one-liner - Priya must learn to author a profile block and run jet profile switch, which is real ceremony for a one-tool need and exactly the discoverability hole this card was filed to close. A follow-up ballot could add the install ergonomic later.",
+          "code": "# ephemeral half ships now, all providers\n$ jetpack tool run npm:prettier -- --write src/\nprettier 3.3.0  (ephemeral)  41ms\n\n# global install? no verb - use the ratified engine by hand:\n$ cat >> env.jet <<'EOF'\nprofile.tools {\n    packages: { ripgrep: cargo:ripgrep, ruff: pypi:ruff }\n}\nEOF\n$ jet profile switch tools\nbuilt profile \"tools\" generation 7  ->  ~/.jet/bin/{rg,ruff}\n\n$ rg --version\nripgrep 14.1.0\n\n# there is no `jetpack tool install one-tool` shortcut in this option"
+        },
+        {
+          "key": "D",
+          "name": "Fold both into the existing `jetpack run <source>:<pkg>` bridge with a persistence flag",
+          "detail": "No new noun or verb at all. Generalize today's jetpack run nixpkgs:fastfetch to every provider (ephemeral by default) and add a flag - --global (or --keep) - to make a run persist on PATH via the profile engine. Smallest possible surface: one verb, one flag. Cost: a run that silently leaves something installed is a surprising overload of the word 'run', and it collides head-on with the OTHER meaning of jetpack run (run this project / a task from #476). Listing and removing installed tools then have no natural home under a run verb, so --list/--uninstall bolt awkwardly onto a run command.",
+          "code": "# ephemeral (default), now all providers\n$ jetpack run cargo:ripgrep -- --version\nripgrep 14.1.0  (ephemeral)\n\n# persistent via a flag on the same verb\n$ jetpack run cargo:ripgrep --global\ninstalled ripgrep 14.1.0  ->  ~/.jet/bin/rg   (profile \"tools\", generation 7)\n\n# overload problem: which `run` is this in a project dir?\n$ jetpack run serve\n#   the project's `serve` task, or an external package named serve? ambiguous\n\n# managing installs has no clean verb:\n$ jetpack run --list-global\nripgrep  14.1.0  cargo"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "uv (Python)",
+          "note": "One noun, two verbs, one mental model: uv tool run (a.k.a. uvx) for ephemeral, uv tool install for persistent, each installed tool isolated in its own environment. Directly the shape of Option A; its uvx shorthand is the optional jetpack x alias.",
+          "code": "uv tool run ruff check .\nuv tool install ruff\nuv tool list"
+        },
+        {
+          "lang": "npm / pnpm / bun",
+          "note": "Ephemeral-only, each a separate bespoke command (npx, pnpm dlx, bunx) with no unified persistent-install sibling - the fragmentation Priya is escaping. There is no 'npm global tool' story that isolates cleanly; global npm installs share one flat prefix and collide.",
+          "code": "npx prettier --write src/\nbunx prettier --write src/"
+        },
+        {
+          "lang": "pipx / cargo-install / brew",
+          "note": "Persistent-only, each isolated-ish but a different tool per ecosystem, and none has a first-class ephemeral sibling (pipx run is the exception, mirroring uv). Reinforces that the beginner today must know which of four tools applies - the discoverability hole Option A closes with one noun.",
+          "code": "pipx install ruff\ncargo install ripgrep\nbrew install ripgrep"
+        }
+      ],
+      "rec": "A",
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-07-10T21:18:01.877Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-10",
+      "retiredAt": "2026-07-13T01:51:29.363Z"
     }
   ],
   "cards": [
@@ -66887,6 +67186,125 @@
       "action": "card.claim",
       "ref": "c0075iyb",
       "note": ""
+    },
+    {
+      "at": "2026-07-12T13:14:43.782Z",
+      "by": "terra-301-builder",
+      "action": "card.criteria-add",
+      "ref": "c0075iyb",
+      "note": "#1 Shared Request, Response, Headers, streaming Body, and close"
+    },
+    {
+      "at": "2026-07-12T13:14:54.100Z",
+      "by": "terra-301-builder",
+      "action": "card.criteria-add",
+      "ref": "c0075iyb",
+      "note": "#2 Client law matches D-HTTP-CLIENT2: pooled keepalive, safe re"
+    },
+    {
+      "at": "2026-07-12T13:15:03.153Z",
+      "by": "terra-301-builder",
+      "action": "card.criteria-add",
+      "ref": "c0075iyb",
+      "note": "#3 Server law matches D-HTTP-SERVER2: deterministic router/midd"
+    },
+    {
+      "at": "2026-07-12T13:15:09.390Z",
+      "by": "terra-301-builder",
+      "action": "card.criteria-add",
+      "ref": "c0075iyb",
+      "note": "#4 core.ws client/server home from D-WS1 is real, interoperable"
+    },
+    {
+      "at": "2026-07-12T13:15:17.892Z",
+      "by": "terra-301-builder",
+      "action": "card.criteria-add",
+      "ref": "c0075iyb",
+      "note": "#5 D-DEP-HTTP2=B holds: zero new external HTTP/compression depe"
+    },
+    {
+      "at": "2026-07-12T13:15:28.897Z",
+      "by": "terra-301-builder",
+      "action": "card.criteria-add",
+      "ref": "c0075iyb",
+      "note": "#6 Real REST client/server examples and focused golden, parser-"
+    },
+    {
+      "at": "2026-07-12T13:15:40.614Z",
+      "by": "terra-301-builder",
+      "action": "card.update",
+      "ref": "c0075iyb",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-12T13:16:00.872Z",
+      "by": "terra-515-builder",
+      "action": "card.criteria-add",
+      "ref": "c0nqsqn5",
+      "note": "#1 Now page shows a Needs your verification section (top priori"
+    },
+    {
+      "at": "2026-07-12T13:16:26.781Z",
+      "by": "terra-515-builder",
+      "action": "card.criteria-add",
+      "ref": "c0nqsqn5",
+      "note": "#2 Cards in verify lane without the needsAcceptance flag/ballot"
+    },
+    {
+      "at": "2026-07-12T13:17:00.860Z",
+      "by": "terra-515-builder",
+      "action": "card.criteria-add",
+      "ref": "c0nqsqn5",
+      "note": "#3 Each entry shows WHAT TO CHECK and WHAT CONFIRMS IT, sourced"
+    },
+    {
+      "at": "2026-07-12T13:17:15.241Z",
+      "by": "terra-515-builder",
+      "action": "card.criteria-add",
+      "ref": "c0nqsqn5",
+      "note": "#4 Accept ratifies the acceptance ballot as owner (or closes di"
+    },
+    {
+      "at": "2026-07-12T13:17:29.727Z",
+      "by": "terra-515-builder",
+      "action": "card.criteria-add",
+      "ref": "c0nqsqn5",
+      "note": "#5 Bounce (with comment box) returns the card to building with "
+    },
+    {
+      "at": "2026-07-12T13:17:46.904Z",
+      "by": "terra-515-builder",
+      "action": "card.criteria-add",
+      "ref": "c0nqsqn5",
+      "note": "#6 mintAcceptance carries a structured checkInstructions field "
+    },
+    {
+      "at": "2026-07-12T13:18:01.645Z",
+      "by": "terra-515-builder",
+      "action": "card.criteria-add",
+      "ref": "c0nqsqn5",
+      "note": "#7 Tower/test acceptance-queue.test.mjs behavioral tests pass; "
+    },
+    {
+      "at": "2026-07-12T13:18:50.852Z",
+      "by": "terra-515-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0nqsqn5",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-12T13:19:05.527Z",
+      "by": "terra-515-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0nqsqn5",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-12T13:19:20.146Z",
+      "by": "terra-515-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0nqsqn5",
+      "note": "#3"
     }
   ]
 }
