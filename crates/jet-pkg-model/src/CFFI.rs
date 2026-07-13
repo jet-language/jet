@@ -599,6 +599,20 @@ fn load_cache_source(
 ///   2. Else `pkg-config <lib>` (an undeclared `use c.<lib>` keeps this path).
 ///   3. Else E3201.
 pub fn resolve_link(lib: &str, project_root: &Path) -> Result<LinkFlags, Diagnostic> {
+    if let Some(actual) = lib.strip_prefix("jet_fortran_") {
+        let archive = project_root
+            .join(Syntax::SOURCE_ROOT_DIR)
+            .join(ForeignLanguage::Fortran.bindings_subdir())
+            .join(format!("libjet_fortran_{actual}.a"));
+        if archive.is_file() {
+            return Ok(LinkFlags {
+                lib_dirs: vec![archive.parent().unwrap_or(project_root).display().to_string()],
+                link_names: vec![format!("static=jet_fortran_{actual}")],
+                ..Default::default()
+            });
+        }
+        return Err(e3201(lib));
+    }
     // 1. A declared `<lib>: c@…` dep in the manifest's `deps:` block.
     if let Some(target) = declared_c_dep(lib, project_root) {
         return clib_link(lib, &target, project_root);

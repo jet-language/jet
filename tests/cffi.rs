@@ -57,6 +57,13 @@ fn unified_foreign_binder_registry_routes_active_and_planned_languages() {
             BinderSurface::Namespace,
             BinderStatus::Planned,
         ),
+        (
+            ForeignLanguage::Fortran,
+            "fortran",
+            "bindings/fortran",
+            BinderSurface::Namespace,
+            BinderStatus::Active,
+        ),
     ];
 
     for (lang, root, bindings, surface, status) in expected {
@@ -83,6 +90,12 @@ fn unified_foreign_namespace_model_recognizes_c_project_import_only() {
             .expect("js namespace")
             .language,
         ForeignLanguage::Js
+    );
+    assert_eq!(
+        ForeignNamespace::from_module_path("fortran.blas")
+            .expect("fortran namespace")
+            .language,
+        ForeignLanguage::Fortran
     );
     assert!(ForeignNamespace::from_module_path("c").is_none());
     assert!(ForeignNamespace::from_module_path("c.raylib.extra").is_none());

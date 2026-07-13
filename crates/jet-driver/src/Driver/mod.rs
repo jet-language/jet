@@ -1529,14 +1529,14 @@ pub fn compile_src(
         dep_roots: std::collections::HashMap::new(),
         active_os: crate::Syntax::OsTarget::host(),
     };
-    // S59: fold any in-file C FFI modules + resolve `use c.<lib>` forms.
+    // Active foreign caches may contribute generated C-ABI bridge modules.
+    if let Err(diags) = crate::Foreign::assemble_active_namespaces(&mut bundle) {
+        return Err(diags);
+    }
     bundle.cffi = match crate::CFFI::assemble(&mut bundle) {
         Ok(c) => c,
         Err(diags) => return Err(diags),
     };
-    if let Err(diags) = crate::Foreign::assemble_active_namespaces(&mut bundle) {
-        return Err(diags);
-    }
     let diags = crate::Sema::check_bundle(&mut bundle, mode);
     let mut errors = Vec::new();
     let mut lints = Vec::new();
@@ -1728,13 +1728,13 @@ pub fn check_eval(src: &str, file: &str) -> Vec<Diagnostic> {
         dep_roots: std::collections::HashMap::new(),
         active_os: crate::Syntax::OsTarget::host(),
     };
+    if let Err(diags) = crate::Foreign::assemble_active_namespaces(&mut bundle) {
+        return diags;
+    }
     bundle.cffi = match crate::CFFI::assemble(&mut bundle) {
         Ok(c) => c,
         Err(diags) => return diags,
     };
-    if let Err(diags) = crate::Foreign::assemble_active_namespaces(&mut bundle) {
-        return diags;
-    }
     let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Eval);
     diags
         .into_iter()

@@ -17,6 +17,7 @@ pub use jet_driver::{
     // Top-level re-exports from Compile module:
     bundle_uses_unsafe,
     CBind,
+    FortranBind,
     CanonicalAST,
     Capabilities,
     Codegen,
@@ -333,13 +334,13 @@ pub fn compile_web_with_path(src: &str, file: &str) -> Result<CompileOutput, Vec
         // host OS is the active bucket.
         active_os: Syntax::OsTarget::host(),
     };
+    if let Err(diags) = Foreign::assemble_active_namespaces(&mut bundle) {
+        return Err(diags);
+    }
     bundle.cffi = match CFFI::assemble(&mut bundle) {
         Ok(c) => c,
         Err(diags) => return Err(diags),
     };
-    if let Err(diags) = Foreign::assemble_active_namespaces(&mut bundle) {
-        return Err(diags);
-    }
     let diags = Sema::check_bundle(&mut bundle, Sema::CompileMode::Run);
     let mut errors = Vec::new();
     let mut lints = Vec::new();

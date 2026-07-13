@@ -31,6 +31,7 @@ pub enum BinderRuntime {
     SupervisedPythonSidecar,
     TargetDispatchedJs,
     SwiftCAbiBridge,
+    FortranIsoCBinding,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,6 +41,7 @@ pub enum BindingStubKind {
     PythonIntrospection,
     TypeScriptDeclarations,
     SwiftModule,
+    FortranIsoCBinding,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,6 +66,7 @@ pub enum ForeignHost {
     NativeJsWasmComponent,
     SupervisedPythonSidecar,
     SwiftCAbiBridge,
+    FortranIsoCBinding,
     LegacyRustExtern,
 }
 
@@ -113,6 +116,13 @@ pub const BINDERS: &[BinderDescriptor] = &[
         runtime: BinderRuntime::SwiftCAbiBridge,
         stub_kind: BindingStubKind::SwiftModule,
     },
+    BinderDescriptor {
+        language: ForeignLanguage::Fortran,
+        surface: BinderSurface::Namespace,
+        status: BinderStatus::Active,
+        runtime: BinderRuntime::FortranIsoCBinding,
+        stub_kind: BindingStubKind::FortranIsoCBinding,
+    },
 ];
 
 pub fn binder_for(language: ForeignLanguage) -> Option<&'static BinderDescriptor> {
@@ -155,6 +165,7 @@ pub fn host_for(language: ForeignLanguage, target: ForeignTarget) -> ForeignHost
             ForeignTarget::Web => ForeignHost::BrowserJsEngine,
         },
         ForeignLanguage::Swift => ForeignHost::SwiftCAbiBridge,
+        ForeignLanguage::Fortran => ForeignHost::FortranIsoCBinding,
     }
 }
 

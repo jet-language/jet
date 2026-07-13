@@ -401,7 +401,7 @@ duplicate this — it is the one surface for lint walls (I8).
 | E3205 | sema  | overlay symbol clashes with bindgen (incompatible signature) |
 | E3206 | parse | user declared reserved `__bindgen__` segment |
 | E3207 | parse | `#Bindgen` outside generated `.jet/bindings/c/` file |
-| E3208 | jet   | `jet inspect bind` / header translation failed |
+| E3208 | jet   | `jet inspect bind` / foreign binding generation failed |
 | E3209 | jet   | linker couldn't find a declared C library at link time |
 | E3210 | jet   | C library auto-provision from nixpkgs failed |
 | E3211 | sema  | string literal with a known interior NUL byte passed to a C-boundary function |
@@ -1261,7 +1261,7 @@ Error [E0150]: `check_in` needs `Reservation` in state `Confirmed`, but `r` is i
 | E3205 | Overlay `{name}` disagrees with the generated binding. | User `#Extern module c.{lib}` may override bindgen symbols, but the Jet signature must stay compatible when replacing. | Match the generated signature, or rename your overlay function. |
 | E3206 | Module path `{path}` uses the reserved segment `__bindgen__`. | Autogen lives in `c.{lib}.__bindgen__`; users declare overlays as `#Extern module c.{lib}` only. | Drop `__bindgen__` from your module path, or use `#Extern module c.{lib} { … }`. |
 | E3207 | `#Bindgen` is only allowed in generated cache files. | `.jet/bindings/c/{lib}.jet` is written by `jet inspect bind`; hand-written sources use `#Extern module`. | Edit your overlay file with `#Extern module`, or regenerate the cache with `jet inspect bind`. |
-| E3208 | Could not generate bindings from `{header}`. | Header parsing or translation failed in the bind backend. | Fix the header path, install dev headers, run `jet inspect bind` manually for details, or hand-write `#Extern module c.{lib}`. |
+| E3208 | Could not generate bindings from `{source}`. | The foreign source could not be read, translated, or compiled by its provisioned binder toolchain. Foreign tool output is laundered into Jet's what/why/fix diagnostic. | Fix the source path or the binder's declared ABI subset, then rerun `jet inspect bind <lang>`; C users may hand-write `#Extern module c.{lib}`. |
 | E3209 | The linker couldn't find C library `{lib}`. | Your program links against `{lib}`, but the linker reported `cannot find -l{lib}` — the library isn't on the link search path. | Declare it in `deps:` so Jet provisions it: `{lib}: c@system` (host pkg-config, else fetched from nixpkgs), or `{lib}: c@nixpkgs:<attr>` to pick the nixpkgs attribute, or install the system package. |
 | E3210 | Couldn't fetch C library `{lib}` from nixpkgs. | `{lib}: c@system` asked Jet to provision `nixpkgs#{attr}`, but `nix build` failed: `{reason}`. | Check the attr exists (`nix build nixpkgs#{attr}`), or point at a local build with `{lib}: c@"<path>"`, or install it and use `system`. |
 | E3211 | This string literal has an embedded NUL byte, so it can't cross into a C function. | C strings are NUL-terminated, not length-prefixed — an embedded `\0` would truncate the string on the C side, silently losing everything after it. | Remove the embedded NUL, or split the call so the C function only sees the part before it. |

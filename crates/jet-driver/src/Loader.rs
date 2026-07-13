@@ -441,8 +441,8 @@ fn load_entry_with_overlays_mode(
     };
     // S59 (E2-M14): fold every `#Extern`/`#Bindgen module c.<lib>` into merged
     // synthetic modules and resolve C `use` forms before sema sees the tree.
-    bundle.cffi = crate::CFFI::assemble(&mut bundle)?;
     crate::Foreign::assemble_active_namespaces(&mut bundle)?;
+    bundle.cffi = crate::CFFI::assemble(&mut bundle)?;
     Ok(bundle)
 }
 

@@ -1199,6 +1199,110 @@ fn bind_missing_header_is_e3208() {
 }
 
 #[test]
+fn fortran_bind_compiles_and_runs_iso_c_binding_scalar() {
+    let dir = isolated_cwd("fortran_bind_scalar");
+    let source = dir.join("scalar.f90");
+    fs::write(
+        &source,
+        r#"module scalar_math
+  use iso_c_binding
+contains
+  function add_i64(a, b) result(value) bind(C, name="add_i64")
+    integer(c_int64_t), value :: a
+    integer(c_int64_t), value :: b
+    integer(c_int64_t) :: value
+    value = a + b
+  end function add_i64
+end module scalar_math
+"#,
+    )
+    .unwrap();
+
+    let bind = Command::new(jet())
+        .args(["inspect", "bind", "fortran"])
+        .arg(&source)
+        .args(["--pkg", "scalar"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        bind.status.success(),
+        "Fortran bind failed:\n{}",
+        String::from_utf8_lossy(&bind.stderr)
+    );
+    assert!(dir.join(".jet/bindings/fortran/scalar.jet").is_file());
+    assert!(dir.join(".jet/bindings/fortran/libjet_fortran_scalar.a").is_file());
+
+    fs::write(
+        dir.join("main.jet"),
+        "use fortran.scalar as scalar\n\nfn run() { print(scalar.add_i64(20, 22)) }\n",
+    )
+    .unwrap();
+    let run = Command::new(jet())
+        .args(["run", "main.jet"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        run.status.success(),
+        "generated Fortran binding did not run:\n{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "42\n");
+}
+
+#[test]
+fn fortran_bind_launders_foreign_compiler_failure_as_e3208() {
+    let dir = isolated_cwd("fortran_bind_failure");
+    let source = dir.join("broken.f90");
+    fs::write(
+        &source,
+        r#"module broken_math
+  use iso_c_binding
+contains
+  function broken(a) result(value) bind(C, name="broken")
+    integer(c_int64_t), value :: a
+    integer(c_int64_t) :: value
+    value = a +
+  end function broken
+end module broken_math
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(jet())
+        .args(["inspect", "bind", "fortran"])
+        .arg(&source)
+        .args(["--pkg", "broken"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Error [E3208]:"),
+        "missing Jet diagnostic:\n{stderr}"
+    );
+    assert!(stderr.contains(" Why:"), "missing reason:\n{stderr}");
+    assert!(stderr.contains(" Fix:"), "missing fix:\n{stderr}");
+    assert!(
+        !stderr.contains("broken.f90:"),
+        "raw gfortran location leaked:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("    7 |"),
+        "raw gfortran source frame leaked:\n{stderr}"
+    );
+    check_snapshot(
+        "bind_fortran_invalid_e3208.txt",
+        &scrub(&stderr, &source),
+    );
+}
+
+#[test]
 fn unknown_cross_target_is_e3302() {
     let src = std::env::temp_dir().join("jet_unknown_cross_target.jet");
     fs::write(&src, "fn run() { print(\"target\") }\n").unwrap();

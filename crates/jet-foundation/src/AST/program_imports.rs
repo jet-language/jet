@@ -121,15 +121,17 @@ pub enum ForeignLanguage {
     Py,
     Js,
     Swift,
+    Fortran,
 }
 
 impl ForeignLanguage {
-    pub const ALL: [ForeignLanguage; 5] = [
+    pub const ALL: [ForeignLanguage; 6] = [
         ForeignLanguage::C,
         ForeignLanguage::Rust,
         ForeignLanguage::Py,
         ForeignLanguage::Js,
         ForeignLanguage::Swift,
+        ForeignLanguage::Fortran,
     ];
 
     pub fn from_root(root: &str) -> Option<Self> {
@@ -139,6 +141,7 @@ impl ForeignLanguage {
             Syntax::PY_MODULE_ROOT => Some(ForeignLanguage::Py),
             Syntax::JS_MODULE_ROOT => Some(ForeignLanguage::Js),
             Syntax::SWIFT_MODULE_ROOT => Some(ForeignLanguage::Swift),
+            Syntax::FORTRAN_MODULE_ROOT => Some(ForeignLanguage::Fortran),
             _ => None,
         }
     }
@@ -150,6 +153,7 @@ impl ForeignLanguage {
             ForeignLanguage::Py => Syntax::PY_MODULE_ROOT,
             ForeignLanguage::Js => Syntax::JS_MODULE_ROOT,
             ForeignLanguage::Swift => Syntax::SWIFT_MODULE_ROOT,
+            ForeignLanguage::Fortran => Syntax::FORTRAN_MODULE_ROOT,
         }
     }
 

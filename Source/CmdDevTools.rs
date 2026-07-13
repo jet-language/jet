@@ -1325,6 +1325,13 @@ pub(crate) fn run_explain(code: Option<&str>, mode: OutputMode) {
 /// **E3208** fires only when the header is unreadable or has no bindable
 /// prototypes — use `#Extern module c.<lib>` for those declarations.
 pub(crate) fn run_bind(args: &[&String]) {
+    if args
+        .first()
+        .is_some_and(|arg| arg.as_str() == jet::Syntax::FORTRAN_MODULE_ROOT)
+    {
+        run_fortran_bind(&args[1..]);
+        return;
+    }
     if args.is_empty() || args[0] == "--help" || args[0] == "-h" {
         eprintln!(
             "usage: {} bind <header.h> [--pkg <lib>] [-o <out.jet>]",
@@ -1435,6 +1442,106 @@ pub(crate) fn run_bind(args: &[&String]) {
             println!("  - {} — {}", name, why);
         }
     }
+}
+
+/// D-FFI-FORTRAN1=A: discover scalar ISO_C_BINDING functions, compile them
+/// with the provisioned gfortran toolchain, and emit a typed `fortran.<lib>`
+/// Jet module backed by the shared C ABI linker.
+fn run_fortran_bind(args: &[&String]) {
+    let usage = || {
+        eprintln!(
+            "usage: {} inspect bind fortran <source.f90> [--pkg <lib>] [-o <out.jet>]",
+            jet::Syntax::BINARY_NAME
+        );
+    };
+    if args.is_empty() || args[0] == "--help" || args[0] == "-h" {
+        usage();
+        eprintln!();
+        eprintln!("Generate typed Jet bindings for scalar ISO_C_BINDING functions.");
+        exit(if args.is_empty() { ExitCodes::USAGE } else { 0 });
+    }
+
+    let source_path = args[0].as_str();
+    let mut pkg = None;
+    let mut out = None;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--pkg" => {
+                pkg = args.get(i + 1).map(|value| value.to_string());
+                if pkg.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE);
+                }
+                i += 2;
+            }
+            "-o" | "--out" => {
+                out = args.get(i + 1).map(|value| value.to_string());
+                if out.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE);
+                }
+                i += 2;
+            }
+            flag => {
+                eprintln!("error: unknown `bind fortran` flag `{flag}`");
+                usage();
+                exit(ExitCodes::USAGE);
+            }
+        }
+    }
+    let lib = pkg.unwrap_or_else(|| {
+        let base = source_path.rsplit('/').next().unwrap_or(source_path);
+        base.rsplit_once('.')
+            .map(|(stem, _)| stem)
+            .unwrap_or(base)
+            .to_string()
+    });
+    let source = match std::fs::read_to_string(source_path) {
+        Ok(source) => source,
+        Err(error) => fortran_bind_error(
+            source_path,
+            &format!("the source file could not be read ({error})"),
+        ),
+    };
+    let out_path = out.unwrap_or_else(|| format!(
+        ".jet/bindings/{}/{}.{}",
+        jet::Syntax::FORTRAN_MODULE_ROOT,
+        lib,
+        jet::Syntax::FILE_EXT
+    ));
+    let cache_dir = std::path::Path::new(&out_path)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let result = match jet::FortranBind::bind(
+        std::path::Path::new(source_path),
+        &source,
+        &lib,
+        cache_dir,
+    ) {
+        Ok(result) => result,
+        Err(error) => fortran_bind_error(source_path, &error.to_string()),
+    };
+    if let Err(error) = std::fs::write(&out_path, &result.source) {
+        fortran_bind_error(
+            source_path,
+            &format!("the generated cache could not be written ({error})"),
+        );
+    }
+    println!(
+        "bound {} ISO_C_BINDING routine{} from `{}` → {}",
+        result.bound.len(),
+        if result.bound.len() == 1 { "" } else { "s" },
+        source_path,
+        out_path
+    );
+}
+
+fn fortran_bind_error(source: &str, why: &str) -> ! {
+    eprintln!("Error [E3208]: Could not generate bindings from `{source}`.");
+    eprintln!(" Why: {why}.");
+    eprintln!(" Fix: use explicit `bind(C, name=\"...\")` routines with ISO_C_BINDING scalar declarations and `value` inputs, then rerun `jet inspect bind fortran`.");
+    exit(ExitCodes::USER_ERROR);
 }
 
 /// S60 / D-PURE1 (E2-M16): evaluate a `pure fn run()` program.
