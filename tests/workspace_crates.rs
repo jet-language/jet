@@ -146,7 +146,7 @@ fn workspace_crates_keep_declared_dependency_direction() {
     // inward on the compiler driver and shared semantic index.
     assert_deps(
         "crates/jet-repl/Cargo.toml",
-        &["jet-driver", "jet-semindex"],
+        &["jet-driver", "jet-foundation", "jet-semindex"],
     );
     assert_deps(
         "crates/jet-jit/Cargo.toml",
