@@ -400,7 +400,6 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         ],
         // D-TTLVAL1=A: TTL-wrapped values and rotting secrets.
         "core.time.expiring" => &["new"],
-        "core.secrets" => &["rotting_new"],
         // E2-M10: networking modules.
         "core.net" => &[
             "ip_addr",
@@ -561,7 +560,7 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         // D-DECIMAL1: exact decimal constructor alias.
         "core.numeric" => &["decimal"],
         // D-PENDING1=B: Loadable<T,E> constructors.
-        "core.async.loadable" => &["idle", "loading", "loaded", "failed"],
+        "core.reactive.loadable" => &["idle", "loading", "loaded", "failed"],
         // D-FIDELITY-API1=A: runtime-global fidelity signal.
         "core.perf" => &[
             "Perf",
@@ -601,7 +600,7 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "core.web.storage" => &["local", "session"],
         "core.web.storage.local" | "core.web.storage.session" => &["get", "set", "remove", "clear"],
         // c-devserver (owner-directed 2026-07-01): `jet dev` server builder.
-        "core.devserver" => &["for_app", "app"],
+        "core.web.devserver" => &["for_app", "app"],
         // D-APPROX1=A: approximate sketch data structures.
         "core.sketch.hll" => &["new"],
         "core.sketch.tdigest" => &["new"],
@@ -627,7 +626,8 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         ],
         // U13 (D-JPK-SECRETCRYPTO1): decrypted-repo-secret read, age-style
         // crypto FFI bridge.
-        "core.vault" => &["get"],
+        // D-CORE-SECRETS1=A: one home for encrypted storage and lifecycle.
+        "core.vault" => &["get", "rotting_new"],
         _ => &[],
     };
     items.iter().map(|s| s.to_string()).collect()

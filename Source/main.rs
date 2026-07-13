@@ -1465,7 +1465,7 @@ fn main() {
             // c-devserver (owner-directed 2026-07-01): a `.jet` file can define
             // its own `jet dev` behavior as ordinary Jet code — a top-level
             // `fn dev()` becomes the program's real (native) entry point,
-            // normally configuring and starting a `core.devserver` value.
+            // normally configuring and starting a `core.web.devserver` value.
             // Checked FIRST, ahead of the #Target(Web)-inferred built-in web
             // server below: `fn dev()` is the more specific, user-authored
             // override, so a file that carries BOTH `#Target(Web)` (a build

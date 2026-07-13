@@ -211,7 +211,7 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     // above): `("core.web.storage.local" | "core.web.storage.session",
     // "get")`-style module alternation.
     ("core.web.storage.local", "core.web.storage.session"),
-    // core.tasks / core.watcher / core.devserver: async runtime primitives
+    // core.tasks / core.watcher / core.web.devserver: async runtime primitives
     // (channels, timers, file/port watchers, a live dev-server handle) — all
     // inherently tied to the running process's event loop; may never make
     // sense as pure comptime values rather than a genuine effect.
@@ -222,8 +222,8 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     ("core.watcher", "port"),
     ("core.watcher", "process_pid"),
     ("core.watcher", "set"),
-    ("core.devserver", "app"),
-    ("core.devserver", "for_app"),
+    ("core.web.devserver", "app"),
+    ("core.web.devserver", "for_app"),
     // Misc small surfaces, each its own small future card.
     ("core.args", "spec"),
     ("core.gc", "collect"),

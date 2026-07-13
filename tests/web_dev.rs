@@ -6,7 +6,7 @@
 //!
 //! Also covers c-devserver (owner-directed 2026-07-01): `jet dev <file>`
 //! when the file defines a top-level `fn dev()` — the file configures and
-//! starts its OWN `core.devserver` value instead of the CLI hardcoding
+//! starts its OWN `core.web.devserver` value instead of the CLI hardcoding
 //! `--target=web --port=<N>`. Same spawn/TCP/rebuild harness, driven through
 //! zero CLI flags — `jet dev app.jet`, no `--target=web`.
 
@@ -1346,7 +1346,7 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
 
 fn fn_fixture_src(port: u16, greeting: &str) -> String {
     format!(
-        r#"use core.devserver as devserver
+        r#"use core.web.devserver as devserver
 
 fn dev() {{
     server :: devserver.for_app("app.jet")
@@ -1371,7 +1371,7 @@ fn wait_for_server_up(port: u16, timeout: Duration) {
         }
         if start.elapsed() > timeout {
             panic!(
-                "jet dev's own core.devserver never came up on port {}",
+                "jet dev's own core.web.devserver never came up on port {}",
                 port
             );
         }
@@ -1484,7 +1484,7 @@ fn jet_dev_app_zero_arg_watches_launched_file() {
     fs::write(
         &src_path,
         format!(
-            r#"use core.devserver as devserver
+            r#"use core.web.devserver as devserver
 
 fn dev() {{
     server :: devserver.app()

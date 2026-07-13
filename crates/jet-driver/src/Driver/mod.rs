@@ -1816,7 +1816,7 @@ pub fn compile_fuzz(
 /// plain-call task deps) still resolve. Same path serves `jet run --task`.
 /// Native only — never freestanding/impure/web (those toggles don't apply to
 /// the `fn dev()` entry path; a `dev()` function's job is to configure and run
-/// an ordinary value like `core.devserver`, nothing more).
+/// an ordinary value like `core.web.devserver`, nothing more).
 pub fn compile_bundle_path_with_entry(
     file: &str,
     entry_fn: &str,

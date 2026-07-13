@@ -159,7 +159,8 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core.numeric",
     // D-PENDING1=B (ratified 2026-06-26): Loadable<T, E> — async UI state machine
     // (Idle / Loading / Loaded(T) / Failed(E)). Pure stdlib enum; no external crates.
-    "core.async.loadable",
+    // D-CORENS2=A: loading state belongs to the reactive domain.
+    "core.reactive.loadable",
     // D-FIDELITY-API1=A (ratified 2026-07-06): core.perf.Perf static API —
     // runtime-global quality/perf knob, with manual override/reset only.
     "core.perf",
@@ -180,8 +181,6 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core.time.datetime",
     // D-TTLVAL1=A: TTL-wrapped cache values.
     "core.time.expiring",
-    // D-TTLVAL1=A: rotting secrets with zeroize-on-expiry.
-    "core.secrets",
     // D-NETDEP1=A / D-HTTPLIB2=B (ratified 2026-06-26): full HTTP library.
     "core.http.client",
     "core.http.server",
@@ -189,12 +188,12 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core.tls",
     // c-devserver (owner-directed 2026-07-01): a `.jet` file's own `jet dev`
     // behavior — a configurable server value (`for_app`/`.html`/`.port`/`.serve`).
-    "core.devserver",
+    // D-CORENS2=A: dev-server configuration belongs to the web domain.
+    "core.web.devserver",
     // U13 (D-JPK-SECRETCRYPTO1, card c9jetpackgates): `core.vault.get` reads a
     // secret decrypted from the project's encrypted repo file (`.jet/secrets.age`),
-    // via an age-style crypto FFI bridge. Named `vault`, not `secrets` — that
-    // name is already `core.secrets` (D-TTLVAL1's in-memory Expiring/Rotting<T>
-    // TTL wrapper), an unrelated feature.
+    // via an age-style crypto FFI bridge. D-CORE-SECRETS1=A also places
+    // secret lifecycle (`Rotting<T>`) here; generic TTL remains core.time.expiring.
     "core.vault",
 ];
 

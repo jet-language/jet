@@ -659,7 +659,7 @@ fn run() { print(summarize(4)) }
 #[test]
 fn host_dev_entry_is_not_web_runtime_and_run_prints_literal_from_tir() {
     let src = r#"#Target(Web)
-use core.devserver as devserver
+use core.web.devserver as devserver
 #Target(Js)
 fn dev() {
     server :: devserver.app()
@@ -684,7 +684,7 @@ fn run() { print("hello, web") }
 #[test]
 fn default_wasm_top_level_dev_is_not_web_runtime() {
     let src = r#"#Target(Web)
-use core.devserver as devserver
+use core.web.devserver as devserver
 fn dev() {
     server :: devserver.app()
     server.port(8080)

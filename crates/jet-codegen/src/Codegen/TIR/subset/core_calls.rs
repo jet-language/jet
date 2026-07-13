@@ -98,7 +98,7 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
         return true;
     }
     // D-PENDING1=B: `L.idle/loading/loaded/failed` → `JetLoadable`. NOT in `core_fixed_sig`.
-    if module == "core.async.loadable" && matches!(method, "idle" | "loading" | "loaded" | "failed")
+    if module == "core.reactive.loadable" && matches!(method, "idle" | "loading" | "loaded" | "failed")
     {
         return true;
     }
@@ -130,7 +130,7 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     if module == "core.time.expiring" && method == "new" {
         return true;
     }
-    if module == "core.secrets" && method == "rotting_new" {
+    if module == "core.vault" && method == "rotting_new" {
         return true;
     }
     // D-NETDEP1=A / D-HTTPLIB1=A: HTTP constructors. NOT in `core_fixed_sig`.

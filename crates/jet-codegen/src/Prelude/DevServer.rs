@@ -1,4 +1,4 @@
-// c-devserver (owner-directed 2026-07-01): `core.devserver` — a `.jet` file's
+// c-devserver (owner-directed 2026-07-01): `core.web.devserver` — a `.jet` file's
 // own `jet dev` behavior as ordinary Jet code, via a real configurable value
 // (the same shape as `core.ui.null_backend()`, see Prelude/Ui.rs), instead of
 // `--port=<N>`/`--target=web` CLI flags. Std-only (I6): `TcpListener`, manual
@@ -40,7 +40,7 @@ mod jet_devserver_impl {
         port: Option<u16>,
     }
 
-    /// The value `core.devserver.for_app(...)` returns. Cheap to clone (an
+    /// The value `core.web.devserver.for_app(...)` returns. Cheap to clone (an
     /// `Rc` handle around shared state) so every builder method can take
     /// `&self` and still hand back a `DevServer` for chaining, exactly like
     /// `core.ui.null_backend()`'s `JetNullBackend` handle.

@@ -187,7 +187,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-A11YGATE1=B (c134 Phase 6): accessible-role opaque type.
         | "UiAriaRole"
         // c-devserver (owner-directed 2026-07-01): the configurable `jet dev`
-        // server value returned by `core.devserver.for_app(...)`.
+        // server value returned by `core.web.devserver.for_app(...)`.
         | "DevServer"
         // D-APPROX1=A: approximate sketch data structures.
         | "HyperLogLog" | "TDigest" | "CountMinSketch" | "ReservoirSampler"

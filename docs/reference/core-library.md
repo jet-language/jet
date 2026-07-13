@@ -2397,12 +2397,12 @@ have/have-not ledger of missing domains.
 `core.regex`, `core.archive`, `core.raylib`, `core.game`,
 `core.compress.gzip`, `core.compress.zstd`, `core.db`, `core.plugin`,
 `core.reactive`, `core.event`, `core.science.measurement`, `core.numeric`,
-`core.async.loadable`, `core.perf`, `core.ui`, `core.web`,
+`core.reactive.loadable`, `core.perf`, `core.ui`, `core.web`,
 `core.web.storage`, `core.web.storage.local`, `core.web.storage.session`,
 `core.sketch.hll`, `core.sketch.tdigest`, `core.sketch.reservoir`,
 `core.sketch.cms`, `core.time.date`, `core.time.datetime`,
-`core.time.expiring`, `core.secrets`, `core.http.client`,
-`core.http.server`, `core.devserver`, `core.vault`.
+`core.time.expiring`, `core.http.client`,
+`core.http.server`, `core.web.devserver`, `core.vault`.
 
 ---
 

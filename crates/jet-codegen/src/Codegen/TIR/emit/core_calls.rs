@@ -162,12 +162,12 @@ pub(crate) fn emit_tir_core_call(
         }
         // D-PENDING1=B: Loadable<T,E> constructors.
         // idle/loading/loaded/failed need concrete type params for E: Clone bound satisfaction.
-        ("core.async.loadable", "idle") => format!("JetLoadable::<(), ()>::Idle"),
-        ("core.async.loadable", "loading") => format!("JetLoadable::<(), ()>::Loading"),
-        ("core.async.loadable", "loaded") => {
+        ("core.reactive.loadable", "idle") => format!("JetLoadable::<(), ()>::Idle"),
+        ("core.reactive.loadable", "loading") => format!("JetLoadable::<(), ()>::Loading"),
+        ("core.reactive.loadable", "loaded") => {
             format!("JetLoadable::<_, ()>::Loaded({})", arg(0))
         }
-        ("core.async.loadable", "failed") => {
+        ("core.reactive.loadable", "failed") => {
             format!("JetLoadable::<(), _>::Failed({})", arg(0))
         }
         // D-FILES-WRITE1 (merge, was `core.fs`): whole-file convenience helpers now
@@ -1204,7 +1204,7 @@ pub(crate) fn emit_tir_core_call(
             helper(""),
             arg(2)
         ),
-        ("core.secrets", "rotting_new") => format!(
+        ("core.vault", "rotting_new") => format!(
             "{}jet_rotting_new({}, {}jet_duration_millis(&({})), {}jet_clock_now(&({})))",
             helper(""),
             arg(0),
@@ -1982,10 +1982,10 @@ pub(crate) fn emit_tir_core_call(
         // c-devserver (owner-directed 2026-07-01): `devserver.for_app(file)`
         // constructor — the builder methods dispatch through
         // `THandleOp::DevServerMethod` above, not here.
-        ("core.devserver", "for_app") => {
+        ("core.web.devserver", "for_app") => {
             format!("{}jet_devserver_for_app(&({}))", cx.root_prefix, arg(0))
         }
-        ("core.devserver", "app") => {
+        ("core.web.devserver", "app") => {
             format!("{}jet_devserver_app()", cx.root_prefix)
         }
         // D-APPROX1=A: sketch constructors.

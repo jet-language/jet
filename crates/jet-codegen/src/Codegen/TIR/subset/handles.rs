@@ -557,7 +557,7 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
             }
         }
         // D-PENDING1=B: Loadable constructors — type carries T from the loaded(val) arg.
-        ("core.async.loadable", "idle") | ("core.async.loadable", "loading") => {
+        ("core.reactive.loadable", "idle") | ("core.reactive.loadable", "loading") => {
             return Type::Apply {
                 name: "Loadable".to_string(),
                 args: vec![
@@ -566,14 +566,14 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
                 ],
             }
         }
-        ("core.async.loadable", "loaded") => {
+        ("core.reactive.loadable", "loaded") => {
             // Type is Loadable<T, Unknown> — T comes from the arg; Unknown for E.
             return Type::Apply {
                 name: "Loadable".to_string(),
                 args: vec![Type::Int, Type::Named("Unknown".to_string())], // sema refines T
             };
         }
-        ("core.async.loadable", "failed") => {
+        ("core.reactive.loadable", "failed") => {
             return Type::Apply {
                 name: "Loadable".to_string(),
                 args: vec![Type::Named("Unknown".to_string()), Type::String], // sema refines E
@@ -607,7 +607,7 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
                 args: vec![Type::Named("Unknown".to_string())],
             }
         }
-        ("core.secrets", "rotting_new") => {
+        ("core.vault", "rotting_new") => {
             return Type::Apply {
                 name: "Rotting".to_string(),
                 args: vec![Type::Named("Unknown".to_string())],

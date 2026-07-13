@@ -1881,7 +1881,7 @@ impl<'a> Checker<'a> {
                     });
                 }
                 // D-PENDING1=B: Loadable<T,E> constructors — idle/loading/loaded/failed.
-                ("core.async.loadable", "idle") => {
+                ("core.reactive.loadable", "idle") => {
                     for a in args.iter_mut() {
                         self.infer(&mut a.expr);
                     }
@@ -1893,7 +1893,7 @@ impl<'a> Checker<'a> {
                         ],
                     });
                 }
-                ("core.async.loadable", "loading") => {
+                ("core.reactive.loadable", "loading") => {
                     for a in args.iter_mut() {
                         self.infer(&mut a.expr);
                     }
@@ -1905,7 +1905,7 @@ impl<'a> Checker<'a> {
                         ],
                     });
                 }
-                ("core.async.loadable", "loaded") => {
+                ("core.reactive.loadable", "loaded") => {
                     if args.len() != 1 {
                         self.diags
                             .push(wrong_core_arity("loaded", 1, args.len(), span));
@@ -1922,7 +1922,7 @@ impl<'a> Checker<'a> {
                         args: vec![val_ty, Type::Named("Unknown".to_string())],
                     });
                 }
-                ("core.async.loadable", "failed") => {
+                ("core.reactive.loadable", "failed") => {
                     if args.len() != 1 {
                         self.diags
                             .push(wrong_core_arity("failed", 1, args.len(), span));
@@ -1970,7 +1970,7 @@ impl<'a> Checker<'a> {
                     });
                 }
                 // D-TTLVAL1=A: Rotting<T> — secret with TTL + zeroize on expiry.
-                ("core.secrets", "rotting_new") => {
+                ("core.vault", "rotting_new") => {
                     if args.len() != 3 {
                         self.diags
                             .push(wrong_core_arity("rotting_new", 3, args.len(), span));

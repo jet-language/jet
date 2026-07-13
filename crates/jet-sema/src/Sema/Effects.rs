@@ -359,10 +359,10 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
         "core.ui" | "core.web" | "core.web.storage.local" | "core.web.storage.session" => {
             Effect::Browser
         }
-        // U13 (D-JPK-SECRETCRYPTO1): `core.vault.get` reads a decrypted repo
-        // secret — never `core.secrets` (D-TTLVAL1's in-memory
-        // Expiring/Rotting<T> wrapper already owns that module name).
-        "core.vault" => Effect::Secret,
+        // U13 (D-JPK-SECRETCRYPTO1): only `core.vault.get` reads the encrypted
+        // store. D-CORE-SECRETS1=A also places pure in-memory lifecycle helpers
+        // in this module; those do not acquire the ambient Secret effect.
+        "core.vault" if method == "get" => Effect::Secret,
         _ => return None,
     })
 }

@@ -507,7 +507,7 @@ pub(crate) fn run_compile_cmd(
 /// defines a top-level `fn dev()` — compile NATIVELY with `dev()` swapped in
 /// as the program's real entry point (`jet::compile_with_entry`), then run the
 /// resulting binary exactly like `jet run` does. `dev()`'s own body decides
-/// what happens next — normally configuring and starting a `core.devserver`
+/// what happens next — normally configuring and starting a `core.web.devserver`
 /// value, but it's just an ordinary function; this call site owns none of
 /// that behavior (I3: codegen/the driver stay dumb about what `dev()` does).
 pub(crate) fn run_dev_entry(file: &str, mode: OutputMode) {

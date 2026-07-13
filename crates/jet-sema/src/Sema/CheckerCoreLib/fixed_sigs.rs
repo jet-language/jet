@@ -1799,7 +1799,7 @@ pub fn core_fixed_sig(
         // builder methods (`.html`/`.port`/`.serve`) are instance methods on
         // `DevServer`, dispatched through `devserver_method_return` (mirrors
         // `ui_backend_method_return`), not module-level names here.
-        ("core.devserver", "for_app") => Some((
+        ("core.web.devserver", "for_app") => Some((
             vec![(read, string)],
             Some(Type::Named("DevServer".to_string())),
         )),
@@ -1807,7 +1807,9 @@ pub fn core_fixed_sig(
         // (passed to the running program via JET_DEV_FILE). The common case:
         // the file defining `fn dev()` is the file to watch, so no path is
         // spelled out at all.
-        ("core.devserver", "app") => Some((vec![], Some(Type::Named("DevServer".to_string())))),
+        ("core.web.devserver", "app") => {
+            Some((vec![], Some(Type::Named("DevServer".to_string()))))
+        }
         _ => None,
     }
 }

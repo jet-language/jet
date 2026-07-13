@@ -325,7 +325,7 @@ const UI_PRELUDE: &str = include_str!("../Prelude/Ui.rs");
 /// a program constructs `core.ui.gtk_backend()` (`uses_gtk_backend`), so no
 /// other program carries the gtk `extern "C"` surface or needs `-lgtk-4`.
 const UI_GTK_PRELUDE: &str = include_str!("../Prelude/UiGtk.rs");
-/// c-devserver (owner-directed 2026-07-01): `core.devserver` — the
+/// c-devserver (owner-directed 2026-07-01): `core.web.devserver` — the
 /// configurable `jet dev` server value (`for_app`/`.html`/`.port`/`.serve`).
 const DEVSERVER_PRELUDE: &str = include_str!("../Prelude/DevServer.rs");
 /// D-ALLOC1/D-ALLOC-C/D-ALLOC-D (ratified 2026-06-19): allocator runtime helpers.
