@@ -421,20 +421,12 @@ pub const CORE_MEM_ALLOC_MODULE: &str = "core.mem.alloc";
 /// D-ARGS1 (ratified 2026-06-22): declarative CLI argument parsing module.
 pub const CORE_ARGS_MODULE: &str = "core.args";
 
-// D-EMAIL1=A: canonical email message/MIME substrate and its ratified public
-// type/function spellings. SMTP transport extends this same family.
+// D-EMAIL1=A: implemented email message/MIME vertical. Transport types remain
+// unavailable until their real runtime vertical lands.
 pub const CORE_EMAIL_MODULE: &str = "core.email";
 pub const TYPE_EMAIL_ADDRESS: &str = "Address";
 pub const TYPE_EMAIL_MESSAGE: &str = "Message";
 pub const TYPE_EMAIL_ATTACHMENT: &str = "Attachment";
-pub const TYPE_EMAIL_ENVELOPE: &str = "Envelope";
-pub const TYPE_EMAIL_MAILER: &str = "Mailer";
-pub const TYPE_EMAIL_SMTP_CONFIG: &str = "SmtpConfig";
-pub const TYPE_EMAIL_SMTP_SECURITY: &str = "SmtpSecurity";
-pub const TYPE_EMAIL_SMTP_AUTH: &str = "SmtpAuth";
-pub const TYPE_EMAIL_DKIM_CONFIG: &str = "DkimConfig";
-pub const TYPE_EMAIL_SEND_REPORT: &str = "SendReport";
-pub const TYPE_EMAIL_RECIPIENT_REPORT: &str = "RecipientReport";
 pub const TYPE_EMAIL_ERROR: &str = "EmailError";
 pub const CORE_EMAIL_ADDRESS_FN: &str = "address";
 pub const CORE_EMAIL_ATTACHMENT_FN: &str = "attachment";

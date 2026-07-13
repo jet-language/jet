@@ -56,6 +56,69 @@ fn core_email_mime_bytes_use_crlf_and_keep_bcc_envelope_only() {
     assert!(!wire.contains("Bcc:"));
     assert!(!wire.contains("secret@example.org"));
     assert!(!wire.replace("\r\n", "").contains('\n'));
+    assert!(wire.split_inclusive("\r\n").all(|line| line.len() <= jet_email::MAX_HEADER_BYTES || !line.contains(':')));
+}
+
+#[test]
+fn core_email_headers_and_wire_bounds_are_prospective() {
+    use email_native::jet_email;
+    let quoted = jet_email::address(&"\"Doe, \\\"Ada\\\"\" <ada@example.net>".to_string()).unwrap();
+    assert!(jet_email::address(&"\"a@b\"@example.net".to_string()).is_ok());
+    let unicode_name = format!("{} <mara@example.com>", "界".repeat(120));
+    let from = jet_email::address(&unicode_name).unwrap();
+    let message = jet_email::message(
+        &from, &vec![quoted], &vec![], &"界".repeat(120),
+        &"plain".to_string(), &String::new(), &vec![],
+    ).unwrap();
+    let wire = String::from_utf8(jet_email::serialize(&message).unwrap()).unwrap();
+    assert!(wire.contains("\"Doe, \\\"Ada\\\"\" <ada@example.net>"));
+    for word in wire.split_whitespace().filter(|word| word.starts_with("=?UTF-8?B?")) {
+        assert!(word.len() <= 75, "encoded word too long: {}", word.len());
+    }
+    for line in wire.split_inclusive("\r\n") {
+        if line.contains(':') || line.starts_with(' ') {
+            assert!(line.len() <= jet_email::MAX_HEADER_BYTES, "header line too long: {}", line.len());
+        }
+    }
+
+    let sender = jet_email::address(&"sender@example.com".to_string()).unwrap();
+    let recipient = jet_email::address(&"recipient@example.com".to_string()).unwrap();
+    let at_body_limit = "x".repeat(jet_email::MAX_BODY_BYTES);
+    assert!(jet_email::message(
+        &sender, &vec![recipient.clone()], &vec![], &"subject".to_string(),
+        &at_body_limit, &String::new(), &vec![],
+    ).is_ok());
+    let over_body_limit = "x".repeat(jet_email::MAX_BODY_BYTES + 1);
+    assert!(jet_email::message(
+        &sender, &vec![recipient.clone()], &vec![], &"subject".to_string(),
+        &over_body_limit, &String::new(), &vec![],
+    ).is_err());
+
+    let max_subject = "s".repeat(jet_email::MAX_HEADER_BYTES - "Subject: ".len() - 2);
+    assert!(jet_email::message(
+        &sender, &vec![recipient.clone()], &vec![], &max_subject,
+        &"body".to_string(), &String::new(), &vec![],
+    ).is_ok());
+    assert!(jet_email::message(
+        &sender, &vec![recipient], &vec![], &format!("{max_subject}s"),
+        &"body".to_string(), &String::new(), &vec![],
+    ).is_err());
+
+    assert!(jet_email::attachment(
+        &format!("{}.txt", "a".repeat(900)), &"application/octet-stream".to_string(), &vec![],
+    ).is_ok());
+    assert!(jet_email::attachment(
+        &format!("{}.txt", "a".repeat(960)), &"application/octet-stream".to_string(), &vec![],
+    ).is_err());
+
+    let tiny = jet_email::attachment(
+        &"tiny.bin".to_string(), &"application/octet-stream".to_string(), &vec![0],
+    ).unwrap();
+    assert!(jet_email::message(
+        &sender, &vec![jet_email::address(&"to@example.com".to_string()).unwrap()], &vec![],
+        &"subject".to_string(), &"body".to_string(), &String::new(),
+        &vec![tiny; jet_email::MAX_ATTACHMENTS + 1],
+    ).is_err());
 }
 
 #[test]

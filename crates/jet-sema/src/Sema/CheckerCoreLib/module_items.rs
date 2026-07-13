@@ -299,13 +299,10 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "percent_decode",
         ],
         "core.mime" => &["parse", "from_extension", "extension"],
-        // D-EMAIL1=A: bounded typed construction. Transport lands as a later
-        // vertical on these same Message/Mailer/Error contracts.
+        // D-EMAIL1=A: implemented bounded message/MIME vertical only.
         "core.email" => &[
             Syntax::TYPE_EMAIL_ADDRESS, Syntax::TYPE_EMAIL_MESSAGE, Syntax::TYPE_EMAIL_ATTACHMENT,
-            Syntax::TYPE_EMAIL_ENVELOPE, Syntax::TYPE_EMAIL_MAILER, Syntax::TYPE_EMAIL_SMTP_CONFIG,
-            Syntax::TYPE_EMAIL_SMTP_SECURITY, Syntax::TYPE_EMAIL_SMTP_AUTH, Syntax::TYPE_EMAIL_DKIM_CONFIG,
-            Syntax::TYPE_EMAIL_SEND_REPORT, Syntax::TYPE_EMAIL_RECIPIENT_REPORT, Syntax::TYPE_EMAIL_ERROR,
+            Syntax::TYPE_EMAIL_ERROR,
             Syntax::CORE_EMAIL_ADDRESS_FN, Syntax::CORE_EMAIL_ATTACHMENT_FN,
             Syntax::CORE_EMAIL_MESSAGE_FN, Syntax::CORE_EMAIL_SERIALIZE_FN,
         ],
