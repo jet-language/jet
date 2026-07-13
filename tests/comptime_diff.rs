@@ -122,7 +122,7 @@ const MODULE_CASES: &[&str] = &[
     // `jet_ring_csv_*`/`toml`/`yaml` mods/`jet_std_xml_*`/`jet_cbor_*`/
     // `jet_std_jsonl_*`/`jet_std_json_render_canonical`/`jet_std_json_events`
     // (see `EncodingLite.rs`). Every case round-trips `parse`+`to_string` (or
-    // `encode`+`decode`) so both the parser and the renderer sides differ
+    // `to_bytes`+`parse`) so both the parser and the renderer sides differ
     // against real generated Rust, not just one direction.
     "use core.encoding.csv as csv\ncomptime C = csv.to_string(csv.parse(\"a,\\\"b,c\\\",\\\"e\\\"\\\"f\\\"\\n\") ?? panic(\"bad\"))\n\nfn run() {\n    r :: csv.to_string(csv.parse(\"a,\\\"b,c\\\",\\\"e\\\"\\\"f\\\"\\n\") ?? panic(\"bad\"))\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
     "use core.encoding.csv as csv\ncomptime C = csv.parse(\"a,b,c\\n1,2\\n\") ?? panic(\"bad\")\n\nfn run() {\n    r :: csv.parse(\"a,b,c\\n1,2\\n\") ?? panic(\"bad\")\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
@@ -130,8 +130,8 @@ const MODULE_CASES: &[&str] = &[
     "use core.encoding.toml as toml\ncomptime C = toml.to_string(toml.parse(\"x = 1.5\\ny = [1, 2, 3]\\nz = {{ a = 1, b = 2 }}\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n\nfn run() {\n    r :: toml.to_string(toml.parse(\"x = 1.5\\ny = [1, 2, 3]\\nz = {{ a = 1, b = 2 }}\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
     "use core.encoding.yaml as yaml\ncomptime C = yaml.to_string(yaml.parse(\"a: &x 1\\nb: *x\\nc:\\n  - 1\\n  - 2\\nd: |\\n  hello\\n  world\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n\nfn run() {\n    r :: yaml.to_string(yaml.parse(\"a: &x 1\\nb: *x\\nc:\\n  - 1\\n  - 2\\nd: |\\n  hello\\n  world\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
     "use core.encoding.xml as xml\ncomptime C = xml.to_string(xml.parse(\"<root xmlns:ns=\\\"http://example\\\"><ns:child id=\\\"1\\\">text</ns:child></root>\") ?? panic(\"bad\"))\n\nfn run() {\n    r :: xml.to_string(xml.parse(\"<root xmlns:ns=\\\"http://example\\\"><ns:child id=\\\"1\\\">text</ns:child></root>\") ?? panic(\"bad\"))\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
-    "use core.encoding.json as json\nuse core.encoding.cbor as cbor\nuse core.encoding.hex as hex\ncomptime C = hex.encode(cbor.encode(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3],\\\"c\\\":-7}}\") ?? panic(\"bad\")))\n\nfn run() {\n    r :: hex.encode(cbor.encode(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3],\\\"c\\\":-7}}\") ?? panic(\"bad\")))\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
-    "use core.encoding.json as json\nuse core.encoding.cbor as cbor\ncomptime C = json.to_string(cbor.decode(cbor.encode(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3]}}\") ?? panic(\"bad\"))) ?? panic(\"bad\"))\n\nfn run() {\n    r :: json.to_string(cbor.decode(cbor.encode(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3]}}\") ?? panic(\"bad\"))) ?? panic(\"bad\"))\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.json as json\nuse core.encoding.cbor as cbor\nuse core.encoding.hex as hex\ncomptime C = hex.encode(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3],\\\"c\\\":-7}}\") ?? panic(\"bad\")) ?? panic(\"bad\"))\n\nfn run() {\n    r :: hex.encode(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3],\\\"c\\\":-7}}\") ?? panic(\"bad\")) ?? panic(\"bad\"))\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.json as json\nuse core.encoding.cbor as cbor\ncomptime C = json.to_string(cbor.parse(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3]}}\") ?? panic(\"bad\")) ?? panic(\"bad\")) ?? panic(\"bad\"))\n\nfn run() {\n    r :: json.to_string(cbor.parse(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3]}}\") ?? panic(\"bad\")) ?? panic(\"bad\")) ?? panic(\"bad\"))\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
     "use core.encoding.jsonl as jsonl\ncomptime C = jsonl.to_string(jsonl.parse(\"{{\\\"a\\\":1}}\\n{{\\\"b\\\":2}}\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n\nfn run() {\n    r :: jsonl.to_string(jsonl.parse(\"{{\\\"a\\\":1}}\\n{{\\\"b\\\":2}}\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
     "use core.encoding.json as json\ncomptime C = json.canonical(json.parse(\"{{\\\"b\\\":1,\\\"a\\\":2}}\") ?? panic(\"bad\"))\n\nfn run() {\n    r :: json.canonical(json.parse(\"{{\\\"b\\\":1,\\\"a\\\":2}}\") ?? panic(\"bad\"))\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
     "use core.encoding.json as json\ncomptime C = json.events(json.parse(\"{{\\\"a\\\":[1,2]}}\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n\nfn run() {\n    r :: json.events(json.parse(\"{{\\\"a\\\":[1,2]}}\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{C}\")\n    print(\"{r}\")\n}\n",
@@ -263,6 +263,16 @@ fn cbor_generic_whole_decode_matches_comptime_and_aot() {
     // not exercise the retired untyped `decode(DataTree)` compatibility arm.
     let src = "use core.encoding.cbor as cbor\ncomptime C = cbor.decode<[Float]>([159, 249, 62, 0, 249, 64, 0, 255]) ?? panic(\"bad\")\n\nfn run() {\n    r: [Float] := cbor.decode<[Float]>([159, 249, 62, 0, 249, 64, 0, 255]) ?? panic(\"bad\")\n    print(\"{C}\")\n    print(\"{r}\")\n}\n";
     check_comptime_src(2000, "generic CBOR indefinite Float16 decode", src);
+}
+
+#[test]
+fn cbor_current_whole_encode_parse_matches_comptime_and_aot() {
+    if !have_rustc() {
+        eprintln!("note: rustc not found; skipping current CBOR whole-value differential");
+        return;
+    }
+    let src = "use core.encoding.json as json\nuse core.encoding.cbor as cbor\nuse core.encoding.hex as hex\ncomptime C = hex.encode(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3],\\\"c\\\":-7}}\") ?? panic(\"bad json\")) ?? panic(\"bad cbor\"))\ncomptime P = json.to_string(cbor.parse(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3]}}\") ?? panic(\"bad json\")) ?? panic(\"bad cbor\")) ?? panic(\"bad parse\"))\n\nfn run() {\n    r :: hex.encode(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3],\\\"c\\\":-7}}\") ?? panic(\"bad json\")) ?? panic(\"bad cbor\"))\n    p :: json.to_string(cbor.parse(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3]}}\") ?? panic(\"bad json\")) ?? panic(\"bad cbor\")) ?? panic(\"bad parse\"))\n    print(\"{C}|{P}\")\n    print(\"{r}|{p}\")\n}\n";
+    check_comptime_src(2001, "current CBOR to_bytes and parse", src);
 }
 
 #[test]

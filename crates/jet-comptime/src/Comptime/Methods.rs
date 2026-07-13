@@ -3172,6 +3172,30 @@ fn apply_core_call(
             Ok(CtValue::Str(super::EncodingLite::xml_render(one(0)?)))
         }
         // --- core.encoding.cbor (ported verbatim, `EncodingLite.rs`) ---
+        // D-ENC-CBOR-SURFACE1: current whole-value names return the same
+        // Result shape as AOT. Edition compatibility names remain below.
+        ("core.encoding.cbor", "to_bytes") => Ok(CtValue::ResOk(Box::new(
+            CtValue::Bytes(super::EncodingLite::cbor_encode(one(0)?)),
+        ))),
+        ("core.encoding.cbor", "parse") => {
+            let bytes = as_bytes(one(0)?, span)?;
+            match super::EncodingLite::cbor_decode(&bytes) {
+                Ok(v) => Ok(CtValue::ResOk(Box::new(v))),
+                Err(reason) => Ok(CtValue::ResErr(Box::new(CtValue::Struct {
+                    type_name: "CBORError".to_string(),
+                    fields: vec![
+                        ("kind".to_string(), CtValue::Enum {
+                            type_name: "CBORErrorKind".to_string(),
+                            variant: "Syntax".to_string(),
+                            args: Vec::new(),
+                        }),
+                        ("byte_offset".to_string(), CtValue::Int(0)),
+                        ("path".to_string(), CtValue::Str("$".to_string())),
+                        ("reason".to_string(), CtValue::Str(reason)),
+                    ],
+                }))),
+            }
+        }
         ("core.encoding.cbor", "encode") => {
             Ok(CtValue::Bytes(super::EncodingLite::cbor_encode(one(0)?)))
         }

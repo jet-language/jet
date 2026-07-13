@@ -562,7 +562,15 @@ fn jet_enc_cbor_decode<T: user_Decode>(bytes: &Vec<u8>, options: jet_std::CBOROp
     let mut i=0usize; let mut items=0i64; let mut budget=JetCborAllocBudget::new(options.max_bytes);
     let tree=jet_cbor_decode_val(bytes,&mut i,&options,&mut budget,0,&mut items,"$",true)?;
     if i!=bytes.len(){return Err(jet_cbor_error(jet_std::CBORErrorKind::TrailingData,i,"$","trailing CBOR data after root value"));}
-    T::jet_decode_traced(&tree).map(|(value,_)|value).map_err(|error|jet_cbor_error(jet_std::CBORErrorKind::TypeMismatch,0,&error.path,error.reason))
+    T::jet_decode_traced(&tree).map(|(value,_)|value).map_err(|mut error| {
+        if error.path.is_empty() { error.path.push('$'); } else { error.path.insert(0, '$'); }
+        jet_std::CBORError {
+            kind: jet_std::CBORErrorKind::TypeMismatch,
+            byte_offset: 0,
+            path: error.path,
+            reason: error.reason,
+        }
+    })
 }
 
 // UUID helpers — pure std, zero deps. CSPRNG via /dev/urandom (POSIX); the

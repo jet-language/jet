@@ -1770,7 +1770,25 @@ use core.encoding.cbor as cbor
 fn run() {
     options := cbor.CBOROptions.{ max_depth: 256, max_items: 1000000, max_bytes: 100, require_canonical: false }
     value := cbor.parse([130, 97, 120, 97, 121], copy options) ?? panic("definite parse")
-    indefinite := cbor.parse([159, 97, 120, 97, 121, 255], options) ?? panic("indefinite parse")
+    indefinite := cbor.parse([159, 97, 120, 97, 121, 255], copy options) ?? panic("indefinite parse")
+    if cbor.parse([130, 97, 120], options) == {
+        ok(_) -> panic("truncated array accepted")
+        err(e) -> print(e.path == "$[1]" && e.reason == "CBOR value is missing")
+    }
+
+    roomy := cbor.CBOROptions.{ max_depth: 256, max_items: 1000000, max_bytes: 256, require_canonical: false }
+    if cbor.parse([129, 130, 97, 120], copy roomy) == {
+        ok(_) -> panic("nested truncation accepted")
+        err(e) -> print(e.path == "$[0][1]" && e.reason == "CBOR value is missing")
+    }
+    if cbor.parse([162, 97, 97, 1, 97, 97, 2], copy roomy) == {
+        ok(_) -> panic("duplicate key accepted")
+        err(e) -> print(e.path == "$" && e.reason == "duplicate CBOR text map key")
+    }
+    if cbor.decode<[Int]>([129, 97, 120], roomy) == {
+        ok(_) -> panic("typed mismatch accepted")
+        err(e) -> print(e.path == "$[0]" && e.reason.contains("expected Int"))
+    }
     print(true)
 }
 "#;
@@ -1780,8 +1798,10 @@ fn run() {
     let out = jet::compile_with_path(source, &shown).unwrap_or_else(|diags| {
         panic!("front end rejected fixture:\n{}", jet::render_diagnostics(&shown, source, &diags))
     });
-    let renamed = out.rust.replacen("fn jet_enc_cbor_parse(", "fn jet_enc_cbor_parse_inner(", 1);
-    assert_ne!(renamed, out.rust, "generated CBOR parser seam changed");
+    let parse_renamed = out.rust.replacen("fn jet_enc_cbor_parse(", "fn jet_enc_cbor_parse_inner(", 1);
+    assert_ne!(parse_renamed, out.rust, "generated CBOR parser seam changed");
+    let renamed = parse_renamed.replacen("fn jet_enc_cbor_decode<T: user_Decode>(", "fn jet_enc_cbor_decode_inner<T: user_Decode>(", 1);
+    assert_ne!(renamed, parse_renamed, "generated CBOR typed decoder seam changed");
     let allocator = r#"
 mod jet_cbor_alloc_probe {
     use std::alloc::{GlobalAlloc, Layout, System};
@@ -1831,6 +1851,14 @@ fn jet_enc_cbor_parse(bytes: &Vec<u8>, options: jet_std::CBOROptions) -> Result<
     assert!(peak <= ceiling, "CBOR requested allocation peak {peak} exceeded {ceiling}");
     result
 }
+fn jet_enc_cbor_decode<T: user_Decode>(bytes: &Vec<u8>, options: jet_std::CBOROptions) -> Result<T, jet_std::CBORError> {
+    let ceiling = options.max_bytes as usize;
+    jet_cbor_alloc_probe::begin();
+    let result = jet_enc_cbor_decode_inner(bytes, options);
+    let peak = jet_cbor_alloc_probe::finish();
+    assert!(peak <= ceiling, "CBOR typed requested allocation peak {peak} exceeded {ceiling}");
+    result
+}
 "#;
     let rs = dir.join("counted.rs");
     let bin = dir.join("counted");
@@ -1843,7 +1871,7 @@ fn jet_enc_cbor_parse(bytes: &Vec<u8>, options: jet_std::CBOROptions) -> Result<
     assert!(rustc.status.success(), "rustc rejected counted CBOR program:\n{}", String::from_utf8_lossy(&rustc.stderr));
     let run = Command::new(&bin).current_dir(&dir).output().unwrap();
     assert!(run.status.success(), "counted CBOR program failed:\n{}", String::from_utf8_lossy(&run.stderr));
-    assert_eq!(String::from_utf8_lossy(&run.stdout), "true\n");
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "true\ntrue\ntrue\ntrue\ntrue\n");
 }
 
 fn compile_temp(name: &str, src: &str) -> jet::CompileOutput {
