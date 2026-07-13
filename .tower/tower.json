@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 530,
-    "rev": 5167,
+    "nextNum": 531,
+    "rev": 5176,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -769,29 +769,29 @@
         {
           "n": 6,
           "text": "Instance fingerprints flow through sema, TIR, codegen, semindex/LSP, and build cache; body/dependency/arg/package/toolchain/profile/target edits invalidate correctly.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-11T23:44:25.519Z"
+          "status": "verified",
+          "metBy": "terra-91-builder",
+          "verifiedBy": "sol-91-reviewer",
+          "evidence": "Independent Sol re-review accepted canonical path-lock/content identity, host-path exclusion, semantic LSP joins, and real production toolchain cache identity. Focused hostile identity and cache tests green.",
+          "at": "2026-07-13T11:32:22.697Z"
         },
         {
           "n": 7,
           "text": "Obsolete E0854 MVP restriction is removed; accepted specializations compile/run and hostile kind/bound/value/scope/body cases reject with Jet diagnostics before codegen.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-11T23:44:25.640Z"
+          "status": "verified",
+          "metBy": "terra-91-builder",
+          "verifiedBy": "sol-91-reviewer",
+          "evidence": "Independent Sol confirmed E0854 absent, accepted specializations run, hostile kind/bound/value/scope/body cases reject before codegen, and corrected focused sema suite passes 11/11.",
+          "at": "2026-07-13T11:37:52.577Z"
         },
         {
           "n": 8,
           "text": "AOT golden and default-dev/JIT parity prove one shared TIR specialization and identical instance count/identity; independent reviewer verifies formatter/canonical-AST/docs/examples and all hostile cases.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-11T23:44:25.758Z"
+          "status": "verified",
+          "metBy": "terra-91-builder",
+          "verifiedBy": "sol-91-reviewer",
+          "evidence": "Independent Sol ran full generic-module example under RejectJitFallback resident JIT and confirmed interpreter/AOT parity. No fallback masking; shared checked bundle/TIR implementation accepted.",
+          "at": "2026-07-13T11:33:28.689Z"
         }
       ],
       "needsAcceptance": false,
@@ -13057,6 +13057,11 @@
       "log": [
         {
           "at": "2026-07-13",
+          "by": "fable-impl-506auth",
+          "text": "D-AUTH1=A HONEST-STOP — no code shipped, no stub, nothing --met. Substrate audit: the ENTIRE ratified surface (app.auth(users: db), app.mount, auth.routes(), auth.user(req), auth.oauth(google,github)) rides the 'app' namespace / app graph = D-WEBAPP1, card #438, which syntax-decisions.md:2114 explicitly calls 'unbuilt infrastructure owned by cards #438 and #134'. No 'app' framework object, no db-backed users store, no first-class app-layer Request/Response exist (verified: fixed_sigs.rs has only core.web.devserver.app() hot-reload watcher + jet.db SQL-string layer; no .mount/.auth/.user). Blocked-leg map: (1) sessions/signed-rotating-cookies/httponly-secure-samesite -> #438 app + session middleware; (2) password login FLOW -> #438 app routes (NOTE: the argon2id primitives themselves ALREADY ship as jet.crypto.password_hash/password_verify/constant_time_eq/sign/verify/hkdf_sha256 — no crypto-card dependency, nothing to add there); (3) OAuth/OIDC client -> #438 app + provider surface; (4) email magic links -> #438 app routes + an email/SMTP substrate that does NOT exist (no smtp/send_email in module_items/fixed_sigs) — no owning card identified, flag for owner; (5) JWT/PASETO verify -> could be standalone core.auth fns but the method spelling is UNRATIFIED (ballot shows only app-integrated spellings); inventing names = I7/I8 violation; (6) .Credential taint kind -> UNRATIFIED attach-grammar: 'Credential' appears nowhere in Syntax.rs; existing taint lattice (D-TAINT1) is single generic #Tainted with Db/Exec/Net sinks only — a kinded taint + a log/leak sink class + the '.Credential' marker spelling are all net-new owner-gated surface, not in ratified text. E0731 (option-C illustrative code) is already taken by tag-as-trait, so nothing pre-reserved. CONCLUSION: zero real, unblocked, ratified-spelling legs to build; matches sibling precedent (D-SYNC1 gated on live-query substrate; #505 4/6 honest-stops). Owner gates to queue as ballots: (a) core.auth standalone-fn spellings for JWT/PASETO if wanted before #438; (b) .Credential marker attach-grammar + kinded-taint/log-sink design; (c) magic-link email substrate owning card."
+        },
+        {
+          "at": "2026-07-13",
           "by": "fable-main",
           "text": "Correction: jetpack compile break self-resolved on HEAD (cargo check -p jetpack clean 9.46s) — was transient mid-refactor state of the peer agent working card 393 Hangar Store v2 (E4-JP1, commits b0ee0a0b/3de52fb5). No P0. STM targeted results stand."
         },
@@ -13151,6 +13156,15 @@
           "verifiedBy": null,
           "evidence": "9c7cf099/eaa656bf/58f9f63b: jet_stm txn stack + canonical-order lock-fold commit, edit_txn routing, uses_stm TIR flag; example memory/shared_transact (8 concurrent transfers, total conserved) golden green; transact/rollback goldens byte-identical; effects 48, rollback 4, tir 147, ownership 12 green; JIT gap registered. Conformance note: commit realized via hybrid-sanctioned canonical-order locking (identical observable guarantee, no lost updates) rather than literal optimistic retry — flagged on card log for owner visibility.",
           "at": "2026-07-13T11:28:10.265Z"
+        },
+        {
+          "n": 6,
+          "text": "D-AUTH1=A batteries suite lands its ratified surface end-to-end: app.auth(users: db) magic default with httponly/secure/samesite signed rotating session cookies, password login on the shipped jet.crypto.password_hash/verify, OAuth/OIDC client, email magic links, JWT/PASETO verify, and the .Credential taint kind — each with example+golden green and R12 parity. BLOCKED until the app namespace/app graph (D-WEBAPP1 #438) + a magic-link email substrate exist and the owner ratifies (a) standalone core.auth JWT/PASETO fn spellings and (b) the .Credential marker attach-grammar + kinded-taint/log-sink design. Bar: no leg may ship on invented (unratified) syntax.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-13T11:37:27.200Z"
         }
       ],
       "refs": [
@@ -14500,6 +14514,27 @@
       "created": "2026-07-13T06:43:53.177Z",
       "updated": "2026-07-13",
       "claimedAt": "2026-07-13T09:32:45.423Z"
+    },
+    {
+      "id": "c0aadf2p",
+      "num": 530,
+      "title": "core email/SMTP substrate — magic links, notifications",
+      "body": "D-AUTH1=A ratified email magic links but no email-sending substrate exists anywhere (no smtp/send_email in module_items or fixed_sigs) and no card owned it — gap found during the 506 D-AUTH1 honest-stop audit 2026-07-13. Scope: design + implement the core email surface (I6: native std-only SMTP or ballot an FFI-bridge exception), typed message construction, deliverability-safe defaults. Syntax/API spellings are owner-gated — ballot before implementation. Blocks the magic-link leg of D-AUTH1 (card 506) alongside 438.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "needsAcceptance": false,
+      "created": "2026-07-13T11:38:37.154Z",
+      "updated": "2026-07-13"
     }
   ],
   "decisions": [
@@ -31485,6 +31520,69 @@
   ],
   "events": [
     {
+      "at": "2026-07-13T11:38:37.154Z",
+      "by": "fable-main",
+      "action": "card.add",
+      "ref": "c0aadf2p",
+      "note": "core email/SMTP substrate — magic links, notifications"
+    },
+    {
+      "at": "2026-07-13T11:37:52.577Z",
+      "by": "sol-91-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c1jixkit",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-13T11:37:27.200Z",
+      "by": "fable-impl-506auth",
+      "action": "card.criteria-add",
+      "ref": "c0n6vj96",
+      "note": "#6 D-AUTH1=A batteries suite lands its ratified surface end-to-"
+    },
+    {
+      "at": "2026-07-13T11:37:11.710Z",
+      "by": "terra-91-builder",
+      "action": "card.criteria-meet",
+      "ref": "c1jixkit",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-13T11:36:56.340Z",
+      "by": "fable-impl-506auth",
+      "action": "card.update",
+      "ref": "c0n6vj96",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T11:33:28.689Z",
+      "by": "sol-91-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c1jixkit",
+      "note": "#8"
+    },
+    {
+      "at": "2026-07-13T11:32:55.545Z",
+      "by": "terra-91-builder",
+      "action": "card.criteria-meet",
+      "ref": "c1jixkit",
+      "note": "#8"
+    },
+    {
+      "at": "2026-07-13T11:32:22.698Z",
+      "by": "sol-91-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c1jixkit",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-13T11:31:51.352Z",
+      "by": "terra-91-builder",
+      "action": "card.criteria-meet",
+      "ref": "c1jixkit",
+      "note": "#6"
+    },
+    {
       "at": "2026-07-13T11:29:59.887Z",
       "by": "fable-main",
       "action": "card.update",
@@ -34920,69 +35018,6 @@
       "action": "card.criteria-meet",
       "ref": "c2yj0nk5",
       "note": "#3"
-    },
-    {
-      "at": "2026-07-12T18:18:50.131Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-verify",
-      "ref": "c2yj0nk5",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-12T18:18:49.990Z",
-      "by": "codex-main",
-      "action": "card.criteria-meet",
-      "ref": "c2yj0nk5",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-12T18:16:04.252Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-verify",
-      "ref": "c2yj0nk5",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-12T18:16:04.107Z",
-      "by": "terra-142-jit",
-      "action": "card.criteria-meet",
-      "ref": "c2yj0nk5",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-12T18:12:50.205Z",
-      "by": "terra-367-builder",
-      "action": "card.criteria-meet",
-      "ref": "c_audit_367_q80zrm",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-12T18:12:28.884Z",
-      "by": "terra-367-builder",
-      "action": "card.criteria-meet",
-      "ref": "c_audit_367_q80zrm",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-12T18:11:01.550Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c2yj0nk5",
-      "note": "#3 Syntax law, Core surface/ring classification, docs, executab"
-    },
-    {
-      "at": "2026-07-12T18:11:01.405Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c2yj0nk5",
-      "note": "#2 Deterministic seed/insertion order, require/failure_count/st"
-    },
-    {
-      "at": "2026-07-12T18:11:01.266Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c2yj0nk5",
-      "note": "#1 Ratified D-SOLVER-LIB1 finite explicit Solver API is sema-ch"
     }
   ],
   "nextNum": 368,
