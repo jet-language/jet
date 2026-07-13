@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 527,
-    "rev": 4966,
+    "nextNum": 528,
+    "rev": 4983,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -1233,12 +1233,22 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "workOrder": 100,
       "plan": "Canonical concurrency implementation plan (D-ASYNCRT1=A, D-MNIO1=A, D-CONCCOMB1=A, D-RACEWIN1=A, D-CONCSELECT1=A). Build one model only: task/channel/taskgroup. No @async/await, no user coroutine primitive, no second race/select mechanism.\n\nAlready shipped foundations to preserve:\n- #102: taskgroup g { ... }, g.task { ... }, wait/join, scope-exit ownership, existing g.all/g.race/g.any vertical slice.\n- #101: task handles expose coroutine-grade controls (pause/resume/cancel/trace); coroutine substrate stays internal.\n- #112: #Context(deadline:) flows through taskgroups and wait points; E3003 owns deadline diagnostics.\n- #126 M1/M2: current scheduler vertical slice, channels/timers/yield hook, 160_scheduler_spawn.\n\nImplementation order for dumb agents:\n1. Inventory current behavior first. Read docs/spec/philosophy.md, syntax-decisions.md entries for D-ASYNCRT1/D-MNIO1/D-NURSERY1/D-TASKSCOPE1/D-CONCCOMB1/D-RACEWIN1/D-CONCSELECT1/D-DEADLINE1/D-COROUTINE1, docs/plans/epoch-3/concurrency-vision.md, Source/Prelude/Scheduler.rs, Source/Interpreter.rs, crates/jet-codegen/src/Prelude/Scheduler.rs, task/channel sema/codegen, and tests for examples 131, 157, 158, 160.\n2. Write missing acceptance tests before code. Add/extend examples/features concurrency examples plus CLI/golden tests for: 100k idle parked tasks or smallest CI-safe equivalent with a scale benchmark guard; channel receive wakes one parked task without busy-wait; taskgroup scope cancels losing race tasks; g.all fail-fast cancels siblings; g.race returns first success and cancels losers; g.any returns first completion including errors; if g.select() arms deregister losers; deadline firing wakes parked I/O/channel/task waits with Jet-owned E3003; detached tasks require explicit expert policy/name.\n3. Replace cooperative-only scheduler gaps with real parker abstraction. Define internal runtime traits, not user syntax: Scheduler, Parker, TimerWheel, IoParker. Start with portable readiness fallback for tests; implement D-MNIO1 native backends behind cfg modules (Linux epoll/io_uring path, macOS/BSD kqueue, Windows IOCP). No external runtime dependency unless owner approves a new dep card.\n4. Route every blocking-looking stdlib wait through the parker. Channel recv/send, timers/sleep, task join/wait, TCP accept/read/write, HTTP client/server waits must park Jet tasks, not OS threads. Real OS-blocking fallback must run on an explicit blocking pool and be observable; never silently block scheduler workers.\n5. Finish structured combinators in taskgroup only. g.all/g.race/g.any/select are methods or scoped operations on the taskgroup; they create no detached work and return/propagate through one cancellation model. Implement D-RACEWIN1 inside g.race; #103 is merged here. Implement D-CONCCOMB1 here; #36 is merged here.\n6. Implement D-CONCSELECT1 exactly as ratified: if-fused select over g.select() arms. Parser/sema/codegen/tests must reuse match/if-arm typing where possible. Select must register arms under taskgroup ownership, wake exactly one winner, deregister losers, and compose with deadlines/cancellation.\n7. Add observability and misuse diagnostics. Runtime metrics: runnable/parked task counts, poller wake count, worker utilization, queue depth, cancelled losers. Diagnostics/lints: forgotten task handle wait, swallowed cancellation, deadline ignored, detached task without policy/name, real blocking call on scheduler worker.\n8. Prove parity and scale. cargo test green; examples 131/157/158/160 still pass; add deterministic scheduler tests with fake clock; add stress tests gated for CI budget; add a benchmark/report target that demonstrates 100k parked connections/tasks when run locally. rustc errors remain ICE-only; all user errors are sema/driver diagnostics.\n\nExit criteria:\n- One coherent public model in docs/spec/spec.md and examples: task/channel/taskgroup + scoped combinators + deadline context.\n- No @async/await surface, no function coloring, no separate user coroutine API.\n- Native parker path exists per platform or has named cfg-tested fallback with honest diagnostic/metric.\n- race/all/any/select cannot leak losing tasks past taskgroup scope.\n- CI-safe tests prove cancellation/deadline/wake correctness; local stress target proves 100k parked tasks/connections target.\n- docs/plans/epoch-3/async-networking.md and concurrency-vision.md match implementation.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-13",
+          "by": "terra-126-final-reviewer",
+          "text": "Independent verifier terra-126-final-reviewer verified all four measurable criteria after three defect/fix review cycles. #126 closes with real Linux native scheduler, structured combinators, cancellation/deadline/Shield semantics, resident JIT containment, scale/acceptance evidence, and no hidden Windows claim; #527 owns Windows IOCP proof."
+        },
+        {
+          "at": "2026-07-13",
+          "by": "terra-126-final-reviewer",
+          "text": "Final scoped closure proof: commits 4a742027, 5b1a1373, 40a9fca8, 5b7db63d independently reviewed. Green: corelib deadline 2/2; Cranelift cancellation/fatal/Shield/no-fallback/three-way 21/21; scheduler interrupt boundary 15 pass/1 intentional local 100k ignored; scheduler_native 4/4; Shield fmt 1/1. Four #126 concurrency examples are exact in observed+expected JIT covered sets. Unrelated global manifest drift remains outside #126. Owner-approved Linux scope is complete; Windows IOCP native proof is preserved explicitly as E8 #527."
+        },
         {
           "at": "2026-07-13",
           "by": "terra-126-reviewer",
@@ -1327,7 +1337,44 @@
       ],
       "created": "2026-06-26T21:10:13.903Z",
       "updated": "2026-07-13",
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Cancellation is preemptive at channel send/receive, sleep/yield, join, all/race/any, and select wait points; cancelled work stops after the wait, reports Cancelled, and Drop-backed cleanup runs exactly once.",
+          "status": "verified",
+          "metBy": "fable-medium",
+          "verifiedBy": "terra-126-final-reviewer",
+          "evidence": "Independent final review: Cranelift cancellation/fatal matrix 21/21; scheduler interrupt boundary 15 pass/1 intentional 100k ignored. Original unshielded receive SIGABRT regression is green; cancellation never resumes post-wait work.",
+          "at": "2026-07-13T02:49:31.429Z"
+        },
+        {
+          "n": 2,
+          "text": "#Shield is the ratified bare-block surface in syntax/docs/parser/formatter/grammars/examples; AOT, interpreter, JIT, and dev defer cancel/deadline through nested regions and leave exactly once on normal, return, ?, trap, break, and continue, with deadline priority.",
+          "status": "verified",
+          "metBy": "terra-126-shield",
+          "verifiedBy": "terra-126-final-reviewer",
+          "evidence": "Independent final review: Shield no-fallback tests and three-way battery green; scheduler emitted guard matrix covers normal/return/?/panic and depth reset; formatter Shield test 1/1; corelib deadline reporter 2/2.",
+          "at": "2026-07-13T02:49:31.522Z"
+        },
+        {
+          "n": 3,
+          "text": "Resident Cranelift contains cancel, deadline, and scheduler-fatal transfers as typed statuses: no Rust panic crosses a native frame, reporting occurs after return, Problems never replay effects through fallback, and TLS/panic-hook state is restored.",
+          "status": "verified",
+          "metBy": "terra-126-shield",
+          "verifiedBy": "terra-126-final-reviewer",
+          "evidence": "Independent source audit and execution: typed Ready/Cancelled/Deadline/Panicked boundary, worker-local payload/TLS restoration, post-native delivery, E3003/E0953 Problems without fallback replay; Cranelift matrix 21/21.",
+          "at": "2026-07-13T02:49:31.614Z"
+        },
+        {
+          "n": 4,
+          "text": "Linux native scheduler readiness, wake/cancel/deadline cleanup, 10k CI scale, 100k local proof target, structured combinators, select, controls, observability, docs, examples, and targeted acceptance are green; Windows IOCP proof is explicitly tracked by #527.",
+          "status": "verified",
+          "metBy": "fable-medium",
+          "verifiedBy": "terra-126-final-reviewer",
+          "evidence": "Independent acceptance: scheduler boundary 15 pass/1 ignored, scheduler_native 4/4, corelib deadline 2/2, Cranelift 21/21, Shield fmt 1/1; four #126 examples match observed and expected JIT covered sets. Global unrelated manifest drift is logged separately.",
+          "at": "2026-07-13T02:49:31.706Z"
+        }
+      ],
       "needsAcceptance": false,
       "refs": [],
       "claimedAt": "2026-07-11T10:44:15.238Z"
@@ -4694,7 +4741,7 @@
       "blockedBy": [
         "c2iizmyx"
       ],
-      "assignee": null,
+      "assignee": "codex-epoch3-306",
       "log": [
         {
           "at": "2026-07-09",
@@ -4747,11 +4794,12 @@
         }
       ],
       "created": "2026-07-07T17:23:33.610Z",
-      "updated": "2026-07-10",
+      "updated": "2026-07-13",
       "workOrder": 101,
       "criteria": [],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-13T02:51:16.478Z"
     },
     {
       "id": "c06tng04",
@@ -13539,6 +13587,11 @@
       "log": [
         {
           "at": "2026-07-13",
+          "by": "fable-impl-521b",
+          "text": "clusters 3+4+5 done. diagnostics_coverage: 3 real fails fixed — E3212/E3213/E3214 docs.md rows added (snapshots already existed); E2941 got real tests/cli/prove_unknown_lens_e2941.txt golden; E3001/E3005 acknowledged-gap (runtime D-OBS voice is bracket-free by design, no fixture can satisfy bracket scanner honestly — real coverage in tests/prove.rs JSON asserts); E0410 (retired D-MARK-DISCARD1) + E0859 (ICE-only via jet_foundation::ice!, unreachable from user source) added to EXPECTED_SPEC_AHEAD_OF_IMPL. semindex: SCHEMA_VERSION 4->5 (commit d80e2cba added instances[] fact array for D-GENMOD-IDENTITY1) — bumped 3 hardcoded expectations, all 12 semindex tests green. CLI goldens man_page/completions already fixed by 597c7aa3, verified green no-op. All targeted suites green: diagnostics_coverage 11/11, semindex 12/12, cli 69/69. Commit 87b109a8."
+        },
+        {
+          "at": "2026-07-13",
           "by": "fable-impl-521a",
           "text": "root cause: expand_generic_module_aliases (crates/jet-sema/src/Sema/Bundle.rs, 3 call sites ~1591/1819/1928) builds disposable TraitRegistry::default() instances to resolve generic-module param bounds, calling register_items() against the REAL bundle diags vec, without ever calling register_synthetic_rollback/display_debug/iter_index. Every impl of a builtin hook trait (Index/IndexMut/Iterable/Iterator/Rollback/Display/Debug) bundle-wide spuriously failed E0119 there before the canonical per-module pass (which does register synthetics) ever ran. Introduced by 4b505c09 (14:27, card #367 product-split, added the first disposable-registry+bound-check pattern) and doubled by 80af1fcc7 (15:46, wip checkpoint, added a second disposable-registry prepass) same day (2026-07-12) -- matches the doubling symptom. Fix: register the 3 synthetic-trait hooks on each disposable registry + route its register_items diags into a throwaway Vec (canonical loop later in check_bundle_opts is sole diag source of truth). Commit b2001c18. Also fixed tests/corelib.rs::user_derive_orphan_rule_allows_either_local_side (separate, unrelated bug: fixture used retired `#[Name]` directive-plane spelling for a custom derive; ratified spelling is `@Name` per D-MARKERMOVE1/2/3 -- card #518s new E0927 gate correctly caught it). Tests green: golden examples_compile_and_run x7 (index_hook/iter_hook/rollback_trait/display_debug/renderable-varargs/renderable-varargs-multi/reflect-value) all ok; diagnostic_snapshots ui_snapshots missing_assoc_type + tag_with_method (E0913/E0732 doubling fixtures) ok; corelib user_derive_orphan_rule_allows_either_local_side ok; interpreter_matches_compiled_binary ok (137 ran, 170 boundary, 0 unexpected). Found but NOT fixed (unrelated, pre-existing, out of card scope): diagnostic_snapshots tests/ui/genmod_unknown_target.jet fails identically on unmodified master (verified via git stash) -- E0850 no longer fires, pre-existing bug unrelated to trait registration. Also found: dev_default_matches_compiled_binary (tests/dev.rs) has a strict boundary-set assertion that now additionally lists collections/list_bounds + concurrency/all_failfast as boundary-hit under the default JIT/interpreter-fallback backend (DEFAULT_BACKEND_EXPECTED_BOUNDARIES const stale) -- reproducible/deterministic, but neither example touches trait registration; likely a pre-existing JIT-tier gap masked because this test always aborted earlier on the E0119 failures before reaching that assertion. Needs a JIT-context owner, not diagnosed further here."
         },
@@ -13796,6 +13849,32 @@
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-13T00:39:33.065Z",
+      "updated": "2026-07-13"
+    },
+    {
+      "id": "c0fylvpy",
+      "num": 527,
+      "title": "Windows IOCP scheduler backend proof",
+      "body": "Complete the Windows-native readiness backend deferred from #126 under the owner-approved Linux closure scope. Replace the named Windows portable-poll fallback with real IOCP behavior and prove lifecycle correctness on an actual Windows CI lane.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e8",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": "Implement cfg(windows) IOCP registration, completion dispatch, cancellation, deadline wake, deregistration, and terminal shutdown without changing Jet task/channel/taskgroup syntax. Add Windows CI that compiles and runs scheduler-native tests on Windows. Acceptance: real socket readiness parks tasks without blocking workers; cancel/deadline wake exactly once; operation allocation/retirement balances; port shutdown completes; no portable fallback is selected on Windows; docs name platform support honestly.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "crates/jet-codegen/src/scheduler.rs",
+        "crates/jet-codegen/src/Prelude/Scheduler.rs",
+        "tests/scheduler_native.rs",
+        "docs/plans/epoch-3/async-networking.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-13T02:47:09.812Z",
       "updated": "2026-07-13"
     }
   ],
@@ -14093,58 +14172,6 @@
       "draft": false
     },
     {
-      "id": "D-ASYNCRT1",
-      "cardId": "c2iizmyx",
-      "title": "Concurrency model for Go-scale networking: green-threads/M:N over task+channel, or add @async/await?",
-      "gist": "Epoch 3 requires an async runtime capable of 100k+ concurrent connections. The shipped model teaches tasks and channels; the question is whether to keep that model and add an M:N scheduler under it, or introduce @async/await coloring. This is the keystone Epoch 3 decision — coroutines, structured concurrency, and deadline cards all depend on it.",
-      "explainer": "The function-color problem (async infects call sites) is the core tradeoff. @async/await requires every function that awaits to be marked, propagating annotation up the call graph — the 'color' spreads. Green-threads / M:N scheduling makes all tasks implicitly concurrent; blocking calls yield automatically; no call-site annotation. Jet already ships `task { }` and channels; green-threads extend that model with a scheduler, not a new surface. @async/await introduces new syntax (D-level decision), a new execution model, and a bifurcated function space — a second way to mean 'this function may yield' next to the task model, which violates I8. A hybrid adds both costs. This decision must be made before coroutines-prim, structured-concurrency, or deadline cards proceed.",
-      "story": "I write a server that handles 100,000 simultaneous WebSocket connections. I don't want to mark half my functions `@async` just because they read from a socket. I want to write normal-looking code and have the runtime handle the concurrency.",
-      "inWild": "// current shipped model:\ntask {\n    msg :: chan.recv()   // blocks this task; runtime yields to others\n    process(msg)\n}\n// question: is this enough, or does networking need @async/await?",
-      "detail": "",
-      "options": [
-        {
-          "key": "A",
-          "name": "Green-threads / M:N scheduler under the task+channel model",
-          "detail": "Add an M:N thread scheduler to the runtime. `task { }` blocks become green-thread yields; socket/IO calls park the task and wake it on readiness. No new surface syntax; no function coloring; the existing task/channel API gains concurrency scale without user changes. Matches Go's goroutine approach. Aligns with the shipped teaching model.",
-          "code": "// same code as today — runtime does the work:\nfn handle(conn: TcpConn) {\n    loop {\n        data :: conn.recv()   // parks task; no @async needed\n        conn.send(process(data))\n    }\n}\nfn main() {\n    server :: TcpListener.bind(\":8080\")\n    loop {\n        conn :: server.accept()\n        task { handle(conn) }   // 100k of these, M:N scheduled\n    }\n}"
-        },
-        {
-          "key": "B",
-          "name": "@async/await + futures",
-          "detail": "Add `@async fn` and `await` expressions. Explicit at every call site that yields; type system tracks async-ness. Functions bifurcate into async/non-async. Introduces function coloring and a second 'this yields' mechanism alongside tasks — I8 tension. Familiar to Rust/JS developers.",
-          "code": "// proposed @async surface:\n@async fn handle(conn: TcpConn) {\n    loop {\n        data :: await conn.recv()\n        await conn.send(process(data))\n    }\n}\n@async fn main() {\n    server :: TcpListener.bind(\":8080\")\n    loop {\n        conn :: await server.accept()\n        task { await handle(conn) }  // color propagates\n    }\n}"
-        },
-        {
-          "key": "C",
-          "name": "Hybrid: M:N scheduler + @async opt-in for fine-grained control",
-          "detail": "Ship the M:N green-thread scheduler (option A) as the default; allow `@async fn` for callers who need explicit future/poll control (e.g. embedding in C event loops). Two mechanisms for yielding — violates I8 unless the `@async` path is kept to an expert escape hatch with a narrow, documented use case.",
-          "code": "// hybrid: plain tasks work at scale (default)\ntask { handle(conn) }\n// @async escape hatch for C-event-loop embedding only:\n@async fn poll_step() -> Bool { ... }"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Go",
-          "note": "Go's goroutines are the green-thread / M:N model: write normal blocking code, the scheduler handles concurrency. No function coloring; 100k+ goroutines are routine.",
-          "code": "go func() {\n    for {\n        data, _ := conn.Read(buf)  // blocks goroutine, not OS thread\n        conn.Write(process(data))\n    }\n}()"
-        },
-        {
-          "lang": "Rust / Tokio",
-          "note": "Rust uses async/await + a future executor. Every async call site must be marked; function color propagates. High performance, but the bifurcation is a known ergonomics cost.",
-          "code": "async fn handle(mut conn: TcpStream) {\n    loop {\n        let n = conn.read(&mut buf).await.unwrap();\n        conn.write_all(&buf[..n]).await.unwrap();\n    }\n}"
-        },
-        {
-          "lang": "Erlang / BEAM",
-          "note": "BEAM spawns millions of lightweight processes (green-threads) with no async annotation. Concurrent IO is the default; no function color. The closest prior art to option A at scale.",
-          "code": "handle(Socket) ->\n    {ok, Data} = gen_tcp:recv(Socket, 0),\n    gen_tcp:send(Socket, process(Data)),\n    handle(Socket)."
-        }
-      ],
-      "rec": "A",
-      "status": "ratified",
-      "outcome": "A",
-      "ratifiedAt": "2026-06-27",
-      "draft": false
-    },
-    {
       "id": "D-USERDERIVE1",
       "cardId": "c2lizsmx",
       "title": "Ship user-authored derives + typed reflection (Epoch 3 exit criterion)?",
@@ -14346,54 +14373,6 @@
           "text": "Ballot tightened: collapsed to 3 options, Option A is the unified optimal recommendation (adversarial pass + recommendation fused), rec moved to A."
         }
       ],
-      "outcome": "A",
-      "ratifiedAt": "2026-06-28",
-      "draft": false
-    },
-    {
-      "id": "D-MNIO1",
-      "cardId": "c2iizmyx",
-      "status": "ratified",
-      "gist": "M:N green threads are decided. This card chooses the runtime implementation behind blocking-looking socket/file APIs. It is not user syntax: user code keeps `task { }`, channels, and ordinary reads/writes.",
-      "story": "Gary runs a chat server with 50,000 open TCP connections. Most sockets are idle. `socket.read()` should park the Jet task and free the OS thread until the socket is ready, without Gary learning epoll, kqueue, or IOCP.",
-      "inWild": "task {\n    socket :: tcp.accept()?\n    loop {\n        data :: socket.read()?   // parks Jet task, not OS thread\n        socket.write(handle(data))?\n    }\n}",
-      "comparisons": [
-        {
-          "lang": "Best current",
-          "note": "Go parks goroutines on epoll/kqueue/IOCP through platform-native netpollers, enabling high concurrency.",
-          "code": "runtime netpoll: epoll/kqueue/IOCP"
-        }
-      ],
-      "options": [
-        {
-          "key": "A",
-          "name": "Own platform-native backends (recommended)",
-          "detail": "Implement Linux io_uring/epoll, macOS/BSD kqueue, and Windows IOCP behind one runtime trait. No external event-loop dependency. Highest ceiling and matches Go/BEAM shape: one scheduler, native pollers, task parking, timers, cancellation, and metrics under Jet control.",
-          "code": "// internal runtime only\ntrait IoParker { fn park(fd: Handle, interest: Interest) -> Ready }\n// linux: io_uring/epoll; macOS: kqueue; windows: IOCP"
-        },
-        {
-          "key": "B",
-          "name": "Own portable poller first",
-          "detail": "Start with epoll/kqueue/IOCP readiness only; defer `io_uring` batching. Still no external dependency and simpler to test, but leaves Linux peak throughput on the table.",
-          "code": "// internal runtime only\ntrait Poller { fn wait(events: ~[Event]) -> Int }\n// readiness model on every platform"
-        },
-        {
-          "key": "C",
-          "name": "Use libuv through C FFI",
-          "detail": "Battle-tested portability. Requires explicit owner approval for a runtime external C dependency and a system-library story. Good fallback if owned backends stall, but not the best Jet identity.",
-          "code": "// runtime dependency path\n// libuv event loop wakes Jet scheduler tasks\n// needs owner approval before implementation"
-        }
-      ],
-      "rec": "A",
-      "recReason": "Owning native backends gives Jet the highest performance ceiling, no foreign event-loop dependency, and full observability/control for the task-scope/task runtime. It keeps the user surface unchanged while letting experts tune the runtime.",
-      "created": "2026-06-27",
-      "raisedBy": "agent",
-      "raisedAt": "2026-06-27",
-      "group": "runtime",
-      "title": "Which OS readiness backend parks M:N tasks on I/O?",
-      "explainer": "The scheduler needs one park/wake layer per platform. The decision is between owning native backends, owning a lowest-common-denominator poller, or depending on libuv. I6 matters: compiler Source has zero external crates, and runtime-side deps still need owner approval. The E3 goal is better-than-Go networking, so the backend must support task-per-connection scale, O(ready events) wakeups, low allocation pressure, and runtime observability.",
-      "bestCurrent": "Go: Go parks goroutines on epoll/kqueue/IOCP through platform-native netpollers, enabling high concurrency.",
-      "recommendation": "Build own platform-native backends. Jet needs Go-class scaling as the floor and a higher ceiling through native pollers, structured cancellation, deadlines, and runtime metrics.",
       "outcome": "A",
       "ratifiedAt": "2026-06-28",
       "draft": false
@@ -30923,6 +30902,125 @@
   ],
   "events": [
     {
+      "at": "2026-07-13T02:51:16.478Z",
+      "by": "codex-epoch3-306",
+      "action": "card.claim",
+      "ref": "c05o0105",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T02:50:26.874Z",
+      "by": "fable-impl-521b",
+      "action": "card.update",
+      "ref": "c0a9unm3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T02:50:02.036Z",
+      "by": "terra-126-final-reviewer",
+      "action": "card.update",
+      "ref": "c2iizmyx",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T02:50:01.925Z",
+      "by": "terra-126-final-reviewer",
+      "action": "card.update",
+      "ref": "c2iizmyx",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T02:49:31.707Z",
+      "by": "terra-126-final-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c2iizmyx",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-13T02:49:31.614Z",
+      "by": "terra-126-final-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c2iizmyx",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-13T02:49:31.522Z",
+      "by": "terra-126-final-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c2iizmyx",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-13T02:49:31.429Z",
+      "by": "terra-126-final-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c2iizmyx",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-13T02:49:04.219Z",
+      "by": "fable-medium",
+      "action": "card.criteria-meet",
+      "ref": "c2iizmyx",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-13T02:49:04.130Z",
+      "by": "terra-126-shield",
+      "action": "card.criteria-meet",
+      "ref": "c2iizmyx",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-13T02:49:04.039Z",
+      "by": "terra-126-shield",
+      "action": "card.criteria-meet",
+      "ref": "c2iizmyx",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-13T02:49:03.946Z",
+      "by": "fable-medium",
+      "action": "card.criteria-meet",
+      "ref": "c2iizmyx",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-13T02:48:36.783Z",
+      "by": "terra-126-final-reviewer",
+      "action": "card.criteria-add",
+      "ref": "c2iizmyx",
+      "note": "#4 Linux native scheduler readiness, wake/cancel/deadline clean"
+    },
+    {
+      "at": "2026-07-13T02:48:36.692Z",
+      "by": "terra-126-final-reviewer",
+      "action": "card.criteria-add",
+      "ref": "c2iizmyx",
+      "note": "#3 Resident Cranelift contains cancel, deadline, and scheduler-"
+    },
+    {
+      "at": "2026-07-13T02:48:36.597Z",
+      "by": "terra-126-final-reviewer",
+      "action": "card.criteria-add",
+      "ref": "c2iizmyx",
+      "note": "#2 #Shield is the ratified bare-block surface in syntax/docs/pa"
+    },
+    {
+      "at": "2026-07-13T02:48:36.507Z",
+      "by": "terra-126-final-reviewer",
+      "action": "card.criteria-add",
+      "ref": "c2iizmyx",
+      "note": "#1 Cancellation is preemptive at channel send/receive, sleep/yi"
+    },
+    {
+      "at": "2026-07-13T02:47:09.812Z",
+      "by": "terra-126-reviewer",
+      "action": "card.add",
+      "ref": "c0fylvpy",
+      "note": "Windows IOCP scheduler backend proof"
+    },
+    {
       "at": "2026-07-13T02:38:14.130Z",
       "by": "fable-impl-521a",
       "action": "card.update",
@@ -34302,125 +34400,6 @@
       "action": "card.update",
       "ref": "c0uxsyns",
       "note": "logEntry"
-    },
-    {
-      "at": "2026-07-12T13:28:27.601Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0nqsqn5",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-12T13:28:27.601Z",
-      "by": "agent",
-      "action": "decision.add",
-      "ref": "D-ACCEPT-515",
-      "note": "Accept #515 — Tower Now page: owner-verification queue with acceptance flow"
-    },
-    {
-      "at": "2026-07-12T13:28:04.165Z",
-      "by": "claude-main",
-      "action": "card.criteria-verify",
-      "ref": "c0nqsqn5",
-      "note": "#7"
-    },
-    {
-      "at": "2026-07-12T13:28:04.063Z",
-      "by": "claude-main",
-      "action": "card.criteria-verify",
-      "ref": "c0nqsqn5",
-      "note": "#6"
-    },
-    {
-      "at": "2026-07-12T13:28:03.956Z",
-      "by": "claude-main",
-      "action": "card.criteria-verify",
-      "ref": "c0nqsqn5",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-12T13:28:03.854Z",
-      "by": "claude-main",
-      "action": "card.criteria-verify",
-      "ref": "c0nqsqn5",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-12T13:28:03.750Z",
-      "by": "claude-main",
-      "action": "card.criteria-verify",
-      "ref": "c0nqsqn5",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-12T13:28:03.648Z",
-      "by": "claude-main",
-      "action": "card.criteria-verify",
-      "ref": "c0nqsqn5",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-12T13:28:03.544Z",
-      "by": "claude-main",
-      "action": "card.criteria-verify",
-      "ref": "c0nqsqn5",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-12T13:25:40.410Z",
-      "by": "terra-296-builder",
-      "action": "card.claim",
-      "ref": "c0uxsyns",
-      "note": ""
-    },
-    {
-      "at": "2026-07-12T13:25:36.675Z",
-      "by": "terra-301-builder",
-      "action": "card.release",
-      "ref": "c0075iyb",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-12T13:25:36.587Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0075iyb",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-12T13:24:39.031Z",
-      "by": "terra-301-builder",
-      "action": "card.update",
-      "ref": "c0075iyb",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-12T13:21:45.132Z",
-      "by": "terra-515-builder",
-      "action": "card.update",
-      "ref": "c0nqsqn5",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-12T13:20:38.699Z",
-      "by": "terra-515-builder",
-      "action": "card.update",
-      "ref": "c0nqsqn5",
-      "note": ""
-    },
-    {
-      "at": "2026-07-12T13:20:28.616Z",
-      "by": "terra-301-builder",
-      "action": "card.update",
-      "ref": "c0075iyb",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-12T13:20:17.578Z",
-      "by": "terra-515-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0nqsqn5",
-      "note": "#7"
     }
   ],
   "nextNum": 368,

@@ -20061,6 +20061,108 @@
       "outcome": "A",
       "ratifiedAt": "2026-07-10",
       "retiredAt": "2026-07-13T01:51:29.363Z"
+    },
+    {
+      "id": "D-ASYNCRT1",
+      "cardId": "c2iizmyx",
+      "title": "Concurrency model for Go-scale networking: green-threads/M:N over task+channel, or add @async/await?",
+      "gist": "Epoch 3 requires an async runtime capable of 100k+ concurrent connections. The shipped model teaches tasks and channels; the question is whether to keep that model and add an M:N scheduler under it, or introduce @async/await coloring. This is the keystone Epoch 3 decision — coroutines, structured concurrency, and deadline cards all depend on it.",
+      "explainer": "The function-color problem (async infects call sites) is the core tradeoff. @async/await requires every function that awaits to be marked, propagating annotation up the call graph — the 'color' spreads. Green-threads / M:N scheduling makes all tasks implicitly concurrent; blocking calls yield automatically; no call-site annotation. Jet already ships `task { }` and channels; green-threads extend that model with a scheduler, not a new surface. @async/await introduces new syntax (D-level decision), a new execution model, and a bifurcated function space — a second way to mean 'this function may yield' next to the task model, which violates I8. A hybrid adds both costs. This decision must be made before coroutines-prim, structured-concurrency, or deadline cards proceed.",
+      "story": "I write a server that handles 100,000 simultaneous WebSocket connections. I don't want to mark half my functions `@async` just because they read from a socket. I want to write normal-looking code and have the runtime handle the concurrency.",
+      "inWild": "// current shipped model:\ntask {\n    msg :: chan.recv()   // blocks this task; runtime yields to others\n    process(msg)\n}\n// question: is this enough, or does networking need @async/await?",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Green-threads / M:N scheduler under the task+channel model",
+          "detail": "Add an M:N thread scheduler to the runtime. `task { }` blocks become green-thread yields; socket/IO calls park the task and wake it on readiness. No new surface syntax; no function coloring; the existing task/channel API gains concurrency scale without user changes. Matches Go's goroutine approach. Aligns with the shipped teaching model.",
+          "code": "// same code as today — runtime does the work:\nfn handle(conn: TcpConn) {\n    loop {\n        data :: conn.recv()   // parks task; no @async needed\n        conn.send(process(data))\n    }\n}\nfn main() {\n    server :: TcpListener.bind(\":8080\")\n    loop {\n        conn :: server.accept()\n        task { handle(conn) }   // 100k of these, M:N scheduled\n    }\n}"
+        },
+        {
+          "key": "B",
+          "name": "@async/await + futures",
+          "detail": "Add `@async fn` and `await` expressions. Explicit at every call site that yields; type system tracks async-ness. Functions bifurcate into async/non-async. Introduces function coloring and a second 'this yields' mechanism alongside tasks — I8 tension. Familiar to Rust/JS developers.",
+          "code": "// proposed @async surface:\n@async fn handle(conn: TcpConn) {\n    loop {\n        data :: await conn.recv()\n        await conn.send(process(data))\n    }\n}\n@async fn main() {\n    server :: TcpListener.bind(\":8080\")\n    loop {\n        conn :: await server.accept()\n        task { await handle(conn) }  // color propagates\n    }\n}"
+        },
+        {
+          "key": "C",
+          "name": "Hybrid: M:N scheduler + @async opt-in for fine-grained control",
+          "detail": "Ship the M:N green-thread scheduler (option A) as the default; allow `@async fn` for callers who need explicit future/poll control (e.g. embedding in C event loops). Two mechanisms for yielding — violates I8 unless the `@async` path is kept to an expert escape hatch with a narrow, documented use case.",
+          "code": "// hybrid: plain tasks work at scale (default)\ntask { handle(conn) }\n// @async escape hatch for C-event-loop embedding only:\n@async fn poll_step() -> Bool { ... }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "Go's goroutines are the green-thread / M:N model: write normal blocking code, the scheduler handles concurrency. No function coloring; 100k+ goroutines are routine.",
+          "code": "go func() {\n    for {\n        data, _ := conn.Read(buf)  // blocks goroutine, not OS thread\n        conn.Write(process(data))\n    }\n}()"
+        },
+        {
+          "lang": "Rust / Tokio",
+          "note": "Rust uses async/await + a future executor. Every async call site must be marked; function color propagates. High performance, but the bifurcation is a known ergonomics cost.",
+          "code": "async fn handle(mut conn: TcpStream) {\n    loop {\n        let n = conn.read(&mut buf).await.unwrap();\n        conn.write_all(&buf[..n]).await.unwrap();\n    }\n}"
+        },
+        {
+          "lang": "Erlang / BEAM",
+          "note": "BEAM spawns millions of lightweight processes (green-threads) with no async annotation. Concurrent IO is the default; no function color. The closest prior art to option A at scale.",
+          "code": "handle(Socket) ->\n    {ok, Data} = gen_tcp:recv(Socket, 0),\n    gen_tcp:send(Socket, process(Data)),\n    handle(Socket)."
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "outcome": "A",
+      "ratifiedAt": "2026-06-27",
+      "draft": false,
+      "retiredAt": "2026-07-13T02:50:02.048Z"
+    },
+    {
+      "id": "D-MNIO1",
+      "cardId": "c2iizmyx",
+      "status": "ratified",
+      "gist": "M:N green threads are decided. This card chooses the runtime implementation behind blocking-looking socket/file APIs. It is not user syntax: user code keeps `task { }`, channels, and ordinary reads/writes.",
+      "story": "Gary runs a chat server with 50,000 open TCP connections. Most sockets are idle. `socket.read()` should park the Jet task and free the OS thread until the socket is ready, without Gary learning epoll, kqueue, or IOCP.",
+      "inWild": "task {\n    socket :: tcp.accept()?\n    loop {\n        data :: socket.read()?   // parks Jet task, not OS thread\n        socket.write(handle(data))?\n    }\n}",
+      "comparisons": [
+        {
+          "lang": "Best current",
+          "note": "Go parks goroutines on epoll/kqueue/IOCP through platform-native netpollers, enabling high concurrency.",
+          "code": "runtime netpoll: epoll/kqueue/IOCP"
+        }
+      ],
+      "options": [
+        {
+          "key": "A",
+          "name": "Own platform-native backends (recommended)",
+          "detail": "Implement Linux io_uring/epoll, macOS/BSD kqueue, and Windows IOCP behind one runtime trait. No external event-loop dependency. Highest ceiling and matches Go/BEAM shape: one scheduler, native pollers, task parking, timers, cancellation, and metrics under Jet control.",
+          "code": "// internal runtime only\ntrait IoParker { fn park(fd: Handle, interest: Interest) -> Ready }\n// linux: io_uring/epoll; macOS: kqueue; windows: IOCP"
+        },
+        {
+          "key": "B",
+          "name": "Own portable poller first",
+          "detail": "Start with epoll/kqueue/IOCP readiness only; defer `io_uring` batching. Still no external dependency and simpler to test, but leaves Linux peak throughput on the table.",
+          "code": "// internal runtime only\ntrait Poller { fn wait(events: ~[Event]) -> Int }\n// readiness model on every platform"
+        },
+        {
+          "key": "C",
+          "name": "Use libuv through C FFI",
+          "detail": "Battle-tested portability. Requires explicit owner approval for a runtime external C dependency and a system-library story. Good fallback if owned backends stall, but not the best Jet identity.",
+          "code": "// runtime dependency path\n// libuv event loop wakes Jet scheduler tasks\n// needs owner approval before implementation"
+        }
+      ],
+      "rec": "A",
+      "recReason": "Owning native backends gives Jet the highest performance ceiling, no foreign event-loop dependency, and full observability/control for the task-scope/task runtime. It keeps the user surface unchanged while letting experts tune the runtime.",
+      "created": "2026-06-27",
+      "raisedBy": "agent",
+      "raisedAt": "2026-06-27",
+      "group": "runtime",
+      "title": "Which OS readiness backend parks M:N tasks on I/O?",
+      "explainer": "The scheduler needs one park/wake layer per platform. The decision is between owning native backends, owning a lowest-common-denominator poller, or depending on libuv. I6 matters: compiler Source has zero external crates, and runtime-side deps still need owner approval. The E3 goal is better-than-Go networking, so the backend must support task-per-connection scale, O(ready events) wakeups, low allocation pressure, and runtime observability.",
+      "bestCurrent": "Go: Go parks goroutines on epoll/kqueue/IOCP through platform-native netpollers, enabling high concurrency.",
+      "recommendation": "Build own platform-native backends. Jet needs Go-class scaling as the floor and a higher ceiling through native pollers, structured cancellation, deadlines, and runtime metrics.",
+      "outcome": "A",
+      "ratifiedAt": "2026-06-28",
+      "draft": false,
+      "retiredAt": "2026-07-13T02:50:02.048Z"
     }
   ],
   "cards": [
@@ -67326,6 +67428,125 @@
       "action": "card.criteria-meet",
       "ref": "c0nqsqn5",
       "note": "#6"
+    },
+    {
+      "at": "2026-07-12T13:20:17.578Z",
+      "by": "terra-515-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0nqsqn5",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-12T13:20:28.616Z",
+      "by": "terra-301-builder",
+      "action": "card.update",
+      "ref": "c0075iyb",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-12T13:20:38.699Z",
+      "by": "terra-515-builder",
+      "action": "card.update",
+      "ref": "c0nqsqn5",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T13:21:45.132Z",
+      "by": "terra-515-builder",
+      "action": "card.update",
+      "ref": "c0nqsqn5",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-12T13:24:39.031Z",
+      "by": "terra-301-builder",
+      "action": "card.update",
+      "ref": "c0075iyb",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-12T13:25:36.587Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0075iyb",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-12T13:25:36.675Z",
+      "by": "terra-301-builder",
+      "action": "card.release",
+      "ref": "c0075iyb",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-12T13:25:40.410Z",
+      "by": "terra-296-builder",
+      "action": "card.claim",
+      "ref": "c0uxsyns",
+      "note": ""
+    },
+    {
+      "at": "2026-07-12T13:28:03.544Z",
+      "by": "claude-main",
+      "action": "card.criteria-verify",
+      "ref": "c0nqsqn5",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-12T13:28:03.648Z",
+      "by": "claude-main",
+      "action": "card.criteria-verify",
+      "ref": "c0nqsqn5",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-12T13:28:03.750Z",
+      "by": "claude-main",
+      "action": "card.criteria-verify",
+      "ref": "c0nqsqn5",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-12T13:28:03.854Z",
+      "by": "claude-main",
+      "action": "card.criteria-verify",
+      "ref": "c0nqsqn5",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-12T13:28:03.956Z",
+      "by": "claude-main",
+      "action": "card.criteria-verify",
+      "ref": "c0nqsqn5",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-12T13:28:04.063Z",
+      "by": "claude-main",
+      "action": "card.criteria-verify",
+      "ref": "c0nqsqn5",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-12T13:28:04.165Z",
+      "by": "claude-main",
+      "action": "card.criteria-verify",
+      "ref": "c0nqsqn5",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-12T13:28:27.601Z",
+      "by": "agent",
+      "action": "decision.add",
+      "ref": "D-ACCEPT-515",
+      "note": "Accept #515 — Tower Now page: owner-verification queue with acceptance flow"
+    },
+    {
+      "at": "2026-07-12T13:28:27.601Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0nqsqn5",
+      "note": "phase"
     }
   ]
 }
