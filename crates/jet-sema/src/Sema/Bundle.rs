@@ -2040,6 +2040,18 @@ pub(crate) fn expand_generic_module_aliases(
                     continue;
                 }
                 let Some(info) = templates.get(&resolved.target) else {
+                    // The alias names a template that does not exist. This guard
+                    // runs before `expand_alias` (the other E0850 site), so it
+                    // must report the unknown target itself — otherwise the
+                    // alias is silently dropped and the program checks clean.
+                    diags.push(Diagnostic::error(
+                        "E0850",
+                        format!("generic module `{}` not found in this scope", resolved.target),
+                        "check the module template name and make sure it is defined in the same file"
+                            .to_string(),
+                        format!("example: `module {} = MyTemplate<String>`", resolved.name),
+                        Some(resolved.target_span),
+                    ));
                     invalid_aliases.insert(alias.name.clone());
                     continue;
                 };
