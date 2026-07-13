@@ -694,12 +694,14 @@ mod jet_os_interrupt {
                         let count = PENDING.swap(0, Ordering::Acquire);
                         for _ in 0..count {
                             for handler in &handlers {
-                                let _ = std::panic::catch_unwind(
+                                if let Err(payload) = std::panic::catch_unwind(
                                     std::panic::AssertUnwindSafe(|| {
                                         let _boundary = PanicBoundary::enter();
                                         handler();
                                     }),
-                                );
+                                ) {
+                                    super::jet_report_caught_unwind(payload);
+                                }
                             }
                         }
                     }

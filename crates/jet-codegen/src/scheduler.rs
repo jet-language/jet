@@ -263,6 +263,17 @@ struct JetDeadlineUnwind {
     rendered: String,
 }
 
+#[allow(dead_code)] // emitted prelude interrupt dispatcher consumes this helper
+fn jet_report_caught_unwind(payload: Box<dyn std::any::Any + Send>) {
+    if let Some(deadline) = payload.downcast_ref::<JetDeadlineUnwind>() {
+        eprintln!("{}", deadline.rendered);
+    } else if let Some(message) = payload.downcast_ref::<String>() {
+        eprintln!("panic: {message}");
+    } else if let Some(message) = payload.downcast_ref::<&'static str>() {
+        eprintln!("panic: {message}");
+    }
+}
+
 /// Result of calling a scheduler wait point from a native-code boundary that
 /// cannot carry Rust unwinds (Cranelift, C, plugins). The boundary catches the
 /// scheduler's internal control transfer before it reaches foreign frames.
