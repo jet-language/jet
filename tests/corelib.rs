@@ -1181,7 +1181,7 @@ fn run() {{
 
 #[test]
 fn cbor_whole_codable_bytes_and_original_wire_canonical_validation() {
-    if !has_rustc() {
+    if !Command::new("rustc").arg("--version").output().is_ok() {
         eprintln!("note: skipping cbor whole-value test (need rustc)");
         return;
     }
