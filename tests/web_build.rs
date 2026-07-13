@@ -607,7 +607,7 @@ fn run() {}
 
 #[test]
 fn web_missing_return_is_a_preflight_diagnostic() {
-    let src = "#Target(Web)\n#Js\nfn missing() -> Int { n :: 1 }\nfn run() {}\n";
+    let src = "#Target(Web)\n#Target(Js)\nfn missing() -> Int { n :: 1 }\nfn run() {}\n";
     let diags = jet::compile_web_with_path(src, "tests/fixtures/web_missing_return.jet")
         .expect_err("non-void JS function without return must be rejected");
     assert!(diags.iter().any(|d| d.code == "E0114"), "{diags:?}");
@@ -631,7 +631,7 @@ fn wasm_unsupported_internal_abi_is_a_preflight_diagnostic() {
 
 #[test]
 fn wasm_cross_bucket_call_is_a_normal_preflight_diagnostic() {
-    let src = "#Target(Web)\n#Js\nfn browser_value() -> Int { return 1 }\n#WasmExport\nfn compute() -> Int { return browser_value() }\nfn run() {}\n";
+    let src = "#Target(Web)\n#Target(Js)\nfn browser_value() -> Int { return 1 }\n#WasmExport\nfn compute() -> Int { return browser_value() }\nfn run() {}\n";
     let diags = jet::compile_web_with_path(src, "tests/fixtures/web_cross_bucket_call.jet")
         .expect_err("Wasm must not call a JS-bucket function directly");
     assert!(diags.iter().any(|d| d.code == "E-WEB-CROSS-PARTITION"), "{diags:?}");
