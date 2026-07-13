@@ -13,8 +13,38 @@ pub struct BudgetSpec {
     pub enforcement: String,
     pub comparison: String,
     pub limit: String,
+    pub comparison_fact: BudgetComparisonFact,
+    pub limit_fact: BudgetLimitFact,
     pub span: Span,
     pub field_spans: BTreeMap<String, Span>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BudgetComparisonFact {
+    pub kind: String,
+    pub baseline: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BudgetLimitFact {
+    pub kind: String,
+    pub quantity: BudgetQuantity,
+    pub raw: BudgetRawQuantity,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BudgetQuantity {
+    DurationNs(u128),
+    Bytes(u128),
+    Count(u128),
+    Rate { numerator: u128, denominator_ns: u128 },
+    PercentBasisPoints(u128),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BudgetRawQuantity {
+    Scalar { digits: String, suffix: Option<String> },
+    Rate { count_digits: String, per_digits: String, per_suffix: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -243,11 +273,12 @@ fn elaborate(role: &str, entry: &BudgetDecl) -> Result<BudgetSpec, Diagnostic> {
     let (limit_expr, _) = required(&map, "limit", span)?;
     let limit = enum_variant(limit_expr).ok_or_else(|| invalid(&name, "`limit` must be a typed comparison limit", "use `.AtMost(value)`, `.AtLeast(value)`, `.RegressionAtMost(percent)`, or `.ImprovementAtLeast(percent)`", limit_expr.span()))?;
     let deterministic = matches!(metric_variant.as_str(), "BinarySize" | "ArtifactSize" | "GeneratedUnsafe" | "PublicApiItems" | "DependencyCount" | "EffectCount");
-    let comparison = match map.get("comparison") {
+    let comparison_fact = match map.get("comparison") {
         Some((expr, _)) => closed_comparison(&name, expr)?,
-        None if deterministic => "Absolute".into(),
-        None => String::new(),
+        None if deterministic => BudgetComparisonFact { kind: "Absolute".into(), baseline: None },
+        None => BudgetComparisonFact { kind: String::new(), baseline: None },
     };
+    let comparison = comparison_fact.kind.clone();
     if comparison.is_empty() {
         return Err(invalid(&name, "statistical metrics require `.AbsoluteFrom(baseline)` or `.RelativeTo(baseline)`", "add a pinned statistical comparison", metric_expr.span()));
     }
@@ -262,7 +293,7 @@ fn elaborate(role: &str, entry: &BudgetDecl) -> Result<BudgetSpec, Diagnostic> {
     if !deterministic && comparison == "Absolute" {
         return Err(invalid(&name, "statistical metrics cannot use `.Absolute`", "use `.AbsoluteFrom(baseline)` or `.RelativeTo(baseline)`", metric_expr.span()));
     }
-    validate_limit_unit(&name, &metric_variant, &limit, limit_expr)?;
+    let limit_fact = normalize_limit(&name, &metric_variant, &limit, limit_expr)?;
     let scope = match map.get("scope") {
         Some((expr, _)) => closed_scope(&name, expr)?,
         None => "Package".into(),
@@ -302,7 +333,7 @@ fn elaborate(role: &str, entry: &BudgetDecl) -> Result<BudgetSpec, Diagnostic> {
     };
     validate_scope_provider_pair(&name, &metric_variant, &scope, &provider, span)?;
     let field_spans = map.into_iter().map(|(k, (_, s))| (k.to_string(), s)).collect();
-    Ok(BudgetSpec { role: role.into(), name, metric, scope, provider, applicability, enforcement, comparison, limit, span, field_spans })
+    Ok(BudgetSpec { role: role.into(), name, metric, scope, provider, applicability, enforcement, comparison, limit, comparison_fact, limit_fact, span, field_spans })
 }
 
 fn closed_scope(name: &str, expr: &Expr) -> Result<String, Diagnostic> {
@@ -350,21 +381,20 @@ fn closed_metric(name: &str, expr: &Expr) -> Result<(String, String), Diagnostic
     Ok((variant.clone(), variant.clone()))
 }
 
-fn closed_comparison(name: &str, expr: &Expr) -> Result<String, Diagnostic> {
+fn closed_comparison(name: &str, expr: &Expr) -> Result<BudgetComparisonFact, Diagnostic> {
     let Expr::EnumLit { variant, args, .. } = expr else {
         return Err(invalid(name, "`comparison` must be `.Absolute`, `.AbsoluteFrom(name)`, or `.RelativeTo(name)`", "use one closed comparison variant", expr.span()));
     };
     match (variant.as_str(), args.as_slice()) {
-        ("Absolute", []) => Ok(variant.clone()),
-        ("AbsoluteFrom" | "RelativeTo", [arg]) => {
-            let value = match arg { EnumLitArg::Positional(value) => value, EnumLitArg::Named { expr, .. } => expr };
+        ("Absolute", []) => Ok(BudgetComparisonFact { kind: variant.clone(), baseline: None }),
+        ("AbsoluteFrom" | "RelativeTo", [EnumLitArg::Positional(value)]) => {
             let Some(baseline) = string_value(value) else {
                 return Err(invalid(name, format!("`.{variant}` requires one constant baseline name"), "write a lowercase slash-separated name such as `\"ci/linux-x64\"`", value.span()));
             };
             if !baseline_name(&baseline) {
                 return Err(invalid(name, format!("`{baseline}` is not a valid baseline name"), "use nonempty slash-separated lowercase kebab-case segments", value.span()));
             }
-            Ok(variant.clone())
+            Ok(BudgetComparisonFact { kind: variant.clone(), baseline: Some(baseline) })
         }
         _ => Err(invalid(name, "`comparison` must be `.Absolute`, `.AbsoluteFrom(name)`, or `.RelativeTo(name)`", "use one closed comparison variant with its exact arguments", expr.span())),
     }
@@ -529,19 +559,72 @@ fn enum_key(expr: &Expr) -> Option<String> {
     Some(format!("{}({})", variant, rendered.join(",")))
 }
 
-fn enum_arg(expr: &Expr) -> Option<&Expr> {
-    let Expr::EnumLit { args, .. } = expr else { return None };
-    match args.first()? { EnumLitArg::Positional(e) => Some(e), EnumLitArg::Named { expr, .. } => Some(expr) }
-}
-
-fn validate_limit_unit(name: &str, metric: &str, limit: &str, expr: &Expr) -> Result<(), Diagnostic> {
-    let Some(value) = enum_arg(expr) else { return Err(invalid(name, format!("`.{limit}` requires one value"), "add the typed limit value", expr.span())) };
+fn normalize_limit(name: &str, metric: &str, limit: &str, expr: &Expr) -> Result<BudgetLimitFact, Diagnostic> {
+    let Expr::EnumLit { args, .. } = expr else { unreachable!("limit variant checked by caller") };
+    let [EnumLitArg::Positional(value)] = args.as_slice() else {
+        return Err(invalid(name, format!("`.{limit}` requires exactly one positional value"), format!("write `.{limit}(value)`"), expr.span()));
+    };
     if matches!(limit, "RegressionAtMost" | "ImprovementAtLeast") {
-        return match value { Expr::UnitLit { suffix, .. } if suffix == "pct" => Ok(()), _ => Err(invalid(name, "relative limits use the `pct` unit", "write a percent such as `3pct`", value.span())) };
+        let (quantity, raw) = normalize_percent(value).ok_or_else(|| invalid(name, "relative limits use the `pct` unit with at most two decimal places", "write a percent such as `3pct` or `0.25pct`", value.span()))?;
+        return Ok(BudgetLimitFact { kind: limit.into(), quantity: BudgetQuantity::PercentBasisPoints(quantity), raw });
+    }
+    if metric == "Throughput" {
+        let (quantity, raw) = normalize_rate(name, value)?;
+        return Ok(BudgetLimitFact { kind: limit.into(), quantity, raw });
     }
     let allowed = if matches!(metric, "BinarySize" | "ArtifactSize" | "AllocationBytes" | "MemoryHighWater" | "SceneAssetBytes") { &["B", "KiB", "MiB", "GiB"][..] } else if matches!(metric, "StartupTime" | "FrameTime" | "Latency" | "BenchTime" | "ServiceReadiness") { &["ns", "us", "ms", "s"][..] } else { &[][..] };
-    if allowed.is_empty() { return if matches!(value, Expr::Int(n, _, _) if *n >= 0) { Ok(()) } else { Err(invalid(name, "this metric uses a nonnegative Count value", "write a nonnegative integer", value.span())) }; }
-    match value { Expr::UnitLit { suffix, .. } if allowed.contains(&suffix.as_str()) => Ok(()), _ => Err(invalid(name, format!("`{metric}` requires one of these units: {}", allowed.join(", ")), format!("write the limit with a {} suffix", allowed[0]), value.span())) }
+    if allowed.is_empty() {
+        let Expr::Int(n, _, _) = value else { return Err(invalid(name, "this metric uses a nonnegative Count value", "write a nonnegative integer", value.span())) };
+        let count = u128::try_from(*n).map_err(|_| invalid(name, "this metric uses a nonnegative Count value", "write a nonnegative integer", value.span()))?;
+        return Ok(BudgetLimitFact { kind: limit.into(), quantity: BudgetQuantity::Count(count), raw: BudgetRawQuantity::Scalar { digits: n.to_string(), suffix: None } });
+    }
+    let Expr::UnitLit { raw, suffix, .. } = value else { return Err(invalid(name, format!("`{metric}` requires one of these units: {}", allowed.join(", ")), format!("write the limit with a {} suffix", allowed[0]), value.span())) };
+    if !allowed.contains(&suffix.as_str()) { return Err(invalid(name, format!("`{metric}` requires one of these units: {}", allowed.join(", ")), format!("write the limit with a {} suffix", allowed[0]), value.span())); }
+    let multiplier = unit_multiplier(suffix).expect("allowed normalized unit");
+    let base = raw.parse::<u128>().ok().and_then(|n| n.checked_mul(multiplier)).ok_or_else(|| invalid(name, "limit value is not a nonnegative integer in range", "write a nonnegative whole value that fits the normalized unit", value.span()))?;
+    let quantity = if matches!(suffix.as_str(), "B" | "KiB" | "MiB" | "GiB") { BudgetQuantity::Bytes(base) } else { BudgetQuantity::DurationNs(base) };
+    Ok(BudgetLimitFact { kind: limit.into(), quantity, raw: BudgetRawQuantity::Scalar { digits: raw.clone(), suffix: Some(suffix.clone()) } })
+}
+
+fn normalize_percent(value: &Expr) -> Option<(u128, BudgetRawQuantity)> {
+    let Expr::UnitLit { raw, suffix, .. } = value else { return None };
+    if suffix != "pct" { return None; }
+    let mut parts = raw.split('.');
+    let whole = parts.next()?;
+    let fraction = parts.next().unwrap_or("");
+    if parts.next().is_some() || fraction.len() > 2 || whole.is_empty() || !whole.bytes().all(|b| b.is_ascii_digit()) || !fraction.bytes().all(|b| b.is_ascii_digit()) { return None; }
+    let whole = whole.parse::<u128>().ok()?.checked_mul(100)?;
+    let fraction = match fraction.len() { 0 => 0, 1 => fraction.parse::<u128>().ok()?.checked_mul(10)?, _ => fraction.parse::<u128>().ok()? };
+    Some((whole.checked_add(fraction)?, BudgetRawQuantity::Scalar { digits: raw.clone(), suffix: Some(suffix.clone()) }))
+}
+
+fn normalize_rate(name: &str, value: &Expr) -> Result<(BudgetQuantity, BudgetRawQuantity), Diagnostic> {
+    let Expr::StructLit { type_name, fields, .. } = value else { return Err(invalid(name, "Throughput limits use `Rate.{ count: Int, per: Duration }`", "write a rate such as `Rate.{ count: 100, per: 1s }`", value.span())) };
+    if type_name != "Rate" { return Err(invalid(name, "Throughput limits use the `Rate` value family", "write `Rate.{ count: 100, per: 1s }`", value.span())); }
+    let mut count = None;
+    let mut per = None;
+    for (field, _, expr) in fields {
+        let slot = match field.as_str() { "count" => &mut count, "per" => &mut per, _ => return Err(invalid(name, format!("`{field}` is not a Rate field"), "use exactly `count` and `per`", expr.span())) };
+        if slot.replace(expr).is_some() { return Err(invalid(name, format!("Rate `{field}` is written more than once"), "keep one value for each Rate field", expr.span())); }
+    }
+    let count_expr = count.ok_or_else(|| invalid(name, "Rate requires `count`", "add `count: <nonnegative integer>`", value.span()))?;
+    let per_expr = per.ok_or_else(|| invalid(name, "Rate requires `per`", "add `per: <positive duration>`", value.span()))?;
+    let Expr::Int(count, _, _) = count_expr else { return Err(invalid(name, "Rate count must be a nonnegative integer", "write `count: 100`", count_expr.span())) };
+    let count = u128::try_from(*count).map_err(|_| invalid(name, "Rate count must be a nonnegative integer", "write `count: 100`", count_expr.span()))?;
+    let Expr::UnitLit { raw: per_raw, suffix, .. } = per_expr else { return Err(invalid(name, "Rate per must be a positive Duration", "write `per: 1s`", per_expr.span())) };
+    let multiplier = unit_multiplier(suffix).filter(|_| matches!(suffix.as_str(), "ns" | "us" | "ms" | "s")).ok_or_else(|| invalid(name, "Rate per must use ns, us, ms, or s", "write `per: 1s`", per_expr.span()))?;
+    let per_ns = per_raw.parse::<u128>().ok().and_then(|n| n.checked_mul(multiplier)).filter(|n| *n > 0).ok_or_else(|| invalid(name, "Rate per must normalize to a positive Duration", "write a positive whole duration", per_expr.span()))?;
+    let divisor = gcd(count, per_ns);
+    Ok((BudgetQuantity::Rate { numerator: count / divisor, denominator_ns: per_ns / divisor }, BudgetRawQuantity::Rate { count_digits: count.to_string(), per_digits: per_raw.clone(), per_suffix: suffix.clone() }))
+}
+
+fn unit_multiplier(suffix: &str) -> Option<u128> {
+    Some(match suffix { "ns" | "B" => 1, "us" => 1_000, "ms" => 1_000_000, "s" => 1_000_000_000, "KiB" => 1_024, "MiB" => 1_048_576, "GiB" => 1_073_741_824, _ => return None })
+}
+
+fn gcd(mut left: u128, mut right: u128) -> u128 {
+    while right != 0 { let remainder = left % right; left = right; right = remainder; }
+    left.max(1)
 }
 
 fn string_value(expr: &Expr) -> Option<String> {

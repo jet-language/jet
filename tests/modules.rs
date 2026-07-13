@@ -200,6 +200,7 @@ fn perf_budget_sema_rejects_closed_metric_baseline_and_selector_shapes() {
         limit: .AtMost(16ms),
     }]
 }
+
 "#;
     assert_eq!(
         collect_perf_specs(bad_percentile).expect_err("closed percentile")[0].code,
@@ -235,6 +236,63 @@ fn perf_budget_sema_rejects_closed_metric_baseline_and_selector_shapes() {
         collect_perf_specs(wrong_axis).expect_err("profile selector family")[0].code,
         "E2903"
     );
+}
+
+#[test]
+fn perf_budget_sema_normalizes_rate_and_retains_canonical_facts() {
+    let source = |baseline: &str, count: i64, seconds: i64| format!(r#"module env.dev {{
+    services: {{ api: {{ enable: true }} }}
+}}
+module perf.release {{
+    budgets: [Budget.{{
+        name: "throughput",
+        scope: .Service("api"),
+        metric: .Throughput,
+        provider: .ServiceProbe("api"),
+        comparison: .AbsoluteFrom("{baseline}"),
+        limit: .AtLeast(Rate.{{ count: {count}, per: {seconds}s }}),
+        enforcement: .Warn,
+    }}]
+}}
+"#);
+    let first = collect_perf_specs(&source("ci/linux-x64", 100, 2)).expect("valid Rate").remove(0);
+    assert_eq!(first.comparison, "AbsoluteFrom");
+    assert_eq!(first.comparison_fact.baseline.as_deref(), Some("ci/linux-x64"));
+    assert_eq!(first.limit_fact.quantity, jet::Sema::BudgetQuantity::Rate { numerator: 1, denominator_ns: 20_000_000 });
+    assert_eq!(first.limit_fact.raw, jet::Sema::BudgetRawQuantity::Rate { count_digits: "100".into(), per_digits: "2".into(), per_suffix: "s".into() });
+    let second = collect_perf_specs(&source("ci/macos-arm64", 75, 1)).expect("second valid Rate").remove(0);
+    assert_ne!(first.comparison_fact, second.comparison_fact);
+    assert_ne!(first.limit_fact, second.limit_fact);
+}
+
+#[test]
+fn perf_budget_sema_rejects_named_and_extra_limit_arguments() {
+    let cases = [
+        ("BinarySize", "", "", "Absolute", "AtMost", "2MiB"),
+        ("StartupTime", "scope: .Service(\"api\"),", "provider: .ServiceProbe(\"api\"),", "RelativeTo(\"ci/linux-x64\")", "RegressionAtMost", "3pct"),
+        ("Throughput", "scope: .Service(\"api\"),", "provider: .ServiceProbe(\"api\"),", "RelativeTo(\"ci/linux-x64\")", "ImprovementAtLeast", "3pct"),
+        ("Throughput", "scope: .Service(\"api\"),", "provider: .ServiceProbe(\"api\"),", "AbsoluteFrom(\"ci/linux-x64\")", "AtLeast", "Rate.{ count: 100, per: 1s }"),
+    ];
+    for (metric, scope, provider, comparison, constructor, value) in cases {
+        for limit_expr in [format!(".{constructor}.{{ value: {value} }}"), format!(".{constructor}({value}, {value})")] {
+            let src = format!(r#"module env.dev {{ services: {{ api: {{ enable: true }} }} }}
+module perf.release {{
+    budgets: [Budget.{{
+        name: "hostile",
+        {scope}
+        metric: .{metric},
+        {provider}
+        comparison: .{comparison},
+        limit: {limit_expr},
+        enforcement: .Fail,
+    }}]
+}}
+"#);
+            let diagnostics = collect_perf_specs(&src).expect_err("limit constructor arity must reject");
+            assert_eq!(diagnostics[0].code, "E2903", "{limit_expr}");
+            assert!(diagnostics[0].why.contains("exactly one positional"), "{:?}", diagnostics[0]);
+        }
+    }
 }
 
 #[test]
