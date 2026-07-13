@@ -994,11 +994,27 @@ impl<'a> Checker<'a> {
                     if args.len() != 1 {
                         self.diags.push(wrong_core_arity(name, 1, args.len(), span));
                     }
+                    if let Some(arg) = args.get_mut(0) {
+                        let ty = self.infer(&mut arg.expr)?;
+                        if !matches!(ty, Type::Float | Type::Float32) {
+                            self.diags.push(Diagnostic::error(
+                                "E0112",
+                                format!("`to_bits` needs Float or F32, not {}", ty.show()),
+                                "only floating-point values have this bit representation".to_string(),
+                                "pass a Float or F32 value".to_string(),
+                                Some(arg.expr.span()),
+                            ));
+                            return None;
+                        }
+                    }
                     return Some(Type::Int);
                 }
                 ("core.math", "from_bits") => {
                     if args.len() != 1 {
                         self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                    }
+                    if let Some(arg) = args.get_mut(0) {
+                        self.expect_core_arg(name, 0, &Type::Int, arg);
                     }
                     return Some(Type::Float);
                 }

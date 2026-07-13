@@ -1,0 +1,39 @@
+Error [E0112]: `sqrt` needs Float or F32, not Int (a whole number)
+  --> tests/ui/core_math_float_type_mismatch.jet:4:15
+    |
+  4 |     math.sqrt(1)
+    |               ^
+ Why: math functions in this family operate on floating-point numbers
+ Fix: pass a Float or F32 value
+
+Error [E0112]: `is_nan` needs Float or F32, not Int (a whole number)
+  --> tests/ui/core_math_float_type_mismatch.jet:5:17
+    |
+  5 |     math.is_nan(1)
+    |                 ^
+ Why: floating-point classification only applies to floats
+ Fix: pass a Float or F32 value
+
+Error [E0112]: `sign` needs Float or F32, not Int (a whole number)
+  --> tests/ui/core_math_float_type_mismatch.jet:6:15
+    |
+  6 |     math.sign(1)
+    |               ^
+ Why: sign classifies a floating-point value as negative, zero, or positive
+ Fix: pass a Float or F32 value
+
+Error [E0112]: `pow` needs both arguments to have the same float type, but base is Float (a decimal number) and exponent is F32 (a 32-bit decimal number)
+  --> tests/ui/core_math_float_type_mismatch.jet:7:23
+    |
+  7 |     math.pow(2.0, 2.0.to_f32())
+    |                       ^^^^^^
+ Why: D-FLOATW1: mixing float widths is not allowed — use the same width for both
+ Fix: convert with `.to_f32()` or `.to_float()` to match
+
+Error [E0112]: `hypot` needs all arguments to have the same float type
+  --> tests/ui/core_math_float_type_mismatch.jet:8:25
+    |
+  8 |     math.hypot(2.0, 2.0.to_f32())
+    |                         ^^^^^^
+ Why: D-FLOATW1: mixing float widths is not allowed
+ Fix: convert the arguments to the same float width
