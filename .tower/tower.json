@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 531,
-    "rev": 5459,
+    "rev": 5463,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -3175,8 +3175,13 @@
       "plan": "Plan seed from D-WD14:\n1. Re-read the ratified ballot and current spec/Tower plans for overlap.\n2. Split into vertical slices if the feature spans compiler, Core, Jetpack, GUI, and OS surfaces.\n3. Queue exact-syntax/subsurface ballots before parser, manifest, CLI, or API surface changes.\n4. Implement the first ungated vertical slice end to end with executable examples and diagnostics.\n5. Prove beginner default UX and expert audit/control UX with tests or transcripts.",
       "blockedBy": [],
       "workOrder": 46,
-      "assignee": "terra-241-dev",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-13",
+          "by": "codex-orchestrator",
+          "text": "[handoff] Criterion 10 blocked without fake facts. ServiceProbe needs a ratified 20-trial lifecycle/reset/isolation and declared-ready workload identity; SceneProbe needs real named replay playback, scene-ready, viewport/settings, 120+600 frame, renderer/RSS/asset instrumentation; AllocationProbe needs registered finite workloads and allocator counters/boundaries. D-PERFBUDGET-PROVIDER1 forbids PATH/env discovery and requires a typed owning-runtime registry; jet dev currently crosses into jetpack without that bridge. No files changed. Resume after these runtime contracts/implementations exist; criteria 10 and 12 stay open."
+        },
         {
           "at": "2026-07-13",
           "by": "codex-orchestrator",
@@ -3540,8 +3545,7 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
-      "claimedAt": "2026-07-13T22:08:18.521Z"
+      "refs": []
     },
     {
       "id": "c008rjua",
@@ -9599,7 +9603,7 @@
       "plan": "docs/plans/epoch-4/world-class-package-manager.md#e4-jp15--typed-variants-and-cross-compilation",
       "blockedBy": [],
       "workOrder": 76,
-      "assignee": null,
+      "assignee": "grok-426-builder",
       "log": [
         {
           "at": "2026-07-13",
@@ -9615,7 +9619,8 @@
       "updated": "2026-07-13",
       "criteria": [],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-13T22:09:51.277Z"
     },
     {
       "id": "c0kalcyg",
@@ -15139,8 +15144,13 @@
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
-      "assignee": "terra-530-dkim",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-13",
+          "by": "codex-orchestrator",
+          "text": "[handoff] Owner gate queued as D-EMAIL-DKIM-CONFIG1: exact DkimConfig fields and attachment authority must be ratified before public DKIM implementation. SMTP Mailer/send remains complete. D-AUTH1 magic-link product route remains blocked on #438 app.auth/app graph; no standalone auth spellings invented. Resume DKIM immediately after decision, then inject Mailer through the ratified app auth surface."
+        },
         {
           "at": "2026-07-13",
           "by": "codex-orchestrator",
@@ -15231,8 +15241,7 @@
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-13T11:38:37.154Z",
-      "updated": "2026-07-13",
-      "claimedAt": "2026-07-13T22:08:26.538Z"
+      "updated": "2026-07-13"
     }
   ],
   "decisions": [
@@ -31866,6 +31875,98 @@
       "created": "2026-07-13T17:15:10.096Z",
       "outcome": "A",
       "ratifiedAt": "2026-07-13"
+    },
+    {
+      "id": "D-EMAIL-DKIM-CONFIG1",
+      "cardId": "c0aadf2p",
+      "group": "stdlib",
+      "title": "Where should optional DKIM signing policy attach?",
+      "gist": "Choose where one optional DKIM identity and signing policy attaches to Jet's existing Message, SmtpConfig, and Mailer values.",
+      "lesson": "DomainKeys Identified Mail, or DKIM, lets a receiving mail server verify that a domain approved an email. The sender signs selected headers and the body. The receiver finds the public key in the domain's Domain Name System, or DNS.\n\nA selector is a short key name, such as `login-2026`. Together, selector `login-2026` and domain `example.com` point to `login-2026._domainkey.example.com`. That DNS record publishes the public key. The private signing key stays inside the sending service.\n\nEmail can be written in several byte-equivalent forms. Canonicalization turns allowed variations into one stable form before hashing. Relaxed header canonicalization normalizes header names and whitespace. Relaxed body canonicalization normalizes line-end whitespace and trailing empty lines. The same rules must run during signing and verification.\n\nDKIM signs the final serialized email bytes, not the earlier Message fields. A body hash proves the body. A signature covers that hash plus a declared header set. `From` must always be signed. Signing `Subject`, `To`, and content headers prevents useful parts from changing unnoticed.\n\nJet already has SHA-256, Ed25519 signing, and redacted Secret values. This decision can therefore fix `ed25519-sha256` with relaxed canonicalization. It needs no second algorithm menu. The private key remains a Secret and is copied only inside the signing boundary, then zeroed.\n\nThe open choice is policy ownership. Signing can belong to the SMTP configuration, to Mailer construction, or to each Message. Ownership matters because omitted signing can silently send an unsigned login email. It also decides whether one Mailer can represent several domains.",
+      "explainer": "",
+      "story": "Mara sends passwordless login links from `login@example.com`. Operations rotates DKIM selector `login-2026` and stores the new private key as a secret. Every message from that Mailer must be signed, including retries performed by application code. A separate product later sends receipts from another domain.",
+      "inWild": "use core.crypto as crypto\nuse core.email as email\n\ndkim_key := crypto.Secret.from_bytes(vault.read(\"mail/dkim/login-2026\")?)\ndkim := email.DkimConfig.{\n    domain: \"example.com\",\n    selector: \"login-2026\",\n    private_key: dkim_key,\n    signed_headers: [\"from\", \"to\", \"subject\", \"mime-version\", \"content-type\", \"content-transfer-encoding\"],\n}\n\n// The chosen option decides where `dkim` appears.\n// Every successful path sends final bytes beginning with DKIM-Signature.",
+      "detail": "Shared law for all options: DkimConfig fields are domain:String, selector:String, private_key:Secret, and signed_headers:[String]. The key is exactly a 32-byte Ed25519 seed. Signing is fixed to ed25519-sha256 and relaxed/relaxed canonicalization. From is mandatory. Header matching is case-insensitive. Duplicate names, absent mandatory headers, and forbidden hop headers are Configuration errors before any SMTP connection. The signer hashes and signs final MIME bytes, prepends one DKIM-Signature header, wipes every private-key copy, and never places key bytes in diagnostics, debug text, logs, or reports. DNS publishes `v=DKIM1; k=ed25519; p=<base64 public key>` at `<selector>._domainkey.<domain>`. SPF and DMARC remain DNS policy. smtp_from_env accepts DKIM only when SMTP_DKIM_DOMAIN, SMTP_DKIM_SELECTOR, and SMTP_DKIM_PRIVATE_KEY_BASE64 are all present. SMTP_DKIM_SIGNED_HEADERS may replace the safe header list. Partial or malformed environment configuration fails before connecting.",
+      "options": [
+        {
+          "key": "A",
+          "name": "DKIM belongs to SmtpConfig",
+          "detail": "Add one optional `dkim` field to SmtpConfig. `smtp_from_env` fills it automatically when the complete DKIM environment set exists. An expert passes the same DkimConfig directly. One Mailer then represents one relay policy and at most one signing identity. Every send through that Mailer follows the same rule, so login mail cannot forget signing per message.",
+          "technical": "SmtpConfig gains `dkim:DkimConfig?`. `none` means unsigned mail. `some` means Mailer construction validates domain, selector, key length, and signed_headers. Mailer owns the extracted key and zeroes it on construction failure and Drop. Mailer.send serializes once, canonicalizes those final bytes, signs them, checks the configured message bound again with the DKIM header included, then begins SMTP. No unsigned fallback exists after a signing error. Creating separate Mailers is the explicit multi-domain path.",
+          "code": "config := email.SmtpConfig.{\n    host: \"smtp.example.com\", port: 587, security: .StartTls,\n    auth: .Password(username: \"mailer\", password: smtp_password),\n    recipient_policy: .RequireAll, trust: .System,\n    limits: email.Limits.safe(), dkim: some(dkim),\n}\nmailer := email.smtp(config)?\nreport := mailer.send(message)?\n\n// Invalid key:\n// EmailError.Configuration(operation: \"dkim\", reason: \"private_key must contain exactly 32 bytes\")\n// No TCP connection was opened."
+        },
+        {
+          "key": "B",
+          "name": "DKIM attaches during Mailer construction",
+          "detail": "Keep SmtpConfig limited to SMTP transport policy. Pass optional signing policy beside it when constructing a Mailer. The Mailer still enforces one identity on every send. The visible distinction says transport and authorship are separate concerns, but it widens the already-ratified smtp constructor.",
+          "technical": "The expert form becomes `smtp(config, dkim:DkimConfig?)`. smtp_from_env reads both transport and DKIM environment values before calling that constructor. Mailer owns and wipes the extracted key exactly as in A. Signing order, bounds, canonicalization, error behavior, and multi-Mailer domain separation are identical. The cost is a second authority beside SmtpConfig that must travel with it through factories and tests.",
+          "code": "mailer := email.smtp(config, dkim: some(dkim))?\nreport := mailer.send(message)?\n\n// Missing selector in environment:\n// EmailError.Configuration(operation: \"smtp_from_env\", reason: \"SMTP_DKIM_DOMAIN, SMTP_DKIM_SELECTOR, and SMTP_DKIM_PRIVATE_KEY_BASE64 must be set together\")\n// No TCP connection was opened."
+        },
+        {
+          "key": "C",
+          "name": "DKIM belongs to each Message",
+          "detail": "Attach DkimConfig while preparing each Message. One Mailer can then send for several domains. This serves multi-tenant systems directly. It also lets one call omit signing while neighboring calls sign, so policy review must inspect every message path.",
+          "technical": "Message gains a signing attachment operation and carries protected signing state until Mailer.send consumes it. The Mailer signs after final serialization, never serializes the key, and wipes extracted copies. smtp_from_env cannot guarantee signing by Mailer identity alone; it must inject a default into every Message path or reject unsigned messages through another policy field. Adding that rejection field would create a second signing authority, so this option leaves omission under caller control.",
+          "code": "login := message.with_dkim(login_dkim)?\nreceipt := other_message.with_dkim(receipt_dkim)?\nreport1 := mailer.send(login)?\nreport2 := mailer.send(receipt)?\n\n// This compiles and sends unsigned mail:\nreport3 := mailer.send(message)?\n// Review must catch whether that omission was intended."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Nodemailer",
+          "note": "Nodemailer normally places DKIM policy on the transport object. One transport then signs every message, while multiple keys can be selected by policy.",
+          "code": "createTransport({ dkim: { domainName, keySelector, privateKey } })"
+        },
+        {
+          "lang": "Python dkimpy",
+          "note": "dkimpy signs completed message bytes through a separate signing call. This exposes the protocol boundary, but applications must remember to call it before transport.",
+          "code": "signed = dkim.sign(message_bytes, selector, domain, private_key)"
+        },
+        {
+          "lang": "Rust lettre",
+          "note": "Mail libraries commonly separate message construction from transport. DKIM integrations often wrap or extend transport so signing policy applies consistently at send time.",
+          "code": "transport.send(&message)?"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A makes signing part of the same auditable send policy as relay trust, authentication, recipient handling, and limits. Beginner environment setup and expert records construct one identical Mailer. A login path cannot accidentally omit DKIM on one Message while using a signing Mailer.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It preserves consistent Mailer signing, but splits one operational mail policy across two constructor inputs. Factories, tests, and configuration stores must keep those values paired."
+          },
+          {
+            "key": "C",
+            "reason": "It supports several identities through one Mailer, but permits accidental unsigned mail on any call. Preventing that would require another Mailer policy and two competing authorities."
+          }
+        ],
+        "tradeoff": "A uses one Mailer per signing identity. Multi-domain services create several Mailers, which is acceptable because keys, domains, selectors, and audit policy already differ by identity."
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "Use A as the canonical policy owner. Keep signing fields inside one nested DkimConfig, preserving B's conceptual separation without a second constructor authority. Multi-domain experts harvest C's flexibility by creating named Mailers per identity, not by weakening per-send guarantees.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "One enforced identity policy per Mailer",
+            "use": "Keep optional DkimConfig inside SmtpConfig and apply it to every send."
+          },
+          {
+            "key": "B",
+            "aspect": "Transport and signing remain understandable as different jobs",
+            "use": "Preserve that boundary through a nested DkimConfig rather than a second constructor argument."
+          },
+          {
+            "key": "C",
+            "aspect": "Explicit multi-domain control",
+            "use": "Use separate named Mailers per identity. Per-message override cannot fit without allowing accidental unsigned mail or adding conflicting policy."
+          }
+        ]
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-13T22:17:26.386Z"
     }
   ],
   "questions": [
@@ -32648,6 +32749,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-13T22:18:03.716Z",
+      "by": "codex-orchestrator",
+      "action": "card.release",
+      "ref": "ccq07pav",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-13T22:17:34.950Z",
+      "by": "codex-orchestrator",
+      "action": "card.release",
+      "ref": "c0aadf2p",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-13T22:17:26.386Z",
+      "by": "codex-orchestrator",
+      "action": "decision.add",
+      "ref": "D-EMAIL-DKIM-CONFIG1",
+      "note": "Where should optional DKIM signing policy attach?"
+    },
+    {
+      "at": "2026-07-13T22:09:51.277Z",
+      "by": "grok-426-builder",
+      "action": "card.claim",
+      "ref": "c0hgr4pk",
+      "note": ""
+    },
     {
       "at": "2026-07-13T22:08:26.538Z",
       "by": "terra-530-dkim",
@@ -36118,34 +36247,6 @@
       "by": "fable-main",
       "action": "card.update",
       "ref": "c0a9unm3",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-13T01:51:29.453Z",
-      "by": "fable-main",
-      "action": "card.claim",
-      "ref": "c0a9unm3",
-      "note": ""
-    },
-    {
-      "at": "2026-07-13T01:51:29.347Z",
-      "by": "fable-main",
-      "action": "card.update",
-      "ref": "c0fchu51",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-13T01:51:29.210Z",
-      "by": "fable-main",
-      "action": "card.update",
-      "ref": "c0qwckht",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-13T01:46:44.466Z",
-      "by": "fable-main",
-      "action": "card.update",
-      "ref": "c0qdr54o",
       "note": "phase,logEntry"
     }
   ],
