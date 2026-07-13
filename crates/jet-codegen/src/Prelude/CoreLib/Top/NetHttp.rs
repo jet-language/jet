@@ -393,6 +393,16 @@ fn jet_net_operation_deadline(timeout_ms: Option<i64>) -> Option<JetDeadlineGuar
     Some(jet_ctx_push_deadline(deadline))
 }
 
+fn jet_net_deadline_timeout(operation: &str) -> JetNetError {
+    JetNetError::Timeout(jet_net_detail(
+        operation,
+        None,
+        None,
+        format!("deadline exceeded while waiting in {}", operation),
+        None,
+    ))
+}
+
 fn jet_net_scheduler_wait(
     stream: &std::net::TcpStream,
     read: bool,
@@ -410,13 +420,7 @@ fn jet_net_scheduler_wait(
             format!("{} cancelled", operation),
             None,
         ))),
-        JetSchedulerWait::Deadline(message) => Err(JetNetError::Timeout(jet_net_detail(
-            operation,
-            None,
-            None,
-            message,
-            None,
-        ))),
+        JetSchedulerWait::Deadline(_) => Err(jet_net_deadline_timeout(operation)),
         JetSchedulerWait::Panicked(message) => Err(JetNetError::Other(jet_net_detail(
             operation,
             None,
@@ -430,7 +434,7 @@ fn jet_net_scheduler_wait(
 fn jet_net_apply_tcp_deadlines(stream: &std::net::TcpStream, op: &str) -> Result<(), JetNetError> {
     if let Some(remaining) = jet_deadline_remaining_ms() {
         if remaining <= 0 {
-            jet_deadline_exceeded(op);
+            return Err(jet_net_deadline_timeout(op));
         }
         let dur = Some(std::time::Duration::from_millis(remaining as u64));
         stream.set_read_timeout(dur)
@@ -655,12 +659,14 @@ fn jet_net_tcp_read_text(stream: &mut JetTcpStream, limit: i64) -> Result<String
     })
 }
 
-fn jet_net_tcp_write_bytes(stream: &mut JetTcpStream, data: &Vec<u8>) -> Result<i64, JetNetError> {
+fn jet_net_tcp_write_bytes_with_current_deadline(
+    stream: &mut JetTcpStream,
+    data: &[u8],
+) -> Result<i64, JetNetError> {
     use std::io::Write;
     if stream.closed || stream.write_shutdown {
         return Err(jet_net_closed("tcp write"));
     }
-    let _deadline = jet_net_operation_deadline(stream.write_timeout_ms);
     jet_net_apply_tcp_deadlines(&stream.inner, "tcp write")?;
     loop {
         match stream.inner.write(data) {
@@ -673,10 +679,16 @@ fn jet_net_tcp_write_bytes(stream: &mut JetTcpStream, data: &Vec<u8>) -> Result<
     }
 }
 
+fn jet_net_tcp_write_bytes(stream: &mut JetTcpStream, data: &Vec<u8>) -> Result<i64, JetNetError> {
+    let _deadline = jet_net_operation_deadline(stream.write_timeout_ms);
+    jet_net_tcp_write_bytes_with_current_deadline(stream, data)
+}
+
 fn jet_net_tcp_write_all_bytes(stream: &mut JetTcpStream, data: &Vec<u8>) -> Result<(), JetNetError> {
+    let _deadline = jet_net_operation_deadline(stream.write_timeout_ms);
     let mut offset = 0usize;
     while offset < data.len() {
-        let wrote = jet_net_tcp_write_bytes(stream, &data[offset..].to_vec())? as usize;
+        let wrote = jet_net_tcp_write_bytes_with_current_deadline(stream, &data[offset..])? as usize;
         if wrote == 0 {
             return Err(JetNetError::ConnectionReset(jet_net_detail(
                 "tcp write all",

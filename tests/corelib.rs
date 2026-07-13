@@ -1204,6 +1204,117 @@ fn run() {
 }
 
 #[test]
+fn core_net_tcp_expired_deadlines_return_typed_timeouts() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_core_net_expired_deadlines_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "net_expired_deadlines",
+        r#"
+use core.net as net
+use core.tasks as tasks
+use core.time as time
+
+fn run() {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    typed_address :: net.listener_local_socket_addr(listener) ?? panic("address")
+    address :: net.socket_to_string(typed_address)
+    server :: tasks.spawn(take(listener) () => {
+        first := net.tcp_accept(listener) ?? return
+        time.sleep(100)
+        first.close() ?? return
+        second := net.tcp_accept(listener) ?? return
+        time.sleep(100)
+        second.close() ?? return
+    })
+
+    first := net.tcp_connect(address) ?? panic("first connect")
+    net.set_read_timeout(&first, 0) ?? panic("zero timeout")
+    if first.read(1) == {
+        ok(_) -> print("unexpected first read")
+        err(error) -> print(net.error_message(error))
+    }
+    first.close() ?? panic("first close")
+
+    second := net.tcp_connect(address) ?? panic("second connect")
+    #Context(deadline: time.now() - 1) {
+        if second.read(1) == {
+            ok(_) -> print("unexpected second read")
+            err(error) -> print(net.error_message(error))
+        }
+    }
+    second.close() ?? panic("second close")
+    server.join()
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(
+        stdout,
+        "deadline exceeded while waiting in tcp read\ndeadline exceeded while waiting in tcp read\n"
+    );
+    assert!(!stderr.contains("E3003"), "typed timeout escaped as runtime deadline: {stderr}");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn core_net_tcp_write_all_uses_one_absolute_deadline() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_core_net_write_deadline_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "net_write_deadline",
+        r#"
+use core.net as net
+use core.tasks as tasks
+use core.time as time
+
+fn run() {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    typed_address :: net.listener_local_socket_addr(listener) ?? panic("address")
+    address :: net.socket_to_string(typed_address)
+    server :: tasks.spawn(take(listener) () => {
+        stream := net.tcp_accept(listener) ?? return
+        loop {
+            chunk := stream.read(65536) ?? return
+            if chunk.len() == 0 {
+                return
+            }
+            time.sleep(15)
+        }
+    })
+    client := net.tcp_connect(address) ?? panic("connect")
+    net.set_write_timeout(&client, 80) ?? panic("timeout")
+    started := time.now()
+    if client.write_text("x".repeat(16000000)) == {
+        ok(_) -> print("unexpected write")
+        err(error) -> print(net.error_message(error))
+    }
+    elapsed := time.now() - started
+    print(elapsed < 300)
+    client.close() ?? panic("close")
+    server.join()
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, "deadline exceeded while waiting in tcp write\ntrue\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn core_tls_byte_stream_runs_real_local_handshake_and_close_notify() {
     let dir = std::env::temp_dir().join(format!("jet_core_tls_surface_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
