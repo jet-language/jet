@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 531,
-    "rev": 5311,
+    "rev": 5335,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -9160,13 +9160,23 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": "e4-jetpack-world-class",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": "docs/plans/epoch-4/world-class-package-manager.md#e4-jp2--one-derivationaction-ir-and-complete-cache-identity",
       "blockedBy": [],
       "workOrder": 71,
-      "assignee": "grok-419-builder",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-13",
+          "by": "grok-419-verify2",
+          "text": "VERIFY PASS Y. C1–C4 still green (BuildPlan IR, ActionKey v2, FrontEndCompletion). jetpack_truth green after #419 truth-matrix live row on master (0e3c158d). Dependents blockedBy c0yxdqju (#419) can clear on parent blocker sweep."
+        },
+        {
+          "at": "2026-07-13",
+          "by": "grok-419-builder",
+          "text": "Live-board rebuild: criteria met after worktree verify PASS; hand to grok-419-verify2."
+        },
         {
           "at": "2026-07-12",
           "by": "cursor-e4-burn",
@@ -9179,43 +9189,42 @@
         {
           "n": 1,
           "text": "One executable action IR covers BuildRecipe/fn build/adapters/toolchains/plugins/generated source under one graph; no parallel second IR.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-13T09:46:12.515Z"
+          "status": "verified",
+          "metBy": "grok-419-builder",
+          "verifiedBy": "grok-419-verify2",
+          "evidence": "Recipe::lower_to_plan builds one BuildPlan; ActionSpec path holds legacy/plugins/generated. Focused: cargo test -p jetpack --lib Recipe:: → recipe_lowers_to_one_build_plan_with_complete_fingerprint ok. Reconfirmed by grok-419-verify2.",
+          "at": "2026-07-13T18:19:59.826Z"
         },
         {
           "n": 2,
           "text": "Action/cache keys include every declared input (parser/sema/policy/diagnostics inputs cannot be bypassed for hits).",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-13T09:46:12.646Z"
+          "status": "verified",
+          "metBy": "grok-419-builder",
+          "verifiedBy": "grok-419-verify2",
+          "evidence": "canonical_action_key jet.action-key.v2 covers kind/exact-source/env-allowlist/dep-outputs/toolchain/helpers/caps. tests/build_graph::complete_action_key_* + action_keys_are_deterministic. Reconfirmed by grok-419-verify2.",
+          "at": "2026-07-13T18:19:59.921Z"
         },
         {
           "n": 3,
           "text": "Focused build_graph/build_sandbox/Recipe/Store identity tests prove miss on any changed input and hit only on complete identity.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-13T09:46:12.756Z"
+          "status": "verified",
+          "metBy": "grok-419-builder",
+          "verifiedBy": "grok-419-verify2",
+          "evidence": "cargo test --test build_graph -- complete_action_key_* action_kinds_have_distinct_identities front_end_completion_gates_cache_lookup → 3 ok; cargo test -p jetpack --lib Recipe:: → 8 ok. Reconfirmed by grok-419-verify2.",
+          "at": "2026-07-13T18:20:00.006Z"
         },
         {
           "n": 4,
           "text": "truth-matrix + plan JP2 exit notes match live behavior; no fixture-only close.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-13T09:46:12.877Z"
+          "status": "verified",
+          "metBy": "grok-419-builder",
+          "verifiedBy": "grok-419-verify2",
+          "evidence": "truth-matrix.md #419 live row (0e3c158d); nix develop -c cargo test --test jetpack_truth → 2 ok (truth_matrix_covers_every_done_epoch4_card). Reconfirmed by grok-419-verify2. C5/jetpack_truth gate green.",
+          "at": "2026-07-13T18:20:00.098Z"
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
-      "claimedAt": "2026-07-13T09:46:04.042Z"
+      "refs": []
     },
     {
       "id": "c01fj815",
@@ -12970,12 +12979,22 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "building",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
-      "assignee": "terra-502-fortran",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-13",
+          "by": "terra-502-fortran",
+          "text": "[handoff] Integrate commit b5a17633. Scalar ISO_C_BINDING project/script slice is real and targeted-green. Card stays open for Go/JVM/.NET plus Fortran arrays, column-major facts, dedicated effect, example/golden, and parent full-suite verification."
+        },
+        {
+          "at": "2026-07-13",
+          "by": "terra-502-fortran",
+          "text": "Fortran project/script scalar vertical complete at b5a17633: jet inspect bind fortran discovers ISO_C_BINDING Int/Float scalar functions, drives provisioned gfortran, emits typed fortran.* wrappers plus static C-ABI archive, links and executes real call, launders tool failures through snapshotted E3208. Proof: cargo test --test cli fortran_bind_ (2 green); cargo test --test cffi (34 green); cargo check -p jet green. Combined criterion remains open: Go/JVM/.NET and Fortran array/layout/effect/golden scope remains."
+        },
         {
           "at": "2026-07-12",
           "by": "claude-main",
@@ -13009,8 +13028,7 @@
       "needsAcceptance": false,
       "created": "2026-07-12T00:54:48.332Z",
       "updated": "2026-07-13",
-      "workOrder": 23,
-      "claimedAt": "2026-07-13T17:46:29.023Z"
+      "workOrder": 23
     },
     {
       "id": "c0vt1qwz",
@@ -13021,12 +13039,22 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "building",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
-      "assignee": "terra-503-sh",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-13",
+          "by": "terra-503-sh",
+          "text": "[handoff] Sh tranche committed at ad54d95c5c444b0a23b908aef88f1b66ac6c7afc on codex/card-503-sh. Criteria 1,2,3,4,6 met with targeted green evidence. Parent must integrate and independently verify; criterion 5 remains for Lua/Ruby/Perl/PHP/R binders and providers."
+        },
+        {
+          "at": "2026-07-13",
+          "by": "terra-503-sh",
+          "text": "Implemented D-FFI-SH1=A vertical in ad54d95c: Sh expected-type and sh-prefix typed text, one argv item per hole, argv-only process.run, audited Sh.raw, E0149 snapshot, example/golden, formatter and dev parity coverage. Targeted suites green; full verification remains parent-owned."
+        },
         {
           "at": "2026-07-12",
           "by": "claude-main",
@@ -13047,38 +13075,38 @@
         {
           "n": 1,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "terra-503-sh",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-12T01:59:48.480Z"
+          "evidence": "ad54d95c adds Sh and typed-text sentinel constants to crates/jet-foundation/src/Syntax/core_surface.rs with D-FFI-SH1/D-TYPEDTEXT2 IDs.",
+          "at": "2026-07-13T18:17:46.448Z"
         },
         {
           "n": 2,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "terra-503-sh",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-12T01:59:48.480Z"
+          "evidence": "docs/spec/syntax-decisions.md already records ratified D-FFI-SH1=A exact Sh law: expected type and sh prefix, one argv item per hole, no shell parsing, Sh.raw sole audited escape.",
+          "at": "2026-07-13T18:17:53.139Z"
         },
         {
           "n": 3,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "terra-503-sh",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-12T01:59:48.480Z"
+          "evidence": "Ran rebuilt wrote editors/vscode/syntaxes/jet.tmLanguage.json\nwrote editors/tree-sitter/grammar.js\nwrote editors/zed/languages/jet/highlights.scm\nregenerated editor grammar sections; VS Code, tree-sitter, and Zed generated sections were rewritten and remained byte-stable after Syntax registry addition.",
+          "at": "2026-07-13T18:18:03.684Z"
         },
         {
           "n": 4,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "terra-503-sh",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-12T01:59:48.480Z"
+          "evidence": "ad54d95c adds reviewed tests/ui/typed_text_string_into_sh.stderr for E0149; focused UI snapshot rerun passed clean after scoped bless.",
+          "at": "2026-07-13T18:18:16.334Z"
         },
         {
           "n": 5,
@@ -13092,11 +13120,11 @@
         {
           "n": 6,
           "text": "Sh typed text: expected-type + sh-prefix paths, argv-item holes never word-split, Sh.raw audited escape, E0149-family snapshot, process.run(cmd: Sh) end-to-end example",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "terra-503-sh",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-12T02:02:15.552Z"
+          "evidence": "ad54d95c implements expected-type, sh-prefix, Sh.raw, E0149, argv-only process.run, executable example/golden, and hole-boundary runtime proof. Green: focused corelib, fmt, UI, golden, dev parity, decisions, syntax reconciliation, and taint 12/12.",
+          "at": "2026-07-13T18:18:24.117Z"
         }
       ],
       "refs": [
@@ -13105,8 +13133,7 @@
       "needsAcceptance": false,
       "created": "2026-07-12T00:54:48.431Z",
       "updated": "2026-07-13",
-      "workOrder": 24,
-      "claimedAt": "2026-07-13T17:59:54.870Z"
+      "workOrder": 24
     },
     {
       "id": "c0xede68",
@@ -32271,6 +32298,174 @@
   ],
   "events": [
     {
+      "at": "2026-07-13T18:20:00.308Z",
+      "by": "grok-419-verify2",
+      "action": "card.release",
+      "ref": "c0yxdqju",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T18:20:00.216Z",
+      "by": "grok-419-verify2",
+      "action": "card.update",
+      "ref": "c0yxdqju",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T18:20:00.098Z",
+      "by": "grok-419-verify2",
+      "action": "card.criteria-verify",
+      "ref": "c0yxdqju",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-13T18:20:00.006Z",
+      "by": "grok-419-verify2",
+      "action": "card.criteria-verify",
+      "ref": "c0yxdqju",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-13T18:19:59.921Z",
+      "by": "grok-419-verify2",
+      "action": "card.criteria-verify",
+      "ref": "c0yxdqju",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-13T18:19:59.826Z",
+      "by": "grok-419-verify2",
+      "action": "card.criteria-verify",
+      "ref": "c0yxdqju",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-13T18:19:59.734Z",
+      "by": "grok-419-verify2",
+      "action": "card.claim",
+      "ref": "c0yxdqju",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T18:19:59.646Z",
+      "by": "grok-419-builder",
+      "action": "card.release",
+      "ref": "c0yxdqju",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-13T18:19:59.556Z",
+      "by": "grok-419-builder",
+      "action": "card.update",
+      "ref": "c0yxdqju",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T18:19:59.443Z",
+      "by": "grok-419-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0yxdqju",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-13T18:19:59.355Z",
+      "by": "grok-419-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0yxdqju",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-13T18:19:59.268Z",
+      "by": "grok-419-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0yxdqju",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-13T18:19:59.179Z",
+      "by": "grok-419-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0yxdqju",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-13T18:19:49.019Z",
+      "by": "grok-419-builder",
+      "action": "card.claim",
+      "ref": "c0yxdqju",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T18:19:48.924Z",
+      "by": "grok-419-builder",
+      "action": "card.release",
+      "ref": "c0yxdqju",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-13T18:18:36.354Z",
+      "by": "terra-503-sh",
+      "action": "card.release",
+      "ref": "c0vt1qwz",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-13T18:18:24.117Z",
+      "by": "terra-503-sh",
+      "action": "card.criteria-meet",
+      "ref": "c0vt1qwz",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-13T18:18:16.334Z",
+      "by": "terra-503-sh",
+      "action": "card.criteria-meet",
+      "ref": "c0vt1qwz",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-13T18:18:03.684Z",
+      "by": "terra-503-sh",
+      "action": "card.criteria-meet",
+      "ref": "c0vt1qwz",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-13T18:17:53.140Z",
+      "by": "terra-503-sh",
+      "action": "card.criteria-meet",
+      "ref": "c0vt1qwz",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-13T18:17:46.448Z",
+      "by": "terra-503-sh",
+      "action": "card.criteria-meet",
+      "ref": "c0vt1qwz",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-13T18:17:41.543Z",
+      "by": "terra-503-sh",
+      "action": "card.update",
+      "ref": "c0vt1qwz",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T18:15:39.119Z",
+      "by": "terra-502-fortran",
+      "action": "card.release",
+      "ref": "c0u6kwwb",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-13T18:15:22.671Z",
+      "by": "terra-502-fortran",
+      "action": "card.update",
+      "ref": "c0u6kwwb",
+      "note": "phase,logEntry"
+    },
+    {
       "at": "2026-07-13T18:14:12.192Z",
       "by": "terra-241-eval",
       "action": "card.release",
@@ -35601,174 +35796,6 @@
       "action": "acceptance.reject",
       "ref": "D-ACCEPT-519",
       "note": "acceptance/challenge: owner verification is accepted only from a direct loopback connection — set auth.token in .tower/secrets.json to allow a remote device to act as owner"
-    },
-    {
-      "at": "2026-07-13T00:11:19.730Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-NATIVEUI-ANDROID1",
-      "note": "C"
-    },
-    {
-      "at": "2026-07-13T00:11:10.034Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-NATIVEUI-DEV1",
-      "note": "C"
-    },
-    {
-      "at": "2026-07-13T00:10:50.628Z",
-      "by": "owner-ui-rejected",
-      "action": "acceptance.reject",
-      "ref": "D-ACCEPT-519",
-      "note": "acceptance/challenge: owner verification is accepted only from a direct loopback connection — set auth.token in .tower/secrets.json to allow a remote device to act as owner"
-    },
-    {
-      "at": "2026-07-13T00:10:45.965Z",
-      "by": "terra-301-builder",
-      "action": "card.update",
-      "ref": "c0075iyb",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-13T00:10:12.854Z",
-      "by": "terra-480-planner",
-      "action": "decision.add",
-      "ref": "D-NATIVEUI-DEV1",
-      "note": "Native UI hot reload and component preview model"
-    },
-    {
-      "at": "2026-07-13T00:10:12.762Z",
-      "by": "terra-480-planner",
-      "action": "decision.add",
-      "ref": "D-NATIVEUI-ANDROID1",
-      "note": "Android native-widget and Kotlin interop transport"
-    },
-    {
-      "at": "2026-07-13T00:07:48.610Z",
-      "by": "terra-301-builder",
-      "action": "card.claim",
-      "ref": "c0075iyb",
-      "note": ""
-    },
-    {
-      "at": "2026-07-13T00:07:36.909Z",
-      "by": "terra-292-builder",
-      "action": "card.claim",
-      "ref": "c0qi7dc2",
-      "note": ""
-    },
-    {
-      "at": "2026-07-13T00:07:16.182Z",
-      "by": "terra-480-planner",
-      "action": "card.claim",
-      "ref": "c0wqwqaq",
-      "note": ""
-    },
-    {
-      "at": "2026-07-13T00:07:16.081Z",
-      "by": "terra-301-builder",
-      "action": "card.claim",
-      "ref": "c0075iyb",
-      "note": ""
-    },
-    {
-      "at": "2026-07-13T00:07:15.977Z",
-      "by": "terra-292-builder",
-      "action": "card.claim",
-      "ref": "c0qi7dc2",
-      "note": ""
-    },
-    {
-      "at": "2026-07-13T00:07:09.034Z",
-      "by": "owner-ui-rejected",
-      "action": "acceptance.reject",
-      "ref": "D-ACCEPT-519",
-      "note": "acceptance/challenge: owner verification is accepted only from a direct loopback connection — set auth.token in .tower/secrets.json to allow a remote device to act as owner"
-    },
-    {
-      "at": "2026-07-12T23:46:15.253Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0n6vj96",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-12T23:39:41.196Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0wf4bxf",
-      "note": "Tower: server restarts on code change (or version-mismatch banner) — stale-process trap"
-    },
-    {
-      "at": "2026-07-12T23:37:15.548Z",
-      "by": "owner-ui-rejected",
-      "action": "acceptance.reject",
-      "ref": "unknown",
-      "note": "acceptance/challenge: missing owner verification UI interaction marker"
-    },
-    {
-      "at": "2026-07-12T23:36:56.757Z",
-      "by": "grok-477-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0fchu51",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-12T23:36:56.664Z",
-      "by": "grok-477-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0fchu51",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-12T23:36:56.576Z",
-      "by": "grok-477-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0fchu51",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-12T23:36:56.491Z",
-      "by": "grok-477-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0fchu51",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-12T23:04:46.276Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-VALIDATE3",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-12T23:03:44.959Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-VALIDATE2",
-      "note": "B"
-    },
-    {
-      "at": "2026-07-12T22:58:34.888Z",
-      "by": "terra-506b-ballot",
-      "action": "decision.add",
-      "ref": "D-VALIDATE3",
-      "note": "Whether validate blocks get a built-in rule vocabulary beyond check()"
-    },
-    {
-      "at": "2026-07-12T22:54:40.600Z",
-      "by": "terra-506b-ballot",
-      "action": "decision.add",
-      "ref": "D-VALIDATE2",
-      "note": "The error shape decode<T>() returns when a validate block fails"
-    },
-    {
-      "at": "2026-07-12T22:48:07.210Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-JOS-ENGINEHOME1",
-      "note": "C"
     }
   ],
   "nextNum": 368,
