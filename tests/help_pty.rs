@@ -68,6 +68,36 @@ fn enter_expands_then_emits_prefill_without_running_it() {
 }
 
 #[test]
+fn shell_prefill_mode_keeps_palette_on_tty_while_stdout_is_captured() {
+    let jet = env!("CARGO_BIN_EXE_jet");
+    let picked = std::env::temp_dir().join(format!("jet-help-picked-{}", std::process::id()));
+    let shell_line = format!(
+        "JET_HELP_SHELL_PREFILL=1 '{}' '?' --color=never > '{}'; printf '\\nJET_HELP_CAPTURED\\n'; cat '{}'",
+        jet.replace('\'', "'\\''"),
+        picked.display(),
+        picked.display(),
+    );
+    let mut command = Command::new("script");
+    command.args(["-qfec", &shell_line, "/dev/null"])
+        .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = command.spawn().expect("util-linux script must allocate a real PTY");
+    let mut stdin = child.stdin.take().unwrap();
+    stdin.write_all(b"\r").unwrap();
+    stdin.flush().unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(150));
+    stdin.write_all(b"\r").unwrap();
+    drop(stdin);
+    let out = child.wait_with_output().unwrap();
+    let _ = std::fs::remove_file(&picked);
+    assert!(out.status.success(), "PTY child failed: {}", String::from_utf8_lossy(&out.stderr));
+    let transcript = String::from_utf8_lossy(&out.stdout);
+    assert!(transcript.contains("command palette"), "captured stdout disabled palette:\n{transcript}");
+    assert!(transcript.contains("JET_HELP_CAPTURED"), "shell did not regain control:\n{transcript}");
+    assert!(transcript.contains("jet run examples/features/basics/hello.jet"), "selection was not captured:\n{transcript}");
+    assert!(!transcript.contains("Hello, Jet!"), "captured selection executed:\n{transcript}");
+}
+
+#[test]
 fn explicit_color_law_reaches_interactive_renderer() {
     let colored = run_pty(b"q", "always", false);
     assert!(colored.contains("\x1b[1;36m"), "color renderer not active:\n{colored:?}");

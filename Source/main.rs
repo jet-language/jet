@@ -718,7 +718,12 @@ fn find_external(cmd: &str) -> Option<PathBuf> {
 /// non-interactive — the static full palette (no args) or the best matches
 /// for `<query>` (args), printed once and exited.
 fn run_question_mark(args: &[String]) -> ! {
-    let is_tty = std::io::stdout().is_terminal() && std::io::stdin().is_terminal();
+    // #360: shell widgets capture stdout because it carries the selected
+    // command. stdin+stderr remain attached to the real palette TTY.
+    let shell_prefill = std::env::var_os("JET_HELP_SHELL_PREFILL").is_some();
+    let is_tty = std::io::stdin().is_terminal()
+        && (std::io::stdout().is_terminal()
+            || (shell_prefill && std::io::stderr().is_terminal()));
     let color = parse_color(args).resolve(is_tty);
     let mut query_args = Vec::new();
     let mut skip_value = false;

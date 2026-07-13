@@ -76,12 +76,20 @@ fn redraw(prev_lines: usize, frame: &str) -> usize {
 /// dispatch for the true non-TTY case; this fallback only covers the rare
 /// "is a TTY but `stty` unavailable" edge, matching `RawGuard`'s contract).
 pub fn run(color: bool) -> io::Result<()> {
-    if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+    let shell_prefill = std::env::var_os("JET_HELP_SHELL_PREFILL").is_some();
+    if !io::stdin().is_terminal()
+        || (!io::stdout().is_terminal() && !(shell_prefill && io::stderr().is_terminal()))
+    {
         print!("{}", super::Render::render_categorized(&build_index(), 0, false, None, 72, color));
         println!();
         return Ok(());
     }
-    let Some(_guard) = RawGuard::enable() else {
+    let guard = if shell_prefill {
+        RawGuard::enable_with_captured_stdout()
+    } else {
+        RawGuard::enable()
+    };
+    let Some(_guard) = guard else {
         eprint!("{}", Render::render_categorized(&build_index(), 0, false, None, 72, color));
         eprintln!();
         return Ok(());

@@ -39,7 +39,21 @@ impl RawGuard {
     /// `None` when stdin/stdout aren't both a real terminal, or `stty` isn't
     /// available/failed — the caller should use the cooked fallback.
     pub fn enable() -> Option<RawGuard> {
-        if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+        Self::enable_inner(false)
+    }
+
+    /// #360: Help's shell-prefill widget captures stdout as its selected-line
+    /// data channel while rendering the raw UI on terminal stderr. This keeps
+    /// the ordinary REPL/raw-mode contract strict and makes the exception
+    /// explicit at the one caller that needs it.
+    pub fn enable_with_captured_stdout() -> Option<RawGuard> {
+        Self::enable_inner(true)
+    }
+
+    fn enable_inner(ui_on_stderr: bool) -> Option<RawGuard> {
+        if !io::stdin().is_terminal()
+            || (!io::stdout().is_terminal() && !(ui_on_stderr && io::stderr().is_terminal()))
+        {
             return None;
         }
         // `Command::output()` defaults stdin to `Stdio::null()` — `stty`
