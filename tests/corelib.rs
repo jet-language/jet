@@ -1269,6 +1269,84 @@ fn run() {
 }
 
 #[test]
+fn cbor_whole_indefinite_values_obey_normal_canonical_and_limit_laws() {
+    if !Command::new("rustc").arg("--version").output().is_ok() {
+        eprintln!("note: skipping CBOR indefinite-value test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_cbor_indefinite_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let source = r#"
+use core.encoding as encoding
+use core.encoding.cbor as cbor
+
+@[Codable]
+struct Packet { name: String, data: [U8] }
+
+fn run() {
+    array: [Int] := cbor.decode<[Int]>([159, 1, 2, 255]) ?? panic("indefinite array")
+    text := cbor.parse([127, 97, 97, 98, 98, 99, 255]) ?? panic("indefinite text")
+    print(array)
+    print(text.text() ?? "bad")
+
+    // {_ "name": (_ "J", "et"), "data": (_ h'0102', h'03')}
+    packet: Packet := cbor.decode<Packet>([191, 100, 110, 97, 109, 101, 127, 97, 74, 98, 101, 116, 255, 100, 100, 97, 116, 97, 95, 66, 1, 2, 65, 3, 255, 255]) ?? panic("typed indefinite decode")
+    print(packet.name)
+    print(packet.data)
+
+    strict := cbor.CBOROptions.{ max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: true }
+    if cbor.parse([159, 1, 255], copy strict) == {
+        ok(_) -> print(false)
+        err(e) -> print(e.byte_offset == 0 && e.path == "$" && e.reason == "indefinite-length CBOR is not Core deterministic")
+    }
+    if cbor.parse([129, 127, 97, 120, 255], copy strict) == {
+        ok(_) -> print(false)
+        err(e) -> print(e.byte_offset == 1 && e.path == "$[0]")
+    }
+
+    item_limited := cbor.CBOROptions.{ max_depth: 256, max_items: 2, max_bytes: 1024, require_canonical: false }
+    if cbor.parse([159, 1, 2, 255], item_limited) == {
+        ok(_) -> print(false)
+        err(e) -> print(e.byte_offset == 2 && e.path == "$[1]" && e.reason == "max_items 2 exceeded")
+    }
+    chunk_limited := cbor.CBOROptions.{ max_depth: 256, max_items: 2, max_bytes: 1024, require_canonical: false }
+    if cbor.parse([127, 97, 97, 97, 98, 255], chunk_limited) == {
+        ok(_) -> print(false)
+        err(e) -> print(e.byte_offset == 3 && e.path == "$" && e.reason == "max_items 2 exceeded")
+    }
+    depth_limited := cbor.CBOROptions.{ max_depth: 1, max_items: 100, max_bytes: 64, require_canonical: false }
+    if cbor.parse([159, 127, 97, 120, 255, 255], depth_limited) == {
+        ok(_) -> print(false)
+        err(e) -> print(e.byte_offset == 1 && e.path == "$[0]" && e.reason == "max_depth 1 exceeded")
+    }
+
+    if cbor.parse([127, 65, 120, 255]) == {
+        ok(_) -> print(false)
+        err(e) -> print(e.byte_offset == 1 && e.reason == "indefinite CBOR string contains a wrong or indefinite chunk")
+    }
+    if cbor.parse([159, 1]) == {
+        ok(_) -> print(false)
+        err(e) -> print(e.byte_offset == 2 && e.reason == "indefinite CBOR array ended before its break")
+    }
+    if cbor.parse([191, 97, 107, 255]) == {
+        ok(_) -> print(false)
+        err(e) -> print(e.byte_offset == 3 && e.reason == "indefinite CBOR map break appears where a value is required")
+    }
+    if cbor.parse([255]) == {
+        ok(_) -> print(false)
+        err(e) -> print(e.byte_offset == 0 && e.reason == "CBOR break outside an indefinite container")
+    }
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "cbor_indefinite", source, &[], None);
+    assert_eq!(code, 0, "CBOR indefinite-value program failed: {stderr}");
+    assert_eq!(
+        stdout,
+        "[1, 2]\nabc\nJet\n[1, 2, 3]\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n"
+    );
+}
+
+#[test]
 fn cbor_whole_requested_allocation_stays_under_counting_allocator_ceiling() {
     if !Command::new("rustc").arg("--version").output().is_ok() {
         eprintln!("note: skipping cbor counting-allocator test (need rustc)");
@@ -1281,7 +1359,8 @@ use core.encoding.cbor as cbor
 
 fn run() {
     options := cbor.CBOROptions.{ max_depth: 256, max_items: 1000000, max_bytes: 100, require_canonical: false }
-    value := cbor.parse([130, 97, 120, 97, 121], options) ?? panic("parse")
+    value := cbor.parse([130, 97, 120, 97, 121], copy options) ?? panic("definite parse")
+    indefinite := cbor.parse([159, 97, 120, 97, 121, 255], options) ?? panic("indefinite parse")
     print(true)
 }
 "#;

@@ -395,16 +395,53 @@ fn jet_cbor_key_path(path: &str, key: &str, budget: &mut JetCborAllocBudget, off
     out.push_str(path); out.push('['); out.push('"'); for c in key.chars() { out.extend(c.escape_debug()); } out.push('"'); out.push(']');
     Ok((out, charged))
 }
+fn jet_cbor_count_item(items: &mut i64, options: &jet_std::CBOROptions, offset: usize, path: &str) -> Result<(), jet_std::CBORError> {
+    *items = items.checked_add(1).ok_or_else(|| jet_cbor_error(jet_std::CBORErrorKind::Limit, offset, path, "max_items counter overflow"))?;
+    if *items > options.max_items { return Err(jet_cbor_error(jet_std::CBORErrorKind::Limit, offset, path, format!("max_items {} exceeded", options.max_items))); }
+    Ok(())
+}
+fn jet_cbor_indefinite_error(options: &jet_std::CBOROptions, offset: usize, path: &str) -> Result<(), jet_std::CBORError> {
+    if options.require_canonical {
+        Err(jet_cbor_error(jet_std::CBORErrorKind::NonCanonical, offset, path, "indefinite-length CBOR is not Core deterministic"))
+    } else {
+        Ok(())
+    }
+}
+fn jet_cbor_decode_indefinite_string(input: &[u8], i: &mut usize, options: &jet_std::CBOROptions, budget: &mut JetCborAllocBudget, depth: i64, items: &mut i64, path: &str, major: u8, start: usize, allow_bytes: bool) -> Result<jet_std::DataTree, jet_std::CBORError> {
+    jet_cbor_indefinite_error(options, start, path)?;
+    if depth + 1 > options.max_depth { return Err(jet_cbor_error(jet_std::CBORErrorKind::Limit, start, path, format!("max_depth {} exceeded", options.max_depth))); }
+    if major == 2 && !allow_bytes { return Err(jet_cbor_error(jet_std::CBORErrorKind::Unsupported, start, path, "CBOR byte strings are outside core.encoding.Data; use decode<[U8]>")); }
+    let mut bytes = Vec::new();
+    loop {
+        if *i >= input.len() { return Err(jet_cbor_error(jet_std::CBORErrorKind::Truncated, input.len(), path, "indefinite CBOR string ended before its break")); }
+        if input[*i] == 0xff { *i += 1; break; }
+        let chunk_start = *i;
+        let head = input[*i]; *i += 1;
+        let chunk_major = head >> 5; let chunk_add = head & 31;
+        jet_cbor_count_item(items, options, chunk_start, path)?;
+        if chunk_major != major || chunk_add == 31 {
+            return Err(jet_cbor_error(jet_std::CBORErrorKind::Syntax, chunk_start, path, "indefinite CBOR string contains a wrong or indefinite chunk"));
+        }
+        let n = usize::try_from(jet_cbor_read_len(input, i, chunk_add, chunk_start, false, path)?).map_err(|_| jet_cbor_error(jet_std::CBORErrorKind::Limit, chunk_start, path, "CBOR string chunk length exceeds target capacity"))?;
+        if n > input.len() - *i { return Err(jet_cbor_error(jet_std::CBORErrorKind::Truncated, input.len(), path, "CBOR byte/text string chunk is truncated")); }
+        if major == 3 && std::str::from_utf8(&input[*i..*i + n]).is_err() { return Err(jet_cbor_error(jet_std::CBORErrorKind::Syntax, chunk_start, path, "CBOR text chunk is not UTF-8")); }
+        budget.reserve(n, 1, chunk_start, path, if major == 2 { "CBOR byte string" } else { "CBOR text string" })?;
+        bytes.try_reserve_exact(n).map_err(|_| jet_cbor_error(jet_std::CBORErrorKind::Limit, chunk_start, path, "CBOR string allocation failed"))?;
+        bytes.extend_from_slice(&input[*i..*i + n]); *i += n;
+    }
+    if major == 2 { Ok(jet_std::DataTree::Bytes(bytes)) }
+    else { String::from_utf8(bytes).map(jet_std::DataTree::Text).map_err(|_| jet_cbor_error(jet_std::CBORErrorKind::Syntax, start, path, "CBOR text is not UTF-8")) }
+}
 fn jet_cbor_decode_val(input: &[u8], i: &mut usize, options: &jet_std::CBOROptions, budget: &mut JetCborAllocBudget, depth: i64, items: &mut i64, path: &str, allow_bytes: bool) -> Result<jet_std::DataTree, jet_std::CBORError> {
     if *i >= input.len() { return Err(jet_cbor_error(jet_std::CBORErrorKind::Truncated, input.len(), path, "CBOR value is missing")); }
     let start = *i; let b = input[*i]; *i += 1;
-    *items = items.checked_add(1).ok_or_else(|| jet_cbor_error(jet_std::CBORErrorKind::Limit, start, path, "max_items counter overflow"))?;
-    if *items > options.max_items { return Err(jet_cbor_error(jet_std::CBORErrorKind::Limit, start, path, format!("max_items {} exceeded", options.max_items))); }
+    jet_cbor_count_item(items, options, start, path)?;
     let major = b >> 5; let add = b & 31;
     match major {
         0 => i64::try_from(jet_cbor_read_len(input, i, add, start, options.require_canonical, path)?).map(jet_std::DataTree::Int).map_err(|_| jet_cbor_error(jet_std::CBORErrorKind::Unsupported, start, path, "CBOR integer is outside Jet Int")),
         1 => i64::try_from(jet_cbor_read_len(input, i, add, start, options.require_canonical, path)?).ok().and_then(|n| n.checked_neg()?.checked_sub(1)).map(jet_std::DataTree::Int).ok_or_else(|| jet_cbor_error(jet_std::CBORErrorKind::Unsupported, start, path, "CBOR integer is outside Jet Int")),
         2 | 3 => {
+            if add == 31 { return jet_cbor_decode_indefinite_string(input, i, options, budget, depth, items, path, major, start, allow_bytes); }
             let n = usize::try_from(jet_cbor_read_len(input, i, add, start, options.require_canonical, path)?).map_err(|_| jet_cbor_error(jet_std::CBORErrorKind::Limit, start, path, "CBOR string length exceeds target capacity"))?;
             if n > input.len() - *i { return Err(jet_cbor_error(jet_std::CBORErrorKind::Truncated, input.len(), path, "CBOR byte/text string is truncated")); }
             if major == 2 && !allow_bytes { return Err(jet_cbor_error(jet_std::CBORErrorKind::Unsupported, start, path, "CBOR byte strings are outside core.encoding.Data; use decode<[U8]>")); }
@@ -413,6 +450,28 @@ fn jet_cbor_decode_val(input: &[u8], i: &mut usize, options: &jet_std::CBOROptio
             if major == 2 { if allow_bytes { Ok(jet_std::DataTree::Bytes(bytes)) } else { Err(jet_cbor_error(jet_std::CBORErrorKind::Unsupported, start, path, "CBOR byte strings are outside core.encoding.Data; use decode<[U8]>") ) } } else { String::from_utf8(bytes).map(jet_std::DataTree::Text).map_err(|_| jet_cbor_error(jet_std::CBORErrorKind::Syntax, start, path, "CBOR text is not UTF-8")) }
         }
         4 => {
+            if add == 31 {
+                jet_cbor_indefinite_error(options, start, path)?;
+                if depth + 1 > options.max_depth { return Err(jet_cbor_error(jet_std::CBORErrorKind::Limit, start, path, format!("max_depth {} exceeded", options.max_depth))); }
+                let mut xs = Vec::new();
+                let mut index = 0usize;
+                loop {
+                    if *i >= input.len() { return Err(jet_cbor_error(jet_std::CBORErrorKind::Truncated, input.len(), path, "indefinite CBOR array ended before its break")); }
+                    if input[*i] == 0xff { *i += 1; break; }
+                    let (child_path, charged) = jet_cbor_index_path(path, index, budget, *i)?;
+                    if *items >= options.max_items {
+                        let error = jet_cbor_error(jet_std::CBORErrorKind::Limit, *i, &child_path, format!("max_items {} exceeded", options.max_items));
+                        budget.release(charged);
+                        return Err(error);
+                    }
+                    budget.reserve(1, std::mem::size_of::<jet_std::DataTree>(), *i, &child_path, "CBOR array")?;
+                    xs.try_reserve_exact(1).map_err(|_| jet_cbor_error(jet_std::CBORErrorKind::Limit, *i, &child_path, "CBOR array allocation failed"))?;
+                    let child = jet_cbor_decode_val(input, i, options, budget, depth + 1, items, &child_path, allow_bytes);
+                    budget.release(charged);
+                    xs.push(child?); index += 1;
+                }
+                return Ok(jet_std::DataTree::Array(xs));
+            }
             if depth + 1 > options.max_depth { return Err(jet_cbor_error(jet_std::CBORErrorKind::Limit, start, path, format!("max_depth {} exceeded", options.max_depth))); }
             let n = usize::try_from(jet_cbor_read_len(input, i, add, start, options.require_canonical, path)?).map_err(|_| jet_cbor_error(jet_std::CBORErrorKind::Limit, start, path, "CBOR array length exceeds target capacity"))?;
             budget.reserve(n, std::mem::size_of::<jet_std::DataTree>(), start, path, "CBOR array")?;
@@ -426,6 +485,28 @@ fn jet_cbor_decode_val(input: &[u8], i: &mut usize, options: &jet_std::CBOROptio
             Ok(jet_std::DataTree::Array(xs))
         }
         5 => {
+            if add == 31 {
+                jet_cbor_indefinite_error(options, start, path)?;
+                if depth + 1 > options.max_depth { return Err(jet_cbor_error(jet_std::CBORErrorKind::Limit, start, path, format!("max_depth {} exceeded", options.max_depth))); }
+                let mut es = Vec::new();
+                loop {
+                    if *i >= input.len() { return Err(jet_cbor_error(jet_std::CBORErrorKind::Truncated, input.len(), path, "indefinite CBOR map ended before its break")); }
+                    if input[*i] == 0xff { *i += 1; break; }
+                    let key_start = *i;
+                    if *items >= options.max_items { return Err(jet_cbor_error(jet_std::CBORErrorKind::Limit, key_start, path, format!("max_items {} exceeded", options.max_items))); }
+                    budget.reserve(1, std::mem::size_of::<(String, jet_std::DataTree)>(), key_start, path, "CBOR map")?;
+                    es.try_reserve_exact(1).map_err(|_| jet_cbor_error(jet_std::CBORErrorKind::Limit, key_start, path, "CBOR map allocation failed"))?;
+                    let k = match jet_cbor_decode_val(input, i, options, budget, depth + 1, items, path, false)? { jet_std::DataTree::Text(s) => s, _ => return Err(jet_cbor_error(jet_std::CBORErrorKind::Unsupported, key_start, path, "CBOR map key must be text")) };
+                    if es.iter().any(|(old, _)| old == &k) { return Err(jet_cbor_error(jet_std::CBORErrorKind::Unsupported, key_start, path, "duplicate CBOR text map key")); }
+                    if *i >= input.len() { return Err(jet_cbor_error(jet_std::CBORErrorKind::Truncated, input.len(), path, "indefinite CBOR map ended before its value")); }
+                    if input[*i] == 0xff { return Err(jet_cbor_error(jet_std::CBORErrorKind::Syntax, *i, path, "indefinite CBOR map break appears where a value is required")); }
+                    let (key_path, charged) = jet_cbor_key_path(path, &k, budget, key_start)?;
+                    let value = jet_cbor_decode_val(input, i, options, budget, depth + 1, items, &key_path, allow_bytes);
+                    budget.release(charged);
+                    es.push((k, value?));
+                }
+                return Ok(jet_std::DataTree::Object(es));
+            }
             if depth + 1 > options.max_depth { return Err(jet_cbor_error(jet_std::CBORErrorKind::Limit, start, path, format!("max_depth {} exceeded", options.max_depth))); }
             let n = usize::try_from(jet_cbor_read_len(input, i, add, start, options.require_canonical, path)?).map_err(|_| jet_cbor_error(jet_std::CBORErrorKind::Limit, start, path, "CBOR map length exceeds target capacity"))?;
             budget.reserve(n, std::mem::size_of::<(String, jet_std::DataTree)>(), start, path, "CBOR map")?;
@@ -452,6 +533,7 @@ fn jet_cbor_decode_val(input: &[u8], i: &mut usize, options: &jet_std::CBOROptio
             25 => { if *i + 2 > input.len() { return Err(jet_cbor_error(jet_std::CBORErrorKind::Truncated, input.len(), path, "CBOR Float16 is truncated")); } let bits=u16::from_be_bytes([input[*i],input[*i+1]]);*i+=2;if options.require_canonical && jet_cbor_half_to_f64(bits).is_nan() && bits != 0x7e00 { return Err(jet_cbor_error(jet_std::CBORErrorKind::NonCanonical,start,path,"CBOR NaN is not the canonical 0xf97e00 encoding")); }Ok(jet_std::DataTree::Float(jet_cbor_half_to_f64(bits))) }
             26 => { if *i + 4 > input.len() { return Err(jet_cbor_error(jet_std::CBORErrorKind::Truncated, input.len(), path, "CBOR Float32 is truncated")); } let mut buf=[0u8;4];buf.copy_from_slice(&input[*i..*i+4]);*i+=4;let value=f32::from_be_bytes(buf) as f64;if options.require_canonical && (value.is_nan() || jet_cbor_half_exact(value).is_some()) { return Err(jet_cbor_error(jet_std::CBORErrorKind::NonCanonical,start,path,"CBOR Float does not use its preferred shortest encoding")); }Ok(jet_std::DataTree::Float(value)) }
             27 => { if *i + 8 > input.len() { return Err(jet_cbor_error(jet_std::CBORErrorKind::Truncated, input.len(), path, "CBOR Float64 is truncated")); } let mut buf = [0u8; 8]; buf.copy_from_slice(&input[*i..*i+8]); *i += 8; let value=f64::from_be_bytes(buf);if options.require_canonical && (value.is_nan() || jet_cbor_half_exact(value).is_some() || ((value as f32) as f64).to_bits()==value.to_bits()) { return Err(jet_cbor_error(jet_std::CBORErrorKind::NonCanonical,start,path,"CBOR Float does not use its preferred shortest encoding")); }Ok(jet_std::DataTree::Float(value)) }
+            31 => Err(jet_cbor_error(jet_std::CBORErrorKind::Syntax, start, path, "CBOR break outside an indefinite container")),
             _ => Err(jet_cbor_error(jet_std::CBORErrorKind::Unsupported, start, path, format!("unsupported CBOR simple value {add}"))),
         },
         6 => Err(jet_cbor_error(jet_std::CBORErrorKind::Unsupported, start, path, "CBOR tags are unsupported")),

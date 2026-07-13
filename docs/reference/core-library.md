@@ -1364,7 +1364,12 @@ Each adapter is a full serde equivalent, not a lossy subset:
   token-local lexical evidence; no lossy `{name, attrs, children, text}` alias.
 - **CBOR** — typed `[U8]` maps to native byte strings. Untyped `DataTree` rejects
   byte strings and every value outside its closed algebra. Canonical maps use
-  RFC 8949 section 4.2.1 complete encoded-key byte ordering.
+  RFC 8949 section 4.2.1 complete encoded-key byte ordering. Whole-value normal
+  mode accepts definite and indefinite byte strings, text strings, arrays, and
+  maps; canonical validation rejects every indefinite-length item at its original
+  byte offset. Indefinite chunks and containers share the same depth, item, live
+  allocation, duplicate-key, UTF-8, path, and typed-decode checks as definite
+  values.
 - **Base encodings are not dynamic-tree/stream codecs.** `core.encoding.base64` exposes
   `encode`/`decode` and `encode_url`/`decode_url`; `core.encoding.base32`
   exposes `encode`/`decode`. They are scalar `[U8]`/`String` RFC 4648 helpers
@@ -1379,12 +1384,14 @@ Each adapter is a full serde equivalent, not a lossy subset:
   anchors/aliases (`&a`/`*a`). Explicit/custom tags (`!!str`, `!T`) are deferred.
 
 **Current implementation boundary:** JSONL, the existing lossy XML prototype,
-prototype CBOR `encode`/dynamic-tree `decode`, base32/base64url, and an infallible
-key-sorting `json.canonical` exist. The ratified pull handles and shared limits/
-errors, exact lossless XML algebra/C14N, RFC 8785 serializer, CBOR typed/error/
-canonical surface, strict edition migration, hostile standards corpora, and
-AOT/JIT/comptime parity remain open. Entries above state ratified API law, not a
-broad-complete implementation claim.
+base32/base64url, and an infallible key-sorting `json.canonical` exist. CBOR's
+typed whole-value byte verbs, closed errors/options, native `[U8]`, original-wire
+Core deterministic validation, live allocation limits, and normal-mode
+indefinite values execute in the native runtime; pull handles also exist. Exact
+lossless XML algebra/C14N, RFC 8785 serialization, strict edition migration,
+full hostile standards corpora, complete stream lifecycle proof, error-allocation
+oracles, and AOT/JIT/comptime parity remain open. Entries above state ratified API
+law, not a broad-complete implementation claim.
 
 Compiler/runtime codec implementations remain std-only under I6.
 
