@@ -36,6 +36,7 @@ pub enum BinderRuntime {
     EmbeddedTcl,
     FortranIsoCBinding,
     AdaGnatCAbi,
+    FreePascalCdecl,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,6 +51,7 @@ pub enum BindingStubKind {
     TclScript,
     FortranIsoCBinding,
     AdaSpec,
+    PascalSource,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -79,6 +81,7 @@ pub enum ForeignHost {
     EmbeddedTcl,
     FortranIsoCBinding,
     AdaGnatCAbi,
+    FreePascalCdecl,
     LegacyRustExtern,
 }
 
@@ -163,6 +166,13 @@ pub const BINDERS: &[BinderDescriptor] = &[
         runtime: BinderRuntime::AdaGnatCAbi,
         stub_kind: BindingStubKind::AdaSpec,
     },
+    BinderDescriptor {
+        language: ForeignLanguage::Pascal,
+        surface: BinderSurface::Namespace,
+        status: BinderStatus::Active,
+        runtime: BinderRuntime::FreePascalCdecl,
+        stub_kind: BindingStubKind::PascalSource,
+    },
 ];
 
 pub fn binder_for(language: ForeignLanguage) -> Option<&'static BinderDescriptor> {
@@ -210,6 +220,7 @@ pub fn host_for(language: ForeignLanguage, target: ForeignTarget) -> ForeignHost
         ForeignLanguage::Tcl => ForeignHost::EmbeddedTcl,
         ForeignLanguage::Fortran => ForeignHost::FortranIsoCBinding,
         ForeignLanguage::Ada => ForeignHost::AdaGnatCAbi,
+        ForeignLanguage::Pascal => ForeignHost::FreePascalCdecl,
     }
 }
 

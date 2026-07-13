@@ -1769,6 +1769,73 @@ fn run() #(Ada, Io) {
 }
 
 #[test]
+fn pascal_bind_runs_scalar_and_owned_class_lifecycle() {
+    let dir=isolated_cwd("pascal_bind_lifecycle");let source=dir.join("inventory.pas");
+    fs::write(&source,r#"library inventory;
+type
+  TCounter = class
+  private
+    FValue: Int64;
+  public
+    constructor Create(Value: Int64);
+    function Add(Delta: Int64): Int64;
+    destructor Destroy; override;
+  end;
+var Destroyed: Int64 = 0;
+constructor TCounter.Create(Value: Int64);
+begin inherited Create; FValue := Value; end;
+function TCounter.Add(Delta: Int64): Int64;
+begin FValue := FValue + Delta; Result := FValue; end;
+destructor TCounter.Destroy;
+begin Destroyed := Destroyed + 1; inherited Destroy; end;
+function add_scalar(A, B: Int64): Int64; cdecl;
+begin Result := A + B; end;
+function counter_new(Value: Int64): Pointer; cdecl;
+begin Result := Pointer(TCounter.Create(Value)); end;
+function counter_add(Handle: Pointer; Delta: Int64): Int64; cdecl;
+begin Result := TCounter(Handle).Add(Delta); end;
+procedure counter_free(Handle: Pointer); cdecl;
+begin TCounter(Handle).Free; end;
+function destroyed_count(): Int64; cdecl;
+begin Result := Destroyed; end;
+exports add_scalar, counter_new, counter_add, counter_free, destroyed_count;
+begin
+end.
+"#).unwrap();
+    let bind=Command::new(jet()).args(["inspect","bind","pascal"]).arg(&source).args(["--pkg","inventory"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
+    assert!(bind.status.success(),"Pascal bind failed:\n{}",String::from_utf8_lossy(&bind.stderr));
+    let cache=dir.join(".jet/bindings/pascal");assert!(cache.join("libjet_pascal_inventory.a").is_file());assert!(cache.join("libjet_pascal_inventory_runtime.so").is_file());assert!(cache.join("inventory.provenance").is_file());
+    fs::write(dir.join("main.jet"),r#"use pascal.inventory as inv
+
+fn run() #(Pascal, Io) {
+    print(inv.add_scalar(20, 22))
+    handle :: inv.counter_new(40) ?? panic("Pascal constructor failed")
+    print(inv.counter_add(handle, 2) ?? -1)
+    print(inv.destroyed_count())
+    inv.counter_close(^handle)
+    print(inv.destroyed_count())
+}
+"#).unwrap();
+    let run=Command::new(jet()).args(["run","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
+    assert!(run.status.success(),"generated Pascal binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),"42\n42\n0\n1\n");
+    fs::write(dir.join("stale.c"),r#"#include <stdint.h>
+extern int64_t jet_pascal_inventory_counter_new(int64_t);
+extern void jet_pascal_inventory_counter_close(int64_t);
+extern int64_t jet_pascal_inventory_take_error(void);
+extern int64_t jet_pascal_inventory_destroyed_count(void);
+int main(void){int64_t h=jet_pascal_inventory_counter_new(1);if(!h)return 1;jet_pascal_inventory_counter_close(h);if(jet_pascal_inventory_destroyed_count()!=1)return 2;jet_pascal_inventory_counter_close(h);if(jet_pascal_inventory_take_error()!=1)return 3;if(jet_pascal_inventory_destroyed_count()!=1)return 4;return 0;}
+"#).unwrap();
+    let cc=Command::new("cc").arg("stale.c").args(["-L.jet/bindings/pascal","-Wl,-rpath,.jet/bindings/pascal","-l:libjet_pascal_inventory.a","-ljet_pascal_inventory_runtime","-lpthread","-ldl","-o","stale"]).current_dir(&dir).output().unwrap();assert!(cc.status.success(),"stale-handle probe link failed:\n{}",String::from_utf8_lossy(&cc.stderr));let stale=Command::new(dir.join("stale")).current_dir(&dir).output().unwrap();assert!(stale.status.success(),"stale close reached Pascal destructor twice: {:?}",stale.status.code());
+}
+
+#[test]
+fn pascal_bind_launders_fpc_failure_as_e3208() {
+    let dir=isolated_cwd("pascal_bind_failure");let source=dir.join("broken.pas");
+    fs::write(&source,"library broken; type TCounter = class end; function counter_new(Value: Int64): Pointer; cdecl; begin Result := ; end; function counter_add(Handle: Pointer; Delta: Int64): Int64; cdecl; begin Result := 0; end; procedure counter_free(Handle: Pointer); cdecl; begin end; exports counter_new, counter_add, counter_free; begin end.\n").unwrap();
+    let output=Command::new(jet()).args(["inspect","bind","pascal"]).arg(&source).args(["--pkg","broken"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(!output.status.success());let stderr=String::from_utf8_lossy(&output.stderr);assert!(stderr.contains("Error [E3208]:"));assert!(stderr.contains(" Why:"));assert!(stderr.contains(" Fix:"));assert!(!stderr.contains("broken.pas("));check_snapshot("bind_pascal_invalid_e3208.txt",&scrub(&stderr,&source));
+}
+
+#[test]
 fn ada_bind_launders_gnat_failure_as_e3208() {
     let dir=isolated_cwd("ada_bind_failure");let spec=dir.join("broken.ads");
     fs::write(&spec,"package Broken is function Value (N : Long_Long_Integer) return Long_Long_Integer with Export, Convention => C, External_Name => \"broken_value\"; end Broken;\n").unwrap();

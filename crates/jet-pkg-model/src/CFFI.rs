@@ -310,6 +310,9 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
         if lib.starts_with("jet_ada_") {
             for function in &mut merged { function.effect_root=Some("Ada".to_string()); }
         }
+        if lib.starts_with("jet_pascal_") {
+            for function in &mut merged { function.effect_root=Some("Pascal".to_string()); }
+        }
 
         let alias = synthetic_alias(lib);
         let synth_idx = bundle.modules.len();
@@ -658,6 +661,12 @@ pub fn resolve_link(lib: &str, project_root: &Path) -> Result<LinkFlags, Diagnos
         let archive=dir.join(format!("libjet_ada_{actual}.a"));let path_file=dir.join(format!("{actual}.ada-path"));
         let Ok(runtime_dir)=std::fs::read_to_string(path_file) else{return Err(e3201(lib))};let runtime_dir=runtime_dir.trim();
         if archive.is_file()&&std::path::Path::new(runtime_dir).is_absolute()&&std::path::Path::new(runtime_dir).join(if cfg!(target_os="macos"){"libgnat.dylib"}else{"libgnat.so"}).is_file(){return Ok(LinkFlags{lib_dirs:vec![dir.display().to_string(),runtime_dir.into()],link_names:vec![format!("static=jet_ada_{actual}"),"gnat".into(),"pthread".into(),"dl".into(),"m".into()],rpath_dirs:vec![runtime_dir.into()],..Default::default()})}
+        return Err(e3201(lib));
+    }
+    if let Some(actual)=lib.strip_prefix("jet_pascal_") {
+        let dir=project_root.join(Syntax::SOURCE_ROOT_DIR).join(ForeignLanguage::Pascal.bindings_subdir());
+        let archive=dir.join(format!("libjet_pascal_{actual}.a"));let runtime=dir.join(format!("libjet_pascal_{actual}_runtime{}",if cfg!(target_os="macos"){".dylib"}else if cfg!(target_os="windows"){".dll"}else{".so"}));
+        if archive.is_file()&&runtime.is_file(){let path=dir.display().to_string();return Ok(LinkFlags{lib_dirs:vec![path.clone()],link_names:vec![format!("static=jet_pascal_{actual}"),format!("dylib=jet_pascal_{actual}_runtime"),"pthread".into(),"dl".into(),"m".into()],rpath_dirs:vec![path],..Default::default()})}
         return Err(e3201(lib));
     }
     if let Some(actual) = lib.strip_prefix("jet_fortran_") {

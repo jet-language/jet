@@ -33,6 +33,7 @@ pub mod CFFI;
 pub mod FortranBind;
 pub mod GoBind;
 pub mod JavaBind;
+pub mod PascalBind;
 pub mod TclBind;
 // Card #367 / D-PRODUCT-SPLIT1=C slice 3: pure policy computation over the
 // manifest/effect-fixpoint data (no network/provider/shell engine code, same

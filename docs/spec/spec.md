@@ -977,6 +977,27 @@ Provenance hashes the spec, package body, GNAT runtime identity, and binding
 schema. The native link records the exact GNAT runtime directory and rejects a
 missing or non-absolute runtime identity.
 
+## E3 — Object Pascal project binder (D-FFI-PASCAL1=A)
+
+`jet inspect bind pascal <library.pas> --pkg <lib>` compiles a FreePascal
+library's exported `cdecl` routines and writes a typed `pascal.<lib>` cache.
+`Int64` and `Double` cross as Jet `Int` and `Float`. A declared class binds
+through exported `<class>_new`, pointer-first method, and `<class>_free`
+wrappers. Unsupported ABI shapes fail binding instead of being guessed.
+
+Class pointers never reach Jet. A generated C bridge owns them in a bounded
+64-slot table and returns opaque integer identities wrapped in a move-only Jet
+type. Methods borrow that type. `<class>_close(^handle)` consumes it. Closing a
+stale identity is rejected by the table before the Pascal destructor runs;
+process teardown destroys any remaining owned objects before FreePascal library
+finalization. Calls carry the `Pascal` effect.
+
+FreePascal, C compiler, and archiver processes have a 60-second deadline and
+64-KiB output bounds. Compiler failures use laundered **E3208** what/why/fix
+copy. Provenance hashes source, canonical compiler identity, and binder schema.
+Native links pin the generated static bridge and shared Pascal runtime cache,
+including its runtime search path.
+
 ## E2-M13 — Expert low-level tier (S58, implemented)
 
 C/Zig-class control behind two explicit gates; ordinary Jet never reaches it and

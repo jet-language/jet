@@ -67,6 +67,8 @@ pub enum Effect {
     Tcl,
     /// D-FFI-ADA1=A: checked call into a GNAT C-ABI export.
     Ada,
+    /// D-FFI-PASCAL1=A: call into a FreePascal cdecl library.
+    Pascal,
     /// D-WASM1=A: browser/DOM API use — implies JS partition for web targets.
     Browser,
     /// U13 (D-JPK-SECRETCRYPTO1): reading a decrypted repo secret
@@ -94,6 +96,7 @@ impl Effect {
             Effect::Java => "Java",
             Effect::Tcl => "Tcl",
             Effect::Ada => "Ada",
+            Effect::Pascal => "Pascal",
             Effect::Browser => "Browser",
             Effect::Secret => "Secret",
         }
@@ -116,6 +119,7 @@ impl Effect {
             "Java" => Effect::Java,
             "Tcl" => Effect::Tcl,
             "Ada" => Effect::Ada,
+            "Pascal" => Effect::Pascal,
             "Browser" => Effect::Browser,
             "Secret" => Effect::Secret,
             _ => return None,
@@ -142,6 +146,7 @@ impl Effect {
             Effect::Java,
             Effect::Tcl,
             Effect::Ada,
+            Effect::Pascal,
             Effect::Browser,
             Effect::Secret,
         ]
