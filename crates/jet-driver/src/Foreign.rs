@@ -37,6 +37,7 @@ pub enum BinderRuntime {
     FortranIsoCBinding,
     AdaGnatCAbi,
     FreePascalCdecl,
+    DartApiDl,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,6 +53,7 @@ pub enum BindingStubKind {
     FortranIsoCBinding,
     AdaSpec,
     PascalSource,
+    DartContract,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,6 +84,7 @@ pub enum ForeignHost {
     FortranIsoCBinding,
     AdaGnatCAbi,
     FreePascalCdecl,
+    DartHostFfi,
     LegacyRustExtern,
 }
 
@@ -173,6 +176,13 @@ pub const BINDERS: &[BinderDescriptor] = &[
         runtime: BinderRuntime::FreePascalCdecl,
         stub_kind: BindingStubKind::PascalSource,
     },
+    BinderDescriptor {
+        language: ForeignLanguage::Dart,
+        surface: BinderSurface::Namespace,
+        status: BinderStatus::Active,
+        runtime: BinderRuntime::DartApiDl,
+        stub_kind: BindingStubKind::DartContract,
+    },
 ];
 
 pub fn binder_for(language: ForeignLanguage) -> Option<&'static BinderDescriptor> {
@@ -194,6 +204,9 @@ pub fn type_stub_file(
     language: ForeignLanguage,
     lib: &str,
 ) -> Option<PathBuf> {
+    if language == ForeignLanguage::Dart {
+        return Some(binding_cache_dir(project_root,language).join(format!("{lib}_host.dart")));
+    }
     let ext = match language {
         ForeignLanguage::Js => "d.ts",
         _ => return None,
@@ -221,6 +234,7 @@ pub fn host_for(language: ForeignLanguage, target: ForeignTarget) -> ForeignHost
         ForeignLanguage::Fortran => ForeignHost::FortranIsoCBinding,
         ForeignLanguage::Ada => ForeignHost::AdaGnatCAbi,
         ForeignLanguage::Pascal => ForeignHost::FreePascalCdecl,
+        ForeignLanguage::Dart => ForeignHost::DartHostFfi,
     }
 }
 

@@ -105,6 +105,8 @@
             pkgs.gnat
             # D-FFI-PASCAL1=A: provision FreePascal for cdecl estate bindings.
             pkgs.fpc
+            # D-FFI-DART1=A: provision Dart native FFI and AOT tooling.
+            pkgs.dart
             # D-FFI-FORTRAN1=A: provision the ISO_C_BINDING bridge compiler.
             pkgs.gfortran
             # D-FFI-GO1=A: provision the in-process c-archive bridge compiler.

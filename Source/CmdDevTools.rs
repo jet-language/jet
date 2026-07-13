@@ -1325,6 +1325,7 @@ pub(crate) fn run_explain(code: Option<&str>, mode: OutputMode) {
 /// **E3208** fires only when the header is unreadable or has no bindable
 /// prototypes — use `#Extern module c.<lib>` for those declarations.
 pub(crate) fn run_bind(args: &[&String]) {
+    if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::DART_MODULE_ROOT){run_dart_bind(&args[1..]);return;}
     if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::PASCAL_MODULE_ROOT){run_pascal_bind(&args[1..]);return;}
     if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::ADA_MODULE_ROOT){run_ada_bind(&args[1..]);return;}
     if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::TCL_MODULE_ROOT){run_tcl_bind(&args[1..]);return;}
@@ -1491,6 +1492,28 @@ fn run_pascal_bind(args:&[&String]){
     println!("bound {} FreePascal export{} from `{path}` → {out_path}",result.bound.len(),if result.bound.len()==1{""}else{"s"});
 }
 fn pascal_bind_error(path:&str,why:&str)->!{eprintln!("Error [E3208]: Could not generate bindings from `{path}`.");eprintln!(" Why: {why}.");eprintln!(" Fix: export scalar cdecl routines plus `<class>_new`, `<class>_free`, and pointer-first method wrappers, then rerun `jet inspect bind pascal`.");exit(ExitCodes::USER_ERROR)}
+
+/// D-FFI-DART1=A: Dart/Flutter owns the isolate. Generate and compile the
+/// dart_api_dl callback bridge plus a native Jet plugin loaded by `dart:ffi`.
+fn run_dart_bind(args:&[&String]){
+    let usage=||eprintln!("usage: {} inspect bind dart <contract.dart> --jet <compute.jet> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);
+    if args.is_empty()||args[0]=="--help"||args[0]=="-h"{usage();exit(if args.is_empty(){ExitCodes::USAGE}else{0})}
+    let path=args[0].as_str();let mut pkg=None;let mut out=None;let mut compute=None;let mut i=1;
+    while i<args.len(){match args[i].as_str(){"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"--jet"=>{compute=args.get(i+1).map(|v|v.to_string());if compute.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{eprintln!("error: unknown `bind dart` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}
+    let Some(compute)=compute else{eprintln!("error: `bind dart` requires `--jet <compute.jet>` so the Dart host has real native Jet code to load");usage();exit(ExitCodes::USAGE)};
+    let lib=pkg.unwrap_or_else(||{let base=path.rsplit('/').next().unwrap_or(path);base.rsplit_once('.').map(|v|v.0).unwrap_or(base).to_ascii_lowercase()});
+    let source=std::fs::read_to_string(path).unwrap_or_else(|e|dart_bind_error(path,&format!("the Dart contract could not be read ({e})")));
+    let out_path=out.unwrap_or_else(||format!(".jet/bindings/{}/{}.{}",jet::Syntax::DART_MODULE_ROOT,lib,jet::Syntax::FILE_EXT));let cache=std::path::Path::new(&out_path).parent().unwrap_or_else(||std::path::Path::new("."));
+    let mut result=jet::DartBind::bind(std::path::Path::new(path),&source,&lib,cache).unwrap_or_else(|e|dart_bind_error(path,&e.to_string()));
+    if let Err(e)=std::fs::write(&out_path,&result.source){dart_bind_error(path,&format!("the generated cache could not be written ({e})"))}
+    let host=cache.join(format!("{lib}_host.dart"));if let Err(e)=std::fs::write(&host,&result.host_source){dart_bind_error(path,&format!("the Dart host wrapper could not be written ({e})"))}
+    let compute_source=std::fs::read_to_string(&compute).unwrap_or_else(|e|dart_bind_error(path,&format!("the Jet compute source could not be read ({e})")));result.provenance=jet::DartBind::bind_compute_provenance(&result.provenance,std::path::Path::new(&compute),&compute_source).unwrap_or_else(|e|dart_bind_error(path,&e.to_string()));
+    let compiled=jet::compile_plugin(&compute).unwrap_or_else(|_|dart_bind_error(path,"the Jet compute source did not pass Jet front-end checks"));let plugin=compiled.plugin.as_ref().unwrap_or_else(||dart_bind_error(path,"the Jet compute source produced no plugin export artifact"));
+    let native=jet::DartBind::build_compute(&plugin.guest_rust,&result.host_rust,compiled.ffi.as_ref(),&compiled.clinks,&lib,cache).unwrap_or_else(|e|dart_bind_error(path,&e.to_string()));
+    if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),&result.provenance){dart_bind_error(path,&format!("the binding provenance could not be written ({e})"))}
+    println!("bound {} Dart callback{} and native Jet compute `{}` from `{}` → {}",result.bound.len(),if result.bound.len()==1{""}else{"s"},native.display(),path,out_path);
+}
+fn dart_bind_error(path:&str,why:&str)->!{eprintln!("Error [E3208]: Could not generate bindings from `{path}`.");eprintln!(" Why: {why}.");eprintln!(" Fix: mark top-level scalar Dart callbacks with `@pragma('vm:entry-point')`, pass a valid Jet plugin source with `--jet`, and rerun inside the provisioned Jet environment.");exit(ExitCodes::USER_ERROR)}
 
 /// D-FFI-JVM1=A: compile Java bytecode, discover its public ABI with javap,
 /// then build an in-process JNI invocation bridge.

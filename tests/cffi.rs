@@ -92,6 +92,13 @@ fn unified_foreign_binder_registry_routes_active_and_planned_languages() {
             BinderSurface::Namespace,
             BinderStatus::Active,
         ),
+        (
+            ForeignLanguage::Dart,
+            "dart",
+            "bindings/dart",
+            BinderSurface::Namespace,
+            BinderStatus::Active,
+        ),
     ];
 
     for (lang, root, bindings, surface, status) in expected {
@@ -129,6 +136,7 @@ fn unified_foreign_namespace_model_recognizes_c_project_import_only() {
     assert_eq!(ForeignNamespace::from_module_path("tcl.eda").unwrap().language, ForeignLanguage::Tcl);
     assert_eq!(ForeignNamespace::from_module_path("ada.geodesy").unwrap().language, ForeignLanguage::Ada);
     assert_eq!(ForeignNamespace::from_module_path("pascal.inventory").unwrap().language, ForeignLanguage::Pascal);
+    assert_eq!(ForeignNamespace::from_module_path("dart.callbacks").unwrap().language, ForeignLanguage::Dart);
     assert!(ForeignNamespace::from_module_path("c").is_none());
     assert!(ForeignNamespace::from_module_path("c.raylib.extra").is_none());
     assert!(ForeignNamespace::from_module_path("lua.socket").is_none());
@@ -253,6 +261,20 @@ fn foreign_interop_routes_swift_as_planned_c_abi_bridge() {
         route.provenance,
         root.join(".jet/bindings/swift/foundation.provenance")
     );
+}
+
+#[test]
+fn foreign_interop_routes_dart_as_active_api_dl_host() {
+    use jet::Foreign::{route_plan,BinderRuntime,BinderStatus,BindingStubKind,ForeignHost,ForeignTarget};
+    use jet::AST::{ForeignLanguage,ForeignNamespace};
+    let root=PathBuf::from("/tmp/jet_foreign_route");
+    let route=route_plan(&root,ForeignNamespace::from_module_path("dart.callbacks").unwrap(),ForeignTarget::Native).unwrap();
+    assert_eq!(route.descriptor.language,ForeignLanguage::Dart);
+    assert_eq!(route.descriptor.status,BinderStatus::Active);
+    assert_eq!(route.descriptor.runtime,BinderRuntime::DartApiDl);
+    assert_eq!(route.descriptor.stub_kind,BindingStubKind::DartContract);
+    assert_eq!(route.host,ForeignHost::DartHostFfi);
+    assert_eq!(route.type_stub,Some(root.join(".jet/bindings/dart/callbacks_host.dart")));
 }
 
 /// Build a tiny C static library `libjetc.a` in `dir`, returning its directory

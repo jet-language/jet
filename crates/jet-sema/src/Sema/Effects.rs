@@ -69,6 +69,8 @@ pub enum Effect {
     Ada,
     /// D-FFI-PASCAL1=A: call into a FreePascal cdecl library.
     Pascal,
+    /// D-FFI-DART1=A: synchronous callback into a Dart-owned isolate.
+    Dart,
     /// D-WASM1=A: browser/DOM API use — implies JS partition for web targets.
     Browser,
     /// U13 (D-JPK-SECRETCRYPTO1): reading a decrypted repo secret
@@ -97,6 +99,7 @@ impl Effect {
             Effect::Tcl => "Tcl",
             Effect::Ada => "Ada",
             Effect::Pascal => "Pascal",
+            Effect::Dart => "Dart",
             Effect::Browser => "Browser",
             Effect::Secret => "Secret",
         }
@@ -120,6 +123,7 @@ impl Effect {
             "Tcl" => Effect::Tcl,
             "Ada" => Effect::Ada,
             "Pascal" => Effect::Pascal,
+            "Dart" => Effect::Dart,
             "Browser" => Effect::Browser,
             "Secret" => Effect::Secret,
             _ => return None,
@@ -147,6 +151,7 @@ impl Effect {
             Effect::Tcl,
             Effect::Ada,
             Effect::Pascal,
+            Effect::Dart,
             Effect::Browser,
             Effect::Secret,
         ]

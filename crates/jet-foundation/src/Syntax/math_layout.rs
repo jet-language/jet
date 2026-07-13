@@ -350,7 +350,7 @@ pub const CORE_CANONICAL: &str = "core";
 
 /// S51 (ratified M10): first-party short names reserved before packages land.
 pub const FIRST_PARTY_RESERVED: &[&str] = &[
-    "core", "jet", "c", "rust", "py", "js", "swift", "go", "java", "tcl", "fortran", "ada", "pascal", "http", "regex", "csv", "toml", "crypto",
+    "core", "jet", "c", "rust", "py", "js", "swift", "go", "java", "tcl", "fortran", "ada", "pascal", "dart", "http", "regex", "csv", "toml", "crypto",
     "archive",
 ];
 
@@ -371,6 +371,7 @@ pub const FOREIGN_ROOTS: &[&str] = &[
     FORTRAN_MODULE_ROOT,
     ADA_MODULE_ROOT,
     PASCAL_MODULE_ROOT,
+    DART_MODULE_ROOT,
 ];
 pub const PY_MODULE_ROOT: &str = "py"; // D-FFI-PY1 / D-FFI-UNIFY1
 pub const JS_MODULE_ROOT: &str = "js"; // D-FFI-JS1 / D-FFI-UNIFY1
@@ -381,6 +382,7 @@ pub const TCL_MODULE_ROOT: &str = "tcl"; // D-FFI-TCL1 / D-FFI-UNIFY1
 pub const FORTRAN_MODULE_ROOT: &str = "fortran"; // D-FFI-FORTRAN1 / D-FFI-UNIFY1
 pub const ADA_MODULE_ROOT: &str = "ada"; // D-FFI-ADA1 / D-FFI-UNIFY1
 pub const PASCAL_MODULE_ROOT: &str = "pascal"; // D-FFI-PASCAL1 / D-FFI-UNIFY1
+pub const DART_MODULE_ROOT: &str = "dart"; // D-FFI-DART1 / D-FFI-UNIFY1
 
 /// S59 (ratified E2-M14): C FFI module path root — `c.<lib>`, `c.<lib>.__bindgen__`.
 pub const C_MODULE_ROOT: &str = "c"; // S59

@@ -1836,6 +1836,27 @@ fn pascal_bind_launders_fpc_failure_as_e3208() {
 }
 
 #[test]
+fn dart_bind_runs_jet_compute_and_dart_callback_in_process() {
+    if Command::new("dart").arg("--version").output().is_err(){return}
+    let dir=isolated_cwd("dart_bind_round_trip");let contract=dir.join("callbacks.dart");let compute=dir.join("compute.jet");
+    fs::write(&contract,"@pragma('vm:entry-point')\nint dartDouble(int value) => value * 2;\n").unwrap();
+    fs::write(&compute,"use dart.callbacks as callbacks\n\npub fn compute(value: Int) #(Dart) -> Int {\n    return callbacks.dartDouble(value) ?? -1\n}\n").unwrap();
+    let bind=Command::new(jet()).args(["inspect","bind","dart"]).arg(&contract).args(["--jet",compute.to_str().unwrap(),"--pkg","callbacks"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
+    assert!(bind.status.success(),"Dart bind failed:\n{}",String::from_utf8_lossy(&bind.stderr));
+    let cache=dir.join(".jet/bindings/dart");let native=cache.join(if cfg!(target_os="macos"){"libjet_dart_callbacks_compute.dylib"}else if cfg!(target_os="windows"){"libjet_dart_callbacks_compute.dll"}else{"libjet_dart_callbacks_compute.so"});
+    assert!(cache.join("libjet_dart_callbacks.a").is_file());assert!(native.is_file());assert!(cache.join("callbacks_host.dart").is_file());assert!(cache.join("callbacks.provenance").is_file());
+    let native_path=native.to_string_lossy().replace('\\',"\\\\").replace('\'',"\\'");
+    fs::write(dir.join("host.dart"),format!("import 'dart:ffi';\nimport '.jet/bindings/dart/callbacks_host.dart';\ntypedef ComputeNative = Int64 Function(Int64);\ntypedef ComputeDart = int Function(int);\nvoid main() {{ initializeJetDart('{native_path}'); final compute = jetDartLibrary.lookupFunction<ComputeNative, ComputeDart>('compute'); print(compute(21)); shutdownJetDart(); }}\n")).unwrap();
+    let run=Command::new("dart").args(["run","host.dart"]).current_dir(&dir).output().unwrap();assert!(run.status.success(),"Dart host failed:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),"42\n");
+}
+
+#[test]
+fn dart_bind_rejects_untyped_contract_as_e3208() {
+    let dir=isolated_cwd("dart_bind_invalid");let contract=dir.join("broken.dart");fs::write(&contract,"@pragma('vm:entry-point')\nString greet(String value) => value;\n").unwrap();
+    let output=Command::new(jet()).args(["inspect","bind","dart"]).arg(&contract).args(["--jet","compute.jet","--pkg","broken"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(!output.status.success());let stderr=String::from_utf8_lossy(&output.stderr);assert!(stderr.contains("Error [E3208]:"));assert!(stderr.contains(" Why:"));assert!(stderr.contains(" Fix:"));check_snapshot("bind_dart_invalid_e3208.txt",&scrub(&stderr,&contract));
+}
+
+#[test]
 fn ada_bind_launders_gnat_failure_as_e3208() {
     let dir=isolated_cwd("ada_bind_failure");let spec=dir.join("broken.ads");
     fs::write(&spec,"package Broken is function Value (N : Long_Long_Integer) return Long_Long_Integer with Export, Convention => C, External_Name => \"broken_value\"; end Broken;\n").unwrap();

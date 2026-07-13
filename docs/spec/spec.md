@@ -998,6 +998,39 @@ copy. Provenance hashes source, canonical compiler identity, and binder schema.
 Native links pin the generated static bridge and shared Pascal runtime cache,
 including its runtime search path.
 
+## E3 — Dart and Flutter host FFI (D-FFI-DART1=A)
+
+`jet inspect bind dart <contract.dart> --jet <compute.jet> --pkg <lib>` builds
+one in-process, bidirectional FFI estate. The Dart or Flutter application owns
+the isolate. The generated `<lib>_host.dart` loads the native Jet compute
+library with `dart:ffi`, initializes `dart_api_dl` from
+`NativeApi.initializeApiDLData`, pins isolate-local callbacks, and registers
+their native function pointers. Jet compute exports use the existing plugin
+C-ABI surface, so the same library can call Dart callbacks and be called from
+Dart. No helper process, command shell, environment variable, or file protocol
+participates in a call.
+
+`shutdownJetDart()` unregisters every native callback pointer before closing
+the pinned `NativeCallable` values. The isolate can then terminate without
+leaving native code a callable address whose Dart owner has been released.
+
+Dart callbacks are top-level `@pragma('vm:entry-point')` functions with
+positional `int`/`double` inputs and an `int`/`double` result. Unsupported,
+optional, named, generic, object, string, async, or overloaded shapes fail
+binding rather than being guessed. Generated Jet wrappers return
+`DartError.NotInitialized` until the Dart host initializes API DL and
+`DartError.CallbackUnavailable` until a callback is registered. Calls carry
+the `Dart` effect.
+
+`NativeCallable.isolateLocal` makes this vertical synchronous and
+isolate-thread-affine. Flutter uses the same generated Dart host and deploys
+the produced platform library through its ordinary native-library packaging;
+Jet does not claim to embed or launch a Flutter engine. Dart SDK discovery,
+C compilation, archiving, and native Rust compilation are bounded to 60
+seconds and 64 KiB of captured output. Tool failures are laundered behind
+**E3208**. Provenance hashes the contract, Jet compute source, both canonical
+source paths, canonical Dart SDK tool identity, and binder schema.
+
 ## E2-M13 — Expert low-level tier (S58, implemented)
 
 C/Zig-class control behind two explicit gates; ordinary Jet never reaches it and
