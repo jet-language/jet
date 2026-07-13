@@ -1,0 +1,28 @@
+// D-EFFDBREAD1=A: core.db read/write effect leaves. The compiler's own closed
+// core.db method table now tags `conn.query`/`conn.query_one` with the `Db.Read`
+// effect leaf and `conn.execute` with `Db.Write` (transaction-control and
+// `close` keep the plain `Db` root). So a read-only query function can PROVE
+// `#(Db.Read)` — the read-footprint qualification a live query (D-LIVEQUERY1)
+// rides on. A write hiding inside such a function would be rejected by E0740.
+use core.db as db
+
+// A checked read-only query: its inferred effect is exactly `Db.Read`, so the
+// `#(Db.Read)` bound holds. Decoding a row value (`.get`/`.int`) is pure, so it
+// adds no effect — only the `conn.query_one` read does.
+fn person_count(conn: DbConnection) #(Db.Read) -> Int {
+    row_opt :: conn.query_one("SELECT COUNT(*) AS n FROM person", []) ?? panic("count failed")
+    if row_opt == Val(row) {
+        n_val :: row.get("n") ?? panic("missing n")
+        return n_val.int() ?? 0
+    }
+    return 0
+}
+
+fn run() {
+    conn :: db.open_memory()
+    _created :: conn.execute("CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT)", []) ?? panic("create failed")
+    _a :: conn.execute("INSERT INTO person (name) VALUES (?)", [DbValue.Text("Ada")]) ?? panic("insert failed")
+    _b :: conn.execute("INSERT INTO person (name) VALUES (?)", [DbValue.Text("Grace")]) ?? panic("insert failed")
+    print("people: {person_count(conn)}")
+    _closed :: conn.close()
+}

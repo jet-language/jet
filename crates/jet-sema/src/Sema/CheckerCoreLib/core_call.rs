@@ -27,12 +27,16 @@ impl<'a> Checker<'a> {
             // D-EFF1: record the effect this Core call contributes to the enclosing
             // function's inferred set (erased in codegen; purely a sema fact).
             if let Some(e) = core_effect(module, name) {
-                // D-EFFTREE1: Core calls stay tagged with a bare root — real
-                // stdlib call sites are unchanged (no migration break: existing
-                // diagnostics naming `Fs`/`Db`/… keep their exact wording). Leaf
-                // precision (`Fs.Read`, `Db.Write`, …) is a user-declared-contract
-                // concept (a function's own `#(…)` bound, D-PROP1-seeded into its
-                // `direct` set) — see Registration.rs / Bundle.rs.
+                // D-EFFTREE1: Core calls (this module-call path) stay tagged with
+                // a bare root — real stdlib call sites are unchanged (no migration
+                // break: existing diagnostics naming `Fs`/`Db`/… keep their exact
+                // wording). Leaf precision (`Fs.Read`, …) is otherwise a
+                // user-declared-contract concept (a function's own `#(…)` bound,
+                // D-PROP1-seeded into its `direct` set) — see Registration.rs /
+                // Bundle.rs. The one exception is D-EFFDBREAD1=A: `core.db`'s own
+                // closed connection-method table infers `Db.Read`/`Db.Write` leaves
+                // (in `check_db_connection_method`, the method-call path — those
+                // methods never reach this module-call `core_effect`).
                 self.record_effect(e.name());
                 // D-TXN2: an irreversible effect (Net/Fs/Exec — a network/file/
                 // subprocess effect) can't be rolled back, so it is rejected when it

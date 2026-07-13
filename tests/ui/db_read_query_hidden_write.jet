@@ -1,0 +1,15 @@
+// D-EFFDBREAD1=A: `conn.query`/`query_one` carry the `Db.Read` effect leaf and
+// `conn.execute` carries `Db.Write`. A function declared `#(Db.Read)` — the
+// bound a live query (D-LIVEQUERY1) requires — that hides a write is caught by
+// the existing E0740 check, naming the offending `Db.Write` leaf. No new
+// diagnostic code: `Db.Read` does not cover its sibling `Db.Write`.
+use core.db as db
+
+fn touch(conn: DbConnection) #(Db.Read) {
+    _rows :: conn.execute("UPDATE person SET active = 1", []) ?? 0
+}
+
+fn run() {
+    conn :: db.open_memory()
+    touch(conn)
+}

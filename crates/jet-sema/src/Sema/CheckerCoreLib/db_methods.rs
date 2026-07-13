@@ -5,6 +5,26 @@ use crate::Sema::Effects::Effect;
 use crate::Syntax;
 use super::alloc_ptrs::{db_error_ty, db_row_ty, result_ty};
 use super::serde_diags::wrong_core_arity;
+
+/// D-EFFDBREAD1=A: the `Db.Read` effect leaf a database read call proves. Unlike
+/// the general rule that Core calls stay tagged with a bare root (D-EFFTREE1),
+/// `core.db`'s own closed method table is precise enough to infer read/write
+/// leaves — the same shape as rustc special-casing a small list of known
+/// intrinsics. This is what lets a `#(Db.Read)` query function actually check,
+/// the read-footprint proof a live query (D-LIVEQUERY1) rides on. A hidden write
+/// inside such a function is then caught by the existing E0740 check with no new
+/// diagnostic code.
+fn db_read() -> String {
+    format!("{}.Read", Effect::Db.name())
+}
+
+/// D-EFFDBREAD1=A: the `Db.Write` effect leaf a database write call proves
+/// (`execute` — arbitrary DDL/DML). Sibling of `Db.Read`; a `#(Db.Read)` bound
+/// does not cover it (E0740), which is exactly how a write hiding inside a
+/// declared read-only query is rejected.
+fn db_write() -> String {
+    format!("{}.Write", Effect::Db.name())
+}
 impl<'a> Checker<'a> {
         /// D-DBDRIVER1: `(sql: String, params: [DbValue])` argument elaboration shared
         /// by `.query`/`.query_one`/`.execute` — SQL text plus a separate bind list,
@@ -44,7 +64,7 @@ impl<'a> Checker<'a> {
             match method {
                 "query" => {
                     self.check_db_sql_params_args("query", args, span);
-                    self.record_effect(Effect::Db.name());
+                    self.record_effect(&db_read());
                     Some(Some(result_ty(
                         Type::List(Box::new(db_row_ty())),
                         db_error_ty(),
@@ -52,7 +72,7 @@ impl<'a> Checker<'a> {
                 }
                 "query_one" => {
                     self.check_db_sql_params_args("query_one", args, span);
-                    self.record_effect(Effect::Db.name());
+                    self.record_effect(&db_read());
                     Some(Some(result_ty(
                         Type::Option(Box::new(db_row_ty())),
                         db_error_ty(),
@@ -60,7 +80,7 @@ impl<'a> Checker<'a> {
                 }
                 "execute" => {
                     self.check_db_sql_params_args("execute", args, span);
-                    self.record_effect(Effect::Db.name());
+                    self.record_effect(&db_write());
                     Some(Some(result_ty(Type::Int, db_error_ty())))
                 }
                 "begin" | "commit" | "rollback" | "close" => {
@@ -71,6 +91,9 @@ impl<'a> Checker<'a> {
                             self.infer(&mut a.expr);
                         }
                     }
+                    // D-EFFDBREAD1=A: transaction-control and close calls neither
+                    // read nor write rows themselves, so they keep the plain `Db`
+                    // root (an ancestor of both leaves).
                     self.record_effect(Effect::Db.name());
                     Some(Some(Type::Bool))
                 }

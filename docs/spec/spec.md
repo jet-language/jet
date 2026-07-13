@@ -1710,7 +1710,7 @@ function's set when the function reaches an operation that carries it.
 | `Rand`  | `core.random.*` |
 | `Env`   | `core.env.*` |
 | `Exec`  | `core.process.run`/`exit`/`cmd`/`pipeline`, `ProcessSpec.run`/`spawn`, `ProcessChild` wait/control/stream calls, `core.watcher.process_pid` |
-| `Db`    | `core.db.*` |
+| `Db`    | `core.db.*`; leaves (D-EFFDBREAD1): `conn.query`/`conn.query_one` carry `Db.Read`, `conn.execute` carries `Db.Write`, `begin`/`commit`/`rollback`/`close` and `open`/`open_memory` keep the bare `Db` root |
 | `Log`   | `core.log.*` |
 | `Gpu`   | `core.raylib.*`, future `core.gpu.*` / `core.game.*` |
 

@@ -2085,6 +2085,38 @@ and any self-hosted server — no platform dependency. Expert floor stays
 public: `app.subscribe`/`app.invalidate` for sources outside the
 tracker, and an `every:` interval option for untracked queries.
 
+**D-EFFDBREAD1=A — how a live query proves it only reads** *(ratified by
+owner 2026-07-12, card #505)*: the compiler's own closed `core.db` method
+table infers effect **leaves** — `conn.query`/`conn.query_one` carry
+`Db.Read`, `conn.execute` carries `Db.Write` (arbitrary DDL/DML), and the
+transaction-control/`close` calls (`begin`/`commit`/`rollback`/`close`)
+keep the plain `Db` root, since they neither read nor write rows
+themselves. This is the one exception to D-EFFTREE1's rule that a real
+Core call is only ever tagged with a bare root (leaf precision otherwise
+being a user-declared-contract concept): the shape is rustc special-casing
+a small closed list of known intrinsics, and it touches only the finite
+table the compiler already keeps for its own stdlib signatures — inference
+through ordinary user calls stays bare-root, exactly as D-EFFTREE1
+decided. A read-only query function can therefore *prove* `#(Db.Read)` —
+the read-footprint qualification `app.live` demands — and a write hiding
+inside such a function is caught by the existing `E0740` check (no new
+diagnostic code). *Reconciliation:* D-LIVEQUERY1's `inWild` stacked
+`@Pure` on top of `#(Db.Read)`; those contradict by design (`@Pure` is the
+empty effect set, any `#(…)` bound is non-empty — `E0745`), so a live
+query qualifies by its `#(Db.Read)` bound alone. `DbConnection` (and
+`DbError`) are now nameable types so a query function can annotate its
+connection parameter.
+*Shipped 2026-07-12 (card #505, slice 4 — leaf-inference layer only)*: the
+`Db.Read`/`Db.Write` leaf inference above, the `#(Db.Read)` qualification
+proof, the `E0740` hidden-write reject (`tests/ui/db_read_query_hidden_write`),
+and `DbConnection`/`DbError` nameability, with a runnable example
+(`examples/features/io/db_read_footprint.jet`). The remaining `app.live`
+legs — the `app` namespace / app graph (D-WEBAPP1, card #438), the
+`core.ws` push transport (D-WS1; a native std-only WebSocket, I6 forbids a
+crate), the client `Signal<T>` binding, and the `#Transact` write-set
+publication + invalidation scheduler — ride unbuilt infrastructure owned
+by cards #438 and #134 and are not yet implemented.
+
 **Web target** *(D-WEBKIND1, D-DOMGEN1, D-WEBBACKEND1, D-OSTARGET1,
 D-WEBDEFAULT1, D-HTMLPAIR1)*: browser target is `wasm32-unknown-unknown` +
 generated JS loader; DOM work goes through a tiny first-party `JetDom` shim
