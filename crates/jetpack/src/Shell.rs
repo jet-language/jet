@@ -514,12 +514,12 @@ mod tests {
     #[test]
     fn help_prefill_widgets_preserve_edit_buffer_in_real_shells() {
         let dir = write_temp_dir("jetpack-help-prefill");
-        let marker = dir.join("executed");
+        let marker = dir.join("selected-bytes");
         let fake_jet = dir.join("jet");
         std::fs::write(
             &fake_jet,
             format!(
-                "#!/bin/sh\n[ \"$JET_HELP_SHELL_PREFILL\" = 1 ] || exit 9\nprintf 'touch {}'\n",
+                "#!/bin/sh\n[ \"$JET_HELP_SHELL_PREFILL\" = 1 ] || exit 9\nprintf \"printf 'JET_SELECTED_BYTES' > '{}'\"\n",
                 marker.display()
             ),
         )
@@ -532,36 +532,35 @@ mod tests {
             std::fs::set_permissions(&fake_jet, permissions).unwrap();
         }
         let path = format!("{}:{}", dir.display(), std::env::var("PATH").unwrap_or_default());
-        let steps = [
-            ("echo JET_HELP_WIDGET_START\n", 250),
-            ("\x1b?", 250),
-            ("\x03", 100),
-            ("echo JET_HELP_WIDGET_RETURNED\nexit 0\n", 50),
-        ];
 
         let bash_file = write_temp("jetpack-help-bashrc", &bash_rc("help", PromptPathMode::Short, PromptStripMode::Off));
         let bash = format!("PATH={} bash --noprofile --rcfile {} -i", shell_single_quote(&path), bash_file.display());
-        let bash_out = pty_steps(&bash, &steps);
+        let bash_out = pty_prefill_oracle(&bash, &marker);
         let _ = std::fs::remove_file(bash_file);
         assert!(bash_out.contains("JET_HELP_WIDGET_RETURNED"), "{bash_out}");
-        assert!(!marker.exists(), "bash help selection executed");
+        assert!(marker.exists(), "bash widget did not preserve selected command:\n{bash_out}");
+        assert_eq!(std::fs::read_to_string(&marker).unwrap(), "JET_SELECTED_BYTES");
+        std::fs::remove_file(&marker).unwrap();
 
         let zdir = write_temp_dir("jetpack-help-zdotdir");
         std::fs::write(zdir.join(".zshrc"), zsh_rc("help", PromptPathMode::Short, PromptStripMode::Off)).unwrap();
         let zsh = format!("PATH={} ZDOTDIR={} zsh -d -i", shell_single_quote(&path), zdir.display());
-        let zsh_out = pty_steps(&zsh, &steps);
+        let zsh_out = pty_prefill_oracle(&zsh, &marker);
         let _ = std::fs::remove_dir_all(zdir);
         assert!(zsh_out.contains("JET_HELP_WIDGET_RETURNED"), "{zsh_out}");
-        assert!(!marker.exists(), "zsh help selection executed");
+        assert!(marker.exists(), "zsh widget did not preserve selected command:\n{zsh_out}");
+        assert_eq!(std::fs::read_to_string(&marker).unwrap(), "JET_SELECTED_BYTES");
+        std::fs::remove_file(&marker).unwrap();
 
         let fish = format!(
-            "PATH={} TERM_PROGRAM=ghostty fish -C {} -i",
+            "PATH={} fish -C {} -i",
             shell_single_quote(&path),
             shell_single_quote(&fish_init("help", PromptPathMode::Short, PromptStripMode::Off))
         );
-        let fish_out = pty_steps(&fish, &steps);
+        let fish_out = pty_prefill_oracle(&fish, &marker);
         assert!(fish_out.contains("JET_HELP_WIDGET_RETURNED"), "{fish_out}");
-        assert!(!marker.exists(), "fish help selection executed");
+        assert!(marker.exists(), "fish widget did not preserve selected command:\n{fish_out}");
+        assert_eq!(std::fs::read_to_string(&marker).unwrap(), "JET_SELECTED_BYTES");
     }
 
     #[test]
@@ -614,7 +613,7 @@ mod tests {
         String::from_utf8_lossy(&stdout).replace('\r', "")
     }
 
-    fn pty_steps(shell_command: &str, steps: &[(&str, u64)]) -> String {
+    fn pty_prefill_oracle(shell_command: &str, marker: &std::path::Path) -> String {
         let mut child = Command::new("script")
             .args(["-qec", shell_command, "/dev/null"])
             .env("NO_COLOR", "1")
@@ -625,11 +624,17 @@ mod tests {
             .spawn()
             .expect("spawn PTY through script(1)");
         let mut stdin = child.stdin.take().unwrap();
-        for (input, delay_ms) in steps {
-            stdin.write_all(input.as_bytes()).unwrap();
-            stdin.flush().unwrap();
-            std::thread::sleep(std::time::Duration::from_millis(*delay_ms));
-        }
+        stdin.write_all(b"echo JET_HELP_WIDGET_START\n").unwrap();
+        stdin.flush().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        stdin.write_all(b"\x1b?").unwrap();
+        stdin.flush().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(350));
+        assert!(!marker.exists(), "help selection executed before explicit Enter");
+        stdin.write_all(b"; printf 'JET_EXPLICIT_ACCEPT\\n'\n").unwrap();
+        stdin.flush().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        stdin.write_all(b"echo JET_HELP_WIDGET_RETURNED\nexit 0\n").unwrap();
         drop(stdin);
         let out = child.wait_with_output().unwrap();
         assert!(
@@ -638,7 +643,9 @@ mod tests {
             String::from_utf8_lossy(&out.stdout),
             String::from_utf8_lossy(&out.stderr)
         );
-        String::from_utf8_lossy(&out.stdout).replace('\r', "")
+        let transcript = String::from_utf8_lossy(&out.stdout).replace('\r', "");
+        assert!(transcript.contains("JET_EXPLICIT_ACCEPT"), "{transcript}");
+        transcript
     }
 
     fn shell_single_quote(text: &str) -> String {
