@@ -71,6 +71,7 @@ impl BudgetStore {
         validate_kind(&kind)?;
         validate_timestamp(accepted_at)?;
         let parsed = verify_budget_report(report).map_err(|e| format!("invalid budget report: {e}"))?;
+        validate_update_evidence(&parsed, &kind)?;
         let current = self.read_manifest_optional(baseline)?;
         if current.is_none() && !matches!(kind, UpdateKind::Bootstrap { .. }) {
             return Err("baseline is absent; bootstrap with an explicit reason".into());
@@ -90,6 +91,7 @@ impl BudgetStore {
         let report = verify_budget_report(&plan.report_bytes).map_err(|e| format!("invalid budget report: {e}"))?;
         if report_id(&report)? != plan.report_id { return Err("planned report id changed".into()); }
 
+        let _baseline_root = self.dir(&[".jet", "perf", "baselines"], true, 0o755)?;
         let locks = self.dir(&[".jet", "perf", "baselines", "locks"], true, 0o700)?;
         let _lock = Lock::take(&locks, &format!("{}.lock", plan.baseline.replace('/', "--")))?;
         let current = self.read_manifest_optional(&plan.baseline)?;
@@ -234,7 +236,7 @@ fn verify_manifest(bytes: &[u8], expected_name: &str) -> Result<CanonicalJson, S
     if !is_hex64(id) || stable_id(content_value) != id { return Err("manifest_id mismatch".into()); }
     let generations = array(content.get("generations"), "generations")?;
     if generations.is_empty() { return Err("manifest has no generations".into()); }
-    for generation in generations {
+    for (index, generation) in generations.iter().enumerate() {
         let generation = exact_object(generation, "generation", &["audit", "report_id"])?;
         let report = text(generation.get("report_id"), "generation.report_id")?;
         if !is_hex64(report) { return Err("generation report_id is not lowercase Hex64".into()); }
@@ -242,6 +244,31 @@ fn verify_manifest(bytes: &[u8], expected_name: &str) -> Result<CanonicalJson, S
         require_text(audit, "actor_label", "local")?;
         require_text(audit, "report_id", report)?;
         validate_timestamp(text(audit.get("accepted_at"), "accepted_at")?)?;
+        let flags = exact_object(audit.get("flags").unwrap(), "audit flags", &["accept_regression", "bootstrap"])?;
+        let bootstrap = boolean(flags.get("bootstrap"), "flags.bootstrap")?;
+        let accept = boolean(flags.get("accept_regression"), "flags.accept_regression")?;
+        let kind = text(audit.get("kind"), "audit.kind")?;
+        let reason = nullable_text(audit.get("reason"), "audit.reason")?;
+        match (kind, bootstrap, accept, reason) {
+            ("pass", false, false, None) => {}
+            ("bootstrap", true, false, Some(reason)) | ("exception", false, true, Some(reason)) => { normalize_reason(reason)?; }
+            _ => return Err("audit kind, flags, and reason disagree".into()),
+        }
+        let prior_state = nullable_text(audit.get("prior_state_id"), "prior_state_id")?;
+        let prior_head = nullable_text(audit.get("prior_head_report_id"), "prior_head_report_id")?;
+        if index == 0 {
+            if prior_state.is_some() || prior_head.is_some() { return Err("first generation has prior CAS links".into()); }
+        } else {
+            let previous = object(&generations[index - 1], "generation")?;
+            let expected_head = text(previous.get("report_id"), "report_id")?;
+            let prefix_content = CanonicalJson::object([
+                ("generations".into(), CanonicalJson::Array(generations[..index].to_vec())),
+                ("head_report_id".into(), CanonicalJson::String(expected_head.into())),
+                ("name".into(), CanonicalJson::String(expected_name.into())),
+            ])?;
+            let expected_state = stable_id(&prefix_content);
+            if prior_state != Some(expected_state.as_str()) || prior_head != Some(expected_head) { return Err("manifest generation CAS chain is broken".into()); }
+        }
         let mut body = audit.clone();
         let audit_id_value = body.remove("audit_id").ok_or("audit_id is absent")?;
         let audit_id = text(Some(&audit_id_value), "audit_id")?.to_owned();
@@ -279,13 +306,22 @@ pub fn validate_baseline_name(value: &str) -> Result<(), String> {
 
 fn validate_kind(kind: &UpdateKind) -> Result<(), String> { match kind { UpdateKind::Pass => Ok(()), UpdateKind::Bootstrap { reason } | UpdateKind::AcceptRegression { reason } => normalize_reason(reason).map(|_| ()) } }
 fn normalize_reason(value: &str) -> Result<String, String> { if value.is_empty() || value.trim() != value || value.chars().count() > 512 || value.chars().any(char::is_control) { Err("acceptance reason must be trimmed, control-free, and 1..=512 scalars".into()) } else { Ok(value.into()) } }
-fn validate_timestamp(value: &str) -> Result<(), String> { let b=value.as_bytes();let punctuation=[(4,b'-'),(7,b'-'),(10,b'T'),(13,b':'),(16,b':'),(19,b'.'),(29,b'Z')];if b.len()!=30||punctuation.iter().any(|(i,v)|b[*i]!=*v)||b.iter().enumerate().any(|(i,v)|!punctuation.iter().any(|(p,_)|*p==i)&&!v.is_ascii_digit()){Err("accepted_at is not RFC3339UTC with nine fractional digits".into())}else{Ok(())} }
+fn validate_update_evidence(report:&CanonicalJson,kind:&UpdateKind)->Result<(),String>{
+    let measurements=array(report_content(report)?.get("measurements"),"measurements")?;
+    if measurements.is_empty(){return Err("update report has no measurements".into())}
+    let mut regressed=false;
+    for measurement in measurements { let measurement=object(measurement,"measurement")?;let decision=object(measurement.get("decision").ok_or("measurement decision is absent")?,"decision")?;let evidence=text(decision.get("evidence"),"decision.evidence")?;match kind{UpdateKind::Pass if evidence!="pass"=>return Err("plain update requires every measurement to pass".into()),UpdateKind::Bootstrap{..} if !matches!(evidence,"pass"|"unavailable")=>return Err("bootstrap rejects regression and inconclusive evidence".into()),UpdateKind::AcceptRegression{..} if !matches!(evidence,"pass"|"regression"|"inconclusive")=>return Err("accept-regression rejects unavailable evidence".into()),_=>{}}if matches!(evidence,"regression"|"inconclusive"){regressed=true;}}
+    if matches!(kind,UpdateKind::AcceptRegression{..})&&!regressed{return Err("accept-regression requires regression or inconclusive evidence".into())}Ok(())
+}
+fn validate_timestamp(value: &str) -> Result<(), String> { let b=value.as_bytes();let punctuation=[(4,b'-'),(7,b'-'),(10,b'T'),(13,b':'),(16,b':'),(19,b'.'),(29,b'Z')];if b.len()!=30||punctuation.iter().any(|(i,v)|b[*i]!=*v)||b.iter().enumerate().any(|(i,v)|!punctuation.iter().any(|(p,_)|*p==i)&&!v.is_ascii_digit()){return Err("accepted_at is not RFC3339UTC with nine fractional digits".into())}let number=|range:std::ops::Range<usize>|std::str::from_utf8(&b[range]).unwrap().parse::<u32>().unwrap();let month=number(5..7);let day=number(8..10);let hour=number(11..13);let minute=number(14..16);let second=number(17..19);if !(1..=12).contains(&month)||!(1..=31).contains(&day)||hour>23||minute>59||second>59{return Err("accepted_at contains an out-of-range UTC field".into())}Ok(()) }
 fn is_hex64(value:&str)->bool{value.len()==64&&value.bytes().all(|b|b.is_ascii_hexdigit()&&!b.is_ascii_uppercase())}
 fn exact_object<'a>(value:&'a CanonicalJson,name:&str,keys:&[&str])->Result<&'a BTreeMap<String,CanonicalJson>,String>{let f=object(value,name)?;if f.len()!=keys.len()||keys.iter().any(|k|!f.contains_key(*k)){Err(format!("{name} has missing or unknown fields"))}else{Ok(f)}}
 fn object<'a>(value:&'a CanonicalJson,name:&str)->Result<&'a BTreeMap<String,CanonicalJson>,String>{match value{CanonicalJson::Object(v)=>Ok(v),_=>Err(format!("{name} is not an object"))}}
 fn array<'a>(value:Option<&'a CanonicalJson>,name:&str)->Result<&'a[CanonicalJson],String>{match value{Some(CanonicalJson::Array(v))=>Ok(v),_=>Err(format!("{name} is not an array"))}}
 fn text<'a>(value:Option<&'a CanonicalJson>,name:&str)->Result<&'a str,String>{match value{Some(CanonicalJson::String(v))=>Ok(v),_=>Err(format!("{name} is not text"))}}
 fn integer<'a>(value:Option<&'a CanonicalJson>,name:&str)->Result<&'a str,String>{match value{Some(CanonicalJson::Integer(v))=>Ok(v),_=>Err(format!("{name} is not integer"))}}
+fn boolean(value:Option<&CanonicalJson>,name:&str)->Result<bool,String>{match value{Some(CanonicalJson::Bool(v))=>Ok(*v),_=>Err(format!("{name} is not boolean"))}}
+fn nullable_text<'a>(value:Option<&'a CanonicalJson>,name:&str)->Result<Option<&'a str>,String>{match value{Some(CanonicalJson::Null)=>Ok(None),Some(CanonicalJson::String(v))=>Ok(Some(v)),_=>Err(format!("{name} is not text or null"))}}
 fn require_text(fields:&BTreeMap<String,CanonicalJson>,key:&str,expected:&str)->Result<(),String>{if text(fields.get(key),key)?==expected{Ok(())}else{Err(format!("{key} mismatch"))}}
 
 #[cfg(unix)]
@@ -309,12 +345,15 @@ fn temp(dir:&File,bytes:&[u8])->Result<(File,String),String>{use std::ffi::CStri
 
 #[cfg(unix)]fn unlink(dir:&File,name:&str){use std::ffi::CString;use std::os::fd::AsRawFd;extern "C"{fn unlinkat(fd:i32,path:*const i8,flags:i32)->i32;}if let Ok(name)=CString::new(name){unsafe{unlinkat(dir.as_raw_fd(),name.as_ptr(),0)};}}
 
-fn install_immutable(dir:&File,name:&str,bytes:&[u8],verify:impl Fn(&[u8])->Result<(),String>)->Result<bool,String>{match read_regular(dir,name){Ok(existing)=>{verify(&existing)?;if existing==bytes{return Ok(false)}return Err("immutable artifact differs from candidate".into())},Err(e)if !e.contains("No such file")=>return Err(e),Err(_)=>{}}let (_file,tmp)=temp(dir,bytes)?;#[cfg(unix)]{use std::ffi::CString;use std::os::fd::AsRawFd;extern "C"{fn linkat(oldfd:i32,old:*const i8,newfd:i32,new:*const i8,flags:i32)->i32;}let old=CString::new(tmp.as_str()).unwrap();let new=CString::new(name).unwrap();if unsafe{linkat(dir.as_raw_fd(),old.as_ptr(),dir.as_raw_fd(),new.as_ptr(),0)}!=0{let error=std::io::Error::last_os_error();unlink(dir,&tmp);if error.kind()==ErrorKind::AlreadyExists{let existing=read_regular(dir,name)?;verify(&existing)?;if existing==bytes{return Ok(false)}}return Err(format!("cannot atomically install artifact: {error}"));}unlink(dir,&tmp);dir.sync_all().map_err(|e|e.to_string())?;Ok(true)}#[cfg(not(unix))]{let _=tmp;Err("atomic no-replace unavailable on this platform".into())}}
+fn install_immutable(dir:&File,name:&str,bytes:&[u8],verify:impl Fn(&[u8])->Result<(),String>)->Result<bool,String>{match read_regular(dir,name){Ok(existing)=>{verify(&existing)?;if existing==bytes{return Ok(false)}return Err("immutable artifact differs from candidate".into())},Err(e)if !e.contains("No such file")=>return Err(e),Err(_)=>{}}let (file,tmp)=temp(dir,bytes)?;artifact_permissions(&file)?;#[cfg(unix)]{use std::ffi::CString;use std::os::fd::AsRawFd;extern "C"{fn linkat(oldfd:i32,old:*const i8,newfd:i32,new:*const i8,flags:i32)->i32;}let old=CString::new(tmp.as_str()).unwrap();let new=CString::new(name).unwrap();if unsafe{linkat(dir.as_raw_fd(),old.as_ptr(),dir.as_raw_fd(),new.as_ptr(),0)}!=0{let error=std::io::Error::last_os_error();unlink(dir,&tmp);if error.kind()==ErrorKind::AlreadyExists{let existing=read_regular(dir,name)?;verify(&existing)?;if existing==bytes{return Ok(false)}}return Err(format!("cannot atomically install artifact: {error}"));}unlink(dir,&tmp);dir.sync_all().map_err(|e|e.to_string())?;Ok(true)}#[cfg(not(unix))]{let _=tmp;Err("atomic no-replace unavailable on this platform".into())}}
 
-fn replace_atomic(dir:&File,name:&str,bytes:&[u8])->Result<(),String>{let (_file,tmp)=temp(dir,bytes)?;#[cfg(unix)]{use std::ffi::CString;use std::os::fd::AsRawFd;extern "C"{fn renameat(oldfd:i32,old:*const i8,newfd:i32,new:*const i8)->i32;}let old=CString::new(tmp.as_str()).unwrap();let new=CString::new(name).unwrap();if unsafe{renameat(dir.as_raw_fd(),old.as_ptr(),dir.as_raw_fd(),new.as_ptr())}!=0{let error=std::io::Error::last_os_error();unlink(dir,&tmp);return Err(format!("cannot atomically replace manifest: {error}"));}dir.sync_all().map_err(|e|e.to_string())?;Ok(())}#[cfg(not(unix))]{let _=(dir,name,tmp);Err("atomic replacement unavailable on this platform".into())}}
+fn replace_atomic(dir:&File,name:&str,bytes:&[u8])->Result<(),String>{let (file,tmp)=temp(dir,bytes)?;artifact_permissions(&file)?;#[cfg(unix)]{use std::ffi::CString;use std::os::fd::AsRawFd;extern "C"{fn renameat(oldfd:i32,old:*const i8,newfd:i32,new:*const i8)->i32;}let old=CString::new(tmp.as_str()).unwrap();let new=CString::new(name).unwrap();if unsafe{renameat(dir.as_raw_fd(),old.as_ptr(),dir.as_raw_fd(),new.as_ptr())}!=0{let error=std::io::Error::last_os_error();unlink(dir,&tmp);return Err(format!("cannot atomically replace manifest: {error}"));}dir.sync_all().map_err(|e|e.to_string())?;Ok(())}#[cfg(not(unix))]{let _=(dir,name,tmp);Err("atomic replacement unavailable on this platform".into())}}
+
+#[cfg(unix)]fn artifact_permissions(file:&File)->Result<(),String>{use std::os::unix::fs::PermissionsExt;file.set_permissions(std::fs::Permissions::from_mode(0o644)).map_err(|e|e.to_string())?;file.sync_all().map_err(|e|e.to_string())}
+#[cfg(not(unix))]fn artifact_permissions(_: &File)->Result<(),String>{Err("artifact permissions unavailable on this platform".into())}
 
 #[cfg(unix)]struct Lock{file:File}
-#[cfg(unix)]impl Lock{fn take(dir:&File,name:&str)->Result<Self,String>{use std::ffi::CString;use std::os::fd::{AsRawFd,FromRawFd};const O_RDWR:i32=2;const O_CREAT:i32=0o100;const O_CLOEXEC:i32=0o2000000;const O_NOFOLLOW:i32=0o400000;const LOCK_EX:i32=2;extern "C"{fn openat(fd:i32,path:*const i8,flags:i32,mode:u32)->i32;fn flock(fd:i32,operation:i32)->i32;}let name=CString::new(name).map_err(|_|"NUL in lock")?;let fd=unsafe{openat(dir.as_raw_fd(),name.as_ptr(),O_RDWR|O_CREAT|O_NOFOLLOW|O_CLOEXEC,0o600)};if fd<0{return Err(format!("cannot securely open lock: {}",std::io::Error::last_os_error()));}let file=unsafe{File::from_raw_fd(fd)};if unsafe{flock(file.as_raw_fd(),LOCK_EX)}!=0{return Err(format!("cannot lock baseline: {}",std::io::Error::last_os_error()));}Ok(Self{file})}}
+#[cfg(unix)]impl Lock{fn take(dir:&File,name:&str)->Result<Self,String>{use std::ffi::CString;use std::os::fd::{AsRawFd,FromRawFd};use std::os::unix::fs::MetadataExt;const O_RDWR:i32=2;const O_CREAT:i32=0o100;const O_CLOEXEC:i32=0o2000000;const O_NOFOLLOW:i32=0o400000;const LOCK_EX:i32=2;extern "C"{fn openat(fd:i32,path:*const i8,flags:i32,mode:u32)->i32;fn flock(fd:i32,operation:i32)->i32;}let name=CString::new(name).map_err(|_|"NUL in lock")?;let fd=unsafe{openat(dir.as_raw_fd(),name.as_ptr(),O_RDWR|O_CREAT|O_NOFOLLOW|O_CLOEXEC,0o600)};if fd<0{return Err(format!("cannot securely open lock: {}",std::io::Error::last_os_error()));}let file=unsafe{File::from_raw_fd(fd)};let meta=file.metadata().map_err(|e|e.to_string())?;if !meta.is_file()||meta.nlink()!=1{return Err("baseline lock is linked or not regular".into())}if unsafe{flock(file.as_raw_fd(),LOCK_EX)}!=0{return Err(format!("cannot lock baseline: {}",std::io::Error::last_os_error()));}Ok(Self{file})}}
 #[cfg(unix)]impl Drop for Lock{fn drop(&mut self){use std::os::fd::AsRawFd;const LOCK_UN:i32=8;extern "C"{fn flock(fd:i32,operation:i32)->i32;}unsafe{flock(self.file.as_raw_fd(),LOCK_UN)};}}
 #[cfg(not(unix))]struct Lock;
 #[cfg(not(unix))]impl Lock{fn take(_: &File,_:&str)->Result<Self,String>{Err("advisory lock unavailable on this platform".into())}}
@@ -336,9 +375,40 @@ mod tests {
         let mut values = BTreeMap::new();
         for (index, key) in keys.into_iter().enumerate() { values.insert(key.into(), format!("{index:064x}")); }
         let base = BudgetStore::cache_identity(&values).unwrap();
-        for key in keys { let mut changed=values.clone();changed.insert(key.into(),"f".repeat(64));assert_ne!(BudgetStore::cache_identity(&changed).unwrap(),base,key); }
+        for key in keys { let mut changed=values.clone();changed.insert(key.into(),"f".repeat(64));assert_ne!(BudgetStore::cache_identity(&changed).unwrap(),base,"{key}"); }
         values.remove("privacy");
         assert!(BudgetStore::cache_identity(&values).is_err());
+    }
+
+    #[test]
+    fn manifests_hash_audits_and_enforce_cas_chain() {
+        let first = UpdatePlan { baseline:"release/linux".into(),report_id:"1".repeat(64),report_bytes:vec![],prior_manifest_id:None,prior_head_report_id:None,accepted_at:"2026-07-13T12:00:00.000000000Z".into(),kind:UpdateKind::Bootstrap{reason:"initial baseline".into()} };
+        let m1=next_manifest(None,&first).unwrap();
+        verify_manifest(&m1.bytes(),"release/linux").unwrap();
+        let second = UpdatePlan { baseline:first.baseline.clone(),report_id:"2".repeat(64),report_bytes:vec![],prior_manifest_id:Some(manifest_id(&m1).unwrap()),prior_head_report_id:Some(first.report_id.clone()),accepted_at:"2026-07-13T13:00:00.000000000Z".into(),kind:UpdateKind::Pass };
+        let m2=next_manifest(Some(&m1),&second).unwrap();
+        verify_manifest(&m2.bytes(),"release/linux").unwrap();
+        let mut corrupt=m2.clone();
+        let wrapper=match &mut corrupt{CanonicalJson::Object(v)=>v,_=>unreachable!()};
+        let content=match wrapper.get_mut("content").unwrap(){CanonicalJson::Object(v)=>v,_=>unreachable!()};
+        let generations=match content.get_mut("generations").unwrap(){CanonicalJson::Array(v)=>v,_=>unreachable!()};
+        let second=match &mut generations[1]{CanonicalJson::Object(v)=>v,_=>unreachable!()};
+        let audit=match second.get_mut("audit").unwrap(){CanonicalJson::Object(v)=>v,_=>unreachable!()};
+        audit.insert("prior_state_id".into(),CanonicalJson::String("f".repeat(64)));
+        let mut body=audit.clone();body.remove("audit_id");audit.insert("audit_id".into(),CanonicalJson::String(stable_id(&CanonicalJson::Object(body))));
+        let new_content=CanonicalJson::Object(content.clone());wrapper.insert("manifest_id".into(),CanonicalJson::String(stable_id(&new_content)));
+        assert!(verify_manifest(&corrupt.bytes(),"release/linux").unwrap_err().contains("CAS chain"));
+    }
+
+    #[test]
+    fn update_kinds_reject_wrong_evidence_before_mutation() {
+        let report=|evidence:&str|CanonicalJson::object([("content".into(),CanonicalJson::object([("measurements".into(),CanonicalJson::Array(vec![CanonicalJson::object([("decision".into(),CanonicalJson::object([("evidence".into(),CanonicalJson::String(evidence.into()))]).unwrap())]).unwrap()]))]).unwrap())]).unwrap();
+        assert!(validate_update_evidence(&report("pass"),&UpdateKind::Pass).is_ok());
+        assert!(validate_update_evidence(&report("regression"),&UpdateKind::Pass).is_err());
+        assert!(validate_update_evidence(&report("regression"),&UpdateKind::AcceptRegression{reason:"reviewed".into()}).is_ok());
+        assert!(validate_update_evidence(&report("pass"),&UpdateKind::AcceptRegression{reason:"reviewed".into()}).is_err());
+        assert!(validate_update_evidence(&report("unavailable"),&UpdateKind::Bootstrap{reason:"initial".into()}).is_ok());
+        assert!(validate_update_evidence(&report("unavailable"),&UpdateKind::AcceptRegression{reason:"reviewed".into()}).is_err());
     }
 
     #[cfg(unix)]
@@ -348,6 +418,8 @@ mod tests {
         let root=std::env::temp_dir().join(format!("jet-budget-store-{}-{}",std::process::id(),NONCE.fetch_add(1,Ordering::Relaxed)));
         std::fs::create_dir(&root).unwrap();let dir=open_dir_chain(&root,&["objects"],true,0o755).unwrap();
         assert!(install_immutable(&dir,"a.json",b"one\n",|_|Ok(())).unwrap());
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(std::fs::metadata(root.join("objects/a.json")).unwrap().permissions().mode()&0o777,0o644);
         assert!(!install_immutable(&dir,"a.json",b"one\n",|_|Ok(())).unwrap());
         assert!(install_immutable(&dir,"a.json",b"two\n",|_|Ok(())).is_err());
         symlink("/etc/passwd",root.join("objects/evil.json")).unwrap();
