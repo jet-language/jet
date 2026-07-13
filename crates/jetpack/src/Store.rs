@@ -1733,7 +1733,10 @@ fn ingest_tree_unlocked(
         let mut staged_outs = BTreeMap::new();
         for (name, src) in &req.outputs {
             let dst = stage.join("outputs").join(name);
-            fs::create_dir_all(dst.parent().unwrap())?;
+            let dst_parent = dst.parent().ok_or_else(|| {
+                IngestError::Invalid(format!("staged output `{name}` has no parent directory"))
+            })?;
+            fs::create_dir_all(dst_parent)?;
             copy_nofollow_tree(src, &dst)?;
             if req.allow_semantic_xattrs {
                 // Still exclude security xattrs from identity via digest path;
@@ -1771,7 +1774,10 @@ fn ingest_tree_unlocked(
             .get("out")
             .cloned()
             .ok_or_else(|| IngestError::Invalid("missing `out` digest".into()))?;
-        let primary_stage = staged_outs.get("out").unwrap().clone();
+        let primary_stage = staged_outs
+            .get("out")
+            .cloned()
+            .ok_or_else(|| IngestError::Invalid("missing staged `out` output".into()))?;
 
         let objects = hangar.join(OBJECTS_DIR);
         fs::create_dir_all(&objects)?;
@@ -1791,7 +1797,12 @@ fn ingest_tree_unlocked(
                     continue;
                 }
                 let dest = partial.join(".named").join(name);
-                fs::create_dir_all(dest.parent().unwrap())?;
+                let dest_parent = dest.parent().ok_or_else(|| {
+                    IngestError::Invalid(format!(
+                        "named output `{name}` has no destination parent directory"
+                    ))
+                })?;
+                fs::create_dir_all(dest_parent)?;
                 if staged.exists() {
                     fs::rename(staged, &dest)?;
                 }
@@ -1858,7 +1869,9 @@ fn ingest_tree_unlocked(
     // Always scrub this stage dir (success moved trees out; failure quarantines).
     if result.is_err() {
         let quarantine = hangar.join("quarantine").join(format!("ingest-{stamp}"));
-        let _ = fs::create_dir_all(quarantine.parent().unwrap());
+        if let Some(quarantine_parent) = quarantine.parent() {
+            let _ = fs::create_dir_all(quarantine_parent);
+        }
         if stage.exists() {
             if fs::rename(&stage, &quarantine).is_err() {
                 let _ = fs::remove_dir_all(&stage);
