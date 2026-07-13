@@ -36,6 +36,7 @@ fn err_codes(src: &str) -> Vec<String> {
         }],
         parse_teaching: Vec::new(),
         used_core: HashSet::new(),
+        ffi_callback_fns: HashSet::new(),
         cffi: CFfi::default(),
         comptime_inputs: Vec::new(),
         import_targets: HashMap::new(),

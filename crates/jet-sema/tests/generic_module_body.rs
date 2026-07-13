@@ -31,6 +31,7 @@ fn check_at(src: &str, root: &str) -> (ProgramBundle, Vec<Diagnostic>) {
         }],
         parse_teaching: Vec::new(),
         used_core: HashSet::new(),
+        ffi_callback_fns: HashSet::new(),
         cffi: CFfi::default(),
         comptime_inputs: Vec::new(),
         import_targets: HashMap::new(),
@@ -75,7 +76,7 @@ fn check_modules(sources: &[(&str, &str, &[(&str, usize)])]) -> (ProgramBundle, 
     }
     let mut bundle = ProgramBundle {
         entry: sources.len() - 1, project_root: PathBuf::from("pkg-a"), modules,
-        parse_teaching: Vec::new(), used_core: HashSet::new(), cffi: CFfi::default(), comptime_inputs: Vec::new(),
+        parse_teaching: Vec::new(), used_core: HashSet::new(), ffi_callback_fns: HashSet::new(), cffi: CFfi::default(), comptime_inputs: Vec::new(),
         import_targets, layer_ceiling: None, inferred_layer: Syntax::RuntimeLayer::Core,
         web_partitions: HashMap::new(), web_partition_enforced: false, web_partition_report: None,
         dep_roots: HashMap::new(), active_os: Syntax::OsTarget::host(),

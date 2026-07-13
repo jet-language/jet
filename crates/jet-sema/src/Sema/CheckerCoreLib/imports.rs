@@ -86,7 +86,7 @@ impl<'a> Checker<'a> {
             }
             sig.return_type
         }
-    
+
         pub(crate) fn infer_import_call(
             &mut self,
             mod_idx: usize,

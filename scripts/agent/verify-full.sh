@@ -47,6 +47,41 @@ if ((${#canvas_missing[@]})); then
   exit 1
 fi
 
+# tests/cffi_native_matrix.rs::required_native_c_abi_matrix never skips (card
+# #436) — it needs a real C compiler/archiver/Rust toolchain to build and run
+# a native C ABI fixture. `nix develop` provides all three on the host
+# target, so full verification runs the matrix for real rather than treating
+# it as optional; same strict-missing-means-fail shape as the Canvas block.
+cffi_missing=()
+for cffi_tool in cc ar rustc; do
+  cffi_command="$cffi_tool"
+  case "$cffi_tool" in
+    cc) cffi_command="${JET_CFFI_CC:-cc}" ;;
+    ar) cffi_command="${JET_CFFI_AR:-ar}" ;;
+    rustc) cffi_command="${JET_CFFI_RUSTC:-rustc}" ;;
+  esac
+  cffi_resolved="$(command -v -- "$cffi_command" 2>/dev/null || true)"
+  if [ -z "$cffi_resolved" ]; then
+    cffi_missing+=("$cffi_tool")
+  else
+    case "$cffi_tool" in
+      cc) export JET_CFFI_CC="$cffi_resolved" ;;
+      ar) export JET_CFFI_AR="$cffi_resolved" ;;
+      rustc) export JET_CFFI_RUSTC="$cffi_resolved" ;;
+    esac
+  fi
+done
+
+if ((${#cffi_missing[@]})); then
+  missing_list="$(IFS=', '; echo "${cffi_missing[*]}")"
+  echo "error: the native C ABI matrix requires a C compiler, archiver, and rustc; missing: $missing_list. Run full verification inside 'nix develop'." >&2
+  exit 1
+fi
+
+export JET_CFFI_MATRIX_REQUIRED=1
+# Native host run: no cross target, alternate linker, or runner wrapper.
+export JET_CFFI_ABI="${JET_CFFI_ABI:-default}"
+
 # Focused hostile tests exercise this exact preflight without recursively
 # starting the repository's full test suite.
 if [ "${JET_VERIFY_CANVAS_PREREQUISITES_ONLY:-}" = "1" ]; then

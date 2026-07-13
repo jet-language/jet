@@ -425,6 +425,7 @@ fn load_entry_with_overlays_mode(
         modules,
         parse_teaching,
         used_core: HashSet::new(),
+        ffi_callback_fns: HashSet::new(),
         cffi: crate::CFFI::CFfi::default(),
         comptime_inputs: Vec::new(),
         import_targets,

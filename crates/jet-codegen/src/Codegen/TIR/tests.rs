@@ -53,6 +53,7 @@
             }],
             parse_teaching: Vec::new(),
             used_core: std::collections::HashSet::new(),
+            ffi_callback_fns: std::collections::HashSet::new(),
             cffi: crate::AST::CFfi::default(),
             comptime_inputs: Vec::new(),
             import_targets: std::collections::HashMap::new(),

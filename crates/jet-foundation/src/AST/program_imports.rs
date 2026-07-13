@@ -214,6 +214,12 @@ pub struct ProgramBundle {
     /// M10: Core helper names proven reachable by sema. Codegen emits only
     /// these helpers (SL9).
     pub used_core: std::collections::HashSet<String>,
+    /// D-CABI-CALLBACK1: top-level function names sema proved are passed as a
+    /// stable C callback symbol (`CallArgFlags::c_callback_symbol`) at some
+    /// `#Extern` call site anywhere in the bundle. Codegen emits exactly these
+    /// definitions as `extern "C" fn` — never every `@Pure fn` (that leaked the
+    /// purity lever into codegen and broke I3 erasure; see 14dd68a5).
+    pub ffi_callback_fns: std::collections::HashSet<String>,
     /// S59 (E2-M14): C-FFI artifacts produced by `CFFI::assemble` after loading
     /// — per-file `use c.<lib>` bindings and the libraries to link against.
     pub cffi: CFfi,

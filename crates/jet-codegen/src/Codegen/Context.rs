@@ -86,6 +86,11 @@ pub(crate) struct Cx {
     pub(crate) core_imports: HashMap<String, String>,
     /// M10 helpers proven reachable by sema.
     pub(crate) used_core: HashSet<String>,
+    /// D-CABI-CALLBACK1: top-level function names sema proved are passed as a
+    /// stable C callback symbol at some `#Extern` call site. Emission must give
+    /// exactly these functions `extern "C" fn` — never every `@Pure fn` (that
+    /// leaked the purity lever into codegen and broke I3 erasure; 14dd68a5).
+    pub(crate) ffi_callback_fns: HashSet<String>,
     /// Empty at the entry module, `super::` inside generated import modules.
     pub(crate) root_prefix: String,
     /// M7: rustc crate name for the FFI bridge (`jet_ffi_…`).
@@ -1182,6 +1187,7 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
     cx.import_rets = import_ret_map(bundle, module_idx);
     cx.core_imports = core_import_map(bundle, module_idx);
     cx.used_core = bundle.used_core.clone();
+    cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
     let (uinline, ufile) = unqualified_import_maps(bundle, module_idx);
     cx.unqualified_inline = uinline;
     cx.unqualified_file = ufile;
@@ -1229,6 +1235,7 @@ pub(crate) fn build_cx_items(
         import_rets: HashMap::new(),
         core_imports: HashMap::new(),
         used_core: HashSet::new(),
+        ffi_callback_fns: HashSet::new(),
         root_prefix: String::new(),
         ffi_crate: link.map(|l| l.crate_name.clone()),
         extern_funcs: extern_funcs.clone(),

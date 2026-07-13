@@ -927,7 +927,7 @@ mod tests {
                 no_prelude: program.no_prelude, html_path: program.html_path,
                 no_alloc_policy: program.no_alloc_policy,
             }],
-            parse_teaching: Vec::new(), used_core: HashSet::new(), cffi: crate::AST::CFfi::default(),
+            parse_teaching: Vec::new(), used_core: HashSet::new(), ffi_callback_fns: HashSet::new(), cffi: crate::AST::CFfi::default(),
             comptime_inputs: Vec::new(), import_targets: HashMap::new(), layer_ceiling: None,
             inferred_layer: crate::Syntax::RuntimeLayer::Core, web_partitions: HashMap::new(),
             web_partition_enforced: false, web_partition_report: None, dep_roots: HashMap::new(),
@@ -998,6 +998,7 @@ mod tests {
             }],
             parse_teaching: Vec::new(),
             used_core: HashSet::new(),
+            ffi_callback_fns: HashSet::new(),
             cffi: crate::AST::CFfi::default(),
             comptime_inputs: Vec::new(),
             import_targets: HashMap::new(),
@@ -1503,6 +1504,7 @@ pub fn emit_bundle_dbg(
         cx.import_rets = import_ret_map(bundle, i);
         cx.core_imports = core_import_map(bundle, i);
         cx.used_core = bundle.used_core.clone();
+        cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
         cx.root_prefix = "super::".to_string();
         cx.active_os = active_os;
         let (uinline, ufile) = unqualified_import_maps(bundle, i);
@@ -1530,6 +1532,7 @@ pub fn emit_bundle_dbg(
     cx.import_rets = import_ret_map(bundle, bundle.entry);
     cx.core_imports = core_import_map(bundle, bundle.entry);
     cx.used_core = bundle.used_core.clone();
+    cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
     let (uinline, ufile) = unqualified_import_maps(bundle, bundle.entry);
     cx.unqualified_inline = uinline;
     cx.unqualified_file = ufile;
@@ -1631,6 +1634,7 @@ pub fn emit_bundle_tests_cov(
         cx.import_rets = import_ret_map(bundle, i);
         cx.core_imports = core_import_map(bundle, i);
         cx.used_core = bundle.used_core.clone();
+        cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
         cx.root_prefix = "super::".to_string();
         let (uinline, ufile) = unqualified_import_maps(bundle, i);
         cx.unqualified_inline = uinline;
@@ -1657,6 +1661,7 @@ pub fn emit_bundle_tests_cov(
     cx.import_rets = import_ret_map(bundle, bundle.entry);
     cx.core_imports = core_import_map(bundle, bundle.entry);
     cx.used_core = bundle.used_core.clone();
+    cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
     let (uinline, ufile) = unqualified_import_maps(bundle, bundle.entry);
     cx.unqualified_inline = uinline;
     cx.unqualified_file = ufile;
@@ -1812,6 +1817,7 @@ pub fn emit_bundle_fuzz(
         cx.import_rets = import_ret_map(bundle, i);
         cx.core_imports = core_import_map(bundle, i);
         cx.used_core = bundle.used_core.clone();
+        cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
         cx.root_prefix = "super::".to_string();
         let (uinline, ufile) = unqualified_import_maps(bundle, i);
         cx.unqualified_inline = uinline;
@@ -1837,6 +1843,7 @@ pub fn emit_bundle_fuzz(
     cx.import_rets = import_ret_map(bundle, bundle.entry);
     cx.core_imports = core_import_map(bundle, bundle.entry);
     cx.used_core = bundle.used_core.clone();
+    cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
     let (uinline, ufile) = unqualified_import_maps(bundle, bundle.entry);
     cx.unqualified_inline = uinline;
     cx.unqualified_file = ufile;
@@ -2055,6 +2062,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         cx.import_rets = import_ret_map(bundle, i);
         cx.core_imports = core_import_map(bundle, i);
         cx.used_core = bundle.used_core.clone();
+        cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
         cx.root_prefix = "super::".to_string();
         let (uinline, ufile) = unqualified_import_maps(bundle, i);
         cx.unqualified_inline = uinline;
@@ -2081,6 +2089,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
     cx.import_rets = import_ret_map(bundle, bundle.entry);
     cx.core_imports = core_import_map(bundle, bundle.entry);
     cx.used_core = bundle.used_core.clone();
+    cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
     let (uinline, ufile) = unqualified_import_maps(bundle, bundle.entry);
     cx.unqualified_inline = uinline;
     cx.unqualified_file = ufile;

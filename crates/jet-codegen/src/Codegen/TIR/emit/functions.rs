@@ -49,6 +49,21 @@ pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
     // `vis`, exactly as `emit_func` (`{vis}{unsafe_kw}fn …`). I1: emitted ONLY when the
     // source was `#Unsafe fn` (`tir.is_unsafe`).
     let unsafe_kw = if tir.is_unsafe { "unsafe " } else { "" };
+    // D-CABI-CALLBACK1: `extern "C" fn` ONLY for a function sema proved is
+    // actually passed as a native callback symbol somewhere (`cx.ffi_callback_fns`,
+    // built from `CallArgFlags::c_callback_symbol` — see
+    // `crates/jet-sema/src/Sema/Bundle.rs::collect_core_expr`). Never every
+    // `@Pure fn`: that leaked the purity lever into codegen and broke I3
+    // erasure (`effect_annotations_are_erased`, `eff2_levers_are_erased`,
+    // fixed by 14dd68a5) — but a bare fn reference handed to a `#Extern`
+    // C-ABI callback parameter (`callback_twice(increment, x)`) genuinely
+    // needs the C calling convention: the referenced Rust item's own type
+    // must match the raw `extern "C" fn` pointer type the C side expects.
+    let abi = if cx.ffi_callback_fns.contains(&tir.name) && tir.generics.is_empty() {
+        "extern \"C\" "
+    } else {
+        ""
+    };
     // D-METHODMACRO1=A: `@Inline`/`@InlineAlways` lower to a Rust `#[inline]`/
     // `#[inline(always)]` attribute right above the signature. `is_inline_always`
     // is only ever `true` here once sema has confirmed the function can actually
@@ -65,11 +80,12 @@ pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
     // matches `emit_func` so panic output is identical.
     *cx.current_fn.borrow_mut() = tir.name.clone();
     out.push_str(&format!(
-        "{inline_attr}{vis}{unsafe_kw}fn {name}{gen}({params}){ret} {{\n",
+        "{inline_attr}{vis}{unsafe_kw}{abi}fn {name}{gen}({params}){ret} {{\n",
         name = cx.mangle_name(&tir.name),
         gen = tir.generics,
         params = params,
         ret = ret_clause,
+        abi = abi,
     ));
     // D-COV1: probe at the function head (skip the synthetic `main`).
     if cx.coverage && !tir.is_main {

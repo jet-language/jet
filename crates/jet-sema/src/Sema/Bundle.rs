@@ -3690,7 +3690,7 @@ pub(crate) fn check_bundle_opts(
         }
     }
 
-    let (mut used_core, usage_spans) = collect_used_core(bundle, &states);
+    let (mut used_core, usage_spans, ffi_callback_fns) = collect_used_core(bundle, &states);
     // D-CLIFLAG1: a `@[Cli]`-derived struct's generated `__jet_cli_spec_*`/
     // `__jet_cli_decode_*` functions (and the synthesized `fn main` for a
     // typed `fn run`) call straight into `core.args`'s `JetArgsSpec`/
@@ -3733,6 +3733,7 @@ pub(crate) fn check_bundle_opts(
         used_core.insert("core.validate::field_error".to_string());
     }
     bundle.used_core = used_core;
+    bundle.ffi_callback_fns = ffi_callback_fns;
     apply_helper_layer_inference(bundle, &states, &usage_spans, &mut diags);
     let (public_summaries, public_solved) = qualified_effect_facts(&module_effect_summaries);
     (
@@ -3992,9 +3993,22 @@ fn module_annotations_mention_encoding_surface(module: &crate::AST::LoadedModule
 pub(crate) fn collect_used_core(
     bundle: &ProgramBundle,
     states: &[ModuleState],
-) -> (HashSet<String>, HashMap<String, crate::Diagnostics::Span>) {
+) -> (
+    HashSet<String>,
+    HashMap<String, crate::Diagnostics::Span>,
+    HashSet<String>,
+) {
     let mut used = HashSet::new();
     let mut spans = HashMap::new();
+    // D-CABI-CALLBACK1: names of top-level functions sema proved are passed as
+    // a stable C callback symbol (`arg.flags.c_callback_symbol`) at some
+    // `#Extern` call site anywhere in the bundle. Collected in this same
+    // whole-program walk (not a second traversal) so codegen knows, before it
+    // emits ANY function, which ones must be `extern "C" fn` — never every
+    // `@Pure fn` (that leaked the purity lever into codegen and broke I3
+    // erasure; see 14dd68a5), only the ones actually crossing the C boundary
+    // as a raw function pointer.
+    let mut ffi_cb = HashSet::new();
     for (idx, module) in bundle.modules.iter().enumerate() {
         let imports = &states[idx].core_imports;
         // D-ENCSTREAM-SURFACE1=A: core.encoding now exports runtime value and
@@ -4013,25 +4027,25 @@ pub(crate) fn collect_used_core(
         }
         for item in &module.items {
             match item {
-                Item::Func(f) => collect_core_stmts(&f.body, imports, &mut used, &mut spans),
+                Item::Func(f) => collect_core_stmts(&f.body, imports, &mut used, &mut spans, &mut ffi_cb),
                 Item::Struct(s) => {
                     for m in &s.methods {
-                        collect_core_stmts(&m.body, imports, &mut used, &mut spans);
+                        collect_core_stmts(&m.body, imports, &mut used, &mut spans, &mut ffi_cb);
                     }
                 }
                 Item::Enum(e) => {
                     for m in &e.methods {
-                        collect_core_stmts(&m.body, imports, &mut used, &mut spans);
+                        collect_core_stmts(&m.body, imports, &mut used, &mut spans, &mut ffi_cb);
                     }
                 }
                 Item::Impl(i) => {
                     for m in &i.methods {
-                        collect_core_stmts(&m.body, imports, &mut used, &mut spans);
+                        collect_core_stmts(&m.body, imports, &mut used, &mut spans, &mut ffi_cb);
                     }
                 }
-                Item::Test(t) => collect_core_stmts(&t.body, imports, &mut used, &mut spans),
-                Item::Bench(b) => collect_core_stmts(&b.body, imports, &mut used, &mut spans),
-                Item::Const(c) => collect_core_expr(&c.value, imports, &mut used, &mut spans),
+                Item::Test(t) => collect_core_stmts(&t.body, imports, &mut used, &mut spans, &mut ffi_cb),
+                Item::Bench(b) => collect_core_stmts(&b.body, imports, &mut used, &mut spans, &mut ffi_cb),
+                Item::Const(c) => collect_core_expr(&c.value, imports, &mut used, &mut spans, &mut ffi_cb),
                 Item::Trait(_)
                 | Item::Tag(_) // D-QUAL2: tags use no core imports
                 | Item::ExternRust(_)
@@ -4050,7 +4064,7 @@ pub(crate) fn collect_used_core(
             }
         }
     }
-    (used, spans)
+    (used, spans, ffi_cb)
 }
 
 fn note_core_usage(
@@ -4120,36 +4134,37 @@ pub(crate) fn collect_core_stmts(
     imports: &HashMap<String, String>,
     used: &mut HashSet<String>,
     spans: &mut HashMap<String, crate::Diagnostics::Span>,
+    ffi_cb: &mut HashSet<String>,
 ) {
     for stmt in stmts {
         match stmt {
-            Stmt::Expr(e) | Stmt::Yield(e, _) => collect_core_expr(e, imports, used, spans),
-            Stmt::Val(b) => collect_core_expr(&b.init, imports, used, spans),
+            Stmt::Expr(e) | Stmt::Yield(e, _) => collect_core_expr(e, imports, used, spans, ffi_cb),
+            Stmt::Val(b) => collect_core_expr(&b.init, imports, used, spans, ffi_cb),
             Stmt::Assign { target, value, .. } => {
-                collect_core_lvalue(target, imports, used, spans);
-                collect_core_expr(value, imports, used, spans);
+                collect_core_lvalue(target, imports, used, spans, ffi_cb);
+                collect_core_expr(value, imports, used, spans, ffi_cb);
             }
-            Stmt::Return(Some(e), _) => collect_core_expr(e, imports, used, spans),
+            Stmt::Return(Some(e), _) => collect_core_expr(e, imports, used, spans, ffi_cb),
             Stmt::Return(None, _) => {}
-            Stmt::If(ifs) => collect_core_if(ifs, imports, used, spans),
+            Stmt::If(ifs) => collect_core_if(ifs, imports, used, spans, ffi_cb),
             Stmt::While { cond, body, .. } => {
-                collect_core_expr(cond, imports, used, spans);
-                collect_core_stmts(body, imports, used, spans);
+                collect_core_expr(cond, imports, used, spans, ffi_cb);
+                collect_core_stmts(body, imports, used, spans, ffi_cb);
             }
             Stmt::For { kind, body, .. } => {
                 match kind {
                     ForKind::Range { start, end, step } => {
-                        collect_core_expr(start, imports, used, spans);
-                        collect_core_expr(end, imports, used, spans);
+                        collect_core_expr(start, imports, used, spans, ffi_cb);
+                        collect_core_expr(end, imports, used, spans, ffi_cb);
                         if let Some(step) = step {
-                            collect_core_expr(step, imports, used, spans);
+                            collect_core_expr(step, imports, used, spans, ffi_cb);
                         }
                     }
                     ForKind::In { collection } => {
-                        collect_core_expr(collection, imports, used, spans)
+                        collect_core_expr(collection, imports, used, spans, ffi_cb)
                     }
                 }
-                collect_core_stmts(body, imports, used, spans);
+                collect_core_stmts(body, imports, used, spans, ffi_cb);
             }
             Stmt::Switch {
                 subject,
@@ -4163,13 +4178,13 @@ pub(crate) fn collect_core_stmts(
                 else_body,
                 ..
             } => {
-                collect_core_expr(subject, imports, used, spans);
+                collect_core_expr(subject, imports, used, spans, ffi_cb);
                 for arm in arms {
-                    collect_core_expr(&arm.cond, imports, used, spans);
-                    collect_core_stmts(&arm.body, imports, used, spans);
+                    collect_core_expr(&arm.cond, imports, used, spans, ffi_cb);
+                    collect_core_stmts(&arm.body, imports, used, spans, ffi_cb);
                 }
                 if let Some(body) = else_body {
-                    collect_core_stmts(body, imports, used, spans);
+                    collect_core_stmts(body, imports, used, spans, ffi_cb);
                 }
             }
             Stmt::CountedLoop {
@@ -4179,10 +4194,10 @@ pub(crate) fn collect_core_stmts(
                 body,
                 ..
             } => {
-                collect_core_expr(&init.init, imports, used, spans);
-                collect_core_expr(cond, imports, used, spans);
-                collect_core_stmts(body, imports, used, spans);
-                collect_core_stmts(std::slice::from_ref(step.as_ref()), imports, used, spans);
+                collect_core_expr(&init.init, imports, used, spans, ffi_cb);
+                collect_core_expr(cond, imports, used, spans, ffi_cb);
+                collect_core_stmts(body, imports, used, spans, ffi_cb);
+                collect_core_stmts(std::slice::from_ref(step.as_ref()), imports, used, spans, ffi_cb);
             }
             Stmt::Loop { body, .. }
             | Stmt::Unsafe { body, .. }
@@ -4195,23 +4210,23 @@ pub(crate) fn collect_core_stmts(
             | Stmt::Caps { body, .. }
             | Stmt::Grant { body, .. }
             | Stmt::Transact { body, .. }
-            | Stmt::AssumeDet { body, .. } => collect_core_stmts(body, imports, used, spans),
+            | Stmt::AssumeDet { body, .. } => collect_core_stmts(body, imports, used, spans, ffi_cb),
             // D-SHIELDNAME1=A: parsed syntax, not raw source text, owns the
             // scheduler-prelude capability. This recognizes legal whitespace
             // such as `# Shield` and cannot be fooled by comments or strings.
             Stmt::Shield { body, span } => {
                 note_core_usage(used, spans, "core.concurrency::shield", Some(*span));
-                collect_core_stmts(body, imports, used, spans);
+                collect_core_stmts(body, imports, used, spans, ffi_cb);
             }
             // D-REACTCORE1: reactive blocks implicitly use `core.reactive`.
             Stmt::Reactive { body, span, .. } => {
                 note_core_usage(used, spans, "core.reactive", Some(*span));
-                collect_core_stmts(body, imports, used, spans);
+                collect_core_stmts(body, imports, used, spans, ffi_cb);
             }
             Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => {
             }
             // D-CTMARKER1: collect Core usage from comptime block body.
-            Stmt::ComptimeBlock { body, .. } => collect_core_stmts(body, imports, used, spans),
+            Stmt::ComptimeBlock { body, .. } => collect_core_stmts(body, imports, used, spans, ffi_cb),
             // D-WHEN1: collect Core usage from both arms (we don't know which is
             // selected until sema runs; over-collecting is harmless here).
             Stmt::ComptimeIf {
@@ -4220,29 +4235,29 @@ pub(crate) fn collect_core_stmts(
                 else_body,
                 ..
             } => {
-                collect_core_expr(cond, imports, used, spans);
-                collect_core_stmts(then_body, imports, used, spans);
+                collect_core_expr(cond, imports, used, spans, ffi_cb);
+                collect_core_stmts(then_body, imports, used, spans, ffi_cb);
                 if let Some(eb) = else_body {
-                    collect_core_stmts(eb, imports, used, spans);
+                    collect_core_stmts(eb, imports, used, spans, ffi_cb);
                 }
             }
             // D-CTX1: collect Core usage from context block fields and body.
             Stmt::ContextBlock { fields, body, .. } => {
                 for (_, e, _) in fields {
-                    collect_core_expr(e, imports, used, spans);
+                    collect_core_expr(e, imports, used, spans, ffi_cb);
                 }
-                collect_core_stmts(body, imports, used, spans);
+                collect_core_stmts(body, imports, used, spans, ffi_cb);
             }
             // D-TERM1 (ratified 2026-06-22): collect Core usage from live block body.
             // The live block implicitly uses `core.term` (jet_term_enter/leave), so
             // we mark it as used here.
             Stmt::Live { body, span, .. } => {
                 note_core_usage(used, spans, "core.term", Some(*span));
-                collect_core_stmts(body, imports, used, spans);
+                collect_core_stmts(body, imports, used, spans, ffi_cb);
             }
             // D-DOTSCOPE1: collect core usage in a scope-member region body.
             Stmt::ScopeMember { body, .. } => {
-                collect_core_stmts(body, imports, used, spans);
+                collect_core_stmts(body, imports, used, spans, ffi_cb);
             }
         }
     }
@@ -4253,12 +4268,13 @@ pub(crate) fn collect_core_if(
     imports: &HashMap<String, String>,
     used: &mut HashSet<String>,
     spans: &mut HashMap<String, crate::Diagnostics::Span>,
+    ffi_cb: &mut HashSet<String>,
 ) {
-    collect_core_expr(&ifs.cond, imports, used, spans);
-    collect_core_stmts(&ifs.then_body, imports, used, spans);
+    collect_core_expr(&ifs.cond, imports, used, spans, ffi_cb);
+    collect_core_stmts(&ifs.then_body, imports, used, spans, ffi_cb);
     match &ifs.else_branch {
-        Some(ElseBranch::Else(body)) => collect_core_stmts(body, imports, used, spans),
-        Some(ElseBranch::ElseIf(next)) => collect_core_if(next, imports, used, spans),
+        Some(ElseBranch::Else(body)) => collect_core_stmts(body, imports, used, spans, ffi_cb),
+        Some(ElseBranch::ElseIf(next)) => collect_core_if(next, imports, used, spans, ffi_cb),
         None => {}
     }
 }
@@ -4268,15 +4284,16 @@ pub(crate) fn collect_core_lvalue(
     imports: &HashMap<String, String>,
     used: &mut HashSet<String>,
     spans: &mut HashMap<String, crate::Diagnostics::Span>,
+    ffi_cb: &mut HashSet<String>,
 ) {
     match lv {
         LValue::Local { .. } => {}
         LValue::Index { base, index, .. } => {
-            collect_core_expr(base, imports, used, spans);
-            collect_core_expr(index, imports, used, spans);
+            collect_core_expr(base, imports, used, spans, ffi_cb);
+            collect_core_expr(index, imports, used, spans, ffi_cb);
         }
         // D-MUTSELF1: `place.field = v` — the base place may use a core import.
-        LValue::Field { base, .. } => collect_core_expr(base, imports, used, spans),
+        LValue::Field { base, .. } => collect_core_expr(base, imports, used, spans, ffi_cb),
     }
 }
 
@@ -4285,6 +4302,7 @@ pub(crate) fn collect_core_expr(
     imports: &HashMap<String, String>,
     used: &mut HashSet<String>,
     spans: &mut HashMap<String, crate::Diagnostics::Span>,
+    ffi_cb: &mut HashSet<String>,
 ) {
     // D-SIMD2 / D-LINALG1: a built-in math type used anywhere (constructor, static
     // method, or instance method on a math-typed receiver-by-name) pulls in the
@@ -4318,7 +4336,7 @@ pub(crate) fn collect_core_expr(
         _ => {}
     }
     match expr {
-        Expr::PtrFromAddr { addr, .. } => collect_core_expr(addr, imports, used, spans),
+        Expr::PtrFromAddr { addr, .. } => collect_core_expr(addr, imports, used, spans, ffi_cb),
         Expr::MethodCall {
             receiver,
             method,
@@ -4393,9 +4411,18 @@ pub(crate) fn collect_core_expr(
                     }
                 }
             }
-            collect_core_expr(receiver, imports, used, spans);
+            collect_core_expr(receiver, imports, used, spans, ffi_cb);
             for arg in args {
-                collect_core_expr(&arg.expr, imports, used, spans);
+                // D-CABI-CALLBACK1: a qualified `#Extern`-module call
+                // (`c.callback_twice(increment, x)`) resolves through
+                // `infer_import_call` (CheckerCoreLib/imports.rs), a separate
+                // path from the bare-name call below — same flag, same fix.
+                if arg.flags.c_callback_symbol {
+                    if let Expr::Ident(name, _) = &arg.expr {
+                        ffi_cb.insert(name.clone());
+                    }
+                }
+                collect_core_expr(&arg.expr, imports, used, spans, ffi_cb);
             }
         }
         Expr::Call(c) => {
@@ -4405,13 +4432,22 @@ pub(crate) fn collect_core_expr(
                 note_core_usage(used, spans, "core.io::input", Some(c.name_span));
             }
             for arg in &c.args {
-                collect_core_expr(&arg.expr, imports, used, spans);
+                // D-CABI-CALLBACK1: `arg.flags.c_callback_symbol` means sema
+                // already proved this bare function name is passed as a stable
+                // C callback at a `#Extern` call site — record the referenced
+                // function so codegen emits its definition as `extern "C" fn`.
+                if arg.flags.c_callback_symbol {
+                    if let Expr::Ident(name, _) = &arg.expr {
+                        ffi_cb.insert(name.clone());
+                    }
+                }
+                collect_core_expr(&arg.expr, imports, used, spans, ffi_cb);
             }
         }
         Expr::CallValue { callee, args, .. } => {
-            collect_core_expr(callee, imports, used, spans);
+            collect_core_expr(callee, imports, used, spans, ffi_cb);
             for arg in args {
-                collect_core_expr(&arg.expr, imports, used, spans);
+                collect_core_expr(&arg.expr, imports, used, spans, ffi_cb);
             }
         }
         Expr::Field(inner, member, span) => {
@@ -4420,9 +4456,9 @@ pub(crate) fn collect_core_expr(
             {
                 note_core_usage(used, spans, "core::json", Some(*span));
             }
-            collect_core_expr(inner, imports, used, spans);
+            collect_core_expr(inner, imports, used, spans, ffi_cb);
         }
-        Expr::OptField { base, .. } => collect_core_expr(base, imports, used, spans),
+        Expr::OptField { base, .. } => collect_core_expr(base, imports, used, spans, ffi_cb),
         Expr::Unary(_, inner, _)
         | Expr::IncDec { operand: inner, .. }
         | Expr::Deref(inner, _)
@@ -4432,84 +4468,84 @@ pub(crate) fn collect_core_expr(
         | Expr::Present(inner, _)
         | Expr::Ok(inner, _)
         | Expr::Err(inner, _)
-        | Expr::Try(inner, _, _) => collect_core_expr(inner, imports, used, spans),
+        | Expr::Try(inner, _, _) => collect_core_expr(inner, imports, used, spans, ffi_cb),
         Expr::Binary(_, lhs, rhs, _)
         | Expr::Index {
             base: lhs,
             index: rhs,
             ..
         } => {
-            collect_core_expr(lhs, imports, used, spans);
-            collect_core_expr(rhs, imports, used, spans);
+            collect_core_expr(lhs, imports, used, spans, ffi_cb);
+            collect_core_expr(rhs, imports, used, spans, ffi_cb);
         }
         Expr::CompareChain { operands, .. } => {
             for e in operands.iter() {
-                collect_core_expr(e, imports, used, spans);
+                collect_core_expr(e, imports, used, spans, ffi_cb);
             }
         }
         Expr::Slice {
             base, start, end, ..
         } => {
-            collect_core_expr(base, imports, used, spans);
-            collect_core_expr(start, imports, used, spans);
-            collect_core_expr(end, imports, used, spans);
+            collect_core_expr(base, imports, used, spans, ffi_cb);
+            collect_core_expr(start, imports, used, spans, ffi_cb);
+            collect_core_expr(end, imports, used, spans, ffi_cb);
         }
         Expr::Str(parts, _) => {
             for part in parts {
                 if let StrPart::Interp(e, _) = part {
-                    collect_core_expr(e, imports, used, spans);
+                    collect_core_expr(e, imports, used, spans, ffi_cb);
                 }
             }
         }
         Expr::ListLit(items, _) => {
             for e in items {
-                collect_core_expr(e, imports, used, spans);
+                collect_core_expr(e, imports, used, spans, ffi_cb);
             }
         }
         Expr::TupleLit(fields, _, _) => {
             for (_, e) in fields {
-                collect_core_expr(e, imports, used, spans);
+                collect_core_expr(e, imports, used, spans, ffi_cb);
             }
         }
         Expr::MapLit(items, _) => {
             for (k, v) in items {
-                collect_core_expr(k, imports, used, spans);
-                collect_core_expr(v, imports, used, spans);
+                collect_core_expr(k, imports, used, spans, ffi_cb);
+                collect_core_expr(v, imports, used, spans, ffi_cb);
             }
         }
         Expr::StructLit { fields, .. } => {
             for (_, _, e) in fields {
-                collect_core_expr(e, imports, used, spans);
+                collect_core_expr(e, imports, used, spans, ffi_cb);
             }
         }
         Expr::EnumLit { args, .. } => {
             for arg in args {
                 match arg {
-                    EnumLitArg::Positional(e) => collect_core_expr(e, imports, used, spans),
-                    EnumLitArg::Named { expr, .. } => collect_core_expr(expr, imports, used, spans),
+                    EnumLitArg::Positional(e) => collect_core_expr(e, imports, used, spans, ffi_cb),
+                    EnumLitArg::Named { expr, .. } => collect_core_expr(expr, imports, used, spans, ffi_cb),
                 }
             }
         }
-        Expr::PatternTest { subject, .. } => collect_core_expr(subject, imports, used, spans),
+        Expr::PatternTest { subject, .. } => collect_core_expr(subject, imports, used, spans, ffi_cb),
         Expr::OrFallback {
             value, fallback, ..
         } => {
-            collect_core_expr(value, imports, used, spans);
+            collect_core_expr(value, imports, used, spans, ffi_cb);
             match fallback {
-                OrFallback::Value(e) => collect_core_expr(e, imports, used, spans),
-                OrFallback::Return(Some(e), _) => collect_core_expr(e, imports, used, spans),
+                OrFallback::Value(e) => collect_core_expr(e, imports, used, spans, ffi_cb),
+                OrFallback::Return(Some(e), _) => collect_core_expr(e, imports, used, spans, ffi_cb),
                 OrFallback::Return(None, _) => {}
                 OrFallback::Panic { args, .. } => {
                     for arg in args {
-                        collect_core_expr(&arg.expr, imports, used, spans);
+                        collect_core_expr(&arg.expr, imports, used, spans, ffi_cb);
                     }
                 }
                 OrFallback::Break(_) | OrFallback::Continue(_) => {}
             }
         }
         Expr::Lambda(lam) => match &lam.body {
-            LambdaBody::Expr(e) => collect_core_expr(e, imports, used, spans),
-            LambdaBody::Block(stmts) => collect_core_stmts(stmts, imports, used, spans),
+            LambdaBody::Expr(e) => collect_core_expr(e, imports, used, spans, ffi_cb),
+            LambdaBody::Block(stmts) => collect_core_stmts(stmts, imports, used, spans, ffi_cb),
         },
         Expr::If {
             cond,
@@ -4519,16 +4555,16 @@ pub(crate) fn collect_core_expr(
             else_value,
             ..
         } => {
-            collect_core_expr(cond, imports, used, spans);
-            collect_core_stmts(then_body, imports, used, spans);
-            collect_core_expr(then_value, imports, used, spans);
-            collect_core_stmts(else_body, imports, used, spans);
-            collect_core_expr(else_value, imports, used, spans);
+            collect_core_expr(cond, imports, used, spans, ffi_cb);
+            collect_core_stmts(then_body, imports, used, spans, ffi_cb);
+            collect_core_expr(then_value, imports, used, spans, ffi_cb);
+            collect_core_stmts(else_body, imports, used, spans, ffi_cb);
+            collect_core_expr(else_value, imports, used, spans, ffi_cb);
         }
         Expr::FanOut { callee, items, .. } => {
-            collect_core_expr(callee, imports, used, spans);
+            collect_core_expr(callee, imports, used, spans, ffi_cb);
             for item in items {
-                collect_core_expr(item, imports, used, spans);
+                collect_core_expr(item, imports, used, spans, ffi_cb);
             }
         }
         Expr::Int(_, _, _)
@@ -4545,8 +4581,8 @@ pub(crate) fn collect_core_expr(
         // literal, no nested `Expr` to recurse into.
         | Expr::StrMatchLit(_, _)
         | Expr::BinMatchLit(_, _) => {}
-        Expr::Paren(inner, _) => collect_core_expr(inner, imports, used, spans),
-        Expr::Spread(inner, _) => collect_core_expr(inner, imports, used, spans),
+        Expr::Paren(inner, _) => collect_core_expr(inner, imports, used, spans, ffi_cb),
+        Expr::Spread(inner, _) => collect_core_expr(inner, imports, used, spans, ffi_cb),
     }
 }
 

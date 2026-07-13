@@ -318,6 +318,7 @@ pub fn compile_web_with_path(src: &str, file: &str) -> Result<CompileOutput, Vec
         }],
         parse_teaching: Vec::new(),
         used_core: std::collections::HashSet::new(),
+        ffi_callback_fns: std::collections::HashSet::new(),
         cffi: CFFI::CFfi::default(),
         comptime_inputs: Vec::new(),
         import_targets: std::collections::HashMap::new(),
