@@ -287,6 +287,8 @@ impl<'a> Checker<'a> {
             // a lambda, off the block's direct path.
             let saved_txn_depth = self.txn_depth;
             self.txn_depth = 0;
+            let saved_expected = self.expected_type.clone();
+            self.expected_type = exp_ret.map(|ret| (**ret).clone());
             let body_ret = match &mut lam.body {
                 LambdaBody::Expr(e) => {
                     if self.is_task_spawn {
@@ -313,6 +315,7 @@ impl<'a> Checker<'a> {
                     last_ret
                 }
             };
+            self.expected_type = saved_expected;
             self.txn_depth = saved_txn_depth;
     
             self.pop_scope();

@@ -5351,7 +5351,11 @@ fn async_event_scheduler_dispatch_and_invalid_capacity() {
 use core.event as event
 use core.tasks as tasks
 
+enum LocalState { Closed }
+
 fn run() {
+    local :: LocalState.Closed
+    print("local={local == .Closed}")
     bad :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 0, overflow: .Block }, .Collect)
     if bad == {
         ok(_) -> print("bad accepted")
@@ -5377,16 +5381,132 @@ fn run() {
     first_report :: first.join()
     second_report :: second.join()
     third_report :: third.join()
-    print("delivered={first_report.delivered() + second_report.delivered()}")
+    print("delivered={first_report.delivered_handlers() + second_report.delivered_handlers()}")
     print("delivered state={first_report.state() == .Delivered}")
     print("closed={!third_report.accepted() && third_report.state() == .Closed}")
+    print(third_report.trace().summary())
 }
 "#,
         &[],
         None,
     );
     assert_eq!(code, 0, "async event runtime failed: {stderr}");
-    assert_eq!(stdout, "invalid capacity\nqueued=1 running=1 blocked=1\ndelivered=2\ndelivered state=true\nclosed=true\n");
+    assert_eq!(stdout, "local=true\ninvalid capacity\nqueued=1 running=1 blocked=1\ndelivered=2\ndelivered state=true\nclosed=true\npending -> terminal:Closed\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn async_event_overflow_and_failure_policies() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc { return; }
+    let dir = std::env::temp_dir().join(format!("jet_corelib_async_event_policies_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "async_event_policies",
+        r#"
+use core.event as event
+use core.tasks as tasks
+
+fn panic_log_handler(n: Int) -> Void ? String {
+    panic("log boom")
+    return err("unreachable")
+}
+
+fn panic_ignore_handler(n: Int) -> Void ? String {
+    panic("ignore boom")
+    return err("unreachable")
+}
+
+fn run() {
+    newest_scope :: event.scope()
+    newest :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .DropNewest }, .Collect) ?? panic("policy")
+    (newest_started_tx, newest_started_rx) :: tasks.channel<Int>()
+    (newest_release_tx, newest_release_rx) :: tasks.channel<Int>()
+    newest.on(newest_scope, (n: Int) => {
+        newest_started_tx.send(copy n)
+        released_newest :: newest_release_rx.receive() ?? panic("release")
+    })
+    newest_first :: newest.emit_async(1)
+    newest_started_first :: newest_started_rx.receive() ?? panic("started")
+    newest_second :: newest.emit_async(2)
+    newest_third :: newest.emit_async(3)
+    newest_report :: newest_third.join()
+    print("newest={!newest_report.accepted() && newest_report.state() == .DroppedNewest}")
+    newest_release_tx.send(1)
+    newest_started_second :: newest_started_rx.receive() ?? panic("second")
+    newest_release_tx.send(2)
+    newest_first.join()
+    newest_second.join()
+
+    oldest_scope :: event.scope()
+    oldest :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .DropOldest }, .Collect) ?? panic("policy")
+    (oldest_started_tx, oldest_started_rx) :: tasks.channel<Int>()
+    (oldest_release_tx, oldest_release_rx) :: tasks.channel<Int>()
+    oldest.on(oldest_scope, (n: Int) => {
+        oldest_started_tx.send(copy n)
+        released_oldest :: oldest_release_rx.receive() ?? panic("release")
+    })
+    oldest_first :: oldest.emit_async(1)
+    oldest_started_first :: oldest_started_rx.receive() ?? panic("started")
+    oldest_evicted :: oldest.emit_async(2)
+    oldest_third :: oldest.emit_async(3)
+    oldest_report :: oldest_evicted.join()
+    print("oldest={oldest_report.accepted() && oldest_report.state() == .DroppedOldest}")
+    oldest_release_tx.send(1)
+    oldest_started_third :: oldest_started_rx.receive() ?? panic("third")
+    oldest_release_tx.send(3)
+    oldest_first.join()
+    oldest_third.join()
+
+    failure_scope :: event.scope()
+    collect :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    collect.on_priority(failure_scope, 10, (n: Int) => err("high"))
+    collect.on_priority(failure_scope, 0, (n: Int) => err("low"))
+    collected :: collect.emit_async(1).join()
+    print("collect={collected.state() == .HandlerFailed} handlers={collected.delivered_handlers()} failures={collected.failures().len()}")
+    print(collected.trace().summary())
+
+    stop :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .StopFirst) ?? panic("policy")
+    stop.on_priority(failure_scope, 10, (n: Int) => err("first"))
+    stop.on_priority(failure_scope, 0, (n: Int) => {})
+    stopped :: stop.emit_async(1).join()
+    print("stop={stopped.state() == .HandlerFailed} handlers={stopped.delivered_handlers()} failures={stopped.failures().len()}")
+
+    log_errors :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Log) ?? panic("policy")
+    log_errors.on_priority(failure_scope, 10, (n: Int) => err("logged secret"))
+    log_errors.on_priority(failure_scope, 0, (n: Int) => {})
+    logged_error :: log_errors.emit_async(1).join()
+    print("log error={logged_error.state() == .Delivered} handlers={logged_error.delivered_handlers()} failures={logged_error.failures().len()} traced={logged_error.trace().summary().contains("failed")}")
+
+    ignore_errors :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Ignore) ?? panic("policy")
+    ignore_errors.on_priority(failure_scope, 10, (n: Int) => err("ignored secret"))
+    ignore_errors.on_priority(failure_scope, 0, (n: Int) => {})
+    ignored_error :: ignore_errors.emit_async(1).join()
+    print("ignore error={ignored_error.state() == .Delivered} handlers={ignored_error.delivered_handlers()} failures={ignored_error.failures().len()} traced={ignored_error.trace().summary().contains("failed")}")
+
+    panic_log :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Log) ?? panic("policy")
+    panic_log.on_priority(failure_scope, 10, (n: Int) => panic_log_handler(n))
+    panic_log.on_priority(failure_scope, 0, (n: Int) => {})
+    logged_panic :: panic_log.emit_async(1).join()
+    print("panic log={logged_panic.state() == .HandlerFailed} handlers={logged_panic.delivered_handlers()} failures={logged_panic.failures().len()} traced={logged_panic.trace().summary().contains("panic:log boom")}")
+
+    panic_ignore :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Ignore) ?? panic("policy")
+    panic_ignore.on_priority(failure_scope, 10, (n: Int) => panic_ignore_handler(n))
+    panic_ignore.on_priority(failure_scope, 0, (n: Int) => {})
+    ignored_panic :: panic_ignore.emit_async(1).join()
+    print("panic ignore={ignored_panic.state() == .HandlerFailed} handlers={ignored_panic.delivered_handlers()} failures={ignored_panic.failures().len()} traced={ignored_panic.trace().summary().contains("panic:ignore boom")}")
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "async event policies failed: {stderr}");
+    assert_eq!(
+        stdout,
+        "newest=true\noldest=true\ncollect=true handlers=2 failures=2\nqueued -> running -> handler:0:failed -> handler:1:failed -> terminal:HandlerFailed\nstop=true handlers=1 failures=1\nlog error=true handlers=2 failures=0 traced=true\nignore error=true handlers=2 failures=0 traced=false\npanic log=true handlers=1 failures=1 traced=true\npanic ignore=true handlers=1 failures=1 traced=true\n"
+    );
     let _ = fs::remove_dir_all(&dir);
 }
 

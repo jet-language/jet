@@ -526,19 +526,47 @@
     pub struct JetDispatchReport<E: Clone + Send + 'static> {
         accepted: bool,
         state: JetDispatchState,
-        delivered: i64,
+        delivered_handlers: i64,
         failures: Vec<JetDispatchFailure<E>>,
+        trace: Vec<String>,
     }
 
     impl<E: Clone + Send + 'static> JetDispatchReport<E> {
         fn terminal(accepted: bool, state: JetDispatchState) -> Self {
-            JetDispatchReport { accepted, state, delivered: 0, failures: Vec::new() }
+            JetDispatchReport {
+                accepted,
+                state,
+                delivered_handlers: 0,
+                failures: Vec::new(),
+                trace: vec![format!("terminal:{:?}", state)],
+            }
+        }
+        fn terminal_with_trace(
+            accepted: bool,
+            state: JetDispatchState,
+            mut trace: Vec<String>,
+        ) -> Self {
+            trace.push(format!("terminal:{:?}", state));
+            JetDispatchReport {
+                accepted,
+                state,
+                delivered_handlers: 0,
+                failures: Vec::new(),
+                trace,
+            }
         }
         pub fn accepted(&self) -> bool { self.accepted }
-        pub fn delivered(&self) -> i64 { self.delivered }
-        pub fn failure_count(&self) -> i64 { self.failures.len() as i64 }
+        pub fn delivered_handlers(&self) -> i64 { self.delivered_handlers }
         pub fn state(&self) -> JetDispatchState { self.state }
         pub fn failures(&self) -> Vec<JetDispatchFailure<E>> { self.failures.clone() }
+        pub fn trace(&self) -> JetEventTrace {
+            JetEventTrace {
+                delivered: self.delivered_handlers,
+                queued: self.trace.iter().filter(|entry| entry.as_str() == "queued").count() as i64,
+                dropped: i64::from(matches!(self.state, JetDispatchState::DroppedNewest | JetDispatchState::DroppedOldest)),
+                summary: self.trace.join(" -> "),
+            }
+        }
     }
 
     struct JetAsyncListener<T, E> {
@@ -554,6 +582,7 @@
         accepted: std::sync::atomic::AtomicBool,
         payload: std::sync::Mutex<Option<T>>,
         terminal: std::sync::Mutex<Option<JetDispatchReport<E>>>,
+        trace: std::sync::Mutex<Vec<String>>,
         wake: std::sync::Arc<super::ParkSlot>,
     }
 
@@ -650,6 +679,7 @@
                 accepted: std::sync::atomic::AtomicBool::new(false),
                 payload: std::sync::Mutex::new(Some(payload)),
                 terminal: std::sync::Mutex::new(None),
+                trace: std::sync::Mutex::new(Vec::new()),
                 wake: super::ParkSlot::new(),
             });
             {
@@ -658,19 +688,25 @@
                     *entry.terminal.lock().unwrap() = Some(JetDispatchReport::terminal(false, JetDispatchState::Closed));
                 } else if state.queued.len() < self.policy.capacity as usize {
                     entry.accepted.store(true, std::sync::atomic::Ordering::Release);
+                    entry.trace.lock().unwrap().push("queued".to_string());
                     state.queued.push_back(entry.clone());
                 } else {
                     match self.policy.overflow {
-                        JetEventOverflow::Block => state.blocked.push_back(entry.clone()),
+                        JetEventOverflow::Block => {
+                            entry.trace.lock().unwrap().push("pending".to_string());
+                            state.blocked.push_back(entry.clone());
+                        }
                         JetEventOverflow::DropNewest => {
                             *entry.terminal.lock().unwrap() = Some(JetDispatchReport::terminal(false, JetDispatchState::DroppedNewest));
                         }
                         JetEventOverflow::DropOldest => {
                             if let Some(oldest) = state.queued.pop_front() {
-                                *oldest.terminal.lock().unwrap() = Some(JetDispatchReport::terminal(true, JetDispatchState::DroppedOldest));
+                                let trace = oldest.trace.lock().unwrap().clone();
+                                *oldest.terminal.lock().unwrap() = Some(JetDispatchReport::terminal_with_trace(true, JetDispatchState::DroppedOldest, trace));
                                 oldest.wake.wake();
                             }
                             entry.accepted.store(true, std::sync::atomic::Ordering::Release);
+                            entry.trace.lock().unwrap().push("queued".to_string());
                             state.queued.push_back(entry.clone());
                         }
                     }
@@ -692,11 +728,19 @@
                 Ok(report) => report,
                 Err(payload) if payload.is::<super::JetCancelUnwind>() => {
                     self.remove_entry(&entry);
-                    JetDispatchReport::terminal(entry.accepted.load(std::sync::atomic::Ordering::Acquire), JetDispatchState::Cancelled)
+                    JetDispatchReport::terminal_with_trace(
+                        entry.accepted.load(std::sync::atomic::Ordering::Acquire),
+                        JetDispatchState::Cancelled,
+                        entry.trace.lock().unwrap().clone(),
+                    )
                 }
                 Err(payload) if payload.is::<super::JetDeadlineUnwind>() => {
                     self.remove_entry(&entry);
-                    JetDispatchReport::terminal(entry.accepted.load(std::sync::atomic::Ordering::Acquire), JetDispatchState::DeadlineExceeded)
+                    JetDispatchReport::terminal_with_trace(
+                        entry.accepted.load(std::sync::atomic::Ordering::Acquire),
+                        JetDispatchState::DeadlineExceeded,
+                        entry.trace.lock().unwrap().clone(),
+                    )
                 }
                 Err(payload) => std::panic::resume_unwind(payload),
             }
@@ -708,22 +752,32 @@
                 let listeners = {
                     let mut state = self.state.lock().unwrap();
                     if state.cancelled {
-                        return JetDispatchReport::terminal(entry.accepted.load(std::sync::atomic::Ordering::Acquire), JetDispatchState::Cancelled);
+                        return JetDispatchReport::terminal_with_trace(
+                            entry.accepted.load(std::sync::atomic::Ordering::Acquire),
+                            JetDispatchState::Cancelled,
+                            entry.trace.lock().unwrap().clone(),
+                        );
                     }
                     if let Some(pos) = state.blocked.iter().position(|item| item.id == entry.id) {
                         if state.closed {
                             state.blocked.remove(pos);
-                            return JetDispatchReport::terminal(false, JetDispatchState::Closed);
+                            return JetDispatchReport::terminal_with_trace(
+                                false,
+                                JetDispatchState::Closed,
+                                entry.trace.lock().unwrap().clone(),
+                            );
                         }
                         if state.queued.len() < self.policy.capacity as usize {
                             state.blocked.remove(pos);
                             entry.accepted.store(true, std::sync::atomic::Ordering::Release);
+                            entry.trace.lock().unwrap().push("queued".to_string());
                             state.queued.push_back(entry.clone());
                         }
                     }
                     if state.queued.front().is_some_and(|front| front.id == entry.id) {
                         state.queued.pop_front();
                         state.running += 1;
+                        entry.trace.lock().unwrap().push("running".to_string());
                         let mut listeners = state.listeners.iter()
                             .filter(|listener| listener.active.load(std::sync::atomic::Ordering::Acquire))
                             .map(|listener| (listener.priority, listener.id, listener.once, listener.active.clone(), listener.handler.clone()))
@@ -735,19 +789,37 @@
                 };
                 if let Some(listeners) = listeners {
                     let payload = entry.payload.lock().unwrap().take().expect("async event payload consumed once");
-                    let mut report = JetDispatchReport { accepted: true, state: JetDispatchState::Delivered, delivered: 0, failures: Vec::new() };
-                    for (_, _, once, active, handler) in listeners {
+                    let mut report = JetDispatchReport {
+                        accepted: true,
+                        state: JetDispatchState::Delivered,
+                        delivered_handlers: 0,
+                        failures: Vec::new(),
+                        trace: entry.trace.lock().unwrap().clone(),
+                    };
+                    for (handler_index, (_, _, once, active, handler)) in listeners.into_iter().enumerate() {
                         if !active.load(std::sync::atomic::Ordering::Acquire) { continue; }
                         if once { active.store(false, std::sync::atomic::Ordering::Release); }
-                        report.delivered += 1;
+                        report.delivered_handlers += 1;
                         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(payload.clone())));
                         match outcome {
-                            Ok(Ok(())) => {}
+                            Ok(Ok(())) => report.trace.push(format!("handler:{handler_index}:delivered")),
                             Ok(Err(error)) => {
                                 match self.failure_policy {
-                                    JetFailurePolicy::StopFirst => { report.state = JetDispatchState::HandlerFailed; report.failures.push(JetDispatchFailure::Handler(error)); break; }
-                                    JetFailurePolicy::Collect => { report.state = JetDispatchState::HandlerFailed; report.failures.push(JetDispatchFailure::Handler(error)); }
-                                    JetFailurePolicy::Log => eprintln!("event handler failed"),
+                                    JetFailurePolicy::StopFirst => {
+                                        report.state = JetDispatchState::HandlerFailed;
+                                        report.failures.push(JetDispatchFailure::Handler(error));
+                                        report.trace.push(format!("handler:{handler_index}:failed"));
+                                        break;
+                                    }
+                                    JetFailurePolicy::Collect => {
+                                        report.state = JetDispatchState::HandlerFailed;
+                                        report.failures.push(JetDispatchFailure::Handler(error));
+                                        report.trace.push(format!("handler:{handler_index}:failed"));
+                                    }
+                                    JetFailurePolicy::Log => {
+                                        report.trace.push(format!("handler:{handler_index}:failed"));
+                                        eprintln!("event handler failed");
+                                    }
                                     JetFailurePolicy::Ignore => {}
                                 }
                             }
@@ -755,15 +827,14 @@
                                 let message = payload.downcast_ref::<String>().cloned()
                                     .or_else(|| payload.downcast_ref::<&str>().map(|s| (*s).to_string()))
                                     .unwrap_or_else(|| "event handler panicked".to_string());
-                                match self.failure_policy {
-                                    JetFailurePolicy::StopFirst => { report.state = JetDispatchState::HandlerFailed; report.failures.push(JetDispatchFailure::Panic(message)); break; }
-                                    JetFailurePolicy::Collect => { report.state = JetDispatchState::HandlerFailed; report.failures.push(JetDispatchFailure::Panic(message)); }
-                                    JetFailurePolicy::Log => eprintln!("event handler panicked: {message}"),
-                                    JetFailurePolicy::Ignore => {}
-                                }
+                                report.state = JetDispatchState::HandlerFailed;
+                                report.failures.push(JetDispatchFailure::Panic(message.clone()));
+                                report.trace.push(format!("handler:{handler_index}:panic:{message}"));
+                                break;
                             }
                         }
                     }
+                    report.trace.push(format!("terminal:{:?}", report.state));
                     let wakes = {
                         let mut state = self.state.lock().unwrap();
                         state.running = state.running.saturating_sub(1);

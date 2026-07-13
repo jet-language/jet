@@ -164,8 +164,7 @@ pub(super) fn is_binding_free_user_variant_pattern_test(pattern: &Pattern, cx: &
             bindings.is_empty()
                 && !is_json_variant(variant)
                 && !is_key_variant(variant)
-                && (cx.variant_owner.contains_key(variant)
-                    || matches!(variant.as_str(), "Delivered" | "HandlerFailed" | "DroppedNewest" | "DroppedOldest" | "Closed" | "Cancelled" | "DeadlineExceeded"))
+                && cx.variant_owner.contains_key(variant)
         }
         _ => false,
     }
@@ -178,15 +177,22 @@ pub(super) fn lower_binding_free_variant_pattern_test(
     env: &mut LowerEnv,
 ) -> TExpr {
     let subj = lower_expr(subject, cx, env);
-    let enum_type = match pattern {
-        Pattern::Variant { variant, .. }
-            if matches!(variant.as_str(), "Delivered" | "HandlerFailed" | "DroppedNewest" | "DroppedOldest" | "Closed" | "Cancelled" | "DeadlineExceeded") => Some("DispatchState"),
-        Pattern::Variant { variant, .. } => cx.variant_owner.get(variant).map(String::as_str),
+    let variant = match pattern {
+        Pattern::Variant { variant, .. } => variant,
+        _ => unreachable!("binding-free variant gate admitted non-variant"),
+    };
+    let subject_enum = match &subj.ty {
+        Type::Named(name) | Type::Apply { name, .. }
+            if cx.enum_variants.get(name).is_some_and(|variants| {
+                variants.iter().any(|(candidate, _)| candidate == variant)
+            }) => Some(name.as_str()),
         _ => None,
     };
-    let pat_str = match (enum_type, pattern) {
-        (Some("DispatchState"), Pattern::Variant { variant, .. }) =>
-            crate::Codegen::TIR::tir_enum_lit_prefix(cx, "DispatchState", variant),
+    let enum_type = subject_enum.or_else(|| cx.variant_owner.get(variant).map(String::as_str));
+    let pat_str = match enum_type {
+        Some(type_name) if cx.enum_variants.get(type_name).is_some_and(|variants| {
+            variants.iter().any(|(candidate, _)| candidate == variant)
+        }) => crate::Codegen::TIR::tir_enum_lit_prefix(cx, type_name, variant),
         _ => emit_match_pattern(cx, pattern, enum_type),
     };
     TExpr {

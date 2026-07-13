@@ -1707,8 +1707,43 @@ pub(crate) fn build_cx_items(
     }
 
     collect_iter_index_hooks(&mut cx, items);
+    register_core_event_enums(&mut cx);
 
     cx
+}
+
+fn register_core_event_enums(cx: &mut Cx) {
+    const ENUMS: &[(&str, &[&str])] = &[
+        ("Overflow", &["Block", "DropNewest", "DropOldest"]),
+        ("FailurePolicy", &["StopFirst", "Collect", "Log", "Ignore"]),
+        (
+            "DispatchState",
+            &[
+                "Delivered",
+                "HandlerFailed",
+                "DroppedNewest",
+                "DroppedOldest",
+                "Closed",
+                "Cancelled",
+                "DeadlineExceeded",
+            ],
+        ),
+    ];
+    for (enum_name, variants) in ENUMS {
+        cx.enum_variants.entry((*enum_name).to_string()).or_insert_with(|| {
+            variants
+                .iter()
+                .map(|variant| ((*variant).to_string(), VariantPayload::Unit))
+                .collect()
+        });
+        for variant in *variants {
+            // User/imported variants keep their owner. Pattern lowering resolves
+            // the subject type first, so a same-named core variant remains exact.
+            cx.variant_owner
+                .entry((*variant).to_string())
+                .or_insert_with(|| (*enum_name).to_string());
+        }
+    }
 }
 
 fn assoc_type_impl<'a>(assoc: &'a [(String, Span, Type)], name: &str) -> Option<&'a Type> {

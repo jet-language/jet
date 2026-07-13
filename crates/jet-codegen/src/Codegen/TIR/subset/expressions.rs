@@ -58,8 +58,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
         } if bindings.is_empty()
             && !is_json_variant(variant)
             && !is_key_variant(variant)
-            && (cx.variant_owner.contains_key(variant)
-                || matches!(variant.as_str(), "Delivered" | "HandlerFailed" | "DroppedNewest" | "DroppedOldest" | "Closed" | "Cancelled" | "DeadlineExceeded")) =>
+            && cx.variant_owner.contains_key(variant) =>
         {
             expr_in_subset(subject, cx, locals)
         }
@@ -375,17 +374,16 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                     return true;
                 }
                 if !locals.contains(enum_name)
-                    && enum_is_covered(enum_name, cx)
-                    && cx.variant_owner.get(member).map(String::as_str) == Some(enum_name.as_str())
+                    && (enum_is_covered(enum_name, cx)
+                        || crate::Codegen::core_rust_type_name(enum_name).is_some())
+                    && cx.enum_variants.get(enum_name).is_some_and(|variants| {
+                        variants.iter().any(|(name, payload)| {
+                            name == member && matches!(payload, crate::AST::VariantPayload::Unit)
+                        })
+                    })
                 {
                     return true;
                 }
-                if !locals.contains(enum_name) && match enum_name.as_str() {
-                    "Overflow" => matches!(member.as_str(), "Block" | "DropNewest" | "DropOldest"),
-                    "FailurePolicy" => matches!(member.as_str(), "StopFirst" | "Collect" | "Log" | "Ignore"),
-                    "DispatchState" => matches!(member.as_str(), "Delivered" | "HandlerFailed" | "DroppedNewest" | "DroppedOldest" | "Closed" | "Cancelled" | "DeadlineExceeded"),
-                    _ => false,
-                } { return true; }
                 // c109 Phase 24: the `JSON.Null` unit construction reaches codegen as a
                 // `Field` (the AST `emit_expr` Field arm emits `{root}jet_std::Json::Null`,
                 // Expression.rs ~L222). Cover it (the only no-arg JSON variant).
@@ -473,26 +471,22 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             if type_name == "TextWidthControls" {
                 return matches!(variant.as_str(), "Zero" | "Reject");
             }
-            if type_name == "Overflow" {
-                return matches!(variant.as_str(), "Block" | "DropNewest" | "DropOldest");
-            }
-            if type_name == "FailurePolicy" {
-                return matches!(variant.as_str(), "StopFirst" | "Collect" | "Log" | "Ignore");
-            }
-            if type_name == "DispatchState" {
-                return matches!(variant.as_str(), "Delivered" | "HandlerFailed" | "DroppedNewest" | "DroppedOldest" | "Closed" | "Cancelled" | "DeadlineExceeded");
-            }
             if type_name == "NetShutdown" {
                 return matches!(variant.as_str(), "Read" | "Write" | "Both");
             }
             if type_name == "NetReadyInterest" {
                 return matches!(variant.as_str(), "Read" | "Write" | "ReadWrite");
             }
-            if !enum_is_covered(type_name, cx) {
+            if !enum_is_covered(type_name, cx)
+                && !(crate::Codegen::core_rust_type_name(type_name).is_some()
+                    && cx.enum_variants.contains_key(type_name))
+            {
                 return false;
             }
             // Defensive: the variant must belong to this enum (sema guaranteed it).
-            if cx.variant_owner.get(variant).map(String::as_str) != Some(type_name.as_str()) {
+            if !cx.enum_variants.get(type_name).is_some_and(|variants| {
+                variants.iter().any(|(candidate, _)| candidate == variant)
+            }) {
                 return false;
             }
             args.iter().all(|a| match a {

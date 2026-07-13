@@ -122,7 +122,7 @@ pub(crate) fn is_event_method_name(method: &str, nargs: usize) -> bool {
             | ("unsubscribe" | "active" | "cancel" | "active_count", 0)
             | ("trace" | "listener_count" | "queued_count", 0)
             | ("summary" | "delivered" | "queued" | "dropped", 0)
-            | ("close" | "running_count" | "blocked_count" | "accepted" | "failure_count" | "state" | "failures", 0)
+            | ("close" | "running_count" | "blocked_count" | "accepted" | "delivered_handlers" | "state" | "failures", 0)
     )
 }
 

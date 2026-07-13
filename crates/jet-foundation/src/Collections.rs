@@ -876,12 +876,13 @@ fn dispatch_report_method_return(args: &[Type], method: &str, nargs: usize) -> O
     let error = args.first().cloned().unwrap_or(Type::String);
     match (method, nargs) {
         ("accepted", 0) => Some(Some(Type::Bool)),
-        ("delivered" | "failure_count", 0) => Some(Some(Type::Int)),
+        ("delivered_handlers", 0) => Some(Some(Type::Int)),
         ("state", 0) => Some(Some(Type::Named(crate::Syntax::TYPE_DISPATCH_STATE.to_string()))),
         ("failures", 0) => Some(Some(Type::List(Box::new(Type::Apply {
             name: crate::Syntax::TYPE_DISPATCH_FAILURE.to_string(),
             args: vec![error],
         })))),
+        ("trace", 0) => Some(Some(Type::Named(crate::Syntax::TYPE_EVENT_TRACE.to_string()))),
         _ => None,
     }
 }
@@ -1343,7 +1344,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             let payload = args.first().cloned().unwrap_or(Type::Int);
             let error = args.get(1).cloned().unwrap_or(Type::String);
             let handler_ret = Type::Result {
-                ok: Box::new(Type::Named("Unit".to_string())),
+                ok: Box::new(Type::Named("Void".to_string())),
                 err: Box::new(error),
             };
             match method {

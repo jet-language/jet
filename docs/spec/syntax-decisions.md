@@ -1665,18 +1665,18 @@ card #286)*: `Event<T>` and `Hook<T,R>` stay synchronous. `core.event`
 `async_result<T,E>(AsyncPolicy.{ capacity, overflow }, FailurePolicy)` creates
 one `AsyncEvent<T,E>` queue; capacity must be positive. Overflow is exactly
 `Block`, `DropNewest`, or `DropOldest`. `emit_async` returns
-`Task<DispatchReport<E>>`; reports expose terminal state, acceptance,
-delivered-handler count, and ordered failures. This scheduler tranche implements
-Pending, Queued, Running, Delivered, HandlerFailed, DroppedNewest,
-DroppedOldest, Closed, Cancelled, and DeadlineExceeded. Capacity counts Queued only; `queued_count`,
-`running_count`, and `blocked_count` expose those exact states. `close()`
-gracefully rejects new and blocked producers while draining accepted work.
-Ambient task cancellation and inherited deadlines produce the matching terminal
-report with acceptance preserved. EventScope owner-wake coupling remains
-unexposed until complete. Failure policy is
-`StopFirst`, `Collect`, `Log`, or `Ignore`; panics are
-typed task-panic dispatch failures, never `E`. The ratified `DecisionHook`
-fold is tracked separately from this scheduler tranche and is not exposed yet.
+`Task<DispatchReport<E>>`. Capacity counts Queued only; Running and Pending do
+not consume a slot. `queued_count`, `running_count`, and `blocked_count` expose
+those states. Dispatch is serial per handle, in stable priority then
+subscription order, with once disabled before invocation. Reports expose
+`state`, `accepted`, `delivered_handlers`, `failures`, and ordered `EventTrace`.
+`close()` rejects new and Pending producers as Closed while draining accepted
+Queued and Running work. StopFirst stops after the first `E`; Collect preserves
+all `E` values in order; Log records failure facts in trace without storing `E`;
+Ignore stores neither. A panic always stops that payload as HandlerFailed with
+`DispatchFailure.Panic`, independent of failure policy. EventScope cancellation,
+owner-teardown cancellation, inherited-deadline transitions, and DecisionHook
+remain deferred; this tranche does not claim them.
 
 **D-FILES-WRITE1 — `core.fs`/`core.files` merge** *(ratified/shipped
 2026-07-04, cv5syntaxdecrees)*: one `core.files` module for both whole-file

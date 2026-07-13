@@ -1044,11 +1044,12 @@ pub(crate) fn lower_method_call(
                 Type::Apply { args, .. } if args.len() >= 2 => args[1].clone(),
                 _ => Type::Named("Unknown".to_string()),
             },
+            (Some("DispatchReport"), "trace") => Type::Named("EventTrace".to_string()),
             (_, "trace" | "summary") => Type::String,
             (
                 _,
                 "listener_count" | "queued_count" | "active_count" | "delivered" | "queued"
-                | "dropped" | "running_count" | "blocked_count" | "failure_count",
+                | "dropped" | "running_count" | "blocked_count" | "delivered_handlers",
             ) => Type::Int,
             (_, "active" | "accepted") => Type::Bool,
             (Some("DispatchReport"), "state") => Type::Named("DispatchState".to_string()),
@@ -1060,7 +1061,7 @@ pub(crate) fn lower_method_call(
         };
         let expected_hook_result = match &recv_t.ty {
             Type::Apply { name, args } if name == "AsyncEvent" && args.len() >= 2 => Some(Type::Result {
-                ok: Box::new(Type::Named("Unit".to_string())),
+                ok: Box::new(Type::Named("Void".to_string())),
                 err: Box::new(args[1].clone()),
             }),
             Type::Apply { args, .. } if args.len() >= 2 => args.get(1).cloned(),
