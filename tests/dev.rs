@@ -2029,10 +2029,77 @@ fn run() {
     sender.send(42)
     ack.receive() ?? panic("closed")
 }
+
 "#,
         "shield_cancel",
     );
     assert_eq!(out.stdout, "42\n");
+}
+
+#[test]
+fn cranelift_unshielded_receive_cancel_does_not_unwind_native_frame() {
+    let out = run_cranelift_without_fallback(
+        r#"use core.tasks as tasks
+fn run() {
+    (ready_sender, ready) :: tasks.channel<Int>()
+    (sender, ch) :: tasks.channel<Int>()
+    slow :: tasks.spawn(take(ch, ready_sender) () => {
+        ready_sender.send(1)
+        ch.receive() ?? panic("closed")
+        print(99)
+    })
+    ready.receive() ?? panic("closed")
+    slow.cancel()
+    sender.send(42)
+}
+"#,
+        "unshielded_receive_cancel",
+    );
+    assert_eq!(out.stdout, "");
+}
+
+#[test]
+fn cranelift_unshielded_sleep_cancel_does_not_unwind_native_frame() {
+    let out = run_cranelift_without_fallback(
+        r#"use core.tasks as tasks
+use core.time as time
+fn run() {
+    (ready_sender, ready) :: tasks.channel<Int>()
+    slow :: tasks.spawn(take(ready_sender) () => {
+        ready_sender.send(1)
+        time.sleep(200)
+        print(99)
+    })
+    ready.receive() ?? panic("closed")
+    slow.cancel()
+}
+"#,
+        "unshielded_sleep_cancel",
+    );
+    assert_eq!(out.stdout, "");
+}
+
+#[test]
+fn cranelift_unshielded_select_cancel_does_not_unwind_native_frame() {
+    let out = run_cranelift_without_fallback(
+        r#"use core.tasks as tasks
+fn run() {
+    taskgroup g {
+        (ready_sender, ready) :: tasks.channel<Int>()
+        (_sender, ch) :: tasks.channel<Int>()
+        slow :: tasks.spawn(take(g, ch, ready_sender) () => {
+            ready_sender.send(1)
+            g.select().recv(ch).wait()
+            print(99)
+        })
+        ready.receive() ?? panic("closed")
+        slow.cancel()
+    }
+}
+"#,
+        "unshielded_select_cancel",
+    );
+    assert_eq!(out.stdout, "");
 }
 
 /// c139 M3: checked integer arithmetic with overflow traps.

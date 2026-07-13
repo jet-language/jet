@@ -3,8 +3,9 @@
 use jet_codegen::scheduler::{
     jet_scheduler_all, jet_scheduler_any, jet_scheduler_race, jet_scheduler_select_int_channels,
     jet_scheduler_deliver_shield_exit, jet_scheduler_shield_enter,
-    jet_scheduler_shield_leave_status, jet_scheduler_spawn_with_control, JetSchedulerChannel,
-    JetSchedulerJoin, JetShieldExit, JetTaskControl,
+    jet_scheduler_shield_leave_status, jet_scheduler_sleep_ms, jet_scheduler_spawn_with_control,
+    jet_scheduler_wait_without_unwind, jet_scheduler_yield_now, JetSchedulerChannel,
+    JetSchedulerJoin, JetSchedulerWait, JetShieldExit, JetTaskControl,
 };
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -12,6 +13,38 @@ use std::sync::Arc;
 thread_local! {
     static ACTIVE_RUNTIME: RefCell<Option<*mut super::JitRuntime>> = const { RefCell::new(None) };
     static PENDING_SHIELD_EXIT: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
+    static WAIT_VALUE: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
+}
+
+#[repr(i64)]
+enum JitWaitStatus {
+    Ready = 0,
+    Interrupted = 1,
+    Panicked = 2,
+}
+
+fn wait_status<F>(f: F) -> i64
+where
+    F: FnOnce() -> i64,
+{
+    match jet_scheduler_wait_without_unwind(f) {
+        JetSchedulerWait::Ready(value) => {
+            WAIT_VALUE.with(|slot| slot.set(value));
+            JitWaitStatus::Ready as i64
+        }
+        JetSchedulerWait::Cancelled => {
+            set_pending_shield_exit(JetShieldExit::Cancelled);
+            JitWaitStatus::Interrupted as i64
+        }
+        JetSchedulerWait::Panicked(message) => {
+            trap_panic(&message);
+            JitWaitStatus::Panicked as i64
+        }
+    }
+}
+
+extern "C" fn jet_jit_wait_value() -> i64 {
+    WAIT_VALUE.with(|slot| slot.get())
 }
 
 fn set_pending_shield_exit(exit: JetShieldExit) {
@@ -95,14 +128,14 @@ extern "C" fn jet_jit_sender_clone(s: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_sender_send(s: i64, v: i64) {
-    with_runtime_mut(|rt| {
+extern "C" fn jet_jit_sender_send(s: i64, v: i64) -> i64 {
+    wait_status(|| with_runtime_mut(|rt| {
         let tx = rt
             .senders
             .get(s as usize)
             .expect("jit sender send: bad handle");
-        tx.send(v);
-    });
+        i64::from(tx.send(v))
+    }))
 }
 
 /// `0` = closed; otherwise `received + 1` (encoding avoids colliding with `0`).
@@ -110,7 +143,7 @@ extern "C" fn jet_jit_sender_send(s: i64, v: i64) {
 /// Blocks until a message arrives or the channel closes — matches AOT
 /// `Channel.receive()` + `??` on `Result` (not `try_receive`).
 extern "C" fn jet_jit_channel_receive_status(ch: i64) -> i64 {
-    with_runtime_mut(|rt| {
+    wait_status(|| with_runtime_mut(|rt| {
         let chan = rt
             .channels
             .get(ch as usize)
@@ -119,11 +152,11 @@ extern "C" fn jet_jit_channel_receive_status(ch: i64) -> i64 {
             Some(v) => v + 1,
             None => 0,
         }
-    })
+    }))
 }
 
 extern "C" fn jet_jit_channel_receive(ch: i64, _line: u32) -> i64 {
-    with_runtime_mut(|rt| {
+    wait_status(|| with_runtime_mut(|rt| {
         let chan = rt
             .channels
             .get(ch as usize)
@@ -135,7 +168,7 @@ extern "C" fn jet_jit_channel_receive(ch: i64, _line: u32) -> i64 {
                 0
             }
         }
-    })
+    }))
 }
 
 extern "C" fn jet_jit_panic_channel_closed(_line: u32) -> i64 {
@@ -249,44 +282,44 @@ extern "C" fn jet_jit_task_cancel(task: i64) {
 }
 
 extern "C" fn jet_jit_task_join(task: i64) -> i64 {
-    with_runtime_mut(|rt| {
+    wait_status(|| with_runtime_mut(|rt| {
         let join = rt.tasks[task as usize]
             .take()
             .expect("jit task join: already joined");
         join.join()
-    })
+    }))
 }
 
 /// D-NURSERY1=A: `g.all([h1, h2, …])` — returns a new `[Int]` list handle.
 extern "C" fn jet_jit_task_all(task_list: i64) -> i64 {
-    with_runtime_mut(|rt| {
+    wait_status(|| with_runtime_mut(|rt| {
         let ids = task_ids_from_list(rt, task_list);
         let entries = take_task_entries(rt, &ids);
         store_i64_list(rt, jet_scheduler_all(entries))
-    })
+    }))
 }
 
 /// D-CONCCOMB1=A: `g.race([h1, h2, …])` — first successful result.
 extern "C" fn jet_jit_task_race(task_list: i64) -> i64 {
-    with_runtime_mut(|rt| {
+    wait_status(|| with_runtime_mut(|rt| {
         let ids = task_ids_from_list(rt, task_list);
         let entries = take_task_entries(rt, &ids);
         jet_scheduler_race(entries)
-    })
+    }))
 }
 
 /// D-CONCCOMB1=A: `g.any([h1, h2, …])` — first completed result.
 extern "C" fn jet_jit_task_any(task_list: i64) -> i64 {
-    with_runtime_mut(|rt| {
+    wait_status(|| with_runtime_mut(|rt| {
         let ids = task_ids_from_list(rt, task_list);
         let entries = take_task_entries(rt, &ids);
         jet_scheduler_any(entries)
-    })
+    }))
 }
 
 /// D-CONCSELECT1=A: `g.select().recv(…).wait()` — multiplex channel/timer arms.
 extern "C" fn jet_jit_select_wait(recv_list: i64, after_list: i64) -> i64 {
-    with_runtime_mut(|rt| {
+    wait_status(|| with_runtime_mut(|rt| {
         let ch_ids = task_ids_from_list(rt, recv_list);
         let after_ids = task_ids_from_list(rt, after_list);
         let channels: Vec<JetSchedulerChannel<i64>> = ch_ids
@@ -300,6 +333,20 @@ extern "C" fn jet_jit_select_wait(recv_list: i64, after_list: i64) -> i64 {
             .collect();
         let timers: Vec<u64> = after_ids.iter().map(|&ms| (ms.max(0)) as u64).collect();
         jet_scheduler_select_int_channels(&channels, timers)
+    }))
+}
+
+extern "C" fn jet_jit_sleep(millis: i64) -> i64 {
+    wait_status(|| {
+        jet_scheduler_sleep_ms(millis.max(0) as u64);
+        0
+    })
+}
+
+extern "C" fn jet_jit_yield_now() -> i64 {
+    wait_status(|| {
+        jet_scheduler_yield_now();
+        0
     })
 }
 
@@ -324,6 +371,10 @@ pub(crate) struct ConcurrencyHostFns {
     pub select_wait: cranelift_module::FuncId,
     pub shield_enter: cranelift_module::FuncId,
     pub shield_leave: cranelift_module::FuncId,
+    pub wait_value: cranelift_module::FuncId,
+    pub sleep: cranelift_module::FuncId,
+    #[allow(dead_code)] // internal scheduler-yield ABI; exercised by boundary tests
+    pub yield_now: cranelift_module::FuncId,
 }
 
 pub(crate) fn register_concurrency_symbols(builder: &mut cranelift_jit::JITBuilder) {
@@ -359,6 +410,9 @@ pub(crate) fn register_concurrency_symbols(builder: &mut cranelift_jit::JITBuild
     builder.symbol("jet_jit_select_wait", jet_jit_select_wait as *const u8);
     builder.symbol("jet_jit_shield_enter", jet_jit_shield_enter as *const u8);
     builder.symbol("jet_jit_shield_leave", jet_jit_shield_leave as *const u8);
+    builder.symbol("jet_jit_wait_value", jet_jit_wait_value as *const u8);
+    builder.symbol("jet_jit_sleep", jet_jit_sleep as *const u8);
+    builder.symbol("jet_jit_yield_now", jet_jit_yield_now as *const u8);
 }
 
 pub(crate) fn declare_concurrency_host_fns(
@@ -383,6 +437,7 @@ pub(crate) fn declare_concurrency_host_fns(
 
     let mut sig_send = Signature::new(cc);
     sig_send.params.push(AbiParam::new(types::I64));
+    sig_send.returns.push(AbiParam::new(types::I64));
     sig_send.params.push(AbiParam::new(types::I64));
 
     let mut sig_spawn0 = Signature::new(cc);
@@ -431,5 +486,8 @@ pub(crate) fn declare_concurrency_host_fns(
         select_wait: import("jet_jit_select_wait", &sig_i64_i64)?,
         shield_enter: import("jet_jit_shield_enter", &sig_void)?,
         shield_leave: import("jet_jit_shield_leave", &sig_noarg_i64)?,
+        wait_value: import("jet_jit_wait_value", &sig_noarg_i64)?,
+        sleep: import("jet_jit_sleep", &sig_i64)?,
+        yield_now: import("jet_jit_yield_now", &sig_noarg_i64)?,
     })
 }

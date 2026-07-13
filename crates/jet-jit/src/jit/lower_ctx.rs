@@ -105,6 +105,28 @@ impl LowerCtx<'_, '_> {
         self.b.seal_block(cont);
     }
 
+    /// Finish a scheduler wait host call. Host shims return only a typed status;
+    /// the value lives in thread-local storage so no Rust unwind or aggregate ABI
+    /// crosses the Cranelift frame.
+    fn finish_wait_call(&mut self, status: Value) -> Value {
+        let zero = self.b.ins().iconst(types::I64, 0);
+        let interrupted = self.b.ins().icmp(IntCC::NotEqual, status, zero);
+        let unwind = self.b.create_block();
+        let ready = self.b.create_block();
+        self.b.ins().brif(interrupted, unwind, &[], ready, &[]);
+        self.b.switch_to_block(unwind);
+        self.b.seal_block(unwind);
+        self.emit_shield_leaves_to(0);
+        self.emit_dummy_return();
+        self.b.switch_to_block(ready);
+        self.b.seal_block(ready);
+        let value_ref = self
+            .module
+            .declare_func_in_func(self.host.conc.wait_value, self.b.func);
+        let call = self.b.ins().call(value_ref, &[]);
+        self.b.inst_results(call)[0]
+    }
+
     fn result_new(&mut self, ok: bool, inner: &TExpr) -> Result<Value, String> {
         let tag = self.b.ins().iconst(types::I8, i64::from(ok));
         let (host_id, payload) = if matches!(&inner.ty, Type::Named(n) if n == "Unit" || n == "Void") {
@@ -1250,6 +1272,15 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host_ref, &[]);
                     return Ok(self.b.inst_results(call)[0]);
                 }
+                if module == "core.time" && method == "sleep" && args.len() == 1 {
+                    let millis = self.lower_expr(&args[0])?;
+                    let host_ref = self
+                        .module
+                        .declare_func_in_func(self.host.conc.sleep, self.b.func);
+                    let call = self.b.ins().call(host_ref, &[millis]);
+                    let _ = self.finish_wait_call(self.b.inst_results(call)[0]);
+                    return Ok(self.b.ins().iconst(types::I8, 0));
+                }
                 if module == "core.perf" {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
                         "fidelity" if args.is_empty() => (self.host.perf_fidelity, Vec::new()),
@@ -1305,7 +1336,7 @@ impl LowerCtx<'_, '_> {
                     .module
                     .declare_func_in_func(self.host.conc.task_all, self.b.func);
                 let call = self.b.ins().call(host_ref, &[list]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.finish_wait_call(self.b.inst_results(call)[0]))
             }
             TExprKind::TaskGroupRace { tasks } => {
                 let list = self.lower_expr(tasks)?;
@@ -1313,7 +1344,7 @@ impl LowerCtx<'_, '_> {
                     .module
                     .declare_func_in_func(self.host.conc.task_race, self.b.func);
                 let call = self.b.ins().call(host_ref, &[list]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.finish_wait_call(self.b.inst_results(call)[0]))
             }
             TExprKind::TaskGroupAny { tasks } => {
                 let list = self.lower_expr(tasks)?;
@@ -1321,7 +1352,7 @@ impl LowerCtx<'_, '_> {
                     .module
                     .declare_func_in_func(self.host.conc.task_any, self.b.func);
                 let call = self.b.ins().call(host_ref, &[list]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.finish_wait_call(self.b.inst_results(call)[0]))
             }
             TExprKind::SelectStart => Ok(self.b.ins().iconst(types::I64, 0)),
             TExprKind::SelectRecv { builder, channel } => {
@@ -1356,7 +1387,7 @@ impl LowerCtx<'_, '_> {
                     .module
                     .declare_func_in_func(self.host.conc.select_wait, self.b.func);
                 let call = self.b.ins().call(host_ref, &[recv_list, after_list]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.finish_wait_call(self.b.inst_results(call)[0]))
             }
             TExprKind::OrFallback {
                 value,
@@ -1935,10 +1966,10 @@ impl LowerCtx<'_, '_> {
                     .module
                     .declare_func_in_func(self.host.conc.task_join, self.b.func);
                 let call = self.b.ins().call(host_ref, &[recv_val]);
+                let result = self.finish_wait_call(self.b.inst_results(call)[0]);
                 if clif_ty(ret_ty).is_some() {
-                    Ok(self.b.inst_results(call)[0])
+                    Ok(result)
                 } else {
-                    let _ = self.b.inst_results(call);
                     Ok(self.b.ins().iconst(types::I8, 0))
                 }
             }
@@ -1955,7 +1986,7 @@ impl LowerCtx<'_, '_> {
                     .module
                     .declare_func_in_func(self.host.conc.channel_receive, self.b.func);
                 let call = self.b.ins().call(host_ref, &[recv_val, line]);
-                let result = self.b.inst_results(call)[0];
+                let result = self.finish_wait_call(self.b.inst_results(call)[0]);
                 self.emit_trap_check()?;
                 Ok(result)
             }
@@ -1964,7 +1995,8 @@ impl LowerCtx<'_, '_> {
                 let host_ref = self
                     .module
                     .declare_func_in_func(self.host.conc.sender_send, self.b.func);
-                self.b.ins().call(host_ref, &[recv_val, val]);
+                let call = self.b.ins().call(host_ref, &[recv_val, val]);
+                let _ = self.finish_wait_call(self.b.inst_results(call)[0]);
                 Ok(self.b.ins().iconst(types::I8, 0))
             }
             // Remaining THandleOp variants have no JIT lowering: named explicitly
@@ -2208,7 +2240,7 @@ impl LowerCtx<'_, '_> {
                 .module
                 .declare_func_in_func(self.host.conc.channel_receive_status, self.b.func);
             let call = self.b.ins().call(host_ref, &[ch]);
-            return Ok(self.b.inst_results(call)[0]);
+            return Ok(self.finish_wait_call(self.b.inst_results(call)[0]));
         }
         Err("jit result status unsupported".to_string())
     }

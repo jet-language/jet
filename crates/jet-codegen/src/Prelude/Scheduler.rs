@@ -68,6 +68,33 @@ fn jet_scheduler_fatal(msg: &str) -> ! {
 // `jet_scheduler_shield_enter`/`_leave` around the body (Codegen/TIR emit).
 struct JetCancelUnwind;
 
+/// Result of calling a scheduler wait point from a native-code boundary that
+/// cannot carry Rust unwinds (Cranelift, C, plugins). The boundary catches the
+/// scheduler's internal control transfer before it reaches foreign frames.
+pub enum JetSchedulerWait<T> {
+    Ready(T),
+    Cancelled,
+    Panicked(String),
+}
+
+pub fn jet_scheduler_wait_without_unwind<F, T>(f: F) -> JetSchedulerWait<T>
+where
+    F: FnOnce() -> T,
+{
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+        Ok(value) => JetSchedulerWait::Ready(value),
+        Err(payload) if payload.is::<JetCancelUnwind>() => JetSchedulerWait::Cancelled,
+        Err(payload) => {
+            let message = payload
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| payload.downcast_ref::<&str>().map(|s| (*s).to_string()))
+                .unwrap_or_else(|| "scheduler wait panicked".to_string());
+            JetSchedulerWait::Panicked(message)
+        }
+    }
+}
+
 thread_local! {
     static SHIELD_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
@@ -429,6 +456,11 @@ pub fn jet_scheduler_sleep_ms(millis: u64) {
     let slot = ParkSlot::new();
     timer_wheel().schedule(Instant::now() + Duration::from_millis(millis), slot.clone());
     jet_scheduler_yield("time sleep", &slot, Some(Duration::from_millis(millis)));
+}
+
+pub fn jet_scheduler_yield_now() {
+    let slot = ParkSlot::new();
+    jet_scheduler_yield("task yield", &slot, Some(Duration::ZERO));
 }
 
 // ── M2: IO poll substrate (native epoll on Linux; portable fallback elsewhere) ─
