@@ -135,6 +135,8 @@ fn cmd_hangar_ingest(theme: &Theme, parsed: &Parsed) -> i32 {
         }
     };
     let version = flag_value(parsed, "--version").unwrap_or_default();
+    let platform_artifact_kind =
+        flag_value(parsed, "--platform-artifact-kind").unwrap_or_default();
     let dir = match positional_path_after(parsed, "ingest") {
         Some(p) => p,
         None => {
@@ -163,7 +165,7 @@ fn cmd_hangar_ingest(theme: &Theme, parsed: &Parsed) -> i32 {
         outputs,
         signature: String::new(),
         provenance: String::new(),
-        allow_semantic_xattrs: false,
+        platform_artifact_kind,
     };
     match Store::ingest_tree(&roots, &req) {
         Ok(ingested) => {
@@ -212,30 +214,13 @@ fn cmd_hangar_verify(theme: &Theme, parsed: &Parsed) -> i32 {
         );
         return 2;
     };
-    match crate::Envelope::try_output_hash_of(&entry.out) {
-        Ok(digest) if digest == entry.envelope.output_hash => {
+    match Store::verify_hangar_object(&roots, entry) {
+        Ok(()) => {
             theme.status(&format!("verified {}", entry.envelope.output_hash));
             0
         }
-        Ok(digest) => {
-            theme.error_coded(
-                "E1315",
-                &format!("hangar object `{}` digest mismatch", entry.id),
-                &format!(
-                    "envelope records `{}`, re-hash produced `{digest}`.",
-                    entry.envelope.output_hash
-                ),
-                "quarantine the object with a clean re-ingest from a trusted source.",
-            );
-            2
-        }
-        Err(e) => {
-            theme.error_coded(
-                "E1315",
-                &format!("hangar object `{}` could not be hashed", entry.id),
-                &e,
-                "inspect the object tree or recover staging with `jetpack hangar recover`.",
-            );
+        Err(err) => {
+            err.report(theme);
             2
         }
     }

@@ -233,6 +233,7 @@ pub fn record_verified(
             cache_identity: cache_identity.clone(),
             references: Vec::new(),
             named_outputs: BTreeMap::new(),
+            platform_artifact_kind: String::new(),
             realized_at,
             last_used_at: now,
         };
@@ -1422,6 +1423,15 @@ fn optimize_hangar_plan(hangar: &Path) -> std::io::Result<CleanReport> {
 }
 
 fn optimize_hangar(hangar: &Path) -> std::io::Result<CleanReport> {
+    let mut report = optimize_package_tree_hardlinks(hangar)?;
+    let cas = optimize_objects_cas_pool(hangar)?;
+    report.optimized_files += cas.optimized_files;
+    report.optimized_bytes += cas.optimized_bytes;
+    Ok(report)
+}
+
+/// Legacy package-dir hardlink dedupe (pre-objects/ layout).
+fn optimize_package_tree_hardlinks(hangar: &Path) -> std::io::Result<CleanReport> {
     let mut seen: BTreeMap<(u64, String), PathBuf> = BTreeMap::new();
     let mut report = CleanReport::default();
     for obj in object_dirs(hangar)? {
@@ -1448,6 +1458,94 @@ fn optimize_hangar(hangar: &Path) -> std::io::Result<CleanReport> {
         }
     }
     Ok(report)
+}
+
+/// Store v2: content-addressed file-byte pool under `hangar/cas/`.
+/// Ingest never links into cas (keeps sealed objects at nlink=1 until clean).
+/// After optimize, verify uses [`try_output_hash_of_in_hangar`] so cas peers
+/// are hangar-internal while outside-hangar hardlinks still reject.
+fn optimize_objects_cas_pool(hangar: &Path) -> std::io::Result<CleanReport> {
+    let objects = hangar.join(OBJECTS_DIR);
+    let cas = hangar.join(CAS_DIR);
+    let mut report = CleanReport::default();
+    if !objects.is_dir() {
+        return Ok(report);
+    }
+    fs::create_dir_all(&cas)?;
+    for ent in fs::read_dir(&objects)?.flatten() {
+        let path = ent.path();
+        let name = ent.file_name().to_string_lossy().into_owned();
+        if !path.is_dir() || name.ends_with(PARTIAL_SUFFIX) {
+            continue;
+        }
+        for file in files_under(&path) {
+            let Ok(meta) = fs::metadata(&file) else {
+                continue;
+            };
+            if !meta.is_file() || meta.len() == 0 {
+                continue;
+            }
+            let Ok(bytes) = fs::read(&file) else {
+                continue;
+            };
+            let digest = SHA256::sha256_hex(&bytes);
+            let cas_file = cas.join(&digest);
+            if !cas_file.exists() {
+                let tmp = cas.join(format!("{digest}.partial"));
+                fs::write(&tmp, &bytes)?;
+                fs::rename(&tmp, &cas_file)?;
+            }
+            if same_file_inode(&file, &cas_file) {
+                continue;
+            }
+            if hardlink_replace(&cas_file, &file).is_ok() {
+                report.optimized_files += 1;
+                report.optimized_bytes += meta.len();
+            }
+        }
+    }
+    Ok(report)
+}
+
+fn same_file_inode(a: &Path, b: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        let Ok(ma) = fs::metadata(a) else {
+            return false;
+        };
+        let Ok(mb) = fs::metadata(b) else {
+            return false;
+        };
+        ma.dev() == mb.dev() && ma.ino() == mb.ino()
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (a, b);
+        false
+    }
+}
+
+/// Run the cas-pool hardlink optimizer (also invoked from `clean`).
+pub fn optimize_cas_pool(roots: &Roots) -> std::io::Result<CleanReport> {
+    super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        optimize_objects_cas_pool(&roots.hangar_dir())
+    })
+}
+
+/// Re-hash a hangar object with cas-peer hardlink law (hangar-internal OK).
+pub fn verify_hangar_object(roots: &Roots, entry: &StoreEntry) -> Result<(), IngestError> {
+    let hangar = roots.hangar_dir();
+    let allow = !entry.platform_artifact_kind.is_empty();
+    let digest = super::Envelope::try_output_hash_of_in_hangar(&entry.out, &hangar, allow)
+        .map_err(IngestError::Invalid)?;
+    if digest != entry.envelope.output_hash {
+        return Err(IngestError::Invalid(format!(
+            "envelope records `{}`, re-hash produced `{digest}`",
+            entry.envelope.output_hash
+        )));
+    }
+    Ok(())
 }
 
 fn hardlink_replace(first: &Path, file: &Path) -> std::io::Result<()> {
@@ -1599,7 +1697,17 @@ pub struct IngestRequest {
     pub outputs: BTreeMap<String, PathBuf>,
     pub signature: String,
     pub provenance: String,
-    pub allow_semantic_xattrs: bool,
+    /// Explicit platform artifact kind. Empty rejects semantic xattrs;
+    /// non-empty is the product surface that keeps them (plan E4-JP1).
+    pub platform_artifact_kind: String,
+}
+
+impl IngestRequest {
+    /// Semantic xattrs are kept only when an explicit platform artifact kind
+    /// is set on the ingest request / CLI.
+    pub fn allow_semantic_xattrs(&self) -> bool {
+        !self.platform_artifact_kind.is_empty()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1733,21 +1841,18 @@ fn ingest_tree_unlocked(
         let mut staged_outs = BTreeMap::new();
         for (name, src) in &req.outputs {
             let dst = stage.join("outputs").join(name);
-            let dst_parent = dst.parent().ok_or_else(|| {
-                IngestError::Invalid(format!("staged output `{name}` has no parent directory"))
-            })?;
-            fs::create_dir_all(dst_parent)?;
+            fs::create_dir_all(dst.parent().unwrap())?;
+            // Gate semantic xattrs on the *source* tree (byte copy drops them).
+            if !req.allow_semantic_xattrs() {
+                reject_semantic_xattrs_tree(src)?;
+            }
             copy_nofollow_tree(src, &dst)?;
-            if req.allow_semantic_xattrs {
-                // Still exclude security xattrs from identity via digest path;
-                // semantic xattrs are permitted to exist on the tree.
-            } else {
-                // Digester rejects semantic xattrs; preflight for clearer E1315.
-                reject_semantic_xattrs_tree(&dst)?;
+            if req.allow_semantic_xattrs() {
+                copy_semantic_xattrs_tree(src, &dst)?;
             }
             let digest = super::Envelope::try_output_hash_of_with_policy(
                 &dst.to_string_lossy(),
-                req.allow_semantic_xattrs,
+                req.allow_semantic_xattrs(),
                 &mut |_, _| {},
             )
             .map_err(|msg| {
@@ -1774,10 +1879,7 @@ fn ingest_tree_unlocked(
             .get("out")
             .cloned()
             .ok_or_else(|| IngestError::Invalid("missing `out` digest".into()))?;
-        let primary_stage = staged_outs
-            .get("out")
-            .cloned()
-            .ok_or_else(|| IngestError::Invalid("missing staged `out` output".into()))?;
+        let primary_stage = staged_outs.get("out").unwrap().clone();
 
         let objects = hangar.join(OBJECTS_DIR);
         fs::create_dir_all(&objects)?;
@@ -1797,12 +1899,7 @@ fn ingest_tree_unlocked(
                     continue;
                 }
                 let dest = partial.join(".named").join(name);
-                let dest_parent = dest.parent().ok_or_else(|| {
-                    IngestError::Invalid(format!(
-                        "named output `{name}` has no destination parent directory"
-                    ))
-                })?;
-                fs::create_dir_all(dest_parent)?;
+                fs::create_dir_all(dest.parent().unwrap())?;
                 if staged.exists() {
                     fs::rename(staged, &dest)?;
                 }
@@ -1858,6 +1955,7 @@ fn ingest_tree_unlocked(
             cache_identity: req.cache_identity.clone(),
             references: req.references.clone(),
             named_outputs: named_digests,
+            platform_artifact_kind: req.platform_artifact_kind.clone(),
             realized_at,
             last_used_at: now,
         };
@@ -1869,9 +1967,7 @@ fn ingest_tree_unlocked(
     // Always scrub this stage dir (success moved trees out; failure quarantines).
     if result.is_err() {
         let quarantine = hangar.join("quarantine").join(format!("ingest-{stamp}"));
-        if let Some(quarantine_parent) = quarantine.parent() {
-            let _ = fs::create_dir_all(quarantine_parent);
-        }
+        let _ = fs::create_dir_all(quarantine.parent().unwrap());
         if stage.exists() {
             if fs::rename(&stage, &quarantine).is_err() {
                 let _ = fs::remove_dir_all(&stage);
@@ -1999,6 +2095,129 @@ fn reject_semantic_xattrs_tree(root: &Path) -> Result<(), IngestError> {
         Ok(())
     }
     walk(root)
+}
+
+/// Preserve non-security xattrs onto the staged tree when an explicit platform
+/// artifact kind opted in. Security/quarantine names stay excluded.
+fn copy_semantic_xattrs_tree(src_root: &Path, dst_root: &Path) -> Result<(), IngestError> {
+    fn walk(src: &Path, dst: &Path) -> Result<(), IngestError> {
+        let meta = fs::symlink_metadata(src).map_err(|e| IngestError::Io(e.to_string()))?;
+        if meta.file_type().is_symlink() {
+            return Ok(());
+        }
+        if meta.is_file() {
+            copy_semantic_xattrs_file(src, dst)?;
+        }
+        if meta.is_dir() {
+            for ent in fs::read_dir(src).map_err(|e| IngestError::Io(e.to_string()))? {
+                let ent = ent.map_err(|e| IngestError::Io(e.to_string()))?;
+                let name = ent.file_name();
+                walk(&ent.path(), &dst.join(&name))?;
+            }
+        }
+        Ok(())
+    }
+    walk(src_root, dst_root)
+}
+
+fn copy_semantic_xattrs_file(src: &Path, dst: &Path) -> Result<(), IngestError> {
+    let names = super::Envelope::list_xattr_names(src).map_err(IngestError::Invalid)?;
+    for name in names {
+        if super::Envelope::is_excluded_xattr(&name) {
+            continue;
+        }
+        let value = get_xattr_value(src, &name)?;
+        set_xattr_value(dst, &name, &value)?;
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn get_xattr_value(path: &Path, name: &str) -> Result<Vec<u8>, IngestError> {
+    use std::os::unix::ffi::OsStrExt as _;
+    type LibcChar = i8;
+    #[link(name = "c")]
+    extern "C" {
+        fn lgetxattr(
+            path: *const LibcChar,
+            name: *const LibcChar,
+            value: *mut u8,
+            size: usize,
+        ) -> isize;
+    }
+    let c_path = std::ffi::CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| IngestError::Invalid(format!("path `{}` contains NUL", path.display())))?;
+    let c_name = std::ffi::CString::new(name)
+        .map_err(|_| IngestError::Invalid(format!("xattr name `{name}` contains NUL")))?;
+    let size = unsafe { lgetxattr(c_path.as_ptr(), c_name.as_ptr(), std::ptr::null_mut(), 0) };
+    if size < 0 {
+        return Err(IngestError::Io(format!(
+            "lgetxattr `{}` on `{}`: {}",
+            name,
+            path.display(),
+            std::io::Error::last_os_error()
+        )));
+    }
+    let mut buf = vec![0u8; size as usize];
+    let wrote = unsafe { lgetxattr(c_path.as_ptr(), c_name.as_ptr(), buf.as_mut_ptr(), buf.len()) };
+    if wrote < 0 {
+        return Err(IngestError::Io(format!(
+            "lgetxattr `{}` on `{}`: {}",
+            name,
+            path.display(),
+            std::io::Error::last_os_error()
+        )));
+    }
+    buf.truncate(wrote as usize);
+    Ok(buf)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn get_xattr_value(_path: &Path, _name: &str) -> Result<Vec<u8>, IngestError> {
+    Ok(Vec::new())
+}
+
+#[cfg(target_os = "linux")]
+fn set_xattr_value(path: &Path, name: &str, value: &[u8]) -> Result<(), IngestError> {
+    use std::os::unix::ffi::OsStrExt as _;
+    type LibcChar = i8;
+    #[link(name = "c")]
+    extern "C" {
+        fn lsetxattr(
+            path: *const LibcChar,
+            name: *const LibcChar,
+            value: *const u8,
+            size: usize,
+            flags: i32,
+        ) -> i32;
+    }
+    let c_path = std::ffi::CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| IngestError::Invalid(format!("path `{}` contains NUL", path.display())))?;
+    let c_name = std::ffi::CString::new(name)
+        .map_err(|_| IngestError::Invalid(format!("xattr name `{name}` contains NUL")))?;
+    let rc = unsafe {
+        lsetxattr(
+            c_path.as_ptr(),
+            c_name.as_ptr(),
+            value.as_ptr(),
+            value.len(),
+            0,
+        )
+    };
+    if rc != 0 {
+        return Err(IngestError::Io(format!(
+            "lsetxattr `{}` on `{}`: {}",
+            name,
+            path.display(),
+            std::io::Error::last_os_error()
+        )));
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn set_xattr_value(_path: &Path, _name: &str, _value: &[u8]) -> Result<(), IngestError> {
+    Ok(())
 }
 
 fn copy_nofollow_tree(src: &Path, dst: &Path) -> Result<(), IngestError> {
@@ -2623,6 +2842,7 @@ mod tests {
             cache_identity: test_identity(),
             references: Vec::new(),
             named_outputs: BTreeMap::new(),
+            platform_artifact_kind: String::new(),
             realized_at: 0,
             last_used_at: 0,
         };
@@ -2746,6 +2966,7 @@ mod tests {
             cache_identity: test_identity(),
             references: Vec::new(),
             named_outputs: BTreeMap::new(),
+            platform_artifact_kind: String::new(),
             realized_at: 0,
             last_used_at: 0,
         };
@@ -2817,6 +3038,7 @@ mod tests {
             cache_identity: test_identity(),
             references: Vec::new(),
             named_outputs: BTreeMap::new(),
+            platform_artifact_kind: String::new(),
             realized_at: 0,
             last_used_at: 0,
         };
@@ -2884,7 +3106,7 @@ mod tests {
                 outputs: outs_a,
                 signature: String::new(),
                 provenance: "test via hangar-ingest".into(),
-                allow_semantic_xattrs: false,
+                platform_artifact_kind: String::new(),
             },
         )
         .unwrap();
@@ -2904,7 +3126,7 @@ mod tests {
                 outputs: outs_b,
                 signature: String::new(),
                 provenance: "test via hangar-ingest".into(),
-                allow_semantic_xattrs: false,
+                platform_artifact_kind: String::new(),
             },
         )
         .unwrap();
@@ -2927,7 +3149,7 @@ mod tests {
                 outputs: outs_c,
                 signature: String::new(),
                 provenance: "test via hangar-ingest".into(),
-                allow_semantic_xattrs: false,
+                platform_artifact_kind: String::new(),
             },
         )
         .unwrap();
@@ -2962,7 +3184,7 @@ mod tests {
                 outputs,
                 signature: String::new(),
                 provenance: String::new(),
-                allow_semantic_xattrs: false,
+                platform_artifact_kind: String::new(),
             },
         )
         .unwrap_err();
@@ -2994,7 +3216,7 @@ mod tests {
                 outputs: o1,
                 signature: String::new(),
                 provenance: String::new(),
-                allow_semantic_xattrs: false,
+                platform_artifact_kind: String::new(),
             },
         )
         .unwrap();
@@ -3009,12 +3231,191 @@ mod tests {
                 outputs: o2,
                 signature: String::new(),
                 provenance: String::new(),
-                allow_semantic_xattrs: false,
+                platform_artifact_kind: String::new(),
             },
         )
         .unwrap();
         assert_eq!(a.entry.envelope.output_hash, b.entry.envelope.output_hash);
         assert!(b.deduplicated);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn ingest_rejects_semantic_xattr_without_platform_artifact_kind() {
+        let (roots, _g) = temp_roots();
+        let src = roots.root.join("xattr-src");
+        fs::create_dir_all(&src).unwrap();
+        let file = src.join("payload");
+        fs::write(&file, "xattr-bytes").unwrap();
+        set_user_xattr(&file, "user.jet.test", b"keep");
+        let mut outputs = BTreeMap::new();
+        outputs.insert("out".to_string(), src);
+        let err = ingest_tree(
+            &roots,
+            &IngestRequest {
+                name: "xattr".into(),
+                version: "1".into(),
+                reference: "path:xattr".into(),
+                cache_identity: test_identity(),
+                references: Vec::new(),
+                outputs,
+                signature: String::new(),
+                provenance: String::new(),
+                platform_artifact_kind: String::new(),
+            },
+        )
+        .unwrap_err();
+        assert_eq!(err.code(), "E1315");
+        assert!(
+            err.what().contains("semantic xattr") || err.why().contains("semantic xattr"),
+            "{err:?}"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn ingest_keeps_semantic_xattr_with_platform_artifact_kind() {
+        let (roots, _g) = temp_roots();
+        let src = roots.root.join("xattr-ok");
+        fs::create_dir_all(&src).unwrap();
+        let file = src.join("payload");
+        fs::write(&file, "xattr-bytes").unwrap();
+        set_user_xattr(&file, "user.jet.test", b"keep");
+        let mut outputs = BTreeMap::new();
+        outputs.insert("out".to_string(), src);
+        let ingested = ingest_tree(
+            &roots,
+            &IngestRequest {
+                name: "xattr-ok".into(),
+                version: "1".into(),
+                reference: "path:xattr-ok".into(),
+                cache_identity: test_identity(),
+                references: Vec::new(),
+                outputs,
+                signature: String::new(),
+                provenance: String::new(),
+                platform_artifact_kind: "macos-app".into(),
+            },
+        )
+        .unwrap();
+        assert_eq!(ingested.entry.platform_artifact_kind, "macos-app");
+        verify_hangar_object(&roots, &ingested.entry).unwrap();
+        let sealed = Path::new(&ingested.entry.out).join("payload");
+        let names = super::super::Envelope::list_xattr_names(&sealed).unwrap();
+        assert!(
+            names.iter().any(|n| n == "user.jet.test"),
+            "semantic xattr must be preserved on sealed object: {names:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cas_pool_hardlink_preserves_verify_and_rejects_outside_peers() {
+        use std::os::unix::fs::MetadataExt as _;
+
+        let (roots, _g) = temp_roots();
+        // Two distinct object digests that share an identical file payload.
+        let src_c = roots.root.join("cas-c");
+        fs::create_dir_all(&src_c).unwrap();
+        fs::write(src_c.join("payload"), "shared-cas-bytes").unwrap();
+        fs::write(src_c.join("unique"), "c-only").unwrap();
+        let src_d = roots.root.join("cas-d");
+        fs::create_dir_all(&src_d).unwrap();
+        fs::write(src_d.join("payload"), "shared-cas-bytes").unwrap();
+        fs::write(src_d.join("unique"), "d-only").unwrap();
+
+        let mut outs_c = BTreeMap::new();
+        outs_c.insert("out".to_string(), src_c);
+        let third = ingest_tree(
+            &roots,
+            &IngestRequest {
+                name: "cas-c".into(),
+                version: "1".into(),
+                reference: "path:cas-c".into(),
+                cache_identity: test_identity(),
+                references: Vec::new(),
+                outputs: outs_c,
+                signature: String::new(),
+                provenance: String::new(),
+                platform_artifact_kind: String::new(),
+            },
+        )
+        .unwrap();
+        let mut outs_d = BTreeMap::new();
+        outs_d.insert("out".to_string(), src_d);
+        let fourth = ingest_tree(
+            &roots,
+            &IngestRequest {
+                name: "cas-d".into(),
+                version: "1".into(),
+                reference: "path:cas-d".into(),
+                cache_identity: test_identity(),
+                references: Vec::new(),
+                outputs: outs_d,
+                signature: String::new(),
+                provenance: String::new(),
+                platform_artifact_kind: String::new(),
+            },
+        )
+        .unwrap();
+        assert_ne!(
+            third.entry.envelope.output_hash,
+            fourth.entry.envelope.output_hash
+        );
+
+        // Ingest leaves nlink=1 (no cas peers yet).
+        let pay_c = Path::new(&third.entry.out).join("payload");
+        assert_eq!(fs::metadata(&pay_c).unwrap().nlink(), 1);
+
+        let report = optimize_cas_pool(&roots).unwrap();
+        assert!(report.optimized_files >= 2, "{report:?}");
+        assert!(roots.hangar_dir().join("cas").is_dir());
+        assert!(fs::metadata(&pay_c).unwrap().nlink() >= 2);
+
+        // Hangar-internal cas peers: verify still green; digest stable.
+        verify_hangar_object(&roots, &third.entry).unwrap();
+        verify_hangar_object(&roots, &fourth.entry).unwrap();
+
+        // Outside-hangar peer still rejected.
+        let outside = roots.root.join("outside-peer");
+        fs::hard_link(&pay_c, &outside).unwrap();
+        let bare = super::super::Envelope::try_output_hash_of(&third.entry.out);
+        assert!(bare.is_err(), "{bare:?}");
+        let in_hangar = super::super::Envelope::try_output_hash_of_in_hangar(
+            &third.entry.out,
+            &roots.hangar_dir(),
+            false,
+        );
+        assert!(in_hangar.is_err(), "{in_hangar:?}");
+        fs::remove_file(outside).ok();
+    }
+
+    #[cfg(target_os = "linux")]
+    fn set_user_xattr(path: &Path, name: &str, value: &[u8]) {
+        use std::os::unix::ffi::OsStrExt as _;
+        type LibcChar = i8;
+        #[link(name = "c")]
+        extern "C" {
+            fn lsetxattr(
+                path: *const LibcChar,
+                name: *const LibcChar,
+                value: *const u8,
+                size: usize,
+                flags: i32,
+            ) -> i32;
+        }
+        let c_path = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
+        let c_name = std::ffi::CString::new(name).unwrap();
+        let rc = unsafe {
+            lsetxattr(
+                c_path.as_ptr(),
+                c_name.as_ptr(),
+                value.as_ptr(),
+                value.len(),
+                0,
+            )
+        };
+        assert_eq!(rc, 0, "lsetxattr failed: {}", std::io::Error::last_os_error());
     }
 }
 

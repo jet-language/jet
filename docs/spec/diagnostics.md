@@ -205,7 +205,7 @@ duplicate this — it is the one surface for lint walls (I8).
 | E0145 | parse | `@Persist` on a binding that isn't module-level (D-PERSIST1) |
 | E0147 | parse | two `{}` holes in a str-match pattern with no literal text between them (D-PARSESTR1/D-PARSESTR2) |
 | E0148 | sema  | a str-match pattern used in an `if == {}` table with no `else` arm (D-PARSESTR1) |
-| E0149 | sema  | a runtime `String` used where `Sql`/`Html`/`Sh` is expected (D-TYPEDTEXT1, D-FFI-SH1) |
+| E0149 | sema  | a runtime `String` used where `Sql`/`Html` is expected (D-TYPEDTEXT1) |
 | E0150 | sema  | typestate: an operation is called on a value in the wrong state (D-STATE1) |
 | E0151 | sema  | typestate: `#State(X)` or `#Transition(A -> B)` references a state not in the `state TypeName { … }` declaration (D-STATE-DECL) |
 | E0153 | sema  | protocol expansion failed to parse a generated handle fragment (D-PROTO1) |
@@ -401,7 +401,7 @@ duplicate this — it is the one surface for lint walls (I8).
 | E3205 | sema  | overlay symbol clashes with bindgen (incompatible signature) |
 | E3206 | parse | user declared reserved `__bindgen__` segment |
 | E3207 | parse | `#Bindgen` outside generated `.jet/bindings/c/` file |
-| E3208 | jet   | `jet inspect bind` / foreign binding generation failed |
+| E3208 | jet   | `jet inspect bind` / header translation failed |
 | E3209 | jet   | linker couldn't find a declared C library at link time |
 | E3210 | jet   | C library auto-provision from nixpkgs failed |
 | E3211 | sema  | string literal with a known interior NUL byte passed to a C-boundary function |
@@ -1261,7 +1261,7 @@ Error [E0150]: `check_in` needs `Reservation` in state `Confirmed`, but `r` is i
 | E3205 | Overlay `{name}` disagrees with the generated binding. | User `#Extern module c.{lib}` may override bindgen symbols, but the Jet signature must stay compatible when replacing. | Match the generated signature, or rename your overlay function. |
 | E3206 | Module path `{path}` uses the reserved segment `__bindgen__`. | Autogen lives in `c.{lib}.__bindgen__`; users declare overlays as `#Extern module c.{lib}` only. | Drop `__bindgen__` from your module path, or use `#Extern module c.{lib} { … }`. |
 | E3207 | `#Bindgen` is only allowed in generated cache files. | `.jet/bindings/c/{lib}.jet` is written by `jet inspect bind`; hand-written sources use `#Extern module`. | Edit your overlay file with `#Extern module`, or regenerate the cache with `jet inspect bind`. |
-| E3208 | Could not generate bindings from `{source}`. | The foreign source could not be read, translated, or compiled by its provisioned binder toolchain. Foreign tool output is laundered into Jet's what/why/fix diagnostic. | Fix the source path or the binder's declared ABI subset, then rerun `jet inspect bind <lang>`; C users may hand-write `#Extern module c.{lib}`. |
+| E3208 | Could not generate bindings from `{header}`. | Header parsing or translation failed in the bind backend. | Fix the header path, install dev headers, run `jet inspect bind` manually for details, or hand-write `#Extern module c.{lib}`. |
 | E3209 | The linker couldn't find C library `{lib}`. | Your program links against `{lib}`, but the linker reported `cannot find -l{lib}` — the library isn't on the link search path. | Declare it in `deps:` so Jet provisions it: `{lib}: c@system` (host pkg-config, else fetched from nixpkgs), or `{lib}: c@nixpkgs:<attr>` to pick the nixpkgs attribute, or install the system package. |
 | E3210 | Couldn't fetch C library `{lib}` from nixpkgs. | `{lib}: c@system` asked Jet to provision `nixpkgs#{attr}`, but `nix build` failed: `{reason}`. | Check the attr exists (`nix build nixpkgs#{attr}`), or point at a local build with `{lib}: c@"<path>"`, or install it and use `system`. |
 | E3211 | This string literal has an embedded NUL byte, so it can't cross into a C function. | C strings are NUL-terminated, not length-prefixed — an embedded `\0` would truncate the string on the C side, silently losing everything after it. | Remove the embedded NUL, or split the call so the C function only sees the part before it. |
@@ -1739,28 +1739,6 @@ is a collision, not a task.
 | `` `{name}` is a built-in lifecycle verb, not a task name ``. | `run`/`dev`/`build`/`test` already name Jet's built-in entry points. | Rename it, e.g. `#Task fn build_assets()`, or drop `#Task` if this is the lifecycle entry. |
 
 ## Process for a new diagnostic
-
-### JT0101 — source importer TODO (D-JPK-IMPORTTODO1, D-MIGRATE-SRC1)
-
-Source importers use the JT01xx family for migration gaps. These are audited
-TODO diagnostics, not compiler acceptance errors: an import may finish while
-retaining TODOs, but no unsupported construct may disappear from both output
-and report.
-
-| What | Why | Fix |
-|------|-----|-----|
-| Python construct was not translated. | Importer could not prove an equivalent canonical Jet construct. Guessing would silently change behavior. | Port the named source construct into the generated Jet file, using the source and target paths in the diagnostic. |
-
-Every record carries code, what, why, fix, foreign source path and line,
-generated target, and migration status. Human output and
-import-report.json contain the same facts.
-
-### JT0198 / JT0199 — source import operation and merge failures
-
-JT0198 reports unreadable input or unwritable output with the failed
-operation, OS reason, and repair. JT0199 reports an update conflict when both
-editable Jet and newly translated source changed since the stored baseline.
-It names every conflicted file and writes none of them.
 
 1. Claim the next code here. 2. Write what/why/fix per the voice rules.
 3. Add a tests/ui fixture + snapshot. 4. Ship. A diagnostic without a

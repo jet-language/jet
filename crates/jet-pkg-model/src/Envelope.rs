@@ -406,18 +406,31 @@ pub fn try_output_hash_of(out: &str) -> Result<String, String> {
     try_output_hash_of_with_policy(out, false, &mut |_, _| {})
 }
 
+/// Like [`try_output_hash_of`], but hangar-internal hardlink peers (cas pool /
+/// sibling objects under `hangar_root`) do not fail the external-hardlink law.
+/// Peers outside the hangar still reject. Digest bytes stay path-local: cas
+/// peers are never encoded as in-tree `H` records.
+pub fn try_output_hash_of_in_hangar(
+    out: &str,
+    hangar_root: &Path,
+    allow_semantic_xattrs: bool,
+) -> Result<String, String> {
+    try_output_hash_of_with_hook(out, allow_semantic_xattrs, Some(hangar_root), &mut |_, _| {})
+}
+
 /// Like [`try_output_hash_of`], with an explicit semantic-xattr policy.
 pub fn try_output_hash_of_with_policy(
     out: &str,
     allow_semantic_xattrs: bool,
     hook: &mut dyn FnMut(&Path, &'static str),
 ) -> Result<String, String> {
-    try_output_hash_of_with_hook(out, allow_semantic_xattrs, hook)
+    try_output_hash_of_with_hook(out, allow_semantic_xattrs, None, hook)
 }
 
 fn try_output_hash_of_with_hook(
     out: &str,
     allow_semantic_xattrs: bool,
+    hangar_root: Option<&Path>,
     hook: &mut dyn FnMut(&Path, &'static str),
 ) -> Result<String, String> {
     let p = Path::new(out);
@@ -443,15 +456,55 @@ fn try_output_hash_of_with_hook(
         allow_semantic_xattrs,
         hook,
     )?;
-    for link in hardlinks.values() {
-        if link.seen != link.total {
-            return Err(format!(
-                "hardlink `{}` has {} link(s), but only {} are inside the output",
-                link.first.display(), link.total, link.seen
-            ));
+    for (key, link) in &hardlinks {
+        if link.seen == link.total {
+            continue;
         }
+        if let Some(hangar) = hangar_root {
+            let hangar_peers = count_inode_peers_under(hangar, *key);
+            if hangar_peers == link.total {
+                // All nlink peers live under the hangar (cas pool / other
+                // objects). External-outside-hangar reject still holds.
+                continue;
+            }
+        }
+        return Err(format!(
+            "hardlink `{}` has {} link(s), but only {} are inside the output",
+            link.first.display(),
+            link.total,
+            link.seen
+        ));
     }
     Ok(format!("sha256-{}", SHA256::sha256_hex(&archive)))
+}
+
+/// Count regular files under `root` that share `(dev, ino)`.
+fn count_inode_peers_under(root: &Path, key: (u64, u64)) -> u64 {
+    fn walk(path: &Path, key: (u64, u64), count: &mut u64) {
+        let Ok(meta) = fs::symlink_metadata(path) else {
+            return;
+        };
+        if meta.file_type().is_symlink() {
+            return;
+        }
+        if meta.is_file() {
+            if file_identity(&meta) == Some(key) {
+                *count += 1;
+            }
+            return;
+        }
+        if meta.is_dir() {
+            let Ok(rd) = fs::read_dir(path) else {
+                return;
+            };
+            for ent in rd.flatten() {
+                walk(&ent.path(), key, count);
+            }
+        }
+    }
+    let mut count = 0u64;
+    walk(root, key, &mut count);
+    count
 }
 
 struct HardlinkState {
@@ -856,6 +909,7 @@ mod tests {
         let error = try_output_hash_of_with_hook(
             &dir.to_string_lossy(),
             false,
+            None,
             &mut |path, stage| {
                 if !changed && path == dir && stage == "directory-snapshotted" {
                     changed = true;
@@ -893,6 +947,7 @@ mod tests {
         let error = try_output_hash_of_with_hook(
             &dir.to_string_lossy(),
             false,
+            None,
             &mut |path, stage| {
                 if !changed && path == file && stage == "file-opened" {
                     changed = true;

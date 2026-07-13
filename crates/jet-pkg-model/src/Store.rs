@@ -97,6 +97,9 @@ pub struct StoreEntry {
     pub references: Vec<String>,
     /// Named outputs → content digests (`out` is the primary).
     pub named_outputs: BTreeMap<String, String>,
+    /// Explicit platform artifact kind that permits semantic xattrs on ingest.
+    /// Empty = semantic xattrs rejected (default).
+    pub platform_artifact_kind: String,
     /// Unix seconds when this hangar object was first realized.
     pub realized_at: u64,
     /// Unix seconds when Jetpack last reused/refreshed this object.
@@ -151,6 +154,7 @@ impl StoreEntry {
         field("identity_platform", &self.cache_identity.platform, false);
         field("references", &references, true);
         field("named_outputs", &named_outputs, true);
+        field("platform_artifact_kind", &self.platform_artifact_kind, false);
         field("realized_at", &realized_at, false);
         // last field — no trailing comma
         out.push_str("  ");
@@ -222,6 +226,7 @@ pub fn list(roots: &Roots) -> Vec<StoreEntry> {
                 cache_identity: parsed.cache_identity,
                 references: parsed.references,
                 named_outputs: parsed.named_outputs,
+                platform_artifact_kind: parsed.platform_artifact_kind,
                 realized_at: parsed.realized_at.unwrap_or(0),
                 last_used_at: parsed.last_used_at.unwrap_or(0),
             });
@@ -246,6 +251,7 @@ pub struct ParsedMeta {
     pub cache_identity: CacheIdentity,
     pub references: Vec<String>,
     pub named_outputs: BTreeMap<String, String>,
+    pub platform_artifact_kind: String,
     pub realized_at: Option<u64>,
     pub last_used_at: Option<u64>,
 }
@@ -298,6 +304,7 @@ pub fn parse_meta(text: &str) -> Option<ParsedMeta> {
         },
         references,
         named_outputs,
+        platform_artifact_kind: get("platform_artifact_kind").unwrap_or_default(),
         realized_at: get("realized_at").and_then(|s| s.parse().ok()),
         last_used_at: get("last_used_at").and_then(|s| s.parse().ok()),
     })
