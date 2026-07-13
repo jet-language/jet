@@ -142,7 +142,7 @@ version. Extend it here with two fields:
    stdin-protocol wrapper around the existing `jet_crypto_*_impl` functions)
    when `needs_crypto`; extend `FfiLink` with `helper_bin_path:
    Option<PathBuf>`.
-3. **`Source/CLI.rs`** — register `jet registry keygen` and `jet registry key
+3. **`crates/jet-cli/src/CLI.rs`** — register `jet registry keygen` and `jet registry key
    backup` verbs (I7: these are new user-typeable subcommands, register in
    `crates/jet-foundation/src/Syntax.rs` alongside existing verb constants).
 4. **`Source/CmdSupply.rs::run_publish`** — after building the index entry

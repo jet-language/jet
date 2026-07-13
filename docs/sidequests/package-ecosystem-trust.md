@@ -201,7 +201,7 @@ Done — the buildable, registry-independent surface:
   prefixed. Advisory-DB line format gained an optional 6th `severity` field.
 
 Diagnostics added (I4): E1217, E1218 in `docs/spec/diagnostics.md` + covered by
-`tests/pkg.rs`. CLI flags `--vendor-dir`/`--sbom` registered in `Source/CLI.rs`.
+`tests/pkg.rs`. CLI flags `--vendor-dir`/`--sbom` registered in `crates/jet-cli/src/CLI.rs`.
 
 **Gated on c96 (registry, open ballot) — NOT built:**
 

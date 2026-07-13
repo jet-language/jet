@@ -36,7 +36,7 @@ R10 pay-for-what-you-call). (CLAUDE.md is owner-owned — flag.)
   `docs/ballots/decision-ballots.md`.
 
 ## 4. Stale `src/` → `Source/` path comments
-- `Source/CLI.rs:9` (`src/syntax.rs` → `Source/Syntax.rs`)
+- `crates/jet-cli/src/CLI.rs` (`src/syntax.rs` → the shared `Syntax` registry)
 - `Source/Prelude/CoreLib.rs:1446` (`src/sha256.rs` → `Source/SHA256.rs`)
 - `Source/CBind.rs:11` (`src/cffi.rs` → `Source/CFFI.rs`)
 - `Source/Comptime/Methods.rs:67`, `Source/Comptime/mod.rs:85` (`src/…` → `Source/…`)

@@ -28,7 +28,7 @@ prints "registry upload not yet implemented"; registry dependencies hard-error a
   **No git working-tree check exists.** Upload is deferred — prints the
   "registry upload not yet implemented (D-PKGS1 deferred)" note, lines 188-196.
 - **Dispatch / CLI** — `Source/main.rs:443` (`"publish"` → `run_publish`),
-  spec at `Source/CLI.rs:57`. No `--allow-dirty` flag registered.
+  spec in `crates/jet-cli/src/CLI.rs`. No `--allow-dirty` flag registered.
 - **`jet registry yank`** — does not exist anywhere (no command, no dispatch, no flag).
 - **Resolver** — `Source/Publish/Resolve.rs` has `check_conflicts` → E2602
   (conflict *detection* only). The full SemVer range engine
@@ -77,7 +77,7 @@ docs. The "verifier" here is the CLI/jetpack path, not the language front end.
 
 ### Stage 1 — `jet registry publish` (D-PUBLISH1A)
 
-1. Register `--allow-dirty` in `Source/CLI.rs` + thread through
+1. Register `--allow-dirty` in `crates/jet-cli/src/CLI.rs` + thread through
    `Source/main.rs:443` → `run_publish`. Keep `--force` as the build/semver
    override; `--allow-dirty` is specifically the working-tree escape (they are
    distinct gates).
@@ -104,7 +104,7 @@ each with what/why/fix + a `tests/ui` snapshot (I4).
    *not* bypass this — immutability is absolute (it underpins the D-PKGSIGN1
    checksum floor).
 2. New command `jet registry yank` (+ `jet registry yank --undo`): mark a published version yanked
-   in the index. Register in `Source/CLI.rs`, dispatch in `Source/main.rs`,
+   in the index. Register in `crates/jet-cli/src/CLI.rs`, dispatch in `Source/main.rs`,
    handler alongside `run_publish` (new `run_yank`). A yank flips an index flag;
    it never deletes content (existing `.jet/lock` pins must still install).
 3. Resolver (Stage 3) skips yanked versions for *new* selection but honors a
@@ -169,7 +169,7 @@ resolver workflow), `docs/spec/roadmap.md` (M12.2 registry done),
 
 | File | Change |
 |---|---|
-| `Source/CLI.rs` | register `--allow-dirty`; add `yank` command spec |
+| `crates/jet-cli/src/CLI.rs` | register `--allow-dirty`; add `yank` command spec |
 | `Source/main.rs` | dispatch `--allow-dirty`, `jet registry yank` |
 | `Source/CmdSupply.rs` | dirty-tree gate (E1219), real test gate (E1220), reject version arg, registry upload, immutability (E1221), `run_yank` |
 | `Source/Fetch.rs` | replace registry "not supported" (lines 405, 512) with highest-compatible resolution |

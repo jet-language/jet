@@ -557,6 +557,6 @@ pub const SECRETS_RECIPIENTS_VERBS: &[&str] =
 /// U13: the `--force` flag on `jetpack secrets keygen`, overwriting an
 /// existing identity. Reuses the bare string rather than minting a new flag
 /// constant family — mirrors `jet registry keygen --force`'s own flag spelling
-/// (`Source/CLI.rs`), kept a plain literal there too.
+/// (`crates/jet-cli/src/CLI.rs`), kept a plain literal there too.
 pub const SECRETS_FLAG_FORCE: &str = "--force";
 use super::{CONFIG_SUBCOMMAND, OS_SUBCOMMAND, USER_SUBCOMMAND};

@@ -831,7 +831,7 @@ fn moved_bare_commands_are_teaching_errors_not_aliases() {
 
 /// D-CLI-STORE2=A / D-CLI-DEVSERVE1=A / D-CLI-SURFACE3=B: words retired with
 /// **no** `jet <group> <same-word>` rename — `teach_retired`'s bespoke path
-/// (`RETIRED_BARE` in `Source/CLI.rs`), not the generic `moved_command` one.
+/// (`RETIRED_BARE` in `crates/jet-cli/src/CLI.rs`), not the generic `moved_command` one.
 #[test]
 fn retired_bespoke_words_teach_real_spelling() {
     for (argv, replacement) in [
@@ -855,6 +855,12 @@ fn retired_bespoke_words_teach_real_spelling() {
 fn every_moved_bare_action_is_e2101_in_human_and_json_modes() {
     for group in jet::CLI::COMMAND_GROUPS {
         for action in group.actions {
+            // `import` names both the canonical source translator and a
+            // physical hangar action. Only actions without a canonical
+            // top-level meaning are moved bare commands.
+            if jet::CLI::is_canonical_top_level(action.name) {
+                continue;
+            }
             let replacement = format!("jet {} {}", group.name, action.name);
             let out = Command::new(jet()).arg(action.name).arg("sentinel").output().unwrap();
             assert_eq!(out.status.code(), Some(2), "bare {}", action.name);

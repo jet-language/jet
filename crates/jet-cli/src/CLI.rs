@@ -183,6 +183,12 @@ pub fn nested_command(group: &str, action: &str) -> Option<(&'static CommandGrou
 }
 
 pub fn moved_command(name: &str) -> Option<(&'static CommandGroup, &'static NestedCommandSpec)> {
+    // A spelling can own a canonical top-level meaning and also name a
+    // grouped action (`import` translates source at the top level and imports
+    // store archives under `hangar`). Such spellings are not moved commands.
+    if COMMANDS.iter().any(|command| command.name == name) {
+        return None;
+    }
     COMMAND_GROUPS.iter().find_map(|group| {
         group.actions.iter().find(|action| action.name == name).map(|action| (group, action))
     })
@@ -995,6 +1001,10 @@ mod tests {
     fn moved_commands_are_not_canonical_top_level() {
         for group in COMMAND_GROUPS {
             for action in group.actions {
+                if COMMANDS.iter().any(|command| command.name == action.name) {
+                    assert!(moved_command(action.name).is_none());
+                    continue;
+                }
                 assert!(!is_canonical_top_level(action.name), "moved bare command leaked: {}", action.name);
                 assert_eq!(moved_command_group(action.name), Some(group.name));
             }

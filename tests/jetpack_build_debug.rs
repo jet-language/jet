@@ -103,7 +103,7 @@ fn failed_adapter_preserves_scratch_and_json_logs() {
 
 /// `explain` stayed a flat top-level command (D-CLI-SURFACE3=B did not move
 /// it — verified against the `COMMANDS`/inspect-action registry in
-/// `Source/CLI.rs`: only `inspect explain-build` exists there, bare
+/// `crates/jet-cli/src/CLI.rs`: only `inspect explain-build` exists there, bare
 /// `explain` is unrelated and still dispatches directly).
 #[test]
 fn top_level_explain_dispatches_to_jetpack() {

@@ -48,7 +48,7 @@ computes anything the compile didn't.
 3. **Driver renders lenses** — new `Source/CmdExpand.rs` modeled line-for-line
    on `Source/CmdImpact.rs` (`open(&abs)` → render text or `to_json()` via the
    global `mode.json` `--json` flag). Wire-up: dispatch arm in
-   `Source/main.rs`, `CommandSpec` row in `Source/CLI.rs`, and bespoke flag
+   `Source/main.rs`, `CommandSpec` row in `crates/jet-cli/src/CLI.rs`, and bespoke flag
    ownership in `jet::CLI::owns_flag_vocabulary`.
 
 ## v1 lenses

@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 
 /// The embedded diagnostics spec — the single source of truth for codes.
-const DIAGNOSTICS_MD: &str = include_str!("../docs/spec/diagnostics.md");
+const DIAGNOSTICS_MD: &str = include_str!("../../../docs/spec/diagnostics.md");
 
 /// One explainable diagnostic code.
 #[derive(Debug, Clone, PartialEq, Eq)]

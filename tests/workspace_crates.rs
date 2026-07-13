@@ -155,6 +155,12 @@ fn workspace_crates_keep_declared_dependency_direction() {
         "crates/jet-debug/Cargo.toml",
         &["jet-driver", "jet-foundation"],
     );
+    // D-ARCH-SOURCE1=A: command vocabulary/help are a product seam depending
+    // only inward on shared syntax policy and the terminal/symbol index seam.
+    assert_deps(
+        "crates/jet-cli/Cargo.toml",
+        &["jet-foundation", "jet-repl"],
+    );
     assert_deps(
         "crates/jet-jit/Cargo.toml",
         &["jet-codegen", "jet-foundation", "jet-rt"],
@@ -168,6 +174,7 @@ fn workspace_crates_keep_declared_dependency_direction() {
         "Cargo.toml",
         &[
             "jet-debug",
+            "jet-cli",
             "jet-driver",
             "jet-env-model",
             "jet-foundation",

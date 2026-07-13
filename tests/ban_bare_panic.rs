@@ -81,7 +81,7 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
         "integration-test assertion fixture",
     ),
     (
-        "Source/Help/mod.rs",
+        "crates/jet-cli/src/Help/mod.rs",
         1,
         "#[test]-only assertion fixture",
     ),
@@ -106,7 +106,7 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
         "#[cfg(test)] deliberately panicking hostile provider fixture for catch_unwind",
     ),
     (
-        "Source/CLI.rs",
+        "crates/jet-cli/src/CLI.rs",
         1,
         "#[cfg(test)] nested-command registry assertion fixture",
     ),
@@ -133,6 +133,7 @@ const SCAN_ROOTS: &[&str] = &[
     "crates/jet-impact",
     "crates/jet-repl",
     "crates/jet-debug",
+    "crates/jet-cli",
     "Source",
 ];
 

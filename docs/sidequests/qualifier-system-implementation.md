@@ -159,7 +159,7 @@ read+write+`--locked` verify), recording each Tier-1 input by content hash:
   Tier-2 ops in its body the way `#Unsafe` authorizes low-level ops.
 
 **Stage 4 — `--allow-impure` build flag.**
-- Declare the flag in `Source/CLI.rs` (`FlagSpec`) and plumb it like `--locked`
+- Declare the flag in `crates/jet-cli/src/CLI.rs` (`FlagSpec`) and plumb it like `--locked`
   (`main.rs:306`) down to the comptime evaluator / build driver.
 - Without `--allow-impure`, a `#Impure` region that actually performs a Tier-2 op
   → new error **E0959**'s sibling (a distinct code, e.g. **E0970**: "`#Impure`

@@ -53,6 +53,9 @@ already right.
   section comments; no behavior change, snapshot-pinned.
 - **Test-file splits**: tests/jetpack.rs (7k) and tests/tir.rs (4.8k)
   split by feature family so targeted `--test` runs stay cheap.
+- **CLI seam**: `crates/jet-cli` owns the one command/flag registry,
+  completion/man generation, offline diagnostic reference, and hybrid help
+  UI. The root package re-exports those APIs without wrapper source.
 - **Syntax.rs census-drift sweep**: unreserve retired `view`; record the live
   law for `it`/`Clock`/`taskgroup`; reconcile the marker-plane matrix with
   D-MARK-META1=B and card #498; regenerate editor grammars.

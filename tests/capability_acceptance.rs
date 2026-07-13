@@ -369,7 +369,7 @@ fn public_build_product() {
         "explain-build must emit provenance: {explain_json}"
     );
 
-    let cli = read("Source/CLI.rs");
+    let cli = read("crates/jet-cli/src/CLI.rs");
     assert!(
         cli.contains("name: \"graph\"")
             && cli.contains("name: \"query\"")

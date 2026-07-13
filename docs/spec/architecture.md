@@ -62,6 +62,7 @@ D-COMPILERSEAMS1/2 split the compiler into workspace seam crates. The root
 | `jet-impact` | blast-radius reports over `jet-semindex` | no |
 | `jet-repl` | complete interactive shell product over `jet-driver`, `jet-semindex`, and leaf policy | no new diagnostics |
 | `jet-debug` | complete source debugger and DAP product over `jet-driver` plus leaf JSON/exit policy | debugger diagnostics only |
+| `jet-cli` | canonical command/flag registry, completions, man page, diagnostic reference, and hybrid help UI over leaf syntax policy plus `jet-repl` terminal/symbol support | renders existing diagnostics only |
 | `jet-rt` | runtime helpers shared by generated code and JIT/dev paths | no |
 | `jet-jit` | dev/JIT execution tier over codegen/TIR facts | internal fallback only |
 | `jet-net` | runtime/comptime fetch helper with TLS diagnostics | yes, for fetch failures |
@@ -109,11 +110,14 @@ invokes rustc, classifies linker/tool failures, renders the I2 ICE banner, and
 links any prepared FFI artifact. Do not move that responsibility into a seam
 crate in documentation until the code moves with it.
 
-D-ARCH-SOURCE1=A also puts interactive product ownership behind real workspace
-seams. `crates/jet-repl` owns the REPL and terminal implementation;
+D-ARCH-SOURCE1=A also puts command and interactive product ownership behind
+real workspace seams. `crates/jet-cli` owns the command/flag registry,
+completion/man generation, diagnostic reference, and hybrid help UI;
+`crates/jet-repl` owns the REPL and terminal implementation;
 `crates/jet-debug` owns the source debugger, native adapter, line map, and DAP
-server. The root host only wires commands and re-exports `jet::REPL` and
-`jet::Debug`. Both products depend inward on compiler seams. Their shared
+server. The root host wires command execution and re-exports `jet::CLI`,
+`jet::Help`, `jet::Explain`, `jet::REPL`, and `jet::Debug`. These products
+depend inward on compiler seams. Their shared
 interpreter eligibility walk lives in `jet-driver`; stable exit codes and the
 std-only JSON codec live in dependency-free `jet-foundation`. Neither product
 depends on the root package, splices root source with `include!`, or owns rustc

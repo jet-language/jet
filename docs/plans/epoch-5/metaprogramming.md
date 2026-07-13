@@ -615,7 +615,7 @@ D-BUILDTARGET1=A and D-BUILDACTION1=A.
   `compile_build_entry(...)` beside the existing
   `compile_bundle_path_with_entry`/`swap_entry_point` (the shipped `fn dev`
   path is the exact template). CLI wiring: `Source/CmdCompile.rs`
-  (`jet build`), `Source/CLI.rs`.
+  (`jet build`), `crates/jet-cli/src/CLI.rs`.
 - `BuildContext`/`BuildPlan` values + method dispatch: new
   `crates/jet-comptime/src/Comptime/Build.rs`, called from the method router in
   `Comptime/Methods.rs`. `find`/`embed`/`fetch` reuse the shipped builtins

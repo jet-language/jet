@@ -199,13 +199,13 @@ fn readme_error_pages_exist() {
 }
 
 // ---------------------------------------------------------------------------
-// Check 4: Every jet subcommand named in README/docs exists in Source/CLI.rs
+// Check 4: Every jet subcommand named in README/docs exists in jet-cli's registry
 // ---------------------------------------------------------------------------
 #[test]
 fn readme_subcommands_exist_in_cli() {
     let root = root();
-    let cli_path = root.join("Source/CLI.rs");
-    let cli_src = fs::read_to_string(&cli_path).expect("Source/CLI.rs missing");
+    let cli_path = root.join("crates/jet-cli/src/CLI.rs");
+    let cli_src = fs::read_to_string(&cli_path).expect("jet-cli registry missing");
 
     // Extract all known command names from the COMMANDS array in CLI.rs
     let mut known: HashSet<String> = HashSet::new();
@@ -240,7 +240,7 @@ fn readme_subcommands_exist_in_cli() {
 
     assert!(
         missing.is_empty(),
-        "README/docs reference jet subcommands not present in Source/CLI.rs:\n{}",
+        "README/docs reference jet subcommands not present in jet-cli's registry:\n{}",
         missing.join("\n")
     );
 }
@@ -344,19 +344,17 @@ fn cargo_and_flake_versions_match() {
 }
 
 // ---------------------------------------------------------------------------
-// Check 7: Source/CLI.rs is the only in-code CLI command registry
+// Check 7: jet-cli owns the only in-code CLI command registry
 // ---------------------------------------------------------------------------
 #[test]
 fn cli_rs_is_declared_module() {
     let root = root();
     let lib_src = fs::read_to_string(root.join("Source/lib.rs")).expect("Source/lib.rs missing");
-    assert!(
-        lib_src.contains("pub mod CLI;") || lib_src.contains("mod CLI;"),
-        "Source/lib.rs does not declare `mod CLI` — the CLI module is not wired up"
-    );
+    assert!(lib_src.contains("pub use jet_cli::{CLI, Explain, Help};"),
+        "Source/lib.rs must re-export the real jet-cli seam");
     assert!(
         !lib_src.contains("mod CLISpec;"),
-        "Source/lib.rs declares mod CLISpec — Source/CLI.rs is the only CLI registry"
+        "Source/lib.rs declares mod CLISpec — jet-cli owns the only CLI registry"
     );
 }
 
@@ -365,11 +363,12 @@ fn cli_has_no_second_command_registry() {
     let root = root();
     assert!(
         !root.join("Source/CLISpec.rs").exists(),
-        "Source/CLISpec.rs must not exist — Source/CLI.rs is the single CLI registry"
+        "Source/CLISpec.rs must not exist — jet-cli owns the single CLI registry"
     );
 
     let mut registries = Vec::new();
-    for path in rs_files(&root.join("Source")) {
+    for path in rs_files(&root.join("Source")).into_iter()
+        .chain(rs_files(&root.join("crates/jet-cli/src"))) {
         if path.extension().and_then(|x| x.to_str()) != Some("rs") {
             continue;
         }
@@ -380,7 +379,7 @@ fn cli_has_no_second_command_registry() {
     }
     assert_eq!(
         registries,
-        vec!["Source/CLI.rs".to_string()],
+        vec!["crates/jet-cli/src/CLI.rs".to_string()],
         "found a second CLI command registry:\n{}",
         registries.join("\n")
     );
@@ -392,7 +391,7 @@ fn cli_has_no_second_command_registry() {
     );
     assert!(
         main_src.contains("jet::CLI::is_builtin(cmd)"),
-        "Source/main.rs should dispatch unknown-command checks through Source/CLI.rs"
+        "Source/main.rs should dispatch unknown-command checks through jet-cli"
     );
 }
 
@@ -450,10 +449,10 @@ fn compiler_seam_crates_have_only_path_dependencies() {
             crate_manifests.push((name, manifest));
         }
     }
-    // D-ARCH-SOURCE1=A: interactive seams are not optional aliases hidden in
+    // D-ARCH-SOURCE1=A: CLI/interactive seams are not optional aliases hidden in
     // the root crate. Their manifests must exist and therefore pass this same
     // path-only dependency audit.
-    for required in ["jet-repl", "jet-debug"] {
+    for required in ["jet-repl", "jet-debug", "jet-cli"] {
         assert!(
             crate_manifests.iter().any(|(name, _)| name == required),
             "D-ARCH-SOURCE1 requires the {required} workspace seam"
@@ -464,6 +463,13 @@ fn compiler_seam_crates_have_only_path_dependencies() {
         root_lib.contains("pub use jet_debug as Debug;")
             && !root.join("Source/Debug").exists(),
         "D-ARCH-SOURCE1 requires jet-debug ownership, not a root Debug wrapper"
+    );
+    assert!(
+        root_lib.contains("pub use jet_cli::{CLI, Explain, Help};")
+            && !root.join("Source/CLI.rs").exists()
+            && !root.join("Source/Explain.rs").exists()
+            && !root.join("Source/Help").exists(),
+        "D-ARCH-SOURCE1 requires jet-cli ownership, not root CLI/help wrappers"
     );
     assert!(
         root_lib.contains("pub use jet_foundation::ExitCodes;")

@@ -67,6 +67,10 @@ pub use jet_queries as Queries;
 // D-ARCH-SOURCE1=A: full debugger subsystem and stable exit policy live in
 // inward workspace seams. Preserve public paths without root-owned wrappers.
 pub use jet_debug as Debug;
+// D-ARCH-SOURCE1=A: CLI registry, argument vocabulary, diagnostic reference,
+// and hybrid help UI live in the inward jet-cli seam. Public paths remain
+// `jet::CLI`, `jet::Explain`, and `jet::Help` without root wrapper modules.
+pub use jet_cli::{CLI, Explain, Help};
 pub use jet_foundation::ExitCodes;
 // D-ARCH-SOURCE1=A: real REPL seam ownership. Compatibility paths remain
 // `jet::REPL`, `jet::Term`, and `jet::SemanticSymbols`; implementation lives
@@ -77,15 +81,12 @@ pub mod BuildCache;
 pub mod BudgetProviders;
 pub mod BudgetStore;
 pub mod BudgetView;
-pub mod CLI;
 pub mod Canvas;
 pub mod Compiler;
 pub mod Doctest;
 pub mod Doctor;
-pub mod Explain;
 pub mod Fetch;
 pub mod FixEngine;
-pub mod Help;
 pub mod Interpreter;
 pub mod JitBackend;
 pub mod LSP;
