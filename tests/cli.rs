@@ -1696,6 +1696,41 @@ fn java_bind_launders_javac_failure_as_e3208() {
 }
 
 #[test]
+fn tcl_bind_runs_one_shot_and_persistent_typed_sessions() {
+    let dir=isolated_cwd("tcl_bind_session");let source=dir.join("eda.tcl");
+    fs::write(&source,"set counter 40\n").unwrap();
+    let bind=Command::new(jet()).args(["inspect","bind","tcl"]).arg(&source).args(["--pkg","eda"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
+    assert!(bind.status.success(),"Tcl bind failed:\n{}",String::from_utf8_lossy(&bind.stderr));
+    assert!(dir.join(".jet/bindings/tcl/libjet_tcl_eda.a").is_file());
+    assert!(dir.join(".jet/bindings/tcl/eda.provenance").is_file());
+    fs::write(dir.join("main.jet"),r#"use tcl.eda as tcl
+
+fn run() #(Tcl, Io) {
+    session :: tcl.open() ?? panic("Tcl open failed")
+    print(tcl.eval_int(session, "incr counter 2") ?? -1)
+    print(tcl.eval_int(session, "incr counter 1") ?? -1)
+    print(tcl.eval_once("expr 6 * 7") ?? "bad")
+    print(tcl.eval_float(session, "expr 5.0 / 2") ?? -1.0)
+    print(tcl.eval(session, "error \"foreign stack secret\"") ?? "tcl-error")
+    tcl.close(^session)
+}
+"#).unwrap();
+    let run=Command::new(jet()).args(["run","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
+    assert!(run.status.success(),"embedded Tcl binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));
+    assert_eq!(String::from_utf8_lossy(&run.stdout),"42\n43\n42\n2.5\ntcl-error\n");
+    assert!(!String::from_utf8_lossy(&run.stderr).contains("foreign stack secret"));
+}
+
+#[test]
+fn tcl_bind_missing_source_is_laundered_e3208() {
+    let dir=isolated_cwd("tcl_bind_missing");let source=dir.join("missing.tcl");
+    let output=Command::new(jet()).args(["inspect","bind","tcl"]).arg(&source).args(["--pkg","missing"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
+    assert!(!output.status.success());let stderr=String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Error [E3208]:"));assert!(stderr.contains(" Why:"));assert!(stderr.contains(" Fix:"));
+    check_snapshot("bind_tcl_missing_e3208.txt",&scrub(&stderr,&source));
+}
+
+#[test]
 fn fortran_bind_launders_foreign_compiler_failure_as_e3208() {
     let dir = isolated_cwd("fortran_bind_failure");
     let source = dir.join("broken.f90");

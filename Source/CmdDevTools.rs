@@ -1325,6 +1325,7 @@ pub(crate) fn run_explain(code: Option<&str>, mode: OutputMode) {
 /// **E3208** fires only when the header is unreadable or has no bindable
 /// prototypes — use `#Extern module c.<lib>` for those declarations.
 pub(crate) fn run_bind(args: &[&String]) {
+    if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::TCL_MODULE_ROOT){run_tcl_bind(&args[1..]);return;}
     if args.first().is_some_and(|arg| arg.as_str() == jet::Syntax::JAVA_MODULE_ROOT) {
         run_java_bind(&args[1..]);
         return;
@@ -1454,6 +1455,9 @@ pub(crate) fn run_bind(args: &[&String]) {
         }
     }
 }
+
+fn run_tcl_bind(args:&[&String]){let usage=||eprintln!("usage: {} inspect bind tcl <script.tcl> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);if args.is_empty()||args[0]=="--help"||args[0]=="-h"{usage();exit(if args.is_empty(){ExitCodes::USAGE}else{0})}let path=args[0].as_str();let mut pkg=None;let mut out=None;let mut i=1;while i<args.len(){match args[i].as_str(){"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{eprintln!("error: unknown `bind tcl` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}let lib=pkg.unwrap_or_else(||{let b=path.rsplit('/').next().unwrap_or(path);b.rsplit_once('.').map(|v|v.0).unwrap_or(b).to_string()});let source=std::fs::read_to_string(path).unwrap_or_else(|e|tcl_bind_error(path,&format!("the script could not be read ({e})")));let out_path=out.unwrap_or_else(||format!(".jet/bindings/{}/{}.{}",jet::Syntax::TCL_MODULE_ROOT,lib,jet::Syntax::FILE_EXT));let cache=std::path::Path::new(&out_path).parent().unwrap_or_else(||std::path::Path::new("."));let result=jet::TclBind::bind(&source,&lib,cache).unwrap_or_else(|e|tcl_bind_error(path,&e.to_string()));if let Err(e)=std::fs::write(&out_path,&result.source){tcl_bind_error(path,&format!("the generated cache could not be written ({e})"))}if let Err(e)=std::fs::write(cache.join(format!("{lib}.tcl-path")),format!("{}\n",result.lib_dir.display())){tcl_bind_error(path,&format!("the Tcl runtime identity could not be written ({e})"))}if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),result.provenance){tcl_bind_error(path,&format!("the binding provenance could not be written ({e})"))}println!("bound in-process Tcl session from `{path}` → {out_path}")}
+fn tcl_bind_error(path:&str,why:&str)->!{eprintln!("Error [E3208]: Could not generate bindings from `{path}`.");eprintln!(" Why: {why}.");eprintln!(" Fix: use a valid Tcl initialization script and rerun `jet inspect bind tcl` inside the provisioned Jet environment.");exit(ExitCodes::USER_ERROR)}
 
 /// D-FFI-JVM1=A: compile Java bytecode, discover its public ABI with javap,
 /// then build an in-process JNI invocation bridge.

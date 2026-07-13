@@ -107,6 +107,8 @@
             pkgs.go
             # D-FFI-JVM1=A: provision javac/javap plus the embedded libjvm runtime.
             pkgs.jdk
+            # D-FFI-TCL1=A: provision embeddable Tcl headers, runtime, and shell.
+            pkgs.tcl
             pkgs.lld
             # Compiler freestanding smoke tests execute aarch64 output under
             # qemu-aarch64. OS image and VM tooling does not belong here.

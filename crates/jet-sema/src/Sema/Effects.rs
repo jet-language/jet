@@ -63,6 +63,8 @@ pub enum Effect {
     Go,
     /// D-FFI-JVM1=A: an embedded JVM invocation.
     Java,
+    /// D-FFI-TCL1=A: synchronous in-process Tcl evaluation.
+    Tcl,
     /// D-WASM1=A: browser/DOM API use — implies JS partition for web targets.
     Browser,
     /// U13 (D-JPK-SECRETCRYPTO1): reading a decrypted repo secret
@@ -88,6 +90,7 @@ impl Effect {
             Effect::Gpu => "Gpu",
             Effect::Go => "Go",
             Effect::Java => "Java",
+            Effect::Tcl => "Tcl",
             Effect::Browser => "Browser",
             Effect::Secret => "Secret",
         }
@@ -108,6 +111,7 @@ impl Effect {
             "Gpu" => Effect::Gpu,
             "Go" => Effect::Go,
             "Java" => Effect::Java,
+            "Tcl" => Effect::Tcl,
             "Browser" => Effect::Browser,
             "Secret" => Effect::Secret,
             _ => return None,
@@ -132,6 +136,7 @@ impl Effect {
             Effect::Gpu,
             Effect::Go,
             Effect::Java,
+            Effect::Tcl,
             Effect::Browser,
             Effect::Secret,
         ]

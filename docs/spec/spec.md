@@ -925,6 +925,30 @@ run under a 60-second deadline with 64-KiB diagnostic capture. Cache provenance
 binds the source, discovered bytecode surface, class cache path, and schema with
 SHA-256. Tool failures use **E3208** what/why/fix copy.
 
+## E3 — Tcl project binder (D-FFI-TCL1=A, live-session vertical)
+
+`jet inspect bind tcl <script.tcl> --pkg <lib>` compiles a std-only C bridge
+against the Nix-provisioned Tcl headers and shared runtime, then writes a typed
+`tcl.<lib>` cache. `open()` creates an in-process interpreter and evaluates the
+script once as session initialization. Later `eval`, `eval_int`, and
+`eval_float` calls share its variables and procedures. `eval_once` uses a fresh
+interpreter and destroys it after one call.
+
+`Session` is opaque and thread-affine. A bounded 64-slot table owns every live
+interpreter; `close(^session)` consumes the Jet handle, and process teardown
+deletes any remaining interpreters before Tcl finalization. String results are
+copied through a 64-KiB thread-local boundary and reject embedded NUL or
+oversize values. Integer and float entrypoints use Tcl's typed object parsers.
+Tcl failures become `TclError.Eval`; raw Tcl result text and stack frames never
+cross the boundary. Calls carry the `Tcl` effect root.
+
+Evaluation is synchronous. A long-running Tcl command blocks its calling Jet
+thread until Tcl returns. This vertical exposes no cancellation claim and does
+not kill or corrupt the in-process interpreter on timeout; cancellation needs a
+future Tcl event-limit contract. Bridge tools run under a 60-second deadline
+with 64-KiB diagnostic capture. Binding provenance hashes the initialization
+script, Tcl runtime identity, and schema. Bind failures use **E3208**.
+
 ## E2-M13 — Expert low-level tier (S58, implemented)
 
 C/Zig-class control behind two explicit gates; ordinary Jet never reaches it and
