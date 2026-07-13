@@ -757,6 +757,13 @@ pub fn encoding_handle_method_return(
         ("JSONLWriter", "write", 1) | ("JSONLWriter", "flush" | "finish", 0) => {
             Some(Some(result_ty(unit, error)))
         }
+        ("CSVReader", "next", 0) => Some(Some(result_ty(
+            Type::Option(Box::new(Type::List(Box::new(Type::String)))),
+            error,
+        ))),
+        ("CSVWriter", "write", 1) | ("CSVWriter", "flush" | "finish", 0) => {
+            Some(Some(result_ty(unit, error)))
+        }
         _ => None,
     }
 }

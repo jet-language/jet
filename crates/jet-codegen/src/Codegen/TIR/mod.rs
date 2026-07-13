@@ -2123,6 +2123,10 @@ pub enum THandleOp {
     JSONLWriterWrite,
     JSONLWriterFlush,
     JSONLWriterFinish,
+    CSVReaderNext,
+    CSVWriterWrite,
+    CSVWriterFlush,
+    CSVWriterFinish,
     /// StdinHandle: `read_line()` → `{root}jet_std_io_stdin_read_line(&mut (recv))`.
     StdinReadLine,
     /// Stdout/Stderr: stream writes and facts (D-COREIO1=A).

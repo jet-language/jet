@@ -452,6 +452,142 @@ fn run() {{
     let _ = fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn csv_stream_records_are_incremental_rfc4180_bounded_and_terminal() {
+    let dir = std::env::temp_dir().join(format!("jet_csv_stream_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let input_path = dir.join("input.csv");
+    let output_path = dir.join("output.csv");
+    let malformed_path = dir.join("malformed.csv");
+    let item_limit_path = dir.join("item-limit.csv");
+    let total_limit_path = dir.join("total-limit.csv");
+    fs::write(&input_path, "a,\"b,b\",\"c\"\"c\",\"line1\nline2\"\r\nlast,,tail").unwrap();
+    fs::write(&malformed_path, "\"bad").unwrap();
+    fs::write(&item_limit_path, "\"abcd\"\r\n").unwrap();
+    fs::write(&total_limit_path, "a,b\r\n").unwrap();
+    let input = input_path.to_string_lossy().replace('\\', "\\\\");
+    let output = output_path.to_string_lossy().replace('\\', "\\\\");
+    let malformed = malformed_path.to_string_lossy().replace('\\', "\\\\");
+    let item_limit = item_limit_path.to_string_lossy().replace('\\', "\\\\");
+    let total_limit = total_limit_path.to_string_lossy().replace('\\', "\\\\");
+    let source = format!(
+        r#"
+use core.encoding as encoding
+use core.encoding.csv as csv
+use core.files as files
+
+fn run() {{
+    output :: files.create("{output}") ?? panic("create")
+    writer :: csv.writer(^output) ?? panic("writer")
+    writer.write(["a", "b,b", "c\"c", "line1\nline2"]) ?? panic("write first")
+    writer.write(["last", "", "tail"]) ?? panic("write second")
+    writer.flush() ?? panic("flush")
+    writer.finish() ?? panic("finish")
+    writer.finish() ?? panic("finish twice")
+    after_finish :: writer.write(["late"])
+    if after_finish == {{
+        ok(_) -> {{ print("write-after-finish-missed") }}
+        err(writer_first) -> {{
+            after_terminal :: writer.flush()
+            if after_terminal == {{
+                ok(_) -> {{ print("writer-terminal-missed") }}
+                err(writer_second) -> {{ print(writer_first.byte_offset == writer_second.byte_offset && writer_first.reason == writer_second.reason) }}
+            }}
+        }}
+    }}
+
+    input :: files.open("{input}") ?? panic("open")
+    reader :: csv.reader(^input) ?? panic("reader")
+    first :: reader.next() ?? panic("first")
+    if first == {{
+        Val(row) -> {{ print(row[0]); print(row[1]); print(row[2]); print(row[3]) }}
+        None -> {{ print("first-missing") }}
+    }}
+    second :: reader.next() ?? panic("second")
+    if second == {{
+        Val(row) -> {{ print(row[0]); print(row[1] == ""); print(row[2]) }}
+        None -> {{ print("second-missing") }}
+    }}
+    eof :: reader.next() ?? panic("eof")
+    if eof == {{ Val(_) -> {{ print(false) }} None -> {{ print(true) }} }}
+    eof_again :: reader.next() ?? panic("eof again")
+    if eof_again == {{ Val(_) -> {{ print(false) }} None -> {{ print(true) }} }}
+
+    malformed_input :: files.open("{malformed}") ?? panic("malformed open")
+    malformed_reader :: csv.reader(^malformed_input) ?? panic("malformed reader")
+    malformed_result :: malformed_reader.next()
+    if malformed_result == {{
+        ok(_) -> {{ print("malformed-missed") }}
+        err(malformed_first) -> {{
+            malformed_again :: malformed_reader.next()
+            if malformed_again == {{
+                ok(_) -> {{ print("malformed-terminal-missed") }}
+                err(malformed_second) -> {{ print(malformed_first.path); print(malformed_first.byte_offset == malformed_second.byte_offset && malformed_first.reason == malformed_second.reason) }}
+            }}
+        }}
+    }}
+
+    item_limits := encoding.EncodingLimits.safe()
+    item_limits.max_item_bytes = 3
+    item_input :: files.open("{item_limit}") ?? panic("item open")
+    item_reader :: csv.reader(^item_input, item_limits) ?? panic("item reader")
+    item_result :: item_reader.next()
+    if item_result == {{
+        ok(_) -> {{ print("item-limit-missed") }}
+        err(item_first) -> {{
+            item_again :: item_reader.next()
+            if item_again == {{
+                ok(_) -> {{ print("item-terminal-missed") }}
+                err(item_second) -> {{ print(item_first.path); print(item_first.byte_offset == item_second.byte_offset && item_first.reason == item_second.reason) }}
+            }}
+        }}
+    }}
+
+    total_limits := encoding.EncodingLimits.safe()
+    total_limits.max_total_bytes = Val(3)
+    total_input :: files.open("{total_limit}") ?? panic("total open")
+    total_reader :: csv.reader(^total_input, total_limits) ?? panic("total reader")
+    total_result :: total_reader.next()
+    if total_result == {{
+        ok(_) -> {{ print("total-limit-missed") }}
+        err(total_first) -> {{
+            total_again :: total_reader.next()
+            if total_again == {{
+                ok(_) -> {{ print("total-terminal-missed") }}
+                err(total_second) -> {{ print(total_first.byte_offset); print(total_first.path); print(total_first.reason == total_second.reason) }}
+            }}
+        }}
+    }}
+
+    writer_limits := encoding.EncodingLimits.safe()
+    writer_limits.max_item_bytes = 3
+    limited_output :: files.create("{output}.limited") ?? panic("limited create")
+    limited_writer :: csv.writer(^limited_output, writer_limits) ?? panic("limited writer")
+    limited_result :: limited_writer.write(["abcd"])
+    if limited_result == {{
+        ok(_) -> {{ print("writer-limit-missed") }}
+        err(limited_first) -> {{
+            limited_again :: limited_writer.finish()
+            if limited_again == {{
+                ok(_) -> {{ print("writer-limit-terminal-missed") }}
+                err(limited_second) -> {{ print(limited_first.path); print(limited_first.reason == limited_second.reason) }}
+            }}
+        }}
+    }}
+}}
+"#
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "csv_stream", &source, &[], None);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(
+        stdout,
+        "true\na\nb,b\nc\"c\nline1\nline2\nlast\ntrue\ntail\ntrue\ntrue\n$[0][0]\ntrue\n$[0][0]\ntrue\n3\n$[0][1]\ntrue\n$[0][0]\ntrue\n"
+    );
+    assert_eq!(fs::read_to_string(&output_path).unwrap(), "a,\"b,b\",\"c\"\"c\",\"line1\nline2\"\r\nlast,,tail\r\n");
+    assert_eq!(stderr, "");
+    let _ = fs::remove_dir_all(&dir);
+}
+
 fn compile_temp(name: &str, src: &str) -> jet::CompileOutput {
     let dir = std::env::temp_dir().join(format!("jet_corelib_test_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();

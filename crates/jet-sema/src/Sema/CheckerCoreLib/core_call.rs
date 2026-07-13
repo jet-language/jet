@@ -107,7 +107,7 @@ impl<'a> Checker<'a> {
             }
             let sig = core_fixed_sig(module, name);
             match (module, name) {
-                ("core.encoding.json" | "core.encoding.jsonl", "reader" | "writer") => {
+                ("core.encoding.json" | "core.encoding.jsonl" | "core.encoding.csv", "reader" | "writer") => {
                     let max = if module == "core.encoding.json" && name == "writer" { 3 } else { 2 };
                     let (min, max) = (1, max);
                     if !(min..=max).contains(&args.len()) {
@@ -115,7 +115,7 @@ impl<'a> Checker<'a> {
                             "E0104",
                             format!("`{}.{}` expects {} to {} arguments, got {}", module_short_name(module), name, min, max, args.len()),
                             "the file handle is required; limits and canonical mode use safe defaults when omitted".to_string(),
-                            if name == "reader" { format!("write `{}.reader(^file)` or `{}.reader(^file, limits)`", module_short_name(module), module_short_name(module)) } else if module == "core.encoding.json" { "write `json.writer(^file)`, `json.writer(^file, limits)`, or `json.writer(^file, limits, canonical)`".to_string() } else { "write `jsonl.writer(^file)` or `jsonl.writer(^file, limits)`".to_string() },
+                            if name == "reader" { format!("write `{}.reader(^file)` or `{}.reader(^file, limits)`", module_short_name(module), module_short_name(module)) } else if module == "core.encoding.json" { "write `json.writer(^file)`, `json.writer(^file, limits)`, or `json.writer(^file, limits, canonical)`".to_string() } else { format!("write `{}.writer(^file)` or `{}.writer(^file, limits)`", module_short_name(module), module_short_name(module)) },
                             Some(span),
                         ));
                     }

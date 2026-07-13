@@ -544,6 +544,14 @@ pub fn core_fixed_sig(
             )],
             Some(Type::String),
         )),
+        ("core.encoding.csv", "reader") => Some((
+            vec![(moved, Type::Named("FileReader".to_string())), (read, Type::Named("EncodingLimits".to_string()))],
+            Some(result_ty(Type::Named("CSVReader".to_string()), encoding_error_ty())),
+        )),
+        ("core.encoding.csv", "writer") => Some((
+            vec![(moved, Type::Named("FileWriter".to_string())), (read, Type::Named("EncodingLimits".to_string()))],
+            Some(result_ty(Type::Named("CSVWriter".to_string()), encoding_error_ty())),
+        )),
         // D-DATA-SURFACE1=A / D-DATA-PLOT1=A / D-DATA-STATUS1=A: core.data
         // facade fixed-shape calls. Generic typed table calls are handled in
         // infer_core_call so selectors stay typed by sema.

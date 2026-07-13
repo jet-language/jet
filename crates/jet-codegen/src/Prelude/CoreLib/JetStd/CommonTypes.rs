@@ -78,7 +78,25 @@
         pub(crate) record_index: i64,
         pub(crate) finished: bool,
     }
-    pub struct CSVReader { _private: () } pub struct CSVWriter { _private: () }
+    pub struct CSVReader {
+        pub(crate) input: super::JetFileReader,
+        pub(crate) limits: EncodingLimits,
+        pub(crate) total: i64,
+        pub(crate) offset: i64,
+        pub(crate) line: i64,
+        pub(crate) column: i64,
+        pub(crate) terminal: Option<EncodingError>,
+        pub(crate) eof: bool,
+        pub(crate) record_index: i64,
+    }
+    pub struct CSVWriter {
+        pub(crate) output: super::JetFileWriter,
+        pub(crate) limits: EncodingLimits,
+        pub(crate) terminal: Option<EncodingError>,
+        pub(crate) total: i64,
+        pub(crate) record_index: i64,
+        pub(crate) finished: bool,
+    }
     pub struct XMLReader { _private: () } pub struct XMLWriter { _private: () }
     pub struct CBORReader { _private: () } pub struct CBORWriter { _private: () }
 

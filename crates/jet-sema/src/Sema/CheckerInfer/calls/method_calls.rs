@@ -1211,6 +1211,10 @@ impl<'a> Checker<'a> {
                                 arg,
                             );
                         }
+                    } else if handle_ty == "CSVWriter" && method == "write" {
+                        if let Some(arg) = args.first_mut() {
+                            self.expect_core_arg("write", 0, &Type::List(Box::new(Type::String)), arg);
+                        }
                     } else {
                         for a in args.iter_mut() { self.infer(&mut a.expr); }
                     }
