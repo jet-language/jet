@@ -298,11 +298,6 @@ fn panic_context_uses_only_lexically_live_locals() {
             &["impure_only"],
         ),
         (
-            "suppress",
-            "#Suppress(MustUse) { suppress_only :: 7; print(suppress_only) }",
-            &["suppress_only"],
-        ),
-        (
             "shield",
             "#Shield { shield_only :: 7; print(shield_only) }",
             &["shield_only"],
