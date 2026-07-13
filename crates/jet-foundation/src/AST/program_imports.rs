@@ -122,17 +122,19 @@ pub enum ForeignLanguage {
     Js,
     Swift,
     Go,
+    Java,
     Fortran,
 }
 
 impl ForeignLanguage {
-    pub const ALL: [ForeignLanguage; 7] = [
+    pub const ALL: [ForeignLanguage; 8] = [
         ForeignLanguage::C,
         ForeignLanguage::Rust,
         ForeignLanguage::Py,
         ForeignLanguage::Js,
         ForeignLanguage::Swift,
         ForeignLanguage::Go,
+        ForeignLanguage::Java,
         ForeignLanguage::Fortran,
     ];
 
@@ -144,6 +146,7 @@ impl ForeignLanguage {
             Syntax::JS_MODULE_ROOT => Some(ForeignLanguage::Js),
             Syntax::SWIFT_MODULE_ROOT => Some(ForeignLanguage::Swift),
             Syntax::GO_MODULE_ROOT => Some(ForeignLanguage::Go),
+            Syntax::JAVA_MODULE_ROOT => Some(ForeignLanguage::Java),
             Syntax::FORTRAN_MODULE_ROOT => Some(ForeignLanguage::Fortran),
             _ => None,
         }
@@ -157,6 +160,7 @@ impl ForeignLanguage {
             ForeignLanguage::Js => Syntax::JS_MODULE_ROOT,
             ForeignLanguage::Swift => Syntax::SWIFT_MODULE_ROOT,
             ForeignLanguage::Go => Syntax::GO_MODULE_ROOT,
+            ForeignLanguage::Java => Syntax::JAVA_MODULE_ROOT,
             ForeignLanguage::Fortran => Syntax::FORTRAN_MODULE_ROOT,
         }
     }

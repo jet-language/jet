@@ -64,6 +64,13 @@ fn unified_foreign_binder_registry_routes_active_and_planned_languages() {
             BinderSurface::Namespace,
             BinderStatus::Active,
         ),
+        (
+            ForeignLanguage::Java,
+            "java",
+            "bindings/java",
+            BinderSurface::Namespace,
+            BinderStatus::Active,
+        ),
     ];
 
     for (lang, root, bindings, surface, status) in expected {
@@ -97,6 +104,7 @@ fn unified_foreign_namespace_model_recognizes_c_project_import_only() {
             .language,
         ForeignLanguage::Fortran
     );
+    assert_eq!(ForeignNamespace::from_module_path("java.counter").unwrap().language, ForeignLanguage::Java);
     assert!(ForeignNamespace::from_module_path("c").is_none());
     assert!(ForeignNamespace::from_module_path("c.raylib.extra").is_none());
     assert!(ForeignNamespace::from_module_path("lua.socket").is_none());

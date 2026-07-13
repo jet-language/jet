@@ -19,6 +19,7 @@ pub use jet_driver::{
     CBind,
     FortranBind,
     GoBind,
+    JavaBind,
     CanonicalAST,
     Capabilities,
     Codegen,

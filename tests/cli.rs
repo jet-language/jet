@@ -1612,6 +1612,50 @@ func main() {}
 }
 
 #[test]
+fn java_bind_embeds_jvm_handles_methods_and_exceptions() {
+    let dir = isolated_cwd("java_bind_embedded");
+    let source = dir.join("Counter.java");
+    fs::write(&source, r#"public class Counter {
+    private long value;
+    public Counter(long value) { this.value = value; }
+    public long add(long amount) { value += amount; return value; }
+    public long explode(long code) { if (code < 0) throw new IllegalStateException("hidden foreign detail"); return code; }
+    public static double twice(double value) { return value * 2.0; }
+}
+"#).unwrap();
+    let bind=Command::new(jet()).args(["inspect","bind","java"]).arg(&source).args(["--pkg","counter"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
+    assert!(bind.status.success(),"Java bind failed:\n{}",String::from_utf8_lossy(&bind.stderr));
+    assert!(dir.join(".jet/bindings/java/libjet_java_counter.a").is_file());
+    assert!(dir.join(".jet/bindings/java/counter.classes/Counter.class").is_file());
+    assert!(dir.join(".jet/bindings/java/counter.provenance").is_file());
+    fs::write(dir.join("main.jet"),r#"use java.counter as counter
+
+fn run() #(Java, Io) {
+    handle :: counter.new(40) ?? panic("JVM create failed")
+    print(counter.add(handle, 2) ?? -1)
+    print(counter.twice(2.5) ?? -1.0)
+    print(counter.explode(handle, -1) ?? -7)
+    counter.close(^handle)
+}
+"#).unwrap();
+    let run=Command::new(jet()).args(["run","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
+    assert!(run.status.success(),"embedded JVM binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));
+    assert_eq!(String::from_utf8_lossy(&run.stdout),"42\n5.0\n-7\n");
+    assert!(!String::from_utf8_lossy(&run.stderr).contains("hidden foreign detail"));
+}
+
+#[test]
+fn java_bind_launders_javac_failure_as_e3208() {
+    let dir=isolated_cwd("java_bind_failure"); let source=dir.join("Broken.java");
+    fs::write(&source,"public class Broken { public Broken(long n) { this. = n; } public long value() { return 1; } }\n").unwrap();
+    let output=Command::new(jet()).args(["inspect","bind","java"]).arg(&source).args(["--pkg","broken"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
+    assert!(!output.status.success()); let stderr=String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Error [E3208]:")); assert!(stderr.contains(" Why:")); assert!(stderr.contains(" Fix:"));
+    assert!(!stderr.contains("Broken.java:"),"raw javac location leaked:\n{stderr}");
+    check_snapshot("bind_java_invalid_e3208.txt", &scrub(&stderr, &source));
+}
+
+#[test]
 fn fortran_bind_launders_foreign_compiler_failure_as_e3208() {
     let dir = isolated_cwd("fortran_bind_failure");
     let source = dir.join("broken.f90");

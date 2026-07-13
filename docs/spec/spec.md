@@ -904,6 +904,27 @@ ordinary C externs remain maximally effectful. Unsupported signatures fail befor
 are laundered through **E3208** and never expose raw foreign source frames
 (I2/I4).
 
+## E3 — JVM project binder (D-FFI-JVM1=A, embedded class vertical)
+
+`jet inspect bind java <source.java> --pkg <lib>` uses the provisioned OpenJDK
+toolchain to compile bytecode and discovers public JVM descriptors through
+`javap -s`. Supported constructors and non-overloaded methods use `long` and
+`double`; unsupported descriptors fail binding rather than guessing an ABI.
+The generated cache links a std-only JNI bridge against the provisioned
+`libjvm`. It creates one JVM lazily inside the native Jet process, attaches
+calling threads, and destroys the JVM at process teardown.
+
+Java objects cross as opaque `java.<lib>.Handle` values backed by a bounded
+1,024-slot global-reference table. Calls borrow the handle; `close(^handle)`
+consumes Jet ownership and releases the global reference. Remaining references
+are released during JVM teardown. Constructors and value-returning methods are
+fallible with `JavaError.Exception`; the bridge clears the Java exception and
+returns only the typed Jet error, never a Java stack or foreign source frame.
+Generated calls carry the `Java` effect root. `javac`, `javap`, `cc`, and `ar`
+run under a 60-second deadline with 64-KiB diagnostic capture. Cache provenance
+binds the source, discovered bytecode surface, class cache path, and schema with
+SHA-256. Tool failures use **E3208** what/why/fix copy.
+
 ## E2-M13 — Expert low-level tier (S58, implemented)
 
 C/Zig-class control behind two explicit gates; ordinary Jet never reaches it and

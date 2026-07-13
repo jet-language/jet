@@ -31,6 +31,7 @@ pub mod CBind;
 pub mod CFFI;
 pub mod FortranBind;
 pub mod GoBind;
+pub mod JavaBind;
 // Card #367 / D-PRODUCT-SPLIT1=C slice 3: pure policy computation over the
 // manifest/effect-fixpoint data (no network/provider/shell engine code, same
 // bar as the rest of this crate) — moved here from `jetpack` so `jet`'s own

@@ -299,6 +299,11 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
                 function.effect_root = Some("Go".to_string());
             }
         }
+        if lib.starts_with("jet_java_") {
+            for function in &mut merged {
+                function.effect_root = Some("Java".to_string());
+            }
+        }
 
         let alias = synthetic_alias(lib);
         let synth_idx = bundle.modules.len();
@@ -614,6 +619,22 @@ pub fn resolve_link(lib: &str, project_root: &Path) -> Result<LinkFlags, Diagnos
             return Ok(LinkFlags {
                 lib_dirs: vec![archive.parent().unwrap_or(project_root).display().to_string()],
                 link_names: vec![format!("static=jet_go_{actual}"), "pthread".into(), "dl".into(), "m".into()],
+                ..Default::default()
+            });
+        }
+        return Err(e3201(lib));
+    }
+    if let Some(actual) = lib.strip_prefix("jet_java_") {
+        let dir = project_root.join(Syntax::SOURCE_ROOT_DIR).join(ForeignLanguage::Java.bindings_subdir());
+        let archive = dir.join(format!("libjet_java_{actual}.a"));
+        let path_file = dir.join(format!("{actual}.jvm-path"));
+        let Ok(jvm_dir) = std::fs::read_to_string(path_file) else { return Err(e3201(lib)); };
+        let jvm_dir = jvm_dir.trim();
+        if archive.is_file() && std::path::Path::new(jvm_dir).is_absolute() && std::path::Path::new(jvm_dir).join(if cfg!(target_os="macos") { "libjvm.dylib" } else { "libjvm.so" }).is_file() {
+            return Ok(LinkFlags {
+                lib_dirs: vec![dir.display().to_string(), jvm_dir.to_string()],
+                link_names: vec![format!("static=jet_java_{actual}"), "jvm".into(), "pthread".into(), "dl".into()],
+                rpath_dirs: vec![jvm_dir.to_string()],
                 ..Default::default()
             });
         }

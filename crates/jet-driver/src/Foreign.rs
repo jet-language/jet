@@ -32,6 +32,7 @@ pub enum BinderRuntime {
     TargetDispatchedJs,
     SwiftCAbiBridge,
     GoCArchive,
+    EmbeddedJvm,
     FortranIsoCBinding,
 }
 
@@ -43,6 +44,7 @@ pub enum BindingStubKind {
     TypeScriptDeclarations,
     SwiftModule,
     GoExports,
+    JvmClass,
     FortranIsoCBinding,
 }
 
@@ -69,6 +71,7 @@ pub enum ForeignHost {
     SupervisedPythonSidecar,
     SwiftCAbiBridge,
     GoCArchive,
+    EmbeddedJvm,
     FortranIsoCBinding,
     LegacyRustExtern,
 }
@@ -127,6 +130,13 @@ pub const BINDERS: &[BinderDescriptor] = &[
         stub_kind: BindingStubKind::GoExports,
     },
     BinderDescriptor {
+        language: ForeignLanguage::Java,
+        surface: BinderSurface::Namespace,
+        status: BinderStatus::Active,
+        runtime: BinderRuntime::EmbeddedJvm,
+        stub_kind: BindingStubKind::JvmClass,
+    },
+    BinderDescriptor {
         language: ForeignLanguage::Fortran,
         surface: BinderSurface::Namespace,
         status: BinderStatus::Active,
@@ -176,6 +186,7 @@ pub fn host_for(language: ForeignLanguage, target: ForeignTarget) -> ForeignHost
         },
         ForeignLanguage::Swift => ForeignHost::SwiftCAbiBridge,
         ForeignLanguage::Go => ForeignHost::GoCArchive,
+        ForeignLanguage::Java => ForeignHost::EmbeddedJvm,
         ForeignLanguage::Fortran => ForeignHost::FortranIsoCBinding,
     }
 }

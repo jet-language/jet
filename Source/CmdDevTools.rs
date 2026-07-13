@@ -1325,6 +1325,10 @@ pub(crate) fn run_explain(code: Option<&str>, mode: OutputMode) {
 /// **E3208** fires only when the header is unreadable or has no bindable
 /// prototypes — use `#Extern module c.<lib>` for those declarations.
 pub(crate) fn run_bind(args: &[&String]) {
+    if args.first().is_some_and(|arg| arg.as_str() == jet::Syntax::JAVA_MODULE_ROOT) {
+        run_java_bind(&args[1..]);
+        return;
+    }
     if args
         .first()
         .is_some_and(|arg| arg.as_str() == jet::Syntax::GO_MODULE_ROOT)
@@ -1450,6 +1454,26 @@ pub(crate) fn run_bind(args: &[&String]) {
         }
     }
 }
+
+/// D-FFI-JVM1=A: compile Java bytecode, discover its public ABI with javap,
+/// then build an in-process JNI invocation bridge.
+fn run_java_bind(args: &[&String]) {
+    let usage = || eprintln!("usage: {} inspect bind java <source.java> [--pkg <lib>] [-o <out.jet>]", jet::Syntax::BINARY_NAME);
+    if args.is_empty() || args[0] == "--help" || args[0] == "-h" { usage(); exit(if args.is_empty(){ExitCodes::USAGE}else{0}); }
+    let source_path=args[0].as_str(); let mut pkg=None; let mut out=None; let mut i=1;
+    while i<args.len(){match args[i].as_str(){"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{eprintln!("error: unknown `bind java` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}
+    let lib=pkg.unwrap_or_else(||{let base=source_path.rsplit('/').next().unwrap_or(source_path);base.rsplit_once('.').map(|v|v.0).unwrap_or(base).to_string()});
+    let source=std::fs::read_to_string(source_path).unwrap_or_else(|e|java_bind_error(source_path,&format!("the source file could not be read ({e})")));
+    let out_path=out.unwrap_or_else(||format!(".jet/bindings/{}/{}.{}",jet::Syntax::JAVA_MODULE_ROOT,lib,jet::Syntax::FILE_EXT));
+    let cache=std::path::Path::new(&out_path).parent().unwrap_or_else(||std::path::Path::new("."));
+    let result=jet::JavaBind::bind(std::path::Path::new(source_path),&source,&lib,cache).unwrap_or_else(|e|java_bind_error(source_path,&e.to_string()));
+    if let Err(e)=std::fs::write(&out_path,&result.source){java_bind_error(source_path,&format!("the generated cache could not be written ({e})"))}
+    if let Err(e)=std::fs::write(cache.join(format!("{lib}.jvm-path")),format!("{}\n",result.jvm_dir.display())){java_bind_error(source_path,&format!("the JVM runtime identity could not be written ({e})"))}
+    if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),&result.provenance){java_bind_error(source_path,&format!("the binding provenance could not be written ({e})"))}
+    println!("bound {} JVM member{} from `{}` → {}",result.bound.len(),if result.bound.len()==1{""}else{"s"},source_path,out_path);
+}
+
+fn java_bind_error(source:&str,why:&str)->!{eprintln!("Error [E3208]: Could not generate bindings from `{source}`.");eprintln!(" Why: {why}.");eprintln!(" Fix: use a public Java class with one public long/double constructor and non-overloaded long/double methods, then rerun `jet inspect bind java`.");exit(ExitCodes::USER_ERROR)}
 
 /// D-FFI-GO1=A: compile exported scalar Go functions and move-only `uintptr`
 /// handles into an in-process c-archive and emit a typed `go.<lib>` Jet module.
