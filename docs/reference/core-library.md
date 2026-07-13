@@ -2152,6 +2152,21 @@ fn run() {
 }
 ```
 
+`take_pattern` reuses the `b"…{hole:U<width>}…"` binary-pattern grammar
+(D-BINPAT1) in consume mode — the byte-mode sibling of `Cursor.take_pattern`
+above: it matches a *prefix* of the remaining bytes and returns the typed
+holes, advancing the reader past them so more reads can follow. A miss is an
+ordinary error value.
+
+```jet
+fn run() {
+    header: [U8] :: [0x45, 0x00, 0x00, 0x28]
+    r :: Reader.over(header)
+    h :: r.take_pattern(b"{version:U4}{ihl:U4}{tos:U8}{len:U16be}") ?? panic("bad header")
+    print("{h.version} {h.ihl} {h.tos} {h.len}")   // 4 5 0 40
+}
+```
+
 | API | Returns | What it does |
 |-----|---------|--------------|
 | `Reader.over(bs)` | `Reader` | Wrap a `[U8]` in a consuming scanner |
@@ -2160,6 +2175,7 @@ fn run() {
 | `r.read_u32_le()` / `_be()` | `U32 ? String` | Four bytes |
 | `r.read_u64_le()` / `_be()` | `U64 ? String` | Eight bytes |
 | `r.take(n)` | `[U8] ? String` | Next `n` bytes (`n: Int`; sized ints widen with `.to_int()`) |
+| `r.take_pattern(b"…{h:U<w>}…")` | `(holes…) ? String` | Match + consume a prefix; literal pattern only |
 | `r.remaining()` | `Int` | Bytes left |
 | `r.at_end()` | `Bool` | Position at buffer end |
 

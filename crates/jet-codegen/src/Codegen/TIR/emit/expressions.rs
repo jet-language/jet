@@ -10,6 +10,7 @@ use crate::Codegen::TIR::emit_tir_orfallback_rhs;
 use crate::Codegen::TIR::emit_tir_str;
 use crate::Codegen::TIR::emit_tir_value_block;
 use crate::Codegen::TIR::ListSpreadPart;
+use crate::Codegen::TIR::bin_match_scan_closure_ex;
 use crate::Codegen::TIR::str_match_scan_closure_ex;
 use crate::Codegen::TIR::TBuiltinOp;
 use crate::Codegen::TIR::TClosureOp;
@@ -2108,6 +2109,41 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     };
                     format!(
                         "{{ let __jet_cur = &mut ({recv}); let __jet_tail: &str = &__jet_cur.buf[__jet_cur.pos..]; match {closure} {{ Some(({bind_pat})) => {{ __jet_cur.pos += __jet_consumed; Ok({ok_val}) }}, None => Err(format!(\"pattern did not match at cursor position {{}}\", __jet_cur.pos)) }} }}",
+                        recv = recv,
+                        closure = closure,
+                        bind_pat = bind_pat,
+                        ok_val = ok_val,
+                    )
+                }
+                // D-BINPAT1 (card #506 follow-up): `reader.take_pattern(b"…")` —
+                // inline scan (I8: the D-BINPAT1 engine in consume mode,
+                // `bin_match_scan_closure_ex`), byte-mode sibling of
+                // `CursorTakePattern` immediately above — same shape, `&[u8]`
+                // tail instead of `&str`.
+                THandleOp::ReaderTakePattern { parts, canonical } => {
+                    let (closure, holes) =
+                        bin_match_scan_closure_ex(parts, cx, "__jet_tail", false);
+                    let mut bind_vars: Vec<String> = holes
+                        .iter()
+                        .map(|(n, _)| format!("__jet_bm_{}", mangle(n)))
+                        .collect();
+                    bind_vars.push("__jet_consumed".to_string());
+                    let bind_pat = tuple_join(&bind_vars);
+                    let ok_val = if canonical.is_empty() {
+                        "()".to_string()
+                    } else {
+                        let struct_name = crate::Codegen::Tuples::tuple_struct_name(canonical);
+                        let field_inits: Vec<String> = canonical
+                            .iter()
+                            .zip(holes.iter())
+                            .map(|((n, _), (hn, _))| {
+                                format!("{}: __jet_bm_{}", mangle(n), mangle(hn))
+                            })
+                            .collect();
+                        format!("{} {{ {} }}", struct_name, field_inits.join(", "))
+                    };
+                    format!(
+                        "{{ let __jet_rdr = &mut ({recv}); let __jet_tail: &[u8] = &__jet_rdr.buf[__jet_rdr.pos..]; match {closure} {{ Some(({bind_pat})) => {{ __jet_rdr.pos += __jet_consumed; Ok({ok_val}) }}, None => Err(format!(\"pattern did not match at reader position {{}}\", __jet_rdr.pos)) }} }}",
                         recv = recv,
                         closure = closure,
                         bind_pat = bind_pat,

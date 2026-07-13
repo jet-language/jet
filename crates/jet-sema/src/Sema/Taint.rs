@@ -176,8 +176,10 @@ impl<'a> TaintCtx<'a> {
             | Expr::Lambda(_)
             | Expr::UnitLit { .. }
             | Expr::ComptimeSplice { .. }
-            // D-SHIFT1 (c7shift): a leaf literal, no nested `Expr` to recurse into.
-            | Expr::StrMatchLit(_, _) => false,
+            // D-SHIFT1 (c7shift) / D-BINPAT1 (card #506 follow-up): a leaf
+            // literal, no nested `Expr` to recurse into.
+            | Expr::StrMatchLit(_, _)
+            | Expr::BinMatchLit(_, _) => false,
             Expr::Paren(inner, _) => self.is_tainted(inner),
             Expr::Spread(inner, _) => self.is_tainted(inner),
         }
@@ -314,8 +316,10 @@ impl<'a> TaintCtx<'a> {
             | Expr::Todo { .. }
             | Expr::UnitLit { .. }
             | Expr::ComptimeSplice { .. }
-            // D-SHIFT1 (c7shift): a leaf literal, no nested `Expr` to recurse into.
-            | Expr::StrMatchLit(_, _) => {}
+            // D-SHIFT1 (c7shift) / D-BINPAT1 (card #506 follow-up): a leaf
+            // literal, no nested `Expr` to recurse into.
+            | Expr::StrMatchLit(_, _)
+            | Expr::BinMatchLit(_, _) => {}
             Expr::Paren(inner, _) => self.check_expr(inner),
             Expr::Spread(inner, _) => self.check_expr(inner),
         }

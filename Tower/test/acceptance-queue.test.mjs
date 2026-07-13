@@ -252,7 +252,7 @@ test('dedicated owner UI action bounces with the comment logged', async () => {
   assert.equal(ratifyEvent.by, 'owner');
 });
 
-test('owner provenance fails closed for missing session, replay, wrong decision/outcome, and non-loopback marker', async () => {
+test('owner provenance fails closed for missing session, replay, and wrong decision/outcome', async () => {
   await post('card/add', { title: 'Third flagged card', needsAcceptance: true, by: 'owner' });
   await post('card/update', { id: '#3', phase: 'done', by: 'builder' });
   await post('card/add', { title: 'Fourth flagged card', needsAcceptance: true, by: 'owner' });
@@ -260,8 +260,10 @@ test('owner provenance fails closed for missing session, replay, wrong decision/
   let r = await fetch(url('/api/acceptance/challenge'), { method: 'POST', body: JSON.stringify({ decisionId: 'D-ACCEPT-3', outcome: 'accept' }) });
   assert.equal(r.status, 403);
   const cookie = await ownerSession();
+  // Owner order 2026-07-12: remote (forwarded) devices act as owner too —
+  // a sessioned, marked request from a non-loopback address succeeds.
   r = await fetch(url('/api/acceptance/challenge'), { method: 'POST', headers: { cookie, 'x-tower-owner-action': 'verify', 'x-forwarded-for': '203.0.113.1' }, body: JSON.stringify({ decisionId: 'D-ACCEPT-3', outcome: 'accept' }) });
-  assert.equal(r.status, 403);
+  assert.equal(r.status, 200);
   const issue = async () => {
     const issued = await fetch(url('/api/acceptance/challenge'), { method: 'POST', headers: { cookie, 'x-tower-owner-action': 'verify' }, body: JSON.stringify({ decisionId: 'D-ACCEPT-3', outcome: 'accept' }) });
     return (await issued.json()).result.challenge;
@@ -306,17 +308,15 @@ test('double-click: two independently-challenged accept attempts on the same bal
   assert.equal(state.cards.find(c => c.num === 4).phase, 'done', 'card closes exactly once');
 });
 
-// Root cause of the P0 report: acceptance previously hard-required literal
-// loopback with no path for an authenticated remote/phone device, even
-// though the rest of the API already treats a device presenting auth.token
-// as the owner (README "Live + remote": LAN/tailnet + PWA + push). A device
-// with no token still can't prove it's the owner and stays blocked.
-test('remote device: rejected with no auth.token configured, accepted once it presents the configured token', async () => {
+// Owner order 2026-07-12: no loopback/token restriction on owner
+// verification — any device that reaches the board acts as the owner
+// (single-owner LAN/tailnet tool). Session + UI-marker + challenge
+// provenance still apply; only the transport gate is gone.
+test('remote device: accepted without any auth.token — restriction removed by owner order', async () => {
   const rdir = mkdtempSync(join(tmpdir(), 'tower-avq-remote-'));
   writeJSON(join(rdir, 'tower.json'), empty('Remote'));
   writeJSON(configFile(rdir), { project: 'Remote' });
   const rstore = openStore(rdir);
-  rstore.config.auth = { token: 'owner-secret-123' };
   const rport = 17960;
   const rserver = serve(rstore, rport, false);
   const rurl = (p) => `http://localhost:${rport}${p}`;
@@ -324,31 +324,19 @@ test('remote device: rejected with no auth.token configured, accepted once it pr
     await fetch(rurl('/api/card/add'), { method: 'POST', body: JSON.stringify({ title: 'Remote card', needsAcceptance: true, by: 'owner' }) });
     await fetch(rurl('/api/card/update'), { method: 'POST', body: JSON.stringify({ id: '#1', phase: 'done', by: 'builder' }) });
 
-    // simulated remote device: loopback socket, but marked forwarded (same
-    // trick the existing non-loopback test above uses) — no token presented.
-    const noToken = await fetch(rurl('/api/acceptance/challenge'), {
-      method: 'POST', headers: { 'x-tower-owner-action': 'verify', 'x-forwarded-for': '203.0.113.9' },
-      body: JSON.stringify({ decisionId: 'D-ACCEPT-1', outcome: 'accept' }),
-    });
-    assert.equal(noToken.status, 403);
-    const noTokenBody = await noToken.json();
-    assert.match(noTokenBody.message, /auth\.token/, 'error must point at the fix, not just say no');
-
-    // same remote device, now presenting the correct bearer token — this is
-    // exactly what a phone away from the loopback machine can do. A real
-    // owner-session cookie is required too (same as loopback), so mint one
-    // first the same way a page load would, forwarded+authed the whole way.
-    const remoteHeaders = { 'x-forwarded-for': '203.0.113.9', authorization: 'Bearer owner-secret-123' };
+    // simulated remote device (forwarded marker), no token anywhere: GET /
+    // mints an owner session, challenge + resolve round-trip closes the card.
+    const remoteHeaders = { 'x-forwarded-for': '203.0.113.9' };
     const page = await fetch(rurl('/'), { headers: remoteHeaders });
     const remoteCookie = page.headers.get('set-cookie')?.split(';', 1)[0];
-    assert.ok(remoteCookie, 'a token-authenticated remote GET / must also mint an owner session');
-    const withToken = await fetch(rurl('/api/acceptance/challenge'), {
+    assert.ok(remoteCookie, 'a remote GET / mints an owner session with no token configured');
+    const challengeRes = await fetch(rurl('/api/acceptance/challenge'), {
       method: 'POST',
       headers: { ...remoteHeaders, cookie: remoteCookie, 'x-tower-owner-action': 'verify' },
       body: JSON.stringify({ decisionId: 'D-ACCEPT-1', outcome: 'accept' }),
     });
-    assert.equal(withToken.status, 200, JSON.stringify(await withToken.clone().json()));
-    const challenge = (await withToken.json()).result.challenge;
+    assert.equal(challengeRes.status, 200, JSON.stringify(await challengeRes.clone().json()));
+    const challenge = (await challengeRes.json()).result.challenge;
     const resolved = await fetch(rurl('/api/acceptance/resolve'), {
       method: 'POST',
       headers: { ...remoteHeaders, cookie: remoteCookie, 'x-tower-owner-action': 'verify' },
@@ -356,15 +344,7 @@ test('remote device: rejected with no auth.token configured, accepted once it pr
     });
     assert.equal(resolved.status, 200);
     const state = await (await fetch(rurl('/api/state'))).json();
-    assert.equal(state.cards.find(c => c.num === 1).phase, 'done', 'remote-but-authenticated accept round-trips to a closed card');
-
-    // wrong token still fails closed.
-    const badToken = await fetch(rurl('/api/acceptance/challenge'), {
-      method: 'POST',
-      headers: { 'x-tower-owner-action': 'verify', 'x-forwarded-for': '203.0.113.9', authorization: 'Bearer not-the-token' },
-      body: JSON.stringify({ decisionId: 'D-ACCEPT-1', outcome: 'accept' }),
-    });
-    assert.equal(badToken.status, 403);
+    assert.equal(state.cards.find(c => c.num === 1).phase, 'done', 'remote no-token accept round-trips to a closed card');
   } finally {
     rserver.close();
   }

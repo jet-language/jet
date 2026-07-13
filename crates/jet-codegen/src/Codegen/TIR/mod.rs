@@ -2353,6 +2353,16 @@ pub enum THandleOp {
         parts: Vec<crate::AST::StrMatchPart>,
         canonical: Vec<(String, Type)>,
     },
+    /// D-BINPAT1 (card #506 follow-up): `reader.take_pattern(b"…")` —
+    /// consume-mode reuse of the D-BINPAT1 bit-scan engine
+    /// (`bin_match_scan_closure_ex`, I8: one matcher, not two). `parts` is
+    /// the pattern literal's already-parsed holes; `canonical` is the same
+    /// `(name, type)` list sema put in the call's `resolved_ret` `Type::Tuple`
+    /// — mirrors `CursorTakePattern` exactly, byte-mode sibling.
+    ReaderTakePattern {
+        parts: Vec<crate::AST::BinMatchPart>,
+        canonical: Vec<(String, Type)>,
+    },
 }
 
 /// One lowered call argument, with the borrow/clone decisions already made (so

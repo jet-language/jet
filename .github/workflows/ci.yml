@@ -30,6 +30,9 @@ jobs:
       - name: Platform audit
         run: cargo test --test jetpack_platform
 
+      - name: Native core.os facts and interrupt lifecycle
+        run: cargo test --test os_native -- --nocapture
+
       - name: Windows core.os Ctrl-C runtime proof
         if: matrix.os == 'windows-latest'
         run: cargo test --test os_interrupt_windows -- --nocapture

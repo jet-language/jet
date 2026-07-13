@@ -1709,8 +1709,10 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
         | AST::Expr::Todo { .. }
         | AST::Expr::UnitLit { .. }
         | AST::Expr::ComptimeSplice { .. }
-        // D-SHIFT1 (c7shift): a leaf literal, no nested `Expr` to recurse into.
-        | AST::Expr::StrMatchLit(_, _) => {}
+        // D-SHIFT1 (c7shift) / D-BINPAT1 (card #506 follow-up): a leaf
+        // literal, no nested `Expr` to recurse into.
+        | AST::Expr::StrMatchLit(_, _)
+        | AST::Expr::BinMatchLit(_, _) => {}
         AST::Expr::Paren(inner, _) => structural_slot(ctx, "inner", StructuralSlotKind::Scalar, |ctx| collect_expr(inner, mp, ctx)),
     }
     if structural_id.is_some() { ctx.structural_parents.pop(); }

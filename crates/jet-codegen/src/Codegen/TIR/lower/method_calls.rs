@@ -43,6 +43,7 @@ use crate::Codegen::TIR::lower_expr_as_mut_place;
 use crate::Codegen::TIR::lower_lambda;
 use crate::Codegen::TIR::lower_lambda_expecting;
 use crate::Codegen::TIR::lower::lower_cursor_take_pattern;
+use crate::Codegen::TIR::lower::lower_reader_take_pattern;
 use crate::Codegen::TIR::lower_method_args;
 use crate::Codegen::TIR::lower_module_args;
 use crate::Codegen::TIR::lower_one_call_arg;
@@ -1680,6 +1681,18 @@ pub(crate) fn lower_method_call(
             if let Some(arg) = args.first() {
                 if let Expr::StrMatchLit(parts, _) = &arg.expr {
                     return lower_cursor_take_pattern(receiver, parts, cx, env);
+                }
+            }
+        }
+    }
+    // D-BINPAT1 (card #506 follow-up): `reader.take_pattern(b"…")` — the
+    // byte-mode sibling, same reasoning. The parser already committed to
+    // `Expr::BinMatchLit` for this argument (sema rejects any other shape).
+    if let Some(handle) = recv_type {
+        if handle == "Reader" && method == "take_pattern" {
+            if let Some(arg) = args.first() {
+                if let Expr::BinMatchLit(parts, _) = &arg.expr {
+                    return lower_reader_take_pattern(receiver, parts, cx, env);
                 }
             }
         }

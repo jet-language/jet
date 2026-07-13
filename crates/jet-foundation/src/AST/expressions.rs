@@ -1,6 +1,6 @@
 use super::{
-    AccessConvention, CtValue, EnumLitArg, Func, IndexKind, OrFallback, Param, Pattern, Stmt,
-    StrMatchPart, TryConvert, Type,
+    AccessConvention, BinMatchPart, CtValue, EnumLitArg, Func, IndexKind, OrFallback, Param,
+    Pattern, Stmt, StrMatchPart, TryConvert, Type,
 };
 use crate::{Diagnostics::Span, Syntax};
 
@@ -176,6 +176,13 @@ pub enum Expr {
     /// not a legal interpolation value expression. Legal ONLY as a
     /// `take_pattern` call argument; sema rejects it anywhere else.
     StrMatchLit(Vec<StrMatchPart>, Span),
+    /// D-BINPAT1 (card #506 follow-up): the byte-mode sibling of
+    /// `StrMatchLit` — the sole legal shape of `reader.take_pattern(b"…")`'s
+    /// argument. Same source syntax as a bin-match `Pattern::BinMatch` (a
+    /// `b"…"` literal with `{name:U<width>}`/`{name:...}` holes), parsed via
+    /// the same D-BINPAT1 hole engine (`BinMatchPart`). Legal ONLY as a
+    /// `take_pattern` call argument; sema rejects it anywhere else.
+    BinMatchLit(Vec<BinMatchPart>, Span),
     /// Integer literal. The third field is the D-SG9 elaborated fixed width
     /// `(signed, bits)`, filled by sema when the literal sits in a sized-integer
     /// context; `None` means the default `Int` (i64). Codegen reads it to pick
@@ -427,6 +434,7 @@ impl Expr {
         match self {
             Expr::Str(_, s)
             | Expr::StrMatchLit(_, s)
+            | Expr::BinMatchLit(_, s)
             | Expr::Int(_, s, _)
             | Expr::Float(_, s, _)
             | Expr::Bool(_, s)

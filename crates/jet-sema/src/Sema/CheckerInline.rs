@@ -312,7 +312,7 @@ impl<'a> InlineAlwaysScan<'a> {
                     }
                 }
             }
-            Expr::StrMatchLit(_, _) => {}
+            Expr::StrMatchLit(_, _) | Expr::BinMatchLit(_, _) => {}
             Expr::Int(_, _, _) | Expr::Float(_, _, _) | Expr::Bool(_, _) | Expr::Char(_, _) => {}
             Expr::ListLit(items, _) => {
                 for i in items {

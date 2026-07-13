@@ -761,19 +761,39 @@ pub(crate) fn str_match_scan_closure_ex(
 /// against a binary pattern with a sequential MSB-first bit cursor, returning
 /// `Option<(T1, T2, …)>` (`None` on any short read, byte mismatch, or a
 /// pattern with no trailing rest that doesn't consume the whole subject). This
-/// is the byte-mode sibling of `str_match_scan_closure_ex` — one matcher
-/// engine (I8) — and must read bit-for-bit identically to the tier-0
-/// interpreter's `Pattern::BinMatch` arm (R12 parity). `subject_src` is a raw
-/// Rust expression yielding the bytes (a `&Vec<u8>`/`Vec<u8>`); the closure
-/// takes it as a slice.
+/// is the byte-mode sibling of `str_match_scan_closure` — one matcher engine
+/// (I8) — and must read bit-for-bit identically to the tier-0 interpreter's
+/// `Pattern::BinMatch` arm (R12 parity). Thin wrapper over
+/// `bin_match_scan_closure_ex` in full-match mode (the `switch`-arm shape).
 pub(crate) fn bin_match_scan_closure(pattern: &Pattern, cx: &Cx) -> (String, Vec<(String, Type)>) {
     let Pattern::BinMatch { parts, .. } = pattern else {
         return ("(|| -> Option<()> { Some(()) })()".to_string(), Vec::new());
     };
+    bin_match_scan_closure_ex(parts, cx, "(_jet_switch_subject).as_slice()", true)
+}
+
+/// D-BINPAT1 (card #506 follow-up): the same bit-scan engine, generalized
+/// over WHERE the subject bytes come from (`subject_src`, a raw Rust
+/// expression yielding `&[u8]`) and whether the WHOLE subject must be
+/// consumed (`require_full_match`) — the byte-mode sibling of
+/// `str_match_scan_closure_ex`. `switch` uses the whole-buffer subject and
+/// full consumption; `Reader.take_pattern` scans a local `__jet_tail` slice
+/// and only needs a PREFIX match, ending on a byte boundary (a `Reader`
+/// advances by whole bytes) — the caller advances the reader's position by
+/// the consumed byte count, appended as one extra trailing `usize` in the
+/// returned Rust tuple (not reflected in the returned `holes` list — callers
+/// reconstruct the same trailing slot themselves, `lower_reader_take_pattern`
+/// does exactly that, mirroring `lower_cursor_take_pattern`).
+pub(crate) fn bin_match_scan_closure_ex(
+    parts: &[crate::AST::BinMatchPart],
+    cx: &Cx,
+    subject_src: &str,
+    require_full_match: bool,
+) -> (String, Vec<(String, Type)>) {
     use crate::AST::{BinEndian, BinMatchPart, BinSpec};
     let mut holes: Vec<(String, Type)> = Vec::new();
     let mut body = String::new();
-    body.push_str("let __jet_bm: &[u8] = (_jet_switch_subject).as_slice();\n");
+    body.push_str(&format!("let __jet_bm: &[u8] = {};\n", subject_src));
     body.push_str("let __jet_total: usize = __jet_bm.len().saturating_mul(8);\n");
     body.push_str("let mut __jet_pos: usize = 0;\n");
     let ends_in_rest = matches!(
@@ -825,14 +845,29 @@ pub(crate) fn bin_match_scan_closure(pattern: &Pattern, cx: &Cx) -> (String, Vec
             },
         }
     }
-    if !ends_in_rest {
-        body.push_str("if __jet_pos != __jet_total { return None; }\n");
+    // A full-match pattern (`switch`) must consume the WHOLE subject, not
+    // just a prefix — a trailing `{...}` rest hole already takes the rest by
+    // construction, so only a non-rest ending needs the check. A
+    // `take_pattern` consume mode (`!require_full_match`) skips this — the
+    // caller only wanted a PREFIX matched — but a `Reader` only advances by
+    // whole bytes, so the match point must still land on a byte boundary.
+    if require_full_match {
+        if !ends_in_rest {
+            body.push_str("if __jet_pos != __jet_total { return None; }\n");
+        }
+    } else {
+        body.push_str("if __jet_pos % 8 != 0 { return None; }\n");
     }
-    let tuple_vars: Vec<String> = holes
+    let mut tuple_vars: Vec<String> = holes
         .iter()
         .map(|(n, _)| format!("__jet_bm_{}", mangle(n)))
         .collect();
-    let tuple_tys: Vec<String> = holes.iter().map(|(_, t)| cx.rust_type(t)).collect();
+    let mut tuple_tys: Vec<String> = holes.iter().map(|(_, t)| cx.rust_type(t)).collect();
+    if !require_full_match {
+        body.push_str("let __jet_consumed: usize = __jet_pos / 8;\n");
+        tuple_vars.push("__jet_consumed".to_string());
+        tuple_tys.push("usize".to_string());
+    }
     body.push_str(&format!("Some(({}))\n", tuple_join(&tuple_vars)));
     let closure = format!("(|| -> Option<({})> {{\n{}}})()", tuple_join(&tuple_tys), body);
     (closure, holes)
@@ -840,7 +875,7 @@ pub(crate) fn bin_match_scan_closure(pattern: &Pattern, cx: &Cx) -> (String, Vec
 
 /// D-BINPAT1: the unsigned Rust integer type a fixed-width bit hole reads into
 /// — matches sema's `bin_bits_type`.
-fn bin_bits_type(width: u8) -> Type {
+pub(super) fn bin_bits_type(width: u8) -> Type {
     let bits = if width <= 8 {
         8
     } else if width <= 16 {

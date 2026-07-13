@@ -554,6 +554,24 @@ fn fmt_preserves_take_pattern_literal() {
     assert_eq!(out, twice, "take_pattern formatting must be idempotent");
 }
 
+#[test]
+fn fmt_preserves_bin_take_pattern_literal() {
+    // D-BINPAT1 (card #506 follow-up): `reader.take_pattern(b"…{hole:U<w>}…")`
+    // — the byte-mode sibling of `fmt_preserves_take_pattern_literal` above.
+    // Must round-trip byte-for-byte (fmt STABILITY, not just accept-without-crash).
+    let src = r#"fn run() {
+    header: [U8] :: [69, 0, 0, 40]
+    r :: Reader.over(header)
+    parsed :: r.take_pattern(b"{version:U4}{ihl:U4}{tos:U8}{len:U16be}") ?? panic("no match")
+    print("{parsed.version} {parsed.ihl} {parsed.tos} {parsed.len}")
+}
+"#;
+    let out = jet::format_source(src).expect("fmt should accept binary take_pattern literals");
+    assert_eq!(out, src, "binary take_pattern literal formatting must be stable");
+    let twice = jet::format_source(&out).expect("binary take_pattern output should re-fmt");
+    assert_eq!(out, twice, "binary take_pattern formatting must be idempotent");
+}
+
 // --- D-FMT1 (revises S44): author-intent single-line brace bodies ---
 //
 // A brace body the author wrote on one line stays one line when it holds one

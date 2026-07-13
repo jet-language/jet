@@ -142,12 +142,12 @@ function ownerLoopback(req) {
 // owner (see authed() below) — the exact case the README's "Live + remote"
 // PWA/push setup exists for. Reuse that same trust boundary: loopback OR
 // the shared token, never a bare LAN/tailnet IP with no proof of identity.
-function ownerTrusted(req, token) {
-  if (ownerLoopback(req)) return true;
-  if (!token) return false;
-  const cookie = cookieValue(req, 'tower');
-  const bearer = /^Bearer (.+)$/.exec(req.headers.authorization || '')?.[1];
-  return cookie === token || bearer === token;
+function ownerTrusted() {
+  // Owner order 2026-07-12: no loopback/token restriction on owner
+  // verification — any device that can reach the board acts as the owner.
+  // The board is a single-owner LAN/tailnet tool; if that changes, revisit
+  // via card #460 (auth.token hardening).
+  return true;
 }
 function ownerSession(req) {
   const token = cookieValue(req, OWNER_SESSION_COOKIE);

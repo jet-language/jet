@@ -349,8 +349,9 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         // D-DEP-WASM1=A / D-PLUGIN1=B (c81): `Plugin` instance methods.
         ("Plugin", "call", 2) => THandleOp::PluginCall,
         ("Plugin", "call_int", 2) => THandleOp::PluginCallInt,
-        // D-SHIFT1 (c7shift): `Reader` instance methods. `take_pattern` isn't
-        // here — Cursor's argument-dependent method, resolved at its call site.
+        // D-SHIFT1 (c7shift) / D-BINPAT1 (card #506 follow-up): `Reader`
+        // instance methods. `take_pattern` isn't here — an argument-dependent
+        // method (like Cursor's), resolved at its call site.
         ("Reader", "read_u8", 0) => THandleOp::ReaderReadU8,
         ("Reader", "read_u16_le", 0) => THandleOp::ReaderReadU16Le,
         ("Reader", "read_u16_be", 0) => THandleOp::ReaderReadU16Be,

@@ -1,9 +1,12 @@
 #![cfg(windows)]
 
 use std::fs;
-use std::io::{BufRead, Read};
+use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
+use std::thread;
+use std::time::{Duration, Instant};
 
 unsafe extern "system" {
     fn FreeConsole() -> i32;
@@ -65,15 +68,43 @@ fn windows_console_ctrl_c_runs_all_handlers_in_order() {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    let mut stdout = std::io::BufReader::new(child.stdout.take().unwrap());
-    let mut ready = String::new();
-    stdout.read_line(&mut ready).unwrap();
-    assert_eq!(ready.replace("\r\n", "\n"), "ready\n");
+    let (lines_tx, lines_rx) = mpsc::channel();
+    let child_stdout = child.stdout.take().unwrap();
+    thread::spawn(move || {
+        for line in BufReader::new(child_stdout).lines() {
+            if lines_tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let ready = match lines_rx.recv_timeout(Duration::from_secs(10)) {
+        Ok(line) => line.unwrap(),
+        Err(error) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("generated child did not become ready within 10 seconds: {error}");
+        }
+    };
+    assert_eq!(ready, "ready");
     assert_ne!(unsafe { GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0) }, 0);
 
-    let status = child.wait().unwrap();
-    let mut rest = String::new();
-    stdout.read_to_string(&mut rest).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("generated child did not handle CTRL_C_EVENT within 10 seconds");
+        }
+        thread::sleep(Duration::from_millis(10));
+    };
     assert!(status.success(), "generated child failed: {status}");
-    assert_eq!(rest.replace("\r\n", "\n"), "second\n");
+    let second = lines_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("second handler produced no output")
+        .unwrap();
+    assert_eq!(second, "second");
+    assert!(lines_rx.try_recv().is_err(), "unexpected handler output");
 }

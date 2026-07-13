@@ -171,6 +171,18 @@ impl<'a> Parser<'a> {
         /// argument, so silently falling back would just move the failure to a
         /// confusing type error later.
         pub(super) fn parse_take_pattern_literal(&mut self) -> Result<Expr, Diagnostic> {
+            // D-BINPAT1 (card #506 follow-up): `reader.take_pattern(b"…")` —
+            // the byte-mode sibling. Receiver type isn't known yet at parse
+            // time (`Cursor` vs `Reader`), so both literal kinds are accepted
+            // here; sema rejects the mismatched pairing (text pattern on a
+            // `Reader`, byte pattern on a `Cursor`). Byte-mode holes have no
+            // alternate legal meaning already (I8: reuse `build_bin_match_parts`,
+            // the same hole engine `try_bin_match_pattern` uses).
+            if let TokKind::BinStr(parts) = self.peek().kind.clone() {
+                let span = self.bump().span;
+                let match_parts = self.build_bin_match_parts(parts, span)?;
+                return Ok(Expr::BinMatchLit(match_parts, span));
+            }
             let TokKind::Str(parts) = self.peek().kind.clone() else {
                 return Err(Diagnostic::error(
                     "E0003",

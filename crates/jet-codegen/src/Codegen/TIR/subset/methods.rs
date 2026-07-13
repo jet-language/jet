@@ -705,6 +705,16 @@ pub(crate) fn method_call_in_subset(
         {
             return expr_in_subset(receiver, cx, locals);
         }
+        // D-BINPAT1 (card #506 follow-up): `reader.take_pattern(b"…")` —
+        // same reasoning, byte-mode sibling. The sole argument is a
+        // parser-committed `Expr::BinMatchLit` leaf.
+        if handle == "Reader"
+            && method == Syntax::METHOD_TAKE_PATTERN
+            && args.len() == 1
+            && matches!(args[0].expr, Expr::BinMatchLit(_, _))
+        {
+            return expr_in_subset(receiver, cx, locals);
+        }
     }
     // D-LAYOUT1 / D-LAYOUT-GATES1: a method on `LayoutHandle`/`Constraint`
     // (mirrors the D-SIMD2 math-method carve-out immediately above). Admitted

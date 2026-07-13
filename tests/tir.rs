@@ -1390,10 +1390,13 @@ fn apply(f: fn(Int) -> Int, x: Int) -> Int {
 fn visit(f: fn(Int), x: Int) {
     f(x)
 }
+fn plus_one(x: Int) -> Int {
+    return x + 1
+}
 fn run() {
     print(apply((n: Int) => {
         doubled :: (n * 2)
-        (doubled + 1)
+        plus_one(doubled)
     }, 20))
     visit((n: Int) => {
         print(\"seen {n}\")

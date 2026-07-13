@@ -1254,6 +1254,49 @@ impl<'a> Checker<'a> {
                     return Some(out);
                 }
             }
+            // D-BINPAT1 (card #506 follow-up): `reader.take_pattern(b"…")` —
+            // the byte-mode sibling of `Cursor.take_pattern` above. Same
+            // reason it's resolved directly here rather than through
+            // `binary_reader_method_return`'s generic table: the return shape
+            // comes from the pattern's holes (I8: one `take_pattern` mechanism,
+            // dispatched on the literal kind the parser already committed to).
+            if let Type::Named(handle_ty) = &recv_ty {
+                if handle_ty == "Reader" && method == Syntax::METHOD_TAKE_PATTERN {
+                    *recv_type_out = Some("Reader".to_string());
+                    if args.len() != 1 {
+                        self.diags
+                            .push(wrong_core_arity(method, 1, args.len(), span));
+                        return Some(result_ty(unit_ty(), Type::String));
+                    }
+                    let Expr::BinMatchLit(parts, lit_span) = &args[0].expr else {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!("`{}` needs a literal binary pattern", Syntax::METHOD_TAKE_PATTERN),
+                            "the pattern is matched at compile time, so it can't be a computed value"
+                                .to_string(),
+                            "write the pattern directly: `take_pattern(b\"literal-{hole:U8}-pattern\")`"
+                                .to_string(),
+                            Some(args[0].expr.span()),
+                        ));
+                        return Some(result_ty(unit_ty(), Type::String));
+                    };
+                    let _ = lit_span;
+                    let holes = self.bin_match_hole_types(parts, span);
+                    let ok_ty = if holes.is_empty() {
+                        unit_ty()
+                    } else {
+                        Type::Tuple(
+                            holes
+                                .iter()
+                                .map(|(n, t)| (n.clone(), Box::new(t.clone())))
+                                .collect(),
+                        )
+                    };
+                    let out = result_ty(ok_ty, Type::String);
+                    *resolved_ret_out = Some(out.clone());
+                    return Some(out);
+                }
+            }
             // D-SHIFT1 (c7shift): `binary.Reader` instance methods (every read
             // fallible — bounds miss is an ordinary `?` error, not a panic).
             // `take(n)` wants an `Int` — sized ints convert explicitly per S42

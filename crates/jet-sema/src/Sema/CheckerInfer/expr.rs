@@ -393,6 +393,21 @@ impl<'a> Checker<'a> {
                 ));
                 None
             }
+            // D-BINPAT1 (card #506 follow-up): byte-mode sibling of the arm
+            // above — `b"…"` with holes is legal ONLY as `reader.take_pattern(b"…")`'s
+            // argument, intercepted there (`CheckerInfer/calls/method_calls.rs`)
+            // before generic inference ever reaches this arm.
+            Expr::BinMatchLit(_, span) => {
+                self.diags.push(Diagnostic::error(
+                    "E0112",
+                    "a binary pattern literal is only valid as a `take_pattern` argument".to_string(),
+                    "this `b\"…\"` literal has typed holes (`{name:U<width>}`), which only `take_pattern` understands"
+                        .to_string(),
+                    "call it as `reader.take_pattern(b\"…\")`".to_string(),
+                    Some(*span),
+                ));
+                None
+            }
             Expr::Ident(name, span) => {
                 // D-PREPOST1 (E0144): `result` names the return value inside a
                 // `@Post` condition; at function entry (a `@Pre` condition)

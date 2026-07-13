@@ -161,7 +161,8 @@ fn substitute_expr(
         | Expr::Todo { .. }
         | Expr::UnitLit { .. }
         | Expr::ComptimeSplice { .. }
-        | Expr::StrMatchLit(..) => {}
+        | Expr::StrMatchLit(..)
+        | Expr::BinMatchLit(..) => {}
         Expr::Str(parts, _) => parts.iter_mut().for_each(|part| {
             if let StrPart::Interp(inner, _) = part {
                 substitute_expr(inner, types, values);
@@ -2279,8 +2280,10 @@ pub(crate) fn rewrite_inline_calls_expr(
         | Expr::Todo { .. }
         | Expr::UnitLit { .. }
         | Expr::ComptimeSplice { .. }
-        // D-SHIFT1 (c7shift): a leaf literal, no nested `Expr` to recurse into.
-        | Expr::StrMatchLit(_, _) => {}
+        // D-SHIFT1 (c7shift) / D-BINPAT1 (card #506 follow-up): a leaf
+        // literal, no nested `Expr` to recurse into.
+        | Expr::StrMatchLit(_, _)
+        | Expr::BinMatchLit(_, _) => {}
         Expr::Str(parts, _) => {
             for p in parts.iter_mut() {
                 if let StrPart::Interp(e, _) = p {
@@ -4374,8 +4377,10 @@ pub(crate) fn collect_core_expr(
         | Expr::Todo { .. }
         | Expr::UnitLit { .. }
         | Expr::ComptimeSplice { .. }
-        // D-SHIFT1 (c7shift): a leaf literal, no nested `Expr` to recurse into.
-        | Expr::StrMatchLit(_, _) => {}
+        // D-SHIFT1 (c7shift) / D-BINPAT1 (card #506 follow-up): a leaf
+        // literal, no nested `Expr` to recurse into.
+        | Expr::StrMatchLit(_, _)
+        | Expr::BinMatchLit(_, _) => {}
         Expr::Paren(inner, _) => collect_core_expr(inner, imports, used, spans),
         Expr::Spread(inner, _) => collect_core_expr(inner, imports, used, spans),
     }

@@ -1265,6 +1265,65 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// D-BINPAT1 (shared with card #506 follow-up's `take_pattern` — I8, one
+    /// hole-type rule, not two): walk a binary pattern's parts, folding the
+    /// running bit offset and pushing alignment/endian diagnostics (E1008,
+    /// E1011), and return the ORDERED `(name, Type)` list for every hole
+    /// (literal parts contribute no entry). Order matches source order —
+    /// `validate_pattern`'s arm-head bindings collect this into a
+    /// name-keyed `HashMap` (binding order doesn't matter for a switch arm);
+    /// `take_pattern` needs the order preserved, since it becomes a
+    /// canonical result tuple, so it keeps the `Vec` as-is.
+    pub(crate) fn bin_match_hole_types(
+        &mut self,
+        parts: &[crate::AST::BinMatchPart],
+        span: Span,
+    ) -> Vec<(String, Type)> {
+        let mut off: usize = 0;
+        let mut holes: Vec<(String, Type)> = Vec::new();
+        for part in parts {
+            match part {
+                crate::AST::BinMatchPart::Lit(bytes) => {
+                    if off % 8 != 0 {
+                        self.diags.push(self.bin_align_diag(span));
+                    }
+                    off += bytes.len() * 8;
+                }
+                crate::AST::BinMatchPart::Hole { name, spec, span: hole_span } => {
+                    match spec {
+                        crate::AST::BinSpec::Rest => {
+                            if off % 8 != 0 {
+                                self.diags.push(self.bin_align_diag(*hole_span));
+                            }
+                            holes.push((
+                                name.clone(),
+                                Type::List(Box::new(Type::IntN { signed: false, bits: 8 })),
+                            ));
+                        }
+                        crate::AST::BinSpec::Bits { width, endian } => {
+                            if matches!(endian, crate::AST::BinEndian::Little) && *width % 8 != 0
+                            {
+                                self.diags.push(Diagnostic::error(
+                                    "E1008",
+                                    format!(
+                                        "a little-endian read `U{width}le` must be a whole number of bytes"
+                                    ),
+                                    "byte order only reorders whole bytes, so a `le` read's width must be a multiple of 8"
+                                        .to_string(),
+                                    "use a multiple-of-8 width (`U16le`, `U32le`) or big-endian `be`".to_string(),
+                                    Some(*hole_span),
+                                ));
+                            }
+                            holes.push((name.clone(), bin_bits_type(*width)));
+                            off += *width as usize;
+                        }
+                    }
+                }
+            }
+        }
+        holes
+    }
+
     /// D-BINPAT1: a fixed byte literal or a rest capture must start on a byte
     /// boundary — the preceding bit-typed holes must sum to a multiple of 8.
     fn bin_align_diag(&self, span: Span) -> Diagnostic {
@@ -1769,50 +1828,9 @@ impl<'a> Checker<'a> {
                 }
                 // Static bit-offset fold: literals and the rest capture must be
                 // byte-aligned, and a little-endian read must be byte-multiple.
-                let mut off: usize = 0;
-                let mut result = HashMap::new();
-                for part in parts {
-                    match part {
-                        crate::AST::BinMatchPart::Lit(bytes) => {
-                            if off % 8 != 0 {
-                                self.diags.push(self.bin_align_diag(span));
-                            }
-                            off += bytes.len() * 8;
-                        }
-                        crate::AST::BinMatchPart::Hole { name, spec, span: hole_span } => {
-                            match spec {
-                                crate::AST::BinSpec::Rest => {
-                                    if off % 8 != 0 {
-                                        self.diags.push(self.bin_align_diag(*hole_span));
-                                    }
-                                    result.insert(
-                                        name.clone(),
-                                        Type::List(Box::new(Type::IntN { signed: false, bits: 8 })),
-                                    );
-                                }
-                                crate::AST::BinSpec::Bits { width, endian } => {
-                                    if matches!(endian, crate::AST::BinEndian::Little)
-                                        && *width % 8 != 0
-                                    {
-                                        self.diags.push(Diagnostic::error(
-                                            "E1008",
-                                            format!(
-                                                "a little-endian read `U{width}le` must be a whole number of bytes"
-                                            ),
-                                            "byte order only reorders whole bytes, so a `le` read's width must be a multiple of 8"
-                                                .to_string(),
-                                            "use a multiple-of-8 width (`U16le`, `U32le`) or big-endian `be`".to_string(),
-                                            Some(*hole_span),
-                                        ));
-                                    }
-                                    result.insert(name.clone(), bin_bits_type(*width));
-                                    off += *width as usize;
-                                }
-                            }
-                        }
-                    }
-                }
-                result
+                self.bin_match_hole_types(parts, span)
+                    .into_iter()
+                    .collect::<HashMap<_, _>>()
             }
             // D-PATO (ratified 2026-06-19): structural or-pattern `A(x) | B(x)`.
             (_, Pattern::Or(alts, _)) => {

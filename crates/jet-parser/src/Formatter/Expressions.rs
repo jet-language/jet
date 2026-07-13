@@ -242,6 +242,12 @@ impl<'a> Fmt<'a> {
             Expr::StrMatchLit(parts, _) => {
                 self.fmt_str_match_parts(parts);
             }
+            // D-BINPAT1 (card #506 follow-up): `reader.take_pattern(b"…")`'s
+            // pattern-literal argument — same rendering as a
+            // `Pattern::BinMatch` (byte-mode sibling of the arm above).
+            Expr::BinMatchLit(parts, _) => {
+                self.fmt_bin_match_parts(parts);
+            }
             // S34/S67: keep the author's radix (`0x2a`/`0o17`/`0b1010`),
             // digit separators (`1_000_000`), and hex-digit case. The AST
             // stores only the value, so fmt was rewriting every hex/octal/

@@ -78,6 +78,59 @@ pub(super) fn lower_cursor_take_pattern(
     }
 }
 
+/// D-BINPAT1 (card #506 follow-up): lower `reader.take_pattern(b"…")` — the
+/// byte-mode sibling of `lower_cursor_take_pattern` immediately above. Builds
+/// the SAME canonical hole list the same way sema did when it set this call's
+/// `resolved_ret` (`bin_match_hole_types`), so the `JetTup_<hash>` struct
+/// `collect_tuple_shapes_from_expr` already registered matches the one this
+/// op constructs.
+pub(super) fn lower_reader_take_pattern(
+    receiver: &Expr,
+    parts: &[crate::AST::BinMatchPart],
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> TExpr {
+    use crate::AST::{BinMatchPart, BinSpec};
+    let recv_t = lower_expr(receiver, cx, env);
+    let canonical: Vec<(String, Type)> = parts
+        .iter()
+        .filter_map(|p| match p {
+            BinMatchPart::Hole { name, spec, .. } => {
+                let ty = match spec {
+                    BinSpec::Rest => Type::List(Box::new(Type::IntN { signed: false, bits: 8 })),
+                    BinSpec::Bits { width, .. } => crate::Codegen::TIR::lower::bin_bits_type(*width),
+                };
+                Some((name.clone(), ty))
+            }
+            BinMatchPart::Lit(_) => None,
+        })
+        .collect();
+    let ok_ty = if canonical.is_empty() {
+        unit_type()
+    } else {
+        Type::Tuple(
+            canonical
+                .iter()
+                .map(|(n, t)| (n.clone(), Box::new(t.clone())))
+                .collect(),
+        )
+    };
+    TExpr {
+        ty: Type::Result {
+            ok: Box::new(ok_ty),
+            err: Box::new(Type::String),
+        },
+        kind: TExprKind::HandleMethod {
+            recv: Box::new(recv_t),
+            op: THandleOp::ReaderTakePattern {
+                parts: parts.to_vec(),
+                canonical,
+            },
+            args: vec![],
+        },
+    }
+}
+
 /// D-PARSESTR1: the bool test for a str-match arm head — whether the scan
 /// closure succeeds. Always refutable (E0148 requires an `else` whenever this
 /// pattern appears in an if-table with no fallback).
