@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 528,
-    "rev": 5013,
+    "nextNum": 530,
+    "rev": 5015,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -13990,6 +13990,48 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-13T02:47:09.812Z",
+      "updated": "2026-07-13"
+    },
+    {
+      "id": "c0awpem6",
+      "num": 528,
+      "title": "R12 divergence: compile_with_path rejects user-derive markers jet run accepts (E0927)",
+      "body": "Deterministic: sema_soundness::valid_corpus_reaches_rustc red on tests/fuzz/sema/valid/ex_comptime_comptime_splice.jet — jet::compile_with_path rejects the fixture user-derive #Label with E0927 unknown marker while jet run on the same source accepts and prints correctly. Real divergence in derive-marker registration between the library compile entrypoint and the CLI path. Discovered during card 521 wave 6 (2026-07-13). Repro: cargo test --test sema_soundness valid_corpus_reaches_rustc.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "needsAcceptance": false,
+      "created": "2026-07-13T06:43:53.011Z",
+      "updated": "2026-07-13"
+    },
+    {
+      "id": "c0dnbc5s",
+      "num": 529,
+      "title": "dev suite parallel flake: core.perf fidelity signal is a process-global static",
+      "body": "Under full parallel cargo test --test dev, core.perf fidelity signal races across JIT-resident test threads: cranelift_three_way_differential_battery diverges on tooling/fidelity and 3+ sibling tests sharing dev_diff_lock cascade with PoisonError. Green standalone/single-threaded. Architectural: the signal needs per-instance or thread-scoped state (or the battery needs an isolation harness). Observed across waves on card 521 (2026-07-12/13).",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "needsAcceptance": false,
+      "created": "2026-07-13T06:43:53.177Z",
       "updated": "2026-07-13"
     }
   ],
@@ -31017,6 +31059,20 @@
   ],
   "events": [
     {
+      "at": "2026-07-13T06:43:53.177Z",
+      "by": "fable-main",
+      "action": "card.add",
+      "ref": "c0dnbc5s",
+      "note": "dev suite parallel flake: core.perf fidelity signal is a process-global static"
+    },
+    {
+      "at": "2026-07-13T06:43:53.012Z",
+      "by": "fable-main",
+      "action": "card.add",
+      "ref": "c0awpem6",
+      "note": "R12 divergence: compile_with_path rejects user-derive markers jet run accepts (E0927)"
+    },
+    {
       "at": "2026-07-13T06:41:59.576Z",
       "by": "fable-impl-521g",
       "action": "card.update",
@@ -34501,20 +34557,6 @@
       "action": "card.release",
       "ref": "ccq07pav",
       "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-12T14:08:29.336Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "ccq07pav",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-12T14:07:25.896Z",
-      "by": "terra-241-builder",
-      "action": "card.update",
-      "ref": "ccq07pav",
-      "note": "phase,logEntry"
     }
   ],
   "nextNum": 368,

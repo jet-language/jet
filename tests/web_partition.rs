@@ -118,6 +118,7 @@ fn dom_fn() {
     let mut bundle = jet::AST::ProgramBundle {
         entry: 0,
         project_root: std::path::PathBuf::from("."),
+        ffi_callback_fns: std::collections::HashSet::new(),
         modules: vec![jet::AST::LoadedModule {
             path: std::path::PathBuf::from("t.jet"),
             display: "t.jet".to_string(),
