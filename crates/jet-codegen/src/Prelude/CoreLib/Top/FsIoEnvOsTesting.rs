@@ -381,7 +381,7 @@ fn jet_std_io_stderr_is_tty(_s: &JetStderr) -> bool {
 }
 
 fn jet_env_int(name: &str) -> Option<i64> {
-    std::env::var(name).ok()?.parse::<i64>().ok().filter(|n| *n > 0)
+    jet_std_env_get(&name.to_string())?.parse::<i64>().ok().filter(|n| *n > 0)
 }
 fn jet_terminal_size_from_stty() -> Option<(i64, i64)> {
     let out = std::process::Command::new("stty").arg("size").output().ok()?;
