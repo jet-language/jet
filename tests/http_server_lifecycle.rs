@@ -159,14 +159,14 @@ fn server_handle_binds_serves_and_rejects_second_shutdown() {
 #[test]
 fn canonical_router_precedence_methods_and_conflicts() {
     let mux = jet_http_mux_new();
-    jet_http_mux_add(&mux, "GET", "/files/{*path}", |req| {
-        jet_http_srv_response(200, &format!("wild:{}", jet_http_srv_req_param(&req, &"path".to_string()).unwrap()))
+    jet_http_mux_add(&mux, "GET", "/files/*", |req| {
+        jet_http_srv_response(200, &format!("wild:{}", jet_http_srv_req_param(&req, &"wildcard".to_string()).unwrap()))
     });
-    jet_http_mux_add(&mux, "GET", "/files/{id}", |req| {
+    jet_http_mux_add(&mux, "GET", "/files/:id", |req| {
         jet_http_srv_response(200, &format!("param:{}", jet_http_srv_req_param(&req, &"id".to_string()).unwrap()))
     });
     jet_http_mux_add(&mux, "GET", "/files/static", |_| jet_http_srv_response(200, &"static".to_string()));
-    jet_http_mux_add(&mux, "POST", "/files/{id}", |_| jet_http_srv_response(201, &"posted".to_string()));
+    jet_http_mux_add(&mux, "POST", "/files/:id", |_| jet_http_srv_response(201, &"posted".to_string()));
 
     let request = |method: &str, path: &str| JetHttpSrvReq {
         method: method.to_string(), path: path.to_string(), params: Default::default(),
@@ -184,12 +184,12 @@ fn canonical_router_precedence_methods_and_conflicts() {
     assert_eq!(options.headers.get("Allow").unwrap(), "GET, HEAD, OPTIONS, POST");
 
     let conflict = jet_http_mux_new();
-    jet_http_mux_add(&conflict, "GET", "/users/{id}", |_| jet_http_srv_response(200, &String::new()));
-    jet_http_mux_add(&conflict, "GET", "/users/{name}", |_| jet_http_srv_response(200, &String::new()));
+    jet_http_mux_add(&conflict, "GET", "/users/:id", |_| jet_http_srv_response(200, &String::new()));
+    jet_http_mux_add(&conflict, "GET", "/users/:name", |_| jet_http_srv_response(200, &String::new()));
     assert!(jet_http_server_bind(&"127.0.0.1:0".to_string(), conflict).err().expect("conflict").contains("route conflict"));
     let legacy = jet_http_mux_new();
-    jet_http_mux_add(&legacy, "GET", "/users/:id", |_| jet_http_srv_response(200, &String::new()));
-    assert!(jet_http_server_bind(&"127.0.0.1:0".to_string(), legacy).err().expect("legacy pattern").contains("use `{name}`"));
+    jet_http_mux_add(&legacy, "GET", "/users/{id}", |_| jet_http_srv_response(200, &String::new()));
+    assert!(jet_http_server_bind(&"127.0.0.1:0".to_string(), legacy).err().expect("brace pattern").contains("use `:name`"));
 }
 
 #[test]
@@ -209,7 +209,7 @@ fn middleware_orders_short_circuits_contains_panics_and_isolates_requests() {
             })
         });
     }
-    jet_http_mux_add(&mux, "GET", "/ok/{id}", |req| {
+    jet_http_mux_add(&mux, "GET", "/ok/:id", |req| {
         jet_http_srv_response(200, &jet_http_srv_req_param(&req, &"id".to_string()).unwrap())
     });
     jet_http_mux_add(&mux, "GET", "/panic", |_| panic!("private failure detail"));

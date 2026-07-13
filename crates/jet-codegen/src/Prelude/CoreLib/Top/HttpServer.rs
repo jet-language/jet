@@ -608,15 +608,18 @@ fn jet_http_match_path(
     let mut ri = 0usize;
     while pi < p_segs.len() {
         let p = p_segs[pi];
-        if let Some(name) = p.strip_prefix("{*").and_then(|s| s.strip_suffix('}')) {
+        // Route params are `:name`; the final `*` is a catch-all bound to the
+        // reserved `wildcard` param (D-HTTPDEPTH1, core-library.md). `{…}` is
+        // not a route sigil — it collides with Jet string interpolation.
+        if p == "*" {
             wildcard = true;
-            params.insert(name.to_string(), r_segs[ri..].join("/"));
+            params.insert("wildcard".to_string(), r_segs[ri..].join("/"));
             ri = r_segs.len();
             pi += 1;
             break;
         }
         let r = *r_segs.get(ri)?;
-        if let Some(name) = p.strip_prefix('{').and_then(|s| s.strip_suffix('}')) {
+        if let Some(name) = p.strip_prefix(':') {
             params.insert(name.to_string(), r.to_string());
             singles += 1;
         } else if p == r {
@@ -650,16 +653,18 @@ fn jet_http_mux_validate(mux: &JetHttpMux) -> Result<(), String> {
         let mut names = std::collections::BTreeSet::new();
         let mut canonical = Vec::new();
         for (index, segment) in segments.iter().enumerate() {
-            if segment.starts_with(':') || *segment == "*" { return Err(format!("invalid HTTP route `{}`: use `{{name}}` or final `{{*name}}` parameters", route.pattern)); }
-            if let Some(name) = segment.strip_prefix("{*").and_then(|s| s.strip_suffix('}')) {
-                if name.is_empty() || index + 1 != segments.len() { return Err(format!("invalid HTTP route `{}`: catch-all must be named and final", route.pattern)); }
-                if !names.insert(name) { return Err(format!("invalid HTTP route `{}`: duplicate parameter `{name}`", route.pattern)); }
-                canonical.push("{*}".to_string());
-            } else if let Some(name) = segment.strip_prefix('{').and_then(|s| s.strip_suffix('}')) {
+            // `{…}` is not a route sigil (it would collide with Jet string
+            // interpolation): routes use `:name` params and a final `*`
+            // catch-all (D-HTTPDEPTH1, core-library.md).
+            if segment.contains('{') || segment.contains('}') { return Err(format!("invalid HTTP route `{}`: use `:name` params or a final `*` wildcard", route.pattern)); }
+            if *segment == "*" {
+                if index + 1 != segments.len() { return Err(format!("invalid HTTP route `{}`: `*` catch-all must be final", route.pattern)); }
+                if !names.insert("wildcard") { return Err(format!("invalid HTTP route `{}`: duplicate catch-all", route.pattern)); }
+                canonical.push("*".to_string());
+            } else if let Some(name) = segment.strip_prefix(':') {
                 if name.is_empty() || !names.insert(name) { return Err(format!("invalid HTTP route `{}`: parameter names must be non-empty and unique", route.pattern)); }
-                canonical.push("{}".to_string());
-            } else if segment.contains('{') || segment.contains('}') { return Err(format!("invalid HTTP route `{}`: malformed parameter", route.pattern)); }
-            else { canonical.push((*segment).to_string()); }
+                canonical.push(":".to_string());
+            } else { canonical.push((*segment).to_string()); }
         }
         let key = (route.method.clone(), canonical.join("/"));
         if !seen.insert(key) { return Err(format!("HTTP route conflict for {} `{}`", route.method, route.pattern)); }
