@@ -272,11 +272,21 @@ pub fn jet_scheduler_shield_enter() {
 }
 
 #[allow(dead_code)] // wired to a user sigil once D-SHIELDNAME1 ratifies
-pub fn jet_scheduler_shield_leave() {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum JetShieldExit {
+    None,
+    Deadline,
+    Cancelled,
+}
+
+/// Leave one shield depth without unwinding. JIT code uses this status form so
+/// no Rust panic ever crosses a Cranelift frame; its Rust task wrapper delivers
+/// the returned interrupt after native code has returned.
+pub fn jet_scheduler_shield_leave_status() -> JetShieldExit {
     // Match `enter`: ambient deadlines must never begin unwinding merely because
     // ordinary non-task code crossed a lexical shield boundary.
     if current_task_control().is_none() || !jet_scheduler_panic_should_unwind() {
-        return;
+        return JetShieldExit::None;
     }
     let landed = SHIELD_DEPTH.with(|d| {
         let n = d.get().saturating_sub(1);
@@ -289,13 +299,27 @@ pub fn jet_scheduler_shield_leave() {
     if landed && !std::thread::panicking() {
         // A deadline that closed while shielded is program-level; raise it first.
         if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) {
-            jet_deadline_exceeded("shield exit");
+            return JetShieldExit::Deadline;
         }
         // A cancel that arrived while shielded now takes effect at region exit.
         if jet_scheduler_task_cancelled() {
-            jet_task_unwind_cancel();
+            return JetShieldExit::Cancelled;
         }
     }
+    JetShieldExit::None
+}
+
+pub fn jet_scheduler_deliver_shield_exit(exit: JetShieldExit) {
+    match exit {
+        JetShieldExit::None => {}
+        JetShieldExit::Deadline => jet_deadline_exceeded("shield exit"),
+        JetShieldExit::Cancelled => jet_task_unwind_cancel(),
+    }
+}
+
+#[allow(dead_code)]
+pub fn jet_scheduler_shield_leave() {
+    jet_scheduler_deliver_shield_exit(jet_scheduler_shield_leave_status());
 }
 
 fn jet_task_unwind_cancel() -> ! {

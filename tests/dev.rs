@@ -2001,6 +2001,40 @@ fn cranelift_covers_string_interpolation() {
     );
 }
 
+#[test]
+fn cranelift_covers_shield_region() {
+    let out = run_cranelift_without_fallback(
+        "fn run() {\n    #Shield {\n        print(7)\n    }\n}\n",
+        "shield_region",
+    );
+    assert_eq!(out.stdout, "7\n");
+}
+
+#[test]
+fn cranelift_shield_defers_task_cancel_without_unwinding_native_frame() {
+    let out = run_cranelift_without_fallback(
+        r#"use core.tasks as tasks
+fn run() {
+    (sender, ch) :: tasks.channel<Int>()
+    (ack_sender, ack) :: tasks.channel<Int>()
+    slow :: tasks.spawn(take(ch, ack_sender) () => {
+               #Shield {
+                   value :: ch.receive() ?? panic("closed")
+                   print(value)
+                   ack_sender.send(1)
+               }
+               print(99)
+       })
+    slow.cancel()
+    sender.send(42)
+    ack.receive() ?? panic("closed")
+}
+"#,
+        "shield_cancel",
+    );
+    assert_eq!(out.stdout, "42\n");
+}
+
 /// c139 M3: checked integer arithmetic with overflow traps.
 #[test]
 fn cranelift_covers_checked_arithmetic() {

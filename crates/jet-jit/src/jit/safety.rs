@@ -530,7 +530,9 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                     .as_ref()
                     .is_none_or(|b| b.iter().all(|s| resident_safe_stmt(s, callees)))
         }
-        TStmt::Region(body) => body.iter().all(|s| resident_safe_stmt(s, callees)),
+        TStmt::Region(body) | TStmt::Shield { body } => {
+            body.iter().all(|s| resident_safe_stmt(s, callees))
+        }
         _ => false,
     }
 }

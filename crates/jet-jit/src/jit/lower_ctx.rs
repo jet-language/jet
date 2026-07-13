@@ -23,6 +23,7 @@ pub(crate) struct LoopTargets {
     label: Option<String>,
     continue_block: Block,
     break_block: Block,
+    shield_depth: u32,
 }
 
 /// One JIT-lowering pass over a single function's `TStmt`/`TExpr` tree into
@@ -57,9 +58,53 @@ pub(crate) struct LowerCtx<'a, 'b> {
     /// CLIF return type of the function being lowered (`None` = returns void).
     /// Drives the dummy value `emit_trap_check` returns on the trap-unwind path.
     pub(crate) ret_clif: Option<types::Type>,
+    /// Lexical `#Shield` depth in emitted native code. Used to emit exact
+    /// cleanup calls before every non-local control-flow edge.
+    pub(crate) shield_depth: u32,
 }
 
 impl LowerCtx<'_, '_> {
+    fn emit_dummy_return(&mut self) {
+        match self.ret_clif {
+            Some(ty) => {
+                let value = if ty == types::F64 {
+                    self.b.ins().f64const(0.0)
+                } else {
+                    self.b.ins().iconst(ty, 0)
+                };
+                self.b.ins().return_(&[value]);
+            }
+            None => {
+                self.b.ins().return_(&[]);
+            }
+        }
+    }
+
+    fn emit_shield_leaves_to(&mut self, target_depth: u32) -> Option<Value> {
+        let leave_ref = self
+            .module
+            .declare_func_in_func(self.host.conc.shield_leave, self.b.func);
+        let mut status = None;
+        for _ in target_depth..self.shield_depth {
+            let call = self.b.ins().call(leave_ref, &[]);
+            status = Some(self.b.inst_results(call)[0]);
+        }
+        status
+    }
+
+    fn emit_pending_interrupt_check(&mut self, status: Value) {
+        let zero = self.b.ins().iconst(types::I64, 0);
+        let pending = self.b.ins().icmp(IntCC::NotEqual, status, zero);
+        let interrupted = self.b.create_block();
+        let cont = self.b.create_block();
+        self.b.ins().brif(pending, interrupted, &[], cont, &[]);
+        self.b.switch_to_block(interrupted);
+        self.b.seal_block(interrupted);
+        self.emit_dummy_return();
+        self.b.switch_to_block(cont);
+        self.b.seal_block(cont);
+    }
+
     fn result_new(&mut self, ok: bool, inner: &TExpr) -> Result<Value, String> {
         let tag = self.b.ins().iconst(types::I8, i64::from(ok));
         let (host_id, payload) = if matches!(&inner.ty, Type::Named(n) if n == "Unit" || n == "Void") {
@@ -111,6 +156,7 @@ impl LowerCtx<'_, '_> {
         self.b.ins().brif(is_ok, ok_block, &[], err_block, &[]);
         self.b.switch_to_block(err_block);
         self.b.seal_block(err_block);
+        self.emit_shield_leaves_to(0);
         self.b.ins().return_(&[handle]);
         self.b.switch_to_block(ok_block);
         self.b.seal_block(ok_block);
@@ -180,19 +226,8 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(epilogue);
         self.b.seal_block(epilogue);
-        match self.ret_clif {
-            Some(ty) => {
-                let dv = if ty == types::F64 {
-                    self.b.ins().f64const(0.0)
-                } else {
-                    self.b.ins().iconst(ty, 0)
-                };
-                self.b.ins().return_(&[dv]);
-            }
-            None => {
-                self.b.ins().return_(&[]);
-            }
-        }
+        self.emit_shield_leaves_to(0);
+        self.emit_dummy_return();
 
         self.b.switch_to_block(cont);
         self.b.seal_block(cont);
@@ -287,10 +322,12 @@ impl LowerCtx<'_, '_> {
             }
             TStmt::Return(Some(expr)) => {
                 let val = self.lower_expr(expr)?;
+                self.emit_shield_leaves_to(0);
                 self.b.ins().return_(&[val]);
                 self.dead = true;
             }
             TStmt::Return(None) => {
+                self.emit_shield_leaves_to(0);
                 self.b.ins().return_(&[]);
                 self.dead = true;
             }
@@ -371,6 +408,7 @@ impl LowerCtx<'_, '_> {
                     label: label.clone(),
                     continue_block: header,
                     break_block: exit,
+                    shield_depth: self.shield_depth,
                 });
                 self.b.switch_to_block(body_block);
                 self.b.seal_block(body_block);
@@ -400,6 +438,7 @@ impl LowerCtx<'_, '_> {
                     label: label.clone(),
                     continue_block: header,
                     break_block: exit,
+                    shield_depth: self.shield_depth,
                 });
                 self.b.switch_to_block(body_block);
                 self.b.seal_block(body_block);
@@ -436,6 +475,7 @@ impl LowerCtx<'_, '_> {
                     label: label.clone(),
                     continue_block: header,
                     break_block: exit,
+                    shield_depth: self.shield_depth,
                 });
                 self.b.switch_to_block(body_block);
                 self.b.seal_block(body_block);
@@ -484,6 +524,7 @@ impl LowerCtx<'_, '_> {
                     label: label.clone(),
                     continue_block: step_block,
                     break_block: exit,
+                    shield_depth: self.shield_depth,
                 });
                 self.b.switch_to_block(body_block);
                 self.b.seal_block(body_block);
@@ -512,12 +553,44 @@ impl LowerCtx<'_, '_> {
             }
             TStmt::Break(label) => {
                 let targets = self.loop_targets(label.as_deref(), "break")?;
-                self.b.ins().jump(targets.break_block, &[]);
+                if let Some(status) = self.emit_shield_leaves_to(targets.shield_depth) {
+                    let zero = self.b.ins().iconst(types::I64, 0);
+                    let pending = self.b.ins().icmp(IntCC::NotEqual, status, zero);
+                    let interrupted = self.b.create_block();
+                    self.b.ins().brif(
+                        pending,
+                        interrupted,
+                        &[],
+                        targets.break_block,
+                        &[],
+                    );
+                    self.b.switch_to_block(interrupted);
+                    self.b.seal_block(interrupted);
+                    self.emit_dummy_return();
+                } else {
+                    self.b.ins().jump(targets.break_block, &[]);
+                }
                 self.dead = true;
             }
             TStmt::Continue(label) => {
                 let targets = self.loop_targets(label.as_deref(), "continue")?;
-                self.b.ins().jump(targets.continue_block, &[]);
+                if let Some(status) = self.emit_shield_leaves_to(targets.shield_depth) {
+                    let zero = self.b.ins().iconst(types::I64, 0);
+                    let pending = self.b.ins().icmp(IntCC::NotEqual, status, zero);
+                    let interrupted = self.b.create_block();
+                    self.b.ins().brif(
+                        pending,
+                        interrupted,
+                        &[],
+                        targets.continue_block,
+                        &[],
+                    );
+                    self.b.switch_to_block(interrupted);
+                    self.b.seal_block(interrupted);
+                    self.emit_dummy_return();
+                } else {
+                    self.b.ins().jump(targets.continue_block, &[]);
+                }
                 self.dead = true;
             }
             TStmt::IndexAssign {
@@ -585,6 +658,7 @@ impl LowerCtx<'_, '_> {
                     label: label.clone(),
                     continue_block: step_block,
                     break_block: exit,
+                    shield_depth: self.shield_depth,
                 });
                 self.b.switch_to_block(body_block);
                 self.b.seal_block(body_block);
@@ -732,11 +806,21 @@ impl LowerCtx<'_, '_> {
                 return Err("jit context block unsupported".to_string());
             }
             TStmt::Live { .. } => return Err("jit live block unsupported".to_string()),
-            // D-SHIELDNAME1=A: a `#Shield` region wraps its body in scheduler
-            // enter/leave RAII — a runtime-scheduler concern the resident JIT tier
-            // doesn't model. Bail so the function routes to the compiled scheduler
-            // (same executable TIR, R12 parity).
-            TStmt::Shield { .. } => return Err("jit shield block unsupported".to_string()),
+            TStmt::Shield { body } => {
+                let enter_ref = self
+                    .module
+                    .declare_func_in_func(self.host.conc.shield_enter, self.b.func);
+                self.b.ins().call(enter_ref, &[]);
+                self.shield_depth += 1;
+                self.lower_stmts_scoped(body)?;
+                if !self.dead {
+                    let status = self
+                        .emit_shield_leaves_to(self.shield_depth - 1)
+                        .expect("one shield leave");
+                    self.emit_pending_interrupt_check(status);
+                }
+                self.shield_depth -= 1;
+            }
             TStmt::ScopeMember { .. } => return Err("jit scope member unsupported".to_string()),
             TStmt::Transact { .. } => return Err("jit transact block unsupported".to_string()),
             TStmt::LineMarker(_) => return Err("jit line marker unsupported".to_string()),

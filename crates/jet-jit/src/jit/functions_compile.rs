@@ -69,6 +69,7 @@ fn lower_spawn_function(
             next_var: 0,
             method_struct: None,
             ret_clif: clif_ty(&lam.ret),
+            shield_depth: 0,
         };
         for cap in &lam.captures {
             let var = lctx.fresh_var(types::I64);
@@ -170,6 +171,7 @@ fn lower_function(
             next_var: 0,
             method_struct,
             ret_clif: tir.ret.as_ref().and_then(clif_ty),
+            shield_depth: 0,
         };
         if matches!(tir.kind, TFuncKind::Method { self_conv: Some(_) }) {
             let self_var = lctx.fresh_var(types::I64);

@@ -2,13 +2,33 @@
 
 use jet_codegen::scheduler::{
     jet_scheduler_all, jet_scheduler_any, jet_scheduler_race, jet_scheduler_select_int_channels,
-    jet_scheduler_spawn_with_control, JetSchedulerChannel, JetSchedulerJoin, JetTaskControl,
+    jet_scheduler_deliver_shield_exit, jet_scheduler_shield_enter,
+    jet_scheduler_shield_leave_status, jet_scheduler_spawn_with_control, JetSchedulerChannel,
+    JetSchedulerJoin, JetShieldExit, JetTaskControl,
 };
 use std::cell::RefCell;
 use std::sync::Arc;
 
 thread_local! {
     static ACTIVE_RUNTIME: RefCell<Option<*mut super::JitRuntime>> = const { RefCell::new(None) };
+    static PENDING_SHIELD_EXIT: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
+}
+
+fn set_pending_shield_exit(exit: JetShieldExit) {
+    let code = match exit {
+        JetShieldExit::None => 0,
+        JetShieldExit::Deadline => 2,
+        JetShieldExit::Cancelled => 1,
+    };
+    PENDING_SHIELD_EXIT.with(|pending| pending.set(pending.get().max(code)));
+}
+
+fn take_pending_shield_exit() -> JetShieldExit {
+    PENDING_SHIELD_EXIT.with(|pending| match pending.replace(0) {
+        2 => JetShieldExit::Deadline,
+        1 => JetShieldExit::Cancelled,
+        _ => JetShieldExit::None,
+    })
 }
 
 pub(crate) fn with_runtime_mut<F, R>(f: F) -> R
@@ -181,13 +201,25 @@ where
             // only touch mutex-backed channel state and indexed sender slots.
             let rt_ptr = rt_addr as *mut super::JitRuntime;
             set_active_runtime(Some(rt_ptr));
+            let _ = take_pending_shield_exit();
             let out = f();
             set_active_runtime(None);
+            jet_scheduler_deliver_shield_exit(take_pending_shield_exit());
             out
         },
         control.clone(),
     );
     store_task(join, control)
+}
+
+extern "C" fn jet_jit_shield_enter() {
+    jet_scheduler_shield_enter();
+}
+
+extern "C" fn jet_jit_shield_leave() -> i64 {
+    let exit = jet_scheduler_shield_leave_status();
+    set_pending_shield_exit(exit);
+    i64::from(!matches!(exit, JetShieldExit::None))
 }
 
 extern "C" fn jet_jit_spawn0(f: SpawnFn0) -> i64 {
@@ -290,6 +322,8 @@ pub(crate) struct ConcurrencyHostFns {
     pub task_race: cranelift_module::FuncId,
     pub task_any: cranelift_module::FuncId,
     pub select_wait: cranelift_module::FuncId,
+    pub shield_enter: cranelift_module::FuncId,
+    pub shield_leave: cranelift_module::FuncId,
 }
 
 pub(crate) fn register_concurrency_symbols(builder: &mut cranelift_jit::JITBuilder) {
@@ -323,6 +357,8 @@ pub(crate) fn register_concurrency_symbols(builder: &mut cranelift_jit::JITBuild
     builder.symbol("jet_jit_task_race", jet_jit_task_race as *const u8);
     builder.symbol("jet_jit_task_any", jet_jit_task_any as *const u8);
     builder.symbol("jet_jit_select_wait", jet_jit_select_wait as *const u8);
+    builder.symbol("jet_jit_shield_enter", jet_jit_shield_enter as *const u8);
+    builder.symbol("jet_jit_shield_leave", jet_jit_shield_leave as *const u8);
 }
 
 pub(crate) fn declare_concurrency_host_fns(
@@ -355,6 +391,9 @@ pub(crate) fn declare_concurrency_host_fns(
 
     let mut sig_void_i64 = Signature::new(cc);
     sig_void_i64.params.push(AbiParam::new(types::I64));
+    let sig_void = Signature::new(cc);
+    let mut sig_noarg_i64 = Signature::new(cc);
+    sig_noarg_i64.returns.push(AbiParam::new(types::I64));
 
     let mut import = |name: &str, sig: &Signature| -> Result<cranelift_module::FuncId, String> {
         module
@@ -390,5 +429,7 @@ pub(crate) fn declare_concurrency_host_fns(
         task_race: import("jet_jit_task_race", &sig_i64)?,
         task_any: import("jet_jit_task_any", &sig_i64)?,
         select_wait: import("jet_jit_select_wait", &sig_i64_i64)?,
+        shield_enter: import("jet_jit_shield_enter", &sig_void)?,
+        shield_leave: import("jet_jit_shield_leave", &sig_noarg_i64)?,
     })
 }
