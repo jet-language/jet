@@ -382,7 +382,7 @@ fn fish_init(label: &str, path: PromptPathMode, strip: PromptStripMode) -> Strin
          function __jetpack_status_words; printf 'build %s · test %s · git %s' \"$__jetpack_build_status\" \"$__jetpack_test_status\" (__jetpack_git_status); end; \
          function __jetpack_status_glance; echo; __jetpack_status_words; echo; commandline -f repaint; end; \
          bind \\cg __jetpack_status_glance; \
-         function __jetpack_help_prefill; set -l picked (env JET_HELP_SHELL_PREFILL=1 command jet '?' </dev/tty); test -n \"$picked\"; or return; commandline -r -- \"$picked\"; commandline -C (string length -- \"$picked\"); end; \
+         function __jetpack_help_prefill; set -l picked (env JET_HELP_SHELL_PREFILL=1 jet '?' </dev/tty); test -n \"$picked\"; or return; commandline -r -- \"$picked\"; commandline -C (string length -- \"$picked\"); end; \
          bind \\e\\? __jetpack_help_prefill; \
          function __jetpack_spinner; set -l frames ⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏; set -l i 1; while true; printf '\\r%s running %s · %ss' $frames[$i] $argv[1] (math (date +%s) - $argv[2]) >&2; set i (math $i % 10 + 1); sleep .1; end; end; \
          function __jetpack_preexec --on-event fish_preexec; switch $argv[1]; case \"jet build*\"; set -g __jetpack_kind build; case \"jet test*\"; set -g __jetpack_kind test; case '*'; set -g __jetpack_kind ''; return; end; set -g __jetpack_command $argv[1]; set -g __jetpack_started (date +%s); if isatty stderr; command sh -c 'while :; do printf \"\\r⠹ running %s · %ss\" \"$0\" \"$(( $(date +%s) - $1 ))\" >&2; sleep .1; done' $__jetpack_kind $__jetpack_started &\nset -g __jetpack_spinner_pid $last_pid; end; end; \
