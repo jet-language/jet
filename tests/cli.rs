@@ -783,6 +783,26 @@ fn unknown_cross_target_is_e3302() {
 }
 
 #[test]
+fn prove_unknown_lens_is_e2941() {
+    let root = std::env::temp_dir().join("jet_cli_prove_unknown_lens");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("plain.jet"), "fn run() {}\n").unwrap();
+    let out = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "plain.jet", "--lens", "test"])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(2), "unexpected stderr:\n{stderr}");
+    assert!(stderr.contains("Error [E2941]:"), "missing lens diagnostic:\n{stderr}");
+    assert!(stderr.contains("Why:"), "missing E2941 reason:\n{stderr}");
+    assert!(stderr.contains("Fix:"), "missing E2941 fix:\n{stderr}");
+    check_snapshot("prove_unknown_lens_e2941.txt", &stderr);
+}
+
+#[test]
 fn completions_generate_for_every_shell() {
     for shell in ["bash", "zsh", "fish", "powershell"] {
         let out = Command::new(jet())

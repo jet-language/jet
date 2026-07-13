@@ -460,6 +460,18 @@ const ACKNOWLEDGED_COVERAGE_GAPS: &[&str] = &[
     // Epoch-5 dependency-build policy ceiling (docs/plans/epoch-5/
     // metaprogramming.md §15.4); add the ui snapshot when that path is wired.
     "E3504",
+    // E3001/E3005: `jet prove --json` (Source/CmdProve.rs render_report) now embeds these
+    // as literal quoted `"E3001"`/`"E3005"` JSON-field values in generated evidence records,
+    // which the literal-scan `emitted_codes()` picks up. But the real user-facing rendering
+    // of these codes (D-OBS1/D-OBS2 runtime panic voice in jet_panic_rich/jet_contract_fail,
+    // crates/jet-codegen/src/Prelude/Core.rs) is deliberately bracket-free — `panic: {msg}` /
+    // `@{Pre|Post} contract failed: {msg}`, never `[E3001]`/`[E3005]` — so no snapshot fixture
+    // can contain the bracket form this scanner's `extract_snapshot_codes` looks for without
+    // fabricating text the compiler never prints. Real coverage exists as CLI-process
+    // assertions in tests/prove.rs (`prove_captures_contract_results_and_runtime_panics_structurally`
+    // asserts `"code":"E3001"` / `"code":"E3005"` in real `jet prove --json` output). Card #521.
+    "E3001",
+    "E3005",
 ];
 
 /// All exclusions combined.
@@ -743,7 +755,7 @@ fn acknowledged_gaps_are_still_unresolved() {
 #[test]
 fn exclusion_list_counts_do_not_grow() {
     const CEILINGS: &[(&str, usize, usize)] = &[
-        ("ACKNOWLEDGED_COVERAGE_GAPS", ACKNOWLEDGED_COVERAGE_GAPS.len(), 4),
+        ("ACKNOWLEDGED_COVERAGE_GAPS", ACKNOWLEDGED_COVERAGE_GAPS.len(), 6),
         ("STAGED_BEHIND_GATE", STAGED_BEHIND_GATE.len(), 5),
         ("UNTESTABLE_VIA_SNAPSHOT", UNTESTABLE_VIA_SNAPSHOT.len(), 1),
         (
@@ -852,6 +864,13 @@ fn registered_unimplemented_codes_are_expected() {
         "E0993", // retired (D-MATCHARM1=A): predicate/Bool arm heads now allowed
         "E0954", // retired by D-S14-PAUSE: was two-keyword comptime binding teaching
         "E1229", // D-JPK-MODBODY1: retired role-module body form — parse recovery only, not stable
+        "E0410", // retired by D-MARK-DISCARD1=A (was `#Suppress` unknown argument); registry row
+                 // already says "retired" — no live Diagnostic::error call to find.
+        "E0859", // D-GENMOD-IDENTITY1=A: raised via `jet_foundation::ice!` (ICE 101), not
+                 // `Diagnostic::error`, so the literal-scan `emitted_codes()` never sees it. It
+                 // guards a SHA256 fingerprint collision between two distinct generic-module
+                 // instance keys — an invariant violation, not a user-triggerable condition; no
+                 // .jet fixture can force a hash collision. Card #521.
     ];
 
     let expected: BTreeSet<String> = EXPECTED_SPEC_AHEAD_OF_IMPL

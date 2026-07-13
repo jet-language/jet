@@ -20,7 +20,11 @@ fn temp_fixture(name: &str, src: &str) -> PathBuf {
 
 #[test]
 fn semindex_schema_version() {
-    assert_eq!(SCHEMA_VERSION, 4);
+    // Bumped 4 -> 5 by commit d80e2cba: SemIndex gained a top-level
+    // `instances` fact array (generic-module instantiation identity —
+    // fingerprint + full key, D-GENMOD-IDENTITY1) alongside the E0859
+    // fingerprint-collision guard in Sema/Bundle.rs.
+    assert_eq!(SCHEMA_VERSION, 5);
 }
 
 #[test]
@@ -28,9 +32,10 @@ fn semindex_hello_json_shape() {
     let idx = open(&fixture("basics/hello.jet")).expect("hello indexes");
     let json = idx.to_json();
     assert!(json.starts_with('{'));
-    assert!(json.contains("\"schema_version\":4"));
+    assert!(json.contains("\"schema_version\":5"));
     assert!(json.contains("\"definition_facts\""));
     assert!(json.contains("\"definitions\""));
+    assert!(json.contains("\"instances\""));
     assert!(json.contains("\"identity\""));
     assert!(json.contains("\"scope_identity\""));
     assert!(json.contains("\"members\""));
@@ -409,7 +414,7 @@ fn jet_semindex_cli_json_smoke() {
         String::from_utf8_lossy(&out.stderr)
     );
     let text = String::from_utf8_lossy(&out.stdout);
-    assert!(text.contains("\"schema_version\":4"));
+    assert!(text.contains("\"schema_version\":5"));
 }
 
 #[test]

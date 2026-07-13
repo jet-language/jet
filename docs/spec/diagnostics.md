@@ -405,6 +405,9 @@ duplicate this — it is the one surface for lint walls (I8).
 | E3209 | jet   | linker couldn't find a declared C library at link time |
 | E3210 | jet   | C library auto-provision from nixpkgs failed |
 | E3211 | sema  | string literal with a known interior NUL byte passed to a C-boundary function |
+| E3212 | parse/sema | `#Abi` on `extern rust` (Rust FFI has no C calling convention to pick), or `#Abi(name)` names an unknown C calling convention |
+| E3213 | sema  | named C calling convention exists but isn't available on this target's OS/architecture |
+| E3214 | sema  | variadic C function used with a calling convention other than the default C ABI (or `cdecl` on Windows x86) |
 | E3215 | sema  | `#FFI(<lang>)` inline foreign fn in an unsafe language (`c`/`cpp`/`asm`) lacks the enclosing `#Unsafe("reason")` gate (D-FFI-INLINE1/ASM1/CPP1) |
 | E3220 | sema  | `#FFI(<lang>)` names a language with no inline foreign binder yet (systems floor ships `c`/`cpp`/`asm`, card #501) |
 | E3221 | sema  | `#FFI(<lang>)` inline foreign body isn't lowerable yet — front end live, body codegen pending (card #501) |
@@ -1260,6 +1263,9 @@ Error [E0150]: `check_in` needs `Reservation` in state `Confirmed`, but `r` is i
 | E3209 | The linker couldn't find C library `{lib}`. | Your program links against `{lib}`, but the linker reported `cannot find -l{lib}` — the library isn't on the link search path. | Declare it in `deps:` so Jet provisions it: `{lib}: c@system` (host pkg-config, else fetched from nixpkgs), or `{lib}: c@nixpkgs:<attr>` to pick the nixpkgs attribute, or install the system package. |
 | E3210 | Couldn't fetch C library `{lib}` from nixpkgs. | `{lib}: c@system` asked Jet to provision `nixpkgs#{attr}`, but `nix build` failed: `{reason}`. | Check the attr exists (`nix build nixpkgs#{attr}`), or point at a local build with `{lib}: c@"<path>"`, or install it and use `system`. |
 | E3211 | This string literal has an embedded NUL byte, so it can't cross into a C function. | C strings are NUL-terminated, not length-prefixed — an embedded `\0` would truncate the string on the C side, silently losing everything after it. | Remove the embedded NUL, or split the call so the C function only sees the part before it. |
+| E3212 | `{abi}` is not a known C calling convention. | `#Abi` accepts only the ratified native ABI names — `#Abi` also never applies to `extern rust` (Rust FFI keeps its own declared ABI). | Use `system`, `cdecl`, `stdcall`, `fastcall`, `win64`, or `sysv64`, or remove `#Abi` from the `extern rust` function. |
+| E3213 | `{abi}` is not available on this target. | Native calling conventions are restricted by operating system and architecture (e.g. `stdcall`/`cdecl`/`fastcall` are Windows x86 only; `win64` is Windows x86-64; `sysv64` is non-Windows x86-64). | Use the default C ABI or `system` for portable declarations. |
+| E3214 | Variadic C function `{name}` cannot use `{abi}`. | Variadics allow only the default C ABI, or `cdecl` on Windows x86 — other calling conventions don't define how a variadic argument list is passed. | Remove `#Abi`, or use `#Abi(cdecl)` on Windows x86. |
 
 ## Cross-compilation and freestanding diagnostics (E2-M15)
 
