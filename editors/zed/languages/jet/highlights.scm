@@ -68,13 +68,12 @@
   "step"
 ] @keyword.control
 
-; keyword.declaration: Bench Context Impure Pure Reactive Sanitizer State Tainted Test Todo Transact Transition Unsafe add alias as assume_deterministic change client comptime const derive distinct enum extern fn impl live migration module policy priv protocol pub region remove rename rust server state struct tag taskgroup trait use validate via
+; keyword.declaration: Bench Context Impure Pure Reactive Sanitizer State Tainted Test Todo Transact Transition Unsafe add alias as change client comptime const derive distinct enum extern fn impl migration module priv protocol pub remove rename rust server state struct tag taskgroup trait use validate via
 [
   "Bench"
   "Test"
   "add"
   "as"
-  "assume_deterministic"
   "change"
   "comptime"
   "const"
@@ -84,11 +83,9 @@
   "extern"
   "fn"
   "impl"
-  "live"
   "migration"
   "module"
   "pub"
-  "region"
   "remove"
   "rename"
   "rust"
@@ -139,7 +136,7 @@
 ] @type.builtin
 
 ; builtin: check input print
-; marker.directive: Abi Bench Bindgen Caller Caps DebugOnly Default DenyUnknownFields Every Extern FFI Flatten Grant Html Impure Invariant Layout Meta Off Reactive Rename RenameAll Replayable Sanitizer SingleUse Skip Sql State Tag Tainted Target Task Test Todo Track Transact Transition UnitFamily Unsafe Untagged WasmExport allow
+; marker.directive: Abi Bench Bindgen Caller Caps DebugOnly Default DenyUnknownFields Every Extern FFI Flatten Grant Html Impure Invariant Layout Live Meta Nondeterministic Off Policy Reactive Region Rename RenameAll Replayable Sanitizer SingleUse Skip Sql State Tag Tainted Target Task Test Todo Track Transact Transition UnitFamily Unsafe Untagged WasmExport allow
 ; marker.contract: Cli Codable CodableAsBase Comparable Decode Doc Encode Inline InlineAlways MustUse Numeric Patchable Persist Post Pre Printable PublishedSchema Pure Redact Summarize
 ; sigil: # & ... :: := @ ^
 ; operator: ! != % %= && &= * *= + ++ += - -- -= -> .. .[ .{ / /= < << <<= <= == => > >= >> >>= ? ?. ?? ^= | |= ||
