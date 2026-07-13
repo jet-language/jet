@@ -132,35 +132,80 @@ impl ProviderRegistry {
         request.validate()?;
         let provider = self.providers.get(identity).ok_or_else(|| ProviderFailure::operation(FailureClass::Unresolved, format!("provider `{identity}` is unresolved")))?;
         let events = match provider {
-            Provider::InProcess(function) => std::panic::catch_unwind(|| function(request)).map_err(|_| ProviderFailure::operation(FailureClass::Panic, format!("provider `{identity}` panicked")))??,
+            Provider::InProcess(function) => run_in_process(*function, request, timeout, identity)?,
             Provider::Subprocess(path) => decode_stream(&run_subprocess(path, &request.bytes()?, timeout)?, request)?,
-            Provider::File(path) => decode_stream(&read_bounded(path)?, request)?,
+            Provider::File(path) => decode_stream(&read_bounded(path, timeout)?, request)?,
         };
         validate_events(events, request)
     }
 }
 
-fn read_bounded(path: &Path) -> Result<Vec<u8>, ProviderFailure> {
-    let file = std::fs::File::open(path).map_err(|error| ProviderFailure::operation(FailureClass::Execution, format!("cannot open provider response {}: {error}", path.display())))?;
+fn run_in_process(function: InProcessProvider, request: &ProviderRequest, timeout: Duration, identity: &str) -> Result<Vec<ProviderEvent>, ProviderFailure> {
+    let request = request.clone();
+    let (tx, rx) = mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let result = std::panic::catch_unwind(|| function(&request))
+            .map_err(|_| ProviderFailure::operation(FailureClass::Panic, "in-process provider panicked"))
+            .and_then(|value| value);
+        let _ = tx.send(result);
+    });
+    rx.recv_timeout(timeout).map_err(|error| match error {
+        mpsc::RecvTimeoutError::Timeout => ProviderFailure::operation(FailureClass::Timeout, format!("provider `{identity}` timed out")),
+        mpsc::RecvTimeoutError::Disconnected => ProviderFailure::operation(FailureClass::Execution, format!("provider `{identity}` worker disconnected")),
+    })?
+}
+
+fn read_bounded(path: &Path, timeout: Duration) -> Result<Vec<u8>, ProviderFailure> {
+    let path = path.to_path_buf();
+    let display = path.display().to_string();
+    let (tx, rx) = mpsc::sync_channel(1);
+    std::thread::spawn(move || { let _ = tx.send(read_regular_bounded(&path)); });
+    rx.recv_timeout(timeout).map_err(|error| match error {
+        mpsc::RecvTimeoutError::Timeout => ProviderFailure::operation(FailureClass::Timeout, format!("provider response {display} timed out")),
+        mpsc::RecvTimeoutError::Disconnected => ProviderFailure::operation(FailureClass::Execution, format!("provider response {display} reader disconnected")),
+    })?
+}
+
+fn read_regular_bounded(path: &Path) -> Result<Vec<u8>, ProviderFailure> {
+    let metadata = std::fs::symlink_metadata(path).map_err(|error| ProviderFailure::operation(FailureClass::Execution, format!("cannot inspect provider response {}: {error}", path.display())))?;
+    if !metadata.file_type().is_file() { return Err(ProviderFailure::operation(FailureClass::Execution, "provider response is not a regular file")); }
+    #[cfg(unix)]
+    let file = { use std::os::unix::fs::OpenOptionsExt; std::fs::OpenOptions::new().read(true).custom_flags(0o400000).open(path) };
+    #[cfg(not(unix))]
+    let file = std::fs::File::open(path);
+    let file = file.map_err(|error| ProviderFailure::operation(FailureClass::Execution, format!("cannot open provider response {}: {error}", path.display())))?;
+    if !file.metadata().map_err(|error| ProviderFailure::operation(FailureClass::Execution, format!("cannot inspect open provider response: {error}")))?.is_file() {
+        return Err(ProviderFailure::operation(FailureClass::Execution, "open provider response is not a regular file"));
+    }
     let mut bytes = Vec::new(); file.take((MAX_BYTES + 1) as u64).read_to_end(&mut bytes).map_err(|error| ProviderFailure::operation(FailureClass::Execution, format!("cannot read provider response: {error}")))?;
     if bytes.len() > MAX_BYTES { return Err(ProviderFailure::malformed("provider stream exceeds 16 MiB")); } Ok(bytes)
 }
 
 fn run_subprocess(path: &Path, request: &[u8], timeout: Duration) -> Result<Vec<u8>, ProviderFailure> {
-    let mut child = Command::new(path).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().map_err(|error| ProviderFailure::operation(FailureClass::Execution, format!("cannot launch provider {}: {error}", path.display())))?;
+    let mut command = Command::new(path);
+    command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
+    #[cfg(unix)] { use std::os::unix::process::CommandExt; command.process_group(0); }
+    let mut child = command.spawn().map_err(|error| ProviderFailure::operation(FailureClass::Execution, format!("cannot launch provider {}: {error}", path.display())))?;
     let mut stdin = child.stdin.take().ok_or_else(|| ProviderFailure::operation(FailureClass::Execution, "provider stdin was unavailable"))?; let request=request.to_vec();
-    let writer=std::thread::spawn(move || stdin.write_all(&request)); let stdout=child.stdout.take().ok_or_else(|| ProviderFailure::operation(FailureClass::Execution, "provider stdout was unavailable"))?;
+    let (writer_tx,writer_rx)=mpsc::sync_channel(1);std::thread::spawn(move || {let _=writer_tx.send(stdin.write_all(&request));});let stdout=child.stdout.take().ok_or_else(|| ProviderFailure::operation(FailureClass::Execution, "provider stdout was unavailable"))?;
     let (tx,rx)=mpsc::channel();std::thread::spawn(move || { let mut bytes=Vec::new();let result=stdout.take((MAX_BYTES+1) as u64).read_to_end(&mut bytes).map(|_|bytes);let _=tx.send(result); });
-    let deadline=Instant::now()+timeout;loop { match child.try_wait() { Ok(Some(status)) => { let _=writer.join();if !status.success(){return Err(ProviderFailure::operation(FailureClass::Execution,format!("provider exited with {status}")));}let bytes=rx.recv_timeout(Duration::from_secs(1)).map_err(|_|ProviderFailure::operation(FailureClass::Execution,"provider stdout did not close"))?.map_err(|e|ProviderFailure::operation(FailureClass::Execution,format!("cannot read provider stdout: {e}")))?;if bytes.len()>MAX_BYTES{return Err(ProviderFailure::malformed("provider stream exceeds 16 MiB"));}return Ok(bytes); },Ok(None) if Instant::now()<deadline=>std::thread::sleep(Duration::from_millis(2)),Ok(None)=>{let _=child.kill();let _=child.wait();return Err(ProviderFailure::operation(FailureClass::Timeout,"provider timed out and was terminated"));},Err(error)=>return Err(ProviderFailure::operation(FailureClass::Execution,format!("cannot supervise provider: {error}"))) } }
+    let deadline=Instant::now()+timeout;loop { match child.try_wait() { Ok(Some(status)) => { if !status.success(){terminate_group(&mut child);return Err(ProviderFailure::operation(FailureClass::Execution,format!("provider exited with {status}")));}let remaining=deadline.saturating_duration_since(Instant::now());let bytes=rx.recv_timeout(remaining).map_err(|_|{terminate_group(&mut child);ProviderFailure::operation(FailureClass::Timeout,"provider stdout did not close before deadline")})?.map_err(|e|ProviderFailure::operation(FailureClass::Execution,format!("cannot read provider stdout: {e}")))?;writer_rx.recv_timeout(deadline.saturating_duration_since(Instant::now())).map_err(|_|{terminate_group(&mut child);ProviderFailure::operation(FailureClass::Timeout,"provider stdin did not close before deadline")})?.map_err(|e|ProviderFailure::operation(FailureClass::Execution,format!("cannot write provider stdin: {e}")))?;if bytes.len()>MAX_BYTES{return Err(ProviderFailure::malformed("provider stream exceeds 16 MiB"));}return Ok(bytes); },Ok(None) if Instant::now()<deadline=>std::thread::sleep(Duration::from_millis(2)),Ok(None)=>{terminate_group(&mut child);return Err(ProviderFailure::operation(FailureClass::Timeout,"provider timed out and was terminated"));},Err(error)=>{terminate_group(&mut child);return Err(ProviderFailure::operation(FailureClass::Execution,format!("cannot supervise provider: {error}")))} } }
+}
+
+fn terminate_group(child: &mut std::process::Child) {
+    #[cfg(unix)] { unsafe { extern "C" { fn kill(pid: i32, signal: i32) -> i32; } let _ = kill(-(child.id() as i32), 9); } }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 pub fn encode_stream(events: &[ProviderEvent]) -> Vec<u8> { let mut out=MAGIC.to_vec();for event in events{match event{ProviderEvent::Sample{spec,metric,value}=>{out.push(1);put_u32(&mut out,*spec);put_text(&mut out,metric);put_text(&mut out,&value.num.to_string());put_text(&mut out,&value.den.to_string());},ProviderEvent::Unavailable{spec,reason,details}=>{out.push(2);put_u32(&mut out,*spec);put_text(&mut out,reason);put_u32(&mut out,details.len() as u32);for(k,v)in details{put_text(&mut out,k);put_text(&mut out,v);}},ProviderEvent::Complete{request_id,samples}=>{out.push(3);put_text(&mut out,request_id);out.extend_from_slice(&samples.to_be_bytes());}}}out }
 fn put_u32(out:&mut Vec<u8>,value:u32){out.extend_from_slice(&value.to_be_bytes())}fn put_text(out:&mut Vec<u8>,value:&str){put_u32(out,value.len() as u32);out.extend_from_slice(value.as_bytes())}
 
-fn decode_stream(bytes:&[u8],request:&ProviderRequest)->Result<Vec<ProviderEvent>,ProviderFailure>{if bytes.len()>MAX_BYTES{return Err(ProviderFailure::malformed("provider stream exceeds 16 MiB"));}let mut r=Reader{bytes,at:0};if r.take(MAGIC.len())?!=MAGIC{return Err(ProviderFailure::malformed("provider stream has bad magic"));}let mut events=Vec::new();while r.at<bytes.len(){let tag=r.byte()?;let event=match tag{1=>ProviderEvent::Sample{spec:r.u32()?,metric:r.text()?,value:Rational::parse(&r.text()?,&r.text()?).map_err(ProviderFailure::malformed)?},2=>{let spec=r.u32()?;let reason=r.text()?;let count=r.u32()? as usize;if count>MAX_DETAIL_SCALARS{return Err(ProviderFailure::malformed("provider unavailable detail exceeds 512 scalars"));}let mut details=Vec::with_capacity(count);for _ in 0..count{details.push((r.text()?,r.text()?));}ProviderEvent::Unavailable{spec,reason,details}},3=>ProviderEvent::Complete{request_id:r.text()?,samples:r.u64()?},_=>return Err(ProviderFailure::malformed("provider stream has unknown event tag"))};events.push(event);}validate_events(events,request).map(|v|v.events)}
+fn decode_stream(bytes:&[u8],request:&ProviderRequest)->Result<Vec<ProviderEvent>,ProviderFailure>{if bytes.len()>MAX_BYTES{return Err(ProviderFailure::malformed("provider stream exceeds 16 MiB"));}let mut r=Reader{bytes,at:0};if r.take(MAGIC.len())?!=MAGIC{return Err(ProviderFailure::malformed("provider stream has bad magic"));}let mut events=Vec::new();while r.at<bytes.len(){let tag=r.byte()?;let event=match tag{1=>ProviderEvent::Sample{spec:r.u32()?,metric:r.text()?,value:Rational::parse(&r.text()?,&r.text()?).map_err(ProviderFailure::malformed)?},2=>{let spec=r.u32()?;let reason=r.text()?;let count=r.u32()? as usize;if count>MAX_DETAIL_SCALARS{return Err(ProviderFailure::malformed("provider unavailable detail exceeds 512 scalars"));}let mut details=Vec::with_capacity(count);for _ in 0..count{details.push((r.text()?,r.text()?));}if detail_scalars(&reason,&details)>MAX_DETAIL_SCALARS{return Err(ProviderFailure::malformed("provider unavailable detail exceeds 512 scalars"));}ProviderEvent::Unavailable{spec,reason,details}},3=>ProviderEvent::Complete{request_id:r.text()?,samples:r.u64()?},_=>return Err(ProviderFailure::malformed("provider stream has unknown event tag"))};events.push(event);}validate_events(events,request).map(|v|v.events)}
 struct Reader<'a>{bytes:&'a[u8],at:usize}impl<'a>Reader<'a>{fn take(&mut self,n:usize)->Result<&'a[u8],ProviderFailure>{let end=self.at.checked_add(n).ok_or_else(||ProviderFailure::malformed("provider frame length overflow"))?;let value=self.bytes.get(self.at..end).ok_or_else(||ProviderFailure::malformed("provider stream is truncated"))?;self.at=end;Ok(value)}fn byte(&mut self)->Result<u8,ProviderFailure>{Ok(self.take(1)?[0])}fn u32(&mut self)->Result<u32,ProviderFailure>{Ok(u32::from_be_bytes(self.take(4)?.try_into().unwrap()))}fn u64(&mut self)->Result<u64,ProviderFailure>{Ok(u64::from_be_bytes(self.take(8)?.try_into().unwrap()))}fn text(&mut self)->Result<String,ProviderFailure>{let n=self.u32()? as usize;String::from_utf8(self.take(n)?.to_vec()).map_err(|_|ProviderFailure::malformed("provider text is not UTF-8"))}}
 
-fn validate_events(events:Vec<ProviderEvent>,request:&ProviderRequest)->Result<ProviderEvidence,ProviderFailure>{if events.is_empty(){return Err(ProviderFailure::malformed("provider stream is empty"));}let mut sample_count=0usize;let mut complete=false;let mut last_spec=0u32;let mut seen=false;for(index,event)in events.iter().enumerate(){if complete{return Err(ProviderFailure::malformed("event follows final Complete"));}match event{ProviderEvent::Sample{spec,metric,..}=>{if *spec as usize>=request.specs.len()||request.specs[*spec as usize].metric!=*metric{return Err(ProviderFailure::operation(FailureClass::Incompatible,"provider sample does not match requested spec/metric"));}if seen&&*spec<last_spec{return Err(ProviderFailure::malformed("provider events are not contiguous and ordered"));}seen=true;last_spec=*spec;sample_count+=1;if sample_count>MAX_SAMPLES{return Err(ProviderFailure::malformed("provider emitted more than 1000000 samples"));}},ProviderEvent::Unavailable{spec,reason,details}=>{if *spec as usize>=request.specs.len()||reason.is_empty(){return Err(ProviderFailure::malformed("provider Unavailable has invalid spec or empty reason"));}if details.len()>MAX_DETAIL_SCALARS{return Err(ProviderFailure::malformed("provider unavailable detail exceeds 512 scalars"));}if seen&&*spec<last_spec{return Err(ProviderFailure::malformed("provider events are not contiguous and ordered"));}seen=true;last_spec=*spec;},ProviderEvent::Complete{request_id,samples}=>{if index+1!=events.len()||request_id!=&request.request_id||*samples!=sample_count as u64{return Err(ProviderFailure::malformed("provider Complete request id/count/finality mismatch"));}complete=true;}}}if !complete{return Err(ProviderFailure::malformed("provider stream has no final Complete"));}Ok(ProviderEvidence{events})}
+fn validate_events(events:Vec<ProviderEvent>,request:&ProviderRequest)->Result<ProviderEvidence,ProviderFailure>{if events.is_empty(){return Err(ProviderFailure::malformed("provider stream is empty"));}let mut sample_count=0usize;let mut complete=false;let mut last_spec=0u32;let mut seen=false;for(index,event)in events.iter().enumerate(){if complete{return Err(ProviderFailure::malformed("event follows final Complete"));}match event{ProviderEvent::Sample{spec,metric,..}=>{if *spec as usize>=request.specs.len()||request.specs[*spec as usize].metric!=*metric{return Err(ProviderFailure::operation(FailureClass::Incompatible,"provider sample does not match requested spec/metric"));}if seen&&*spec<last_spec{return Err(ProviderFailure::malformed("provider events are not contiguous and ordered"));}seen=true;last_spec=*spec;sample_count+=1;if sample_count>MAX_SAMPLES{return Err(ProviderFailure::malformed("provider emitted more than 1000000 samples"));}},ProviderEvent::Unavailable{spec,reason,details}=>{if *spec as usize>=request.specs.len()||reason.is_empty(){return Err(ProviderFailure::malformed("provider Unavailable has invalid spec or empty reason"));}if detail_scalars(reason,details)>MAX_DETAIL_SCALARS{return Err(ProviderFailure::malformed("provider unavailable detail exceeds 512 scalars"));}if seen&&*spec<last_spec{return Err(ProviderFailure::malformed("provider events are not contiguous and ordered"));}seen=true;last_spec=*spec;},ProviderEvent::Complete{request_id,samples}=>{if index+1!=events.len()||request_id!=&request.request_id||*samples!=sample_count as u64{return Err(ProviderFailure::malformed("provider Complete request id/count/finality mismatch"));}complete=true;}}}if !complete{return Err(ProviderFailure::malformed("provider stream has no final Complete"));}Ok(ProviderEvidence{events})}
+fn detail_scalars(reason:&str,details:&[(String,String)])->usize{reason.chars().count().saturating_add(details.iter().map(|(key,value)|key.chars().count().saturating_add(value.chars().count())).sum::<usize>())}
 fn is_hex64(value:&str)->bool{value.len()==64&&value.bytes().all(|b|b.is_ascii_hexdigit()&&!b.is_ascii_uppercase())}
 
 pub fn unavailable_if_too_few(budget:&str, evidence:&ProviderEvidence, minimum:usize)->Result<(),ProviderDiagnostic>{let count=evidence.events.iter().filter(|e|matches!(e,ProviderEvent::Sample{..})).count();if let Some(ProviderEvent::Unavailable{reason,..})=evidence.events.iter().find(|e|matches!(e,ProviderEvent::Unavailable{..})){return Err(ProviderFailure::operation(FailureClass::Unavailable,reason.clone()).diagnostic(budget));}if count<minimum{return Err(ProviderFailure::operation(FailureClass::Unavailable,format!("provider returned {count} samples; policy requires {minimum}")).diagnostic(budget));}Ok(())}
@@ -200,6 +245,8 @@ mod tests {
     fn in_process_panic_and_unavailable_are_separate_diagnostic_classes(){
         let req=request();let mut registry=ProviderRegistry::default();registry.register_in_process("panic",panic_provider).unwrap();let failure=registry.collect("panic",&req,Duration::from_secs(1)).unwrap_err();let diagnostic=failure.diagnostic("api-p99");assert_eq!((diagnostic.code,diagnostic.what.as_str()),("E2908","performance budget operation failed"));
         registry.register_in_process("unavailable",unavailable_provider).unwrap();let evidence=registry.collect("unavailable",&req,Duration::from_secs(1)).unwrap();let diagnostic=unavailable_if_too_few("api-p99",&evidence,20).unwrap_err();assert_eq!((diagnostic.code,diagnostic.what.as_str()),("E2906","performance budget api-p99 has no usable evidence"));assert!(diagnostic.why.contains("ready event"));
+        fn slow(_: &ProviderRequest)->Result<Vec<ProviderEvent>,ProviderFailure>{std::thread::sleep(Duration::from_secs(2));Ok(Vec::new())}
+        registry.register_in_process("slow",slow).unwrap();let started=Instant::now();let failure=registry.collect("slow",&req,Duration::from_millis(20)).unwrap_err();assert_eq!(failure.class,FailureClass::Timeout);assert!(started.elapsed()<Duration::from_secs(1));
     }
 
     #[cfg(unix)]
@@ -208,6 +255,14 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let req=request();let response=temporary("subprocess-response");std::fs::write(&response,encode_stream(&valid_events(&req))).unwrap();let script=temporary("provider.sh");std::fs::write(&script,format!("#!/bin/sh\ncat '{}'\n",response.display())).unwrap();let mut permissions=std::fs::metadata(&script).unwrap().permissions();permissions.set_mode(0o700);std::fs::set_permissions(&script,permissions).unwrap();let mut registry=ProviderRegistry::default();registry.register_subprocess("process",script.clone()).unwrap();assert_eq!(registry.collect("process",&req,Duration::from_secs(2)).unwrap().events,valid_events(&req));
         let sleeper=temporary("sleep.sh");std::fs::write(&sleeper,"#!/bin/sh\nsleep 5\n").unwrap();let mut permissions=std::fs::metadata(&sleeper).unwrap().permissions();permissions.set_mode(0o700);std::fs::set_permissions(&sleeper,permissions).unwrap();let mut registry=ProviderRegistry::default();registry.register_subprocess("slow",sleeper.clone()).unwrap();let started=Instant::now();let failure=registry.collect("slow",&req,Duration::from_millis(30)).unwrap_err();assert_eq!(failure.class,FailureClass::Timeout);assert!(started.elapsed()<Duration::from_secs(2));
-        for path in [response,script,sleeper]{let _=std::fs::remove_file(path);}
+        let descendant=temporary("descendant.sh");std::fs::write(&descendant,"#!/bin/sh\nsleep 5 &\nexit 0\n").unwrap();let mut permissions=std::fs::metadata(&descendant).unwrap().permissions();permissions.set_mode(0o700);std::fs::set_permissions(&descendant,permissions).unwrap();let mut registry=ProviderRegistry::default();registry.register_subprocess("descendant",descendant.clone()).unwrap();let started=Instant::now();let failure=registry.collect("descendant",&req,Duration::from_millis(30)).unwrap_err();assert_eq!(failure.class,FailureClass::Timeout);assert!(started.elapsed()<Duration::from_secs(1));
+        for path in [response,script,sleeper,descendant]{let _=std::fs::remove_file(path);}
+    }
+
+    #[test]
+    fn file_transport_rejects_symlinks_and_scalar_overflow(){
+        let req=request();let target=temporary("target");std::fs::write(&target,encode_stream(&valid_events(&req))).unwrap();
+        #[cfg(unix)]{use std::os::unix::fs::symlink;let link=temporary("link");symlink(&target,&link).unwrap();let mut registry=ProviderRegistry::default();registry.register_file("link",link.clone()).unwrap();assert!(registry.collect("link",&req,Duration::from_secs(1)).is_err());let _=std::fs::remove_file(link);}
+        let events=vec![ProviderEvent::Unavailable{spec:0,reason:"x".repeat(513),details:Vec::new()},ProviderEvent::Complete{request_id:req.request_id.clone(),samples:0}];let path=temporary("detail");std::fs::write(&path,encode_stream(&events)).unwrap();let mut registry=ProviderRegistry::default();registry.register_file("detail",path.clone()).unwrap();assert!(registry.collect("detail",&req,Duration::from_secs(1)).unwrap_err().reason.contains("512 scalars"));for path in [target,path]{let _=std::fs::remove_file(path);}
     }
 }
