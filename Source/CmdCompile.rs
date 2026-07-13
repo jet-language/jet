@@ -422,10 +422,12 @@ pub(crate) fn run_compile_cmd(
 
     match cmd {
         "build" => {
+            let artifact_path=bin_path(file);
+            let budget_profile=profile.budget_name().to_string();
             build(
                 file,
                 &rust_code,
-                bin_path(file),
+                artifact_path.clone(),
                 profile,
                 ffi_link.as_ref(),
                 &clinks,
@@ -436,6 +438,14 @@ pub(crate) fn run_compile_cmd(
                 mode,
                 native_key.clone(),
             );
+            // D-PERFBUDGET-INTEGRATION1: every build enforces applicable
+            // deterministic Fail budgets through CmdBudget's one canonical
+            // evaluator/report path. Cross backends use their semantic target
+            // class; native remains the default current target.
+            let budget_target=if is_web{"web"}else if is_plugin{"plugin"}else{"native"};
+            if crate::CmdBudget::run_build_gates(file,&artifact_path,budget_target,&budget_profile)!=0{
+                exit(ExitCodes::USER_ERROR);
+            }
             if is_web {
                 println!("built: build/app.wasm + build/app.js");
             } else if is_plugin {

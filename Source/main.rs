@@ -286,6 +286,21 @@ pub(crate) enum BuildProfile {
 }
 
 impl BuildProfile {
+    /// Ratified performance-budget applicability name. Default builds retain
+    /// the existing `dev` profile identity; named profiles use their declared
+    /// name, never their cache-settings suffix.
+    pub(crate) fn budget_name(&self) -> &str {
+        match self {
+            BuildProfile::Default => "dev",
+            BuildProfile::Release => "release",
+            BuildProfile::Debug => "debug",
+            BuildProfile::Ci => "ci",
+            BuildProfile::Named { name, .. } => name,
+            BuildProfile::Small => "small",
+            BuildProfile::Freestanding => "freestanding",
+        }
+    }
+
     pub(crate) fn cache_tag(&self) -> String {
         match self {
             BuildProfile::Default => "default".to_string(),

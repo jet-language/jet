@@ -308,6 +308,48 @@ fn budget_report_collects_mixed_providers_measurement_locally() {
 }
 
 #[test]
+fn build_enforces_deterministic_fail_budgets_and_reuses_relevant_identity() {
+    use jet_foundation::PerformanceBudget::CanonicalJson;
+    let dir = mixed_budget_project("build_budget_gates");
+    let source_path = dir.join("src/main.jet");
+    let passing = fs::read_to_string(&source_path).unwrap();
+    let failing = passing.replace(".AtMost(10)", ".AtMost(0)");
+    fs::write(&source_path, &failing).unwrap();
+
+    let failed = Command::new(jet()).args(["build", "src/main.jet"]).current_dir(&dir).output().unwrap();
+    assert_eq!(failed.status.code(), Some(1), "stdout: {}\nstderr: {}", String::from_utf8_lossy(&failed.stdout), String::from_utf8_lossy(&failed.stderr));
+    assert!(!String::from_utf8_lossy(&failed.stdout).contains("built:"), "failed budget claimed build success");
+    assert!(String::from_utf8_lossy(&failed.stderr).contains("Error [E2907]: performance budget public-api regressed"));
+    let report_dir = dir.join(".jet/perf/reports");
+    assert_eq!(fs::read_dir(&report_dir).unwrap().count(), 1);
+
+    fs::write(&source_path, &passing).unwrap();
+    let passed = Command::new(jet()).args(["build", "src/main.jet"]).current_dir(&dir).output().unwrap();
+    assert_eq!(passed.status.code(), Some(0), "stdout: {}\nstderr: {}", String::from_utf8_lossy(&passed.stdout), String::from_utf8_lossy(&passed.stderr));
+    assert!(String::from_utf8_lossy(&passed.stderr).contains("budgets: 2 budgets passed · report "));
+    assert_eq!(fs::read_dir(&report_dir).unwrap().count(), 2, "source/spec change must refresh evidence");
+
+    let reused = Command::new(jet()).args(["build", "src/main.jet"]).current_dir(&dir).output().unwrap();
+    assert_eq!(reused.status.code(), Some(0), "{}", String::from_utf8_lossy(&reused.stderr));
+    assert_eq!(fs::read_dir(&report_dir).unwrap().count(), 2, "unchanged relevant identity must reuse canonical report");
+
+    let ci = Command::new(jet()).args(["build", "src/main.jet", "--profile=ci"]).current_dir(&dir).output().unwrap();
+    assert_eq!(ci.status.code(), Some(0), "stdout: {}\nstderr: {}", String::from_utf8_lossy(&ci.stdout), String::from_utf8_lossy(&ci.stderr));
+    assert_eq!(fs::read_dir(&report_dir).unwrap().count(), 3, "CI profile identity must refresh evidence");
+    let mut profiles = Vec::new();
+    for entry in fs::read_dir(&report_dir).unwrap() {
+        let value = CanonicalJson::parse_canonical(&fs::read(entry.unwrap().path()).unwrap()).unwrap();
+        let CanonicalJson::Object(report) = value else { panic!("report") };
+        let CanonicalJson::Object(content) = &report["content"] else { panic!("content") };
+        let CanonicalJson::Object(subject) = &content["subject"] else { panic!("subject") };
+        let CanonicalJson::String(profile) = &subject["profile"] else { panic!("profile") };
+        profiles.push(profile.clone());
+    }
+    assert!(profiles.iter().any(|profile| profile == "dev"));
+    assert!(profiles.iter().any(|profile| profile == "ci"));
+}
+
+#[test]
 fn budget_bench_measurement_bootstraps_then_consumes_compatible_history() {
     use jet_foundation::PerformanceBudget::CanonicalJson;
     let dir = benchmark_budget_project("budget_bench_measurement");
