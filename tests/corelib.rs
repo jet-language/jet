@@ -1226,6 +1226,137 @@ fn run() {
     );
 }
 
+#[test]
+fn cbor_whole_live_allocation_and_preferred_float_validation() {
+    if !Command::new("rustc").arg("--version").output().is_ok() {
+        eprintln!("note: skipping cbor whole-value limits test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_cbor_whole_limits_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let source = r#"
+use core.encoding.cbor as cbor
+
+fn run() {
+    strict := cbor.CBOROptions.{ max_depth: 256, max_items: 1000000, max_bytes: 1024, require_canonical: true }
+    if cbor.parse([249, 62, 0], copy strict) == {
+        ok(value) -> print(value.float() ?? -1.0)
+        err(_) -> print(-2.0)
+    }
+    if cbor.parse([250, 63, 192, 0, 0], copy strict) == {
+        ok(_) -> print(false)
+        err(e) -> print(e.byte_offset == 0 && e.reason == "CBOR Float does not use its preferred shortest encoding")
+    }
+    if cbor.parse([249, 126, 1], copy strict) == {
+        ok(_) -> print(false)
+        err(e) -> print(e.byte_offset == 0 && e.reason == "CBOR NaN is not the canonical 0xf97e00 encoding")
+    }
+    if cbor.parse([249, 126, 0], copy strict) == {
+        ok(_) -> print(true)
+        err(_) -> print(false)
+    }
+
+    tiny := cbor.CBOROptions.{ max_depth: 256, max_items: 1000000, max_bytes: 3, require_canonical: false }
+    if cbor.parse([130, 1, 2], tiny) == {
+        ok(_) -> print(false)
+        err(e) -> print(e.byte_offset == 0 && e.reason == "CBOR array allocation exceeds max_bytes 3")
+    }
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "cbor_whole_limits", source, &[], None);
+    assert_eq!(code, 0, "CBOR whole-value limits program failed: {stderr}");
+    assert_eq!(stdout, "1.5\ntrue\ntrue\ntrue\ntrue\n");
+}
+
+#[test]
+fn cbor_whole_requested_allocation_stays_under_counting_allocator_ceiling() {
+    if !Command::new("rustc").arg("--version").output().is_ok() {
+        eprintln!("note: skipping cbor counting-allocator test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_cbor_counted_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let source = r#"
+use core.encoding.cbor as cbor
+
+fn run() {
+    options := cbor.CBOROptions.{ max_depth: 256, max_items: 1000000, max_bytes: 100, require_canonical: false }
+    value := cbor.parse([130, 97, 120, 97, 121], options) ?? panic("parse")
+    print(true)
+}
+"#;
+    let path = dir.join("counted.jet");
+    fs::write(&path, source).unwrap();
+    let shown = path.to_string_lossy();
+    let out = jet::compile_with_path(source, &shown).unwrap_or_else(|diags| {
+        panic!("front end rejected fixture:\n{}", jet::render_diagnostics(&shown, source, &diags))
+    });
+    let renamed = out.rust.replacen("fn jet_enc_cbor_parse(", "fn jet_enc_cbor_parse_inner(", 1);
+    assert_ne!(renamed, out.rust, "generated CBOR parser seam changed");
+    let allocator = r#"
+mod jet_cbor_alloc_probe {
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    pub struct CountingAlloc;
+    static COUNTING: AtomicBool = AtomicBool::new(false);
+    static LIVE: AtomicUsize = AtomicUsize::new(0);
+    static PEAK: AtomicUsize = AtomicUsize::new(0);
+    fn add(size: usize) {
+        let live = LIVE.fetch_add(size, Ordering::SeqCst) + size;
+        let mut peak = PEAK.load(Ordering::SeqCst);
+        while live > peak {
+            match PEAK.compare_exchange(peak, live, Ordering::SeqCst, Ordering::SeqCst) {
+                Ok(_) => break,
+                Err(next) => peak = next,
+            }
+        }
+    }
+    unsafe impl GlobalAlloc for CountingAlloc {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            let ptr = System.alloc(layout);
+            if !ptr.is_null() && COUNTING.load(Ordering::SeqCst) { add(layout.size()); }
+            ptr
+        }
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            if COUNTING.load(Ordering::SeqCst) { LIVE.fetch_sub(layout.size(), Ordering::SeqCst); }
+            System.dealloc(ptr, layout);
+        }
+        unsafe fn realloc(&self, ptr: *mut u8, old: Layout, new_size: usize) -> *mut u8 {
+            let counting = COUNTING.load(Ordering::SeqCst);
+            if counting { LIVE.fetch_sub(old.size(), Ordering::SeqCst); }
+            let next = System.realloc(ptr, old, new_size);
+            if counting { if next.is_null() { add(old.size()); } else { add(new_size); } }
+            next
+        }
+    }
+    pub fn begin() { LIVE.store(0, Ordering::SeqCst); PEAK.store(0, Ordering::SeqCst); COUNTING.store(true, Ordering::SeqCst); }
+    pub fn finish() -> usize { COUNTING.store(false, Ordering::SeqCst); PEAK.load(Ordering::SeqCst) }
+}
+#[global_allocator]
+static JET_CBOR_ALLOC: jet_cbor_alloc_probe::CountingAlloc = jet_cbor_alloc_probe::CountingAlloc;
+fn jet_enc_cbor_parse(bytes: &Vec<u8>, options: jet_std::CBOROptions) -> Result<jet_std::DataTree, jet_std::CBORError> {
+    let ceiling = options.max_bytes as usize;
+    jet_cbor_alloc_probe::begin();
+    let result = jet_enc_cbor_parse_inner(bytes, options);
+    let peak = jet_cbor_alloc_probe::finish();
+    assert!(peak <= ceiling, "CBOR requested allocation peak {peak} exceeded {ceiling}");
+    result
+}
+"#;
+    let rs = dir.join("counted.rs");
+    let bin = dir.join("counted");
+    let generated = renamed.replacen("#![allow(warnings)]", "", 1);
+    assert_ne!(generated, renamed, "generated crate attribute changed");
+    fs::write(&rs, format!("#![allow(warnings)]\n{allocator}\n{generated}")).unwrap();
+    let rustc = Command::new("rustc")
+        .args(["--edition", "2021", rs.to_str().unwrap(), "-o", bin.to_str().unwrap()])
+        .output().unwrap();
+    assert!(rustc.status.success(), "rustc rejected counted CBOR program:\n{}", String::from_utf8_lossy(&rustc.stderr));
+    let run = Command::new(&bin).current_dir(&dir).output().unwrap();
+    assert!(run.status.success(), "counted CBOR program failed:\n{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "true\n");
+}
+
 fn compile_temp(name: &str, src: &str) -> jet::CompileOutput {
     let dir = std::env::temp_dir().join(format!("jet_corelib_test_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
