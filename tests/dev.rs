@@ -1783,7 +1783,7 @@ fn assert_cranelift_three_way(file: &str, stem: &str) {
         }
     };
 
-    let mut backend = CraneliftBackend::new(InterpreterBackend::new());
+    let mut backend = CraneliftBackend::new(RejectJitFallback);
     let jit = match backend.run(&bundle, false) {
         RunOutcome::Ran { stdout, .. } => stdout,
         RunOutcome::Problems(ds) => panic!("cranelift backend did not run `{stem}`: {ds:?}"),

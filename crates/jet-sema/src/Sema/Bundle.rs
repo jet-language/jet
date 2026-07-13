@@ -1250,7 +1250,12 @@ fn canonical_lock_source(
             } else {
                 path.replace('\\', "/").split('/').filter(|part| !part.is_empty() && *part != ".").collect::<Vec<_>>().join("/")
             };
-            return format!("path:{canonical}");
+            let content = if !content_hash.is_empty() {
+                content_hash
+            } else {
+                inline_lock_value(&locked, "tree-hash").unwrap_or_else(|| "unlocked".into())
+            };
+            return format!("path:{canonical}#{content}");
         }
         if let Some(url) = inline_lock_value(&source, "git") {
             let rev = inline_lock_value(&locked, "rev").unwrap_or_default();
@@ -5495,6 +5500,30 @@ mod instance_collision_tests {
         let b = definition_full_key(&package_identity(&bundle, &second, Some("second")), "src/template.jet", "", "Boxed");
         assert_ne!(a, b);
         assert!(!String::from_utf8_lossy(&a).contains(&root.to_string_lossy().as_ref()));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn path_lock_content_changes_definition_and_instance_identity_but_host_path_does_not() {
+        let root = std::env::temp_dir().join(format!("jet_path_lock_identity_{}", std::process::id()));
+        let project = root.join("project");
+        let dependency = root.join("dependency");
+        std::fs::create_dir_all(project.join(".jet")).unwrap();
+        std::fs::create_dir_all(&dependency).unwrap();
+        std::fs::write(dependency.join(crate::Syntax::PAYLOAD_FILE), "payload: { name: \"dep\", version: \"1.2.3\" }").unwrap();
+        let lock = |path: &str, content: &str| format!("version=1\n[[package]]\nname=\"dep\"\nversion=\"1.2.3\"\nsource={{path=\"{path}\"}}\ncontent-hash=\"{content}\"\n");
+        let bundle = identity_bundle(project.clone());
+        std::fs::write(project.join(crate::Syntax::UNIFIED_LOCK_FILE), lock("/host/a/dep", "tree-a")).unwrap();
+        let package_a = package_identity(&bundle, &dependency, Some("dep"));
+        std::fs::write(project.join(crate::Syntax::UNIFIED_LOCK_FILE), lock("/host/b/dep", "tree-a")).unwrap();
+        assert_eq!(package_a, package_identity(&bundle, &dependency, Some("dep")));
+        std::fs::write(project.join(crate::Syntax::UNIFIED_LOCK_FILE), lock("/host/b/dep", "tree-b")).unwrap();
+        let package_b = package_identity(&bundle, &dependency, Some("dep"));
+        let definition_a = definition_full_key(&package_a, "template.jet", "", "Boxed");
+        let definition_b = definition_full_key(&package_b, "template.jet", "", "Boxed");
+        assert_ne!(crate::SHA256::sha256_hex(&definition_a), crate::SHA256::sha256_hex(&definition_b));
+        let instance = |definition_full_key| ModuleInstanceKey { definition_full_key, parameters: vec![1], args: vec![vec![2]] };
+        assert_ne!(crate::SHA256::sha256_hex(&instance(definition_a).bytes()), crate::SHA256::sha256_hex(&instance(definition_b).bytes()));
         let _ = std::fs::remove_dir_all(root);
     }
 
