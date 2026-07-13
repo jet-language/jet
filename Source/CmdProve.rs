@@ -137,16 +137,18 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
         (Vec::new(), ExitCodes::OK)
     };
     let test_failed = tests.iter().filter(|item| (item.kind == 0 || item.kind == 3 || item.kind == 4) && item.state == 1).count();
+    let budgets = budget_projection(&target);
+    let budget_failed = budgets.facts.iter().any(|fact| fact.outcome == "fail");
     let exit_code = if producer_exit == ExitCodes::ICE {
         ExitCodes::ICE
     } else if producer_exit == ExitCodes::RUNTIME_PANIC {
         ExitCodes::RUNTIME_PANIC
-    } else if failed > 0 || test_failed > 0 {
+    } else if failed > 0 || test_failed > 0 || budget_failed {
         ExitCodes::USER_ERROR
     } else {
         ExitCodes::OK
     };
-    let report = render_report(&target, &items, &tests, proved, failed, exit_code);
+    let report = render_report(&target, &items, &tests, &budgets, proved, failed, exit_code);
     if json {
         println!("{report}");
     } else {
@@ -161,10 +163,16 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
             let skipped = tests.iter().filter(|item| item.kind == 0 && item.state == 2).count();
             println!("TESTS    unit: {passed} passed, {test_failed} failed, {skipped} skipped");
         }
+        if !budgets.facts.is_empty() {
+            let met = budgets.facts.iter().filter(|fact| fact.outcome == "pass").count();
+            let failed = budgets.facts.iter().filter(|fact| fact.outcome == "fail").count();
+            let warned = budgets.facts.len() - met - failed;
+            println!("BUDGETS  {met} met, {failed} failed, {warned} warned · verified canonical reports");
+        }
         let unavailable = tests.iter().filter(|item| item.state == 3).count();
         println!(
             "RESULT   {}",
-            if failed > 0 || test_failed > 0 {
+            if failed > 0 || test_failed > 0 || budget_failed {
                 "fail"
             } else if unavailable > 0 {
                 "pass_incomplete"
@@ -510,6 +518,18 @@ fn normalized(path: &Path) -> String {
         .join("/")
 }
 
+fn budget_projection(target: &Target) -> jet::BudgetView::BudgetProjection {
+    let target_path = Path::new(&target.root);
+    let search = if target_path.is_file() { target_path.parent().unwrap_or(Path::new(".")) } else { target_path };
+    let root = jet::Loader::find_manifest_root(search).unwrap_or_else(|| search.to_path_buf());
+    let sources = target.members.iter().map(|member| {
+        let path = Path::new(&member.path);
+        let path = path.strip_prefix(&root).unwrap_or(path).to_string_lossy().replace('\\', "/");
+        (path.trim_start_matches("./").to_string(), member.sha256.clone())
+    }).collect::<Vec<_>>();
+    jet::BudgetView::read_compatible(&root, &sources)
+}
+
 fn diagnostic_span(source: &str, diagnostic: &Diagnostic) -> String {
     let Some(span) = diagnostic.span else { return "0:0-0:0".into() };
     let (sl, sc) = span_line_col(source, span.start);
@@ -527,7 +547,7 @@ fn evidence_id(target: &Target, kind: &str, origin: &str, span: &str, claim: &st
     jet::SHA256::sha256_hex(&preimage)
 }
 
-fn render_report(target: &Target, items: &[FrontEndItem], tests: &[TestItem], proved: usize, failed: usize, exit_code: i32) -> String {
+fn render_report(target: &Target, items: &[FrontEndItem], tests: &[TestItem], budgets: &jet::BudgetView::BudgetProjection, proved: usize, failed: usize, exit_code: i32) -> String {
     let members = target.members.iter().map(|m| format!("{{\"path\":{},\"sha256\":{}}}", json(&m.path), json(&m.sha256))).collect::<Vec<_>>().join(",");
     let mut diagnostics = items.iter().filter_map(|item| item.diagnostic.as_ref().map(|d| diagnostic_json(&item.path, &item.source, d))).collect::<Vec<_>>();
     let mut diagnostic_index = 0usize;
@@ -554,6 +574,13 @@ fn render_report(target: &Target, items: &[FrontEndItem], tests: &[TestItem], pr
         let property = if item.kind == 3 { format!("{{\"caseIndex\":{},\"effectiveSeed\":{},\"generatedCases\":{},\"shrinkTrace\":{},\"source\":{{\"column\":1,\"line\":1,\"path\":{}}},\"toolchain\":{{\"jet\":{},\"targetTriple\":{}}}}}", item.line.saturating_sub(1), item.seed.parse::<u64>().unwrap_or(0), item.line, if item.message.is_empty() { "[]".into() } else { format!("[{{\"name\":\"minimized_inputs\",\"value\":{}}}]", json(&item.message)) }, json(&item.path), json(env!("CARGO_PKG_VERSION")), json(std::env::consts::ARCH)) } else { "null".into() };
         evidence_rows.push(format!("{{\"attachment\":null,\"budget\":null,\"contract\":{contract},\"count\":1,\"diagnosticIndexes\":{diagnostic_indexes},\"facet\":\"{facet}\",\"id\":{},\"kind\":\"{kind}\",\"outcome\":\"{outcome}\",\"producer\":\"{producer}\",\"property\":{property},\"reason\":{reason},\"solver\":null,\"source\":{{\"column\":1,\"line\":{},\"path\":{}}},\"state\":\"{state}\"}}", json(&item.id), item.line.max(1), json(&item.path)));
     }
+    for fact in &budgets.facts {
+        let kind = if fact.statistical { "statistical_budget" } else { "deterministic_budget" };
+        let facet = "budgets";
+        let outcome = match fact.outcome.as_str() { "pass" => "met", "warn" => "warning", _ => "failed" };
+        let budget = format!("{{\"budgetId\":{},\"enforcement\":{},\"evidenceId\":{},\"reportId\":{},\"statistical\":{}}}", json(&fact.budget_id), json(&fact.enforcement), json(&fact.evidence_id), json(&fact.report_id), fact.statistical);
+        evidence_rows.push(format!("{{\"attachment\":null,\"budget\":{budget},\"contract\":null,\"count\":1,\"diagnosticIndexes\":[],\"facet\":\"{facet}\",\"id\":{},\"kind\":\"{kind}\",\"outcome\":\"{outcome}\",\"producer\":\"jet-budget\",\"property\":null,\"reason\":null,\"solver\":null,\"source\":{{\"column\":1,\"line\":1,\"path\":{}}},\"state\":\"checked\"}}", json(&fact.evidence_id), json(&target.root)));
+    }
     let evidence = evidence_rows.join(",");
     let unit_passed = tests.iter().filter(|item| item.kind == 0 && item.state == 0).count();
     let unit_failed = tests.iter().filter(|item| item.kind == 0 && item.state == 1).count();
@@ -568,7 +595,23 @@ fn render_report(target: &Target, items: &[FrontEndItem], tests: &[TestItem], pr
     let doctest_passed = tests.iter().filter(|item| item.kind == 4 && item.state == 0).count();
     let doctest_failed = tests.iter().filter(|item| item.kind == 4 && item.state == 1).count();
     let unit_selected = unit_passed + unit_failed + unit_skipped;
+    let deterministic_selected = budgets.facts.iter().filter(|fact| !fact.statistical).count();
+    let deterministic_failed = budgets.facts.iter().filter(|fact| !fact.statistical && fact.outcome == "fail").count();
+    let deterministic_met = budgets.facts.iter().filter(|fact| !fact.statistical && fact.outcome == "pass").count();
+    let deterministic_unavailable = budgets.facts.iter().filter(|fact| !fact.statistical && fact.evidence == "unavailable").count();
+    let statistical_selected = budgets.facts.iter().filter(|fact| fact.statistical).count();
+    let statistical_failed = budgets.facts.iter().filter(|fact| fact.statistical && fact.outcome == "fail").count();
+    let statistical_met = budgets.facts.iter().filter(|fact| fact.statistical && fact.outcome == "pass").count();
+    let statistical_unavailable = budgets.facts.iter().filter(|fact| fact.statistical && fact.evidence == "unavailable").count();
     format!("{{\"diagnostics\":[{}],\"evidence\":[{evidence}],\"evidencePolicy\":\"allow_incomplete\",\"exitCode\":{exit_code},\"result\":\"{}\",\"schemaVersion\":1,\"summaries\":{{\"contract\":{{\"declared\":0,\"failed\":0,\"notObserved\":0,\"observed\":0,\"passed\":0,\"selected\":0,\"skipped\":0}},\"deterministicBudget\":{{\"failed\":0,\"met\":0,\"selected\":0,\"skipped\":0,\"unavailable\":0}},\"doctest\":{{\"failed\":0,\"passed\":0,\"selected\":0,\"skipped\":0}},\"frontEnd\":{{\"failed\":{failed},\"proved\":{proved},\"selected\":{},\"skipped\":0}},\"property\":{{\"failed\":0,\"generatedCases\":0,\"passed\":0,\"selected\":0,\"shrunkFailures\":0,\"skipped\":0}},\"solver\":{{\"disproved\":0,\"proved\":0,\"selected\":0,\"unavailable\":0,\"unknown\":0}},\"statisticalBudget\":{{\"failed\":0,\"met\":0,\"selected\":0,\"skipped\":0,\"unavailable\":0}},\"unit\":{{\"failed\":{unit_failed},\"passed\":{unit_passed},\"selected\":{unit_selected},\"skipped\":{unit_skipped}}}}},\"target\":{{\"inputSha256\":{},\"kind\":\"{}\",\"members\":[{members}],\"root\":{}}},\"tool\":{{\"jet\":{},\"proofProducer\":\"jet-prove\",\"targetTriple\":{}}}}}", diagnostics.join(","), if failed == 0 && unit_failed == 0 { if unit_unavailable > 0 { "pass_incomplete" } else { "pass" } } else { "fail" }, items.len(), json(&target.input_sha256), target.kind, json(&target.root), json(env!("CARGO_PKG_VERSION")), json(std::env::consts::ARCH))
+    .replace(
+        "\"deterministicBudget\":{\"failed\":0,\"met\":0,\"selected\":0,\"skipped\":0,\"unavailable\":0}",
+        &format!("\"deterministicBudget\":{{\"failed\":{deterministic_failed},\"met\":{deterministic_met},\"selected\":{deterministic_selected},\"skipped\":0,\"unavailable\":{deterministic_unavailable}}}"),
+    )
+    .replace(
+        "\"statisticalBudget\":{\"failed\":0,\"met\":0,\"selected\":0,\"skipped\":0,\"unavailable\":0}",
+        &format!("\"statisticalBudget\":{{\"failed\":{statistical_failed},\"met\":{statistical_met},\"selected\":{statistical_selected},\"skipped\":0,\"unavailable\":{statistical_unavailable}}}"),
+    )
     .replace(
         "\"contract\":{\"declared\":0,\"failed\":0,\"notObserved\":0,\"observed\":0,\"passed\":0,\"selected\":0,\"skipped\":0}",
         &format!("\"contract\":{{\"declared\":{contract_selected},\"failed\":{contract_failed},\"notObserved\":0,\"observed\":{contract_selected},\"passed\":{contract_passed},\"selected\":{contract_selected},\"skipped\":0}}"),
@@ -583,7 +626,7 @@ fn render_report(target: &Target, items: &[FrontEndItem], tests: &[TestItem], pr
     )
     .replace(
         "\"result\":\"pass\"",
-        if exit_code == ExitCodes::RUNTIME_PANIC || contract_failed > 0 {
+        if exit_code != ExitCodes::OK || contract_failed > 0 {
             "\"result\":\"fail\""
         } else {
             "\"result\":\"pass\""

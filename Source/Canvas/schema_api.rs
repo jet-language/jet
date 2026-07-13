@@ -554,8 +554,19 @@ pub fn proof_json_for_entry_with_receipt(
     } else {
         "{\"state\":\"missing\",\"stale\":true,\"reasons\":[\"no check/build/run receipt for this source revision\"]}".to_string()
     };
+    let budget_root = crate::Loader::find_manifest_root(path.parent().unwrap_or(Path::new(".")))
+        .unwrap_or_else(|| path.parent().unwrap_or(Path::new(".")).to_path_buf());
+    let budget_path = path.strip_prefix(&budget_root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
+    let budget_digest = crate::SHA256::sha256_hex(src.as_bytes());
+    let budgets = crate::BudgetView::read_compatible(&budget_root, &[(budget_path, budget_digest)]);
+    let budget_reports = budgets.facts.iter().map(|fact| format!(
+        "{{\"budget_id\":{},\"enforcement\":{},\"evidence\":{},\"evidence_id\":{},\"outcome\":{},\"report_id\":{},\"statistical\":{}}}",
+        json_str(&fact.budget_id), json_str(&fact.enforcement), json_str(&fact.evidence), json_str(&fact.evidence_id),
+        json_str(&fact.outcome), json_str(&fact.report_id), fact.statistical
+    )).collect::<Vec<_>>().join(",");
+    let budget_rejected = budgets.rejected.iter().map(|reason| json_str(reason)).collect::<Vec<_>>().join(",");
     Ok(format!(
-        "{{\"protocol\":\"jet.canvas.proof\",\"schema_version\":{},\"ok\":true,\"source_id\":{},\"source_path\":{},\"revision\":{},\"check\":{},\"source_control\":{{\"truth\":\"git-text\",\"available\":{},\"dirty\":{},\"status\":{}}},\"debug\":{{\"state\":\"local-only\",\"persistence\":\"local-source-span\"}},\"command_receipts\":{},\"proof\":{}}}",
+        "{{\"protocol\":\"jet.canvas.proof\",\"schema_version\":{},\"ok\":true,\"source_id\":{},\"source_path\":{},\"revision\":{},\"check\":{},\"source_control\":{{\"truth\":\"git-text\",\"available\":{},\"dirty\":{},\"status\":{}}},\"debug\":{{\"state\":\"local-only\",\"persistence\":\"local-source-span\"}},\"command_receipts\":{},\"budget_reports\":{{\"mode\":\"read_only\",\"reports\":[{}],\"rejected\":[{}]}},\"proof\":{}}}",
         PROOF_SCHEMA_VERSION,
         json_str(&source_label),
         json_str(&path.display().to_string()),
@@ -565,6 +576,8 @@ pub fn proof_json_for_entry_with_receipt(
         git_dirty,
         json_str(&git_status),
         command_receipts,
+        budget_reports,
+        budget_rejected,
         proof
     ))
 }

@@ -1851,6 +1851,40 @@ fn canvas_proof_lens_reports_revision_check_git_and_missing_receipts() {
 }
 
 #[test]
+fn canvas_proof_projects_canonical_budget_report_read_only() {
+    let dir = temp_dir("proof_budget_projection");
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(dir.join("pkg.jet"), "payload: { name: \"app\", version: \"0.1.0\" }\n").unwrap();
+    let entry = dir.join("src/main.jet");
+    fs::write(&entry, r#"module perf.package {
+    budgets: [Budget.{
+        name: "public-api",
+        scope: .Package,
+        metric: .PublicApiItems,
+        comparison: .Absolute,
+        limit: .AtMost(10),
+    }],
+}
+pub fn api() {}
+fn run() {}
+"#).unwrap();
+    let out = Command::new(PathBuf::from(env!("CARGO_BIN_EXE_jet"))).current_dir(&dir).args(["budget", "check", "--json"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    let command = String::from_utf8(out.stdout).unwrap();
+    let report_id = command.split("\"report_id\":\"").nth(1).unwrap().split('"').next().unwrap();
+    let before = fs::read_dir(dir.join(".jet/perf/reports")).unwrap().count();
+    let proof = jet::Canvas::proof_json_for_entry(&entry, None).expect("canvas proof");
+    assert!(proof.contains("\"budget_reports\":{\"mode\":\"read_only\""), "{proof}");
+    assert!(proof.contains("\"budget_id\":\"package:public-api\""), "{proof}");
+    assert!(proof.contains(&format!("\"report_id\":\"{report_id}\"")), "{proof}");
+    assert_eq!(fs::read_dir(dir.join(".jet/perf/reports")).unwrap().count(), before, "Canvas measured or wrote a report");
+    fs::write(&entry, format!("{}\n// relevant source digest changed\n", fs::read_to_string(&entry).unwrap())).unwrap();
+    let stale = jet::Canvas::proof_json_for_entry(&entry, None).expect("stale canvas proof");
+    assert!(stale.contains("\"budget_reports\":{\"mode\":\"read_only\",\"reports\":[]"), "{stale}");
+    assert_eq!(fs::read_dir(dir.join(".jet/perf/reports")).unwrap().count(), before, "stale Canvas projection refreshed measurement");
+}
+
+#[test]
 fn canvas_project_json_reports_single_file_without_manifest() {
     let path = write_fixture("project_single", CANVAS_FIXTURE);
     let json = jet::Canvas::project_json_for_entry(&path);

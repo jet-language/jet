@@ -11,6 +11,43 @@ fn workspace(name: &str) -> PathBuf {
     path
 }
 
+fn budget_workspace(name: &str) -> PathBuf {
+    let root = workspace(name);
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::write(root.join("pkg.jet"), "payload: { name: \"app\", version: \"0.1.0\" }\n").unwrap();
+    fs::write(root.join("src/main.jet"), r#"module perf.package {
+    budgets: [Budget.{
+        name: "public-api",
+        scope: .Package,
+        metric: .PublicApiItems,
+        comparison: .Absolute,
+        limit: .AtMost(10),
+    }],
+}
+pub fn api() {}
+fn run() {}
+"#).unwrap();
+    root
+}
+
+#[test]
+fn prove_projects_compatible_canonical_budget_identity_without_measuring() {
+    let root = budget_workspace("budget_projection");
+    let checked = Command::new(jet()).current_dir(&root).args(["budget", "check", "--json"]).output().unwrap();
+    assert_eq!(checked.status.code(), Some(0), "{}", String::from_utf8_lossy(&checked.stderr));
+    let command = String::from_utf8(checked.stdout).unwrap();
+    let report_id = command.split("\"report_id\":\"").nth(1).unwrap().split('"').next().unwrap().to_string();
+    let before = fs::read_dir(root.join(".jet/perf/reports")).unwrap().count();
+    let out = Command::new(jet()).current_dir(&root).args(["prove", "src/main.jet", "--json"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    let proof = String::from_utf8(out.stdout).unwrap();
+    assert!(proof.contains("\"producer\":\"jet-budget\""), "{proof}");
+    assert!(proof.contains("\"budgetId\":\"package:public-api\""), "{proof}");
+    assert!(proof.contains(&format!("\"reportId\":\"{report_id}\"")), "{proof}");
+    assert!(proof.contains("\"deterministicBudget\":{\"failed\":0,\"met\":1,\"selected\":1"), "{proof}");
+    assert_eq!(fs::read_dir(root.join(".jet/perf/reports")).unwrap().count(), before, "prove measured or wrote a report");
+}
+
 #[test]
 fn prove_json_is_derived_from_real_front_end_and_sorted_target() {
     let root = workspace("report");
