@@ -11,6 +11,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
+use std::sync::{Arc, atomic::{AtomicBool, Ordering as AtomicOrdering}};
 use std::time::{Duration, Instant};
 
 pub const MAX_SAMPLES: usize = 1_000_000;
@@ -18,6 +19,14 @@ pub const MAX_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_SPECS: usize = 4_096;
 pub const MAX_DETAIL_SCALARS: usize = 512;
 const MAGIC: &[u8] = b"JETBUDGET1\n";
+#[cfg(test)]static FILE_READER_DELAY_MS:AtomicU64=AtomicU64::new(0);
+#[cfg(test)]static ACTIVE_FILE_READERS:AtomicU64=AtomicU64::new(0);
+#[cfg(test)]use std::sync::atomic::AtomicU64;
+#[cfg(test)]struct ActiveFileReader;
+#[cfg(test)]impl ActiveFileReader{fn new()->Self{ACTIVE_FILE_READERS.fetch_add(1,AtomicOrdering::SeqCst);Self}}
+#[cfg(test)]impl Drop for ActiveFileReader{fn drop(&mut self){ACTIVE_FILE_READERS.fetch_sub(1,AtomicOrdering::SeqCst);}}
+#[cfg(not(test))]struct ActiveFileReader;
+#[cfg(not(test))]impl ActiveFileReader{fn new()->Self{Self}}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProviderSpec {
@@ -107,13 +116,18 @@ impl ProviderFailure {
 pub struct ProviderDiagnostic { pub code: &'static str, pub what: String, pub why: String, pub fix: String }
 impl ProviderDiagnostic { pub fn render(&self)->String{format!("# Error [{}]: {}\n\nWhat: {}\nWhy: {}\nFix: {}\n",self.code,self.what,self.what,self.why,self.fix)} }
 
-type InProcessProvider = fn(&ProviderRequest) -> Result<Vec<ProviderEvent>, ProviderFailure>;
+#[derive(Clone)]
+pub struct ProviderCancellation { cancelled: Arc<AtomicBool> }
+impl ProviderCancellation { pub fn cancelled(&self)->bool{self.cancelled.load(AtomicOrdering::Acquire)} }
+type InProcessProvider = fn(&ProviderRequest,&ProviderCancellation) -> Result<Vec<ProviderEvent>, ProviderFailure>;
 #[derive(Clone)]
 enum Provider { InProcess(InProcessProvider), Subprocess(PathBuf), File(PathBuf) }
 
 #[derive(Default)]
 pub struct ProviderRegistry { providers: BTreeMap<String, Provider> }
 impl ProviderRegistry {
+    /// Provider must poll `ProviderCancellation::cancelled` during long work;
+    /// collection joins every worker before returning.
     pub fn register_in_process(&mut self, identity: impl Into<String>, provider: InProcessProvider) -> Result<(), String> { self.insert(identity.into(), Provider::InProcess(provider)) }
     pub fn register_subprocess(&mut self, identity: impl Into<String>, executable: PathBuf) -> Result<(), String> {
         if !executable.is_absolute() { return Err("provider executable must be an absolute compiler-resolved path".into()); }
@@ -142,43 +156,31 @@ impl ProviderRegistry {
 
 fn run_in_process(function: InProcessProvider, request: &ProviderRequest, timeout: Duration, identity: &str) -> Result<Vec<ProviderEvent>, ProviderFailure> {
     let request = request.clone();
+    let cancellation=ProviderCancellation{cancelled:Arc::new(AtomicBool::new(false))};let worker_cancellation=cancellation.clone();
     let (tx, rx) = mpsc::sync_channel(1);
-    std::thread::spawn(move || {
-        let result = std::panic::catch_unwind(|| function(&request))
+    let worker=std::thread::spawn(move || {
+        let result = std::panic::catch_unwind(|| function(&request,&worker_cancellation))
             .map_err(|_| ProviderFailure::operation(FailureClass::Panic, "in-process provider panicked"))
             .and_then(|value| value);
         let _ = tx.send(result);
     });
-    rx.recv_timeout(timeout).map_err(|error| match error {
-        mpsc::RecvTimeoutError::Timeout => ProviderFailure::operation(FailureClass::Timeout, format!("provider `{identity}` timed out")),
-        mpsc::RecvTimeoutError::Disconnected => ProviderFailure::operation(FailureClass::Execution, format!("provider `{identity}` worker disconnected")),
-    })?
+    match rx.recv_timeout(timeout){Ok(result)=>{worker.join().map_err(|_|ProviderFailure::operation(FailureClass::Panic,format!("provider `{identity}` worker panicked")))?;result},Err(mpsc::RecvTimeoutError::Timeout)=>{cancellation.cancelled.store(true,AtomicOrdering::Release);worker.join().map_err(|_|ProviderFailure::operation(FailureClass::Panic,format!("provider `{identity}` worker panicked during cancellation")))?;Err(ProviderFailure::operation(FailureClass::Timeout,format!("provider `{identity}` timed out and cancelled")))},Err(mpsc::RecvTimeoutError::Disconnected)=>{let _=worker.join();Err(ProviderFailure::operation(FailureClass::Execution,format!("provider `{identity}` worker disconnected")))}}
 }
 
 fn read_bounded(path: &Path, timeout: Duration) -> Result<Vec<u8>, ProviderFailure> {
-    let path = path.to_path_buf();
-    let display = path.display().to_string();
-    let (tx, rx) = mpsc::sync_channel(1);
-    std::thread::spawn(move || { let _ = tx.send(read_regular_bounded(&path)); });
-    rx.recv_timeout(timeout).map_err(|error| match error {
-        mpsc::RecvTimeoutError::Timeout => ProviderFailure::operation(FailureClass::Timeout, format!("provider response {display} timed out")),
-        mpsc::RecvTimeoutError::Disconnected => ProviderFailure::operation(FailureClass::Execution, format!("provider response {display} reader disconnected")),
-    })?
+    #[cfg(target_os="linux")]{read_bounded_isolated(path,timeout)}
+    #[cfg(not(target_os="linux"))]{let _=(path,timeout);Err(ProviderFailure::operation(FailureClass::Execution,"isolated provider file reads are enabled only on Linux"))}
 }
 
-fn read_regular_bounded(path: &Path) -> Result<Vec<u8>, ProviderFailure> {
-    let metadata = std::fs::symlink_metadata(path).map_err(|error| ProviderFailure::operation(FailureClass::Execution, format!("cannot inspect provider response {}: {error}", path.display())))?;
-    if !metadata.file_type().is_file() { return Err(ProviderFailure::operation(FailureClass::Execution, "provider response is not a regular file")); }
-    #[cfg(unix)]
-    let file = { use std::os::unix::fs::OpenOptionsExt; std::fs::OpenOptions::new().read(true).custom_flags(0o400000).open(path) };
-    #[cfg(not(unix))]
-    let file = std::fs::File::open(path);
-    let file = file.map_err(|error| ProviderFailure::operation(FailureClass::Execution, format!("cannot open provider response {}: {error}", path.display())))?;
-    if !file.metadata().map_err(|error| ProviderFailure::operation(FailureClass::Execution, format!("cannot inspect open provider response: {error}")))?.is_file() {
-        return Err(ProviderFailure::operation(FailureClass::Execution, "open provider response is not a regular file"));
-    }
-    let mut bytes = Vec::new(); file.take((MAX_BYTES + 1) as u64).read_to_end(&mut bytes).map_err(|error| ProviderFailure::operation(FailureClass::Execution, format!("cannot read provider response: {error}")))?;
-    if bytes.len() > MAX_BYTES { return Err(ProviderFailure::malformed("provider stream exceeds 16 MiB")); } Ok(bytes)
+#[cfg(target_os="linux")]
+fn read_bounded_isolated(path:&Path,timeout:Duration)->Result<Vec<u8>,ProviderFailure>{
+    use std::ffi::CString;use std::os::unix::ffi::OsStrExt;
+    let name=CString::new(path.as_os_str().as_bytes()).map_err(|_|ProviderFailure::operation(FailureClass::Execution,"provider response path contains NUL"))?;
+    #[repr(C)]struct StatxTimestamp{sec:i64,nsec:u32,reserved:i32}#[repr(C)]struct Statx{mask:u32,blksize:u32,attributes:u64,nlink:u32,uid:u32,gid:u32,mode:u16,spare0:u16,ino:u64,size:u64,blocks:u64,attributes_mask:u64,atime:StatxTimestamp,btime:StatxTimestamp,ctime:StatxTimestamp,mtime:StatxTimestamp,rdev_major:u32,rdev_minor:u32,dev_major:u32,dev_minor:u32,mnt_id:u64,dio_mem_align:u32,dio_offset_align:u32,spare3:[u64;12]}
+    const O_RDONLY:i32=0;const O_NONBLOCK:i32=0o4000;const O_CLOEXEC:i32=0o2000000;const O_NOFOLLOW:i32=0o400000;const WNOHANG:i32=1;const F_SETFL:i32=4;const SIGKILL:i32=9;const AT_EMPTY_PATH:i32=0x1000;const STATX_TYPE:u32=1;const S_IFMT:u16=0o170000;const S_IFREG:u16=0o100000;
+    extern "C"{fn pipe(fds:*mut i32)->i32;fn fork()->i32;fn close(fd:i32)->i32;fn open(path:*const i8,flags:i32,...)->i32;fn read(fd:i32,buffer:*mut u8,count:usize)->isize;fn write(fd:i32,buffer:*const u8,count:usize)->isize;fn fcntl(fd:i32,command:i32,...)->i32;fn waitpid(pid:i32,status:*mut i32,options:i32)->i32;fn kill(pid:i32,signal:i32)->i32;fn statx(fd:i32,path:*const i8,flags:i32,mask:u32,stat:*mut Statx)->i32;#[cfg(test)]fn usleep(micros:u32)->i32;fn _exit(status:i32)->!;}
+    let mut pipes=[-1,-1];if unsafe{pipe(pipes.as_mut_ptr())}!=0{return Err(ProviderFailure::operation(FailureClass::Execution,format!("cannot create provider reader pipe: {}",std::io::Error::last_os_error())))}let pid=unsafe{fork()};if pid<0{unsafe{close(pipes[0]);close(pipes[1]);}return Err(ProviderFailure::operation(FailureClass::Execution,format!("cannot isolate provider reader: {}",std::io::Error::last_os_error())))}if pid==0{unsafe{close(pipes[0]);#[cfg(test)]{let delay=FILE_READER_DELAY_MS.load(AtomicOrdering::Relaxed);if delay>0{usleep((delay.min(u32::MAX as u64)*1000)as u32);}}let fd=open(name.as_ptr(),O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_NOFOLLOW);if fd<0{_exit(2)}let empty=b"\0";let mut info:Statx=std::mem::zeroed();if statx(fd,empty.as_ptr()as*const i8,AT_EMPTY_PATH,STATX_TYPE,&mut info)!=0||info.mode&S_IFMT!=S_IFREG{close(fd);_exit(6)}let mut total=0usize;let mut buffer=[0u8;8192];loop{let count=read(fd,buffer.as_mut_ptr(),buffer.len());if count<0{close(fd);_exit(3)}if count==0{break}total+=count as usize;if total>MAX_BYTES{close(fd);_exit(4)}let mut at=0usize;while at<count as usize{let sent=write(pipes[1],buffer[at..].as_ptr(),count as usize-at);if sent<=0{close(fd);_exit(5)}at+=sent as usize}}close(fd);close(pipes[1]);_exit(0)}}let _active=ActiveFileReader::new();
+    unsafe{close(pipes[1]);fcntl(pipes[0],F_SETFL,O_NONBLOCK);}let deadline=Instant::now()+timeout;let mut bytes=Vec::new();let mut status=0i32;let mut exited=false;loop{let mut buffer=[0u8;8192];loop{let count=unsafe{read(pipes[0],buffer.as_mut_ptr(),buffer.len())};if count>0{bytes.extend_from_slice(&buffer[..count as usize]);continue}break}if !exited{let waited=unsafe{waitpid(pid,&mut status,WNOHANG)};if waited==pid{exited=true}else if waited<0{unsafe{close(pipes[0]);}return Err(ProviderFailure::operation(FailureClass::Execution,format!("cannot reap provider reader: {}",std::io::Error::last_os_error())))}}if exited{let count=unsafe{read(pipes[0],buffer.as_mut_ptr(),buffer.len())};if count>0{bytes.extend_from_slice(&buffer[..count as usize]);continue}break}if Instant::now()>=deadline{unsafe{kill(pid,SIGKILL);waitpid(pid,&mut status,0);close(pipes[0]);}return Err(ProviderFailure::operation(FailureClass::Timeout,format!("provider response {} timed out and reader was reaped",path.display())))}std::thread::sleep(Duration::from_millis(1));}unsafe{close(pipes[0]);}let exit=(status>>8)&0xff;if exit==4{return Err(ProviderFailure::malformed("provider stream exceeds 16 MiB"))}if exit!=0{return Err(ProviderFailure::operation(FailureClass::Execution,format!("isolated provider reader failed with status {exit}")))}Ok(bytes)
 }
 
 fn run_subprocess(path: &Path, request: &[u8], timeout: Duration) -> Result<Vec<u8>, ProviderFailure> {
@@ -224,18 +226,20 @@ pub fn evaluation_diagnostic(budget:&str,evaluation:&Evaluation,direction:Direct
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::atomic::{AtomicU64, Ordering};use std::sync::Mutex;
+    static PROCESS_TEST_LOCK:Mutex<()>=Mutex::new(());
 
     fn request() -> ProviderRequest {
         ProviderRequest { schema:"jet.provider-request".into(), version:1, request_id:"1".repeat(64), provider_hash:"2".repeat(64), context_hash:"3".repeat(64), specs:vec![ProviderSpec{budget_hash:"4".repeat(64),metric:"BenchTime".into()}], workload:CanonicalJson::Null, policy:CanonicalJson::Null }
     }
     fn valid_events(request:&ProviderRequest)->Vec<ProviderEvent>{vec![ProviderEvent::Sample{spec:0,metric:"BenchTime".into(),value:Rational::integer(42)},ProviderEvent::Complete{request_id:request.request_id.clone(),samples:1}]}
-    fn panic_provider(_: &ProviderRequest)->Result<Vec<ProviderEvent>,ProviderFailure>{panic!("hostile provider panic")}
-    fn unavailable_provider(request:&ProviderRequest)->Result<Vec<ProviderEvent>,ProviderFailure>{Ok(vec![ProviderEvent::Unavailable{spec:0,reason:"probe could not observe ready event".into(),details:vec![]},ProviderEvent::Complete{request_id:request.request_id.clone(),samples:0}])}
+    fn panic_provider(_: &ProviderRequest,_:&ProviderCancellation)->Result<Vec<ProviderEvent>,ProviderFailure>{panic!("hostile provider panic")}
+    fn unavailable_provider(request:&ProviderRequest,_:&ProviderCancellation)->Result<Vec<ProviderEvent>,ProviderFailure>{Ok(vec![ProviderEvent::Unavailable{spec:0,reason:"probe could not observe ready event".into(),details:vec![]},ProviderEvent::Complete{request_id:request.request_id.clone(),samples:0}])}
     fn temporary(name:&str)->PathBuf{static NEXT:AtomicU64=AtomicU64::new(0);std::env::temp_dir().join(format!("jet-budget-provider-{}-{name}-{}",std::process::id(),NEXT.fetch_add(1,Ordering::Relaxed)))}
 
     #[test]
     fn file_transport_round_trips_and_rejects_hostile_frames(){
+        let _guard=PROCESS_TEST_LOCK.lock().unwrap_or_else(|poisoned|poisoned.into_inner());
         let req=request();let path=temporary("response");std::fs::write(&path,encode_stream(&valid_events(&req))).unwrap();let mut registry=ProviderRegistry::default();registry.register_file("fixture",path.clone()).unwrap();let evidence=registry.collect("fixture",&req,Duration::from_secs(1)).unwrap();assert_eq!(evidence.events,valid_events(&req));
         for (name,bytes) in [("bad-magic",b"NOTBUDGET\n".to_vec()),("truncated",{let mut b=MAGIC.to_vec();b.extend_from_slice(&[1,0,0]);b}),("trailing",{let mut b=encode_stream(&valid_events(&req));b.push(99);b})] { let hostile=temporary(name);std::fs::write(&hostile,bytes).unwrap();let mut registry=ProviderRegistry::default();registry.register_file("hostile",hostile.clone()).unwrap();let error=registry.collect("hostile",&req,Duration::from_secs(1)).unwrap_err();assert_eq!(error.diagnostic("api").code,"E2908");let _=std::fs::remove_file(hostile); }
         let _=std::fs::remove_file(path);
@@ -245,13 +249,14 @@ mod tests {
     fn in_process_panic_and_unavailable_are_separate_diagnostic_classes(){
         let req=request();let mut registry=ProviderRegistry::default();registry.register_in_process("panic",panic_provider).unwrap();let failure=registry.collect("panic",&req,Duration::from_secs(1)).unwrap_err();let diagnostic=failure.diagnostic("api-p99");assert_eq!((diagnostic.code,diagnostic.what.as_str()),("E2908","performance budget operation failed"));
         registry.register_in_process("unavailable",unavailable_provider).unwrap();let evidence=registry.collect("unavailable",&req,Duration::from_secs(1)).unwrap();let diagnostic=unavailable_if_too_few("api-p99",&evidence,20).unwrap_err();assert_eq!((diagnostic.code,diagnostic.what.as_str()),("E2906","performance budget api-p99 has no usable evidence"));assert!(diagnostic.why.contains("ready event"));
-        fn slow(_: &ProviderRequest)->Result<Vec<ProviderEvent>,ProviderFailure>{std::thread::sleep(Duration::from_secs(2));Ok(Vec::new())}
-        registry.register_in_process("slow",slow).unwrap();let started=Instant::now();let failure=registry.collect("slow",&req,Duration::from_millis(20)).unwrap_err();assert_eq!(failure.class,FailureClass::Timeout);assert!(started.elapsed()<Duration::from_secs(1));
+        static ACTIVE:AtomicU64=AtomicU64::new(0);fn slow(_: &ProviderRequest,cancel:&ProviderCancellation)->Result<Vec<ProviderEvent>,ProviderFailure>{ACTIVE.fetch_add(1,Ordering::SeqCst);while !cancel.cancelled(){std::thread::sleep(Duration::from_millis(1));}ACTIVE.fetch_sub(1,Ordering::SeqCst);Ok(Vec::new())}
+        registry.register_in_process("slow",slow).unwrap();let started=Instant::now();for _ in 0..25{let failure=registry.collect("slow",&req,Duration::from_millis(5)).unwrap_err();assert_eq!(failure.class,FailureClass::Timeout);}assert_eq!(ACTIVE.load(Ordering::SeqCst),0);assert!(started.elapsed()<Duration::from_secs(1));
     }
 
     #[cfg(unix)]
     #[test]
     fn subprocess_uses_exact_path_and_is_bounded_and_timed(){
+        let _guard=PROCESS_TEST_LOCK.lock().unwrap_or_else(|poisoned|poisoned.into_inner());
         use std::os::unix::fs::PermissionsExt;
         let req=request();let response=temporary("subprocess-response");std::fs::write(&response,encode_stream(&valid_events(&req))).unwrap();let script=temporary("provider.sh");std::fs::write(&script,format!("#!/bin/sh\ncat '{}'\n",response.display())).unwrap();let mut permissions=std::fs::metadata(&script).unwrap().permissions();permissions.set_mode(0o700);std::fs::set_permissions(&script,permissions).unwrap();let mut registry=ProviderRegistry::default();registry.register_subprocess("process",script.clone()).unwrap();assert_eq!(registry.collect("process",&req,Duration::from_secs(2)).unwrap().events,valid_events(&req));
         let sleeper=temporary("sleep.sh");std::fs::write(&sleeper,"#!/bin/sh\nsleep 5\n").unwrap();let mut permissions=std::fs::metadata(&sleeper).unwrap().permissions();permissions.set_mode(0o700);std::fs::set_permissions(&sleeper,permissions).unwrap();let mut registry=ProviderRegistry::default();registry.register_subprocess("slow",sleeper.clone()).unwrap();let started=Instant::now();let failure=registry.collect("slow",&req,Duration::from_millis(30)).unwrap_err();assert_eq!(failure.class,FailureClass::Timeout);assert!(started.elapsed()<Duration::from_secs(2));
@@ -261,8 +266,11 @@ mod tests {
 
     #[test]
     fn file_transport_rejects_symlinks_and_scalar_overflow(){
+        let _guard=PROCESS_TEST_LOCK.lock().unwrap_or_else(|poisoned|poisoned.into_inner());
         let req=request();let target=temporary("target");std::fs::write(&target,encode_stream(&valid_events(&req))).unwrap();
         #[cfg(unix)]{use std::os::unix::fs::symlink;let link=temporary("link");symlink(&target,&link).unwrap();let mut registry=ProviderRegistry::default();registry.register_file("link",link.clone()).unwrap();assert!(registry.collect("link",&req,Duration::from_secs(1)).is_err());let _=std::fs::remove_file(link);}
         let events=vec![ProviderEvent::Unavailable{spec:0,reason:"x".repeat(513),details:Vec::new()},ProviderEvent::Complete{request_id:req.request_id.clone(),samples:0}];let path=temporary("detail");std::fs::write(&path,encode_stream(&events)).unwrap();let mut registry=ProviderRegistry::default();registry.register_file("detail",path.clone()).unwrap();assert!(registry.collect("detail",&req,Duration::from_secs(1)).unwrap_err().reason.contains("512 scalars"));for path in [target,path]{let _=std::fs::remove_file(path);}
     }
+
+    #[cfg(unix)]#[test]fn repeated_timed_file_readers_are_killed_and_reaped(){let _guard=PROCESS_TEST_LOCK.lock().unwrap_or_else(|poisoned|poisoned.into_inner());let req=request();let path=temporary("delayed");std::fs::write(&path,encode_stream(&valid_events(&req))).unwrap();let mut registry=ProviderRegistry::default();registry.register_file("delayed",path.clone()).unwrap();FILE_READER_DELAY_MS.store(100,Ordering::SeqCst);let started=Instant::now();for _ in 0..25{let failure=registry.collect("delayed",&req,Duration::from_millis(5)).unwrap_err();assert_eq!(failure.class,FailureClass::Timeout);assert_eq!(ACTIVE_FILE_READERS.load(Ordering::SeqCst),0);}FILE_READER_DELAY_MS.store(0,Ordering::SeqCst);assert!(started.elapsed()<Duration::from_secs(1));let _=std::fs::remove_file(path);}
 }
