@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 527,
-    "rev": 4963,
+    "rev": 4966,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -1239,6 +1239,16 @@
       "plan": "Canonical concurrency implementation plan (D-ASYNCRT1=A, D-MNIO1=A, D-CONCCOMB1=A, D-RACEWIN1=A, D-CONCSELECT1=A). Build one model only: task/channel/taskgroup. No @async/await, no user coroutine primitive, no second race/select mechanism.\n\nAlready shipped foundations to preserve:\n- #102: taskgroup g { ... }, g.task { ... }, wait/join, scope-exit ownership, existing g.all/g.race/g.any vertical slice.\n- #101: task handles expose coroutine-grade controls (pause/resume/cancel/trace); coroutine substrate stays internal.\n- #112: #Context(deadline:) flows through taskgroups and wait points; E3003 owns deadline diagnostics.\n- #126 M1/M2: current scheduler vertical slice, channels/timers/yield hook, 160_scheduler_spawn.\n\nImplementation order for dumb agents:\n1. Inventory current behavior first. Read docs/spec/philosophy.md, syntax-decisions.md entries for D-ASYNCRT1/D-MNIO1/D-NURSERY1/D-TASKSCOPE1/D-CONCCOMB1/D-RACEWIN1/D-CONCSELECT1/D-DEADLINE1/D-COROUTINE1, docs/plans/epoch-3/concurrency-vision.md, Source/Prelude/Scheduler.rs, Source/Interpreter.rs, crates/jet-codegen/src/Prelude/Scheduler.rs, task/channel sema/codegen, and tests for examples 131, 157, 158, 160.\n2. Write missing acceptance tests before code. Add/extend examples/features concurrency examples plus CLI/golden tests for: 100k idle parked tasks or smallest CI-safe equivalent with a scale benchmark guard; channel receive wakes one parked task without busy-wait; taskgroup scope cancels losing race tasks; g.all fail-fast cancels siblings; g.race returns first success and cancels losers; g.any returns first completion including errors; if g.select() arms deregister losers; deadline firing wakes parked I/O/channel/task waits with Jet-owned E3003; detached tasks require explicit expert policy/name.\n3. Replace cooperative-only scheduler gaps with real parker abstraction. Define internal runtime traits, not user syntax: Scheduler, Parker, TimerWheel, IoParker. Start with portable readiness fallback for tests; implement D-MNIO1 native backends behind cfg modules (Linux epoll/io_uring path, macOS/BSD kqueue, Windows IOCP). No external runtime dependency unless owner approves a new dep card.\n4. Route every blocking-looking stdlib wait through the parker. Channel recv/send, timers/sleep, task join/wait, TCP accept/read/write, HTTP client/server waits must park Jet tasks, not OS threads. Real OS-blocking fallback must run on an explicit blocking pool and be observable; never silently block scheduler workers.\n5. Finish structured combinators in taskgroup only. g.all/g.race/g.any/select are methods or scoped operations on the taskgroup; they create no detached work and return/propagate through one cancellation model. Implement D-RACEWIN1 inside g.race; #103 is merged here. Implement D-CONCCOMB1 here; #36 is merged here.\n6. Implement D-CONCSELECT1 exactly as ratified: if-fused select over g.select() arms. Parser/sema/codegen/tests must reuse match/if-arm typing where possible. Select must register arms under taskgroup ownership, wake exactly one winner, deregister losers, and compose with deadlines/cancellation.\n7. Add observability and misuse diagnostics. Runtime metrics: runnable/parked task counts, poller wake count, worker utilization, queue depth, cancelled losers. Diagnostics/lints: forgotten task handle wait, swallowed cancellation, deadline ignored, detached task without policy/name, real blocking call on scheduler worker.\n8. Prove parity and scale. cargo test green; examples 131/157/158/160 still pass; add deterministic scheduler tests with fake clock; add stress tests gated for CI budget; add a benchmark/report target that demonstrates 100k parked connections/tasks when run locally. rustc errors remain ICE-only; all user errors are sema/driver diagnostics.\n\nExit criteria:\n- One coherent public model in docs/spec/spec.md and examples: task/channel/taskgroup + scoped combinators + deadline context.\n- No @async/await surface, no function coloring, no separate user coroutine API.\n- Native parker path exists per platform or has named cfg-tested fallback with honest diagnostic/metric.\n- race/all/any/select cannot leak losing tasks past taskgroup scope.\n- CI-safe tests prove cancellation/deadline/wake correctness; local stress target proves 100k parked tasks/connections target.\n- docs/plans/epoch-3/async-networking.md and concurrency-vision.md match implementation.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-13",
+          "by": "terra-126-reviewer",
+          "text": "Final review of 40a9fca8 remains BLOCKED by direct AOT regression. JIT containment proof is green: Cranelift targeted 21/21 including original SIGABRT receive, receive/select/sleep cancellation, join/all fatal Problems without fallback, Shield, hot-swap, and three-way battery; scheduler interrupt boundary 15 pass/1 ignored. Four #126 examples all_failfast/cancel_cleanup/race_cancel/shield_commit are present in expected covered manifest and observed covered set; global manifest test still has unrelated concurrent drift. Exact AOT check `cargo test --test corelib deadline -- --nocapture`: deadline_context_exceed_reports_e3003 passes, core_os_interrupt_deadline_diagnostic_unwinds_inside_handler_boundary fails because stderr lost `Error [E3003]: deadline exceeded while waiting in time sleep`. Cause: MathRandomTime now panic_any(JetDeadlineUnwind) inside interrupt handler, while existing handler catch/report understands rendered String path from jet_runtime_diagnostic, so custom deadline payload is not rendered. Restore handler E3003 what/why/fix semantics or teach handler boundary typed payload, then rerun corelib deadline + prior JIT/scheduler gates. No close, criteria, or IOCP follow-up."
+        },
+        {
+          "at": "2026-07-13",
+          "by": "terra-126-reviewer",
+          "text": "Second independent review of 5b1a1373: prior unshielded receive SIGABRT is fixed for spawned cancellation; exact Cranelift tests receive/select/sleep pass 3/3. Closure still blocked. JetSchedulerWait lacks Deadline; non-test jet_deadline_exceeded and top-level jet_scheduler_fatal use process::exit(70), so wait_without_unwind cannot contain top-level JIT deadline, join cancelled/panicked child, all fail-fast, race/any all-fail, or select closed/timer-without-value. Plain catch_unwind also does not itself set scheduler panic-hook suppression. Required: boundary-local unwind mode/hook suppression restored exactly, typed Deadline distinct from Cancelled/Panicked, no process exit while a native boundary is active, then deliver/report only after Cranelift frame returns. Add exact no-fallback cases for send/yield/join/all/race/any and deadline/fatal cases. Manifest also inconsistent: removed four concurrency gaps were not added to covered, making dev jit manifest/audit tests fail. Current evidence: dev cancellation subset 3/3; scheduler 14 pass/1 ignored; scheduler_native 4/4; fmt Shield 1/1; full dev 48/56 with two direct manifest failures plus unrelated fidelity/poison cascade. No close or IOCP follow-up."
+        },
         {
           "at": "2026-07-13",
           "by": "terra-126-reviewer",
@@ -13527,6 +13537,11 @@
       "blockedBy": [],
       "assignee": "fable-main",
       "log": [
+        {
+          "at": "2026-07-13",
+          "by": "fable-impl-521a",
+          "text": "root cause: expand_generic_module_aliases (crates/jet-sema/src/Sema/Bundle.rs, 3 call sites ~1591/1819/1928) builds disposable TraitRegistry::default() instances to resolve generic-module param bounds, calling register_items() against the REAL bundle diags vec, without ever calling register_synthetic_rollback/display_debug/iter_index. Every impl of a builtin hook trait (Index/IndexMut/Iterable/Iterator/Rollback/Display/Debug) bundle-wide spuriously failed E0119 there before the canonical per-module pass (which does register synthetics) ever ran. Introduced by 4b505c09 (14:27, card #367 product-split, added the first disposable-registry+bound-check pattern) and doubled by 80af1fcc7 (15:46, wip checkpoint, added a second disposable-registry prepass) same day (2026-07-12) -- matches the doubling symptom. Fix: register the 3 synthetic-trait hooks on each disposable registry + route its register_items diags into a throwaway Vec (canonical loop later in check_bundle_opts is sole diag source of truth). Commit b2001c18. Also fixed tests/corelib.rs::user_derive_orphan_rule_allows_either_local_side (separate, unrelated bug: fixture used retired `#[Name]` directive-plane spelling for a custom derive; ratified spelling is `@Name` per D-MARKERMOVE1/2/3 -- card #518s new E0927 gate correctly caught it). Tests green: golden examples_compile_and_run x7 (index_hook/iter_hook/rollback_trait/display_debug/renderable-varargs/renderable-varargs-multi/reflect-value) all ok; diagnostic_snapshots ui_snapshots missing_assoc_type + tag_with_method (E0913/E0732 doubling fixtures) ok; corelib user_derive_orphan_rule_allows_either_local_side ok; interpreter_matches_compiled_binary ok (137 ran, 170 boundary, 0 unexpected). Found but NOT fixed (unrelated, pre-existing, out of card scope): diagnostic_snapshots tests/ui/genmod_unknown_target.jet fails identically on unmodified master (verified via git stash) -- E0850 no longer fires, pre-existing bug unrelated to trait registration. Also found: dev_default_matches_compiled_binary (tests/dev.rs) has a strict boundary-set assertion that now additionally lists collections/list_bounds + concurrency/all_failfast as boundary-hit under the default JIT/interpreter-fallback backend (DEFAULT_BACKEND_EXPECTED_BOUNDARIES const stale) -- reproducible/deterministic, but neither example touches trait registration; likely a pre-existing JIT-tier gap masked because this test always aborted earlier on the E0119 failures before reaching that assertion. Needs a JIT-context owner, not diagnosed further here."
+        },
         {
           "at": "2026-07-13",
           "by": "fable-main",
@@ -30908,6 +30923,27 @@
   ],
   "events": [
     {
+      "at": "2026-07-13T02:38:14.130Z",
+      "by": "fable-impl-521a",
+      "action": "card.update",
+      "ref": "c0a9unm3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T02:19:38.230Z",
+      "by": "terra-126-reviewer",
+      "action": "card.update",
+      "ref": "c2iizmyx",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T02:03:44.969Z",
+      "by": "terra-126-reviewer",
+      "action": "card.update",
+      "ref": "c2iizmyx",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-07-13T01:52:24.011Z",
       "by": "fable-main",
       "action": "card.criteria-add",
@@ -34385,27 +34421,6 @@
       "action": "card.criteria-meet",
       "ref": "c0nqsqn5",
       "note": "#7"
-    },
-    {
-      "at": "2026-07-12T13:20:02.801Z",
-      "by": "terra-515-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0nqsqn5",
-      "note": "#6"
-    },
-    {
-      "at": "2026-07-12T13:19:48.756Z",
-      "by": "terra-515-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0nqsqn5",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-12T13:19:34.277Z",
-      "by": "terra-515-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0nqsqn5",
-      "note": "#4"
     }
   ],
   "nextNum": 368,
