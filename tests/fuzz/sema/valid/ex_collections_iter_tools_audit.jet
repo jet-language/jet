@@ -31,10 +31,10 @@ fn run() {
     print(pq.to_sorted_list())
 
     cache: Lru<String, Int> := Lru.new(2)
-    cache.add("a", 1)
-    cache.add("b", 2)
+    cache.add("a", 1).drop("cache is new, so no displaced value is needed")
+    cache.add("b", 2).drop("cache is new, so no displaced value is needed")
     print(cache.get("a"))
-    cache.add("c", 3)
+    cache.add("c", 3).drop("this audit only needs the eviction effect")
     print(cache.has_key("b"))
     print(cache.keys())
 
