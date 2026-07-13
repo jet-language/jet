@@ -49,6 +49,16 @@ pub(crate) fn method_call_in_subset(
     cx: &Cx,
     locals: &HashSet<String>,
 ) -> bool {
+    // D-NETIO-CONTRACT2=B: sema resolves a method on a bounded type parameter
+    // to the synthetic Reader/Writer contract and records that type parameter
+    // in `recv_type`. Rust emits the real trait-bound call.
+    if recv_type.as_ref().is_some_and(|name| {
+        cx.current_type_params.borrow().contains(name.as_str())
+    }) && matches!(method, "read" | "write" | "write_all") {
+        return args.iter().all(|arg| {
+            arg.label.is_none() && expr_in_subset(&arg.expr, cx, locals)
+        }) && expr_in_subset(receiver, cx, locals);
+    }
     // Shape (a): the sema-inserted `.clone()`. It takes no args; the receiver is an
     // owning field read / borrowed value, which must itself be in-subset. The AST
     // path emits `(recv).clone()` unconditionally (no `recv_type` needed) — match it.

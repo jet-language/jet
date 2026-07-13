@@ -25,6 +25,8 @@ pub const DECODE: &str = "Decode";
 /// internal codegen name (never spelled by a user), so renaming it bought
 /// nothing and would have touched every `Prelude/Core.rs` blanket impl.
 pub const RENDERABLE: &str = "Renderable";
+pub const IO_READER: &str = "Reader";
+pub const IO_WRITER: &str = "Writer";
 
 pub const BUILTIN_TRAITS: &[&str] = &[
     PRINTABLE, EQUATABLE, COMPARABLE, SERIALIZE, ENCODE, DECODE, RENDERABLE,
@@ -46,6 +48,8 @@ pub fn rust_trait_bound(trait_name: &str) -> Option<&'static str> {
         ENCODE => Some("user_Encode"),
         DECODE => Some("user_Decode"),
         RENDERABLE => Some("JetDisplay"),
+        IO_READER => Some("JetIoReader"),
+        IO_WRITER => Some("JetIoWriter"),
         _ => None,
     }
 }
@@ -249,7 +253,9 @@ pub fn rust_type_param_list(
                 .bounds
                 .iter()
                 .filter_map(|b| {
-                    if is_builtin_trait(b) {
+                    if matches!(b.as_str(), IO_READER | IO_WRITER) {
+                        rust_trait_bound(b).map(str::to_string)
+                    } else if is_builtin_trait(b) {
                         rust_trait_bound(b).map(str::to_string)
                     } else {
                         Some(user_trait_rust(b))
@@ -260,6 +266,9 @@ pub fn rust_type_param_list(
                 for b in ex {
                     let rb = match b.as_str() {
                         "Clone" | "JetShow" | "JetDebug" => b.clone(),
+                        _ if matches!(b.as_str(), IO_READER | IO_WRITER) => {
+                            rust_trait_bound(b).unwrap_or("").to_string()
+                        }
                         _ if is_builtin_trait(b) => rust_trait_bound(b).unwrap_or("").to_string(),
                         _ => user_trait_rust(b),
                     };
@@ -612,7 +621,18 @@ pub fn e0909(chain: &str, span: Span) -> Diagnostic {
 pub fn rust_extra_clone_bounds(params: &[TypeParam]) -> HashMap<String, Vec<String>> {
     params
         .iter()
-        .map(|p| (p.name.clone(), vec!["Clone".to_string()]))
+        .map(|p| {
+            let bounds = if p
+                .bounds
+                .iter()
+                .any(|b| matches!(b.as_str(), IO_READER | IO_WRITER))
+            {
+                Vec::new()
+            } else {
+                vec!["Clone".to_string()]
+            };
+            (p.name.clone(), bounds)
+        })
         .collect()
 }
 

@@ -1532,12 +1532,61 @@ fn run() {
     server.cancel()
     server.join()
 }
+
 "#,
         &[],
         None,
     );
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(stdout, "tcp read cancelled\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn core_net_tcp_implements_nominal_io_reader_writer() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_core_net_io_contract_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "net_io_contract",
+        r#"
+use core.net as net
+use core.tasks as tasks
+
+fn receive_four<T: Reader>(&stream: T) -> [U8] ? IOError {
+    return stream.read(4)
+}
+
+fn send_four<T: Writer>(&stream: T) -> Int ? IOError {
+    stream.write_all([1, 2, 3, 4])?
+    return ok(4)
+}
+
+fn run() {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    typed_address :: net.listener_local_socket_addr(listener) ?? panic("address")
+    address :: net.socket_to_string(typed_address)
+    server :: tasks.spawn(take(listener) () => {
+        stream := net.tcp_accept(listener) ?? panic("accept")
+        bytes :: receive_four(&stream) ?? panic("read")
+        print(bytes.len())
+    })
+    client := net.tcp_connect(address) ?? panic("connect")
+    count :: send_four(&client) ?? panic("write")
+    print(count)
+    client.close() ?? panic("close")
+    server.join()
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, "4\n4\n");
     let _ = fs::remove_dir_all(&dir);
 }
 

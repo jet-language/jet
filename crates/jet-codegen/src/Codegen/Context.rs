@@ -1140,11 +1140,19 @@ pub(crate) fn rust_param_type(cx: &Cx, convention: AccessConvention, ty: &Type) 
             AccessConvention::Move => base,
         };
     }
-    // c148: type-var params are by-value — single-char heuristic + current_type_params.
+    // Type parameters obey the same explicit access convention as concrete
+    // types. D-NETIO-CONTRACT2 relies on `&stream: T` becoming `&mut T`;
+    // forcing every generic parameter by value would move non-cloneable handles.
     if matches!(ty, Type::Named(n) if Generics::is_type_var_name(n)
         || cx.current_type_params.borrow().contains(n.as_str()))
     {
-        return base;
+        return match convention {
+            AccessConvention::Read | AccessConvention::Share | AccessConvention::Raw => {
+                format!("&{base}")
+            }
+            AccessConvention::Write => format!("&mut {base}"),
+            AccessConvention::Move => base,
+        };
     }
     if matches!(ty, Type::Fn { .. }) {
         return base;
@@ -1282,19 +1290,12 @@ pub(crate) fn build_cx_items(
     for item in items {
         match item {
             Item::Func(f) => {
-                let type_params: HashSet<String> =
-                    f.type_params.iter().map(|p| p.name.clone()).collect();
                 cx.sigs.insert(
                     f.name.clone(),
                     f.params
                         .iter()
                         .map(|p| {
-                            let conv = if matches!(&p.ty, Type::Named(n) if type_params.contains(n))
-                            {
-                                AccessConvention::Move
-                            } else {
-                                p.convention
-                            };
+                            let conv = p.convention;
                             let ty = if p.variadic {
                                 Type::List(Box::new(p.ty.clone()))
                             } else {

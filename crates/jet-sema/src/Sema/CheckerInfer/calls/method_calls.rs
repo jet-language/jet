@@ -2116,10 +2116,15 @@ impl<'a> Checker<'a> {
                                 self.diags.push(e0901(method, trait_name, span));
                             }
                             *recv_type_out = Some(n.clone());
-                            for arg in args.iter_mut() {
+                            for (arg, param) in args.iter_mut().zip(msig.params.iter().skip(1)) {
+                                arg.convention = param.convention;
+                                let old = self.expected_type.replace(param.ty.clone());
                                 self.infer(&mut arg.expr);
+                                self.expected_type = old;
                             }
-                            return msig.return_type.clone();
+                            let ret = msig.return_type.clone();
+                            *resolved_ret_out = ret.clone();
+                            return ret;
                         }
                     }
                 }

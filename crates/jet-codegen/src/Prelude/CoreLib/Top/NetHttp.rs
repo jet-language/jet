@@ -15,6 +15,37 @@ pub struct JetTcpStream {
     write_timeout_ms: Option<i64>,
 }
 
+// D-NETIO-CONTRACT2=B: one nominal byte-stream contract. Network-specific
+// state stays on JetTcpStream; generic consumers see only IOError.
+trait JetIoReader {
+    fn read(&mut self, limit: i64) -> Result<Vec<u8>, jet_std::IoError>;
+}
+
+trait JetIoWriter {
+    fn write(&mut self, bytes: &Vec<u8>) -> Result<i64, jet_std::IoError>;
+    fn write_all(&mut self, bytes: &Vec<u8>) -> Result<(), jet_std::IoError>;
+}
+
+fn jet_net_to_io_error(error: JetNetError) -> jet_std::IoError {
+    jet_std::IoError::Other { message: error.jet_show() }
+}
+
+impl JetIoReader for JetTcpStream {
+    fn read(&mut self, limit: i64) -> Result<Vec<u8>, jet_std::IoError> {
+        jet_net_tcp_read_bytes(self, limit).map_err(jet_net_to_io_error)
+    }
+}
+
+impl JetIoWriter for JetTcpStream {
+    fn write(&mut self, bytes: &Vec<u8>) -> Result<i64, jet_std::IoError> {
+        jet_net_tcp_write_bytes(self, bytes).map_err(jet_net_to_io_error)
+    }
+
+    fn write_all(&mut self, bytes: &Vec<u8>) -> Result<(), jet_std::IoError> {
+        jet_net_tcp_write_all_bytes(self, bytes).map_err(jet_net_to_io_error)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct JetNetErrorDetail {
     operation: String,

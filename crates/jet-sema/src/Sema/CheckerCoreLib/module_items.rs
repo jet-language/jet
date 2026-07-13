@@ -6,6 +6,8 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
     let module = normalized_module.as_str();
     let items: &[&str] = match module {
         "core.io" => &[
+            "Reader",
+            "Writer",
             "args",
             "input",
             "read_all_input",

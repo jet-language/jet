@@ -226,24 +226,15 @@ pub(crate) fn render_generics(type_params: &[crate::AST::TypeParam]) -> String {
     crate::Generics::rust_type_param_list(type_params, &extra)
 }
 
-/// c109 Phase 17: `param_place` for a (possibly generic) free function. A param whose type
-/// is a bare type-parameter name (`Type::Named(T)` where `T` is one of `type_params`) is
-/// forced to `Move` for the deref decision (it is by-value), mirroring `emit_func`'s
-/// `is_type_param` branch; any other param uses `param_place`'s convention-based deref.
+/// c109 Phase 17: `param_place` for a (possibly generic) free function.
+/// Generic parameters preserve their declared access convention exactly like
+/// concrete parameters; `&stream: T` therefore dereferences its Rust `&mut T`.
 pub(crate) fn param_place_generic(
     rust_name: &str,
     p: &Param,
-    type_params: &[crate::AST::TypeParam],
+    _type_params: &[crate::AST::TypeParam],
 ) -> String {
-    let is_type_param = type_params
-        .iter()
-        .any(|tp| matches!(&p.ty, Type::Named(n) if n == &tp.name));
-    if is_type_param {
-        // Forced `Move` → no deref (by-value), exactly `emit_func`.
-        rust_name.to_string()
-    } else {
-        param_place(rust_name, p)
-    }
+    param_place(rust_name, p)
 }
 
 /// c109 Phase 7: lower an inherent method (instance or static) of `type_name` to a

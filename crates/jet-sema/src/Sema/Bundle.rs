@@ -1812,6 +1812,7 @@ fn expand_alias(
         nested_traits.register_synthetic_rollback();
         nested_traits.register_synthetic_display_debug();
         nested_traits.register_synthetic_iter_index();
+        nested_traits.register_synthetic_io();
         for def in &nested_defs { nested_traits.register_items(&def.body, &mut Vec::new()); }
         let nested_enums: HashMap<String, bool> = nested_defs.iter().flat_map(|def| def.body.iter()).filter_map(|item| {
             let Item::Enum(def) = item else { return None };
@@ -2054,6 +2055,7 @@ pub(crate) fn expand_generic_module_aliases(
             traits.register_synthetic_rollback();
             traits.register_synthetic_display_debug();
             traits.register_synthetic_iter_index();
+            traits.register_synthetic_io();
             traits.register_items(&module.items, &mut Vec::new());
             let enums: HashMap<String, bool> = module
                 .items
@@ -2161,6 +2163,7 @@ pub(crate) fn expand_generic_module_aliases(
         traits.register_synthetic_rollback();
         traits.register_synthetic_display_debug();
         traits.register_synthetic_iter_index();
+        traits.register_synthetic_io();
         traits.register_items(&module.items,&mut Vec::new());
         let enums:HashMap<String,bool>=module.items.iter().filter_map(|item|if let Item::Enum(def)=item{Some((def.name.clone(),def.variants.iter().all(|v|matches!(v.payload,VariantPayload::Unit))))}else{None}).collect();
         let funcs:HashMap<String,&Func>=module.items.iter().filter_map(|item|if let Item::Func(f)=item{Some((f.name.clone(),f))}else{None}).collect();
@@ -3307,6 +3310,7 @@ pub(crate) fn check_bundle_opts(
         st.trait_reg.register_synthetic_rollback();
         st.trait_reg.register_synthetic_display_debug();
         st.trait_reg.register_synthetic_iter_index();
+        st.trait_reg.register_synthetic_io();
         st.trait_reg.register_items(&module.items, &mut diags);
         // D-SERDE: validate `@[Codable]`/`@[Encode]`/`@[Decode]` markers (E2407–E2412)
         // now that the trait registry resolves field/variant types — keeps the emitted

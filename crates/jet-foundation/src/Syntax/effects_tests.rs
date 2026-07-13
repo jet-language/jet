@@ -193,6 +193,10 @@ pub const TRAIT_ITERATOR: &str = "Iterator";
 pub const TRAIT_INDEX: &str = "Index";
 /// D-INDEX-HOOK: expert opt-in hook enabling `mytype[key] = v` write syntax.
 pub const TRAIT_INDEX_MUT: &str = "IndexMut";
+/// D-NETIO-CONTRACT2=B: nominal byte-stream read contract in `core.io`.
+pub const TRAIT_IO_READER: &str = "Reader";
+/// D-NETIO-CONTRACT2=B: nominal byte-stream write contract in `core.io`.
+pub const TRAIT_IO_WRITER: &str = "Writer";
 /// D-DISPLAYDBG2: closed interpolation selector spelling after `@`.
 pub const INTERP_SELECTOR_DEBUG: &str = "Debug";
 /// D-DEBUG-REDACT / D-MARKERMOVE1 (contract plane, `@Redact`): hide a field

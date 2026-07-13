@@ -88,6 +88,27 @@ pub(crate) fn lower_method_call(
     cx: &Cx,
     env: &mut LowerEnv,
 ) -> TExpr {
+    if recv_type.as_ref().is_some_and(|name| {
+        cx.current_type_params.borrow().contains(name.as_str())
+    }) && matches!(method, "read" | "write" | "write_all") {
+        let arg_ty = if method == "read" {
+            Type::Int
+        } else {
+            Type::List(Box::new(Type::IntN { signed: false, bits: 8 }))
+        };
+        let recv = lower_expr(receiver, cx, env);
+        let targs = args.iter().map(|arg| {
+            lower_one_call_arg(arg, Some((arg.convention, arg_ty.clone())), env, cx)
+        }).collect();
+        return TExpr {
+            ty: resolved_ret.cloned().unwrap_or_else(unit_type),
+            kind: TExprKind::MethodCall {
+                recv: Box::new(recv),
+                method_rust: method.to_string(),
+                args: targs,
+            },
+        };
+    }
     // D-NURSERY1/A: from `[Task<T>]` list type extract `T` (the joined result type).
     fn taskgroup_result_elem(tasks: &TExpr) -> Type {
         match &tasks.ty {

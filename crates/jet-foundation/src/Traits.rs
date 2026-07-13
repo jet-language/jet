@@ -767,6 +767,64 @@ impl TraitRegistry {
         );
     }
 
+    /// D-NETIO-CONTRACT2=B: register one nominal byte-stream contract and the
+    /// compiler-owned TCP implementation. Runtime methods live on the same
+    /// `JetTcpStream`; this metadata is the sema half of that implementation.
+    pub fn register_synthetic_io(&mut self) {
+        let dummy = Span { start: 0, end: 0 };
+        let io_error = Type::Named(Syntax::TYPE_IO_ERROR.to_string());
+        let bytes = Type::List(Box::new(Type::IntN { signed: false, bits: 8 }));
+        let write_self = crate::AST::Param {
+            name: Syntax::KW_SELF.to_string(),
+            name_span: dummy,
+            ty: Type::Named(String::new()),
+            ty_span: dummy,
+            convention: AccessConvention::Write,
+            default: None,
+            variadic: false,
+            variadic_bound_list: None,
+        };
+        if !self.traits.contains_key(Syntax::TRAIT_IO_READER) {
+            let mut methods = HashMap::new();
+            methods.insert("read".to_string(), TraitMethodSig {
+                name: "read".to_string(), name_span: dummy,
+                params: vec![write_self.clone(), crate::AST::Param {
+                    name: "limit".to_string(), name_span: dummy, ty: Type::Int,
+                    ty_span: dummy, convention: AccessConvention::Move,
+                    default: None, variadic: false, variadic_bound_list: None,
+                }],
+                return_type: Some(Type::Result { ok: Box::new(bytes.clone()), err: Box::new(io_error.clone()) }),
+                span: dummy, default_body: None, is_pure: false, declared_effects: None,
+            });
+            self.local_traits.insert(Syntax::TRAIT_IO_READER.to_string());
+            self.traits.insert(Syntax::TRAIT_IO_READER.to_string(), TraitInfo { methods, assoc_types: Vec::new(), span: dummy });
+        }
+        if !self.traits.contains_key(Syntax::TRAIT_IO_WRITER) {
+            let bytes_param = crate::AST::Param {
+                name: "bytes".to_string(), name_span: dummy, ty: bytes,
+                ty_span: dummy, convention: AccessConvention::Read,
+                default: None, variadic: false, variadic_bound_list: None,
+            };
+            let mut methods = HashMap::new();
+            methods.insert("write".to_string(), TraitMethodSig {
+                name: "write".to_string(), name_span: dummy,
+                params: vec![write_self.clone(), bytes_param.clone()],
+                return_type: Some(Type::Result { ok: Box::new(Type::Int), err: Box::new(io_error.clone()) }),
+                span: dummy, default_body: None, is_pure: false, declared_effects: None,
+            });
+            methods.insert("write_all".to_string(), TraitMethodSig {
+                name: "write_all".to_string(), name_span: dummy,
+                params: vec![write_self, bytes_param],
+                return_type: Some(Type::Result { ok: Box::new(Type::Named("Unit".to_string())), err: Box::new(io_error) }),
+                span: dummy, default_body: None, is_pure: false, declared_effects: None,
+            });
+            self.local_traits.insert(Syntax::TRAIT_IO_WRITER.to_string());
+            self.traits.insert(Syntax::TRAIT_IO_WRITER.to_string(), TraitInfo { methods, assoc_types: Vec::new(), span: dummy });
+        }
+        self.trait_impls.insert(("TcpStream".to_string(), Syntax::TRAIT_IO_READER.to_string()));
+        self.trait_impls.insert(("TcpStream".to_string(), Syntax::TRAIT_IO_WRITER.to_string()));
+    }
+
     /// D-ITER-HOOK / D-INDEX-HOOK: register Iterable/Iterator/Index/IndexMut hooks.
     pub fn register_synthetic_iter_index(&mut self) {
         let dummy = Span { start: 0, end: 0 };
