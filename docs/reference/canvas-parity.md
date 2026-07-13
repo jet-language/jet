@@ -79,6 +79,7 @@ contract; it does not mean every form has a bespoke graph gesture. Status values
 
 - [Expr::Str] status=graph literal/expression node.
 - [Expr::StrMatchLit] status=readonly pattern literal, source edits.
+- [Expr::BinMatchLit] status=readonly pattern literal, source edits.
 - [Expr::Int] status=graph literal node.
 - [Expr::Float] status=graph literal node.
 - [Expr::Bool] status=graph literal node.
@@ -155,6 +156,7 @@ contract; it does not mean every form has a bespoke graph gesture. Status values
 - [Pattern::Or] status=graph source-backed or-pattern detail.
 - [Pattern::Struct] status=graph struct pattern detail.
 - [Pattern::StrMatch] status=readonly string-match pattern, source edits.
+- [Pattern::BinMatch] status=readonly binary-match pattern, source edits.
 
 ## Binding Patterns
 
