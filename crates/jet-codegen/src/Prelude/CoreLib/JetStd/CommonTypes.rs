@@ -98,7 +98,27 @@
         pub(crate) finished: bool,
     }
     pub struct XMLReader { _private: () } pub struct XMLWriter { _private: () }
-    pub struct CBORReader { _private: () } pub struct CBORWriter { _private: () }
+    pub struct CBORReader {
+        pub(crate) input: super::JetFileReader,
+        pub(crate) limits: EncodingLimits,
+        pub(crate) total: i64,
+        pub(crate) terminal: Option<EncodingError>,
+        pub(crate) eof: bool,
+        pub(crate) root_done: bool,
+        pub(crate) lookahead: Option<u8>,
+        pub(crate) frames: Vec<super::JetCborReadFrame>,
+        pub(crate) retained: usize,
+    }
+    pub struct CBORWriter {
+        pub(crate) output: super::JetFileWriter,
+        pub(crate) limits: EncodingLimits,
+        pub(crate) terminal: Option<EncodingError>,
+        pub(crate) total: i64,
+        pub(crate) frames: Vec<super::JetCborWriteFrame>,
+        pub(crate) root_written: bool,
+        pub(crate) finished: bool,
+        pub(crate) retained: usize,
+    }
 
     #[derive(Clone, Debug, PartialEq)]
     pub struct ProcessSpec {

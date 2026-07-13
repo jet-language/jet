@@ -107,7 +107,7 @@ impl<'a> Checker<'a> {
             }
             let sig = core_fixed_sig(module, name);
             match (module, name) {
-                ("core.encoding.json" | "core.encoding.jsonl" | "core.encoding.csv", "reader" | "writer") => {
+                ("core.encoding.json" | "core.encoding.jsonl" | "core.encoding.csv" | "core.encoding.cbor", "reader" | "writer") => {
                     let max = if module == "core.encoding.json" && name == "writer" { 3 } else { 2 };
                     let (min, max) = (1, max);
                     if !(min..=max).contains(&args.len()) {

@@ -627,6 +627,14 @@ pub fn core_fixed_sig(
             vec![(read, Type::List(Box::new(u8_ty())))],
             Some(result_ty(json.clone(), Type::String)),
         )),
+        ("core.encoding.cbor", "reader") => Some((
+            vec![(moved, Type::Named("FileReader".to_string())), (read, Type::Named("EncodingLimits".to_string()))],
+            Some(result_ty(Type::Named("CBORReader".to_string()), encoding_error_ty())),
+        )),
+        ("core.encoding.cbor", "writer") => Some((
+            vec![(moved, Type::Named("FileWriter".to_string())), (read, Type::Named("EncodingLimits".to_string()))],
+            Some(result_ty(Type::Named("CBORWriter".to_string()), encoding_error_ty())),
+        )),
         // E2-M7: streaming file handles (D-IO2, files.open / files.create).
         ("core.files", "open" | "append") => Some((
             vec![(read, string.clone())],

@@ -1224,6 +1224,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::CSVWriterWrite => format!("{}jet_enc_csv_writer_write(&mut ({}), {})", root, recv, a(0)),
                 THandleOp::CSVWriterFlush => format!("{}jet_enc_csv_writer_flush(&mut ({}))", root, recv),
                 THandleOp::CSVWriterFinish => format!("{}jet_enc_csv_writer_finish(&mut ({}))", root, recv),
+                THandleOp::CBORReaderNext => format!("{}jet_enc_cbor_reader_next(&mut ({}))", root, recv),
+                THandleOp::CBORWriterWrite => format!("{}jet_enc_cbor_writer_write(&mut ({}), {})", root, recv, a(0)),
+                THandleOp::CBORWriterFlush => format!("{}jet_enc_cbor_writer_flush(&mut ({}))", root, recv),
+                THandleOp::CBORWriterFinish => format!("{}jet_enc_cbor_writer_finish(&mut ({}))", root, recv),
                 THandleOp::StdinReadLine => {
                     format!("{}jet_std_io_stdin_read_line(&mut ({}))", root, recv)
                 }

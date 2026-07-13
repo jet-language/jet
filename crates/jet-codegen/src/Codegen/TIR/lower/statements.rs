@@ -314,6 +314,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     || n == "JSONReader" || n == "JSONWriter"
                     || n == "JSONLReader" || n == "JSONLWriter"
                     || n == "CSVReader" || n == "CSVWriter"
+                    || n == "CBORReader" || n == "CBORWriter"
                     || n == "Stdout" || n == "Stderr"
                     || n == "TcpStream" || n == "UnixStream" || n == "HttpRouter"
                     || n == "Arena" || n == "Bump" || n == "Pool" || n == "Fixed"

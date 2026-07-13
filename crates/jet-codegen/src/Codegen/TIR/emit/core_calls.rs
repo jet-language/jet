@@ -882,6 +882,14 @@ pub(crate) fn emit_tir_core_call(
         ("core.encoding.cbor", "encode") => {
             format!("{}(&({}))", helper("jet_std_cbor_encode"), arg(0))
         }
+        ("core.encoding.cbor", "reader") => {
+            let limits = if args.len() > 1 { arg(1) } else { format!("{}jet_std::EncodingLimits::safe()", cx.root_prefix) };
+            format!("{}({}, {})", helper("jet_enc_cbor_reader"), arg(0), limits)
+        }
+        ("core.encoding.cbor", "writer") => {
+            let limits = if args.len() > 1 { arg(1) } else { format!("{}jet_std::EncodingLimits::safe()", cx.root_prefix) };
+            format!("{}({}, {})", helper("jet_enc_cbor_writer"), arg(0), limits)
+        }
         ("core.encoding.cbor", "decode") => {
             format!("{}(&({}))", helper("jet_std_cbor_decode"), arg(0))
         }

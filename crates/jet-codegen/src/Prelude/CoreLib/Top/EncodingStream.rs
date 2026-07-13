@@ -1382,3 +1382,155 @@ impl jet_std::CSVWriter {
 fn jet_enc_csv_writer_write(writer: &mut jet_std::CSVWriter, row: Vec<String>) -> Result<(), jet_std::EncodingError> { writer.write_record(row) }
 fn jet_enc_csv_writer_flush(writer: &mut jet_std::CSVWriter) -> Result<(), jet_std::EncodingError> { writer.flush_output() }
 fn jet_enc_csv_writer_finish(writer: &mut jet_std::CSVWriter) -> Result<(), jet_std::EncodingError> { writer.finish_output() }
+
+enum JetCborReadFrame {
+    Array { remaining: Option<u64>, index: u64 },
+    Object { remaining: Option<u64>, expecting_key: bool, key: Option<String>, keys: Vec<String> },
+}
+
+enum JetCborWriteFrame {
+    Array { items: Vec<Vec<u8>> },
+    Object { entries: Vec<(Vec<u8>, Vec<u8>)>, key: Option<Vec<u8>> },
+}
+
+fn jet_cbor_stream_error(kind: jet_std::EncodingErrorKind, offset: i64, path: String, reason: impl Into<String>) -> jet_std::EncodingError {
+    jet_std::EncodingError { format: jet_std::EncodingFormat::CBOR, kind, byte_offset: offset, line: None, column: None, path, reason: reason.into(), cause: None }
+}
+
+fn jet_cbor_stream_io(error: std::io::Error, offset: i64, path: String) -> jet_std::EncodingError {
+    let mut out = jet_cbor_stream_error(jet_std::EncodingErrorKind::IO, offset, path, "file IO failed");
+    out.cause = Some(jet_std::EncodingCause { kind: format!("{:?}", error.kind()), os_code: error.raw_os_error().map(i64::from), message: error.to_string() });
+    out
+}
+
+fn jet_enc_cbor_reader(input: JetFileReader, limits: jet_std::EncodingLimits) -> Result<jet_std::CBORReader, jet_std::EncodingError> {
+    jet_encoding_validate_limits(&limits).map_err(|mut e| { e.format = jet_std::EncodingFormat::CBOR; e.line = None; e.column = None; e })?;
+    Ok(jet_std::CBORReader { input, limits, total: 0, terminal: None, eof: false, root_done: false, lookahead: None, frames: Vec::new(), retained: 0 })
+}
+
+impl jet_std::CBORReader {
+    fn fail<T>(&mut self, error: jet_std::EncodingError) -> Result<T, jet_std::EncodingError> { self.terminal = Some(error.clone()); Err(error) }
+    fn path(&self) -> String {
+        let mut path = "$".to_string();
+        for frame in &self.frames {
+            match frame {
+                JetCborReadFrame::Array { index, .. } => path.push_str(&format!("[{index}]")),
+                JetCborReadFrame::Object { key: Some(key), expecting_key: false, .. } => path.push_str(&format!("[{:?}]", key)),
+                _ => {}
+            }
+        }
+        path
+    }
+    fn raw(&mut self) -> Result<Option<u8>, jet_std::EncodingError> {
+        if let Some(byte) = self.lookahead.take() { return Ok(Some(byte)); }
+        if self.limits.max_total_bytes.is_some_and(|n| self.total >= n) {
+            return Err(jet_cbor_stream_error(jet_std::EncodingErrorKind::Limit, self.total, self.path(), format!("max_total_bytes {} exceeded", self.limits.max_total_bytes.unwrap())));
+        }
+        let mut byte = [0u8; 1];
+        match std::io::Read::read(&mut self.input.inner, &mut byte) {
+            Ok(0) => Ok(None),
+            Ok(_) => { self.total += 1; Ok(Some(byte[0])) }
+            Err(error) => Err(jet_cbor_stream_io(error, self.total, self.path())),
+        }
+    }
+    fn required(&mut self, start: i64, reason: &str) -> Result<u8, jet_std::EncodingError> {
+        self.raw()?.ok_or_else(|| jet_cbor_stream_error(jet_std::EncodingErrorKind::Truncated, self.total.max(start), self.path(), reason))
+    }
+    fn arg(&mut self, add: u8, start: i64) -> Result<Option<u64>, jet_std::EncodingError> {
+        let need = match add { n @ 0..=23 => return Ok(Some(n as u64)), 24 => 1, 25 => 2, 26 => 4, 27 => 8, 31 => return Ok(None), _ => return Err(jet_cbor_stream_error(jet_std::EncodingErrorKind::Syntax, start, self.path(), format!("reserved CBOR additional value {add}"))) };
+        let mut value = 0u64;
+        for _ in 0..need { value = (value << 8) | self.required(start, "CBOR argument ended before all bytes were present")? as u64; }
+        let non_shortest = matches!(add, 24) && value < 24
+            || matches!(add, 25) && value <= u8::MAX as u64
+            || matches!(add, 26) && value <= u16::MAX as u64
+            || matches!(add, 27) && value <= u32::MAX as u64;
+        if non_shortest { return Err(jet_cbor_stream_error(jet_std::EncodingErrorKind::Syntax, start, self.path(), "non-shortest CBOR argument is not accepted by stream mode")); }
+        Ok(Some(value))
+    }
+    fn payload(&mut self, len: u64, start: i64) -> Result<Vec<u8>, jet_std::EncodingError> {
+        if len > self.limits.max_item_bytes as u64 || self.retained.saturating_add(len as usize) > self.limits.max_item_bytes as usize {
+            return Err(jet_cbor_stream_error(jet_std::EncodingErrorKind::Limit, start, self.path(), format!("max_item_bytes {} exceeded", self.limits.max_item_bytes)));
+        }
+        let mut out = Vec::new();
+        out.try_reserve_exact(len as usize).map_err(|_| jet_cbor_stream_error(jet_std::EncodingErrorKind::Limit, start, self.path(), "CBOR payload allocation failed"))?;
+        for _ in 0..len { out.push(self.required(start, "CBOR payload ended before its declared length")?); }
+        Ok(out)
+    }
+    fn string(&mut self, major: u8, add: u8, start: i64) -> Result<Vec<u8>, jet_std::EncodingError> {
+        if let Some(len) = self.arg(add, start)? { return self.payload(len, start); }
+        if self.frames.len() + 1 > self.limits.max_depth as usize { return Err(jet_cbor_stream_error(jet_std::EncodingErrorKind::Limit, start, self.path(), format!("max_depth {} exceeded", self.limits.max_depth))); }
+        let mut out = Vec::new();
+        loop {
+            let chunk_start = self.total;
+            let head = self.required(chunk_start, "indefinite CBOR string ended before break")?;
+            if head == 0xff { break; }
+            if head >> 5 != major || head & 31 == 31 { return Err(jet_cbor_stream_error(jet_std::EncodingErrorKind::Syntax, chunk_start, self.path(), "indefinite CBOR string contains a wrong or indefinite chunk")); }
+            let len = self.arg(head & 31, chunk_start)?.unwrap();
+            if out.len().saturating_add(len as usize) > self.limits.max_item_bytes as usize { return Err(jet_cbor_stream_error(jet_std::EncodingErrorKind::Limit, chunk_start, self.path(), format!("max_item_bytes {} exceeded", self.limits.max_item_bytes))); }
+            let chunk = self.payload(len, chunk_start)?;
+            out.extend_from_slice(&chunk);
+        }
+        Ok(out)
+    }
+    fn close_event(&mut self) -> Result<Option<jet_std::DataEvent>, jet_std::EncodingError> {
+        let close = match self.frames.last() {
+            Some(JetCborReadFrame::Array { remaining: Some(0), .. }) => Some(false),
+            Some(JetCborReadFrame::Object { remaining: Some(0), expecting_key: true, .. }) => Some(true),
+            Some(JetCborReadFrame::Array { remaining: None, .. }) => { let b = self.raw()?; if b == Some(0xff) { Some(false) } else { self.lookahead = b; None } }
+            Some(JetCborReadFrame::Object { remaining: None, expecting_key: true, .. }) => { let b = self.raw()?; if b == Some(0xff) { Some(true) } else { self.lookahead = b; None } }
+            _ => None,
+        };
+        if let Some(object) = close { if let Some(JetCborReadFrame::Object { keys, .. }) = self.frames.pop() { self.retained = self.retained.saturating_sub(keys.iter().map(String::len).sum::<usize>()); } self.complete_parent(); if self.frames.is_empty() { self.root_done = true; } return Ok(Some(if object { jet_std::DataEvent::ObjectEnd } else { jet_std::DataEvent::ArrayEnd })); }
+        Ok(None)
+    }
+    fn complete_parent(&mut self) {
+        if let Some(frame) = self.frames.last_mut() {
+            match frame {
+                JetCborReadFrame::Array { remaining, index } => { if let Some(n) = remaining { *n = n.saturating_sub(1); } *index += 1; }
+                JetCborReadFrame::Object { remaining, expecting_key, key, .. } if !*expecting_key => { if let Some(n) = remaining { *n = n.saturating_sub(1); } *expecting_key = true; *key = None; }
+                _ => {}
+            }
+        }
+    }
+    fn next_event(&mut self) -> Result<Option<jet_std::DataEvent>, jet_std::EncodingError> {
+        if let Some(error) = &self.terminal { return Err(error.clone()); }
+        if self.eof { return Ok(None); }
+        if let Some(event) = self.close_event()? { return Ok(Some(event)); }
+        if self.root_done {
+            match self.raw() { Ok(None) => { self.eof = true; return Ok(None); }, Ok(Some(_)) => return self.fail(jet_cbor_stream_error(jet_std::EncodingErrorKind::Syntax, self.total - 1, "$".to_string(), "trailing CBOR data after root value")), Err(e) => return self.fail(e) }
+        }
+        let start = self.total;
+        let head = match self.raw() { Ok(Some(b)) => b, Ok(None) if self.frames.is_empty() => { self.eof = true; return Ok(None); }, Ok(None) => return self.fail(jet_cbor_stream_error(jet_std::EncodingErrorKind::Truncated, self.total, self.path(), "CBOR container ended before all items were present")), Err(e) => return self.fail(e) };
+        if head == 0xff { return self.fail(jet_cbor_stream_error(jet_std::EncodingErrorKind::Syntax, start, self.path(), "CBOR break outside an indefinite container")); }
+        let major = head >> 5; let add = head & 31;
+        let expecting_key = matches!(self.frames.last(), Some(JetCborReadFrame::Object { expecting_key: true, .. }));
+        if expecting_key && major != 3 { return self.fail(jet_cbor_stream_error(jet_std::EncodingErrorKind::Unsupported, start, self.path(), "CBOR map key must be text")); }
+        let event = match major {
+            0 | 1 => { let Some(n) = self.arg(add, start)? else { return self.fail(jet_cbor_stream_error(jet_std::EncodingErrorKind::Syntax, start, self.path(), "indefinite CBOR integer")); }; let value = if major == 0 { i64::try_from(n).ok() } else { i64::try_from(n).ok().and_then(|n| n.checked_neg()?.checked_sub(1)) }; let Some(value) = value else { return self.fail(jet_cbor_stream_error(jet_std::EncodingErrorKind::Unsupported, start, self.path(), "CBOR integer is outside Jet Int")); }; jet_std::DataEvent::Int(value) }
+            2 | 3 => { let bytes = match self.string(major, add, start) { Ok(v) => v, Err(e) => return self.fail(e) }; if major == 2 { jet_std::DataEvent::Bytes(bytes) } else { let text = match String::from_utf8(bytes) { Ok(v) => v, Err(_) => return self.fail(jet_cbor_stream_error(jet_std::EncodingErrorKind::Syntax, start, self.path(), "CBOR text is not UTF-8")) }; if expecting_key { if self.retained.saturating_add(text.len()) > self.limits.max_item_bytes as usize { return self.fail(jet_cbor_stream_error(jet_std::EncodingErrorKind::Limit, start, self.path(), format!("max_item_bytes {} exceeded", self.limits.max_item_bytes))); } if let Some(JetCborReadFrame::Object { expecting_key, key, keys, .. }) = self.frames.last_mut() { if keys.contains(&text) { return self.fail(jet_cbor_stream_error(jet_std::EncodingErrorKind::Unsupported, start, self.path(), "duplicate CBOR text map key")); } self.retained = self.retained.saturating_add(text.len()); keys.push(text.clone()); *key = Some(text.clone()); *expecting_key = false; } return Ok(Some(jet_std::DataEvent::Key(text))); } jet_std::DataEvent::Text(text) } }
+            4 | 5 => { if self.frames.len() + 1 > self.limits.max_depth as usize { return self.fail(jet_cbor_stream_error(jet_std::EncodingErrorKind::Limit, start, self.path(), format!("max_depth {} exceeded", self.limits.max_depth))); } let count = match self.arg(add, start) { Ok(v) => v, Err(e) => return self.fail(e) }; if major == 4 { self.frames.push(JetCborReadFrame::Array { remaining: count, index: 0 }); jet_std::DataEvent::ArrayStart } else { self.frames.push(JetCborReadFrame::Object { remaining: count, expecting_key: true, key: None, keys: Vec::new() }); jet_std::DataEvent::ObjectStart } }
+            6 => return self.fail(jet_cbor_stream_error(jet_std::EncodingErrorKind::Unsupported, start, self.path(), "CBOR tags are outside DataEvent")),
+            7 => match add { 20 => jet_std::DataEvent::Bool(false), 21 => jet_std::DataEvent::Bool(true), 22 => jet_std::DataEvent::Null, 26 => { let mut b=[0u8;4]; for x in &mut b { *x=self.required(start,"truncated CBOR Float32")?; } jet_std::DataEvent::Float(f32::from_be_bytes(b) as f64) }, 27 => { let mut b=[0u8;8]; for x in &mut b { *x=self.required(start,"truncated CBOR Float64")?; } jet_std::DataEvent::Float(f64::from_be_bytes(b)) }, _ => return self.fail(jet_cbor_stream_error(jet_std::EncodingErrorKind::Unsupported, start, self.path(), format!("unsupported CBOR simple value {add}"))) },
+            _ => unreachable!(),
+        };
+        if !matches!(event, jet_std::DataEvent::ArrayStart | jet_std::DataEvent::ObjectStart) { self.complete_parent(); if self.frames.is_empty() { self.root_done = true; } }
+        Ok(Some(event))
+    }
+}
+
+fn jet_enc_cbor_reader_next(reader: &mut jet_std::CBORReader) -> Result<Option<jet_std::DataEvent>, jet_std::EncodingError> { reader.next_event() }
+
+fn jet_cbor_stream_len(out: &mut Vec<u8>, major: u8, n: u64) { if n < 24 { out.push((major << 5) | n as u8); } else if n <= 255 { out.extend_from_slice(&[(major << 5) | 24, n as u8]); } else if n <= 65535 { out.push((major << 5) | 25); out.extend_from_slice(&(n as u16).to_be_bytes()); } else if n <= u32::MAX as u64 { out.push((major << 5) | 26); out.extend_from_slice(&(n as u32).to_be_bytes()); } else { out.push((major << 5) | 27); out.extend_from_slice(&n.to_be_bytes()); } }
+fn jet_cbor_stream_scalar(event: jet_std::DataEvent) -> Result<Vec<u8>, jet_std::EncodingError> { let mut out=Vec::new(); match event { jet_std::DataEvent::Null=>out.push(0xf6), jet_std::DataEvent::Bool(false)=>out.push(0xf4), jet_std::DataEvent::Bool(true)=>out.push(0xf5), jet_std::DataEvent::Int(n) if n>=0=>jet_cbor_stream_len(&mut out,0,n as u64), jet_std::DataEvent::Int(n)=>jet_cbor_stream_len(&mut out,1,(-1-n) as u64), jet_std::DataEvent::Float(f)=>{out.push(0xfb);out.extend_from_slice(&f.to_be_bytes());}, jet_std::DataEvent::Text(s)=>{jet_cbor_stream_len(&mut out,3,s.len() as u64);out.extend_from_slice(s.as_bytes());}, jet_std::DataEvent::Bytes(b)=>{jet_cbor_stream_len(&mut out,2,b.len() as u64);out.extend_from_slice(&b);}, _=>return Err(jet_cbor_stream_error(jet_std::EncodingErrorKind::State,0,"$".to_string(),"CBOR container event reached scalar encoder")) }; Ok(out) }
+
+fn jet_enc_cbor_writer(output: JetFileWriter, limits: jet_std::EncodingLimits) -> Result<jet_std::CBORWriter, jet_std::EncodingError> { jet_encoding_validate_limits(&limits).map_err(|mut e|{e.format=jet_std::EncodingFormat::CBOR;e.line=None;e.column=None;e})?; Ok(jet_std::CBORWriter{output,limits,terminal:None,total:0,frames:Vec::new(),root_written:false,finished:false,retained:0}) }
+impl jet_std::CBORWriter {
+    fn fail<T>(&mut self,e:jet_std::EncodingError)->Result<T,jet_std::EncodingError>{self.terminal=Some(e.clone());Err(e)}
+    fn accept(&mut self, bytes:Vec<u8>)->Result<(),jet_std::EncodingError>{ let size=bytes.len(); if self.retained.saturating_add(size)>self.limits.max_item_bytes as usize{return self.fail(jet_cbor_stream_error(jet_std::EncodingErrorKind::Limit,self.total,"$".to_string(),format!("max_item_bytes {} exceeded",self.limits.max_item_bytes)));} if let Some(frame)=self.frames.last_mut(){match frame{JetCborWriteFrame::Array{items}=>items.push(bytes),JetCborWriteFrame::Object{entries,key}=>if let Some(k)=key.take(){entries.push((k,bytes))}else{return self.fail(jet_cbor_stream_error(jet_std::EncodingErrorKind::State,self.total,"$".to_string(),"CBOR object value written before Key"))}} self.retained=self.retained.saturating_add(size);return Ok(());} if self.root_written{return self.fail(jet_cbor_stream_error(jet_std::EncodingErrorKind::State,self.total,"$".to_string(),"CBOR writer accepts exactly one root"));} if self.limits.max_total_bytes.is_some_and(|n|self.total.saturating_add(size as i64)>n){return self.fail(jet_cbor_stream_error(jet_std::EncodingErrorKind::Limit,self.total,"$".to_string(),format!("max_total_bytes {} exceeded",self.limits.max_total_bytes.unwrap())));} if let Err(e)=std::io::Write::write_all(&mut self.output.inner,&bytes){return self.fail(jet_cbor_stream_io(e,self.total,"$".to_string()));} self.total+=size as i64;self.root_written=true;Ok(()) }
+    fn write_event(&mut self,event:jet_std::DataEvent)->Result<(),jet_std::EncodingError>{if let Some(e)=&self.terminal{return Err(e.clone())}if self.finished{return self.fail(jet_cbor_stream_error(jet_std::EncodingErrorKind::State,self.total,"$".to_string(),"write called after finish"));}match event{jet_std::DataEvent::ArrayStart=>{if self.frames.len()+1>self.limits.max_depth as usize{return self.fail(jet_cbor_stream_error(jet_std::EncodingErrorKind::Limit,self.total,"$".to_string(),format!("max_depth {} exceeded",self.limits.max_depth)));}self.frames.push(JetCborWriteFrame::Array{items:Vec::new()});Ok(())},jet_std::DataEvent::ObjectStart=>{if self.frames.len()+1>self.limits.max_depth as usize{return self.fail(jet_cbor_stream_error(jet_std::EncodingErrorKind::Limit,self.total,"$".to_string(),format!("max_depth {} exceeded",self.limits.max_depth)));}self.frames.push(JetCborWriteFrame::Object{entries:Vec::new(),key:None});Ok(())},jet_std::DataEvent::Key(k)=>{match self.frames.last_mut(){Some(JetCborWriteFrame::Object{key,entries})if key.is_none()=>{let mut encoded=Vec::new();jet_cbor_stream_len(&mut encoded,3,k.len()as u64);encoded.extend_from_slice(k.as_bytes());if entries.iter().any(|(old,_)|*old==encoded){return self.fail(jet_cbor_stream_error(jet_std::EncodingErrorKind::Unsupported,self.total,"$".to_string(),"duplicate CBOR text map key"));}*key=Some(encoded);Ok(())},_=>self.fail(jet_cbor_stream_error(jet_std::EncodingErrorKind::State,self.total,"$".to_string(),"Key outside CBOR object or before prior value"))}},jet_std::DataEvent::ArrayEnd=>{let Some(JetCborWriteFrame::Array{items})=self.frames.pop()else{return self.fail(jet_cbor_stream_error(jet_std::EncodingErrorKind::State,self.total,"$".to_string(),"ArrayEnd does not match open CBOR container"));};let mut out=Vec::new();jet_cbor_stream_len(&mut out,4,items.len()as u64);for item in items{out.extend_from_slice(&item);}self.accept(out)},jet_std::DataEvent::ObjectEnd=>{let Some(JetCborWriteFrame::Object{mut entries,key:None})=self.frames.pop()else{return self.fail(jet_cbor_stream_error(jet_std::EncodingErrorKind::State,self.total,"$".to_string(),"ObjectEnd does not match complete CBOR object"));};entries.sort_by(|a,b|a.0.cmp(&b.0));let mut out=Vec::new();jet_cbor_stream_len(&mut out,5,entries.len()as u64);for(k,v)in entries{out.extend_from_slice(&k);out.extend_from_slice(&v);}self.accept(out)},scalar=>match jet_cbor_stream_scalar(scalar){Ok(v)=>self.accept(v),Err(e)=>self.fail(e)}}}
+    fn flush_output(&mut self)->Result<(),jet_std::EncodingError>{if let Some(e)=&self.terminal{return Err(e.clone())}if let Err(e)=std::io::Write::flush(&mut self.output.inner){return self.fail(jet_cbor_stream_io(e,self.total,"$".to_string()));}Ok(())}
+    fn finish_output(&mut self)->Result<(),jet_std::EncodingError>{if let Some(e)=&self.terminal{return Err(e.clone())}if self.finished{return Ok(())}if !self.frames.is_empty()||!self.root_written{return self.fail(jet_cbor_stream_error(jet_std::EncodingErrorKind::State,self.total,"$".to_string(),"finish requires one complete CBOR root"));}self.flush_output()?;self.finished=true;Ok(())}
+}
+fn jet_enc_cbor_writer_write(writer:&mut jet_std::CBORWriter,event:jet_std::DataEvent)->Result<(),jet_std::EncodingError>{writer.write_event(event)}
+fn jet_enc_cbor_writer_flush(writer:&mut jet_std::CBORWriter)->Result<(),jet_std::EncodingError>{writer.flush_output()}
+fn jet_enc_cbor_writer_finish(writer:&mut jet_std::CBORWriter)->Result<(),jet_std::EncodingError>{writer.finish_output()}

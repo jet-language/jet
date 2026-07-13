@@ -1215,6 +1215,8 @@ impl<'a> Checker<'a> {
                         if let Some(arg) = args.first_mut() {
                             self.expect_core_arg("write", 0, &Type::List(Box::new(Type::String)), arg);
                         }
+                    } else if handle_ty == "CBORWriter" && method == "write" {
+                        if let Some(arg) = args.first_mut() { self.expect_core_arg("write", 0, &Type::Named("DataEvent".to_string()), arg); }
                     } else {
                         for a in args.iter_mut() { self.infer(&mut a.expr); }
                     }

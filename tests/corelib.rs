@@ -689,6 +689,138 @@ fn run() {{
     let _ = fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn cbor_stream_is_incremental_bounded_deterministic_and_terminal() {
+    let dir = std::env::temp_dir().join(format!("jet_cbor_stream_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let output = dir.join("output.cbor");
+    let indefinite = dir.join("indefinite.cbor");
+    let truncated = dir.join("truncated.cbor");
+    let half = dir.join("half.cbor");
+    let non_shortest = dir.join("non-shortest.cbor");
+    let nested = dir.join("nested.cbor");
+    fs::write(&indefinite, [0x9f, 0x01, 0x7f, 0x61, b'a', 0xff, 0x42, 0x01, 0x02, 0xff]).unwrap();
+    fs::write(&truncated, [0x63, b'a']).unwrap();
+    fs::write(&half, [0xf9, 0x3c, 0x00]).unwrap();
+    fs::write(&non_shortest, [0x18, 0x01]).unwrap();
+    fs::write(&nested, [0x81, 0x80]).unwrap();
+    let output_text = output.to_string_lossy().replace('\\', "\\\\");
+    let indefinite_text = indefinite.to_string_lossy().replace('\\', "\\\\");
+    let truncated_text = truncated.to_string_lossy().replace('\\', "\\\\");
+    let half_text = half.to_string_lossy().replace('\\', "\\\\");
+    let non_shortest_text = non_shortest.to_string_lossy().replace('\\', "\\\\");
+    let nested_text = nested.to_string_lossy().replace('\\', "\\\\");
+    let source = format!(r#"
+use core.encoding as encoding
+use core.encoding.cbor as cbor
+use core.files as files
+
+fn run() {{
+    output :: files.create("{output_text}") ?? panic("create")
+    writer :: cbor.writer(^output) ?? panic("writer")
+    writer.write(encoding.DataEvent.ObjectStart) ?? panic("start")
+    writer.write(encoding.DataEvent.Key("b")) ?? panic("key")
+    writer.write(encoding.DataEvent.Text("xy")) ?? panic("text")
+    writer.write(encoding.DataEvent.Key("a")) ?? panic("key")
+    writer.write(encoding.DataEvent.Int(1)) ?? panic("int")
+    writer.write(encoding.DataEvent.ObjectEnd) ?? panic("end")
+    writer.flush() ?? panic("flush")
+    writer.finish() ?? panic("finish")
+    writer.finish() ?? panic("finish twice")
+    whole_tree :: DataTree.Object(["b": DataTree.Text("xy"), "a": DataTree.Int(1)])
+    expected_whole: [U8] :: [162, 97, 97, 1, 97, 98, 98, 120, 121]
+    print(cbor.encode(whole_tree) == expected_whole)
+    after :: writer.write(encoding.DataEvent.Null)
+    if after == {{
+        ok(_) -> print(false)
+        err(writer_first) -> {{
+            again :: writer.flush()
+            if again == {{
+                ok(_) -> print(false)
+                err(writer_second) -> print(writer_first.reason == writer_second.reason)
+            }}
+        }}
+    }}
+
+    input :: files.open("{output_text}") ?? panic("open")
+    reader :: cbor.reader(^input) ?? panic("reader")
+    count := 0
+    loop count < 6 {{
+        event :: reader.next() ?? panic("next")
+        if event == {{
+            Val(_) -> count++
+            None -> print("early")
+        }}
+    }}
+    eof :: reader.next() ?? panic("eof")
+    if eof == {{
+        None -> print(count)
+        Val(_) -> print("late")
+    }}
+
+    indef_input :: files.open("{indefinite_text}") ?? panic("indef open")
+    indef_reader :: cbor.reader(^indef_input) ?? panic("indef reader")
+    indef_count := 0
+    loop indef_count < 5 {{
+        indef_event :: indef_reader.next() ?? panic("indef next")
+        if indef_event == {{
+            Val(_) -> indef_count++
+            None -> print("indef early")
+        }}
+    }}
+    print(indef_count)
+
+    half_input :: files.open("{half_text}") ?? panic("half open")
+    half_reader :: cbor.reader(^half_input) ?? panic("half reader")
+    if half_reader.next() == {{
+        ok(_) -> print(false)
+        err(half_error) -> print(half_error.reason == "unsupported CBOR simple value 25")
+    }}
+
+    short_input :: files.open("{non_shortest_text}") ?? panic("short open")
+    short_reader :: cbor.reader(^short_input) ?? panic("short reader")
+    if short_reader.next() == {{
+        ok(_) -> print(false)
+        err(short_error) -> print(short_error.reason == "non-shortest CBOR argument is not accepted by stream mode")
+    }}
+
+    depth_limits := encoding.EncodingLimits.safe()
+    depth_limits.max_depth = 1
+    nested_input :: files.open("{nested_text}") ?? panic("nested open")
+    nested_reader :: cbor.reader(^nested_input, depth_limits) ?? panic("nested reader")
+    root_event :: nested_reader.next() ?? panic("root array")
+    if nested_reader.next() == {{
+        ok(_) -> print(false)
+        err(depth_error) -> print(depth_error.reason == "max_depth 1 exceeded")
+    }}
+
+    bad_input :: files.open("{truncated_text}") ?? panic("bad open")
+    bad_reader :: cbor.reader(^bad_input) ?? panic("bad reader")
+    first_bad :: bad_reader.next()
+    if first_bad == {{
+        ok(_) -> print("missed")
+        err(bad_first) -> {{
+            second_bad :: bad_reader.next()
+            if second_bad == {{
+                ok(_) -> print("unlatched")
+                err(bad_second) -> {{
+                    print(bad_first.byte_offset)
+                    print(bad_first.path)
+                    print(bad_first.reason == bad_second.reason)
+                }}
+            }}
+        }}
+    }}
+}}
+"#);
+    let (code, stdout, stderr) = build_and_run(&dir, "cbor_stream", &source, &[], None);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(stdout, "true\ntrue\n6\n5\ntrue\ntrue\ntrue\n2\n$\ntrue\n");
+    assert_eq!(fs::read(&output).unwrap(), [0xa2, 0x61, b'a', 0x01, 0x61, b'b', 0x62, b'x', b'y']);
+    assert_eq!(stderr, "");
+    let _ = fs::remove_dir_all(&dir);
+}
+
 fn compile_temp(name: &str, src: &str) -> jet::CompileOutput {
     let dir = std::env::temp_dir().join(format!("jet_corelib_test_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
