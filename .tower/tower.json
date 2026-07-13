@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 528,
-    "rev": 4997,
+    "rev": 5001,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -4743,6 +4743,16 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-13",
+          "by": "codex-epoch3-306",
+          "text": "Review blocker fixed in 0be86ec3: new scheduler park API preserves vetted static wait identity; emitted prelude mirrors it; ProcessChild.wait parks as process wait. Exact AOT process_wait_observes_inherited_deadline now passes and asserts E3003 plus process wait. Bounded cranelift_three_way_differential_battery was invoked under 120s timeout; it printed test start but no completion result before harness termination, so not claimed green. Independent reviewer should rerun/diagnose that separate stall. No Windows scope added."
+        },
+        {
+          "at": "2026-07-13",
+          "by": "terra-306-final-reviewer",
+          "text": "Final verifier BLOCK: committed focused test fails. `nix develop -c cargo test --test corelib process_wait_observes_inherited_deadline -- --exact --nocapture` returns E3003 `deadline exceeded while waiting in time sleep`, but test and process contract require `process wait`. Root: ProcessChild.wait calls jet_scheduler_sleep_ms(10); scheduler helper hardcodes wait kind `time sleep`. Defect is present in 9feeedb8, not shared-tree drift. Do not verify criteria/close until process-specific scheduler wait boundary passes. Other evidence: jet-codegen interrupt boundaries 15 pass/1 ignored; scheduler_native 4/4; Cranelift 20 displayed pass before remaining run was interrupted after stall; task_runtime_audit golden filter selected 0 tests and is not evidence."
+        },
         {
           "at": "2026-07-13",
           "by": "codex-epoch3-306",
@@ -30962,6 +30972,34 @@
   ],
   "events": [
     {
+      "at": "2026-07-13T03:07:35.930Z",
+      "by": "codex-epoch3-306",
+      "action": "card.release",
+      "ref": "c05o0105",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T03:07:35.836Z",
+      "by": "codex-epoch3-306",
+      "action": "card.update",
+      "ref": "c05o0105",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T03:04:41.822Z",
+      "by": "codex-epoch3-306",
+      "action": "card.claim",
+      "ref": "c05o0105",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T03:04:40.031Z",
+      "by": "terra-306-final-reviewer",
+      "action": "card.update",
+      "ref": "c05o0105",
+      "note": "phase,logEntry"
+    },
+    {
       "at": "2026-07-13T03:03:26.702Z",
       "by": "fable-impl-521c",
       "action": "card.update",
@@ -34432,34 +34470,6 @@
       "action": "card.criteria-verify",
       "ref": "c0zpoz3m",
       "note": "#1"
-    },
-    {
-      "at": "2026-07-12T13:52:19.898Z",
-      "by": "terra-516-builder",
-      "action": "card.update",
-      "ref": "c0zpoz3m",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T13:52:05.242Z",
-      "by": "terra-516-builder",
-      "action": "card.update",
-      "ref": "c0zpoz3m",
-      "note": "needsAcceptance"
-    },
-    {
-      "at": "2026-07-12T13:51:33.855Z",
-      "by": "terra-516-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0zpoz3m",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-12T13:51:19.003Z",
-      "by": "terra-516-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0zpoz3m",
-      "note": "#4"
     }
   ],
   "nextNum": 368,
