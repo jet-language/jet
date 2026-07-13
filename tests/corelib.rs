@@ -326,6 +326,8 @@ fn jsonl_fold_heap_budget_rejects_growth_before_large_record_allocation() {
     fs::create_dir_all(&dir).unwrap();
     let array_path = dir.join("array.jsonl");
     let object_path = dir.join("object.jsonl");
+    let valid_path = dir.join("valid.jsonl");
+    let scalar_path = dir.join("scalar.jsonl");
     let array = format!("[{}]\n", std::iter::repeat("0").take(256).collect::<Vec<_>>().join(","));
     let object = format!(
         "{{{}}}\n",
@@ -336,8 +338,12 @@ fn jsonl_fold_heap_budget_rejects_growth_before_large_record_allocation() {
     );
     fs::write(&array_path, array).unwrap();
     fs::write(&object_path, object).unwrap();
+    fs::write(&valid_path, format!("[{}]\n", std::iter::repeat("0").take(32).collect::<Vec<_>>().join(","))).unwrap();
+    fs::write(&scalar_path, "1\n").unwrap();
     let array_path = array_path.to_string_lossy().replace('\\', "\\\\");
     let object_path = object_path.to_string_lossy().replace('\\', "\\\\");
+    let valid_path = valid_path.to_string_lossy().replace('\\', "\\\\");
+    let scalar_path = scalar_path.to_string_lossy().replace('\\', "\\\\");
     let source = format!(
         r#"
 use core.encoding as encoding
@@ -345,6 +351,32 @@ use core.encoding.jsonl as jsonl
 use core.files as files
 
 fn run() {{
+    valid_limits := encoding.EncodingLimits.safe()
+    valid_limits.max_item_bytes = 512
+    valid_input :: files.open("{valid_path}") ?? panic("valid open")
+    valid_reader :: jsonl.reader(^valid_input, valid_limits) ?? panic("valid reader")
+    valid_record :: valid_reader.next() ?? panic("valid next")
+    if valid_record == {{
+        Val(value) -> {{ last :: value.at(31) ?? DataTree.Int(-1); print(last.int() ?? -1) }}
+        None -> {{ print("valid-missing") }}
+    }}
+
+    scalar_limits := encoding.EncodingLimits.safe()
+    scalar_limits.max_item_bytes = 7
+    scalar_input :: files.open("{scalar_path}") ?? panic("scalar open")
+    scalar_reader :: jsonl.reader(^scalar_input, scalar_limits) ?? panic("scalar reader")
+    scalar_result :: scalar_reader.next()
+    if scalar_result == {{
+        ok(_) -> {{ print("scalar-limit-missed") }}
+        err(first) -> {{
+            scalar_again :: scalar_reader.next()
+            if scalar_again == {{
+                ok(_) -> {{ print("scalar-terminal-missed") }}
+                err(second) -> {{ print(first.path); print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason) }}
+            }}
+        }}
+    }}
+
     array_limits := encoding.EncodingLimits.safe()
     array_limits.max_item_bytes = 512
     array_input :: files.open("{array_path}") ?? panic("array open")
@@ -357,7 +389,7 @@ fn run() {{
             if array_again == {{
                 ok(_) -> {{ print("array-terminal-missed") }}
                 err(second) -> {{
-                    print(first.byte_offset < 64)
+                    print(first.byte_offset < 256)
                     print(first.path)
                     print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason)
                 }}
@@ -377,7 +409,7 @@ fn run() {{
             if object_again == {{
                 ok(_) -> {{ print("object-terminal-missed") }}
                 err(second) -> {{
-                    print(first.byte_offset < 200)
+                    print(first.byte_offset < 2048)
                     print(first.path)
                     print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason)
                 }}
@@ -389,7 +421,7 @@ fn run() {{
     );
     let (code, stdout, stderr) = build_and_run(&dir, "jsonl_heap", &source, &[], None);
     assert_eq!(code, 0, "stderr: {stderr}");
-    assert_eq!(stdout, "true\n$[0][8]\ntrue\ntrue\n$[0][\"key0004\"]\ntrue\n");
+    assert_eq!(stdout, "0\n$[0]\ntrue\ntrue\n$[0][63]\ntrue\ntrue\n$[0][\"key0073\"]\ntrue\n");
     assert_eq!(stderr, "");
     let _ = fs::remove_dir_all(&dir);
 }

@@ -601,6 +601,8 @@ enum JetJsonlFoldFrame {
 struct JetJsonlHeapBudget {
     used: usize,
     limit: usize,
+    decoded: usize,
+    decoded_limit: usize,
 }
 
 impl JetJsonlHeapBudget {
@@ -608,6 +610,13 @@ impl JetJsonlHeapBudget {
         let Some(next) = self.used.checked_add(bytes) else { return false };
         if next > self.limit { return false; }
         self.used = next;
+        true
+    }
+
+    fn charge_decoded(&mut self, bytes: usize) -> bool {
+        let Some(next) = self.decoded.checked_add(bytes) else { return false };
+        if next > self.decoded_limit { return false; }
+        self.decoded = next;
         true
     }
 }
@@ -695,15 +704,30 @@ impl jet_std::JSONLReader {
         }
     }
 
-    fn heap_limit_error(&self) -> jet_std::EncodingError {
+    fn limit_error(&self, heap: &mut JetJsonlHeapBudget, heap_limit: bool) -> jet_std::EncodingError {
+        // Reserve the terminal path before constructing it. Four bytes per key
+        // byte covers Rust Debug escaping; indices need at most 20 digits.
+        let path_capacity = 1usize.saturating_add(self.json.frames.iter().map(|frame| match frame {
+            JetJsonReadFrame::ArrayValueOrEnd { .. } | JetJsonReadFrame::ArrayCommaOrEnd { .. } => 22,
+            JetJsonReadFrame::ObjectColonValue { key } | JetJsonReadFrame::ObjectCommaOrEnd { key } => key.len().saturating_mul(4).saturating_add(4),
+            JetJsonReadFrame::ObjectKeyOrEnd { .. } => 0,
+        }).sum::<usize>());
+        // JSONL projection prefixes the record index into a replacement path;
+        // reserve both live buffers before either allocation.
+        let path_reservation = path_capacity.saturating_mul(2).saturating_add(24);
+        let path = if heap.charge(path_reservation) { self.json.path() } else { String::new() };
         let mut error = jet_encoding_error(
             jet_std::EncodingErrorKind::Limit,
             self.json.offset,
             self.json.line,
             self.json.column,
-            format!("max_item_bytes {} exceeded by retained JSONL record heap", self.json.limits.max_item_bytes),
+            if heap_limit {
+                format!("JSONL record heap exceeded the bounded allocator ceiling for max_item_bytes {}", self.json.limits.max_item_bytes)
+            } else {
+                format!("max_item_bytes {} exceeded", self.json.limits.max_item_bytes)
+            },
         );
-        error.path = self.json.path();
+        error.path = path;
         error
     }
 
@@ -712,7 +736,7 @@ impl jet_std::JSONLReader {
         heap: &mut JetJsonlHeapBudget,
         value: &String,
     ) -> Result<(), jet_std::EncodingError> {
-        if heap.charge(value.capacity()) { Ok(()) } else { Err(self.heap_limit_error()) }
+        if heap.charge(value.capacity()) { Ok(()) } else { Err(self.limit_error(heap, true)) }
     }
 
     fn push_value(
@@ -724,7 +748,7 @@ impl jet_std::JSONLReader {
     ) -> Result<(), jet_std::EncodingError> {
         match frames.last_mut() {
             Some(JetJsonlFoldFrame::Array(items)) => {
-                if !jet_jsonl_reserve_push(heap, items) { return Err(self.heap_limit_error()); }
+                if !jet_jsonl_reserve_push(heap, items) { return Err(self.limit_error(heap, true)); }
                 items.push(value);
             }
             Some(JetJsonlFoldFrame::Object { entries, key }) => {
@@ -737,7 +761,7 @@ impl jet_std::JSONLReader {
                         "JSON event stream produced an object value without a key",
                     ));
                 };
-                if !jet_jsonl_reserve_push(heap, entries) { return Err(self.heap_limit_error()); }
+                if !jet_jsonl_reserve_push(heap, entries) { return Err(self.limit_error(heap, true)); }
                 entries.push((key, value));
             }
             None if root.is_none() => *root = Some(value),
@@ -770,9 +794,15 @@ impl jet_std::JSONLReader {
 
         let mut root = None;
         let mut frames = Vec::new();
+        let heap_limit = (self.json.limits.buffer_bytes as usize)
+            .saturating_add(self.json.limits.max_item_bytes as usize)
+            .saturating_add((self.json.limits.max_depth as usize).saturating_mul(256))
+            .saturating_add(65_536);
         let mut heap = JetJsonlHeapBudget {
             used: 0,
-            limit: self.json.limits.max_item_bytes as usize,
+            limit: heap_limit,
+            decoded: 0,
+            decoded_limit: self.json.limits.max_item_bytes as usize,
         };
         loop {
             let event = match self.json.next_event() {
@@ -803,18 +833,23 @@ impl jet_std::JSONLReader {
             };
             let result = (|| -> Result<(), jet_std::EncodingError> { match event {
                 jet_std::DataEvent::Null => {
+                    if !heap.charge_decoded(1) { return Err(self.limit_error(&mut heap, false)); }
                     self.push_value(&mut heap, &mut root, &mut frames, jet_std::DataTree::Null)
                 }
                 jet_std::DataEvent::Bool(value) => {
+                    if !heap.charge_decoded(1) { return Err(self.limit_error(&mut heap, false)); }
                     self.push_value(&mut heap, &mut root, &mut frames, jet_std::DataTree::Bool(value))
                 }
                 jet_std::DataEvent::Int(value) => {
+                    if !heap.charge_decoded(8) { return Err(self.limit_error(&mut heap, false)); }
                     self.push_value(&mut heap, &mut root, &mut frames, jet_std::DataTree::Int(value))
                 }
                 jet_std::DataEvent::Float(value) => {
+                    if !heap.charge_decoded(8) { return Err(self.limit_error(&mut heap, false)); }
                     self.push_value(&mut heap, &mut root, &mut frames, jet_std::DataTree::Float(value))
                 }
                 jet_std::DataEvent::Text(value) => {
+                    if !heap.charge_decoded(value.len()) { return Err(self.limit_error(&mut heap, false)); }
                     self.admit_string(&mut heap, &value)?;
                     self.push_value(&mut heap, &mut root, &mut frames, jet_std::DataTree::Text(value))
                 }
@@ -826,15 +861,17 @@ impl jet_std::JSONLReader {
                     "JSON tokenizer produced Bytes",
                 )),
                 jet_std::DataEvent::ArrayStart => {
+                    if !heap.charge_decoded(1) { return Err(self.limit_error(&mut heap, false)); }
                     if !jet_jsonl_reserve_push(&mut heap, &mut frames) {
-                        return Err(self.heap_limit_error());
+                        return Err(self.limit_error(&mut heap, true));
                     }
                     frames.push(JetJsonlFoldFrame::Array(Vec::new()));
                     Ok(())
                 }
                 jet_std::DataEvent::ObjectStart => {
+                    if !heap.charge_decoded(1) { return Err(self.limit_error(&mut heap, false)); }
                     if !jet_jsonl_reserve_push(&mut heap, &mut frames) {
-                        return Err(self.heap_limit_error());
+                        return Err(self.limit_error(&mut heap, true));
                     }
                     frames.push(JetJsonlFoldFrame::Object { entries: Vec::new(), key: None });
                     Ok(())
@@ -842,7 +879,10 @@ impl jet_std::JSONLReader {
                 jet_std::DataEvent::Key(value) => {
                     match frames.last_mut() {
                         Some(JetJsonlFoldFrame::Object { key, .. }) if key.is_none() => {
-                            self.admit_string(&mut heap, &value)?;
+                            if !heap.charge_decoded(value.len()) { return Err(self.limit_error(&mut heap, false)); }
+                            // The shared tokenizer retains one cloned key for
+                            // exact paths until the value completes.
+                            if !heap.charge(value.capacity().saturating_mul(2)) { return Err(self.limit_error(&mut heap, true)); }
                             *key = Some(value);
                             Ok(())
                         }
