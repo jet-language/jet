@@ -3362,6 +3362,46 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// Card #129 / R11: generated declarations are ordinary Jet items. They must
+/// be registered before later generated code (here `@[Codable]`) is checked,
+/// and `#[Default(expr)]` must retain its exact compile-time value.
+#[test]
+fn user_derive_generated_struct_reenters_registration_and_serde() {
+    let dir = std::env::temp_dir().join(format!("jet_derive_reentry_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let src = r#"
+use core.encoding.json as json
+
+derive T.ConfigSchema {
+    emit("""
+@[Codable]
+struct GeneratedConfig {{
+    #[Default([80, 443])] ports: [Int]
+}}
+""")
+}
+
+@ConfigSchema
+struct Schema<T> { witness: T }
+
+fn run() {
+    config := json.decode<GeneratedConfig>("{{}}") ?? panic("decode")
+    print(config.ports)
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "user_derive_generated_struct",
+        src,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "generated struct did not re-enter registration: {stderr}");
+    assert_eq!(stdout, "[80, 443]\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
 /// #495 / I2: a field read from a bare (`Read`) parameter is still rooted in
 /// the borrowed parameter. The explicit `copy` required by E0209 must produce
 /// owned values for both shallow and nested fields, compile through rustc, and

@@ -876,10 +876,26 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                 }
             }
 
-            // Register new funcs so subsequent sema sees them.
+            // R11: generated declarations re-enter ordinary registration, not
+            // only parsing. Later generated passes and body checking must see
+            // exactly the same type registry as handwritten source.
             for item in &new_items {
-                if let Item::Func(f) = item {
-                    funcs.insert(f.name.clone(), func_to_sig(f));
+                match item {
+                    Item::Func(f) => {
+                        funcs.insert(f.name.clone(), func_to_sig(f));
+                    }
+                    Item::Struct(s) => register_struct(
+                        s,
+                        &mut registry,
+                        &mut struct_fields_legacy,
+                        &mut diags,
+                        &funcs,
+                        &consts,
+                    ),
+                    Item::Enum(e) => {
+                        register_enum(e, &mut registry, &mut diags, &funcs, &consts)
+                    }
+                    _ => {}
                 }
             }
             prog.items.extend(new_items);

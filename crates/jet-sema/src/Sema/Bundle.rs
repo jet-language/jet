@@ -3226,6 +3226,41 @@ pub(crate) fn check_bundle_opts(
                 for item in &new_items {
                     match item {
                         Item::Func(f) => register_func_item(f, st, &mut diags),
+                        Item::Struct(s) => {
+                            register_struct(
+                                s,
+                                &mut st.registry,
+                                &mut st.structs,
+                                &mut diags,
+                                &st.funcs,
+                                &st.consts,
+                            );
+                            st.type_pub
+                                .insert(s.name.clone(), s.is_pub && !s.is_package_pub);
+                            st.type_pkg_pub.insert(s.name.clone(), s.is_package_pub);
+                            for field in &s.fields {
+                                st.field_pub.insert(
+                                    (s.name.clone(), field.name.clone()),
+                                    field.is_pub && !field.is_package_pub,
+                                );
+                                st.field_pkg_pub.insert(
+                                    (s.name.clone(), field.name.clone()),
+                                    field.is_package_pub,
+                                );
+                            }
+                        }
+                        Item::Enum(e) => {
+                            register_enum(
+                                e,
+                                &mut st.registry,
+                                &mut diags,
+                                &st.funcs,
+                                &st.consts,
+                            );
+                            st.type_pub
+                                .insert(e.name.clone(), e.is_pub && !e.is_package_pub);
+                            st.type_pkg_pub.insert(e.name.clone(), e.is_package_pub);
+                        }
                         Item::Impl(i) => {
                             for m in &i.methods {
                                 st.method_pub
