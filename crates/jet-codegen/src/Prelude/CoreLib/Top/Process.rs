@@ -173,7 +173,7 @@ fn jet_process_child_wait(
         // D-TASKRUNTIME1=A: process waits are scheduler wait points. Parking
         // here keeps the worker available and makes inherited cancellation and
         // deadlines wake the wait exactly like channel, timer, and I/O waits.
-        jet_scheduler_sleep_ms(10);
+        jet_scheduler_park_ms("process wait", 10);
     };
     child.inner.borrow_mut().take();
     let (output, errors) = jet_process_collect_output(child)?;

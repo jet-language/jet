@@ -482,12 +482,16 @@ fn timer_wheel() -> Arc<TimerWheel> {
 }
 
 pub fn jet_scheduler_sleep_ms(millis: u64) {
+    jet_scheduler_park_ms("time sleep", millis);
+}
+
+pub fn jet_scheduler_park_ms(wait_kind: &'static str, millis: u64) {
     if millis == 0 {
         return;
     }
     let slot = ParkSlot::new();
     timer_wheel().schedule(Instant::now() + Duration::from_millis(millis), slot.clone());
-    jet_scheduler_yield("time sleep", &slot, Some(Duration::from_millis(millis)));
+    jet_scheduler_yield(wait_kind, &slot, Some(Duration::from_millis(millis)));
 }
 
 pub fn jet_scheduler_yield_now() {
