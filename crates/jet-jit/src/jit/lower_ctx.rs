@@ -5,7 +5,7 @@ use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Module};
 use jet_codegen::Codegen::TIR::{
     self, TBuiltinOp, TCallArg, TCoreClosureKind, TEnumPayload, TExpr, TExprKind, THandleOp,
-    TIfCond, TJitSpawnLambda, TOrFallback, TStmt, TStrPart,
+    TIfCond, TJitSpawnLambda, TModuleCallForm, TOrFallback, TStmt, TStrPart,
 };
 use jet_foundation::AST::{BinOp, IncDecOp, Type, UnOp};
 use std::collections::HashMap;
@@ -1691,7 +1691,19 @@ impl LowerCtx<'_, '_> {
                 Err("jit overflow opt-out expression unsupported".to_string())
             }
             TExprKind::FnValue { .. } => Err("jit fn value unsupported".to_string()),
-            TExprKind::ModuleCall { .. } => Err("jit module call unsupported".to_string()),
+            TExprKind::ModuleCall { form, args } => match form {
+                TModuleCallForm::InlineMangled { mangled } => {
+                    let func_id = self.func_ids.get(mangled).copied()
+                        .ok_or_else(|| "jit module call unsupported".to_string())?;
+                    let arg_vals: Result<Vec<_>, _> = args.iter().map(|arg| self.lower_call_arg(arg)).collect();
+                    let func_ref = self.module.declare_func_in_func(func_id, self.b.func);
+                    let call = self.b.ins().call(func_ref, &arg_vals?);
+                    let result = clif_ty(&expr.ty).map(|_| self.b.inst_results(call)[0]);
+                    self.emit_trap_check()?;
+                    Ok(result.unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)))
+                }
+                TModuleCallForm::Qualified { .. } => Err("jit file-module call unsupported".to_string()),
+            },
             TExprKind::ExternCall { .. } => Err("jit extern call unsupported".to_string()),
         }
     }

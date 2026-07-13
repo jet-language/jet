@@ -963,6 +963,7 @@ enum ResolvedModuleParam {
 struct TemplateInfo {
     def: GenericModuleDef,
     definition_id: String,
+    definition_full_key: Vec<u8>,
     params: Vec<ResolvedModuleParam>,
     source_module: usize,
     source_items: Vec<Item>,
@@ -974,6 +975,7 @@ impl Clone for TemplateInfo {
         Self {
             def: clone_generic_module_def(&self.def),
             definition_id: self.definition_id.clone(),
+            definition_full_key: self.definition_full_key.clone(),
             params: self.params.clone(),
             source_module: self.source_module,
             source_items: clone_definition_items(&self.source_items),
@@ -1067,15 +1069,17 @@ enum ResolvedModuleArg { Type(Type), Value(crate::AST::CtValue, Vec<u8>) }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct ModuleInstanceKey {
-    definition_id: String,
+    definition_full_key: Vec<u8>,
+    parameters: Vec<u8>,
     args: Vec<Vec<u8>>,
 }
 
 impl ModuleInstanceKey {
     fn bytes(&self) -> Vec<u8> {
         let mut out = Vec::new();
-        out.extend_from_slice(&(self.definition_id.len() as u64).to_be_bytes());
-        out.extend_from_slice(self.definition_id.as_bytes());
+        frame_bytes(&mut out, b"jet.genmod.application.v1");
+        frame_bytes(&mut out, &self.definition_full_key);
+        frame_bytes(&mut out, &self.parameters);
         out.extend_from_slice(&(self.args.len() as u64).to_be_bytes());
         for arg in &self.args {
             out.extend_from_slice(&(arg.len() as u64).to_be_bytes());
@@ -1085,16 +1089,81 @@ impl ModuleInstanceKey {
     }
 }
 
-fn instance_identity(key: &ModuleInstanceKey, template: &TemplateInfo) -> crate::AST::ModuleInstanceIdentity {
+fn frame_bytes(out: &mut Vec<u8>, bytes: &[u8]) {
+    out.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
+    out.extend_from_slice(bytes);
+}
+
+fn frame_text(out: &mut Vec<u8>, text: &str) { frame_bytes(out, text.as_bytes()); }
+
+fn type_full_key(ty: &Type) -> Vec<u8> {
+    fn write(out: &mut Vec<u8>, ty: &Type) {
+        use Type::*;
+        match ty {
+            Int => out.push(1), Float => out.push(2), Bool => out.push(3), String => out.push(4), Char => out.push(5),
+            List(inner) => { out.push(6); write(out, inner); }
+            Map { key, value, .. } => { out.push(7); write(out, key); write(out, value); }
+            Shared(inner) => { out.push(8); write(out, inner); }
+            Option(inner) => { out.push(9); write(out, inner); }
+            Result { ok, err } => { out.push(10); write(out, ok); write(out, err); }
+            Fn { params, ret, .. } => {
+                out.push(11); out.extend_from_slice(&(params.len() as u64).to_be_bytes());
+                for param in params { write(out, param); }
+                match ret { Some(ret) => { out.push(1); write(out, ret); }, None => out.push(0) }
+            }
+            Named(name) => { out.push(12); frame_text(out, name); }
+            Apply { name, args } => {
+                out.push(13); frame_text(out, name); out.extend_from_slice(&(args.len() as u64).to_be_bytes());
+                for arg in args { write(out, arg); }
+            }
+            TraitObject(names) => { out.push(14); out.extend_from_slice(&(names.len() as u64).to_be_bytes()); for name in names { frame_text(out, name); } }
+            Tuple(fields) => { out.push(15); out.extend_from_slice(&(fields.len() as u64).to_be_bytes()); for (name, ty) in fields { frame_text(out, name); write(out, ty); } }
+            FixedList { elem, len, .. } => { out.push(16); write(out, elem); out.extend_from_slice(&len.to_be_bytes()); }
+            IntN { signed, bits } => { out.push(17); out.push(u8::from(*signed)); out.push(*bits); }
+            Float32 => out.push(18),
+            Tagged { inner, .. } => write(out, inner),
+        }
+    }
+    let mut out = Vec::new();
+    frame_bytes(&mut out, b"jet.type.full-key.v1");
+    write(&mut out, ty);
+    out
+}
+
+fn parameter_bytes(params: &[ResolvedModuleParam]) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(&(params.len() as u64).to_be_bytes());
+    for param in params {
+        match param {
+            ResolvedModuleParam::Type { name, bound } => {
+                out.push(0); frame_text(&mut out, name);
+                frame_text(&mut out, bound.as_deref().unwrap_or(""));
+            }
+            ResolvedModuleParam::Value { name, ty } => {
+                out.push(1); frame_text(&mut out, name); frame_bytes(&mut out, &type_full_key(ty));
+            }
+            ResolvedModuleParam::Invalid => out.push(2),
+        }
+    }
+    out
+}
+
+fn definition_full_key(package_identity: &str, module_path: &str, lexical_path: &str, name: &str) -> Vec<u8> {
+    let mut out = Vec::new();
+    frame_bytes(&mut out, b"jet.genmod.definition.v1");
+    frame_text(&mut out, package_identity);
+    frame_text(&mut out, module_path);
+    frame_text(&mut out, lexical_path);
+    frame_text(&mut out, "generic-module");
+    frame_text(&mut out, name);
+    out
+}
+
+fn instance_identity(key: &ModuleInstanceKey) -> crate::AST::ModuleInstanceIdentity {
     let full_key = key.bytes();
-    let mut input = full_key.clone();
-    // Template/dependency semantics, excluding consumer alias spelling. The
-    // resolved definition snapshot includes captured dependency declarations.
-    input.extend_from_slice(&crate::CanonicalAST::canonical_fragment(&template.def.body));
-    input.extend_from_slice(&crate::CanonicalAST::canonical_fragment(&template.source_items));
     crate::AST::ModuleInstanceIdentity {
+        fingerprint: crate::SHA256::sha256_hex(&full_key),
         full_key,
-        fingerprint: crate::SHA256::sha256_hex(&input),
     }
 }
 
@@ -1143,10 +1212,9 @@ fn instance_key(
 ) -> ModuleInstanceKey {
     let args = args.iter().map(|arg| match arg {
         ResolvedModuleArg::Type(ty) => {
-            let name = normalized_instance_type(ty, type_aliases).name();
+            let key = type_full_key(&normalized_instance_type(ty, type_aliases));
             let mut bytes = vec![0];
-            bytes.extend_from_slice(&(name.len() as u64).to_be_bytes());
-            bytes.extend_from_slice(name.as_bytes());
+            frame_bytes(&mut bytes, &key);
             bytes
         }
         ResolvedModuleArg::Value(_, normalized) => {
@@ -1156,7 +1224,7 @@ fn instance_key(
             bytes
         }
     }).collect();
-    ModuleInstanceKey { definition_id: info.definition_id.clone(), args }
+    ModuleInstanceKey { definition_full_key: info.definition_full_key.clone(), parameters: parameter_bytes(&info.params), args }
 }
 
 fn resolve_params(
@@ -1606,7 +1674,8 @@ fn expand_alias(
             let Item::Func(def) = item else { return None }; Some((def.name.clone(), def))
         }).collect();
         let nested_templates: HashMap<String, TemplateInfo> = nested_defs.iter().map(|def| {
-            (def.name.clone(), TemplateInfo { def: clone_generic_module_def(def), definition_id: format!("{}::{}", alias.name, def.name),
+            let full_key = definition_full_key("nested", "", &info.definition_id, &def.name);
+            (def.name.clone(), TemplateInfo { def: clone_generic_module_def(def), definition_id: crate::SHA256::sha256_hex(&full_key), definition_full_key: full_key,
                 params: resolve_params(def, &nested_traits, &nested_enums, diags),
                 source_module: consumer_module, source_items: Vec::new(), source_values: definition_values.clone() })
         }).collect();
@@ -1818,7 +1887,10 @@ pub(crate) fn expand_generic_module_aliases(
     bundle: &mut ProgramBundle,
     diags: &mut Vec<Diagnostic>,
 ) {
-    let package_identity = bundle.project_root.to_string_lossy().replace('\\', "/");
+    // Host-absolute roots never enter language identity. Package source/version
+    // identity is currently represented by the loader's stable root basename;
+    // module paths below remain workspace-relative.
+    let package_identity = bundle.project_root.file_name().and_then(|name| name.to_str()).unwrap_or("workspace").to_string();
     let template_snapshots: Vec<HashMap<String, TemplateInfo>> = bundle
         .modules
         .iter()
@@ -1881,11 +1953,14 @@ pub(crate) fn expand_generic_module_aliases(
                 .iter()
                 .filter_map(|item| match item {
                     Item::GenericModule(gm) => {
+                        let module_path = module.path.strip_prefix(&bundle.project_root).unwrap_or(&module.path).to_string_lossy().replace('\\', "/");
+                        let full_key = definition_full_key(&package_identity, &module_path, "", &gm.name);
                         Some((
                             gm.name.clone(),
                             TemplateInfo {
                                 def: clone_generic_module_def(gm),
-                                definition_id: format!("{}::{}::{}", package_identity, module.path.to_string_lossy().replace('\\', "/"), gm.name),
+                                definition_id: crate::SHA256::sha256_hex(&full_key),
+                                definition_full_key: full_key,
                                 params: resolve_params(gm, &traits, &enums, diags),
                                 source_module,
                                 source_items: clone_definition_items(&source_items),
@@ -2065,7 +2140,7 @@ pub(crate) fn expand_generic_module_aliases(
                     continue;
                 }
                 if let Some(mut cm) = expand_alias(&resolved, module_idx, &templates, diags,&traits,&funcs,&globals,&enums, Some(args)) {
-                    let identity = instance_identity(&key, info);
+                    let identity = instance_identity(&key);
                     register_instance_fingerprint(&mut fingerprint_keys, &identity, alias.span);
                     cm.module.instance_identity = Some(identity);
                     bundle_instance_nominals.insert(alias.name.clone(), cm.declarations.iter().filter_map(|item| match item {

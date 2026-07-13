@@ -960,7 +960,8 @@ mod tests {
         let semantic_edit = checked_generic_bundle(
             "module Boxed<T, n: Int> { fn value() -> Int { return n + 1 } }\nmodule A = Boxed<Int, 3>\nfn run() {}", "pkg-a");
         let edited_rust = emit_bundle(&semantic_edit, CompileMode::Run, None);
-        assert!(!edited_rust.contains(&format!("fingerprint={fingerprint}")));
+        assert!(edited_rust.contains(&format!("fingerprint={fingerprint}")), "body shape is a cache input, not nominal instance identity");
+        assert_ne!(rust, edited_rust, "semantic body edits still change generated code/cache material");
 
         let distinct = checked_generic_bundle(
             "module Boxed<T, n: Int> { fn value() -> Int { return n } }\nmodule A = Boxed<Int, 3>\nmodule B = Boxed<Int, 4>\nfn run() {}", "pkg-a");

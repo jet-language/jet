@@ -167,6 +167,19 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                     funcs.push(lowered);
                 }
             }
+            Item::CodeModule(cm) => {
+                if cm.instance_identity.is_none() { continue; }
+                let Some(body) = &cm.body else { continue };
+                for inner in body {
+                    let Item::Func(f) = inner else { continue };
+                    if !f.type_params.is_empty() || !tir_covers(f, &cx) {
+                        continue;
+                    }
+                    let mut lowered = lower_func(f, &cx);
+                    lowered.name = format!("{}__{}", cm.name, f.name);
+                    funcs.push(lowered);
+                }
+            }
             _ => {}
         }
     }

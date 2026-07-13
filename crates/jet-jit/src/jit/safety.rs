@@ -1,6 +1,6 @@
 use jet_codegen::Codegen::TIR::{
     self, JitProgram, JitSpawnCapture, TBuiltinOp, TCallArg, TCoreClosureKind, TEnumPayload, TExpr,
-    TExprKind, TFunc, TFuncKind, THandleOp, TIfCond, TJitSpawnBody, TJitSpawnLambda, TOrFallback,
+    TExprKind, TFunc, TFuncKind, THandleOp, TIfCond, TJitSpawnBody, TJitSpawnLambda, TModuleCallForm, TOrFallback,
     TStmt, TStrPart,
 };
 use jet_foundation::AST::{BinOp, Type, UnOp};
@@ -137,6 +137,9 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                 return false;
             }
             args.iter().all(|a| resident_safe_call_arg(a, callees))
+        }
+        TExprKind::ModuleCall { form: TModuleCallForm::InlineMangled { mangled }, args } => {
+            callees.contains(mangled) && args.iter().all(|arg| resident_safe_call_arg(arg, callees))
         }
         TExprKind::CoreCall {
             module,

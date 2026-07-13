@@ -164,14 +164,14 @@ fn run() {}
 }
 
 #[test]
-fn instance_fingerprint_ignores_spans_but_invalidates_semantic_inputs() {
+fn instance_fingerprint_is_nominal_and_ignores_body_shape() {
     let base = "module Boxed<T, n: Int> { fn value() -> Int { return n } }\nmodule Use = Boxed<Int, 3>\nfn run() {}";
     let shifted = "\n\nmodule Boxed<T, n: Int> {   fn value() -> Int { return n } }\nmodule Renamed = Boxed<Int, 3>\nfn run() {}";
     let body = "module Boxed<T, n: Int> { fn value() -> Int { return n + 1 } }\nmodule Use = Boxed<Int, 3>\nfn run() {}";
     let arg = "module Boxed<T, n: Int> { fn value() -> Int { return n } }\nmodule Use = Boxed<Int, 4>\nfn run() {}";
     let fp = only_instance_fingerprint(base, "pkg-a");
     assert_eq!(fp, only_instance_fingerprint(shifted, "pkg-a"));
-    assert_ne!(fp, only_instance_fingerprint(body, "pkg-a"));
+    assert_eq!(fp, only_instance_fingerprint(body, "pkg-a"));
     assert_ne!(fp, only_instance_fingerprint(arg, "pkg-a"));
     assert_ne!(fp, only_instance_fingerprint(base, "pkg-b"));
 }

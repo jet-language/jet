@@ -1457,6 +1457,31 @@ fn run_cranelift_without_fallback(src: &str, tag: &str) -> ProgramOutput {
 }
 
 #[test]
+fn generic_module_instance_runs_identically_in_resident_jit_and_aot() {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() { return; }
+    let src = r#"
+module Value<n: Int> { pub fn get() -> Int { return n } }
+module Three = Value<3>
+module Same = Value<3>
+fn run() { print(Three.get()); print(Same.get()) }
+"#;
+    let jit = run_cranelift_without_fallback(src, "generic_module_instance");
+    assert_eq!(jit.stdout, "3\n3\n");
+
+    let dir = std::env::temp_dir().join(format!("jet_generic_module_jit_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("generic_module_instance.jet");
+    fs::write(&file, src).unwrap();
+    let aot = compiled_binary_output(&dir, "generic_module_instance", 0, "generic_module_instance", file.to_str().unwrap());
+    assert_eq!(jit, aot);
+
+    let bundle = checked_bundle_from_path(file.to_str().unwrap());
+    let tir = jet::Codegen::TIR::lower_jit_program(&bundle).expect("generic instance lowers to JIT TIR");
+    assert_eq!(tir.instance_provenance.len(), 1, "equivalent aliases share one canonical instance");
+    assert_eq!(tir.funcs.iter().filter(|f| f.name == "Three__get").count(), 1);
+}
+
+#[test]
 fn solver_state_transitions_match_aot_in_resident_jit() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
