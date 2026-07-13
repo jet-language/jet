@@ -1327,6 +1327,13 @@ pub(crate) fn run_explain(code: Option<&str>, mode: OutputMode) {
 pub(crate) fn run_bind(args: &[&String]) {
     if args
         .first()
+        .is_some_and(|arg| arg.as_str() == jet::Syntax::GO_MODULE_ROOT)
+    {
+        run_go_bind(&args[1..]);
+        return;
+    }
+    if args
+        .first()
         .is_some_and(|arg| arg.as_str() == jet::Syntax::FORTRAN_MODULE_ROOT)
     {
         run_fortran_bind(&args[1..]);
@@ -1442,6 +1449,47 @@ pub(crate) fn run_bind(args: &[&String]) {
             println!("  - {} — {}", name, why);
         }
     }
+}
+
+/// D-FFI-GO1=A: compile exported scalar Go functions into an in-process
+/// c-archive and emit a typed `go.<lib>` Jet module.
+fn run_go_bind(args: &[&String]) {
+    let usage = || eprintln!("usage: {} inspect bind go <source.go> [--pkg <lib>] [-o <out.jet>]", jet::Syntax::BINARY_NAME);
+    if args.is_empty() || args[0] == "--help" || args[0] == "-h" {
+        usage();
+        eprintln!();
+        eprintln!("Generate typed Jet bindings for scalar //export Go functions.");
+        exit(if args.is_empty() { ExitCodes::USAGE } else { 0 });
+    }
+    let source_path = args[0].as_str();
+    let mut pkg = None;
+    let mut out = None;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--pkg" => { pkg = args.get(i + 1).map(|value| value.to_string()); if pkg.is_none() { usage(); exit(ExitCodes::USAGE); } i += 2; }
+            "-o" | "--out" => { out = args.get(i + 1).map(|value| value.to_string()); if out.is_none() { usage(); exit(ExitCodes::USAGE); } i += 2; }
+            flag => { eprintln!("error: unknown `bind go` flag `{flag}`"); usage(); exit(ExitCodes::USAGE); }
+        }
+    }
+    let lib = pkg.unwrap_or_else(|| {
+        let base = source_path.rsplit('/').next().unwrap_or(source_path);
+        base.rsplit_once('.').map(|(stem, _)| stem).unwrap_or(base).to_string()
+    });
+    let source = std::fs::read_to_string(source_path).unwrap_or_else(|error| go_bind_error(source_path, &format!("the source file could not be read ({error})")));
+    let out_path = out.unwrap_or_else(|| format!(".jet/bindings/{}/{}.{}", jet::Syntax::GO_MODULE_ROOT, lib, jet::Syntax::FILE_EXT));
+    let cache_dir = std::path::Path::new(&out_path).parent().unwrap_or_else(|| std::path::Path::new("."));
+    let result = jet::GoBind::bind(std::path::Path::new(source_path), &source, &lib, cache_dir)
+        .unwrap_or_else(|error| go_bind_error(source_path, &error.to_string()));
+    if let Err(error) = std::fs::write(&out_path, &result.source) { go_bind_error(source_path, &format!("the generated cache could not be written ({error})")); }
+    println!("bound {} Go export{} from `{}` → {}", result.bound.len(), if result.bound.len() == 1 { "" } else { "s" }, source_path, out_path);
+}
+
+fn go_bind_error(source: &str, why: &str) -> ! {
+    eprintln!("Error [E3208]: Could not generate bindings from `{source}`.");
+    eprintln!(" Why: {why}.");
+    eprintln!(" Fix: export scalar `int64`/`float64` functions with `//export Name`, then rerun `jet inspect bind go`.");
+    exit(ExitCodes::USER_ERROR);
 }
 
 /// D-FFI-FORTRAN1=A: discover scalar ISO_C_BINDING functions, compile them

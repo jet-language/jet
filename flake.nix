@@ -103,6 +103,8 @@
             pkgs.gcc
             # D-FFI-FORTRAN1=A: provision the ISO_C_BINDING bridge compiler.
             pkgs.gfortran
+            # D-FFI-GO1=A: provision the in-process c-archive bridge compiler.
+            pkgs.go
             pkgs.lld
             # Compiler freestanding smoke tests execute aarch64 output under
             # qemu-aarch64. OS image and VM tooling does not belong here.

@@ -1406,6 +1406,101 @@ end module scalar_math
 }
 
 #[test]
+fn go_bind_compiles_and_runs_c_archive_scalar() {
+    let dir = isolated_cwd("go_bind_scalar");
+    let source = dir.join("scalar.go");
+    fs::write(
+        &source,
+        r#"package main
+
+/*
+#include <stdint.h>
+*/
+import "C"
+
+//export add_i64
+func add_i64(a int64, b int64) int64 {
+    return a + b
+}
+
+func main() {}
+"#,
+    )
+    .unwrap();
+
+    let bind = Command::new(jet())
+        .args(["inspect", "bind", "go"])
+        .arg(&source)
+        .args(["--pkg", "scalar"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        bind.status.success(),
+        "Go bind failed:\n{}",
+        String::from_utf8_lossy(&bind.stderr)
+    );
+    assert!(dir.join(".jet/bindings/go/scalar.jet").is_file());
+    assert!(dir.join(".jet/bindings/go/libjet_go_scalar.a").is_file());
+
+    fs::write(
+        dir.join("main.jet"),
+        "use go.scalar as scalar\n\nfn run() { print(scalar.add_i64(20, 22)) }\n",
+    )
+    .unwrap();
+    let run = Command::new(jet())
+        .args(["run", "main.jet"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        run.status.success(),
+        "generated Go binding did not run:\n{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "42\n");
+}
+
+#[test]
+fn go_bind_launders_foreign_compiler_failure_as_e3208() {
+    let dir = isolated_cwd("go_bind_failure");
+    let source = dir.join("broken.go");
+    fs::write(
+        &source,
+        r#"package main
+
+import "C"
+
+//export broken
+func broken(a int64) int64 {
+    return a +
+}
+
+func main() {}
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(jet())
+        .args(["inspect", "bind", "go"])
+        .arg(&source)
+        .args(["--pkg", "broken"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Error [E3208]:"), "missing Jet diagnostic:\n{stderr}");
+    assert!(stderr.contains(" Why:"), "missing reason:\n{stderr}");
+    assert!(stderr.contains(" Fix:"), "missing fix:\n{stderr}");
+    assert!(!stderr.contains("broken.go:"), "raw Go location leaked:\n{stderr}");
+    check_snapshot("bind_go_invalid_e3208.txt", &scrub(&stderr, &source));
+}
+
+#[test]
 fn fortran_bind_launders_foreign_compiler_failure_as_e3208() {
     let dir = isolated_cwd("fortran_bind_failure");
     let source = dir.join("broken.f90");

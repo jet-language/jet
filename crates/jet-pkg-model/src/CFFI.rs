@@ -599,6 +599,20 @@ fn load_cache_source(
 ///   2. Else `pkg-config <lib>` (an undeclared `use c.<lib>` keeps this path).
 ///   3. Else E3201.
 pub fn resolve_link(lib: &str, project_root: &Path) -> Result<LinkFlags, Diagnostic> {
+    if let Some(actual) = lib.strip_prefix("jet_go_") {
+        let archive = project_root
+            .join(Syntax::SOURCE_ROOT_DIR)
+            .join(ForeignLanguage::Go.bindings_subdir())
+            .join(format!("libjet_go_{actual}.a"));
+        if archive.is_file() {
+            return Ok(LinkFlags {
+                lib_dirs: vec![archive.parent().unwrap_or(project_root).display().to_string()],
+                link_names: vec![format!("static=jet_go_{actual}"), "pthread".into(), "dl".into(), "m".into()],
+                ..Default::default()
+            });
+        }
+        return Err(e3201(lib));
+    }
     if let Some(actual) = lib.strip_prefix("jet_fortran_") {
         let archive = project_root
             .join(Syntax::SOURCE_ROOT_DIR)
