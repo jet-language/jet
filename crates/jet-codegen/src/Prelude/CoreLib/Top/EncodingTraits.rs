@@ -56,7 +56,7 @@ impl<T: user_Encode> user_Encode for Vec<T> {
     fn jet_encode(&self) -> jet_std::DataTree {
         // D-ENC-CBOR-SURFACE1: `[U8]` carries binary identity through the shared
         // Codable tree. Text codecs already render Bytes as a number list, while
-        // CBOR emits major type 2. No downcast or unsafe code is needed.
+        // CBOR emits major type 2. No downcast or raw-pointer code is needed.
         if std::any::type_name::<T>() == "u8" {
             let mut bytes = Vec::with_capacity(self.len());
             for value in self {
