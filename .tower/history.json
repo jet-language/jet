@@ -20213,6 +20213,118 @@
       "ratifiedAt": "2026-07-07",
       "draft": false,
       "retiredAt": "2026-07-13T09:28:09.821Z"
+    },
+    {
+      "id": "D-FE-PROMPT1",
+      "cardId": "c0iyfhaf",
+      "group": "tooling",
+      "title": "Jet shell prompt — pick the UX archetype",
+      "gist": "How the jet env prompt communicates: on demand, always, or only when something changed.",
+      "explainer": "Hybrid — adaptive's silence as the default, minimal's pull and segments' awareness both available the moment you want them, never before. One status mechanism, three entrypoints (I8).",
+      "story": "Sam works four hours inside `jet env` and glances at the prompt hundreds of times. The real choice is a communication policy, not a look: pull (silent until asked), push-always (segments answer every question before he asks), or push-on-event (silence is the all-clear; the prompt speaks once when a build fails or a job runs). All ≤2 lines, one shared theme. Browse: file:///home/nate/Projects/Github/jet/docs/design/frontends/index.html#prompt (←/→ switches, c compares).",
+      "inWild": "$ jet env\n── web-api · dev shell ─────────────────────────\n# hours of: edit → jet build → jet test → glance\n$ jet build    # fails — how loudly should the prompt say so?\n$ jet bench    # runs 90s — how does the prompt show it's alive?",
+      "detail": "Owner modification (2026-07-08): ratify hybrid prompt, but show the environment name by default and show at least a partial current path for navigation. Keep adaptive status behavior, ^G glance, transient receipts, and opt-in status strip, but the base prompt is not anonymous/bare: it should include env name plus compact path context before the prompt mark.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Minimal — silent until asked (pull)",
+          "detail": "Core loop: the prompt stays out of the way until you ask it for status. One line: env marker + chevron; the only persistent signal is the chevron's exit state (green ok / red + code). One keystroke (^G) expands a single dim line with last build/test, then it collapses. For people who want zero prompt noise and are willing to ask. NO_COLOR: chevron color becomes an ok / x N tag.\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/prompt/minimal.html",
+          "code": "web-api ❯ jet test\n12 passed\nweb-api ❯ jet run           (chevron green: last exit 0)\n…server exited 1\nweb-api ❯ 1                 (chevron red + code: last exit 1)\nweb-api ❯                   (press ^G to glance ↓)\n        build ok · 0.4s     test 12/12 · 8ms ago\nNO_COLOR:  web-api ok ❯     web-api x 1 ❯"
+        },
+        {
+          "key": "B",
+          "name": "Segments — everything on, every prompt (push-always)",
+          "detail": "Core loop: a glance answers every status question before you type. A second info line carries always-on segments — env · jet version · build · test · git — each one truth, color-coded, words not glyphs (so NO_COLOR holds: `build ✗ E0112`, `test stale`, `main •1`). Finished commands collapse to a one-line receipt so history stays skimmable. Costs one extra line every prompt; segments drop right-to-left on narrow terminals.\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/prompt/segments.html",
+          "code": "web-api ❯ jet test                          ✓ 12/12 · 0.3s   (collapsed)\nweb-api · jet 0.1.0 · build ok · test 12/12 · main ✓\n❯ _\n\nafter a failed build:\nweb-api ❯ jet build                         ✗ E0112 · 0.2s\nweb-api · jet 0.1.0 · build ✗ E0112 · test stale · main •1\n❯ _"
+        },
+        {
+          "key": "C",
+          "name": "Adaptive — speaks only on change (push-on-event)",
+          "detail": "Core loop: the prompt speaks only when something changed. Clean shell = bare chevron; a running job shows one live spinner line that collapses when done; a failure inserts exactly one line phrased as the next action with a runnable command, gone on your next input. Success adds nothing — silence is the signal. The action line is prompt copy, never a restated diagnostic (I4-safe: it points and hands a command). Needs a build/test event feed; reduced motion freezes the spinner.\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/prompt/adaptive.html",
+          "code": "❯                            (clean: bare chevron)\n❯ jet test\n⠹ running tests · 6/12 · 0.2s          (live, then collapses)\n❯ jet test\n12 passed                    (success: prompt adds nothing)\n❯\n\non failure — one inserted action line:\n❯ jet test\n11 passed · 1 failed\n→ 1 test failed. Rerun just it: jet test url_parse\n❯\nNO_COLOR: spinner ⠹ stays; arrow → degrades to ->"
+        },
+        {
+          "key": "D",
+          "name": "Hybrid — silent default, pulled and opt-in status",
+          "detail": "Core loop: the prompt stays silent until something changes — then it shows exactly one line — while ^G pulls a status glance on demand and a per-env flag can pin an always-on strip. Takes: adaptive's foundation (bare chevron, live spinner line, one next-action line on failure) + segments' transient receipts (cmd ✓/✗ · duration) and its always-on strip demoted to opt-in env.jet config + minimal's ^G glance. Left out: the colored-chevron status channel (redundant next to the action line, I8) and always-on segments as default (contradicts silence-is-the-signal). Both status entrypoints render identical words so they can never disagree.\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/prompt/hybrid.html",
+          "code": "❯                                   (clean: bare chevron)\n❯ jet test\n⠹ running tests · 6/12 · 0.2s       (live, then collapses)\n❯ jet test                          ✓ 12/12 · 0.3s   (receipt)\n❯\n\non failure — receipt + one action line:\n❯ jet test                          ✗ 11/12 · 0.3s\n11 passed · 1 failed\n→ 1 test failed. Rerun just it: jet test url_parse\n❯\n\n^G glance (pulled, collapses next command):\n        build ok · 0.4s     test 12/12 · 8ms ago\n\nopt-in strip (env.jet: prompt.strip = on):\nweb-api · jet 0.1.0 · build ok · test 12/12 · main ✓\n❯ _\nNO_COLOR: spinner ⠹ stays; → degrades to ->; receipts are words."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "starship",
+          "note": "B builds on its segment model and transient collapse; A and C reuse only the transient collapse and last-exit glyph.",
+          "code": "web-api on  main took 1.2s\n❯"
+        },
+        {
+          "lang": "fish",
+          "note": "A and C's philosophy: the shell stays minimal and truthful; state you didn't ask about stays out of the way.",
+          "code": "~/w/api ❯   (nothing else, until something matters)"
+        }
+      ],
+      "rec": "D",
+      "status": "ratified",
+      "created": "2026-07-08T13:10:17.032Z",
+      "outcome": "D",
+      "comment": "Hybrid prompt, but env name and partial path visible by default for navigation.",
+      "ratifiedAt": "2026-07-08",
+      "draft": false,
+      "retiredAt": "2026-07-13T09:56:35.529Z"
+    },
+    {
+      "id": "D-FE-PROMPT-STRIP1",
+      "cardId": "c0iyfhaf",
+      "group": "tooling",
+      "title": "jet env prompt status strip config",
+      "gist": "How users opt into the always-on prompt status strip.",
+      "explainer": "D-FE-PROMPT1 ratified hybrid prompt behavior and kept an optional status strip, but the exact user-facing config key is not ratified. Existing env config already has a simple prompt label. This chooses the one config surface for prompt depth without creating multiple prompt mechanisms.",
+      "story": "Doris works in a monorepo where she wants every prompt to show build/test/git state. Walter wants the default quiet prompt with env name and path only. Both should use the same env.jet mechanism, not shell-specific dotfiles.",
+      "inWild": "module dev {\n    env.web: Env.{\n        packages: [\"node\", \"ripgrep\"],\n        prompt: \"web-api\",\n        # status strip config goes here\n    }\n}\n\n$ jet env web\nweb-api ~/repo/app > _",
+      "detail": "Beginner pass: default prompt needs no config and already shows env name plus path. Expert pass: teams need a reviewed env.jet switch for always-on status. Hybrid pass: one prompt engine with a mode field is cleaner than shell-specific flags or a second prompt file.",
+      "options": [
+        {
+          "key": "A",
+          "name": "No config; default prompt only for now",
+          "detail": "Implement env name + path and adaptive receipts, but omit the optional always-on strip. This avoids new config surface, but drops a ratified hybrid depth and forces teams into shell-local customization.",
+          "code": "env.web: Env.{\n    prompt: \"web-api\"\n}\n# no always-on strip support"
+        },
+        {
+          "key": "B",
+          "name": "Structured prompt config in env.jet (recommended)",
+          "detail": "Keep `prompt: \"name\"` as the beginner shorthand. Add `prompt: Prompt.{ label: \"web-api\", strip: .On, path: .Short }` for expert control. One env.jet-owned prompt engine handles default, glance, and strip words across shells.",
+          "code": "env.web: Env.{\n    prompt: Prompt.{\n        label: \"web-api\",\n        path: .Short,\n        strip: .On,\n    },\n}"
+        },
+        {
+          "key": "C",
+          "name": "Shell environment variable opt-in",
+          "detail": "Use JET_PROMPT_STRIP=1 or per-shell rc overrides. Easy to test locally, but not source-reviewed in env.jet and differs by shell/session.",
+          "code": "JET_PROMPT_STRIP=1 jet env web\n# shell-local, not part of project env source"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "starship",
+          "note": "Prompt behavior is configured in a dedicated file, outside project language semantics.",
+          "code": "~/.config/starship.toml"
+        },
+        {
+          "lang": "direnv",
+          "note": "Project env behavior comes from reviewed project files, but shell prompt customization is usually external.",
+          "code": ".envrc"
+        },
+        {
+          "lang": "Nix devShell",
+          "note": "shellHook can customize PS1, but it is raw shell code and not a typed project setting.",
+          "code": "shellHook = \"export PS1=...\";"
+        }
+      ],
+      "rec": "B",
+      "status": "ratified",
+      "created": "2026-07-08T15:43:37.222Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-07-08",
+      "draft": false,
+      "retiredAt": "2026-07-13T09:56:35.529Z"
     }
   ],
   "cards": [
@@ -68535,6 +68647,76 @@
       "action": "card.criteria-verify",
       "ref": "c0iftbrr",
       "note": "#4"
+    },
+    {
+      "at": "2026-07-12T17:19:19.634Z",
+      "by": "sol-wave-verifier",
+      "action": "card.criteria-verify",
+      "ref": "c0iftbrr",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-12T17:19:19.736Z",
+      "by": "sol-wave-verifier",
+      "action": "card.criteria-verify",
+      "ref": "c0iftbrr",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-12T17:19:19.836Z",
+      "by": "sol-wave-verifier",
+      "action": "card.criteria-verify",
+      "ref": "c0iftbrr",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-12T17:19:19.936Z",
+      "by": "sol-wave-verifier",
+      "action": "card.criteria-verify",
+      "ref": "c0iftbrr",
+      "note": "#8"
+    },
+    {
+      "at": "2026-07-12T17:19:51.486Z",
+      "by": "sol-wave-verifier",
+      "action": "card.criteria-verify",
+      "ref": "c0gv4b2r",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-12T17:19:51.585Z",
+      "by": "sol-wave-verifier",
+      "action": "card.criteria-verify",
+      "ref": "c0gv4b2r",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-12T17:19:51.687Z",
+      "by": "sol-wave-verifier",
+      "action": "card.criteria-verify",
+      "ref": "c0gv4b2r",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-12T17:19:51.794Z",
+      "by": "sol-wave-verifier",
+      "action": "card.criteria-verify",
+      "ref": "c0gv4b2r",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-12T17:19:51.894Z",
+      "by": "sol-wave-verifier",
+      "action": "card.criteria-verify",
+      "ref": "c0qdl0gg",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-12T17:19:51.991Z",
+      "by": "sol-wave-verifier",
+      "action": "card.criteria-verify",
+      "ref": "c0qdl0gg",
+      "note": "#2"
     }
   ]
 }
