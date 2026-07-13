@@ -2168,12 +2168,10 @@ fn core_ioerror_preserves_kind_operation_and_resource() {
     ));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
-    let (code, stdout, stderr) = build_and_run(
-        &dir,
-        "ioerror_tree",
-        r#"
+    let source = r#"
 use core.files as fs
 use core.net as net
+use core.process as process
 
 fn receive<T: Reader>(&stream: T, limit: Int) -> [U8] ? IOError {
     return stream.read(limit)
@@ -2210,13 +2208,53 @@ fn run() {
             }
         }
     }
+    if process.cmd([]).run() == {
+        ok(_) -> panic("empty command succeeded")
+        err(error) -> {
+            if error == {
+                .InvalidInput(context) -> print(if context.operation == .Resolve { "empty-command" } else { "wrong-command-operation" })
+                else -> { print("wrong-command-kind") }
+            }
+        }
+    }
+    if process.pipeline([]) == {
+        ok(_) -> panic("empty pipeline succeeded")
+        err(error) -> {
+            if error == {
+                .InvalidInput(context) -> print(if context.operation == .Resolve { "empty-pipeline" } else { "wrong-pipeline-operation" })
+                else -> { print("wrong-pipeline-kind") }
+            }
+        }
+    }
+    if process.cmd(["unused"]).env("BAD=NAME", "value").run() == {
+        ok(_) -> panic("invalid environment succeeded")
+        err(error) -> {
+            if error == {
+                .InvalidInput(context) -> print(if context.operation == .Resolve { context.resource ?? "missing-env-resource" } else { "wrong-env-operation" })
+                else -> { print("wrong-env-kind") }
+            }
+        }
+    }
 }
-"#,
+"#;
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "ioerror_tree",
+        source,
         &[],
         None,
     );
     assert_eq!(code, 0, "{stderr}");
-    assert_eq!(stdout, "invalid-read\ndefinitely-missing/ioerror-tree\nwrite\n");
+    let expected = "invalid-read\ndefinitely-missing/ioerror-tree\nwrite\nempty-command\nempty-pipeline\nBAD=NAME\n";
+    assert_eq!(stdout, expected);
+    let file = dir.join("ioerror_tree.jet");
+    fs::write(&file, source).unwrap();
+    match jet::Interpreter::dev_iteration(file.to_str().unwrap(), false, false) {
+        jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
+            assert_eq!((exit_code, stdout.as_str(), stderr.as_str()), (0, expected, ""));
+        }
+        other => panic!("IOError tree did not run in default dev: {other:?}"),
+    }
     let _ = fs::remove_dir_all(&dir);
 }
 

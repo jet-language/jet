@@ -852,9 +852,6 @@ fn sanitize_test_name(name: &str) -> String {
 fn jet_std_process_exit(code: i64) -> ! {
     std::process::exit(code as i32)
 }
-fn io_other(e: impl ToString) -> jet_std::IoError {
-    jet_std::IoError::other(jet_std::IoOperation::Codec, None, e)
-}
 fn jet_std_process_cmd(cmd: &Vec<String>) -> jet_std::ProcessSpec {
     jet_std::ProcessSpec {
         cmd: cmd.clone(),
@@ -881,7 +878,12 @@ fn jet_std_process_pipeline(
     specs: &Vec<jet_std::ProcessSpec>,
 ) -> Result<jet_std::ProcessResult, jet_std::IoError> {
     if specs.is_empty() {
-        return Err(jet_std::IoError::other(jet_std::IoOperation::Codec, None, "process.pipeline needs at least one command"));
+        return Err(jet_std::IoError::InvalidInput(jet_std::IoContext::new(
+            jet_std::IoOperation::Resolve,
+            None,
+            None,
+            Some("process.pipeline needs at least one command".to_string()),
+        )));
     }
     let mut children: Vec<std::process::Child> = Vec::new();
     let mut prev_stdout: Option<std::process::ChildStdout> = None;
@@ -892,23 +894,31 @@ fn jet_std_process_pipeline(
         }
         command.stdout(std::process::Stdio::piped());
         command.stderr(std::process::Stdio::piped());
-        let mut child = command.spawn().map_err(io_other)?;
+        let mut child = command.spawn().map_err(|error| {
+            jet_std::IoError::other(jet_std::IoOperation::Resolve, spec.cmd.first().cloned(), error)
+        })?;
         prev_stdout = child.stdout.take();
         children.push(child);
     }
     let mut output = String::new();
     if let Some(mut stdout) = prev_stdout.take() {
-        std::io::Read::read_to_string(&mut stdout, &mut output).map_err(io_other)?;
+        std::io::Read::read_to_string(&mut stdout, &mut output).map_err(|error| {
+            jet_std::IoError::other(jet_std::IoOperation::Read, Some("pipeline stdout".to_string()), error)
+        })?;
     }
     let mut errors = String::new();
     let mut code = 0;
     for mut child in children {
         if let Some(mut stderr) = child.stderr.take() {
             let mut text = String::new();
-            std::io::Read::read_to_string(&mut stderr, &mut text).map_err(io_other)?;
+            std::io::Read::read_to_string(&mut stderr, &mut text).map_err(|error| {
+                jet_std::IoError::other(jet_std::IoOperation::Read, Some("pipeline stderr".to_string()), error)
+            })?;
             errors.push_str(&text);
         }
-        let status = child.wait().map_err(io_other)?;
+        let status = child.wait().map_err(|error| {
+            jet_std::IoError::other(jet_std::IoOperation::Close, Some("pipeline process".to_string()), error)
+        })?;
         code = status.code().unwrap_or(-1) as i64;
         if !status.success() {
             break;

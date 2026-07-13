@@ -30,7 +30,12 @@ fn jet_process_command(
     spec: &jet_std::ProcessSpec,
 ) -> Result<std::process::Command, jet_std::IoError> {
     if spec.cmd.is_empty() {
-        return Err(jet_std::IoError::other(jet_std::IoOperation::Codec, None, "process command needs at least one word"));
+        return Err(jet_std::IoError::InvalidInput(jet_std::IoContext::new(
+            jet_std::IoOperation::Resolve,
+            None,
+            None,
+            Some("process command needs at least one word".to_string()),
+        )));
     }
     let mut command = std::process::Command::new(&spec.cmd[0]);
     command.args(&spec.cmd[1..]);
@@ -46,8 +51,12 @@ fn jet_process_command(
         jet_std_env_snapshot_raw()
     };
     for (name, value) in &spec.env_set {
-        jet_env_validate_name(name).map_err(|error| jet_std::IoError::other(jet_std::IoOperation::Codec, None, error.jet_show()))?;
-        jet_env_validate_value(value).map_err(|error| jet_std::IoError::other(jet_std::IoOperation::Codec, None, error.jet_show()))?;
+        jet_env_validate_name(name).map_err(|error| jet_std::IoError::InvalidInput(jet_std::IoContext::new(
+            jet_std::IoOperation::Resolve, Some(name.clone()), None, Some(error.jet_show()),
+        )))?;
+        jet_env_validate_value(value).map_err(|error| jet_std::IoError::InvalidInput(jet_std::IoContext::new(
+            jet_std::IoOperation::Resolve, Some(name.clone()), None, Some(error.jet_show()),
+        )))?;
         let os_name = std::ffi::OsString::from(name);
         child_env.retain(|(candidate, _)| {
             !jet_env_key_eq(candidate.as_os_str(), os_name.as_os_str())
@@ -55,7 +64,9 @@ fn jet_process_command(
         child_env.push((os_name, std::ffi::OsString::from(value)));
     }
     for name in &spec.env_remove {
-        jet_env_validate_name(name).map_err(|error| jet_std::IoError::other(jet_std::IoOperation::Codec, None, error.jet_show()))?;
+        jet_env_validate_name(name).map_err(|error| jet_std::IoError::InvalidInput(jet_std::IoContext::new(
+            jet_std::IoOperation::Resolve, Some(name.clone()), None, Some(error.jet_show()),
+        )))?;
         let name = std::ffi::OsStr::new(name);
         child_env.retain(|(candidate, _)| !jet_env_key_eq(candidate.as_os_str(), name));
     }
@@ -80,7 +91,9 @@ fn jet_process_spec_spawn(
         command.stdout(std::process::Stdio::null());
         command.stderr(std::process::Stdio::null());
     }
-    let mut child = command.spawn().map_err(io_other)?;
+    let mut child = command.spawn().map_err(|error| {
+        jet_std::IoError::other(jet_std::IoOperation::Resolve, spec.cmd.first().cloned(), error)
+    })?;
     Ok(jet_std::ProcessChild {
         stdin: std::rc::Rc::new(std::cell::RefCell::new(child.stdin.take())),
         stdout: std::rc::Rc::new(std::cell::RefCell::new(
@@ -100,10 +113,14 @@ fn jet_process_collect_output(
     let mut output = String::new();
     let mut errors = String::new();
     if let Some(mut stdout) = child.stdout.borrow_mut().take() {
-        std::io::Read::read_to_string(&mut stdout, &mut output).map_err(io_other)?;
+        std::io::Read::read_to_string(&mut stdout, &mut output).map_err(|error| {
+            jet_std::IoError::other(jet_std::IoOperation::Read, Some("process stdout".to_string()), error)
+        })?;
     }
     if let Some(mut stderr) = child.stderr.borrow_mut().take() {
-        std::io::Read::read_to_string(&mut stderr, &mut errors).map_err(io_other)?;
+        std::io::Read::read_to_string(&mut stderr, &mut errors).map_err(|error| {
+            jet_std::IoError::other(jet_std::IoOperation::Read, Some("process stderr".to_string()), error)
+        })?;
     }
     Ok((output, errors))
 }
@@ -149,14 +166,14 @@ fn jet_process_child_wait(
                 errors,
             });
         };
-        if let Some(status) = inner.try_wait().map_err(io_other)? {
+        if let Some(status) = inner.try_wait().map_err(|error| jet_std::IoError::other(jet_std::IoOperation::Close, Some("process".to_string()), error))? {
             break status;
         }
         if let Some(timeout) = child.timeout_ms {
             if child.started.elapsed() >= std::time::Duration::from_millis(timeout as u64) {
-                inner.kill().map_err(io_other)?;
+                inner.kill().map_err(|error| jet_std::IoError::other(jet_std::IoOperation::Close, Some("process".to_string()), error))?;
                 timed_out = true;
-                break inner.wait().map_err(io_other)?;
+                break inner.wait().map_err(|error| jet_std::IoError::other(jet_std::IoOperation::Close, Some("process".to_string()), error))?;
             }
         }
         drop(slot);
@@ -179,7 +196,7 @@ fn jet_process_child_wait(
 }
 fn jet_process_child_kill(child: &jet_std::ProcessChild) -> Result<(), jet_std::IoError> {
     if let Some(inner) = child.inner.borrow_mut().as_mut() {
-        inner.kill().map_err(io_other)?;
+        inner.kill().map_err(|error| jet_std::IoError::other(jet_std::IoOperation::Close, Some("process".to_string()), error))?;
     }
     Ok(())
 }
@@ -198,7 +215,7 @@ fn jet_process_stdin_write(
     text: &String,
 ) -> Result<(), jet_std::IoError> {
     if let Some(stdin) = handle.borrow_mut().as_mut() {
-        std::io::Write::write_all(stdin, text.as_bytes()).map_err(io_other)?;
+        std::io::Write::write_all(stdin, text.as_bytes()).map_err(|error| jet_std::IoError::other(jet_std::IoOperation::Write, Some("process stdin".to_string()), error))?;
     }
     Ok(())
 }
@@ -209,7 +226,7 @@ fn jet_process_child_read_line<R: std::io::Read>(
         return Ok(None);
     };
     let mut line = String::new();
-    let n = std::io::BufRead::read_line(reader, &mut line).map_err(io_other)?;
+    let n = std::io::BufRead::read_line(reader, &mut line).map_err(|error| jet_std::IoError::other(jet_std::IoOperation::Read, Some("process output".to_string()), error))?;
     if n == 0 {
         Ok(None)
     } else {
