@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 527,
-    "rev": 4917,
+    "rev": 4923,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -4525,6 +4525,11 @@
       "log": [
         {
           "at": "2026-07-13",
+          "by": "terra-302-reviewer",
+          "text": "[review] Independent review of remediation e0c2c809 clean. Verified criteria 2-5 as terra-302-reviewer: one exact internal JetCryptoError across random and bridge consumers; fail-closed no-partial behavior and zeroization preserved; bounded subprocess-exec public-provider proof kills/reaps on timeout; hostile/live/no-fallback coverage green; crypto_entropy fresh 13/13 plus crypto goldens and compiler dependency truthfulness green. Criterion 6 remains open because #306 still gates task-cancellation context; no close claim."
+        },
+        {
+          "at": "2026-07-13",
           "by": "terra-302-linux",
           "text": "[handoff] Linux implementation tranche complete and criteria 2-5 met. Exact source files: crates/jet-pkg-model/src/Prelude/Crypto.rs, tests/crypto_entropy.rs, tests/fixtures/crypto_bridge_entropy.rs. Tests: crypto_entropy 12/12; crypto-filtered golden green; compiler seam dependency invariant green. Parent must commit because worker .git is read-only. Remaining: independent reviewer verifies criterion 6; #306 supplies task-cancellation context. macOS/Windows/WASI native proof lives on Epoch 8 #526. Preserve .tower changes and verify-full-real2.log."
         },
@@ -4613,38 +4618,38 @@
         {
           "n": 2,
           "text": "Entropy failure propagates one typed CryptoError through random_bytes, key generation, nonce/salt creation, sealing, password hashing, and file envelopes without returning partial bytes or reusing prior state.",
-          "status": "met",
+          "status": "verified",
           "metBy": "terra-302-linux",
-          "verifiedBy": null,
-          "evidence": "Internal JetCryptoError::Entropy(JetCryptoEntropyError) now propagates unchanged through random_bytes provider calls, seal/file-seal nonce creation, Ed25519 keygen seed creation, and Argon2 salt creation; String conversion occurs only at existing public bridge boundaries. Injected provider failures assert typed Unavailable and public calls return no artifact. nix develop -c cargo test --test crypto_entropy: 12/12 green.",
-          "at": "2026-07-13T00:45:27.985Z"
+          "verifiedBy": "terra-302-reviewer",
+          "evidence": "Independent review of remediation e0c2c809: one concrete JetCryptoError is shared exactly by random_bytes/fill and bridge consumers via the JetCryptoEntropyError type alias; seal/file-seal, Ed25519 keygen, and password-hash entropy failures stay typed until existing public String boundaries; hostile failures return no partial artifact; zeroization paths remain intact. Fresh crypto_entropy 13/13 green.",
+          "at": "2026-07-13T01:04:44.911Z"
         },
         {
           "n": 3,
           "text": "Every cryptographic randomness consumer uses the same audited provider; concurrent Linux calls, process/fork behavior where applicable, requested-length filling, and zero-length behavior are explicit and race-free. Deferred platform behavior is #526.",
-          "status": "met",
+          "status": "verified",
           "metBy": "terra-302-linux",
-          "verifiedBy": null,
-          "evidence": "All entropy consumers route through jet_crypto_entropy_fill. Linux live tests prove exact 0/32/64-byte behavior, reject negative and >1MiB requests, synchronize 8 concurrent calls and require distinct 64-byte results, then fork and require successful nonzero independent 64-byte parent/child results. crypto_entropy 12/12 green.",
-          "at": "2026-07-13T00:45:42.438Z"
+          "verifiedBy": "terra-302-reviewer",
+          "evidence": "Independent review of e0c2c809: every consumer reaches the shared audited entropy provider; focused proof covers zero/32/64-byte requests, bounds, eight synchronized concurrent calls, and independent parent/subprocess public-provider results. Subprocess-exec avoids inherited post-fork Rust locks and has a five-second deadline with kill+wait timeout reap. Fresh crypto_entropy 13/13 green.",
+          "at": "2026-07-13T01:04:50.936Z"
         },
         {
           "n": 4,
           "text": "Focused tests inject short-read/failure paths, exercise the live native Linux provider, and machine-check absence of predictable fallback; macOS/Windows/WASI matrix remains platform-literal on #526.",
-          "status": "met",
+          "status": "verified",
           "metBy": "terra-302-linux",
-          "verifiedBy": null,
-          "evidence": "Focused suite injects short read, EINTR, zero read, terminal failure, partial-write-then-failure, unsupported provider, and 17-interrupt WASI cap; tainted attempts are zeroized and no partial bytes escape. Live Linux getrandom, concurrency, and fork execute. Production-source scan rejects time, counters, PRNG names, /dev random paths, UUID fill, and deterministic fallbacks. 12/12 green.",
-          "at": "2026-07-13T00:45:42.534Z"
+          "verifiedBy": "terra-302-reviewer",
+          "evidence": "Independent review of e0c2c809 confirmed short fill, EINTR retry, zero/terminal/partial failure, unsupported provider, bounded WASI interruption, volatile zeroization, live Linux getrandom, concurrency/process proof, and source scan rejecting predictable fallbacks. Fresh crypto_entropy 13/13 green.",
+          "at": "2026-07-13T01:04:56.010Z"
         },
         {
           "n": 5,
           "text": "Existing reference vectors, misuse diagnostics, envelope/password/signature/key-agreement examples, goldens, and no-compiler-dependency proof remain green after entropy repair.",
-          "status": "met",
+          "status": "verified",
           "metBy": "terra-302-linux",
-          "verifiedBy": null,
-          "evidence": "Preservation gates green: nix develop -c env JET_GOLDEN_FILTER=crypto/ cargo test --test golden examples_compile_and_run (all crypto examples/goldens); nix develop -c cargo test --test truthfulness compiler_seam_crates_have_only_path_dependencies; bridge fixture compiles offline and retains seal/open, Ed25519 keygen, password hash/verify, key zeroization, and hostile entropy tests.",
-          "at": "2026-07-13T00:45:42.623Z"
+          "verifiedBy": "terra-302-reviewer",
+          "evidence": "Independent preservation review of e0c2c809: bridge fixture retains seal/open, Ed25519 keygen, password hash/verify, hostile entropy, and key zeroization coverage. Fresh crypto_entropy 13/13 green; crypto-filtered golden green; compiler_seam_crates_have_only_path_dependencies green. Public error strings and bridge behavior unchanged.",
+          "at": "2026-07-13T01:05:00.581Z"
         },
         {
           "n": 6,
@@ -10800,6 +10805,11 @@
       "blockedBy": [],
       "assignee": "grok-476-builder",
       "log": [
+        {
+          "at": "2026-07-13",
+          "by": "fable-impl-476",
+          "text": "landed grok/card-476 merge 99fde681. resolved conflicts: .tower/*(ours=master), run_enter_dev.rs (grafted task-dispatch onto post-#367 workspace-selector shape, single project_dir), diagnostics.md (E1294 no collision, kept alongside E1295/E1296). dropped dup dead module_aliases in Bundle.rs (build error surfaced by merge). tests: jetpack_tasks 5/5 ok; ui_snapshots (task_reserved_lifecycle/E0928) ok; golden task_runner ok. smoke: jet run --task=greet + jetpack run greet (typed @Cli args) + jetpack run bogus->E1294 all correct on target/debug binaries. no renumbering needed."
+        },
         {
           "at": "2026-07-13",
           "by": "jet-verify-sweep",
@@ -30976,6 +30986,48 @@
   ],
   "events": [
     {
+      "at": "2026-07-13T01:05:08.318Z",
+      "by": "terra-302-reviewer",
+      "action": "card.update",
+      "ref": "c0184j6s",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T01:05:00.581Z",
+      "by": "terra-302-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0184j6s",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-13T01:04:56.010Z",
+      "by": "terra-302-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0184j6s",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-13T01:04:50.936Z",
+      "by": "terra-302-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0184j6s",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-13T01:04:44.911Z",
+      "by": "terra-302-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0184j6s",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-13T01:02:40.477Z",
+      "by": "fable-impl-476",
+      "action": "card.update",
+      "ref": "c0qwckht",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-07-13T00:49:49.522Z",
       "by": "fable-main",
       "action": "card.update",
@@ -34432,48 +34484,6 @@
       "action": "card.update",
       "ref": "c0gv4b2r",
       "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T12:57:40.268Z",
-      "by": "claude-main",
-      "action": "card.claim",
-      "ref": "c0gv4b2r",
-      "note": ""
-    },
-    {
-      "at": "2026-07-12T12:55:55.133Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c02wa1dn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-12T12:54:50.462Z",
-      "by": "sol-452-round2-reviewer",
-      "action": "card.criteria-verify",
-      "ref": "c02wa1dn",
-      "note": "#7"
-    },
-    {
-      "at": "2026-07-12T12:46:22.554Z",
-      "by": "claude-main",
-      "action": "card.criteria-meet",
-      "ref": "c02wa1dn",
-      "note": "#7"
-    },
-    {
-      "at": "2026-07-12T12:38:56.130Z",
-      "by": "terra-302-builder",
-      "action": "card.claim",
-      "ref": "c0184j6s",
-      "note": ""
-    },
-    {
-      "at": "2026-07-12T12:37:37.680Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CRYPTO-KEYGEN-CODE2",
-      "note": "A"
     }
   ],
   "nextNum": 368,
