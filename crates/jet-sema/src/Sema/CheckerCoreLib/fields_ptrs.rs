@@ -26,11 +26,10 @@ impl<'a> Checker<'a> {
                 // D-SOLVER-LIB1=A: `solve.Solver.new(seed)` constructs explicit solver state.
                 ("core.solve", "Solver") => Some(Type::Named(Syntax::SOLVER_TYPE.to_string())),
                 // D-GAME1/2/3 + D-WD10: static sentinels for `game.Scene.new`,
-                // `game.Replay.record`, `game.Backend.headless`, and `game.Budgets.new`.
+                // `game.Replay.record` and `game.Backend.headless`.
                 ("core.game", "Scene") => Some(Type::Named("GameSceneType".to_string())),
                 ("core.game", "Replay") => Some(Type::Named("GameReplayType".to_string())),
                 ("core.game", "Backend") => Some(Type::Named("GameBackendType".to_string())),
-                ("core.game", "Budgets") => Some(Type::Named("GameBudgetsType".to_string())),
                 // D-FIDELITY-API1=A: `core.perf.Perf` static API sentinel.
                 ("core.perf", "Perf") => Some(Type::Named("Perf".to_string())),
                 ("core.encoding", "DataEvent") => Some(Type::Named("DataEvent".to_string())),

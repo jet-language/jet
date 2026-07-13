@@ -428,15 +428,6 @@ pub(crate) fn emit_tir_core_call(
         ("core.testing", "corpus") => format!("{}(&({}))", helper("jet_testing_corpus"), arg(0)),
         ("core.testing", "fake_clock") => format!("{}({})", helper("jet_std_clock_new"), arg(0)),
         ("core.testing", "fake_rng") => format!("{}({})", helper("jet_std_rng_new"), arg(0)),
-        ("core.testing", "bench_budget") => {
-            format!(
-                "{}(&({}), {}, {})",
-                helper("jet_testing_bench_budget"),
-                arg(0),
-                arg(1),
-                arg(2)
-            )
-        }
         // D-FLOATW1: width-generic math — choose the f32 helper when the arg is F32.
         ("core.math", "sqrt") => {
             let f32_path = matches!(args.first().map(|a| &a.ty), Some(Type::Float32));

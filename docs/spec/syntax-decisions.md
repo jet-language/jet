@@ -1323,11 +1323,11 @@ with `-u`/`--update-snapshots`. **D-A11YGATE1**: accessibility issues are
 
 **D-TESTKIT1=A** *(ratified 2026-07-07, card #308)*: `#Test` remains the only
 test syntax. `core.testing` adds snapshots, fixtures, corpora, temp dirs, fake
-clocks/random, HTTP servers, golden files, and benchmark budgets as library
+clocks/random, HTTP servers, and golden files as library
 helpers. Helpers emit structured test metadata so reports and CI can render
 categories without adding markers for every feature. Epoch 3 ships `snap`,
-`golden`, `fixture`, `temp_dir`, `corpus`, `fake_clock`, `fake_rng`, and
-`bench_budget`; the existing `expect(...).snapshot()` remains the canonical
+`golden`, `fixture`, `temp_dir`, `corpus`, `fake_clock`, and `fake_rng`;
+the existing `expect(...).snapshot()` remains the canonical
 assertion snapshot path.
 
 ### Formatting & comments
@@ -1640,7 +1640,8 @@ asset registries (`scene.assets.image`, `scene.assets.sound`), struct-marker
 components (`scene.component<T>()`) plus typed queries (`scene.query<T...>()`),
 scene input bindings with per-frame snapshots (`scene.input.bind`,
 `frame.input.pressed`), `game.Replay.record(".jreplay")`, an explicit
-`game.Backend.headless()` default, and scene budgets via `scene.budgets.set`.
+`game.Backend.headless()` default. D-PERFBUDGET-GAMEMIGRATE1 supersedes the
+former scene-budget value/setter with typed `perf` role declarations.
 `game.run(scene, replay: replay)` produces a deterministic transcript without
 renderer/audio/editor dependencies. Renderer, audio, editor, native asset I/O,
 and richer replay files remain replaceable-package layers over this substrate.

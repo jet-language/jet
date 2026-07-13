@@ -134,7 +134,7 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         "HttpRequest" | "HttpResponse" => {
             matches!(member, "method" | "path" | "body" | "headers" | "status")
         }
-        "GameScene" => matches!(member, "assets" | "input" | "budgets"),
+        "GameScene" => matches!(member, "assets" | "input"),
         "GameFrame" => matches!(member, "index" | "input"),
         // D-MIGRATE3=A: `MigrationStatus` — `.migrated`/`.from`/`.steps`.
         "MigrationStatus" => matches!(member, "migrated" | "from" | "steps"),
@@ -256,7 +256,6 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
         return match field {
             "assets" => Some(Type::Named("GameAssets".to_string())),
             "input" => Some(Type::Named("GameInputMap".to_string())),
-            "budgets" => Some(Type::Named("GameBudgetsSlot".to_string())),
             _ => None,
         };
     }

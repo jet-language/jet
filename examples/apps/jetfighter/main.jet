@@ -1,4 +1,13 @@
 use core.game as game
+
+module perf.game {
+    budgets: [
+        Budget.{ name: "frame", scope: .Scene("jetfighter"), metric: .FrameTime(.P99), provider: .SceneProbe("jetfighter"), comparison: .AbsoluteFrom("local/jetfighter"), limit: .AtMost(16ms) },
+        Budget.{ name: "memory", scope: .Scene("jetfighter"), metric: .MemoryHighWater, provider: .SceneProbe("jetfighter"), comparison: .AbsoluteFrom("local/jetfighter"), limit: .AtMost(128MiB) },
+        Budget.{ name: "assets", scope: .Scene("jetfighter"), metric: .SceneAssetBytes, provider: .SceneProbe("jetfighter"), comparison: .AbsoluteFrom("local/jetfighter"), limit: .AtMost(512KiB) },
+        Budget.{ name: "draws", scope: .Scene("jetfighter"), metric: .DrawCalls(.P99), provider: .SceneProbe("jetfighter"), comparison: .AbsoluteFrom("local/jetfighter"), limit: .AtMost(8) },
+    ]
+}
 use core.env as env
 use core.raylib as rl
 use "./level" as level
@@ -180,7 +189,6 @@ fn run() {
     scene.input.bind("fire", "Space")
     scene.component<Position>()
     scene.component<Velocity>()
-    scene.budgets.set(game.Budgets.new(16, 128, 512, 8))
     print("query {scene.query<Position, Velocity>().len()}")
     scene.on_frame((frame) => {
         if frame.input.pressed("fire") {

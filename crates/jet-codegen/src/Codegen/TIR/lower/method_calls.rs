@@ -611,14 +611,12 @@ pub(crate) fn lower_method_call(
                 ("Scene", "new") => THandleOp::GameSceneNew,
                 ("Replay", "record") => THandleOp::GameReplayRecord,
                 ("Backend", "headless") => THandleOp::GameBackendHeadless,
-                ("Budgets", "new") => THandleOp::GameBudgetsNew,
                 _ => unreachable!("game_static_type admitted only stable game constructors"),
             };
             let ty = match static_type {
                 "Scene" => Type::Named("GameScene".to_string()),
                 "Replay" => Type::Named("GameReplay".to_string()),
                 "Backend" => Type::Named("GameBackend".to_string()),
-                "Budgets" => Type::Named("GameBudgets".to_string()),
                 _ => unit_type(),
             };
             let recv = if args.is_empty() {

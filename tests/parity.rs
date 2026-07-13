@@ -232,7 +232,6 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     ("core.mime", "from_extension"),
     ("core.mime", "parse"),
     ("core.numeric", "decimal"),
-    ("core.testing", "bench_budget"),
     ("core.testing", "corpus"),
     ("core.testing", "fake_clock"),
     ("core.testing", "fake_rng"),

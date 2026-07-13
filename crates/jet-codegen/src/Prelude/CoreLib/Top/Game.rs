@@ -3,7 +3,6 @@
 struct GameState {
     assets: Vec<(String, String)>,
     bindings: Vec<(String, String)>,
-    budgets: Option<GameBudgets>,
     components: Vec<String>,
 }
 
@@ -17,19 +16,12 @@ struct GameInputMap {
     state: std::rc::Rc<std::cell::RefCell<GameState>>,
 }
 
-#[derive(Clone)]
-struct GameBudgetsSlot {
-    state: std::rc::Rc<std::cell::RefCell<GameState>>,
-}
-
 struct GameScene {
     name: String,
     assets: GameAssets,
     user_assets: GameAssets,
     input: GameInputMap,
     user_input: GameInputMap,
-    budgets: GameBudgetsSlot,
-    user_budgets: GameBudgetsSlot,
     callbacks: std::rc::Rc<std::cell::RefCell<Vec<Box<dyn FnMut(GameFrame)>>>>,
 }
 
@@ -53,14 +45,6 @@ struct GameBackend {
     renderer: String,
     audio: String,
     editor: String,
-}
-
-#[derive(Clone, Debug)]
-struct GameBudgets {
-    frame_ms: i64,
-    memory_mb: i64,
-    asset_kb: i64,
-    draw_calls: i64,
 }
 
 #[derive(Clone, Debug)]
@@ -89,11 +73,6 @@ impl JetShow for GameAssets {
 impl JetShow for GameInputMap {
     fn jet_show(&self) -> String {
         "GameInputMap".to_string()
-    }
-}
-impl JetShow for GameBudgetsSlot {
-    fn jet_show(&self) -> String {
-        "GameBudgetsSlot".to_string()
     }
 }
 impl JetShow for GameImage {
@@ -129,14 +108,6 @@ impl JetShow for GameBackend {
         )
     }
 }
-impl JetShow for GameBudgets {
-    fn jet_show(&self) -> String {
-        format!(
-            "GameBudgets(frame_ms: {}, memory_mb: {}, asset_kb: {}, draw_calls: {})",
-            self.frame_ms, self.memory_mb, self.asset_kb, self.draw_calls
-        )
-    }
-}
 impl JetShow for GameInputSnapshot {
     fn jet_show(&self) -> String {
         format!("GameInputSnapshot({})", self.pressed.join(","))
@@ -156,15 +127,12 @@ fn jet_game_scene_new(name: &String) -> GameScene {
     let input = GameInputMap {
         state: state.clone(),
     };
-    let budgets = GameBudgetsSlot { state };
     GameScene {
         name: name.clone(),
         assets: assets.clone(),
         user_assets: assets,
         input: input.clone(),
         user_input: input,
-        budgets: budgets.clone(),
-        user_budgets: budgets,
         callbacks: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
     }
 }
@@ -178,20 +146,6 @@ fn jet_game_backend_headless() -> GameBackend {
         renderer: "headless".to_string(),
         audio: "none".to_string(),
         editor: "none".to_string(),
-    }
-}
-
-fn jet_game_budgets_new(
-    frame_ms: i64,
-    memory_mb: i64,
-    asset_kb: i64,
-    draw_calls: i64,
-) -> GameBudgets {
-    GameBudgets {
-        frame_ms,
-        memory_mb,
-        asset_kb,
-        draw_calls,
     }
 }
 
@@ -248,10 +202,6 @@ fn jet_game_input_bind(input: &GameInputMap, action: &String, key: &String) {
     if !state.bindings.iter().any(|(a, k)| a == action && k == key) {
         state.bindings.push((action.clone(), key.clone()));
     }
-}
-
-fn jet_game_budgets_set(slot: &GameBudgetsSlot, budgets: &GameBudgets) {
-    slot.state.borrow_mut().budgets = Some(budgets.clone());
 }
 
 fn jet_game_input_pressed(input: &GameInputSnapshot, action: &String) -> bool {
@@ -313,14 +263,6 @@ fn jet_game_run(
                 components
             }
         ));
-        if let Some(b) = &state.budgets {
-            out.push(format!(
-                "budgets:frame={}ms,memory={}mb,assets={}kb,draws={}",
-                b.frame_ms, b.memory_mb, b.asset_kb, b.draw_calls
-            ));
-        } else {
-            out.push("budgets:none".to_string());
-        }
     }
     for frame_idx in 0..3 {
         let pressed = if frame_idx == 1 {
@@ -357,4 +299,3 @@ fn jet_game_run(
     }
     out.join("\n")
 }
-

@@ -1,4 +1,4 @@
-use crate::AST::{BudgetDecl, ContribValue, EnumLitArg, Expr, Item, ModuleDecl, Namespace, Program, ProgramBundle, SystemFieldValue};
+use crate::AST::{BudgetDecl, ContribValue, EnumLitArg, Expr, Item, ModuleDecl, Namespace, Program, ProgramBundle, Stmt, SystemFieldValue};
 use crate::Diagnostics::{Diagnostic, Span};
 use std::collections::BTreeMap;
 
@@ -142,6 +142,10 @@ fn attachment_catalog(items: &[Item]) -> AttachmentCatalog {
     let mut catalog = AttachmentCatalog::default();
     for item in items {
         if let Item::Bench(bench) = item { catalog.benches.insert(bench.name.clone()); continue; }
+        if let Item::Func(func) = item {
+            collect_scene_attachments(&func.body, &mut catalog.scenes);
+            continue;
+        }
         let Item::Module(module) = item else { continue };
         for contribution in &module.contributions {
             match contribution.namespace {
@@ -163,6 +167,63 @@ fn attachment_catalog(items: &[Item]) -> AttachmentCatalog {
         }
     }
     catalog
+}
+
+fn collect_scene_attachments(stmts: &[Stmt], scenes: &mut std::collections::BTreeSet<String>) {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Val(binding) => collect_scene_expr(&binding.init, scenes),
+            Stmt::Expr(expr) | Stmt::Return(Some(expr), _) => collect_scene_expr(expr, scenes),
+            Stmt::Assign { value, .. } => collect_scene_expr(value, scenes),
+            Stmt::If(value) => {
+                collect_scene_expr(&value.cond, scenes);
+                collect_scene_attachments(&value.then_body, scenes);
+                if let Some(crate::AST::ElseBranch::Else(body)) = &value.else_branch {
+                    collect_scene_attachments(body, scenes);
+                }
+            }
+            Stmt::While { cond, body, .. } => {
+                collect_scene_expr(cond, scenes);
+                collect_scene_attachments(body, scenes);
+            }
+            Stmt::Loop { body, .. }
+            | Stmt::Unsafe { body, .. }
+            | Stmt::Impure { body, .. }
+            | Stmt::Reactive { body, .. }
+            | Stmt::Shield { body, .. }
+            | Stmt::Off { body, .. }
+            | Stmt::DebugOnly { body, .. }
+            | Stmt::Region { body, .. }
+            | Stmt::TaskGroup { body, .. }
+            | Stmt::Layout { body, .. }
+            | Stmt::Caps { body, .. } => collect_scene_attachments(body, scenes),
+            _ => {}
+        }
+    }
+}
+
+fn collect_scene_expr(expr: &Expr, scenes: &mut std::collections::BTreeSet<String>) {
+    match expr {
+        Expr::MethodCall { receiver, method, args, .. } => {
+            if method == "new"
+                && matches!(&**receiver, Expr::Field(_, member, _) if member == "Scene")
+                && args.len() == 1
+            {
+                if let Some(name) = string_value(&args[0].expr) {
+                    scenes.insert(name);
+                }
+            }
+            collect_scene_expr(receiver, scenes);
+            for arg in args { collect_scene_expr(&arg.expr, scenes); }
+        }
+        Expr::Call(call) => for arg in &call.args { collect_scene_expr(&arg.expr, scenes); },
+        Expr::Field(base, _, _) | Expr::Unary(_, base, _) => collect_scene_expr(base, scenes),
+        Expr::Binary(_, left, right, _) => {
+            collect_scene_expr(left, scenes);
+            collect_scene_expr(right, scenes);
+        }
+        _ => {}
+    }
 }
 
 fn validate_resolution(specs: &[BudgetSpec], catalog: &AttachmentCatalog, diags: &mut Vec<Diagnostic>) {

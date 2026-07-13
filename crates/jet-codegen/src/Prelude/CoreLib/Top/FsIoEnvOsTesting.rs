@@ -791,48 +791,6 @@ fn jet_testing_corpus(path: &String) -> Vec<String> {
     entries
 }
 
-// D-TESTKIT1=A: run `body` (a few warmup calls, then timed trials), compare
-// the measured mean wall-clock time against `max_ns`, and report mean/stddev
-// so a failing budget is diagnosable, not just a bare `false`.
-fn jet_testing_bench_budget<F: Fn()>(name: &String, max_ns: i64, body: F) -> bool {
-    const WARMUPS: u32 = 3;
-    const TRIALS: u32 = 10;
-    for _ in 0..WARMUPS {
-        body();
-    }
-    let mut samples_ns: Vec<f64> = Vec::with_capacity(TRIALS as usize);
-    for _ in 0..TRIALS {
-        let t0 = std::time::Instant::now();
-        body();
-        samples_ns.push(t0.elapsed().as_nanos() as f64);
-    }
-    let n = samples_ns.len() as f64;
-    let mean = samples_ns.iter().sum::<f64>() / n;
-    let variance = samples_ns.iter().map(|s| (s - mean).powi(2)).sum::<f64>() / n;
-    let stddev = variance.sqrt();
-    let ok = mean <= max_ns as f64;
-    // The default line is deterministic (no measured numbers) so a golden/dev-vs-
-    // AOT comparison never flakes on timing noise. `JET_BENCH_VERBOSE=1` opts into
-    // the full mean/stddev/budget line for a human debugging a budget failure.
-    if std::env::var("JET_BENCH_VERBOSE").is_ok() {
-        eprintln!(
-            "bench_budget {}: {:.0}ns (±{:.0}) budget {}ns — {}",
-            name,
-            mean,
-            stddev,
-            max_ns,
-            if ok { "ok" } else { "over budget" }
-        );
-    } else {
-        eprintln!(
-            "bench_budget {}: {}",
-            name,
-            if ok { "within budget — ok" } else { "over budget — FAIL" }
-        );
-    }
-    ok
-}
-
 fn sanitize_test_name(name: &str) -> String {
     let mut out = String::new();
     for ch in name.chars() {

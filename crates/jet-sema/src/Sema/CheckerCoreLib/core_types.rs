@@ -133,10 +133,9 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-DET1: deterministic injected capability handles.
         // D-DET-CAPAPI: `Duration` value type for the widened clock surface.
         | "Clock" | "Rng" | "Duration"
-        | "GameScene" | "GameAssets" | "GameInputMap" | "GameBudgetsSlot" | "GameBudgets"
+        | "GameScene" | "GameAssets" | "GameInputMap"
         | "GameBackend" | "GameReplay" | "GameImage" | "GameSound" | "GameFrame"
         | "GameInputSnapshot" | "GameSceneType" | "GameReplayType" | "GameBackendType"
-        | "GameBudgetsType"
         // D-BIGINT1 / D-DECIMAL1: arbitrary-precision numerics.
         | "BigInt" | "Decimal"
         // D-DBDRIVER1 / D-EFFDBREAD1=A: the `core.db` connection handle and its
@@ -444,7 +443,6 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         // D-GAME-*: scene-owned headless game substrate fields.
         ("GameScene", "assets") => Some(Type::Named("GameAssets".to_string())),
         ("GameScene", "input") => Some(Type::Named("GameInputMap".to_string())),
-        ("GameScene", "budgets") => Some(Type::Named("GameBudgetsSlot".to_string())),
         ("GameFrame", "index") => Some(Type::Int),
         ("GameFrame", "input") => Some(Type::Named("GameInputSnapshot".to_string())),
         _ => None,

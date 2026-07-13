@@ -1811,7 +1811,7 @@ scene-first with a frame hook (D-GAME3=C): a `Scene` owns durable editable game
 data, while `scene.on_frame((frame) => { ... })` attaches per-frame logic.
 The current Core floor is headless and deterministic: `game.Scene.new`,
 `scene.assets.image`/`sound`, `scene.input.bind`, `scene.component<T>()`,
-`scene.query<T...>()`, `scene.budgets.set(game.Budgets.new(...))`,
+`scene.query<T...>()`,
 `game.Replay.record`, `game.Backend.headless`, and
 `game.run(scene, replay: replay)` produce a stable transcript without renderer,
 audio, editor, or file-backend dependencies.

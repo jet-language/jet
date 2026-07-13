@@ -382,8 +382,6 @@ pub(crate) fn game_handle_rust_type(name: &str) -> Option<&'static str> {
         "GameScene" => Some("GameScene"),
         "GameAssets" => Some("GameAssets"),
         "GameInputMap" => Some("GameInputMap"),
-        "GameBudgetsSlot" => Some("GameBudgetsSlot"),
-        "GameBudgets" => Some("GameBudgets"),
         "GameBackend" => Some("GameBackend"),
         "GameReplay" => Some("GameReplay"),
         "GameImage" => Some("GameImage"),

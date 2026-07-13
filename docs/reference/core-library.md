@@ -1089,7 +1089,6 @@ fn run() {
     scene := game.Scene.new("arcade")
     scene.assets.image("assets/player.png") ?? panic("image")
     scene.input.bind("jump", "Space")
-    scene.budgets.set(game.Budgets.new(16, 96, 256, 4))
     scene.component<Position>()
     scene.component<Velocity>()
     scene.on_frame((frame) => {
@@ -1104,15 +1103,13 @@ fn run() {
 
 | Surface | Returns | What it does |
 |---------|---------|--------------|
-| `game.Scene.new(name)` | `GameScene` | Create one scene identity with assets, input, budgets, components, and frame hooks |
+| `game.Scene.new(name)` | `GameScene` | Create one scene identity with assets, input, components, and frame hooks |
 | `scene.assets.image(path)` / `.sound(path)` | `GameImage ? String` / `GameSound ? String` | Register a typed scene asset handle; paths containing `missing` fail deterministically |
 | `scene.input.bind(action, key)` | nothing | Bind an action name to a device key name |
 | `scene.on_frame((frame) => { ... })` | nothing | Attach frame logic to the scene |
 | `frame.input.pressed(action)` | `Bool` | Read the deterministic per-frame input snapshot |
 | `scene.component<T>()` | nothing | Register a struct-marker component type on the scene |
 | `scene.query<T...>()` | `[String]` | Query registered component markers as a deterministic scene view |
-| `game.Budgets.new(frame_ms, memory_mb, asset_kb, draw_calls)` | `GameBudgets` | Build a scene budget value |
-| `scene.budgets.set(budgets)` | nothing | Attach budgets to the scene transcript |
 | `game.Replay.record(path)` | `GameReplay` | Name a `.jreplay` artifact for transcript recording |
 | `game.Backend.headless()` | `GameBackend` | Explicit no-renderer/no-audio/no-editor backend value |
 | `game.run(scene, replay: replay)` | `String` | Run three deterministic headless frames and return a transcript |
@@ -1763,21 +1760,13 @@ fn run() {
 }
 ```
 
-Helpers: `snap`, `golden`, `fixture`, `temp_dir`, `corpus`, `fake_clock`,
-`fake_rng`, and `bench_budget`. Use `expect(value).snapshot()` inside `#Test`
+Helpers: `snap`, `golden`, `fixture`, `temp_dir`, `corpus`, `fake_clock`, and
+`fake_rng`. Use `expect(value).snapshot()` inside `#Test`
 blocks for assertion snapshots; `testing.snap` is for explicit named files.
 
-`bench_budget(name, max_ns, body)` actually runs `body` (a zero-arg closure):
-a few warmup calls, then timed trials, then compares the measured mean
-wall-clock time to `max_ns` and returns whether it's within budget. The default
-stderr line is deterministic (`bench_budget <name>: within budget — ok` /
-`over budget — FAIL`) — no measured numbers, so comparing output across runs or
-tiers (dev vs AOT) never flakes on timing noise. Set `JET_BENCH_VERBOSE=1` to
-see the full mean/stddev/budget line for diagnosing a failure.
-
-```jet
-print(testing.bench_budget("parse", 5_000_000, () => { parse(input) }))
-```
+Benchmark limits use a `#Bench` region plus a typed `Budget` declaration. The
+shared budget evaluator owns samples, baselines, confidence, reports, and CI
+outcomes; `core.testing` has no separate benchmark evaluator.
 
 #### `jet test` — directory recursion, filters, shuffle, parallel runs
 

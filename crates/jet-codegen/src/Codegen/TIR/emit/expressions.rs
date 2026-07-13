@@ -1323,14 +1323,6 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     format!("{}jet_game_replay_record(&({}))", root, recv)
                 }
                 THandleOp::GameBackendHeadless => format!("{}jet_game_backend_headless()", root),
-                THandleOp::GameBudgetsNew => format!(
-                    "{}jet_game_budgets_new({}, {}, {}, {})",
-                    root,
-                    recv,
-                    a(0),
-                    a(1),
-                    a(2)
-                ),
                 THandleOp::GameSceneOnFrame => {
                     format!("{}jet_game_scene_on_frame(&mut ({}), {})", root, recv, a(0))
                 }
@@ -1348,9 +1340,6 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 }
                 THandleOp::GameInputBind => {
                     format!("{}jet_game_input_bind(&({}), &({}), &({}))", root, recv, a(0), a(1))
-                }
-                THandleOp::GameBudgetsSet => {
-                    format!("{}jet_game_budgets_set(&({}), &({}))", root, recv, a(0))
                 }
                 THandleOp::GameInputPressed => {
                     format!("{}jet_game_input_pressed(&({}), &({}))", root, recv, a(0))

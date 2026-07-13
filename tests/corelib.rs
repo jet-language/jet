@@ -4024,6 +4024,18 @@ fn core_testing_helpers_run_against_files() {
         r#"
 use core.testing as testing
 
+module perf.testing {
+    budgets: [Budget.{
+        name: "parse",
+        scope: .Bench("parse"),
+        metric: .BenchTime(.P50),
+        provider: .BenchMeasurement("parse"),
+        comparison: .AbsoluteFrom("local/testing-helpers"),
+        limit: .AtMost(5ms),
+        enforcement: .Warn,
+    }]
+}
+
 fn run() {
     print(testing.fixture("fixture.txt"))
     print(testing.golden("golden.txt", "gold"))
@@ -4034,8 +4046,9 @@ fn run() {
     rng := testing.fake_rng(5)
     print(clock.now())
     print(rng.int(1, 4) >= 1)
-    print(testing.bench_budget("parse", 5000000, () => {}))
 }
+
+#Bench("parse") {}
 "#,
         &[],
         None,
@@ -4043,7 +4056,7 @@ fn run() {
     assert_eq!(code, 0, "core.testing helpers failed: {stderr}");
     assert_eq!(
         stdout,
-        "fixture\ntrue\ntrue\n2\ntrue\n99\ntrue\ntrue\n"
+        "fixture\ntrue\ntrue\n2\ntrue\n99\ntrue\n"
     );
     assert_eq!(
         fs::read_to_string(dir.join("__snapshots__/case.snap")).unwrap(),
@@ -6402,6 +6415,15 @@ fn game_headless_scene_replay_transcript_is_deterministic() {
         r#"
 use core.game as game
 
+module perf.game {
+    budgets: [
+        Budget.{ name: "frame", scope: .Scene("arcade"), metric: .FrameTime(.P99), provider: .SceneProbe("arcade"), comparison: .AbsoluteFrom("local/arcade"), limit: .AtMost(16ms) },
+        Budget.{ name: "memory", scope: .Scene("arcade"), metric: .MemoryHighWater, provider: .SceneProbe("arcade"), comparison: .AbsoluteFrom("local/arcade"), limit: .AtMost(96MiB) },
+        Budget.{ name: "assets", scope: .Scene("arcade"), metric: .SceneAssetBytes, provider: .SceneProbe("arcade"), comparison: .AbsoluteFrom("local/arcade"), limit: .AtMost(256KiB) },
+        Budget.{ name: "draws", scope: .Scene("arcade"), metric: .DrawCalls(.P99), provider: .SceneProbe("arcade"), comparison: .AbsoluteFrom("local/arcade"), limit: .AtMost(4) },
+    ]
+}
+
 struct Position { x: Int }
 struct Velocity { dx: Int }
 
@@ -6410,7 +6432,6 @@ fn run() {
     scene.assets.image("assets/player.png") ?? panic("image")
     scene.assets.sound("assets/jump.wav") ?? panic("sound")
     scene.input.bind("jump", "Space")
-    scene.budgets.set(game.Budgets.new(16, 96, 256, 4))
     scene.component<Position>()
     scene.component<Velocity>()
     print("query {scene.query<Position, Velocity>().len()}")
@@ -6429,7 +6450,7 @@ fn run() {
     assert_eq!(code, 0, "stderr: {stderr}");
     assert_eq!(
         stdout,
-        "query 1\nhook jump 1\nscene:arcade\nbackend:headless/none/none\nreplay:runs/demo.jreplay\nassets:image:assets/player.png,sound:assets/jump.wav\ninput:jump=Space\ncomponents:Position,Velocity\nbudgets:frame=16ms,memory=96mb,assets=256kb,draws=4\nframe:0 input:none\nframe:1 input:jump\nframe:2 input:none\n"
+        "query 1\nhook jump 1\nscene:arcade\nbackend:headless/none/none\nreplay:runs/demo.jreplay\nassets:image:assets/player.png,sound:assets/jump.wav\ninput:jump=Space\ncomponents:Position,Velocity\nframe:0 input:none\nframe:1 input:jump\nframe:2 input:none\n"
     );
     assert_eq!(stderr, "");
     let _ = fs::remove_dir_all(&dir);

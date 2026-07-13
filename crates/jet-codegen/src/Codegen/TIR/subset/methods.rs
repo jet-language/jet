@@ -325,7 +325,6 @@ pub(crate) fn method_call_in_subset(
     if let Some(static_type) = game_static_type(receiver, method, cx, locals) {
         let want = match (static_type, method) {
             ("Backend", "headless") => 0,
-            ("Budgets", "new") => 4,
             _ => 1,
         };
         return args.len() == want && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));

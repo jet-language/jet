@@ -156,7 +156,7 @@ fn run() {}
     dir
 }
 
-fn bench_budget_project(tag: &str) -> PathBuf {
+fn benchmark_budget_project(tag: &str) -> PathBuf {
     let dir = isolated_cwd(tag);
     fs::create_dir_all(dir.join("src")).unwrap();
     fs::write(dir.join("pkg.jet"), "payload: { name: \"app\", version: \"0.1.0\" }\n").unwrap();
@@ -310,7 +310,7 @@ fn budget_report_collects_mixed_providers_measurement_locally() {
 #[test]
 fn budget_bench_measurement_bootstraps_then_consumes_compatible_history() {
     use jet_foundation::PerformanceBudget::CanonicalJson;
-    let dir = bench_budget_project("budget_bench_measurement");
+    let dir = benchmark_budget_project("budget_bench_measurement");
     let bootstrap = Command::new(jet()).args(["budget","update","--baseline","ci/linux","--bootstrap","--reason","initial benchmark","--yes","--json"]).current_dir(&dir).output().unwrap();
     assert_eq!(bootstrap.status.code(),Some(0),"stdout: {}\nstderr: {}",String::from_utf8_lossy(&bootstrap.stdout),String::from_utf8_lossy(&bootstrap.stderr));
     let CanonicalJson::Object(first)=CanonicalJson::parse_canonical(&bootstrap.stdout).unwrap() else{panic!("command")};
@@ -358,7 +358,7 @@ fn age_budget_baseline(dir: &Path, baseline: &str) -> (String, String) {
 #[test]
 fn budget_stale_history_is_persisted_rendered_and_bootstrap_appends() {
     use jet_foundation::PerformanceBudget::CanonicalJson;
-    let dir = bench_budget_project("budget_stale_history");
+    let dir = benchmark_budget_project("budget_stale_history");
     let source = fs::read_to_string(dir.join("src/main.jet")).unwrap().replace("enforcement: .Warn", "enforcement: .Fail");
     fs::write(dir.join("src/main.jet"), source).unwrap();
     let first = Command::new(jet()).args(["budget","update","--baseline","ci/linux","--bootstrap","--reason","initial benchmark","--yes","--json"]).current_dir(&dir).output().unwrap();

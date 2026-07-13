@@ -285,23 +285,6 @@ impl<'a> Checker<'a> {
                                     *recv_type_out = Some("GameBackendType".to_string());
                                     return Some(Type::Named("GameBackend".to_string()));
                                 }
-                                ("Budgets", "new") => {
-                                    if args.len() != 4 {
-                                        self.diags.push(wrong_core_arity(
-                                            "Budgets.new",
-                                            4,
-                                            args.len(),
-                                            span,
-                                        ));
-                                    }
-                                    for i in 0..4 {
-                                        if let Some(arg) = args.get_mut(i) {
-                                            self.expect_core_arg("Budgets.new", i, &Type::Int, arg);
-                                        }
-                                    }
-                                    *recv_type_out = Some("GameBudgetsType".to_string());
-                                    return Some(Type::Named("GameBudgets".to_string()));
-                                }
                                 _ => {}
                             }
                         }
@@ -1161,23 +1144,6 @@ impl<'a> Checker<'a> {
                             if let Some(arg) = args.get_mut(i) {
                                 self.expect_core_arg("bind", i, &Type::String, arg);
                             }
-                        }
-                        *recv_type_out = Some(handle_ty.clone());
-                        return None;
-                    }
-                    ("GameBudgetsSlot", "set") => {
-                        needs_edit(self, "budgets.set");
-                        if args.len() != 1 {
-                            self.diags
-                                .push(wrong_core_arity("set", 1, args.len(), span));
-                        }
-                        if let Some(arg) = args.get_mut(0) {
-                            self.expect_core_arg(
-                                "set",
-                                0,
-                                &Type::Named("GameBudgets".to_string()),
-                                arg,
-                            );
                         }
                         *recv_type_out = Some(handle_ty.clone());
                         return None;

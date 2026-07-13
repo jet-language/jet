@@ -190,6 +190,21 @@ jet budget check
 
 The closed metric set adds `SceneAssetBytes` and `DrawCalls(percentile)`. Game fields map exactly: `frame_ms` to `FrameTime(.P99)` in nanoseconds, `memory_mb` to `MemoryHighWater` in MiB, `asset_kb` to `SceneAssetBytes` in KiB, and `draw_calls` to `DrawCalls(.P99)` as Count. Each uses `AbsoluteFrom` and `AtMost`. One `SceneProbe` pins backend build, target, device, replay/input, scene-ready event, 120 warmup frames, 600 measured frames, viewport, and settings; it defines the sample stream and max/percentile estimators. The entire former `Game.Budgets` declaration, display, and evaluator path is deleted. Old uses receive ordinary unresolved diagnostics; no alias or second engine survives.
 
+### Prototype retirement ledger
+
+| Former fact | Canonical replacement | Retired behavior |
+|---|---|---|
+| `bench_budget("parse", 5_000_000, body)` name and body | `#Bench("parse") { body }` plus a `.Bench("parse")` / `.BenchMeasurement("parse")` `Budget` | Helper Bool return, fixed 3/10 sampling, floating mean/deviation, environment-controlled stderr |
+| `bench_budget` `max_ns` | `.BenchTime(percentile)` with `.AtMost(5ms)` and explicit baseline policy | Implicit unpinned wall-clock hard gate |
+| `Game.Budgets.frame_ms` | `.Scene(scene)` / `.SceneProbe(scene)`, `.FrameTime(.P99)`, nanosecond-normalized `.AtMost` | Transcript display and runtime setter |
+| `Game.Budgets.memory_mb` | `.MemoryHighWater`, `.AtMost(value MiB)` | Transcript display and runtime setter |
+| `Game.Budgets.asset_kb` | `.SceneAssetBytes`, `.AtMost(value KiB)` | Transcript display and runtime setter |
+| `Game.Budgets.draw_calls` | `.DrawCalls(.P99)`, `.AtMost(value)` | Transcript display and runtime setter |
+
+Every migrated statistical fact uses `.AbsoluteFrom(baseline)`. Scene probes
+retain backend build, target, device, replay/input, ready event, warmups,
+measured frames, viewport, and settings in canonical provider/context identity.
+
 ## D-PERFBUDGET-PROVIDER1=A — In-process typed provider registry
 
 Providers are resolved deterministically from the compiler-owned registry, never from `PATH`. A `ProviderRequest` fixes schema/version, request id, provider/context/budget hashes, ordered metrics, workload, and policy. Canonical sorting and hashing use REPORT1 bytes. Providers emit a contiguous ordered stream of typed `Sample`, `Unavailable`, then one final `Complete`; providers collect evidence only, while the shared engine owns policy and outcomes. Limits are 1,000,000 samples, 16 MiB total bytes, 4,096 specs, and 512 scalars of detail. Valid unavailability or too few samples is E2906; malformed streams, panic, or timeout are E2908; unsupported pairs are E2903; unresolved providers are E2905. Provider identity and context remain part of every fact.

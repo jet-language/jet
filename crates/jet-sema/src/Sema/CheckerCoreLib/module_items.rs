@@ -204,7 +204,7 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "core.mem.alloc" => &["Arena", "Bump", "Pool", "Fixed"],
         "core.gc" => &["Gc", "collect"],
         "core.solve" => &["Solver"],
-        "core.game" => &["Scene", "Replay", "Backend", "Budgets", "run"],
+        "core.game" => &["Scene", "Replay", "Backend", "run"],
         "core.data" => &[
             "csv",
             "count",
@@ -249,7 +249,6 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "corpus",
             "fake_clock",
             "fake_rng",
-            "bench_budget",
         ],
         // D-FILES-WRITE1 (merge, was `core.fs` + `core.files`): one module for
         // both whole-file convenience helpers and streaming handle constructors.

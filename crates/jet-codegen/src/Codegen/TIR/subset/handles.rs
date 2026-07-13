@@ -93,7 +93,7 @@ pub(crate) fn game_static_type<'a>(
         return None;
     }
     match (static_type.as_str(), method) {
-        ("Scene", "new") | ("Replay", "record") | ("Backend", "headless") | ("Budgets", "new") => {
+        ("Scene", "new") | ("Replay", "record") | ("Backend", "headless") => {
             Some(static_type.as_str())
         }
         _ => None,
@@ -194,7 +194,6 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("GameAssets", "image", 1) => THandleOp::GameAssetsImage,
         ("GameAssets", "sound", 1) => THandleOp::GameAssetsSound,
         ("GameInputMap", "bind", 2) => THandleOp::GameInputBind,
-        ("GameBudgetsSlot", "set", 1) => THandleOp::GameBudgetsSet,
         ("GameInputSnapshot", "pressed", 1) => THandleOp::GameInputPressed,
         ("Duration", "millis", 0) => THandleOp::DurationMillis,
         ("Duration", "seconds", 0) => THandleOp::DurationSeconds,
@@ -524,8 +523,7 @@ pub(crate) fn handle_method_return_ty(handle: &str, method: &str, nargs: usize) 
             ("GameScene", "query", 1) => Some(Some(Type::List(Box::new(Type::String)))),
             ("GameInputSnapshot", "pressed", 1) => Some(Some(Type::Bool)),
             ("GameScene", "on_frame" | "component", 1)
-            | ("GameInputMap", "bind", 2)
-            | ("GameBudgetsSlot", "set", 1) => Some(None),
+            | ("GameInputMap", "bind", 2) => Some(None),
             _ => None,
         });
     match ret {
