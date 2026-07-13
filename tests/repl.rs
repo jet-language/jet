@@ -1839,7 +1839,7 @@ fn repl_raw_project_baseline_survives_downstream_replay() {
   sleep 0.12
   printf '1\r'
   sleep 0.12
-  printf '\1772\r'
+  printf '\033[D\1772\r'
   sleep 0.2
   printf 'y\r'
   sleep 0.15
