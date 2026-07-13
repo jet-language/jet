@@ -1885,6 +1885,16 @@ index, not a substitute for that law.
   UTF-8 helpers project over those bytes. UDP remains packet-oriented and
   reports source, original length, and truncation. Half-close is explicit;
   close is idempotent; later misuse returns `.Closed`.
+- **D-NETIO-CONTRACT1=A / D-NETIO-CONTRACT2=B**: `core.io.Reader` and
+  `core.io.Writer` are the one nominal byte-stream contract. Both use write
+  receivers and return `IOError`; `read(limit)` requires a positive limit,
+  returns at most that many bytes, and reserves an empty success for clean EOF.
+  `write(bytes)` may report a positive prefix; zero for nonempty input is an
+  error; `write_all` is the one looping implementation. Close stays inherent
+  and idempotent, never a trait member. File, TCP, Unix, TLS, and explicit codec
+  adapters convert their native failures into the closed `IOError` tree.
+  Runtime/compiler conformance remains open on card #300; native byte methods
+  keep their existing error types until that one contract is wired end to end.
 - **D-NETERROR1=A**: every fallible network operation returns the structured
   `NetError` family. Stable variants cover invalid input, permissions,
   address/connection state, closed handles, timeout, cancellation,
@@ -1895,8 +1905,12 @@ index, not a substitute for that law.
   available, and obey the earliest context, persistent socket, or explicit
   per-call deadline. The same handles expose readiness; cancellation and
   expiry are distinct `.Cancelled` and `.Timeout` values. **Implementation
-  status:** deadline bounding and same-handle readiness exist in AOT; prompt
-  task cancellation and scheduler/JIT integration remain tracked by #306.
+  status:** TCP reads and writes use nonblocking handles plus the shared AOT
+  readiness backend; a blocked operation returns typed `.Cancelled` or
+  `.Timeout` when the scheduler reports either condition. Same-handle readiness
+  and deadline bounding exist. UDP, Unix, DNS, TLS, per-call deadline coverage,
+  JIT parity, and remaining platform proof stay tracked by #300; #306's shared
+  cancellation/runtime prerequisite is complete.
 - **D-NETTLSSTREAM1=A**: `core.tls.client` consumes a connected `TcpStream` and
   returns a `TlsStream` with the same byte and close law. Safe defaults verify the server name
   with system roots; advanced roots, ALPN, identity, protocol bounds, peer

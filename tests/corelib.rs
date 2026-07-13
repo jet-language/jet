@@ -1120,6 +1120,90 @@ fn core_net_dns_nxdomain_is_an_error() {
 }
 
 #[test]
+fn core_net_tcp_read_uses_scheduler_and_returns_typed_cancellation() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_core_net_task_cancel_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "net_task_cancel",
+        r#"
+use core.net as net
+use core.tasks as tasks
+
+fn run() {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    typed_address :: net.listener_local_socket_addr(listener) ?? panic("address")
+    address :: net.socket_to_string(typed_address)
+    (ready_tx, ready_rx) :: tasks.channel<Int>()
+    server :: tasks.spawn(take(listener, ready_tx) () => {
+        stream := net.tcp_accept(listener) ?? panic("accept")
+        ready_tx.send(1)
+        if stream.read(1) == {
+            ok(_) -> print("unexpected read")
+            err(error) -> print(net.error_message(error))
+        }
+    })
+    _client :: net.tcp_connect(address) ?? panic("connect")
+    _ready :: ready_rx.receive() ?? panic("ready")
+    server.cancel()
+    server.join()
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, "tcp read cancelled\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn core_net_tcp_read_persistent_timeout_uses_scheduler_budget() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_core_net_task_timeout_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "net_task_timeout",
+        r#"
+use core.net as net
+use core.tasks as tasks
+use core.time as time
+
+fn run() {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    typed_address :: net.listener_local_socket_addr(listener) ?? panic("address")
+    address :: net.socket_to_string(typed_address)
+    client :: tasks.spawn(take(address) () => {
+        stream := net.tcp_connect(address) ?? panic("connect")
+        time.sleep(100)
+        stream.close() ?? panic("close")
+    })
+    stream := net.tcp_accept(listener) ?? panic("accept")
+    net.set_read_timeout(&stream, 20) ?? panic("timeout")
+    if stream.read(1) == {
+        ok(_) -> print("unexpected read")
+        err(error) -> print(net.error_message(error))
+    }
+    client.join()
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "{stderr}");
+    assert!(stdout.contains("deadline exceeded while waiting in tcp read"), "{stdout}");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn core_tls_byte_stream_runs_real_local_handshake_and_close_notify() {
     let dir = std::env::temp_dir().join(format!("jet_core_tls_surface_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();

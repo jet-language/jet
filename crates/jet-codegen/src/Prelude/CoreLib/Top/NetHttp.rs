@@ -11,6 +11,8 @@ pub struct JetTcpStream {
     closed: bool,
     read_shutdown: bool,
     write_shutdown: bool,
+    read_timeout_ms: Option<i64>,
+    write_timeout_ms: Option<i64>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -370,12 +372,58 @@ fn jet_net_error_os_code(error: &JetNetError) -> Option<i64> {
     jet_net_error_detail(error).and_then(|d| d.os_code)
 }
 
-fn jet_net_tcp_stream(inner: std::net::TcpStream) -> JetTcpStream {
-    JetTcpStream {
+fn jet_net_tcp_stream(inner: std::net::TcpStream) -> Result<JetTcpStream, JetNetError> {
+    inner
+        .set_nonblocking(true)
+        .map_err(|error| jet_net_io_error("tcp scheduler registration", None, error))?;
+    Ok(JetTcpStream {
         inner,
         closed: false,
         read_shutdown: false,
         write_shutdown: false,
+        read_timeout_ms: None,
+        write_timeout_ms: None,
+    })
+}
+
+fn jet_net_operation_deadline(timeout_ms: Option<i64>) -> Option<JetDeadlineGuard> {
+    let timeout_ms = timeout_ms?;
+    let configured = jet_std_time_now().saturating_add(timeout_ms);
+    let deadline = jet_ctx_deadline_ms().map_or(configured, |ambient| ambient.min(configured));
+    Some(jet_ctx_push_deadline(deadline))
+}
+
+fn jet_net_scheduler_wait(
+    stream: &std::net::TcpStream,
+    read: bool,
+    write: bool,
+    operation: &str,
+) -> Result<(), JetNetError> {
+    match jet_scheduler_wait_without_unwind(|| {
+        jet_scheduler_io_wait(stream, read, write, operation)
+    }) {
+        JetSchedulerWait::Ready(()) => Ok(()),
+        JetSchedulerWait::Cancelled => Err(JetNetError::Cancelled(jet_net_detail(
+            operation,
+            None,
+            None,
+            format!("{} cancelled", operation),
+            None,
+        ))),
+        JetSchedulerWait::Deadline(message) => Err(JetNetError::Timeout(jet_net_detail(
+            operation,
+            None,
+            None,
+            message,
+            None,
+        ))),
+        JetSchedulerWait::Panicked(message) => Err(JetNetError::Other(jet_net_detail(
+            operation,
+            None,
+            None,
+            format!("{} scheduler wait failed: {}", operation, message),
+            None,
+        ))),
     }
 }
 
@@ -463,15 +511,15 @@ fn jet_net_tcp_listen_addr(addr: &JetSocketAddr) -> Result<JetTcpListener, JetNe
 
 fn jet_net_tcp_connect_addr(addr: &JetSocketAddr) -> Result<JetTcpStream, JetNetError> {
     std::net::TcpStream::connect(addr.inner)
-        .map(jet_net_tcp_stream)
         .map_err(|e| jet_net_io_error("tcp connect", Some(addr.inner.to_string()), e))
+        .and_then(jet_net_tcp_stream)
 }
 
 fn jet_net_tcp_connect_timeout(addr: &JetSocketAddr, ms: i64) -> Result<JetTcpStream, JetNetError> {
     let timeout = jet_net_timeout(ms).map_err(|m| JetNetError::InvalidInput(jet_net_detail("tcp connect", Some(addr.inner.to_string()), None, m, None)))?;
     std::net::TcpStream::connect_timeout(&addr.inner, timeout)
-        .map(jet_net_tcp_stream)
         .map_err(|e| jet_net_io_error("tcp connect", Some(addr.inner.to_string()), e))
+        .and_then(jet_net_tcp_stream)
 }
 
 fn jet_net_tcp_connect_happy(host: &String, port: i64, ms: i64) -> Result<JetTcpStream, JetNetError> {
@@ -495,7 +543,7 @@ fn jet_net_tcp_connect_happy(host: &String, port: i64, ms: i64) -> Result<JetTcp
             break;
         }
         match std::net::TcpStream::connect_timeout(&addr, deadline.saturating_duration_since(now)) {
-            Ok(s) => return Ok(jet_net_tcp_stream(s)),
+            Ok(s) => return jet_net_tcp_stream(s),
             Err(e) => last = Some((addr, e)),
         }
     }
@@ -545,14 +593,14 @@ fn jet_net_tcp_accept(listener: &JetTcpListener) -> Result<JetTcpStream, JetNetE
     listener
         .inner
         .accept()
-        .map(|(s, _)| jet_net_tcp_stream(s))
         .map_err(|e| jet_net_io_error("tcp accept", None, e))
+        .and_then(|(stream, _)| jet_net_tcp_stream(stream))
 }
 
 fn jet_net_tcp_connect(addr: &String) -> Result<JetTcpStream, JetNetError> {
     std::net::TcpStream::connect(addr.as_str())
-        .map(jet_net_tcp_stream)
         .map_err(|e| jet_net_io_error("tcp connect", Some(addr.clone()), e))
+        .and_then(jet_net_tcp_stream)
 }
 
 fn jet_net_tcp_read(stream: &mut JetTcpStream) -> Result<String, JetNetError> {
@@ -577,6 +625,7 @@ fn jet_net_tcp_read_bytes(stream: &mut JetTcpStream, limit: i64) -> Result<Vec<u
     if cap == 0 {
         return Ok(Vec::new());
     }
+    let _deadline = jet_net_operation_deadline(stream.read_timeout_ms);
     jet_net_apply_tcp_deadlines(&stream.inner, "tcp read")?;
     let mut bytes = vec![0u8; cap];
     loop {
@@ -586,7 +635,7 @@ fn jet_net_tcp_read_bytes(stream: &mut JetTcpStream, limit: i64) -> Result<Vec<u
                 return Ok(bytes);
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                jet_scheduler_io_wait(&stream.inner, true, false, "tcp read");
+                jet_net_scheduler_wait(&stream.inner, true, false, "tcp read")?;
             }
             Err(e) => return Err(jet_net_io_error("tcp read", None, e)),
         }
@@ -611,12 +660,13 @@ fn jet_net_tcp_write_bytes(stream: &mut JetTcpStream, data: &Vec<u8>) -> Result<
     if stream.closed || stream.write_shutdown {
         return Err(jet_net_closed("tcp write"));
     }
+    let _deadline = jet_net_operation_deadline(stream.write_timeout_ms);
     jet_net_apply_tcp_deadlines(&stream.inner, "tcp write")?;
     loop {
         match stream.inner.write(data) {
             Ok(n) => return Ok(n as i64),
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                jet_scheduler_io_wait(&stream.inner, false, true, "tcp write");
+                jet_net_scheduler_wait(&stream.inner, false, true, "tcp write")?;
             }
             Err(e) => return Err(jet_net_io_error("tcp write", None, e)),
         }
@@ -697,7 +747,6 @@ fn jet_net_tcp_ready(
         .map(|ms| std::time::Duration::from_millis(ms as u64));
     let budget = ambient.map_or(explicit, |duration| duration.min(explicit));
     let deadline = std::time::Instant::now() + budget;
-    stream.inner.set_nonblocking(true).map_err(|e| jet_net_io_error("tcp ready", None, e))?;
     let result = loop {
         let readable = if matches!(interest, JetNetReadyInterest::Read | JetNetReadyInterest::ReadWrite) {
             let mut byte = [0u8; 1];
@@ -730,12 +779,7 @@ fn jet_net_tcp_ready(
         }
         std::thread::sleep(std::time::Duration::from_millis(1));
     };
-    let restore = stream.inner.set_nonblocking(false).map_err(|e| jet_net_io_error("tcp ready restore", None, e));
-    match (result, restore) {
-        (Err(error), _) => Err(error),
-        (Ok(_), Err(error)) => Err(error),
-        (Ok(ready), Ok(())) => Ok(ready),
-    }
+    result
 }
 
 fn jet_net_ready_readable(ready: &JetNetReady) -> bool {
@@ -766,23 +810,22 @@ fn jet_net_listener_local_addr(listener: &JetTcpListener) -> Result<String, JetN
 }
 
 fn jet_net_set_timeout(stream: &mut JetTcpStream, ms: i64) -> Result<(), JetNetError> {
-    let dur = jet_net_timeout(ms).map_err(|m| JetNetError::InvalidInput(jet_net_detail("set tcp timeout", None, None, m, None)))?;
-    stream.inner.set_read_timeout(Some(dur)).map_err(|e| jet_net_io_error("set tcp read timeout", None, e))?;
-    stream.inner.set_write_timeout(Some(dur)).map_err(|e| jet_net_io_error("set tcp write timeout", None, e))
+    let _ = jet_net_timeout(ms).map_err(|m| JetNetError::InvalidInput(jet_net_detail("set tcp timeout", None, None, m, None)))?;
+    stream.read_timeout_ms = Some(ms);
+    stream.write_timeout_ms = Some(ms);
+    Ok(())
 }
 
 fn jet_net_set_read_timeout(stream: &mut JetTcpStream, ms: i64) -> Result<(), JetNetError> {
-    stream
-        .inner
-        .set_read_timeout(Some(jet_net_timeout(ms).map_err(|m| JetNetError::InvalidInput(jet_net_detail("set tcp read timeout", None, None, m, None)))?))
-        .map_err(|e| jet_net_io_error("set tcp read timeout", None, e))
+    let _ = jet_net_timeout(ms).map_err(|m| JetNetError::InvalidInput(jet_net_detail("set tcp read timeout", None, None, m, None)))?;
+    stream.read_timeout_ms = Some(ms);
+    Ok(())
 }
 
 fn jet_net_set_write_timeout(stream: &mut JetTcpStream, ms: i64) -> Result<(), JetNetError> {
-    stream
-        .inner
-        .set_write_timeout(Some(jet_net_timeout(ms).map_err(|m| JetNetError::InvalidInput(jet_net_detail("set tcp write timeout", None, None, m, None)))?))
-        .map_err(|e| jet_net_io_error("set tcp write timeout", None, e))
+    let _ = jet_net_timeout(ms).map_err(|m| JetNetError::InvalidInput(jet_net_detail("set tcp write timeout", None, None, m, None)))?;
+    stream.write_timeout_ms = Some(ms);
+    Ok(())
 }
 
 fn jet_net_udp_bind(addr: &String) -> Result<JetUdpSocket, JetNetError> {
