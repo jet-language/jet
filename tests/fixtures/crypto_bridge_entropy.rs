@@ -53,28 +53,28 @@ mod tests {
         fail_entropy();
         assert_eq!(
             jet_crypto_entropy_bytes(32),
-            Err(JetCryptoError::Unavailable)
+            Err(JetCryptoError::EntropyUnavailable)
         );
         jet_crypto_entropy_clear_test_provider();
 
         fail_entropy();
         assert_eq!(
             seal_with_algo(&key, &plaintext, ALGO_CHACHA20),
-            Err(JetCryptoError::Unavailable)
+            Err(JetCryptoError::EntropyUnavailable)
         );
         jet_crypto_entropy_clear_test_provider();
 
         fail_entropy();
         assert_eq!(
             crypto_keygen(),
-            Err(JetCryptoError::Unavailable)
+            Err(JetCryptoError::EntropyUnavailable)
         );
         jet_crypto_entropy_clear_test_provider();
 
         fail_entropy();
         assert_eq!(
             crypto_password_hash(&"password".to_string()),
-            Err(JetCryptoError::Unavailable)
+            Err(JetCryptoError::EntropyUnavailable)
         );
         jet_crypto_entropy_clear_test_provider();
     }
@@ -116,5 +116,48 @@ mod tests {
             .borrow()
             .iter()
             .all(|snapshot| snapshot == &vec![0; 32]));
+    }
+
+    #[test]
+    fn typed_recipient_envelopes_are_canonical_and_fail_closed() {
+        let alice = jet_crypto_x25519_generate_impl().unwrap();
+        let bob = jet_crypto_x25519_generate_impl().unwrap();
+        let wrong = jet_crypto_x25519_generate_impl().unwrap();
+        let plain = b"purpose-bound payload".to_vec();
+        let aad = b"tenant-7".to_vec();
+        let sealed = jet_crypto_seal_typed_impl(
+            vec![jet_crypto_x25519_public_typed_impl(&bob), jet_crypto_x25519_public_typed_impl(&alice)],
+            &plain,
+            &aad,
+        ).unwrap();
+        let bytes = jet_crypto_sealed_bytes_impl(&sealed);
+        assert_eq!(&bytes[..4], b"JETV");
+        assert_eq!(jet_crypto_open_typed_impl(&alice, jet_crypto_sealed_from_bytes_impl(bytes.clone()).unwrap(), &aad).unwrap(), plain);
+        assert_eq!(jet_crypto_open_typed_impl(&wrong, jet_crypto_sealed_from_bytes_impl(bytes.clone()).unwrap(), &aad), Err(JetCryptoError::OpenFailed));
+        assert_eq!(jet_crypto_open_typed_impl(&alice, jet_crypto_sealed_from_bytes_impl(bytes.clone()).unwrap(), &b"wrong".to_vec()), Err(JetCryptoError::OpenFailed));
+        let mut tampered = bytes; *tampered.last_mut().unwrap() ^= 1;
+        assert_eq!(jet_crypto_open_typed_impl(&alice, jet_crypto_sealed_from_bytes_impl(tampered).unwrap(), &aad), Err(JetCryptoError::OpenFailed));
+    }
+
+    #[test]
+    fn typed_secret_wrap_sign_kdf_and_password_paths_preserve_roles() {
+        let recipient = jet_crypto_x25519_generate_impl().unwrap();
+        let secret = jet_crypto_secret_from_text_impl("do not print".to_string());
+        let wrapped = jet_crypto_wrap_typed_impl(&secret, jet_crypto_x25519_public_typed_impl(&recipient)).unwrap();
+        let bytes = jet_crypto_wrapped_bytes_impl(&wrapped);
+        assert_eq!(&bytes[..4], b"JETW");
+        let unwrapped = jet_crypto_unwrap_typed_impl(&recipient, jet_crypto_wrapped_from_bytes_impl(bytes).unwrap()).unwrap();
+        assert!(jet_crypto_constant_time_secret_impl(&secret, &unwrapped));
+        let derived = jet_crypto_hkdf_typed_impl(&secret, &vec![], &b"domain".to_vec(), 32).unwrap();
+        assert!(!jet_crypto_constant_time_secret_impl(&secret, &derived));
+        let signing = jet_crypto_signing_generate_impl().unwrap();
+        let message = b"release".to_vec();
+        let signature = jet_crypto_sign_typed_impl(&signing, &message).unwrap();
+        assert!(jet_crypto_verify_typed_impl(jet_crypto_signing_public_impl(&signing), &message, signature).unwrap());
+        let stored = jet_crypto_password_hash_typed_impl(&secret).unwrap();
+        assert!(jet_crypto_password_verify_typed_impl(&secret, stored).unwrap());
+        let wrong = jet_crypto_secret_from_text_impl("wrong".to_string());
+        let stored = jet_crypto_password_hash_typed_impl(&secret).unwrap();
+        assert!(!jet_crypto_password_verify_typed_impl(&wrong, stored).unwrap());
     }
 }

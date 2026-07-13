@@ -793,6 +793,15 @@ pub(crate) fn method_call_in_subset(
     if recv_type.is_none() {
         return false;
     }
+    if matches!(
+        (recv_type.as_deref(), method, args.len()),
+        (Some("SigningKey" | "X25519SecretKey"), "public_key", 0)
+            | (Some("VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey" | "Digest256" | "Digest512"), "bytes", 0)
+            | (Some("Digest256" | "Digest512"), "hex", 0)
+            | (Some("PasswordHash"), "text", 0)
+    ) {
+        return expr_in_subset(receiver, cx, locals);
+    }
     // Shape (n) [c109 Phase 30]: DYNAMIC dispatch on a TRAIT-OBJECT receiver
     // (`s.name()`/`s.area()` where `s: Shape` is a `Box<dyn user_Shape>`). Sema sets
     // `recv_type == Some(<trait>)` with the trait in `cx.trait_names`; the AST
@@ -979,6 +988,15 @@ pub(crate) fn static_method_call_in_subset(
 ) -> bool {
     if locals.contains(type_name) {
         return false;
+    }
+    if matches!(
+        (type_name, method, args.len()),
+        ("Secret", "from_text" | "from_bytes", 1)
+            | ("SigningKey" | "X25519SecretKey", "generate", 0)
+            | ("VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey", "from_bytes", 1)
+            | ("PasswordHash", "parse", 1)
+    ) {
+        return args.iter().all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
     }
     // D-SIMD2 / D-LINALG1: a static method on a built-in math type (`F32x4.splat(x)`,
     // `Vec3.from_array([…])`). Admitted when the (type, method, nargs) names a covered

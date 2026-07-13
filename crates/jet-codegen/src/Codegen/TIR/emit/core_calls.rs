@@ -1077,7 +1077,7 @@ pub(crate) fn emit_tir_core_call(
             arg(0),
             arg(1)
         ),
-        ("jet.crypto", "sha256") => format!("{}(&({}))", helper("jet_ring_crypto_sha256"), arg(0)),
+        ("jet.crypto", "sha256") => format!("{}(&({}))", regex_fn("jet_crypto_sha256_typed_impl"), arg(0)),
         ("jet.crypto", "sha256_bytes") => {
             format!("{}(&({}))", helper("jet_ring_crypto_sha256_bytes"), arg(0))
         }
@@ -1117,7 +1117,7 @@ pub(crate) fn emit_tir_core_call(
         ("jet.crypto", "password_hash") => {
             format!(
                 "{}(&({}))",
-                regex_fn("jet_crypto_password_hash_impl"),
+                regex_fn("jet_crypto_password_hash_typed_impl"),
                 arg(0)
             )
         }
@@ -1129,16 +1129,17 @@ pub(crate) fn emit_tir_core_call(
         ),
         ("jet.crypto", "password_verify") => format!(
             "{}(&({}), &({}))",
-            regex_fn("jet_crypto_password_verify_impl"),
+            regex_fn("jet_crypto_password_verify_typed_impl"),
             arg(0),
             arg(1)
         ),
         // D-CRYPTOENV1=A: misuse-resistant envelope (RustCrypto FFI bridge).
         ("jet.crypto", "seal") => format!(
-            "{}(&({}), &({}))",
-            regex_fn("jet_crypto_seal_impl"),
+            "{}({}, &({}), &({}))",
+            regex_fn("jet_crypto_seal_typed_impl"),
             arg(0),
-            arg(1)
+            arg(1),
+            arg(2)
         ),
         ("jet.crypto", "file_seal") => format!(
             "{}(&({}), &({}))",
@@ -1147,10 +1148,11 @@ pub(crate) fn emit_tir_core_call(
             arg(1)
         ),
         ("jet.crypto", "open") => format!(
-            "{}(&({}), &({}))",
-            regex_fn("jet_crypto_open_impl"),
+            "{}(&({}), {}, &({}))",
+            regex_fn("jet_crypto_open_typed_impl"),
             arg(0),
-            arg(1)
+            arg(1),
+            arg(2)
         ),
         ("jet.crypto", "file_open") => format!(
             "{}(&({}), &({}))",
@@ -1160,17 +1162,45 @@ pub(crate) fn emit_tir_core_call(
         ),
         ("jet.crypto", "sign") => format!(
             "{}(&({}), &({}))",
-            regex_fn("jet_crypto_sign_impl"),
+            regex_fn("jet_crypto_sign_typed_impl"),
             arg(0),
             arg(1)
         ),
         ("jet.crypto", "verify") => format!(
-            "{}(&({}), &({}), &({}))",
-            regex_fn("jet_crypto_verify_impl"),
+            "{}({}, &({}), {})",
+            regex_fn("jet_crypto_verify_typed_impl"),
             arg(0),
             arg(1),
             arg(2)
         ),
+        ("jet.crypto", "wrap") => format!("{}(&({}), {})", regex_fn("jet_crypto_wrap_typed_impl"), arg(0), arg(1)),
+        ("jet.crypto", "unwrap") => format!("{}(&({}), {})", regex_fn("jet_crypto_unwrap_typed_impl"), arg(0), arg(1)),
+        ("jet.crypto", "x25519") => format!("{}(&({}), {})", regex_fn("jet_crypto_x25519_typed_impl"), arg(0), arg(1)),
+        ("jet.crypto", "constant_time_equal") => format!("{}(&({}), &({}))", regex_fn("jet_crypto_constant_time_secret_impl"), arg(0), arg(1)),
+        ("jet.crypto", "blake3") => format!("{}(&({}))", regex_fn("jet_crypto_blake3_typed_impl"), arg(0)),
+        ("jet.crypto", "sha512") => format!("{}(&({}))", regex_fn("jet_crypto_sha512_typed_impl"), arg(0)),
+        ("jet.crypto", "__secret_from_text") => format!("{}({})", regex_fn("jet_crypto_secret_from_text_impl"), arg(0)),
+        ("jet.crypto", "__secret_from_bytes") => format!("{}({})", regex_fn("jet_crypto_secret_from_bytes_impl"), arg(0)),
+        ("jet.crypto", "__signing_generate") => format!("{}()", regex_fn("jet_crypto_signing_generate_impl")),
+        ("jet.crypto", "__x25519_generate") => format!("{}()", regex_fn("jet_crypto_x25519_generate_impl")),
+        ("jet.crypto", "__verify_key_from_bytes") => format!("{}({})", regex_fn("jet_crypto_verify_key_from_bytes_impl"), arg(0)),
+        ("jet.crypto", "__x25519_public_from_bytes") => format!("{}({})", regex_fn("jet_crypto_x25519_public_from_bytes_impl"), arg(0)),
+        ("jet.crypto", "__signature_from_bytes") => format!("{}({})", regex_fn("jet_crypto_signature_from_bytes_impl"), arg(0)),
+        ("jet.crypto", "__sealed_from_bytes") => format!("{}({})", regex_fn("jet_crypto_sealed_from_bytes_impl"), arg(0)),
+        ("jet.crypto", "__wrapped_from_bytes") => format!("{}({})", regex_fn("jet_crypto_wrapped_from_bytes_impl"), arg(0)),
+        ("jet.crypto", "__password_parse") => format!("{}({})", regex_fn("jet_crypto_password_parse_impl"), arg(0)),
+        ("jet.crypto", "__signing_public") => format!("{}(&({}))", regex_fn("jet_crypto_signing_public_impl"), arg(0)),
+        ("jet.crypto", "__x25519_public") => format!("{}(&({}))", regex_fn("jet_crypto_x25519_public_typed_impl"), arg(0)),
+        ("jet.crypto", "__verify_key_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_verify_key_bytes_impl"), arg(0)),
+        ("jet.crypto", "__x25519_public_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_x25519_public_bytes_impl"), arg(0)),
+        ("jet.crypto", "__signature_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_signature_bytes_impl"), arg(0)),
+        ("jet.crypto", "__sealed_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_sealed_bytes_impl"), arg(0)),
+        ("jet.crypto", "__wrapped_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_wrapped_bytes_impl"), arg(0)),
+        ("jet.crypto", "__digest256_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_digest256_bytes_impl"), arg(0)),
+        ("jet.crypto", "__digest512_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_digest512_bytes_impl"), arg(0)),
+        ("jet.crypto", "__digest256_hex") => format!("{}(&({}))", regex_fn("jet_crypto_digest256_hex_impl"), arg(0)),
+        ("jet.crypto", "__digest512_hex") => format!("{}(&({}))", regex_fn("jet_crypto_digest512_hex_impl"), arg(0)),
+        ("jet.crypto", "__password_text") => format!("{}(&({}))", regex_fn("jet_crypto_password_text_impl"), arg(0)),
         // D-CRYPTOENV1=A: expert-only raw AEAD (same bridge, explicit algorithm id).
         ("core.crypto.expert", "aes256_gcm_seal") => format!(
             "{}(&({}), &({}), 2i64)",

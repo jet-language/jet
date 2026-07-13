@@ -25,6 +25,7 @@ pub use fixed_sigs::*;
 mod process_ui;
 pub(crate) use process_ui::*;
 mod module_items;
+pub(crate) use module_items::*;
 mod serde_diags;
 pub(crate) use serde_diags::*;
 mod data_reflect;

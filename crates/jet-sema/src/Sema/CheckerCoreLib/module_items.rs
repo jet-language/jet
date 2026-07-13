@@ -383,6 +383,19 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "setup",
         ],
         "jet.crypto" => &[
+            "Secret",
+            "SigningKey",
+            "VerifyKey",
+            "X25519SecretKey",
+            "X25519PublicKey",
+            "SharedSecret",
+            "Signature",
+            "Sealed",
+            "WrappedKey",
+            "PasswordHash",
+            "Digest256",
+            "Digest512",
+            "CryptoError",
             "sha256",
             "sha256_bytes",
             "sha512_bytes",
@@ -400,6 +413,12 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "file_open",
             "sign",
             "verify",
+            "wrap",
+            "unwrap",
+            "x25519",
+            "blake3",
+            "sha512",
+            "constant_time_equal",
         ],
         // D-CRYPTOENV1=A: expert-only raw primitives — misuse lint at call site.
         "core.crypto.expert" => &[
@@ -641,4 +660,16 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         _ => &[],
     };
     items.iter().map(|s| s.to_string()).collect()
+}
+
+/// Ratified nominal types exported by a Core module. Separate from callable
+/// items so `alias.Type.method()` is a static type call, not a nested module.
+pub(crate) fn core_module_type_item(module: &str, item: &str) -> bool {
+    let module = Syntax::normalize_core_module(module).unwrap_or_else(|| module.to_string());
+    matches!(
+        (module.as_str(), item),
+        ("jet.crypto", "Secret" | "SigningKey" | "VerifyKey" | "X25519SecretKey"
+            | "X25519PublicKey" | "SharedSecret" | "Signature" | "Sealed" | "WrappedKey"
+            | "PasswordHash" | "Digest256" | "Digest512" | "CryptoError")
+    )
 }

@@ -188,6 +188,17 @@ impl<'a> Checker<'a> {
             if let Expr::Field(base, leaf, _) = &**receiver {
                 if let Expr::Ident(alias, _) = &**base {
                     if let Some(ns) = self.core_imports.get(alias).cloned() {
+                        if crate::Sema::CheckerCoreLib::core_module_type_item(&ns, leaf) {
+                            let type_name = leaf.clone();
+                            **receiver = Expr::Ident(type_name.clone(), span);
+                            let ty = Type::Named(type_name.clone());
+                            if let Some(ret) = Collections::builtin_method_return(&ty, method, args.len(), true) {
+                                let ret = self.finish_builtin_method(receiver, method, &ty, args, span, ret);
+                                *resolved_ret_out = ret.clone();
+                                return ret;
+                            }
+                            return self.check_static_method(&type_name, method, span, args);
+                        }
                         if ns == "core.encoding" && leaf == "EncodingLimits" && method == "safe" {
                             return self.check_static_method("EncodingLimits", method, span, args);
                         }
@@ -2264,6 +2275,11 @@ impl<'a> Checker<'a> {
                 }
             }
             if let Some(ret) = Collections::builtin_method_return(&recv_ty, method, args.len(), false) {
+                if let Type::Named(name) = &recv_ty {
+                    if matches!(name.as_str(), "SigningKey" | "X25519SecretKey" | "VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey" | "Digest256" | "Digest512" | "PasswordHash") {
+                        *recv_type_out = Some(name.clone());
+                    }
+                }
                 // D-NUMOPS1: hand codegen the receiver's numeric width so it picks the
                 // same widening/narrowing form sema just chose for the return type.
                 if recv_ty.is_numeric() {

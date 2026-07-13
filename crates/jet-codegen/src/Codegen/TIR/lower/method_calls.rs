@@ -100,6 +100,51 @@ pub(crate) fn lower_method_call(
             _ => unit_type(),
         }
     }
+    let crypto_static = static_call_type_name_lower(receiver, env).and_then(|ty| {
+        let helper = match (ty.as_str(), method) {
+            ("Secret", "from_text") => "__secret_from_text",
+            ("Secret", "from_bytes") => "__secret_from_bytes",
+            ("SigningKey", "generate") => "__signing_generate",
+            ("X25519SecretKey", "generate") => "__x25519_generate",
+            ("VerifyKey", "from_bytes") => "__verify_key_from_bytes",
+            ("X25519PublicKey", "from_bytes") => "__x25519_public_from_bytes",
+            ("Signature", "from_bytes") => "__signature_from_bytes",
+            ("Sealed", "from_bytes") => "__sealed_from_bytes",
+            ("WrappedKey", "from_bytes") => "__wrapped_from_bytes",
+            ("PasswordHash", "parse") => "__password_parse",
+            _ => return None,
+        };
+        Some(helper)
+    });
+    if let Some(helper) = crypto_static {
+        return TExpr { ty: resolved_ret.cloned().unwrap_or_else(unit_type), kind: TExprKind::CoreCall {
+            module: "jet.crypto".to_string(), method: helper.to_string(),
+            args: args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect(),
+        }};
+    }
+    if let Some(kind) = recv_type.as_deref() {
+        let helper = match (kind, method) {
+            ("SigningKey", "public_key") => Some("__signing_public"),
+            ("X25519SecretKey", "public_key") => Some("__x25519_public"),
+            ("VerifyKey", "bytes") => Some("__verify_key_bytes"),
+            ("X25519PublicKey", "bytes") => Some("__x25519_public_bytes"),
+            ("Signature", "bytes") => Some("__signature_bytes"),
+            ("Sealed", "bytes") => Some("__sealed_bytes"),
+            ("WrappedKey", "bytes") => Some("__wrapped_bytes"),
+            ("Digest256", "bytes") => Some("__digest256_bytes"),
+            ("Digest512", "bytes") => Some("__digest512_bytes"),
+            ("Digest256", "hex") => Some("__digest256_hex"),
+            ("Digest512", "hex") => Some("__digest512_hex"),
+            ("PasswordHash", "text") => Some("__password_text"),
+            _ => None,
+        };
+        if let Some(helper) = helper {
+            let recv = lower_expr(receiver, cx, env);
+            return TExpr { ty: resolved_ret.cloned().unwrap_or_else(unit_type), kind: TExprKind::CoreCall {
+                module: "jet.crypto".to_string(), method: helper.to_string(), args: vec![recv],
+            }};
+        }
+    }
     // D-TOOL4: `expect(x).snapshot()` — render the harness snapshot call. Test
     // bodies are `Result<(), String>`, so the trailing `?` propagates mismatch.
     if method == Syntax::BUILTIN_SNAPSHOT {

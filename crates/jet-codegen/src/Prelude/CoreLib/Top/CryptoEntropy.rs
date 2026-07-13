@@ -7,20 +7,34 @@ mod jet_crypto_entropy {
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[allow(dead_code)]
 pub enum JetCryptoError {
-    NegativeLength,
-    TooLarge,
-    Unavailable,
-    Operation(String),
+    InvalidLength { operation: &'static str, parameter: &'static str, expected: &'static str, actual: usize },
+    InvalidEncoding { operation: &'static str, value_kind: &'static str },
+    UnsupportedVersion { operation: &'static str, version: u8 },
+    UnsupportedAlgorithm { operation: &'static str, algorithm: u8 },
+    OpenFailed,
+    NonContributoryKey,
+    OutputLength { operation: &'static str, minimum: usize, maximum: usize, actual: usize },
+    PasswordPolicy { reason: &'static str },
+    EntropyUnavailable,
+    ResourceUnavailable { resource: &'static str },
+    Internal { incident_id: &'static str },
 }
 
 impl std::fmt::Display for JetCryptoError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::NegativeLength => "cryptographic random length cannot be negative",
-            Self::TooLarge => "one cryptographic random request is limited to 1048576 bytes",
-            Self::Unavailable => "the operating system could not provide cryptographic randomness",
-            Self::Operation(message) => return f.write_str(message),
-        })
+        match self {
+            Self::InvalidLength { operation, parameter, expected, actual } => write!(f, "{operation}: {parameter} must be {expected}; got {actual}"),
+            Self::InvalidEncoding { operation, value_kind } => write!(f, "{operation}: invalid {value_kind} encoding"),
+            Self::UnsupportedVersion { operation, version } => write!(f, "{operation}: unsupported version {version}"),
+            Self::UnsupportedAlgorithm { operation, algorithm } => write!(f, "{operation}: unsupported algorithm {algorithm}"),
+            Self::OpenFailed => f.write_str("open failed"),
+            Self::NonContributoryKey => f.write_str("key agreement produced no shared contribution"),
+            Self::OutputLength { operation, minimum, maximum, actual } => write!(f, "{operation}: output length must be {minimum}..={maximum}; got {actual}"),
+            Self::PasswordPolicy { reason } => write!(f, "password policy rejected the value: {reason}"),
+            Self::EntropyUnavailable => f.write_str("the operating system could not provide cryptographic randomness"),
+            Self::ResourceUnavailable { resource } => write!(f, "cryptographic resource unavailable: {resource}"),
+            Self::Internal { incident_id } => write!(f, "internal cryptographic failure; incident {incident_id}"),
+        }
     }
 }
 
@@ -145,7 +159,7 @@ pub fn jet_crypto_entropy_unsupported_for_test(
     out: &mut [u8],
 ) -> Result<(), JetCryptoEntropyError> {
     jet_crypto_entropy_zeroize(out);
-    Err(JetCryptoEntropyError::Unavailable)
+    Err(JetCryptoEntropyError::EntropyUnavailable)
 }
 
 fn jet_crypto_entropy_fill_loop(
@@ -161,7 +175,7 @@ fn jet_crypto_entropy_fill_loop(
             JetCryptoEntropyStep::Interrupted => {}
             JetCryptoEntropyStep::Filled(_) | JetCryptoEntropyStep::Failed => {
                 jet_crypto_entropy_zeroize(out);
-                return Err(JetCryptoEntropyError::Unavailable);
+                return Err(JetCryptoEntropyError::EntropyUnavailable);
             }
         }
     }
@@ -298,7 +312,7 @@ fn jet_crypto_entropy_wasi_with(
             &[],
         );
         if errno != ERRNO_INTR || generation == 16 {
-            return Err(JetCryptoEntropyError::Unavailable);
+            return Err(JetCryptoEntropyError::EntropyUnavailable);
         }
     }
     unreachable!()
@@ -331,7 +345,7 @@ pub fn jet_crypto_entropy_wasi_with_for_test(
 )))]
 fn jet_crypto_entropy_fill_native(out: &mut [u8]) -> Result<(), JetCryptoEntropyError> {
     jet_crypto_entropy_zeroize(out);
-    Err(JetCryptoEntropyError::Unavailable)
+    Err(JetCryptoEntropyError::EntropyUnavailable)
 }
 
 #[cfg(not(all(target_os = "wasi", target_arch = "wasm32")))]
@@ -352,10 +366,10 @@ fn jet_crypto_entropy_fill_platform(out: &mut [u8]) -> Result<(), JetCryptoEntro
 
 pub fn jet_crypto_entropy_bytes(count: i64) -> Result<Vec<u8>, JetCryptoEntropyError> {
     if count < 0 {
-        return Err(JetCryptoEntropyError::NegativeLength);
+        return Err(JetCryptoEntropyError::InvalidLength { operation: "core.crypto.random.bytes", parameter: "count", expected: "non-negative", actual: count.unsigned_abs() as usize });
     }
     if count > 1_048_576 {
-        return Err(JetCryptoEntropyError::TooLarge);
+        return Err(JetCryptoEntropyError::OutputLength { operation: "core.crypto.random.bytes", minimum: 0, maximum: 1_048_576, actual: count as usize });
     }
     if count == 0 {
         return Ok(Vec::new());

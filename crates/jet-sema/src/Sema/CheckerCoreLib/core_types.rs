@@ -145,6 +145,11 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "DnsSrv" | "UnixListener" | "UnixStream" | "TlsStream"
         | "NetError" | "NetErrorDetail" | "NetDnsError" | "NetShutdown" | "NetReadyInterest" | "NetReady"
         | "HttpRequest" | "HttpResponse" | "HttpRouter"
+        // D-CRYPTO-API1=A: purpose-bound crypto values. Secret-bearing values
+        // are opaque and receive no structural/collection capabilities.
+        | "Secret" | "SigningKey" | "VerifyKey" | "X25519SecretKey" | "X25519PublicKey"
+        | "SharedSecret" | "Signature" | "Sealed" | "WrappedKey" | "PasswordHash"
+        | "Digest256" | "Digest512" | "CryptoError"
         // D-ALLOC1/D-ALLOC-C (ratified 2026-06-19): allocator opaque types.
         | "Arena" | "Bump" | "Pool" | "Fixed"
         // D-ARGS1 (ratified 2026-06-22): declarative CLI arg parsing types.

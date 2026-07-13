@@ -778,7 +778,7 @@ pub fn core_fixed_sig(
             Some(Type::String),
         )),
         // jet.crypto: vetted hash functions (D-LR3).
-        ("jet.crypto", "sha256") => Some((vec![(read, Type::String)], Some(Type::String))),
+        ("jet.crypto", "sha256") => Some((vec![(read, Type::List(Box::new(u8_ty())))], Some(Type::Named("Digest256".into())))),
         ("jet.crypto", "sha256_bytes") => Some((
             vec![(read, Type::List(Box::new(u8_ty())))],
             Some(Type::String),
@@ -796,12 +796,12 @@ pub fn core_fixed_sig(
         )),
         ("jet.crypto", "hkdf_sha256") => Some((
             vec![
-                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::Named("Secret".into())),
                 (read, Type::List(Box::new(u8_ty()))),
                 (read, Type::List(Box::new(u8_ty()))),
                 (read, Type::Int),
             ],
-            Some(result_ty(Type::List(Box::new(u8_ty())), Type::String)),
+            Some(result_ty(Type::Named("Secret".into()), Type::Named("CryptoError".into()))),
         )),
         ("jet.crypto", "x25519_public") => Some((
             vec![(read, Type::List(Box::new(u8_ty())))],
@@ -815,47 +815,72 @@ pub fn core_fixed_sig(
             Some(result_ty(Type::List(Box::new(u8_ty())), Type::String)),
         )),
         ("jet.crypto", "password_hash") => Some((
-            vec![(read, Type::String)],
-            Some(result_ty(Type::String, Type::String)),
+            vec![(read, Type::Named("Secret".into()))],
+            Some(result_ty(Type::Named("PasswordHash".into()), Type::Named("CryptoError".into()))),
         )),
         ("jet.crypto", "password_hash_with_salt") => Some((
             vec![(read, Type::String), (read, Type::List(Box::new(u8_ty())))],
             Some(result_ty(Type::String, Type::String)),
         )),
         ("jet.crypto", "password_verify") => Some((
-            vec![(read, Type::String), (read, Type::String)],
-            Some(Type::Bool),
+            vec![(read, Type::Named("Secret".into())), (read, Type::Named("PasswordHash".into()))],
+            Some(result_ty(Type::Bool, Type::Named("CryptoError".into()))),
         )),
         // D-CRYPTOENV1=A: misuse-resistant envelope (RustCrypto via FFI bridge).
-        ("jet.crypto", "seal" | "file_seal") => Some((
+        ("jet.crypto", "seal") => Some((
             vec![
+                (read, Type::List(Box::new(Type::Named("X25519PublicKey".into())))),
                 (read, Type::List(Box::new(u8_ty()))),
                 (read, Type::List(Box::new(u8_ty()))),
             ],
-            Some(result_ty(Type::List(Box::new(u8_ty())), Type::String)),
+            Some(result_ty(Type::Named("Sealed".into()), Type::Named("CryptoError".into()))),
         )),
-        ("jet.crypto", "open" | "file_open") => Some((
+        ("jet.crypto", "open") => Some((
             vec![
-                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::Named("X25519SecretKey".into())),
+                (read, Type::Named("Sealed".into())),
                 (read, Type::List(Box::new(u8_ty()))),
             ],
+            Some(result_ty(Type::List(Box::new(u8_ty())), Type::Named("CryptoError".into()))),
+        )),
+        ("jet.crypto", "file_seal" | "file_open") => Some((
+            vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty())))],
             Some(result_ty(Type::List(Box::new(u8_ty())), Type::String)),
         )),
         ("jet.crypto", "sign") => Some((
             vec![
-                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::Named("SigningKey".into())),
                 (read, Type::List(Box::new(u8_ty()))),
             ],
-            Some(result_ty(Type::List(Box::new(u8_ty())), Type::String)),
+            Some(result_ty(Type::Named("Signature".into()), Type::Named("CryptoError".into()))),
         )),
         ("jet.crypto", "verify") => Some((
             vec![
+                (read, Type::Named("VerifyKey".into())),
                 (read, Type::List(Box::new(u8_ty()))),
-                (read, Type::List(Box::new(u8_ty()))),
-                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::Named("Signature".into())),
             ],
-            Some(result_ty(unit_ty(), Type::String)),
+            Some(result_ty(Type::Bool, Type::Named("CryptoError".into()))),
         )),
+        // D-CRYPTO-API1=A typed safe surface. Existing edition-2026 raw calls
+        // are diagnosed/migrated separately; these signatures are nominal.
+        ("jet.crypto", "wrap") => Some((
+            vec![(read, Type::Named("Secret".into())), (read, Type::Named("X25519PublicKey".into()))],
+            Some(result_ty(Type::Named("WrappedKey".into()), Type::Named("CryptoError".into()))),
+        )),
+        ("jet.crypto", "unwrap") => Some((
+            vec![(read, Type::Named("X25519SecretKey".into())), (read, Type::Named("WrappedKey".into()))],
+            Some(result_ty(Type::Named("Secret".into()), Type::Named("CryptoError".into()))),
+        )),
+        ("jet.crypto", "x25519") => Some((
+            vec![(read, Type::Named("X25519SecretKey".into())), (read, Type::Named("X25519PublicKey".into()))],
+            Some(result_ty(Type::Named("SharedSecret".into()), Type::Named("CryptoError".into()))),
+        )),
+        ("jet.crypto", "constant_time_equal") => Some((
+            vec![(read, Type::Named("Secret".into())), (read, Type::Named("Secret".into()))], Some(Type::Bool),
+        )),
+        ("jet.crypto", "blake3") => Some((vec![(read, Type::List(Box::new(u8_ty())))], Some(Type::Named("Digest256".into())))),
+        ("jet.crypto", "sha512") => Some((vec![(read, Type::List(Box::new(u8_ty())))], Some(Type::Named("Digest512".into())))),
         // D-CRYPTOENV1=A: expert-only raw AEAD (requires #Unsafe + expert import).
         ("core.crypto.expert", "aes256_gcm_seal" | "chacha20_seal") => Some((
             vec![

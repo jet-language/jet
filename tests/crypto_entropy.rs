@@ -98,7 +98,7 @@ fn failure_and_zero_fill_clear_the_entire_attempt() {
             terminal
         })
         .unwrap_err();
-        assert_eq!(err, JetCryptoEntropyError::Unavailable);
+        assert_eq!(err, JetCryptoEntropyError::EntropyUnavailable);
         assert_eq!(out, [0; 32], "tainted attempt must be zeroized");
     }
 }
@@ -117,7 +117,7 @@ fn injected_partial_failure_returns_no_bytes() {
     });
     assert_eq!(
         jet_crypto_entropy_bytes(16),
-        Err(JetCryptoEntropyError::Unavailable)
+        Err(JetCryptoEntropyError::EntropyUnavailable)
     );
     jet_crypto_entropy_clear_test_provider();
 }
@@ -206,7 +206,7 @@ fn wasi_stops_after_seventeen_interrupts() {
         out.fill(0xa5);
         27
     });
-    assert_eq!(result, Err(JetCryptoEntropyError::Unavailable));
+    assert_eq!(result, Err(JetCryptoEntropyError::EntropyUnavailable));
     assert_eq!(calls, 17);
     jet_crypto_entropy_clear_wasi_attempt_test_observer();
     assert_eq!(&*generations.borrow(), &(0..17).collect::<Vec<_>>());
@@ -217,7 +217,7 @@ fn unsupported_provider_zeroizes_and_fails_closed() {
     let mut out = [0xa5; 16];
     assert_eq!(
         jet_crypto_entropy_unsupported_for_test(&mut out),
-        Err(JetCryptoEntropyError::Unavailable)
+        Err(JetCryptoEntropyError::EntropyUnavailable)
     );
     assert_eq!(out, [0; 16]);
 }
@@ -230,11 +230,11 @@ fn live_provider_obeys_bounds_zero_and_concurrency() {
     assert_ne!(filled, [0; 32]);
     assert_eq!(
         jet_crypto_entropy_bytes(-1),
-        Err(JetCryptoEntropyError::NegativeLength)
+        Err(JetCryptoEntropyError::InvalidLength { operation: "core.crypto.random.bytes", parameter: "count", expected: "non-negative", actual: 1 })
     );
     assert_eq!(
         jet_crypto_entropy_bytes(1_048_577),
-        Err(JetCryptoEntropyError::TooLarge)
+        Err(JetCryptoEntropyError::OutputLength { operation: "core.crypto.random.bytes", minimum: 0, maximum: 1_048_576, actual: 1_048_577 })
     );
 
     let workers = 8;

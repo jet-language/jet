@@ -1,0 +1,20 @@
+// D-CRYPTO-API1=A: purpose-bound safe cryptography.
+use core.crypto as crypto
+
+fn run() {
+    recipient :: crypto.X25519SecretKey.generate() ?? panic("recipient key")
+    plaintext: [U8] :: [0x73, 0x61, 0x66, 0x65]
+    aad: [U8] :: [0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74]
+    sealed :: crypto.seal([recipient.public_key()], plaintext, aad) ?? panic("seal")
+    opened :: crypto.open(recipient, sealed, aad) ?? panic("open")
+    print(opened == plaintext)
+
+    signing :: crypto.SigningKey.generate() ?? panic("signing key")
+    signature :: crypto.sign(signing, plaintext) ?? panic("sign")
+    print(crypto.verify(signing.public_key(), plaintext, signature) ?? panic("verify"))
+
+    password :: crypto.Secret.from_text("correct horse battery staple")
+    stored :: crypto.password_hash(password) ?? panic("password hash")
+    print(crypto.password_verify(password, stored) ?? panic("password verify"))
+    print(crypto.sha256(plaintext).hex())
+}
