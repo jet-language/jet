@@ -393,8 +393,20 @@ extern "C" fn jet_jit_struct_set_str(h: i64, idx: i64, v: i64) {
 }
 
 const JIT_PERF_DEFAULT_FIDELITY_BITS: u32 = 1.0f32.to_bits();
-static JIT_PERF_FIDELITY: std::sync::atomic::AtomicU32 =
-    std::sync::atomic::AtomicU32::new(JIT_PERF_DEFAULT_FIDELITY_BITS);
+// D-FIDELITY-API1=A: this signal is deliberately outside `JitRuntime` — it
+// must survive `resident_teardown()` + a fresh `JitRuntime` (a "restart"),
+// exactly like the AOT binary's process-global static survives every read/
+// write for the life of that one running program. What must NOT happen is
+// leaking one resident-JIT execution's override into a DIFFERENT one running
+// concurrently on another thread (the actual bug: a process-wide
+// `AtomicU32` let a parallel `cargo test` thread observe another thread's
+// override mid-battery). Thread-local scoping keeps every within-thread
+// restart/hot-swap/relaunch sequence exactly as before while giving each
+// thread — i.e. each independent resident-JIT session — its own signal.
+thread_local! {
+    static JIT_PERF_FIDELITY: std::cell::Cell<u32> =
+        const { std::cell::Cell::new(JIT_PERF_DEFAULT_FIDELITY_BITS) };
+}
 
 fn alloc_jit_result(rt: &mut JitRuntime, ok: bool, bits: u64) -> i64 {
     rt.results.push(JitResultValue { ok, bits });
@@ -447,7 +459,7 @@ extern "C" fn jet_jit_result_get_i32(handle: i64) -> i32 {
 }
 
 extern "C" fn jet_jit_perf_fidelity() -> f64 {
-    f32::from_bits(JIT_PERF_FIDELITY.load(std::sync::atomic::Ordering::SeqCst)) as f64
+    f32::from_bits(JIT_PERF_FIDELITY.with(std::cell::Cell::get)) as f64
 }
 
 extern "C" fn jet_jit_perf_default_fidelity() -> f64 {
@@ -464,16 +476,13 @@ extern "C" fn jet_jit_perf_override_fidelity(value: f64) -> i64 {
             let string = rt.heap.alloc_string(message);
             return alloc_jit_result(rt, false, string as u64);
         }
-        JIT_PERF_FIDELITY.store((value as f32).to_bits(), std::sync::atomic::Ordering::SeqCst);
+        JIT_PERF_FIDELITY.with(|c| c.set((value as f32).to_bits()));
         alloc_jit_result(rt, true, 0)
     })
 }
 
 extern "C" fn jet_jit_perf_reset_fidelity() {
-    JIT_PERF_FIDELITY.store(
-        JIT_PERF_DEFAULT_FIDELITY_BITS,
-        std::sync::atomic::Ordering::SeqCst,
-    );
+    JIT_PERF_FIDELITY.with(|c| c.set(JIT_PERF_DEFAULT_FIDELITY_BITS));
 }
 
 pub(crate) struct HostFns {
