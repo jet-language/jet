@@ -19,6 +19,18 @@ pub struct BudgetSpec {
     pub field_spans: BTreeMap<String, Span>,
 }
 
+#[derive(Debug, Clone)]
+pub struct LocatedBudgetSpec {
+    pub spec: BudgetSpec,
+    pub module_index: usize,
+}
+
+impl std::ops::Deref for LocatedBudgetSpec {
+    type Target = BudgetSpec;
+
+    fn deref(&self) -> &Self::Target { &self.spec }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BudgetComparisonFact {
     pub kind: String,
@@ -74,14 +86,21 @@ pub fn collect_budget_specs(program: &Program) -> Result<Vec<BudgetSpec>, Vec<Di
 /// Budget commands consume this after the ordinary front-end check, so command
 /// execution cannot grow a second parser or semantic interpretation.
 pub fn collect_budget_specs_bundle(bundle: &ProgramBundle) -> Result<Vec<BudgetSpec>, Vec<Diagnostic>> {
+    collect_located_budget_specs_bundle(bundle)
+        .map(|specs| specs.into_iter().map(|located| located.spec).collect())
+}
+
+/// Collect budgets while retaining the module that owns each source span.
+pub fn collect_located_budget_specs_bundle(bundle: &ProgramBundle) -> Result<Vec<LocatedBudgetSpec>, Vec<Diagnostic>> {
     let mut specs = Vec::new();
     let mut diags = Vec::new();
-    for module in &bundle.modules {
+    for (module_index, module) in bundle.modules.iter().enumerate() {
         let (mut module_specs, mut module_diags) = validate_items(&module.items);
-        specs.append(&mut module_specs);
+        specs.extend(module_specs.drain(..).map(|spec| LocatedBudgetSpec { spec, module_index }));
         diags.append(&mut module_diags);
     }
-    validate_collisions(&specs, &mut diags);
+    let plain_specs = specs.iter().map(|located| located.spec.clone()).collect::<Vec<_>>();
+    validate_collisions(&plain_specs, &mut diags);
     if diags.is_empty() { Ok(specs) } else { Err(diags) }
 }
 

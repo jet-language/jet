@@ -16,6 +16,79 @@ const H0: [u32; 8] = [
     0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
 ];
 
+/// Incremental SHA-256. Keeps at most one partial 64-byte block, allowing
+/// compiler/tool identities to hash large artifacts without whole-file reads.
+pub struct StreamingSha256 {
+    state: [u32; 8],
+    block: [u8; 64],
+    block_len: usize,
+    byte_len: u64,
+}
+
+impl StreamingSha256 {
+    pub fn new() -> Self {
+        Self { state: H0, block: [0; 64], block_len: 0, byte_len: 0 }
+    }
+
+    pub fn update(&mut self, mut data: &[u8]) {
+        self.byte_len = self.byte_len.wrapping_add(data.len() as u64);
+        if self.block_len != 0 {
+            let take = (64 - self.block_len).min(data.len());
+            self.block[self.block_len..self.block_len + take].copy_from_slice(&data[..take]);
+            self.block_len += take;
+            data = &data[take..];
+            if self.block_len == 64 {
+                compress(&mut self.state, &self.block);
+                self.block_len = 0;
+            }
+        }
+        let mut chunks = data.chunks_exact(64);
+        for chunk in &mut chunks { compress(&mut self.state, chunk); }
+        let remainder = chunks.remainder();
+        self.block[..remainder.len()].copy_from_slice(remainder);
+        self.block_len = remainder.len();
+    }
+
+    pub fn finalize(mut self) -> [u8; 32] {
+        let mut tail = [0u8; 128];
+        tail[..self.block_len].copy_from_slice(&self.block[..self.block_len]);
+        tail[self.block_len] = 0x80;
+        let tail_len = if self.block_len < 56 { 64 } else { 128 };
+        tail[tail_len - 8..tail_len].copy_from_slice(&self.byte_len.wrapping_mul(8).to_be_bytes());
+        for block in tail[..tail_len].chunks_exact(64) { compress(&mut self.state, block); }
+        let mut out = [0u8; 32];
+        for (index, word) in self.state.iter().enumerate() {
+            out[index * 4..index * 4 + 4].copy_from_slice(&word.to_be_bytes());
+        }
+        out
+    }
+}
+
+impl Default for StreamingSha256 {
+    fn default() -> Self { Self::new() }
+}
+
+pub fn sha256_file_hex(path: &std::path::Path) -> std::io::Result<String> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path)?;
+    let mut hasher = StreamingSha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let count = file.read(&mut buffer)?;
+        if count == 0 { break; }
+        hasher.update(&buffer[..count]);
+    }
+    Ok(hex(hasher.finalize()))
+}
+
+fn hex(bytes: [u8; 32]) -> String {
+    bytes.iter().fold(String::with_capacity(64), |mut text, byte| {
+        use std::fmt::Write;
+        let _ = write!(text, "{byte:02x}");
+        text
+    })
+}
+
 pub fn sha256(data: &[u8]) -> [u8; 32] {
     let mut state = H0;
     let bit_len = (data.len() as u64).wrapping_mul(8);
@@ -90,12 +163,7 @@ fn compress(state: &mut [u32; 8], block: &[u8]) {
 }
 
 pub fn sha256_hex(data: &[u8]) -> String {
-    let bytes = sha256(data);
-    bytes.iter().fold(String::with_capacity(64), |mut s, b| {
-        use std::fmt::Write;
-        let _ = write!(s, "{:02x}", b);
-        s
-    })
+    hex(sha256(data))
 }
 
 /// Compute a canonical tree hash of a source directory.
@@ -166,5 +234,13 @@ mod tests {
             got,
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
+    }
+
+    #[test]
+    fn streaming_matches_one_shot_across_block_boundaries() {
+        let data = (0..10_000).map(|value| (value % 251) as u8).collect::<Vec<_>>();
+        let mut streaming = StreamingSha256::new();
+        for chunk in data.chunks(73) { streaming.update(chunk); }
+        assert_eq!(hex(streaming.finalize()), sha256_hex(&data));
     }
 }

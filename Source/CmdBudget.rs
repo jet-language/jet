@@ -3,14 +3,13 @@
 use jet::AST::Item;
 use jet::BudgetProviders::{ProviderEvent, ProviderRegistry, ProviderRequest, ProviderSpec};
 use jet::BudgetStore::{BudgetStore, UpdateKind};
-use jet::Sema::{BudgetAxis, BudgetQuantity, BudgetSpec};
+use jet::Sema::{BudgetAxis, BudgetQuantity, BudgetSpec, LocatedBudgetSpec};
 use jet_foundation::PerformanceBudget::{
     evaluate, stable_id, CanonicalJson, Comparison, Direction, Enforcement, Evidence,
     LimitDirection, PolicyOutcome, Rational,
 };
 use jet_foundation::SHA256::sha256_hex;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -43,6 +42,7 @@ pub(crate) fn run(raw: &[String]) -> i32 {
         return tool_failure(&options, "no project entry exists; add src/main.jet inside a project");
     }
 
+    let measured_start = timestamp_now();
     // Preflight owns no artifact write: parse/load/sema must finish first.
     let entry_text = entry.to_string_lossy();
     let (diagnostics, bundle, effect_facts) = jet::Driver::check_file_with_effect_facts(&entry_text, None, false);
@@ -50,13 +50,12 @@ pub(crate) fn run(raw: &[String]) -> i32 {
         return compiler_failure(&options, &entry, &diagnostics);
     }
     let Some(bundle) = bundle else { return tool_failure(&options, "front-end produced no checked program"); };
-    let specs = match jet::Sema::collect_budget_specs_bundle(&bundle) {
+    let specs = match jet::Sema::collect_located_budget_specs_bundle(&bundle) {
         Ok(specs) => specs,
         Err(diagnostics) => return compiler_failure(&options, &entry, &diagnostics),
     };
-    let active: Vec<_> = specs.into_iter().filter(|spec| applicable(spec, "native", "dev")).collect();
-    let started = timestamp_now();
-    let built = match build_report(&root, &bundle, &effect_facts, &active, &started) {
+    let active: Vec<_> = specs.into_iter().filter(|located| applicable(&located.spec, "native", "dev")).collect();
+    let built = match build_report(&root, &bundle, &effect_facts, &active, &measured_start) {
         Ok(report) => report,
         Err(error) => return tool_failure(&options, &error),
     };
@@ -160,21 +159,26 @@ fn parse(raw: &[String]) -> Result<Options, String> {
 struct BuiltReport { value: CanonicalJson, bytes: Vec<u8>, results: Vec<ResultRow>, pass:usize, warn:usize, fail:usize }
 struct ResultRow { id:String, name:String, source:String, line:usize, column:usize, metric:String, sample:Rational, outcome:PolicyOutcome, evidence:Evidence, enforcement:Enforcement, reason:String }
 
-fn build_report(root:&Path, bundle:&jet::AST::ProgramBundle, effect_facts:&jet::Sema::SemIndexEffectFacts, specs:&[BudgetSpec], at:&str)->Result<BuiltReport,String>{
-    for spec in specs { if spec.provider != "CompilerFacts" || spec.comparison_fact.kind != "Absolute" { return Err(format!("provider `{}` for budget `{}` has no command-owned deterministic measurement implementation",spec.provider,spec.name)); } }
-    let subject=subject(root,bundle,at)?;let tool=toolchain()?;let provider=provider()?;
-    let mut ordered=specs.iter().collect::<Vec<_>>();ordered.sort_by(|a,b|a.name.cmp(&b.name));
-    let facts=ordered.iter().map(|spec|compiler_fact(bundle,effect_facts,spec)).collect::<Result<Vec<_>,_>>()?;
+fn build_report(root:&Path, bundle:&jet::AST::ProgramBundle, effect_facts:&jet::Sema::SemIndexEffectFacts, specs:&[LocatedBudgetSpec], at:&str)->Result<BuiltReport,String>{
+    for located in specs { let spec=&located.spec; if spec.provider != "CompilerFacts" || spec.comparison_fact.kind != "Absolute" { return Err(format!("provider `{}` for budget `{}` has no command-owned deterministic measurement implementation",spec.provider,spec.name)); } }
+    let context_subject=subject(root,bundle,at,at)?;let tool=toolchain()?;let provider=provider()?;
+    let mut ordered=specs.iter().collect::<Vec<_>>();ordered.sort_by(|a,b|a.spec.name.cmp(&b.spec.name));
+    let facts=ordered.iter().map(|located|compiler_fact(bundle,effect_facts,&located.spec)).collect::<Result<Vec<_>,_>>()?;
     let mut bases=Vec::new();let mut requests=Vec::new();
-    for spec in &ordered { let (base,hash,context)=measurement_base_truthful(root,bundle,spec,&subject,&tool,&provider)?;bases.push((base,hash.clone(),context));requests.push(ProviderSpec{budget_hash:hash,metric:spec.metric.clone()}); }
-    let request=ProviderRequest{schema:"jet.provider-request".into(),version:1,request_id:stable_id(&CanonicalJson::Array(facts.iter().map(|v|CanonicalJson::Integer(v.to_string())).collect())),provider_hash:stable_id(&provider),context_hash:stable_id(&subject),specs:requests,workload:CanonicalJson::Array(facts.iter().map(|v|CanonicalJson::Integer(v.to_string())).collect()),policy:CanonicalJson::Null};
+    for located in &ordered { let spec=&located.spec;let (base,hash,context)=measurement_base_truthful(root,bundle,located,&context_subject,&tool,&provider)?;bases.push((base,hash.clone(),context));requests.push(ProviderSpec{budget_hash:hash,metric:spec.metric.clone()}); }
+    let request=ProviderRequest{schema:"jet.provider-request".into(),version:1,request_id:stable_id(&CanonicalJson::Array(facts.iter().map(|v|CanonicalJson::Integer(v.to_string())).collect())),provider_hash:stable_id(&provider),context_hash:stable_id(&context_subject),specs:requests,workload:CanonicalJson::Array(facts.iter().map(|v|CanonicalJson::Integer(v.to_string())).collect()),policy:CanonicalJson::Null};
     let evidence=ProviderRegistry::with_compiler_facts().collect("CompilerFacts",&request,Duration::from_secs(10)).map_err(|e|e.reason)?;
     let samples=evidence.events.iter().filter_map(|event|if let ProviderEvent::Sample{value,..}=event{Some(value.clone())}else{None}).collect::<Vec<_>>();
     if samples.len()!=ordered.len(){return Err("CompilerFacts provider returned incomplete evidence".into())}
+    let subject=subject(root,bundle,at,&timestamp_now())?;
     for (index, sample) in samples.iter().enumerate() {
+        let metric_name=ordered[index].spec.metric.split('(').next().unwrap_or(&ordered[index].spec.metric);
+        let context=context_key(&subject,&tool,&provider,metric_name,None)?;
         let mut base = as_object(&bases[index].0)?.clone();
         base.insert("samples".into(), CanonicalJson::Array(vec![sample.to_json()]));
+        base.insert("context_key".into(), CanonicalJson::String(context.clone()));
         bases[index].0 = CanonicalJson::Object(base);
+        bases[index].2 = context;
     }
     let skeletons=bases.iter().map(|(base,_,_)|base.clone()).collect::<Vec<_>>();
     let evidence_id=stable_id(&CanonicalJson::object([("measurements".into(),CanonicalJson::Array(skeletons)),("subject".into(),subject.clone()),("toolchain".into(),tool.clone())])?);
@@ -185,12 +189,15 @@ fn build_report(root:&Path, bundle:&jet::AST::ProgramBundle, effect_facts:&jet::
 
 fn measurement_base(root:&Path,bundle:&jet::AST::ProgramBundle,spec:&BudgetSpec,_subject:&CanonicalJson,tool:&CanonicalJson,provider:&CanonicalJson)->Result<(CanonicalJson,String,String),String>{let metric_name=spec.metric.split('(').next().unwrap_or(&spec.metric);let metric=CanonicalJson::object([("name".into(),CanonicalJson::String(metric_name.into())),("percentile".into(),CanonicalJson::Null)])?;let limit=quantity(&spec.limit_fact.quantity)?;let direction=if spec.limit_fact.kind=="AtLeast"{"at_least"}else{"at_most"};let comparison=CanonicalJson::object([("direction".into(),CanonicalJson::String(direction.into())),("kind".into(),CanonicalJson::String("absolute".into())),("limit".into(),limit.to_json())])?;let applies=CanonicalJson::object([("profiles".into(),CanonicalJson::Array(axis(&spec.applicability.profiles,"dev"))), ("targets".into(),CanonicalJson::Array(axis(&spec.applicability.targets,"native")))])?;let budget_spec=CanonicalJson::object([("applies".into(),applies),("comparison".into(),comparison.clone()),("enforcement".into(),CanonicalJson::String(spec.enforcement.to_ascii_lowercase())),("metric".into(),metric.clone()),("name".into(),CanonicalJson::String(spec.name.clone())),("package_id".into(),CanonicalJson::String(package_name(root))),("perf_role".into(),CanonicalJson::String(spec.role.clone())),("provider".into(),CanonicalJson::object([("identity".into(),CanonicalJson::String(String::new())),("kind".into(),CanonicalJson::String("CompilerFacts".into()))])?),("scope".into(),CanonicalJson::String(spec.scope.clone()))])?;let hash=stable_id(&budget_spec);let tool_digest=text_field(tool,"digest")?;let fingerprint=text_field(provider,"hardware_fingerprint")?;let mut framed=b"jet-budget-context-v1\0".to_vec();for value in ["package",metric_name,"","native",std::env::consts::ARCH,"dev",env!("CARGO_PKG_VERSION"),"jet","stdlib","jet",tool_digest,"CompilerFacts","","1","process",std::env::consts::ARCH,"compiler","1","0",std::env::consts::OS,"compiler","unknown",fingerprint]{frame(&mut framed,value)}let context=sha256_hex(&framed);let(source,line,_)=source_location(root,bundle,spec);Ok((CanonicalJson::object([("baseline".into(),CanonicalJson::Null),("budget_id".into(),CanonicalJson::String(format!("{}:{}",spec.role,spec.name))),("budget_spec".into(),budget_spec),("budget_spec_sha256".into(),CanonicalJson::String(hash.clone())),("comparison".into(),comparison),("context_key".into(),CanonicalJson::String(context.clone())),("decision".into(),CanonicalJson::Null),("direction".into(),CanonicalJson::String(if direction=="at_most"{"lower_is_better".into()}else{"higher_is_better".into()})),("enforcement".into(),CanonicalJson::String(spec.enforcement.to_ascii_lowercase())),("history".into(),CanonicalJson::Null),("metric".into(),metric),("policy".into(),CanonicalJson::Null),("provider".into(),provider.clone()),("samples".into(),CanonicalJson::Array(vec![CanonicalJson::Integer("0".into())])),("source".into(),CanonicalJson::String(format!("{source}:{line}"))),("statistics".into(),CanonicalJson::Null),("target_class".into(),CanonicalJson::String("native".into())),("unit".into(),CanonicalJson::String("Count".into()))])?,hash,context))}
 
-fn measurement_base_truthful(root:&Path,bundle:&jet::AST::ProgramBundle,spec:&BudgetSpec,subject:&CanonicalJson,tool:&CanonicalJson,provider:&CanonicalJson)->Result<(CanonicalJson,String,String),String>{
+fn measurement_base_truthful(root:&Path,bundle:&jet::AST::ProgramBundle,located:&LocatedBudgetSpec,subject:&CanonicalJson,tool:&CanonicalJson,provider:&CanonicalJson)->Result<(CanonicalJson,String,String),String>{
+    let spec=&located.spec;
     let (base, hash, _) = measurement_base(root,bundle,spec,subject,tool,provider)?;
     let metric_name=spec.metric.split('(').next().unwrap_or(&spec.metric);
     let context=context_key(subject,tool,provider,metric_name,None)?;
     let mut object=as_object(&base)?.clone();
     object.insert("context_key".into(),CanonicalJson::String(context.clone()));
+    let(source,line,_)=source_location(root,bundle,located);
+    object.insert("source".into(),CanonicalJson::String(format!("{source}:{line}")));
     Ok((CanonicalJson::Object(object),hash,context))
 }
 
@@ -210,12 +217,28 @@ fn axis(axis:&BudgetAxis,current:&str)->Vec<CanonicalJson>{match axis{BudgetAxis
 fn title(s:&str)->String{let mut c=s.chars();c.next().map(|x|x.to_ascii_uppercase().to_string()+c.as_str()).unwrap_or_default()}
 fn project_entry(root:&Path)->PathBuf{let main=root.join("src/main.jet");if main.is_file(){return main}if let Some(Ok(manifest))=jet::PackageManifest::PackManifest::load(root){let named=root.join(format!("{}.jet",manifest.package.name));if named.is_file(){return named}}main}
 fn package_name(root:&Path)->String{jet::PackageManifest::PackManifest::load(root).and_then(Result::ok).map(|m|m.package.name).unwrap_or_else(||"package".into())}
-fn source_location(root:&Path,bundle:&jet::AST::ProgramBundle,spec:&BudgetSpec)->(String,usize,usize){let module=&bundle.modules[bundle.entry];let(line,column)=jet::Diagnostics::span_line_col(&module.source,spec.span.start.min(module.source.len()));let path=module.path.strip_prefix(root).unwrap_or(&module.path).to_string_lossy().replace('\\',"/");(path,line,column)}
-fn subject(root:&Path,bundle:&jet::AST::ProgramBundle,at:&str)->Result<CanonicalJson,String>{let mut sources=Vec::new();for module in &bundle.modules{let path=module.path.strip_prefix(root).unwrap_or(&module.path).to_string_lossy().replace('\\',"/");sources.push((path,sha256_hex(module.source.as_bytes())))}sources.sort();CanonicalJson::object([("artifact".into(),CanonicalJson::Null),("measured_end".into(),CanonicalJson::String(at.into())),("measured_start".into(),CanonicalJson::String(at.into())),("member_sources".into(),CanonicalJson::Array(sources.into_iter().map(|(path,hash)|CanonicalJson::object([("path".into(),CanonicalJson::String(path)),("sha256".into(),CanonicalJson::String(hash))]).unwrap()).collect())),("profile".into(),CanonicalJson::String("dev".into())),("target_class".into(),CanonicalJson::String("native".into())),("target_id".into(),CanonicalJson::String(package_name(root))),("target_triple".into(),CanonicalJson::String(host_triple()?))])}
+trait BudgetSource {
+    fn spec(&self) -> &BudgetSpec;
+    fn module_index(&self, bundle: &jet::AST::ProgramBundle) -> usize;
+}
+impl BudgetSource for BudgetSpec {
+    fn spec(&self) -> &BudgetSpec { self }
+    fn module_index(&self, bundle: &jet::AST::ProgramBundle) -> usize { bundle.entry }
+}
+impl BudgetSource for LocatedBudgetSpec {
+    fn spec(&self) -> &BudgetSpec { &self.spec }
+    fn module_index(&self, _bundle: &jet::AST::ProgramBundle) -> usize { self.module_index }
+}
+impl<T: BudgetSource + ?Sized> BudgetSource for &T {
+    fn spec(&self) -> &BudgetSpec { (*self).spec() }
+    fn module_index(&self, bundle: &jet::AST::ProgramBundle) -> usize { (*self).module_index(bundle) }
+}
+fn source_location<T:BudgetSource+?Sized>(root:&Path,bundle:&jet::AST::ProgramBundle,located:&T)->(String,usize,usize){let spec=located.spec();let module=&bundle.modules[located.module_index(bundle)];let(line,column)=jet::Diagnostics::span_line_col(&module.source,spec.span.start.min(module.source.len()));let path=module.path.strip_prefix(root).unwrap_or(&module.path).to_string_lossy().replace('\\',"/");(path,line,column)}
+fn subject(root:&Path,bundle:&jet::AST::ProgramBundle,start:&str,end:&str)->Result<CanonicalJson,String>{let mut sources=Vec::new();for module in &bundle.modules{let path=module.path.strip_prefix(root).unwrap_or(&module.path).to_string_lossy().replace('\\',"/");sources.push((path,sha256_hex(module.source.as_bytes())))}sources.sort();CanonicalJson::object([("artifact".into(),CanonicalJson::Null),("measured_end".into(),CanonicalJson::String(end.into())),("measured_start".into(),CanonicalJson::String(start.into())),("member_sources".into(),CanonicalJson::Array(sources.into_iter().map(|(path,hash)|CanonicalJson::object([("path".into(),CanonicalJson::String(path)),("sha256".into(),CanonicalJson::String(hash))]).unwrap()).collect())),("profile".into(),CanonicalJson::String("dev".into())),("target_class".into(),CanonicalJson::String("native".into())),("target_id".into(),CanonicalJson::String(package_name(root))),("target_triple".into(),CanonicalJson::String(host_triple()?))])}
 fn toolchain()->Result<CanonicalJson,String>{let executable=std::env::current_exe().map_err(|e|format!("cannot identify running compiler executable: {e}"))?;let build=executable_digest(&executable)?;let body=CanonicalJson::object([("compiler_build_id".into(),CanonicalJson::String(build.clone())),("jet_version".into(),CanonicalJson::String(env!("CARGO_PKG_VERSION").into())),("runner_id".into(),CanonicalJson::String(build.clone())),("stdlib_id".into(),CanonicalJson::String(build))])?;let mut map=as_object(&body)?.clone();map.insert("digest".into(),CanonicalJson::String(stable_id(&body)));Ok(CanonicalJson::Object(map))}
 fn provider()->Result<CanonicalJson,String>{let triple=host_triple()?;let cpu_arch=triple.split('-').next().filter(|v|!v.is_empty()).ok_or("host triple has no architecture")?;let cpuinfo=std::fs::read_to_string("/proc/cpuinfo").map_err(|e|format!("cannot read CPU identity: {e}"))?;let cpu_model=proc_value(&cpuinfo,"model name").or_else(||proc_value(&cpuinfo,"Hardware")).ok_or("CPU model is unavailable")?;let meminfo=std::fs::read_to_string("/proc/meminfo").map_err(|e|format!("cannot read memory identity: {e}"))?;let memory_kib=proc_value(&meminfo,"MemTotal").and_then(|v|v.split_whitespace().next()).ok_or("memory total is unavailable")?.parse::<u128>().map_err(|_|"memory total is malformed")?;let memory_bytes=memory_kib.checked_mul(1024).ok_or("memory total overflow")?;let kernel=read_trimmed("/proc/sys/kernel/osrelease","kernel identity")?;let power_governor=read_trimmed("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor","CPU power governor")?;let logical_cpus=std::thread::available_parallelism().map_err(|e|format!("logical CPU count unavailable: {e}"))?.get();let body=CanonicalJson::object([("cpu_arch".into(),CanonicalJson::String(cpu_arch.into())),("cpu_model".into(),CanonicalJson::String(cpu_model.into())),("identity".into(),CanonicalJson::String(String::new())),("isolation".into(),CanonicalJson::String("process".into())),("kernel".into(),CanonicalJson::String(kernel)),("kind".into(),CanonicalJson::String("CompilerFacts".into())),("logical_cpus".into(),CanonicalJson::Integer(logical_cpus.to_string())),("memory_bytes".into(),CanonicalJson::Integer(memory_bytes.to_string())),("os".into(),CanonicalJson::String(std::env::consts::OS.into())),("power_governor".into(),CanonicalJson::String(power_governor)),("version".into(),CanonicalJson::String("1".into()))])?;let mut map=as_object(&body)?.clone();map.insert("hardware_fingerprint".into(),CanonicalJson::String(stable_id(&body)));Ok(CanonicalJson::Object(map))}
-fn executable_digest(path:&Path)->Result<String,String>{for(program,args)in[("sha256sum",Vec::<&str>::new()),("shasum",vec!["-a","256"]) ]{if let Ok(output)=Command::new(program).args(args).arg(path).output(){if output.status.success(){if let Some(id)=String::from_utf8_lossy(&output.stdout).split_whitespace().next(){if id.len()==64&&id.bytes().all(|byte|byte.is_ascii_hexdigit()){return Ok(id.to_ascii_lowercase())}}}}}let bytes=std::fs::read(path).map_err(|e|format!("cannot hash running compiler executable: {e}"))?;Ok(sha256_hex(&bytes))}
-fn host_triple()->Result<String,String>{let output=Command::new("rustc").arg("-vV").output().map_err(|e|format!("cannot resolve host target triple: {e}"))?;if !output.status.success(){return Err("rustc -vV failed while resolving host target triple".into())}let text=String::from_utf8(output.stdout).map_err(|_|"rustc -vV output is not UTF-8")?;text.lines().find_map(|line|line.strip_prefix("host: ")).filter(|value|value.split('-').count()>=3).map(str::to_string).ok_or_else(||"rustc -vV omitted canonical host target triple".into())}
+fn executable_digest(path:&Path)->Result<String,String>{jet::SHA256::sha256_file_hex(path).map_err(|e|format!("cannot hash running compiler executable: {e}"))}
+fn host_triple()->Result<String,String>{let target=env!("JET_BUILD_TARGET");if target.split('-').count()<3{return Err("compiler build omitted canonical target triple".into())}Ok(target.into())}
 fn proc_value<'a>(text:&'a str,key:&str)->Option<&'a str>{text.lines().find_map(|line|{let(left,right)=line.split_once(':')?;(left.trim()==key).then(||right.trim())})}
 fn read_trimmed(path:&str,label:&str)->Result<String,String>{let value=std::fs::read_to_string(path).map_err(|e|format!("cannot read {label}: {e}"))?;let value=value.trim();if value.is_empty(){Err(format!("{label} is empty"))}else{Ok(value.into())}}
 fn text_map<'a>(map:&'a std::collections::BTreeMap<String,CanonicalJson>,key:&str)->Result<&'a str,String>{match map.get(key){Some(CanonicalJson::String(value))=>Ok(value),_=>Err(format!("{key} is not text"))}}
@@ -235,4 +258,4 @@ fn compiler_failure(options:&Options,entry:&Path,diags:&[jet::Diagnostics::Diagn
 fn tool_failure(options:&Options,why:&str)->i32{if options.json{let diagnostic=CanonicalJson::object([("code".into(),CanonicalJson::String("E2908".into())),("fix".into(),CanonicalJson::String("correct the named failure and retry".into())),("message".into(),CanonicalJson::String("performance budget operation failed".into())),("phase".into(),CanonicalJson::String("tool".into())),("severity".into(),CanonicalJson::String("error".into())),("source".into(),CanonicalJson::Null),("why".into(),CanonicalJson::String(why.into()))]).unwrap();let empty=BuiltReport{value:CanonicalJson::Null,bytes:Vec::new(),results:Vec::new(),pass:0,warn:0,fail:0};emit_json(options,&empty,"",None,false,1,Some(diagnostic))}else{eprintln!("Error [E2908]: performance budget operation failed\n Why: {why}\n Fix: correct the named failure and retry\nbudget command failed before a valid report was produced")}1}
 fn tool_failure_with_report(options:&Options,id:&str,why:&str)->i32{if options.json{return tool_failure(options,why)}eprintln!("Error [E2908]: performance budget operation failed\n Why: {why}\n Fix: correct the named failure and retry\nbudget command failed · report {id} was not accepted");1}
 
-fn timestamp_now()->String{let seconds=SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()as i64;let(days,second)=(seconds.div_euclid(86400),seconds.rem_euclid(86400));let z=days+719468;let era=if z>=0{z}else{z-146096}/146097;let doe=z-era*146097;let yoe=(doe-doe/1460+doe/36524-doe/146096)/365;let mut year=yoe+era*400;let doy=doe-(365*yoe+yoe/4-yoe/100);let mp=(5*doy+2)/153;let day=doy-(153*mp+2)/5+1;let month=mp+if mp<10{3}else{-9};year+=if month<=2{1}else{0};format!("{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.000000000Z",second/3600,(second%3600)/60,second%60)}
+fn timestamp_now()->String{let elapsed=SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();let seconds=elapsed.as_secs()as i64;let(days,second)=(seconds.div_euclid(86400),seconds.rem_euclid(86400));let z=days+719468;let era=if z>=0{z}else{z-146096}/146097;let doe=z-era*146097;let yoe=(doe-doe/1460+doe/36524-doe/146096)/365;let mut year=yoe+era*400;let doy=doe-(365*yoe+yoe/4-yoe/100);let mp=(5*doy+2)/153;let day=doy-(153*mp+2)/5+1;let month=mp+if mp<10{3}else{-9};year+=if month<=2{1}else{0};format!("{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{:09}Z",second/3600,(second%3600)/60,second%60,elapsed.subsec_nanos())}

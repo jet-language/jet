@@ -141,6 +141,9 @@ fn budget_check_uses_real_compiler_fact_and_writes_verified_report() {
     let subject = match &content["subject"] { jet_foundation::PerformanceBudget::CanonicalJson::Object(value) => value, _ => panic!("subject is not an object") };
     let jet_foundation::PerformanceBudget::CanonicalJson::String(triple) = &subject["target_triple"] else { panic!("target triple is not text") };
     assert!(triple.split('-').count() >= 3, "target triple must be canonical: {triple}");
+    let jet_foundation::PerformanceBudget::CanonicalJson::String(measured_start) = &subject["measured_start"] else { panic!("measurement start is not text") };
+    let jet_foundation::PerformanceBudget::CanonicalJson::String(measured_end) = &subject["measured_end"] else { panic!("measurement end is not text") };
+    assert!(measured_start < measured_end, "measurement must cover preflight and evidence: {measured_start}..{measured_end}");
     let measurements = match &content["measurements"] { jet_foundation::PerformanceBudget::CanonicalJson::Array(value) => value, _ => panic!("measurements is not an array") };
     let measurement = match &measurements[0] { jet_foundation::PerformanceBudget::CanonicalJson::Object(value) => value, _ => panic!("measurement is not an object") };
     let provider = match &measurement["provider"] { jet_foundation::PerformanceBudget::CanonicalJson::Object(value) => value, _ => panic!("provider is not an object") };
@@ -183,13 +186,39 @@ fn run() {}
 }
 
 #[test]
-fn budget_missing_host_identity_rejects_before_artifact() {
-    let dir = budget_project("budget_host_identity", 10);
-    let out = Command::new(jet()).args(["budget", "check"]).env("PATH", "").current_dir(&dir).output().unwrap();
+fn budget_path_tools_cannot_forge_provenance() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = budget_project("budget_hostile_path", 10);
+    let fake = dir.join("fake-bin");
+    fs::create_dir(&fake).unwrap();
+    for (name, body) in [
+        ("rustc", "#!/bin/sh\necho 'host: fake-forged-triple'\n"),
+        ("sha256sum", "#!/bin/sh\necho 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff  fake'\n"),
+        ("shasum", "#!/bin/sh\necho 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff  fake'\n"),
+    ] {
+        let path = fake.join(name);
+        fs::write(&path, body).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let out = Command::new(jet()).args(["budget", "check", "--json"]).env("PATH", &fake).current_dir(&dir).output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    let json = String::from_utf8(out.stdout).unwrap();
+    assert!(!json.contains("fake-forged-triple"), "PATH rustc forged target identity");
+    assert!(!json.contains("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"), "PATH digest tool forged compiler identity");
+}
+
+#[test]
+fn budget_unreadable_compiler_identity_rejects_before_artifact() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = budget_project("budget_missing_compiler_identity", 10);
+    let copied = dir.join("jet-unreadable");
+    fs::copy(jet(), &copied).unwrap();
+    fs::set_permissions(&copied, fs::Permissions::from_mode(0o111)).unwrap();
+    let out = Command::new(&copied).args(["budget", "check"]).current_dir(&dir).output().unwrap();
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).unwrap();
-    assert!(stderr.contains("cannot resolve host target triple"), "{stderr}");
-    assert!(!dir.join(".jet").exists(), "missing host identity emitted an artifact");
+    assert!(stderr.contains("cannot hash running compiler executable"), "{stderr}");
+    assert!(!dir.join(".jet").exists(), "missing compiler identity emitted an artifact");
 }
 
 #[test]
@@ -202,6 +231,25 @@ fn budget_failure_has_human_github_projection_and_exit_one() {
     assert!(stderr.contains("Error [E2907]: performance budget public-api regressed"), "{stderr}");
     assert!(stderr.contains("::error file=src/main.jet"), "{stderr}");
     assert!(stderr.contains("budgets failed: 1 budget failed · report "), "{stderr}");
+}
+
+#[test]
+fn budget_imported_declaration_reports_owning_module_location() {
+    let dir = budget_project("budget_imported_source", 10);
+    fs::write(dir.join("src/main.jet"), "module perf_defs;\nfn run() {}\n").unwrap();
+    fs::write(dir.join("src/perf_defs.jet"), r#"module perf.package {
+    budgets: [Budget.{ name: "imported-api", scope: .Package, metric: .PublicApiItems, comparison: .Absolute, limit: .AtMost(0) }],
+}
+pub fn imported() {}
+"#).unwrap();
+    let out = Command::new(jet()).args(["budget", "check", "--annotations", "github"]).current_dir(&dir).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(stderr.contains(" --> src/perf_defs.jet:2:15"), "{stderr}");
+    assert!(stderr.contains("::error file=src/perf_defs.jet,line=2,col=15,title=Jet E2907::"), "{stderr}");
+    let report = fs::read_dir(dir.join(".jet/perf/reports")).unwrap().next().unwrap().unwrap().path();
+    let report = fs::read_to_string(report).unwrap();
+    assert!(report.contains("\"source\":\"src/perf_defs.jet:2\""), "{report}");
 }
 
 #[test]
