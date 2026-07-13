@@ -372,6 +372,7 @@ pub const JETPACK_VERBS: &[&str] = &[
     SECRETS_SUBCOMMAND,
     IMAGE_SUBCOMMAND,
     USER_SUBCOMMAND,
+    TOOL_SUBCOMMAND,
 ];
 
 /// U16 (card c9jetpackgates): `jet env -p <pkg>...` — ad-hoc nixpkgs packages
@@ -435,6 +436,36 @@ pub const SERVICES_SUBCOMMAND: &str = "services";
 /// until TLS support lands for registry pushes.
 pub const IMAGE_SUBCOMMAND: &str = "image";
 pub const IMAGE_FLAG_PUSH: &str = "--push";
+
+/// D-JPK-TOOLRUN1=A: unified `jetpack tool run|install|list|uninstall` noun —
+/// ephemeral package-binary execution and persistent global PATH installs.
+pub const TOOL_SUBCOMMAND: &str = "tool";
+pub const TOOL_VERB_RUN: &str = "run";
+pub const TOOL_VERB_INSTALL: &str = "install";
+pub const TOOL_VERB_LIST: &str = "list";
+pub const TOOL_VERB_UNINSTALL: &str = "uninstall";
+pub const TOOL_VERBS: &[&str] = &[
+    TOOL_VERB_RUN,
+    TOOL_VERB_INSTALL,
+    TOOL_VERB_LIST,
+    TOOL_VERB_UNINSTALL,
+];
+/// Install under a different on-PATH bin name (avoids JPK-TOOL-COLLIDE / E1297).
+pub const TOOL_FLAG_AS: &str = "--as";
+/// Default profile name for `jetpack tool install` PATH projections.
+pub const TOOL_PROFILE_NAME: &str = "tools";
+/// On-PATH projection directory under `~/.jet/` (`bin/`).
+pub const TOOL_BIN_DIR: &str = "bin";
+/// Generation + metadata root under `~/.jet/` (`tools/`).
+pub const TOOL_STATE_DIR: &str = "tools";
+/// External tool-provider prefixes recognized but not yet realizable as
+/// hangar providers — emit E1298 instead of silently skipping.
+pub const TOOL_EXTERNAL_PROVIDERS: &[&str] =
+    &["npm", "pypi", "cargo", "crates", "brew", "go", "gem"];
+/// Diagnostic class JPK-TOOL-COLLIDE (E1297): install bin shadows a `#Task fn`.
+pub const TOOL_DIAG_COLLIDE: &str = "E1297";
+/// Diagnostic class JPK-TOOL-PROVIDER (E1298): external provider not available.
+pub const TOOL_DIAG_PROVIDER: &str = "E1298";
 
 /// D-JPK-GRANTCMD1=A: `jet trust <verb>` is the public grant graph command
 /// family. The top-level `jet` binary dispatches it to Jetpack, which owns the

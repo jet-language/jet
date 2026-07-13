@@ -26,6 +26,10 @@ pub(super) fn usage() -> String {
   {bin} run   <source>:<package> -- cmd run a command in that environment, then exit
   {bin} run                            enter the shell described by ./{pack}
   {bin} dev                            realize the env, then run the project's fn dev()
+  {bin} tool run <ref> [-- cmd]        run a package binary ephemerally (D-JPK-TOOLRUN1)
+  {bin} tool install <ref> [--as name] install onto ~/.jet/bin (tools profile generation)
+  {bin} tool list                      list globally installed tools
+  {bin} tool uninstall <name>          remove an installed tool from ~/.jet/bin
 
 {manifest}
   {bin} add    <source>:<package>      add a package to ./{pack}
@@ -117,6 +121,7 @@ pub(super) fn usage() -> String {
   --headless                           (jetos studio) print app path without opening
   --serve <addr>                       (jetos studio) run local projection service
   --host <host>                        (os import/studio) select system host
+  --as <name>                          (tool install) project bin under a different name
 ",
         title = h(&format!("{bin} — Jet's package manager (Phase 1)")),
         envs = h("environments:"),
@@ -143,6 +148,17 @@ mod tests {
         assert!(Syntax::JETPACK_VERBS.contains(&"doctor"));
         assert!(usage().contains("jetpack doctor [--online]"));
         assert_eq!(RuntimePolicy::verb_policy("doctor", &[]).verb, "doctor");
+    }
+
+    #[test]
+    fn tool_is_in_canonical_route_registry_and_help() {
+        assert!(Syntax::JETPACK_VERBS.contains(&Syntax::TOOL_SUBCOMMAND));
+        assert!(usage().contains("tool run"));
+        assert!(usage().contains("tool install"));
+        assert_eq!(
+            RuntimePolicy::verb_policy(Syntax::TOOL_SUBCOMMAND, &[]).verb,
+            Syntax::TOOL_SUBCOMMAND
+        );
     }
 
     #[test]
