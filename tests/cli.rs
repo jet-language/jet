@@ -121,6 +121,40 @@ fn run() {{
     dir
 }
 
+fn mixed_budget_project(tag: &str) -> PathBuf {
+    let dir = isolated_cwd(tag);
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(
+        dir.join("pkg.jet"),
+        "payload: { name: \"app\", version: \"0.1.0\" }\n",
+    ).unwrap();
+    fs::write(
+        dir.join("src/main.jet"),
+        r#"module perf.package {
+    budgets: [
+        Budget.{
+            name: "binary",
+            scope: .Package,
+            metric: .BinarySize,
+            comparison: .Absolute,
+            limit: .AtMost(100000000B),
+        },
+        Budget.{
+            name: "public-api",
+            scope: .Package,
+            metric: .PublicApiItems,
+            comparison: .Absolute,
+            limit: .AtMost(10),
+        },
+    ],
+}
+pub fn api() {}
+fn run() {}
+"#,
+    ).unwrap();
+    dir
+}
+
 #[test]
 fn budget_usage_and_preflight_fail_without_artifacts() {
     let dir = budget_project("budget_no_artifact", 10);
@@ -205,6 +239,38 @@ fn budget_build_artifact_measures_real_selected_binary() {
     let CanonicalJson::Object(provider) = &measurement["provider"] else { panic!("provider") };
     assert_eq!(provider["kind"], CanonicalJson::String("BuildArtifact".into()));
     assert_eq!(measurement["unit"], CanonicalJson::String("Bytes".into()));
+}
+
+#[test]
+fn budget_report_collects_mixed_providers_measurement_locally() {
+    use jet_foundation::PerformanceBudget::CanonicalJson;
+    let dir = mixed_budget_project("budget_mixed_providers");
+    let out = Command::new(jet()).args(["budget", "check", "--json"]).current_dir(&dir).output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "stdout: {}\nstderr: {}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    assert!(out.stderr.is_empty());
+    let CanonicalJson::Object(command) = CanonicalJson::parse_canonical(&out.stdout).unwrap() else { panic!("command object") };
+    let CanonicalJson::Object(report) = &command["report"] else { panic!("report object") };
+    let CanonicalJson::Object(content) = &report["content"] else { panic!("content object") };
+    let CanonicalJson::Array(measurements) = &content["measurements"] else { panic!("measurements") };
+    assert_eq!(measurements.len(), 2);
+    let mut providers = std::collections::BTreeMap::new();
+    for measurement in measurements {
+        let CanonicalJson::Object(measurement) = measurement else { panic!("measurement object") };
+        let CanonicalJson::String(id) = &measurement["budget_id"] else { panic!("budget id") };
+        let CanonicalJson::Object(provider) = &measurement["provider"] else { panic!("provider") };
+        let CanonicalJson::String(kind) = &provider["kind"] else { panic!("provider kind") };
+        let CanonicalJson::Array(samples) = &measurement["samples"] else { panic!("samples") };
+        assert_eq!(samples.len(), 1, "{id} must own its provider sample");
+        providers.insert(id.clone(), kind.clone());
+    }
+    assert_eq!(providers.get("package:binary").map(String::as_str), Some("BuildArtifact"));
+    assert_eq!(providers.get("package:public-api").map(String::as_str), Some("CompilerFacts"));
+    let CanonicalJson::Object(subject) = &content["subject"] else { panic!("subject") };
+    let CanonicalJson::Object(artifact) = &subject["artifact"] else { panic!("shared artifact provenance") };
+    let CanonicalJson::Integer(bytes) = &artifact["bytes"] else { panic!("artifact bytes") };
+    assert_eq!(bytes, &fs::metadata(dir.join("build/main")).unwrap().len().to_string());
+    let report_path = fs::read_dir(dir.join(".jet/perf/reports")).unwrap().next().unwrap().unwrap().path();
+    jet_foundation::PerformanceBudget::verify_budget_report(&fs::read(report_path).unwrap()).unwrap();
 }
 
 #[test]

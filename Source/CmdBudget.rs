@@ -186,23 +186,47 @@ struct ResultRow { id:String, name:String, source:String, line:usize, column:usi
 
 fn build_report(root:&Path, bundle:&jet::AST::ProgramBundle, effect_facts:&jet::Sema::SemIndexEffectFacts, specs:&[LocatedBudgetSpec], at:&str)->Result<BuiltReport,String>{
     for located in specs { let spec=&located.spec; if (!matches!(provider_kind(&spec.provider),"CompilerFacts"|"BuildArtifact")) || spec.comparison_fact.kind != "Absolute" { return Err(format!("provider `{}` for budget `{}` has no command-owned deterministic measurement implementation",spec.provider,spec.name)); } }
-    let provider_kinds=specs.iter().map(|located|provider_kind(&located.spec.provider)).collect::<std::collections::BTreeSet<_>>();
-    if provider_kinds.len()>1{return Err("one report cannot yet collect CompilerFacts and BuildArtifact together".into())}
-    let artifact=if provider_kinds.contains("BuildArtifact"){Some(build_selected_artifact(root,&project_entry(root))?)}else{None};
-    let context_subject=subject(root,bundle,at,at,artifact.as_ref())?;let tool=toolchain()?;let first_provider=specs.first().map(|v|v.spec.provider.as_str()).unwrap_or("CompilerFacts");let provider=provider(provider_kind(first_provider),provider_identity(first_provider))?;
     let mut ordered=specs.iter().collect::<Vec<_>>();ordered.sort_by(|a,b|a.spec.name.cmp(&b.spec.name));
-    let facts=ordered.iter().map(|located|if provider_kind(&located.spec.provider)=="BuildArtifact"{Ok(artifact.as_ref().expect("built artifact").1 as u128)}else{compiler_fact(bundle,effect_facts,&located.spec)}).collect::<Result<Vec<_>,_>>()?;
-    let mut bases=Vec::new();let mut requests=Vec::new();
-    for located in &ordered { let spec=&located.spec;let (base,hash,context)=measurement_base_truthful(root,bundle,located,&context_subject,&tool,&provider)?;bases.push((base,hash.clone(),context));requests.push(ProviderSpec{budget_hash:hash,metric:spec.metric.clone()}); }
-    let workload=if provider_kind(first_provider)=="BuildArtifact"{CanonicalJson::object([("path".into(),CanonicalJson::String(artifact.as_ref().expect("built artifact").0.to_string_lossy().into_owned()))])?}else{CanonicalJson::Array(facts.iter().map(|v|CanonicalJson::Integer(v.to_string())).collect())};
-    let request=ProviderRequest{schema:"jet.provider-request".into(),version:1,request_id:stable_id(&workload),provider_hash:stable_id(&provider),context_hash:stable_id(&context_subject),specs:requests,workload,policy:CanonicalJson::Null};
-    let evidence=ProviderRegistry::with_builtins().collect(provider_kind(first_provider),&request,Duration::from_secs(30)).map_err(|e|e.reason)?;
-    let samples=evidence.events.iter().filter_map(|event|if let ProviderEvent::Sample{value,..}=event{Some(value.clone())}else{None}).collect::<Vec<_>>();
-    if samples.len()!=ordered.len(){return Err("CompilerFacts provider returned incomplete evidence".into())}
+    let needs_artifact=ordered.iter().any(|located|provider_kind(&located.spec.provider)=="BuildArtifact");
+    let artifact=if needs_artifact{Some(build_selected_artifact(root,&project_entry(root))?)}else{None};
+    let context_subject=subject(root,bundle,at,at,artifact.as_ref())?;let tool=toolchain()?;
+    let providers=ordered.iter().map(|located|provider(provider_kind(&located.spec.provider),provider_identity(&located.spec.provider))).collect::<Result<Vec<_>,_>>()?;
+    let mut bases=Vec::new();
+    for (located,provider) in ordered.iter().zip(&providers) { bases.push(measurement_base_truthful(root,bundle,located,&context_subject,&tool,provider)?); }
+    let mut groups=std::collections::BTreeMap::<String,Vec<usize>>::new();
+    for (index,located) in ordered.iter().enumerate(){groups.entry(located.spec.provider.clone()).or_default().push(index);}
+    let registry=ProviderRegistry::with_builtins();
+    let mut samples=vec![None;ordered.len()];
+    for (provider_name,indices) in groups {
+        let kind=provider_kind(&provider_name);
+        let provider=&providers[indices[0]];
+        let workload=if kind=="BuildArtifact"{
+            CanonicalJson::object([("path".into(),CanonicalJson::String(artifact.as_ref().expect("built artifact").0.to_string_lossy().into_owned()))])?
+        }else{
+            CanonicalJson::Array(indices.iter().map(|index|compiler_fact(bundle,effect_facts,&ordered[*index].spec).map(|value|CanonicalJson::Integer(value.to_string()))).collect::<Result<Vec<_>,_>>()?)
+        };
+        let requests=indices.iter().map(|index|ProviderSpec{budget_hash:bases[*index].1.clone(),metric:ordered[*index].spec.metric.clone()}).collect();
+        let request=ProviderRequest{schema:"jet.provider-request".into(),version:1,request_id:stable_id(&workload),provider_hash:stable_id(provider),context_hash:stable_id(&context_subject),specs:requests,workload,policy:CanonicalJson::Null};
+        let evidence=registry.collect(kind,&request,Duration::from_secs(30)).map_err(|e|e.reason)?;
+        for event in evidence.events {
+            match event {
+                ProviderEvent::Sample{spec,value,..}=>{
+                    let global=*indices.get(spec as usize).ok_or("provider sample index escaped its measurement group")?;
+                    if samples[global].replace(value).is_some(){return Err(format!("provider `{provider_name}` returned duplicate evidence for budget `{}`",ordered[global].spec.name));}
+                }
+                ProviderEvent::Unavailable{spec,reason,..}=>{
+                    let global=*indices.get(spec as usize).ok_or("provider unavailable index escaped its measurement group")?;
+                    return Err(format!("provider `{provider_name}` has no evidence for budget `{}`: {reason}",ordered[global].spec.name));
+                }
+                ProviderEvent::Complete{..}=>{}
+            }
+        }
+    }
+    let samples=samples.into_iter().enumerate().map(|(index,sample)|sample.ok_or_else(||format!("provider `{}` returned incomplete evidence for budget `{}`",ordered[index].spec.provider,ordered[index].spec.name))).collect::<Result<Vec<_>,_>>()?;
     let subject=subject(root,bundle,at,&timestamp_now(),artifact.as_ref())?;
     for (index, sample) in samples.iter().enumerate() {
         let metric_name=ordered[index].spec.metric.split('(').next().unwrap_or(&ordered[index].spec.metric);
-        let context=context_key(&subject,&tool,&provider,metric_name,None)?;
+        let context=context_key(&subject,&tool,&providers[index],metric_name,None)?;
         let mut base = as_object(&bases[index].0)?.clone();
         base.insert("samples".into(), CanonicalJson::Array(vec![sample.to_json()]));
         base.insert("context_key".into(), CanonicalJson::String(context.clone()));
