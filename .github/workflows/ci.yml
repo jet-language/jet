@@ -11,6 +11,46 @@ on:
     - cron: "0 3 * * *"
 
 jobs:
+  cffi-native-matrix:
+    name: C ABI native (linux-x64)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Required native C ABI proof
+        env:
+          JET_CFFI_MATRIX_REQUIRED: "1"
+          JET_CFFI_CC: clang
+          JET_CFFI_AR: llvm-ar
+          JET_CFFI_RUSTC: rustc
+          JET_CFFI_ABI: sysv64
+        run: cargo test --test cffi_native_matrix -- --nocapture
+
+  cffi-native-aarch64:
+    name: C ABI native (linux-aarch64-qemu)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cross tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user gcc-aarch64-linux-gnu
+          rustup target add aarch64-unknown-linux-gnu
+      - name: Required aarch64 C ABI proof
+        env:
+          JET_CFFI_MATRIX_REQUIRED: "1"
+          JET_CFFI_CC: aarch64-linux-gnu-gcc
+          JET_CFFI_AR: aarch64-linux-gnu-ar
+          JET_CFFI_RUSTC: rustc
+          JET_CFFI_RUST_TARGET: aarch64-unknown-linux-gnu
+          JET_CFFI_RUST_LINKER: aarch64-linux-gnu-gcc
+          JET_CFFI_RUNNER: qemu-aarch64 -L /usr/aarch64-linux-gnu
+          JET_CFFI_ABI: default
+        run: cargo test --test cffi_native_matrix -- --nocapture
+
   jetpack-platform:
     name: Jetpack platform audit (${{ matrix.os }})
     if: github.event_name != 'schedule'
