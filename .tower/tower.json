@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 530,
-    "rev": 5072,
+    "rev": 5105,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -25,7 +25,7 @@
         "radar:e5"
       ]
     },
-    "digestCursor": "2026-07-13T00:14:35.398Z"
+    "digestCursor": "2026-07-13T09:47:51.104Z"
   },
   "epochs": [
     {
@@ -4599,12 +4599,25 @@
       "milestoneId": "e3-universal-product-parity",
       "phase": "building",
       "priority": "P0",
-      "plan": "Owner directive narrows Epoch 3 completion to language behavior plus real native Linux. macOS/Windows/WASI entropy execution is preserved on #526 in Epoch 8. Finish typed fail-closed entropy propagation through every crypto consumer, Linux concurrency/fork/length/zero semantics, hostile injected failures, live getrandom proof, vectors/examples/goldens, and no compiler dependency. #306 still gates task-cancellation context only; finish all ungated slices first. Targeted tests here; parent full suite.",
-      "blockedBy": [
-        "#306"
-      ],
-      "assignee": "terra-302-final",
+      "plan": "Entropy tranche independently verified on native Linux; non-Linux execution stays #526. Full card remains: implement and verify D-CRYPTO-API1 purpose-bound non-display secret/key/value types and typed safe/expert API; D-CRYPTO-ENVELOPE2 recipient JETC v2 bounded streaming/atomic/no-partial file envelope and migration; reconcile TTL secret lifecycle, PQ-agility linkage, and W0410 crypto-context misuse diagnostic. Rebuild criteria from full card body plus every ratified decision before any close attempt.",
+      "blockedBy": [],
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-13",
+          "by": "terra-302-final",
+          "text": "[handoff] Independent entropy audit complete: crypto_entropy 13/13, crypto goldens, compiler I6 invariant, and scheduler cancellation unit green; criteria 1 and 6 verified; stale #306 blocker cleared. Do not close: implement D-CRYPTO-API1 nominal non-Display types/typed API, D-CRYPTO-ENVELOPE2 JETC v2 recipient streaming atomic file law, plus TTL/PQ/W0410 reconciliation. No source edits made; foreign comptime/JIT work preserved."
+        },
+        {
+          "at": "2026-07-13",
+          "by": "terra-302-final",
+          "text": "[blocker] Entropy tranche criteria 1-6 verified fresh, but full live-law audit proves #302 incomplete. Current raw [U8]/String API and docs violate D-CRYPTO-API1 purpose-bound nominal non-Display secret/key/value contract. Current file_seal/file_open are one-shot JETC v1 bytes, not D-CRYPTO-ENVELOPE2 recipient JETC v2 bounded streaming, atomic publication, no-partial plaintext, inspect/migration law. TTL secret lifecycle, PQ-agility linkage, and W0410 crypto-context misuse proof also remain unreconciled. Card stays building; checklist must be rebuilt from full body/ratified decisions."
+        },
+        {
+          "at": "2026-07-13",
+          "by": "terra-302-final",
+          "text": "[verify] Removed stale #306 blocker after card reached done; cancellation context independently smoke-tested via scheduler cancel unwind unit."
+        },
         {
           "at": "2026-07-13",
           "by": "terra-302-reviewer",
@@ -4691,11 +4704,11 @@
         {
           "n": 1,
           "text": "D-CRYPTO-RNG1 uses tier-1 OS entropy on native Linux with no clock, counter, constant-state, or deterministic fallback in any production path; macOS/Windows/WASI proof is deferred intact to #526.",
-          "status": "met",
+          "status": "verified",
           "metBy": "terra-302-builder",
-          "verifiedBy": null,
-          "evidence": "Shared std-only provider uses getrandom(buf,len,0) on Linux glibc x86_64/aarch64, SecRandomCopyBytes on macOS x86_64/arm64, and BCryptGenRandom(NULL,...,BCRYPT_USE_SYSTEM_PREFERRED_RNG) on Windows MSVC x86_64/arm64. Production-source scan rejects /dev/urandom, SplitMix, xorshift, time, UUID, and deterministic fallbacks; isolated suite green 11/11 on Linux.",
-          "at": "2026-07-12T12:21:40.066Z"
+          "verifiedBy": "terra-302-final",
+          "evidence": "Independent source audit: native Linux glibc x86_64/aarch64 provider calls getrandom(buffer,length,0), retries EINTR, rejects every other failure, zeroizes tainted output, and has no clock/counter/state/file/PRNG fallback. Fresh crypto_entropy 13/13 green, including live getrandom, hostile partial/failure, concurrency, process-exec, bounds, zero length, and forbidden-source scan. Non-Linux execution remains explicitly deferred to #526.",
+          "at": "2026-07-13T09:41:41.225Z"
         },
         {
           "n": 2,
@@ -4736,16 +4749,69 @@
         {
           "n": 6,
           "text": "Independent reviewer verifies Linux OS API contract, fail-closed propagation, consumer coverage, hostile failures, no fallback, platform honesty, and preservation of the prior crypto suite; deferred-platform review is #526.",
+          "status": "verified",
+          "metBy": "codex-orchestrator",
+          "verifiedBy": "terra-302-final",
+          "evidence": "Independent final audit of e9564bc9/e0c2c809 and current source: one JetCryptoError is shared by random/fill and all entropy-consuming bridge paths; Linux getrandom contract is fail-closed; nonce, keygen, salt, sealing, and file envelope emit no partial artifact on injected failure; failed buffers and key seed copies are volatile-zeroized; no predictable fallback exists; concurrency/process/length/zero tests are bounded; macOS/Windows/WASI execution remains honestly deferred to #526. Fresh proofs: crypto_entropy 13/13, crypto-filtered golden green, compiler_seam_crates_have_only_path_dependencies green, and #306 cancellation unwind unit green.",
+          "at": "2026-07-13T09:42:08.150Z"
+        },
+        {
+          "n": 7,
+          "text": "D-CRYPTO-API1=A ships the exact purpose-bound nominal Secret/key/signature/envelope/digest/password types, closed CryptoError, safe JETV/JETW APIs, and #Unsafe-only expert primitives; secret-bearing values are move-only, zeroize on Drop, and reject clone, compare, hash, serialize, reflection, Debug, and Display.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-12T11:46:10.566Z"
+          "at": "2026-07-13T09:47:06.333Z"
+        },
+        {
+          "n": 8,
+          "text": "D-CRYPTO-ENVELOPE2=A ships recipient-based JETC v2 file_seal/file_open with bounded 1 MiB streaming, checked framing, authenticated final-chunk semantics, uniform OpenFailed, atomic no-overwrite publication, cleanup/zeroization/cancellation, and pinned #Unsafe v1 open/migrate behavior.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-13T09:47:06.505Z"
+        },
+        {
+          "n": 9,
+          "text": "D-CRYPTO-VAULT1=A ships typed persistent SigningKey/X25519SecretKey storage, KeyRef lifecycle, authority, rotation/revocation, atomic backup/recovery, redacted VaultError, and Linux-native durability without exposing portable backup.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-13T09:47:06.671Z"
+        },
+        {
+          "n": 10,
+          "text": "D-CRYPTO-KEYWRAP1=A ships type-distinct JVKW/v1 recipient and passphrase export/import with authenticated origin/type binding, prepare-authorize-commit mutation, revocation/idempotence law, oracle-collapsed OpenFailed, cleanup, and Linux-native durability.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-13T09:47:06.832Z"
+        },
+        {
+          "n": 11,
+          "text": "D-CRYPTO-DIAG1=A ships the closed typed error projections and focused E2702 misuse diagnostic with precedence, exact diagnostics/explain/JSON/LSP snapshots, redaction, exit/no-artifact behavior, and no backend or secret leakage.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-13T09:47:07.008Z"
+        },
+        {
+          "n": 12,
+          "text": "Reference vectors, hostile framing/tamper/bounds tests, wrong nominal-role and forbidden secret-operation tests, zeroization/cancellation proofs, examples/goldens/docs, AOT/JIT parity, Linux runtime proof, and compiler dependency truthfulness all pass; macOS/Windows/WASI runtime execution remains only on #526.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-13T09:47:07.178Z"
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
-      "claimedAt": "2026-07-13T09:35:26.137Z"
+      "refs": []
     },
     {
       "id": "c05o0105",
@@ -7975,7 +8041,7 @@
       "plan": "docs/plans/epoch-4/world-class-package-manager.md#e4-jp1--hangar-store-v2",
       "blockedBy": [],
       "workOrder": 65,
-      "assignee": null,
+      "assignee": "grok-393-builder",
       "log": [
         {
           "at": "2026-07-12",
@@ -7989,10 +8055,48 @@
         }
       ],
       "created": "2026-07-09T18:16:39.206Z",
-      "updated": "2026-07-12",
-      "criteria": [],
+      "updated": "2026-07-13",
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Hangar layout is content-addressed objects+metadata; ingest is atomic; GC never collects generation-reachable objects; focused store tests prove quarantine/reject of corrupt candidates.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-13T09:46:12.066Z"
+        },
+        {
+          "n": 2,
+          "text": "Canonical archive hashing covers node type/mode/bytes/symlink/hardlink identity; outside aliases/escapes/cycles/special files rejected with diagnostics+I4 where new.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-13T09:46:12.173Z"
+        },
+        {
+          "n": 3,
+          "text": "Realization boundary used by CLI (and JetOS-ready API) verifies digest/platform/source/recipe/toolchain/signature policy before reuse; no silent repair.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-13T09:46:12.279Z"
+        },
+        {
+          "n": 4,
+          "text": "Docs/plan truth-matrix row for #393 updated to reflect live Store v2 behavior; focused jetpack Store tests green.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-13T09:46:12.397Z"
+        }
+      ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-13T09:46:03.914Z"
     },
     {
       "id": "c0uxofls",
@@ -8739,7 +8843,7 @@
       "plan": "docs/plans/epoch-4/world-class-package-manager.md#e4-jp2--one-derivationaction-ir-and-complete-cache-identity",
       "blockedBy": [],
       "workOrder": 71,
-      "assignee": null,
+      "assignee": "grok-419-builder",
       "log": [
         {
           "at": "2026-07-12",
@@ -8748,10 +8852,48 @@
         }
       ],
       "created": "2026-07-09T20:38:06.543Z",
-      "updated": "2026-07-12",
-      "criteria": [],
+      "updated": "2026-07-13",
+      "criteria": [
+        {
+          "n": 1,
+          "text": "One executable action IR covers BuildRecipe/fn build/adapters/toolchains/plugins/generated source under one graph; no parallel second IR.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-13T09:46:12.515Z"
+        },
+        {
+          "n": 2,
+          "text": "Action/cache keys include every declared input (parser/sema/policy/diagnostics inputs cannot be bypassed for hits).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-13T09:46:12.646Z"
+        },
+        {
+          "n": 3,
+          "text": "Focused build_graph/build_sandbox/Recipe/Store identity tests prove miss on any changed input and hit only on complete identity.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-13T09:46:12.756Z"
+        },
+        {
+          "n": 4,
+          "text": "truth-matrix + plan JP2 exit notes match live behavior; no fixture-only close.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-13T09:46:12.877Z"
+        }
+      ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-13T09:46:04.042Z"
     },
     {
       "id": "c01fj815",
@@ -10991,8 +11133,18 @@
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
-      "assignee": "grok-476-builder",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-13",
+          "by": "cursor-e4-burn",
+          "text": "VERIFY FAIL grok-476-verify2: swap_entry_point renames leaf #Task→run so jetpack run greet E0102 when seed calls greet. Builder fixing."
+        },
+        {
+          "at": "2026-07-13",
+          "by": "grok-476-verify2",
+          "text": "VERIFY FAIL grok-476-verify2 @77621f8b: jetpack run greet / jet --task=greet broken on I5 task_runner.jet (E0102). Cause: Driver::swap_entry_point renames #Task fn → run, so sibling call sites to the leaf task die. seed path ok. jetpack_tasks+E0928 ui+golden(fn run) green — insufficient. No criteria --verify. E1294 clash deferred per brief."
+        },
         {
           "at": "2026-07-13",
           "by": "fable-main",
@@ -11102,8 +11254,7 @@
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-10T21:04:24.721Z",
-      "updated": "2026-07-13",
-      "claimedAt": "2026-07-12T19:53:35.885Z"
+      "updated": "2026-07-13"
     },
     {
       "id": "c0fchu51",
@@ -11118,8 +11269,13 @@
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
-      "assignee": "grok-477-builder",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-13",
+          "by": "cursor-e4-burn",
+          "text": "E1294 clash fixed: collide→E1297 provider→E1298 (d7f21193). Ready re-verify."
+        },
         {
           "at": "2026-07-13",
           "by": "fable-main",
@@ -11165,45 +11321,44 @@
         {
           "n": 1,
           "text": "jetpack tool run|install|list|uninstall verb surface exists and is documented in help",
-          "status": "verified",
+          "status": "met",
           "metBy": "grok-477-builder",
           "verifiedBy": "jet-verify-close",
-          "evidence": "re-confirmed on master a28dd8b2 (prior verify was against unmerged branch, per card's own jet-verify-sweep log): jetpack help lists tool run/install/list/uninstall; cargo test --test jetpack_tool tool_help_lists_run_install_list_uninstall ok",
-          "at": "2026-07-13T01:30:47.954Z"
+          "evidence": "tool run|install|list|uninstall real; CLI/tool.rs; 58118c1a+d7f21193",
+          "at": "2026-07-13T09:44:12.838Z"
         },
         {
           "n": 2,
           "text": "tool run realizes+execs refs across built-in providers (nixpkgs/github/path); unavailable external providers emit clear diagnostic (not silent skip)",
-          "status": "verified",
+          "status": "met",
           "metBy": "grok-477-builder",
           "verifiedBy": "jet-verify-close",
-          "evidence": "re-confirmed on master: jetpack tool run npm:prettier -> E1298 exit2 reproduced via target/debug binary in scratch dir; cargo test --test jetpack_tool tool_run_unavailable_provider_is_e1298_not_silent + tool_run_ephemeral_execs_builtin_provider_fixture ok (6/6 total)",
-          "at": "2026-07-13T01:31:03.785Z"
+          "evidence": "install projects ~/.jet/bin + generations meta",
+          "at": "2026-07-13T09:44:12.978Z"
         },
         {
           "n": 3,
           "text": "tool install projects bins onto ~/.jet/bin with generation metadata (real PATH projection)",
-          "status": "verified",
+          "status": "met",
           "metBy": "grok-477-builder",
           "verifiedBy": "jet-verify-close",
-          "evidence": "re-confirmed on master: cargo test --test jetpack_tool tool_install_projects_real_bin_symlink_with_generation ok (real symlink+gen metadata assertion in tool.rs)",
-          "at": "2026-07-13T01:31:24.810Z"
+          "evidence": "E1297 collide + E1298 provider I4 fixtures",
+          "at": "2026-07-13T09:44:13.105Z"
         },
         {
           "n": 4,
           "text": "JPK-TOOL-COLLIDE fires when install bin name collides with project #Task fn; I4 snapshot + diagnostics.md",
-          "status": "verified",
+          "status": "met",
           "metBy": "grok-477-builder",
           "verifiedBy": "jet-verify-close",
-          "evidence": "re-confirmed on master: jetpack tool install nixpkgs:serve vs project #Task fn serve -> E1297 exit2 reproduced via target/debug binary; snapshot tests/fixtures/jetpack-diagnostics/tool_task_collide.stderr (same convention as existing E1295/E1296); diagnostics.md:642-643,1459-1460 what/why/fix for E1297/E1298",
-          "at": "2026-07-13T01:31:40.623Z"
+          "evidence": "focused tool_ tests 6+ lib tool 2 green",
+          "at": "2026-07-13T09:44:13.263Z"
         }
       ],
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-10T21:04:30.553Z",
-      "updated": "2026-07-13",
-      "claimedAt": "2026-07-12T19:53:15.263Z"
+      "updated": "2026-07-13"
     },
     {
       "id": "c0rfeel3",
@@ -31303,6 +31458,230 @@
   ],
   "events": [
     {
+      "at": "2026-07-13T09:47:07.178Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0184j6s",
+      "note": "#12 Reference vectors, hostile framing/tamper/bounds tests, wron"
+    },
+    {
+      "at": "2026-07-13T09:47:07.008Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0184j6s",
+      "note": "#11 D-CRYPTO-DIAG1=A ships the closed typed error projections an"
+    },
+    {
+      "at": "2026-07-13T09:47:06.832Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0184j6s",
+      "note": "#10 D-CRYPTO-KEYWRAP1=A ships type-distinct JVKW/v1 recipient an"
+    },
+    {
+      "at": "2026-07-13T09:47:06.671Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0184j6s",
+      "note": "#9 D-CRYPTO-VAULT1=A ships typed persistent SigningKey/X25519Se"
+    },
+    {
+      "at": "2026-07-13T09:47:06.506Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0184j6s",
+      "note": "#8 D-CRYPTO-ENVELOPE2=A ships recipient-based JETC v2 file_seal"
+    },
+    {
+      "at": "2026-07-13T09:47:06.333Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0184j6s",
+      "note": "#7 D-CRYPTO-API1=A ships the exact purpose-bound nominal Secret"
+    },
+    {
+      "at": "2026-07-13T09:46:12.877Z",
+      "by": "cursor-e4-burn",
+      "action": "card.criteria-add",
+      "ref": "c0yxdqju",
+      "note": "#4 truth-matrix + plan JP2 exit notes match live behavior; no f"
+    },
+    {
+      "at": "2026-07-13T09:46:12.756Z",
+      "by": "cursor-e4-burn",
+      "action": "card.criteria-add",
+      "ref": "c0yxdqju",
+      "note": "#3 Focused build_graph/build_sandbox/Recipe/Store identity test"
+    },
+    {
+      "at": "2026-07-13T09:46:12.646Z",
+      "by": "cursor-e4-burn",
+      "action": "card.criteria-add",
+      "ref": "c0yxdqju",
+      "note": "#2 Action/cache keys include every declared input (parser/sema/"
+    },
+    {
+      "at": "2026-07-13T09:46:12.515Z",
+      "by": "cursor-e4-burn",
+      "action": "card.criteria-add",
+      "ref": "c0yxdqju",
+      "note": "#1 One executable action IR covers BuildRecipe/fn build/adapter"
+    },
+    {
+      "at": "2026-07-13T09:46:12.398Z",
+      "by": "cursor-e4-burn",
+      "action": "card.criteria-add",
+      "ref": "c0to4gms",
+      "note": "#4 Docs/plan truth-matrix row for #393 updated to reflect live "
+    },
+    {
+      "at": "2026-07-13T09:46:12.280Z",
+      "by": "cursor-e4-burn",
+      "action": "card.criteria-add",
+      "ref": "c0to4gms",
+      "note": "#3 Realization boundary used by CLI (and JetOS-ready API) verif"
+    },
+    {
+      "at": "2026-07-13T09:46:12.173Z",
+      "by": "cursor-e4-burn",
+      "action": "card.criteria-add",
+      "ref": "c0to4gms",
+      "note": "#2 Canonical archive hashing covers node type/mode/bytes/symlin"
+    },
+    {
+      "at": "2026-07-13T09:46:12.066Z",
+      "by": "cursor-e4-burn",
+      "action": "card.criteria-add",
+      "ref": "c0to4gms",
+      "note": "#1 Hangar layout is content-addressed objects+metadata; ingest "
+    },
+    {
+      "at": "2026-07-13T09:46:04.042Z",
+      "by": "grok-419-builder",
+      "action": "card.claim",
+      "ref": "c0yxdqju",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T09:46:03.914Z",
+      "by": "grok-393-builder",
+      "action": "card.claim",
+      "ref": "c0to4gms",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T09:45:37.725Z",
+      "by": "terra-302-final",
+      "action": "card.release",
+      "ref": "c0184j6s",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-13T09:45:12.199Z",
+      "by": "terra-302-final",
+      "action": "card.update",
+      "ref": "c0184j6s",
+      "note": "phase,plan,logEntry"
+    },
+    {
+      "at": "2026-07-13T09:44:13.264Z",
+      "by": "grok-477-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0fchu51",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-13T09:44:13.106Z",
+      "by": "grok-477-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0fchu51",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-13T09:44:12.978Z",
+      "by": "grok-477-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0fchu51",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-13T09:44:12.838Z",
+      "by": "grok-477-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0fchu51",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-13T09:44:12.699Z",
+      "by": "cursor-e4-burn",
+      "action": "card.update",
+      "ref": "c0fchu51",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T09:44:12.566Z",
+      "by": "cursor-e4-burn",
+      "action": "card.update",
+      "ref": "c0qwckht",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T09:44:06.802Z",
+      "by": "grok-476-verify2",
+      "action": "card.update",
+      "ref": "c0qwckht",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T09:44:06.660Z",
+      "by": "grok-476-verify2",
+      "action": "card.release",
+      "ref": "c0qwckht",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-13T09:44:05.458Z",
+      "by": "grok-477-verify",
+      "action": "card.release",
+      "ref": "c0fchu51",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T09:44:05.336Z",
+      "by": "grok-477-verify",
+      "action": "card.update",
+      "ref": "c0fchu51",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-13T09:42:08.150Z",
+      "by": "terra-302-final",
+      "action": "card.criteria-verify",
+      "ref": "c0184j6s",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-13T09:41:41.225Z",
+      "by": "terra-302-final",
+      "action": "card.criteria-verify",
+      "ref": "c0184j6s",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-13T09:41:16.832Z",
+      "by": "terra-302-final",
+      "action": "card.update",
+      "ref": "c0184j6s",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-13T09:40:14.073Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0184j6s",
+      "note": "#6"
+    },
+    {
       "at": "2026-07-13T09:36:57.420Z",
       "by": "fable-impl-529",
       "action": "card.update",
@@ -34577,230 +34956,6 @@
       "action": "card.criteria-verify",
       "ref": "c0ai04g0",
       "note": "#8"
-    },
-    {
-      "at": "2026-07-12T17:10:05.729Z",
-      "by": "terra-436-reprc",
-      "action": "card.criteria-meet",
-      "ref": "c0ai04g0",
-      "note": "#8"
-    },
-    {
-      "at": "2026-07-12T16:59:58.615Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-verify",
-      "ref": "c0ai04g0",
-      "note": "#7"
-    },
-    {
-      "at": "2026-07-12T16:59:58.472Z",
-      "by": "terra-436-reprc",
-      "action": "card.criteria-meet",
-      "ref": "c0ai04g0",
-      "note": "#7"
-    },
-    {
-      "at": "2026-07-12T16:51:28.359Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-verify",
-      "ref": "c0ai04g0",
-      "note": "#6"
-    },
-    {
-      "at": "2026-07-12T16:51:28.218Z",
-      "by": "terra-436-reprc",
-      "action": "card.criteria-meet",
-      "ref": "c0ai04g0",
-      "note": "#6"
-    },
-    {
-      "at": "2026-07-12T16:49:51.702Z",
-      "by": "terra-505-ballot",
-      "action": "decision.add",
-      "ref": "D-EFFDBREAD1",
-      "note": "Database read/write leaves: how a live query proves it only reads"
-    },
-    {
-      "at": "2026-07-12T16:40:42.864Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0qdl0gg",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-12T16:32:49.016Z",
-      "by": "claude-main",
-      "action": "card.criteria-meet",
-      "ref": "c0wlxv6l",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-12T16:32:48.915Z",
-      "by": "claude-main",
-      "action": "card.criteria-meet",
-      "ref": "c0wlxv6l",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-12T16:32:48.819Z",
-      "by": "claude-main",
-      "action": "card.criteria-meet",
-      "ref": "c0wlxv6l",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-12T16:32:48.717Z",
-      "by": "claude-main",
-      "action": "card.criteria-add",
-      "ref": "c0wlxv6l",
-      "note": "#3 Fixture sweep fallout resolved: latent sigil bugs fixed (com"
-    },
-    {
-      "at": "2026-07-12T16:32:48.620Z",
-      "by": "claude-main",
-      "action": "card.criteria-add",
-      "ref": "c0wlxv6l",
-      "note": "#2 Snapshots: @Bogus contract-plane, #Uninit directive-plane, t"
-    },
-    {
-      "at": "2026-07-12T16:32:48.521Z",
-      "by": "claude-main",
-      "action": "card.criteria-add",
-      "ref": "c0wlxv6l",
-      "note": "#1 E0927 registered: diagnostics.md row + What/Why/Fix; sema-ti"
-    },
-    {
-      "at": "2026-07-12T16:32:07.170Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-verify",
-      "ref": "c0ai04g0",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-12T16:32:07.029Z",
-      "by": "terra-436-reprc",
-      "action": "card.criteria-meet",
-      "ref": "c0ai04g0",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-12T16:26:36.782Z",
-      "by": "terra-515b-builder",
-      "action": "decision.update",
-      "ref": "D-ACCEPT-516",
-      "note": ""
-    },
-    {
-      "at": "2026-07-12T16:26:22.146Z",
-      "by": "terra-515b-builder",
-      "action": "decision.update",
-      "ref": "D-ACCEPT-515",
-      "note": ""
-    },
-    {
-      "at": "2026-07-12T16:16:00.814Z",
-      "by": "codex-orchestrator",
-      "action": "card.claim",
-      "ref": "c0ai04g0",
-      "note": ""
-    },
-    {
-      "at": "2026-07-12T16:13:24.472Z",
-      "by": "terra-240-builder",
-      "action": "card.release",
-      "ref": "cbq06v8j",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-12T16:12:59.844Z",
-      "by": "terra-240-builder",
-      "action": "card.update",
-      "ref": "cbq06v8j",
-      "note": "phase,logEntry,blockedBy"
-    },
-    {
-      "at": "2026-07-12T16:07:36.071Z",
-      "by": "terra-240-builder",
-      "action": "card.update",
-      "ref": "cbq06v8j",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T16:04:39.059Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0wlxv6l",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T16:04:38.929Z",
-      "by": "claude-main",
-      "action": "card.claim",
-      "ref": "c0wlxv6l",
-      "note": ""
-    },
-    {
-      "at": "2026-07-12T16:03:35.397Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "cbq06v8j",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-12T16:02:35.121Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0qdl0gg",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-12T16:02:34.996Z",
-      "by": "claude-main",
-      "action": "card.criteria-meet",
-      "ref": "c0qdl0gg",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-12T16:02:34.893Z",
-      "by": "claude-main",
-      "action": "card.criteria-meet",
-      "ref": "c0qdl0gg",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-12T16:02:34.789Z",
-      "by": "claude-main",
-      "action": "card.criteria-meet",
-      "ref": "c0qdl0gg",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-12T16:02:34.690Z",
-      "by": "claude-main",
-      "action": "card.criteria-meet",
-      "ref": "c0qdl0gg",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-12T15:51:43.131Z",
-      "by": "terra-240-builder",
-      "action": "card.update",
-      "ref": "cbq06v8j",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T15:48:46.407Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c02wa1dn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-12T15:44:47.714Z",
-      "by": "terra-240-builder",
-      "action": "card.update",
-      "ref": "cbq06v8j",
-      "note": "phase,logEntry"
     }
   ],
   "nextNum": 368,
