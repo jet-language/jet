@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 528,
-    "rev": 5003,
+    "rev": 5007,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -1233,12 +1233,17 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "done",
+      "phase": "building",
       "priority": "P0",
       "workOrder": 100,
       "plan": "Canonical concurrency implementation plan (D-ASYNCRT1=A, D-MNIO1=A, D-CONCCOMB1=A, D-RACEWIN1=A, D-CONCSELECT1=A). Build one model only: task/channel/taskgroup. No @async/await, no user coroutine primitive, no second race/select mechanism.\n\nAlready shipped foundations to preserve:\n- #102: taskgroup g { ... }, g.task { ... }, wait/join, scope-exit ownership, existing g.all/g.race/g.any vertical slice.\n- #101: task handles expose coroutine-grade controls (pause/resume/cancel/trace); coroutine substrate stays internal.\n- #112: #Context(deadline:) flows through taskgroups and wait points; E3003 owns deadline diagnostics.\n- #126 M1/M2: current scheduler vertical slice, channels/timers/yield hook, 160_scheduler_spawn.\n\nImplementation order for dumb agents:\n1. Inventory current behavior first. Read docs/spec/philosophy.md, syntax-decisions.md entries for D-ASYNCRT1/D-MNIO1/D-NURSERY1/D-TASKSCOPE1/D-CONCCOMB1/D-RACEWIN1/D-CONCSELECT1/D-DEADLINE1/D-COROUTINE1, docs/plans/epoch-3/concurrency-vision.md, Source/Prelude/Scheduler.rs, Source/Interpreter.rs, crates/jet-codegen/src/Prelude/Scheduler.rs, task/channel sema/codegen, and tests for examples 131, 157, 158, 160.\n2. Write missing acceptance tests before code. Add/extend examples/features concurrency examples plus CLI/golden tests for: 100k idle parked tasks or smallest CI-safe equivalent with a scale benchmark guard; channel receive wakes one parked task without busy-wait; taskgroup scope cancels losing race tasks; g.all fail-fast cancels siblings; g.race returns first success and cancels losers; g.any returns first completion including errors; if g.select() arms deregister losers; deadline firing wakes parked I/O/channel/task waits with Jet-owned E3003; detached tasks require explicit expert policy/name.\n3. Replace cooperative-only scheduler gaps with real parker abstraction. Define internal runtime traits, not user syntax: Scheduler, Parker, TimerWheel, IoParker. Start with portable readiness fallback for tests; implement D-MNIO1 native backends behind cfg modules (Linux epoll/io_uring path, macOS/BSD kqueue, Windows IOCP). No external runtime dependency unless owner approves a new dep card.\n4. Route every blocking-looking stdlib wait through the parker. Channel recv/send, timers/sleep, task join/wait, TCP accept/read/write, HTTP client/server waits must park Jet tasks, not OS threads. Real OS-blocking fallback must run on an explicit blocking pool and be observable; never silently block scheduler workers.\n5. Finish structured combinators in taskgroup only. g.all/g.race/g.any/select are methods or scoped operations on the taskgroup; they create no detached work and return/propagate through one cancellation model. Implement D-RACEWIN1 inside g.race; #103 is merged here. Implement D-CONCCOMB1 here; #36 is merged here.\n6. Implement D-CONCSELECT1 exactly as ratified: if-fused select over g.select() arms. Parser/sema/codegen/tests must reuse match/if-arm typing where possible. Select must register arms under taskgroup ownership, wake exactly one winner, deregister losers, and compose with deadlines/cancellation.\n7. Add observability and misuse diagnostics. Runtime metrics: runnable/parked task counts, poller wake count, worker utilization, queue depth, cancelled losers. Diagnostics/lints: forgotten task handle wait, swallowed cancellation, deadline ignored, detached task without policy/name, real blocking call on scheduler worker.\n8. Prove parity and scale. cargo test green; examples 131/157/158/160 still pass; add deterministic scheduler tests with fake clock; add stress tests gated for CI budget; add a benchmark/report target that demonstrates 100k parked connections/tasks when run locally. rustc errors remain ICE-only; all user errors are sema/driver diagnostics.\n\nExit criteria:\n- One coherent public model in docs/spec/spec.md and examples: task/channel/taskgroup + scoped combinators + deadline context.\n- No @async/await surface, no function coloring, no separate user coroutine API.\n- Native parker path exists per platform or has named cfg-tested fallback with honest diagnostic/metric.\n- race/all/any/select cannot leak losing tasks past taskgroup scope.\n- CI-safe tests prove cancellation/deadline/wake correctness; local stress target proves 100k parked tasks/connections target.\n- docs/plans/epoch-3/async-networking.md and concurrency-vision.md match implementation.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-13",
+          "by": "fable-impl-521f",
+          "text": "Reopened by truthfulness ledger (card #521 cluster 6): claim.core-concurrency is partial — the M:N scheduler executes but pause/cancel controls, native pollers, Windows IOCP, and non-ignored scale closure are unproven (runtime_hostile_scale gap anchor). An open capability claim cannot have a done owner card."
+        },
         {
           "at": "2026-07-13",
           "by": "terra-126-final-reviewer",
@@ -1823,11 +1828,16 @@
       "kind": "idea",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "done",
+      "phase": "building",
       "priority": "P3",
       "plan": "Durable plan: docs/plans/epoch-3/adaptive-runtime.md",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-13",
+          "by": "fable-impl-521f",
+          "text": "Reopened by truthfulness ledger (card #521 cluster 6): claim.adaptive-runtime is reserved — D-ADAPTRT1=C declined the full adaptive runtime; no environment providers or runtime policy implementation exist and the measured_adaptation lane gap anchor records only planning evidence. An open capability claim cannot have a done owner card."
+        },
         {
           "at": "2026-07-12",
           "by": "codex-orchestrator",
@@ -1910,7 +1920,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-07-12",
+      "updated": "2026-07-13",
       "workOrder": 105,
       "criteria": [
         {
@@ -1982,11 +1992,16 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "done",
+      "phase": "building",
       "priority": "P3",
       "plan": "Durable plan: docs/plans/epoch-3/logic-programming-subset.md",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-13",
+          "by": "fable-impl-521f",
+          "text": "Reopened by truthfulness ledger (card #521 cluster 6): claim.logic-programming is reserved — the bounded logic subset has no proven executable multi-answer/failure-driven semantics. An open capability claim cannot have a done owner card."
+        },
         {
           "at": "2026-07-10",
           "by": "codex-orchestrator",
@@ -2039,7 +2054,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-07-12",
+      "updated": "2026-07-13",
       "workOrder": 106,
       "claimedAt": "2026-07-12T18:10:00.474Z",
       "criteria": [
@@ -2084,11 +2099,16 @@
       "kind": "idea",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "done",
+      "phase": "building",
       "priority": "P3",
       "plan": "Durable plan: docs/plans/epoch-3/structural-merge.md",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-13",
+          "by": "fable-impl-521f",
+          "text": "Reopened by truthfulness ledger (card #521 cluster 6): claim.structural-merge is reserved — semantic identity and conflict policy are ratified but not implemented (no executable semantic merge). An open capability claim cannot have a done owner card."
+        },
         {
           "at": "2026-07-12",
           "by": "codex-orchestrator",
@@ -2169,7 +2189,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-07-12",
+      "updated": "2026-07-13",
       "workOrder": 107,
       "criteria": [
         {
@@ -30982,6 +31002,34 @@
   ],
   "events": [
     {
+      "at": "2026-07-13T05:29:52.095Z",
+      "by": "fable-impl-521f",
+      "action": "card.update",
+      "ref": "c2iizmyx",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T05:29:51.966Z",
+      "by": "fable-impl-521f",
+      "action": "card.update",
+      "ref": "c2zj0p7p",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T05:29:51.835Z",
+      "by": "fable-impl-521f",
+      "action": "card.update",
+      "ref": "c2yj0nk5",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T05:29:51.703Z",
+      "by": "fable-impl-521f",
+      "action": "card.update",
+      "ref": "c2sj0bd9",
+      "note": "phase,logEntry"
+    },
+    {
       "at": "2026-07-13T05:09:48.429Z",
       "by": "fable-impl-521e",
       "action": "card.update",
@@ -34452,34 +34500,6 @@
       "action": "card.update",
       "ref": "c0zpoz3m",
       "note": "phase"
-    },
-    {
-      "at": "2026-07-12T13:54:28.212Z",
-      "by": "agent",
-      "action": "decision.add",
-      "ref": "D-ACCEPT-516",
-      "note": "Accept #516 — Tower: remove greenlight/activate gate — ballots are the only owner confirmation"
-    },
-    {
-      "at": "2026-07-12T13:54:28.114Z",
-      "by": "claude-main",
-      "action": "card.criteria-verify",
-      "ref": "c0zpoz3m",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-12T13:54:28.014Z",
-      "by": "claude-main",
-      "action": "card.criteria-verify",
-      "ref": "c0zpoz3m",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-12T13:54:27.908Z",
-      "by": "claude-main",
-      "action": "card.criteria-verify",
-      "ref": "c0zpoz3m",
-      "note": "#3"
     }
   ],
   "nextNum": 368,

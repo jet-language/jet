@@ -82,7 +82,7 @@
               "path": "tests/truthfulness.rs",
               "anchor": "CAPABILITY_CLAIM: claim.examples-spec / expected-output-pairs",
               "why": "Dedicated expected-output inventory test.",
-              "contentDigest": "ca657e5ff3d5d987d357d6f2bdb05a5bf3d8a477bb601ce14ad7ab2c9e11a0fc"
+              "contentDigest": "1d6321e765c8eb5ee43c1fb0fad01e7b36130d64165aaa6d8a7607ae933ff4f0"
             }
           ]
         }
@@ -244,7 +244,7 @@
               "path": "tests/jit_gaps.txt",
               "anchor": "# Covered/gap movement is intentional only",
               "why": "Current explicit gap whitelist prevents a proven classification.",
-              "contentDigest": "b1e22ed51a0caf357633a7f14d88f6fe2584fda737756638055494bad2060631"
+              "contentDigest": "2046f04b460ac5bcbc80a4a2610010a9334d8d1a788e330a69c84be327713d6c"
             }
           ]
         }
@@ -338,7 +338,7 @@
               "path": "examples/features/errors/discard_fallible.jet",
               "anchor": ".drop(\"best-effort write, not critical\")",
               "why": "I5 example exercises both discard channels.",
-              "contentDigest": "8baab723a9b0cf7ada99dc52656d11261fb62bb5c45915ae4ff8d55277fe8ddc"
+              "contentDigest": "e112f81c8e1d246adbe6cc4e85588d031691a27b2b37b378560edcc36bce6764"
             },
             {
               "role": "proof",
@@ -462,7 +462,7 @@
       },
       "class": "partial",
       "disposition": "open",
-      "reviewerRationale": "Function signatures substitute, while value parameters, bodies, structs, enums, bounds, and cycles remain incomplete.",
+      "reviewerRationale": "Type parameters, bodies, structs, enums, and Tier-0 value parameters now substitute, but value parameters are restricted to the Tier-0 scalar/fieldless-enum set (E0856) rather than general const generics, and full bound/recursive coverage is unproven.",
       "acceptanceLanes": [
         {
           "id": "complete-instantiation",
@@ -481,9 +481,9 @@
               "role": "gap",
               "kind": "file",
               "path": "crates/jet-sema/src/Sema/Bundle.rs",
-              "anchor": "value params are left as-is for now",
-              "why": "Decisive source limitation.",
-              "contentDigest": "b094f159599a58b82daaa9bf16f38eb9dba8bf402934d31cb92b6d7339afbe03"
+              "anchor": "value parameters admit only Bool, Int, Char, String, or a fieldless enum",
+              "why": "Decisive source limitation: generic-module value parameters are restricted to the Tier-0 scalar/fieldless-enum set, not general const-generic value types.",
+              "contentDigest": "4b4ec90c00a70ec75445549a44997c91832efb2c3680b2d92cc0f077369480f0"
             }
           ]
         }
@@ -553,7 +553,7 @@
               "field": "log",
               "anchor": "owner-environment palette behavior",
               "why": "Live owner acceptance remains open.",
-              "contentDigest": "8c0256c15fd3ad25b12ce6b7fc835aa06efd2adb4273028b64c606bd30d15598"
+              "contentDigest": "689f7e73477320fd625c281e300201d28ea0782288e2a9022046e399338364e2"
             }
           ]
         }
@@ -588,7 +588,7 @@
               "path": "docs/plans/epoch-3/universal-language-core.md",
               "anchor": "remains LSP-only and whole-document",
               "why": "Audited query-engine boundary contradicts the broad claim.",
-              "contentDigest": "39f4eddace5085150954a8b3c895c11cf0eab2fc8c261a3b84098a3acf0a4fc0"
+              "contentDigest": "ba4608fc3ece78b9423799e6f0d7f1e836f6781b511ab4e8473c4c23418f9c09"
             }
           ]
         }
@@ -631,7 +631,7 @@
               "path": "Source/CmdCompile.rs",
               "anchor": "JET_UPDATE_SNAPSHOTS",
               "why": "run_test_cov forwards --update-snapshots into the harness env.",
-              "contentDigest": "5654ccd4df03d2b7acce1c73f6b9a9618e73a6988503c597aea664c7bd7fb100"
+              "contentDigest": "8fd61ea781c8acf8e4b601b7cba64af5f0e2708be97485f4fa944cecf671cb9d"
             },
             {
               "role": "proof",
@@ -690,7 +690,7 @@
               "path": "docs/plans/epoch-3/universal-language-core.md",
               "anchor": "#95/#224 public build product shipped",
               "why": "Master audit records the shipped public build product surface.",
-              "contentDigest": "39f4eddace5085150954a8b3c895c11cf0eab2fc8c261a3b84098a3acf0a4fc0"
+              "contentDigest": "ba4608fc3ece78b9423799e6f0d7f1e836f6781b511ab4e8473c4c23418f9c09"
             },
             {
               "role": "proof",
@@ -698,7 +698,7 @@
               "path": "Source/CLI.rs",
               "anchor": "name: \"explain-build\"",
               "why": "Public graph/query/explain-build commands are owned by claim.package-build.",
-              "contentDigest": "13a5677e1475e4133b9f2dc31161550ec61150c3a832ec374e13bd5f81a20a93"
+              "contentDigest": "4e39a0b4cb4e0d6760a6c5a4d8aac2e553e57e7914be6485c56b2db2adb9def0"
             }
           ]
         }
@@ -733,7 +733,7 @@
               "path": "crates/jet-codegen/src/Codegen/mod.rs",
               "anchor": "const CORELIB_PRELUDE_PARTS",
               "why": "Hand-maintained compiler template breadth remains authoritative.",
-              "contentDigest": "e23260755e7722fbe7a9f50506eb9162257afffa5b8b28c4c764302005dff68c"
+              "contentDigest": "0b29a03ed1f4974af5a4506e223032fc611ef0e891eba015cbf73e748267bb4f"
             }
           ]
         }
@@ -768,7 +768,7 @@
               "path": "docs/plans/epoch-3/universal-language-core.md",
               "anchor": "Pause/cancel controls, blocking server execution, stream-select gaps",
               "why": "Audited runtime gaps block a proven claim.",
-              "contentDigest": "39f4eddace5085150954a8b3c895c11cf0eab2fc8c261a3b84098a3acf0a4fc0"
+              "contentDigest": "ba4608fc3ece78b9423799e6f0d7f1e836f6781b511ab4e8473c4c23418f9c09"
             }
           ]
         }
@@ -803,7 +803,7 @@
               "path": "docs/plans/epoch-3/universal-language-core.md",
               "anchor": "durable atomic file replacement and typed paths",
               "why": "Master acceptance identifies missing production proof.",
-              "contentDigest": "39f4eddace5085150954a8b3c895c11cf0eab2fc8c261a3b84098a3acf0a4fc0"
+              "contentDigest": "ba4608fc3ece78b9423799e6f0d7f1e836f6781b511ab4e8473c4c23418f9c09"
             }
           ]
         }
@@ -838,7 +838,7 @@
               "path": "docs/plans/epoch-3/universal-language-core.md",
               "anchor": "versioned Unicode conformance data",
               "why": "Required standards corpus is not yet the implementation source.",
-              "contentDigest": "39f4eddace5085150954a8b3c895c11cf0eab2fc8c261a3b84098a3acf0a4fc0"
+              "contentDigest": "ba4608fc3ece78b9423799e6f0d7f1e836f6781b511ab4e8473c4c23418f9c09"
             }
           ]
         }
@@ -873,7 +873,7 @@
               "path": "docs/plans/epoch-3/universal-language-core.md",
               "anchor": "fixed transaction ID, or unvalidated",
               "why": "Audited DNS behavior invalidates production networking.",
-              "contentDigest": "39f4eddace5085150954a8b3c895c11cf0eab2fc8c261a3b84098a3acf0a4fc0"
+              "contentDigest": "ba4608fc3ece78b9423799e6f0d7f1e836f6781b511ab4e8473c4c23418f9c09"
             }
           ]
         }
@@ -885,9 +885,9 @@
         "cardId": "c0184j6s",
         "num": 302
       },
-      "class": "facade",
+      "class": "partial",
       "disposition": "open",
-      "reviewerRationale": "Predictable entropy fallback makes security-shaped success unsafe.",
+      "reviewerRationale": "The predictable-entropy fallback is gone: randomness now runs through one D-CRYPTO-RNG1 fail-closed OS provider with bounded, zeroized WASI retries, and real AEAD/Ed25519/Argon2 primitives execute. The claim stays open because cross-target live backend coverage and full reference-vector proof of the suite are not yet demonstrated.",
       "acceptanceLanes": [
         {
           "id": "fail-closed-entropy",
@@ -905,10 +905,10 @@
             {
               "role": "gap",
               "kind": "file",
-              "path": "crates/jet-pkg-model/src/Prelude/Crypto.rs",
-              "anchor": "let mut state: u64 = 0x4d595df4d0f33173",
-              "why": "Deterministic fallback is decisive security evidence.",
-              "contentDigest": "e52d138ae4425e295ded87ed1dbc8e21396281d3fb6cb12991a2ca87ec2c1a01"
+              "path": "docs/plans/epoch-3/universal-language-core.md",
+              "anchor": "Keep #302/#64 open for the remaining cross-target",
+              "why": "Decisive audit evidence: the crypto suite still lacks cross-target live backend coverage and full reference-vector proof, so it is a real subset rather than a proven security product.",
+              "contentDigest": "ba4608fc3ece78b9423799e6f0d7f1e836f6781b511ab4e8473c4c23418f9c09"
             }
           ]
         }
@@ -943,7 +943,7 @@
               "path": "docs/plans/epoch-3/universal-language-core.md",
               "anchor": "joins return grouped counts",
               "why": "Current implementation changes advertised semantics.",
-              "contentDigest": "39f4eddace5085150954a8b3c895c11cf0eab2fc8c261a3b84098a3acf0a4fc0"
+              "contentDigest": "ba4608fc3ece78b9423799e6f0d7f1e836f6781b511ab4e8473c4c23418f9c09"
             }
           ]
         }
@@ -978,7 +978,7 @@
               "path": "docs/plans/epoch-3/universal-language-core.md",
               "anchor": "fake DOM/headless fixtures remain supporting tests only",
               "why": "Fixture-only browser proof blocks the advertised claim.",
-              "contentDigest": "39f4eddace5085150954a8b3c895c11cf0eab2fc8c261a3b84098a3acf0a4fc0"
+              "contentDigest": "ba4608fc3ece78b9423799e6f0d7f1e836f6781b511ab4e8473c4c23418f9c09"
             }
           ]
         }
@@ -1025,9 +1025,9 @@
         "cardId": "caffiunify",
         "num": 180
       },
-      "class": "facade",
+      "class": "partial",
       "disposition": "open",
-      "reviewerRationale": "Some C paths work, while accepted unsupported shapes silently emit unit and the multi-language structure is incomplete.",
+      "reviewerRationale": "The silent unsupported-lowering facade is gone: sema now rejects non-C-ABI shapes (E3202/E3203) and codegen carries a real C ABI type/callback matrix, so C interop executes for real. The claim stays open because 'one structure for every foreign language' (C++/Rust/Swift/JS/Python/JVM/.NET/R/Julia, with callbacks, async, bindgen, and live upstream conformance) is not built.",
       "acceptanceLanes": [
         {
           "id": "typed-live-interop",
@@ -1045,10 +1045,10 @@
             {
               "role": "gap",
               "kind": "file",
-              "path": "crates/jet-codegen/src/Codegen/CModule.rs",
-              "anchor": "format!(\"/* unsupported: {} */ ()\"",
-              "why": "Silent unsupported lowering is decisive facade evidence.",
-              "contentDigest": "a06cb262aa8619db18c0d36bd72883579df0ca8a405f01970ccbec6da62c22fb"
+              "path": "docs/plans/epoch-3/universal-language-core.md",
+              "anchor": "make the one FFI structure real for C/C++/Rust/Swift/JS/Python/",
+              "why": "Decisive audit evidence: only the C boundary exists; the promised one-structure-for-every-foreign-language interop across C++/Rust/Swift/JS/Python/JVM/.NET/R/Julia is unbuilt.",
+              "contentDigest": "ba4608fc3ece78b9423799e6f0d7f1e836f6781b511ab4e8473c4c23418f9c09"
             }
           ]
         }
@@ -1083,7 +1083,7 @@
               "path": "docs/plans/epoch-3/universal-language-core.md",
               "anchor": "typed target-profile data into real firmware/kernel builds",
               "why": "Master audit distinguishes schema from executable toolchain.",
-              "contentDigest": "39f4eddace5085150954a8b3c895c11cf0eab2fc8c261a3b84098a3acf0a4fc0"
+              "contentDigest": "ba4608fc3ece78b9423799e6f0d7f1e836f6781b511ab4e8473c4c23418f9c09"
             }
           ]
         }
@@ -1118,7 +1118,7 @@
               "field": "log",
               "anchor": "plan complete",
               "why": "Tower evidence records planning, not execution.",
-              "contentDigest": "019703d992a46ae273457fc0704c471d211a9fcd27a5fe994263aa9823bd28de"
+              "contentDigest": "09af585cd37b3a2ddde12c09dc17ff37ae9b8ecee4cfd90c68554770d08880d7"
             }
           ]
         }
@@ -1153,7 +1153,7 @@
               "field": "log",
               "anchor": "plan complete",
               "why": "Only planning evidence exists.",
-              "contentDigest": "028d1a151bc82c48c984079cef7028fa9b8b17ea37c9be93d0f836e45c75323c"
+              "contentDigest": "d4387c58ae56b2dd1306c199981c3000169c9014b0413d4cf80c28209e7c438b"
             }
           ]
         }
@@ -1188,7 +1188,7 @@
               "field": "log",
               "anchor": "plan complete",
               "why": "Only planning evidence exists.",
-              "contentDigest": "a15967b0cd3510e52bf2fb47430bc2904dac699acc2f8249a8f6c31cb9160de7"
+              "contentDigest": "57b8cc27a8f02221e2e2f981a4bb97932880f2e2d897e72d24c2c1bd989b72f0"
             }
           ]
         }
@@ -1293,7 +1293,7 @@
               "path": "Cargo.toml",
               "anchor": "jetpack = { path = \"crates/jetpack\" }",
               "why": "Root package still directly depends on the jetpack crate/engine (slice 3 of card #367 is not done).",
-              "contentDigest": "bf3808bedbe49066905977a46b5d940db7fd851caec3093c00d0f087f34854e5"
+              "contentDigest": "413bfd183664c03ff6f670169d79f05e85e2a47d8dbebe673aa161565d49a3b7"
             }
           ]
         }
@@ -1372,7 +1372,17 @@
     "inspect": "claim.tooling-cli",
     "self": "claim.tooling-cli",
     "diff": "claim.structural-merge",
-    "merge": "claim.structural-merge"
+    "merge": "claim.structural-merge",
+    "prove": "claim.proof-replay",
+    "hangar": "claim.package-build",
+    "copy": "claim.package-build",
+    "du": "claim.package-build",
+    "dump": "claim.package-build",
+    "export": "claim.package-build",
+    "import": "claim.package-build",
+    "repair": "claim.package-build",
+    "restore": "claim.package-build",
+    "sign": "claim.package-build"
   },
   "coreOwnership": {
     "core": "claim.core-foundation",
