@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 526,
-    "rev": 4880,
+    "nextNum": 527,
+    "rev": 4917,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -4515,14 +4515,19 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P0",
-      "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-CRYPTO-SUITE1=A: Hybrid: safe envelopes with audited expert primitives. Beginner APIs are seal/open, sign/verify, password_hash/verify, key agreement, file envelope, and Secret/Key types that refuse accidental display. Expert primitives live under crypto.expert with explicit algorithm selection, audit docs, and unsafe/effect gates where needed. Algorithm agility and key encoding are part of the envelope.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: corelib audit: core.crypto — misuse-resistant suite (AEAD, signatures, KDF, password hashing)\n\nCurrent law: Existing linked decisions: D-PWHASH1=ratified/A. D-CORENS1 keeps all first-party modules under core.*; I6 forbids compiler deps; D-STDRUBRIC1 requires mechanical core API laws.\n\nBuild order: Audit current Core/API/prelude/docs/tests first; write failing UI/golden/unit fixtures; implement std-only or approved bridge code; update docs/reference and syntax-decisions when law changes; run targeted tests, then full nix develop -c cargo test before close.\n\nAcceptance: Examples/goldens or UI snapshots prove each shipped behavior; stdlib map records shipped/carded/declined rows; no rustc/user-hostile errors; no compiler external deps.\n\nDependencies/collisions: Respect neighboring core cards: io/args/process separate; text before regex; net/url before http; encoding before data/db; random never owns secrets.",
+      "plan": "Owner directive narrows Epoch 3 completion to language behavior plus real native Linux. macOS/Windows/WASI entropy execution is preserved on #526 in Epoch 8. Finish typed fail-closed entropy propagation through every crypto consumer, Linux concurrency/fork/length/zero semantics, hostile injected failures, live getrandom proof, vectors/examples/goldens, and no compiler dependency. #306 still gates task-cancellation context only; finish all ungated slices first. Targeted tests here; parent full suite.",
       "blockedBy": [
         "#306"
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-13",
+          "by": "terra-302-linux",
+          "text": "[handoff] Linux implementation tranche complete and criteria 2-5 met. Exact source files: crates/jet-pkg-model/src/Prelude/Crypto.rs, tests/crypto_entropy.rs, tests/fixtures/crypto_bridge_entropy.rs. Tests: crypto_entropy 12/12; crypto-filtered golden green; compiler seam dependency invariant green. Parent must commit because worker .git is read-only. Remaining: independent reviewer verifies criterion 6; #306 supplies task-cancellation context. macOS/Windows/WASI native proof lives on Epoch 8 #526. Preserve .tower changes and verify-full-real2.log."
+        },
         {
           "at": "2026-07-12",
           "by": "codex-orchestrator",
@@ -4593,12 +4598,12 @@
         }
       ],
       "created": "2026-07-07T17:23:33.341Z",
-      "updated": "2026-07-12",
+      "updated": "2026-07-13",
       "workOrder": 62,
       "criteria": [
         {
           "n": 1,
-          "text": "D-CRYPTO-RNG1 uses tier-1 OS entropy on Linux, macOS, and Windows with no clock, counter, constant-state, or deterministic fallback in any production path.",
+          "text": "D-CRYPTO-RNG1 uses tier-1 OS entropy on native Linux with no clock, counter, constant-state, or deterministic fallback in any production path; macOS/Windows/WASI proof is deferred intact to #526.",
           "status": "met",
           "metBy": "terra-302-builder",
           "verifiedBy": null,
@@ -4608,42 +4613,42 @@
         {
           "n": 2,
           "text": "Entropy failure propagates one typed CryptoError through random_bytes, key generation, nonce/salt creation, sealing, password hashing, and file envelopes without returning partial bytes or reusing prior state.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "terra-302-linux",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-12T11:46:09.432Z"
+          "evidence": "Internal JetCryptoError::Entropy(JetCryptoEntropyError) now propagates unchanged through random_bytes provider calls, seal/file-seal nonce creation, Ed25519 keygen seed creation, and Argon2 salt creation; String conversion occurs only at existing public bridge boundaries. Injected provider failures assert typed Unavailable and public calls return no artifact. nix develop -c cargo test --test crypto_entropy: 12/12 green.",
+          "at": "2026-07-13T00:45:27.985Z"
         },
         {
           "n": 3,
-          "text": "Every cryptographic randomness consumer uses the same audited provider; concurrent calls, process/fork behavior where applicable, requested-length filling, and zero-length behavior are explicit and race-free.",
-          "status": "open",
-          "metBy": null,
+          "text": "Every cryptographic randomness consumer uses the same audited provider; concurrent Linux calls, process/fork behavior where applicable, requested-length filling, and zero-length behavior are explicit and race-free. Deferred platform behavior is #526.",
+          "status": "met",
+          "metBy": "terra-302-linux",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-12T11:46:09.723Z"
+          "evidence": "All entropy consumers route through jet_crypto_entropy_fill. Linux live tests prove exact 0/32/64-byte behavior, reject negative and >1MiB requests, synchronize 8 concurrent calls and require distinct 64-byte results, then fork and require successful nonzero independent 64-byte parent/child results. crypto_entropy 12/12 green.",
+          "at": "2026-07-13T00:45:42.438Z"
         },
         {
           "n": 4,
-          "text": "Focused tests inject short-read/failure paths, exercise live native providers, and machine-check absence of predictable fallback; Linux/macOS/Windows matrix claims remain platform-literal.",
-          "status": "open",
-          "metBy": null,
+          "text": "Focused tests inject short-read/failure paths, exercise the live native Linux provider, and machine-check absence of predictable fallback; macOS/Windows/WASI matrix remains platform-literal on #526.",
+          "status": "met",
+          "metBy": "terra-302-linux",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-12T11:46:10.003Z"
+          "evidence": "Focused suite injects short read, EINTR, zero read, terminal failure, partial-write-then-failure, unsupported provider, and 17-interrupt WASI cap; tainted attempts are zeroized and no partial bytes escape. Live Linux getrandom, concurrency, and fork execute. Production-source scan rejects time, counters, PRNG names, /dev random paths, UUID fill, and deterministic fallbacks. 12/12 green.",
+          "at": "2026-07-13T00:45:42.534Z"
         },
         {
           "n": 5,
           "text": "Existing reference vectors, misuse diagnostics, envelope/password/signature/key-agreement examples, goldens, and no-compiler-dependency proof remain green after entropy repair.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "terra-302-linux",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-12T11:46:10.284Z"
+          "evidence": "Preservation gates green: nix develop -c env JET_GOLDEN_FILTER=crypto/ cargo test --test golden examples_compile_and_run (all crypto examples/goldens); nix develop -c cargo test --test truthfulness compiler_seam_crates_have_only_path_dependencies; bridge fixture compiles offline and retains seal/open, Ed25519 keygen, password hash/verify, key zeroization, and hostile entropy tests.",
+          "at": "2026-07-13T00:45:42.623Z"
         },
         {
           "n": 6,
-          "text": "Independent reviewer verifies OS API contracts, fail-closed propagation, consumer coverage, hostile failures, no fallback, platform honesty, and preservation of the prior crypto suite.",
+          "text": "Independent reviewer verifies Linux OS API contract, fail-closed propagation, consumer coverage, hostile failures, no fallback, platform honesty, and preservation of the prior crypto suite; deferred-platform review is #526.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -6489,6 +6494,11 @@
       "log": [
         {
           "at": "2026-07-13",
+          "by": "codex-orchestrator",
+          "text": "[verify] Integrated full suite reached ban_bare_panic then failed on concurrent master invariant drift: jet-parser/lib.rs, generic_module_body.rs, CModule.rs, REPL History/HistoryPlatform, BudgetProviders contain unallowlisted bare panic!. Criterion 5 remains open; focused Help/Shell/CLI green."
+        },
+        {
+          "at": "2026-07-13",
           "by": "terra-360-builder",
           "text": "[handoff] Linux shell-prefill slice complete in f9f41157. Criteria 3-4 met with actual jet captured-stdout PTY proof and generated bash/zsh/fish RC real-PTY proof (fish Ghostty host env); selection replaces editable parent buffer and never accepts/executes. Focused green: help_pty 6/6, jetpack Shell 13/13, CLI question_mark 4/4; diff check clean. Criterion 5 remains open for parent full-suite plus independent verifier. Card remains blocked by #359 owner acceptance."
         },
@@ -6607,11 +6617,11 @@
         {
           "n": 3,
           "text": "Enter inserts the selected command into the editable parent shell line without executing it in bash, zsh, and fish through the shared #359 RC surface; bare jet ? prints one composable fallback line.",
-          "status": "met",
+          "status": "verified",
           "metBy": "terra-360-builder",
-          "verifiedBy": null,
-          "evidence": "Commit f9f41157 adds one #359 RC surface for bash READLINE_LINE, zsh BUFFER, and fish commandline replacement. Real script(1) PTY test invokes Alt-?, receives a malicious-looking selected line, cancels it, regains each shell prompt, and proves marker never executes. Actual jet Help PTY test proves Enter emits the selected command through captured stdout while UI stays on terminal stderr and never runs it.",
-          "at": "2026-07-13T00:27:24.746Z"
+          "verifiedBy": "terra-360-reviewer",
+          "evidence": "Independent review of 25ccb1a8 and 53d24067 plus focused Shell suite 13/13 green. Non-vacuous real-PTY oracle fails if buffer assignment is absent: before explicit Enter marker must not exist; after appending a suffix to the live line and pressing Enter, exact selected command bytes create JET_SELECTED_BYTES and suffix sentinel prints. Bash READLINE_LINE, zsh BUFFER, and fish commandline all pass. Fish now invokes env-prefixed jet correctly; TERM_PROGRAM spoof was removed. Bare palette captured-stdout fallback remained covered by prior help_pty review. Criteria 4/6 and 5 remain open.",
+          "at": "2026-07-13T00:35:06.188Z"
         },
         {
           "n": 4,
@@ -6619,8 +6629,8 @@
           "status": "met",
           "metBy": "terra-360-builder",
           "verifiedBy": null,
-          "evidence": "Linux host-wrapper matrix is executable proof in crates/jetpack Shell tests: bash, zsh, and fish each run generated RC inside a real util-linux script(1) PTY; fish runs with TERM_PROGRAM=ghostty. All return to editable prompt after cancellation and do not execute the inserted selection. Owner directive excludes Mac/Windows proof from this tranche.",
-          "at": "2026-07-13T00:27:31.579Z"
+          "evidence": "WITHDRAWN: prior TERM_PROGRAM assignment was not Ghostty execution and does not satisfy owner-environment proof. Linux bash, zsh, and fish script PTY coverage exists, but actual Ghostty 1.3.1 plus fish host-wrapper interaction has not been run. Tower criteria API cannot regress met to open; superseding open criterion 6 carries this missing gate.",
+          "at": "2026-07-13T00:33:49.415Z"
         },
         {
           "n": 5,
@@ -6630,6 +6640,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-07-11T02:10:09.931Z"
+        },
+        {
+          "n": 6,
+          "text": "Supersedes withdrawn criterion 4 status: run the complete owner matrix in an actual Ghostty terminal with the fish host wrapper; environment-variable spoofing does not count.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-13T00:33:52.845Z"
         }
       ],
       "needsAcceptance": false,
@@ -9038,6 +9057,11 @@
       "log": [
         {
           "at": "2026-07-13",
+          "by": "codex-orchestrator",
+          "text": "[verify] Linux x64 required cffi_native_matrix green and commit 6a4ef523 integrated. Full suite reached unrelated concurrent ban_bare_panic invariant failure. Linux aarch64/QEMU literal CI execution still required before criterion 10 verification."
+        },
+        {
+          "at": "2026-07-13",
           "by": "terra-436-builder",
           "text": "[handoff] Integrate commit be93c9fd from branch card-436-matrix. Parent runs/pushes CI. Do not meet criterion 10 until both required jobs are green: C ABI native (linux-x64) and C ABI native (linux-aarch64-qemu). Then independent verifier records literal run evidence. Epoch 8 follow-ups: #524 macOS, #525 Windows."
         },
@@ -9789,6 +9813,11 @@
       "assignee": "fable-main",
       "log": [
         {
+          "at": "2026-07-13",
+          "by": "terra-453-repair",
+          "text": "[repair] Restored W4 bare-panic invariant after concurrent master drift: production C ABI impossible states now use span-bearing ice!; five test-only files are pinned by exact-count reasoned allowlist entries. Targeted green: ban_bare_panic 2/2, parser generic modules 3/3, sema generic-module body 10/10, CFFI card436 round-trip 1/1, History lock 1/1, Unix flag tables 3/3, hostile budget provider 1/1. Parent owns full suite."
+        },
+        {
           "at": "2026-07-11",
           "by": "fable-main",
           "text": "Closed by fable-main after independent parent verification (builders were separate subagent sessions; parent re-ran all decisive suites)."
@@ -9810,7 +9839,7 @@
         }
       ],
       "created": "2026-07-10T10:49:07.298Z",
-      "updated": "2026-07-11",
+      "updated": "2026-07-13",
       "criteria": [],
       "needsAcceptance": false,
       "refs": [],
@@ -10772,6 +10801,11 @@
       "assignee": "grok-476-builder",
       "log": [
         {
+          "at": "2026-07-13",
+          "by": "jet-verify-sweep",
+          "text": "VERIFY GAP (jet-verify-sweep): all 7 criteria FALSE on master. Full impl (956 insertions: CmdCompile.rs, Driver/mod.rs, CheckerSchedule.rs, run_enter_dev.rs, tests/jetpack_tasks.rs, examples/features/jetpack/task_runner.jet, tests/ui/task_reserved_lifecycle) exists ONLY on unmerged branch grok/card-476 (commits 77621f8b, d954a6e6). git merge-base --is-ancestor grok/card-476 HEAD = false. On master: no tests/jetpack_tasks.rs, no examples/features/jetpack/task_runner.jet, no tests/ui/task_reserved_lifecycle.*, no TASK_RESERVED_LIFECYCLE const anywhere. NOTE criterion 1 evidence is doubly misleading: KW_TASK in math_layout.rs already existed pre-#476 from card #505/D-SCHEDULE1 (a DIFFERENT #Task -- scheduled-task concurrency marker), not this card's task-runner marker; card's own log already flagged this #Task/Task<T> name collision as an open owner question, unresolved. Cannot verify any criterion until grok/card-476 merges to master. Same unmerged-branch pattern found on sibling card #477 (grok/card-477)."
+        },
+        {
           "at": "2026-07-12",
           "by": "cursor-e4-burn",
           "text": "VERIFY FAIL grok-476-verify2: swap_entry_point renames leaf #Task→run so jetpack run greet E0102 when seed calls greet. Builder fixing."
@@ -10865,7 +10899,7 @@
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-10T21:04:24.721Z",
-      "updated": "2026-07-12",
+      "updated": "2026-07-13",
       "claimedAt": "2026-07-12T19:53:35.885Z"
     },
     {
@@ -10883,6 +10917,11 @@
       "blockedBy": [],
       "assignee": "grok-477-builder",
       "log": [
+        {
+          "at": "2026-07-13",
+          "by": "jet-verify-sweep",
+          "text": "VERIFY GAP (jet-verify-sweep): all 4 criteria marked verified by grok-477-verify are FALSE on master. Implementation (crates/jetpack/src/CLI/tool.rs 742 lines, tests/jetpack.rs +234, diagnostics.md +8) exists ONLY on unmerged branch grok/card-477 (commits 58118c1a, d7f21193, 77637527) -- git merge-base --is-ancestor d7f21193 HEAD = false. Current master HEAD (53d24067): './target/debug/jetpack tool --help' -> 'error: tool is not a jetpack command. Phase 1 commands are: doctor, run, enter, build, test, list, hangar, vendor, audit, clean, add, remove, update, outdated, search, info, explain, logs, override, push, trust, os, dev, config, bridge, services, secrets, image, user.' Zero JPK-TOOL-COLLIDE/E1297/E1298 hits anywhere in repo tree (grep -rn confirmed). Card cannot close until grok/card-477 is merged to master and re-verified there."
+        },
         {
           "at": "2026-07-12",
           "by": "cursor-e4-burn",
@@ -10945,7 +10984,7 @@
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-10T21:04:30.553Z",
-      "updated": "2026-07-12",
+      "updated": "2026-07-13",
       "claimedAt": "2026-07-12T19:53:15.263Z"
     },
     {
@@ -11627,12 +11666,17 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
       "assignee": "claude-main",
       "log": [
+        {
+          "at": "2026-07-13",
+          "by": "fable-main",
+          "text": "Closeout sweep: all 5 criteria met+verified (sol-wave-verifier/terra-reverify-2), independently re-confirmed live on master by jet-verify-sweep (hangar/E2101 teaching errors/inspect grouping/bare-entry test/docs). Honest deferrals tracked on ratified follow-up card 517."
+        },
         {
           "at": "2026-07-12",
           "by": "claude-main",
@@ -11660,45 +11704,45 @@
           "text": "jet hangar group exists with D-JPK-STORECLI1 verb set; jet store/jet gc are teaching errors (tests/cli transcripts)",
           "status": "verified",
           "metBy": "claude-main",
-          "verifiedBy": "sol-wave-verifier",
-          "evidence": "real target/debug/jet: jet store/jet gc E2101 teaching errors (D-CLI-STORE2=A); jet hangar help lists ratified verb set (verify/rollback/generations/du real, 7 not-built = #517).",
-          "at": "2026-07-12T17:19:51.485Z"
+          "verifiedBy": "jet-verify-sweep",
+          "evidence": "Reconfirmed on master HEAD 53d24067: 'jet store verify'/'jet gc' -> E2101 teaching errors naming hangar/clean; 'jet hangar help' lists verify/repair/copy/import/export/dump/restore/sign/rollback/generations/du (4 real, 7 honest not-yet-built, tracked by follow-up card #517, planning phase, ballot-gated -- acceptable ratified deferral, not a hidden stub).",
+          "at": "2026-07-13T00:47:06.887Z"
         },
         {
           "n": 2,
           "text": "jet serve removed; teaching error names jet dev --swap (transcript test)",
           "status": "verified",
           "metBy": "claude-main",
-          "verifiedBy": "sol-wave-verifier",
-          "evidence": "real binary: jet serve E2101 names jet dev <file> --swap (D-CLI-DEVSERVE1=A).",
-          "at": "2026-07-12T17:19:51.585Z"
+          "verifiedBy": "jet-verify-sweep",
+          "evidence": "Reconfirmed: 'jet serve x.jet' -> E2101 naming 'jet dev x.jet --swap' (D-CLI-DEVSERVE1=A) on master binary.",
+          "at": "2026-07-13T00:47:23.067Z"
         },
         {
           "n": 3,
           "text": "D-CLI-SURFACE3=B map implemented: env/fetch/clean flat; search/info/logs/outdated under inspect; push/bridge/services/image/config under os; doctor/devtools/toolchain/gc flat forms are teaching errors; help/man/completions advertise only canonical spellings",
           "status": "verified",
           "metBy": "claude-main",
-          "verifiedBy": "sol-wave-verifier",
-          "evidence": "map verified via binary: doctor/devtools/toolchain/gc teaching errors, inspect/os subverbs. CAVEAT: cli man+completions goldens RED but ONLY from external prove verb + --lens flag (evidence work), not #497 verbs; #497 spellings canonical-only.",
-          "at": "2026-07-12T17:19:51.686Z"
+          "verifiedBy": "jet-verify-sweep",
+          "evidence": "Reconfirmed on binary: 'jet inspect help' lists search/info/logs/outdated among semantic verbs; 'jet os help' lists push/bridge/services/config; jet doctor/devtools/toolchain -> E2101 naming 'jet self <verb>'. D-CLI-OSIMAGE1=A correction (later ballot on same card) keeps 'jet image' flat + 'jet os image' as jetos disk-image (unchanged) -- confirmed via 'jet image --help' (env.jet image.<name> error, correct top-level) vs 'jet os image --help' (jetos config error, correct jetos meaning). No collision on master.",
+          "at": "2026-07-13T00:47:50.088Z"
         },
         {
           "n": 4,
           "text": "bare run/dev/debug/bench/check/build resolve package entry via targets/D-ILE1; ambiguity error lists targets; outside-package usage error unchanged (tests)",
           "status": "verified",
           "metBy": "claude-main",
-          "verifiedBy": "terra-reverify-2",
-          "evidence": "real bin: bare run @ monorepo root -> ambiguity(hello,ranker); -p hello/-p ranker run; cd packages/hello bare run ok; outside-pkg err unchanged; find_project_entry: src/main.jet then <pkg>.jet from pkg.jet name (D-ILE1 order confirmed). cargo test --test cli: 65 pass 2 fail (man_page_golden+completions_generate_for_every_shell, known external). monorepo_bare_entry_honors_d_ile1_search_order: ok.",
-          "at": "2026-07-12T17:40:27.736Z"
+          "verifiedBy": "jet-verify-sweep",
+          "evidence": "cargo test --test cli monorepo_bare_entry_honors_d_ile1_search_order: ok. Source/main.rs:2071 resolve_bare_entry is the shared D-CLI-BARE1 resolver, wired into debug/bench (grep-confirmed call sites) + run/dev/check/build per doc comment at main.rs:2050. Full cli.rs: 65 passed, 2 failed (man_page_golden, completions_generate_for_every_shell -- both fail ONLY on external 'prove' verb + '--lens' flag additions not yet re-blessed into golden, unrelated to #497 verbs; diff-verified byte-for-byte).",
+          "at": "2026-07-13T00:48:05.369Z"
         },
         {
           "n": 5,
           "text": "docs match: architecture.md exit-code/CLI sections, reference docs, man page regenerated",
           "status": "verified",
           "metBy": "claude-main",
-          "verifiedBy": "sol-wave-verifier",
-          "evidence": "diagnostics.md 7 teaching-error rows correct; man.txt carries all #497 content. CAVEAT: man_page_golden RED solely from external prove/--lens rows unblessed, not #497.",
-          "at": "2026-07-12T17:19:51.793Z"
+          "verifiedBy": "jet-verify-sweep",
+          "evidence": "man.txt content (from failing golden's own 'left' actual output) carries correct #497 rows: hangar/inspect/self groups, store/gc/serve/doctor/devtools/toolchain absent as top-level, image flat, os subverbs listed. diagnostics.md has E2101 teaching-error rows. The 2 golden failures are external drift (prove/--lens), not #497 content -- confirmed by diff inspection.",
+          "at": "2026-07-13T00:48:20.566Z"
         }
       ],
       "refs": [
@@ -11706,7 +11750,7 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-12T00:42:29.598Z",
-      "updated": "2026-07-12",
+      "updated": "2026-07-13",
       "workOrder": 18,
       "claimedAt": "2026-07-12T12:57:40.268Z"
     },
@@ -12506,6 +12550,11 @@
       "assignee": "claude-main",
       "log": [
         {
+          "at": "2026-07-13",
+          "by": "jet-verify-sweep",
+          "text": "VERIFY GAP (not one of 4 chores, but caused by this card's landed code): commit 47b3de84 added validate_block/validate_span fields to StructDef (items.rs:1161-62) but did NOT update tests/reflect.rs:93,133 StructDef initializers -> E0063, cargo test fails to COMPILE repo-wide (exit 101). Full suite (scripts/agent/verify-full.sh) currently RED on master HEAD (53d24067) for this reason -- 0 tests run. cargo build (binaries only) still succeeds; jet/jetpack smoke-testable. Fix: add validate_block: Vec::new(), validate_span: None to both reflect.rs initializers."
+        },
+        {
           "at": "2026-07-12",
           "by": "claude-main",
           "text": "D-BINPAT1 shipped full vertical (lexer/parser/sema/codegen/interpreter/formatter/grammars/snapshots/golden; E1007-E1011; R12 parity proven byte-identical on IPv4 example). Conservative law reading: multi-byte reads REQUIRE explicit be/le (no bare default invented) — flag for owner if a default was intended; ballot with next batch. Deferred named slice: Reader.take_pattern(b\"...\") consume-mode overload — builder launched. External churn note for #521: impl/derive ui snapshots now show doubled/tripled diagnostics (E0906/E0922/derive paths) from concurrent jet-sema work."
@@ -12545,38 +12594,38 @@
         {
           "n": 1,
           "text": "Syntax.rs entry updated",
-          "status": "met",
+          "status": "verified",
           "metBy": "terra-506v-builder",
-          "verifiedBy": null,
-          "evidence": "crates/jet-foundation/src/Syntax/package_files.rs: KW_VALIDATE_BLOCK+VALIDATE_CHECK_FN consts (D-VALIDATE1), added to JET_KEYWORD_LIST + highlights.rs",
-          "at": "2026-07-12T22:44:24.050Z"
+          "verifiedBy": "jet-verify-sweep",
+          "evidence": "Confirmed KW_VALIDATE_BLOCK/VALIDATE_CHECK_FN in crates/jet-foundation/src/Syntax/package_files.rs:172,179 (D-VALIDATE1); D-BINPAT1 entries same file lines 100-109. I7 satisfied.",
+          "at": "2026-07-13T00:39:47.826Z"
         },
         {
           "n": 2,
           "text": "syntax-decisions.md log entry",
-          "status": "met",
+          "status": "verified",
           "metBy": "terra-506v-builder",
-          "verifiedBy": null,
-          "evidence": "docs/spec/syntax-decisions.md D-VALIDATE1 entry (already ratified) now matches shipped spelling; docs/spec/spec.md + docs/reference/core-library.md gained validate{} sections",
-          "at": "2026-07-12T22:44:46.377Z"
+          "verifiedBy": "jet-verify-sweep",
+          "evidence": "docs/spec/syntax-decisions.md D-VALIDATE1 (line 2009) + D-BINPAT1 (line 257) entries present; diagnostics.md has E0353/E0354/E1007-E1011 rows.",
+          "at": "2026-07-13T00:40:09.639Z"
         },
         {
           "n": 3,
           "text": "jet devtools grammars regenerated",
-          "status": "met",
+          "status": "verified",
           "metBy": "terra-506v-builder",
-          "verifiedBy": null,
-          "evidence": "jet self devtools grammars run; editors/tree-sitter/grammar.js, editors/vscode/syntaxes/jet.tmLanguage.json, editors/zed/languages/jet/highlights.scm regenerated (validate+check added), tests/grammar.rs green",
-          "at": "2026-07-12T22:45:00.734Z"
+          "verifiedBy": "jet-verify-sweep",
+          "evidence": "jet self devtools grammars --check: zero git diff on editors/ after regen (already matches committed state: tmLanguage.json, tree-sitter grammar.js, zed highlights.scm).",
+          "at": "2026-07-13T00:40:27.513Z"
         },
         {
           "n": 4,
           "text": "snapshots re-blessed",
-          "status": "met",
+          "status": "verified",
           "metBy": "terra-506v-builder",
-          "verifiedBy": null,
-          "evidence": "3 new tests/ui/*.stderr snapshots (E0353/E0354/E3401) blessed+green; examples/features/serde/validate.jet + expected/serde/validate.out golden pair blessed+green; jet fmt round-trip stable",
-          "at": "2026-07-12T22:45:15.005Z"
+          "verifiedBy": "jet-verify-sweep",
+          "evidence": "9/9 relevant tests/ui snapshots green individually (JET_UI_FILTER, diagnostic_snapshots ui_snapshots): binpat_subject_not_bytes, binpat_bad_width, binpat_unaligned_rest, binpat_rest_not_final, binpat_multibyte_needs_endian, binpat_take_pattern_bad_width, validate_bad_rule_shape, validate_unknown_field, validate_impure_rule.",
+          "at": "2026-07-13T00:40:43.418Z"
         }
       ],
       "refs": [
@@ -12584,7 +12633,7 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-12T02:44:52.267Z",
-      "updated": "2026-07-12",
+      "updated": "2026-07-13",
       "claimedAt": "2026-07-12T21:44:25.906Z"
     },
     {
@@ -13533,6 +13582,73 @@
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-13T00:25:40.260Z",
+      "updated": "2026-07-13"
+    },
+    {
+      "id": "c0zdbl2x",
+      "num": 526,
+      "title": "Epoch 8 core.crypto native macOS/Windows/WASI entropy matrix",
+      "body": "Deferred from #302 by owner Epoch 3 Linux-only directive. Preserve native production entropy proof on macOS, Windows, and WASI: real provider execution, fail-closed injection, concurrency/length/zero behavior, no predictable fallback, and consumer propagation. WASI additionally proves D-CRYPTO-WASI-ALLOC2 retry-generation zeroization/release law under actual WASI runtime. No platform inference or cross-compiled/static-only substitute.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e8",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": "Reuse the shared std-only CryptoEntropy provider and tests/crypto_entropy.rs. Add native platform runners/CI evidence for macOS Security.framework, Windows BCryptGenRandom, and WASI preview1 random_get. Preserve exact provider/error/no-fallback law and run full crypto vector/golden preservation matrix on each supported target where applicable.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Native macOS x86_64/aarch64 executes Security.framework entropy provider and proves live, failure, concurrent, requested-length, and zero-length behavior without fallback.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-13T00:39:42.979Z"
+        },
+        {
+          "n": 2,
+          "text": "Native Windows MSVC x86_64/arm64 executes BCryptGenRandom entropy provider and proves live, failure, concurrent, requested-length, and zero-length behavior without fallback.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-13T00:39:43.071Z"
+        },
+        {
+          "n": 3,
+          "text": "Actual WASI preview1 runtime executes random_get and proves bounded interrupt retries, exact-count fresh ownership generations, volatile zeroization and release before retry, failure closure, length and zero behavior.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-13T00:39:43.163Z"
+        },
+        {
+          "n": 4,
+          "text": "Every supported deferred platform proves all crypto randomness consumers propagate the typed failure without partial bytes or stale-state reuse; vector/golden/no-dependency preservation remains green.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-13T00:39:43.258Z"
+        },
+        {
+          "n": 5,
+          "text": "Independent reviewer verifies native run evidence and rejects cross-compiled, cfg-only, environment-spoofed, or static-only platform claims.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-13T00:39:43.351Z"
+        }
+      ],
+      "refs": [],
+      "needsAcceptance": false,
+      "created": "2026-07-13T00:39:33.065Z",
       "updated": "2026-07-13"
     }
   ],
@@ -30860,6 +30976,265 @@
   ],
   "events": [
     {
+      "at": "2026-07-13T00:49:49.522Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0gv4b2r",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T00:48:33.471Z",
+      "by": "terra-453-reviewer",
+      "action": "card.update",
+      "ref": "c047jzdr",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T00:48:20.566Z",
+      "by": "jet-verify-sweep",
+      "action": "card.criteria-verify",
+      "ref": "c0gv4b2r",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-13T00:48:06.089Z",
+      "by": "terra-302-linux",
+      "action": "card.release",
+      "ref": "c0184j6s",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-13T00:48:05.369Z",
+      "by": "jet-verify-sweep",
+      "action": "card.criteria-verify",
+      "ref": "c0gv4b2r",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-13T00:47:50.088Z",
+      "by": "jet-verify-sweep",
+      "action": "card.criteria-verify",
+      "ref": "c0gv4b2r",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-13T00:47:23.067Z",
+      "by": "jet-verify-sweep",
+      "action": "card.criteria-verify",
+      "ref": "c0gv4b2r",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-13T00:47:06.887Z",
+      "by": "jet-verify-sweep",
+      "action": "card.criteria-verify",
+      "ref": "c0gv4b2r",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-13T00:45:58.837Z",
+      "by": "terra-453-repair",
+      "action": "card.update",
+      "ref": "c047jzdr",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T00:45:42.623Z",
+      "by": "terra-302-linux",
+      "action": "card.criteria-meet",
+      "ref": "c0184j6s",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-13T00:45:42.535Z",
+      "by": "terra-302-linux",
+      "action": "card.criteria-meet",
+      "ref": "c0184j6s",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-13T00:45:42.438Z",
+      "by": "terra-302-linux",
+      "action": "card.criteria-meet",
+      "ref": "c0184j6s",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-13T00:45:27.985Z",
+      "by": "terra-302-linux",
+      "action": "card.criteria-meet",
+      "ref": "c0184j6s",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-13T00:45:05.845Z",
+      "by": "terra-302-linux",
+      "action": "card.claim",
+      "ref": "c0184j6s",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T00:43:42.366Z",
+      "by": "jet-verify-sweep",
+      "action": "card.update",
+      "ref": "c0qwckht",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T00:42:18.032Z",
+      "by": "jet-verify-sweep",
+      "action": "card.update",
+      "ref": "c0fchu51",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T00:41:05.701Z",
+      "by": "jet-verify-sweep",
+      "action": "card.update",
+      "ref": "c0n6vj96",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T00:40:43.418Z",
+      "by": "jet-verify-sweep",
+      "action": "card.criteria-verify",
+      "ref": "c0n6vj96",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-13T00:40:27.513Z",
+      "by": "jet-verify-sweep",
+      "action": "card.criteria-verify",
+      "ref": "c0n6vj96",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-13T00:40:09.639Z",
+      "by": "jet-verify-sweep",
+      "action": "card.criteria-verify",
+      "ref": "c0n6vj96",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-13T00:39:58.704Z",
+      "by": "terra-302-linux",
+      "action": "card.update",
+      "ref": "c0184j6s",
+      "note": "plan,criteria,phase"
+    },
+    {
+      "at": "2026-07-13T00:39:47.827Z",
+      "by": "jet-verify-sweep",
+      "action": "card.criteria-verify",
+      "ref": "c0n6vj96",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-13T00:39:43.351Z",
+      "by": "terra-302-linux",
+      "action": "card.criteria-add",
+      "ref": "c0zdbl2x",
+      "note": "#5 Independent reviewer verifies native run evidence and reject"
+    },
+    {
+      "at": "2026-07-13T00:39:43.258Z",
+      "by": "terra-302-linux",
+      "action": "card.criteria-add",
+      "ref": "c0zdbl2x",
+      "note": "#4 Every supported deferred platform proves all crypto randomne"
+    },
+    {
+      "at": "2026-07-13T00:39:43.164Z",
+      "by": "terra-302-linux",
+      "action": "card.criteria-add",
+      "ref": "c0zdbl2x",
+      "note": "#3 Actual WASI preview1 runtime executes random_get and proves "
+    },
+    {
+      "at": "2026-07-13T00:39:43.071Z",
+      "by": "terra-302-linux",
+      "action": "card.criteria-add",
+      "ref": "c0zdbl2x",
+      "note": "#2 Native Windows MSVC x86_64/arm64 executes BCryptGenRandom en"
+    },
+    {
+      "at": "2026-07-13T00:39:42.979Z",
+      "by": "terra-302-linux",
+      "action": "card.criteria-add",
+      "ref": "c0zdbl2x",
+      "note": "#1 Native macOS x86_64/aarch64 executes Security.framework entr"
+    },
+    {
+      "at": "2026-07-13T00:39:33.065Z",
+      "by": "terra-302-linux",
+      "action": "card.add",
+      "ref": "c0zdbl2x",
+      "note": "Epoch 8 core.crypto native macOS/Windows/WASI entropy matrix"
+    },
+    {
+      "at": "2026-07-13T00:39:13.037Z",
+      "by": "terra-302-linux",
+      "action": "card.claim",
+      "ref": "c0184j6s",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T00:38:02.692Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0ai04g0",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T00:38:02.573Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0l5fmyy",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T00:35:06.188Z",
+      "by": "terra-360-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0l5fmyy",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-13T00:33:59.826Z",
+      "by": "terra-360-builder",
+      "action": "card.update",
+      "ref": "c0l5fmyy",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T00:33:52.845Z",
+      "by": "terra-360-builder",
+      "action": "card.criteria-add",
+      "ref": "c0l5fmyy",
+      "note": "#6 Supersedes withdrawn criterion 4 status: run the complete ow"
+    },
+    {
+      "at": "2026-07-13T00:33:49.415Z",
+      "by": "terra-360-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0l5fmyy",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-13T00:33:43.165Z",
+      "by": "terra-360-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0l5fmyy",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-13T00:33:33.871Z",
+      "by": "terra-360-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0l5fmyy",
+      "note": "#3"
+    },
+    {
       "at": "2026-07-13T00:27:36.364Z",
       "by": "terra-360-builder",
       "action": "card.release",
@@ -34099,265 +34474,6 @@
       "action": "decision.ratify",
       "ref": "D-CRYPTO-KEYGEN-CODE2",
       "note": "A"
-    },
-    {
-      "at": "2026-07-12T12:37:13.883Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c02wa1dn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-12T12:36:57.083Z",
-      "by": "terra-302-builder",
-      "action": "card.release",
-      "ref": "c0184j6s",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-12T12:32:17.156Z",
-      "by": "codex-orchestrator",
-      "action": "decision.add",
-      "ref": "D-CRYPTO-KEYGEN-CODE2",
-      "note": "Resolve the package-keygen diagnostic code collision"
-    },
-    {
-      "at": "2026-07-12T12:28:54.838Z",
-      "by": "terra-302-builder",
-      "action": "card.claim",
-      "ref": "c0184j6s",
-      "note": ""
-    },
-    {
-      "at": "2026-07-12T12:27:31.605Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CRYPTO-KEYGEN-DIAG1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-12T12:24:42.696Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CRYPTO-WASI-ALLOC2",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-12T12:23:35.272Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0184j6s",
-      "note": "phase,logEntry,blockedBy"
-    },
-    {
-      "at": "2026-07-12T12:22:17.737Z",
-      "by": "terra-302-builder",
-      "action": "card.release",
-      "ref": "c0184j6s",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-12T12:21:40.066Z",
-      "by": "terra-302-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0184j6s",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-12T12:17:29.195Z",
-      "by": "codex-orchestrator",
-      "action": "decision.add",
-      "ref": "D-CRYPTO-KEYGEN-DIAG1",
-      "note": "Package key generation entropy failure"
-    },
-    {
-      "at": "2026-07-12T12:16:28.922Z",
-      "by": "codex-orchestrator",
-      "action": "decision.add",
-      "ref": "D-CRYPTO-WASI-ALLOC2",
-      "note": "WASI entropy retry allocation identity"
-    },
-    {
-      "at": "2026-07-12T12:02:56.174Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0184j6s",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-12T11:57:17.690Z",
-      "by": "grok-361-builder",
-      "action": "card.update",
-      "ref": "c0nhjxh4",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T11:57:17.600Z",
-      "by": "grok-361-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0nhjxh4",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-12T11:57:17.515Z",
-      "by": "grok-361-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0nhjxh4",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-12T11:57:17.430Z",
-      "by": "grok-361-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0nhjxh4",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-12T11:57:17.343Z",
-      "by": "grok-361-builder",
-      "action": "card.criteria-meet",
-      "ref": "c0nhjxh4",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-12T11:50:39.256Z",
-      "by": "grok-359-verify",
-      "action": "card.update",
-      "ref": "c0iyfhaf",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-12T11:46:26.922Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0184j6s",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T11:46:10.567Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0184j6s",
-      "note": "#6 Independent reviewer verifies OS API contracts, fail-closed "
-    },
-    {
-      "at": "2026-07-12T11:46:10.284Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0184j6s",
-      "note": "#5 Existing reference vectors, misuse diagnostics, envelope/pas"
-    },
-    {
-      "at": "2026-07-12T11:46:10.004Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0184j6s",
-      "note": "#4 Focused tests inject short-read/failure paths, exercise live"
-    },
-    {
-      "at": "2026-07-12T11:46:09.723Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0184j6s",
-      "note": "#3 Every cryptographic randomness consumer uses the same audite"
-    },
-    {
-      "at": "2026-07-12T11:46:09.432Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0184j6s",
-      "note": "#2 Entropy failure propagates one typed CryptoError through ran"
-    },
-    {
-      "at": "2026-07-12T11:46:09.145Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0184j6s",
-      "note": "#1 D-CRYPTO-RNG1 uses tier-1 OS entropy on Linux, macOS, and Wi"
-    },
-    {
-      "at": "2026-07-12T11:45:53.658Z",
-      "by": "terra-302-builder",
-      "action": "card.claim",
-      "ref": "c0184j6s",
-      "note": ""
-    },
-    {
-      "at": "2026-07-12T11:45:34.229Z",
-      "by": "cursor-e4-burn",
-      "action": "card.criteria-add",
-      "ref": "c0rfeel3",
-      "note": "#3 Focused workspace tests prove -p isolation, --affected-since"
-    },
-    {
-      "at": "2026-07-12T11:45:34.125Z",
-      "by": "cursor-e4-burn",
-      "action": "card.criteria-add",
-      "ref": "c0rfeel3",
-      "note": "#2 jet build/test/run accept --affected and --affected-since <r"
-    },
-    {
-      "at": "2026-07-12T11:45:34.033Z",
-      "by": "cursor-e4-burn",
-      "action": "card.criteria-add",
-      "ref": "c0rfeel3",
-      "note": "#1 jet build/test/run accept repeatable -p <member>; unknown me"
-    },
-    {
-      "at": "2026-07-12T11:45:33.934Z",
-      "by": "cursor-e4-burn",
-      "action": "card.criteria-add",
-      "ref": "c0nhjxh4",
-      "note": "#4 Long download/build progress shows nh-style dependency/curre"
-    },
-    {
-      "at": "2026-07-12T11:45:33.839Z",
-      "by": "cursor-e4-burn",
-      "action": "card.criteria-add",
-      "ref": "c0nhjxh4",
-      "note": "#3 Mutation commands (switch/gc class) print plan with +/~/- ma"
-    },
-    {
-      "at": "2026-07-12T11:45:33.743Z",
-      "by": "cursor-e4-burn",
-      "action": "card.criteria-add",
-      "ref": "c0nhjxh4",
-      "note": "#2 Long realize/build path pins live region, promotes finished "
-    },
-    {
-      "at": "2026-07-12T11:45:33.642Z",
-      "by": "cursor-e4-burn",
-      "action": "card.criteria-add",
-      "ref": "c0nhjxh4",
-      "note": "#1 Trivial ops (add/realize short path) emit quiet ledger rows "
-    },
-    {
-      "at": "2026-07-12T11:45:33.499Z",
-      "by": "grok-478-builder",
-      "action": "card.claim",
-      "ref": "c0rfeel3",
-      "note": ""
-    },
-    {
-      "at": "2026-07-12T11:45:33.390Z",
-      "by": "grok-361-builder",
-      "action": "card.claim",
-      "ref": "c0nhjxh4",
-      "note": ""
-    },
-    {
-      "at": "2026-07-12T11:45:33.282Z",
-      "by": "grok-359-builder",
-      "action": "card.claim",
-      "ref": "c0iyfhaf",
-      "note": ""
-    },
-    {
-      "at": "2026-07-12T11:44:28.412Z",
-      "by": "cursor-e4-burn",
-      "action": "card.update",
-      "ref": "c0yxdqju",
-      "note": "logEntry,blockedBy"
     }
   ],
   "nextNum": 368,
