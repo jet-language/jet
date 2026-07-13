@@ -797,8 +797,16 @@ fn completions_generate_for_every_shell() {
             shell
         );
         let s = String::from_utf8_lossy(&out.stdout);
-        for flag in ["--structural", "--out", "--report", "--repo"] {
-            assert!(s.contains(flag), "{shell} completion missing {flag}");
+        for flag in ["structural", "out", "report", "repo"] {
+            let spelling = if shell == "fish" {
+                format!("-l {flag}")
+            } else {
+                format!("--{flag}")
+            };
+            assert!(
+                s.contains(&spelling),
+                "{shell} completion missing {spelling}"
+            );
         }
         check_snapshot(&format!("completions_{}.txt", shell), &s);
     }
