@@ -1953,6 +1953,18 @@ impl<'a> Checker<'a> {
                     let result =
                         self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
                     *recv_type_out = Some("Shared".to_string());
+                    // D-STM1=A (card #506): a `Shared.edit` on the direct path of a
+                    // `#Transact` block joins the block's atomic commit — the write is
+                    // DEFERRED, so the call yields nothing (Unit), matching codegen's
+                    // `edit_txn(…) -> ()`. Consuming it (`x :: h.edit(…)`) then fails as an
+                    // ordinary type error against Unit. `txn_depth` is 0 inside a nested
+                    // lambda (an `on_commit` hook / a spawned task), where the edit stays
+                    // immediate and keeps its normal return — so this narrows exactly to
+                    // the edits the STM plane actually defers (the codegen routes the same
+                    // set, resetting `in_stm_transact` for lambda bodies).
+                    if method == "edit" && self.txn_depth > 0 {
+                        return Some(Type::Tuple(vec![]));
+                    }
                     return result;
                 }
             }

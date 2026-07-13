@@ -759,11 +759,23 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
         TStmt::Transact {
             handle,
             snapshots,
+            uses_stm,
             body,
         } => {
             let inner = indent + 1;
             let inner_pad = "    ".repeat(inner);
             out.push_str(&format!("{}{{\n", pad));
+            // D-STM1=A (card #506): a block that touched the Shared plane opens an STM
+            // transaction; `edit_txn` calls in the body defer onto it, and `.commit()`
+            // (emitted after the body, before any `<handle>.commit()`) applies every
+            // deferred edit atomically under all the handles' locks at once. A `?`/early
+            // return skips the commit, so the guard's Drop discards the deferred edits.
+            if *uses_stm {
+                out.push_str(&format!(
+                    "{}let __jet_stm = {}jet_stm::begin();\n",
+                    inner_pad, cx.root_prefix
+                ));
+            }
             // A named handle uses its mangled name; a bare block with auto-snapshots
             // needs a synthesized handle to register the snapshot restores on. A bare
             // block with neither handle nor snapshots erases to a plain block (its only
@@ -799,9 +811,17 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                         }
                     }
                     emit_tir_stmts(body, cx, out, inner);
+                    if *uses_stm {
+                        out.push_str(&format!("{}__jet_stm.commit();\n", inner_pad));
+                    }
                     out.push_str(&format!("{}{}.commit();\n", inner_pad, handle));
                 }
-                None => emit_tir_stmts(body, cx, out, inner),
+                None => {
+                    emit_tir_stmts(body, cx, out, inner);
+                    if *uses_stm {
+                        out.push_str(&format!("{}__jet_stm.commit();\n", inner_pad));
+                    }
+                }
             }
             out.push_str(&format!("{}}}\n", pad));
         }

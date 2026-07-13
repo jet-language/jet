@@ -2498,6 +2498,149 @@ mod jet_txn {
         }));
     }
 }
+// ── D-STM1=A (ratified 2026-07-12, card #506): the Shared plane of #Transact ──
+// `#Transact(tx) { from.edit(…); to.edit(…) }` on `Shared<T>` handles lowers to:
+//   { let mut tx = jet_transaction();
+//     let __jet_stm = jet_stm::begin();
+//     from.edit_txn(move |b| …); to.edit_txn(move |b| …);
+//     __jet_stm.commit(); tx.commit(); }
+//
+// Each `edit_txn` DEFERS its mutation onto the current thread's transaction
+// instead of taking a lock now. `begin()` pushes a fresh transaction; `commit()`
+// applies every deferred edit at once: it sorts the touched handles into a
+// canonical order by their `Arc` pointer, takes ALL their write locks (held
+// simultaneously via a recursive fold), runs each handle's buffered mutations
+// against a fresh `&mut T` under that lock, then releases. Because the locks are
+// taken in one fixed order there is no lock-ordering deadlock (the deadlock class
+// STM was invented to remove), and because they are all held together no other
+// task observes a half-applied transfer. A `?`-failure or early return skips
+// `commit()`, so the guard's Drop discards every deferred edit — nothing lands.
+//
+// Purely safe std Rust (the raw pointer is only read as an ordering key, never
+// dereferenced); no external crate (I6); the compiler decides WHICH `.edit`
+// calls defer (any inside a Shared-touching `#Transact`), this module is the
+// dumb runtime (I3). E0746 keeps rejecting irreversible effects inside, so a
+// deferred, all-or-nothing commit is always safe.
+mod jet_stm {
+    use std::any::Any;
+    use std::cell::RefCell;
+    use std::sync::{Arc, RwLock};
+
+    thread_local! {
+        // A stack, so nested `#Transact` blocks each own their own deferred set;
+        // an `edit_txn` always attaches to the innermost open transaction.
+        static STACK: RefCell<Vec<Txn>> = const { RefCell::new(Vec::new()) };
+    }
+
+    struct Txn {
+        parts: Vec<Box<dyn Participant>>,
+    }
+
+    // One touched handle plus every mutation deferred against it this transaction.
+    // Type-erased behind `dyn Participant` so a single `Vec` holds handles of
+    // different `T`; `as_any_mut` lets `record_edit` re-find and extend the entry
+    // for a handle edited more than once (so its lock is taken exactly once).
+    trait Participant {
+        fn addr(&self) -> usize;
+        fn lock_apply(&mut self, next: &mut dyn FnMut());
+        fn as_any_mut(&mut self) -> &mut dyn Any;
+    }
+
+    struct Cell<T: 'static> {
+        cell: Arc<RwLock<T>>,
+        addr: usize,
+        deltas: Vec<Box<dyn FnOnce(&mut T)>>,
+    }
+
+    impl<T: 'static> Participant for Cell<T> {
+        fn addr(&self) -> usize {
+            self.addr
+        }
+        fn lock_apply(&mut self, next: &mut dyn FnMut()) {
+            // Hold this handle's write lock across `next()` so every touched
+            // handle's lock is held at once while the whole transaction applies —
+            // that simultaneity is what makes the commit atomic to observers.
+            let mut guard = self.cell.write().unwrap_or_else(|e| e.into_inner());
+            for delta in self.deltas.drain(..) {
+                delta(&mut *guard);
+            }
+            next();
+        }
+        fn as_any_mut(&mut self) -> &mut dyn Any {
+            self
+        }
+    }
+
+    /// `handle.edit(f)` inside a `#Transact` block. Buffers `f` on the innermost
+    /// open transaction; the actual write happens at `commit()`.
+    pub(crate) fn record_edit<T: 'static>(cell: Arc<RwLock<T>>, delta: Box<dyn FnOnce(&mut T)>) {
+        let addr = Arc::as_ptr(&cell) as *const () as usize;
+        STACK.with(|s| {
+            let mut stack = s.borrow_mut();
+            let txn = stack
+                .last_mut()
+                .expect("edit_txn called outside a #Transact block (compiler invariant)");
+            for p in txn.parts.iter_mut() {
+                if p.addr() == addr {
+                    if let Some(c) = p.as_any_mut().downcast_mut::<Cell<T>>() {
+                        c.deltas.push(delta);
+                        return;
+                    }
+                }
+            }
+            txn.parts.push(Box::new(Cell {
+                cell,
+                addr,
+                deltas: vec![delta],
+            }));
+        });
+    }
+
+    /// The RAII guard for one `#Transact` block's Shared plane. Dropping it
+    /// without `commit()` (a `?`-failure / early return) discards every deferred
+    /// edit — the all-or-nothing guarantee.
+    pub(crate) struct Guard {
+        committed: bool,
+    }
+
+    pub(crate) fn begin() -> Guard {
+        STACK.with(|s| s.borrow_mut().push(Txn { parts: Vec::new() }));
+        Guard { committed: false }
+    }
+
+    impl Guard {
+        pub(crate) fn commit(mut self) {
+            self.committed = true;
+            let txn = STACK
+                .with(|s| s.borrow_mut().pop())
+                .expect("jet_stm::commit with no open transaction (compiler invariant)");
+            apply(txn.parts);
+        }
+    }
+
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            if !self.committed {
+                STACK.with(|s| {
+                    s.borrow_mut().pop();
+                });
+            }
+        }
+    }
+
+    // Take every touched handle's write lock in canonical pointer order and hold
+    // them all at once (each stack frame owns one guard) while the buffered
+    // mutations run — atomic and deadlock-free.
+    fn apply(mut parts: Vec<Box<dyn Participant>>) {
+        parts.sort_by_key(|p| p.addr());
+        fn go(parts: &mut [Box<dyn Participant>]) {
+            if let Some((head, rest)) = parts.split_first_mut() {
+                head.lock_apply(&mut || go(rest));
+            }
+        }
+        go(&mut parts);
+    }
+}
 trait user_Serialize {
     fn to_json(&self) -> String;
 }

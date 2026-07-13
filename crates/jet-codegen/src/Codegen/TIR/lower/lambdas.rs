@@ -95,6 +95,13 @@ pub(crate) fn lower_lambda_expecting(
     // The body: an expression body lowers + emits directly; a block body lowers its
     // statements (on the lambda env) and emits a `{ … }` at indent 1 — byte-for-byte
     // `emit_lambda`'s `emit_stmts(…, 1, false)` then `format!("{{ {} }}", inner)`.
+    // D-STM1=A (card #506): a lambda body is a deferred execution context (it may
+    // run after the `#Transact` block commits — an `on_commit` hook, a spawned
+    // task). So a `Shared.edit` inside a lambda must NOT route to the transaction's
+    // deferred `edit_txn` (whose thread-local transaction is gone by then); it stays
+    // an immediate edit. This mirrors sema zeroing `txn_depth` for lambda bodies
+    // (the same D-TXN2 reason E0746 doesn't fire inside `on_commit`).
+    let prev_in_stm = cx.in_stm_transact.replace(false);
     let (body, executable) = match &lam.body {
         LambdaBody::Expr(e) => {
             let lowered = lower_expr(e, cx, &mut lam_env);
@@ -107,6 +114,7 @@ pub(crate) fn lower_lambda_expecting(
             (format!("{{ {} }}", inner), TLambdaBody::Block(lowered))
         }
     };
+    cx.in_stm_transact.set(prev_in_stm);
     // `move ` keyword: the AST emits it UNLESS the lambda is FnMut and does not escape.
     let is_move = !(lam.meta.needs_fn_mut && !lam.meta.escapes);
     TLambda {

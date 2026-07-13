@@ -1530,17 +1530,33 @@ pub(crate) fn lower_method_call(
                     p.insert_str(pos + 2, ref_prefix);
                 }
             }
-            let move_kw = if tl.is_move { "move " } else { "" };
+            // D-STM1=A (card #506): a `Shared<T>.edit(f)` inside a `#Transact` block
+            // routes to the deferred `edit_txn` — the write is buffered and applied
+            // atomically at the block's commit, so the call yields nothing (Unit; E0750
+            // rejects a value-producing edit here). The closure is stored past the call,
+            // so it must `move` its captures. A `.read` (or an `.edit` outside a
+            // transaction) is unchanged.
+            let (method_out, ty, force_move) =
+                if method == "edit" && cx.in_stm_transact.get() {
+                    cx.stm_touched.set(true);
+                    ("edit_txn", Type::Tuple(vec![]), true)
+                } else {
+                    (
+                        method,
+                        lambda_body_ty_expecting(lam, cx, env, Some(expected)),
+                        tl.is_move,
+                    )
+                };
+            let move_kw = if force_move { "move " } else { "" };
             let raw = format!("{}|{}| {}", move_kw, tl.params.join(", "), tl.body);
             let closure = if tl.prep.is_empty() {
                 raw
             } else {
                 format!("{{ {} {} }}", tl.prep, raw)
             };
-            let ty = lambda_body_ty_expecting(lam, cx, env, Some(expected));
             return TExpr {
                 ty,
-                kind: TExprKind::ConstInline(format!("({}).{}({})", recv_s, method, closure)),
+                kind: TExprKind::ConstInline(format!("({}).{}({})", recv_s, method_out, closure)),
             };
         }
     }

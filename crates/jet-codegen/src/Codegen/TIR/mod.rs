@@ -825,6 +825,11 @@ pub enum TStmt {
         /// `Some(ty)` → the place implements `Rollback`; use `jet_txn::snapshot_custom`
         /// with `<ty>::restore` so the custom cheap diff runs instead of a full clone.
         snapshots: Vec<(String, Option<String>)>,
+        /// D-STM1=A (card #506): true when the block touches the `Shared<T>` plane
+        /// (some `.edit` inside routed to `edit_txn`), so emission wraps the body in
+        /// `jet_stm::begin()` … `.commit()` — the atomic multi-handle commit. False
+        /// for a plain local-only `#Transact` (byte-identical to the pre-STM output).
+        uses_stm: bool,
         body: Vec<TStmt>,
     },
     /// D-DBG3 step 2 (dap-debugger): a source line marker, one per lowered `Stmt`,

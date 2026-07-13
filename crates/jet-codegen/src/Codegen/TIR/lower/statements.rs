@@ -913,10 +913,22 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     (place_ref, rollback_ty)
                 })
                 .collect();
+            // D-STM1=A (card #506): lower the body with `in_stm_transact` raised so a
+            // `Shared<T>.edit` inside routes to the deferred `edit_txn`. `stm_touched`
+            // is reset first and read after, so `uses_stm` reflects THIS block only
+            // (save/restore isolates nested blocks); a Shared edit in a nested
+            // `#Transact` attaches to that inner block's own transaction, not this one.
+            let prev_in = cx.in_stm_transact.replace(true);
+            let prev_touched = cx.stm_touched.replace(false);
+            let lowered_body = lower_stmts(body, cx, &mut scoped);
+            let uses_stm = cx.stm_touched.get();
+            cx.in_stm_transact.set(prev_in);
+            cx.stm_touched.set(prev_touched);
             TStmt::Transact {
                 handle,
                 snapshots,
-                body: lower_stmts(body, cx, &mut scoped),
+                uses_stm,
+                body: lowered_body,
             }
         }
         // Forward-safety default: a Stmt variant not in the subset never reaches
