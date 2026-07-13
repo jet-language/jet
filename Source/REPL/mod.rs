@@ -1900,7 +1900,8 @@ fn run_cooked(project_dir: Option<&str>, color: bool, flags: ReplFlags) -> i32 {
     let mut stdin_lock = stdin.lock();
 
     loop {
-        let text = match read_input(&mut stdin_lock, color, "user> ") {
+        let prompt = Render::render_prompt(session.turns.len() + 1, color);
+        let text = match read_input(&mut stdin_lock, color, &prompt) {
             Some(t) => t,
             None => {
                 println!();
@@ -2258,6 +2259,7 @@ pub(crate) fn execute_line(
                     }
                     if let Some(full) = pending_unfold {
                         if let Some(t) = session.turns.last_mut() {
+                            t.folded = true;
                             t.pending_unfold = Some(full);
                         }
                     }

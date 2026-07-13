@@ -89,8 +89,8 @@ pub(crate) fn run_interactive(project_dir: Option<&str>, color: bool, mut guard:
                     println!("{}", dim("bindings pane closed", color));
                 }
             }
-            LineOutcome::CtrlP => cmd_toggle_pin(&mut session, color),
-            LineOutcome::CtrlF => cmd_toggle_fold(&mut session, color),
+            LineOutcome::CtrlP => cmd_toggle_pin(&mut reader, &mut session, color),
+            LineOutcome::CtrlF => cmd_toggle_fold(&mut reader, &mut session, color),
             LineOutcome::CtrlR => cmd_rerun(&mut reader, &mut session, &base_dir, color, &mut policy, &mut guard),
         }
     }
@@ -161,24 +161,47 @@ fn print_pin_rail(session: &Session, color: bool) {
 
 fn print_bindings_pane(session: &Session, changed: &HashSet<String>, color: bool) {
     let lines = Render::render_bindings_pane(session, changed);
-    println!("{}", dim("┌─ bindings ──────────────────────────", color));
+    let width = super::Terminal::terminal_width();
+    let split = (width / 2).clamp(20, 48);
+    println!("{}", Render::render_workspace_row("┌─ session", "bindings ─┐", split, color));
     if lines.is_empty() {
-        println!("{}", dim("│ (no bindings yet)", color));
+        println!("{}", Render::render_workspace_row("│", "(no bindings yet)", split, color));
     } else {
         for l in &lines {
-            println!("│ {}", l);
+            println!("{}", Render::render_workspace_row("│", l, split, color));
         }
     }
-    println!("{}", dim("└──────────────────────────────────────", color));
+    println!("{}", Render::render_workspace_row("└─ session", "bindings ─┘", split, color));
 }
 
-fn cmd_toggle_pin(session: &mut Session, color: bool) {
-    let Some(last) = session.turns.last() else {
+fn select_turn<R: Read>(reader: &mut KeyReader<R>, session: &mut Session, action: &str, color: bool) -> Option<usize> {
+    if session.turns.is_empty() {
+        println!("{}", dim(&format!("no turns yet to {action}"), color));
+        return None;
+    }
+    println!("{}", dim(&format!("select turn to {action}:"), color));
+    let text = match read_line(reader, "turn> ", "", session, color) {
+        LineOutcome::Submitted(text) => text,
+        _ => return None,
+    };
+    match text.trim().parse::<usize>() {
+        Ok(id) if session.turns.iter().any(|turn| turn.id == id) => Some(id),
+        _ => {
+            eprintln!("turn #{} does not exist", text.trim());
+            None
+        }
+    }
+}
+
+fn cmd_toggle_pin<R: Read>(reader: &mut KeyReader<R>, session: &mut Session, color: bool) {
+    let Some(id) = select_turn(reader, session, "pin", color) else {
+        return;
+    };
+    let Some(turn) = session.turns.iter().find(|turn| turn.id == id) else {
         println!("{}", dim("no turns yet to pin", color));
         return;
     };
-    let id = last.id;
-    let now_pinned = !last.pinned;
+    let now_pinned = !turn.pinned;
     let _ = set_turn_flag(session, id, "pinned", now_pinned);
     println!(
         "{}",
@@ -189,15 +212,14 @@ fn cmd_toggle_pin(session: &mut Session, color: bool) {
     );
 }
 
-fn cmd_toggle_fold(session: &mut Session, color: bool) {
-    let Some(last) = session.turns.last() else {
-        println!("{}", dim("no turns yet to fold", color));
+fn cmd_toggle_fold<R: Read>(reader: &mut KeyReader<R>, session: &mut Session, color: bool) {
+    let Some(id) = select_turn(reader, session, "fold", color) else {
         return;
     };
-    let id = last.id;
-    if last.folded {
+    let folded = session.turns.iter().find(|turn| turn.id == id).is_some_and(|turn| turn.folded);
+    if folded {
         if let Ok(Some(full)) = unfold_turn(session, id) {
-            println!("{}", full);
+            page_collection(reader, &full, color);
         }
         println!("{}", dim(&format!("turn {} unfolded", id), color));
     } else {
@@ -353,7 +375,7 @@ fn read_line<R: Read>(
                             let id = last.id;
                             display.finish();
                             if let Ok(Some(full)) = unfold_turn(session, id) {
-                                println!("{}", full);
+                                page_collection(reader, &full, color);
                             }
                             display.redraw(prompt, &buf, cursor, None, color);
                             continue;
@@ -509,6 +531,105 @@ fn ghost_for(buf: &[char], history: &[String]) -> Option<String> {
         .map(|h| h[prefix.len()..].to_string())
 }
 
+fn highlight_input(line: &str, color: bool) -> String {
+    if !color {
+        return line.to_string();
+    }
+    let mut out = String::new();
+    let chars: Vec<char> = line.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '"' {
+            let start = i;
+            i += 1;
+            while i < chars.len() {
+                let escaped = i > start && chars[i - 1] == '\\';
+                i += 1;
+                if chars[i - 1] == '"' && !escaped { break; }
+            }
+            out.push_str("\x1b[32m");
+            out.extend(chars[start..i].iter());
+            out.push_str("\x1b[0m");
+        } else if chars[i].is_ascii_digit() {
+            let start = i;
+            i += 1;
+            while i < chars.len() && (chars[i].is_ascii_digit() || chars[i] == '.') { i += 1; }
+            out.push_str("\x1b[36m");
+            out.extend(chars[start..i].iter());
+            out.push_str("\x1b[0m");
+        } else if chars[i].is_alphabetic() || chars[i] == '_' {
+            let start = i;
+            i += 1;
+            while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') { i += 1; }
+            let word: String = chars[start..i].iter().collect();
+            if matches!(word.as_str(), "fn" | "if" | "else" | "loop" | "return" | "use" | "struct" | "enum" | "match" | "true" | "false") {
+                out.push_str("\x1b[35m");
+                out.push_str(&word);
+                out.push_str("\x1b[0m");
+            } else {
+                out.push_str(&word);
+            }
+        } else {
+            out.push(chars[i]);
+            i += 1;
+        }
+    }
+    out
+}
+
+fn collection_rows(full: &str) -> Vec<String> {
+    let Some(start) = full.find('[') else { return vec![full.to_string()]; };
+    let Some(relative_end) = full[start..].find("] : List") else { return vec![full.to_string()]; };
+    let body = &full[start + 1..start + relative_end];
+    let mut rows = Vec::new();
+    let mut current = String::new();
+    let mut depth = 0usize;
+    let mut quoted = false;
+    let mut escaped = false;
+    for ch in body.chars() {
+        if quoted {
+            current.push(ch);
+            if ch == '"' && !escaped { quoted = false; }
+            escaped = ch == '\\' && !escaped;
+            if ch != '\\' { escaped = false; }
+            continue;
+        }
+        match ch {
+            '"' => { quoted = true; current.push(ch); }
+            '[' | '{' | '(' => { depth += 1; current.push(ch); }
+            ']' | '}' | ')' => { depth = depth.saturating_sub(1); current.push(ch); }
+            ',' if depth == 0 => { rows.push(current.trim().to_string()); current.clear(); }
+            _ => current.push(ch),
+        }
+    }
+    if !current.trim().is_empty() { rows.push(current.trim().to_string()); }
+    rows
+}
+
+fn page_collection<R: Read>(reader: &mut KeyReader<R>, full: &str, color: bool) {
+    let rows = collection_rows(full);
+    if rows.len() <= Render::FOLD_LIST_THRESHOLD {
+        println!("{full}");
+        return;
+    }
+    const PAGE: usize = 10;
+    let mut start = 0usize;
+    loop {
+        println!("{}", dim("idx │ value", color));
+        for (offset, value) in rows.iter().skip(start).take(PAGE).enumerate() {
+            println!("{:>3} │ {}", start + offset, value);
+        }
+        println!("{}", dim(&format!("-- rows {}-{}/{} · j/k page · q close --", start + 1, (start + PAGE).min(rows.len()), rows.len()), color));
+        io::stdout().flush().ok();
+        match reader.read_key() {
+            Key::Char('j') | Key::Down if start + PAGE < rows.len() => start += PAGE,
+            Key::Char('k') | Key::Up if start >= PAGE => start -= PAGE,
+            Key::Idle => continue,
+            _ => break,
+        }
+    }
+}
+
 fn line_start(buf: &[char], cursor: usize) -> usize {
     buf[..cursor]
         .iter()
@@ -610,6 +731,7 @@ impl EditorDisplay {
         ghost: Option<String>,
         color: bool,
     ) {
+        let ghost = color.then_some(ghost).flatten();
         // Refresh every redraw: SIGWINCH is not needed because raw reads
         // already wake at least every 100ms and the next key repaints using
         // the current PTY width.
@@ -638,7 +760,7 @@ impl EditorDisplay {
             } else {
                 print!("{}", prompt);
             }
-            print!("{}", line);
+            print!("{}", highlight_input(line, color));
         }
         if cursor == buf.len() {
             if let Some(g) = ghost {

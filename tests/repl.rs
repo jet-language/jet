@@ -1862,6 +1862,201 @@ fn repl_raw_project_baseline_survives_downstream_replay() {
     std::fs::remove_dir_all(root).ok();
 }
 
+#[cfg(unix)]
+#[test]
+fn repl_raw_pin_and_fold_select_arbitrary_turns() {
+    let output = run_raw_multiline_pty(
+        "printf 'first :: 1\\r'; sleep 0.12; printf 'second :: 2\\r'; sleep 0.12; printf '\\020'; sleep 0.12; printf '1\\r'; sleep 0.12; printf '\\006'; sleep 0.12; printf '1\\r'; sleep 0.12; printf ':turns\\r'",
+    );
+    let out = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "PTY status: {:?}\n{out}", output.status);
+    assert!(out.contains("select turn to pin"), "^P arbitrary selector missing: {out:?}");
+    assert!(out.contains("select turn to fold"), "^F arbitrary selector missing: {out:?}");
+    assert!(out.contains("#1 ok pinned folded"), "selected turn state missing: {out:?}");
+    assert!(!out.contains("#2 ok pinned") && !out.contains("#2 ok folded"), "latest turn was changed instead: {out:?}");
+}
+
+#[test]
+fn repl_cooked_prompt_keeps_truthful_turn_digits() {
+    let state = std::env::temp_dir().join(format!("jet_repl_cooked_ids_{}", std::process::id()));
+    std::fs::remove_dir_all(&state).ok();
+    let output = run_repl_process(&state, b"1 + 1\n2 + 2\n:quit\n", None);
+    let out = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "cooked REPL failed: {out}");
+    assert!(out.contains("1 user> ") && out.contains("2 user> ") && out.contains("3 user> "), "cooked turn ids missing: {out:?}");
+    std::fs::remove_dir_all(state).ok();
+}
+
+#[cfg(unix)]
+#[test]
+fn repl_raw_long_list_unfold_opens_indexed_pager() {
+    let values = (0..25).map(|n| n.to_string()).collect::<Vec<_>>().join(", ");
+    let script = format!(
+        "printf '[{}]\\r'; sleep 0.2; printf '\\r'; sleep 0.15; printf 'j'; sleep 0.12; printf 'q'; sleep 0.12; printf ':quit\\r'",
+        values
+    );
+    let output = run_raw_multiline_pty(&script);
+    let out = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "PTY status: {:?}\n{out}", output.status);
+    assert!(out.contains("25 rows folded"), "long collection did not fold: {out:?}");
+    assert!(out.contains("idx") && out.contains("value"), "indexed table missing: {out:?}");
+    assert!(out.contains("j/k") && out.contains("q"), "pager controls missing: {out:?}");
+    assert!(out.contains(" 10 │ 10"), "pager did not advance to second page: {out:?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn repl_raw_bindings_are_live_in_side_pane() {
+    let output = run_raw_multiline_pty(
+        "printf '\\002'; sleep 0.12; printf 'score := 7\\r'; sleep 0.2; printf ':quit\\r'",
+    );
+    let out = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "PTY status: {:?}\n{out}", output.status);
+    assert!(out.contains("session") && out.contains("bindings"), "workspace headers missing: {out:?}");
+    assert!(out.contains("│ score: Int := 7"), "binding not in side column: {out:?}");
+    assert!(out.contains("new this step"), "live changed marker missing: {out:?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn repl_raw_no_color_never_renders_history_ghost_as_real_text() {
+    let output = run_raw_multiline_pty(
+        "printf 'alphabet := 1\\r'; sleep 0.12; printf 'a'; sleep 0.15; printf '\\003'",
+    );
+    let out = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "PTY status: {:?}\n{out}", output.status);
+    let second = out.rsplit("2 user> ").next().unwrap_or(&out);
+    assert!(!second.contains("alphabet := 1"), "NO_COLOR ghost became fake typed text: {second:?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn repl_raw_color_highlights_live_input() {
+    use std::process::Command;
+    let shell = r#"
+{
+  sleep 0.2
+  printf 'value :: "hi"'
+  sleep 0.15
+  printf '\003'
+} | timeout 8s script -qec '"$JET_REPL_BIN" repl' /dev/null
+"#;
+    let output = Command::new("sh")
+        .args(["-c", shell])
+        .env("JET_REPL_BIN", env!("CARGO_BIN_EXE_jet"))
+        .env("JET_REPL_HISTORY", "off")
+        .env("CLICOLOR", "1")
+        .env_remove("NO_COLOR")
+        .output()
+        .unwrap();
+    let out = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "PTY status: {:?}\n{out}", output.status);
+    assert!(out.contains("\u{1b}["), "live editor emitted no ANSI highlighting: {out:?}");
+    assert!(out.contains("\u{1b}[3") || out.contains("\u{1b}[9"), "input tokens were not colorized: {out:?}");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn repl_terminal_matrix_raw_width_color_eof_and_ctrl_d() {
+    use std::process::Command;
+    for (cols, no_color) in [(20, true), (120, false)] {
+        let shell = format!(
+            "{{ sleep 0.2; printf '1 + 1\\r'; sleep 0.12; printf '\\004'; }} | timeout 8s script -qec 'stty cols {cols}; \"$JET_REPL_BIN\" repl' /dev/null"
+        );
+        let mut command = Command::new("sh");
+        command.args(["-c", &shell]).env("JET_REPL_BIN", env!("CARGO_BIN_EXE_jet")).env("JET_REPL_HISTORY", "off");
+        if no_color { command.env("NO_COLOR", "1"); } else { command.env_remove("NO_COLOR").env("CLICOLOR", "1"); }
+        let output = command.output().unwrap();
+        let out = String::from_utf8_lossy(&output.stdout);
+        assert!(output.status.success(), "raw {cols}-column Ctrl-D row failed: {out}");
+        assert!(out.contains("Tab") && out.contains("F3") && !out.contains("interactive keys require a TTY"), "raw mode not reached at width {cols}: {out:?}");
+        assert!(out.contains("2 : Int"), "raw evaluation failed at width {cols}: {out:?}");
+        if no_color { assert!(!out.contains("\u{1b}[32m") && !out.contains("\u{1b}[35m") && !out.contains("\u{1b}[36m"), "NO_COLOR emitted token colors: {out:?}"); }
+        else { assert!(out.contains("\u{1b}[36m"), "color row emitted no numeric highlight: {out:?}"); }
+    }
+
+    let eof = Command::new("sh")
+        .args(["-c", "timeout 8s script -qec '\"$JET_REPL_BIN\" repl < /dev/null' /dev/null"])
+        .env("JET_REPL_BIN", env!("CARGO_BIN_EXE_jet"))
+        .env("NO_COLOR", "1")
+        .env("JET_REPL_HISTORY", "off")
+        .output()
+        .unwrap();
+    assert!(eof.status.success(), "PTY EOF row hung or failed: {}", String::from_utf8_lossy(&eof.stdout));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn repl_terminal_matrix_cooked_stdio_and_missing_stty_are_truthful() {
+    use std::process::Command;
+    let cases = [
+        ("stdin-pipe/stdout-pty", "printf \"1 + 1\\n:quit\\n\" | \"$JET_REPL_BIN\" repl"),
+        ("missing-stty", "PATH=/definitely-missing \"$JET_REPL_BIN\" repl"),
+    ];
+    for (name, inner) in cases {
+        let shell = if name == "missing-stty" {
+            format!("{{ sleep 0.2; printf '1 + 1\\r:quit\\r'; }} | timeout 8s script -qec '{inner}' /dev/null")
+        } else {
+            format!("timeout 8s script -qec '{inner}' /dev/null")
+        };
+        let output = Command::new("sh")
+            .args(["-c", &shell])
+            .env("JET_REPL_BIN", env!("CARGO_BIN_EXE_jet"))
+            .env("NO_COLOR", "1")
+            .env("JET_REPL_HISTORY", "off")
+            .output()
+            .unwrap();
+        let out = String::from_utf8_lossy(&output.stdout);
+        assert!(output.status.success(), "{name} row failed: {out}");
+        assert!(out.contains("interactive keys require a TTY"), "{name} falsely claimed raw mode: {out:?}");
+        assert!(!out.contains("Tab complete"), "{name} advertised unavailable keys: {out:?}");
+        assert!(out.contains("1 user> ") && out.contains("2 : Int"), "{name} cooked behavior missing: {out:?}");
+    }
+
+    let root = std::env::temp_dir().join(format!("jet_repl_stdout_mode_{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    let captured = root.join("stdout.txt");
+    let shell = format!(
+        "{{ sleep 0.2; printf '3 + 4\\r:quit\\r'; }} | timeout 8s script -qec '\"$JET_REPL_BIN\" repl > \"{}\"' /dev/null",
+        captured.display()
+    );
+    let output = Command::new("sh").args(["-c", &shell]).env("JET_REPL_BIN", env!("CARGO_BIN_EXE_jet")).env("NO_COLOR", "1").env("JET_REPL_HISTORY", "off").output().unwrap();
+    let stderr_side = String::from_utf8_lossy(&output.stdout);
+    let stdout_side = std::fs::read_to_string(&captured).unwrap();
+    assert!(output.status.success(), "stdin-pty/stdout-file row failed: {stderr_side}");
+    assert!(stderr_side.contains("interactive keys require a TTY"), "redirected stdout falsely entered raw mode: {stderr_side:?}");
+    assert!(stdout_side.contains("1 user> ") && stdout_side.contains("7 : Int"), "redirected cooked stdout missing: {stdout_side:?}");
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn repl_terminal_matrix_keyboard_and_text_fallbacks_are_reachable() {
+    let raw = run_raw_multiline_pty(
+        "printf 'alpha := 1\\r'; sleep 0.12; printf '\\002'; sleep 0.12; printf '\\0201\\r'; sleep 0.12; printf '\\0061\\r'; sleep 0.12; printf '\\0221\\r\\r'; sleep 0.18; printf 'alp\\t\\r'; sleep 0.12; printf '\\033ORa\\r\\r'; sleep 0.15; printf ':quit\\r'",
+    );
+    let raw_out = String::from_utf8_lossy(&raw.stdout);
+    assert!(raw.status.success(), "raw key matrix failed: {raw_out}");
+    for marker in ["bindings", "select turn to pin", "select turn to fold", "select turn to edit", "history search>"] {
+        assert!(raw_out.contains(marker), "raw key `{marker}` unreachable: {raw_out:?}");
+    }
+    assert!(raw_out.contains("1 : Int"), "Tab completion did not resolve live binding: {raw_out:?}");
+
+    let state = std::env::temp_dir().join(format!("jet_repl_text_matrix_{}", std::process::id()));
+    std::fs::remove_dir_all(&state).ok();
+    let cooked = run_repl_process(
+        &state,
+        b"alpha := 1\n?alpha\n:pin 1\n:fold 1\n:unfold 1\n:rerun 1\n\n:history search alpha\n:turns\n:quit\n",
+        None,
+    );
+    let cooked_out = String::from_utf8_lossy(&cooked.stdout);
+    assert!(cooked.status.success(), "text fallback matrix failed: {cooked_out}");
+    for marker in ["alpha: Int := 1", "turn pinned", "turn folded", "turn unfolded", "rerun #1", "#1 ok"] {
+        assert!(cooked_out.contains(marker), "text fallback `{marker}` unreachable: {cooked_out:?}");
+    }
+    std::fs::remove_dir_all(state).ok();
+}
+
 // ── D-BIGINT1: comptime/REPL tier-0 BigInt (card #392) ─────────────────────
 // Same expression shapes and expected decimal strings as the AOT golden
 // example `examples/features/text/bigint.jet` /
