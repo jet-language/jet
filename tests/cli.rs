@@ -319,7 +319,7 @@ fn build_enforces_deterministic_fail_budgets_and_reuses_relevant_identity() {
     let failed = Command::new(jet()).args(["build", "src/main.jet"]).current_dir(&dir).output().unwrap();
     assert_eq!(failed.status.code(), Some(1), "stdout: {}\nstderr: {}", String::from_utf8_lossy(&failed.stdout), String::from_utf8_lossy(&failed.stderr));
     assert!(!String::from_utf8_lossy(&failed.stdout).contains("built:"), "failed budget claimed build success");
-    assert!(String::from_utf8_lossy(&failed.stderr).contains("Error [E2907]: performance budget public-api regressed"));
+    assert!(String::from_utf8_lossy(&failed.stderr).contains("Error [E2907]: performance budget public-api regressed"), "{}", String::from_utf8_lossy(&failed.stderr));
     let report_dir = dir.join(".jet/perf/reports");
     assert_eq!(fs::read_dir(&report_dir).unwrap().count(), 1);
 
