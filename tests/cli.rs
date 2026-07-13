@@ -187,6 +187,14 @@ fn budget_usage_and_preflight_fail_without_artifacts() {
     for argv in [
         vec!["budget", "check", "--unknown"],
         vec!["budget", "update", "--baseline", "ci/linux", "--reason", "no gate"],
+        vec!["budget", "report"],
+        vec!["budget", "check", "--json", "--unknown"],
+        vec!["budget", "check", "--unknown", "--json"],
+        vec!["budget", "check", "--json", "--json"],
+        vec!["budget", "check", "--annotations", "gitlab"],
+        vec!["budget", "update", "--baseline", "CI/Linux"],
+        vec!["budget", "update", "--baseline", "ci/linux", "--bootstrap", "--accept-regression", "--reason", "invalid"],
+        vec!["budget", "update", "--baseline", "ci/linux", "--yes", "-y"],
     ] {
         let out = Command::new(jet()).args(argv).current_dir(&dir).output().unwrap();
         assert_eq!(out.status.code(), Some(2));
@@ -313,7 +321,12 @@ fn budget_bench_measurement_bootstraps_then_consumes_compatible_history() {
 
     let check=Command::new(jet()).args(["budget","check","--json"]).current_dir(&dir).output().unwrap();
     assert!(matches!(check.status.code(),Some(0)|Some(1)),"stdout: {}\nstderr: {}",String::from_utf8_lossy(&check.stdout),String::from_utf8_lossy(&check.stderr));
-    let CanonicalJson::Object(second)=CanonicalJson::parse_canonical(&check.stdout).unwrap() else{panic!("command")};let CanonicalJson::Object(report)=&second["report"] else{panic!("report")};let CanonicalJson::Object(content)=&report["content"] else{panic!("content")};let CanonicalJson::Array(measurements)=&content["measurements"] else{panic!("measurements")};let CanonicalJson::Object(measurement)=&measurements[0] else{panic!("measurement")};let CanonicalJson::Object(history)=&measurement["history"] else{panic!("history")};let CanonicalJson::Array(ids)=&history["report_ids"] else{panic!("ids")};assert_eq!(ids, &vec![CanonicalJson::String(first_id)]);let CanonicalJson::Object(baseline)=&measurement["baseline"] else{panic!("baseline")};let CanonicalJson::Array(pooled)=&baseline["pooled_samples"] else{panic!("pooled")};assert_eq!(pooled.len(),20);let CanonicalJson::Object(decision)=&measurement["decision"] else{panic!("decision")};assert_ne!(decision["evidence"],CanonicalJson::String("unavailable".into()));
+    let CanonicalJson::Object(second)=CanonicalJson::parse_canonical(&check.stdout).unwrap() else{panic!("command")};
+    let CanonicalJson::Object(report)=&second["report"] else{panic!("report")};let CanonicalJson::Object(content)=&report["content"] else{panic!("content")};let CanonicalJson::Array(measurements)=&content["measurements"] else{panic!("measurements")};let CanonicalJson::Object(measurement)=&measurements[0] else{panic!("measurement")};let CanonicalJson::Object(history)=&measurement["history"] else{panic!("history")};let CanonicalJson::Array(ids)=&history["report_ids"] else{panic!("ids")};assert_eq!(ids, &vec![CanonicalJson::String(first_id.clone())]);let CanonicalJson::Object(baseline)=&measurement["baseline"] else{panic!("baseline")};let CanonicalJson::Array(pooled)=&baseline["pooled_samples"] else{panic!("pooled")};assert_eq!(pooled.len(),20);let CanonicalJson::Object(decision)=&measurement["decision"] else{panic!("decision")};assert_ne!(decision["evidence"],CanonicalJson::String("unavailable".into()));
+    let CanonicalJson::Array(results)=&second["results"] else{panic!("results")};let CanonicalJson::Object(result)=&results[0] else{panic!("result")};
+    assert_eq!(result["baseline_report_ids"],CanonicalJson::Array(vec![CanonicalJson::String(first_id)]));
+    assert_eq!(result["metric"],measurement["metric"]);
+    assert_eq!(result["lower95"],decision["lower95"]);assert_eq!(result["upper95"],decision["upper95"]);assert_eq!(result["trend"],decision["trend"]);assert_eq!(result["reason"],decision["reason"]);
 }
 
 #[test]
@@ -395,6 +408,8 @@ fn budget_failure_has_human_github_projection_and_exit_one() {
     let stderr = String::from_utf8(out.stderr).unwrap();
     assert!(stderr.contains("Error [E2907]: performance budget public-api regressed"), "{stderr}");
     assert!(stderr.contains("::error file=src/main.jet"), "{stderr}");
+    assert!(stderr.contains("performance budget public-api regressed%0AWhy: measured estimator"), "{stderr}");
+    assert!(stderr.contains("%0AFix: improve the measured behavior, inspect `jet budget check --verbose`, or record an explicit exception"), "{stderr}");
     assert!(stderr.contains("budgets failed: 1 budget failed · report "), "{stderr}");
 }
 
@@ -419,13 +434,15 @@ pub fn imported() {}
 
 #[test]
 fn budget_update_is_plan_first_and_yes_applies_once() {
+    use jet_foundation::PerformanceBudget::CanonicalJson;
     let dir = budget_project("budget_update", 10);
     let args = ["budget", "update", "--baseline", "ci/linux", "--bootstrap", "--reason", "initial evidence", "--json"];
     let plan = Command::new(jet()).args(args).current_dir(&dir).output().unwrap();
     assert_eq!(plan.status.code(), Some(0), "{}", String::from_utf8_lossy(&plan.stderr));
-    let plan = String::from_utf8(plan.stdout).unwrap();
-    assert!(plan.contains("\"applied\":false"));
-    assert!(!dir.join(".jet/perf/baselines/names/ci/linux.json").exists());
+    let CanonicalJson::Object(plan)=jet_foundation::PerformanceBudget::CanonicalJson::parse_canonical(&plan.stdout).unwrap() else{panic!("command")};
+    assert_eq!(plan["applied"],CanonicalJson::Bool(false));
+    let CanonicalJson::Object(plan)=&plan["plan"] else{panic!("plan")};assert_eq!(plan["requires_confirmation"],CanonicalJson::Bool(false));let CanonicalJson::Array(rows)=&plan["rows"] else{panic!("rows")};assert_eq!(rows.len(),2);let CanonicalJson::Object(report)=&rows[0] else{panic!("report row")};let CanonicalJson::Object(baseline)=&rows[1] else{panic!("baseline row")};assert_eq!(report["operation"],CanonicalJson::String("create".into()));assert_eq!(report["artifact"],CanonicalJson::String("report".into()));assert_eq!(baseline["operation"],CanonicalJson::String("advance".into()));assert_eq!(baseline["artifact"],CanonicalJson::String("baseline".into()));
+    assert!(!dir.join(".jet").exists(),"JSON plan-only mutated workspace");
 
     let applied = Command::new(jet()).args(args).arg("--yes").current_dir(&dir).output().unwrap();
     assert_eq!(applied.status.code(), Some(0), "{}", String::from_utf8_lossy(&applied.stderr));
@@ -541,11 +558,13 @@ fn budget_surface_is_generated_into_help_completions_and_man() {
     let completions = Command::new(jet()).args(["self", "completions", "bash"]).output().unwrap();
     let completions = String::from_utf8(completions.stdout).unwrap();
     assert!(completions.contains("budget"));
-    assert!(completions.contains("--baseline"));
     let man = Command::new(jet()).args(["self", "man"]).output().unwrap();
     let man = String::from_utf8(man.stdout).unwrap();
     assert!(man.contains("budget"));
-    assert!(man.contains("--accept-regression"));
+    for flag in ["--annotations","--baseline","--bootstrap","--accept-regression","--reason","--yes","-y"] {
+        assert!(completions.contains(flag),"completion omitted {flag}");
+        assert!(man.contains(flag),"man page omitted {flag}");
+    }
 }
 
 // ── Exit-code table ────────────────────────────────────────────────
