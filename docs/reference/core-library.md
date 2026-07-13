@@ -331,6 +331,33 @@ implicit; callers choose an explicit MIME type or extension lookup.
 | `m.media_type()` / `.subtype()` / `.essence()` | `String` | Type/subtype accessors |
 | `m.param(name)` / `.params()` | `String?` / `[[String]]` | Parameter lookup and decoded key/value rows |
 
+### `core.email` — bounded messages and SMTP submission
+
+`core.email` separates a typed message from its transport. Address and header
+construction rejects control characters before serialization. MIME output uses
+CRLF, bounded Base64 lines, deterministic content-derived multipart boundaries,
+and never emits Bcc recipients in message headers. Attachments and recipient,
+header, and total-message counts are bounded before serialization or transport.
+
+```jet
+use core.email as email
+
+fn run() {
+    from :: email.address("Mara <mara@example.com>") ?? return
+    to :: email.address("Ada <ada@example.net>") ?? return
+    message :: email.message(from, [to], [], "Welcome", "Hello", "", []) ?? return
+    bytes :: email.serialize(message) ?? return
+    print(bytes.len())
+}
+```
+
+This first native vertical ships `address`, `attachment`, `message`, and
+`serialize` over `Address`, `Attachment`, `Message`, and `EmailError`. SMTP,
+Mailer configuration, SendReport, scheduler/deadline integration, and DKIM use
+the same ratified types but are not yet callable. No send-shaped placeholder is
+exported. `serialize` returns final MIME bytes; Bcc remains available only to
+the later envelope/transport path.
+
 ### `core.http` — HTTP client and server
 
 `core.http.client` is the request side; `core.http.server` is the serving side.

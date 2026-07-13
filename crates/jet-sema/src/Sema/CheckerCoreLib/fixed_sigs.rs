@@ -693,6 +693,29 @@ pub fn core_fixed_sig(
             vec![(read, Type::String)],
             Some(Type::Option(Box::new(Type::String))),
         )),
+        // D-EMAIL1=A: one bounded native message/MIME construction path.
+        ("core.email", "address") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(Type::Named("Address".to_string()), Type::Named("EmailError".to_string()))),
+        )),
+        ("core.email", "attachment") => Some((
+            vec![(read, Type::String), (read, Type::String), (read, list_u8.clone())],
+            Some(result_ty(Type::Named("Attachment".to_string()), Type::Named("EmailError".to_string()))),
+        )),
+        ("core.email", "message") => Some((
+            vec![
+                (read, Type::Named("Address".to_string())),
+                (read, Type::List(Box::new(Type::Named("Address".to_string())))),
+                (read, Type::List(Box::new(Type::Named("Address".to_string())))),
+                (read, Type::String), (read, Type::String), (read, Type::String),
+                (read, Type::List(Box::new(Type::Named("Attachment".to_string())))),
+            ],
+            Some(result_ty(Type::Named("Message".to_string()), Type::Named("EmailError".to_string()))),
+        )),
+        ("core.email", "serialize") => Some((
+            vec![(read, Type::Named("Message".to_string()))],
+            Some(result_ty(list_u8, Type::Named("EmailError".to_string()))),
+        )),
         // D-TEXTUNICODE1: std-only Unicode scalar helpers.
         ("core.text.unicode", "scalar_count" | "byte_count") => {
             Some((vec![(read, Type::String)], Some(Type::Int)))

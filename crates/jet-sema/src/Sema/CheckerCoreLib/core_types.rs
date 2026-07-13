@@ -205,6 +205,10 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "ZonedDateTime"
         // D-URL1=A: typed URL and MIME values.
         | "Url" | "Mime"
+        // D-EMAIL1=A: canonical email value/error/transport family.
+        | "Address" | "Message" | "Attachment" | "Envelope" | "Mailer" | "SmtpConfig"
+        | "SmtpSecurity" | "SmtpAuth" | "DkimConfig" | "SendReport" | "RecipientReport"
+        | "EmailError"
         // D-REGEXENGINE1=A: std-only linear regex values.
         | "Regex" | "RegexFlags" | "Match"
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP types.

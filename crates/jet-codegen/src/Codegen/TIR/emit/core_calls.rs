@@ -965,6 +965,16 @@ pub(crate) fn emit_tir_core_call(
             format!("{}(&({}))", helper("jet_mime_from_extension"), arg(0))
         }
         ("core.mime", "extension") => format!("{}(&({}))", helper("jet_mime_extension"), arg(0)),
+        ("core.email", "address") => format!("{}jet_email::address(&({}))", cx.root_prefix, arg(0)),
+        ("core.email", "attachment") => format!(
+            "{}jet_email::attachment(&({}), &({}), &({}))",
+            cx.root_prefix, arg(0), arg(1), arg(2)
+        ),
+        ("core.email", "message") => format!(
+            "{}jet_email::message(&({}), &({}), &({}), &({}), &({}), &({}), &({}))",
+            cx.root_prefix, arg(0), arg(1), arg(2), arg(3), arg(4), arg(5), arg(6)
+        ),
+        ("core.email", "serialize") => format!("{}jet_email::serialize(&({}))", cx.root_prefix, arg(0)),
         // D-TEXTUNICODE1: std-only Unicode scalar helpers.
         ("core.text.unicode", "scalar_count") => {
             format!("{}(&({}))", helper("jet_text_unicode_scalar_count"), arg(0))

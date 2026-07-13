@@ -1773,6 +1773,22 @@ index, not a substitute for that law.
   percent-encoding, IDNA host handling, and `file:`/`data:` URLs. `Mime` owns
   extension mapping plus `type/subtype; param=value` parsing. `core.http` and
   `core.web` consume typed values instead of re-solving string escaping.
+- **D-EMAIL1=A**: `core.email` is the one provider-neutral email mechanism.
+  `Address`, `Message`, `Attachment`, `Envelope`, `Mailer`, `SmtpConfig`,
+  `SmtpSecurity`, `SmtpAuth`, `DkimConfig`, `SendReport`, `RecipientReport`,
+  and `EmailError` cover construction, transport, signing, and honest relay
+  acceptance. `smtp_from_env` supplies verified STARTTLS beginner defaults;
+  `smtp(config)` exposes the same Mailer with expert policy. Port 587 requires
+  verified STARTTLS; port 465 TLS is explicit; STARTTLS never downgrades and
+  password AUTH never crosses plaintext. MIME uses CRLF, bounded safe folding,
+  Unicode encodings, content-derived collision-resistant boundaries, bounded
+  attachments, and Bcc only in the SMTP envelope. RequireAll rejects before
+  DATA when any recipient is rejected; DeliverAccepted is explicit. SendReport
+  means relay acceptance, never inbox delivery. EmailError distinguishes
+  configuration, DNS, connect, TLS, auth, protocol, rejection, transient,
+  timeout, cancellation, and DeliveryUnknown. No hidden retry, thread-per-send,
+  raw transport error, credential disclosure, external dependency, or duplicate
+  async API exists. DKIM signs final bytes; SPF and DMARC remain DNS policy.
 - **D-ENCSTREAM1=A**: each `core.encoding` codec has one adapter identity with
   whole-value and reader/writer stream modes over the shared `DataTree`
   and `Codable` machinery. Streaming is a mode of that adapter, never a second

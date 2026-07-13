@@ -20,6 +20,44 @@ mod dns_resolver_policy {
     }
 }
 
+mod email_native {
+    fn jet_sha256_raw(data: &[u8]) -> [u8; 32] {
+        let mut out = [0u8; 32];
+        for (index, byte) in data.iter().enumerate() {
+            out[index % 32] = out[index % 32].wrapping_mul(31).wrapping_add(*byte);
+        }
+        out
+    }
+    include!("../crates/jet-codegen/src/Prelude/CoreLib/Email.rs");
+}
+
+#[test]
+fn core_email_mime_bytes_use_crlf_and_keep_bcc_envelope_only() {
+    use email_native::jet_email;
+    let from = jet_email::address(&"Mara ☕ <mara@example.com>".to_string()).unwrap();
+    let to = jet_email::address(&"Ada <ada@example.net>".to_string()).unwrap();
+    let bcc = jet_email::address(&"secret@example.org".to_string()).unwrap();
+    let attachment = jet_email::attachment(
+        &"notes.txt".to_string(),
+        &"text/plain".to_string(),
+        &b"hi".to_vec(),
+    ).unwrap();
+    let message = jet_email::message(
+        &from, &vec![to], &vec![bcc], &"Welcome ☕".to_string(),
+        &"plain".to_string(), &"<b>html</b>".to_string(), &vec![attachment],
+    ).unwrap();
+    let first = jet_email::serialize(&message).unwrap();
+    let second = jet_email::serialize(&message).unwrap();
+    assert_eq!(first, second);
+    let wire = String::from_utf8(first).unwrap();
+    assert!(wire.contains("Content-Type: multipart/mixed"));
+    assert!(wire.contains("Content-Type: multipart/alternative"));
+    assert!(wire.contains("aGk="));
+    assert!(!wire.contains("Bcc:"));
+    assert!(!wire.contains("secret@example.org"));
+    assert!(!wire.replace("\r\n", "").contains('\n'));
+}
+
 #[test]
 fn encoding_stream_foundation_types_are_real_jet_values() {
     let dir = std::env::temp_dir().join(format!("jet_encoding_foundation_{}", std::process::id()));
@@ -2064,6 +2102,63 @@ fn run() {
         stdout,
         "https://xn--bcher-kva.example:443/a/c?x=1#frag\nxn--bcher-kva.example\n/a/c\nx\n1\nhttps://xn--bcher-kva.example:443/notify?user=ada%20lovelace&user=grace#done\nnotify\ndone\nuser=ada%20lovelace&user=grace&empty=\na%20b%2Fc\na b/c\ntext/html\nUTF-8\nimage/png\npng\ndata:image/png,%3Ch1%3EHi%3C%2Fh1%3E\nfile:///tmp/a%20b.txt\n"
     );
+}
+
+#[test]
+fn core_email_address_and_mime_are_bounded_and_deterministic() {
+    let dir = std::env::temp_dir().join(format!("jet_corelib_email_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let src = r#"
+use core.email as email
+
+fn run() {
+    sender :: email.address("Mara ☕ <mara@example.com>") ?? panic("unicode address")
+    recipient :: email.address("Ada <ada@example.net>") ?? panic("recipient")
+    hidden :: email.address("audit@example.org") ?? panic("bcc")
+    if email.address("attacker@example.com\nBcc: stolen@example.com") == {
+        ok(_) -> panic("address injection accepted")
+        err(_) -> print("address-rejected")
+    }
+    if email.message(copy sender, [copy recipient], [], "hello\nBcc: stolen@example.com", "text", "", []) == {
+        ok(_) -> panic("header injection accepted")
+        err(_) -> print("header-rejected")
+    }
+    recipients := [copy recipient]
+    count := 1
+    loop count < 101 { recipients.push(copy recipient); count++ }
+    if email.message(copy sender, recipients, [], "subject", "text", "", []) == {
+        ok(_) -> panic("recipient bound ignored")
+        err(_) -> print("recipient-bound")
+    }
+    too_large: [U8] := [0]
+    count = 1
+    loop count < 26214401 { too_large.push(0); count++ }
+    if email.attachment("large.bin", "application/octet-stream", too_large) == {
+        ok(_) -> panic("attachment bound ignored")
+        err(_) -> print("attachment-bound")
+    }
+    attachment :: email.attachment("notes.txt", "text/plain", [104, 105]) ?? panic("attachment")
+    message :: email.message(sender, [recipient], [hidden], "Welcome ☕", "plain", "<b>html</b>", [attachment]) ?? panic("message")
+    first :: email.serialize(copy message) ?? panic("serialize")
+    second :: email.serialize(message) ?? panic("serialize twice")
+    print(first == second)
+    print(first.len())
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "email_mime", src, &[], None);
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert!(stdout.starts_with("address-rejected\nheader-rejected\nrecipient-bound\nattachment-bound\ntrue\n"), "{stdout}");
+    let file = dir.join("email_mime.jet");
+    fs::write(&file, src).unwrap();
+    match jet::Interpreter::dev_iteration(file.to_str().unwrap(), false, false) {
+        jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
+            assert_eq!(exit_code, 0, "email MIME failed in default dev: {stderr}");
+            assert!(stdout.starts_with("address-rejected\nheader-rejected\nrecipient-bound\nattachment-bound\ntrue\n"), "{stdout}");
+        }
+        other => panic!("email MIME did not run in default dev: {other:?}"),
+    }
+    let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]

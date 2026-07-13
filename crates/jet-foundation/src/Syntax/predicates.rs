@@ -81,6 +81,8 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     // D-URL1=A: typed WHATWG-class URLs and MIME values.
     "core.url",
     "core.mime",
+    // D-EMAIL1=A: typed message construction and native SMTP substrate.
+    CORE_EMAIL_MODULE,
     // D-WATCH-SCOPE1: unified file/process/port watcher constructors.
     "core.watcher",
     // E2-M10: TCP/UDP sockets.
@@ -390,6 +392,6 @@ pub fn edit_distance(a: &str, b: &str) -> usize {
     prev[b.len()]
 }
 use super::{
-    CONTRACT_MARKERS, CORE_CANONICAL, CORE_SHORT, DIRECTIVE_MARKERS, STDLIB_DSL_BLOCK_MARKERS,
-    TYPE_BIT_SET, TYPE_BYTE_BUFFER,
+    CONTRACT_MARKERS, CORE_CANONICAL, CORE_EMAIL_MODULE, CORE_SHORT, DIRECTIVE_MARKERS,
+    STDLIB_DSL_BLOCK_MARKERS, TYPE_BIT_SET, TYPE_BYTE_BUFFER,
 };

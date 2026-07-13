@@ -291,6 +291,7 @@ const CORELIB_PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/CoreLib/JetStd/Json.rs"),
     include_str!("../Prelude/CoreLib/JetStd/Toml.rs"),
     include_str!("../Prelude/CoreLib/JetStd/Yaml.rs"),
+    include_str!("../Prelude/CoreLib/Email.rs"),
     include_str!("../Prelude/CoreLib/Top/HandlesRaylib.rs"),
     include_str!("../Prelude/CoreLib/Top/Game.rs"),
     include_str!("../Prelude/CoreLib/Top/PathFiles.rs"),

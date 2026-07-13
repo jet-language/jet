@@ -1,0 +1,10 @@
+use core.email as email
+
+fn run() {
+    from :: email.address("Mara ☕ <mara@example.com>") ?? panic("invalid sender")
+    to :: email.address("Ada <ada@example.net>") ?? panic("invalid recipient")
+    attachment :: email.attachment("hello.txt", "text/plain", [104, 105]) ?? panic("invalid attachment")
+    message :: email.message(from, [to], [], "Welcome ☕", "Hello", "<b>Hello</b>", [attachment]) ?? panic("invalid message")
+    bytes :: email.serialize(message) ?? panic("cannot serialize")
+    print(bytes.len() > 0)
+}

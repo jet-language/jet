@@ -635,6 +635,13 @@ impl Cx {
             Type::Named(name) if name == "Mime" => {
                 format!("{}jet_std::JetMime", self.root_prefix)
             }
+            Type::Named(name) if matches!(name.as_str(), "Address" | "Message" | "Attachment" | "EmailError") => {
+                let rust = match name.as_str() {
+                    "Address" => "Address", "Message" => "Message", "Attachment" => "Attachment",
+                    _ => "Error",
+                };
+                format!("{}jet_email::{rust}", self.root_prefix)
+            }
             // D-NETDEP1=A / D-HTTPLIB1=A: HTTP types → opaque Rust structs.
             Type::Named(name) if name == "HttpClientReq" => "JetHttpClientReq".to_string(),
             Type::Named(name) if name == "HttpClientResp" => "JetHttpClientResp".to_string(),
