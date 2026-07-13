@@ -2121,7 +2121,9 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
     // One body fn + one timing wrapper per bench. The body fn is shaped exactly
     // like a test fn (so `require`'s `return Err(…)` compiles); the wrapper
     // auto-scales the iteration count until a batch lasts >= 1ms, then collects
-    // 10 per-iteration samples and returns (mean_ns, stddev_ns, iters).
+    // 20 exact batch-duration samples and returns (elapsed_ns, iters). The
+    // command layer alone projects means/stddev or feeds exact rationals into
+    // the canonical performance-budget provider/evaluator.
     for (i, bench) in benches.iter().enumerate() {
         out.push_str(&format!(
             "fn jet_bench_body_{}() -> Result<(), String> {{\n",
@@ -2131,7 +2133,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         out.push_str("    Ok(())\n");
         out.push_str("}\n\n");
 
-        out.push_str(&format!("fn jet_bench_{}() -> (f64, f64, u64) {{\n", i));
+        out.push_str(&format!("fn jet_bench_{}() -> (Vec<u128>, u64) {{\n", i));
         out.push_str("    let mut iters: u64 = 1;\n");
         out.push_str("    while iters < (1u64 << 30) {\n");
         out.push_str("        let t0 = std::time::Instant::now();\n");
@@ -2142,37 +2144,30 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         out.push_str("        if t0.elapsed().as_millis() >= 1 { break; }\n");
         out.push_str("        iters = iters.saturating_mul(2);\n");
         out.push_str("    }\n");
-        out.push_str("    let mut samples: Vec<f64> = Vec::new();\n");
-        out.push_str("    for _ in 0..10 {\n");
+        out.push_str("    let mut samples: Vec<u128> = Vec::new();\n");
+        out.push_str("    for _ in 0..20 {\n");
         out.push_str("        let t0 = std::time::Instant::now();\n");
         out.push_str(&format!(
             "        for _ in 0..iters {{ let _ = std::hint::black_box(jet_bench_body_{}()); }}\n",
             i
         ));
-        out.push_str("        samples.push(t0.elapsed().as_nanos() as f64 / iters as f64);\n");
+        out.push_str("        samples.push(t0.elapsed().as_nanos());\n");
         out.push_str("    }\n");
-        out.push_str("    let n = samples.len() as f64;\n");
-        out.push_str("    let mean = samples.iter().sum::<f64>() / n;\n");
-        out.push_str(
-            "    let var = samples.iter().map(|x| (x - mean) * (x - mean)).sum::<f64>() / n;\n",
-        );
-        out.push_str("    (mean, var.sqrt(), iters)\n");
+        out.push_str("    (samples, iters)\n");
         out.push_str("}\n\n");
     }
 
     out.push_str("fn main() {\n");
     out.push_str("    jet_std_env_init();\n");
+    out.push_str("    fn hex(bytes: &[u8]) -> String { const H: &[u8; 16] = b\"0123456789abcdef\"; let mut out = String::with_capacity(bytes.len() * 2); for byte in bytes { out.push(H[(byte >> 4) as usize] as char); out.push(H[(byte & 15) as usize] as char); } out }\n");
     for (i, bench) in benches.iter().enumerate() {
         let name = escape_rust_str(&bench.name);
         out.push_str(&format!(
-            "    {{\n        let (mean, sd, _it) = jet_bench_{}();\n",
+            "    {{\n        let (samples, iters) = jet_bench_{}();\n",
             i
         ));
-        out.push_str("        let ops = if mean > 0.0 { 1.0e9 / mean } else { 0.0 };\n");
-        out.push_str(&format!(
-            "        println!(\"{{}}  {{:.1}} ns/iter (\\u{{00b1}}{{:.1}})  {{:.0}} ops/sec\", {}, mean, sd, ops);\n",
-            name
-        ));
+        out.push_str(&format!("        print!(\"JETBENCH1\\t{{}}\\t{{}}\", hex({}.as_bytes()), iters);\n", name));
+        out.push_str("        for sample in samples { print!(\"\\t{}\", sample); }\n        println!();\n");
         out.push_str("    }\n");
     }
     out.push_str("}\n");

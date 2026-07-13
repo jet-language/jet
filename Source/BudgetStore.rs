@@ -5,7 +5,7 @@
 //! plus directory durability. Other platforms stay read-only until they gain
 //! equivalent primitives.
 
-use jet_foundation::PerformanceBudget::{stable_id, verify_budget_report, CanonicalJson};
+use jet_foundation::PerformanceBudget::{stable_id, verify_budget_report, CanonicalJson, Rational};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{File, OpenOptions};
 use std::io::{ErrorKind, Read, Write};
@@ -177,6 +177,21 @@ impl BudgetStore {
         Ok(selected)
     }
 
+    pub fn history_state_id(&self, baseline: &str) -> Result<String, String> {
+        manifest_id(&self.read_manifest(baseline)?)
+    }
+
+    pub fn load_history_samples(&self, report_ids: &[String], budget_id: &str) -> Result<Vec<Vec<Rational>>, String> {
+        let objects = self.dir(&[".jet", "perf", "baselines", "objects"], false, 0o755)?;
+        report_ids.iter().map(|id| {
+            let bytes = read_regular(&objects, &format!("{id}.json"))?;
+            let report = verify_budget_report(&bytes).map_err(|e| format!("corrupt baseline object {id}: {e}"))?;
+            if report_id(&report)? != id.as_str() { return Err(format!("baseline object {id} contains a different report_id")); }
+            let measurement = measurement(report_content(&report)?, budget_id)?;
+            array(measurement.get("samples"), "measurement.samples")?.iter().map(rational).collect()
+        }).collect()
+    }
+
     pub fn gc(&self, at:&str)->Result<GcResult,String>{mutation_supported()?;let now=timestamp_seconds(at)?;let locks=self.dir(&[".jet","perf","baselines","locks"],true,0o700)?;let _global=Lock::take(&locks,"global.lock")?;let names=self.dir(&[".jet","perf","baselines","names"],false,0o755)?;let mut referenced=BTreeSet::new();let mut retained=Vec::new();let mut reachability_complete=true;collect_manifest_refs(&names,"",&mut referenced,&mut retained,&mut reachability_complete)?;let objects=self.dir(&[".jet","perf","baselines","objects"],false,0o755)?;let mut removed=Vec::new();for entry in list_dir(&objects)?{if entry.is_dir||entry.is_symlink{retained.push(format!("objects/{}",entry.name));continue}let Some(id)=entry.name.strip_suffix(".json")else{retained.push(format!("objects/{}",entry.name));continue};if !is_hex64(id){retained.push(format!("objects/{}",entry.name));continue}let bytes=match read_regular(&objects,&entry.name){Ok(bytes)=>bytes,Err(error)=>{retained.push(format!("objects/{}: {error}",entry.name));continue}};let report=match verify_budget_report(&bytes){Ok(report)=>report,Err(error)=>{retained.push(format!("objects/{}: {error}",entry.name));continue}};if report_id(&report)?!=id{retained.push(format!("objects/{}: report_id mismatch",entry.name));continue}if !reachability_complete||referenced.contains(id)||now.saturating_sub(entry.modified)<86400{retained.push(format!("objects/{}",entry.name));continue}unlink_checked(&objects,&entry.name)?;removed.push(id.into())}removed.sort();retained.sort();Ok(GcResult{removed,retained})}
 
     fn validate_update_eligibility(&self,baseline:&str,report:&CanonicalJson,kind:&UpdateKind,current:Option<&CanonicalJson>,at:&str)->Result<(),String>{
@@ -233,6 +248,13 @@ impl BudgetStore {
     fn dir(&self, parts: &[&str], create: bool, mode: u32) -> Result<File, String> {
         open_dir_chain(&self.workspace, parts, create, mode)
     }
+}
+
+fn rational(value:&CanonicalJson)->Result<Rational,String>{
+    let value=object(value,"rational")?;
+    let num=match value.get("num"){Some(CanonicalJson::Integer(value))=>value,_=>return Err("rational.num is not an integer".into())};
+    let den=match value.get("den"){Some(CanonicalJson::Integer(value))=>value,_=>return Err("rational.den is not an integer".into())};
+    Rational::parse(num,den)
 }
 
 struct ListedEntry{name:String,is_dir:bool,is_symlink:bool,modified:u64}

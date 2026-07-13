@@ -1871,6 +1871,26 @@ pub(crate) fn run_bench(file: &str, mode: OutputMode) {
 /// per region (ns/iter + ops/sec), so this just compiles, runs it once, and
 /// relays its output.
 fn run_bench_regions(file: &str, src: &str, mode: OutputMode) {
+    let evidence = collect_bench_evidence(file, src, mode, true);
+    for bench in evidence {
+        let samples = bench.samples.iter().map(|(elapsed, iters)| *elapsed as f64 / *iters as f64).collect::<Vec<_>>();
+        let n = samples.len() as f64;
+        let mean = samples.iter().sum::<f64>() / n;
+        let variance = samples.iter().map(|sample| (sample - mean) * (sample - mean)).sum::<f64>() / n;
+        let ops = if mean > 0.0 { 1.0e9 / mean } else { 0.0 };
+        println!("{}  {:.1} ns/iter (\u{00b1}{:.1})  {:.0} ops/sec", bench.name, mean, variance.sqrt(), ops);
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct BenchEvidence {
+    pub(crate) name: String,
+    pub(crate) samples: Vec<(u128, u64)>,
+}
+
+/// Shared `#Bench` executor for human bench output and BenchMeasurement.
+/// Wire rows are compiler-private; user-facing spelling stays `jet bench`.
+pub(crate) fn collect_bench_evidence(file: &str, src: &str, mode: OutputMode, relay_output: bool) -> Vec<BenchEvidence> {
     let (rust_code, ffi_link) = match jet::compile_benches_with_path(file) {
         Ok(r) => r,
         Err(diags) => {
@@ -1898,13 +1918,49 @@ fn run_bench_regions(file: &str, src: &str, mode: OutputMode) {
         eprintln!("bench: couldn't run `{}`: {}", bin.display(), e);
         exit(ExitCodes::USER_ERROR);
     });
-    print!("{}", String::from_utf8_lossy(&out.stdout));
     if !out.stderr.is_empty() {
         eprint!("{}", String::from_utf8_lossy(&out.stderr));
     }
     if !out.status.success() {
         exit(ExitCodes::USER_ERROR);
     }
+    let stdout = String::from_utf8(out.stdout).unwrap_or_else(|_| {
+        eprintln!("bench: harness emitted non-UTF-8 evidence");
+        exit(ExitCodes::USER_ERROR);
+    });
+    let mut evidence = Vec::new();
+    for line in stdout.lines() {
+        let Some(wire) = line.strip_prefix("JETBENCH1\t") else {
+            if relay_output { println!("{line}"); }
+            continue;
+        };
+        let mut fields = wire.split('\t');
+        let name = fields.next().and_then(decode_hex).unwrap_or_else(|| {
+            eprintln!("bench: harness emitted malformed benchmark identity");
+            exit(ExitCodes::USER_ERROR);
+        });
+        let iters = fields.next().and_then(|value| value.parse::<u64>().ok()).filter(|value| *value > 0).unwrap_or_else(|| {
+            eprintln!("bench: harness emitted invalid iteration count");
+            exit(ExitCodes::USER_ERROR);
+        });
+        let samples = fields.map(|value| value.parse::<u128>().map(|elapsed| (elapsed, iters))).collect::<Result<Vec<_>, _>>().unwrap_or_else(|_| {
+            eprintln!("bench: harness emitted invalid exact sample");
+            exit(ExitCodes::USER_ERROR);
+        });
+        if samples.len() != 20 {
+            eprintln!("bench: harness emitted {} samples; policy requires 20", samples.len());
+            exit(ExitCodes::USER_ERROR);
+        }
+        evidence.push(BenchEvidence { name, samples });
+    }
+    evidence
+}
+
+fn decode_hex(value: &str) -> Option<String> {
+    if value.len() % 2 != 0 { return None; }
+    let nibble = |byte: u8| match byte { b'0'..=b'9' => Some(byte - b'0'), b'a'..=b'f' => Some(byte - b'a' + 10), _ => None };
+    let bytes = value.as_bytes().chunks_exact(2).map(|pair| Some((nibble(pair[0])? << 4) | nibble(pair[1])?)).collect::<Option<Vec<_>>>()?;
+    String::from_utf8(bytes).ok()
 }
 
 #[cfg(test)]

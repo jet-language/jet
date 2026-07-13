@@ -141,6 +141,7 @@ struct AttachmentCatalog {
 fn attachment_catalog(items: &[Item]) -> AttachmentCatalog {
     let mut catalog = AttachmentCatalog::default();
     for item in items {
+        if let Item::Bench(bench) = item { catalog.benches.insert(bench.name.clone()); continue; }
         let Item::Module(module) = item else { continue };
         for contribution in &module.contributions {
             match contribution.namespace {

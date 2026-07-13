@@ -148,10 +148,36 @@ fn mixed_budget_project(tag: &str) -> PathBuf {
         },
     ],
 }
+
 pub fn api() {}
 fn run() {}
 "#,
     ).unwrap();
+    dir
+}
+
+fn bench_budget_project(tag: &str) -> PathBuf {
+    let dir = isolated_cwd(tag);
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(dir.join("pkg.jet"), "payload: { name: \"app\", version: \"0.1.0\" }\n").unwrap();
+    fs::write(dir.join("src/main.jet"), r#"module perf.package {
+    budgets: [Budget.{
+        name: "parse",
+        scope: .Bench("parse"),
+        metric: .BenchTime(.P50),
+        provider: .BenchMeasurement("parse"),
+        comparison: .RelativeTo("ci/linux"),
+        limit: .RegressionAtMost(100pct),
+        enforcement: .Warn,
+    }],
+}
+#Bench("parse") {
+    total := 0
+    loop value in 0..100 { total = total + value }
+    require_eq(total, 4950)
+}
+fn run() {}
+"#).unwrap();
     dir
 }
 
@@ -271,6 +297,23 @@ fn budget_report_collects_mixed_providers_measurement_locally() {
     assert_eq!(bytes, &fs::metadata(dir.join("build/main")).unwrap().len().to_string());
     let report_path = fs::read_dir(dir.join(".jet/perf/reports")).unwrap().next().unwrap().unwrap().path();
     jet_foundation::PerformanceBudget::verify_budget_report(&fs::read(report_path).unwrap()).unwrap();
+}
+
+#[test]
+fn budget_bench_measurement_bootstraps_then_consumes_compatible_history() {
+    use jet_foundation::PerformanceBudget::CanonicalJson;
+    let dir = bench_budget_project("budget_bench_measurement");
+    let bootstrap = Command::new(jet()).args(["budget","update","--baseline","ci/linux","--bootstrap","--reason","initial benchmark","--yes","--json"]).current_dir(&dir).output().unwrap();
+    assert_eq!(bootstrap.status.code(),Some(0),"stdout: {}\nstderr: {}",String::from_utf8_lossy(&bootstrap.stdout),String::from_utf8_lossy(&bootstrap.stderr));
+    let CanonicalJson::Object(first)=CanonicalJson::parse_canonical(&bootstrap.stdout).unwrap() else{panic!("command")};
+    let CanonicalJson::Object(report)=&first["report"] else{panic!("report")};let CanonicalJson::Object(content)=&report["content"] else{panic!("content")};let CanonicalJson::Array(measurements)=&content["measurements"] else{panic!("measurements")};let CanonicalJson::Object(measurement)=&measurements[0] else{panic!("measurement")};
+    let CanonicalJson::Array(samples)=&measurement["samples"] else{panic!("samples")};assert_eq!(samples.len(),20);assert!(matches!(measurement["statistics"],CanonicalJson::Object(_)));assert!(matches!(measurement["policy"],CanonicalJson::Object(_)));assert_eq!(measurement["history"],CanonicalJson::Null);assert_eq!(measurement["baseline"],CanonicalJson::Null);
+    let CanonicalJson::Object(provider)=&measurement["provider"] else{panic!("provider")};assert_eq!(provider["kind"],CanonicalJson::String("BenchMeasurement".into()));assert_eq!(provider["identity"],CanonicalJson::String("parse".into()));
+    let first_id=match &report["report_id"]{CanonicalJson::String(value)=>value.clone(),_=>panic!("report id")};
+
+    let check=Command::new(jet()).args(["budget","check","--json"]).current_dir(&dir).output().unwrap();
+    assert!(matches!(check.status.code(),Some(0)|Some(1)),"stdout: {}\nstderr: {}",String::from_utf8_lossy(&check.stdout),String::from_utf8_lossy(&check.stderr));
+    let CanonicalJson::Object(second)=CanonicalJson::parse_canonical(&check.stdout).unwrap() else{panic!("command")};let CanonicalJson::Object(report)=&second["report"] else{panic!("report")};let CanonicalJson::Object(content)=&report["content"] else{panic!("content")};let CanonicalJson::Array(measurements)=&content["measurements"] else{panic!("measurements")};let CanonicalJson::Object(measurement)=&measurements[0] else{panic!("measurement")};let CanonicalJson::Object(history)=&measurement["history"] else{panic!("history")};let CanonicalJson::Array(ids)=&history["report_ids"] else{panic!("ids")};assert_eq!(ids, &vec![CanonicalJson::String(first_id)]);let CanonicalJson::Object(baseline)=&measurement["baseline"] else{panic!("baseline")};let CanonicalJson::Array(pooled)=&baseline["pooled_samples"] else{panic!("pooled")};assert_eq!(pooled.len(),20);let CanonicalJson::Object(decision)=&measurement["decision"] else{panic!("decision")};assert_ne!(decision["evidence"],CanonicalJson::String("unavailable".into()));
 }
 
 #[test]

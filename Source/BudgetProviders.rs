@@ -101,7 +101,7 @@ pub enum FailureClass { Unavailable, Malformed, Panic, Timeout, Execution, Incom
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProviderFailure { pub class: FailureClass, pub reason: String }
 impl ProviderFailure {
-    fn malformed(reason: impl Into<String>) -> Self { Self { class: FailureClass::Malformed, reason: reason.into() } }
+    pub fn malformed(reason: impl Into<String>) -> Self { Self { class: FailureClass::Malformed, reason: reason.into() } }
     fn operation(class: FailureClass, reason: impl Into<String>) -> Self { Self { class, reason: reason.into() } }
     pub fn diagnostic(&self, budget: &str) -> ProviderDiagnostic {
         match self.class {

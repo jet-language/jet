@@ -1,12 +1,12 @@
 //! D-PERFBUDGET-OUTPUT1 command projection over the shared evaluator/provider/store.
 
 use jet::AST::Item;
-use jet::BudgetProviders::{terminate_group, ProviderEvent, ProviderRegistry, ProviderRequest, ProviderSpec};
-use jet::BudgetStore::{BudgetStore, UpdateKind};
+use jet::BudgetProviders::{terminate_group, ProviderCancellation, ProviderEvent, ProviderFailure, ProviderRegistry, ProviderRequest, ProviderSpec};
+use jet::BudgetStore::{BudgetStore, HistoryQuery, UpdateKind};
 use jet::Sema::{BudgetAxis, BudgetQuantity, BudgetSpec, LocatedBudgetSpec};
 use jet_foundation::PerformanceBudget::{
-    evaluate, stable_id, CanonicalJson, Comparison, Direction, Enforcement, Evidence,
-    LimitDirection, PolicyOutcome, Rational,
+    estimator, evaluate, stable_id, statistics, trend as evaluate_trend, BigInt, CanonicalJson, Comparison, Direction, Enforcement, Evidence,
+    Evaluation, LimitDirection, MeasurementPolicy, Percentile, PolicyOutcome, Rational, RelativeGoal, TrendLabel,
 };
 use jet_foundation::SHA256::sha256_hex;
 use std::path::{Path, PathBuf};
@@ -57,11 +57,11 @@ pub(crate) fn run(raw: &[String]) -> i32 {
         Err(diagnostics) => return compiler_failure(&options, &entry, &diagnostics),
     };
     let active: Vec<_> = specs.into_iter().filter(|located| applicable(&located.spec, "native", "dev")).collect();
-    let built = match build_report(&root, &bundle, &effect_facts, &active, &measured_start) {
+    let store = BudgetStore::new(&root);
+    let built = match build_report(&root, &store, &bundle, &effect_facts, &active, &measured_start) {
         Ok(report) => report,
         Err(error) => return tool_failure(&options, &error),
     };
-    let store = BudgetStore::new(&root);
     let report_id = text_field(&built.value, "report_id").expect("verified report id").to_string();
     let report_path = format!(".jet/perf/reports/{report_id}.json");
     let failed = built.fail > 0;
@@ -74,7 +74,7 @@ pub(crate) fn run(raw: &[String]) -> i32 {
         emit_check(&options, &built, &report_id, &report_path, created);
         return if failed { 1 } else { 0 };
     }
-    if failed && !options.accept_regression {
+    if failed && !options.accept_regression && !options.bootstrap {
         let created = match store.write_report(&built.bytes) {
             Ok((_, created)) => created,
             Err(error) => return tool_failure(&options, &format!("report write refused: {error}")),
@@ -184,8 +184,8 @@ fn parse(raw: &[String]) -> Result<Options, String> {
 struct BuiltReport { value: CanonicalJson, bytes: Vec<u8>, results: Vec<ResultRow>, pass:usize, warn:usize, fail:usize }
 struct ResultRow { id:String, name:String, source:String, line:usize, column:usize, metric:String, unit:String, direction:String, comparison:CanonicalJson, sample:Rational, outcome:PolicyOutcome, evidence:Evidence, enforcement:Enforcement, reason:String }
 
-fn build_report(root:&Path, bundle:&jet::AST::ProgramBundle, effect_facts:&jet::Sema::SemIndexEffectFacts, specs:&[LocatedBudgetSpec], at:&str)->Result<BuiltReport,String>{
-    for located in specs { let spec=&located.spec; if (!matches!(provider_kind(&spec.provider),"CompilerFacts"|"BuildArtifact")) || spec.comparison_fact.kind != "Absolute" { return Err(format!("provider `{}` for budget `{}` has no command-owned deterministic measurement implementation",spec.provider,spec.name)); } }
+fn build_report(root:&Path, store:&BudgetStore, bundle:&jet::AST::ProgramBundle, effect_facts:&jet::Sema::SemIndexEffectFacts, specs:&[LocatedBudgetSpec], at:&str)->Result<BuiltReport,String>{
+    for located in specs { let spec=&located.spec; if !matches!(provider_kind(&spec.provider),"CompilerFacts"|"BuildArtifact"|"BenchMeasurement") { return Err(format!("provider `{}` for budget `{}` has no command-owned measurement implementation",spec.provider,spec.name)); } }
     let mut ordered=specs.iter().collect::<Vec<_>>();ordered.sort_by(|a,b|a.spec.name.cmp(&b.spec.name));
     let needs_artifact=ordered.iter().any(|located|provider_kind(&located.spec.provider)=="BuildArtifact");
     let artifact=if needs_artifact{Some(build_selected_artifact(root,&project_entry(root))?)}else{None};
@@ -195,13 +195,16 @@ fn build_report(root:&Path, bundle:&jet::AST::ProgramBundle, effect_facts:&jet::
     for (located,provider) in ordered.iter().zip(&providers) { bases.push(measurement_base_truthful(root,bundle,located,&context_subject,&tool,provider)?); }
     let mut groups=std::collections::BTreeMap::<String,Vec<usize>>::new();
     for (index,located) in ordered.iter().enumerate(){groups.entry(located.spec.provider.clone()).or_default().push(index);}
-    let registry=ProviderRegistry::with_builtins();
-    let mut samples=vec![None;ordered.len()];
+    let mut registry=ProviderRegistry::with_builtins();
+    registry.register_in_process("BenchMeasurement",bench_measurement_provider).map_err(|error|format!("cannot register BenchMeasurement: {error}"))?;
+    let mut samples=vec![Vec::new();ordered.len()];
     for (provider_name,indices) in groups {
         let kind=provider_kind(&provider_name);
         let provider=&providers[indices[0]];
         let workload=if kind=="BuildArtifact"{
             CanonicalJson::object([("path".into(),CanonicalJson::String(artifact.as_ref().expect("built artifact").0.to_string_lossy().into_owned()))])?
+        }else if kind=="BenchMeasurement"{
+            CanonicalJson::object([("name".into(),CanonicalJson::String(provider_identity(&provider_name).into())),("path".into(),CanonicalJson::String(project_entry(root).to_string_lossy().into_owned()))])?
         }else{
             CanonicalJson::Array(indices.iter().map(|index|compiler_fact(bundle,effect_facts,&ordered[*index].spec).map(|value|CanonicalJson::Integer(value.to_string()))).collect::<Result<Vec<_>,_>>()?)
         };
@@ -212,7 +215,7 @@ fn build_report(root:&Path, bundle:&jet::AST::ProgramBundle, effect_facts:&jet::
             match event {
                 ProviderEvent::Sample{spec,value,..}=>{
                     let global=*indices.get(spec as usize).ok_or("provider sample index escaped its measurement group")?;
-                    if samples[global].replace(value).is_some(){return Err(format!("provider `{provider_name}` returned duplicate evidence for budget `{}`",ordered[global].spec.name));}
+                    samples[global].push(value);
                 }
                 ProviderEvent::Unavailable{spec,reason,..}=>{
                     let global=*indices.get(spec as usize).ok_or("provider unavailable index escaped its measurement group")?;
@@ -222,49 +225,78 @@ fn build_report(root:&Path, bundle:&jet::AST::ProgramBundle, effect_facts:&jet::
             }
         }
     }
-    let samples=samples.into_iter().enumerate().map(|(index,sample)|sample.ok_or_else(||format!("provider `{}` returned incomplete evidence for budget `{}`",ordered[index].spec.provider,ordered[index].spec.name))).collect::<Result<Vec<_>,_>>()?;
+    for(index,values)in samples.iter().enumerate(){let statistical=ordered[index].spec.comparison_fact.kind!="Absolute";if values.is_empty()||(!statistical&&values.len()!=1)||statistical&&values.len()<20{return Err(format!("provider `{}` returned {} samples for budget `{}`; policy requires {}",ordered[index].spec.provider,values.len(),ordered[index].spec.name,if statistical{20}else{1}));}}
     let subject=subject(root,bundle,at,&timestamp_now(),artifact.as_ref())?;
-    for (index, sample) in samples.iter().enumerate() {
+    for (index, provider_samples) in samples.iter().enumerate() {
         let metric_name=ordered[index].spec.metric.split('(').next().unwrap_or(&ordered[index].spec.metric);
-        let context=context_key(&subject,&tool,&providers[index],metric_name,None)?;
+        let context=context_key(&subject,&tool,&providers[index],metric_name,metric_percentile(&ordered[index].spec.metric))?;
         let mut base = as_object(&bases[index].0)?.clone();
-        base.insert("samples".into(), CanonicalJson::Array(vec![sample.to_json()]));
+        base.insert("samples".into(), CanonicalJson::Array(provider_samples.iter().map(Rational::to_json).collect()));
+        if ordered[index].spec.comparison_fact.kind!="Absolute"{base.insert("statistics".into(),statistics_json(&provider_samples)?);}
         base.insert("context_key".into(), CanonicalJson::String(context.clone()));
         bases[index].0 = CanonicalJson::Object(base);
         bases[index].2 = context;
     }
     let skeletons=bases.iter().map(|(base,_,_)|base.clone()).collect::<Vec<_>>();
     let evidence_id=stable_id(&CanonicalJson::object([("measurements".into(),CanonicalJson::Array(skeletons)),("subject".into(),subject.clone()),("toolchain".into(),tool.clone())])?);
+    let privacy=privacy_json()?;
+    let provisional=report_wrapper(&evidence_id,bases.iter().map(|base|base.0.clone()).collect(),subject.clone(),tool.clone(),privacy.clone(),0,0,0)?;
+    let provisional_bytes=provisional.bytes();
     let mut measurements=Vec::new();let mut results=Vec::new();let(mut pass,mut warn,mut fail)=(0,0,0);
     for (index, spec) in ordered.iter().enumerate() {
-        let limit = quantity(&spec.limit_fact.quantity)?;
-        let direction = if spec.limit_fact.kind == "AtLeast" { LimitDirection::AtLeast } else { LimitDirection::AtMost };
-        let comparison = Comparison::Absolute { limit: limit.clone(), direction };
-        let improvement = if direction == LimitDirection::AtMost { Direction::LowerIsBetter } else { Direction::HigherIsBetter };
+        let provider_samples=&samples[index];
+        let comparison = comparison_model(&spec)?;
+        let improvement = if spec.metric.starts_with("Throughput") { Direction::HigherIsBetter } else { Direction::LowerIsBetter };
         let enforcement = if spec.enforcement == "Warn" { Enforcement::Warn } else { Enforcement::Fail };
-        let evaluation = evaluate(&evidence_id, &bases[index].2, &[], &[samples[index].clone()], &[], None, &comparison, improvement, enforcement, None)?;
+        let mut history_ids=Vec::new();let mut history_samples=Vec::new();let mut history_state=None;
+        if let Some(baseline)=spec.comparison_fact.baseline.as_deref(){
+            let query=HistoryQuery{budget_id:format!("{}:{}",spec.role,spec.name),budget_spec_sha256:bases[index].1.clone(),context_key:bases[index].2.clone(),at:at.into()};
+            match store.select_compatible_history(baseline,&provisional_bytes,&query){
+                Ok(ids)=>{history_ids=ids;if !history_ids.is_empty(){history_state=Some(store.history_state_id(baseline)?);history_samples=store.load_history_samples(&history_ids,&query.budget_id)?;}}
+                Err(error)if error==format!("baseline `{baseline}` is absent")=>{}
+                Err(error)=>return Err(error),
+            }
+        }
+        let pooled=history_samples.iter().flatten().cloned().collect::<Vec<_>>();
+        let policy=evaluation_policy();
+        let evaluation = if matches!(comparison,Comparison::RelativeTo{..})&&pooled.is_empty(){let point=estimator(provider_samples,percentile(&spec.metric))?;Evaluation{point,lower95:None,upper95:None,evidence:Evidence::Unavailable,outcome:if enforcement==Enforcement::Warn{PolicyOutcome::Warn}else{PolicyOutcome::Fail},bootstrap:Vec::new()}}else{evaluate(&evidence_id, &bases[index].2, &history_ids, provider_samples, &pooled, percentile(&spec.metric), &comparison, improvement, enforcement,if spec.comparison_fact.kind=="Absolute"{None}else{Some(&policy)})?};
         match evaluation.outcome { PolicyOutcome::Pass => pass += 1, PolicyOutcome::Warn => warn += 1, PolicyOutcome::Fail => fail += 1 }
         let evidence_name = match evaluation.evidence { Evidence::Pass => "pass", Evidence::Regression => "regression", Evidence::Inconclusive => "inconclusive", Evidence::Unavailable => "unavailable" };
         let outcome = match evaluation.outcome { PolicyOutcome::Pass => "pass", PolicyOutcome::Warn => "warn", PolicyOutcome::Fail => "fail" };
-        let reason = format!("measured {} against {} {}", samples[index].num, spec.limit_fact.kind, limit.num);
-        let decision = CanonicalJson::object([("evidence".into(), CanonicalJson::String(evidence_name.into())), ("lower95".into(), CanonicalJson::Null), ("point".into(), evaluation.point.to_json()), ("policy_outcome".into(), CanonicalJson::String(outcome.into())), ("reason".into(), CanonicalJson::String(reason.clone())), ("trend".into(), trend()), ("upper95".into(), CanonicalJson::Null)])?;
+        let reason = if evaluation.evidence==Evidence::Unavailable{"named baseline has no compatible history".into()}else{format!("measured estimator {} under {} policy",evaluation.point.num,spec.comparison_fact.kind)};
+        let trend=trend_json(&history_ids,&history_samples,percentile(&spec.metric),improvement)?;
+        let decision = CanonicalJson::object([("evidence".into(), CanonicalJson::String(evidence_name.into())), ("lower95".into(), evaluation.lower95.as_ref().map(Rational::to_json).unwrap_or(CanonicalJson::Null)), ("point".into(), evaluation.point.to_json()), ("policy_outcome".into(), CanonicalJson::String(outcome.into())), ("reason".into(), CanonicalJson::String(reason.clone())), ("trend".into(), trend), ("upper95".into(), evaluation.upper95.as_ref().map(Rational::to_json).unwrap_or(CanonicalJson::Null))])?;
         let mut object = as_object(&bases[index].0)?.clone();
+        if let Some(state)=history_state{let history=CanonicalJson::object([("report_ids".into(),CanonicalJson::Array(history_ids.iter().cloned().map(CanonicalJson::String).collect())),("state_id".into(),CanonicalJson::String(state))])?;object.insert("history".into(),history.clone());if matches!(comparison,Comparison::RelativeTo{..})&&!pooled.is_empty(){object.insert("baseline".into(),CanonicalJson::object([("history".into(),history),("pooled_samples".into(),CanonicalJson::Array(pooled.iter().map(Rational::to_json).collect())),("policy".into(),policy_json()),("statistics".into(),statistics_json(&pooled)?)])?);}}
         object.insert("decision".into(), decision);
         measurements.push(CanonicalJson::Object(object));
         let (source, line, column) = source_location(root, bundle, spec);
-        let comparison_json = CanonicalJson::object([("direction".into(), CanonicalJson::String(spec.limit_fact.kind.clone())), ("kind".into(), CanonicalJson::String("absolute".into())), ("limit".into(), limit.to_json())])?;
-        results.push(ResultRow { id:format!("{}:{}",spec.role,spec.name), name:spec.name.clone(), source, line, column, metric:spec.metric.clone(), unit:metric_unit(&spec.metric).into(), direction:if direction==LimitDirection::AtMost{"lower_is_better".into()}else{"higher_is_better".into()}, comparison:comparison_json, sample:samples[index].clone(), outcome:evaluation.outcome, evidence:evaluation.evidence, enforcement, reason });
+        let comparison_json = comparison_json(&spec)?;
+        results.push(ResultRow { id:format!("{}:{}",spec.role,spec.name), name:spec.name.clone(), source, line, column, metric:spec.metric.clone(), unit:metric_unit(&spec.metric).into(), direction:if improvement==Direction::LowerIsBetter{"lower_is_better".into()}else{"higher_is_better".into()}, comparison:comparison_json, sample:evaluation.point.clone(), outcome:evaluation.outcome, evidence:evaluation.evidence, enforcement, reason });
     }
-    let overall=if fail>0{"fail"}else if warn>0{"warn"}else{"pass"};let privacy=CanonicalJson::object([("excluded".into(),CanonicalJson::Array(Vec::new())),("retained".into(),CanonicalJson::Array(vec![CanonicalJson::String("typed measurements".into()),CanonicalJson::String("workspace source hashes".into())])),("schema".into(),CanonicalJson::Integer("1".into())),("workspace_paths_only".into(),CanonicalJson::Bool(true))])?;let content=CanonicalJson::object([("evidence_id".into(),CanonicalJson::String(evidence_id)),("measurements".into(),CanonicalJson::Array(measurements)),("privacy".into(),privacy),("subject".into(),subject),("summary".into(),CanonicalJson::object([("fail".into(),CanonicalJson::Integer(fail.to_string())),("outcome".into(),CanonicalJson::String(overall.into())),("pass".into(),CanonicalJson::Integer(pass.to_string())),("warn".into(),CanonicalJson::Integer(warn.to_string()))])?),("toolchain".into(),tool)])?;let id=stable_id(&content);let value=CanonicalJson::object([("content".into(),content),("report_id".into(),CanonicalJson::String(id)),("schema".into(),CanonicalJson::String("jet.budget-report".into())),("version".into(),CanonicalJson::Integer("1".into()))])?;let bytes=value.bytes();jet_foundation::PerformanceBudget::verify_budget_report(&bytes)?;Ok(BuiltReport{value,bytes,results,pass,warn,fail})
+    let value=report_wrapper(&evidence_id,measurements,subject,tool,privacy,pass,warn,fail)?;let bytes=value.bytes();jet_foundation::PerformanceBudget::verify_budget_report(&bytes)?;Ok(BuiltReport{value,bytes,results,pass,warn,fail})
 }
 
-fn measurement_base(root:&Path,bundle:&jet::AST::ProgramBundle,spec:&BudgetSpec,_subject:&CanonicalJson,tool:&CanonicalJson,provider:&CanonicalJson)->Result<(CanonicalJson,String,String),String>{let metric_name=spec.metric.split('(').next().unwrap_or(&spec.metric);let metric=CanonicalJson::object([("name".into(),CanonicalJson::String(metric_name.into())),("percentile".into(),CanonicalJson::Null)])?;let limit=quantity(&spec.limit_fact.quantity)?;let direction=if spec.limit_fact.kind=="AtLeast"{"at_least"}else{"at_most"};let comparison=CanonicalJson::object([("direction".into(),CanonicalJson::String(direction.into())),("kind".into(),CanonicalJson::String("absolute".into())),("limit".into(),limit.to_json())])?;let applies=CanonicalJson::object([("profiles".into(),CanonicalJson::Array(axis(&spec.applicability.profiles,"dev"))), ("targets".into(),CanonicalJson::Array(axis(&spec.applicability.targets,"native")))])?;let kind=provider_kind(&spec.provider);let identity=provider_identity(&spec.provider);let budget_spec=CanonicalJson::object([("applies".into(),applies),("comparison".into(),comparison.clone()),("enforcement".into(),CanonicalJson::String(spec.enforcement.to_ascii_lowercase())),("metric".into(),metric.clone()),("name".into(),CanonicalJson::String(spec.name.clone())),("package_id".into(),CanonicalJson::String(package_name(root))),("perf_role".into(),CanonicalJson::String(spec.role.clone())),("provider".into(),CanonicalJson::object([("identity".into(),CanonicalJson::String(identity.into())),("kind".into(),CanonicalJson::String(kind.into()))])?),("scope".into(),CanonicalJson::String(spec.scope.clone()))])?;let hash=stable_id(&budget_spec);let fingerprint=text_field(provider,"hardware_fingerprint")?;let mut framed=b"jet-budget-context-v1\0".to_vec();for value in ["package",metric_name,"","native",std::env::consts::ARCH,"dev",env!("CARGO_PKG_VERSION"),text_field(tool,"compiler_build_id")?,text_field(tool,"stdlib_id")?,text_field(tool,"runner_id")?,text_field(tool,"digest")?,kind,identity,text_field(provider,"version")?,text_field(provider,"isolation")?,text_field(provider,"cpu_arch")?,text_field(provider,"cpu_model")?,wire_map(as_object(provider)?,"logical_cpus")?,wire_map(as_object(provider)?,"memory_bytes")?,text_field(provider,"os")?,text_field(provider,"kernel")?,text_field(provider,"power_governor")?,fingerprint]{frame(&mut framed,value)}let context=sha256_hex(&framed);let(source,line,_)=source_location(root,bundle,spec);Ok((CanonicalJson::object([("baseline".into(),CanonicalJson::Null),("budget_id".into(),CanonicalJson::String(format!("{}:{}",spec.role,spec.name))),("budget_spec".into(),budget_spec),("budget_spec_sha256".into(),CanonicalJson::String(hash.clone())),("comparison".into(),comparison),("context_key".into(),CanonicalJson::String(context.clone())),("decision".into(),CanonicalJson::Null),("direction".into(),CanonicalJson::String(if direction=="at_most"{"lower_is_better".into()}else{"higher_is_better".into()})),("enforcement".into(),CanonicalJson::String(spec.enforcement.to_ascii_lowercase())),("history".into(),CanonicalJson::Null),("metric".into(),metric),("policy".into(),CanonicalJson::Null),("provider".into(),provider.clone()),("samples".into(),CanonicalJson::Array(vec![CanonicalJson::Integer("0".into())])),("source".into(),CanonicalJson::String(format!("{source}:{line}"))),("statistics".into(),CanonicalJson::Null),("target_class".into(),CanonicalJson::String("native".into())),("unit".into(),CanonicalJson::String(metric_unit(&spec.metric).into()))])?,hash,context))}
+fn bench_measurement_provider(request:&ProviderRequest,_:&ProviderCancellation)->Result<Vec<ProviderEvent>,ProviderFailure>{
+    let CanonicalJson::Object(workload)=&request.workload else{return Err(ProviderFailure::malformed("BenchMeasurement workload is not an object"))};
+    let Some(CanonicalJson::String(path))=workload.get("path") else{return Err(ProviderFailure::malformed("BenchMeasurement workload has no source path"))};
+    let Some(CanonicalJson::String(name))=workload.get("name") else{return Err(ProviderFailure::malformed("BenchMeasurement workload has no benchmark name"))};
+    let source=std::fs::read_to_string(path).map_err(|error|ProviderFailure::malformed(format!("cannot read benchmark source: {error}")))?;
+    let mode=crate::OutputMode{json:false,color:jet::Diagnostics::ColorChoice::Never};
+    let evidence=crate::CmdDevTools::collect_bench_evidence(path,&source,mode,false);
+    let bench=evidence.into_iter().find(|bench|bench.name==*name).ok_or_else(||ProviderFailure::malformed(format!("#Bench `{name}` was not emitted by its selected benchmark target")))?;
+    let mut events=Vec::new();
+    for(index,spec)in request.specs.iter().enumerate(){if !spec.metric.starts_with("BenchTime("){return Err(ProviderFailure::malformed(format!("BenchMeasurement does not support metric `{}`",spec.metric)))}for(elapsed,iters)in &bench.samples{let value=Rational::parse(&elapsed.to_string(),&iters.to_string()).map_err(ProviderFailure::malformed)?;events.push(ProviderEvent::Sample{spec:index as u32,metric:spec.metric.clone(),value});}}
+    let samples=events.len()as u64;events.push(ProviderEvent::Complete{request_id:request.request_id.clone(),samples});Ok(events)
+}
+
+fn measurement_base(root:&Path,bundle:&jet::AST::ProgramBundle,spec:&BudgetSpec,_subject:&CanonicalJson,tool:&CanonicalJson,provider:&CanonicalJson)->Result<(CanonicalJson,String,String),String>{let metric_name=spec.metric.split('(').next().unwrap_or(&spec.metric);let percentile=metric_percentile(&spec.metric).map(|value|CanonicalJson::String(value.into())).unwrap_or(CanonicalJson::Null);let metric=CanonicalJson::object([("name".into(),CanonicalJson::String(metric_name.into())),("percentile".into(),percentile.clone())])?;let comparison=comparison_json(spec)?;let direction=if metric_name=="Throughput"{"higher_is_better"}else{"lower_is_better"};let applies=CanonicalJson::object([("profiles".into(),CanonicalJson::Array(axis(&spec.applicability.profiles,"dev"))), ("targets".into(),CanonicalJson::Array(axis(&spec.applicability.targets,"native")))])?;let kind=provider_kind(&spec.provider);let identity=provider_identity(&spec.provider);let budget_spec=CanonicalJson::object([("applies".into(),applies),("comparison".into(),comparison.clone()),("enforcement".into(),CanonicalJson::String(spec.enforcement.to_ascii_lowercase())),("metric".into(),metric.clone()),("name".into(),CanonicalJson::String(spec.name.clone())),("package_id".into(),CanonicalJson::String(package_name(root))),("perf_role".into(),CanonicalJson::String(spec.role.clone())),("provider".into(),CanonicalJson::object([("identity".into(),CanonicalJson::String(identity.into())),("kind".into(),CanonicalJson::String(kind.into()))])?),("scope".into(),CanonicalJson::String(spec.scope.clone()))])?;let hash=stable_id(&budget_spec);let fingerprint=text_field(provider,"hardware_fingerprint")?;let mut framed=b"jet-budget-context-v1\0".to_vec();for value in ["package",metric_name,metric_percentile(&spec.metric).unwrap_or(""),"native",std::env::consts::ARCH,"dev",env!("CARGO_PKG_VERSION"),text_field(tool,"compiler_build_id")?,text_field(tool,"stdlib_id")?,text_field(tool,"runner_id")?,text_field(tool,"digest")?,kind,identity,text_field(provider,"version")?,text_field(provider,"isolation")?,text_field(provider,"cpu_arch")?,text_field(provider,"cpu_model")?,wire_map(as_object(provider)?,"logical_cpus")?,wire_map(as_object(provider)?,"memory_bytes")?,text_field(provider,"os")?,text_field(provider,"kernel")?,text_field(provider,"power_governor")?,fingerprint]{frame(&mut framed,value)}let context=sha256_hex(&framed);let(source,line,_)=source_location(root,bundle,spec);Ok((CanonicalJson::object([("baseline".into(),CanonicalJson::Null),("budget_id".into(),CanonicalJson::String(format!("{}:{}",spec.role,spec.name))),("budget_spec".into(),budget_spec),("budget_spec_sha256".into(),CanonicalJson::String(hash.clone())),("comparison".into(),comparison),("context_key".into(),CanonicalJson::String(context.clone())),("decision".into(),CanonicalJson::Null),("direction".into(),CanonicalJson::String(direction.into())),("enforcement".into(),CanonicalJson::String(spec.enforcement.to_ascii_lowercase())),("history".into(),CanonicalJson::Null),("metric".into(),metric),("policy".into(),if spec.comparison_fact.kind=="Absolute"{CanonicalJson::Null}else{policy_json()}),("provider".into(),provider.clone()),("samples".into(),CanonicalJson::Array(vec![CanonicalJson::Integer("0".into())])),("source".into(),CanonicalJson::String(format!("{source}:{line}"))),("statistics".into(),CanonicalJson::Null),("target_class".into(),CanonicalJson::String("native".into())),("unit".into(),CanonicalJson::String(metric_unit(&spec.metric).into()))])?,hash,context))}
 
 fn measurement_base_truthful(root:&Path,bundle:&jet::AST::ProgramBundle,located:&LocatedBudgetSpec,subject:&CanonicalJson,tool:&CanonicalJson,provider:&CanonicalJson)->Result<(CanonicalJson,String,String),String>{
     let spec=&located.spec;
     let (base, hash, _) = measurement_base(root,bundle,spec,subject,tool,provider)?;
     let metric_name=spec.metric.split('(').next().unwrap_or(&spec.metric);
-    let context=context_key(subject,tool,provider,metric_name,None)?;
+    let context=context_key(subject,tool,provider,metric_name,metric_percentile(&spec.metric))?;
     let mut object=as_object(&base)?.clone();
     object.insert("context_key".into(),CanonicalJson::String(context.clone()));
     let(source,line,_)=source_location(root,bundle,located);
@@ -294,6 +326,16 @@ fn build_selected_artifact(root:&Path,entry:&Path)->Result<(PathBuf,u64,String),
     let stem=entry.file_stem().and_then(|v|v.to_str()).ok_or("selected artifact entry has no UTF-8 stem")?;let artifact=root.join("build").join(if cfg!(windows){format!("{stem}.exe")}else{stem.into()});let metadata=std::fs::symlink_metadata(&artifact).map_err(|e|format!("selected artifact was not produced: {e}"))?;if metadata.file_type().is_symlink()||!metadata.is_file(){return Err("selected artifact is not a regular file".into())}let digest=jet::SHA256::sha256_file_hex(&artifact).map_err(|e|format!("cannot hash selected artifact: {e}"))?;Ok((artifact,metadata.len(),digest))
 }
 fn quantity(value:&BudgetQuantity)->Result<Rational,String>{match value{BudgetQuantity::Count(v)|BudgetQuantity::Bytes(v)|BudgetQuantity::DurationNs(v)=>Rational::parse(&v.to_string(),"1"),BudgetQuantity::Rate{numerator,denominator_ns}=>Rational::parse(&numerator.to_string(),&denominator_ns.to_string()),BudgetQuantity::PercentBasisPoints(_)=>Err("absolute budget cannot use a relative percent limit".into())}}
+fn metric_percentile(metric:&str)->Option<&'static str>{let raw=metric.split_once('(')?.1.strip_suffix(')')?;match raw{"P50"=>Some("p50"),"P90"=>Some("p90"),"P95"=>Some("p95"),"P99"=>Some("p99"),"P999"=>Some("p999"),_=>None}}
+fn percentile(metric:&str)->Option<Percentile>{match metric_percentile(metric){Some("p50")=>Some(Percentile::P50),Some("p90")=>Some(Percentile::P90),Some("p95")=>Some(Percentile::P95),Some("p99")=>Some(Percentile::P99),Some("p999")=>Some(Percentile::P999),_=>None}}
+fn comparison_json(spec:&BudgetSpec)->Result<CanonicalJson,String>{let direction=if spec.limit_fact.kind=="AtLeast"{"at_least"}else{"at_most"};match spec.comparison_fact.kind.as_str(){"Absolute"=>CanonicalJson::object([("direction".into(),CanonicalJson::String(direction.into())),("kind".into(),CanonicalJson::String("absolute".into())),("limit".into(),quantity(&spec.limit_fact.quantity)?.to_json())]),"AbsoluteFrom"=>CanonicalJson::object([("baseline".into(),CanonicalJson::String(spec.comparison_fact.baseline.clone().ok_or("AbsoluteFrom baseline is absent")?)),("direction".into(),CanonicalJson::String(direction.into())),("kind".into(),CanonicalJson::String("absolute_from".into())),("limit".into(),quantity(&spec.limit_fact.quantity)?.to_json())]),"RelativeTo"=>{let BudgetQuantity::PercentBasisPoints(value)=&spec.limit_fact.quantity else{return Err("RelativeTo requires a basis-point limit".into())};let improvement=spec.limit_fact.kind=="ImprovementAtLeast";CanonicalJson::object([("baseline".into(),CanonicalJson::String(spec.comparison_fact.baseline.clone().ok_or("RelativeTo baseline is absent")?)),("direction".into(),CanonicalJson::String(if spec.metric.starts_with("Throughput"){"higher_is_better".into()}else{"lower_is_better".into()})),("goal".into(),CanonicalJson::String(if improvement{"improvement_at_least".into()}else{"regression_at_most".into()})),("kind".into(),CanonicalJson::String("relative_to".into())),("limit_basis_points".into(),CanonicalJson::Integer(value.to_string()))])},other=>Err(format!("unknown budget comparison `{other}`"))}}
+fn comparison_model(spec:&BudgetSpec)->Result<Comparison,String>{let direction=if spec.limit_fact.kind=="AtLeast"{LimitDirection::AtLeast}else{LimitDirection::AtMost};match spec.comparison_fact.kind.as_str(){"Absolute"=>Ok(Comparison::Absolute{limit:quantity(&spec.limit_fact.quantity)?,direction}),"AbsoluteFrom"=>Ok(Comparison::AbsoluteFrom{limit:quantity(&spec.limit_fact.quantity)?,direction}),"RelativeTo"=>{let BudgetQuantity::PercentBasisPoints(value)=&spec.limit_fact.quantity else{return Err("RelativeTo requires a basis-point limit".into())};let value=i128::try_from(*value).map_err(|_|"relative basis-point limit exceeds evaluator range")?;Ok(Comparison::RelativeTo{limit_basis_points:BigInt::from_i128(value),goal:if spec.limit_fact.kind=="ImprovementAtLeast"{RelativeGoal::ImprovementAtLeast}else{RelativeGoal::RegressionAtMost}})},other=>Err(format!("unknown budget comparison `{other}`"))}}
+fn policy_json()->CanonicalJson{CanonicalJson::object([("baseline_generations".into(),CanonicalJson::Integer("5".into())),("bootstrap_resamples".into(),CanonicalJson::Integer("10000".into())),("lower_rank".into(),CanonicalJson::Integer("250".into())),("min_baseline_samples".into(),CanonicalJson::Integer("20".into())),("min_candidate_samples".into(),CanonicalJson::Integer("20".into())),("stale_after_seconds".into(),CanonicalJson::Integer("2592000".into())),("trend_generations".into(),CanonicalJson::Integer("5".into())),("upper_rank".into(),CanonicalJson::Integer("9750".into()))]).unwrap()}
+fn evaluation_policy()->MeasurementPolicy{MeasurementPolicy{bootstrap_resamples:10000,lower_rank:250,upper_rank:9750}}
+fn statistics_json(samples:&[Rational])->Result<CanonicalJson,String>{let mut sorted=samples.to_vec();sorted.sort();let value=statistics(samples)?;CanonicalJson::object([("count".into(),CanonicalJson::Integer(samples.len().to_string())),("mad".into(),value.mad.to_json()),("mean".into(),value.mean.to_json()),("p50".into(),value.p50.to_json()),("p90".into(),value.p90.to_json()),("p95".into(),value.p95.to_json()),("p99".into(),value.p99.to_json()),("p999".into(),value.p999.to_json()),("sorted_samples".into(),CanonicalJson::Array(sorted.iter().map(Rational::to_json).collect()))])}
+fn privacy_json()->Result<CanonicalJson,String>{CanonicalJson::object([("excluded".into(),CanonicalJson::Array(Vec::new())),("retained".into(),CanonicalJson::Array(vec![CanonicalJson::String("typed measurements".into()),CanonicalJson::String("workspace source hashes".into())])),("schema".into(),CanonicalJson::Integer("1".into())),("workspace_paths_only".into(),CanonicalJson::Bool(true))])}
+fn report_wrapper(evidence_id:&str,measurements:Vec<CanonicalJson>,subject:CanonicalJson,tool:CanonicalJson,privacy:CanonicalJson,pass:usize,warn:usize,fail:usize)->Result<CanonicalJson,String>{let overall=if fail>0{"fail"}else if warn>0{"warn"}else{"pass"};let content=CanonicalJson::object([("evidence_id".into(),CanonicalJson::String(evidence_id.into())),("measurements".into(),CanonicalJson::Array(measurements)),("privacy".into(),privacy),("subject".into(),subject),("summary".into(),CanonicalJson::object([("fail".into(),CanonicalJson::Integer(fail.to_string())),("outcome".into(),CanonicalJson::String(overall.into())),("pass".into(),CanonicalJson::Integer(pass.to_string())),("warn".into(),CanonicalJson::Integer(warn.to_string()))])?),("toolchain".into(),tool)])?;let id=stable_id(&content);CanonicalJson::object([("content".into(),content),("report_id".into(),CanonicalJson::String(id)),("schema".into(),CanonicalJson::String("jet.budget-report".into())),("version".into(),CanonicalJson::Integer("1".into()))])}
+fn trend_json(ids:&[String],samples:&[Vec<Rational>],percentile:Option<Percentile>,direction:Direction)->Result<CanonicalJson,String>{let mut pairs=ids.iter().cloned().zip(samples.iter()).map(|(id,samples)|Ok((id,estimator(samples,percentile)?))).collect::<Result<Vec<_>,String>>()?;pairs.reverse();let ids=pairs.iter().map(|pair|pair.0.clone()).collect::<Vec<_>>();let estimators=pairs.iter().map(|pair|pair.1.clone()).collect::<Vec<_>>();let value=evaluate_trend(&ids,&estimators,direction)?;let label=match value.label{TrendLabel::Improving=>"improving",TrendLabel::Stable=>"stable",TrendLabel::Regressing=>"regressing",TrendLabel::Insufficient=>"insufficient"};CanonicalJson::object([("estimators".into(),CanonicalJson::Array(value.estimators.iter().map(Rational::to_json).collect())),("label".into(),CanonicalJson::String(label.into())),("report_ids".into(),CanonicalJson::Array(value.report_ids.into_iter().map(CanonicalJson::String).collect())),("score".into(),value.score.as_ref().map(Rational::to_json).unwrap_or(CanonicalJson::Null))])}
 fn applicable(spec:&BudgetSpec,target:&str,profile:&str)->bool{fn one(axis:&BudgetAxis,current:&str)->bool{match axis{BudgetAxis::Current|BudgetAxis::All=>true,BudgetAxis::Only(values)=>values.iter().any(|v|v.eq_ignore_ascii_case(current)||v.contains(&title(current)))}}one(&spec.applicability.targets,target)&&one(&spec.applicability.profiles,profile)}
 fn axis(axis:&BudgetAxis,current:&str)->Vec<CanonicalJson>{match axis{BudgetAxis::Current=>vec![CanonicalJson::String(current.into())],BudgetAxis::All=>vec![CanonicalJson::String("all".into())],BudgetAxis::Only(v)=>v.iter().cloned().map(CanonicalJson::String).collect()}}
 fn title(s:&str)->String{let mut c=s.chars();c.next().map(|x|x.to_ascii_uppercase().to_string()+c.as_str()).unwrap_or_default()}
