@@ -173,7 +173,21 @@ fn instance_fingerprint_is_nominal_and_ignores_body_shape() {
     assert_eq!(fp, only_instance_fingerprint(shifted, "pkg-a"));
     assert_eq!(fp, only_instance_fingerprint(body, "pkg-a"));
     assert_ne!(fp, only_instance_fingerprint(arg, "pkg-a"));
-    assert_ne!(fp, only_instance_fingerprint(base, "pkg-b"));
+    assert_eq!(fp, only_instance_fingerprint(base, "pkg-b"), "manifest-less host paths are non-semantic");
+
+    let roots = std::env::temp_dir().join(format!("jet_genmod_nominal_packages_{}", std::process::id()));
+    let package_a = roots.join("checkout-a");
+    let package_b = roots.join("checkout-b");
+    std::fs::create_dir_all(&package_a).unwrap();
+    std::fs::create_dir_all(&package_b).unwrap();
+    std::fs::write(package_a.join("pkg.jet"), "payload: { name: \"package-a\", version: \"1.0.0\" }").unwrap();
+    std::fs::write(package_b.join("pkg.jet"), "payload: { name: \"package-b\", version: \"1.0.0\" }").unwrap();
+    assert_ne!(
+        only_instance_fingerprint(base, package_a.to_str().unwrap()),
+        only_instance_fingerprint(base, package_b.to_str().unwrap()),
+        "canonical package identity remains nominal",
+    );
+    let _ = std::fs::remove_dir_all(roots);
 }
 
 #[test]
