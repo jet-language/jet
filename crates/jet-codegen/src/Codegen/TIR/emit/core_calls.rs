@@ -916,7 +916,13 @@ pub(crate) fn emit_tir_core_call(
         }
         ("core.encoding.cbor", "decode") => {
             let options = if args.len() > 1 { arg(1) } else { format!("{}jet_std::CBOROptions::safe()", cx.root_prefix) };
-            format!("{}::<{}>(&({}), {})", helper("jet_enc_cbor_decode"), enc_target_rust(ret_ty, cx), arg(0), options)
+            // CBOR decodes one whole Codable value. Unlike CSV, a list return is
+            // the target itself, not a row wrapper whose element type is T.
+            let target = match ret_ty {
+                Type::Result { ok, .. } => cx.rust_type(ok),
+                other => cx.rust_type(other),
+            };
+            format!("{}::<{}>(&({}), {})", helper("jet_enc_cbor_decode"), target, arg(0), options)
         }
         // D-UUIDENC1=A: hex and base64 encode/decode.
         ("core.encoding.hex", "encode") => {

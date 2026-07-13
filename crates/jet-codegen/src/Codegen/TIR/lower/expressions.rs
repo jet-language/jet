@@ -941,6 +941,24 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // Resolve the head here (totality); a missing alias falls to `user_unknown`,
             // exactly as the AST path (the gate already required the alias to resolve).
             if let Some(alias) = import_ns {
+                if cx.core_imports.get(alias).map(String::as_str) == Some("core.encoding.cbor")
+                    && matches!(type_name.as_str(), "CBOROptions" | "CBORError")
+                    && type_args.is_empty()
+                {
+                    let tfields = fields
+                        .iter()
+                        .map(|(name, _, value)| (name.clone(), lower_expr(value, cx, env), false))
+                        .collect();
+                    return TExpr {
+                        ty: Type::Named(type_name.clone()),
+                        kind: TExprKind::StructLit {
+                            rust_type: format!("{}jet_std::{}", cx.root_prefix, type_name),
+                            fields: tfields,
+                            extra: None,
+                            as_trait: None,
+                        },
+                    };
+                }
                 if cx.core_imports.get(alias).map(String::as_str) == Some(crate::Syntax::CORE_EMAIL_MODULE)
                     && matches!(type_name.as_str(), "RecipientReport" | "SendReport")
                 {
