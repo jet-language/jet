@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 530,
-    "rev": 5016,
+    "rev": 5025,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -14001,13 +14001,47 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "building",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
       "assignee": "fable-impl-528",
-      "log": [],
-      "criteria": [],
+      "log": [
+        {
+          "at": "2026-07-13",
+          "by": "fable-impl-528",
+          "text": "Investigated hypothesized R12 entrypoint divergence. Disproven: jet::compile_with_path AND ./target/debug/jet run BOTH reject the fixture (tests/fuzz/sema/valid/ex_comptime_comptime_splice.jet) with identical E0927 on `#Label` — verified by direct smoke test (rm -rf ~/.cache/jet/build; jet run <copy-of-fixture>) which also fails E0927. Root cause: commit 3ab7c5d2 (card #518, E0927 closed marker vocab) fixed examples/features/comptime/comptime_splice.jet from `#Label` to the correct `@Label` (derive-provider markers live on the @ contract plane per is_legal_contract_name in crates/jet-sema/src/Sema/CheckerMarkers.rs:94-96) but never touched its mirror copy tests/fuzz/sema/valid/ex_comptime_comptime_splice.jet (copied byte-for-byte from the example in c737dc22, card #353). The corpus fixture went stale, not the compiler. Only that one valid-corpus fixture uses a user-derive marker (grep derive T\\\\. across tests/fuzz/sema/ confirms). Fix: synced the fixture #Label -> @Label to match the live example (tests/fuzz/sema/valid/ex_comptime_comptime_splice.jet:14). No sema/driver code changed — both entrypoints already share one marker-vocabulary check (Bundle.rs:2596 known_derive_names built once from bundle.modules, consumed by check_marker_vocabulary regardless of caller)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "sema_soundness full target green (7 tests) after fixture sync",
+          "status": "met",
+          "metBy": "fable-impl-528",
+          "verifiedBy": null,
+          "evidence": "cargo test --test sema_soundness => running 7 tests ... test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 142.66s",
+          "at": "2026-07-13T07:31:18.021Z"
+        },
+        {
+          "n": 2,
+          "text": "golden examples_compile_and_run green for comptime/comptime_splice, unchanged (no example edit needed)",
+          "status": "met",
+          "metBy": "fable-impl-528",
+          "verifiedBy": null,
+          "evidence": "JET_GOLDEN_FILTER=comptime/comptime_splice cargo test --test golden examples_compile_and_run => running 1 test ... test result: ok. 1 passed; 0 failed. Also smoke: rm -rf ~/.cache/jet/build; cargo build; ./target/debug/jet run examples/features/comptime/comptime_splice.jet => prints 'Cube'.",
+          "at": "2026-07-13T07:31:33.545Z"
+        },
+        {
+          "n": 3,
+          "text": "root cause documented: no entrypoint divergence found; premise disproven with direct jet-run smoke evidence",
+          "status": "met",
+          "metBy": "fable-impl-528",
+          "verifiedBy": null,
+          "evidence": "Direct repro: copied ex_comptime_comptime_splice.jet (pre-fix, #Label) to scratch path, ran ./target/debug/jet run on it directly (not via test harness) -> same Error [E0927] `#Label` isn't a known marker. Both entrypoints (CLI jet run, library compile_with_path) reject identically; no divergence exists. git blame shows commit 3ab7c5d2 fixed the live example's sigil #Label->@Label (card #518) without updating the tests/fuzz mirror copied in c737dc22.",
+          "at": "2026-07-13T07:31:49.154Z"
+        }
+      ],
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-13T06:43:53.011Z",
@@ -30277,6 +30311,100 @@
       "draft": false,
       "status": "open",
       "created": "2026-07-13T01:46:21.791Z"
+    },
+    {
+      "id": "D-OPDEF1",
+      "cardId": "c11pkkov",
+      "group": "syntax",
+      "title": "User-defined operators for structs and classes",
+      "gist": "How users make `+ - * / == <` work on their own structs, like a `Vec2` or a `Money`.",
+      "lesson": "Operator overloading is powerful and easy to abuse. C++ repurposes `<<`, its bit-shift operator, to mean stream output in `cout << x`, a meaning unrelated to shifting bits. Readers then learn each library's private meaning for a symbol before they can read the code.\n\nThe guardrail Jet keeps under every option below: overload only existing symbols, never invent new ones, never let a user change precedence, and keep arithmetic symbols doing arithmetic. `v1 + v2` must read as addition, not a disguised side effect.",
+      "explainer": "",
+      "story": "Priya builds a physics demo. She has a `Vec2` struct and writes `pos = pos + velocity`, the obvious spelling. Today Jet rejects it, because `+` is defined only for built-in numbers and lane types.\n\nShe falls back to `pos = pos.add(velocity)`, then longer `.add(...).scale(...)` chains that bury the math. She wants the same `+` beginners already use on `Int` to work on her own type.",
+      "inWild": "Every mainstream language picks a lane. Python defines `__add__` / `__lt__` dunder methods on a class. Rust implements the `std::ops::Add` and `PartialOrd` traits. Go refuses operator overloading entirely and forces named methods.\n\n```python\n# Python: dunder methods on the class\nclass Vec2:\n    def __add__(self, o): return Vec2(self.x + o.x, self.y + o.y)\nv = a + b        # calls a.__add__(b)\n```\n\n```rust\n// Rust: implement a std trait\nimpl Add for Vec2 {\n    type Output = Vec2;\n    fn add(self, o: Vec2) -> Vec2 { Vec2 { x: self.x + o.x, y: self.y + o.y } }\n}\nlet v = a + b;\n```\n\n```go\n// Go: no overloading, named method only\nfunc (a Vec2) Add(b Vec2) Vec2 { return Vec2{a.X + b.X, a.Y + b.Y} }\nv := a.Add(b)\n```",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Operator hook traits",
+          "detail": "Operators are trait sugar, the same family as `Index`, `Display`, and `Iterable`. You implement one trait per operator family on your type, and the compiler wires the symbol to the method. The beginner front-doors stay: `@Numeric` and `@Comparable` on distinct types, plus auto-derived `Equatable`, generate these same impls. One mechanism, several ergonomic entrypoints.",
+          "code": "// Vec2: define + by implementing the Add trait\nVec2 :: struct { x: Float, y: Float }\n\nimpl Vec2.Add {\n    fn add(self, rhs: Vec2) -> Vec2 {\n        Vec2.{ x: self.x + rhs.x, y: self.y + rhs.y }\n    }\n}\n\npos := Vec2.{ x: 1.0, y: 2.0 }\nvel := Vec2.{ x: 0.5, y: 0.0 }\npos = pos + vel        // Vec2.{ x: 1.5, y: 2.0 }\npos += vel             // += falls out of Add, no extra trait\n\n// Money: a struct with cents + currency, ordered by Comparable\nMoney :: struct { cents: Int, currency: Currency }\n\nimpl Money.Comparable {\n    fn compare(self, other: Money) -> Ordering {\n        self.cents.compare(other.cents)\n    }\n}\n\nrent := Money.{ cents: 120000, currency: .Usd }\nfood := Money.{ cents:  45000, currency: .Usd }\nfood < rent            // true, and <=, >, >= all come from compare\n\n// Undefined case: no Mul defined for Vec2\nscaled := pos * 2.0\n// error[E0330]: no `*` operator is defined for `Vec2`\n//   --> demo.jet:22\n//    |\n// 22 |     scaled := pos * 2.0\n//    |               ^^^^^^^^^ `Vec2` has no `Mul` impl\n//    = fix: implement `Vec2.Mul`, or call a named method like `pos.scale(2.0)`"
+        },
+        {
+          "key": "B",
+          "name": "Direct operator functions",
+          "detail": "Define the symbol itself as a function, the way C++ and Python spell it. `fn +(a: Vec2, b: Vec2) -> Vec2` reads tersely at the definition site. It adds a second definition plane beside traits: capability lives on `fn <symbol>`, not on a named trait, so generic code has nothing to require.",
+          "code": "Vec2 :: struct { x: Float, y: Float }\n\n// the operator is its own function, keyed by the symbol\nfn +(a: Vec2, b: Vec2) -> Vec2 {\n    Vec2.{ x: a.x + b.x, y: a.y + b.y }\n}\n\npos := Vec2.{ x: 1.0, y: 2.0 }\npos = pos + Vec2.{ x: 0.5, y: 0.0 }\n\nMoney :: struct { cents: Int, currency: Currency }\n\nfn <(a: Money, b: Money) -> Bool {\n    a.cents < b.cents\n}\nfood < rent            // true\n\n// Undefined case\nscaled := pos * 2.0\n// error[E0330]: no `*` operator function is defined for `Vec2`\n//    = fix: define `fn *(a: Vec2, b: Float) -> Vec2`\n\n// The snag: a generic bound has no capability name to require\nfn sum3<T>(a: T, b: T, c: T) -> T { a + b + c }\n// error: `+` on `T` needs a bound, but `fn +` defines no nameable capability"
+        },
+        {
+          "key": "C",
+          "name": "Named methods only",
+          "detail": "Follow Go: no operator overloading for user types at all. Users write named methods like `pos.add(vel)` and `a.less_than(b)`. The teaching error for `v1 + v2` points straight at methods and the built-in hooks. Symbols stay reserved for built-in numbers and lane types.",
+          "code": "Vec2 :: struct { x: Float, y: Float }\n\nfn Vec2.add(self, rhs: Vec2) -> Vec2 {\n    Vec2.{ x: self.x + rhs.x, y: self.y + rhs.y }\n}\n\npos := Vec2.{ x: 1.0, y: 2.0 }\npos = pos.add(Vec2.{ x: 0.5, y: 0.0 })\n\nMoney :: struct { cents: Int, currency: Currency }\nfn Money.less_than(self, other: Money) -> Bool { self.cents < other.cents }\nfood.less_than(rent)   // true\n\n// Any attempt to use a symbol on a user type:\npos = pos + vel\n// error[E0330]: `+` is not defined for user types\n//    = Jet has no operator overloading; use a named method\n//    = fix: define `fn Vec2.add(self, rhs: Vec2)` and call `pos.add(vel)`\n\n// Where it hurts: units and money math become chained calls\ntotal := price.mul(qty).add(tax).sub(discount)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Operators are traits (`std::ops::Add`, `PartialOrd`), so a generic bound names the capability (`T: Add`). This is the model option A adopts, minus lifetimes.",
+          "code": "impl Add for Vec2 { type Output = Vec2; fn add(self, o: Vec2) -> Vec2 { /* ... */ } }\nfn sum3<T: Add<Output = T>>(a: T, b: T, c: T) -> T { a + b + c }"
+        },
+        {
+          "lang": "C++",
+          "note": "Operators are free functions or methods keyed by the symbol, which is option B's plane. No capability name, and `<<` shows how far a symbol's meaning can drift from its arithmetic origin.",
+          "code": "Vec2 operator+(const Vec2& a, const Vec2& b) { return {a.x + b.x, a.y + b.y}; }\nstd::cout << v;   // same operator family, now stream output"
+        },
+        {
+          "lang": "Go",
+          "note": "No overloading; named methods only, which is option C. Symbols stay honest, but numeric-heavy code turns into verbose method chains.",
+          "code": "func (a Vec2) Add(b Vec2) Vec2 { return Vec2{a.X + b.X, a.Y + b.Y} }\nv := a.Add(b).Scale(2)"
+        },
+        {
+          "lang": "Python",
+          "note": "Dunder methods (`__add__`, `__lt__`) are per-class and dynamically dispatched, with no static bound a generic can require. Convenient, but the capability is invisible to a type checker.",
+          "code": "class Vec2:\n    def __add__(self, o): return Vec2(self.x + o.x, self.y + o.y)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Operators are already trait sugar in Jet: `Index` gives `x[i]`, `Display` gives `{x}`, and `Iterable` gives the `loop x in` header. Adding `Add`, `Comparable`, and `Equatable` to that family is the same mechanism, so there stays exactly one way to grant a type new syntax. The beginner bundles `@Numeric` and `@Comparable`, plus auto-derived equality, generate these exact impls, so magic and expert control share one spine (I8).",
+        "tradeoff": "You name the operator's trait (`impl Vec2.Add`) rather than write the bare symbol, so the definition site is a line longer than C++'s `fn +`. In exchange, generic code can bound on the capability (`<T: Add>`), and every operator reaches through the same door as `Index` and `Display`. Adopting this lifts the v1 non-goal on operator overloading and widens D-SIMD1 beyond built-in lane types.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A `fn +` plane duplicates the trait mechanism Jet already ships for `Index`, `Display`, and `Iterable`, giving two ways to grant syntax (I8). It also leaves generic bounds nothing to name, so `sum3<T>(a + b + c)` cannot state its requirement."
+          },
+          {
+            "key": "C",
+            "reason": "Named-only regresses beginner readability, priority #2: units and money math decay to `price.mul(qty).add(tax)`. It also contradicts shipped surface, since Jet already overloads operators on lane types and re-exposes them through `@Numeric` bundles, so a flat refusal is inconsistent rather than principled."
+          }
+        ]
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "Ship A as the one mechanism, then fold the other options' virtues into it. Beginner bundles (`@Numeric`, `@Comparable`) and auto-derived `Equatable` become front-doors that generate the same operator trait impls a beginner never has to write by hand.\n\nOption B's brevity survives as short method names (`add`, `compare`) and inline `impl` inside the type body. Option C's restraint survives as the fence: overload only existing symbols, invent no operators, change no precedence, and keep named methods the advised path for mutating or side-effectful work.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "Operators as trait impls in the existing hook-trait family.",
+            "use": "The spine of the decision: one mechanism grants a user type every kind of new syntax, from `x[i]` to `x + y`."
+          },
+          {
+            "key": "B",
+            "aspect": "Terse, low-ceremony definition site.",
+            "use": "Kept as short method names (`add`, `compare`) and inline `impl` in the type body, without adding a second definition plane."
+          },
+          {
+            "key": "C",
+            "aspect": "Restraint: no new operators, no precedence changes, named methods for side effects.",
+            "use": "Kept as the invariant fence around A and the advised path for mutating or side-effectful operations, where a symbol would mislead."
+          }
+        ]
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-13T07:30:41.306Z"
     }
   ],
   "questions": [
@@ -31059,6 +31187,69 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-13T07:31:49.155Z",
+      "by": "fable-impl-528",
+      "action": "card.criteria-meet",
+      "ref": "c0awpem6",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-13T07:31:33.545Z",
+      "by": "fable-impl-528",
+      "action": "card.criteria-meet",
+      "ref": "c0awpem6",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-13T07:31:18.021Z",
+      "by": "fable-impl-528",
+      "action": "card.criteria-meet",
+      "ref": "c0awpem6",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-13T07:30:52.230Z",
+      "by": "fable-impl-528",
+      "action": "card.criteria-add",
+      "ref": "c0awpem6",
+      "note": "#3 root cause documented: no entrypoint divergence found; premi"
+    },
+    {
+      "at": "2026-07-13T07:30:41.306Z",
+      "by": "fable-main",
+      "action": "decision.add",
+      "ref": "D-OPDEF1",
+      "note": "User-defined operators for structs and classes"
+    },
+    {
+      "at": "2026-07-13T07:30:36.623Z",
+      "by": "fable-impl-528",
+      "action": "card.criteria-add",
+      "ref": "c0awpem6",
+      "note": "#2 golden examples_compile_and_run green for comptime/comptime_"
+    },
+    {
+      "at": "2026-07-13T07:30:21.012Z",
+      "by": "fable-impl-528",
+      "action": "card.criteria-add",
+      "ref": "c0awpem6",
+      "note": "#1 sema_soundness full target green (7 tests) after fixture syn"
+    },
+    {
+      "at": "2026-07-13T07:29:45.409Z",
+      "by": "fable-impl-528",
+      "action": "card.update",
+      "ref": "c0awpem6",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T07:29:16.803Z",
+      "by": "fable-impl-528",
+      "action": "card.update",
+      "ref": "c0awpem6",
+      "note": "phase"
+    },
     {
       "at": "2026-07-13T07:13:27.981Z",
       "by": "fable-impl-528",
@@ -34495,69 +34686,6 @@
       "action": "card.criteria-meet",
       "ref": "c0iftbrr",
       "note": "#4"
-    },
-    {
-      "at": "2026-07-12T14:25:32.889Z",
-      "by": "claude-main",
-      "action": "card.criteria-meet",
-      "ref": "c0iftbrr",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-12T14:25:32.792Z",
-      "by": "claude-main",
-      "action": "card.criteria-meet",
-      "ref": "c0iftbrr",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-12T14:25:32.686Z",
-      "by": "claude-main",
-      "action": "card.criteria-meet",
-      "ref": "c0iftbrr",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-12T14:25:08.420Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-ACCEPT-516",
-      "note": "accept"
-    },
-    {
-      "at": "2026-07-12T14:24:58.206Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0wlxv6l",
-      "note": "durability: no generic unknown-marker mechanism — bogus markers silently no-op"
-    },
-    {
-      "at": "2026-07-12T14:24:56.207Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-ACCEPT-515",
-      "note": "accept"
-    },
-    {
-      "at": "2026-07-12T14:21:33.336Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CLI-OSIMAGE1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-12T14:16:18.470Z",
-      "by": "terra-301-builder",
-      "action": "card.update",
-      "ref": "c0075iyb",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T14:08:37.994Z",
-      "by": "terra-301-builder",
-      "action": "card.claim",
-      "ref": "c0075iyb",
-      "note": ""
     }
   ],
   "nextNum": 368,
