@@ -1035,17 +1035,44 @@ pub(crate) fn emit_type_impl(
     if methods.is_empty() {
         return;
     }
-    let tp = Generics::type_param_rust_list(type_params);
+    let tp_use = Generics::type_param_rust_list(type_params);
+    let clone_bounds: std::collections::HashMap<String, Vec<String>> =
+        Generics::rust_extra_clone_bounds(type_params).into_iter().collect();
+    let tp_impl = Generics::rust_type_param_list(type_params, &clone_bounds);
     out.push_str(&format!(
         "impl{} {}{} {{\n",
-        tp,
+        tp_impl,
         user_type_rust(type_name),
-        tp
+        tp_use
     ));
+    let previous_type_params = cx.current_type_params.replace(
+        type_params
+            .iter()
+            .map(|param| param.name.clone())
+            .collect(),
+    );
     for m in methods {
         emit_method(cx, type_name, m, out, 1);
     }
+    cx.current_type_params.replace(previous_type_params);
     out.push_str("}\n\n");
+}
+
+/// Type parameters owned by a named declaration. A top-level inherent `impl`
+/// has no second generic declaration in Jet; it inherits this identity from
+/// its target exactly like an in-type method block.
+pub(crate) fn type_params_for_name<'a>(
+    items: &'a [Item],
+    type_name: &str,
+) -> &'a [crate::AST::TypeParam] {
+    items
+        .iter()
+        .find_map(|item| match item {
+            Item::Struct(s) if s.name == type_name => Some(s.type_params.as_slice()),
+            Item::Enum(e) if e.name == type_name => Some(e.type_params.as_slice()),
+            _ => None,
+        })
+        .unwrap_or(&[])
 }
 
 pub(crate) fn emit_trait_impl(

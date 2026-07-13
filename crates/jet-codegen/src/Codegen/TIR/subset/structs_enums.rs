@@ -221,12 +221,9 @@ pub(crate) fn boxed_field_payload_constructible(
 }
 
 /// c109 Phase 19: is `name` a GENERIC user struct (one with declared type params)? A generic
-/// struct's fields reference type vars (`first: T`); `struct_is_covered` now admits those
-/// (so a generic struct is a covered VALUE type — Phase 19 covers turbofish construction +
-/// `Type::Apply` params). But a METHOD on a generic struct (`impl<T> user_<T>`) is a
-/// SEPARATE deferred surface (the inventory's "generic-type method"), so the method gates
-/// exclude an owning type that is generic. (Free generic functions are covered by Phase 17;
-/// generic STRUCT free functions by Phase 19; generic METHODS stay on the AST path.)
+/// struct's fields reference type vars (`first: T`); `struct_is_covered` admits those
+/// so turbofish construction, `Type::Apply` params, and inherent methods all lower
+/// through TIR. Trait methods keep their separate trait-specific admission rules.
 ///
 /// c148: uses `cx.struct_type_params` (populated from `StructDef.type_params`) rather
 /// than `ty_mentions_type_var`, so multi-char type params (`Kind`, `Elem`) are recognized.

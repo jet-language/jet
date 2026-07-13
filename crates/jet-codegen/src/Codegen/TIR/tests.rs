@@ -767,13 +767,11 @@ fn mk() {
     }
 
     #[test]
-    fn rejects_generic_method() {
-        // c109 Phase 19: a method on a GENERIC struct (`impl<T> user_<T>`) is the deferred
-        // "generic-type method" surface — `struct_is_generic` excludes it even though the
-        // owning struct is now a covered VALUE type (turbofish construction is covered, but
-        // the method's `impl<T>` clause is not yet validated across every shape).
+    fn covers_generic_method() {
+        // Card #129: generic owner identity survives through the enclosing
+        // `impl<T> user_Box<T>`; the method body lowers through ordinary TIR.
         let src = "struct Box<T> {\n v: T\n fn get(self) -> T {\n return self.v\n }\n}\n";
-        assert!(!covers_method(src, "Box", "get"));
+        assert!(covers_method(src, "Box", "get"));
     }
 
     #[test]

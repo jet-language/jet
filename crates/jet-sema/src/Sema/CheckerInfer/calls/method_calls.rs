@@ -2357,9 +2357,9 @@ impl<'a> Checker<'a> {
                 return None;
             }
             let type_name = match &recv_ty {
-                Type::Named(n) => n.clone(),
+                Type::Named(n) | Type::Apply { name: n, .. } => n.clone(),
                 Type::Option(inner) => match inner.as_ref() {
-                    Type::Named(n) => n.clone(),
+                    Type::Named(n) | Type::Apply { name: n, .. } => n.clone(),
                     _ => {
                         self.diags.push(Diagnostic::error(
                             "E0311",
@@ -2405,7 +2405,7 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            let Some(msig) = self.registry.method(&type_name, method).cloned() else {
+            let Some(mut msig) = self.registry.method(&type_name, method).cloned() else {
                 self.diags.push(Diagnostic::error(
                     "E0102",
                     format!("`{}` has no method `{}`", type_name, method),
@@ -2418,6 +2418,34 @@ impl<'a> Checker<'a> {
                 }
                 return None;
             };
+            let applied_args = match &recv_ty {
+                Type::Apply { args, .. } => Some(args.as_slice()),
+                Type::Option(inner) => match inner.as_ref() {
+                    Type::Apply { args, .. } => Some(args.as_slice()),
+                    _ => None,
+                },
+                _ => None,
+            };
+            if let Some(args) = applied_args {
+                let declared = self
+                    .trait_reg
+                    .struct_params
+                    .get(&type_name)
+                    .or_else(|| self.trait_reg.enum_params.get(&type_name));
+                if let Some(params) = declared {
+                    let subst: std::collections::HashMap<String, Type> = params
+                        .iter()
+                        .zip(args)
+                        .map(|(param, arg)| (param.name.clone(), arg.clone()))
+                        .collect();
+                    for (_, ty) in &mut msig.params {
+                        *ty = crate::Generics::substitute_type(ty, &subst);
+                    }
+                    if let Some(ret) = &mut msig.return_type {
+                        *ret = crate::Generics::substitute_type(ret, &subst);
+                    }
+                }
+            }
             self.record_method_reference(&type_name, method, span);
             if msig.is_static {
                 self.diags.push(Diagnostic::error(

@@ -483,7 +483,13 @@ pub(crate) fn emit_program_items(cx: &Cx, items: &[Item], out: &mut String, incl
                     });
                     emit_external_trait_impl(cx, i, struct_def, out);
                 } else {
-                    emit_type_impl(cx, &i.type_name, &[], &i.methods, out);
+                    emit_type_impl(
+                        cx,
+                        &i.type_name,
+                        type_params_for_name(items, &i.type_name),
+                        &i.methods,
+                        out,
+                    );
                 }
             }
             // D-ERR-CONV: emit the conversion function.

@@ -3402,6 +3402,51 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// Card #129 / D-METADERIVE1: an emitted inherent impl keeps the target's
+/// generic identity through sema, TIR, AOT, and default `jet dev`.
+#[test]
+fn user_derive_generic_impl_runs_in_aot_and_default_dev() {
+    let dir = std::env::temp_dir().join(format!("jet_derive_generic_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let src = r#"
+derive T.TypeName {
+    info :: T.reflect()
+    name :: info.name
+    param :: info.type_params[0].name
+    emit("impl $name {{ fn get_value(self) -> $param {{ return self.value }} fn type_name(self) -> String {{ return \"$name\" }} }}")
+}
+
+@TypeName
+struct Box<T> { value: T }
+
+fn run() {
+    boxed := Box<Int>.{ value: 7 }
+    n: Int := boxed.get_value()
+    print(n)
+    print(boxed.type_name())
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "user_derive_generic", src, &[], None);
+    assert_eq!(code, 0, "generic user derive failed in AOT: {stderr}");
+    assert_eq!(stdout, "7\nBox\n");
+
+    let file = dir.join("user_derive_generic.jet");
+    fs::write(&file, src).unwrap();
+    match jet::Interpreter::dev_iteration(file.to_str().unwrap(), false, false) {
+        jet::Interpreter::RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => {
+            assert_eq!(exit_code, 0, "generic user derive failed in dev: {stderr}");
+            assert_eq!(stdout, "7\nBox\n");
+        }
+        other => panic!("generic user derive did not run in default dev: {other:?}"),
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
 /// #495 / I2: a field read from a bare (`Read`) parameter is still rooted in
 /// the borrowed parameter. The explicit `copy` required by E0209 must produce
 /// owned values for both shallow and nested fields, compile through rustc, and

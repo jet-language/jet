@@ -884,7 +884,13 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
                     });
                     emit_external_trait_impl(&cx, i, struct_def, &mut out);
                 } else {
-                    emit_type_impl(&cx, &i.type_name, &[], &i.methods, &mut out);
+                    emit_type_impl(
+                        &cx,
+                        &i.type_name,
+                        type_params_for_name(&prog.items, &i.type_name),
+                        &i.methods,
+                        &mut out,
+                    );
                 }
             }
             // D-ERR-CONV: emit a standalone Rust function for each declared conversion.
@@ -1140,7 +1146,13 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
                     });
                     emit_external_trait_impl(&cx, i, struct_def, &mut out);
                 } else {
-                    emit_type_impl(&cx, &i.type_name, &[], &i.methods, &mut out);
+                    emit_type_impl(
+                        &cx,
+                        &i.type_name,
+                        type_params_for_name(&prog.items, &i.type_name),
+                        &i.methods,
+                        &mut out,
+                    );
                 }
             }
             Item::ErrorConv(ec) => {

@@ -116,15 +116,12 @@ pub(crate) fn tir_covers_method(f: &Func, type_name: &str, cx: &Cx) -> bool {
     }
     // The owning type must be a covered struct or enum (the receiver place and
     // every `self.field` read then emit exactly as `emit_method` produces them).
+    let generic_owner = struct_is_generic(type_name, cx);
     let owner_ty = Type::Named(type_name.to_string());
-    if !is_covered_struct_ty(&owner_ty, cx) && !is_covered_enum_ty(&owner_ty, cx) {
-        return false;
-    }
-    // c109 Phase 19: a method on a GENERIC struct (`impl<T> user_<T>`) is the deferred
-    // "generic-type method" surface — exclude it (the owning struct is a covered value
-    // type, but the method's `impl<T>` clause + turbofish receiver are not yet validated
-    // across every method shape; stay conservative — exclude on any doubt).
-    if struct_is_generic(type_name, cx) {
+    if !generic_owner
+        && !is_covered_struct_ty(&owner_ty, cx)
+        && !is_covered_enum_ty(&owner_ty, cx)
+    {
         return false;
     }
     // The self parameter (if any) must be the FIRST parameter, per the method
