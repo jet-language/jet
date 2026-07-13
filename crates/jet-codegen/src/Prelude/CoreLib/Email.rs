@@ -286,14 +286,19 @@ pub mod jet_email {
     }
 
     #[derive(Clone, Debug, PartialEq)]
-    pub struct SmtpCapabilities { pub names: Vec<String> }
+    pub struct SmtpCapabilities {
+        pub names: Vec<String>,
+        auth_mechanisms: Vec<String>,
+    }
 
     pub fn smtp_capabilities(reply: &SmtpReply, limits: &Limits) -> Result<SmtpCapabilities, Error> {
         limits.validate()?;
         if reply.code != 250 { return Err(protocol_error("EHLO requires a 250 reply")); }
         let mut names = Vec::new();
+        let mut auth_mechanisms = Vec::new();
         for line in reply.lines.iter().skip(1) {
-            let name = line.split_ascii_whitespace().next().unwrap_or("");
+            let mut words = line.split_ascii_whitespace();
+            let name = words.next().unwrap_or("");
             if name.is_empty() || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
                 return Err(protocol_error("EHLO capability name is invalid"));
             }
@@ -302,10 +307,21 @@ pub mod jet_email {
                 if names.len() == limits.max_capabilities as usize {
                     return Err(protocol_error("EHLO exceeds max_capabilities"));
                 }
-                names.push(name);
+                names.push(name.clone());
+            }
+            if name == "AUTH" {
+                for mechanism in words {
+                    if !mechanism.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-') {
+                        return Err(protocol_error("EHLO AUTH mechanism is invalid"));
+                    }
+                    let mechanism = mechanism.to_ascii_uppercase();
+                    if !auth_mechanisms.contains(&mechanism) {
+                        auth_mechanisms.push(mechanism);
+                    }
+                }
             }
         }
-        Ok(SmtpCapabilities { names })
+        Ok(SmtpCapabilities { names, auth_mechanisms })
     }
 
     #[derive(Clone, Debug, PartialEq)]
@@ -365,6 +381,441 @@ pub mod jet_email {
         pub response_code: i64,
         pub response: String,
         pub accepted_at: String,
+    }
+
+    // Hidden transport seam for D-EMAIL1's one synchronous send mechanism.
+    // Concrete runtime adapters own TCP, verified rustls, scheduler waits, and
+    // ambient context. This engine owns SMTP ordering and never retries.
+    pub trait SmtpTransport: std::io::Read + std::io::Write {
+        fn verified_tls(&self) -> bool;
+        fn start_tls(&mut self, server: &str, trust: &TlsTrust) -> Result<(), String>;
+        fn close(&mut self);
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    pub enum SmtpStop { Cancelled, TimedOut }
+
+    pub trait SmtpControl {
+        fn checkpoint(&self, operation: &str) -> Result<(), SmtpStop>;
+        fn accepted_at(&self) -> String;
+    }
+
+    pub struct NoopSmtpControl;
+
+    impl SmtpControl for NoopSmtpControl {
+        fn checkpoint(&self, _operation: &str) -> Result<(), SmtpStop> { Ok(()) }
+
+        fn accepted_at(&self) -> String {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|value| value.as_secs().to_string())
+                .unwrap_or_else(|_| "0".to_string())
+        }
+    }
+
+    pub fn smtp_transaction<T: SmtpTransport, C: SmtpControl>(
+        transport: &mut T,
+        config: &SmtpConfig<Vec<u8>>,
+        message: &Message,
+        control: &C,
+    ) -> Result<SendReport, Error> {
+        let result = smtp_transaction_inner(transport, config, message, control);
+        transport.close();
+        result
+    }
+
+    fn smtp_transaction_inner<T: SmtpTransport, C: SmtpControl>(
+        transport: &mut T,
+        config: &SmtpConfig<Vec<u8>>,
+        message: &Message,
+        control: &C,
+    ) -> Result<SendReport, Error> {
+        validate_smtp_config(config)?;
+        if message.envelope.recipients.len() > config.limits.max_recipients as usize {
+            return Err(smtp_error(
+                ErrorKind::Configuration, "recipients", &config.host, None,
+                "envelope exceeds configured max_recipients",
+            ));
+        }
+        let mime = serialize(message)?;
+        if mime.len() > config.limits.max_message_bytes as usize {
+            return Err(smtp_error(
+                ErrorKind::Configuration, "message", &config.host, None,
+                "serialized message exceeds configured max_message_bytes",
+            ));
+        }
+        if let SmtpAuth::Password { password, .. } = &config.auth {
+            std::str::from_utf8(password).map_err(|_| smtp_error(
+                ErrorKind::Configuration, "auth", &config.host, None,
+                "SMTP password must be UTF-8",
+            ))?;
+        }
+
+        checkpoint(control, "greeting", &config.host, false)?;
+        if config.security == SmtpSecurity::Tls && !transport.verified_tls() {
+            return Err(smtp_error(
+                ErrorKind::Tls, "connect_tls", &config.host, None,
+                "implicit TLS transport is not verified",
+            ));
+        }
+        let greeting = read_reply(transport, config, "greeting", false)?;
+        let mut state = SmtpState::new();
+        state.greeting(&greeting).map_err(|error| with_server(error, &config.host))?;
+        if config.security == SmtpSecurity::Tls { state.verified_tls(); }
+
+        let mut capabilities = ehlo(transport, config, control, &mut state)?;
+        if config.security == SmtpSecurity::StartTls {
+            state.start_tls(&capabilities).map_err(|error| with_server(error, &config.host))?;
+            command(transport, control, config, "starttls", b"STARTTLS\r\n", false)?;
+            let reply = read_reply(transport, config, "starttls", false)?;
+            expect_code(&reply, 220, "starttls", &config.host)?;
+            checkpoint(control, "tls_handshake", &config.host, false)?;
+            transport.start_tls(&config.host, &config.trust).map_err(|reason| smtp_error(
+                ErrorKind::Tls, "starttls", &config.host, None, reason,
+            ))?;
+            if !transport.verified_tls() {
+                return Err(smtp_error(
+                    ErrorKind::Tls, "starttls", &config.host, None,
+                    "STARTTLS completed without verified peer identity",
+                ));
+            }
+            state.verified_tls();
+            capabilities = ehlo(transport, config, control, &mut state)?;
+        }
+
+        authenticate(transport, config, control, &mut state, &capabilities)?;
+
+        let mail = format!("MAIL FROM:<{}>\r\n", message.envelope.from.mailbox);
+        command(transport, control, config, "mail_from", mail.as_bytes(), false)?;
+        let mail_reply = read_reply(transport, config, "mail_from", false)?;
+        expect_success(&mail_reply, "mail_from", &config.host)?;
+
+        let mut accepted = Vec::new();
+        let mut rejected = Vec::new();
+        for recipient in &message.envelope.recipients {
+            let rcpt = format!("RCPT TO:<{}>\r\n", recipient.mailbox);
+            command(transport, control, config, "rcpt_to", rcpt.as_bytes(), false)?;
+            let reply = read_reply(transport, config, "rcpt_to", false)?;
+            let report = RecipientReport {
+                address: recipient.clone(),
+                accepted: matches!(reply.code, 250 | 251 | 252),
+                code: reply.code,
+                message: reply_text(&reply),
+            };
+            if report.accepted {
+                accepted.push(report);
+            } else if (400..=599).contains(&reply.code) {
+                rejected.push(report);
+            } else {
+                return Err(smtp_error(
+                    ErrorKind::Protocol, "rcpt_to", &config.host, Some(reply.code),
+                    "RCPT TO returned an unexpected response code",
+                ));
+            }
+        }
+
+        if accepted.is_empty() || (config.recipient_policy == RecipientPolicy::RequireAll && !rejected.is_empty()) {
+            let refusal = rejected.first().expect("recipient outcome must include a refusal");
+            return Err(reply_failure("rcpt_to", &config.host, refusal.code, &refusal.message));
+        }
+
+        command(transport, control, config, "data", b"DATA\r\n", false)?;
+        let data_reply = read_reply(transport, config, "data", false)?;
+        expect_code(&data_reply, 354, "data", &config.host)?;
+        checkpoint(control, "data_body", &config.host, false)?;
+        let wire = dot_stuff(&mime, config.limits.max_message_bytes as usize)?;
+        transport.write_all(&wire).map_err(|reason| smtp_error(
+            ErrorKind::DeliveryUnknown, "data_body", &config.host, None,
+            format!("connection failed after DATA began: {reason}"),
+        ))?;
+        transport.flush().map_err(|reason| smtp_error(
+            ErrorKind::DeliveryUnknown, "data_body", &config.host, None,
+            format!("connection failed while flushing DATA: {reason}"),
+        ))?;
+        checkpoint(control, "data_response", &config.host, true)?;
+        let final_reply = read_reply(transport, config, "data_response", true)?;
+        expect_success(&final_reply, "data_response", &config.host)?;
+
+        let report = SendReport {
+            server: config.host.clone(),
+            accepted,
+            rejected,
+            response_code: final_reply.code,
+            response: reply_text(&final_reply),
+            accepted_at: control.accepted_at(),
+        };
+        let _ = command(transport, control, config, "quit", b"QUIT\r\n", false)
+            .and_then(|_| read_reply(transport, config, "quit", false).map(|_| ()));
+        Ok(report)
+    }
+
+    fn ehlo<T: SmtpTransport, C: SmtpControl>(
+        transport: &mut T,
+        config: &SmtpConfig<Vec<u8>>,
+        control: &C,
+        state: &mut SmtpState,
+    ) -> Result<SmtpCapabilities, Error> {
+        command(transport, control, config, "ehlo", b"EHLO localhost\r\n", false)?;
+        let reply = read_reply(transport, config, "ehlo", false)?;
+        state.ehlo(&reply, &config.limits).map_err(|error| with_server(error, &config.host))
+    }
+
+    fn authenticate<T: SmtpTransport, C: SmtpControl>(
+        transport: &mut T,
+        config: &SmtpConfig<Vec<u8>>,
+        control: &C,
+        state: &mut SmtpState,
+        capabilities: &SmtpCapabilities,
+    ) -> Result<(), Error> {
+        let SmtpAuth::Password { username, password } = &config.auth else { return Ok(()); };
+        let mechanism = if capabilities.auth_mechanisms.iter().any(|item| item == "PLAIN") {
+            "PLAIN"
+        } else if capabilities.auth_mechanisms.iter().any(|item| item == "LOGIN") {
+            "LOGIN"
+        } else {
+            return Err(smtp_error(
+                ErrorKind::Auth, "auth", &config.host, None,
+                "relay does not offer PLAIN or LOGIN authentication",
+            ));
+        };
+        state.authenticate(mechanism, 0, &config.limits)
+            .map_err(|error| with_server(error, &config.host))?;
+        if mechanism == "PLAIN" {
+            let mut payload = Vec::with_capacity(username.len().saturating_add(password.len()).saturating_add(2));
+            payload.push(0);
+            payload.extend_from_slice(username.as_bytes());
+            payload.push(0);
+            payload.extend_from_slice(password);
+            let line = format!("AUTH PLAIN {}\r\n", base64(&payload));
+            command(transport, control, config, "auth", line.as_bytes(), false)?;
+            let reply = read_reply(transport, config, "auth", false)?;
+            expect_auth_success(&reply, config)
+        } else {
+            command(transport, control, config, "auth", b"AUTH LOGIN\r\n", false)?;
+            let username_challenge = read_reply(transport, config, "auth_username", false)?;
+            expect_auth_challenge(&username_challenge, config)?;
+            let line = format!("{}\r\n", base64(username.as_bytes()));
+            command(transport, control, config, "auth_username", line.as_bytes(), false)?;
+            let password_challenge = read_reply(transport, config, "auth_password", false)?;
+            expect_auth_challenge(&password_challenge, config)?;
+            let line = format!("{}\r\n", base64(password));
+            command(transport, control, config, "auth_password", line.as_bytes(), false)?;
+            let reply = read_reply(transport, config, "auth", false)?;
+            expect_auth_success(&reply, config)
+        }
+    }
+
+    fn expect_auth_success(reply: &SmtpReply, config: &SmtpConfig<Vec<u8>>) -> Result<(), Error> {
+        if reply.code == 235 { return Ok(()); }
+        if (400..=599).contains(&reply.code) {
+            return Err(smtp_error(
+                ErrorKind::Auth, "auth", &config.host, Some(reply.code), reply_text(reply),
+            ));
+        }
+        Err(smtp_error(
+            ErrorKind::Protocol, "auth", &config.host, Some(reply.code),
+            format!("expected SMTP 235, got {}", reply.code),
+        ))
+    }
+
+    fn expect_auth_challenge(reply: &SmtpReply, config: &SmtpConfig<Vec<u8>>) -> Result<(), Error> {
+        expect_code(reply, 334, "auth", &config.host)?;
+        if reply.lines.iter().map(String::len).sum::<usize>() > config.limits.max_auth_challenge_bytes as usize {
+            return Err(smtp_error(
+                ErrorKind::Auth, "auth", &config.host, Some(reply.code),
+                "authentication challenge exceeds max_auth_challenge_bytes",
+            ));
+        }
+        Ok(())
+    }
+
+    fn command<T: SmtpTransport, C: SmtpControl>(
+        transport: &mut T,
+        control: &C,
+        config: &SmtpConfig<Vec<u8>>,
+        operation: &str,
+        bytes: &[u8],
+        ambiguous: bool,
+    ) -> Result<(), Error> {
+        checkpoint(control, operation, &config.host, ambiguous)?;
+        transport.write_all(bytes).map_err(|reason| smtp_error(
+            if ambiguous { ErrorKind::DeliveryUnknown } else { ErrorKind::Connect },
+            operation, &config.host, None, format!("SMTP write failed: {reason}"),
+        ))?;
+        transport.flush().map_err(|reason| smtp_error(
+            if ambiguous { ErrorKind::DeliveryUnknown } else { ErrorKind::Connect },
+            operation, &config.host, None, format!("SMTP flush failed: {reason}"),
+        ))
+    }
+
+    fn read_reply<T: SmtpTransport>(
+        transport: &mut T,
+        config: &SmtpConfig<Vec<u8>>,
+        operation: &str,
+        ambiguous: bool,
+    ) -> Result<SmtpReply, Error> {
+        read_smtp_reply(transport, &config.limits).map_err(|error| {
+            if ambiguous {
+                smtp_error(
+                    ErrorKind::DeliveryUnknown, operation, &config.host, None,
+                    format!("relay acceptance is unknown: {}", error_reason(&error)),
+                )
+            } else {
+                with_operation_server(error, operation, &config.host)
+            }
+        })
+    }
+
+    pub fn smtp_dot_stuff(bytes: &[u8]) -> Result<Vec<u8>, Error> { dot_stuff(bytes, usize::MAX) }
+
+    fn dot_stuff(bytes: &[u8], max_message_bytes: usize) -> Result<Vec<u8>, Error> {
+        let leading_dots = bytes.windows(3).filter(|window| *window == b"\r\n.").count()
+            + usize::from(bytes.first() == Some(&b'.'));
+        let final_crlf = if bytes.ends_with(b"\r\n") { 0 } else { 2 };
+        let capacity = bytes.len().checked_add(leading_dots)
+            .and_then(|value| value.checked_add(final_crlf))
+            .and_then(|value| value.checked_add(3))
+            .ok_or_else(|| error("smtp", "dot-stuffed message size overflow"))?;
+        if capacity.saturating_sub(3) > max_message_bytes {
+            return Err(error("smtp", "dot-stuffed message exceeds configured max_message_bytes"));
+        }
+        let mut out = Vec::with_capacity(capacity);
+        let mut line_start = true;
+        for byte in bytes {
+            if line_start && *byte == b'.' { out.push(b'.'); }
+            out.push(*byte);
+            line_start = out.ends_with(b"\r\n");
+        }
+        if final_crlf != 0 { out.extend_from_slice(b"\r\n"); }
+        out.extend_from_slice(b".\r\n");
+        Ok(out)
+    }
+
+    fn checkpoint<C: SmtpControl>(
+        control: &C,
+        operation: &str,
+        server: &str,
+        ambiguous: bool,
+    ) -> Result<(), Error> {
+        control.checkpoint(operation).map_err(|stop| {
+            if ambiguous {
+                smtp_error(
+                    ErrorKind::DeliveryUnknown, operation, server, None,
+                    "operation stopped after DATA was transmitted; relay acceptance is unknown",
+                )
+            } else {
+                smtp_error(
+                    match stop { SmtpStop::Cancelled => ErrorKind::Cancelled, SmtpStop::TimedOut => ErrorKind::TimedOut },
+                    operation, server, None,
+                    match stop { SmtpStop::Cancelled => "SMTP operation cancelled", SmtpStop::TimedOut => "SMTP operation timed out" },
+                )
+            }
+        })
+    }
+
+    fn expect_success(reply: &SmtpReply, operation: &str, server: &str) -> Result<(), Error> {
+        if (200..=299).contains(&reply.code) { Ok(()) }
+        else if (400..=599).contains(&reply.code) {
+            Err(reply_failure(operation, server, reply.code, &reply_text(reply)))
+        } else {
+            Err(smtp_error(
+                ErrorKind::Protocol, operation, server, Some(reply.code),
+                "SMTP command returned an unexpected response code",
+            ))
+        }
+    }
+
+    fn expect_code(reply: &SmtpReply, code: i64, operation: &str, server: &str) -> Result<(), Error> {
+        if reply.code == code { Ok(()) }
+        else if (400..=599).contains(&reply.code) {
+            Err(reply_failure(operation, server, reply.code, &reply_text(reply)))
+        } else {
+            Err(smtp_error(
+                ErrorKind::Protocol, operation, server, Some(reply.code),
+                format!("expected SMTP {code}, got {}", reply.code),
+            ))
+        }
+    }
+
+    fn reply_failure(operation: &str, server: &str, code: i64, reason: &str) -> Error {
+        smtp_error(
+            if code < 500 { ErrorKind::Transient } else { ErrorKind::Rejected },
+            operation, server, Some(code), reason,
+        )
+    }
+
+    fn reply_text(reply: &SmtpReply) -> String { reply.lines.join("\n") }
+
+    fn error_reason(error: &Error) -> &str {
+        match error {
+            Error::Configuration { reason, .. } | Error::Dns { reason, .. }
+            | Error::Connect { reason, .. } | Error::Tls { reason, .. }
+            | Error::Auth { reason, .. } | Error::Protocol { reason, .. }
+            | Error::Rejected { reason, .. } | Error::Transient { reason, .. }
+            | Error::TimedOut { reason, .. } | Error::Cancelled { reason, .. }
+            | Error::DeliveryUnknown { reason, .. } => reason,
+        }
+    }
+
+    fn with_server(error: Error, server: &str) -> Error {
+        with_operation_server(error, "smtp", server)
+    }
+
+    fn with_operation_server(error: Error, operation: &str, server: &str) -> Error {
+        let reason = error_reason(&error).to_string();
+        let code = match &error {
+            Error::Configuration { code, .. } | Error::Dns { code, .. }
+            | Error::Connect { code, .. } | Error::Tls { code, .. }
+            | Error::Auth { code, .. } | Error::Protocol { code, .. }
+            | Error::Rejected { code, .. } | Error::Transient { code, .. }
+            | Error::TimedOut { code, .. } | Error::Cancelled { code, .. }
+            | Error::DeliveryUnknown { code, .. } => *code,
+        };
+        let kind = match error {
+            Error::Configuration { .. } => ErrorKind::Configuration,
+            Error::Dns { .. } => ErrorKind::Dns,
+            Error::Connect { .. } => ErrorKind::Connect,
+            Error::Tls { .. } => ErrorKind::Tls,
+            Error::Auth { .. } => ErrorKind::Auth,
+            Error::Protocol { .. } => ErrorKind::Protocol,
+            Error::Rejected { .. } => ErrorKind::Rejected,
+            Error::Transient { .. } => ErrorKind::Transient,
+            Error::TimedOut { .. } => ErrorKind::TimedOut,
+            Error::Cancelled { .. } => ErrorKind::Cancelled,
+            Error::DeliveryUnknown { .. } => ErrorKind::DeliveryUnknown,
+        };
+        smtp_error(kind, operation, server, code, reason)
+    }
+
+    #[derive(Clone, Copy)]
+    enum ErrorKind {
+        Configuration, Dns, Connect, Tls, Auth, Protocol, Rejected, Transient,
+        TimedOut, Cancelled, DeliveryUnknown,
+    }
+
+    fn smtp_error(
+        kind: ErrorKind,
+        operation: &str,
+        server: &str,
+        code: Option<i64>,
+        reason: impl Into<String>,
+    ) -> Error {
+        let operation = operation.to_string();
+        let server = Some(server.to_string());
+        let reason = reason.into();
+        match kind {
+            ErrorKind::Configuration => Error::Configuration { operation, server, code, reason },
+            ErrorKind::Dns => Error::Dns { operation, server, code, reason },
+            ErrorKind::Connect => Error::Connect { operation, server, code, reason },
+            ErrorKind::Tls => Error::Tls { operation, server, code, reason },
+            ErrorKind::Auth => Error::Auth { operation, server, code, reason },
+            ErrorKind::Protocol => Error::Protocol { operation, server, code, reason },
+            ErrorKind::Rejected => Error::Rejected { operation, server, code, reason },
+            ErrorKind::Transient => Error::Transient { operation, server, code, reason },
+            ErrorKind::TimedOut => Error::TimedOut { operation, server, code, reason },
+            ErrorKind::Cancelled => Error::Cancelled { operation, server, code, reason },
+            ErrorKind::DeliveryUnknown => Error::DeliveryUnknown { operation, server, code, reason },
+        }
     }
 
     fn error(operation: &'static str, reason: impl Into<String>) -> Error {

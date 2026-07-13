@@ -225,6 +225,181 @@ fn core_email_smtp_reply_parser_bounds_and_tls_auth_order_are_real() {
 }
 
 #[test]
+fn core_email_smtp_transaction_starttls_auth_rcpt_and_data_are_real() {
+    use email_native::jet_email;
+    use std::io::{Read, Write};
+
+    struct Script {
+        replies: std::io::Cursor<Vec<u8>>,
+        writes: Vec<u8>,
+        verified_tls: bool,
+        upgrades: usize,
+        closed: bool,
+    }
+    impl Read for Script {
+        fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> { self.replies.read(out) }
+    }
+    impl Write for Script {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.writes.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
+    }
+    impl jet_email::SmtpTransport for Script {
+        fn verified_tls(&self) -> bool { self.verified_tls }
+        fn start_tls(&mut self, _server: &str, _trust: &jet_email::TlsTrust) -> Result<(), String> {
+            self.verified_tls = true;
+            self.upgrades += 1;
+            Ok(())
+        }
+        fn close(&mut self) { self.closed = true; }
+    }
+
+    let sender = jet_email::address(&"sender@example.com".to_string()).unwrap();
+    let accepted = jet_email::address(&"ok@example.net".to_string()).unwrap();
+    let rejected = jet_email::address(&"no@example.org".to_string()).unwrap();
+    let message = jet_email::message(
+        &sender, &vec![accepted.clone(), rejected.clone()], &vec![], &"subject".to_string(),
+        &"first\r\n.second".to_string(), &String::new(), &vec![],
+    ).unwrap();
+    let config = jet_email::SmtpConfig {
+        host: "smtp.example.com".to_string(),
+        port: 587,
+        security: jet_email::SmtpSecurity::StartTls,
+        auth: jet_email::SmtpAuth::Password {
+            username: "mailer".to_string(),
+            password: b"secret".to_vec(),
+        },
+        recipient_policy: jet_email::RecipientPolicy::DeliverAccepted,
+        trust: jet_email::TlsTrust::System,
+        limits: jet_email::Limits::safe(),
+    };
+    let replies = concat!(
+        "220 relay ready\r\n",
+        "250-relay\r\n250-STARTTLS\r\n250 AUTH PLAIN LOGIN\r\n",
+        "220 begin TLS\r\n",
+        "250-relay\r\n250 AUTH PLAIN LOGIN\r\n",
+        "235 authenticated\r\n",
+        "250 sender accepted\r\n",
+        "250 recipient accepted\r\n",
+        "550 recipient rejected\r\n",
+        "354 send data\r\n",
+        "250 queued as q-1\r\n",
+        "221 bye\r\n",
+    );
+    let mut transport = Script {
+        replies: std::io::Cursor::new(replies.as_bytes().to_vec()),
+        writes: Vec::new(), verified_tls: false, upgrades: 0, closed: false,
+    };
+    let report = jet_email::smtp_transaction(
+        &mut transport, &config, &message, &jet_email::NoopSmtpControl,
+    ).unwrap();
+    assert_eq!((report.accepted.len(), report.rejected.len()), (1, 1));
+    assert_eq!((report.response_code, report.response.as_str()), (250, "queued as q-1"));
+    assert!(!report.accepted_at.is_empty());
+    assert_eq!(transport.upgrades, 1);
+    assert!(transport.closed);
+    let wire = String::from_utf8(transport.writes).unwrap();
+    assert!(wire.starts_with("EHLO localhost\r\nSTARTTLS\r\nEHLO localhost\r\nAUTH PLAIN "));
+    assert!(!wire.contains("secret"));
+    assert!(wire.contains("MAIL FROM:<sender@example.com>\r\n"));
+    assert!(wire.contains("RCPT TO:<ok@example.net>\r\nRCPT TO:<no@example.org>\r\nDATA\r\n"));
+    assert!(wire.contains("\r\n.\r\nQUIT\r\n"));
+    assert_eq!(
+        jet_email::smtp_dot_stuff(b"first\r\n.second\r\n").unwrap(),
+        b"first\r\n..second\r\n.\r\n",
+    );
+}
+
+#[test]
+fn core_email_smtp_transaction_require_all_and_delivery_unknown_are_honest() {
+    use email_native::jet_email;
+    use std::io::{Read, Write};
+
+    struct Script { replies: std::io::Cursor<Vec<u8>>, writes: Vec<u8>, closed: bool }
+    impl Read for Script {
+        fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> { self.replies.read(out) }
+    }
+    impl Write for Script {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.writes.extend_from_slice(bytes); Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
+    }
+    impl jet_email::SmtpTransport for Script {
+        fn verified_tls(&self) -> bool { true }
+        fn start_tls(&mut self, _server: &str, _trust: &jet_email::TlsTrust) -> Result<(), String> {
+            panic!("implicit TLS must not upgrade")
+        }
+        fn close(&mut self) { self.closed = true; }
+    }
+    struct Stop(jet_email::SmtpStop);
+    impl jet_email::SmtpControl for Stop {
+        fn checkpoint(&self, _operation: &str) -> Result<(), jet_email::SmtpStop> { Err(self.0) }
+        fn accepted_at(&self) -> String { panic!("stopped transaction cannot be accepted") }
+    }
+
+    let sender = jet_email::address(&"sender@example.com".to_string()).unwrap();
+    let recipient = jet_email::address(&"recipient@example.net".to_string()).unwrap();
+    let message = jet_email::message(
+        &sender, &vec![recipient], &vec![], &"subject".to_string(),
+        &"body".to_string(), &String::new(), &vec![],
+    ).unwrap();
+    let config = |policy| jet_email::SmtpConfig {
+        host: "smtp.example.com".to_string(), port: 465,
+        security: jet_email::SmtpSecurity::Tls, auth: jet_email::SmtpAuth::None,
+        recipient_policy: policy, trust: jet_email::TlsTrust::System,
+        limits: jet_email::Limits::safe(),
+    };
+
+    for (stop, timed_out) in [
+        (jet_email::SmtpStop::Cancelled, false),
+        (jet_email::SmtpStop::TimedOut, true),
+    ] {
+        let mut stopped = Script {
+            replies: std::io::Cursor::new(Vec::new()), writes: Vec::new(), closed: false,
+        };
+        let error = jet_email::smtp_transaction(
+            &mut stopped, &config(jet_email::RecipientPolicy::RequireAll), &message, &Stop(stop),
+        ).unwrap_err();
+        assert_eq!(matches!(error, jet_email::Error::TimedOut { .. }), timed_out);
+        assert_eq!(matches!(error, jet_email::Error::Cancelled { .. }), !timed_out);
+        assert!(stopped.writes.is_empty());
+        assert!(stopped.closed);
+    }
+
+    let reject_replies = concat!(
+        "220 ready\r\n", "250 relay\r\n", "250 sender\r\n", "550 no\r\n",
+    );
+    let mut reject = Script {
+        replies: std::io::Cursor::new(reject_replies.as_bytes().to_vec()),
+        writes: Vec::new(), closed: false,
+    };
+    assert!(matches!(jet_email::smtp_transaction(
+        &mut reject, &config(jet_email::RecipientPolicy::RequireAll), &message,
+        &jet_email::NoopSmtpControl,
+    ), Err(jet_email::Error::Rejected { code: Some(550), .. })));
+    assert!(!String::from_utf8(reject.writes).unwrap().contains("DATA\r\n"));
+    assert!(reject.closed);
+
+    let unknown_replies = concat!(
+        "220 ready\r\n", "250 relay\r\n", "250 sender\r\n", "250 recipient\r\n",
+        "354 continue\r\n",
+    );
+    let mut unknown = Script {
+        replies: std::io::Cursor::new(unknown_replies.as_bytes().to_vec()),
+        writes: Vec::new(), closed: false,
+    };
+    assert!(matches!(jet_email::smtp_transaction(
+        &mut unknown, &config(jet_email::RecipientPolicy::DeliverAccepted), &message,
+        &jet_email::NoopSmtpControl,
+    ), Err(jet_email::Error::DeliveryUnknown { operation, .. }) if operation == "data_response"));
+    assert_eq!(String::from_utf8(unknown.writes).unwrap().matches("DATA\r\n").count(), 1);
+    assert!(unknown.closed);
+}
+
+#[test]
 fn core_email_limits_are_constructible_real_jet_values() {
     let dir = std::env::temp_dir().join(format!("jet_email_limits_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
