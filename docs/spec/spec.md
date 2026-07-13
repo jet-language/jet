@@ -297,6 +297,29 @@ the lock scoped to the call only. Cloning `Shared<T>` is always a cheap
 handle clone, never a deep copy of `T` — so it crosses a `tasks.spawn`
 boundary with no `^`.
 
+Inside a `#Transact` block (D-STM1), a `Shared<T>.edit` joins the block's
+atomic commit instead of locking on its own line: every touched handle changes
+together or not at all, and no other task ever sees a half-applied change. The
+runtime defers each edit and, at the block's end, takes all the touched
+handles' locks at once in a fixed order that cannot deadlock — the deadlock
+class hand-ordered locking is famous for simply disappears. One marker, one
+meaning (I8): the same `#Transact` that gives single-task rollback now spans
+shared state.
+
+```jet
+fn transfer(from: Shared<Account>, to: Shared<Account>, amount: Int) {
+    #Transact(tx) {
+        from.edit(a => { a.balance -= amount })  // both land, or neither
+        to.edit(a => { a.balance += amount })    // no lock order to get wrong
+    }
+}
+```
+
+(examples/features/memory/shared_transact.jet) A `Shared.edit` here yields
+nothing — the write happens at commit — so its closure ends in a statement.
+An irreversible effect (`Net`/`Fs`/`Exec`) directly in the block is still
+E0746: move it after the block or register it with `tx.on_commit(…)`.
+
 **`Pool<T>`/`Id<T>`** (D-POOLID-API1) is a generational arena: every value
 lives in one shared table, and other values point at it by `Id<T>` — plain
 copyable, comparable index+generation data, never touching `T` itself:
