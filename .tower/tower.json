@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 531,
-    "rev": 5357,
+    "rev": 5360,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -3163,8 +3163,18 @@
       "plan": "Plan seed from D-WD14:\n1. Re-read the ratified ballot and current spec/Tower plans for overlap.\n2. Split into vertical slices if the feature spans compiler, Core, Jetpack, GUI, and OS surfaces.\n3. Queue exact-syntax/subsurface ballots before parser, manifest, CLI, or API surface changes.\n4. Implement the first ungated vertical slice end to end with executable examples and diagnostics.\n5. Prove beginner default UX and expert audit/control UX with tests or transcripts.",
       "blockedBy": [],
       "workOrder": 46,
-      "assignee": "terra-241-cli-close",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-13",
+          "by": "terra-241-cli-close",
+          "text": "[handoff] Integrate 38676f9f and rerun targeted budget CLI gate. Resume criterion 9 at stale-history semantics: expose otherwise-compatible stale generation/state from BudgetStore, persist stale HistorySelection without pooling baseline, render stale true/status/evidence summary, and prove stale bootstrap append/CAS. Then independently verify criterion 9. Worktree /tmp/jet-card-241-cli-close must be removed after integration."
+        },
+        {
+          "at": "2026-07-13",
+          "by": "terra-241-cli-close",
+          "text": "[progress] Criterion-9 CLI correctness committed at 38676f9f. Renderer preserves percentile, baseline ids, confidence bounds, trend, and reason; common ordering/status/failure_kind, matching human/GitHub copy, verbose evidence, and invalid-baseline usage preflight fixed. Targeted budget CLI 16/16 and cargo check green. Criterion 9 remains open: stale compatible history still collapses to ordinary unavailable, so exact stale result/summary/bootstrap projection needs a real follow-up before meet."
+        },
         {
           "at": "2026-07-13",
           "by": "codex-orchestrator",
@@ -3448,8 +3458,7 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
-      "claimedAt": "2026-07-13T19:07:05.108Z"
+      "refs": []
     },
     {
       "id": "c008rjua",
@@ -4156,8 +4165,13 @@
       "priority": "P1",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-ENCSTREAM1=A: Hybrid: same codec modules, tree and stream modes. Every codec module keeps one adapter identity: parse/to_string/decode<T> for whole values and reader/writer event streams for large inputs. XML, JSONL, canonical JSON, and CBOR all flow through Data/DataTree and Codable, so streaming is a mode of the same codec, not a second library.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: corelib audit: core.encoding — format breadth (XML, binary interchange, streaming)\n\nCurrent law: Existing linked decisions: D-ENCBIN1=ratified/A. D-CORENS1 keeps all first-party modules under core.*; I6 forbids compiler deps; D-STDRUBRIC1 requires mechanical core API laws.\n\nBuild order: Audit current Core/API/prelude/docs/tests first; write failing UI/golden/unit fixtures; implement std-only or approved bridge code; update docs/reference and syntax-decisions when law changes; run targeted tests, then full nix develop -c cargo test before close.\n\nAcceptance: Examples/goldens or UI snapshots prove each shipped behavior; stdlib map records shipped/carded/declined rows; no rustc/user-hostile errors; no compiler external deps.\n\nDependencies/collisions: Respect neighboring core cards: io/args/process separate; text before regex; net/url before http; encoding before data/db; random never owns secrets.",
       "blockedBy": [],
-      "assignee": "terra-296-cbor-limits",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-13",
+          "by": "terra-296-cbor-limits",
+          "text": "[handoff] Commit 0052c3cd in /tmp/jet-card-296-cbor-limits. Whole parser now prospectively bounds retained byte/text payloads, array/map requested capacities, key capacities, and temporary path capacities under one peak-live budget; division-before-product comparisons reject before allocation and cannot wrap; temporary path charges release; canonical key comparison is zero-copy. Original-wire canonical validation now rejects noncanonical Float16 NaNs, all wider NaNs, and Float32/64 values exactly representable at a shorter width; canonical 0xf97e00 remains accepted. Evidence: new hostile float/allocation gate 1/1 green; prior typed whole regression 1/1 green; real test-only GlobalAlloc oracle tracks actual requested alloc/realloc/dealloc live bytes with input excluded and returned tree retained, 1/1 green; git diff --check green. No broad suite due parent stop and /tmp 83 percent. Honest remaining #296 work: indefinite-length whole decoding, corpus/docs; error-object String accounting on failure paths is not covered by the successful-return allocator oracle and should receive a hostile allocator-failure oracle before claiming the entire allocation criterion closed."
+        },
         {
           "at": "2026-07-13",
           "by": "codex-orchestrator",
@@ -4388,8 +4402,7 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
-      "claimedAt": "2026-07-13T19:06:44.190Z"
+      "refs": []
     },
     {
       "id": "c0wx96s2",
@@ -32371,6 +32384,27 @@
   ],
   "events": [
     {
+      "at": "2026-07-13T19:17:42.719Z",
+      "by": "terra-241-cli-close",
+      "action": "card.release",
+      "ref": "ccq07pav",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-13T19:17:25.574Z",
+      "by": "terra-241-cli-close",
+      "action": "card.update",
+      "ref": "ccq07pav",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T19:17:06.840Z",
+      "by": "terra-296-cbor-limits",
+      "action": "card.release",
+      "ref": "c0uxsyns",
+      "note": "[handoff] logged"
+    },
+    {
       "at": "2026-07-13T19:08:55.610Z",
       "by": "terra-511-hygiene",
       "action": "card.claim",
@@ -35848,27 +35882,6 @@
       "action": "card.criteria-add",
       "ref": "c0h1r3b8",
       "note": "#3 All readiness and completion waits are bounded; timeout kill"
-    },
-    {
-      "at": "2026-07-13T00:23:54.689Z",
-      "by": "terra-301-builder",
-      "action": "card.criteria-add",
-      "ref": "c0h1r3b8",
-      "note": "#2 Native Windows compiles and runs core.os facts plus real Set"
-    },
-    {
-      "at": "2026-07-13T00:23:54.598Z",
-      "by": "terra-301-builder",
-      "action": "card.criteria-add",
-      "ref": "c0h1r3b8",
-      "note": "#1 Native macOS compiles and runs core.os facts plus real SIGIN"
-    },
-    {
-      "at": "2026-07-13T00:23:47.234Z",
-      "by": "terra-301-builder",
-      "action": "card.add",
-      "ref": "c0h1r3b8",
-      "note": "Epoch 8 core.os native macOS/Windows runtime matrix"
     }
   ],
   "nextNum": 368,
