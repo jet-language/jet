@@ -633,14 +633,17 @@ fn run() { print(Left.value() + Right.value()) }
 
 #[test]
 fn web_wasm_inline_modules_emit_distinct_qualified_calls() {
-    if !have_tool("rustc") {
+    if !have_tool("rustc") || !have_tool("node") {
         eprintln!("note: skipping web Wasm module identity test");
         return;
     }
     let src = r#"#Target(Web)
 module Left { pub fn value() -> Int { return 1 } }
 module Right { pub fn value() -> Int { return 2 } }
-fn run() { print(Left.value() + Right.value()) }
+#WasmExport
+fn total() -> Int { return Left.value() + Right.value() }
+#Target(Js)
+fn run() { print(total()) }
 "#;
     let dir = build_web_fixture("wasm_module_identity", src, "tests/fixtures/web_wasm_module_identity.jet");
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
@@ -648,6 +651,27 @@ fn run() { print(Left.value() + Right.value()) }
     assert!(wasm.contains("fn jet_wasm_Right__value() -> i64"), "right Wasm identity was dropped:\n{wasm}");
     assert!(wasm.contains("jet_wasm_Left__value()"), "left qualified call was dropped:\n{wasm}");
     assert!(wasm.contains("jet_wasm_Right__value()"), "right qualified call was dropped:\n{wasm}");
+    assert_eq!(run_web_app(&dir), "3\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn module_local_run_cannot_hijack_web_entrypoint() {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web entrypoint identity test");
+        return;
+    }
+    let src = r#"#Target(Web)
+module Helper { pub fn run() -> Int { return 7 } }
+#Target(Js)
+fn run() { print("top-level") }
+"#;
+    let dir = build_web_fixture("entry_identity", src, "tests/fixtures/web_entry_identity.jet");
+    let manifest = fs::read_to_string(dir.join("build/web.manifest.json")).unwrap();
+    assert!(manifest.contains("\"entry\": \"Js\""), "module-local run hijacked manifest entry:\n{manifest}");
+    let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
+    assert!(!js.contains("wasm.jet_export_run()"), "module-local run hijacked JS startup:\n{js}");
+    assert_eq!(run_web_app(&dir), "top-level\n");
     let _ = fs::remove_dir_all(&dir);
 }
 

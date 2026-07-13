@@ -446,7 +446,7 @@ fn emit_manifest(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> String {
     parts.push("  \"wasmTriple\": \"wasm32-unknown-unknown\"".to_string());
     let entry = funcs
         .iter()
-        .find(|f| f.name == "run")
+        .find(|f| f.key == "run")
         .map(|f| f.bucket.name())
         .unwrap_or(Syntax::WEB_BUCKET_JS);
     parts.push(format!("  \"entry\": {}", json_quote(entry)));
@@ -632,7 +632,7 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
     }
     for f in wasm_funcs {
         let export = f.marker == Some(WebPartitionMarker::WasmExport)
-            || (f.name == "run"
+            || (f.key == "run"
                 && f.bucket == WebBucket::Wasm
                 && bundle.modules[bundle.entry].html_path.is_none());
         emit_wasm_fn(bundle, f, export, &mut out, funcs)?;
@@ -885,7 +885,7 @@ fn emit_js_app(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<Strin
         emit_js_fn(f, &mut out, funcs)?;
     }
 
-    if let Some(main_fn) = funcs.iter().find(|f| f.name == "run") {
+    if let Some(main_fn) = funcs.iter().find(|f| f.key == "run") {
         if main_fn.bucket == WebBucket::Js {
             out.push_str("export async function jet_main() {\n");
             out.push_str(&format!(
