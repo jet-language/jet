@@ -20325,6 +20325,130 @@
       "ratifiedAt": "2026-07-08",
       "draft": false,
       "retiredAt": "2026-07-13T09:56:35.529Z"
+    },
+    {
+      "id": "D-GENMOD1",
+      "cardId": "c1jixkit",
+      "title": "Add generic modules (ML-functor-style module parameterized by a type or value)?",
+      "gist": "Jet has generic types and functions. Generic modules — a module parameterized by a type or value at the module level, instantiated to produce a new module — do not exist. This decides whether to add them or keep the surface at generic types and functions only.",
+      "explainer": "ML-style functors let you write `module Map(K: Ord)` and instantiate it as `module IntMap = Map(Int)`. The result is a new module with all members specialized to `K = Int`. In Jet, generic types already handle the common case (`Map[K: Ord, V]`); generic modules go further by allowing module-level abstraction (sharing multiple related types, hiding implementation modules, enforcing interface contracts at the module boundary). Under I8, if generic types already cover the use case, a second mechanism is a strike. The complexity is high: module instantiation affects name resolution, the module graph, and comptime. There is no ratified syntax precedent in Jet for module-level generics.",
+      "story": "I'm building a pluggable hash-map where the key comparison strategy is a module (not just a function). I want `module HashMap(K: KeyModule)` where `KeyModule` supplies `hash`, `eq`, and an associated `Error` type — none of which are cleanly expressible as a single generic type parameter.",
+      "inWild": "// Proposed syntax (not ratified):\nmodule HashMap(K: KeyModule) {\n    type Map[V] = ...\n    pub fn insert(m: Map[V], k: K.Key, v: V) -> Map[V] { ... }\n}\n\nmodule IntHashMap = HashMap(IntKeyModule)\nlet m: IntHashMap.Map[String] = ...",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Add generic modules (ML-functor style)",
+          "detail": "Ratify module-level parameterization. A module can declare type/value parameters; instantiation produces a new named module. Requires new syntax, new name-resolution rules, and comptime integration. Only justified if a concrete use case cannot be served by generic types alone.",
+          "code": "module Sorted(T: Ord) {\n    pub fn sort(xs: [T]) -> [T] { ... }\n}\nmodule SortedInt = Sorted(Int)\nlet xs: [Int] = SortedInt.sort.[5, 1, 3]"
+        },
+        {
+          "key": "B",
+          "name": "Keep generic types and functions only (status quo)",
+          "detail": "The existing `Type[T: Trait]` and `fn foo[T: Trait]()` cover the overwhelming majority of parameterization needs. Module-level generics add complexity for a narrow use case. Reject until a concrete case proves generic types are insufficient. I8-clean.",
+          "code": "// status quo: generic type covers the common case\nstruct HashMap[K: Ord, V] { ... }\nimpl[K: Ord, V] HashMap[K, V] {\n    pub fn insert(self, k: K, v: V) -> Self { ... }\n}"
+        },
+        {
+          "key": "C",
+          "name": "Defer pending concrete use case",
+          "detail": "Don't reject outright — park the card until a real Jet codebase hits the wall with generic types and functions and needs functor-level abstraction. Then revisit with a concrete motivating example.",
+          "code": "// deferred: no syntax or implementation\n// reopen when a concrete stdlib or user case requires it"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "OCaml (functors)",
+          "note": "OCaml functors are the canonical ML-functor. `module Map.Make(Ord)` produces a map module specialized to `Ord.t`. Widely used but notoriously hard to read for newcomers.",
+          "code": "module IntMap = Map.Make(Int)\nlet m = IntMap.add 1 \"one\" IntMap.empty"
+        },
+        {
+          "lang": "Rust",
+          "note": "Rust has no module generics — generic types and traits cover the use case. This is the status-quo model Jet already follows; it has proven sufficient for a production systems language.",
+          "code": "// No generic modules; use generic structs + traits:\nstruct HashMap<K: [Hash, Eq], V> { ... }"
+        }
+      ],
+      "rec": "B",
+      "status": "ratified",
+      "group": "research",
+      "outcome": "A",
+      "ratifiedAt": "2026-06-27",
+      "draft": false,
+      "retiredAt": "2026-07-13T11:43:10.583Z"
+    },
+    {
+      "id": "D-GENMOD2",
+      "cardId": "c1jixkit",
+      "title": "What exact syntax distinguishes generic-module type parameters, value parameters, and instantiation?",
+      "gist": "Before choosing a spelling: resolve the conflict with D-GENMOD1's floor example (paren type params) and D-LINALG1's blessed `<N>` value-in-angles. The current option set contains no choice that is consistent with both prior decisions simultaneously. A new option (annotation-kind in `<...>`, no extra keyword) resolves both. The \"const generics in v1 rejected\" ruling may also close Options A–C entirely; confirm its scope before proceeding.",
+      "explainer": "Owner instruction integrated: Jet generics use `<T>`, so generic modules must not invent `[]` for type parameters. Adversarial pass: mixing type and value parameters can become C++-template soup or force users to guess whether an argument is a type or value. Patch: keep type parameters in `<...>`, keep compile-time value parameters in `(...)`, and require instantiation to mirror declaration. If that still feels too large for E3, choose the Epoch 6 defer option and keep ordinary generic structs/functions as the only generic surface for now.",
+      "story": "Priya is writing a fixed-size LRU cache package. The key type controls hashing/equality, while the capacity is a compile-time value. She wants one generic module that exports `Cache`, `put`, and `get`, then instantiates `StringCache32` once for the rest of the package.",
+      "inWild": "module Lru<K: Hash>(capacity: Int) {\n    pub struct Cache<V> { ... }\n    pub fn put(c: ~Cache<V>, key: K, value: V) { ... }\n}\n\nmodule StringCache32 = Lru<String>(32)",
+      "detail": "Owner Q: Address GENMOD2; integrate the instruction that Jet generics use `<T>`, provide better options, and include an option to defer to Epoch 6.\nAgent answer: Corrected. The previous `[]` type-parameter option was wrong for Jet because `[]` already reads as list/indexing while `<T>` is the ratified generic form. Updated options now center `<T>` for type parameters, separate compile-time value parameters with `(...)`, and add an Epoch 6 defer option.\n\nAdversarial pass (2026-06-28): PRIOR DECISION CONFLICTS (must resolve before any option is adopted): D-GENMOD1's ratified code example uses `module Sorted(T: Ord)` — type param in parens; Option A contradicts this. D-LINALG1 blessed Vec<N> (value-in-<...>) as the substrate spelling; Option A puts values in (...), directly contradicting. The comptime section of syntax-decisions.md says \"Rejected: const generics in v1\" — module value parameters are const generics and this rejection may apply. PARSER HAZARD (Option A): `Lru<String>(32)` is syntactically identical to D-SERDE6 turbofish `fn<T>(arg)`; parser cannot resolve without name-resolution, violating parse-before-sema. VOCABULARY HAZARD (Option B): `const` is a teaching-error-only keyword (S14); using it inside `<...>` is the first real use. MISSING OPTION E: unified `<K: Hash, capacity: Int>` with annotation-kind as distinguisher — consistent with D-LINALG1, avoids all vocabulary collisions.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Unified `<...>`: annotation kind distinguishes type vs value params (recommended)",
+          "detail": "Both type and value parameters live in `<...>`. A parameter whose annotation is a bound/trait (`K: Hash`) is a type parameter; one whose annotation is a value type (`capacity: Int`) is a value parameter — no extra keyword, no dual-bracket syntax. Instantiation mirrors declaration: `Lru<String, 32>`. Consistent with D-LINALG1's `Vec<N>` substrate (value-in-angles already blessed). Supersedes D-GENMOD1's prototype floor example which used parens — that was explicitly a placeholder \"until GENMOD2 decides.\" Parser: distinguishes a type expression (capital-cased, D-CASING1) from a value expression at instantiation sites in `<...>` — mostly mechanical at the lexer level.",
+          "code": "module Lru<K: Hash, capacity: Int> {\n    pub struct Cache<V> { ... }\n    pub fn put(c: ~Cache<V>, key: K, value: V) { ... }\n    pub fn get(c: ~Cache<V>, key: K) -> V? { ... }\n}\n\nmodule StringCache32 = Lru<String, 32>\n// StringCache32.put(cache, \"hello\", profile)"
+        },
+        {
+          "key": "B",
+          "name": "Defer generic modules to Epoch 6",
+          "detail": "Do not add module-level type/value parameters now. Ordinary generic structs and functions (`fn sort<T: Ord>`, `struct Vec<T>`) already cover most use cases. Defer if the \"const generics in v1 rejected\" ruling in the comptime section applies to module value parameters, or if the D-LINALG1 `Vec<N>` value-parameter surface needs a unified ruling before any single site commits.",
+          "code": "module LruString32 {\n    pub struct Cache<V> { ... }\n    pub fn put(c: ~Cache<V>, key: String, value: V) { ... }\n}\n// Epoch 6: module Lru<K: Hash, capacity: Int> { ... }"
+        },
+        {
+          "key": "C",
+          "name": "Ordinary generic types/fns only — no module-level parameters",
+          "detail": "Decline generic modules entirely. Priya's LRU cache is a generic struct with a capacity field; the type-level instantiation story is solved by generic types already. Module-level parameters are a second mechanism for the same parametrization job (I8 risk). Only reconsider if a concrete use case cannot be expressed with generic types.",
+          "code": "struct LruCache<K: Hash, V> {\n    capacity: Int,\n    // ...\n}\n// Not a module param; capacity is a runtime constructor arg"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust uses `<T>` for type parameters and also has const generics in `<...>`. Good precedent for Option B, but Jet should avoid forcing values into type syntax unless needed.",
+          "code": "struct Ring<T, const N: usize> { ... }"
+        },
+        {
+          "lang": "C++",
+          "note": "C++ templates mix type and value parameters in angle brackets. Powerful, but visually dense and a known complexity sink.",
+          "code": "template<typename K, int N> struct Lru { ... };"
+        },
+        {
+          "lang": "OCaml",
+          "note": "OCaml functors are module-level generics, but parameters are module-shaped. Powerful, less beginner-direct than Jet’s desired package surface.",
+          "code": "module IntMap = Map.Make(Int)"
+        },
+        {
+          "lang": "Zig",
+          "note": "Zig uses comptime parameters in function-like declarations; clear for values, but Jet already has `<T>` for type generics.",
+          "code": "fn Lru(comptime K: type, comptime capacity: usize) type { ... }"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "group": "language",
+      "createdAt": "2026-06-28",
+      "recommendation": "Unified `<K: Hash, capacity: Int>` — annotation kind distinguishes type vs value parameters in `<...>` (Option A). Consistent with D-LINALG1's Vec<N>; supersedes D-GENMOD1's prototype floor example. If the \"const generics in v1 rejected\" ruling applies, choose Option B (defer).",
+      "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Ballot cleanup: rec key fixed, detail deduplicated, naming corrected."
+        },
+        {
+          "at": "2026-06-28",
+          "text": "Adversarial pass complete: options hardened, challenges documented in detail field."
+        },
+        {
+          "at": "2026-06-28",
+          "text": "Ballot tightened: collapsed to 3 options, Option A is the unified optimal recommendation (adversarial pass + recommendation fused), rec moved to A."
+        }
+      ],
+      "outcome": "A",
+      "ratifiedAt": "2026-06-28",
+      "draft": false,
+      "retiredAt": "2026-07-13T11:43:10.583Z"
     }
   ],
   "cards": [
@@ -69074,6 +69198,20 @@
       "action": "card.criteria-verify",
       "ref": "c2yj0nk5",
       "note": "#2"
+    },
+    {
+      "at": "2026-07-12T18:18:50.273Z",
+      "by": "terra-142-jit",
+      "action": "card.criteria-meet",
+      "ref": "c2yj0nk5",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-12T18:18:50.417Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c2yj0nk5",
+      "note": "#3"
     }
   ]
 }
