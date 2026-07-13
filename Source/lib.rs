@@ -63,6 +63,11 @@ pub use jet_driver::{
     SHA256,
 };
 pub use jet_queries as Queries;
+// D-ARCH-SOURCE1=A: real REPL seam ownership. Compatibility paths remain
+// `jet::REPL`, `jet::Term`, and `jet::SemanticSymbols`; implementation lives
+// entirely in the workspace crate.
+pub use jet_repl as REPL;
+pub use jet_repl::{SemanticSymbols, Term};
 pub mod BuildCache;
 pub mod BudgetProviders;
 pub mod BudgetStore;
@@ -78,14 +83,11 @@ pub mod Explain;
 pub mod Fetch;
 pub mod FixEngine;
 pub mod Help;
-pub mod SemanticSymbols;
 pub mod Interpreter;
 pub mod JitBackend;
 pub mod LSP;
 pub mod Publish;
-pub mod REPL;
 pub mod Store;
-pub mod Term;
 
 use Diagnostics::Diagnostic;
 

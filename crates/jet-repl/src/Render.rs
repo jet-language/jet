@@ -58,7 +58,7 @@ pub fn render_discovery_hint(raw_mode: bool, color: bool) -> String {
 
 /// The interactive-only prompt: a dim one-character-cost turn-number gutter
 /// ahead of `user> ` (`1 user> `). The non-TTY floor keeps the old bare
-/// `user> ` prompt (see `Source/REPL/mod.rs::run_cooked`) — this is never
+/// `user> ` prompt (see `lib.rs::run_cooked`) — this is never
 /// called from there.
 pub fn render_prompt(turn_no: usize, color: bool) -> String {
     format!("{} user> ", dim(&turn_no.to_string(), color))
@@ -75,7 +75,7 @@ pub fn format_binding(name: &str, v: &CtValue, mutable: bool) -> String {
 
 /// The element type name shown inside a fold marker (`[Row]`, `[Int]`, …).
 /// Structs/enums use their declared name; everything else uses the same
-/// name `Source/REPL/mod.rs::type_name` shows for a scalar echo.
+/// name `lib.rs::type_name` shows for a scalar echo.
 fn element_type_name(v: &CtValue) -> String {
     match v {
         CtValue::Struct { type_name, .. } => type_name.clone(),

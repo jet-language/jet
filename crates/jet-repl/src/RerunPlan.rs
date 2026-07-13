@@ -8,7 +8,7 @@
 //! silently.
 //!
 //! This module is pure: it only *decides* the plan and renders it as text.
-//! `Interactive::cmd_rerun` (and the `:rerun` textual fallback in `mod.rs`)
+//! `Interactive::cmd_rerun` (and the `:rerun` textual fallback in `lib.rs`)
 //! own actually re-executing the steps and asking for confirmation.
 
 use super::{bold, ReplTurn};
@@ -114,7 +114,7 @@ pub fn render_replay_plan(plan: &ReplayPlan, color: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::REPL::ReplTurnStatus;
+    use crate::ReplTurnStatus;
 
     fn turn(id: usize, input: &str, had_effect: bool, bound_name: Option<&str>) -> ReplTurn {
         ReplTurn {

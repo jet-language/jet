@@ -450,6 +450,13 @@ fn compiler_seam_crates_have_only_path_dependencies() {
             crate_manifests.push((name, manifest));
         }
     }
+    // D-ARCH-SOURCE1=A: interactive seams are not optional aliases hidden in
+    // the root crate. Their manifests must exist and therefore pass this same
+    // path-only dependency audit.
+    assert!(
+        crate_manifests.iter().any(|(name, _)| name == "jet-repl"),
+        "D-ARCH-SOURCE1 requires the jet-repl workspace seam"
+    );
 
     let mut offenders = Vec::new();
     for (name, manifest) in &crate_manifests {

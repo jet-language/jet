@@ -21,7 +21,7 @@
 //!   E1802  hard-reject: feature not available in the REPL interpreter
 //!
 //! D-FE-REPL1=D (2026-07-08): hybrid REPL — the line REPL's mental model with
-//! notebook/workspace layers one keystroke away. `mod.rs` keeps the session
+//! notebook/workspace layers one keystroke away. `lib.rs` keeps the session
 //! model, input classification, sema plumbing, and the non-TTY floor
 //! (`run_transcript`/`run_cooked`) byte-identical to the pre-redesign REPL.
 //! The interactive-TTY rendering lives in sibling modules so its pieces are
@@ -31,6 +31,17 @@
 //!   `Docs`        — D-FE-REPL-DOCS1=B `?name` lookup over the shared docs index
 //!   `Terminal`    — raw-mode guard (`stty` shell-out, I6) + key decoding
 //!   `Interactive` — the raw-mode event loop wiring the above together
+
+#![allow(non_snake_case)]
+#![deny(warnings)]
+
+// D-ARCH-SOURCE1=A: the REPL is a real outer seam over the compiler driver.
+// Re-export inward compiler vocabulary so moved subsystem source keeps its
+// established `crate::AST`/`crate::Comptime` paths without depending on root.
+pub use jet_driver::{AST, Comptime, Diagnostics, Lexer, Loader, Parser, Sema, Syntax};
+
+pub mod SemanticSymbols;
+pub mod Term;
 
 use std::collections::{HashMap, HashSet};
 use std::io::{self, BufRead, Write};
@@ -45,7 +56,8 @@ mod History;
 mod Interactive;
 pub mod Render;
 pub mod RerunPlan;
-// `Terminal` moved to `crate::Term` (shared with `Help`, I8); alias keeps
+// `Terminal` lives in this seam's shared `Term` module; root Help/dev callers
+// consume the same mechanism through the seam (I8).
 // every existing `Terminal::…` reference in this module + `Interactive.rs`
 // unchanged.
 use crate::Term as Terminal;
@@ -1840,7 +1852,7 @@ fn cmd_type(name: &str, session: &Session, color: bool) {
 // ── diagnostic rendering ───────────────────────────────────────────────────
 
 fn render_diags(file: &str, src: &str, diags: &[Diagnostic], color: bool) {
-    eprint!("{}", crate::render_all_colored(file, src, diags, color));
+    eprint!("{}", crate::Diagnostics::render_all_colored(file, src, diags, color));
     let n = diags.len();
     eprintln!("{} problem{} found", n, if n == 1 { "" } else { "s" });
 }

@@ -2,7 +2,7 @@
 //!
 //! `?name` is a REPL-only query form — it is parsed here, in the REPL's own
 //! input classifier, and never reaches the Jet lexer/parser as source (no new
-//! user-typeable syntax; see `Source/REPL/mod.rs` where `?name` is peeled off
+//! user-typeable syntax; see this crate's `lib.rs` where `?name` is peeled off
 //! before `classify()` sees the rest of the line).
 //!
 //! It resolves a name exactly the way completion/LSP hover would: builtin
@@ -111,7 +111,11 @@ fn session_item_lookup(session: &Session, name: &str) -> Option<String> {
         return None;
     }
     let path_str = tmp_path.to_string_lossy().to_string();
-    let (_, bundle, facts) = crate::LSP::check_document_with_bundle(&path_str, &src);
+    let (_, bundle, facts) = jet_driver::Driver::check_file_with_effect_facts(
+        &path_str,
+        Some((&tmp_path, &src)),
+        true,
+    );
     let result = (|| {
         let bundle = bundle?;
         let db = jet_semindex::build_symbol_db(&bundle, &facts);

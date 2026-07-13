@@ -1147,7 +1147,7 @@ fn repl_core_process_run_is_authorized_and_captured() {
 
 #[test]
 fn repl_interrupt_signal_paths_cover_apple_and_bsd_unix() {
-    let terminal = include_str!("../Source/Term.rs");
+    let terminal = include_str!("../crates/jet-repl/src/Term.rs");
     let evaluation_path = terminal
         .split("pub struct EvaluationInterruptGuard")
         .nth(1)
@@ -1586,9 +1586,9 @@ fn repl_immut_binding_rejects_reassign() {
 
 // ── D-FE-REPL1=D: hybrid REPL — turn gutter, fold, pin rail, docs, rerun ───
 //
-// The raw-mode TTY event loop (`Source/REPL/Interactive.rs`) isn't
+// The raw-mode TTY event loop (`crates/jet-repl/src/Interactive.rs`) isn't
 // exercised here (no real pty in the test harness — see
-// `Source/REPL/Terminal.rs` for the raw-mode guard/key-decoder unit tests
+// `crates/jet-repl/src/Term.rs` for the raw-mode guard/key-decoder unit tests
 // instead). What IS tested here, against the same `pub` API the interactive
 // loop calls, is every decision that shapes the interactive UX: the turn
 // gutter, the auto-fold threshold, the pin rail, `?name` docs, and the
@@ -1776,7 +1776,7 @@ fn textual_rerun_fallback_still_previews_a_turn() {
     // `:rerun <id>` preview shape byte-for-byte (same assertion
     // `repl_notebook_turn_controls` already pins for `:turns`/`:pin`/`:fold`).
     // The plan-based replay (`Replay plan: … Apply? [y/N]`) is the cooked/
-    // interactive-loop behavior (`Source/REPL/mod.rs::handle_meta`, exercised
+    // interactive-loop behavior (`crates/jet-repl/src/lib.rs::handle_meta`, exercised
     // by `RerunPlan`'s own unit/integration tests above) — `run_transcript`
     // doesn't route through it, by design (I6/floor: no pty in this harness).
     let out = run_transcript(&["1 + 2", ":rerun 1"], None);

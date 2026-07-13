@@ -8,7 +8,7 @@
 //! dev shell targets); key decoding is plain byte parsing over `std::io`.
 //! When stdin/stdout aren't both a TTY, or `stty` isn't available, `enable()`
 //! returns `None` and the caller falls back to its non-interactive floor
-//! (REPL: `Source/REPL/mod.rs::run_cooked`; help: the static/query palette).
+//! (REPL: `lib.rs::run_cooked`; help: the static/query palette).
 
 use std::io::{self, IsTerminal, Read};
 use std::process::{Command, Stdio};

@@ -142,6 +142,12 @@ fn workspace_crates_keep_declared_dependency_direction() {
         &["jet-driver", "jet-foundation", "jet-sema"],
     );
     assert_deps("crates/jet-impact/Cargo.toml", &["jet-semindex"]);
+    // D-ARCH-SOURCE1=A: interactive shell owns behavior, depending only
+    // inward on the compiler driver and shared semantic index.
+    assert_deps(
+        "crates/jet-repl/Cargo.toml",
+        &["jet-driver", "jet-semindex"],
+    );
     assert_deps(
         "crates/jet-jit/Cargo.toml",
         &["jet-codegen", "jet-foundation", "jet-rt"],
@@ -160,6 +166,7 @@ fn workspace_crates_keep_declared_dependency_direction() {
             "jet-impact",
             "jet-jit",
             "jet-queries",
+            "jet-repl",
             "jet-semindex",
             "jetpack",
         ],

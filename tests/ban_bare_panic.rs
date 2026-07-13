@@ -86,17 +86,17 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
         "#[test]-only assertion fixture",
     ),
     (
-        "Source/REPL/mod.rs",
+        "crates/jet-repl/src/lib.rs",
         3,
         "three #[cfg(test)] REPL statement-classifier assertion fixtures",
     ),
     (
-        "Source/REPL/HistoryPlatform.rs",
+        "crates/jet-repl/src/HistoryPlatform.rs",
         1,
         "#[cfg(test)] Unix ABI-table assertion helper",
     ),
     (
-        "Source/REPL/History.rs",
+        "crates/jet-repl/src/History.rs",
         1,
         "#[test] history lock assertion fixture",
     ),
@@ -131,6 +131,7 @@ const SCAN_ROOTS: &[&str] = &[
     "crates/jet-queries",
     "crates/jet-rt",
     "crates/jet-impact",
+    "crates/jet-repl",
     "Source",
 ];
 
