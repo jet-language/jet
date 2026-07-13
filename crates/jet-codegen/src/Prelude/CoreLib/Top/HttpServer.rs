@@ -21,6 +21,7 @@ struct JetHttpSrvReq {
 type JetHttpMuxHandlerFn = std::sync::Arc<dyn Fn(JetHttpSrvReq) -> JetHttpSrvResp + Send + Sync>;
 type JetHttpMuxMiddlewareFn = std::sync::Arc<dyn Fn(JetHttpMuxHandlerFn) -> JetHttpMuxHandlerFn + Send + Sync>;
 
+#[derive(Clone)]
 struct JetHttpMuxRoute {
     method: String,
     pattern: String,
@@ -541,11 +542,16 @@ fn jet_http_srv_parse(raw: &str) -> JetHttpSrvReq {
 }
 
 fn jet_http_mux_dispatch(mux: &JetHttpMux, req: JetHttpSrvReq) -> JetHttpSrvResp {
-    let routes = mux.0.lock().unwrap();
-    let path_matches: Vec<(&JetHttpMuxRoute, std::collections::BTreeMap<String, String>, (usize, usize, usize))> = routes
-        .iter()
-        .filter_map(|route| jet_http_match_path(&route.pattern, &req.path).map(|(params, score)| (route, params, score)))
-        .collect();
+    // Route lookup is a short snapshot operation. Never retain the registry
+    // lock while composing middleware or running user code: handlers may
+    // overlap and may register another route on this same mux.
+    let path_matches: Vec<(JetHttpMuxRoute, std::collections::BTreeMap<String, String>, (usize, usize, usize))> = {
+        let routes = mux.0.lock().unwrap();
+        routes
+            .iter()
+            .filter_map(|route| jet_http_match_path(&route.pattern, &req.path).map(|(params, score)| (route.clone(), params, score)))
+            .collect()
+    };
     let requested_method = req.method.to_uppercase();
     let effective_method = if requested_method == "HEAD"
         && !path_matches.iter().any(|(route, _, _)| route.method == "HEAD")
@@ -626,7 +632,7 @@ fn jet_http_match_path(
 }
 
 fn jet_http_allowed_methods(
-    matches: &[(&JetHttpMuxRoute, std::collections::BTreeMap<String, String>, (usize, usize, usize))],
+    matches: &[(JetHttpMuxRoute, std::collections::BTreeMap<String, String>, (usize, usize, usize))],
 ) -> String {
     let mut methods = std::collections::BTreeSet::new();
     for (route, _, _) in matches { methods.insert(route.method.clone()); }

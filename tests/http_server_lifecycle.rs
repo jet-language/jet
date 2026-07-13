@@ -247,3 +247,48 @@ fn middleware_orders_short_circuits_contains_panics_and_isolates_requests() {
     }
     for thread in threads { thread.join().unwrap(); }
 }
+
+#[test]
+fn dispatch_drops_route_lock_before_concurrent_and_reentrant_handlers() {
+    let request = |path: &str| JetHttpSrvReq {
+        method: "GET".to_string(), path: path.to_string(), params: Default::default(),
+        body: String::new(), headers: Default::default(),
+    };
+
+    // Two requests must enter the same handler concurrently. Holding the route
+    // registry guard through user code serializes them and strands this barrier.
+    let overlap = jet_http_mux_new();
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+    let entered = barrier.clone();
+    jet_http_mux_add(&overlap, "GET", "/overlap", move |_| {
+        entered.wait();
+        jet_http_srv_response(200, &"overlap".to_string())
+    });
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    for _ in 0..2 {
+        let mux = overlap.clone();
+        let done = done_tx.clone();
+        std::thread::spawn(move || {
+            done.send(jet_http_mux_dispatch(&mux, request("/overlap")).status).unwrap();
+        });
+    }
+    for _ in 0..2 {
+        assert_eq!(done_rx.recv_timeout(std::time::Duration::from_secs(2)).expect("handlers did not overlap"), 200);
+    }
+
+    // User code may register a route on its own mux without deadlocking on the
+    // registry lock retained by dispatch.
+    let reentrant = jet_http_mux_new();
+    let from_handler = reentrant.clone();
+    jet_http_mux_add(&reentrant, "GET", "/register", move |_| {
+        jet_http_mux_add(&from_handler, "GET", "/added", |_| jet_http_srv_response(201, &"added".to_string()));
+        jet_http_srv_response(200, &"registered".to_string())
+    });
+    let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+    let dispatch_mux = reentrant.clone();
+    std::thread::spawn(move || {
+        reply_tx.send(jet_http_mux_dispatch(&dispatch_mux, request("/register"))).unwrap();
+    });
+    assert_eq!(reply_rx.recv_timeout(std::time::Duration::from_secs(2)).expect("route registration deadlocked").status, 200);
+    assert_eq!(jet_http_mux_dispatch(&reentrant, request("/added")).status, 201);
+}
