@@ -196,7 +196,7 @@ impl<'a> Checker<'a> {
             // a fixed-width integer type when one is expected here (binding/param/
             // return annotation, sized arithmetic). A literal that doesn't fit the
             // width is rejected (E1003) — there is no silent truncation.
-            Expr::Int(n, span, width) => {
+            Expr::Int(n, span, width, _) => {
                 let (n, span) = (*n, *span);
                 if let Some(Type::IntN { signed, bits }) = self.expected_type.clone() {
                     let (lo, hi) = crate::AST::int_range(signed, bits);
@@ -557,7 +557,7 @@ impl<'a> Checker<'a> {
                 // literal is range-checked at its negated value (`-128` fits `I8`)
                 // and the operand's own positive range check doesn't fire spuriously.
                 if let UnOp::Neg = op {
-                    if let (Expr::Int(n, ispan, width), Some(Type::IntN { signed: true, bits })) =
+                    if let (Expr::Int(n, ispan, width, _), Some(Type::IntN { signed: true, bits })) =
                         (inner.as_mut(), self.expected_type.clone())
                     {
                         let v = -(*n as i128);
@@ -1575,7 +1575,7 @@ impl<'a> Checker<'a> {
                         "use an Int index, like `items[0]`".to_string(),
                         Some(index.span()),
                     ));
-                } else if let Expr::Int(n, _, _) = index.as_ref() {
+                } else if let Expr::Int(n, _, _, _) = index.as_ref() {
                     // E0965: compile-time out-of-bounds index.
                     if *n < 0 || *n as u64 >= *len {
                         self.diags.push(Diagnostic::error(
@@ -1670,7 +1670,7 @@ impl<'a> Checker<'a> {
                         "use an Int index, like `v[0]`".to_string(),
                         Some(index.span()),
                     ));
-                } else if let Expr::Int(num, _, _) = index.as_ref() {
+                } else if let Expr::Int(num, _, _, _) = index.as_ref() {
                     let lanes = math_arity(&lane_name) as i64;
                     if *num < 0 || *num >= lanes {
                         self.diags.push(Diagnostic::error(

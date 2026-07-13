@@ -46,7 +46,7 @@ pub(super) fn layout_constraint_fingerprint(e: &Expr) -> String {
             _ => "<str>".to_string(),
         },
         Expr::Float(f, _, _) => f.to_string(),
-        Expr::Int(i, _, _) => i.to_string(),
+        Expr::Int(i, _, _, _) => i.to_string(),
         _ => "<?>".to_string(),
     }
 }

@@ -278,19 +278,19 @@ impl<'a> Lexer<'a> {
                         Some(span),
                     ));
                     return Token {
-                        kind: TokKind::Int(0),
+                        kind: TokKind::Int(0, self.src[span.start..span.end].to_string()),
                         span,
                     };
                 }
                 return match i64::from_str_radix(&digits, radix) {
                     Ok(n) => Token {
-                        kind: TokKind::Int(n),
+                        kind: TokKind::Int(n, self.src[span.start..span.end].to_string()),
                         span,
                     },
                     Err(_) => {
                         self.diags.push(self.too_big(span));
                         Token {
-                            kind: TokKind::Int(0),
+                            kind: TokKind::Int(0, self.src[span.start..span.end].to_string()),
                             span,
                         }
                     }
@@ -367,7 +367,7 @@ impl<'a> Lexer<'a> {
                 }
                 let span = Span::new(start, self.pos(self.i));
                 Token {
-                    kind: TokKind::Int(n),
+                    kind: TokKind::Int(n, self.src[span.start..span.end].to_string()),
                     span,
                 }
             }
@@ -375,7 +375,7 @@ impl<'a> Lexer<'a> {
                 let span = Span::new(start, self.pos(self.i));
                 self.diags.push(self.too_big(span));
                 Token {
-                    kind: TokKind::Int(0),
+                    kind: TokKind::Int(0, self.src[span.start..span.end].to_string()),
                     span,
                 }
             }

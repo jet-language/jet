@@ -574,7 +574,7 @@ fn normalize_limit(name: &str, metric: &str, limit: &str, expr: &Expr) -> Result
     }
     let allowed = if matches!(metric, "BinarySize" | "ArtifactSize" | "AllocationBytes" | "MemoryHighWater" | "SceneAssetBytes") { &["B", "KiB", "MiB", "GiB"][..] } else if matches!(metric, "StartupTime" | "FrameTime" | "Latency" | "BenchTime" | "ServiceReadiness") { &["ns", "us", "ms", "s"][..] } else { &[][..] };
     if allowed.is_empty() {
-        let Expr::Int(n, _, _) = value else { return Err(invalid(name, "this metric uses a nonnegative Count value", "write a nonnegative integer", value.span())) };
+        let Expr::Int(n, _, _, _) = value else { return Err(invalid(name, "this metric uses a nonnegative Count value", "write a nonnegative integer", value.span())) };
         let count = u128::try_from(*n).map_err(|_| invalid(name, "this metric uses a nonnegative Count value", "write a nonnegative integer", value.span()))?;
         return Ok(BudgetLimitFact { kind: limit.into(), quantity: BudgetQuantity::Count(count), raw: BudgetRawQuantity::Scalar { digits: n.to_string(), suffix: None } });
     }
@@ -609,13 +609,13 @@ fn normalize_rate(name: &str, value: &Expr) -> Result<(BudgetQuantity, BudgetRaw
     }
     let count_expr = count.ok_or_else(|| invalid(name, "Rate requires `count`", "add `count: <nonnegative integer>`", value.span()))?;
     let per_expr = per.ok_or_else(|| invalid(name, "Rate requires `per`", "add `per: <positive duration>`", value.span()))?;
-    let Expr::Int(count, _, _) = count_expr else { return Err(invalid(name, "Rate count must be a nonnegative integer", "write `count: 100`", count_expr.span())) };
+    let Expr::Int(count, _, _, Some(count_raw)) = count_expr else { return Err(invalid(name, "Rate count must be a nonnegative integer", "write `count: 100`", count_expr.span())) };
     let count = u128::try_from(*count).map_err(|_| invalid(name, "Rate count must be a nonnegative integer", "write `count: 100`", count_expr.span()))?;
     let Expr::UnitLit { raw: per_raw, suffix, .. } = per_expr else { return Err(invalid(name, "Rate per must be a positive Duration", "write `per: 1s`", per_expr.span())) };
     let multiplier = unit_multiplier(suffix).filter(|_| matches!(suffix.as_str(), "ns" | "us" | "ms" | "s")).ok_or_else(|| invalid(name, "Rate per must use ns, us, ms, or s", "write `per: 1s`", per_expr.span()))?;
     let per_ns = per_raw.parse::<u128>().ok().and_then(|n| n.checked_mul(multiplier)).filter(|n| *n > 0).ok_or_else(|| invalid(name, "Rate per must normalize to a positive Duration", "write a positive whole duration", per_expr.span()))?;
     let divisor = gcd(count, per_ns);
-    Ok((BudgetQuantity::Rate { numerator: count / divisor, denominator_ns: per_ns / divisor }, BudgetRawQuantity::Rate { count_digits: count.to_string(), per_digits: per_raw.clone(), per_suffix: suffix.clone() }))
+    Ok((BudgetQuantity::Rate { numerator: count / divisor, denominator_ns: per_ns / divisor }, BudgetRawQuantity::Rate { count_digits: count_raw.clone(), per_digits: per_raw.clone(), per_suffix: suffix.clone() }))
 }
 
 fn unit_multiplier(suffix: &str) -> Option<u128> {

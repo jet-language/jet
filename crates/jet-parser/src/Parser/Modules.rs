@@ -593,7 +593,7 @@ impl<'a> Parser<'a> {
                 // expressions are values; an identifier can still be
                 // contextualized as either a type or an earlier constant by sema.
                 match &self.peek().kind {
-                    TokKind::Int(_) | TokKind::KwTrue | TokKind::KwFalse | TokKind::Char(_) | TokKind::Str(_)
+                    TokKind::Int(_, _) | TokKind::KwTrue | TokKind::KwFalse | TokKind::Char(_) | TokKind::Str(_)
                     | TokKind::LParen | TokKind::Minus | TokKind::Bang => {
                         let expr = self.module_arg_expr()?;
                         args.push(ModuleArg::Value(expr, arg_start));

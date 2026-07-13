@@ -101,7 +101,7 @@ impl<'a> Parser<'a> {
     
         /// S73: reject `.0` / `.1` field access before `expect_ident`.
         pub(super) fn expect_field_name(&mut self) -> Result<(String, Span), Diagnostic> {
-            if matches!(self.peek().kind, TokKind::Int(_) | TokKind::Float(_)) {
+            if matches!(self.peek().kind, TokKind::Int(_, _) | TokKind::Float(_)) {
                 let span = self.peek().span;
                 self.bump();
                 self.emit_numeric_field_error(span);
@@ -197,13 +197,13 @@ impl<'a> Parser<'a> {
             if self.after_lparen_is_positional_tuple() {
                 self.emit_positional_tuple_error(open);
                 self.sync_to_rparen();
-                return Ok(Expr::Int(0, open, None));
+                return Ok(Expr::Int(0, open, None, None));
             }
             let inner = self.expr()?;
             if matches!(self.peek().kind, TokKind::Comma) {
                 self.emit_positional_tuple_error(open);
                 self.sync_to_rparen();
-                return Ok(Expr::Int(0, open, None));
+                return Ok(Expr::Int(0, open, None, None));
             }
             self.expect(TokKind::RParen, "to close this `(`")?;
             let close_span = self.toks[self.pos - 1].span;

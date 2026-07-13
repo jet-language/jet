@@ -205,7 +205,7 @@ impl<'a> Checker<'a> {
                         if ns == "core.encoding" && leaf == "DataEvent" {
                             let saved: Vec<Expr> = args
                                 .iter_mut()
-                                .map(|a| std::mem::replace(&mut a.expr, Expr::Int(0, a.span, None)))
+                                .map(|a| std::mem::replace(&mut a.expr, Expr::Int(0, a.span, None, None)))
                                 .collect();
                             let mut enum_args: Vec<EnumLitArg> =
                                 saved.into_iter().map(EnumLitArg::Positional).collect();
@@ -367,7 +367,7 @@ impl<'a> Checker<'a> {
                     if has_variant {
                         let saved: Vec<Expr> = args
                             .iter_mut()
-                            .map(|a| std::mem::replace(&mut a.expr, Expr::Int(0, a.span, None)))
+                            .map(|a| std::mem::replace(&mut a.expr, Expr::Int(0, a.span, None, None)))
                             .collect();
                         let mut enum_args: Vec<EnumLitArg> =
                             saved.into_iter().map(EnumLitArg::Positional).collect();

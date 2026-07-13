@@ -438,7 +438,7 @@ impl<'a> Parser<'a> {
                     // S76 (2026-06-16): `[T#N]` fixed-size list.
                     self.bump(); // consume `#`
                     let (len, len_symbol) = match &self.peek().kind {
-                        TokKind::Int(n) => {
+                        TokKind::Int(n, _) => {
                             let n = *n;
                             self.bump();
                             (n as u64, None)

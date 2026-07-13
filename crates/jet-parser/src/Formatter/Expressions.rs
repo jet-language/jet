@@ -256,7 +256,7 @@ impl<'a> Fmt<'a> {
             // slice, but only when it round-trips to the same value: some
             // Int nodes are synthesized with a borrowed nearby span whose
             // text isn't a number at all.
-            Expr::Int(n, span, _) => {
+            Expr::Int(n, span, _, _) => {
                 let text = int_literal_spelling(self.src, *span, *n);
                 self.write(&text);
             }

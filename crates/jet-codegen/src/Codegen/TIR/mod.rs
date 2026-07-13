@@ -293,7 +293,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
             Item::Const(c) => {
                 let value = match &c.ct {
                     Some(crate::AST::CtValue::Int(value)) => Some(*value),
-                    _ => match &c.value { crate::AST::Expr::Int(value, _, _) => Some(*value), _ => None },
+                    _ => match &c.value { crate::AST::Expr::Int(value, _, _, _) => Some(*value), _ => None },
                 };
                 if let Some(value) = value {
                     int_constants.insert(c.name.clone(), value);
@@ -339,7 +339,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                                 let value = match &c.ct {
                                     Some(crate::AST::CtValue::Int(value)) => Some(*value),
                                     _ => match &c.value {
-                                        crate::AST::Expr::Int(value, _, _) => Some(*value),
+                                        crate::AST::Expr::Int(value, _, _, _) => Some(*value),
                                         _ => None,
                                     },
                                 };

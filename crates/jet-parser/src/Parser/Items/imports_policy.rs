@@ -317,7 +317,7 @@ impl<'a> Parser<'a> {
             let mut text = String::new();
             let mut end;
             match self.peek().kind.clone() {
-                TokKind::Int(n) => {
+                TokKind::Int(n, _) => {
                     text.push_str(&n.to_string());
                     end = self.bump().span.end;
                 }
@@ -338,10 +338,10 @@ impl<'a> Parser<'a> {
                 }
             }
             while matches!(self.peek().kind, TokKind::Dot)
-                && matches!(self.peek2().kind, TokKind::Int(_))
+                && matches!(self.peek2().kind, TokKind::Int(_, _))
             {
                 self.bump(); // `.`
-                let TokKind::Int(n) = self.peek().kind else {
+                let TokKind::Int(n, _) = self.peek().kind else {
                     unreachable!("guarded by the match above")
                 };
                 text.push('.');

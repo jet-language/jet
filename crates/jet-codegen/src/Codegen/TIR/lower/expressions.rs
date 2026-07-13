@@ -116,7 +116,7 @@ pub(crate) fn lower_expr_as_mut_place(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> 
 
 pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
     match e {
-        Expr::Int(n, _, width) => TExpr {
+        Expr::Int(n, _, width, _) => TExpr {
             ty: int_lit_type(width),
             kind: TExprKind::IntLit(*n, *width),
         },

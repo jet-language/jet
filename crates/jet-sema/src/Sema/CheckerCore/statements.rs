@@ -957,7 +957,7 @@ impl<'a> Checker<'a> {
                                     ));
                                     }
                                 }
-                                if let Expr::Int(n, sp, _) = step {
+                                if let Expr::Int(n, sp, _, _) = step {
                                     if *n <= 0 {
                                         self.diags.push(Diagnostic::error(
                                             "E0123",

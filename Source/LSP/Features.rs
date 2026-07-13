@@ -438,7 +438,7 @@ fn semantic_token_type_for(tokens: &[Token], idx: usize, src: &str) -> Option<(u
 
         TokKind::Str(_) => Some((st::STRING, 0)),
 
-        TokKind::Int(_) | TokKind::Float(_) | TokKind::Char(_) => Some((st::NUMBER, 0)),
+        TokKind::Int(..) | TokKind::Float(_) | TokKind::Char(_) => Some((st::NUMBER, 0)),
 
         TokKind::LineComment(_) | TokKind::BlockComment(_) => Some((st::COMMENT, 0)),
 

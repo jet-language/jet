@@ -438,7 +438,7 @@ fn ptr_fact_from_expr(expr: &crate::AST::Expr) -> Option<PtrFact> {
     let crate::AST::Expr::PtrFromAddr { elem, addr, .. } = expr else {
         return None;
     };
-    let crate::AST::Expr::Int(address, _, _) = addr.as_ref() else {
+    let crate::AST::Expr::Int(address, _, _, _) = addr.as_ref() else {
         return None;
     };
     if *address < 0 {

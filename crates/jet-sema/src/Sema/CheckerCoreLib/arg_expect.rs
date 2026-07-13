@@ -26,7 +26,7 @@ fn core_consuming_place(expr: &Expr) -> Option<(String, Option<String>, Span)> {
 
         match expr {
             Expr::Ident(name, _) => Some(name.clone()),
-            Expr::Int(value, _, _) => Some(value.to_string()),
+            Expr::Int(value, _, _, _) => Some(value.to_string()),
             Expr::Bool(value, _) => Some(value.to_string()),
             Expr::Call(call) => Some(format!("{}({})", call.name, args(&call.args)?)),
             Expr::MethodCall {

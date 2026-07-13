@@ -80,6 +80,15 @@ fn fmt_preserves_typed_performance_budget_role() {
 }
 
 #[test]
+fn fmt_preserves_rate_count_literal_spelling() {
+    let src = "fn run() {\n    rate :: Rate.{ count: 000_100, per: 2s }\n}\n";
+    let once = jet::format_source(src).expect("Rate count spelling should format");
+    assert!(once.contains("count: 000_100"), "formatter rewrote Rate count:\n{once}");
+    let twice = jet::format_source(&once).expect("formatted Rate count should parse");
+    assert_eq!(once, twice, "Rate count formatting must be stable");
+}
+
+#[test]
 fn fmt_preserves_s61_call_labels() {
     // S61: call-site argument labels (`name:`) must survive fmt — previously
     // `fmt_call_args` dropped them, so `area(width: 3, height: 4)` round-tripped

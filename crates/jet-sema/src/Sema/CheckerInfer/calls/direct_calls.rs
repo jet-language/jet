@@ -632,7 +632,7 @@ impl<'a> Checker<'a> {
                     // validate" as a type.
                     if let Some((lo, hi)) = self.registry.distinct_range(&call.name) {
                         match &call.args[0].expr {
-                            Expr::Int(n, span, _) => {
+                            Expr::Int(n, span, _, _) => {
                                 if *n < lo || *n > hi {
                                     self.diags.push(Diagnostic::error(
                                         "E0135",

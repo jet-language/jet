@@ -240,7 +240,7 @@ fn perf_budget_sema_rejects_closed_metric_baseline_and_selector_shapes() {
 
 #[test]
 fn perf_budget_sema_normalizes_rate_and_retains_canonical_facts() {
-    let source = |baseline: &str, count: i64, seconds: i64| format!(r#"module env.dev {{
+    let source = |baseline: &str, count: &str, seconds: i64| format!(r#"module env.dev {{
     services: {{ api: {{ enable: true }} }}
 }}
 module perf.release {{
@@ -255,14 +255,20 @@ module perf.release {{
     }}]
 }}
 "#);
-    let first = collect_perf_specs(&source("ci/linux-x64", 100, 2)).expect("valid Rate").remove(0);
+    let first = collect_perf_specs(&source("ci/linux-x64", "100", 2)).expect("valid Rate").remove(0);
     assert_eq!(first.comparison, "AbsoluteFrom");
     assert_eq!(first.comparison_fact.baseline.as_deref(), Some("ci/linux-x64"));
     assert_eq!(first.limit_fact.quantity, jet::Sema::BudgetQuantity::Rate { numerator: 1, denominator_ns: 20_000_000 });
     assert_eq!(first.limit_fact.raw, jet::Sema::BudgetRawQuantity::Rate { count_digits: "100".into(), per_digits: "2".into(), per_suffix: "s".into() });
-    let second = collect_perf_specs(&source("ci/macos-arm64", 75, 1)).expect("second valid Rate").remove(0);
+    let second = collect_perf_specs(&source("ci/macos-arm64", "75", 1)).expect("second valid Rate").remove(0);
     assert_ne!(first.comparison_fact, second.comparison_fact);
     assert_ne!(first.limit_fact, second.limit_fact);
+
+    let hostile = collect_perf_specs(&source("ci/linux-x64", "000_100", 2))
+        .expect("Rate with legal leading zeroes and separators")
+        .remove(0);
+    assert_eq!(hostile.limit_fact.quantity, jet::Sema::BudgetQuantity::Rate { numerator: 1, denominator_ns: 20_000_000 });
+    assert_eq!(hostile.limit_fact.raw, jet::Sema::BudgetRawQuantity::Rate { count_digits: "000_100".into(), per_digits: "2".into(), per_suffix: "s".into() });
 }
 
 #[test]

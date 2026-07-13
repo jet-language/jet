@@ -478,7 +478,7 @@ fn dot_zero_in_statement_lexes_as_dot_then_int() {
         .position(|t| matches!(t.kind, jet::Lexer::TokKind::Dot))
         .expect("dot");
     assert!(
-        matches!(toks[dot + 1].kind, jet::Lexer::TokKind::Int(0)),
+        matches!(toks[dot + 1].kind, jet::Lexer::TokKind::Int(0, _)),
         "{:?}",
         toks[dot + 1].kind
     );

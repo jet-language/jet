@@ -17,7 +17,7 @@ impl<'a> Parser<'a> {
             while matches!(
                 self.peek().kind,
                 TokKind::Ident(_)
-                    | TokKind::Int(_)
+                    | TokKind::Int(_, _)
                     | TokKind::Dot
                     | TokKind::Slash
                     | TokKind::Minus
@@ -152,7 +152,7 @@ impl<'a> Parser<'a> {
             matches!(
                 kind,
                 TokKind::Ident(_)
-                    | TokKind::Int(_)
+                    | TokKind::Int(_, _)
                     | TokKind::Float(_)
                     | TokKind::Str(_)
                     | TokKind::KwTrue

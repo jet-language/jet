@@ -978,7 +978,7 @@ mod tests {
                     from_span: zero(),
                     to_ty: Type::Int,
                     to_span: zero(),
-                    converter: Some(crate::AST::Expr::Int(0, zero(), None)),
+                    converter: Some(crate::AST::Expr::Int(0, zero(), None, None)),
                     converter_span: Some(zero()),
                     conv_fn: None,
                 }],

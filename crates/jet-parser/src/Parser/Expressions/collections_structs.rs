@@ -284,13 +284,13 @@ impl<'a> Parser<'a> {
                             {
                                 self.bump();
                                 crate::AST::PatSlot::Wildcard
-                            } else if let TokKind::Int(lo_val) = &self.peek().kind.clone() {
+                            } else if let TokKind::Int(lo_val, _) = &self.peek().kind.clone() {
                                 // D-PATR: `lo..hi` range in payload slot.
                                 let lo = *lo_val;
                                 self.bump();
                                 if matches!(self.peek().kind, TokKind::DotDot) {
                                     self.bump(); // consume `..`
-                                    if let TokKind::Int(hi_val) = &self.peek().kind.clone() {
+                                    if let TokKind::Int(hi_val, _) = &self.peek().kind.clone() {
                                         let hi = *hi_val;
                                         self.bump();
                                         crate::AST::PatSlot::Range { lo, hi }
@@ -390,12 +390,12 @@ impl<'a> Parser<'a> {
                                 {
                                     self.bump();
                                     crate::AST::PatSlot::Wildcard
-                                } else if let TokKind::Int(lo_val) = &self.peek().kind.clone() {
+                                } else if let TokKind::Int(lo_val, _) = &self.peek().kind.clone() {
                                     let lo = *lo_val;
                                     self.bump();
                                     if matches!(self.peek().kind, TokKind::DotDot) {
                                         self.bump();
-                                        if let TokKind::Int(hi_val) = &self.peek().kind.clone() {
+                                        if let TokKind::Int(hi_val, _) = &self.peek().kind.clone() {
                                             let hi = *hi_val;
                                             self.bump();
                                             crate::AST::PatSlot::Range { lo, hi }

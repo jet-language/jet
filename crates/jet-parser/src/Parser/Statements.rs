@@ -1520,7 +1520,7 @@ impl<'a> Parser<'a> {
         // D-PATR: `Int .. Int ->` is a range arm — detect without full expr parse.
         // Also detect `Int ..= Int ->` (E0318) and `Int .. Int step Int ->` (E0319)
         // porting hazards so we can emit teaching errors rather than confusing parse failures.
-        if let TokKind::Int(_) = &self.peek().kind {
+        if let TokKind::Int(_, _) = &self.peek().kind {
             if matches!(
                 self.toks.get(self.pos + 1).map(|t| &t.kind),
                 Some(TokKind::DotDot)
@@ -1612,7 +1612,7 @@ impl<'a> Parser<'a> {
                     let arm_start = self.peek().span;
                     // D-PATR: detect `Int .. Int ->` as a range-pattern arm head.
                     // C25: also detect `Int ..= Int ->` (E0318) and `Int .. Int step N ->` (E0319).
-                    let raw_head = if let TokKind::Int(lo_val) = &self.peek().kind.clone() {
+                    let raw_head = if let TokKind::Int(lo_val, _) = &self.peek().kind.clone() {
                         if matches!(
                             self.toks.get(self.pos + 1).map(|t| &t.kind),
                             Some(TokKind::DotDot)
@@ -1624,7 +1624,7 @@ impl<'a> Parser<'a> {
                                          // Push the error, then recover by consuming hi and building a valid range arm.
                             if matches!(self.peek().kind, TokKind::Eq) {
                                 self.bump(); // consume `=`
-                                if let TokKind::Int(hi_val) = &self.peek().kind.clone() {
+                                if let TokKind::Int(hi_val, _) = &self.peek().kind.clone() {
                                     let hi = *hi_val;
                                     let range_end = self.bump().span; // consume hi
                                     let pat_span = Span::new(range_start.start, range_end.end);
@@ -1653,7 +1653,7 @@ impl<'a> Parser<'a> {
                                         Some(self.peek().span),
                                     ));
                                 }
-                            } else if let TokKind::Int(hi_val) = &self.peek().kind.clone() {
+                            } else if let TokKind::Int(hi_val, _) = &self.peek().kind.clone() {
                                 let hi = *hi_val;
                                 let range_end = self.bump().span; // consume hi
                                 let pat_span = Span::new(range_start.start, range_end.end);
@@ -1669,7 +1669,7 @@ impl<'a> Parser<'a> {
                                         Some(pat_span),
                                     ));
                                     self.bump(); // consume `step`
-                                    if matches!(self.peek().kind, TokKind::Int(_)) {
+                                    if matches!(self.peek().kind, TokKind::Int(_, _)) {
                                         self.bump(); // consume step value
                                     }
                                 }
@@ -2168,12 +2168,12 @@ impl<'a> Parser<'a> {
                                     {
                                         self.bump();
                                         crate::AST::PatSlot::Wildcard
-                                    } else if let TokKind::Int(lo_val) = &self.peek().kind.clone() {
+                                    } else if let TokKind::Int(lo_val, _) = &self.peek().kind.clone() {
                                         let lo = *lo_val;
                                         self.bump();
                                         if matches!(self.peek().kind, TokKind::DotDot) {
                                             self.bump();
-                                            if let TokKind::Int(hi_val) = &self.peek().kind.clone()
+                                            if let TokKind::Int(hi_val, _) = &self.peek().kind.clone()
                                             {
                                                 let hi = *hi_val;
                                                 self.bump();
@@ -2223,7 +2223,7 @@ impl<'a> Parser<'a> {
                             },
                             span: pat_span,
                         }
-                    } else if let TokKind::Int(lo_val) = &self.peek().kind.clone() {
+                    } else if let TokKind::Int(lo_val, _) = &self.peek().kind.clone() {
                         if matches!(
                             self.toks.get(self.pos + 1).map(|t| &t.kind),
                             Some(TokKind::DotDot)
@@ -2235,7 +2235,7 @@ impl<'a> Parser<'a> {
                                          // Push the error, then recover by consuming hi and building a valid range arm.
                             if matches!(self.peek().kind, TokKind::Eq) {
                                 self.bump(); // consume `=`
-                                if let TokKind::Int(hi_val) = &self.peek().kind.clone() {
+                                if let TokKind::Int(hi_val, _) = &self.peek().kind.clone() {
                                     let hi = *hi_val;
                                     let range_end = self.bump().span; // consume hi
                                     let pat_span = Span::new(range_start.start, range_end.end);
@@ -2264,7 +2264,7 @@ impl<'a> Parser<'a> {
                                         Some(self.peek().span),
                                     ));
                                 }
-                            } else if let TokKind::Int(hi_val) = &self.peek().kind.clone() {
+                            } else if let TokKind::Int(hi_val, _) = &self.peek().kind.clone() {
                                 let hi = *hi_val;
                                 let range_end = self.bump().span; // consume hi
                                 let pat_span = Span::new(range_start.start, range_end.end);
@@ -2280,7 +2280,7 @@ impl<'a> Parser<'a> {
                                         Some(pat_span),
                                     ));
                                     self.bump(); // consume `step`
-                                    if matches!(self.peek().kind, TokKind::Int(_)) {
+                                    if matches!(self.peek().kind, TokKind::Int(_, _)) {
                                         self.bump(); // consume step value
                                     }
                                 }
@@ -2459,7 +2459,7 @@ impl<'a> Parser<'a> {
                             ty_span,
                             // Harmless placeholder — never evaluated; sema/codegen
                             // branch on `uninit` first and use `ty` for the type.
-                            init: Expr::Int(0, marker_span, None),
+                            init: Expr::Int(0, marker_span, None, None),
                             is_comptime: false,
                             ct: None,
                             uninit: true,

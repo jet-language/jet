@@ -308,9 +308,9 @@ impl<'a> Parser<'a> {
                     let span = self.bump().span;
                     self.str_expr_from_parts(parts, span)
                 }
-                TokKind::Int(n) => {
+                TokKind::Int(n, raw) => {
                     let span = self.bump().span;
-                    Ok(Expr::Int(n, span, None))
+                    Ok(Expr::Int(n, span, None, Some(raw)))
                 }
                 TokKind::Float(v) => {
                     let span = self.bump().span;

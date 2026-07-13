@@ -1135,7 +1135,7 @@ fn project_value_node(
         return Some(pin);
     }
     let (kind, title, badges) = match expr {
-        Expr::Int(_, _, _)
+        Expr::Int(_, _, _, _)
         | Expr::Float(_, _, _)
         | Expr::Bool(_, _)
         | Expr::Str(_, _)

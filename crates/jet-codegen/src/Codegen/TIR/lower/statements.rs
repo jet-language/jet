@@ -966,8 +966,8 @@ mod handoff_assert_tests {
         let cx = empty_cx();
         let mut env = LowerEnv::new("run".to_string());
         let idx_expr = Expr::Index {
-            base: Box::new(Expr::Int(0, Span::new(0, 0), None)),
-            index: Box::new(Expr::Int(0, Span::new(0, 0), None)),
+            base: Box::new(Expr::Int(0, Span::new(0, 0), None, None)),
+            index: Box::new(Expr::Int(0, Span::new(0, 0), None, None)),
             span: Span::new(0, 0),
             kind: IndexKind::Unknown, // seeded leak: sema never resolved this
         };
@@ -981,14 +981,14 @@ mod handoff_assert_tests {
         let mut env = LowerEnv::new("run".to_string());
         let stmt = Stmt::Assign {
             target: LValue::Index {
-                base: Box::new(Expr::Int(0, Span::new(0, 0), None)),
-                index: Box::new(Expr::Int(0, Span::new(0, 0), None)),
+                base: Box::new(Expr::Int(0, Span::new(0, 0), None, None)),
+                index: Box::new(Expr::Int(0, Span::new(0, 0), None, None)),
                 span: Span::new(0, 0),
                 kind: IndexKind::Unknown, // seeded leak: sema never resolved this
             },
             op: None,
             op_span: Span::new(0, 0),
-            value: Expr::Int(1, Span::new(0, 0), None),
+            value: Expr::Int(1, Span::new(0, 0), None, None),
         };
         let _ = lower_stmt(&stmt, &cx, &mut env);
     }

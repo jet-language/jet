@@ -187,7 +187,9 @@ pub enum Expr {
     /// `(signed, bits)`, filled by sema when the literal sits in a sized-integer
     /// context; `None` means the default `Int` (i64). Codegen reads it to pick
     /// the Rust literal suffix.
-    Int(i64, Span, Option<(bool, u8)>),
+    /// The fourth field preserves exact lexer spelling for source-authored
+    /// literals. Synthesized nodes carry `None`.
+    Int(i64, Span, Option<(bool, u8)>, Option<String>),
     /// D-FLOATW1: the bool is `true` when the literal is resolved as F32 in a
     /// typed context (e.g. `x: F32 = 1.5`). `false` = default F64/Float.
     Float(f64, Span, bool),
@@ -438,7 +440,7 @@ impl Expr {
             Expr::Str(_, s)
             | Expr::StrMatchLit(_, s)
             | Expr::BinMatchLit(_, s)
-            | Expr::Int(_, s, _)
+            | Expr::Int(_, s, _, _)
             | Expr::Float(_, s, _)
             | Expr::Bool(_, s)
             | Expr::Char(_, s)

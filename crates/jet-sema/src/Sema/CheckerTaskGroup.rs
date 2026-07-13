@@ -140,7 +140,7 @@ impl<'a> Checker<'a> {
         let span = expr.span();
         let init = std::mem::replace(
             expr,
-            Expr::Int(0, span, None), // placeholder; replaced below
+            Expr::Int(0, span, None, None), // placeholder; replaced below
         );
         *stmt = Stmt::Val(crate::AST::Binding {
             mutable: false,

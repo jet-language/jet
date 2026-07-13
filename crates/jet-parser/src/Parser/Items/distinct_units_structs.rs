@@ -289,7 +289,7 @@ impl<'a> Parser<'a> {
         /// Base(lo..hi)` range constraint.
         fn expect_range_bound_int(&mut self, where_: &str) -> Result<(i64, Span), Diagnostic> {
             match self.peek().kind {
-                TokKind::Int(n) => {
+                TokKind::Int(n, _) => {
                     let span = self.bump().span;
                     Ok((n, span))
                 }

@@ -1891,7 +1891,7 @@ fn serde_ct_source(value: &crate::AST::CtValue) -> Option<String> {
 
 fn serde_source_literal(e: &crate::AST::Expr) -> Option<String> {
     match e {
-        crate::AST::Expr::Int(v, _, _) => Some(v.to_string()),
+        crate::AST::Expr::Int(v, _, _, _) => Some(v.to_string()),
         crate::AST::Expr::Float(v, _, _) => Some(v.to_string()),
         crate::AST::Expr::Bool(v, _) => Some(v.to_string()),
         crate::AST::Expr::Char(v, _) => Some(format!("{v:?}")),
@@ -2546,7 +2546,7 @@ pub(crate) fn register_const(
         return;
     }
     let ty = match &c.value {
-        Expr::Int(_, _, _) => Some(Type::Int),
+        Expr::Int(_, _, _, _) => Some(Type::Int),
         Expr::Float(_, _, _) => Some(Type::Float),
         Expr::Bool(_, _) => Some(Type::Bool),
         _ => None,

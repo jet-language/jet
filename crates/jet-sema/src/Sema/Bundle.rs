@@ -122,7 +122,7 @@ fn normalize_sem_path(path: &Path) -> PathBuf {
 fn ct_value_expr(value: &crate::AST::CtValue, span: crate::Diagnostics::Span) -> Expr {
     match value {
         crate::AST::CtValue::Bool(v) => Expr::Bool(*v, span),
-        crate::AST::CtValue::Int(v) => Expr::Int(*v, span, None),
+        crate::AST::CtValue::Int(v) => Expr::Int(*v, span, None, None),
         crate::AST::CtValue::Char(v) => Expr::Char(*v, span),
         crate::AST::CtValue::Str(v) => Expr::Str(vec![StrPart::Lit(v.clone())], span),
         crate::AST::CtValue::Enum {
@@ -2550,7 +2550,7 @@ pub(crate) fn rewrite_inline_calls_expr(
             }
         }
         Expr::Char(_, _)
-        | Expr::Int(_, _, _)
+        | Expr::Int(_, _, _, _)
         | Expr::Float(_, _, _)
         | Expr::Bool(_, _)
         | Expr::Absent(_)
@@ -4854,7 +4854,7 @@ pub(crate) fn collect_core_expr(
                 collect_core_expr(item, imports, used, spans, ffi_cb);
             }
         }
-        Expr::Int(_, _, _)
+        Expr::Int(_, _, _, _)
         | Expr::Float(_, _, _)
         | Expr::Bool(_, _)
         | Expr::Char(_, _)

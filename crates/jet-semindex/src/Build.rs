@@ -1741,7 +1741,7 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
                 for item in items { collect_expr(item, mp, ctx); }
             });
         }
-        AST::Expr::Int(_, _, _)
+        AST::Expr::Int(_, _, _, _)
         | AST::Expr::Float(_, _, _)
         | AST::Expr::Bool(_, _)
         | AST::Expr::Char(_, _)

@@ -318,7 +318,7 @@ fn apply_dollar_splices(s: &str, scope: &HashMap<String, CtValue>) -> String {
 /// ranged distinct-type constructor (`eval_distinct_ctor`).
 fn literal_int(e: &Expr) -> Option<i64> {
     match e {
-        Expr::Int(n, _, _) => Some(*n),
+        Expr::Int(n, _, _, _) => Some(*n),
         Expr::Unary(UnOp::Neg, inner, _) => literal_int(inner).and_then(i64::checked_neg),
         Expr::Paren(inner, _) => literal_int(inner),
         _ => None,

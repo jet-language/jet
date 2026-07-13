@@ -117,7 +117,7 @@ impl<'a> Parser<'a> {
                     true
                 } else { false };
                 let tok = self.bump();
-                let TokKind::Int(raw) = tok.kind else {
+                let TokKind::Int(raw, _) = tok.kind else {
                     return Err(Diagnostic::error(
                         "E0035", "An enum discriminant must be an integer literal.".to_string(),
                         "C enum values are fixed integers known at compile time.".to_string(),

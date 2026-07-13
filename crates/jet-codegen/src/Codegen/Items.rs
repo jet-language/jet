@@ -1417,11 +1417,11 @@ pub(crate) fn emit_const(c: &crate::AST::ConstDef, out: &mut String) {
     }
     let (val, ty) = match &c.value {
         // D-SG9: a const declared at a fixed width keeps that width.
-        Expr::Int(n, _, Some((signed, bits))) => {
+        Expr::Int(n, _, Some((signed, bits)), _) => {
             let rust = format!("{}{}", if *signed { 'i' } else { 'u' }, bits);
             (format!("{n}{rust}"), rust)
         }
-        Expr::Int(n, _, None) => (format!("{}i64", n), "i64".to_string()),
+        Expr::Int(n, _, None, _) => (format!("{}i64", n), "i64".to_string()),
         Expr::Float(v, _, is_f32) => {
             if *is_f32 {
                 (format!("{:?}f32", v), "f32".to_string())
