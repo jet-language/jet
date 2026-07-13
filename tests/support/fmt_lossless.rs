@@ -7,6 +7,10 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/E2714_derive_old_for.jet",
     "tests/ui/assign_in_condition.jet",
     "tests/ui/bad_escape.jet",
+    "tests/ui/binpat_bad_width.jet",
+    "tests/ui/binpat_multibyte_needs_endian.jet",
+    "tests/ui/binpat_rest_not_final.jet",
+    "tests/ui/binpat_take_pattern_bad_width.jet",
     "tests/ui/build_locked_drift.jet",
     "tests/ui/cffi_e3206_reserved_segment.jet",
     "tests/ui/cffi_retired_at_extern.jet",
@@ -23,6 +27,7 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/empty_map_colon_retired.jet",
     "tests/ui/enum_group_payload.jet",
     "tests/ui/external_method_retired_separator.jet",
+    "tests/ui/ffi_body_not_string.jet",
     "tests/ui/ffi_foreign_unsafe.jet",
     "tests/ui/generic_square_brackets.jet",
     "tests/ui/if_expr_missing_else.jet",
@@ -57,7 +62,9 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/marker_codable_hash.jet",
     "tests/ui/marker_decode_hash.jet",
     "tests/ui/marker_encode_hash.jet",
+    "tests/ui/marker_experimental_at.jet",
     "tests/ui/marker_experimental_hash.jet",
+    "tests/ui/marker_hardened_at.jet",
     "tests/ui/marker_hardened_hash.jet",
     "tests/ui/marker_mustuse_hash.jet",
     "tests/ui/marker_numeric_hash.jet",
@@ -65,9 +72,11 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/marker_pure_hash.jet",
     "tests/ui/marker_redact_hash.jet",
     "tests/ui/marker_test_at.jet",
+    "tests/ui/marker_tested_at.jet",
     "tests/ui/marker_tested_hash.jet",
     "tests/ui/marker_unsafe_at.jet",
     "tests/ui/matcharm_mixing_needs_parens.jet",
+    "tests/ui/meta_bad_maturity.jet",
     "tests/ui/meta_on_expression.jet",
     "tests/ui/migration_unknown_op.jet",
     "tests/ui/missing_mut_call.jet",
@@ -82,6 +91,7 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/opt_chain_method.jet",
     "tests/ui/params_not_yet.jet",
     "tests/ui/parse_pattern_adjacent_holes.jet",
+    "tests/ui/perf_budget_unknown_role_field.jet",
     "tests/ui/persist_not_module_level.jet",
     "tests/ui/protocol_bad_endpoint.jet",
     "tests/ui/pub_file_duplicate_marker.jet",
@@ -98,10 +108,12 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/repl_effect_denied_e1803.jet",
     "tests/ui/result_old_syntax.jet",
     "tests/ui/return_arrow_split.jet",
+    "tests/ui/schedule_every_without_task.jet",
+    "tests/ui/schedule_task_on_method.jet",
     "tests/ui/shield_arguments.jet",
     "tests/ui/stacked_type_markers.jet",
     "tests/ui/string_lone_brace.jet",
-    "tests/ui/suppress_unknown_argument.jet",
+    "tests/ui/suppress_retired.jet",
     "tests/ui/take_pattern_bad_hole.jet",
     "tests/ui/take_pattern_computed_arg.jet",
     "tests/ui/teaching_positional_tuple.jet",
@@ -671,6 +683,13 @@ fn plain_string_value(parts: &[StrTokPart]) -> Option<String> {
 fn token_kinds_equal(left: &TokKind, right: &TokKind) -> bool {
     match (left, right) {
         (TokKind::Str(left), TokKind::Str(right)) => string_parts_equal(left, right),
+        // D-BINPAT1 (card #506): `b"…"` binary patterns share `StrTokPart`'s
+        // nested-token shape (including each part's absolute `Span`), so a
+        // derived `==` here is exactly as span-sensitive as the old bug this
+        // whole function exists to route around for `Str` — reformatting
+        // upstream text shifts every later byte offset even though no
+        // meaningful token changed. Compare structurally like `Str`.
+        (TokKind::BinStr(left), TokKind::BinStr(right)) => string_parts_equal(left, right),
         _ => left == right,
     }
 }
