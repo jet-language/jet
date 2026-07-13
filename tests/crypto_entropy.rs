@@ -257,6 +257,72 @@ fn live_provider_obeys_bounds_zero_and_concurrency() {
     }
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn live_provider_remains_independent_across_fork() {
+    use std::os::raw::{c_int, c_void};
+
+    unsafe extern "C" {
+        fn close(fd: c_int) -> c_int;
+        fn fork() -> c_int;
+        fn pipe(fds: *mut c_int) -> c_int;
+        fn read(fd: c_int, buffer: *mut c_void, count: usize) -> isize;
+        fn waitpid(pid: c_int, status: *mut c_int, options: c_int) -> c_int;
+        fn write(fd: c_int, buffer: *const c_void, count: usize) -> isize;
+        fn _exit(status: c_int) -> !;
+    }
+
+    let parent_bytes = jet_crypto_entropy_bytes(64).unwrap();
+    let mut fds = [-1; 2];
+    assert_eq!(unsafe { pipe(fds.as_mut_ptr()) }, 0);
+    let pid = unsafe { fork() };
+    assert!(pid >= 0, "fork failed");
+    if pid == 0 {
+        unsafe { close(fds[0]) };
+        let child_bytes = match jet_crypto_entropy_bytes(64) {
+            Ok(bytes) => bytes,
+            Err(_) => unsafe { _exit(2) },
+        };
+        let mut written = 0usize;
+        while written < child_bytes.len() {
+            let count = unsafe {
+                write(
+                    fds[1],
+                    child_bytes[written..].as_ptr().cast(),
+                    child_bytes.len() - written,
+                )
+            };
+            if count <= 0 {
+                unsafe { _exit(3) };
+            }
+            written += count as usize;
+        }
+        unsafe { close(fds[1]) };
+        unsafe { _exit(0) };
+    }
+
+    unsafe { close(fds[1]) };
+    let mut child_bytes = [0u8; 64];
+    let mut received = 0usize;
+    while received < child_bytes.len() {
+        let count = unsafe {
+            read(
+                fds[0],
+                child_bytes[received..].as_mut_ptr().cast(),
+                child_bytes.len() - received,
+            )
+        };
+        assert!(count > 0, "child entropy pipe closed early");
+        received += count as usize;
+    }
+    unsafe { close(fds[0]) };
+    let mut status = 0;
+    assert_eq!(unsafe { waitpid(pid, &mut status, 0) }, pid);
+    assert_eq!(status, 0, "child entropy process failed: wait status {status}");
+    assert_ne!(child_bytes, [0; 64]);
+    assert_ne!(parent_bytes, child_bytes);
+}
+
 #[test]
 fn crypto_runtime_sources_contain_no_predictable_fallback() {
     let process = include_str!("../crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs");

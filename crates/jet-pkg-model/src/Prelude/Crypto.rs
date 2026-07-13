@@ -20,31 +20,61 @@ const ALGO_CHACHA20: u8 = 1;
 const ALGO_AES256: u8 = 2;
 const NONCE_LEN: usize = 12;
 
-fn seal_with_algo(key: &[u8], plaintext: &[u8], algo: u8) -> Result<Vec<u8>, String> {
+#[derive(Debug, Eq, PartialEq)]
+enum JetCryptoError {
+    Entropy(JetCryptoEntropyError),
+    Operation(String),
+}
+
+impl From<JetCryptoEntropyError> for JetCryptoError {
+    fn from(error: JetCryptoEntropyError) -> Self {
+        Self::Entropy(error)
+    }
+}
+
+impl std::fmt::Display for JetCryptoError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Entropy(error) => error.fmt(formatter),
+            Self::Operation(message) => formatter.write_str(message),
+        }
+    }
+}
+
+fn crypto_operation_error(message: impl Into<String>) -> JetCryptoError {
+    JetCryptoError::Operation(message.into())
+}
+
+fn seal_with_algo(key: &[u8], plaintext: &[u8], algo: u8) -> Result<Vec<u8>, JetCryptoError> {
     if key.len() != 32 {
-        return Err(format!(
+        return Err(crypto_operation_error(format!(
             "crypto.seal expects a 32-byte key, got {} bytes",
             key.len()
-        ));
+        )));
     }
     let mut nonce = [0u8; NONCE_LEN];
-    jet_fill_random(&mut nonce).map_err(|error| error.to_string())?;
+    jet_fill_random(&mut nonce)?;
     let ciphertext = match algo {
         ALGO_CHACHA20 => {
-            let cipher = ChaCha20Poly1305::new_from_slice(key)
-                .map_err(|e| format!("invalid ChaCha20-Poly1305 key: {e}"))?;
+            let cipher = ChaCha20Poly1305::new_from_slice(key).map_err(|e| {
+                crypto_operation_error(format!("invalid ChaCha20-Poly1305 key: {e}"))
+            })?;
             cipher
                 .encrypt(ChaNonce::from_slice(&nonce), plaintext)
-                .map_err(|e| format!("encryption failed: {e}"))?
+                .map_err(|e| crypto_operation_error(format!("encryption failed: {e}")))?
         }
         ALGO_AES256 => {
             let cipher = Aes256Gcm::new_from_slice(key)
-                .map_err(|e| format!("invalid AES-256-GCM key: {e}"))?;
+                .map_err(|e| crypto_operation_error(format!("invalid AES-256-GCM key: {e}")))?;
             cipher
                 .encrypt(AesNonce::from_slice(&nonce), plaintext)
-                .map_err(|e| format!("encryption failed: {e}"))?
+                .map_err(|e| crypto_operation_error(format!("encryption failed: {e}")))?
         }
-        other => return Err(format!("unknown seal algorithm id {other}")),
+        other => {
+            return Err(crypto_operation_error(format!(
+                "unknown seal algorithm id {other}"
+            )))
+        }
     };
     let mut out = Vec::with_capacity(4 + 2 + NONCE_LEN + ciphertext.len());
     out.extend_from_slice(MAGIC);
@@ -108,7 +138,7 @@ fn jet_fill_random(out: &mut [u8]) -> Result<(), JetCryptoEntropyError> {
 
 /// Default seal — ChaCha20-Poly1305 (D-CRYPTOENV1 misuse-resistant envelope).
 pub fn jet_crypto_seal_impl(key: &Vec<u8>, plaintext: &Vec<u8>) -> Result<Vec<u8>, String> {
-    seal_with_algo(key, plaintext, ALGO_CHACHA20)
+    seal_with_algo(key, plaintext, ALGO_CHACHA20).map_err(|error| error.to_string())
 }
 
 /// Open any supported envelope version/algorithm (algorithm agility).
@@ -122,7 +152,7 @@ pub fn jet_crypto_seal_algo_impl(
     plaintext: &Vec<u8>,
     algo: i64,
 ) -> Result<Vec<u8>, String> {
-    seal_with_algo(key, plaintext, algo as u8)
+    seal_with_algo(key, plaintext, algo as u8).map_err(|error| error.to_string())
 }
 
 /// Sign `message` with a 32-byte Ed25519 seed key.
@@ -148,14 +178,18 @@ pub fn jet_crypto_sign_impl(
 /// is the 32-byte secret seed and `public_key` is the 32-byte verifying key.
 /// Randomness comes from the shared D-CRYPTO-RNG1 OS provider. Used by the
 /// package-signing helper (c146); failure returns before any key artifact.
-pub fn jet_crypto_keygen_impl() -> Result<(Vec<u8>, Vec<u8>), String> {
+fn crypto_keygen() -> Result<(Vec<u8>, Vec<u8>), JetCryptoError> {
     let mut seed = [0u8; 32];
-    jet_fill_random(&mut seed).map_err(|error| error.to_string())?;
+    jet_fill_random(&mut seed)?;
     let returned_seed = seed.to_vec();
     let signing_key = SigningKey::from_bytes(&seed);
     let public = signing_key.verifying_key().to_bytes().to_vec();
     jet_crypto_entropy_zeroize(&mut seed);
     Ok((returned_seed, public))
+}
+
+pub fn jet_crypto_keygen_impl() -> Result<(Vec<u8>, Vec<u8>), String> {
+    crypto_keygen().map_err(|error| error.to_string())
 }
 
 /// Verify an Ed25519 signature (32-byte public key, 64-byte signature).
@@ -237,10 +271,15 @@ pub fn jet_crypto_x25519_shared_impl(
     Ok(x25519_dalek::x25519(sk, pk).to_vec())
 }
 
-pub fn jet_crypto_password_hash_impl(password: &String) -> Result<String, String> {
+fn crypto_password_hash(password: &String) -> Result<String, JetCryptoError> {
     let mut salt = [0u8; 16];
-    jet_fill_random(&mut salt).map_err(|error| error.to_string())?;
+    jet_fill_random(&mut salt)?;
     jet_crypto_password_hash_with_salt_impl(password, &salt.to_vec())
+        .map_err(crypto_operation_error)
+}
+
+pub fn jet_crypto_password_hash_impl(password: &String) -> Result<String, String> {
+    crypto_password_hash(password).map_err(|error| error.to_string())
 }
 
 pub fn jet_crypto_password_hash_with_salt_impl(
@@ -271,7 +310,7 @@ pub fn jet_crypto_password_verify_impl(password: &String, stored: &String) -> bo
 }
 
 pub fn jet_crypto_file_seal_impl(key: &Vec<u8>, plaintext: &Vec<u8>) -> Result<Vec<u8>, String> {
-    jet_crypto_seal_impl(key, plaintext)
+    seal_with_algo(key, plaintext, ALGO_CHACHA20).map_err(|error| error.to_string())
 }
 
 pub fn jet_crypto_file_open_impl(key: &Vec<u8>, envelope: &Vec<u8>) -> Result<Vec<u8>, String> {
