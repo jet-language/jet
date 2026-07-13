@@ -260,6 +260,11 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
     },
     CommandSpec {
+        name: "import",
+        summary: "translate foreign source into editable canonical Jet",
+        headline: false,
+    },
+    CommandSpec {
         name: "new",
         summary: "create a new project folder",
         headline: false,
@@ -685,6 +690,7 @@ pub fn owns_flag_vocabulary(name: &str) -> bool {
             | "outdated"
             | "search"
             | "info"
+            | "import"
             | "explain"
             | "logs"
             | "clean"

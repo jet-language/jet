@@ -1740,6 +1740,28 @@ is a collision, not a task.
 
 ## Process for a new diagnostic
 
+### JT0101 — source importer TODO (D-JPK-IMPORTTODO1, D-MIGRATE-SRC1)
+
+Source importers use the JT01xx family for migration gaps. These are audited
+TODO diagnostics, not compiler acceptance errors: an import may finish while
+retaining TODOs, but no unsupported construct may disappear from both output
+and report.
+
+| What | Why | Fix |
+|------|-----|-----|
+| Python construct was not translated. | Importer could not prove an equivalent canonical Jet construct. Guessing would silently change behavior. | Port the named source construct into the generated Jet file, using the source and target paths in the diagnostic. |
+
+Every record carries code, what, why, fix, foreign source path and line,
+generated target, and migration status. Human output and
+import-report.json contain the same facts.
+
+### JT0198 / JT0199 — source import operation and merge failures
+
+JT0198 reports unreadable input or unwritable output with the failed
+operation, OS reason, and repair. JT0199 reports an update conflict when both
+editable Jet and newly translated source changed since the stored baseline.
+It names every conflicted file and writes none of them.
+
 1. Claim the next code here. 2. Write what/why/fix per the voice rules.
 3. Add a tests/ui fixture + snapshot. 4. Ship. A diagnostic without a
 snapshot test does not exist (invariant I4).

@@ -24,6 +24,7 @@ mod CmdDevWeb;
 mod CmdDossier;
 mod CmdExpand;
 mod CmdImpact;
+mod CmdImport;
 mod CmdPkg;
 mod CmdProve;
 mod CmdSchema;
@@ -582,6 +583,11 @@ fn unknown_subcommand(cmd: &str) -> ! {
 /// reach the existing real handlers without keeping compatibility aliases.
 fn normalize_frequency_ring_argv(raw: &mut Vec<String>) {
     let Some(first) = raw.first().map(String::as_str) else { return };
+    // D-JPK-IMPORTCMD1 / D-MIGRATE-SRC1: top-level import is canonical and
+    // distinct from the physical hangar archive action.
+    if first == "import" {
+        return;
+    }
     if let Some((group_spec, _)) = jet::CLI::moved_command(first) {
         let group = group_spec.name;
         let verb = first;
@@ -1223,6 +1229,9 @@ fn main() {
             let impact_args: Vec<String> = raw.iter().skip(1).cloned().collect();
             run_impact(&impact_args, mode.json);
             return;
+        }
+        "import" => {
+            exit(CmdImport::run(&raw, mode.json));
         }
         "graph" | "query" | "explain-build" => {
             let query_args: Vec<&String> = args.iter().skip(1).copied().collect();

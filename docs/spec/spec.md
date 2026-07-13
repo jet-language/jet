@@ -2650,6 +2650,28 @@ typed graph without executing actions. `jet inspect explain-build <target|action
 <file>` reports graph and cache provenance. LSP checking uses the same selected
 root signature validation and the same static graph facts, including E3501.
 
+## Semantic source import
+
+D-MIGRATE-SRC1 extends the canonical import command to foreign source:
+jet import LANG DIR. A language importer parses constructs it can prove,
+emits ordinary editable Jet, and records every other construct as a structured
+JT01xx TODO in import-report.json. Unsupported code never becomes guessed
+behavior and never disappears silently.
+
+The first importer is py. Its initial proven subset is annotated top-level
+functions over int, float, str, bool, and None; straight-line local assignment,
+return, calls, arithmetic/comparison/boolean expressions, and equality asserts.
+Python test_ functions with no parameters become Jet Test functions. Unsupported
+imports, signatures, expressions, and nested control flow stay absent from
+callable Jet and appear in the omissions report with what, why, fix, source,
+generated target, and migration status.
+
+Dry-run computes and prints the same plan without writing. A plain rerun is
+byte-idempotent. Update uses the last generated baseline: untouched generated
+files advance, owner-edited files remain when foreign source is unchanged, and
+simultaneous edits conflict before any conflicted file is written. Directory
+walks are deterministic and do not follow symlinks.
+
 ## Deliberately absent
 
 See non-goals in docs/spec/philosophy.md. The parser should produce staged
