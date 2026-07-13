@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 531,
-    "rev": 5265,
+    "rev": 5268,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -4423,8 +4423,18 @@
       "blockedBy": [
         "c05o0105"
       ],
-      "assignee": "fable-300-io",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-13",
+          "by": "fable-300-io",
+          "text": "[handoff] Integrated nominal TCP Reader/Writer through 0fa89857; independent rereview and parent TCP 5/5 green. D-IOERROR-TREE1 now gates exact expanded IOError constructors/context. Resume after owner ratification: propagate public tree, replace flat Other mapping, then file/Unix/TLS conformance and broader parity. No #300 implementation or review worktree should remain after cleanup."
+        },
+        {
+          "at": "2026-07-13",
+          "by": "agent",
+          "text": "[integrated-progress] Ratified nominal core.io Reader/Writer TCP vertical landed at 8668ef70..0fa89857. Independent rereview accepted real generic Jet sema/TIR/AOT execution over live TcpStream, positive read-limit enforcement, clean-EOF-only empty success, zero-write defense, and one absolute write_all deadline; parent TCP cluster 5/5 green. Partial only: native methods still return NetError and current bridge preserves it as IOError.Other text. Exact expanded structured IOError variant/field surface promised semantically by D-NETIO-CONTRACT2 is not ratified/typeable; queue owner ballot before inventing it. File/Unix/TLS conformance remains."
+        },
         {
           "at": "2026-07-13",
           "by": "codex-orchestrator",
@@ -4581,8 +4591,7 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
-      "claimedAt": "2026-07-13T14:47:24.962Z"
+      "refs": []
     },
     {
       "id": "c0075iyb",
@@ -31083,6 +31092,98 @@
       "created": "2026-07-13T12:22:47.873Z",
       "outcome": "A",
       "ratifiedAt": "2026-07-13"
+    },
+    {
+      "id": "D-IOERROR-TREE1",
+      "cardId": "c0z3l25j",
+      "group": "stdlib",
+      "title": "What exact structured IOError tree should every byte stream use?",
+      "gist": "Choose the public IOError variants and shared context fields that let files, TCP, Unix sockets, TLS, and codecs implement one nominal Reader/Writer contract without flattening failures into strings.",
+      "lesson": "A byte-stream trait can unify operations only if its error type preserves the facts callers need. The variant answers what kind of failure happened, such as timeout or permission denial. Context answers where and during which operation it happened. An optional operating-system code and cause preserve audit detail without making host-specific text part of program logic.\n\nClean EOF is not an error: Reader.read returns an empty byte list only after the peer or file reaches end-of-stream. Invalid limits, cancellation, timeout, closed handles, and transport failures must remain distinguishable errors. If adapters collapse NetError, file errors, and TLS errors into Other(message), beginner code can still print the text, but expert code cannot reliably retry, cancel, classify, or audit it.\n\nD-NETIO-CONTRACT2 already ratified one core.io.Reader/Writer contract and the semantic facts IOError must carry. It did not ratify exact constructors or field names. This ballot fixes that public surface before more adapters are wired.",
+      "explainer": "",
+      "story": "Mara writes one copy function that accepts any Reader and Writer. It works for a file locally, then production reads through TLS over TCP. Beginner code uses ? unchanged. Her service policy retries TimedOut, stops immediately on Cancelled, reports PermissionDenied with a path, and marks Closed as a lifecycle bug. The same match must work across every adapter without parsing messages.",
+      "inWild": "fn copy(source: ^Reader, sink: ^Writer) -> Int ? IOError {\n    total := 0\n    loop {\n        bytes := source.read(64KiB)?\n        if bytes.len() == 0 { return total }\n        sink.write_all(bytes)?\n        total += bytes.len()\n    }\n}\n\ncopy(source, sink) catch {\n    .TimedOut(context) => retry_after(context.operation, 100ms),\n    .Cancelled(_) => return,\n    error => log(error),\n}",
+      "detail": "Acceptance: one public core.io.IOError tree serves Reader/Writer adapters for files, TCP, Unix, TLS, and codecs; exact constructors and fields enter Syntax.rs if user-typeable; read(0) is InvalidInput and empty success means clean EOF only; native errors map losslessly into stable variants/context; beginner Display text remains concise; experts can match kind, operation, resource, OS code, and cause without parsing text; cancellation and timeout never become Other; diagnostics/examples/reference docs and hostile AOT/default-dev tests cover every mapping; obsolete flat adapters are removed rather than retained as a second path.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Closed variants plus shared IOContext",
+          "detail": "IOError has stable semantic variants and every variant carries the same IOContext record. Beginner code uses ?; expert code matches a variant and inspects one predictable context shape.",
+          "technical": "Public tree: InvalidInput(IOContext), NotFound(IOContext), PermissionDenied(IOContext), TimedOut(IOContext), Cancelled(IOContext), Closed(IOContext), and Other(IOContext). IOContext fields are operation: IOOperation, resource: String?, os_code: Int?, and cause: String?. IOOperation is a closed enum for Read, Write, Flush, Connect, Accept, Close, Resolve, and Codec; adapters select the closest canonical operation. resource contains a path, address, or codec identity when known. os_code is audit data, never portable control flow. cause preserves owned source detail and never contains secrets. Display renders variant + operation + resource, then cause. Existing NotFound(path), PermissionDenied(path), and Other(message) migrate to the context-bearing form; no compatibility alias remains in current-law mode.",
+          "code": "read_result catch {\n    .TimedOut(.{ operation: .Read, resource, ... }) => retry(resource),\n    .PermissionDenied(context) => audit(context.resource),\n    .Cancelled(_) => return,\n    error => log(error),\n}"
+        },
+        {
+          "key": "B",
+          "name": "Variants with per-kind fields",
+          "detail": "Keep stable variants, but give each constructor only fields relevant to that kind. Matches are shorter for common cases, while generic logging must normalize several shapes.",
+          "technical": "Examples: InvalidInput { operation, reason }, NotFound { operation, path }, PermissionDenied { operation, path, os_code }, TimedOut { operation, resource, os_code, cause }, Cancelled { operation, cause }, Closed { operation, resource }, Other { operation, resource, os_code, cause }. Every adapter still maps to a typed variant, but adding shared audit data later may change several constructors.",
+          "code": "read_result catch {\n    .TimedOut { operation, resource, ... } => retry(resource),\n    .PermissionDenied { path, ... } => audit(path),\n    .Cancelled { ... } => return,\n    error => log(error),\n}"
+        },
+        {
+          "key": "C",
+          "name": "Keep the three-variant tree",
+          "detail": "Retain NotFound(path), PermissionDenied(path), and Other(message). Network, TLS, cancellation, timeout, closed, and invalid-input failures remain formatted inside Other.",
+          "technical": "No new public constructors ship. Adapter implementations preserve human-readable text but typed programs must parse messages or inspect native errors before conversion. Generic Reader/Writer consumers cannot distinguish retry, cancellation, timeout, or lifecycle policy.",
+          "code": "read_result catch {\n    .NotFound(path) => missing(path),\n    .PermissionDenied(path) => audit(path),\n    .Other(message) => log(message),\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "Go wraps operation, network, source, destination, and cause in net.OpError, then supports errors.Is for timeout and cancellation. A keeps the useful shared context while using a closed Jet enum instead of interface probing.",
+          "code": "if errors.Is(err, context.DeadlineExceeded) { ... }"
+        },
+        {
+          "lang": "Rust",
+          "note": "Rust io::Error exposes a stable ErrorKind plus an optional OS code and source. A makes the kind a Jet variant and the remaining audit facts one typed context.",
+          "code": "match err.kind() { ErrorKind::TimedOut => retry(), _ => fail() }"
+        },
+        {
+          "lang": "Python",
+          "note": "Python uses an OSError hierarchy with errno and filename fields. A keeps typed classification and resource context without exception subclass ambiguity.",
+          "code": "except TimeoutError as error: retry(error.filename)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A provides one semantic mechanism for beginners and experts. ? stays ceremony-free, while every stream adapter preserves the same typed classification and audit context. Shared context also keeps formatter, debugger, report, and policy code uniform.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Per-variant records repeat the same operation/resource/cause law and force generic tooling to normalize several shapes. Future shared audit facts would touch every constructor."
+          },
+          {
+            "key": "C",
+            "reason": "It contradicts the already-ratified structured contract: cancellation, timeout, invalid input, and closed lifecycle become unmatchable strings after nominal conversion."
+          }
+        ],
+        "tradeoff": "A exposes a small IOContext value even for simple path errors. That value is the canonical place for cross-adapter facts and avoids a second native-error channel."
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "Use A as the single public tree. Harvest B's concise matching through enum-pattern ergonomics and keep C's short Display text, without flattening stored facts.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "Uniform context",
+            "use": "Canonical storage and adapter mapping."
+          },
+          {
+            "key": "B",
+            "aspect": "Concise common matches",
+            "use": "Pattern examples bind only fields callers need."
+          },
+          {
+            "key": "C",
+            "aspect": "Simple beginner output",
+            "use": "Display remains short while typed context stays available."
+          }
+        ]
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-13T15:26:59.215Z"
     }
   ],
   "questions": [
@@ -31865,6 +31966,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-13T15:27:32.914Z",
+      "by": "fable-300-io",
+      "action": "card.release",
+      "ref": "c0z3l25j",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-13T15:26:59.216Z",
+      "by": "codex-orchestrator",
+      "action": "decision.add",
+      "ref": "D-IOERROR-TREE1",
+      "note": "What exact structured IOError tree should every byte stream use?"
+    },
+    {
+      "at": "2026-07-13T15:24:14.186Z",
+      "by": "agent",
+      "action": "card.update",
+      "ref": "c0z3l25j",
+      "note": "logEntry"
+    },
     {
       "at": "2026-07-13T15:18:02.835Z",
       "by": "agent",
@@ -35343,27 +35465,6 @@
       "action": "card.update",
       "ref": "c0fchu51",
       "note": "logEntry"
-    },
-    {
-      "at": "2026-07-12T20:08:17.394Z",
-      "by": "grok-476-verify",
-      "action": "card.update",
-      "ref": "c0qwckht",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-12T20:07:19.097Z",
-      "by": "codex-orchestrator",
-      "action": "card.criteria-verify",
-      "ref": "c1jixkit",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-12T20:07:18.813Z",
-      "by": "terra-91-generic-modules",
-      "action": "card.criteria-meet",
-      "ref": "c1jixkit",
-      "note": "#2"
     }
   ],
   "nextNum": 368,
