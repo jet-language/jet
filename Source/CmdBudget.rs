@@ -249,22 +249,22 @@ fn build_report(root:&Path, store:&BudgetStore, bundle:&jet::AST::ProgramBundle,
         let comparison = comparison_model(&spec)?;
         let improvement = if spec.metric.starts_with("Throughput") { Direction::HigherIsBetter } else { Direction::LowerIsBetter };
         let enforcement = if spec.enforcement == "Warn" { Enforcement::Warn } else { Enforcement::Fail };
-        let mut history_ids=Vec::new();let mut history_samples=Vec::new();let mut history_state=None;
+        let mut history_ids=Vec::new();let mut history_samples=Vec::new();let mut history_state=None;let mut stale=false;let mut stale_age=None;let mut stale_after=None;
         if let Some(baseline)=spec.comparison_fact.baseline.as_deref(){
             let query=HistoryQuery{budget_id:format!("{}:{}",spec.role,spec.name),budget_spec_sha256:bases[index].1.clone(),context_key:bases[index].2.clone(),at:at.into()};
             match store.select_compatible_history(baseline,&provisional_bytes,&query){
-                Ok(ids)=>{history_ids=ids;if !history_ids.is_empty(){history_state=Some(store.history_state_id(baseline)?);history_samples=store.load_history_samples(&history_ids,&query.budget_id)?;}}
+                Ok(selection)=>{history_ids=selection.report_ids;if !history_ids.is_empty(){history_state=Some(selection.state_id);stale=selection.stale;stale_age=selection.newest_age_seconds;stale_after=Some(selection.stale_after_seconds);history_samples=store.load_history_samples(&history_ids,&query.budget_id)?;}}
                 Err(error)if error==format!("baseline `{baseline}` is absent")=>{}
                 Err(error)=>return Err(error),
             }
         }
-        let pooled=history_samples.iter().flatten().cloned().collect::<Vec<_>>();
+        let pooled=if stale{Vec::new()}else{history_samples.iter().flatten().cloned().collect::<Vec<_>>()};
         let policy=evaluation_policy();
         let evaluation = if matches!(comparison,Comparison::RelativeTo{..})&&pooled.is_empty(){let point=estimator(provider_samples,percentile(&spec.metric))?;Evaluation{point,lower95:None,upper95:None,evidence:Evidence::Unavailable,outcome:if enforcement==Enforcement::Warn{PolicyOutcome::Warn}else{PolicyOutcome::Fail},bootstrap:Vec::new()}}else{evaluate(&evidence_id, &bases[index].2, &history_ids, provider_samples, &pooled, percentile(&spec.metric), &comparison, improvement, enforcement,if spec.comparison_fact.kind=="Absolute"{None}else{Some(&policy)})?};
         match evaluation.outcome { PolicyOutcome::Pass => pass += 1, PolicyOutcome::Warn => warn += 1, PolicyOutcome::Fail => fail += 1 }
         let evidence_name = match evaluation.evidence { Evidence::Pass => "pass", Evidence::Regression => "regression", Evidence::Inconclusive => "inconclusive", Evidence::Unavailable => "unavailable" };
         let outcome = match evaluation.outcome { PolicyOutcome::Pass => "pass", PolicyOutcome::Warn => "warn", PolicyOutcome::Fail => "fail" };
-        let reason = if evaluation.evidence==Evidence::Unavailable{"named baseline has no compatible history".into()}else{format!("measured estimator {} under {} policy",evaluation.point.num,spec.comparison_fact.kind)};
+        let reason = if stale{format!("named baseline compatible history is stale: newest generation is {} seconds old; policy limit is {} seconds",stale_age.expect("stale selection age"),stale_after.expect("stale selection policy"))}else if evaluation.evidence==Evidence::Unavailable{"named baseline has no compatible history".into()}else{format!("measured estimator {} under {} policy",evaluation.point.num,spec.comparison_fact.kind)};
         let trend=trend_json(&history_ids,&history_samples,percentile(&spec.metric),improvement)?;
         let decision = CanonicalJson::object([("evidence".into(), CanonicalJson::String(evidence_name.into())), ("lower95".into(), evaluation.lower95.as_ref().map(Rational::to_json).unwrap_or(CanonicalJson::Null)), ("point".into(), evaluation.point.to_json()), ("policy_outcome".into(), CanonicalJson::String(outcome.into())), ("reason".into(), CanonicalJson::String(reason.clone())), ("trend".into(), trend.clone()), ("upper95".into(), evaluation.upper95.as_ref().map(Rational::to_json).unwrap_or(CanonicalJson::Null))])?;
         let mut object = as_object(&bases[index].0)?.clone();
@@ -274,7 +274,7 @@ fn build_report(root:&Path, store:&BudgetStore, bundle:&jet::AST::ProgramBundle,
         let (source, line, column) = source_location(root, bundle, spec);
         let comparison_json = comparison_json(&spec)?;
         let metric=CanonicalJson::object([("name".into(),CanonicalJson::String(spec.metric.split('(').next().unwrap_or(&spec.metric).into())),("percentile".into(),metric_percentile(&spec.metric).map(|value|CanonicalJson::String(value.into())).unwrap_or(CanonicalJson::Null))])?;
-        results.push(ResultRow { id:format!("{}:{}",spec.role,spec.name), name:spec.name.clone(), source, line, column, metric, metric_label:spec.metric.clone(), unit:metric_unit(&spec.metric).into(), direction:if improvement==Direction::LowerIsBetter{"lower_is_better".into()}else{"higher_is_better".into()}, comparison:comparison_json, sample:evaluation.point.clone(), lower95:evaluation.lower95.clone(), upper95:evaluation.upper95.clone(), trend, baseline_report_ids:history_ids, stale:false, outcome:evaluation.outcome, evidence:evaluation.evidence, enforcement, reason });
+        results.push(ResultRow { id:format!("{}:{}",spec.role,spec.name), name:spec.name.clone(), source, line, column, metric, metric_label:spec.metric.clone(), unit:metric_unit(&spec.metric).into(), direction:if improvement==Direction::LowerIsBetter{"lower_is_better".into()}else{"higher_is_better".into()}, comparison:comparison_json, sample:evaluation.point.clone(), lower95:evaluation.lower95.clone(), upper95:evaluation.upper95.clone(), trend, baseline_report_ids:history_ids, stale, outcome:evaluation.outcome, evidence:evaluation.evidence, enforcement, reason });
     }
     results.sort_by(|a,b|result_rank(a).cmp(&result_rank(b)).then_with(||a.id.cmp(&b.id)));
     let value=report_wrapper(&evidence_id,measurements,subject,tool,privacy,pass,warn,fail)?;let bytes=value.bytes();jet_foundation::PerformanceBudget::verify_budget_report(&bytes)?;Ok(BuiltReport{value,bytes,results,fail})

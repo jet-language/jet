@@ -329,6 +329,96 @@ fn budget_bench_measurement_bootstraps_then_consumes_compatible_history() {
     assert_eq!(result["lower95"],decision["lower95"]);assert_eq!(result["upper95"],decision["upper95"]);assert_eq!(result["trend"],decision["trend"]);assert_eq!(result["reason"],decision["reason"]);
 }
 
+fn age_budget_baseline(dir: &Path, baseline: &str) -> (String, String) {
+    use jet_foundation::PerformanceBudget::{stable_id, CanonicalJson};
+    let path = dir.join(format!(".jet/perf/baselines/names/{baseline}.json"));
+    let mut manifest = CanonicalJson::parse_canonical(&fs::read(&path).unwrap()).unwrap();
+    let CanonicalJson::Object(wrapper) = &mut manifest else { panic!("manifest") };
+    let report_id = {
+        let CanonicalJson::Object(content) = &wrapper["content"] else { panic!("content") };
+        let CanonicalJson::String(id) = &content["head_report_id"] else { panic!("head") };
+        id.clone()
+    };
+    {
+        let CanonicalJson::Object(content) = wrapper.get_mut("content").unwrap() else { panic!("content") };
+        let CanonicalJson::Array(generations) = content.get_mut("generations").unwrap() else { panic!("generations") };
+        let CanonicalJson::Object(generation) = &mut generations[0] else { panic!("generation") };
+        let CanonicalJson::Object(audit) = generation.get_mut("audit").unwrap() else { panic!("audit") };
+        audit.insert("accepted_at".into(), CanonicalJson::String("2000-01-01T00:00:00.000000000Z".into()));
+        let mut body = audit.clone();
+        body.remove("audit_id").unwrap();
+        audit.insert("audit_id".into(), CanonicalJson::String(stable_id(&CanonicalJson::Object(body))));
+    }
+    let state_id = stable_id(&wrapper["content"]);
+    wrapper.insert("manifest_id".into(), CanonicalJson::String(state_id.clone()));
+    fs::write(path, manifest.bytes()).unwrap();
+    (report_id, state_id)
+}
+
+#[test]
+fn budget_stale_history_is_persisted_rendered_and_bootstrap_appends() {
+    use jet_foundation::PerformanceBudget::CanonicalJson;
+    let dir = bench_budget_project("budget_stale_history");
+    let source = fs::read_to_string(dir.join("src/main.jet")).unwrap().replace("enforcement: .Warn", "enforcement: .Fail");
+    fs::write(dir.join("src/main.jet"), source).unwrap();
+    let first = Command::new(jet()).args(["budget","update","--baseline","ci/linux","--bootstrap","--reason","initial benchmark","--yes","--json"]).current_dir(&dir).output().unwrap();
+    assert_eq!(first.status.code(),Some(0),"stdout: {}\nstderr: {}",String::from_utf8_lossy(&first.stdout),String::from_utf8_lossy(&first.stderr));
+    let (first_id, stale_state_id) = age_budget_baseline(&dir, "ci/linux");
+
+    let check = Command::new(jet()).args(["budget","check","--json"]).current_dir(&dir).output().unwrap();
+    assert_eq!(check.status.code(),Some(1),"stdout: {}\nstderr: {}",String::from_utf8_lossy(&check.stdout),String::from_utf8_lossy(&check.stderr));
+    let CanonicalJson::Object(check) = CanonicalJson::parse_canonical(&check.stdout).unwrap() else { panic!("command") };
+    assert_eq!(check["status"],CanonicalJson::String("stale".into()));
+    assert_eq!(check["failure_kind"],CanonicalJson::String("evidence".into()));
+    let CanonicalJson::Array(results)=&check["results"] else { panic!("results") };
+    let CanonicalJson::Object(result)=&results[0] else { panic!("result") };
+    assert_eq!(result["stale"],CanonicalJson::Bool(true));
+    assert_eq!(result["status"],CanonicalJson::String("stale".into()));
+    assert_eq!(result["evidence"],CanonicalJson::String("unavailable".into()));
+    assert_eq!(result["baseline_report_ids"],CanonicalJson::Array(vec![CanonicalJson::String(first_id.clone())]));
+    let CanonicalJson::String(reason)=&result["reason"] else { panic!("reason") };
+    assert!(reason.contains("compatible history is stale"),"{reason}");
+    assert!(reason.contains("policy limit is 2592000 seconds"),"{reason}");
+    let CanonicalJson::Object(report)=&check["report"] else { panic!("report") };
+    jet_foundation::PerformanceBudget::verify_budget_report(&CanonicalJson::Object(report.clone()).bytes()).unwrap();
+    let CanonicalJson::Object(content)=&report["content"] else { panic!("content") };
+    let CanonicalJson::Array(measurements)=&content["measurements"] else { panic!("measurements") };
+    let CanonicalJson::Object(measurement)=&measurements[0] else { panic!("measurement") };
+    let CanonicalJson::Object(history)=&measurement["history"] else { panic!("history") };
+    assert_eq!(history["state_id"],CanonicalJson::String(stale_state_id.clone()));
+    assert_eq!(history["report_ids"],CanonicalJson::Array(vec![CanonicalJson::String(first_id.clone())]));
+    assert_eq!(measurement["baseline"],CanonicalJson::Null,"stale samples must not be pooled");
+    let CanonicalJson::Object(decision)=&measurement["decision"] else { panic!("decision") };
+    let CanonicalJson::Object(trend)=&decision["trend"] else { panic!("trend") };
+    assert_eq!(trend["report_ids"],CanonicalJson::Array(vec![CanonicalJson::String(first_id.clone())]));
+
+    let human = Command::new(jet()).args(["budget","check","--annotations","none"]).current_dir(&dir).output().unwrap();
+    assert_eq!(human.status.code(),Some(1));
+    let human = String::from_utf8(human.stderr).unwrap();
+    assert!(human.contains("Error [E2906]: performance budget parse has no usable evidence"),"{human}");
+    assert!(human.contains("compatible history is stale"),"{human}");
+    assert!(human.contains("budgets stale: 1 baseline stale · report "),"{human}");
+
+    let bootstrap = Command::new(jet()).args(["budget","update","--baseline","ci/linux","--bootstrap","--reason","refresh stale benchmark","--yes","--json"]).current_dir(&dir).output().unwrap();
+    assert_eq!(bootstrap.status.code(),Some(0),"stdout: {}\nstderr: {}",String::from_utf8_lossy(&bootstrap.stdout),String::from_utf8_lossy(&bootstrap.stderr));
+    let CanonicalJson::Object(bootstrap)=CanonicalJson::parse_canonical(&bootstrap.stdout).unwrap() else { panic!("bootstrap") };
+    assert_eq!(bootstrap["applied"],CanonicalJson::Bool(true));
+    assert_eq!(bootstrap["status"],CanonicalJson::String("stale".into()));
+    let CanonicalJson::Object(report)=&bootstrap["report"] else { panic!("report") };
+    let CanonicalJson::String(second_id)=&report["report_id"] else { panic!("report id") };
+    let manifest = CanonicalJson::parse_canonical(&fs::read(dir.join(".jet/perf/baselines/names/ci/linux.json")).unwrap()).unwrap();
+    let CanonicalJson::Object(wrapper)=manifest else { panic!("manifest") };
+    let CanonicalJson::Object(content)=&wrapper["content"] else { panic!("content") };
+    let CanonicalJson::Array(generations)=&content["generations"] else { panic!("generations") };
+    assert_eq!(generations.len(),2);
+    let CanonicalJson::Object(second)=&generations[1] else { panic!("generation") };
+    let CanonicalJson::Object(audit)=&second["audit"] else { panic!("audit") };
+    assert_eq!(audit["kind"],CanonicalJson::String("bootstrap".into()));
+    assert_eq!(audit["prior_state_id"],CanonicalJson::String(stale_state_id));
+    assert_eq!(audit["prior_head_report_id"],CanonicalJson::String(first_id));
+    assert_eq!(second["report_id"],CanonicalJson::String(second_id.clone()));
+}
+
 #[test]
 fn budget_effect_count_uses_solved_effects_not_import_count() {
     let dir = budget_project("budget_effect_truth", 10);

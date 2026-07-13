@@ -52,6 +52,15 @@ pub struct HistoryQuery {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HistorySelection {
+    pub report_ids: Vec<String>,
+    pub state_id: String,
+    pub stale: bool,
+    pub newest_age_seconds: Option<u64>,
+    pub stale_after_seconds: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GcResult { pub removed: Vec<String>, pub retained: Vec<String> }
 
 pub struct BudgetStore {
@@ -146,7 +155,7 @@ impl BudgetStore {
         Ok(AppliedUpdate { report_id: plan.report_id.clone(), manifest_id: manifest_id(&manifest)?, object_created })
     }
 
-    pub fn select_compatible_history(&self, baseline: &str, candidate: &[u8], query: &HistoryQuery) -> Result<Vec<String>, String> {
+    pub fn select_compatible_history(&self, baseline: &str, candidate: &[u8], query: &HistoryQuery) -> Result<HistorySelection, String> {
         validate_baseline_name(baseline)?;
         let candidate = verify_budget_report(candidate).map_err(|e| format!("invalid candidate report: {e}"))?;
         let candidate_content = report_content(&candidate)?;
@@ -154,9 +163,13 @@ impl BudgetStore {
         require_text(candidate_measurement, "budget_spec_sha256", &query.budget_spec_sha256)?;
         require_text(candidate_measurement, "context_key", &query.context_key)?;
         let maximum=history_window(candidate_measurement)?;
+        let stale_after_seconds=stale_after_seconds(candidate_measurement)?;
         let manifest = self.read_manifest(baseline)?;
+        let state_id=manifest_id(&manifest)?;
         let objects = self.dir(&[".jet", "perf", "baselines", "objects"], false, 0o755)?;
         let mut selected = Vec::new();
+        let mut selected_stale=None;
+        let mut newest_age_seconds=None;
         for generation in generations(&manifest)?.iter().rev() {
             let generation = object(generation, "generation")?;
             let id = text(generation.get("report_id"), "generation.report_id")?;
@@ -169,16 +182,17 @@ impl BudgetStore {
                 let audit=object(generation.get("audit").ok_or("generation audit is absent")?,"audit")?;
                 let accepted=text(audit.get("accepted_at"),"accepted_at")?;
                 let age=timestamp_seconds(&query.at)?.checked_sub(timestamp_seconds(accepted)?).ok_or("baseline generation is future-dated")?;
-                if age>stale_after_seconds(candidate_measurement)?{continue}
+                let stale=age>stale_after_seconds;
+                match selected_stale {
+                    Some(mode) if mode!=stale => continue,
+                    None => { selected_stale=Some(stale);newest_age_seconds=Some(age); }
+                    _ => {}
+                }
                 selected.push(id.into());
                 if selected.len() == maximum { break; }
             }
         }
-        Ok(selected)
-    }
-
-    pub fn history_state_id(&self, baseline: &str) -> Result<String, String> {
-        manifest_id(&self.read_manifest(baseline)?)
+        Ok(HistorySelection { report_ids:selected, state_id, stale:selected_stale.unwrap_or(false), newest_age_seconds, stale_after_seconds })
     }
 
     pub fn load_history_samples(&self, report_ids: &[String], budget_id: &str) -> Result<Vec<Vec<Rational>>, String> {
@@ -558,7 +572,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn store_rejects_fresh_bootstrap_corrupt_links_and_collects_only_old_unreferenced(){
-        let root=std::env::temp_dir().join(format!("jet-budget-store-full-{}-{}",std::process::id(),NONCE.fetch_add(1,Ordering::Relaxed)));std::fs::create_dir(&root).unwrap();let store=BudgetStore::new(&root);let(bytes,id,spec,context)=valid_report("one");let plan=store.plan_update("release/linux",&bytes,UpdateKind::Bootstrap{reason:"initial baseline".into()},"2026-01-01T00:00:00.000000000Z").unwrap();assert_eq!(store.apply_update(&plan).unwrap().report_id,id);assert!(store.plan_update("release/linux",&bytes,UpdateKind::Bootstrap{reason:"replace fresh".into()},"2026-01-02T00:00:00.000000000Z").unwrap_err().contains("stale"));let fresh=HistoryQuery{budget_id:"pkg:size-one".into(),budget_spec_sha256:spec.clone(),context_key:context.clone(),at:"2026-01-02T00:00:00.000000000Z".into()};assert_eq!(store.select_compatible_history("release/linux",&bytes,&fresh).unwrap(),vec![id.clone()]);let stale=HistoryQuery{at:"2026-03-02T00:00:00.000000000Z".into(),..fresh.clone()};assert!(store.select_compatible_history("release/linux",&bytes,&stale).unwrap().is_empty());
+        let root=std::env::temp_dir().join(format!("jet-budget-store-full-{}-{}",std::process::id(),NONCE.fetch_add(1,Ordering::Relaxed)));std::fs::create_dir(&root).unwrap();let store=BudgetStore::new(&root);let(bytes,id,spec,context)=valid_report("one");let plan=store.plan_update("release/linux",&bytes,UpdateKind::Bootstrap{reason:"initial baseline".into()},"2026-01-01T00:00:00.000000000Z").unwrap();assert_eq!(store.apply_update(&plan).unwrap().report_id,id);assert!(store.plan_update("release/linux",&bytes,UpdateKind::Bootstrap{reason:"replace fresh".into()},"2026-01-02T00:00:00.000000000Z").unwrap_err().contains("stale"));let fresh=HistoryQuery{budget_id:"pkg:size-one".into(),budget_spec_sha256:spec.clone(),context_key:context.clone(),at:"2026-01-02T00:00:00.000000000Z".into()};let fresh_selection=store.select_compatible_history("release/linux",&bytes,&fresh).unwrap();assert_eq!(fresh_selection.report_ids,vec![id.clone()]);assert!(!fresh_selection.stale);assert_eq!(fresh_selection.newest_age_seconds,Some(86_400));let stale=HistoryQuery{at:"2026-03-02T00:00:00.000000000Z".into(),..fresh.clone()};let stale_selection=store.select_compatible_history("release/linux",&bytes,&stale).unwrap();assert_eq!(stale_selection.report_ids,vec![id.clone()]);assert!(stale_selection.stale);assert_eq!(stale_selection.stale_after_seconds,2_592_000);
         let(other,other_id,_,_)=valid_report("other");let objects=store.dir(&[".jet","perf","baselines","objects"],false,0o755).unwrap();assert!(install_immutable(&objects,&format!("{other_id}.json"),&other,|bytes|verify_budget_report(bytes).map(|_|()).map_err(|e|e.to_string())).unwrap());use std::ffi::CString;#[repr(C)]struct Timespec{tv_sec:i64,tv_nsec:i64}extern "C"{fn utimensat(fd:i32,path:*const i8,times:*const Timespec,flags:i32)->i32;}let path=CString::new(root.join(format!(".jet/perf/baselines/objects/{other_id}.json")).to_str().unwrap()).unwrap();let times=[Timespec{tv_sec:0,tv_nsec:0},Timespec{tv_sec:0,tv_nsec:0}];assert_eq!(unsafe{utimensat(-100,path.as_ptr(),times.as_ptr(),0)},0);std::fs::write(root.join(".jet/perf/baselines/objects/unknown"),b"retain").unwrap();let result=store.gc("2026-03-02T00:00:00.000000000Z").unwrap();assert_eq!(result.removed,vec![other_id.clone()]);assert!(result.retained.iter().any(|item|item.contains("unknown")));
         std::fs::remove_file(root.join(format!(".jet/perf/baselines/objects/{id}.json"))).unwrap();std::fs::write(root.join(format!(".jet/perf/baselines/objects/{id}.json")),other).unwrap();assert!(store.select_compatible_history("release/linux",&bytes,&fresh).unwrap_err().contains("different report_id"));std::fs::remove_dir_all(root).unwrap();
     }
