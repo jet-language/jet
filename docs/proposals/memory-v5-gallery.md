@@ -222,7 +222,7 @@ fn integrate(world: &mut World, dt: f64) {
 
 ```jet
 // Jet — same machine code; strictness claimed where it matters
-policy no_alloc                            // this module: no heap, enforced
+#Policy(no_alloc)                          // this module: no heap, enforced
 
 fn integrate(world: &World, dt: F64) {
     loop e in &world.entities { e.pos += (e.vel * dt) }
@@ -366,7 +366,7 @@ small POD behaves like the numbers it's made of.
 // Rust
 let mut f = File::create("save.txt")?;
 writeln!(f, "{data}")?;
-drop(f);                       // early close: fine, but silent
+consume(f);                    // early close: fine, but silent
 // writeln!(f, "x")?;          // E0382 — mentions "move", not "closed"
 ```
 

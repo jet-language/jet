@@ -570,7 +570,6 @@ pub const FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--json", help: "emit machine-readable diagnostics" },
     FlagSpec { long: "--color", help: "color: auto | always | never" },
     FlagSpec { long: "--version", help: "print compiler version" },
-    FlagSpec { long: "--emit-rust", help: "also print the generated Rust code" },
     FlagSpec { long: "--check", help: "with fmt: exit 1 if any file would change (CI gate)" },
     FlagSpec { long: "--diff", help: "with fmt --check: also print unified diffs for each changed file" },
     FlagSpec { long: "--changed", help: "with fmt: format only VCS-changed .jet files (requires git)" },

@@ -1373,17 +1373,17 @@ fn run() {
 
 #[test]
 fn fmt_no_alloc_policy_d_mem1_s7_stability() {
-    // D-MEM1/S7 (D-NOALLOC-SEM1=A): `policy no_alloc` is a fixed post-import
+    // D-POLICY-WORD1=A: `#Policy(no_alloc)` is a fixed post-import
     // file marker, same treatment as `#PubFile`/`#Target(…)` — must survive
     // fmt unchanged.
     let src = "\
-policy no_alloc
+#Policy(no_alloc)
 
 fn run() {
     print(\"ok\")
 }
 ";
-    assert_fmt_keeps(src, &["policy no_alloc"], "D-MEM1/S7 policy no_alloc");
+    assert_fmt_keeps(src, &["#Policy(no_alloc)"], "D-POLICY-WORD1 policy marker");
 }
 
 #[test]

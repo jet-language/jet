@@ -204,9 +204,9 @@ impl<'a> Fmt<'a> {
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
-            // D-REGION1 (opt B): `region r { … }`.
+            // D-BLOCKPLANE1=A: `#Region(r) { … }`.
             Stmt::Region { name, body, .. } => {
-                self.write(&format!("{} {} {{", Syntax::KW_REGION, name));
+                self.write(&format!("#{}({}) {{", Syntax::ATTR_REGION, name));
                 self.newline();
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
@@ -323,18 +323,16 @@ impl<'a> Fmt<'a> {
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
-            // D-TERM1 (ratified 2026-06-22): `live { … }` — terminal direct-input block.
+            // D-BLOCKPLANE1=A: `#Live { … }`.
             Stmt::Live { body, .. } => {
-                self.write(Syntax::KW_LIVE);
-                self.write(" {");
+                self.write(&format!("#{} {{", Syntax::ATTR_LIVE));
                 self.newline();
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
-            // D-DET1: `assume_deterministic { … }` — the expert determinism escape.
-            Stmt::AssumeDet { body, .. } => {
-                self.write(Syntax::KW_ASSUME_DET);
-                self.write(" {");
+            // D-BLOCKPLANE1=A: `#Nondeterministic("reason") { … }`.
+            Stmt::AssumeDet { reason, body, .. } => {
+                self.write(&format!("#{}(\"{}\") {{", Syntax::ATTR_NONDETERMINISTIC, reason));
                 self.newline();
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();

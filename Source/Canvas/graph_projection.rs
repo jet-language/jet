@@ -932,7 +932,7 @@ fn project_stmt(
         }
         Stmt::ContextBlock { body, span, .. }
         | Stmt::Live { body, span }
-        | Stmt::AssumeDet { body, span }
+        | Stmt::AssumeDet { body, span, .. }
         | Stmt::Transact { body, span, .. } => {
             add_region(g, ordinal, "scope", "scope", *span);
             project_stmt_block(g, index, src, body, ordinal * 100 + 200, x + 230, y + 70);

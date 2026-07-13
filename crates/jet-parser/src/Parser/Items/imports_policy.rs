@@ -6,31 +6,33 @@ use super::TargetMarker;
 use super::helpers::format_version_segment;
 
 impl<'a> Parser<'a> {
-        /// D-MEM1/S7 (D-NOALLOC-SEM1=A): `policy no_alloc;` — the file's
+        /// D-POLICY-WORD1=A: `#Policy(no_alloc)` — file allocation floor.
         /// allocation floor. `no_alloc` is the only ratified policy name today;
         /// any other name is an ordinary "expected X, found Y" parse error (the
         /// full policy list is a follow-on ballot, not this stage's business).
         fn policy_decl(&mut self) -> Result<Span, Diagnostic> {
-            let start = self.bump().span; // consume `policy`
+            let start = self.bump().span; // consume `#`
+            self.bump(); // `Policy`
+            self.expect(TokKind::LParen, "after `#Policy`")?;
             match &self.peek().kind {
                 TokKind::Ident(n) if n == Syntax::POLICY_NO_ALLOC => {
                     let name_span = self.bump().span;
-                    self.expect(TokKind::Semi, "after a `policy` declaration")?;
+                    self.expect(TokKind::RParen, "after the policy name")?;
                     Ok(Span::new(start.start, name_span.end))
                 }
                 other => Err(Diagnostic::error(
                     "E0003",
                     format!(
-                        "expected `{}` after `{}`, found {}",
+                        "expected `{}` inside `#{}`, found {}",
                         Syntax::POLICY_NO_ALLOC,
-                        Syntax::KW_POLICY,
+                        Syntax::ATTR_POLICY,
                         describe(other)
                     ),
                     format!(
                         "`{}` is the only ratified policy name today",
                         Syntax::POLICY_NO_ALLOC
                     ),
-                    format!("write `{} {}`", Syntax::KW_POLICY, Syntax::POLICY_NO_ALLOC),
+                    format!("write `#{}({})`", Syntax::ATTR_POLICY, Syntax::POLICY_NO_ALLOC),
                     Some(self.peek().span),
                 )),
             }
@@ -387,15 +389,16 @@ impl<'a> Parser<'a> {
                     // D-MEM1/S7 (D-NOALLOC-SEM1=A): `policy no_alloc;` — file-scoped
                     // allocation floor, parsed like `use`/`#PubFile` (not inside any
                     // `module { … }` body — only the top-level file item list).
-                    TokKind::Ident(n) if n == Syntax::KW_POLICY => match self.policy_decl() {
+                    TokKind::Hash
+                        if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_POLICY) => match self.policy_decl() {
                         Ok(span) => {
                             if let Some(first) = no_alloc_policy {
                                 self.diags.push(Diagnostic::error(
                                     "E0003",
-                                    "only one `policy no_alloc` declaration is allowed per file"
+                                    "only one `#Policy(no_alloc)` declaration is allowed per file"
                                         .to_string(),
                                     "a file may declare its allocation floor once".to_string(),
-                                    "remove the duplicate `policy no_alloc` line".to_string(),
+                                    "remove the duplicate `#Policy(no_alloc)` line".to_string(),
                                     Some(span),
                                 ));
                                 let _ = first;

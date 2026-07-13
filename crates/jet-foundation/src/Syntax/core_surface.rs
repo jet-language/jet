@@ -476,13 +476,13 @@ pub const CORE_EMAIL_SERIALIZE_FN: &str = "serialize";
 pub const CORE_EMAIL_SMTP_FN: &str = "smtp";
 pub const CORE_EMAIL_SMTP_FROM_ENV_FN: &str = "smtp_from_env";
 
-/// D-REGION1 (ratified 2026-06-21, opt B): explicit allocation-region block
-/// `region r { … }`. A lowercase contextual block keyword (D-CASING1) that
-/// names a region spanning multiple arenas or narrower than the enclosing
+/// D-REGION1 / D-BLOCKPLANE1: explicit allocation-region block
+/// `#Region(r) { … }`.
+/// Names a region spanning multiple arenas or narrower than the enclosing
 /// function; arena `view`s allocated inside may not escape the region (E0631).
 /// The beginner default is an implicit scope-inferred region (opt A) and never
 /// writes `region`.
-pub const KW_REGION: &str = "region";
+pub const ATTR_REGION: &str = "Region"; // D-BLOCKPLANE1
 
 /// D-TASKSCOPE1=A: structured task group scope — owns child tasks until scope exit.
 pub const KW_TASKGROUP: &str = "taskgroup";
@@ -503,21 +503,21 @@ pub const CTX_FIELD_LOGGER: &str = "logger";
 /// through wait/IO points in the current task context.
 pub const CTX_FIELD_DEADLINE: &str = "deadline";
 
-/// D-TERM1 (ratified 2026-06-22): terminal direct-input block keyword.
-/// `live { … }` enters un-buffered/no-echo input mode for its body and
+/// D-TERM1 / D-BLOCKPLANE1: terminal direct-input block marker.
+/// `#Live { … }` enters un-buffered/no-echo input mode for its body and
 /// guarantees terminal-state restore on every exit path including panic
 /// (implemented with the D-DEFER1 scope-guard mechanism). "raw mode" jargon
 /// is deliberately avoided; `live` is the user-facing name. A contextual
 /// keyword: recognised only when followed by `{`.
-pub const KW_LIVE: &str = "live";
+pub const ATTR_LIVE: &str = "Live"; // D-BLOCKPLANE1
 
-/// D-DET1 (ratified 2026-06-22): the expert determinism-escape block keyword.
-/// `assume_deterministic { … }` inside a `@Pure fn` suspends the determinism
+/// D-DET1 / D-BLOCKPLANE1: expert determinism-escape marker.
+/// `#Nondeterministic("reason") { … }` inside a `@Pure fn` suspends determinism
 /// rejections (E3401/E3403) for its body — the "I know this is deterministic"
 /// hatch. A semantic footgun, v1-legal per the card. A contextual keyword:
 /// recognised only when followed by `{`, so a name `assume_deterministic` still
 /// works elsewhere. Erased in codegen (I3) — the block is a plain Rust block.
-pub const KW_ASSUME_DET: &str = "assume_deterministic";
+pub const ATTR_NONDETERMINISTIC: &str = "Nondeterministic"; // D-BLOCKPLANE1
 
 /// D-DET1 (ratified 2026-06-22): the deterministic injected `Clock` capability
 /// type. A `@Pure fn` taking a `Clock` param may read time **through it**
@@ -546,7 +546,7 @@ pub const DURATION_TYPE: &str = "Duration";
 pub const TYPE_BIGINT: &str = "BigInt";
 
 /// D-DECIMAL1 (ratified 2026-06-26): exact base-10 decimal. Construct with
-/// `Decimal("12.34")` or `core.numeric.decimal("12.34")`; no implicit `Float`.
+/// `Decimal("12.34")` or `core.math.decimal("12.34")`; no implicit `Float`.
 pub const TYPE_DECIMAL: &str = "Decimal";
 
 /// D-BUILDENTRY1/D-BUILDTARGET1/D-BUILDACTION1: typed build-program values.

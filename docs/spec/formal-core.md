@@ -26,7 +26,7 @@ guaranteeing accuracy.
 | `loop x in iter { … }` | `TExprKind::ForIn` → iterator protocol |
 | `loop { … }` | `TExprKind::Loop` |
 | `@MustUse` / `#SingleUse` markers | `TMarker::MustUse` / `TMarker::SingleUse` |
-| `drop(x)` (D-LIN1-DROP=A) | `TExprKind::Drop` |
+| `consume(x)` (D-DROP-WORD1=A) | `TExprKind::Drop` |
 | struct/enum auto-derive | comptime derive pass → normal TIR |
 
 Do not treat this table as authoritative — it is a sketch to reduce cold-start

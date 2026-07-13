@@ -4619,7 +4619,7 @@ pub(crate) fn collect_core_expr(
         Expr::Call(c)
             if c.name == crate::Syntax::TYPE_BIGINT || c.name == crate::Syntax::TYPE_DECIMAL =>
         {
-            note_core_usage(used, spans, "core.numeric::__precise__", Some(c.name_span));
+            note_core_usage(used, spans, "core.math::__precise__", Some(c.name_span));
         }
         Expr::MethodCall {
             receiver,
@@ -4665,7 +4665,7 @@ pub(crate) fn collect_core_expr(
                 note_core_usage(
                     used,
                     spans,
-                    "core.numeric::__precise__",
+                    "core.math::__precise__",
                     Some(*method_span),
                 );
             }

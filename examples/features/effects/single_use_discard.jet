@@ -8,7 +8,7 @@
 // resource it guards is already gone. That is a real decision with consequences,
 // so it has to be written down.
 //
-// The hatch is `drop(x)` inside an `#Unsafe("reason")` region or fn. The
+// The hatch is `consume(x)` inside an `#Unsafe("reason")` region or fn. The
 // `#Unsafe` reason IS the audit note — there is no second audit channel. Outside
 // an `#Unsafe` context, `drop` of a `#SingleUse` value is E0143, pointing you at
 // the audited form.
@@ -37,7 +37,7 @@ fn run() {
     // so in the `#Unsafe` reason, and `drop` discharges the consume duty.
     b :: issue("B")
     #Unsafe("event cancelled; the ticket admits to nothing, so voiding it is correct") {
-        drop(b)
+        consume(b)
     }
     print("ticket B voided")
 }

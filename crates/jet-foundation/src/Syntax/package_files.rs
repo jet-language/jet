@@ -328,7 +328,7 @@ pub const ATTR_HARDENED: &str = "Hardened"; // D-MARK-META1
 // fallible or @MustUse result. It is now the SOLE discard spelling; the
 // `#Suppress(MustUse) { … }` lexical-scope form is retired outright
 // (ordinary unknown-marker error — no ATTR_SUPPRESS registration).
-pub const METHOD_DROP: &str = "drop"; // D-IGNORERET2 (method form; distinct from BUILTIN_DROP fn)
+pub const METHOD_DROP: &str = "drop"; // D-IGNORERET2 method; distinct from consume builtin
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Canonical keyword/type/builtin tables (c44: single source of truth).
@@ -360,7 +360,6 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     KW_AS,
     KW_EXTERN,
     KW_MODULE,
-    KW_POLICY,
     // Control flow (M1, S19, S23, M1/M2)
     KW_IF,
     KW_ELSE,
@@ -398,12 +397,8 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     // Memory / expert tier (S58, D-REGION1, D-CTX1, D-TERM1, D-CTEFFECT1)
     KW_UNSAFE,
     KW_IMPURE,
-    KW_REGION,
     KW_TASKGROUP,
     CTX_BLOCK,
-    KW_LIVE,
-    // Determinism escape (D-DET1): `assume_deterministic { … }`
-    KW_ASSUME_DET,
     // Transactions (D-TXN1–D-TXN4): `#Transact(name) { … }`
     KW_TRANSACT,
     // Schedule-as-code (D-SCHEDULE1, card #505): `#Task fn` — `#Every(…)`
@@ -554,10 +549,10 @@ pub const IMPURE_BUILTINS: &[&str] = &[BUILTIN_PRINT, "eprint", "print", BUILTIN
 // `derive T.Wire { … }` bodies applied as `#[Wire]` remain `#` generation
 // machinery — the built-in/user line IS the plane line.
 use super::{
-    BUILTIN_INPUT, BUILTIN_PRINT, CTX_BLOCK, KW_ALIAS, KW_AS, KW_ASSUME_DET, KW_BENCH,
+    BUILTIN_INPUT, BUILTIN_PRINT, CTX_BLOCK, KW_ALIAS, KW_AS, KW_BENCH,
     KW_BREAK, KW_COMPTIME, KW_CONST, KW_CONTINUE, KW_COPY, KW_DERIVE, KW_ELSE, KW_ENUM,
-    KW_EXTERN, KW_FN, KW_IF, KW_IMPL, KW_IMPURE, KW_IN, KW_IT, KW_LIVE, KW_LOOP, KW_MODULE,
-    KW_POLICY, KW_PRIV, KW_PROTOCOL, KW_PUB, KW_PURE, KW_REGION, KW_RETURN, KW_SANITIZER,
+    KW_EXTERN, KW_FN, KW_IF, KW_IMPL, KW_IMPURE, KW_IN, KW_IT, KW_LOOP, KW_MODULE,
+    KW_PRIV, KW_PROTOCOL, KW_PUB, KW_PURE, KW_RETURN, KW_SANITIZER,
     KW_SELF, KW_STATE, KW_STATE_DECL, KW_STRUCT, KW_TAG, KW_TAINTED, KW_TASK, KW_TASKGROUP, KW_TEST,
     KW_TODO, KW_TRAIT, KW_TRANSACT, KW_TRANSITION, KW_UNSAFE, KW_USE, LIT_ERR, LIT_FALSE,
     LIT_NULL, LIT_OK, LIT_TRUE, PROTO_CLIENT, PROTO_SERVER, TYPE_BIT_SET, TYPE_BOOL,

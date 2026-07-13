@@ -355,7 +355,7 @@ fn file_chunk_category(chunk: &[Token]) -> usize {
             2
         }
         [TokKind::Ident(policy), TokKind::Ident(no_alloc), ..]
-            if policy == jet::Syntax::KW_POLICY && no_alloc == jet::Syntax::POLICY_NO_ALLOC =>
+            if policy == jet::Syntax::ATTR_POLICY && no_alloc == jet::Syntax::POLICY_NO_ALLOC =>
         {
             2
         }

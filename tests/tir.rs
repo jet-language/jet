@@ -2578,7 +2578,7 @@ fn run() {
     assert_eq!(stdout, "42\n99\n7\n3\n");
 }
 
-/// c109 Phase 19: an explicit `region r { … }` block (D-REGION1) — a plain Rust block
+/// D-BLOCKPLANE1: explicit `#Region(r) { … }` — plain Rust block
 /// scope; views made inside live only until the block ends.
 #[test]
 fn arena_region_block() {
@@ -2588,7 +2588,7 @@ fn arena_region_block() {
     let src = "\
 use core.mem
 fn run() {
-    region scratch {
+    #Region(scratch) {
         a :: mem.Arena.new()
         b :: mem.Bump.new()
         x :: a.alloc(1)

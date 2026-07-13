@@ -431,7 +431,7 @@ supply chain (E2-M8):
   {bin} inspect sbom                emit a software bill of materials
 
 flags:
-  --emit-rust                  also print the generated Rust code
+  emit --rust <file.{ext}>     print generated Rust source
   --check                      with fmt: exit 1 if file would change (CI)
   --sbom                       with build: write an SPDX SBOM beside the binary
   --vendor-dir <path>          with vendor: directory to copy dependencies into
@@ -698,6 +698,12 @@ fn check_flags(raw: &[String], subcmd: &str) {
             continue;
         }
         let head = a.split('=').next().unwrap_or(a);
+        if head == "--emit-rust" {
+            eprintln!("Error [E2102]: `--emit-rust` isn't a flag {bin} understands");
+            eprintln!(" Why: generated output belongs to the `emit` command");
+            eprintln!(" Fix: run `{bin} emit --rust <file.{}>`", jet::Syntax::FILE_EXT);
+            exit(ExitCodes::USAGE);
+        }
         eprintln!("Error [E2102]: `{}` isn't a flag {} understands", head, bin);
         eprintln!(" Why: flags before `--` belong to {}; everything after `--` is forwarded to your program", bin);
         match jet::CLI::closest_flag(head) {
@@ -822,7 +828,8 @@ fn main() {
         None => Vec::new(),
     };
 
-    let emit_rust = jet_argv.iter().any(|a| a == "--emit-rust");
+    // D-CLI-EMIT1=A: generated Rust has one spelling: `jet emit --rust`.
+    let emit_rust = false;
     let fmt_check = jet_argv.iter().any(|a| a == "--check");
     let json = jet_argv.iter().any(|a| a == "--json");
     let small = jet_argv.iter().any(|a| a == "--small");

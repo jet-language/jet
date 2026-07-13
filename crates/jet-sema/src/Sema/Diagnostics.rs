@@ -252,7 +252,7 @@ fn is_cloneable_rec(
 /// D-MEM1/S7 (D-NOALLOC-SEM1=A): true when `ty` owns heap data — directly
 /// (`String`/`[T]`/`[K,V]`/`Shared<T>`/a boxed trait object/a `[T#N]`, which
 /// erases to `Vec<T>` at codegen) or transitively (a struct/enum/tuple/distinct/
-/// alias with a heap-owning part). Backs the `policy no_alloc` struct/enum-
+/// alias with a heap-owning part). Backs `#Policy(no_alloc)` struct/enum-
 /// literal and `copy` checks (E0921) — deliberately narrower than
 /// `is_cloneable`, which asks a different question ("can Rust `.clone()` this",
 /// true for nearly everything including heap types).
@@ -343,7 +343,7 @@ fn type_owns_heap_rec(ty: &Type, registry: &TypeRegistry, visiting: &mut HashSet
     }
 }
 
-/// D-MEM1/S7 (D-NOALLOC-SEM1=A): one shared shape for every `policy no_alloc`
+/// D-POLICY-WORD1: one shared shape for every `#Policy(no_alloc)`
 /// floor violation — only `what` varies by call-site shape (interpolation /
 /// `.push`/`.insert` / heap-owning struct-or-enum literal / `copy` of a
 /// heap-owning type); why and fix are identical across all four (I8: one
@@ -352,12 +352,12 @@ pub(crate) fn no_alloc_violation(what: String, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0921",
         what,
-        "this module declares `policy no_alloc` (D-NOALLOC-SEM1) — every \
+        "this module declares `#Policy(no_alloc)` (D-NOALLOC-SEM1) — every \
          allocation-shaped expression in its own function bodies is a compile \
          error; a call to a function defined elsewhere is that function's own \
          module's problem, not checked here"
             .to_string(),
-        "avoid the allocation here, or move this code out of the `policy no_alloc` module"
+        "avoid the allocation here, or move this code out of the `#Policy(no_alloc)` module"
             .to_string(),
         Some(span),
     )

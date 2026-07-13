@@ -186,8 +186,8 @@ pub(crate) fn emit_tir_core_call(
                 arg(1)
             )
         }
-        // D-DECIMAL1: `core.numeric.decimal(s)` → exact parse.
-        ("core.numeric", "decimal") => {
+        // D-CORE-NUMERIC1=A: `core.math.decimal(s)` → exact parse.
+        ("core.math", "decimal") => {
             format!("{}jet_decimal_from_str(&({}))", cx.root_prefix, arg(0))
         }
         // D-PENDING1=B: Loadable<T,E> constructors.

@@ -6,7 +6,7 @@
 //!      read time/randomness THROUGH a `Clock`/`Rng` parameter (seeded by the
 //!      caller, hence reproducible), while ambient `time.now()`/`random.int()`
 //!      stay E3403.
-//!   2. `assume_deterministic { … }` — the expert escape that suspends the
+//!   2. `#Nondeterministic("reason") { … }` — expert escape suspending
 //!      determinism rejections (E3401/E3403) for its body.
 
 // ── Piece 1: injected deterministic Clock / Rng ───────────────────────────────
@@ -112,16 +112,16 @@ fn run() { print("{bad()}") }
     );
 }
 
-// ── Piece 2: assume_deterministic { } expert escape ───────────────────────────
+// ── Piece 2: audited nondeterminism escape ────────────────────────────────────
 
-/// `assume_deterministic { … }` suspends E3403 for ambient time inside a `@Pure fn`.
+/// `#Nondeterministic("reason") { … }` suspends E3403 inside `@Pure fn`.
 #[test]
 fn assume_deterministic_suppresses_e3403() {
     let src = r#"
 use core.time as time;
 @Pure fn risky() -> Int {
     t := 0
-    assume_deterministic {
+    #Nondeterministic("ambient clock is explicit test input") {
         t = time.now()
     }
     return t
@@ -131,17 +131,17 @@ fn run() { print("{risky()}") }
     let res = jet::compile(src);
     assert!(
         res.is_ok(),
-        "assume_deterministic should suppress E3403: {:?}",
+        "#Nondeterministic should suppress E3403: {:?}",
         res.err()
     );
 }
 
-/// `assume_deterministic { … }` suspends E3401 for an impure builtin call too.
+/// `#Nondeterministic("reason") { … }` suspends E3401 too.
 #[test]
 fn assume_deterministic_suppresses_e3401() {
     let src = r#"
 @Pure fn risky() -> Int {
-    assume_deterministic {
+    #Nondeterministic("ambient print is deliberate") {
         print("side effect")
     }
     return 42
@@ -151,7 +151,7 @@ fn run() { print("{risky()}") }
     let res = jet::compile(src);
     assert!(
         res.is_ok(),
-        "assume_deterministic should suppress E3401: {:?}",
+        "#Nondeterministic should suppress E3401: {:?}",
         res.err()
     );
 }
@@ -162,7 +162,7 @@ fn assume_deterministic_is_scoped() {
     let src = r#"
 use core.time as time;
 @Pure fn risky() -> Int {
-    assume_deterministic {
+    #Nondeterministic("ambient clock is deliberate") {
         a := time.now()
     }
     return time.now()
@@ -182,20 +182,19 @@ fn run() { print("{risky()}") }
     );
 }
 
-/// `assume_deterministic` is a contextual keyword: a binding named
-/// `assume_deterministic` (not followed by `{`) still works.
+/// Retired word is now an ordinary identifier.
 #[test]
-fn assume_deterministic_contextual_keyword() {
+fn retired_determinism_word_is_ordinary_identifier() {
     let src = r#"
 fn run() {
-    assume_deterministic :: 5
-    print("{assume_deterministic}")
+    old_escape_name :: 5
+    print("{old_escape_name}")
 }
 "#;
     let res = jet::compile(src);
     assert!(
         res.is_ok(),
-        "`assume_deterministic` should still be a valid name: {:?}",
+        "ordinary identifier should compile: {:?}",
         res.err()
     );
 }

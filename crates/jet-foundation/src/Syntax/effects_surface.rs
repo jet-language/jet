@@ -221,14 +221,14 @@ pub const FOREIGN_TODO: &str = "todo";
 /// `sanitizer` elsewhere is unaffected.
 pub const FOREIGN_SANITIZER: &str = "sanitizer";
 
-/// D-LIN1-DROP (ratified 2026-06-25, option A): `drop(x)` is the deliberate
+/// D-LIN1-DROP / D-DROP-WORD1: `consume(x)` is the deliberate
 /// discard of a `#SingleUse` value. Legal ONLY inside an `#Unsafe("reason")`
 /// region/fn — the `#Unsafe` reason IS the audit note (reuses D-UNSAFE2's audited
 /// gate). It satisfies the single-use consume duty by moving the value to nowhere;
 /// the value's Rust `Drop` runs. Outside an `#Unsafe` context it is E0143. Erased
 /// to a plain `drop(x)` in codegen (I3 — no `unsafe` emitted). Shadowed by any
 /// user-defined `drop` function or local.
-pub const BUILTIN_DROP: &str = "drop";
+pub const BUILTIN_CONSUME: &str = "consume"; // D-DROP-WORD1
 
 /// D-TOOL4 (ratified 2026-06-16, E2-M11): snapshot testing builtin.
 /// `expect(value).snapshot()` records or compares a golden snapshot.

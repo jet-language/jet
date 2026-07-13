@@ -327,16 +327,16 @@ impl<'a> Checker<'a> {
             // `#SingleUse` value is legal only inside an `#Unsafe("reason")`
             // region/fn (the reason IS the audit note) — otherwise E0143. Shadowed
             // by any user `drop` fn or local of that name.
-            if call.name == Syntax::BUILTIN_DROP
-                && self.funcs.get(Syntax::BUILTIN_DROP).is_none()
-                && self.lookup(Syntax::BUILTIN_DROP).is_none()
+            if call.name == Syntax::BUILTIN_CONSUME
+                && self.funcs.get(Syntax::BUILTIN_CONSUME).is_none()
+                && self.lookup(Syntax::BUILTIN_CONSUME).is_none()
             {
                 if call.args.len() != 1 {
                     self.diags.push(Diagnostic::error(
                         "E0103",
-                        format!("`{}` discards exactly one value", Syntax::BUILTIN_DROP),
+                        format!("`{}` discards exactly one value", Syntax::BUILTIN_CONSUME),
                         "`drop` throws a single value away, running its cleanup".to_string(),
-                        format!("e.g. {}(x)", Syntax::BUILTIN_DROP),
+                        format!("e.g. {}(x)", Syntax::BUILTIN_CONSUME),
                         Some(call.name_span),
                     ));
                     for a in call.args.iter_mut() {

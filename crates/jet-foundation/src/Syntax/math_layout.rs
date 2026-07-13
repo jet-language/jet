@@ -334,13 +334,13 @@ pub const FOREIGN_NOT: &str = "not";
 pub const KW_USE: &str = "use";
 pub const KW_AS: &str = "as";
 
-/// D-MEM1/S7 (D-NOALLOC-SEM1=A, ratified 2026-07-04): `policy no_alloc;` — a
+/// D-MEM1/S7 / D-POLICY-WORD1: `#Policy(no_alloc)` — a
 /// module-level allocation floor, file-scoped like `web_target_ceiling`/
 /// `#PubFile`. Sema flags allocation-shaped expressions written directly in
 /// this file's own function bodies (E0921) — local only, never follows calls
 /// into other modules. `no_alloc` is the only ratified policy name; the full
 /// policy list is a follow-on ballot (an unknown name after `policy` is E0003).
-pub const KW_POLICY: &str = "policy";
+pub const ATTR_POLICY: &str = "Policy"; // D-POLICY-WORD1
 pub const POLICY_NO_ALLOC: &str = "no_alloc";
 
 /// S51 / D-CORENS-CANON1: compiler-known `core.*` library root.

@@ -324,6 +324,46 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// D-BLOCKPLANE1=A: `#Region(name) { … }`.
+    fn at_region_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+        let start = self.bump().span; // `#`
+        self.bump(); // `Region`
+        self.expect(TokKind::LParen, "after `#Region`")?;
+        let (name, name_span) = self.expect_ident("for the region name")?;
+        self.expect(TokKind::RParen, "after the region name")?;
+        self.expect(TokKind::LBrace, "after `#Region(name)`")?;
+        let body = self.block_stmts();
+        let end = self.toks[self.pos - 1].span.end;
+        Ok(Stmt::Region { name, name_span, body, span: Span::new(start.start, end) })
+    }
+
+    /// D-BLOCKPLANE1=A: `#Live { … }`.
+    fn at_live_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+        let start = self.bump().span; // `#`
+        self.bump(); // `Live`
+        self.expect(TokKind::LBrace, "after `#Live`")?;
+        let body = self.block_stmts();
+        let end = self.toks[self.pos - 1].span.end;
+        Ok(Stmt::Live { body, span: Span::new(start.start, end) })
+    }
+
+    /// D-BLOCKPLANE1=A: audited `#Nondeterministic("reason") { … }`.
+    fn at_nondeterministic_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+        let start = self.bump().span; // `#`
+        self.bump(); // `Nondeterministic`
+        self.expect(TokKind::LParen, "after `#Nondeterministic`")?;
+        let (reason, _) = self.expect_plain_string(
+            "for the nondeterminism reason",
+            "`#Nondeterministic` requires quoted audit text",
+            "write: #Nondeterministic(\"OS clock is an explicit input\") { … }",
+        )?;
+        self.expect(TokKind::RParen, "after the nondeterminism reason")?;
+        self.expect(TokKind::LBrace, "after `#Nondeterministic(…)`")?;
+        let body = self.block_stmts();
+        let end = self.toks[self.pos - 1].span.end;
+        Ok(Stmt::AssumeDet { reason, body, span: Span::new(start.start, end) })
+    }
+
     /// D-CTX1 (ratified 2026-06-22, G2): parse `#Context(field: value, …) { … }`.
     /// Cursor is on the `#` token. Emits E0760 for `=` spelling, E0761 for
     /// unknown fields.
@@ -1085,6 +1125,15 @@ impl<'a> Parser<'a> {
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::CTX_BLOCK) {
                     return self.at_context_stmt();
                 }
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_REGION) {
+                    return self.at_region_stmt();
+                }
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_LIVE) {
+                    return self.at_live_stmt();
+                }
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_NONDETERMINISTIC) {
+                    return self.at_nondeterministic_stmt();
+                }
                 // D-EFF1 / D-QUAL1: `#Caps(Net, Db) { … }` effect-restriction region.
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_CAPS) {
                     return self.at_caps_stmt();
@@ -1198,62 +1247,6 @@ impl<'a> Parser<'a> {
                         .to_string(),
                     Some(t.span),
                 ))
-            }
-            // D-TERM1 (ratified 2026-06-22): `live { … }` — terminal direct-input
-            // block. `live` is a lowercase contextual keyword (D-CASING1):
-            // recognised only when immediately followed by `{`, so a variable or
-            // function named `live` still works everywhere else.
-            TokKind::Ident(n)
-                if n == Syntax::KW_LIVE && matches!(self.peek2().kind, TokKind::LBrace) =>
-            {
-                let start = self.bump().span; // `live`
-                self.expect(TokKind::LBrace, "after `live`")?;
-                let body = self.block_stmts();
-                let end = self.toks[self.pos - 1].span.end;
-                return Ok(Stmt::Live {
-                    body,
-                    span: Span::new(start.start, end),
-                });
-            }
-            // D-DET1 (ratified 2026-06-22): `assume_deterministic { … }` — the
-            // expert determinism-escape block. A lowercase contextual keyword
-            // (like `live`): recognised only when immediately followed by `{`, so
-            // a name `assume_deterministic` still works everywhere else.
-            TokKind::Ident(n)
-                if n == Syntax::KW_ASSUME_DET && matches!(self.peek2().kind, TokKind::LBrace) =>
-            {
-                let start = self.bump().span; // `assume_deterministic`
-                self.expect(
-                    TokKind::LBrace,
-                    &format!("after `{}`", Syntax::KW_ASSUME_DET),
-                )?;
-                let body = self.block_stmts();
-                let end = self.toks[self.pos - 1].span.end;
-                return Ok(Stmt::AssumeDet {
-                    body,
-                    span: Span::new(start.start, end),
-                });
-            }
-            // D-REGION1 (opt B): `region r { … }` — an explicit allocation
-            // region. `region` is a lowercase contextual keyword (D-CASING1):
-            // recognized only when followed by `name {`, so a variable named
-            // `region` still works everywhere else.
-            TokKind::Ident(n)
-                if n == Syntax::KW_REGION
-                    && matches!(&self.peek2().kind, TokKind::Ident(_))
-                    && matches!(self.peek3().kind, TokKind::LBrace) =>
-            {
-                let start = self.bump().span; // `region`
-                let (name, name_span) = self.expect_ident("for the region name")?;
-                self.expect(TokKind::LBrace, "after the region name")?;
-                let body = self.block_stmts();
-                let end = self.toks[self.pos - 1].span.end;
-                return Ok(Stmt::Region {
-                    name,
-                    name_span,
-                    body,
-                    span: Span::new(start.start, end),
-                });
             }
             // D-TASKSCOPE1=A: `taskgroup g { … }` — structured task scope.
             TokKind::Ident(n)

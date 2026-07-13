@@ -143,10 +143,6 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
         class: HighlightClass::KeywordDeclaration,
     },
     HighlightToken {
-        text: KW_POLICY,
-        class: HighlightClass::KeywordDeclaration,
-    },
-    HighlightToken {
         text: KW_STRUCT,
         class: HighlightClass::KeywordDeclaration,
     },
@@ -223,23 +219,11 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
         class: HighlightClass::KeywordDeclaration,
     },
     HighlightToken {
-        text: KW_REGION,
-        class: HighlightClass::KeywordDeclaration,
-    },
-    HighlightToken {
         text: KW_TASKGROUP,
         class: HighlightClass::KeywordDeclaration,
     },
     HighlightToken {
         text: CTX_BLOCK,
-        class: HighlightClass::KeywordDeclaration,
-    },
-    HighlightToken {
-        text: KW_LIVE,
-        class: HighlightClass::KeywordDeclaration,
-    },
-    HighlightToken {
-        text: KW_ASSUME_DET,
         class: HighlightClass::KeywordDeclaration,
     },
     HighlightToken {
@@ -989,7 +973,6 @@ fn is_zed_anonymous_word_token(s: &str) -> bool {
             | "Void"
             | "add"
             | "as"
-            | "assume_deterministic"
             | "break"
             | "change"
             | "comptime"
@@ -1007,13 +990,11 @@ fn is_zed_anonymous_word_token(s: &str) -> bool {
             | "if"
             | "impl"
             | "in"
-            | "live"
             | "loop"
             | "migration"
             | "module"
             | "ok"
             | "pub"
-            | "region"
             | "remove"
             | "rename"
             | "return"
@@ -1078,11 +1059,11 @@ fn tree_sitter_const_name(class: HighlightClass) -> &'static str {
 }
 use super::{
     ATTR_PREFIX, BUILTIN_INPUT, BUILTIN_PRINT, CONTRACT_MARKERS, CONTRACT_PREFIX, CTX_BLOCK,
-    DIRECTIVE_MARKERS, KW_ADD, KW_ALIAS, KW_AS, KW_ASSUME_DET, KW_BENCH, KW_BREAK, KW_CHANGE,
+    DIRECTIVE_MARKERS, KW_ADD, KW_ALIAS, KW_AS, KW_BENCH, KW_BREAK, KW_CHANGE,
     KW_COMPTIME, KW_CONST, KW_CONTINUE, KW_COPY, KW_DERIVE, KW_DISTINCT, KW_ELSE, KW_ENUM,
-    KW_EXTERN, KW_FN, KW_IF, KW_IMPL, KW_IMPURE, KW_IN, KW_IT, KW_LIVE, KW_LOOP,
-    KW_MIGRATION, KW_MODULE, KW_POLICY, KW_PRIV, KW_PROTOCOL, KW_PUB, KW_PURE, KW_RANGE_STEP,
-    KW_REACTIVE, KW_REGION, KW_REMOVE, KW_RENAME, KW_RETURN, KW_RUST, KW_SANITIZER, KW_SELF,
+    KW_EXTERN, KW_FN, KW_IF, KW_IMPL, KW_IMPURE, KW_IN, KW_IT, KW_LOOP,
+    KW_MIGRATION, KW_MODULE, KW_PRIV, KW_PROTOCOL, KW_PUB, KW_PURE, KW_RANGE_STEP,
+    KW_REACTIVE, KW_REMOVE, KW_RENAME, KW_RETURN, KW_RUST, KW_SANITIZER, KW_SELF,
     KW_STATE, KW_STATE_DECL, KW_STRUCT, KW_TAG, KW_TAINTED, KW_TASKGROUP, KW_TEST, KW_TODO,
     KW_TRAIT, KW_TRANSACT, KW_TRANSITION, KW_UNINIT, KW_UNSAFE, KW_USE, KW_VALIDATE_BLOCK,
     KW_VIA, LIT_ERR, VALIDATE_CHECK_FN,

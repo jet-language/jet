@@ -565,7 +565,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // proved the discard is audited when the value is `#SingleUse`. Lowers
             // to a plain `drop(arg)`; no `unsafe` (I3). Disjoint from a user `drop`
             // fn or local of that name (`cx.sigs`/`env.locals` would be set then).
-            if call.name == Syntax::BUILTIN_DROP
+            if call.name == Syntax::BUILTIN_CONSUME
                 && !cx.sigs.contains_key(&call.name)
                 && !env.locals.contains_key(&call.name)
             {

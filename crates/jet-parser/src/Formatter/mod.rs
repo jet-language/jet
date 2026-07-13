@@ -130,7 +130,7 @@ pub fn format_program(prog: &Program, src: &str, comment_toks: &[Token]) -> Stri
         f.write(&format!("#{}(\"{}\")", Syntax::ATTR_HTML, html_path));
         f.newline();
     }
-    // D-MEM1/S7 (D-NOALLOC-SEM1=A): `policy no_alloc;` — fixed post-import
+    // D-POLICY-WORD1=A: `#Policy(no_alloc)` — fixed post-import
     // position, same single-instance-marker treatment as `#PubFile`/
     // `#Target(…)`/`#Html(…)` above (no span to preserve original placement).
     if let Some(policy_span) = prog.no_alloc_policy {
@@ -139,9 +139,7 @@ pub fn format_program(prog: &Program, src: &str, comment_toks: &[Token]) -> Stri
         }
         first = false;
         f.emit_leading(policy_span.start);
-        f.write(Syntax::KW_POLICY);
-        f.write(" ");
-        f.write(Syntax::POLICY_NO_ALLOC);
+        f.write(&format!("#{}({})", Syntax::ATTR_POLICY, Syntax::POLICY_NO_ALLOC));
         f.newline();
         f.emit_trailing(policy_span.end);
     }

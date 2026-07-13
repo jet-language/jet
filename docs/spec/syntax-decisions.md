@@ -402,7 +402,7 @@ implementations.
 
 **D-BIGINT1** *(home moved to `core.math` by D-CORE-NUMERIC1=A, 2026-07-12)*: Core `BigInt`, explicit construction `BigInt(…)`/`BigInt("…")`;
 `Int` never auto-promotes (E0130–E0133). **D-DECIMAL1**: arbitrary-precision
-base-10 `Decimal` in `core.numeric`; default-on lint L0504 fires when a
+base-10 `Decimal` in `core.math`; default-on lint L0504 fires when a
 money-named field holds a float (`#[allow(float_money)]` suppresses).
 
 **D-STATE1 — Typestate** *(D-STATE-REQ/TRANS/DECL)*: states declared in a
@@ -809,17 +809,16 @@ job (export surface) and is untouched.
 
 **D-BLOCKPLANE1=A — expert regions are `#` blocks** *(ratified by owner
 2026-07-12, card #512)*: the three keyword regions join the marker
-family. `region r { }` → `#Region(r) { }` (D-REGION1 semantics
-unchanged); `live { }` → `#Live { }` (D-TERM1 semantics unchanged, no
-reason argument); `assume_deterministic { }` →
-`#Nondeterministic("reason") { }` (D-DET1 semantics unchanged, now
+family. `#Region(r) { }` has D-REGION1 semantics; `#Live { }` has D-TERM1
+semantics and no reason argument; `#Nondeterministic("reason") { }` has
+D-DET1 semantics, now
 reason-gated like `#Unsafe`/`#Impure`). The three keywords leave the
 grammar as ordinary syntax errors. The rule is now universal: an expert
 scoped region is a `#` block.
 
 **D-POLICY-WORD1=A — one meaning for `policy`** *(ratified by owner
 2026-07-12, card #512)*: the in-source module floor respells as
-`#Policy(no_alloc)` — a module-level directive; future floors arrive as
+`#Policy(no_alloc)` is a module-level directive; future floors arrive as
 arguments, never new keywords. The D-NOALLOC-SEM1 checker (local-only
 walk, E0921, ratified scope cut) is unchanged; only the trigger
 respells. The bare `policy` keyword leaves the grammar; the word means
@@ -827,8 +826,8 @@ the manifest governance namespace alone.
 
 **D-DROP-WORD1=A — one meaning for `drop`** *(ratified by owner
 2026-07-12, card #512)*: the linear finisher for `#SingleUse` values
-respells `drop(x)` → `consume(x)` (still `#Unsafe`-gated, D-LIN1
-semantics unchanged). `.drop("reason")` keeps sole ownership of the
+uses `consume(x)` (still `#Unsafe`-gated, D-LIN1 semantics unchanged).
+`.drop("reason")` keeps sole ownership of the
 discard meaning.
 
 **D-DOTSCOPE1 — Scope members**: inside a `#Marker { }` block body, a

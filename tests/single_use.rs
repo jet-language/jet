@@ -196,7 +196,7 @@ fn run() {
 
 // --- D-LIN1-DROP (ratified 2026-06-25): the audited deliberate-discard hatch ---
 
-/// `drop(x)` inside an `#Unsafe("reason") { … }` block counts as the terminal
+/// `consume(x)` inside an `#Unsafe("reason") { … }` block counts as terminal
 /// consumption — the duty is discharged, so the program compiles cleanly.
 #[test]
 fn drop_inside_unsafe_block_satisfies_single_use() {
@@ -205,7 +205,7 @@ fn drop_inside_unsafe_block_satisfies_single_use() {
 fn run() {
     db :: acquire("db")
     #Unsafe("the resource is already gone; nothing to release") {
-        drop(db)
+        consume(db)
     }
 }
 "#,
@@ -217,7 +217,7 @@ fn run() {
     );
 }
 
-/// `drop(x)` inside an `#Unsafe fn` body is equally audited — the fn's reason IS
+/// `consume(x)` inside an `#Unsafe fn` body is equally audited.
 /// the audit note, so a `#SingleUse` local it owns may be discarded with `drop`.
 #[test]
 fn drop_inside_unsafe_fn_satisfies_single_use() {
@@ -226,7 +226,7 @@ fn drop_inside_unsafe_fn_satisfies_single_use() {
 #Unsafe("voids a freshly-acquired lock whose resource is already gone")
 fn void_one() {
     db :: acquire("db")
-    drop(db)
+    consume(db)
 }
 fn run() {
     #Unsafe("calling the audited voider") {
@@ -242,7 +242,7 @@ fn run() {
     );
 }
 
-/// `drop(x)` of a `#SingleUse` value OUTSIDE any `#Unsafe` context → E0143,
+/// `consume(x)` outside `#Unsafe` → E0143,
 /// telling the user to wrap it in `#Unsafe("reason")`.
 #[test]
 fn drop_outside_unsafe_is_e0143() {
@@ -250,7 +250,7 @@ fn drop_outside_unsafe_is_e0143() {
         r#"
 fn run() {
     db :: acquire("db")
-    drop(db)
+    consume(db)
 }
 "#,
     );
@@ -275,7 +275,7 @@ fn reuse_after_drop_is_e0121() {
 fn run() {
     db :: acquire("db")
     #Unsafe("done with it") {
-        drop(db)
+        consume(db)
     }
     release(^db)
 }
@@ -311,17 +311,17 @@ fn run() {
     );
 }
 
-/// `drop` erases to a plain Rust `drop(...)` — no `unsafe` in generated code (I1/I3).
+/// `consume` erases to Rust `drop(...)` — no `unsafe` in generated code.
 #[test]
 fn drop_erases_no_unsafe_in_codegen() {
     let src = format!(
-        "{}\nfn run() {{ db :: acquire(\"db\"); #Unsafe(\"gone\") {{ drop(db) }} }}\n",
+        "{}\nfn run() {{ db :: acquire(\"db\"); #Unsafe(\"gone\") {{ consume(db) }} }}\n",
         LOCK
     );
     let out = jet::compile(&src).expect("should compile");
     assert!(
         out.rust.contains("drop("),
-        "drop should lower to a Rust drop(...) call"
+        "consume should lower to a Rust drop(...) call"
     );
 }
 

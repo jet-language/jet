@@ -132,8 +132,8 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
-    /// D-REGION1 (ratified 2026-06-21, opt B): explicit allocation region
-    /// `region r { … }`. `name` names the region; arena `view`s allocated
+    /// D-REGION1 / D-BLOCKPLANE1: explicit allocation region
+    /// `#Region(r) { … }`. `name` names the region; arena `view`s allocated
     /// inside may not escape it (E0631). A lexical scope like `loop`/`#Unsafe`,
     /// emitted as a plain Rust block — the region bound is enforced entirely in
     /// sema (I3: codegen stays dumb).
@@ -269,6 +269,7 @@ pub enum Stmt {
     /// footgun, v1-legal per the card. A lexical scope emitted as a plain Rust
     /// block; the suppression is a compile-time fact, erased in codegen (I3).
     AssumeDet {
+        reason: String,
         body: Vec<Stmt>,
         span: Span,
     },

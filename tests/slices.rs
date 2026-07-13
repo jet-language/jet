@@ -356,7 +356,6 @@ fn jetgrep_cli_modes_are_pinned() {
 fn metal_freestanding_builds() {
     let out = run_jet(&[
         "build",
-        "--emit-rust",
         "--freestanding",
         "examples/apps/metal/main.jet",
     ]);

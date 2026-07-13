@@ -61,7 +61,7 @@ merge red work with green CI.
   oracle = front-end accepts, rustc rejects, or diagnostic-code match) and
   `jet self devtools ice-report` (bundle source + generated Rust + rustc stderr +
   versions). Turns a P0 ICE from frontier-level hand-reduction into a
-  mechanical step. `--emit-rust` already exists as the raw ingredient.
+  mechanical step. `jet emit --rust` already exists as the raw ingredient.
 - **Scaffolders.** `jet self devtools new-example <topic>/<name>` and `new-ui
   <name>` that create fixture + expected output + remind the registry row.
 - **Mass migration.** `jet inspect codemod` rejects everything but single renames

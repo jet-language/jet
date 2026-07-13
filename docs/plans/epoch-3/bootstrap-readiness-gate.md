@@ -143,8 +143,8 @@ Options:
   verifier backend.
 
 ```text
-stage0 jet build compiler.jet --emit-rust
-stage1 jet build compiler.jet --emit-rust
+stage0 jet emit --rust compiler.jet
+stage1 jet emit --rust compiler.jet
 compare stage1 stage2
 ```
 

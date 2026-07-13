@@ -34,6 +34,7 @@ commands=(
         'clean:optimize and collect stale Jetpack hangar entries'
         'emit:emit generated output (--rust\: print Rust source)'
         'eval:evaluate a pure Jet program to stable JSON (--pure required)'
+        'budget:check performance budgets or explicitly update a baseline'
         'bench:benchmark a Jet program with honest stats'
         'fuzz:fuzz a property `#Test fn` — corpus, minimization, seeded PRNG'
         'version:print compiler version'
@@ -47,7 +48,6 @@ flags=(
         '--json[emit machine-readable diagnostics]'
         '--color[color\: auto | always | never]'
         '--version[print compiler version]'
-        '--emit-rust[also print the generated Rust code]'
         '--check[with fmt\: exit 1 if any file would change (CI gate)]'
         '--diff[with fmt --check\: also print unified diffs for each changed file]'
         '--changed[with fmt\: format only VCS-changed .jet files (requires git)]'
@@ -107,6 +107,13 @@ flags=(
         '--seed[with fuzz\: base PRNG seed --seed=<n> (default\: fixed, reproducible)]'
         '--corpus[with fuzz\: corpus directory --corpus=<dir> (default\: .jet/fuzz/<test>)]'
         '--lens[with prove\: project the human report by an exact evidence facet]'
+        '--annotations[with budget\: CI annotations auto, none, or github]'
+        '--baseline[with budget update\: selected baseline name]'
+        '--bootstrap[with budget update\: create absent or stale baseline history]'
+        '--accept-regression[with budget update\: explicitly accept a regression]'
+        '--reason[with exceptional budget update\: checked-in reason]'
+        '--yes[with budget update\: apply a valid non-interactive plan]'
+        '-y[short form of --yes]'
     )
 if (( CURRENT == 2 )); then
 _describe -t commands 'command' commands

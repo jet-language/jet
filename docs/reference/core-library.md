@@ -2093,7 +2093,7 @@ narrower than the function — write an explicit **`region r { … }`** block:
 use core.mem
 
 fn run() {
-    region scratch {
+    #Region(scratch) {
         a :: mem.Arena.new()
         b :: mem.Bump.new()
         first :: a.alloc(1)
@@ -2455,7 +2455,7 @@ have/have-not ledger of missing domains.
 `core.crypto`, `core.crypto.random`, `core.crypto.expert`, `core.http`,
 `core.regex`, `core.archive`, `core.raylib`, `core.game`,
 `core.compress.gzip`, `core.compress.zstd`, `core.db`, `core.plugin`,
-`core.reactive`, `core.event`, `core.science.measurement`, `core.numeric`,
+`core.reactive`, `core.event`, `core.science.measurement`,
 `core.reactive.loadable`, `core.perf`, `core.ui`, `core.web`,
 `core.web.storage`, `core.web.storage.local`, `core.web.storage.session`,
 `core.sketch.hll`, `core.sketch.tdigest`, `core.sketch.reservoir`,

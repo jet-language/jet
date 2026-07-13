@@ -360,7 +360,7 @@ as **E0921**. The check is local only: a call into another function is that
 function's own module's problem, never followed.
 
 ```jet
-policy no_alloc
+#Policy(no_alloc)
 
 fn integrate(e: &Entity, dt: Float) { e.pos += e.vel * dt }
 ```
@@ -1124,7 +1124,7 @@ checker so Jet always rejects first (I2):
 
 Regions (D-REGION1): **implicit and scope-inferred by default** — the region is the lexical
 scope of the `arena` binding; the beginner never types a lifetime. **Plus an explicit
-`region r { … }` block** (lowercase contextual keyword, `KW_REGION`) for the expert cases
+`#Region(r) { … }` block** for expert cases
 inference can't give: a region spanning two allocators, narrower than the enclosing function,
 or named. The escape rule is enforced against the inferred scope or the named region
 identically. v1 restriction (I8): views are non-reassignable, non-escaping locals; anything
@@ -2025,7 +2025,7 @@ unwind) via a RAII scope guard (D-DEFER1).
 ```jet
 use core.term as term
 
-live {
+#Live {
     k :: term.read_key()
     if k == Enter { return }
     print("got: {k}")

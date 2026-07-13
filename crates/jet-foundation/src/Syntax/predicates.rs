@@ -157,8 +157,7 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     // D-HONESTNUM1=A (ratified 2026-06-26): Measurement<T> — value ± uncertainty
     // with standard uncertainty propagation. Pure float arithmetic; no external crates.
     "core.science.measurement",
-    // D-BIGINT1 / D-DECIMAL1 (ratified 2026-06-28 / 2026-06-26): precise numerics.
-    "core.numeric",
+    // D-CORE-NUMERIC1=A: precise numerics live in core.math.
     // D-PENDING1=B (ratified 2026-06-26): Loadable<T, E> — async UI state machine
     // (Idle / Loading / Loaded(T) / Failed(E)). Pure stdlib enum; no external crates.
     // D-CORENS2=A: loading state belongs to the reactive domain.

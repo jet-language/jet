@@ -1919,6 +1919,19 @@ fn man_page_golden() {
 }
 
 #[test]
+fn retired_emit_rust_flag_teaches_canonical_command() {
+    let out = Command::new(jet())
+        .args(["run", "examples/features/basics/hello.jet", "--emit-rust"])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(2), "unexpected stderr:\n{stderr}");
+    assert!(stderr.contains("Error [E2102]: `--emit-rust` isn't a flag"));
+    assert!(stderr.contains("Fix: run `jet emit --rust <file.jet>`"));
+}
+
+#[test]
 fn fix_dry_run_does_not_write() {
     // A file with an autofixable diagnostic. S14 teaching fixes are paused, so
     // use the still-live Core habit fix (`println` -> `print`).

@@ -1571,14 +1571,14 @@ impl<'a> Checker<'a> {
                     if self.in_pure {
                         self.diags.push(crate::Sema::e3401(
                             &self.fn_name.clone(),
-                            "live { … }",
+                            "#Live { … }",
                             &[],
                             *span,
                         ));
                     }
                     if self.freestanding {
                         self.diags.push(crate::Sema::e3301(
-                            "live { … }",
+                            "#Live { … }",
                             "Terminal I/O requires an OS terminal device. Build without `--freestanding`.",
                             *span,
                         ));

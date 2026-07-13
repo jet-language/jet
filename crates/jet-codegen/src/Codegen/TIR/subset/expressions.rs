@@ -86,7 +86,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                 && c.args.len() == 1;
             // D-LIN1-DROP: `drop(x)` — the discard builtin (exactly one arg, not
             // shadowed by a user `drop` fn or local). Lowers to `TExprKind::Drop`.
-            let is_drop = c.name == Syntax::BUILTIN_DROP
+            let is_drop = c.name == Syntax::BUILTIN_CONSUME
                 && !cx.sigs.contains_key(&c.name)
                 && !locals.contains(&c.name)
                 && c.args.len() == 1;

@@ -25,7 +25,7 @@ pub struct Program {
     /// the silent `<stem>.html` sibling-filename convention. Relative to the
     /// `.jet` source file's own directory.
     pub html_path: Option<String>,
-    /// D-MEM1/S7 (D-NOALLOC-SEM1=A, ratified 2026-07-04): `policy no_alloc;` —
+    /// D-MEM1/S7 / D-POLICY-WORD1: `#Policy(no_alloc)` —
     /// this file's allocation floor. `Some(span)` = the policy line's span
     /// (for a "declared twice" check); `None` = no policy. Local-only: sema
     /// checks only expressions written directly in this file's own function

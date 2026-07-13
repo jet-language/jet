@@ -1774,7 +1774,7 @@ pub fn core_fixed_sig(
         )),
         ("core.perf", "reset_fidelity") => Some((vec![], Some(unit))),
         // D-DECIMAL1: exact decimal parse from string.
-        ("core.numeric", "decimal") => Some((
+        ("core.math", "decimal") => Some((
             vec![(read, string.clone())],
             Some(Type::Named(crate::Syntax::TYPE_DECIMAL.to_string())),
         )),

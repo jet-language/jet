@@ -2464,8 +2464,8 @@ impl<'a> Checker<'a> {
                         args: vec![Type::Float],
                     });
                 }
-                // D-DECIMAL1: `core.numeric.decimal(s)` → `Decimal`.
-                ("core.numeric", "decimal") => {
+                // D-CORE-NUMERIC1=A: `core.math.decimal(s)` → `Decimal`.
+                ("core.math", "decimal") => {
                     if args.len() != 1 {
                         self.diags
                             .push(wrong_core_arity("decimal", 1, args.len(), span));
