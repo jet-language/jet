@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 531,
-    "rev": 5296,
+    "rev": 5297,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -31351,6 +31351,93 @@
       "created": "2026-07-13T16:32:46.352Z",
       "outcome": "A",
       "ratifiedAt": "2026-07-13"
+    },
+    {
+      "id": "D-EMAIL-SMTP-CONFIG1",
+      "cardId": "c0aadf2p",
+      "group": "stdlib",
+      "title": "How should SMTP limits, password secrets, and custom certificate trust become exact?",
+      "gist": "Complete the missing SMTP configuration law without inventing field names, weakening certificate checks, or creating a second secret mechanism.",
+      "lesson": "An SMTP client reads lines and message data from a server. Every read needs a limit, because a hostile server can send endless lines or an enormous authentication challenge. A Limits value makes those memory and work ceilings visible and testable. Limits.safe() supplies ordinary defaults.\n\nA password must not behave like a normal String. Jet's Secret value prevents ordinary display and debug output. The open question is whether email uses that existing value, makes Secret generic, or adds a narrower password type.\n\nTransport Layer Security checks two things: encryption and server identity. A private certificate authority can extend trusted roots for a company relay. It must never disable hostname verification. SystemPlusCa therefore means system roots plus supplied certificates, not trust every certificate.",
+      "explainer": "",
+      "story": "Mara uses the safe defaults for a public relay. Her operations team later adds a company certificate authority and lowers reply bounds for a locked-down relay. Passwords must remain redacted in both setups.",
+      "inWild": "limits := email.Limits.{\n    max_reply_line_bytes: 512,\n    max_reply_lines: 100,\n    max_capabilities: 100,\n    max_recipients: 100,\n    max_message_bytes: 33554432,\n    max_auth_challenge_bytes: 4096,\n}\nconfig := email.SmtpConfig.{\n    host: \"smtp.example.com\",\n    port: 587,\n    security: .StartTls,\n    auth: .Password(username: \"mailer\", password: smtp_password),\n    recipient_policy: .RequireAll,\n    trust: .SystemPlusCa(pem: company_ca),\n    limits: limits,\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Existing Secret, exact limits",
+          "detail": "Keep Jet's existing non-generic Secret for SMTP passwords. Ratify six explicit limit fields and a verified system-plus-CA trust bridge. Beginners still use Limits.safe() and smtp_from_env().",
+          "technical": "Limits fields and safe defaults are max_reply_line_bytes=512, max_reply_lines=100, max_capabilities=100, max_recipients=100, max_message_bytes=33554432, and max_auth_challenge_bytes=4096. Valid ranges are 64..65536, 1..1000, 1..1000, 1..10000, 1..1073741824, and 1..65536. Validation follows field order and returns EmailError.Configuration on the first failure. SmtpAuth.Password stores password:Secret. SystemPlusCa parses PEM certificates, appends them to system roots, and retains DNS-name verification. Empty, malformed, or certificate-free PEM is rejected before SMTP credentials can be sent.",
+          "code": "password := Secret.from_text(env.get(\"SMTP_PASSWORD\")?)\nconfig := email.SmtpConfig.{\n    host: \"smtp.example.com\", port: 587, security: .StartTls,\n    auth: .Password(username: \"mailer\", password: password),\n    recipient_policy: .RequireAll, trust: .System,\n    limits: email.Limits.safe(),\n}"
+        },
+        {
+          "key": "B",
+          "name": "Generic Secret payload",
+          "detail": "Make Secret generic and use Secret<String> for SMTP passwords. Limits and certificate trust stay identical to A. Other secret APIs must choose their payload types too.",
+          "technical": "The six Limits fields, defaults, ranges, validation order, and SystemPlusCa law are identical to A. Secret<T> becomes the canonical secret wrapper. Existing bare Secret uses require a ratified default parameter or migration to Secret<[U8]>. Debug, display, clone, serialization, reflection, and error behavior remain redacted for every T.",
+          "code": "password: Secret<String> := Secret.from_text(env.get(\"SMTP_PASSWORD\")?)\nauth := email.SmtpAuth.Password(username: \"mailer\", password: password)"
+        },
+        {
+          "key": "C",
+          "name": "Dedicated EmailPassword",
+          "detail": "Add a purpose-specific EmailPassword value for SMTP authentication. Limits and certificate trust stay identical to A. Callers must convert an existing Secret into this narrower value.",
+          "technical": "The six Limits fields, defaults, ranges, validation order, and SystemPlusCa law are identical to A. EmailPassword is move-only, redacted, and non-serializable. Conversion consumes Secret. No plain String constructor exists outside smtp_from_env, which performs the same protected conversion internally.",
+          "code": "password := email.EmailPassword.from_secret(^smtp_password)\nauth := email.SmtpAuth.Password(username: \"mailer\", password: password)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "Go extends a RootCAs pool and still verifies ServerName. Jet's SystemPlusCa keeps that identity check while hiding certificate-pool mechanics.",
+          "code": "tls.Config{RootCAs: roots, ServerName: \"smtp.example.com\"}"
+        },
+        {
+          "lang": "Rust",
+          "note": "Rust secrecy wrappers redact values, while TLS clients use explicit root stores. A keeps both properties behind Jet's smaller existing types.",
+          "code": "SecretString::new(password); roots.add(certificate)?;"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A completes the ratified SMTP policy through Jet's existing secret mechanism. It gives beginners fixed safe defaults and experts explicit, bounded, hostname-verified control.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Payload generics do not strengthen redaction or SMTP safety. They change every existing secret API and create type choices where one protected byte value already works."
+          },
+          {
+            "key": "C",
+            "reason": "A second protected password type duplicates Secret's semantic job and adds conversion ceremony without a stronger safety boundary."
+          }
+        ],
+        "tradeoff": "Secret does not encode a String payload in its type. SMTP interprets its protected bytes as UTF-8 only when forming authentication data, with invalid bytes rejected as configuration."
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "Use A as the one mechanism. Keep B's payload validation at the SMTP boundary and C's purpose-specific handling inside SmtpAuth, without adding public wrapper types.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "One existing secret mechanism",
+            "use": "Store SMTP passwords as Secret and keep safe defaults short."
+          },
+          {
+            "key": "B",
+            "aspect": "Payload-type clarity",
+            "use": "Validate protected bytes as UTF-8 when SMTP AUTH needs text."
+          },
+          {
+            "key": "C",
+            "aspect": "Purpose-bound handling",
+            "use": "Keep password extraction private to SmtpAuth and transport internals."
+          }
+        ]
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-13T17:15:10.096Z"
     }
   ],
   "questions": [
@@ -32133,6 +32220,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-13T17:15:10.096Z",
+      "by": "codex-card-530",
+      "action": "decision.add",
+      "ref": "D-EMAIL-SMTP-CONFIG1",
+      "note": "How should SMTP limits, password secrets, and custom certificate trust become exact?"
+    },
     {
       "at": "2026-07-13T17:13:06.996Z",
       "by": "codex-card-530",
@@ -35625,13 +35719,6 @@
       "action": "card.claim",
       "ref": "c0n6vj96",
       "note": ""
-    },
-    {
-      "at": "2026-07-12T21:43:44.784Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c_audit_367_q80zrm",
-      "note": "logEntry"
     }
   ],
   "nextNum": 368,
