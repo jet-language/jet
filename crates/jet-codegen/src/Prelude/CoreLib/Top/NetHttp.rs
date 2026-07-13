@@ -72,6 +72,57 @@ impl JetIoWriter for JetTcpStream {
     }
 }
 
+impl JetIoReader for JetUnixStream {
+    fn read(&mut self, limit: i64) -> Result<Vec<u8>, jet_std::IoError> {
+        if limit <= 0 {
+            return Err(jet_std::IoError::InvalidInput(jet_std::IoContext::new(
+                jet_std::IoOperation::Read,
+                None,
+                None,
+                Some("unix read limit must be positive".to_string()),
+            )));
+        }
+        jet_net_unix_read_bytes(self, limit).map_err(jet_net_to_io_error)
+    }
+}
+
+impl JetIoWriter for JetUnixStream {
+    fn write(&mut self, bytes: &Vec<u8>) -> Result<i64, jet_std::IoError> {
+        jet_net_unix_write_bytes(self, bytes).map_err(jet_net_to_io_error)
+    }
+
+    fn write_all(&mut self, bytes: &Vec<u8>) -> Result<(), jet_std::IoError> {
+        jet_net_unix_write_all_bytes(self, bytes).map_err(jet_net_to_io_error)
+    }
+}
+
+impl JetIoReader for JetTlsStream {
+    fn read(&mut self, limit: i64) -> Result<Vec<u8>, jet_std::IoError> {
+        if limit <= 0 {
+            return Err(jet_std::IoError::InvalidInput(jet_std::IoContext::new(
+                jet_std::IoOperation::Read,
+                None,
+                None,
+                Some("tls read limit must be positive".to_string()),
+            )));
+        }
+        jet_net_tls_result((self.read_bytes)(self.id, limit), "tls read")
+            .map_err(jet_net_to_io_error)
+    }
+}
+
+impl JetIoWriter for JetTlsStream {
+    fn write(&mut self, bytes: &Vec<u8>) -> Result<i64, jet_std::IoError> {
+        jet_net_tls_result((self.write_bytes)(self.id, bytes), "tls write")
+            .map_err(jet_net_to_io_error)
+    }
+
+    fn write_all(&mut self, bytes: &Vec<u8>) -> Result<(), jet_std::IoError> {
+        jet_net_tls_result((self.write_all_bytes)(self.id, bytes), "tls write all")
+            .map_err(jet_net_to_io_error)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct JetNetErrorDetail {
     operation: String,
@@ -177,6 +228,9 @@ pub struct JetUnixStream;
 
 pub struct JetTlsStream {
     id: i64,
+    read_bytes: fn(i64, i64) -> Result<Vec<u8>, String>,
+    write_bytes: fn(i64, &Vec<u8>) -> Result<i64, String>,
+    write_all_bytes: fn(i64, &Vec<u8>) -> Result<(), String>,
 }
 
 #[derive(Clone)]
@@ -1133,8 +1187,27 @@ fn jet_net_unix_write_all_bytes(stream: &mut JetUnixStream, data: &Vec<u8>) -> R
     stream.inner.write_all(data).map_err(|error| jet_net_io_error("unix write", None, error))
 }
 
+#[cfg(unix)]
+fn jet_net_unix_write_bytes(stream: &mut JetUnixStream, data: &Vec<u8>) -> Result<i64, JetNetError> {
+    use std::io::Write;
+    if stream.closed || stream.write_shutdown { return Err(jet_net_closed("unix write")); }
+    if let Some(remaining) = jet_deadline_remaining_ms() {
+        if remaining <= 0 { return Err(JetNetError::Timeout(jet_net_detail("unix write", None, None, "unix write deadline expired".to_string(), None))); }
+        stream.inner.set_write_timeout(Some(std::time::Duration::from_millis(remaining as u64)))
+            .map_err(|error| jet_net_io_error("unix write timeout", None, error))?;
+    }
+    stream.inner.write(data).map(|count| count as i64).map_err(|error| jet_net_io_error("unix write", None, error))
+}
+
 #[cfg(not(unix))]
 fn jet_net_unix_write_all_bytes(_stream: &mut JetUnixStream, _data: &Vec<u8>) -> Result<(), JetNetError> {
+    Err(JetNetError::Unsupported(jet_net_detail(
+        "unix write", None, None, "unix sockets are not supported on this platform".to_string(), None,
+    )))
+}
+
+#[cfg(not(unix))]
+fn jet_net_unix_write_bytes(_stream: &mut JetUnixStream, _data: &Vec<u8>) -> Result<i64, JetNetError> {
     Err(JetNetError::Unsupported(jet_net_detail(
         "unix write", None, None, "unix sockets are not supported on this platform".to_string(), None,
     )))

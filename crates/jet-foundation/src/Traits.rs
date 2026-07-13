@@ -768,8 +768,8 @@ impl TraitRegistry {
     }
 
     /// D-NETIO-CONTRACT2=B: register one nominal byte-stream contract and the
-    /// compiler-owned TCP implementation. Runtime methods live on the same
-    /// `JetTcpStream`; this metadata is the sema half of that implementation.
+    /// compiler-owned stream implementations. Runtime methods live on the same
+    /// opaque handles; this metadata is the sema half of those implementations.
     pub fn register_synthetic_io(&mut self) {
         let dummy = Span { start: 0, end: 0 };
         let io_error = Type::Named(Syntax::TYPE_IO_ERROR.to_string());
@@ -823,6 +823,10 @@ impl TraitRegistry {
         }
         self.trait_impls.insert(("TcpStream".to_string(), Syntax::TRAIT_IO_READER.to_string()));
         self.trait_impls.insert(("TcpStream".to_string(), Syntax::TRAIT_IO_WRITER.to_string()));
+        self.trait_impls.insert(("UnixStream".to_string(), Syntax::TRAIT_IO_READER.to_string()));
+        self.trait_impls.insert(("UnixStream".to_string(), Syntax::TRAIT_IO_WRITER.to_string()));
+        self.trait_impls.insert(("TlsStream".to_string(), Syntax::TRAIT_IO_READER.to_string()));
+        self.trait_impls.insert(("TlsStream".to_string(), Syntax::TRAIT_IO_WRITER.to_string()));
     }
 
     /// D-ITER-HOOK / D-INDEX-HOOK: register Iterable/Iterator/Index/IndexMut hooks.

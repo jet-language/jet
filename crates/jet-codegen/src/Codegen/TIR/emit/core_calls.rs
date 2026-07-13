@@ -1538,11 +1538,14 @@ pub(crate) fn emit_tir_core_call(
             format!("{}(&({}))", helper("jet_net_dns_srv_weight"), arg(0))
         }
         ("core.net", "tls_connect") => format!(
-            "{{ let _s = {}; {}({}(_s.inner, &({})), \"tls handshake\").map(|id| JetTlsStream{{id}}) }}",
+            "{{ let _s = {}; {}({}(_s.inner, &({})), \"tls handshake\").map(|id| JetTlsStream{{id, read_bytes: {}::jet_net_tls_read_bytes_impl, write_bytes: {}::jet_net_tls_write_bytes_impl, write_all_bytes: {}::jet_net_tls_write_all_bytes_impl}}) }}",
             arg(0),
             helper("jet_net_tls_result"),
             regex_fn("jet_net_tls_connect_impl"),
-            arg(1)
+            arg(1),
+            cx.ffi_crate.as_deref().unwrap_or("jet_ffi"),
+            cx.ffi_crate.as_deref().unwrap_or("jet_ffi"),
+            cx.ffi_crate.as_deref().unwrap_or("jet_ffi")
         ),
         ("core.net", "tls_read") => {
             format!("{}({}(({}).id), \"tls read text\")", helper("jet_net_tls_result"), regex_fn("jet_net_tls_read_impl"), arg(0))
@@ -1558,8 +1561,11 @@ pub(crate) fn emit_tir_core_call(
             format!("{}({}(({}).id), \"tls close\")", helper("jet_net_tls_result"), regex_fn("jet_net_tls_close_impl"), arg(0))
         }
         ("core.tls", "client") => format!(
-            "{{ let _s = {}; {}({}(_s.inner, &({})), \"tls handshake\").map(|id| JetTlsStream{{id}}) }}",
-            arg(0), helper("jet_net_tls_result"), regex_fn("jet_net_tls_connect_impl"), arg(1)
+            "{{ let _s = {}; {}({}(_s.inner, &({})), \"tls handshake\").map(|id| JetTlsStream{{id, read_bytes: {}::jet_net_tls_read_bytes_impl, write_bytes: {}::jet_net_tls_write_bytes_impl, write_all_bytes: {}::jet_net_tls_write_all_bytes_impl}}) }}",
+            arg(0), helper("jet_net_tls_result"), regex_fn("jet_net_tls_connect_impl"), arg(1),
+            cx.ffi_crate.as_deref().unwrap_or("jet_ffi"),
+            cx.ffi_crate.as_deref().unwrap_or("jet_ffi"),
+            cx.ffi_crate.as_deref().unwrap_or("jet_ffi")
         ),
         ("core.tls", "read") => format!(
             "{}({}(({}).id, {}), \"tls read\")",

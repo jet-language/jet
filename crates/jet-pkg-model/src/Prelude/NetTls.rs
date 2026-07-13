@@ -40,6 +40,9 @@ pub fn jet_net_tls_connect_impl(stream: TcpStream, server_name: &String) -> Resu
     });
     let name = rustls::pki_types::ServerName::try_from(server_name.clone())
         .map_err(|_| format!("invalid TLS server name `{}`", server_name))?;
+    stream
+        .set_nonblocking(false)
+        .map_err(|e| format!("TLS could not configure the TCP stream: {}", e))?;
     let conn = rustls::ClientConnection::new(jet_net_tls_config()?, name)
         .map_err(|e| format!("TLS handshake with `{}` failed: {}", server_name, e))?;
     let mut tls = rustls::StreamOwned::new(conn, stream);

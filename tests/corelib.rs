@@ -2160,6 +2160,77 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+#[cfg(unix)]
+#[test]
+fn core_net_unix_stream_implements_nominal_io_reader_writer() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_core_unix_io_contract_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let socket = jet_string_path(&dir.join("stream.sock"));
+    let source = format!(
+        r#"
+use core.net as net
+use core.tasks as tasks
+
+fn receive<T: Reader>(&stream: T, limit: Int) -> [U8] ? IOError {{
+    return stream.read(limit)
+}}
+
+fn send_four<T: Writer>(&stream: T) -> Int ? IOError {{
+    first :: stream.write([1, 2])?
+    stream.write_all([3, 4])?
+    return ok(first)
+}}
+
+fn run() {{
+    listener :: net.unix_listen("{socket}") ?? panic("listen")
+    server :: tasks.spawn(take(listener) () => {{
+        stream := net.unix_accept(listener) ?? panic("accept")
+        if receive(&stream, 0) == {{
+            ok(_) -> panic("zero limit looked like EOF")
+            err(error) -> {{
+                if error == {{
+                    .InvalidInput(context) -> print(if context.operation == .Read {{ "invalid" }} else {{ "wrong-operation" }})
+                    else -> {{ print("wrong-error") }}
+                }}
+            }}
+        }}
+        first :: receive(&stream, 2) ?? panic("first read")
+        second :: receive(&stream, 2) ?? panic("second read")
+        print("read:{{first.len()}}+{{second.len()}}")
+        eof :: receive(&stream, 2) ?? panic("eof")
+        if eof.len() == 0 {{ print("eof") }}
+        net.unix_close(&stream) ?? panic("server close")
+    }})
+    client := net.unix_connect("{socket}") ?? panic("connect")
+    first_count :: send_four(&client) ?? panic("write")
+    print("wrote:{{first_count}}")
+    net.unix_close(&client) ?? panic("close")
+    net.unix_close(&client) ?? panic("second close")
+    if receive(&client, 1) == {{
+        ok(_) -> panic("closed read succeeded")
+        err(error) -> {{
+            if error == {{
+                .Closed(context) -> print(if context.operation == .Read {{ "closed" }} else {{ "wrong-close-operation" }})
+                else -> {{ print("wrong-close-error") }}
+            }}
+        }}
+    }}
+    server.join()
+}}
+"#
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "unix_io_contract", &source, &[], None);
+    assert_eq!(code, 0, "{stderr}");
+    let mut lines: Vec<_> = stdout.lines().collect();
+    lines.sort_unstable();
+    assert_eq!(lines, ["closed", "eof", "invalid", "read:2+2", "wrote:2"]);
+    let _ = fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn core_ioerror_preserves_kind_operation_and_resource() {
     let dir = std::env::temp_dir().join(format!(
@@ -2479,23 +2550,53 @@ fn core_tls_byte_stream_runs_real_local_handshake_and_close_notify() {
         .stderr(std::process::Stdio::null())
         .spawn()
         .unwrap();
-    std::thread::sleep(std::time::Duration::from_millis(100));
+    std::thread::sleep(std::time::Duration::from_millis(250));
     let src = r#"
 use core.net as net
 use core.tls as tls
 
+fn receive<T: Reader>(&stream: T, limit: Int) -> [U8] ? IOError {
+    return stream.read(limit)
+}
+
+fn send<T: Writer>(&stream: T, bytes: [U8]) -> Int ? IOError {
+    empty_count :: stream.write([])?
+    stream.write_all(bytes)?
+    return ok(empty_count)
+}
+
+fn zero_rejected<T: Reader>(&stream: T) -> Bool {
+    if stream.read(0) == {
+        ok(_) -> return false
+        err(error) -> {
+            if error == {
+                .InvalidInput(context) -> return context.operation == .Read
+                else -> { return false }
+            }
+        }
+    }
+    return false
+}
+
 fn run() {
     tcp :: net.tcp_connect("127.0.0.1:$PORT") ?? panic("tcp")
-    if tls.client(tcp, "localhost") == {
-        ok(secure) -> {
-            request: [U8] :: [71, 69, 84, 32, 47, 32, 72, 84, 84, 80, 47, 49, 46, 48, 13, 10, 13, 10]
-            tls.write_all(&secure, request) ?? panic("write bytes")
-            response :: tls.read(&secure, 4096) ?? panic("read bytes")
-            print(response.len() > 0)
-            tls.close(&secure) ?? panic("close notify")
-            tls.close(&secure) ?? panic("idempotent close")
+    secure := tls.client(^tcp, "localhost") ?? panic("tls handshake")
+    request: [U8] :: [71, 69, 84, 32, 47, 32, 72, 84, 84, 80, 47, 49, 46, 48, 13, 10, 13, 10]
+    print(zero_rejected(&secure))
+    empty_count :: send(&secure, request) ?? panic("write bytes")
+    print(empty_count)
+    response :: receive(&secure, 4096) ?? panic("read bytes")
+    print(response.len() > 0)
+    tls.close(&secure) ?? panic("close notify")
+    tls.close(&secure) ?? panic("idempotent close")
+    if receive(&secure, 1) == {
+        ok(_) -> panic("closed read succeeded")
+        err(error) -> {
+            if error == {
+                .Closed(context) -> print(if context.operation == .Read { "closed" } else { "wrong-operation" })
+                else -> { print("wrong-error") }
+            }
         }
-        err(error) -> panic(net.error_message(error))
     }
 }
 "#.replace("$PORT", &port.to_string());
@@ -2504,7 +2605,7 @@ fn run() {
     let _ = server.kill();
     let _ = server.wait();
     assert_eq!(code, 0, "{stderr}");
-    assert_eq!(stdout, "true\n");
+    assert_eq!(stdout, "true\n0\ntrue\nclosed\n");
 }
 
 #[test]
