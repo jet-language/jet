@@ -766,7 +766,24 @@ pub fn dev_run_bundle(
     } else {
         let mut backend =
             jet_jit::CraneliftBackend::new(AotFallbackBackend::new(InterpreterBackend::new()));
-        backend.run(bundle, try_anyway)
+        let outcome = backend.run(bundle, try_anyway);
+        // A resident JIT panic trap (E0953) means native user code panicked —
+        // e.g. a task-body divide-by-zero — but the in-process JIT cannot
+        // reproduce the exact AOT panic stderr/exit envelope (a caught task
+        // panic prints "panic: a task panicked" and exits 70). The backend layer
+        // CONTAINS the trap (never exits the process, never unwinds a JIT frame)
+        // and reports E0953; here at the `jet dev` driver seam we re-run through
+        // the AOT tier so default `jet dev` stays functionally identical to
+        // `jet run` for panic demos (owner requirement 2026-06-30). The
+        // hot_swap/restart live-loop paths keep the resident diagnostic
+        // authoritative — this parity re-run is `run`-only.
+        if let RunOutcome::Problems(ref diags) = outcome {
+            if diags.iter().any(|d| d.code == "E0953") {
+                let mut aot = AotFallbackBackend::new(InterpreterBackend::new());
+                return aot.run(bundle, try_anyway);
+            }
+        }
+        outcome
     }
 }
 
