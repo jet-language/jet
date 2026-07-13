@@ -107,7 +107,7 @@ impl<'a> Checker<'a> {
             param_ty: &Type,
             arg: &mut crate::AST::CallArg,
         ) {
-            self.expect_core_arg_impl(call_name, idx, param_ty, arg, false);
+            self.expect_core_arg_impl(call_name, idx, param_ty, arg, false, false);
         }
     
         pub(crate) fn expect_url_arg(
@@ -151,7 +151,17 @@ impl<'a> Checker<'a> {
             param_ty: &Type,
             arg: &mut crate::AST::CallArg,
         ) {
-            self.expect_core_arg_impl(call_name, idx, param_ty, arg, true);
+            self.expect_core_arg_impl(call_name, idx, param_ty, arg, true, false);
+        }
+
+        pub(crate) fn expect_core_arg_moving(
+            &mut self,
+            call_name: &str,
+            idx: usize,
+            param_ty: &Type,
+            arg: &mut crate::AST::CallArg,
+        ) {
+            self.expect_core_arg_impl(call_name, idx, param_ty, arg, true, true);
         }
     
         fn expect_core_arg_impl(
@@ -161,8 +171,10 @@ impl<'a> Checker<'a> {
             param_ty: &Type,
             arg: &mut crate::AST::CallArg,
             consumes: bool,
+            accepts_move: bool,
         ) {
             if matches!(arg.convention, AccessConvention::Move)
+                && !accepts_move
                 && !matches!(param_ty, Type::Named(n) if n == "Unit")
             {
                 self.diags.push(Diagnostic::error(

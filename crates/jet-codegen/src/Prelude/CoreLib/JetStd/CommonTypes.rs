@@ -41,7 +41,30 @@
         Null, Bool(bool), Int(i64), Float(f64), Text(String), Bytes(Vec<u8>),
         ArrayStart, ArrayEnd, ObjectStart, Key(String), ObjectEnd,
     }
-    pub struct JSONReader { _private: () } pub struct JSONWriter { _private: () }
+    pub struct JSONReader {
+        pub(crate) input: super::JetFileReader,
+        pub(crate) limits: EncodingLimits,
+        pub(crate) total: i64,
+        pub(crate) offset: i64,
+        pub(crate) line: i64,
+        pub(crate) column: i64,
+        pub(crate) lookahead: Option<u8>,
+        pub(crate) frames: Vec<super::JetJsonReadFrame>,
+        pub(crate) root_started: bool,
+        pub(crate) root_done: bool,
+        pub(crate) terminal: Option<EncodingError>,
+        pub(crate) eof: bool,
+    }
+    pub struct JSONWriter {
+        pub(crate) output: super::JetFileWriter,
+        pub(crate) limits: EncodingLimits,
+        pub(crate) frames: Vec<super::JetJsonWriteFrame>,
+        pub(crate) root_written: bool,
+        pub(crate) finished: bool,
+        pub(crate) terminal: Option<EncodingError>,
+        pub(crate) total: i64,
+        pub(crate) canonical: bool,
+    }
     pub struct JSONLReader { _private: () } pub struct JSONLWriter { _private: () }
     pub struct CSVReader { _private: () } pub struct CSVWriter { _private: () }
     pub struct XMLReader { _private: () } pub struct XMLWriter { _private: () }

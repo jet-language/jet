@@ -2091,6 +2091,14 @@ impl LowerCtx<'_, '_> {
             THandleOp::FileReaderReadLine => Err("jit handle method unsupported".to_string()),
             THandleOp::FileWriterWriteLine => Err("jit handle method unsupported".to_string()),
             THandleOp::FileWriterFlush => Err("jit handle method unsupported".to_string()),
+            THandleOp::JSONReaderNext => {
+                Err("jit JSON streaming falls back to the AOT executable TIR path".to_string())
+            }
+            THandleOp::JSONWriterWrite
+            | THandleOp::JSONWriterFlush
+            | THandleOp::JSONWriterFinish => {
+                Err("jit JSON streaming falls back to the AOT executable TIR path".to_string())
+            }
             THandleOp::StdinReadLine => Err("jit handle method unsupported".to_string()),
             THandleOp::StdoutWrite => Err("jit handle method unsupported".to_string()),
             THandleOp::StdoutWriteLine => Err("jit handle method unsupported".to_string()),

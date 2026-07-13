@@ -1,7 +1,7 @@
 use crate::AST::{AccessConvention, Type};
 use crate::Syntax;
 use super::alloc_ptrs::{db_error_ty, db_row_ty, io_error_ty, result_ty};
-use super::core_types::{json_error_ty, json_ty, u8_ty, unit_ty};
+use super::core_types::{encoding_error_ty, json_error_ty, json_ty, u8_ty, unit_ty};
 
 /// c109 Phase 20: the polymorphic core specials whose return type is resolved by
 /// `infer_core_call`'s bespoke arg-type logic (NOT the fixed `core_fixed_sig`
@@ -101,6 +101,7 @@ pub fn core_fixed_sig(
         Syntax::normalize_core_module(module).unwrap_or_else(|| module.to_string());
     let module = normalized_module.as_str();
     let read = AccessConvention::Read;
+    let moved = AccessConvention::Move;
     let string = Type::String;
     let int = Type::Int;
     let float = Type::Float;
@@ -491,6 +492,21 @@ pub fn core_fixed_sig(
         ("core.encoding.json", "canonical" | "events") => {
             Some((vec![(read, json.clone())], Some(Type::String)))
         }
+        ("core.encoding.json", "reader") => Some((
+            vec![
+                (moved, Type::Named("FileReader".to_string())),
+                (read, Type::Named("EncodingLimits".to_string())),
+            ],
+            Some(result_ty(Type::Named("JSONReader".to_string()), encoding_error_ty())),
+        )),
+        ("core.encoding.json", "writer") => Some((
+            vec![
+                (moved, Type::Named("FileWriter".to_string())),
+                (read, Type::Named("EncodingLimits".to_string())),
+                (read, Type::Bool),
+            ],
+            Some(result_ty(Type::Named("JSONWriter".to_string()), encoding_error_ty())),
+        )),
         ("core.encoding.jsonl", "parse") => Some((
             vec![(read, Type::String)],
             Some(result_ty(Type::List(Box::new(json.clone())), json_error_ty())),

@@ -598,6 +598,12 @@ pub(crate) fn emit_tir_core_call(
         ("core.encoding.json", "parse") => {
             format!("{}(&({}))", helper("jet_std_json_parse"), arg(0))
         }
+        ("core.encoding.json", "reader") => {
+            format!("{}({}, {})", helper("jet_enc_json_reader"), arg(0), arg(1))
+        }
+        ("core.encoding.json", "writer") => {
+            format!("{}({}, {}, {})", helper("jet_enc_json_writer"), arg(0), arg(1), arg(2))
+        }
         ("core.encoding.json", "decode") => {
             if enc_ok_is_json(ret_ty) {
                 format!("{}(&({}))", helper("jet_std_json_decode_lenient"), arg(0))

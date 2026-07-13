@@ -33,6 +33,7 @@ impl<'a> Checker<'a> {
                 ("core.game", "Budgets") => Some(Type::Named("GameBudgetsType".to_string())),
                 // D-FIDELITY-API1=A: `core.perf.Perf` static API sentinel.
                 ("core.perf", "Perf") => Some(Type::Named("Perf".to_string())),
+                ("core.encoding", "DataEvent") => Some(Type::Named("DataEvent".to_string())),
                 _ => {
                     self.diags.push(unknown_core_item(module, name, span));
                     let _ = alias_span;

@@ -138,6 +138,10 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("FileReader", "read_line", 0) => THandleOp::FileReaderReadLine,
         ("FileWriter", "write_line", 1) => THandleOp::FileWriterWriteLine,
         ("FileWriter", "flush", 0) => THandleOp::FileWriterFlush,
+        ("JSONReader", "next", 0) => THandleOp::JSONReaderNext,
+        ("JSONWriter", "write", 1) => THandleOp::JSONWriterWrite,
+        ("JSONWriter", "flush", 0) => THandleOp::JSONWriterFlush,
+        ("JSONWriter", "finish", 0) => THandleOp::JSONWriterFinish,
         ("StdinHandle", "read_line", 0) => THandleOp::StdinReadLine,
         ("Stdout", "write", 1) => THandleOp::StdoutWrite,
         ("Stdout", "write_line", 1) => THandleOp::StdoutWriteLine,
@@ -382,6 +386,7 @@ pub(crate) fn handle_method_return_ty(handle: &str, method: &str, nargs: usize) 
     let span = crate::Diagnostics::Span { start: 0, end: 0 };
     let mut sink = Vec::new();
     let ret = crate::Sema::file_handle_method_return(handle, method, nargs, span, &mut sink)
+        .or_else(|| crate::Sema::encoding_handle_method_return(handle, method, nargs))
         .or_else(|| crate::Sema::net_method_return(handle, method, nargs, span, &mut sink))
         .or_else(|| crate::Sema::path_method_return(handle, method, nargs, span, &mut sink))
         .or_else(|| {

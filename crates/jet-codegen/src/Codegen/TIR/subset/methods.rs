@@ -764,6 +764,11 @@ pub(crate) fn method_call_in_subset(
                             .iter()
                             .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
                 }
+                if type_name == "DataEvent" {
+                    return matches!(method, "Bool" | "Int" | "Float" | "Text" | "Bytes" | "Key")
+                        && args.len() == 1
+                        && args.iter().all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+                }
                 if let Some(variants) = cx.enum_variants.get(type_name) {
                     if variants.iter().any(|(v, _)| v == method) {
                         return enum_is_covered(type_name, cx)

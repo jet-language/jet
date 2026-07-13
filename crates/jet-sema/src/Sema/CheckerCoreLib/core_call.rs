@@ -2446,6 +2446,19 @@ impl<'a> Checker<'a> {
                     .push(wrong_core_arity(name, params.len(), args.len(), span));
             }
             for (i, ((conv, param_ty), arg)) in params.iter().zip(args.iter_mut()).enumerate() {
+                if *conv == AccessConvention::Move {
+                    if arg.convention != AccessConvention::Move {
+                        self.diags.push(Diagnostic::error(
+                            "E0201",
+                            format!("argument {} to `{}` transfers ownership (`^`)", i + 1, name),
+                            "this standard library constructor retains the consumed handle".to_string(),
+                            format!("write `{}value` for this argument", Syntax::SIGIL_MOVE),
+                            Some(arg.span),
+                        ));
+                    }
+                    self.expect_core_arg_moving(name, i, param_ty, arg);
+                    continue;
+                }
                 if *conv == AccessConvention::Write && arg.convention != AccessConvention::Write {
                     self.diags.push(Diagnostic::error(
                         "E0202",

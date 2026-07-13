@@ -43,6 +43,10 @@ pub(crate) fn json_error_ty() -> Type {
     Type::Named(Syntax::TYPE_JSON_ERROR.to_string())
 }
 
+pub(crate) fn encoding_error_ty() -> Type {
+    Type::Named("EncodingError".to_string())
+}
+
 // D-ENC-DYN1=A+: the dynamic encoding value `Data` (+ aliases `Json`/`Toml`/
 // `Yaml`/`Csv`).
 pub(crate) fn is_json_type_name(name: &str) -> bool {
@@ -721,6 +725,26 @@ pub fn file_handle_method_return(
             "is_tty" if n_args == 0 => Some(Some(Type::Bool)),
             _ => None,
         },
+        _ => None,
+    }
+}
+
+/// D-ENCSTREAM-SURFACE1=A: mutable opaque codec-handle methods.
+pub fn encoding_handle_method_return(
+    handle_ty: &str,
+    method: &str,
+    n_args: usize,
+) -> Option<Option<Type>> {
+    let error = encoding_error_ty();
+    let unit = unit_ty();
+    match (handle_ty, method, n_args) {
+        ("JSONReader", "next", 0) => Some(Some(result_ty(
+            Type::Option(Box::new(Type::Named("DataEvent".to_string()))),
+            error,
+        ))),
+        ("JSONWriter", "write", 1) | ("JSONWriter", "flush" | "finish", 0) => {
+            Some(Some(result_ty(unit, error)))
+        }
         _ => None,
     }
 }

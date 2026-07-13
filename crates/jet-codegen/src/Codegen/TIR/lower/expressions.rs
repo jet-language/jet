@@ -1141,6 +1141,18 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // variant; emit `user_<Enum>::user_<variant>` (the AST path's form).
             if let Expr::Ident(enum_name, _) = receiver.as_ref() {
                 if env.ty_of(enum_name).is_none()
+                    && enum_name == "DataEvent"
+                    && matches!(member.as_str(), "Null" | "ArrayStart" | "ArrayEnd" | "ObjectStart" | "ObjectEnd")
+                {
+                    return TExpr {
+                        ty: Type::Named("DataEvent".to_string()),
+                        kind: TExprKind::EnumLit {
+                            prefix: format!("{}jet_std::DataEvent::{}", cx.root_prefix, member),
+                            payload: TEnumPayload::Unit,
+                        },
+                    };
+                }
+                if env.ty_of(enum_name).is_none()
                     && cx.variant_owner.get(member).map(String::as_str) == Some(enum_name.as_str())
                 {
                     // c109 Phase 24: a FOREIGN enum's unit literal (`NoteType.User` in

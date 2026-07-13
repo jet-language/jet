@@ -44,6 +44,9 @@ pub(crate) fn enum_is_covered(name: &str, cx: &Cx) -> bool {
 /// String/struct/collection payloads route through `emit_boxed_enum_arg`'s borrowed
 /// `.clone()` (reproduced at lowering), so they are byte-parity safe.
 pub(crate) fn enum_is_covered_inner(name: &str, cx: &Cx, seen: &mut HashSet<String>) -> bool {
+    if name == "DataEvent" {
+        return true;
+    }
     if crate::Generics::is_type_var_name(name)
         || is_json_type_name(name)
         || is_db_value_type_name(name)

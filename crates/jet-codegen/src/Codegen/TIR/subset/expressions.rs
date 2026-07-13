@@ -368,6 +368,11 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             // its (unit) variants. A receiver that is a known local can't also be a
             // covered enum name, so the two branches never collide.
             if let Expr::Ident(enum_name, _) = receiver.as_ref() {
+                if enum_name == "DataEvent"
+                    && matches!(member.as_str(), "Null" | "ArrayStart" | "ArrayEnd" | "ObjectStart" | "ObjectEnd")
+                {
+                    return true;
+                }
                 if !locals.contains(enum_name)
                     && enum_is_covered(enum_name, cx)
                     && cx.variant_owner.get(member).map(String::as_str) == Some(enum_name.as_str())

@@ -7,7 +7,7 @@ use crate::Sema::CheckerCoreLib::{
     alloc_method_return, args_spec_method_return, binary_reader_method_return,
     civil_time_method_return, data_renamed_to_datatree, datatree_method_return,
     devserver_method_return, db_value_method_return, e3104, expiring_method_return,
-    file_handle_method_return, gc_method_return, http_type_method_return, is_db_value_type_name,
+    encoding_handle_method_return, file_handle_method_return, gc_method_return, http_type_method_return, is_db_value_type_name,
     is_gc_type, is_json_type_name, is_layout_axis_type, is_layout_type, is_math_type,
     is_polymorphic_core_special, is_reflect_type_name, is_simd_lane_type, json_ty,
     layout_method_arg_ty, layout_method_return, loadable_method_return, math_method_arg_ty,
@@ -190,6 +190,20 @@ impl<'a> Checker<'a> {
                     if let Some(ns) = self.core_imports.get(alias).cloned() {
                         if ns == "core.encoding" && leaf == "EncodingLimits" && method == "safe" {
                             return self.check_static_method("EncodingLimits", method, span, args);
+                        }
+                        if ns == "core.encoding" && leaf == "DataEvent" {
+                            let saved: Vec<Expr> = args
+                                .iter_mut()
+                                .map(|a| std::mem::replace(&mut a.expr, Expr::Int(0, a.span, None)))
+                                .collect();
+                            let mut enum_args: Vec<EnumLitArg> =
+                                saved.into_iter().map(EnumLitArg::Positional).collect();
+                            let ty = self.check_enum_lit("DataEvent", method, &mut enum_args, span);
+                            for (arg, enum_arg) in args.iter_mut().zip(enum_args) {
+                                if let EnumLitArg::Positional(expr) = enum_arg { arg.expr = expr; }
+                            }
+                            **receiver = Expr::Ident("DataEvent".to_string(), span);
+                            return Some(ty);
                         }
                         if ns == "core.solve" && leaf == Syntax::SOLVER_TYPE && method == "new" {
                             if args.len() != 1 {
@@ -1163,6 +1177,25 @@ impl<'a> Checker<'a> {
                         return Some(Type::Bool);
                     }
                     _ => {}
+                }
+            }
+            // D-ENCSTREAM-SURFACE1=A: methods on opaque codec handles.
+            if let Type::Named(handle_ty) = &recv_ty {
+                if let Some(ret) = encoding_handle_method_return(handle_ty, method, args.len()) {
+                    if handle_ty == "JSONWriter" && method == "write" {
+                        if let Some(arg) = args.first_mut() {
+                            self.expect_core_arg(
+                                "write",
+                                0,
+                                &Type::Named("DataEvent".to_string()),
+                                arg,
+                            );
+                        }
+                    } else {
+                        for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    }
+                    *recv_type_out = Some(handle_ty.clone());
+                    return ret;
                 }
             }
             // E2-M7: method calls on streaming file handles (D-IO2).

@@ -1809,6 +1809,17 @@ impl<'a> Checker<'a> {
         member: &str,
         span: Span,
     ) -> Option<Type> {
+        if let Expr::Field(base, leaf, _) = &**inner {
+            if let Expr::Ident(alias, _) = &**base {
+                if self.core_imports.get(alias).map(String::as_str) == Some("core.encoding")
+                    && leaf == "DataEvent"
+                {
+                    **inner = Expr::Ident("DataEvent".to_string(), span);
+                    let mut empty = Vec::new();
+                    return Some(self.check_enum_lit("DataEvent", member, &mut empty, span));
+                }
+            }
+        }
         if let Expr::Ident(root, _) = &**inner {
             if root == Syntax::FOREIGN_OS && member == "environ" {
                 self.diags.push(Diagnostic::error(

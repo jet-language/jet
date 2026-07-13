@@ -140,7 +140,15 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         ],
         // D-ENC1: unified serialization. `core.encoding` is the library root (no direct
         // verbs — formats are submodules); each format submodule carries the verbs.
-        "core.encoding" => &[],
+        "core.encoding" => &[
+            "DataTree",
+            "EncodingLimits",
+            "EncodingError",
+            "EncodingCause",
+            "EncodingFormat",
+            "EncodingErrorKind",
+            "DataEvent",
+        ],
         // D-JSONVERB1: `to_string`/`to_string_pretty` (compact/pretty); `parse` → dynamic
         // JSON value; `decode` → lenient typed decode (D-JSON3). D-MIGRATE3=A:
         // `decode_traced<T>` rides alongside `decode` on every format.
@@ -152,6 +160,8 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "to_string_pretty",
             "canonical",
             "events",
+            "reader",
+            "writer",
         ],
         "core.encoding.jsonl" => &["parse", "to_string"],
         // D-SERDE6: typed `decode<T>` rides every format submodule alongside `parse`.

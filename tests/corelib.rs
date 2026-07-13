@@ -63,6 +63,57 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn json_stream_reader_writer_are_real_incremental_handles() {
+    let dir = std::env::temp_dir().join(format!("jet_json_stream_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("events.json");
+    let path_text = path.to_string_lossy().replace('\\', "\\\\");
+    let source = format!(
+        r#"
+use core.encoding as encoding
+use core.encoding.json as json
+use core.files as files
+
+fn run() {{
+    limits :: encoding.EncodingLimits.safe()
+    output :: files.create("{path_text}") ?? panic("create")
+    writer :: json.writer(^output, limits, false) ?? panic("writer")
+    writer.write(encoding.DataEvent.ObjectStart) ?? panic("write")
+    writer.write(encoding.DataEvent.Key("message")) ?? panic("write")
+    writer.write(encoding.DataEvent.Text("hi ☺")) ?? panic("write")
+    writer.write(encoding.DataEvent.Key("values")) ?? panic("write")
+    writer.write(encoding.DataEvent.ArrayStart) ?? panic("write")
+    writer.write(encoding.DataEvent.Int(7)) ?? panic("write")
+    writer.write(encoding.DataEvent.Bool(true)) ?? panic("write")
+    writer.write(encoding.DataEvent.Null) ?? panic("write")
+    writer.write(encoding.DataEvent.ArrayEnd) ?? panic("write")
+    writer.write(encoding.DataEvent.ObjectEnd) ?? panic("write")
+    writer.finish() ?? panic("finish")
+    writer.finish() ?? panic("finish")
+
+    input :: files.open("{path_text}") ?? panic("open")
+    reader :: json.reader(^input, encoding.EncodingLimits.safe()) ?? panic("reader")
+    count := 0
+    loop count < 11 {{
+        maybe_event :: reader.next() ?? panic("next")
+        if maybe_event == None {{ print("eof") }} else {{ print("event") }}
+        count++
+    }}
+}}
+"#
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "json_stream", &source, &[], None);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(
+        stdout,
+        "event\nevent\nevent\nevent\nevent\nevent\nevent\nevent\nevent\nevent\neof\n"
+    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), r#"{"message":"hi ☺","values":[7,true,null]}"#);
+    assert_eq!(stderr, "");
+    let _ = fs::remove_dir_all(&dir);
+}
+
 fn compile_temp(name: &str, src: &str) -> jet::CompileOutput {
     let dir = std::env::temp_dir().join(format!("jet_corelib_test_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();

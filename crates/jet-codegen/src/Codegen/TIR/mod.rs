@@ -2114,6 +2114,11 @@ pub enum THandleOp {
     FileWriterWriteLine,
     /// FileWriter: `flush()` → `{root}jet_std_file_writer_flush(&mut (recv))`.
     FileWriterFlush,
+    /// D-ENCSTREAM-SURFACE1=A: JSON pull reader/writer lifecycle.
+    JSONReaderNext,
+    JSONWriterWrite,
+    JSONWriterFlush,
+    JSONWriterFinish,
     /// StdinHandle: `read_line()` → `{root}jet_std_io_stdin_read_line(&mut (recv))`.
     StdinReadLine,
     /// Stdout/Stderr: stream writes and facts (D-COREIO1=A).

@@ -624,6 +624,26 @@ pub(crate) fn lower_method_call(
                         kind: TExprKind::EnumLit { prefix, payload },
                     };
                 }
+                if type_name == "DataEvent"
+                    && matches!(method, "Bool" | "Int" | "Float" | "Text" | "Bytes" | "Key")
+                {
+                    let payload = TEnumPayload::Positional(
+                        args.iter()
+                            .map(|a| TEnumArg {
+                                value: lower_expr(&a.expr, cx, env),
+                                clone: false,
+                                boxed: false,
+                            })
+                            .collect(),
+                    );
+                    return TExpr {
+                        ty: Type::Named("DataEvent".to_string()),
+                        kind: TExprKind::EnumLit {
+                            prefix: format!("{}jet_std::DataEvent::{}", cx.root_prefix, method),
+                            payload,
+                        },
+                    };
+                }
                 if let Some(variants) = cx.enum_variants.get(type_name) {
                     if variants.iter().any(|(v, _)| v == method) {
                         let prefix = tir_enum_lit_prefix(cx, type_name, method);

@@ -1194,6 +1194,19 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::FileWriterFlush => {
                     format!("{}jet_std_file_writer_flush(&mut ({}))", root, recv)
                 }
+                THandleOp::JSONReaderNext => {
+                    format!("{}jet_enc_json_reader_next(&mut ({}))", root, recv)
+                }
+                THandleOp::JSONWriterWrite => format!(
+                    "{}jet_enc_json_writer_write(&mut ({}), {})",
+                    root, recv, a(0)
+                ),
+                THandleOp::JSONWriterFlush => {
+                    format!("{}jet_enc_json_writer_flush(&mut ({}))", root, recv)
+                }
+                THandleOp::JSONWriterFinish => {
+                    format!("{}jet_enc_json_writer_finish(&mut ({}))", root, recv)
+                }
                 THandleOp::StdinReadLine => {
                     format!("{}jet_std_io_stdin_read_line(&mut ({}))", root, recv)
                 }
