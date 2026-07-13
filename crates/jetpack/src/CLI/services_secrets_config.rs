@@ -419,6 +419,32 @@ pub(super) fn has_dev_or_run_entry(file: &Path) -> bool {
         .any(|i| matches!(i, crate::AST::Item::Func(f) if f.name == "dev" || f.name == "run"))
 }
 
+/// D-JPK-TASKRUN1: top-level `#Task fn` names in the project entry (sorted).
+/// Parse failure → empty list (real diagnostics surface when jet compiles).
+pub(super) fn list_project_tasks(file: &Path) -> Vec<String> {
+    let Ok(src) = std::fs::read_to_string(file) else {
+        return Vec::new();
+    };
+    let (toks, diags) = crate::Lexer::lex(&src);
+    if !diags.is_empty() {
+        return Vec::new();
+    }
+    let Ok(prog) = crate::Parser::parse(&toks) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = prog
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            crate::AST::Item::Func(f) if f.is_task => Some(f.name.clone()),
+            _ => None,
+        })
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
 /// `jetpack config trust add/list/remove` (U19) — durable glob/prefix patterns
 /// that pre-authorize matching projects with no per-hash prompt at all.
 pub(super) fn cmd_config(theme: &Theme, parsed: &Parsed) -> i32 {

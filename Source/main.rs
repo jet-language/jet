@@ -34,7 +34,7 @@ mod EngineDispatch;
 use CmdCodemod::run_codemod;
 use CmdCompile::{
     run_build_query, run_compile_cmd, run_debug_native, run_dev_entry, run_fix, run_fmt,
-    run_fuzz, run_new, run_test, run_test_opts, FuzzRunOpts, TestRunOpts,
+    run_fuzz, run_new, run_task_entry, run_test, run_test_opts, FuzzRunOpts, TestRunOpts,
 };
 use CmdDevTools::{
     run_bench, run_bind, run_completions, run_dev, run_devtools, run_doctor, run_emit_rust,
@@ -850,6 +850,28 @@ fn main() {
     } else {
         profile_flag
     };
+    // D-JPK-TASKRUN1: `jet run --task <name>` / `--task=<name>`.
+    let task_name: Option<String> = {
+        let mut found = None;
+        let mut i = 0;
+        while i < jet_argv.len() {
+            let a = &jet_argv[i];
+            if let Some(v) = a.strip_prefix("--task=") {
+                found = Some(v.to_string());
+                break;
+            }
+            if a == "--task" {
+                if let Some(v) = jet_argv.get(i + 1).filter(|s| !s.starts_with('-')) {
+                    found = Some(v.clone());
+                } else {
+                    found = Some(String::new());
+                }
+                break;
+            }
+            i += 1;
+        }
+        found
+    };
     let mode = OutputMode {
         json,
         color: parse_color(jet_argv),
@@ -858,6 +880,7 @@ fn main() {
     // other dash-flag including short forms like `-u` / `-v` so they never become
     // the file target (D-TOOL4). D-CLI-BARE1=A: `-p <member>` also swallows its
     // value — a workspace member name is never a positional file/program arg.
+    // D-JPK-TASKRUN1: `--task <name>` swallows its value the same way.
     let args: Vec<&String> = {
         let mut out = Vec::new();
         let mut skip_next = false;
@@ -866,8 +889,11 @@ fn main() {
                 skip_next = false;
                 continue;
             }
-            if a == "-p" {
+            if a == "-p" || a == "--task" {
                 skip_next = true;
+                continue;
+            }
+            if a.starts_with("--task=") {
                 continue;
             }
             if a.as_str() == "-" || !a.starts_with('-') {
@@ -1886,6 +1912,22 @@ fn main() {
             } else {
                 target.to_string()
             };
+            // D-JPK-TASKRUN1: `jet run --task <name> <file>` swaps the named
+            // `#Task fn` in as the entry before codegen (same path as `fn dev`).
+            if cmd == "run" {
+                if let Some(task) = task_name.as_deref() {
+                    if task.is_empty() {
+                        eprintln!("error: `--task` needs a task name");
+                        eprintln!(
+                            " fix: write `jet run --task <name> <file.{}>`",
+                            jet::Syntax::FILE_EXT
+                        );
+                        exit(ExitCodes::USAGE);
+                    }
+                    run_task_entry(&resolved, task, &program_args, mode);
+                    return;
+                }
+            }
             let effective = effective_target(cmd, &resolved, cross_target.as_deref());
             run_compile_cmd(
                 cmd,

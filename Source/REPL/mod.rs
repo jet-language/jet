@@ -421,6 +421,33 @@ pub(crate) fn looks_effectful(input: &str) -> bool {
     EFFECT_MARKERS.iter().any(|m| input.contains(m))
 }
 
+/// Runtime-semantic effect classifier for replay. It observes Core operations
+/// at the interpreter authorization boundary, after call/argument resolution,
+/// instead of guessing from source spelling.
+struct TrackingAuthorizer<'a> {
+    inner: &'a mut dyn crate::Comptime::ReplAuthorizer,
+    observed: bool,
+}
+
+impl crate::Comptime::ReplAuthorizer for TrackingAuthorizer<'_> {
+    fn preflight(&mut self, request: &crate::Comptime::ReplEffectRequest, span: crate::Diagnostics::Span) -> Result<(), Diagnostic> {
+        self.inner.preflight(request, span)
+    }
+    fn authorize(&mut self, request: &crate::Comptime::ReplEffectRequest, span: crate::Diagnostics::Span) -> Result<(), Diagnostic> {
+        let result = self.inner.authorize(request, span);
+        if result.is_ok() { self.observed = true; }
+        result
+    }
+    fn fs_read(&mut self, path: &str) -> std::io::Result<Vec<u8>> { self.inner.fs_read(path) }
+    fn fs_write(&mut self, path: &str, bytes: &[u8], append: bool) -> std::io::Result<()> { self.inner.fs_write(path, bytes, append) }
+    fn fs_exists(&mut self, path: &str) -> std::io::Result<bool> { self.inner.fs_exists(path) }
+    fn fs_is_dir(&mut self, path: &str) -> std::io::Result<bool> { self.inner.fs_is_dir(path) }
+    fn fs_create_dir(&mut self, path: &str) -> std::io::Result<()> { self.inner.fs_create_dir(path) }
+    fn fs_remove(&mut self, path: &str) -> std::io::Result<()> { self.inner.fs_remove(path) }
+    fn verified_root(&mut self) -> std::io::Result<std::fs::File> { self.inner.verified_root() }
+    fn reset_session(&mut self) { self.inner.reset_session() }
+}
+
 const TERMINAL_SHIFT_IN: &str = "\x0f";
 
 fn strip_terminal_control_bytes(input: &str) -> String {
@@ -561,6 +588,12 @@ pub struct Session {
     /// `run_repl_step` so the comptime interpreter can execute whitelisted
     /// pure Core calls (e.g. `math.sqrt(16.0)`) inline instead of E0956.
     pub core_imports: HashMap<String, String>,
+    /// Source/project state loaded before turn 1. Replay resets to this
+    /// baseline, never to an empty synthetic module.
+    baseline_item_srcs: Vec<String>,
+    baseline_import_srcs: Vec<String>,
+    baseline_func_defs: HashMap<String, Func>,
+    baseline_core_imports: HashMap<String, String>,
     /// Notebook controls state: every accepted input gets an addressable turn.
     pub turns: Vec<ReplTurn>,
     /// D-FE-REPL-HISTORY1=A: successful submissions from this and prior
@@ -577,6 +610,9 @@ pub struct ReplTurn {
     pub status: ReplTurnStatus,
     pub folded: bool,
     pub pinned: bool,
+    /// Skipped during a downstream replay. Stale turns are retained for
+    /// notebook truth but did not contribute to the rebuilt live session.
+    pub stale: bool,
     /// D-FE-REPL-RERUN1=A: whether this turn produced an observable side
     /// effect (print/write/…) — gates replay-plan auto vs confirm-effect.
     pub had_effect: bool,
@@ -618,6 +654,10 @@ impl Session {
             moved_names: HashSet::new(),
             stmt_srcs: Vec::new(),
             core_imports: HashMap::new(),
+            baseline_item_srcs: Vec::new(),
+            baseline_import_srcs: Vec::new(),
+            baseline_func_defs: HashMap::new(),
+            baseline_core_imports: HashMap::new(),
             turns: Vec::new(),
             history: History::History::session_only(),
         }
@@ -632,18 +672,25 @@ impl Session {
     }
 
     pub fn reset(&mut self) {
-        self.item_srcs.clear();
-        self.import_srcs.clear();
+        self.item_srcs = self.baseline_item_srcs.clone();
+        self.import_srcs = self.baseline_import_srcs.clone();
         self.sema_stmts.clear();
-        self.func_defs.clear();
+        self.func_defs = self.baseline_func_defs.clone();
         self.scope.clear();
         self.binding_types.clear();
         self.step = 0;
         self.moved_names.clear();
         self.stmt_srcs.clear();
-        self.core_imports.clear();
+        self.core_imports = self.baseline_core_imports.clone();
         self.turns.clear();
         // Keep shown_preload_note — no need to repeat the teaching note.
+    }
+
+    fn preserve_project_baseline(&mut self) {
+        self.baseline_item_srcs = self.item_srcs.clone();
+        self.baseline_import_srcs = self.import_srcs.clone();
+        self.baseline_func_defs = self.func_defs.clone();
+        self.baseline_core_imports = self.core_imports.clone();
     }
 
     fn record_turn(&mut self, input: &str, status: ReplTurnStatus, summary: String) {
@@ -668,6 +715,7 @@ impl Session {
             status,
             folded: summary.lines().count() > 6 || summary.len() > 240,
             pinned: false,
+            stale: false,
             had_effect,
             bound_name,
             pending_unfold: None,
@@ -765,12 +813,14 @@ fn render_turns(session: &Session, color: bool) {
     for turn in &session.turns {
         let pin = if turn.pinned { " pinned" } else { "" };
         let fold = if turn.folded { " folded" } else { "" };
+        let stale = if turn.stale { " stale" } else { "" };
         println!(
-            "{} {}{}{}  {}",
+            "{} {}{}{}{}  {}",
             bold(&format!("#{}", turn.id), color),
             status_word(turn.status),
             pin,
             fold,
+            stale,
             turn.summary
         );
     }
@@ -784,12 +834,14 @@ fn render_turns_text(session: &Session) -> String {
     for turn in &session.turns {
         let pin = if turn.pinned { " pinned" } else { "" };
         let fold = if turn.folded { " folded" } else { "" };
+        let stale = if turn.stale { " stale" } else { "" };
         out.push_str(&format!(
-            "#{} {}{}{}  {}\n",
+            "#{} {}{}{}{}  {}\n",
             turn.id,
             status_word(turn.status),
             pin,
             fold,
+            stale,
             turn.summary
         ));
     }
@@ -1841,6 +1893,7 @@ fn run_cooked(project_dir: Option<&str>, color: bool, flags: ReplFlags) -> i32 {
     if let Some(dir) = project_dir {
         let mut stdout = io::stdout();
         load_project_items(Path::new(dir), &mut session, &mut stdout);
+        session.preserve_project_baseline();
     }
 
     let stdin = io::stdin();
@@ -1860,6 +1913,19 @@ fn run_cooked(project_dir: Option<&str>, color: bool, flags: ReplFlags) -> i32 {
             continue;
         }
 
+        if let Some(arg) = trimmed.strip_prefix(":rerun ") {
+            let mut authorizer = policy.authorizer(None);
+            rerun_cooked(
+                arg,
+                &mut stdin_lock,
+                &mut session,
+                &base_dir,
+                color,
+                &mut authorizer,
+            );
+            continue;
+        }
+
         let mut authorizer = policy.authorizer(None);
         if execute_line(trimmed, &mut session, &base_dir, color, false, false, &mut authorizer) {
             break;
@@ -1867,6 +1933,53 @@ fn run_cooked(project_dir: Option<&str>, color: bool, flags: ReplFlags) -> i32 {
     }
 
     0
+}
+
+fn rerun_cooked(
+    id_text: &str,
+    input: &mut dyn BufRead,
+    session: &mut Session,
+    base_dir: &Path,
+    color: bool,
+    authorizer: &mut dyn crate::Comptime::ReplAuthorizer,
+) {
+    let id = match id_text.trim().parse::<usize>() {
+        Ok(id) if session.turns.iter().any(|turn| turn.id == id) => id,
+        _ => {
+            eprintln!("turn #{} does not exist", id_text.trim());
+            return;
+        }
+    };
+    let original = session.turns.iter().find(|turn| turn.id == id).unwrap().input.clone();
+    print!("edit turn {id} [{original}]: ");
+    io::stdout().flush().ok();
+    let mut edited = String::new();
+    if input.read_line(&mut edited).ok().filter(|n| *n > 0).is_none() {
+        eprintln!("rerun cancelled at end of input");
+        return;
+    }
+    let edited = edited.trim();
+    let replacement = (!edited.is_empty() && edited != original).then_some(edited);
+    let plan = match RerunPlan::build_replay_plan(&session.turns, id, replacement) {
+        Ok(plan) => plan,
+        Err(message) => {
+            eprintln!("{message}");
+            return;
+        }
+    };
+    println!("{}", RerunPlan::render_replay_plan(&plan, color));
+    let mut stale_from = None;
+    for step in &plan.steps {
+        if step.kind != RerunPlan::StepKind::ConfirmEffect { continue; }
+        print!("replay effect turn {}? [y] replay  [s] skip and mark stale: ", step.turn_id);
+        io::stdout().flush().ok();
+        let mut answer = String::new();
+        if input.read_line(&mut answer).is_err() || !answer.trim().eq_ignore_ascii_case("y") {
+            stale_from = Some(step.turn_id);
+            break;
+        }
+    }
+    apply_replay_plan_with_stale(session, &plan, stale_from, base_dir, color, authorizer);
 }
 
 /// Classify + execute one already-trimmed input line, printing results to
@@ -2053,6 +2166,7 @@ pub(crate) fn execute_line(
                 .map(|(k, v)| (k.clone(), v))
                 .collect();
             let mut sink = DevSink::new();
+            let mut tracking_authorizer = TrackingAuthorizer { inner: authorizer, observed: false };
             // A turn commits as one transaction. Interpreter writes land in
             // this private scope and become session-visible only on success.
             let mut trial_scope = session.scope.clone();
@@ -2066,7 +2180,7 @@ pub(crate) fn execute_line(
                     REPL_FUEL_BUDGET,
                     suppress,
                     &session.core_imports,
-                    authorizer,
+                    &mut tracking_authorizer,
                 )
             } else {
                 crate::Comptime::run_repl_step(
@@ -2078,7 +2192,7 @@ pub(crate) fn execute_line(
                     REPL_FUEL_BUDGET,
                     suppress,
                     &session.core_imports,
-                    authorizer,
+                    &mut tracking_authorizer,
                 )
                 .map_err(crate::Comptime::ReplStepError::Diagnostic)
             };
@@ -2131,7 +2245,7 @@ pub(crate) fn execute_line(
                             }
                         }
                     }
-                    let had_effect = looks_effectful(trimmed)
+                    let had_effect = tracking_authorizer.observed
                         || !sink.stdout.is_empty()
                         || !sink.stderr.is_empty();
                     let bound_name = match new_names.as_slice() {
@@ -2154,7 +2268,7 @@ pub(crate) fn execute_line(
                         trimmed,
                         ReplTurnStatus::Interrupted,
                         "Interrupted".to_string(),
-                        looks_effectful(trimmed) || !sink.stdout.is_empty() || !sink.stderr.is_empty(),
+                        tracking_authorizer.observed || !sink.stdout.is_empty() || !sink.stderr.is_empty(),
                         None,
                     );
                 }
@@ -2311,6 +2425,20 @@ fn handle_meta(
 /// `plan.from_id` are known-good (their input/output already matched once)
 /// so they replay silently; only the plan's own steps print.
 fn apply_replay_plan(session: &mut Session, plan: &RerunPlan::ReplayPlan, base_dir: &Path, color: bool, authorizer: &mut dyn crate::Comptime::ReplAuthorizer) {
+    apply_replay_plan_with_stale(session, plan, None, base_dir, color, authorizer);
+}
+
+/// Apply replay while conservatively retaining a skipped effect and every
+/// downstream turn as stale notebook history. Those turns are not evaluated
+/// and therefore cannot contribute bindings to the rebuilt live session.
+pub(crate) fn apply_replay_plan_with_stale(
+    session: &mut Session,
+    plan: &RerunPlan::ReplayPlan,
+    stale_from: Option<usize>,
+    base_dir: &Path,
+    color: bool,
+    authorizer: &mut dyn crate::Comptime::ReplAuthorizer,
+) {
     let prior: Vec<String> = session
         .turns
         .iter()
@@ -2324,6 +2452,22 @@ fn apply_replay_plan(session: &mut Session, plan: &RerunPlan::ReplayPlan, base_d
         execute_line(input, session, base_dir, color, false, true, authorizer);
     }
     for step in &plan.steps {
+        if stale_from.is_some_and(|from| step.turn_id >= from) {
+            session.turns.push(ReplTurn {
+                id: session.turns.len() + 1,
+                input: step.input.clone(),
+                summary: "not replayed".to_string(),
+                status: ReplTurnStatus::Ok,
+                folded: false,
+                pinned: false,
+                stale: true,
+                had_effect: step.kind == RerunPlan::StepKind::ConfirmEffect,
+                bound_name: None,
+                pending_unfold: None,
+            });
+            println!("{}", dim(&format!("turn {} stale: not replayed", step.turn_id), color));
+            continue;
+        }
         println!(
             "{}",
             dim(&format!("rerun #{}: {}", step.turn_id, step.input), color)

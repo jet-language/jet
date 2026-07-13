@@ -581,6 +581,125 @@ pub(crate) fn run_dev_entry(file: &str, mode: OutputMode) {
     exit(status.code().unwrap_or(ExitCodes::OK));
 }
 
+/// D-JPK-TASKRUN1 (card #476): `jet run --task <name> <file>` — compile with
+/// the named `#Task fn` as the entry via a synthetic `fn run { task(…) }`
+/// wrapper (same `compile_with_entry` path `fn dev()` uses; the task keeps
+/// its source name so plain-call deps stay resolvable), then run the binary
+/// with `program_args` (typed CLI args via D-CLIFLAG1 ride for free).
+pub(crate) fn run_task_entry(
+    file: &str,
+    task: &str,
+    program_args: &[&String],
+    mode: OutputMode,
+) {
+    let src = match fs::read_to_string(file) {
+        Ok(s) => s,
+        Err(_) => {
+            eprintln!("error: can't find the file `{}`", file);
+            eprintln!(
+                " fix: check the spelling, or run {} from the folder that contains it",
+                jet::Syntax::BINARY_NAME
+            );
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let declared = list_task_names(&src);
+    let is_marked = match task_is_marked(&src, task) {
+        Some(v) => v,
+        None => {
+            // Parse failed — let compile_with_entry surface real diagnostics.
+            true
+        }
+    };
+    if !is_marked {
+        let list = if declared.is_empty() {
+            "(none)".to_string()
+        } else {
+            declared.join(", ")
+        };
+        let diag = jet::Diagnostics::Diagnostic::error(
+            "E1294",
+            format!("no task named `{task}`"),
+            format!("`jet run --task` / `jetpack run` only invoke functions marked `#Task` (D-JPK-TASKRUN1)."),
+            "mark a function `#Task` to make it runnable, or check the spelling.".to_string(),
+            None,
+        )
+        .with_detail(format!("declared tasks: {list}\n"));
+        report_problems(mode, file, &src, &[diag]);
+        exit(ExitCodes::USER_ERROR);
+    }
+    let out = match jet::compile_with_entry(file, task) {
+        Ok(out) => out,
+        Err(diags) => {
+            report_problems(mode, file, &src, &diags);
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let clinks = match jet::resolve_c_links(file) {
+        Ok(args) => args,
+        Err(diags) => {
+            report_problems(mode, file, &src, &diags);
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let bin = bin_path(file);
+    build(
+        file,
+        &out.rust,
+        bin.clone(),
+        BuildProfile::Default,
+        out.ffi.as_ref(),
+        &clinks,
+        false,
+        None,
+        None,
+        None,
+        mode,
+        // Task entry-swap is a one-shot; skip content-cache (same as `run_dev_entry`).
+        None,
+    );
+    let mut run_cmd = Command::new(&bin);
+    for arg in program_args {
+        run_cmd.arg(arg.as_str());
+    }
+    let status = run_cmd.status().unwrap_or_else(|e| {
+        eprintln!("error: couldn't run the built program: {}", e);
+        exit(ExitCodes::USER_ERROR);
+    });
+    exit(status.code().unwrap_or(ExitCodes::OK));
+}
+
+/// Cheap lex+parse: names of top-level `#Task fn`s in `src`.
+fn list_task_names(src: &str) -> Vec<String> {
+    let (toks, lex_diags) = jet::Lexer::lex(src);
+    if !lex_diags.is_empty() {
+        return Vec::new();
+    }
+    let Ok(prog) = jet::Parser::parse(&toks) else {
+        return Vec::new();
+    };
+    prog.items
+        .iter()
+        .filter_map(|i| match i {
+            jet::AST::Item::Func(f) if f.is_task => Some(f.name.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// `Some(true)` if `name` is a `#Task fn`; `Some(false)` if the file parsed
+/// but has no such task; `None` on lex/parse failure.
+fn task_is_marked(src: &str, name: &str) -> Option<bool> {
+    let (toks, lex_diags) = jet::Lexer::lex(src);
+    if !lex_diags.is_empty() {
+        return None;
+    }
+    let prog = jet::Parser::parse(&toks).ok()?;
+    Some(prog.items.iter().any(
+        |i| matches!(i, jet::AST::Item::Func(f) if f.is_task && f.name == name),
+    ))
+}
+
 /// D-SUPPLY1 — write an SPDX SBOM next to the freshly built binary.
 ///
 /// Best-effort: an SBOM describes the *dependency* graph, so a single-file

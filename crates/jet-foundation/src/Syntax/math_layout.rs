@@ -556,6 +556,11 @@ pub fn duration_suffix_nanos(suffix: &str) -> Option<u128> {
 /// `fn run()`. Bare marker, no arguments.
 pub const KW_TASK: &str = "Task";
 
+/// D-JPK-TASKRUN1=A: lifecycle verbs a `#Task fn` must not reuse — they already
+/// name Jet's built-in entry points (`fn run`/`fn dev`/`fn build`/`fn test`).
+/// Sema rejects a collision as E0928.
+pub const TASK_RESERVED_LIFECYCLE: &[&str] = &["run", "dev", "build", "test"];
+
 /// D-SCHEDULE1: `#Every(…)` — a declarative schedule marker on a `#Task fn`.
 /// Legal only alongside `#Task` (E0925 otherwise).
 pub const ATTR_EVERY: &str = "Every";

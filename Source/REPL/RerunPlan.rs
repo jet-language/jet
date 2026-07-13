@@ -124,6 +124,7 @@ mod tests {
             status: ReplTurnStatus::Ok,
             folded: false,
             pinned: false,
+            stale: false,
             had_effect,
             bound_name: bound_name.map(str::to_string),
             pending_unfold: None,

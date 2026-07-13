@@ -1688,6 +1688,7 @@ fn fixture_turn(id: usize, input: &str, had_effect: bool, bound_name: Option<&st
         status: ReplTurnStatus::Ok,
         folded: false,
         pinned: false,
+        stale: false,
         had_effect,
         bound_name: bound_name.map(str::to_string),
         pending_unfold: None,
@@ -1756,6 +1757,109 @@ fn textual_rerun_fallback_still_previews_a_turn() {
     let out = run_transcript(&["1 + 2", ":rerun 1"], None);
     assert!(out.contains("rerun #1: 1 + 2"), "got: {out:?}");
     assert!(out.matches("3 : Int").count() >= 2, "got: {out:?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn repl_raw_rerun_selects_edits_and_replays_downstream_state() {
+    let output = run_raw_multiline_pty(
+        "printf 'rate := 7\\r'; sleep 0.12; printf 'total :: rate * 2\\r'; sleep 0.12; printf '\\022'; sleep 0.12; printf '1\\r'; sleep 0.12; printf '\\1778\\r'; sleep 0.2; printf 'total\\r'",
+    );
+    let out = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "PTY status: {:?}\n{out}", output.status);
+    assert!(out.contains("select turn to edit"), "arbitrary-turn selector missing: {out:?}");
+    assert!(out.contains("rerun #2: total :: rate * 2"), "downstream turn not replayed: {out:?}");
+    assert!(out.contains("16 : Int"), "edited state did not reach downstream binding: {out:?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn repl_raw_rerun_effect_skip_marks_turn_and_downstream_stale_without_execution() {
+    let output = run_raw_multiline_pty(
+        "printf 'x := 1\\r'; sleep 0.12; printf 'print(\"EFFECT_ONCE\")\\r'; sleep 0.12; printf 'y :: x + 1\\r'; sleep 0.12; printf '\\022'; sleep 0.12; printf '1\\r'; sleep 0.12; printf '\\r'; sleep 0.12; printf 's'; sleep 0.15; printf ':turns\\r'",
+    );
+    let out = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "PTY status: {:?}\n{out}", output.status);
+    let normalized = out.replace('\r', "");
+    assert_eq!(normalized.lines().filter(|line| *line == "EFFECT_ONCE").count(), 1, "skipped effect replayed: {out:?}");
+    assert!(out.contains("skip and mark stale"), "per-effect skip prompt missing: {out:?}");
+    assert!(out.contains("stale"), "skipped/downstream turns not stale-marked: {out:?}");
+}
+
+#[test]
+fn repl_cooked_rerun_edits_and_applies_downstream_state() {
+    let state = std::env::temp_dir().join(format!("jet_repl_rerun_cooked_{}", std::process::id()));
+    std::fs::remove_dir_all(&state).ok();
+    let output = run_repl_process(
+        &state,
+        b"x := 1\ny :: x + 1\n:rerun 1\nx := 8\ny\n:quit\n",
+        None,
+    );
+    let out = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "cooked rerun failed: {out}");
+    assert!(out.contains("edit turn 1 [x := 1]"), "cooked edit prompt missing: {out}");
+    assert!(out.contains("rerun #2: y :: x + 1"), "cooked downstream replay missing: {out}");
+    assert!(out.contains("9 : Int"), "cooked edited state not live: {out}");
+    std::fs::remove_dir_all(state).ok();
+}
+
+#[test]
+fn repl_cooked_rerun_prompts_each_effect_and_skip_stales_downstream() {
+    let state = std::env::temp_dir().join(format!("jet_repl_rerun_cooked_effect_{}", std::process::id()));
+    std::fs::remove_dir_all(&state).ok();
+    let output = run_repl_process(
+        &state,
+        b"x := 1\nprint(\"COOKED_EFFECT\")\ny :: x + 1\n:rerun 1\n\ns\n:turns\n:quit\n",
+        None,
+    );
+    let out = String::from_utf8_lossy(&output.stdout).replace('\r', "");
+    assert!(output.status.success(), "cooked effect rerun failed: {out}");
+    assert_eq!(out.lines().filter(|line| *line == "COOKED_EFFECT").count(), 1, "skipped cooked effect replayed: {out}");
+    assert!(out.contains("replay effect turn 2?"), "per-effect cooked prompt missing: {out}");
+    assert!(out.contains("#2 ok stale") && out.contains("#3 ok stale"), "cooked stale marking missing: {out}");
+    std::fs::remove_dir_all(state).ok();
+}
+
+#[cfg(unix)]
+#[test]
+fn repl_raw_project_baseline_survives_downstream_replay() {
+    use std::process::Command;
+    let root = std::env::temp_dir().join(format!("jet_repl_rerun_project_{}", std::process::id()));
+    std::fs::remove_dir_all(&root).ok();
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("helper.jet"), "fn add_three(x: Int) -> Int { return x + 3; }\n").unwrap();
+    let shell = r#"
+{
+  sleep 0.2
+  printf 'x := add_three(1)\r'
+  sleep 0.15
+  printf 'y :: add_three(x)\r'
+  sleep 0.15
+  printf '\022'
+  sleep 0.12
+  printf '1\r'
+  sleep 0.12
+  printf '\1772\r'
+  sleep 0.2
+  printf 'y\r'
+  sleep 0.15
+  printf ':quit\r'
+} | timeout 8s script -qec '"$JET_REPL_BIN" repl --project "$JET_REPL_ROOT"' /dev/null
+"#;
+    let output = Command::new("sh")
+        .args(["-c", shell])
+        .env("JET_REPL_BIN", env!("CARGO_BIN_EXE_jet"))
+        .env("JET_REPL_ROOT", &root)
+        .env("JET_REPL_HISTORY", "off")
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let out = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "project replay PTY failed: {out}");
+    assert!(out.contains("rerun #2: y :: add_three(x)"), "project downstream replay missing: {out}");
+    assert!(out.contains("8 : Int"), "project function baseline was lost: {out}");
+    assert!(!out.contains("E0102"), "project function became unknown: {out}");
+    std::fs::remove_dir_all(root).ok();
 }
 
 // ── D-BIGINT1: comptime/REPL tier-0 BigInt (card #392) ─────────────────────

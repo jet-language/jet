@@ -1876,11 +1876,6 @@ pub(crate) fn expand_generic_module_aliases(
                 .collect()
         })
         .collect();
-    let module_aliases: Vec<String> = bundle
-        .modules
-        .iter()
-        .map(|module| module.alias.clone())
-        .collect();
     // `use alias.Item` has its own span and therefore no `import_targets`
     // entry. Resolve it through the namespace import which established
     // `alias`, exactly like the later ordinary-import registration pass.
@@ -1907,6 +1902,10 @@ pub(crate) fn expand_generic_module_aliases(
     let mut bundle_instances: HashMap<ModuleInstanceKey, String> = HashMap::new();
     let mut bundle_instance_nominals: HashMap<String, Vec<String>> = HashMap::new();
     let mut fingerprint_keys: HashMap<String, Vec<u8>> = HashMap::new();
+
+    // Snapshot aliases up front — the mut loop below can't re-borrow `bundle.modules`
+    // for an E0609 message that names the source module.
+    let module_aliases: Vec<String> = bundle.modules.iter().map(|m| m.alias.clone()).collect();
 
     for (module_idx, module) in bundle.modules.iter_mut().enumerate() {
         if report_generic_module_cycles(&module.items, diags) {

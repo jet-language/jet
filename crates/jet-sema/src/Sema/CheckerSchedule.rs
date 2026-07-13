@@ -1,21 +1,26 @@
 //! D-SCHEDULE1 (ratified 2026-07-11, card #505): checked `#Every(…)`
-//! schedule arguments.
+//! schedule arguments, plus D-JPK-TASKRUN1 reserved-name law on `#Task fn`.
 //!
 //! The parser only records the raw shape it saw (`EveryArg` — a duration
 //! literal or a quoted string) and, at parse time, whether `#Every(…)` is
 //! paired with `#Task` on the same function (E0925, pushed directly by
 //! `jet-parser` — a placement question, not a value question). This module
-//! owns the one thing left: is the VALUE a real schedule? `EveryArg::resolve`
-//! (`crates/jet-foundation/src/AST/items.rs`) is the single source of truth
-//! for that arithmetic/range check — `jet dev`, the service runtime, and a
-//! jetos timer projection all call the same function later to get the same
-//! answer, so this checker and every runtime consumer can never disagree.
+//! owns the one thing left for schedules: is the VALUE a real schedule?
+//! `EveryArg::resolve` (`crates/jet-foundation/src/AST/items.rs`) is the
+//! single source of truth for that arithmetic/range check — `jet dev`, the
+//! service runtime, and a jetos timer projection all call the same function
+//! later to get the same answer, so this checker and every runtime consumer
+//! can never disagree.
+//!
+//! D-JPK-TASKRUN1 also lives here: a `#Task fn` must not reuse the reserved
+//! lifecycle verbs `run`/`dev`/`build`/`test` (E0928).
 //!
 //! I3: this module only decides; codegen never reads `Func::every` at all —
 //! a `#Task`/`#Every` function generates as an ordinary fn.
 
 use crate::AST::{EveryScheduleError, Func};
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::Syntax;
 
 /// E0926: `#Every(…)`'s value isn't a real schedule — a bad duration unit,
 /// a non-positive duration, or a malformed/out-of-range `"HH:MM"`.
@@ -52,22 +57,56 @@ fn e0926_bad_schedule_value(reason: EveryScheduleError, span: Span) -> Diagnosti
     Diagnostic::error("E0926", what.to_string(), why.to_string(), fix.to_string(), Some(span))
 }
 
+/// E0928: `#Task fn` reused a reserved lifecycle verb (D-JPK-TASKRUN1).
+fn e0928_reserved_task_name(name: &str, span: Span) -> Diagnostic {
+    let reserved = Syntax::TASK_RESERVED_LIFECYCLE.join(", ");
+    Diagnostic::error(
+        "E0928",
+        format!("`{name}` is a built-in lifecycle verb, not a task name"),
+        format!(
+            "`run`, `dev`, `build`, and `test` already name Jet's built-in entry points — \
+             a `#Task fn` picks a user-chosen verb beside them (D-JPK-TASKRUN1)."
+        ),
+        format!(
+            "rename it, e.g. `#Task fn {name}_assets()`, or drop `#Task` if this is the lifecycle entry."
+        ),
+        Some(span),
+    )
+    .with_detail(format!("reserved: {reserved}\n"))
+}
+
+/// D-JPK-TASKRUN1: reject `#Task fn run|dev|build|test`. Called alongside the
+/// `#Every` value check during registration.
+pub(crate) fn check_task_marker(f: &Func) -> Vec<Diagnostic> {
+    if !f.is_task {
+        return Vec::new();
+    }
+    if Syntax::TASK_RESERVED_LIFECYCLE.contains(&f.name.as_str()) {
+        let span = f.task_span.unwrap_or(f.name_span);
+        return vec![e0928_reserved_task_name(&f.name, span)];
+    }
+    Vec::new()
+}
+
 /// D-SCHEDULE1: validate `f`'s `#Every(…)` argument, if it has one. Called
 /// once per function during registration (mirrors `check_inline_always_fn`'s
 /// call sites in `Registration.rs`/`Bundle.rs`) — E0925 placement is already
-/// handled by the parser, so this is the value check alone.
+/// handled by the parser, so this is the value check alone. Also runs the
+/// D-JPK-TASKRUN1 reserved-name check for `#Task`.
 pub(crate) fn check_every_marker(f: &Func) -> Vec<Diagnostic> {
+    let mut diags = check_task_marker(f);
     let Some(every) = &f.every else {
-        return Vec::new();
+        return diags;
     };
     match every.arg.resolve() {
-        Ok(_) => Vec::new(),
+        Ok(_) => diags,
         Err(reason) => {
             let span = match &every.arg {
                 crate::AST::EveryArg::Duration { suffix_span, .. } => *suffix_span,
                 crate::AST::EveryArg::WallClock { text_span, .. } => *text_span,
             };
-            vec![e0926_bad_schedule_value(reason, span)]
+            diags.push(e0926_bad_schedule_value(reason, span));
+            diags
         }
     }
 }

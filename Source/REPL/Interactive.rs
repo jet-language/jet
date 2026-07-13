@@ -21,7 +21,7 @@ use std::path::Path;
 
 use super::Terminal::{Key, KeyReader, RawGuard};
 use super::{
-    apply_replay_plan, dim, execute_line, set_turn_flag, unfold_turn, Docs, RerunPlan, Render,
+    dim, execute_line, set_turn_flag, unfold_turn, Docs, RerunPlan, Render,
     EffectPrompt, PromptChoice, ReplFlags, ReplPolicy, Session,
 };
 
@@ -39,6 +39,7 @@ pub(crate) fn run_interactive(project_dir: Option<&str>, color: bool, mut guard:
     if let Some(dir) = project_dir {
         let mut stdout = io::stdout();
         super::load_project_items(Path::new(dir), &mut session, &mut stdout);
+        session.preserve_project_baseline();
     }
 
     let stdin = io::stdin();
@@ -208,12 +209,23 @@ fn cmd_toggle_fold(session: &mut Session, color: bool) {
 // ── rerun (^R, D-FE-REPL-RERUN1=A) ─────────────────────────────────────────
 
 fn cmd_rerun<R: Read>(reader: &mut KeyReader<R>, session: &mut Session, base_dir: &Path, color: bool, policy: &mut ReplPolicy, guard: &mut RawGuard) {
-    let Some(last) = session.turns.last() else {
+    if session.turns.is_empty() {
         println!("{}", dim("no turns yet to rerun", color));
         return;
+    }
+    println!("{}", dim("select turn to edit:", color));
+    let id_text = match read_line(reader, "turn> ", "", session, color) {
+        LineOutcome::Submitted(text) => text,
+        _ => return,
     };
-    let id = last.id;
-    let original = last.input.clone();
+    let id = match id_text.trim().parse::<usize>() {
+        Ok(id) if session.turns.iter().any(|turn| turn.id == id) => id,
+        _ => {
+            eprintln!("turn #{} does not exist", id_text.trim());
+            return;
+        }
+    };
+    let original = session.turns.iter().find(|turn| turn.id == id).unwrap().input.clone();
     println!(
         "{}",
         dim(
@@ -241,34 +253,36 @@ fn cmd_rerun<R: Read>(reader: &mut KeyReader<R>, session: &mut Session, base_dir
             return;
         }
     };
-    if RerunPlan::plan_needs_confirmation(&plan) {
-        // Ratified shape: `Replay plan: … Apply? [y/N]` — only shown when
-        // there's actually a `y`/`N` to answer; an all-auto plan just
-        // applies (see the `else` below), so it never asks a question it
-        // doesn't wait for.
-        println!("{}", RerunPlan::render_replay_plan(&plan, color));
-        io::stdout().flush().ok();
-        let confirmed = matches!(reader.read_key(), Key::Char('y') | Key::Char('Y'));
-        println!();
-        if !confirmed {
-            println!(
-                "{}",
-                dim(
-                    "rerun cancelled — effectful steps need confirmation; session unchanged",
-                    color
-                )
-            );
-            return;
+    println!("{}", RerunPlan::render_replay_plan(&plan, color));
+    let mut stale_from = None;
+    for step in &plan.steps {
+        if step.kind != RerunPlan::StepKind::ConfirmEffect {
+            continue;
         }
-    } else {
         println!(
-            "{}",
-            dim(&format!("replaying {} turn(s), all auto", plan.steps.len()), color)
+            "replay effect turn {}? [y] replay  [s] skip and mark stale",
+            step.turn_id
         );
+        io::stdout().flush().ok();
+        match reader.read_key() {
+            Key::Char('y') | Key::Char('Y') => println!(),
+            _ => {
+                println!();
+                stale_from = Some(step.turn_id);
+                break;
+            }
+        }
     }
     let mut prompt = InteractiveEffectPrompt { reader, guard };
     let mut authorizer = policy.authorizer(Some(&mut prompt));
-    apply_replay_plan(session, &plan, base_dir, color, &mut authorizer);
+    super::apply_replay_plan_with_stale(
+        session,
+        &plan,
+        stale_from,
+        base_dir,
+        color,
+        &mut authorizer,
+    );
 }
 
 // ── line editor ─────────────────────────────────────────────────────────────
