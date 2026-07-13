@@ -63,6 +63,55 @@ fn build_web_fixture(stem: &str, src: &str, shown: &str) -> PathBuf {
     dir
 }
 
+fn build_web_project(stem: &str, files: &[(&str, &str)]) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("jet_web_{stem}_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(dir.join("build")).unwrap();
+    for (path, src) in files {
+        fs::write(dir.join(path), src).unwrap();
+    }
+
+    let entry = dir.join("main.jet");
+    let out = jet::compile_web(entry.to_str().unwrap()).unwrap_or_else(|diags| {
+        panic!(
+            "front end rejected web project:\n{}",
+            jet::render_diagnostics(
+                entry.to_str().unwrap(),
+                &fs::read_to_string(&entry).unwrap(),
+                &diags,
+            )
+        )
+    });
+    let web = out.web.expect("web target compile must produce web artifacts");
+    fs::write(dir.join("build/web.manifest.json"), &web.manifest_json).unwrap();
+    fs::write(dir.join("build/jet_dom_runtime.js"), &web.dom_runtime).unwrap();
+    fs::write(dir.join("build/app.js"), &web.js_app).unwrap();
+    fs::write(dir.join("build/app_wasm.rs"), &web.wasm_rust).unwrap();
+
+    let rustc = Command::new("rustc")
+        .current_dir(&dir)
+        .args([
+            "--edition",
+            "2021",
+            "--target",
+            "wasm32-unknown-unknown",
+            "--crate-type",
+            "cdylib",
+            "-O",
+            "build/app_wasm.rs",
+            "-o",
+            "build/app.wasm",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        rustc.status.success(),
+        "rustc rejected wasm for {stem}:\n{}",
+        String::from_utf8_lossy(&rustc.stderr)
+    );
+    dir
+}
+
 fn run_web_app(dir: &PathBuf) -> String {
     let node = Command::new("node")
         .current_dir(dir.join("build"))
@@ -652,6 +701,95 @@ fn run() { print(total()) }
     assert!(wasm.contains("jet_wasm_Left__value()"), "left qualified call was dropped:\n{wasm}");
     assert!(wasm.contains("jet_wasm_Right__value()"), "right qualified call was dropped:\n{wasm}");
     assert_eq!(run_web_app(&dir), "3\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn web_file_modules_keep_qualified_js_function_identity() {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web file-module JS identity test");
+        return;
+    }
+    let dir = build_web_project(
+        "file_module_js_identity",
+        &[
+            (
+                "main.jet",
+                "#Target(Web)\nuse \"./left\" as left\nuse \"./right\" as right\n#Target(Js)\nfn run() { print(left.value() + right.value()) }\n",
+            ),
+            (
+                "left.jet",
+                "#Target(Js)\npub fn value() -> Int { return 1 }\n",
+            ),
+            (
+                "right.jet",
+                "#Target(Js)\npub fn value() -> Int { return 2 }\n",
+            ),
+        ],
+    );
+    let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
+    assert!(js.contains("function left__value()"), "left identity was dropped:\n{js}");
+    assert!(js.contains("function right__value()"), "right identity was dropped:\n{js}");
+    assert_eq!(run_web_app(&dir), "3\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn web_file_modules_emit_distinct_qualified_wasm_calls() {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web file-module Wasm identity test");
+        return;
+    }
+    let dir = build_web_project(
+        "file_module_wasm_identity",
+        &[
+            (
+                "main.jet",
+                "#Target(Web)\nuse \"./left\" as left\nuse \"./right\" as right\n#WasmExport\nfn total() -> Int { return left.value() + right.value() }\n#Target(Js)\nfn run() { print(total()) }\n",
+            ),
+            ("left.jet", "pub fn value() -> Int { return 1 }\n"),
+            ("right.jet", "pub fn value() -> Int { return 2 }\n"),
+        ],
+    );
+    let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
+    assert!(wasm.contains("fn jet_wasm_left__value() -> i64"), "left identity was dropped:\n{wasm}");
+    assert!(wasm.contains("fn jet_wasm_right__value() -> i64"), "right identity was dropped:\n{wasm}");
+    assert!(wasm.contains("jet_wasm_left__value()"), "left call was dropped:\n{wasm}");
+    assert!(wasm.contains("jet_wasm_right__value()"), "right call was dropped:\n{wasm}");
+    assert_eq!(run_web_app(&dir), "3\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn web_file_module_wasm_export_uses_qualified_bridge() {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web file-module bridge test");
+        return;
+    }
+    let dir = build_web_project(
+        "file_module_bridge",
+        &[
+            (
+                "main.jet",
+                "#Target(Web)\nuse \"./math\" as math\n#Target(Js)\nfn run() { print(math.value()) }\n",
+            ),
+            (
+                "math.jet",
+                "#WasmExport\npub fn value() -> Int { return 7 }\n",
+            ),
+        ],
+    );
+    let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
+    assert!(
+        js.contains("await bridge_math__value()"),
+        "qualified call did not use Wasm bridge:\n{js}"
+    );
+    let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
+    assert!(
+        wasm.contains("pub extern \"C\" fn jet_export_math__value() -> i64"),
+        "qualified export symbol was dropped:\n{wasm}"
+    );
+    assert_eq!(run_web_app(&dir), "7\n");
     let _ = fs::remove_dir_all(&dir);
 }
 

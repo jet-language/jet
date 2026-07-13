@@ -240,9 +240,22 @@ fn web_wasm_expr_supported(
         }
         TIR::TExprKind::Call { name, args } => wasm_callee_bucket(bundle, web_name(name)) == Some(WebBucket::Wasm)
             && args.iter().all(|a| web_wasm_expr_supported(&a.value, bundle, reconstructions)),
-        TIR::TExprKind::ModuleCall { form: TIR::TModuleCallForm::InlineMangled { mangled }, args } => {
-            bundle.web_partitions.get(mangled).copied() == Some(WebBucket::Wasm)
-                && args.iter().all(|a| web_wasm_expr_supported(&a.value, bundle, reconstructions))
+        TIR::TExprKind::ModuleCall { form, args } => {
+            let key = match form {
+                TIR::TModuleCallForm::Qualified { rust_mod, rust_fn } => {
+                    qualified_web_key(rust_mod, rust_fn)
+                }
+                TIR::TModuleCallForm::InlineMangled { mangled } => mangled.clone(),
+            };
+            bundle
+                .web_partitions
+                .get(&key)
+                .or_else(|| bundle.web_partitions.get(web_name(key.rsplit("__").next().unwrap_or(&key))))
+                .copied()
+                == Some(WebBucket::Wasm)
+                && args
+                    .iter()
+                    .all(|a| web_wasm_expr_supported(&a.value, bundle, reconstructions))
         }
         _ => false,
     }
@@ -309,7 +322,7 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
         E::Field { recv, .. } => web_expr_supported(recv),
         E::StructLit { fields, .. } => fields.iter().all(|(_, e, _)| web_expr_supported(e)),
         E::Call { args, .. } | E::MethodCall { args, .. } => args.iter().all(|a| web_expr_supported(&a.value)),
-        E::ModuleCall { form: TIR::TModuleCallForm::InlineMangled { .. }, args } => args.iter().all(|a| web_expr_supported(&a.value)),
+        E::ModuleCall { form: TIR::TModuleCallForm::Qualified { .. } | TIR::TModuleCallForm::InlineMangled { .. }, args } => args.iter().all(|a| web_expr_supported(&a.value)),
         E::CoreCall { module, method, args } => web_core_arity(module, method) == Some(args.len()) && args.iter().all(web_expr_supported),
         E::HandleMethod { recv, op, args } => matches!(op, TIR::THandleOp::UiBackendMethod { .. } | TIR::THandleOp::ReactiveGet | TIR::THandleOp::ReactiveSet) && web_expr_supported(recv) && args.iter().all(web_expr_supported),
         E::NumericMethod { recv, op: TIR::TNumericOp::CastAs { .. } } => web_expr_supported(recv),
@@ -366,6 +379,7 @@ fn collect_web_funcs(bundle: &ProgramBundle) -> Vec<FuncWeb> {
             module.web_target_ceiling,
             None,
             None,
+            (i != bundle.entry).then_some(module.alias.as_str()),
             bundle,
             &cx,
             &mut out,
@@ -379,6 +393,7 @@ fn collect_module_funcs(
     file_ceiling: Option<WebBucket>,
     module_ceiling: Option<WebBucket>,
     module_prefix: Option<&str>,
+    file_prefix: Option<&str>,
     bundle: &ProgramBundle,
     cx: &Cx,
     out: &mut Vec<FuncWeb>,
@@ -390,11 +405,14 @@ fn collect_module_funcs(
             Item::Func(f) => {
                 let key = match module_prefix {
                     Some(m) => format!("{m}__{}", f.name),
-                    None => f.name.clone(),
+                    None => file_prefix
+                        .map(|m| format!("{m}__{}", f.name))
+                        .unwrap_or_else(|| f.name.clone()),
                 };
                 let bucket = bundle
                     .web_partitions
                     .get(&key)
+                    .or_else(|| bundle.web_partitions.get(&f.name))
                     .copied()
                     .unwrap_or(WebBucket::Wasm);
                 out.push(FuncWeb {
@@ -420,6 +438,7 @@ fn collect_module_funcs(
                         file_ceiling,
                         mod_ceiling,
                         Some(&cm.name),
+                        file_prefix,
                         bundle,
                         cx,
                         out,
@@ -821,11 +840,17 @@ fn wasm_emit_expr(
             let symbol = format!("jet_wasm_{source}");
             format!("{symbol}({})", args.iter().map(|a| wasm_emit_expr(&a.value, funcs, reconstructions)).collect::<Result<Vec<_>, _>>()?.join(", "))
         }
-        TIR::TExprKind::ModuleCall { form: TIR::TModuleCallForm::InlineMangled { mangled }, args } => {
-            let mut callees = funcs.iter().filter(|f| f.key == *mangled && f.bucket == WebBucket::Wasm);
+        TIR::TExprKind::ModuleCall { form, args } => {
+            let key = match form {
+                TIR::TModuleCallForm::Qualified { rust_mod, rust_fn } => {
+                    qualified_web_key(rust_mod, rust_fn)
+                }
+                TIR::TModuleCallForm::InlineMangled { mangled } => mangled.clone(),
+            };
+            let mut callees = funcs.iter().filter(|f| f.key == key && f.bucket == WebBucket::Wasm);
             callees.next().ok_or(())?;
             if callees.next().is_some() { return Err(()); }
-            format!("jet_wasm_{mangled}({})", args.iter().map(|a| wasm_emit_expr(&a.value, funcs, reconstructions)).collect::<Result<Vec<_>, _>>()?.join(", "))
+            format!("jet_wasm_{key}({})", args.iter().map(|a| wasm_emit_expr(&a.value, funcs, reconstructions)).collect::<Result<Vec<_>, _>>()?.join(", "))
         }
         _ => return Err(()),
     })
@@ -963,6 +988,10 @@ fn web_name(name: &str) -> &str {
     name.strip_prefix("user_").unwrap_or(name)
 }
 
+fn qualified_web_key(rust_mod: &str, rust_fn: &str) -> String {
+    format!("{}__{}", web_name(rust_mod), web_name(rust_fn))
+}
+
 fn web_place(name: &str) -> String {
     let name = name.strip_prefix("(*").and_then(|s| s.strip_suffix(')')).unwrap_or(name);
     if let Some(source) = name.strip_prefix("_jet_cap_user_") {
@@ -1040,10 +1069,16 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb]) -> Result<String, ()> {
             else if is_wasm_export(name, funcs) { format!("await bridge_{name}({args})") }
             else { format!("{name}({args})") }
         }
-        E::ModuleCall { form: TIR::TModuleCallForm::InlineMangled { mangled }, args } => {
+        E::ModuleCall { form, args } => {
+            let key = match form {
+                TIR::TModuleCallForm::Qualified { rust_mod, rust_fn } => {
+                    qualified_web_key(rust_mod, rust_fn)
+                }
+                TIR::TModuleCallForm::InlineMangled { mangled } => mangled.clone(),
+            };
             let args = tir_call_args(args, funcs)?;
-            if is_wasm_export(mangled, funcs) { format!("await bridge_{mangled}({args})") }
-            else { format!("{mangled}({args})") }
+            if is_wasm_export(&key, funcs) { format!("await bridge_{key}({args})") }
+            else { format!("{key}({args})") }
         }
         E::Print(value) => format!("jetDom.print({})", tir_js_expr(value, funcs)?),
         E::MethodCall { recv, method_rust, args } => format!("{}.{}({})", tir_js_expr(recv, funcs)?, web_name(method_rust), tir_call_args(args, funcs)?),
