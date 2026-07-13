@@ -10,6 +10,7 @@ use jet_foundation::PerformanceBudget::{
 };
 use jet_foundation::SHA256::sha256_hex;
 use std::path::{Path, PathBuf};
+use std::io::{IsTerminal, Write};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -60,18 +61,23 @@ pub(crate) fn run(raw: &[String]) -> i32 {
         Err(error) => return tool_failure(&options, &error),
     };
     let store = BudgetStore::new(&root);
-    let (report_id, created) = match store.write_report(&built.bytes) {
-        Ok(value) => value,
-        Err(error) => return tool_failure(&options, &format!("report write refused: {error}")),
-    };
+    let report_id = text_field(&built.value, "report_id").expect("verified report id").to_string();
     let report_path = format!(".jet/perf/reports/{report_id}.json");
     let failed = built.fail > 0;
 
     if options.command == "check" {
+        let created = match store.write_report(&built.bytes) {
+            Ok((_, created)) => created,
+            Err(error) => return tool_failure(&options, &format!("report write refused: {error}")),
+        };
         emit_check(&options, &built, &report_id, &report_path, created);
         return if failed { 1 } else { 0 };
     }
     if failed && !options.accept_regression {
+        let created = match store.write_report(&built.bytes) {
+            Ok((_, created)) => created,
+            Err(error) => return tool_failure(&options, &format!("report write refused: {error}")),
+        };
         emit_check(&options, &built, &report_id, &report_path, created);
         return 1;
     }
@@ -86,18 +92,29 @@ pub(crate) fn run(raw: &[String]) -> i32 {
         Err(error) => return tool_failure_with_report(&options, &report_id, &format!("baseline plan refused: {error}")),
     };
     let old = plan.prior_head_report_id().map(str::to_string);
-    let apply = options.yes;
+    let created = match store.inspect_report(&built.bytes) {
+        Ok((_, exists)) => !exists,
+        Err(error) => return tool_failure_with_report(&options, &report_id, &format!("report inspection refused: {error}")),
+    };
     if options.json {
-        if apply {
+        if options.yes {
+            if let Err(error) = store.write_report(&built.bytes) {
+                return tool_failure_with_report(&options, &report_id, &format!("report write refused: {error}"));
+            }
             if let Err(error) = store.apply_update(&plan) {
                 return tool_failure_with_report(&options, &report_id, &format!("baseline apply refused: {error}"));
             }
         }
-        emit_json(&options, &built, &report_path, Some((baseline, old.as_deref(), created)), apply, 0, None);
+        emit_json(&options, &built, &report_path, Some((baseline, old.as_deref(), created)), options.yes, 0, None);
     } else {
         eprintln!("{} report {}", if created { "+" } else { "~" }, report_id);
         eprintln!("~ baseline {} {} -> {}", baseline, old.as_deref().unwrap_or("none"), report_id);
+        let interactive = std::io::stdin().is_terminal();
+        let apply = options.yes || (interactive && confirm_update());
         if apply {
+            if let Err(error) = store.write_report(&built.bytes) {
+                return tool_failure_with_report(&options, &report_id, &format!("report write refused: {error}"));
+            }
             match store.apply_update(&plan) {
                 Ok(_) => {
                     eprintln!("{} report {}", if created { "+" } else { "~" }, report_id);
@@ -105,11 +122,21 @@ pub(crate) fn run(raw: &[String]) -> i32 {
                 }
                 Err(error) => return tool_failure_with_report(&options, &report_id, &format!("baseline apply refused: {error}")),
             }
+        } else if interactive {
+            eprintln!("plan cancelled; no baseline changed");
         } else {
             eprintln!("plan only; pass -y or --yes to apply in a non-interactive shell");
         }
     }
     0
+}
+
+fn confirm_update() -> bool {
+    eprint!("Apply? [y/N] ");
+    let _ = std::io::stderr().flush();
+    let mut answer = String::new();
+    if std::io::stdin().read_line(&mut answer).is_err() { return false; }
+    matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes")
 }
 
 const USAGE: &str = "jet budget check [--json] [--verbose] [--annotations auto|none|github] | jet budget update --baseline <name> [--bootstrap|--accept-regression] [--reason <text>] [-y|--yes] [--json] [--verbose] [--annotations auto|none|github]";
@@ -157,7 +184,7 @@ fn parse(raw: &[String]) -> Result<Options, String> {
 }
 
 struct BuiltReport { value: CanonicalJson, bytes: Vec<u8>, results: Vec<ResultRow>, pass:usize, warn:usize, fail:usize }
-struct ResultRow { id:String, name:String, source:String, line:usize, column:usize, metric:String, sample:Rational, outcome:PolicyOutcome, evidence:Evidence, enforcement:Enforcement, reason:String }
+struct ResultRow { id:String, name:String, source:String, line:usize, column:usize, metric:String, unit:String, direction:String, comparison:CanonicalJson, sample:Rational, outcome:PolicyOutcome, evidence:Evidence, enforcement:Enforcement, reason:String }
 
 fn build_report(root:&Path, bundle:&jet::AST::ProgramBundle, effect_facts:&jet::Sema::SemIndexEffectFacts, specs:&[LocatedBudgetSpec], at:&str)->Result<BuiltReport,String>{
     for located in specs { let spec=&located.spec; if spec.provider != "CompilerFacts" || spec.comparison_fact.kind != "Absolute" { return Err(format!("provider `{}` for budget `{}` has no command-owned deterministic measurement implementation",spec.provider,spec.name)); } }
@@ -183,7 +210,25 @@ fn build_report(root:&Path, bundle:&jet::AST::ProgramBundle, effect_facts:&jet::
     let skeletons=bases.iter().map(|(base,_,_)|base.clone()).collect::<Vec<_>>();
     let evidence_id=stable_id(&CanonicalJson::object([("measurements".into(),CanonicalJson::Array(skeletons)),("subject".into(),subject.clone()),("toolchain".into(),tool.clone())])?);
     let mut measurements=Vec::new();let mut results=Vec::new();let(mut pass,mut warn,mut fail)=(0,0,0);
-    for(index,spec)in ordered.iter().enumerate(){let limit=quantity(&spec.limit_fact.quantity)?;let direction=if spec.limit_fact.kind=="AtLeast"{LimitDirection::AtLeast}else{LimitDirection::AtMost};let comparison=Comparison::Absolute{limit:limit.clone(),direction};let improvement=if direction==LimitDirection::AtMost{Direction::LowerIsBetter}else{Direction::HigherIsBetter};let enforcement=if spec.enforcement=="Warn"{Enforcement::Warn}else{Enforcement::Fail};let evaluation=evaluate(&evidence_id,&bases[index].2,&[],&[samples[index].clone()],&[],None,&comparison,improvement,enforcement,None)?;match evaluation.outcome{PolicyOutcome::Pass=>pass+=1,PolicyOutcome::Warn=>warn+=1,PolicyOutcome::Fail=>fail+=1};let evidence_name=match evaluation.evidence{Evidence::Pass=>"pass",Evidence::Regression=>"regression",Evidence::Inconclusive=>"inconclusive",Evidence::Unavailable=>"unavailable"};let outcome=match evaluation.outcome{PolicyOutcome::Pass=>"pass",PolicyOutcome::Warn=>"warn",PolicyOutcome::Fail=>"fail"};let reason=format!("measured {} against {} {}",samples[index].num,spec.limit_fact.kind,limit.num);let decision=CanonicalJson::object([("evidence".into(),CanonicalJson::String(evidence_name.into())),("lower95".into(),CanonicalJson::Null),("point".into(),evaluation.point.to_json()),("policy_outcome".into(),CanonicalJson::String(outcome.into())),("reason".into(),CanonicalJson::String(reason.clone())),("trend".into(),trend()),("upper95".into(),CanonicalJson::Null)])?;let mut object=as_object(&bases[index].0)?.clone();object.insert("decision".into(),decision);measurements.push(CanonicalJson::Object(object));let(source,line,column)=source_location(root,bundle,spec);results.push(ResultRow{id:format!("{}:{}",spec.role,spec.name),name:spec.name.clone(),source,line,column,metric:spec.metric.clone(),sample:samples[index].clone(),outcome:evaluation.outcome,evidence:evaluation.evidence,enforcement,reason});}
+    for (index, spec) in ordered.iter().enumerate() {
+        let limit = quantity(&spec.limit_fact.quantity)?;
+        let direction = if spec.limit_fact.kind == "AtLeast" { LimitDirection::AtLeast } else { LimitDirection::AtMost };
+        let comparison = Comparison::Absolute { limit: limit.clone(), direction };
+        let improvement = if direction == LimitDirection::AtMost { Direction::LowerIsBetter } else { Direction::HigherIsBetter };
+        let enforcement = if spec.enforcement == "Warn" { Enforcement::Warn } else { Enforcement::Fail };
+        let evaluation = evaluate(&evidence_id, &bases[index].2, &[], &[samples[index].clone()], &[], None, &comparison, improvement, enforcement, None)?;
+        match evaluation.outcome { PolicyOutcome::Pass => pass += 1, PolicyOutcome::Warn => warn += 1, PolicyOutcome::Fail => fail += 1 }
+        let evidence_name = match evaluation.evidence { Evidence::Pass => "pass", Evidence::Regression => "regression", Evidence::Inconclusive => "inconclusive", Evidence::Unavailable => "unavailable" };
+        let outcome = match evaluation.outcome { PolicyOutcome::Pass => "pass", PolicyOutcome::Warn => "warn", PolicyOutcome::Fail => "fail" };
+        let reason = format!("measured {} against {} {}", samples[index].num, spec.limit_fact.kind, limit.num);
+        let decision = CanonicalJson::object([("evidence".into(), CanonicalJson::String(evidence_name.into())), ("lower95".into(), CanonicalJson::Null), ("point".into(), evaluation.point.to_json()), ("policy_outcome".into(), CanonicalJson::String(outcome.into())), ("reason".into(), CanonicalJson::String(reason.clone())), ("trend".into(), trend()), ("upper95".into(), CanonicalJson::Null)])?;
+        let mut object = as_object(&bases[index].0)?.clone();
+        object.insert("decision".into(), decision);
+        measurements.push(CanonicalJson::Object(object));
+        let (source, line, column) = source_location(root, bundle, spec);
+        let comparison_json = CanonicalJson::object([("direction".into(), CanonicalJson::String(spec.limit_fact.kind.clone())), ("kind".into(), CanonicalJson::String("absolute".into())), ("limit".into(), limit.to_json())])?;
+        results.push(ResultRow { id:format!("{}:{}",spec.role,spec.name), name:spec.name.clone(), source, line, column, metric:spec.metric.clone(), unit:"Count".into(), direction:if direction==LimitDirection::AtMost{"lower_is_better".into()}else{"higher_is_better".into()}, comparison:comparison_json, sample:samples[index].clone(), outcome:evaluation.outcome, evidence:evaluation.evidence, enforcement, reason });
+    }
     let overall=if fail>0{"fail"}else if warn>0{"warn"}else{"pass"};let privacy=CanonicalJson::object([("excluded".into(),CanonicalJson::Array(Vec::new())),("retained".into(),CanonicalJson::Array(vec![CanonicalJson::String("typed measurements".into()),CanonicalJson::String("workspace source hashes".into())])),("schema".into(),CanonicalJson::Integer("1".into())),("workspace_paths_only".into(),CanonicalJson::Bool(true))])?;let content=CanonicalJson::object([("evidence_id".into(),CanonicalJson::String(evidence_id)),("measurements".into(),CanonicalJson::Array(measurements)),("privacy".into(),privacy),("subject".into(),subject),("summary".into(),CanonicalJson::object([("fail".into(),CanonicalJson::Integer(fail.to_string())),("outcome".into(),CanonicalJson::String(overall.into())),("pass".into(),CanonicalJson::Integer(pass.to_string())),("warn".into(),CanonicalJson::Integer(warn.to_string()))])?),("toolchain".into(),tool)])?;let id=stable_id(&content);let value=CanonicalJson::object([("content".into(),content),("report_id".into(),CanonicalJson::String(id)),("schema".into(),CanonicalJson::String("jet.budget-report".into())),("version".into(),CanonicalJson::Integer("1".into()))])?;let bytes=value.bytes();jet_foundation::PerformanceBudget::verify_budget_report(&bytes)?;Ok(BuiltReport{value,bytes,results,pass,warn,fail})
 }
 
@@ -251,11 +296,65 @@ fn frame(out:&mut Vec<u8>,value:&str){out.extend_from_slice(&(value.len()as u64)
 fn emit_check(options:&Options,built:&BuiltReport,id:&str,path:&str,created:bool){if options.json{emit_json(options,built,path,None,false,if built.fail>0{1}else{0},None);return}for row in &built.results{if row.outcome==PolicyOutcome::Pass{if options.verbose{eprintln!("pass {}: {}",row.name,row.reason)}continue}let(code,state)=if row.evidence==Evidence::Unavailable{("E2906","has no usable evidence")}else if row.evidence==Evidence::Inconclusive{("E2907","is inconclusive")}else{("E2907","regressed")};let severity=if row.outcome==PolicyOutcome::Warn{"Warning"}else{"Error"};eprintln!("{severity} [{code}]: performance budget {} {state}\n --> {}:{}:{}\n Why: {}\n Fix: improve the measured behavior, inspect `jet budget check --verbose`, or update the named baseline explicitly",row.name,row.source,row.line,row.column,row.reason);emit_annotation(options,severity,code,row,state)}if options.verbose{eprintln!("{} report {} {}{}",if created{"+"}else{"~"},id,path,if created{""}else{" (verified reuse)"})}let short=&id[..12];if built.fail>0{eprintln!("budgets failed: {} · report {}",count(built.fail,"budget failed","budgets failed"),short)}else if built.warn>0{eprintln!("budgets: {}{}warning{} · report {}",if built.pass>0{format!("{} passed · ",count(built.pass,"budget","budgets"))}else{String::new()},built.warn,if built.warn==1{""}else{"s"},short)}else{eprintln!("budgets: {} passed · report {}",count(built.pass,"budget","budgets"),short)}}
 fn emit_annotation(options:&Options,severity:&str,code:&str,row:&ResultRow,state:&str){let enabled=options.annotations==Annotations::Github||(options.annotations==Annotations::Auto&&std::env::var("GITHUB_ACTIONS").ok().as_deref()==Some("true"));if !enabled{return}let level=if severity=="Warning"{"warning"}else{"error"};let property=|v:&str|v.replace('%',"%25").replace('\r',"%0D").replace('\n',"%0A").replace(':',"%3A").replace(',',"%2C");let message=format!("performance budget {} {}\nWhy: {}\nFix: inspect jet budget check --verbose",row.name,state,row.reason).replace('%',"%25").replace('\r',"%0D").replace('\n',"%0A");eprintln!("::{level} file={},line={},col={},title={}::{message}",property(&row.source),row.line,row.column,property(&format!("Jet {code}")))}
 fn emit_json(options:&Options,built:&BuiltReport,path:&str,plan:Option<(&str,Option<&str>,bool)>,applied:bool,exit:i32,diagnostic:Option<CanonicalJson>){let status=if built.fail>0{"fail"}else if built.warn>0{"warn"}else{"pass"};let results=built.results.iter().map(result_json).collect();let plan=plan.map(|(baseline,old,created)|CanonicalJson::object([("baseline".into(),CanonicalJson::String(baseline.into())),("requires_confirmation".into(),CanonicalJson::Bool(false)),("rows".into(),CanonicalJson::Array(vec![plan_row(if created{"create"}else{"reuse"},"report",path,None,text_field(&built.value,"report_id").unwrap()),plan_row("advance","baseline",&format!(".jet/perf/baselines/names/{baseline}.json"),old,text_field(&built.value,"report_id").unwrap())]))]).unwrap()).unwrap_or(CanonicalJson::Null);let value=CanonicalJson::object([("applied".into(),CanonicalJson::Bool(applied)),("command".into(),CanonicalJson::String(options.command.into())),("diagnostics".into(),CanonicalJson::Array(diagnostic.into_iter().collect())),("exit_code".into(),CanonicalJson::Integer(exit.to_string())),("failure_kind".into(),if built.fail>0{CanonicalJson::String("budget".into())}else{CanonicalJson::Null}),("plan".into(),plan),("report".into(),built.value.clone()),("report_path".into(),CanonicalJson::String(path.into())),("results".into(),CanonicalJson::Array(results)),("schema".into(),CanonicalJson::String("jet.budget-command".into())),("status".into(),CanonicalJson::String(status.into())),("version".into(),CanonicalJson::Integer("1".into()))]).unwrap();print!("{}",String::from_utf8(value.bytes()).unwrap())}
-fn result_json(row:&ResultRow)->CanonicalJson{let evidence=match row.evidence{Evidence::Pass=>"pass",Evidence::Regression=>"regression",Evidence::Inconclusive=>"inconclusive",Evidence::Unavailable=>"unavailable"};let status=match row.outcome{PolicyOutcome::Pass=>"pass",PolicyOutcome::Warn=>"warn",PolicyOutcome::Fail=>"fail"};CanonicalJson::object([("baseline_report_ids".into(),CanonicalJson::Array(Vec::new())),("budget_id".into(),CanonicalJson::String(row.id.clone())),("column".into(),CanonicalJson::Integer(row.column.to_string())),("diagnostic_code".into(),if row.outcome==PolicyOutcome::Pass{CanonicalJson::Null}else{CanonicalJson::String(if row.evidence==Evidence::Unavailable{"E2906".into()}else{"E2907".into()})}),("direction".into(),CanonicalJson::String("lower_is_better".into())),("enforcement".into(),CanonicalJson::String(if row.enforcement==Enforcement::Warn{"warn".into()}else{"fail".into()})),("evidence".into(),CanonicalJson::String(evidence.into())),("lower95".into(),CanonicalJson::Null),("metric".into(),CanonicalJson::object([("name".into(),CanonicalJson::String(row.metric.clone())),("percentile".into(),CanonicalJson::Null)]).unwrap()),("point".into(),row.sample.to_json()),("reason".into(),CanonicalJson::String(row.reason.clone())),("source".into(),CanonicalJson::object([("column".into(),CanonicalJson::Integer(row.column.to_string())),("line".into(),CanonicalJson::Integer(row.line.to_string())),("path".into(),CanonicalJson::String(row.source.clone()))]).unwrap()),("stale".into(),CanonicalJson::Bool(false)),("status".into(),CanonicalJson::String(status.into())),("trend".into(),trend()),("unit".into(),CanonicalJson::String("Count".into())),("upper95".into(),CanonicalJson::Null)]).unwrap()}
+fn result_json(row:&ResultRow)->CanonicalJson{let evidence=match row.evidence{Evidence::Pass=>"pass",Evidence::Regression=>"regression",Evidence::Inconclusive=>"inconclusive",Evidence::Unavailable=>"unavailable"};let status=match row.outcome{PolicyOutcome::Pass=>"pass",PolicyOutcome::Warn=>"warn",PolicyOutcome::Fail=>"fail"};CanonicalJson::object([("baseline_report_ids".into(),CanonicalJson::Array(Vec::new())),("budget_id".into(),CanonicalJson::String(row.id.clone())),("comparison".into(),row.comparison.clone()),("diagnostic_code".into(),if row.outcome==PolicyOutcome::Pass{CanonicalJson::Null}else{CanonicalJson::String(if row.evidence==Evidence::Unavailable{"E2906".into()}else{"E2907".into()})}),("direction".into(),CanonicalJson::String(row.direction.clone())),("enforcement".into(),CanonicalJson::String(if row.enforcement==Enforcement::Warn{"warn".into()}else{"fail".into()})),("evidence".into(),CanonicalJson::String(evidence.into())),("lower95".into(),CanonicalJson::Null),("metric".into(),CanonicalJson::object([("name".into(),CanonicalJson::String(row.metric.clone())),("percentile".into(),CanonicalJson::Null)]).unwrap()),("point".into(),row.sample.to_json()),("reason".into(),CanonicalJson::String(row.reason.clone())),("source".into(),CanonicalJson::object([("column".into(),CanonicalJson::Integer(row.column.to_string())),("line".into(),CanonicalJson::Integer(row.line.to_string())),("path".into(),CanonicalJson::String(row.source.clone()))]).unwrap()),("stale".into(),CanonicalJson::Bool(false)),("status".into(),CanonicalJson::String(status.into())),("trend".into(),trend()),("unit".into(),CanonicalJson::String(row.unit.clone())),("upper95".into(),CanonicalJson::Null)]).unwrap()}
 fn plan_row(operation:&str,artifact:&str,path:&str,from:Option<&str>,id:&str)->CanonicalJson{CanonicalJson::object([("artifact".into(),CanonicalJson::String(artifact.into())),("from_id".into(),from.map(|v|CanonicalJson::String(v.into())).unwrap_or(CanonicalJson::Null)),("id".into(),CanonicalJson::String(id.into())),("operation".into(),CanonicalJson::String(operation.into())),("path".into(),CanonicalJson::String(path.into())),("to_id".into(),CanonicalJson::String(id.into()))]).unwrap()}
 fn count(n:usize,one:&str,many:&str)->String{format!("{} {}",n,if n==1{one}else{many})}
-fn compiler_failure(options:&Options,entry:&Path,diags:&[jet::Diagnostics::Diagnostic])->i32{let src=std::fs::read_to_string(entry).unwrap_or_default();if options.json{let diagnostics=diags.iter().map(|d|CanonicalJson::object([("code".into(),CanonicalJson::String(d.code.clone())),("fix".into(),CanonicalJson::String(d.fix.clone())),("message".into(),CanonicalJson::String(d.what.clone())),("phase".into(),CanonicalJson::String("compiler".into())),("severity".into(),CanonicalJson::String("error".into())),("source".into(),CanonicalJson::Null),("why".into(),CanonicalJson::String(d.why.clone()))]).unwrap()).collect();let value=CanonicalJson::object([("applied".into(),CanonicalJson::Bool(false)),("command".into(),CanonicalJson::String(options.command.into())),("diagnostics".into(),CanonicalJson::Array(diagnostics)),("exit_code".into(),CanonicalJson::Integer("1".into())),("failure_kind".into(),CanonicalJson::String("compiler".into())),("plan".into(),CanonicalJson::Null),("report".into(),CanonicalJson::Null),("report_path".into(),CanonicalJson::Null),("results".into(),CanonicalJson::Array(Vec::new())),("schema".into(),CanonicalJson::String("jet.budget-command".into())),("status".into(),CanonicalJson::String("fail".into())),("version".into(),CanonicalJson::Integer("1".into()))]).unwrap();print!("{}",String::from_utf8(value.bytes()).unwrap())}else{eprint!("{}",jet::Diagnostics::render_all(&entry.to_string_lossy(),&src,diags))}1}
-fn tool_failure(options:&Options,why:&str)->i32{if options.json{let diagnostic=CanonicalJson::object([("code".into(),CanonicalJson::String("E2908".into())),("fix".into(),CanonicalJson::String("correct the named failure and retry".into())),("message".into(),CanonicalJson::String("performance budget operation failed".into())),("phase".into(),CanonicalJson::String("tool".into())),("severity".into(),CanonicalJson::String("error".into())),("source".into(),CanonicalJson::Null),("why".into(),CanonicalJson::String(why.into()))]).unwrap();let empty=BuiltReport{value:CanonicalJson::Null,bytes:Vec::new(),results:Vec::new(),pass:0,warn:0,fail:0};emit_json(options,&empty,"",None,false,1,Some(diagnostic))}else{eprintln!("Error [E2908]: performance budget operation failed\n Why: {why}\n Fix: correct the named failure and retry\nbudget command failed before a valid report was produced")}1}
+fn compiler_failure(options: &Options, entry: &Path, diags: &[jet::Diagnostics::Diagnostic]) -> i32 {
+    let src = std::fs::read_to_string(entry).unwrap_or_default();
+    if options.json {
+        let path = entry
+            .parent()
+            .and_then(Path::parent)
+            .and_then(|root| entry.strip_prefix(root).ok())
+            .unwrap_or(entry)
+            .to_string_lossy()
+            .replace('\\', "/");
+        let diagnostics = diags.iter().map(|diagnostic| {
+            let source = diagnostic.span.map(|span| {
+                let (line, column) = jet::Diagnostics::span_line_col(&src, span.start.min(src.len()));
+                let (end_line, end_column) = jet::Diagnostics::span_line_col(&src, span.end.min(src.len()));
+                CanonicalJson::object([
+                    ("column".into(), CanonicalJson::Integer(column.to_string())),
+                    ("end_column".into(), CanonicalJson::Integer(end_column.to_string())),
+                    ("end_line".into(), CanonicalJson::Integer(end_line.to_string())),
+                    ("line".into(), CanonicalJson::Integer(line.to_string())),
+                    ("path".into(), CanonicalJson::String(path.clone())),
+                ]).unwrap()
+            }).unwrap_or(CanonicalJson::Null);
+            let why = diagnostic.detail.as_deref().filter(|detail| !detail.is_empty())
+                .map(|detail| format!("{}\n{}", diagnostic.why, detail))
+                .unwrap_or_else(|| diagnostic.why.clone());
+            CanonicalJson::object([
+                ("code".into(), CanonicalJson::String(diagnostic.code.clone())),
+                ("fix".into(), CanonicalJson::String(diagnostic.fix.clone())),
+                ("message".into(), CanonicalJson::String(diagnostic.what.clone())),
+                ("phase".into(), CanonicalJson::String("compiler".into())),
+                ("severity".into(), CanonicalJson::String(if diagnostic.severity == jet::Diagnostics::Severity::Lint { "warning".into() } else { "error".into() })),
+                ("source".into(), source),
+                ("why".into(), CanonicalJson::String(why)),
+            ]).unwrap()
+        }).collect();
+        let value = CanonicalJson::object([
+            ("applied".into(), CanonicalJson::Bool(false)),
+            ("command".into(), CanonicalJson::String(options.command.into())),
+            ("diagnostics".into(), CanonicalJson::Array(diagnostics)),
+            ("exit_code".into(), CanonicalJson::Integer("1".into())),
+            ("failure_kind".into(), CanonicalJson::String("compiler".into())),
+            ("plan".into(), CanonicalJson::Null),
+            ("report".into(), CanonicalJson::Null),
+            ("report_path".into(), CanonicalJson::Null),
+            ("results".into(), CanonicalJson::Array(Vec::new())),
+            ("schema".into(), CanonicalJson::String("jet.budget-command".into())),
+            ("status".into(), CanonicalJson::String("fail".into())),
+            ("version".into(), CanonicalJson::Integer("1".into())),
+        ]).unwrap();
+        print!("{}", String::from_utf8(value.bytes()).unwrap())
+    } else {
+        eprint!("{}", jet::Diagnostics::render_all(&entry.to_string_lossy(), &src, diags))
+    }
+    1
+}
+fn tool_failure(options:&Options,why:&str)->i32{if options.json{let diagnostic=CanonicalJson::object([("code".into(),CanonicalJson::String("E2908".into())),("fix".into(),CanonicalJson::String("correct the named failure and retry".into())),("message".into(),CanonicalJson::String("performance budget operation failed".into())),("phase".into(),CanonicalJson::String("tool".into())),("severity".into(),CanonicalJson::String("error".into())),("source".into(),CanonicalJson::Null),("why".into(),CanonicalJson::String(why.into()))]).unwrap();let value=CanonicalJson::object([("applied".into(),CanonicalJson::Bool(false)),("command".into(),CanonicalJson::String(options.command.into())),("diagnostics".into(),CanonicalJson::Array(vec![diagnostic])),("exit_code".into(),CanonicalJson::Integer("1".into())),("failure_kind".into(),CanonicalJson::String("tool".into())),("plan".into(),CanonicalJson::Null),("report".into(),CanonicalJson::Null),("report_path".into(),CanonicalJson::Null),("results".into(),CanonicalJson::Array(Vec::new())),("schema".into(),CanonicalJson::String("jet.budget-command".into())),("status".into(),CanonicalJson::String("fail".into())),("version".into(),CanonicalJson::Integer("1".into()))]).unwrap();print!("{}",String::from_utf8(value.bytes()).unwrap())}else{eprintln!("Error [E2908]: performance budget operation failed\n Why: {why}\n Fix: correct the named failure and retry\nbudget command failed before a valid report was produced")}1}
 fn tool_failure_with_report(options:&Options,id:&str,why:&str)->i32{if options.json{return tool_failure(options,why)}eprintln!("Error [E2908]: performance budget operation failed\n Why: {why}\n Fix: correct the named failure and retry\nbudget command failed · report {id} was not accepted");1}
 
 fn timestamp_now()->String{let elapsed=SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();let seconds=elapsed.as_secs()as i64;let(days,second)=(seconds.div_euclid(86400),seconds.rem_euclid(86400));let z=days+719468;let era=if z>=0{z}else{z-146096}/146097;let doe=z-era*146097;let yoe=(doe-doe/1460+doe/36524-doe/146096)/365;let mut year=yoe+era*400;let doy=doe-(365*yoe+yoe/4-yoe/100);let mp=(5*doy+2)/153;let day=doy-(153*mp+2)/5+1;let month=mp+if mp<10{3}else{-9};year+=if month<=2{1}else{0};format!("{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{:09}Z",second/3600,(second%3600)/60,second%60,elapsed.subsec_nanos())}

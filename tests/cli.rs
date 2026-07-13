@@ -272,6 +272,104 @@ fn budget_update_is_plan_first_and_yes_applies_once() {
 }
 
 #[test]
+fn budget_json_projection_is_exact_and_tool_failure_uses_null_report_fields() {
+    use jet_foundation::PerformanceBudget::CanonicalJson;
+    let dir = budget_project("budget_json_exact", 10);
+    let out = Command::new(jet()).args(["budget", "check", "--json"]).current_dir(&dir).output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    assert!(out.stderr.is_empty());
+    let CanonicalJson::Object(command) = CanonicalJson::parse_canonical(&out.stdout).unwrap() else { panic!("command object") };
+    assert_eq!(command.keys().map(String::as_str).collect::<Vec<_>>(), ["applied","command","diagnostics","exit_code","failure_kind","plan","report","report_path","results","schema","status","version"]);
+    let CanonicalJson::Array(results) = &command["results"] else { panic!("results") };
+    let CanonicalJson::Object(result) = &results[0] else { panic!("result") };
+    assert_eq!(result.keys().map(String::as_str).collect::<Vec<_>>(), ["baseline_report_ids","budget_id","comparison","diagnostic_code","direction","enforcement","evidence","lower95","metric","point","reason","source","stale","status","trend","unit","upper95"]);
+    let CanonicalJson::Object(source) = &result["source"] else { panic!("source") };
+    assert_eq!(source.keys().map(String::as_str).collect::<Vec<_>>(), ["column","line","path"]);
+    let CanonicalJson::Object(comparison) = &result["comparison"] else { panic!("comparison") };
+    assert_eq!(comparison.keys().map(String::as_str).collect::<Vec<_>>(), ["direction","kind","limit"]);
+
+    fs::write(dir.join("src/main.jet"), "fn run( {\n").unwrap();
+    let invalid = Command::new(jet()).args(["budget", "check", "--json"]).current_dir(&dir).output().unwrap();
+    assert_eq!(invalid.status.code(), Some(1));
+    assert!(invalid.stderr.is_empty());
+    let CanonicalJson::Object(invalid) = CanonicalJson::parse_canonical(&invalid.stdout).unwrap() else { panic!("compiler failure object") };
+    assert_eq!(invalid["failure_kind"], CanonicalJson::String("compiler".into()));
+    let CanonicalJson::Array(diagnostics) = &invalid["diagnostics"] else { panic!("diagnostics") };
+    let CanonicalJson::Object(diagnostic) = &diagnostics[0] else { panic!("diagnostic") };
+    let CanonicalJson::Object(source) = &diagnostic["source"] else { panic!("diagnostic source") };
+    assert_eq!(source.keys().map(String::as_str).collect::<Vec<_>>(), ["column","end_column","end_line","line","path"]);
+    assert_eq!(source["path"], CanonicalJson::String("src/main.jet".into()));
+    assert!(matches!(source["end_line"], CanonicalJson::Integer(_)));
+    assert!(matches!(source["end_column"], CanonicalJson::Integer(_)));
+
+    let empty = isolated_cwd("budget_json_tool_failure");
+    let failed = Command::new(jet()).args(["budget", "check", "--json"]).current_dir(&empty).output().unwrap();
+    assert_eq!(failed.status.code(), Some(1));
+    assert!(failed.stderr.is_empty());
+    let CanonicalJson::Object(failure) = CanonicalJson::parse_canonical(&failed.stdout).unwrap() else { panic!("failure object") };
+    assert_eq!(failure["status"], CanonicalJson::String("fail".into()));
+    assert_eq!(failure["failure_kind"], CanonicalJson::String("tool".into()));
+    assert_eq!(failure["report"], CanonicalJson::Null);
+    assert_eq!(failure["report_path"], CanonicalJson::Null);
+    assert_eq!(failure["plan"], CanonicalJson::Null);
+}
+
+#[test]
+fn budget_non_tty_plan_only_creates_no_artifact_or_baseline() {
+    let dir = budget_project("budget_non_tty_cancel", 10);
+    let out = Command::new(jet()).args(["budget", "update", "--baseline", "ci/linux", "--bootstrap", "--reason", "initial evidence"]).current_dir(&dir).output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    assert!(out.stdout.is_empty());
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(stderr.contains("plan only; pass -y or --yes to apply in a non-interactive shell"), "{stderr}");
+    assert!(!dir.join(".jet").exists(), "plan-only update mutated workspace");
+}
+
+#[cfg(unix)]
+fn run_budget_update_pty(dir: &Path, answer: &[u8]) -> (i32, String) {
+    use std::fs::File;
+    use std::io::{Read, Write};
+    use std::os::fd::FromRawFd;
+    use std::process::Stdio;
+    unsafe extern "C" { fn openpty(master: *mut i32, slave: *mut i32, name: *mut i8, termp: *const u8, winp: *const u8) -> i32; }
+    let (mut master_fd, mut slave_fd) = (-1, -1);
+    assert_eq!(unsafe { openpty(&mut master_fd, &mut slave_fd, std::ptr::null_mut(), std::ptr::null(), std::ptr::null()) }, 0);
+    let mut master = unsafe { File::from_raw_fd(master_fd) };
+    let slave = unsafe { File::from_raw_fd(slave_fd) };
+    let mut child = Command::new(jet())
+        .args(["budget", "update", "--baseline", "ci/linux", "--bootstrap", "--reason", "initial evidence"])
+        .current_dir(dir)
+        .stdin(Stdio::from(slave.try_clone().unwrap()))
+        .stdout(Stdio::from(slave.try_clone().unwrap()))
+        .stderr(Stdio::from(slave))
+        .spawn().unwrap();
+    master.write_all(answer).unwrap();
+    let status = child.wait().unwrap();
+    let mut bytes = Vec::new();
+    let mut buffer = [0u8; 4096];
+    loop { match master.read(&mut buffer) { Ok(0) => break, Ok(n) => bytes.extend_from_slice(&buffer[..n]), Err(error) if error.raw_os_error() == Some(5) => break, Err(error) => panic!("PTY read: {error}") } }
+    (status.code().unwrap(), String::from_utf8_lossy(&bytes).replace("\r\n", "\n"))
+}
+
+#[test]
+#[cfg(unix)]
+fn budget_tty_confirmation_cancel_and_yes_control_mutation() {
+    let cancelled = budget_project("budget_tty_no", 10);
+    let (code, transcript) = run_budget_update_pty(&cancelled, b"n\n");
+    assert_eq!(code, 0, "{transcript}");
+    assert!(transcript.contains("Apply? [y/N]"), "{transcript}");
+    assert!(transcript.contains("plan cancelled; no baseline changed"), "{transcript}");
+    assert!(!cancelled.join(".jet").exists(), "TTY cancel mutated workspace");
+
+    let applied = budget_project("budget_tty_yes", 10);
+    let (code, transcript) = run_budget_update_pty(&applied, b"yes\n");
+    assert_eq!(code, 0, "{transcript}");
+    assert!(transcript.contains("Apply? [y/N]"), "{transcript}");
+    assert!(applied.join(".jet/perf/baselines/names/ci/linux.json").is_file(), "TTY yes did not apply");
+    assert!(applied.join(".jet/perf/reports").read_dir().unwrap().next().is_some(), "TTY yes omitted report artifact");
+}
+
+#[test]
 fn budget_surface_is_generated_into_help_completions_and_man() {
     let help = Command::new(jet()).arg("help").output().unwrap();
     assert!(String::from_utf8(help.stdout).unwrap().contains("budget"));

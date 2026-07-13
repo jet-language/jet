@@ -76,6 +76,24 @@ impl BudgetStore {
         Ok((id, created))
     }
 
+    pub fn inspect_report(&self, bytes: &[u8]) -> Result<(String, bool), String> {
+        let report = verify_budget_report(bytes).map_err(|e| format!("invalid budget report: {e}"))?;
+        let id = report_id(&report)?;
+        let dir = match self.dir(&[".jet", "perf", "reports"], false, 0o755) {
+            Ok(dir) => dir,
+            Err(error) if error.contains("No such file") => return Ok((id, false)),
+            Err(error) => return Err(error),
+        };
+        let existing = match read_regular(&dir, &format!("{id}.json")) {
+            Ok(bytes) => bytes,
+            Err(error) if error.contains("No such file") => return Ok((id, false)),
+            Err(error) => return Err(error),
+        };
+        let value = verify_budget_report(&existing).map_err(|e| format!("invalid existing report: {e}"))?;
+        if report_id(&value)? != id || existing != bytes { return Err("existing report filename/id/bytes mismatch".into()); }
+        Ok((id, true))
+    }
+
     pub fn plan_update(&self, baseline: &str, report: &[u8], kind: UpdateKind, accepted_at: &str) -> Result<UpdatePlan, String> {
         mutation_supported()?;
         validate_baseline_name(baseline)?;
