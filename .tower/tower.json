@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 531,
-    "rev": 5207,
+    "rev": 5218,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -1413,7 +1413,7 @@
     },
     {
       "milestoneId": "e3-universal-product-parity",
-      "assignee": null,
+      "assignee": "terra-129-builder",
       "id": "c2lizsmx",
       "num": 129,
       "title": "User-authored derives + typed reflection (c155 umbrella)",
@@ -1464,10 +1464,11 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-07-10",
+      "updated": "2026-07-13",
       "criteria": [],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-13T12:25:07.678Z"
     },
     {
       "milestoneId": "e3-universal-product-parity",
@@ -4682,10 +4683,20 @@
       "milestoneId": "e3-universal-product-parity",
       "phase": "building",
       "priority": "P0",
-      "plan": "Entropy tranche independently verified on native Linux; non-Linux execution stays #526. Full card remains: implement and verify D-CRYPTO-API1 purpose-bound non-display secret/key/value types and typed safe/expert API; D-CRYPTO-ENVELOPE2 recipient JETC v2 bounded streaming/atomic/no-partial file envelope and migration; reconcile TTL secret lifecycle, PQ-agility linkage, and W0410 crypto-context misuse diagnostic. Rebuild criteria from full card body plus every ratified decision before any close attempt.",
+      "plan": "Criterion 7: finish D-CRYPTO-API1 exact expert calls, forbidden secret-operation diagnostics/snapshots, Bech32m hostile vectors, docs and JIT parity; independently verify before meet. Criterion 8 audit: current file_seal/file_open remain whole-buffer symmetric JETC/v1 aliases; implement recipient JETC/v2 bounded 1 MiB streaming, authenticated final chunks, atomic no-overwrite publication, uniform OpenFailed, cancellation cleanup/zeroization, inspect, and pinned #Unsafe v1 open/migrate. Then criteria 9-12.",
       "blockedBy": [],
-      "assignee": "terra-302-api",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-13",
+          "by": "terra-302-api",
+          "text": "[handoff] Safe typed API and Bech32m tranches committed; criterion 7 remains open. Resume exact expert surface, negative UI/docs/parity, then independent verify. Criterion 8 audit/gaps recorded in plan/log."
+        },
+        {
+          "at": "2026-07-13",
+          "by": "terra-302-api",
+          "text": "[handoff] Criterion 7 safe typed tranche integrated in 57f49274/fe172a37/47d0f208: closed CryptoError, nominal non-Debug/non-Display secret/key/value types, Drop zeroization, purpose-bound JETV/JETW runtime, typed seal/open/sign/verify/password/HKDF/digests, structural qualified Core type classifier, TIR static/instance dispatch, native Linux example smoke green, crypto_entropy 13/13. Bech32m recipient encoding integrated as 75cafb0a; diff-check clean, not re-tested after stop instruction. Do not meet/close c7: remaining exact gaps are full #Unsafe expert surface, hostile Bech32m vectors, compile-time rejection snapshots for clone/compare/hash/serialize/reflect/Debug/Display/wrong roles, zeroization proof, docs, and AOT/JIT parity. Criterion 8 audit remains unchanged: file APIs are raw whole-buffer JETC/v1 aliases, missing all D-CRYPTO-ENVELOPE2 streaming/atomic/migration law."
+        },
         {
           "at": "2026-07-13",
           "by": "terra-302-final",
@@ -4894,8 +4905,7 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
-      "claimedAt": "2026-07-13T11:54:28.537Z"
+      "refs": []
     },
     {
       "id": "c05o0105",
@@ -13089,6 +13099,11 @@
       "log": [
         {
           "at": "2026-07-13",
+          "by": "fable-main",
+          "text": "[handoff] Session end 2026-07-13 (owner stop order). Shipped this session: D-VALIDATE1, D-BINPAT1, D-STM1 (9c7cf099 — see lock-fold conformance note), D-ENVHOOK1 (6eb7997e). D-OBSERVE-LIVE1 slice was dispatched but stopped before any code — clean, nothing partial; NEXT ACTION: re-run that slice (read D-OBSERVE-LIVE1 verbatim from board, honest-stop mandate, sibling commits above are the shape guide). D-AUTH1 full honest-stop on 438 substrate (criterion 6 records the bar; ballots D-AUTH2/D-TAINT2 queued to owner; email substrate card 530 minted). D-SYNC1/D-DBPOLICY1 substrate-gated (438/505-chain). After 506 workable slices: highest-leverage burndown target is card 438 (app graph) — auth/sync/dbpolicy/live-query all funnel into it. Criteria 5 (STM) and 7 (envhook) are met, unverified — verifier needed before any done move."
+        },
+        {
+          "at": "2026-07-13",
           "by": "fable-impl-506env",
           "text": "D-ENVHOOK1=A shipped full vertical (commit 6eb7997e). jet env hook bash|zsh|fish prints opt-in per-prompt hook; private jet env export <shell> callback walks to nearest env.jet, reuses compose_env + Trust::gate (one env engine, I8), emits shell activate/unload only on env-boundary crossing (no-op otherwise). First activation of untrusted trust-sensitive env prompts via D-JPK-GRANTCMD1; JET_ENV_DISABLE unloads + suppresses. Both subverbs route through jetpack enter (D-JPK-DISPATCH1) — no new Jet-language syntax, so no grammars/formatter/golden leg. Tooling feature: no TIR/interpreter/JIT path (R12 parity N/A). Syntax consts ENV_HOOK_VERB/ENV_EXPORT_VERB/ENV_DISABLE_VAR/ENV_HOOK_ACTIVE_DIR_VAR/ENV_HOOK_OLD_PATH_VAR/JETPACK_REF_VAR in jet-foundation (every_syntax_const_has_adjacent_decision_comment green). Tests: jetpack::EnvHook 6 unit + tests/env_hook.rs 7 CLI (green); env_dev_trust 14 green (enter regression); syntax_reconciliation 9 + decisions 2 green. Live bash round-trip: cd in->activate, subdir->stable ancestor-walk, cd out->deactivate/restore PATH. NAMED GAP (not D-ENVHOOK1 scope): arbitrary shell env-var export e.g. PGHOST — env.jet models packages/PATH/prompt/services/secrets, not free env vars; owning card = env-model surface. Known flake hit: Shell::tests::fish_prompt_pty (assert_no_esc_after_marker, OSC-133 leak from test-env fish) — unrelated to my byte-identical JETPACK_REF const swap; 12 other Shell tests incl bash/zsh PTY green."
         },
@@ -14579,14 +14594,19 @@
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
-      "assignee": "terra-530-ballot",
-      "log": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-13",
+          "by": "codex-orchestrator",
+          "text": "[owner-gate] D-EMAIL1 queued ballot-ready. Recommends native std-only core.email over existing net/TLS/tasks/encoding/files/crypto: one typed Message/Mailer/SendReport/Error law, verified STARTTLS defaults, honest relay-acceptance/DeliveryUnknown semantics, no hidden retries or external dependency. No implementation may start before owner outcome."
+        }
+      ],
       "criteria": [],
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-13T11:38:37.154Z",
-      "updated": "2026-07-13",
-      "claimedAt": "2026-07-13T12:11:28.265Z"
+      "updated": "2026-07-13"
     }
   ],
   "decisions": [
@@ -30754,8 +30774,10 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-07-13T11:49:40.259Z"
+      "status": "ratified",
+      "created": "2026-07-13T11:49:40.259Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-13"
     },
     {
       "id": "D-TAINT2",
@@ -30843,8 +30865,104 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-07-13T11:49:40.368Z"
+      "status": "ratified",
+      "created": "2026-07-13T11:49:40.368Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-13"
+    },
+    {
+      "id": "D-EMAIL1",
+      "cardId": "c0aadf2p",
+      "group": "stdlib",
+      "title": "What is Jet's canonical email and SMTP surface?",
+      "gist": "Choose how Jet constructs and sends secure, typed email for magic links, notifications, and expert SMTP workflows.",
+      "lesson": "Email has two separate jobs. A message describes recipients, subject, text, HTML, and attachments. A transport moves that message to a mail server. SMTP is the standard submission transport; applications normally use port 587 with STARTTLS or port 465 with TLS from connection start.\n\nMIME represents Unicode text, HTML, and attachments. Correct generation prevents header injection, bounds sizes and lines, and encodes content safely. Server acceptance is not inbox delivery: a relay can later bounce or filter a message. SMTP also has an ambiguous failure boundary: a connection can disappear after acceptance but before Jet sees the reply, so automatic retry can duplicate mail.\n\nDKIM signs final message bytes, while SPF and DMARC are domain DNS policy. Jet already owns scheduler-aware sockets, TLS, tasks, deadlines, DNS, encoding, files, and crypto. This decision chooses one typed message model, one honest result/error law, safe beginner defaults, and explicit expert transport policy.",
+      "explainer": "",
+      "story": "Mara adds passwordless login to a small service. She wants one clear call that sends a magic link securely. Later her team adds HTML branding, DKIM signing, a private relay, cancellation deadlines, and delivery audits. Those needs should extend the same Message and Mailer values instead of replacing a beginner-only sender.",
+      "inWild": "use core.email as email\n\nfn send_magic_link(user_email: String, link: String) -> email.SendReport ? email.EmailError {\n    mailer := email.smtp_from_env()?\n    message := email.message(\n        from: email.address(\"Acme Login <login@example.com>\")?,\n        to: [email.address(user_email)?],\n        subject: \"Sign in to Acme\",\n        text: \"Open this one-time link: {link}\",\n    )?\n    mailer.send(message)\n}",
+      "detail": "Acceptance: register core.email and real source-level types; hostile address/header/MIME/Bcc/bounds tests; scripted SMTP greeting/EHLO/STARTTLS/AUTH/MAIL/RCPT/DATA/reply/QUIT tests; verified TLS/downgrade/credential-order/plaintext tests; scheduler park/deadline/cancel/drop proofs; exact Cancelled/Timeout/Transient/Rejected/DeliveryUnknown boundaries with no auto-retry; DKIM published vectors; D-AUTH1 uses injected Mailer; UI diagnostics and local-relay golden; docs cover environment defaults, expert overrides, limits, recipient policy, cancellation, and acceptance meaning; no external dependency, hidden thread-per-send, raw transport error, or credential leak. Implementation order: propagate ratification to durable specs; register Core types/signatures in sema; add failing source and hostile tests; implement one bounded serializer; implement one SMTP state machine over core.net/core.tls; map every state to EmailError/SendReport; add DKIM over final bytes; wire D-AUTH1; run targeted sema/codegen/Core/SMTP/TLS/task/UI/golden gates, then parent full suite.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Native core.email over Jet runtime",
+          "detail": "Jet owns typed messages, MIME, SMTP submission, DKIM, reports, and errors. smtp_from_env supplies safe beginner configuration; smtp(config) exposes the same Mailer with expert policy. No external dependency or FFI exception.",
+          "technical": "Types: Address, Message, Attachment, Envelope, Mailer, SmtpConfig, SmtpSecurity, SmtpAuth, DkimConfig, SendReport, RecipientReport, EmailError. Default submission is port 587 with verified STARTTLS required; port 465 TLS is explicit. STARTTLS never falls back, AUTH never precedes verified TLS, remote plaintext requires explicit insecure opt-in and forbids password auth. EHLO capabilities govern AUTH, SIZE, SMTPUTF8, and 8BITMIME. Credentials use existing taint and never appear in debug/errors. MIME uses CRLF, safe folding, Unicode encodings, unpredictable boundaries, Bcc envelope-only handling, bounded attachment streaming, and dot-stuffing. The default RequireAll policy aborts before DATA on any RCPT rejection; DeliverAccepted is explicit. SendReport means relay acceptance, not delivery. EmailError distinguishes configuration, DNS, connect, TLS, auth, protocol, rejection, transient, timeout, cancellation, and DeliveryUnknown. No hidden retry. send parks through existing task-aware net/TLS and inherits earliest context deadline. Concurrency uses tasks.spawn; no send_async duplicate. Optional DKIM signs final bytes. SPF/DMARC remain documented DNS duties. Implementation is std-only Core runtime composition with no compiler dependency.",
+          "code": "use core.email as email\nuse core.tasks as tasks\n\nconfig := email.SmtpConfig.{\n    host: \"smtp.example.com\",\n    port: 465,\n    security: .Tls,\n    auth: .Password(username: \"mailer\", password: smtp_password),\n    recipient_policy: .RequireAll,\n    limits: email.Limits.safe(),\n}\nmailer := email.smtp(config)?\njob := tasks.spawn(take(mailer, message) () => mailer.send(message))\nreport := job.join()?"
+        },
+        {
+          "key": "B",
+          "name": "Message model, provider-only delivery",
+          "detail": "Jet standardizes Message, SendReport, and EmailError, but provider packages send through HTTP APIs. This gains managed analytics but makes D-AUTH1 depend on a vendor package/token and cannot serve private SMTP relays.",
+          "technical": "core.email owns message and result types only. Each provider maps proprietary acceptance, webhooks, and retry behavior into them. No built-in SMTP client ships.",
+          "code": "use core.email as email\nuse postmark.email as postmark\n\nmessage := email.message(from: email.address(\"login@example.com\")?, to: [email.address(user.email)?], subject: \"Sign in\", text: \"Open {link}\")?\nreport := postmark.client(token).send(message)?"
+        },
+        {
+          "key": "C",
+          "name": "External SMTP bridge",
+          "detail": "Jet exposes A's API but delegates SMTP/MIME to an approved Rust library behind a Core bridge.",
+          "technical": "Approve a new stdlib external dependency outside compiler seams. Jet must still own public types, diagnostics, task/deadline mapping, credential redaction, and acceptance law; raw dependency errors never escape.",
+          "code": "use core.email as email\nmailer := email.smtp_from_env()?\nreport := mailer.send(message)?"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Python",
+          "note": "Python separates EmailMessage construction from smtplib transport. Jet keeps that useful split while adding typed addresses, safe defaults, task cancellation, and honest delivery states.",
+          "code": "msg = EmailMessage()\nmsg[\"To\"] = user\nsmtp.send_message(msg)"
+        },
+        {
+          "lang": "Node.js",
+          "note": "Nodemailer offers one approachable transport object and rich message options. Jet can preserve that shape without dynamic maps, callback errors, or silent fallback.",
+          "code": "await transporter.sendMail({ to: user, subject: \"Sign in\", text: link })"
+        },
+        {
+          "lang": "Rust",
+          "note": "Rust mail libraries provide typed builders and SMTP transports. Jet keeps those strengths behind a smaller surface aligned with Jet tasks, errors, taint, and diagnostics.",
+          "code": "transport.send(&message)?;"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A completes D-AUTH1 with one provider-neutral transport built from Jet's existing audited runtime. Beginners get secure submission; experts retain explicit SMTP security, limits, signing, envelope, and recipient policy.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A vendor package and token become mandatory, while private relays, local test servers, and provider-neutral deployments remain unsupported."
+          },
+          {
+            "key": "C",
+            "reason": "It adds an external trust and release boundary although Jet already owns the required sockets, TLS, scheduler, encoding, DNS, files, and crypto primitives."
+          }
+        ],
+        "tradeoff": "Native SMTP cannot promise provider analytics or inbox placement. Jet reports relay acceptance honestly; provider packages may later reuse the same Message and SendReport types."
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "Keep A as the single Core mechanism. Harvest B's transport-neutral message/report types and C's hostile conformance knowledge without requiring a provider or dependency.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "Provider-neutral SMTP",
+            "use": "Built-in transport and beginner default."
+          },
+          {
+            "key": "B",
+            "aspect": "Provider analytics and webhooks",
+            "use": "Future packages consume the same Message and return the same SendReport."
+          },
+          {
+            "key": "C",
+            "aspect": "Established protocol conformance suites",
+            "use": "Harvest hostile cases into Jet tests without importing dependency/error surfaces."
+          }
+        ]
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-07-13T12:22:47.873Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-13"
     }
   ],
   "questions": [
@@ -31627,6 +31745,83 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-13T12:29:04.992Z",
+      "by": "terra-302-api",
+      "action": "card.release",
+      "ref": "c0184j6s",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-13T12:28:58.613Z",
+      "by": "terra-302-api",
+      "action": "card.update",
+      "ref": "c0184j6s",
+      "note": "phase,plan,logEntry"
+    },
+    {
+      "at": "2026-07-13T12:25:07.679Z",
+      "by": "terra-129-builder",
+      "action": "card.claim",
+      "ref": "c2lizsmx",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T12:24:11.403Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-EMAIL1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-13T12:23:03.631Z",
+      "by": "codex-orchestrator",
+      "action": "card.release",
+      "ref": "c0aadf2p",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T12:23:03.325Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0aadf2p",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T12:22:47.873Z",
+      "by": "terra-530-ballot",
+      "action": "decision.add",
+      "ref": "D-EMAIL1",
+      "note": "What is Jet's canonical email and SMTP surface?"
+    },
+    {
+      "at": "2026-07-13T12:21:04.299Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-AUTH2",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-13T12:20:32.923Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-TAINT2",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-13T12:20:27.379Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-TAINT2",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-13T12:19:58.539Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0n6vj96",
+      "note": "logEntry"
+    },
     {
       "at": "2026-07-13T12:17:50.516Z",
       "by": "sol-300-reviewer",
@@ -35049,83 +35244,6 @@
       "action": "card.release",
       "ref": "c0nhjxh4",
       "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-12T19:00:46.333Z",
-      "by": "grok-361-verify",
-      "action": "card.update",
-      "ref": "c0nhjxh4",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T19:00:46.222Z",
-      "by": "grok-361-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0nhjxh4",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-12T19:00:46.131Z",
-      "by": "grok-361-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0nhjxh4",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-12T19:00:46.039Z",
-      "by": "grok-361-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0nhjxh4",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-12T19:00:45.944Z",
-      "by": "grok-361-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0nhjxh4",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-12T18:59:10.299Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c_audit_367_q80zrm",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-12T18:56:54.150Z",
-      "by": "terra-367b-builder",
-      "action": "card.criteria-meet",
-      "ref": "c_audit_367_q80zrm",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-12T18:53:38.499Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c1jixkit",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-12T18:49:19.908Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0skyr40",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-12T18:49:19.776Z",
-      "by": "claude-main",
-      "action": "card.criteria-meet",
-      "ref": "c0skyr40",
-      "note": "#8"
-    },
-    {
-      "at": "2026-07-12T18:49:19.678Z",
-      "by": "claude-main",
-      "action": "card.criteria-meet",
-      "ref": "c0skyr40",
-      "note": "#4"
     }
   ],
   "nextNum": 368,
