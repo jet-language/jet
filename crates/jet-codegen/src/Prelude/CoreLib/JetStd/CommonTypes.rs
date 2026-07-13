@@ -55,6 +55,7 @@
         pub(crate) terminal: Option<EncodingError>,
         pub(crate) eof: bool,
         pub(crate) record_mode: bool,
+        pub(crate) allocation_budget: Option<super::JetJsonAllocationBudget>,
     }
     pub struct JSONWriter {
         pub(crate) output: super::JetFileWriter,

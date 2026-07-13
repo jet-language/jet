@@ -328,6 +328,7 @@ fn jsonl_fold_heap_budget_rejects_growth_before_large_record_allocation() {
     let object_path = dir.join("object.jsonl");
     let valid_path = dir.join("valid.jsonl");
     let scalar_path = dir.join("scalar.jsonl");
+    let near_string_path = dir.join("near-string.jsonl");
     let array = format!("[{}]\n", std::iter::repeat("0").take(256).collect::<Vec<_>>().join(","));
     let object = format!(
         "{{{}}}\n",
@@ -340,10 +341,12 @@ fn jsonl_fold_heap_budget_rejects_growth_before_large_record_allocation() {
     fs::write(&object_path, object).unwrap();
     fs::write(&valid_path, format!("[{}]\n", std::iter::repeat("0").take(32).collect::<Vec<_>>().join(","))).unwrap();
     fs::write(&scalar_path, "1\n").unwrap();
+    fs::write(&near_string_path, format!("{{\"{}\":0}}\n", "k".repeat(100_000))).unwrap();
     let array_path = array_path.to_string_lossy().replace('\\', "\\\\");
     let object_path = object_path.to_string_lossy().replace('\\', "\\\\");
     let valid_path = valid_path.to_string_lossy().replace('\\', "\\\\");
     let scalar_path = scalar_path.to_string_lossy().replace('\\', "\\\\");
+    let near_string_path = near_string_path.to_string_lossy().replace('\\', "\\\\");
     let source = format!(
         r#"
 use core.encoding as encoding
@@ -351,6 +354,29 @@ use core.encoding.jsonl as jsonl
 use core.files as files
 
 fn run() {{
+    near_limits := encoding.EncodingLimits.safe()
+    near_limits.buffer_bytes = 4096
+    near_limits.max_depth = 1
+    near_limits.max_item_bytes = 100000
+    near_input :: files.open("{near_string_path}") ?? panic("near string open")
+    near_reader :: jsonl.reader(^near_input, near_limits) ?? panic("near string reader")
+    near_result :: near_reader.next()
+    if near_result == {{
+        ok(_) -> {{ print("near-string-limit-missed") }}
+        err(first) -> {{
+            near_again :: near_reader.next()
+            if near_again == {{
+                ok(_) -> {{ print("near-string-terminal-missed") }}
+                err(second) -> {{
+                    print(first.byte_offset == 100003)
+                    print(first.path)
+                    print(first.reason)
+                    print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason)
+                }}
+            }}
+        }}
+    }}
+
     valid_limits := encoding.EncodingLimits.safe()
     valid_limits.max_item_bytes = 512
     valid_input :: files.open("{valid_path}") ?? panic("valid open")
@@ -421,7 +447,7 @@ fn run() {{
     );
     let (code, stdout, stderr) = build_and_run(&dir, "jsonl_heap", &source, &[], None);
     assert_eq!(code, 0, "stderr: {stderr}");
-    assert_eq!(stdout, "0\n$[0]\ntrue\ntrue\n$[0][63]\ntrue\ntrue\n$[0][\"key0073\"]\ntrue\n");
+    assert_eq!(stdout, "true\n$[0]\nJSON string allocation exceeded the bounded record resource limit\ntrue\n0\n$[0]\ntrue\ntrue\n$[0][63]\ntrue\ntrue\n$[0][\"key0073\"]\ntrue\n");
     assert_eq!(stderr, "");
     let _ = fs::remove_dir_all(&dir);
 }

@@ -2,13 +2,50 @@
 // Reader consumes at most one scalar/container boundary per `next`; no read-to-end
 // or delimiter transcript sits behind this API.
 
-#[derive(Clone)]
 enum JetJsonReadFrame {
     ArrayValueOrEnd { first: bool, index: usize },
     ArrayCommaOrEnd { index: usize },
     ObjectKeyOrEnd { first: bool },
-    ObjectColonValue { key: String },
-    ObjectCommaOrEnd { key: String },
+    ObjectColonValue { key: String, key_heap: usize },
+    ObjectCommaOrEnd { key: String, key_heap: usize },
+}
+
+#[derive(Clone, Copy)]
+enum JetJsonReadState {
+    ArrayValueOrEnd { first: bool, index: usize },
+    ArrayCommaOrEnd { index: usize },
+    ObjectKeyOrEnd { first: bool },
+    ObjectColonValue,
+    ObjectCommaOrEnd,
+}
+
+#[derive(Clone)]
+struct JetJsonAllocationBudget {
+    inner: std::rc::Rc<std::cell::RefCell<JetJsonAllocationState>>,
+}
+
+struct JetJsonAllocationState {
+    used: usize,
+    limit: usize,
+}
+
+impl JetJsonAllocationBudget {
+    fn new(limit: usize) -> Self {
+        Self { inner: std::rc::Rc::new(std::cell::RefCell::new(JetJsonAllocationState { used: 0, limit })) }
+    }
+
+    fn charge(&self, bytes: usize) -> bool {
+        let mut state = self.inner.borrow_mut();
+        let Some(next) = state.used.checked_add(bytes) else { return false };
+        if next > state.limit { return false; }
+        state.used = next;
+        true
+    }
+
+    fn release(&self, bytes: usize) {
+        let mut state = self.inner.borrow_mut();
+        state.used = state.used.saturating_sub(bytes);
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -111,6 +148,7 @@ fn jet_enc_json_reader(
         terminal: None,
         eof: false,
         record_mode: false,
+        allocation_budget: None,
     })
 }
 
@@ -152,8 +190,8 @@ impl jet_std::JSONReader {
                     path.push_str(&index.to_string());
                     path.push(']');
                 }
-                JetJsonReadFrame::ObjectColonValue { key }
-                | JetJsonReadFrame::ObjectCommaOrEnd { key } => {
+                JetJsonReadFrame::ObjectColonValue { key, .. }
+                | JetJsonReadFrame::ObjectCommaOrEnd { key, .. } => {
                     path.push('[');
                     path.push_str(&format!("{:?}", key));
                     path.push(']');
@@ -178,9 +216,44 @@ impl jet_std::JSONReader {
         if new_len > limit {
             return Err(jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.offset, self.line, self.column, format!("max_item_bytes {} exceeded", self.limits.max_item_bytes)));
         }
-        bytes.reserve_exact(new_len.saturating_sub(bytes.capacity()));
+        if new_len > bytes.capacity() {
+            let next_capacity = bytes.capacity().max(1).saturating_mul(2).max(new_len);
+            let growth = next_capacity.saturating_sub(bytes.capacity());
+            if self.allocation_budget.as_ref().is_some_and(|budget| !budget.charge(growth)) {
+                return Err(self.string_allocation_error());
+            }
+            if bytes.try_reserve_exact(next_capacity - bytes.len()).is_err() {
+                return Err(self.string_allocation_error());
+            }
+            debug_assert_eq!(bytes.capacity(), next_capacity);
+        }
         bytes.extend_from_slice(append);
         Ok(())
+    }
+
+    fn string_allocation_error(&self) -> jet_std::EncodingError {
+        jet_encoding_error(
+            jet_std::EncodingErrorKind::Limit,
+            self.offset,
+            self.line,
+            self.column,
+            "JSON string allocation exceeded the bounded record resource limit",
+        )
+    }
+
+    fn clone_key_for_frame(&self, key: &str) -> Result<(String, usize), jet_std::EncodingError> {
+        let Some(budget) = &self.allocation_budget else { return Ok((key.to_string(), 0)) };
+        let capacity = key.len();
+        if !budget.charge(capacity) { return Err(self.string_allocation_error()); }
+        let mut cloned = String::new();
+        if cloned.try_reserve_exact(capacity).is_err() { return Err(self.string_allocation_error()); }
+        cloned.push_str(key);
+        debug_assert_eq!(cloned.capacity(), capacity);
+        Ok((cloned, capacity))
+    }
+
+    fn release_key_heap(&self, bytes: usize) {
+        if let Some(budget) = &self.allocation_budget { budget.release(bytes); }
     }
 
     fn fill(&mut self) -> Result<Option<u8>, jet_std::EncodingError> {
@@ -395,9 +468,15 @@ impl jet_std::JSONReader {
         if self.eof { return Ok(None); }
         loop {
             self.skip_ws()?;
-            let state = self.frames.last().cloned();
+            let state = self.frames.last().map(|frame| match frame {
+                JetJsonReadFrame::ArrayValueOrEnd { first, index } => JetJsonReadState::ArrayValueOrEnd { first: *first, index: *index },
+                JetJsonReadFrame::ArrayCommaOrEnd { index } => JetJsonReadState::ArrayCommaOrEnd { index: *index },
+                JetJsonReadFrame::ObjectKeyOrEnd { first } => JetJsonReadState::ObjectKeyOrEnd { first: *first },
+                JetJsonReadFrame::ObjectColonValue { .. } => JetJsonReadState::ObjectColonValue,
+                JetJsonReadFrame::ObjectCommaOrEnd { .. } => JetJsonReadState::ObjectCommaOrEnd,
+            });
             match state {
-                Some(JetJsonReadFrame::ArrayValueOrEnd { first, index }) => {
+                Some(JetJsonReadState::ArrayValueOrEnd { first, index }) => {
                     if self.fill()? == Some(b']') {
                         if !first { return self.fail(jet_encoding_error(jet_std::EncodingErrorKind::Syntax, self.offset, self.line, self.column, "expected a JSON value after `,`")); }
                         self.take()?; self.frames.pop(); return Ok(Some(jet_std::DataEvent::ArrayEnd));
@@ -406,13 +485,13 @@ impl jet_std::JSONReader {
                     *self.frames.last_mut().unwrap() = JetJsonReadFrame::ArrayCommaOrEnd { index };
                     return self.parse_value().map(Some).or_else(|e| self.fail(e));
                 }
-                Some(JetJsonReadFrame::ArrayCommaOrEnd { index }) => match self.fill()? {
+                Some(JetJsonReadState::ArrayCommaOrEnd { index }) => match self.fill()? {
                     Some(b',') => { self.take()?; *self.frames.last_mut().unwrap() = JetJsonReadFrame::ArrayValueOrEnd { first: false, index: index + 1 }; }
                     Some(b']') => { self.take()?; self.frames.pop(); return Ok(Some(jet_std::DataEvent::ArrayEnd)); }
                     Some(_) => return self.fail(jet_encoding_error(jet_std::EncodingErrorKind::Syntax, self.offset, self.line, self.column, "expected `,` or `]` after array value")),
                     None => return self.fail(jet_encoding_error(jet_std::EncodingErrorKind::Truncated, self.offset, self.line, self.column, "unterminated JSON array")),
                 },
-                Some(JetJsonReadFrame::ObjectKeyOrEnd { first }) => {
+                Some(JetJsonReadState::ObjectKeyOrEnd { first }) => {
                     if self.fill()? == Some(b'}') {
                         if !first { return self.fail(jet_encoding_error(jet_std::EncodingErrorKind::Syntax, self.offset, self.line, self.column, "expected an object key after `,`")); }
                         self.take()?; self.frames.pop(); return Ok(Some(jet_std::DataEvent::ObjectEnd));
@@ -420,17 +499,31 @@ impl jet_std::JSONReader {
                     if !first && self.fill()?.is_none() { return self.fail(jet_encoding_error(jet_std::EncodingErrorKind::Truncated, self.offset, self.line, self.column, "unterminated JSON object")); }
                     if self.fill()? != Some(b'"') { return self.fail(jet_encoding_error(jet_std::EncodingErrorKind::Syntax, self.offset, self.line, self.column, "expected a quoted object key")); }
                     let key = match self.read_string() { Ok(v) => v, Err(e) => return self.fail(e) };
-                    *self.frames.last_mut().unwrap() = JetJsonReadFrame::ObjectColonValue { key: key.clone() };
+                    let (frame_key, key_heap) = match self.clone_key_for_frame(&key) { Ok(value) => value, Err(error) => return self.fail(error) };
+                    *self.frames.last_mut().unwrap() = JetJsonReadFrame::ObjectColonValue { key: frame_key, key_heap };
                     return Ok(Some(jet_std::DataEvent::Key(key)));
                 }
-                Some(JetJsonReadFrame::ObjectColonValue { key }) => {
+                Some(JetJsonReadState::ObjectColonValue) => {
                     if let Err(e) = self.expect_byte(b':', "`:` after object key") { return self.fail(e); }
-                    *self.frames.last_mut().unwrap() = JetJsonReadFrame::ObjectCommaOrEnd { key };
+                    let frame = self.frames.last_mut().unwrap();
+                    let previous = std::mem::replace(frame, JetJsonReadFrame::ObjectKeyOrEnd { first: false });
+                    let JetJsonReadFrame::ObjectColonValue { key, key_heap } = previous else { unreachable!() };
+                    *frame = JetJsonReadFrame::ObjectCommaOrEnd { key, key_heap };
                     return self.parse_value().map(Some).or_else(|e| self.fail(e));
                 }
-                Some(JetJsonReadFrame::ObjectCommaOrEnd { .. }) => match self.fill()? {
-                    Some(b',') => { self.take()?; *self.frames.last_mut().unwrap() = JetJsonReadFrame::ObjectKeyOrEnd { first: false }; }
-                    Some(b'}') => { self.take()?; self.frames.pop(); return Ok(Some(jet_std::DataEvent::ObjectEnd)); }
+                Some(JetJsonReadState::ObjectCommaOrEnd) => match self.fill()? {
+                    Some(b',') => {
+                        self.take()?;
+                        let previous = std::mem::replace(self.frames.last_mut().unwrap(), JetJsonReadFrame::ObjectKeyOrEnd { first: false });
+                        let JetJsonReadFrame::ObjectCommaOrEnd { key_heap, .. } = previous else { unreachable!() };
+                        self.release_key_heap(key_heap);
+                    }
+                    Some(b'}') => {
+                        self.take()?;
+                        let Some(JetJsonReadFrame::ObjectCommaOrEnd { key_heap, .. }) = self.frames.pop() else { unreachable!() };
+                        self.release_key_heap(key_heap);
+                        return Ok(Some(jet_std::DataEvent::ObjectEnd));
+                    }
                     Some(_) => return self.fail(jet_encoding_error(jet_std::EncodingErrorKind::Syntax, self.offset, self.line, self.column, "expected `,` or `}` after object value")),
                     None => return self.fail(jet_encoding_error(jet_std::EncodingErrorKind::Truncated, self.offset, self.line, self.column, "unterminated JSON object")),
                 },
@@ -599,18 +692,14 @@ enum JetJsonlFoldFrame {
 }
 
 struct JetJsonlHeapBudget {
-    used: usize,
-    limit: usize,
+    allocation: JetJsonAllocationBudget,
     decoded: usize,
     decoded_limit: usize,
 }
 
 impl JetJsonlHeapBudget {
     fn charge(&mut self, bytes: usize) -> bool {
-        let Some(next) = self.used.checked_add(bytes) else { return false };
-        if next > self.limit { return false; }
-        self.used = next;
-        true
+        self.allocation.charge(bytes)
     }
 
     fn charge_decoded(&mut self, bytes: usize) -> bool {
@@ -709,7 +798,7 @@ impl jet_std::JSONLReader {
         // byte covers Rust Debug escaping; indices need at most 20 digits.
         let path_capacity = 1usize.saturating_add(self.json.frames.iter().map(|frame| match frame {
             JetJsonReadFrame::ArrayValueOrEnd { .. } | JetJsonReadFrame::ArrayCommaOrEnd { .. } => 22,
-            JetJsonReadFrame::ObjectColonValue { key } | JetJsonReadFrame::ObjectCommaOrEnd { key } => key.len().saturating_mul(4).saturating_add(4),
+            JetJsonReadFrame::ObjectColonValue { key, .. } | JetJsonReadFrame::ObjectCommaOrEnd { key, .. } => key.len().saturating_mul(4).saturating_add(4),
             JetJsonReadFrame::ObjectKeyOrEnd { .. } => 0,
         }).sum::<usize>());
         // JSONL projection prefixes the record index into a replacement path;
@@ -729,14 +818,6 @@ impl jet_std::JSONLReader {
         );
         error.path = path;
         error
-    }
-
-    fn admit_string(
-        &self,
-        heap: &mut JetJsonlHeapBudget,
-        value: &String,
-    ) -> Result<(), jet_std::EncodingError> {
-        if heap.charge(value.capacity()) { Ok(()) } else { Err(self.limit_error(heap, true)) }
     }
 
     fn push_value(
@@ -798,9 +879,10 @@ impl jet_std::JSONLReader {
             .saturating_add(self.json.limits.max_item_bytes as usize)
             .saturating_add((self.json.limits.max_depth as usize).saturating_mul(256))
             .saturating_add(65_536);
+        let allocation = JetJsonAllocationBudget::new(heap_limit);
+        self.json.allocation_budget = Some(allocation.clone());
         let mut heap = JetJsonlHeapBudget {
-            used: 0,
-            limit: heap_limit,
+            allocation,
             decoded: 0,
             decoded_limit: self.json.limits.max_item_bytes as usize,
         };
@@ -850,7 +932,6 @@ impl jet_std::JSONLReader {
                 }
                 jet_std::DataEvent::Text(value) => {
                     if !heap.charge_decoded(value.len()) { return Err(self.limit_error(&mut heap, false)); }
-                    self.admit_string(&mut heap, &value)?;
                     self.push_value(&mut heap, &mut root, &mut frames, jet_std::DataTree::Text(value))
                 }
                 jet_std::DataEvent::Bytes(_) => Err(jet_encoding_error(
@@ -880,9 +961,6 @@ impl jet_std::JSONLReader {
                     match frames.last_mut() {
                         Some(JetJsonlFoldFrame::Object { key, .. }) if key.is_none() => {
                             if !heap.charge_decoded(value.len()) { return Err(self.limit_error(&mut heap, false)); }
-                            // The shared tokenizer retains one cloned key for
-                            // exact paths until the value completes.
-                            if !heap.charge(value.capacity().saturating_mul(2)) { return Err(self.limit_error(&mut heap, true)); }
                             *key = Some(value);
                             Ok(())
                         }
