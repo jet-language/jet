@@ -329,6 +329,12 @@ pub fn search(index: &[Entry], query: &str) -> Vec<Hit> {
 /// the best matches (or the verbatim code page) as plain text; no raw mode,
 /// no box drawing beyond what `Render` already produces for NO_COLOR.
 pub fn run_query(query: &str, color: bool) -> String {
+    if let Some(symbol) = crate::SemanticSymbols::lookup(query.trim()) {
+        return format!(
+            "{}\n{}\nExample: {}\nSource: {} ({})\n",
+            symbol.signature, symbol.summary, symbol.example, symbol.module, symbol.provenance
+        );
+    }
     let index = build_index();
     let hits = search(&index, query);
     if hits.is_empty() {

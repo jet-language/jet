@@ -1651,6 +1651,31 @@ fn docs_lookup_builtin_list_filter_matches_ratified_mock() {
     );
     assert!(doc.contains("Keeps items where f(item) is true."), "got: {doc:?}");
     assert!(doc.contains("Source:"), "got: {doc:?}");
+    assert!(doc.contains("Example:"), "shared symbol example missing: {doc:?}");
+}
+
+#[test]
+fn shared_semantic_symbol_has_complete_identity_and_docs() {
+    let symbol = jet::SemanticSymbols::lookup("List.filter").expect("shared List.filter symbol");
+    assert_eq!(symbol.module, "core.collections");
+    assert_eq!(symbol.owner, Some("List"));
+    assert_eq!(symbol.member, "filter");
+    assert!(symbol.signature.contains("fn(T) -> Bool"));
+    assert!(!symbol.summary.is_empty());
+    assert!(!symbol.example.is_empty());
+    assert_eq!(symbol.provenance, "builtin");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn repl_raw_member_completion_menu_is_selectable() {
+    let output = run_raw_multiline_pty(
+        "printf 'items :: [1, 2, 3]\\r'; sleep 0.12; printf 'items.f\\t'; sleep 0.15; printf '\\033[B\\033[B\\r'; sleep 0.15; printf '\\003'",
+    );
+    let out = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "selectable completion PTY failed: {out}");
+    assert!(out.contains("filter") && out.contains("filter_map"), "shared candidates missing: {out:?}");
+    assert!(out.contains("items.filter_map"), "Down+Enter did not select second completion: {out:?}");
 }
 
 #[test]

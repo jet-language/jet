@@ -70,6 +70,7 @@ pub mod Explain;
 pub mod Fetch;
 pub mod FixEngine;
 pub mod Help;
+pub mod SemanticSymbols;
 pub mod Interpreter;
 pub mod JitBackend;
 pub mod LSP;

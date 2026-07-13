@@ -453,7 +453,7 @@ fn read_line<R: Read>(
                 }
             }
             Key::Tab => {
-                if apply_completion(&mut buf, &mut cursor, session, color) {
+                if apply_completion(reader, &mut buf, &mut cursor, session, color) {
                     display = EditorDisplay::default();
                 }
             }
@@ -891,7 +891,8 @@ mod display_tests {
 /// or (after a `.`) builtin member names for the receiver's live type —
 /// sourced from `Docs::BUILTIN_DOCS`, the same table `?name` reads, so the
 /// completion menu and its docs never drift apart (I8).
-fn apply_completion(
+fn apply_completion<R: Read>(
+    reader: &mut KeyReader<R>,
     buf: &mut Vec<char>,
     cursor: &mut usize,
     session: &Session,
@@ -942,14 +943,32 @@ fn apply_completion(
         insert_completion(buf, cursor, replace_start, &candidates[0]);
         return false;
     }
-    // Shell-style: complete to the longest common prefix, then list matches
-    // once beneath the line (redrawn away on the next keystroke).
-    let common = longest_common_prefix(&candidates);
-    let already: String = buf[replace_start..*cursor].iter().collect();
-    if common.len() > already.len() {
-        insert_completion(buf, cursor, replace_start, &common);
+    let mut selected = 0usize;
+    loop {
+        print!("\r\n");
+        for (index, candidate) in candidates.iter().enumerate() {
+            let marker = if index == selected { ">" } else { " " };
+            let detail = crate::SemanticSymbols::lookup(
+                &session.scope.get(&text[..text.rfind('.').unwrap_or(0)])
+                    .map(|value| format!("{}.{}", super::type_name(value), candidate))
+                    .unwrap_or_default(),
+            ).map(|symbol| format!("  {} — {}", symbol.signature, symbol.summary)).unwrap_or_default();
+            println!("{} {}{}", marker, candidate, dim(&detail, color));
+        }
+        println!("{}", dim("↑/↓ select · Enter/Tab accept · Esc cancel", color));
+        io::stdout().flush().ok();
+        match reader.read_key() {
+            Key::Up => selected = selected.saturating_sub(1),
+            Key::Down => selected = (selected + 1).min(candidates.len() - 1),
+            Key::Enter | Key::Tab => {
+                insert_completion(buf, cursor, replace_start, &candidates[selected]);
+                break;
+            }
+            Key::Escape | Key::CtrlC | Key::Eof => break,
+            Key::Idle => continue,
+            _ => break,
+        }
     }
-    print!("\r\n{}\r\n", dim(&candidates.join("   "), color));
     true
 }
 
@@ -957,21 +976,4 @@ fn insert_completion(buf: &mut Vec<char>, cursor: &mut usize, replace_start: usi
     buf.truncate(replace_start);
     buf.extend(completion.chars());
     *cursor = buf.len();
-}
-
-fn longest_common_prefix(items: &[String]) -> String {
-    let mut items = items.iter();
-    let Some(first) = items.next() else {
-        return String::new();
-    };
-    let mut prefix: Vec<char> = first.chars().collect();
-    for item in items {
-        let chars: Vec<char> = item.chars().collect();
-        let mut i = 0;
-        while i < prefix.len() && i < chars.len() && prefix[i] == chars[i] {
-            i += 1;
-        }
-        prefix.truncate(i);
-    }
-    prefix.into_iter().collect()
 }

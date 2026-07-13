@@ -198,6 +198,15 @@ fn function_detail(name: &str, params: &[(String, AST::Type)], ret: &Option<AST:
     out
 }
 
+fn builtin_owner(ty: &AST::Type) -> Option<&'static str> {
+    match ty {
+        AST::Type::List(_) | AST::Type::FixedList { .. } => Some("List"),
+        AST::Type::Map { .. } => Some("Map"),
+        AST::Type::String => Some("String"),
+        _ => None,
+    }
+}
+
 pub(crate) fn compute_completions(
     db: &SymbolDB,
     src: &str,
@@ -255,6 +264,28 @@ pub(crate) fn compute_completions(
         // Find the type of receiver_name from DB
         for def in &db.defs {
             if def.name == receiver_name {
+                let receiver_type = match &def.kind {
+                    SymKind::Local { ty: Some(ty), .. } | SymKind::Param { ty } => Some(ty),
+                    _ => None,
+                };
+                if let Some(owner) = receiver_type.and_then(builtin_owner) {
+                    for symbol in crate::SemanticSymbols::members(owner, "") {
+                        if seen.insert(format!("builtin:{}", symbol.identity)) {
+                            items.push(CompletionItem {
+                                label: symbol.member.to_string(),
+                                kind: ck::METHOD,
+                                detail: Some(format!(
+                                    "{} — {} [{} ({})] Example: {}",
+                                    symbol.signature, symbol.summary, symbol.module,
+                                    symbol.provenance, symbol.example
+                                )),
+                                insert_text: None,
+                                insert_text_format: 1,
+                                auto_import: None,
+                            });
+                        }
+                    }
+                }
                 match &def.kind {
                     SymKind::Struct { fields } => {
                         for (fname, fty) in fields {

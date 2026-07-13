@@ -542,6 +542,21 @@ fn question_mark_query_prints_matches_non_interactively() {
     assert!(stdout.contains("jet run"), "expected a `run` match, got:\n{}", stdout);
 }
 
+#[test]
+fn question_mark_language_symbol_uses_shared_semantic_index() {
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["?", "List.filter"])
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run jet ? List.filter");
+    assert!(output.status.success(), "status: {:?}", output.status);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("List.filter(f: fn(T) -> Bool) -> List<T>"), "signature missing: {stdout}");
+    assert!(stdout.contains("Keeps items where f(item) is true."), "summary missing: {stdout}");
+    assert!(stdout.contains("Example:"), "example missing: {stdout}");
+    assert!(stdout.contains("core.collections"), "provenance missing: {stdout}");
+}
+
 /// A query that looks like a diagnostic code renders the verbatim I4 essay —
 /// byte-identical to `jet explain <CODE>`, since both go through
 /// `jet::Explain::render` over the same registry (single source of truth).

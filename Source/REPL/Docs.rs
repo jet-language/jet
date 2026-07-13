@@ -14,86 +14,20 @@
 
 use super::{unique_temp_name, Session};
 
-/// One builtin method's docs: `(qualified name, signature, one-line summary)`.
-/// Hand-curated from the real method tables in
-/// `crates/jet-foundation/src/Collections.rs` (`list_method_return`,
-/// `map_method_return`, `string_method_return`, `builtin_method_arg_types`) —
-/// not a separate, driftable prose source.
-pub(crate) const BUILTIN_DOCS: &[(&str, &str, &str)] = &[
-    ("List.len", "List.len() -> Int", "Number of items."),
-    ("List.is_empty", "List.is_empty() -> Bool", "True when there are no items."),
-    ("List.push", "List.push(item: T)", "Appends an item to the end."),
-    ("List.pop", "List.pop() -> T?", "Removes and returns the last item, if any."),
-    ("List.get", "List.get(i: Int) -> T?", "The item at index i, if in bounds."),
-    ("List.first", "List.first() -> T?", "The first item, if any."),
-    ("List.last", "List.last() -> T?", "The last item, if any."),
-    ("List.contains", "List.contains(item: T) -> Bool", "True when item appears in the list."),
-    ("List.index_of", "List.index_of(item: T) -> Int?", "Index of the first matching item, if any."),
-    ("List.join", "List.join(sep: String) -> String", "Joins string items with sep."),
-    ("List.sum", "List.sum() -> T", "Sum of all items."),
-    ("List.product", "List.product() -> T", "Product of all items."),
-    ("List.min", "List.min() -> T?", "The smallest item, if any."),
-    ("List.max", "List.max() -> T?", "The largest item, if any."),
-    ("List.map", "List.map(f: fn(T) -> R) -> [R]", "Transforms each item with f."),
-    ("List.filter", "List.filter(f: fn(T) -> Bool) -> List<T>", "Keeps items where f(item) is true."),
-    ("List.filter_map", "List.filter_map(f: fn(T) -> V?) -> [V]", "Maps then drops failures — keeps only successes."),
-    ("List.each", "List.each(f: fn(T))", "Runs f once per item, for its side effects."),
-    ("List.find", "List.find(f: fn(T) -> Bool) -> T?", "The first item where f(item) is true, if any."),
-    ("List.any", "List.any(f: fn(T) -> Bool) -> Bool", "True if f is true for at least one item."),
-    ("List.all", "List.all(f: fn(T) -> Bool) -> Bool", "True if f is true for every item."),
-    ("List.sort_by", "List.sort_by(key: fn(T) -> K)", "Sorts in place by the key f extracts."),
-    ("List.reduce", "List.reduce(init: R, f: fn(R, T) -> R) -> R", "Folds items into one value, starting from init."),
-    ("List.fold", "List.fold(init: R, f: fn(R, T) -> R) -> R", "Folds items into one value, starting from init."),
-    ("List.reverse", "List.reverse()", "Reverses the list in place."),
-    ("List.sort", "List.sort()", "Sorts the list in place."),
-    ("List.clear", "List.clear()", "Removes every item."),
-    ("List.insert", "List.insert(i: Int, item: T)", "Inserts item at index i."),
-    ("List.remove", "List.remove(i: Int) -> T?", "Removes and returns the item at index i."),
-    ("List.enumerate", "List.enumerate() -> [(idx: Int, item: T)]", "Pairs each item with its index."),
-    ("List.zip", "List.zip(other: [U]) -> [(a: T, b: U)]", "Pairs items from two lists positionally."),
-    ("Map.len", "Map.len() -> Int", "Number of entries."),
-    ("Map.is_empty", "Map.is_empty() -> Bool", "True when there are no entries."),
-    ("Map.get", "Map.get(key: K) -> V?", "Value for key, if present."),
-    ("Map.insert", "Map.insert(key: K, value: V)", "Inserts or overwrites the value for key."),
-    ("Map.remove", "Map.remove(key: K) -> V?", "Removes and returns the value for key, if present."),
-    ("Map.contains_key", "Map.contains_key(key: K) -> Bool", "True when key has an entry."),
-    ("Map.keys", "Map.keys() -> [K]", "Every key, in map order."),
-    ("Map.values", "Map.values() -> [V]", "Every value, in map order."),
-    ("Map.each", "Map.each(f: fn(K, V))", "Runs f once per entry."),
-    ("String.len", "String.len() -> Int", "Number of characters."),
-    ("String.is_empty", "String.is_empty() -> Bool", "True when the string is empty."),
-    ("String.contains", "String.contains(s: String) -> Bool", "True when s appears in the string."),
-    ("String.starts_with", "String.starts_with(s: String) -> Bool", "True when the string starts with s."),
-    ("String.ends_with", "String.ends_with(s: String) -> Bool", "True when the string ends with s."),
-    ("String.trim", "String.trim() -> String", "Removes leading/trailing whitespace."),
-    ("String.to_upper", "String.to_upper() -> String", "Uppercased copy."),
-    ("String.to_lower", "String.to_lower() -> String", "Lowercased copy."),
-    ("String.split", "String.split(sep: String) -> [String]", "Splits on every occurrence of sep."),
-    ("String.lines", "String.lines() -> [String]", "Splits into lines."),
-    ("String.chars", "String.chars() -> [Char]", "Every character, in order."),
-    ("String.replace", "String.replace(from: String, to: String) -> String", "Replaces every occurrence of from with to."),
-    ("String.repeat", "String.repeat(n: Int) -> String", "Concatenates n copies of the string."),
-    ("String.to_int", "String.to_int() -> Int ? ParseError", "Parses the string as an Int."),
-];
-
 /// Builtin method names on `ty` (e.g. `"List"`) whose name starts with
 /// `partial` — the same table `?Type.method` reads from, so `Interactive`'s
 /// Tab-completion menu and `?name` docs never drift apart (I8).
 pub(crate) fn method_candidates(ty: &str, partial: &str) -> Vec<String> {
-    let prefix = format!("{}.", ty);
-    BUILTIN_DOCS
-        .iter()
-        .filter_map(|(qualified, _, _)| qualified.strip_prefix(prefix.as_str()))
-        .filter(|m| m.starts_with(partial))
-        .map(|m| m.to_string())
+    crate::SemanticSymbols::members(ty, partial)
+        .map(|symbol| symbol.member.to_string())
         .collect()
 }
 
 fn builtin_lookup(name: &str) -> Option<String> {
-    let (_, sig, summary) = BUILTIN_DOCS.iter().find(|(n, _, _)| *n == name)?;
+    let symbol = crate::SemanticSymbols::lookup(name)?;
     Some(format!(
-        "{}\n{}\nSource: core.collections (builtin)\n",
-        sig, summary
+        "{}\n{}\nExample: {}\nSource: {} ({})\n",
+        symbol.signature, symbol.summary, symbol.example, symbol.module, symbol.provenance
     ))
 }
 

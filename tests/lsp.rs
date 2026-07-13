@@ -1148,6 +1148,27 @@ fn lsp_completion_returns_items() {
 }
 
 #[test]
+fn lsp_builtin_member_completion_uses_shared_semantic_symbol_docs() {
+    let src = "fn run() {\n    items :: [1, 2, 3]\n    items.f\n}\n";
+    let uri = "file:///tmp/lsp_shared_symbols.jet";
+    run_transcript(src, &[
+        TranscriptStep::Send {
+            msg: r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#.to_string(),
+            expect_contains: Some(vec!["completionProvider".to_string()]),
+        },
+        TranscriptStep::Open { uri: uri.to_string(), expect_notification: true },
+        TranscriptStep::Send {
+            msg: format!(r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":2,"character":11}}}}}}"#, uri),
+            expect_contains: Some(vec!["\"label\":\"filter\"".to_string(), "Keeps items where f(item) is true.".to_string(), "core.collections".to_string()]),
+        },
+        TranscriptStep::Send {
+            msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),
+            expect_contains: Some(vec!["result".to_string()]),
+        },
+    ]);
+}
+
+#[test]
 fn lsp_completion_returns_snippets_and_auto_imports() {
     let jet = jet_bin();
     if !jet.exists() {
