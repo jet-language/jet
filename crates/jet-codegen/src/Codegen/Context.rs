@@ -301,6 +301,7 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // (`(String, Vec<String>)` / `String`), not this placeholder.
         "Sql" => Some("Sql"),
         "Html" => Some("Html"),
+        "Sh" => Some("Sh"),
         // D-SIMD2 / D-LINALG1: built-in math value types (lane + linalg structs).
         "F32x4" => Some("F32x4"),
         "F64x2" => Some("F64x2"),
@@ -684,6 +685,7 @@ impl Cx {
             // escaped text, so it's just a `String` underneath.
             Type::Named(name) if name == "Sql" => "(String, Vec<String>)".to_string(),
             Type::Named(name) if name == "Html" => "String".to_string(),
+            Type::Named(name) if name == "Sh" => "Vec<String>".to_string(),
             // D-DEFER1: ScopeGuard is generic over F (the closure type); emit `_`
             // so Rust infers the monomorphised type from the initialiser expression.
             Type::Named(name) if name == "ScopeGuard" => "_".to_string(),

@@ -214,10 +214,15 @@ pub(crate) fn lower_method_call(
     // shape directly instead.
     if method == "raw" {
         if let Expr::Ident(n, _) = receiver {
-            if n == "Sql" || n == "Html" {
+            if n == "Sql" || n == "Html" || n == Syntax::TYPE_SH {
                 let arg = lower_expr(&args[0].expr, cx, env);
                 let code = if n == "Sql" {
                     format!("(({}).clone(), Vec::new())", emit_tir_expr(&arg, cx))
+                } else if n == Syntax::TYPE_SH {
+                    format!(
+                        "({}).split_whitespace().map(|word| word.to_string()).collect::<Vec<String>>()",
+                        emit_tir_expr(&arg, cx)
+                    )
                 } else {
                     format!("({}).clone()", emit_tir_expr(&arg, cx))
                 };

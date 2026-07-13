@@ -93,7 +93,7 @@ pub(crate) fn method_call_in_subset(
     // a distinct value's `.raw()` never takes an argument).
     if method == "raw" {
         if let Expr::Ident(n, _) = receiver {
-            if n == "Sql" || n == "Html" {
+            if n == "Sql" || n == "Html" || n == Syntax::TYPE_SH {
                 return args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals);
             }
         }

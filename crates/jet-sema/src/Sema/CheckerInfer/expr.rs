@@ -269,13 +269,13 @@ impl<'a> Checker<'a> {
             }
             Expr::Bool(_, _) => Some(Type::Bool),
             // D-TYPEDTEXT1=D: a string literal in a position whose expected
-            // type is `Sql`/`Html` elaborates to that typed value instead of
+            // type is `Sql`/`Html`/`Sh` elaborates to that typed value instead of
             // `String` — the same expected-type law as `.{ }` construction.
             // Each `{hole}` becomes a bound parameter (Sql) or an escaped
             // insertion (Html) at codegen; it is checked here like any other
             // value, not run through the Display-ability check below (a hole
             // is never printed as text).
-            Expr::Str(_, str_span) if matches!(&self.expected_type, Some(Type::Named(n)) if n == "Sql" || n == "Html") =>
+            Expr::Str(_, str_span) if matches!(&self.expected_type, Some(Type::Named(n)) if n == "Sql" || n == "Html" || n == Syntax::TYPE_SH) =>
             {
                 let Some(Type::Named(type_name)) = self.expected_type.clone() else {
                     unreachable!()

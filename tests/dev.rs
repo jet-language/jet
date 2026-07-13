@@ -884,6 +884,18 @@ fn stdin_filter_exercises_jit_then_exact_interpreter_boundary() {
     assert_eq!(stats.boundary_stems, ["io/stdin_filter"]);
 }
 
+#[test]
+fn sh_typed_text_default_matches_compiled_binary() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_dev_sh_typed_text_{}",
+        std::process::id()
+    ));
+    let stats = check_dev_default_stem(0, "safety/sh_typed_text", &dir, &[]);
+    assert_eq!(stats.ran, 1);
+    assert_eq!(stats.boundary, 0);
+    assert_eq!(stats.manifested, 0);
+}
+
 /// Every example that runs in the interpreter and has a checked-in
 /// `expected/*.out` golden (the executable spec, I5) must match it byte for
 /// byte — a cheap check that needs no rustc. Examples that hit a boundary, or

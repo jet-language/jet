@@ -26,6 +26,12 @@ the spec and a passing example disagree, the spec is wrong — fix the spec.
   and interpolation. The newline right after the opening `"""` and the one right
   before the closing `"""` are dropped, and the closing `"""`'s indentation is
   stripped from every line (Swift-style). An unterminated `"""` is E0002.
+- Typed text (D-TYPEDTEXT1/2, D-FFI-SH1): a literal expected as `Sql`, `Html`,
+  or `Sh` uses one checked interpolation engine. `sql"…"`, `html"…"`, and
+  `sh"…"` provide the same rewrite without an expected type. For `Sh`, literal
+  words become argv items and each `{hole}` becomes exactly one argv item;
+  neither word splitting, glob expansion, nor shell parsing touches a hole.
+  Runtime `String` conversion is E0149; `Sh.raw(text)` is the audited escape.
 - Numbers (S67): decimal `Int` (64-bit signed, E0007 if too large) and `Float`
   (digits `.` digits, optional `e`/`E` exponent). `_` digit separators are
   allowed anywhere among the digits (`1_000_000`); base prefixes `0x`/`0o`/`0b`

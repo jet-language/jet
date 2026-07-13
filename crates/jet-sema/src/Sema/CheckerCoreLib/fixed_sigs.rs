@@ -293,7 +293,7 @@ pub fn core_fixed_sig(
         )),
         ("core.process", "exit") => Some((vec![(read, int)], None)),
         ("core.process", "run") => Some((
-            vec![(read, Type::List(Box::new(Type::String)))],
+            vec![(read, Type::Named(Syntax::TYPE_SH.to_string()))],
             Some(result_ty(
                 Type::Named("ProcessResult".to_string()),
                 io_error_ty(),

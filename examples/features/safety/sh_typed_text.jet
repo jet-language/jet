@@ -1,0 +1,10 @@
+// D-FFI-SH1: Sh reuses typed-text elaboration. Literal words are argv items;
+// each hole is exactly one argv item, regardless of spaces or shell metacharacters.
+use core.process as process
+
+fn run() {
+    value :: "two words;*.jet"
+    cmd: Sh :: "printf <%s> {value}"
+    result :: process.run(cmd) ?? panic("command failed")
+    print(result.output)
+}

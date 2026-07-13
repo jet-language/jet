@@ -34,20 +34,24 @@ pub(crate) fn type_fix_hint(want: &Type, got: &Type) -> String {
     }
 }
 
-/// D-TYPEDTEXT1=D: a plain `String` reaching a `Sql`/`Html` position. `None`
+/// D-TYPEDTEXT1/D-FFI-SH1: plain `String` reaching checked typed text. `None`
 /// when `want`/`got` isn't that shape — caller falls back to the generic
 /// mismatch diagnostic.
 pub(crate) fn typed_text_mismatch(want: &Type, got: &Type, span: Span) -> Option<Diagnostic> {
     let Type::Named(tn) = want else {
         return None;
     };
-    if (tn != "Sql" && tn != "Html") || *got != Type::String {
+    if (tn != "Sql" && tn != "Html" && tn != Syntax::TYPE_SH) || *got != Type::String {
         return None;
     }
     Some(Diagnostic::error(
         "E0149",
         format!("a runtime `String` can't be used as `{}`", tn),
-        "interpolating untrusted text into a query or page is how injection happens; only a checked literal (its `{value}` holes become bound parameters or escaped insertions) may build one".to_string(),
+        if tn == Syntax::TYPE_SH {
+            "a runtime string could change the executable or argument boundaries; only a checked literal may build `Sh`, where every `{value}` hole is exactly one argv item".to_string()
+        } else {
+            "interpolating untrusted text into a query or page is how injection happens; only a checked literal (its `{value}` holes become bound parameters or escaped insertions) may build one".to_string()
+        },
         format!(
             "write it as a literal with `{{value}}` holes, or use `{}.raw(\"…\")` if you have audited the text",
             tn

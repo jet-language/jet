@@ -386,12 +386,15 @@ impl<'a> Checker<'a> {
     
             if matches!(
                 call.name.as_str(),
-                Syntax::TYPED_TEXT_SQL_PREFIX_CALL | Syntax::TYPED_TEXT_HTML_PREFIX_CALL
+                Syntax::TYPED_TEXT_SQL_PREFIX_CALL
+                    | Syntax::TYPED_TEXT_HTML_PREFIX_CALL
+                    | Syntax::TYPED_TEXT_SH_PREFIX_CALL
             ) {
-                let type_name = if call.name == Syntax::TYPED_TEXT_SQL_PREFIX_CALL {
-                    "Sql"
-                } else {
-                    "Html"
+                let type_name = match call.name.as_str() {
+                    Syntax::TYPED_TEXT_SQL_PREFIX_CALL => "Sql",
+                    Syntax::TYPED_TEXT_HTML_PREFIX_CALL => "Html",
+                    Syntax::TYPED_TEXT_SH_PREFIX_CALL => Syntax::TYPE_SH,
+                    _ => unreachable!(),
                 };
                 if let Some(arg) = call.args.get_mut(0) {
                     let span = arg.span;

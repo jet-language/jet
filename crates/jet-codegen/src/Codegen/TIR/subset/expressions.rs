@@ -177,7 +177,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             // D-TYPEDTEXT1=D: the synthetic `Sql`/`Html` call sema rewrote a typed
             // text literal into (see `lower_expr`'s matching case).
             let is_typed_text_ctor = !locals.contains(&c.name)
-                && (c.name == "Sql" || c.name == "Html")
+                && (c.name == "Sql" || c.name == "Html" || c.name == "Sh")
                 && !cx.type_names.contains(&c.name);
             // c109 Phase 14: FFI extern + unqualified module-import calls are now
             // covered. Each lowers to its own resolved call form (`emit_call`'s

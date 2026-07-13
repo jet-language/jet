@@ -44,7 +44,7 @@ impl<'a> Parser<'a> {
                     Ok(Expr::Present(Box::new(inner), full))
                 }
                 TokKind::Ident(name)
-                    if matches!(name.as_str(), "sql" | "html")
+                    if matches!(name.as_str(), "sql" | "html" | "sh")
                         && matches!(
                             self.toks.get(self.pos + 1).map(|t| &t.kind),
                             Some(TokKind::Str(_))
@@ -60,10 +60,11 @@ impl<'a> Parser<'a> {
                         unreachable!()
                     };
                     let str_expr = self.str_expr_from_parts(parts, str_tok.span)?;
-                    let name = if name == "sql" {
-                        Syntax::TYPED_TEXT_SQL_PREFIX_CALL
-                    } else {
-                        Syntax::TYPED_TEXT_HTML_PREFIX_CALL
+                    let name = match name.as_str() {
+                        "sql" => Syntax::TYPED_TEXT_SQL_PREFIX_CALL,
+                        "html" => Syntax::TYPED_TEXT_HTML_PREFIX_CALL,
+                        "sh" => Syntax::TYPED_TEXT_SH_PREFIX_CALL,
+                        _ => unreachable!(),
                     };
                     Ok(Expr::Call(Call {
                         name: name.to_string(),

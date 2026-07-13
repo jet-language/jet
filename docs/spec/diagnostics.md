@@ -205,7 +205,7 @@ duplicate this — it is the one surface for lint walls (I8).
 | E0145 | parse | `@Persist` on a binding that isn't module-level (D-PERSIST1) |
 | E0147 | parse | two `{}` holes in a str-match pattern with no literal text between them (D-PARSESTR1/D-PARSESTR2) |
 | E0148 | sema  | a str-match pattern used in an `if == {}` table with no `else` arm (D-PARSESTR1) |
-| E0149 | sema  | a runtime `String` used where `Sql`/`Html` is expected (D-TYPEDTEXT1) |
+| E0149 | sema  | a runtime `String` used where `Sql`/`Html`/`Sh` is expected (D-TYPEDTEXT1, D-FFI-SH1) |
 | E0150 | sema  | typestate: an operation is called on a value in the wrong state (D-STATE1) |
 | E0151 | sema  | typestate: `#State(X)` or `#Transition(A -> B)` references a state not in the `state TypeName { … }` declaration (D-STATE-DECL) |
 | E0153 | sema  | protocol expansion failed to parse a generated handle fragment (D-PROTO1) |

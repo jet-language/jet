@@ -14,6 +14,15 @@ use super::serde_diags::{
     freestanding_hint, is_freestanding_forbidden, module_short_name, reactive_derived_unit,
     reactive_lambda_arity, reactive_not_lambda, unknown_core_item, wrong_core_arity,
 };
+
+fn is_string_literal_expr(expr: &crate::AST::Expr) -> bool {
+    match expr {
+        crate::AST::Expr::Str(..) => true,
+        crate::AST::Expr::Paren(inner, _) => is_string_literal_expr(inner),
+        _ => false,
+    }
+}
+
 impl<'a> Checker<'a> {
         pub(crate) fn infer_core_call(
             &mut self,
@@ -2491,6 +2500,52 @@ impl<'a> Checker<'a> {
                     }
                 }
                 _ => {}
+            }
+
+            // D-FFI-SH1=A: `process.run` gives its literal argument expected type
+            // `Sh`, activating the shared typed-text rewrite. Keep the older explicit
+            // argv value accepted as compatibility sugar over `process.cmd(argv).run()`;
+            // both lower to the same argv-only primitive and neither invokes a shell.
+            if module == "core.process" && name == "run" {
+                let Some((_, ret)) = sig else { unreachable!() };
+                if args.len() != 1 {
+                    self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                }
+                if let Some(arg) = args.get_mut(0) {
+                    let saved = self.expected_type.clone();
+                    self.expected_type = is_string_literal_expr(&arg.expr)
+                        .then(|| Type::Named(Syntax::TYPE_SH.to_string()));
+                    let got = self.infer(&mut arg.expr);
+                    self.expected_type = saved;
+                    if let Some(got) = got {
+                        let explicit_argv = matches!(
+                            got,
+                            Type::List(ref elem) | Type::FixedList { ref elem, .. }
+                                if **elem == Type::String
+                        );
+                        if got != Type::Named(Syntax::TYPE_SH.to_string()) && !explicit_argv {
+                            if let Some(diag) = crate::Sema::Diagnostics::typed_text_mismatch(
+                                &Type::Named(Syntax::TYPE_SH.to_string()),
+                                &got,
+                                arg.expr.span(),
+                            ) {
+                                self.diags.push(diag);
+                            } else {
+                                self.diags.push(Diagnostic::error(
+                                    "E0112",
+                                    format!("`run` needs Sh, but this is {}", got.show()),
+                                    "process.run executes a checked argv command without a shell".to_string(),
+                                    "pass a Sh literal, or build an explicit argv command with process.cmd(argv).run()".to_string(),
+                                    Some(arg.expr.span()),
+                                ));
+                            }
+                        }
+                    }
+                }
+                for arg in args.iter_mut().skip(1) {
+                    self.infer(&mut arg.expr);
+                }
+                return ret;
             }
 
             let Some((params, ret)) = sig else {

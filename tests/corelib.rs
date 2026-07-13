@@ -2804,6 +2804,41 @@ fn run() {{
     assert!(stdout.contains("line-one\n"), "{stdout}");
 }
 
+#[cfg(unix)]
+#[test]
+fn core_process_sh_typed_text_keeps_each_hole_one_argv_item() {
+    let dir = std::env::temp_dir().join(format!("jet_core_process_sh_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "process_sh_typed_text",
+        r#"
+use core.process as process
+
+fn run() {
+    hostile :: "two words;*.jet"
+    expected: Sh :: "printf <%s> {hostile}"
+    first :: process.run(expected) ?? panic("expected-type command failed")
+    print(first.output)
+
+    second :: process.run(sh"printf [%s] {hostile}") ?? panic("prefix command failed")
+    print(second.output)
+
+    audited :: Sh.raw("printf raw")
+    third :: process.run(audited) ?? panic("raw command failed")
+    print(third.output)
+
+    fourth :: process.run("printf direct") ?? panic("direct expected-type command failed")
+    print(fourth.output)
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "<two words;*.jet>\n[two words;*.jet]\nraw\ndirect\n");
+}
+
 #[test]
 fn core_time_calendar_zone_and_dst_run() {
     let source_zone = std::env::var_os("TZDIR")

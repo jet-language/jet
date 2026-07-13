@@ -1696,6 +1696,10 @@ fn run() {
     render(page)
     trusted :: Html.raw(\"<b>audited</b>\")
     render(trusted)
+    arg :: \"two words;*.jet\"
+    expected: Sh :: \"printf <%s> {arg}\"
+    prefixed :: sh\"printf [%s] {arg}\"
+    audited_cmd :: Sh.raw(\"printf raw\")
 }
 ";
     assert_fmt_stable(src, "typed text");

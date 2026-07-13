@@ -329,13 +329,16 @@ impl<'a> Fmt<'a> {
             Expr::Call(c)
                 if matches!(
                     c.name.as_str(),
-                    Syntax::TYPED_TEXT_SQL_PREFIX_CALL | Syntax::TYPED_TEXT_HTML_PREFIX_CALL
+                    Syntax::TYPED_TEXT_SQL_PREFIX_CALL
+                        | Syntax::TYPED_TEXT_HTML_PREFIX_CALL
+                        | Syntax::TYPED_TEXT_SH_PREFIX_CALL
                 ) =>
             {
-                self.write(if c.name == Syntax::TYPED_TEXT_SQL_PREFIX_CALL {
-                    "sql"
-                } else {
-                    "html"
+                self.write(match c.name.as_str() {
+                    Syntax::TYPED_TEXT_SQL_PREFIX_CALL => "sql",
+                    Syntax::TYPED_TEXT_HTML_PREFIX_CALL => "html",
+                    Syntax::TYPED_TEXT_SH_PREFIX_CALL => "sh",
+                    _ => unreachable!(),
                 });
                 if let Some(arg) = c.args.first() {
                     if let Expr::Str(parts, _) = &arg.expr {

@@ -788,16 +788,22 @@ Example: `examples/features/io/os_facts.jet`.
 
 ### `core.process` — exit and subprocesses (D-PROCESS1)
 
-`process.run(argv)` is beginner sugar over the same one mechanism as
-everything else here: `process.cmd(argv).run()`. Everything is argv-only —
-there is no shell-string helper, so there is no quoting/injection footgun to
-learn.
+`process.run(cmd)` accepts checked `Sh` typed text and directly executes its
+argv. Literal words become argv items; every `{hole}` becomes exactly one item,
+even when its value contains spaces, globs, or shell metacharacters. No shell
+parses the command. `process.cmd(argv).run()` remains the explicit argv path;
+both reach the same subprocess primitive. `Sh.raw(text)` is the sole audited
+runtime-string escape and splits audited text only on whitespace; it still does
+not invoke a shell.
 
 ```jet
 use core.process as process
 use core.time as time
 
 fn run() {
+    target :: "directory with spaces;*.tmp"
+    copied :: process.run(sh"cp -- {target} backup") ?? return
+
     spec :: process.cmd(["cargo", "test"])
         .cwd("crates/app")
         .env_clear()
@@ -826,7 +832,7 @@ fn run() {
 | Function | Returns | What it does |
 |----------|---------|--------------|
 | `exit(code)` | never | Stop the program with the given exit code |
-| `run(cmd)` | `ProcessResult ? IOError` | Beginner sugar for `cmd(cmd).run()`; `cmd` is `[String]` |
+| `run(cmd)` | `ProcessResult ? IOError` | Execute checked `Sh` argv directly; explicit `[String]` argv remains accepted for compatibility |
 | `cmd(argv)` | `ProcessSpec` | Build a subprocess spec from an argv array; no shell string |
 | `pipeline(specs)` | `ProcessResult ? IOError` | Connect stdout to stdin across `[ProcessSpec]` stages, no shell |
 

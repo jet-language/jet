@@ -481,8 +481,11 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // compile-time-known literal segment, odd index is a hole value. A hole
             // never re-enters the template text: `Sql` keeps it as a separate bound
             // param, `Html` HTML-escapes it before joining.
-            if (call.name == "Sql" || call.name == "Html") && !cx.sigs.contains_key(&call.name) {
+            if (call.name == "Sql" || call.name == "Html" || call.name == "Sh")
+                && !cx.sigs.contains_key(&call.name)
+            {
                 let is_sql = call.name == "Sql";
+                let is_sh = call.name == "Sh";
                 let mut literals: Vec<String> = Vec::new();
                 let mut holes: Vec<String> = Vec::new();
                 for (i, a) in call.args.iter().enumerate() {
@@ -511,6 +514,17 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         escape_rust_str(&template),
                         holes.join(", ")
                     )
+                } else if is_sh {
+                    let mut argv = Vec::new();
+                    for (i, lit) in literals.iter().enumerate() {
+                        for word in lit.split_whitespace() {
+                            argv.push(format!("{}.to_string()", escape_rust_str(word)));
+                        }
+                        if let Some(hole) = holes.get(i) {
+                            argv.push(hole.clone());
+                        }
+                    }
+                    format!("vec![{}]", argv.join(", "))
                 } else {
                     // Holes are runtime values — use `format!` (not `+`) so a
                     // literal segment's `&str` never needs an owned-`String` LHS.

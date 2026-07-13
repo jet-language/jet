@@ -299,6 +299,10 @@ pub const STDLIB_DSL_BLOCK_MARKERS: &[&str] = &[DSL_BLOCK_SQL, ATTR_HTML];
 /// synthetic `Sql`/`Html` typed-text calls before codegen.
 pub const TYPED_TEXT_SQL_PREFIX_CALL: &str = "$typed_text_sql";
 pub const TYPED_TEXT_HTML_PREFIX_CALL: &str = "$typed_text_html";
+/// D-FFI-SH1=A: `Sh` is D-TYPEDTEXT1's argv-safe shell-command instance.
+pub const TYPE_SH: &str = "Sh";
+/// D-FFI-SH1=A / D-TYPEDTEXT2: parser sentinel for user spelling `sh"…"`.
+pub const TYPED_TEXT_SH_PREFIX_CALL: &str = "$typed_text_sh";
 
 /// D-OSTARGET1=A (ratified 2026-07-01, c134): `#Target(Os. … )` namespace — the
 /// second, mutually-exclusive axis of the `#Target(...)` marker family
