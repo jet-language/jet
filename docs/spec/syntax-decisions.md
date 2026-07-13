@@ -1667,8 +1667,8 @@ one `AsyncEvent<T,E>` queue; capacity must be positive. Overflow is exactly
 `Block`, `DropNewest`, or `DropOldest`. `emit_async` returns
 `Task<DispatchReport<E>>`. Capacity counts Queued only; Running and Pending do
 not consume a slot. `queued_count`, `running_count`, and `blocked_count` expose
-those states. Dispatch is serial per handle, in stable priority then
-subscription order, with once disabled before invocation. Reports expose
+those states. Each payload uses stable priority then subscription order, with
+once reserved atomically before invocation. Reports expose
 `state`, `accepted`, `delivered_handlers`, `failures`, and ordered `EventTrace`.
 `close()` rejects new and Pending producers as Closed while draining accepted
 Queued and Running work. StopFirst stops after the first `E`; Collect preserves

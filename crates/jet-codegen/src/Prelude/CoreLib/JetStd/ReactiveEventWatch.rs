@@ -779,8 +779,20 @@
                         state.running += 1;
                         entry.trace.lock().unwrap().push("running".to_string());
                         let mut listeners = state.listeners.iter()
-                            .filter(|listener| listener.active.load(std::sync::atomic::Ordering::Acquire))
-                            .map(|listener| (listener.priority, listener.id, listener.once, listener.active.clone(), listener.handler.clone()))
+                            .filter_map(|listener| {
+                                if !listener.active.load(std::sync::atomic::Ordering::Acquire) {
+                                    return None;
+                                }
+                                if listener.once && listener.active.compare_exchange(
+                                    true,
+                                    false,
+                                    std::sync::atomic::Ordering::AcqRel,
+                                    std::sync::atomic::Ordering::Acquire,
+                                ).is_err() {
+                                    return None;
+                                }
+                                Some((listener.priority, listener.id, listener.once, listener.active.clone(), listener.handler.clone()))
+                            })
                             .collect::<Vec<_>>();
                         listeners.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
                         for blocked in &state.blocked { blocked.wake.wake(); }
@@ -797,8 +809,10 @@
                         trace: entry.trace.lock().unwrap().clone(),
                     };
                     for (handler_index, (_, _, once, active, handler)) in listeners.into_iter().enumerate() {
-                        if !active.load(std::sync::atomic::Ordering::Acquire) { continue; }
-                        if once { active.store(false, std::sync::atomic::Ordering::Release); }
+                        // A once listener is reserved by clearing `active` while
+                        // the async state lock is held. Its owning snapshot must
+                        // still invoke it; later snapshots cannot reserve it.
+                        if !once && !active.load(std::sync::atomic::Ordering::Acquire) { continue; }
                         report.delivered_handlers += 1;
                         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(payload.clone())));
                         match outcome {

@@ -5460,6 +5460,25 @@ fn run() {
     oldest_first.join()
     oldest_third.join()
 
+    once_scope :: event.scope()
+    once_event :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 2, overflow: .Block }, .Collect) ?? panic("policy")
+    (once_started_tx, once_started_rx) :: tasks.channel<Int>()
+    (once_release_tx, once_release_rx) :: tasks.channel<Int>()
+    once_event.on_priority(once_scope, 10, (n: Int) => {
+        if n == 1 {
+            once_started_tx.send(copy n)
+            released_once :: once_release_rx.receive() ?? panic("release")
+        }
+    })
+    once_event.once(once_scope, (n: Int) => {})
+    once_first :: once_event.emit_async(1)
+    once_started :: once_started_rx.receive() ?? panic("started")
+    once_second :: once_event.emit_async(2)
+    once_second_report :: once_second.join()
+    once_release_tx.send(1)
+    once_first_report :: once_first.join()
+    print("once first={once_first_report.delivered_handlers()} second={once_second_report.delivered_handlers()}")
+
     failure_scope :: event.scope()
     collect :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
     collect.on_priority(failure_scope, 10, (n: Int) => err("high"))
@@ -5505,7 +5524,7 @@ fn run() {
     assert_eq!(code, 0, "async event policies failed: {stderr}");
     assert_eq!(
         stdout,
-        "newest=true\noldest=true\ncollect=true handlers=2 failures=2\nqueued -> running -> handler:0:failed -> handler:1:failed -> terminal:HandlerFailed\nstop=true handlers=1 failures=1\nlog error=true handlers=2 failures=0 traced=true\nignore error=true handlers=2 failures=0 traced=false\npanic log=true handlers=1 failures=1 traced=true\npanic ignore=true handlers=1 failures=1 traced=true\n"
+        "newest=true\noldest=true\nonce first=2 second=1\ncollect=true handlers=2 failures=2\nqueued -> running -> handler:0:failed -> handler:1:failed -> terminal:HandlerFailed\nstop=true handlers=1 failures=1\nlog error=true handlers=2 failures=0 traced=true\nignore error=true handlers=2 failures=0 traced=false\npanic log=true handlers=1 failures=1 traced=true\npanic ignore=true handlers=1 failures=1 traced=true\n"
     );
     let _ = fs::remove_dir_all(&dir);
 }
