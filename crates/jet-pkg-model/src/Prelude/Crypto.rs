@@ -20,27 +20,6 @@ const ALGO_CHACHA20: u8 = 1;
 const ALGO_AES256: u8 = 2;
 const NONCE_LEN: usize = 12;
 
-#[derive(Debug, Eq, PartialEq)]
-enum JetCryptoError {
-    Entropy(JetCryptoEntropyError),
-    Operation(String),
-}
-
-impl From<JetCryptoEntropyError> for JetCryptoError {
-    fn from(error: JetCryptoEntropyError) -> Self {
-        Self::Entropy(error)
-    }
-}
-
-impl std::fmt::Display for JetCryptoError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Entropy(error) => error.fmt(formatter),
-            Self::Operation(message) => formatter.write_str(message),
-        }
-    }
-}
-
 fn crypto_operation_error(message: impl Into<String>) -> JetCryptoError {
     JetCryptoError::Operation(message.into())
 }

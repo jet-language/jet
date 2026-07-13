@@ -49,24 +49,32 @@ mod tests {
     fn entropy_failure_stays_typed_until_each_public_bridge_boundary() {
         let key = vec![7u8; 32];
         let plaintext = b"secret".to_vec();
+
+        fail_entropy();
+        assert_eq!(
+            jet_crypto_entropy_bytes(32),
+            Err(JetCryptoError::Unavailable)
+        );
+        jet_crypto_entropy_clear_test_provider();
+
         fail_entropy();
         assert_eq!(
             seal_with_algo(&key, &plaintext, ALGO_CHACHA20),
-            Err(JetCryptoError::Entropy(JetCryptoEntropyError::Unavailable))
+            Err(JetCryptoError::Unavailable)
         );
         jet_crypto_entropy_clear_test_provider();
 
         fail_entropy();
         assert_eq!(
             crypto_keygen(),
-            Err(JetCryptoError::Entropy(JetCryptoEntropyError::Unavailable))
+            Err(JetCryptoError::Unavailable)
         );
         jet_crypto_entropy_clear_test_provider();
 
         fail_entropy();
         assert_eq!(
             crypto_password_hash(&"password".to_string()),
-            Err(JetCryptoError::Entropy(JetCryptoEntropyError::Unavailable))
+            Err(JetCryptoError::Unavailable)
         );
         jet_crypto_entropy_clear_test_provider();
     }

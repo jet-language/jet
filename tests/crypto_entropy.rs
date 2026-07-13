@@ -257,70 +257,56 @@ fn live_provider_obeys_bounds_zero_and_concurrency() {
     }
 }
 
+#[test]
+fn live_provider_subprocess_child() {
+    if std::env::var_os("JET_CRYPTO_ENTROPY_SUBPROCESS").is_none() {
+        return;
+    }
+    let bytes = jet_crypto_entropy_bytes(64).unwrap();
+    let encoded: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+    println!("JET_CRYPTO_ENTROPY={encoded}");
+}
+
 #[cfg(target_os = "linux")]
 #[test]
-fn live_provider_remains_independent_across_fork() {
-    use std::os::raw::{c_int, c_void};
-
-    unsafe extern "C" {
-        fn close(fd: c_int) -> c_int;
-        fn fork() -> c_int;
-        fn pipe(fds: *mut c_int) -> c_int;
-        fn read(fd: c_int, buffer: *mut c_void, count: usize) -> isize;
-        fn waitpid(pid: c_int, status: *mut c_int, options: c_int) -> c_int;
-        fn write(fd: c_int, buffer: *const c_void, count: usize) -> isize;
-        fn _exit(status: c_int) -> !;
-    }
+fn live_provider_remains_independent_across_process_exec() {
+    use std::io::Read;
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
 
     let parent_bytes = jet_crypto_entropy_bytes(64).unwrap();
-    let mut fds = [-1; 2];
-    assert_eq!(unsafe { pipe(fds.as_mut_ptr()) }, 0);
-    let pid = unsafe { fork() };
-    assert!(pid >= 0, "fork failed");
-    if pid == 0 {
-        unsafe { close(fds[0]) };
-        let child_bytes = match jet_crypto_entropy_bytes(64) {
-            Ok(bytes) => bytes,
-            Err(_) => unsafe { _exit(2) },
-        };
-        let mut written = 0usize;
-        while written < child_bytes.len() {
-            let count = unsafe {
-                write(
-                    fds[1],
-                    child_bytes[written..].as_ptr().cast(),
-                    child_bytes.len() - written,
-                )
-            };
-            if count <= 0 {
-                unsafe { _exit(3) };
-            }
-            written += count as usize;
+    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "live_provider_subprocess_child", "--nocapture"])
+        .env("JET_CRYPTO_ENTROPY_SUBPROCESS", "1")
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
         }
-        unsafe { close(fds[1]) };
-        unsafe { _exit(0) };
-    }
-
-    unsafe { close(fds[1]) };
-    let mut child_bytes = [0u8; 64];
-    let mut received = 0usize;
-    while received < child_bytes.len() {
-        let count = unsafe {
-            read(
-                fds[0],
-                child_bytes[received..].as_mut_ptr().cast(),
-                child_bytes.len() - received,
-            )
-        };
-        assert!(count > 0, "child entropy pipe closed early");
-        received += count as usize;
-    }
-    unsafe { close(fds[0]) };
-    let mut status = 0;
-    assert_eq!(unsafe { waitpid(pid, &mut status, 0) }, pid);
-    assert_eq!(status, 0, "child entropy process failed: wait status {status}");
-    assert_ne!(child_bytes, [0; 64]);
-    assert_ne!(parent_bytes, child_bytes);
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("entropy subprocess exceeded five-second deadline");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    assert!(status.success(), "entropy subprocess failed: {status}");
+    let mut stdout = String::new();
+    child.stdout.take().unwrap().read_to_string(&mut stdout).unwrap();
+    let encoded = stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("JET_CRYPTO_ENTROPY="))
+        .expect("child emitted entropy marker");
+    assert_eq!(encoded.len(), 128);
+    assert!(encoded.bytes().all(|byte| byte.is_ascii_hexdigit()));
+    let parent_encoded: String = parent_bytes
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    assert_ne!(encoded, parent_encoded);
 }
 
 #[test]

@@ -4,22 +4,27 @@
 
 mod jet_crypto_entropy {
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum JetCryptoEntropyError {
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(dead_code)]
+pub enum JetCryptoError {
     NegativeLength,
     TooLarge,
     Unavailable,
+    Operation(String),
 }
 
-impl std::fmt::Display for JetCryptoEntropyError {
+impl std::fmt::Display for JetCryptoError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             Self::NegativeLength => "cryptographic random length cannot be negative",
             Self::TooLarge => "one cryptographic random request is limited to 1048576 bytes",
             Self::Unavailable => "the operating system could not provide cryptographic randomness",
+            Self::Operation(message) => return f.write_str(message),
         })
     }
 }
+
+pub type JetCryptoEntropyError = JetCryptoError;
 
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -385,6 +390,8 @@ pub fn jet_crypto_entropy_fill(out: &mut [u8]) -> Result<(), JetCryptoEntropyErr
 pub use jet_crypto_entropy::{
     jet_crypto_entropy_bytes, jet_crypto_entropy_fill, JetCryptoEntropyError,
 };
+#[allow(unused_imports)]
+pub use jet_crypto_entropy::JetCryptoError;
 #[allow(unused_imports)]
 pub(crate) use jet_crypto_entropy::jet_crypto_entropy_zeroize;
 
