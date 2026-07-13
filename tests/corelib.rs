@@ -114,6 +114,100 @@ fn run() {{
     let _ = fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn json_stream_defaults_paths_limits_and_terminal_errors_are_stable() {
+    let dir = std::env::temp_dir().join(format!("jet_json_stream_hostile_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let input_path = dir.join("hostile.json");
+    let default_path = dir.join("default.json");
+    let limited_path = dir.join("limited.json");
+    fs::write(&input_path, r#"{"o":[0,{"i":"\u263a"}]}"#).unwrap();
+    let input_text = input_path.to_string_lossy().replace('\\', "\\\\");
+    let default_text = default_path.to_string_lossy().replace('\\', "\\\\");
+    let limited_text = limited_path.to_string_lossy().replace('\\', "\\\\");
+    let source = format!(
+        r#"
+use core.encoding as encoding
+use core.encoding.json as json
+use core.files as files
+
+fn run() {{
+    default_output :: files.create("{default_text}") ?? panic("create")
+    default_writer :: json.writer(^default_output) ?? panic("default writer")
+    default_writer.write(encoding.DataEvent.Null) ?? panic("default write")
+    default_writer.finish() ?? panic("default finish")
+    default_input :: files.open("{default_text}") ?? panic("default open")
+    default_reader :: json.reader(^default_input) ?? panic("default reader")
+    if default_reader.next() == {{
+        ok(_) -> {{ print(true) }}
+        err(_) -> {{ print(false) }}
+    }}
+
+    limits := encoding.EncodingLimits.safe()
+    limits.max_item_bytes = 2
+    input :: files.open("{input_text}") ?? panic("open")
+    reader :: json.reader(^input, limits) ?? panic("reader")
+    count := 0
+    loop count < 8 {{
+        result :: reader.next()
+        if result == {{
+            ok(_) -> {{ count++ }}
+            err(first) -> {{
+                again :: reader.next()
+                if again == {{
+                    ok(_) -> {{ print("reader-not-latched") }}
+                    err(second) -> {{
+                        print(first.path)
+                        print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason)
+                    }}
+                }}
+                break
+            }}
+        }}
+    }}
+
+    finished_output :: files.create("{limited_text}") ?? panic("create")
+    finished_writer :: json.writer(^finished_output) ?? panic("writer")
+    finished_writer.write(encoding.DataEvent.Null) ?? panic("write")
+    finished_writer.finish() ?? panic("finish")
+    after_finish :: finished_writer.write(encoding.DataEvent.Null)
+    if after_finish == {{
+        ok(_) -> {{ print("finish-missed") }}
+        err(first) -> {{
+            after_flush :: finished_writer.flush()
+            if after_flush == {{
+                ok(_) -> {{ print("finish-not-latched") }}
+                err(second) -> {{ print(first.byte_offset == second.byte_offset && first.reason == second.reason) }}
+            }}
+        }}
+    }}
+
+    escaped_limits := encoding.EncodingLimits.safe()
+    escaped_limits.max_item_bytes = 1
+    escaped_output :: files.create("{limited_text}") ?? panic("create")
+    escaped_writer :: json.writer(^escaped_output, escaped_limits) ?? panic("writer")
+    escaped_result :: escaped_writer.write(encoding.DataEvent.Text("\n"))
+    if escaped_result == {{
+        ok(_) -> {{ print("escape-missed") }}
+        err(first) -> {{
+            escaped_again :: escaped_writer.finish()
+            if escaped_again == {{
+                ok(_) -> {{ print("escape-not-latched") }}
+                err(second) -> {{ print(first.byte_offset == second.byte_offset && first.reason == second.reason) }}
+            }}
+        }}
+    }}
+}}
+"#
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "json_stream_hostile", &source, &[], None);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(stdout, "true\n$[\"o\"][1][\"i\"]\ntrue\ntrue\ntrue\n");
+    assert_eq!(fs::read_to_string(&default_path).unwrap(), "null");
+    assert_eq!(stderr, "");
+    let _ = fs::remove_dir_all(&dir);
+}
+
 fn compile_temp(name: &str, src: &str) -> jet::CompileOutput {
     let dir = std::env::temp_dir().join(format!("jet_corelib_test_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();

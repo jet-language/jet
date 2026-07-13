@@ -107,6 +107,37 @@ impl<'a> Checker<'a> {
             }
             let sig = core_fixed_sig(module, name);
             match (module, name) {
+                ("core.encoding.json", "reader" | "writer") => {
+                    let (min, max) = if name == "reader" { (1, 2) } else { (1, 3) };
+                    if !(min..=max).contains(&args.len()) {
+                        self.diags.push(Diagnostic::error(
+                            "E0104",
+                            format!("`json.{}` expects {} to {} arguments, got {}", name, min, max, args.len()),
+                            "the file handle is required; limits and canonical mode use safe defaults when omitted".to_string(),
+                            if name == "reader" { "write `json.reader(^file)` or `json.reader(^file, limits)`".to_string() } else { "write `json.writer(^file)`, `json.writer(^file, limits)`, or `json.writer(^file, limits, canonical)`".to_string() },
+                            Some(span),
+                        ));
+                    }
+                    let Some((params, ret)) = &sig else { unreachable!() };
+                    for (i, ((conv, param_ty), arg)) in params.iter().zip(args.iter_mut()).enumerate() {
+                        if *conv == AccessConvention::Move {
+                            if arg.convention != AccessConvention::Move {
+                                self.diags.push(Diagnostic::error(
+                                    "E0201",
+                                    format!("argument {} to `{}` transfers ownership (`^`)", i + 1, name),
+                                    "this standard library constructor retains the consumed handle".to_string(),
+                                    format!("write `{}value` for this argument", Syntax::SIGIL_MOVE),
+                                    Some(arg.span),
+                                ));
+                            }
+                            self.expect_core_arg_moving(name, i, param_ty, arg);
+                        } else {
+                            self.expect_core_arg(name, i, param_ty, arg);
+                        }
+                    }
+                    for arg in args.iter_mut().skip(params.len()) { self.infer(&mut arg.expr); }
+                    return ret.clone();
+                }
                 ("core.game", "run") => {
                     if let Some(scene) = args.get_mut(0) {
                         self.check_game_run_scene_edit(&scene.expr);
