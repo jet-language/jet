@@ -50,6 +50,8 @@ pub mod MigrationImport;
 // jetpack's env-runtime and JetOS realization, name it directly
 // (`jet_env_model::ModuleEval`) instead of sharing it by living in the same
 // crate. No re-export here; that was the step-2 shim, now dropped.
+/// E4-JP8 — native Nix `.drv` / path calculus (internal compat surface).
+pub mod NixDrv;
 pub mod Output;
 pub mod Overlay;
 pub mod PackageGraph;
