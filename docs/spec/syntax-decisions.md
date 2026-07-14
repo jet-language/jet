@@ -3574,9 +3574,29 @@ implementation milestone is pending.
 ### Registered for M3–M14
 
 
-| ID   | Question                                   | Needed by |
-| ---- | ------------------------------------------ | --------- |
-| S56  | typed reflection / user derives | **Epoch 3** — Tower #129 |
+| ID | Question | Needed by |
+| --- | -------- | --------- |
+| S56 | typed reflection / user derives | **Epoch 3** — Tower #129 |
+| D-SHAPE1 | binding language-shape constitution | **Epoch 3** — Tower #533 |
+| D-SHAPE2 | user-visible `@` attachment / `#` context boundary | **Epoch 3** — Tower #534 |
+| D-SHAPE-LIFECYCLE | explicit copy at an ownership-taking call | **Epoch 3** — Tower #535 |
+| D-SHAPE3a | construction taxonomy and named constructor verbs | **Epoch 3** — Tower #536 |
+| D-SHAPE4 | Core API verb grammar | **Epoch 3** — Tower #538 |
+| D-SHAPE5a | package-role body structure | **Epoch 3** — Tower #539 |
+| D-SHAPE5b | typed package-output algebra | **Epoch 3** — Tower #540 |
+| D-SHAPE7 | `source@package#version` reference slots | **Epoch 3** — Tower #542 |
+| D-SHAPE8 | collection-shaped effect signatures | **Epoch 3** — Tower #543 |
+| D-SHAPE-DELIMS1 | delimiter constitution | **Epoch 3** — Tower #550 |
+| D-SHAPE-INTERNAL1 | leading-underscore internal / expert surface | **Epoch 3** — Tower #551 |
+| D-SHAPE-PIPE1 | pipe alternatives and data flow | **Epoch 3** — Tower #552 |
+| D-SHAPE-INFER1 | expected-type shorthand boundary | **Epoch 3** — Tower #553 |
+| D-SHAPE-DECL1 | declaration admission rule | **Epoch 3** — Tower #554 |
+| D-SHAPE-CLI1 | function-derived command-line interfaces | **Epoch 3** — Tower #541 |
+| D-SHAPE-ENTRY1 | callable-to-entrypoint law | **Epoch 3** — Tower #544 |
+| D-SHAPE-RESOURCE1 | deterministic resource lifetime and early release | **Epoch 3** — Tower #557 |
+| D-SHAPE-DURATION1 | static and dynamic duration construction | **Epoch 3** — Tower #558 |
+| D-SHAPE-MERGE1 | typed package-role merge and provenance | **Epoch 3** — Tower #559 |
+| D-ECO1 | one-file through workspace package composition | **Epoch 3** — Tower #532 |
 
 
 ## Decision log
