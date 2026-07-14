@@ -472,8 +472,11 @@ fn compiler_seam_crates_have_only_path_dependencies() {
         "D-ARCH-SOURCE1 requires jet-cli ownership, not root CLI/help wrappers"
     );
     assert!(
-        root_lib.contains("pub use jet_devserver as DevServer;"),
-        "D-ARCH-SOURCE1 requires direct jet-devserver ownership exposure"
+        root_lib.contains("pub use jet_devserver as DevServer;")
+            && root_lib.contains("pub use jet_devserver::Canvas;")
+            && !root.join("Source/Canvas.rs").exists()
+            && !root.join("Source/Canvas").exists(),
+        "D-ARCH-SOURCE1 requires jet-devserver ownership of Canvas semantics, not root wrappers"
     );
     assert!(
         root_lib.contains("pub use jet_canvas as CanvasUi;")
@@ -481,6 +484,13 @@ fn compiler_seam_crates_have_only_path_dependencies() {
             && !root.join("Source/Canvas/js.rs").exists()
             && !root.join("Source/Canvas/js").exists(),
         "Canvas browser projection assets must live in jet-canvas"
+    );
+    assert!(
+        root_lib.contains("pub use jet_driver::BudgetView;")
+            && root_lib.contains("pub use jet_driver::FixEngine;")
+            && !root.join("Source/BudgetView.rs").exists()
+            && !root.join("Source/FixEngine.rs").exists(),
+        "Canvas shared compiler helpers must live inward in jet-driver"
     );
     assert!(
         root_lib.contains("pub use jet_foundation::ExitCodes;")

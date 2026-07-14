@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::FixEngine;
+use jet_driver::FixEngine;
 use jet_semindex::{SemIndex, SourceSpan, SymbolKind};
 
 use super::graph_helpers::{
@@ -351,13 +351,13 @@ struct CoreCatalogMember {
 
 fn core_catalog_entries(query: &str) -> Vec<CoreCatalogModule> {
     let needle = query.trim();
-    let mut modules = parse_core_catalog_markdown(include_str!("../../docs/reference/core-library.md"));
+    let mut modules = parse_core_catalog_markdown(include_str!("../../../../docs/reference/core-library.md"));
     let exports = parse_sema_core_module_items(
-        include_str!("../../crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs"),
+        include_str!("../../../../crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs"),
     );
     merge_sema_core_registry(
         &mut modules,
-        include_str!("../../crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs"),
+        include_str!("../../../../crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs"),
     );
     mark_core_catalog_availability(&mut modules, &exports);
     if !needle.is_empty() {
@@ -1307,10 +1307,10 @@ pub(super) struct CanvasAuthority {
 
 pub(super) fn canvas_authority_context(path: &Path) -> CanvasAuthority {
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
-    if let Some(root) = crate::Loader::find_manifest_root(dir) {
-        let manifest_path = root.join(crate::Syntax::PAYLOAD_FILE);
+    if let Some(root) = jet_driver::Loader::find_manifest_root(dir) {
+        let manifest_path = root.join(jet_driver::Syntax::PAYLOAD_FILE);
         if let Ok(raw) = fs::read_to_string(&manifest_path) {
-            if let Ok(manifest) = crate::PackageManifest::parse(&raw) {
+            if let Ok(manifest) = jet_driver::PackageManifest::parse(&raw) {
                 return CanvasAuthority {
                     grant: "canvas.source_edit:package".to_string(),
                     package_id: manifest.package.name,

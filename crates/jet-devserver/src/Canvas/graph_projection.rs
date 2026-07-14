@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::AST::{self, Expr, Item, Stmt};
+use jet_driver::AST::{self, Expr, Item, Stmt};
 use jet_semindex::{SemIndex, SemIndexEffectFacts, SourceSpan, SymbolKind};
 
 use super::graph_helpers::{
@@ -44,7 +44,7 @@ pub(super) fn project_checked(
             &mut node_refs,
         );
     }
-    let fmt = crate::format_source(src).unwrap_or_else(|_| src.to_string());
+    let fmt = jet_driver::Formatter::format_source(src).unwrap_or_else(|_| src.to_string());
     let blueprint = canvas_blueprint_facts_json(src, bundle, &index);
     let json = format!(
         "{{\"protocol\":\"jet.canvas.graph\",\"schema_version\":{},\"source_id\":{},\"revision\":{},\"fmt_fingerprint\":{},\"source_text\":{},\"graphs\":[{}],\"diagnostics\":[],\"facts\":{{\"semindex_schema_version\":{},\"handles\":[\"definitions\",\"references\",\"calls\",\"effects\",\"members\"],\"blueprint\":{}}}}}",

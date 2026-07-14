@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::Diagnostics::{Diagnostic, Severity};
+use jet_driver::Diagnostics::{Diagnostic, Severity};
 
 use super::graph_helpers::{project_edit_error, project_edit_ok, simple_diff};
 use super::project_scan::{
@@ -73,8 +73,8 @@ pub(super) fn apply_project_add_dependency(
     let manifest_rel = json_string_field(request, "manifest").unwrap_or_else(|| {
         ctx.manifest_root
             .as_deref()
-            .map(|root| rel_path(&ctx.project_root, &root.join(crate::Syntax::PAYLOAD_FILE)))
-            .unwrap_or_else(|| crate::Syntax::PAYLOAD_FILE.to_string())
+            .map(|root| rel_path(&ctx.project_root, &root.join(jet_driver::Syntax::PAYLOAD_FILE)))
+            .unwrap_or_else(|| jet_driver::Syntax::PAYLOAD_FILE.to_string())
     });
     if !touched.iter().any(|f| f.path == manifest_rel) {
         return Err(project_edit_error(
@@ -88,8 +88,8 @@ pub(super) fn apply_project_add_dependency(
     let spec = project_dep_spec(&spec_text)?;
     let manifest_path = ctx.project_root.join(&manifest_rel);
     let before = fs::read_to_string(&manifest_path).map_err(|e| project_edit_error("io", &e.to_string()))?;
-    let after = crate::Manifest::add_dependency(&before, &name, &spec);
-    crate::PackageManifest::parse(&after)
+    let after = jet_driver::Manifest::add_dependency(&before, &name, &spec);
+    jet_driver::PackageManifest::parse(&after)
         .map_err(|e| project_edit_error("diagnostic", &format!("{:?}", e)))?;
     let change = ProjectChange {
         path: manifest_path,
@@ -108,8 +108,8 @@ pub(super) fn apply_project_remove_dependency(
     let manifest_rel = json_string_field(request, "manifest").unwrap_or_else(|| {
         ctx.manifest_root
             .as_deref()
-            .map(|root| rel_path(&ctx.project_root, &root.join(crate::Syntax::PAYLOAD_FILE)))
-            .unwrap_or_else(|| crate::Syntax::PAYLOAD_FILE.to_string())
+            .map(|root| rel_path(&ctx.project_root, &root.join(jet_driver::Syntax::PAYLOAD_FILE)))
+            .unwrap_or_else(|| jet_driver::Syntax::PAYLOAD_FILE.to_string())
     });
     if !touched.iter().any(|f| f.path == manifest_rel) {
         return Err(project_edit_error(
@@ -121,8 +121,8 @@ pub(super) fn apply_project_remove_dependency(
     validate_ident_for_project(&name)?;
     let manifest_path = ctx.project_root.join(&manifest_rel);
     let before = fs::read_to_string(&manifest_path).map_err(|e| project_edit_error("io", &e.to_string()))?;
-    let after = crate::Manifest::remove_dependency(&before, &name);
-    crate::PackageManifest::parse(&after)
+    let after = jet_driver::Manifest::remove_dependency(&before, &name);
+    jet_driver::PackageManifest::parse(&after)
         .map_err(|e| project_edit_error("diagnostic", &format!("{:?}", e)))?;
     let change = ProjectChange {
         path: manifest_path,
@@ -151,7 +151,7 @@ pub(super) fn apply_project_edit_pkg_field(
     let manifest_path = ctx.project_root.join(&manifest_rel);
     let before = fs::read_to_string(&manifest_path).map_err(|e| project_edit_error("io", &e.to_string()))?;
     let after = set_manifest_payload_field(&before, &field, &value)?;
-    crate::PackageManifest::parse(&after)
+    jet_driver::PackageManifest::parse(&after)
         .map_err(|e| project_edit_error("diagnostic", &format!("{:?}", e)))?;
     finish_project_changes(
         ctx,
@@ -186,7 +186,7 @@ pub(super) fn apply_project_add_target(
     let manifest_path = ctx.project_root.join(&manifest_rel);
     let before = fs::read_to_string(&manifest_path).map_err(|e| project_edit_error("io", &e.to_string()))?;
     let after = add_manifest_target(&before, &name, target)?;
-    crate::PackageManifest::parse(&after)
+    jet_driver::PackageManifest::parse(&after)
         .map_err(|e| project_edit_error("diagnostic", &format!("{:?}", e)))?;
     finish_project_changes(
         ctx,
@@ -205,8 +205,8 @@ fn project_manifest_rel(ctx: &ProjectContext, request: &str) -> String {
     json_string_field(request, "manifest").unwrap_or_else(|| {
         ctx.manifest_root
             .as_deref()
-            .map(|root| rel_path(&ctx.project_root, &root.join(crate::Syntax::PAYLOAD_FILE)))
-            .unwrap_or_else(|| crate::Syntax::PAYLOAD_FILE.to_string())
+            .map(|root| rel_path(&ctx.project_root, &root.join(jet_driver::Syntax::PAYLOAD_FILE)))
+            .unwrap_or_else(|| jet_driver::Syntax::PAYLOAD_FILE.to_string())
     })
 }
 
@@ -246,7 +246,7 @@ pub(super) fn apply_project_create_package(
     }
     let target = json_string_field(request, "target").unwrap_or_else(|| "executable".to_string());
     let target = project_target_text(&target)?;
-    let manifest_rel = format!("{package_rel}/{}", crate::Syntax::PAYLOAD_FILE);
+    let manifest_rel = format!("{package_rel}/{}", jet_driver::Syntax::PAYLOAD_FILE);
     require_touched_revision(touched, &manifest_rel, "missing")?;
     require_touched_revision(touched, &entry_rel, "missing")?;
 
@@ -262,18 +262,18 @@ pub(super) fn apply_project_create_package(
         "payload: {{\n    name: \"{}\",\n    version: \"0.1.0\",\n}}\npackages: {{\n    {}: {},\n}}\n",
         name, name, target
     );
-    crate::PackageManifest::parse(&manifest)
+    jet_driver::PackageManifest::parse(&manifest)
         .map_err(|e| project_edit_error("diagnostic", &format!("{:?}", e)))?;
     let entry = if target == "library" {
         format!("pub fn {}_ready() -> Bool {{\n    return true\n}}\n", name)
     } else {
         format!("fn run() {{\n    print(\"{}\")\n}}\n", name)
     };
-    let (tokens, lex_diags) = crate::Lexer::lex(&entry);
+    let (tokens, lex_diags) = jet_driver::Lexer::lex(&entry);
     if let Some(d) = lex_diags.into_iter().find(|d| d.severity == Severity::Error) {
         return Err(project_edit_error("diagnostic", &d.what));
     }
-    crate::Parser::parse(&tokens)
+    jet_driver::Parser::parse(&tokens)
         .map(|_| ())
         .map_err(|mut diags| {
             let what = diags
@@ -307,10 +307,10 @@ pub(super) fn apply_project_add_workspace_member(
     let workspace_rel = json_string_field(request, "workspace")
         .map(|path| clean_project_rel_path(&path))
         .transpose()?
-        .unwrap_or_else(|| crate::Syntax::WORKSPACE_FILE.to_string());
+        .unwrap_or_else(|| jet_driver::Syntax::WORKSPACE_FILE.to_string());
     let member_path = clean_project_rel_path(&required_project_string(request, "member_path")?)?;
     let member_dir = ctx.project_root.join(&member_path);
-    if !member_dir.join(crate::Syntax::PAYLOAD_FILE).is_file() {
+    if !member_dir.join(jet_driver::Syntax::PAYLOAD_FILE).is_file() {
         return Err(project_edit_error(
             "not_found",
             "workspace member must contain a pkg.jet",
@@ -359,7 +359,7 @@ pub(super) fn apply_project_add_env_service(
     let env_rel = json_string_field(request, "env")
         .map(|path| clean_project_rel_path(&path))
         .transpose()?
-        .unwrap_or_else(|| crate::Syntax::ENV_FILE.to_string());
+        .unwrap_or_else(|| jet_driver::Syntax::ENV_FILE.to_string());
     let env_path = ctx.project_root.join(&env_rel);
     let existed = env_path.is_file();
     require_touched_revision(
@@ -693,12 +693,12 @@ fn project_target_text(target: &str) -> Result<&'static str, String> {
     }
 }
 
-fn project_dep_spec(spec: &str) -> Result<crate::Manifest::DepSpec, String> {
+fn project_dep_spec(spec: &str) -> Result<jet_driver::Manifest::DepSpec, String> {
     if let Some(path) = spec.strip_prefix("path@") {
         if path.trim().is_empty() {
             return Err(project_edit_error("bad_request", "path dependency needs a path"));
         }
-        return Ok(crate::Manifest::DepSpec::Path {
+        return Ok(jet_driver::Manifest::DepSpec::Path {
             path: path.to_string(),
         });
     }
@@ -711,7 +711,7 @@ fn project_dep_spec(spec: &str) -> Result<crate::Manifest::DepSpec, String> {
     if spec.trim().is_empty() {
         return Err(project_edit_error("bad_request", "dependency spec is empty"));
     }
-    Ok(crate::Manifest::DepSpec::Registry(spec.to_string()))
+    Ok(jet_driver::Manifest::DepSpec::Registry(spec.to_string()))
 }
 
 fn finish_project_changes(
@@ -788,18 +788,18 @@ fn normalize_and_validate_project_changes(
         if change.before == change.after {
             continue;
         }
-        if change.rel.ends_with(&format!("/{}", crate::Syntax::PAYLOAD_FILE))
-            || change.rel == crate::Syntax::PAYLOAD_FILE
+        if change.rel.ends_with(&format!("/{}", jet_driver::Syntax::PAYLOAD_FILE))
+            || change.rel == jet_driver::Syntax::PAYLOAD_FILE
         {
-            crate::PackageManifest::parse(&change.after)
+            jet_driver::PackageManifest::parse(&change.after)
                 .map_err(|e| project_edit_error("diagnostic", &format!("{:?}", e)))?;
-        } else if change.rel.ends_with(&format!("/{}", crate::Syntax::WORKSPACE_FILE))
-            || change.rel == crate::Syntax::WORKSPACE_FILE
+        } else if change.rel.ends_with(&format!("/{}", jet_driver::Syntax::WORKSPACE_FILE))
+            || change.rel == jet_driver::Syntax::WORKSPACE_FILE
         {
             jetpack::WorkspaceFile::evaluate(&change.after, &ctx.project_root)
                 .map_err(|d| project_edit_error("diagnostic", &d.what))?;
-        } else if change.rel.ends_with(&format!("/{}", crate::Syntax::ENV_FILE))
-            || change.rel == crate::Syntax::ENV_FILE
+        } else if change.rel.ends_with(&format!("/{}", jet_driver::Syntax::ENV_FILE))
+            || change.rel == jet_driver::Syntax::ENV_FILE
         {
             jet_env_model::ModuleEval::evaluate_env(&change.after, &ctx.project_root)
                 .map_err(|d| project_edit_error("diagnostic", &d.what))?;
@@ -807,12 +807,12 @@ fn normalize_and_validate_project_changes(
             .path
             .extension()
             .and_then(|e| e.to_str())
-            == Some(crate::Syntax::FILE_EXT)
+            == Some(jet_driver::Syntax::FILE_EXT)
         {
-            change.after = crate::format_source(&change.after).map_err(|diags| {
+            change.after = jet_driver::Formatter::format_source(&change.after).map_err(|diags| {
                 project_edit_error(
                     "diagnostic",
-                    &crate::render_diagnostics(
+                    &jet_driver::Diagnostics::render_all(
                         &change.path.display().to_string(),
                         &change.after,
                         &diags,
@@ -833,10 +833,10 @@ fn normalize_and_validate_project_changes(
 fn validate_project_jet_overlay(path: &Path, src: &str) -> Result<(), String> {
     let shown = path.display().to_string();
     let diags = if path.exists() {
-        let (diags, _) = crate::Driver::check_file(&shown, Some((path, src)), false);
+        let (diags, _) = jet_driver::Driver::check_file(&shown, Some((path, src)), false);
         diags
     } else {
-        crate::check_for_eval(src, &shown)
+        jet_driver::Driver::check_eval(src, &shown)
     };
     let errors = diags
         .into_iter()
@@ -847,7 +847,7 @@ fn validate_project_jet_overlay(path: &Path, src: &str) -> Result<(), String> {
     }
     Err(project_edit_error(
         "diagnostic",
-        &crate::render_diagnostics(&shown, src, &errors),
+        &jet_driver::Diagnostics::render_all(&shown, src, &errors),
     ))
 }
 
@@ -894,17 +894,17 @@ struct ProjectWriteBackup {
 }
 
 fn project_file_kind_for_rel(rel: &str) -> &'static str {
-    if rel.ends_with(&format!("/{}", crate::Syntax::PAYLOAD_FILE))
-        || rel == crate::Syntax::PAYLOAD_FILE
+    if rel.ends_with(&format!("/{}", jet_driver::Syntax::PAYLOAD_FILE))
+        || rel == jet_driver::Syntax::PAYLOAD_FILE
     {
         "manifest"
-    } else if rel.ends_with(&format!("/{}", crate::Syntax::WORKSPACE_FILE))
-        || rel == crate::Syntax::WORKSPACE_FILE
+    } else if rel.ends_with(&format!("/{}", jet_driver::Syntax::WORKSPACE_FILE))
+        || rel == jet_driver::Syntax::WORKSPACE_FILE
     {
         "workspace"
-    } else if rel.ends_with(&format!("/{}", crate::Syntax::ENV_FILE)) || rel == crate::Syntax::ENV_FILE {
+    } else if rel.ends_with(&format!("/{}", jet_driver::Syntax::ENV_FILE)) || rel == jet_driver::Syntax::ENV_FILE {
         "env"
-    } else if rel == crate::Syntax::UNIFIED_LOCK_FILE {
+    } else if rel == jet_driver::Syntax::UNIFIED_LOCK_FILE {
         "lock"
     } else {
         "source"

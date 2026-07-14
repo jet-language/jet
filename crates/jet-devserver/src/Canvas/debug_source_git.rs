@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::Diagnostics::Diagnostic;
+use jet_driver::Diagnostics::Diagnostic;
 use jet_semindex::SourceSpan;
 
 use super::schema_api::{DEBUG_SCHEMA_VERSION, source_revision};
@@ -63,7 +63,7 @@ pub(super) fn debug_error(kind: &str, message: &str) -> String {
 pub(super) fn debug_diagnostics_error(path: &Path, src: &str, diags: &[Diagnostic]) -> String {
     debug_error(
         "diagnostic",
-        &crate::render_diagnostics(&path.display().to_string(), src, diags),
+        &jet_driver::Diagnostics::render_all(&path.display().to_string(), src, diags),
     )
 }
 

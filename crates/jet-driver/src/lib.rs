@@ -6,7 +6,9 @@ pub use jet_codegen::{
     Sema, Syntax, TargetProfile, Traits, AST, SHA256,
 };
 pub mod Compile;
+pub mod BudgetView;
 pub mod Driver;
+pub mod FixEngine;
 pub mod Foreign;
 pub mod InterpreterBoundary;
 pub mod Loader;

@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::Diagnostics::Span;
-use crate::AST;
+use jet_driver::Diagnostics::Span;
+use jet_driver::AST;
 use jet_semindex::SourceSpan;
 
 use super::debug_source_git::span_overlaps;

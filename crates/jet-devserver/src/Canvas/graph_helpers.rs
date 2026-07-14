@@ -1,8 +1,8 @@
 use std::fs;
 use std::path::Path;
 
-use crate::Diagnostics::{Diagnostic, Severity, Span, TextEdit};
-use crate::AST::{self, Expr};
+use jet_driver::Diagnostics::{Diagnostic, Severity, Span, TextEdit};
+use jet_driver::AST::{self, Expr};
 use jet_semindex::{SemIndex, SourceSpan, SymbolKind};
 
 use super::graph_json::add_wire_with_span;
@@ -532,7 +532,7 @@ pub(super) fn project_edit_error(kind: &str, message: &str) -> String {
 pub(super) fn diagnostics_error(path: &Path, src: &str, diags: &[Diagnostic]) -> String {
     edit_error_with_diagnostics(
         "diagnostic",
-        &crate::render_diagnostics(&path.display().to_string(), src, diags),
+        &jet_driver::Diagnostics::render_all(&path.display().to_string(), src, diags),
         path,
         src,
         diags,
@@ -542,7 +542,7 @@ pub(super) fn diagnostics_error(path: &Path, src: &str, diags: &[Diagnostic]) ->
 pub(super) fn query_diagnostics_error(path: &Path, src: &str, diags: &[Diagnostic]) -> String {
     query_error_with_diagnostics(
         "diagnostic",
-        &crate::render_diagnostics(&path.display().to_string(), src, diags),
+        &jet_driver::Diagnostics::render_all(&path.display().to_string(), src, diags),
         path,
         src,
         diags,
@@ -564,7 +564,7 @@ fn diagnostic_payload_json(path: &Path, src: &str, d: &Diagnostic) -> String {
     };
     let span_json = match d.span {
         Some(span) => {
-            let (line, column) = crate::Diagnostics::span_line_col(src, span.start);
+            let (line, column) = jet_driver::Diagnostics::span_line_col(src, span.start);
             format!(
                 "{{\"start\":{},\"end\":{},\"line\":{},\"column\":{}}}",
                 span.start, span.end, line, column
@@ -572,7 +572,7 @@ fn diagnostic_payload_json(path: &Path, src: &str, d: &Diagnostic) -> String {
         }
         None => "null".to_string(),
     };
-    let rendered = crate::render_diagnostics(&path.display().to_string(), src, std::slice::from_ref(d));
+    let rendered = jet_driver::Diagnostics::render_all(&path.display().to_string(), src, std::slice::from_ref(d));
     format!(
         "{{\"code\":{},\"severity\":{},\"what\":{},\"why\":{},\"fix\":{},\"message\":{},\"rendered\":{},\"source_span\":{},\"source_path\":{}}}",
         json_str(&d.code),

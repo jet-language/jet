@@ -3,8 +3,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::Diagnostics::{Diagnostic, Severity};
-use crate::SHA256;
+use jet_driver::Diagnostics::{Diagnostic, Severity};
+use jet_driver::SHA256;
 use jet_semindex::SourceSpan;
 
 use super::debug_source_git::{
@@ -169,7 +169,7 @@ pub fn graph_json_for_entry_source(
         let src = fs::read_to_string(&path).unwrap_or_default();
         query_error(
             "diagnostic",
-            &crate::render_diagnostics(&path.display().to_string(), &src, &diags),
+            &jet_driver::Diagnostics::render_all(&path.display().to_string(), &src, &diags),
         )
     })
 }
@@ -177,7 +177,7 @@ pub fn graph_json_for_entry_source(
 /// Resolve a project-relative source id without escaping the projected source truth.
 pub fn project_path_for_source_id(entry: &Path, source_id: &str) -> Option<PathBuf> {
     let wanted = clean_project_rel_path(source_id).ok()?;
-    if Path::new(&wanted).extension().and_then(|e| e.to_str()) != Some(crate::Syntax::FILE_EXT) {
+    if Path::new(&wanted).extension().and_then(|e| e.to_str()) != Some(jet_driver::Syntax::FILE_EXT) {
         return None;
     }
     let ctx = project_context_for_entry(entry);
@@ -190,7 +190,7 @@ pub fn project_path_for_source_id(entry: &Path, source_id: &str) -> Option<PathB
     }
     let candidate = ctx.project_root.join(&wanted);
     if candidate.is_file()
-        && candidate.extension().and_then(|e| e.to_str()) == Some(crate::Syntax::FILE_EXT)
+        && candidate.extension().and_then(|e| e.to_str()) == Some(jet_driver::Syntax::FILE_EXT)
         && project_source_roots(&ctx)
             .iter()
             .any(|root| canonical_path(&candidate).starts_with(canonical_path(root)))
@@ -504,7 +504,7 @@ pub fn proof_json_for_entry_with_receipt(
                 .to_string()
         }
         Err(diags) => {
-            let message = crate::render_diagnostics(&path.display().to_string(), &src, &diags);
+            let message = jet_driver::Diagnostics::render_all(&path.display().to_string(), &src, &diags);
             format!(
                 "{{\"state\":\"diagnostic\",\"diagnostics_count\":{},\"message\":{}}}",
                 diags.len(),
@@ -554,11 +554,11 @@ pub fn proof_json_for_entry_with_receipt(
     } else {
         "{\"state\":\"missing\",\"stale\":true,\"reasons\":[\"no check/build/run receipt for this source revision\"]}".to_string()
     };
-    let budget_root = crate::Loader::find_manifest_root(path.parent().unwrap_or(Path::new(".")))
+    let budget_root = jet_driver::Loader::find_manifest_root(path.parent().unwrap_or(Path::new(".")))
         .unwrap_or_else(|| path.parent().unwrap_or(Path::new(".")).to_path_buf());
     let budget_path = path.strip_prefix(&budget_root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
-    let budget_digest = crate::SHA256::sha256_hex(src.as_bytes());
-    let budgets = crate::BudgetView::read_compatible(&budget_root, &[(budget_path, budget_digest)]);
+    let budget_digest = jet_driver::SHA256::sha256_hex(src.as_bytes());
+    let budgets = jet_driver::BudgetView::read_compatible(&budget_root, &[(budget_path, budget_digest)]);
     let budget_reports = budgets.facts.iter().map(|fact| format!(
         "{{\"budget_id\":{},\"enforcement\":{},\"evidence\":{},\"evidence_id\":{},\"outcome\":{},\"report_id\":{},\"statistical\":{}}}",
         json_str(&fact.budget_id), json_str(&fact.enforcement), json_str(&fact.evidence), json_str(&fact.evidence_id),
@@ -621,7 +621,7 @@ pub fn command_receipt_json_for_entry(entry: &Path, request: &str) -> Result<Str
         let abs = canonical_path(entry);
         let overlay = source_override.as_deref().map(|text| (abs.as_path(), text));
         let (diags, _bundle, _facts) =
-            crate::Driver::check_file_with_effect_facts(&entry.display().to_string(), overlay, true);
+            jet_driver::Driver::check_file_with_effect_facts(&entry.display().to_string(), overlay, true);
         let errors: Vec<Diagnostic> = diags
             .iter()
             .filter(|d| d.severity == Severity::Error)
@@ -634,7 +634,7 @@ pub fn command_receipt_json_for_entry(entry: &Path, request: &str) -> Result<Str
                 false,
                 Some(1),
                 String::new(),
-                crate::render_diagnostics(&entry.display().to_string(), check_src, &errors),
+                jet_driver::Diagnostics::render_all(&entry.display().to_string(), check_src, &errors),
                 diagnostics_json(entry, check_src, &errors),
             )
         }
@@ -1004,7 +1004,7 @@ pub fn debug_session_json_for_file(path: &Path, request: &str) -> Result<String,
     }
     inputs.push("bt".to_string());
     let refs = inputs.iter().map(|s| s.as_str()).collect::<Vec<_>>();
-    let transcript = crate::Debug::run_session(&path.display().to_string(), &refs);
+    let transcript = jet_debug::run_session(&path.display().to_string(), &refs);
     if transcript.contains("Error [") || transcript.contains("\n[E") || transcript.starts_with("[E")
     {
         return Err(debug_error("diagnostic", &transcript));

@@ -1,8 +1,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::Diagnostics::{Diagnostic, Severity};
-use crate::SHA256;
+use jet_driver::Diagnostics::{Diagnostic, Severity};
+use jet_driver::SHA256;
 
 use super::graph_projection::project_checked;
 use super::project_transactions::{diagnostic_json, rel_path};
@@ -12,7 +12,7 @@ use super::validation_json::{json_optional_str, json_str};
 pub(super) fn project_file(path: &Path) -> Result<Projection, Vec<Diagnostic>> {
     let path_str = path.to_string_lossy();
     let src = fs::read_to_string(path).unwrap_or_default();
-    let (diags, bundle, facts) = crate::Driver::check_file_with_effect_facts(&path_str, None, true);
+    let (diags, bundle, facts) = jet_driver::Driver::check_file_with_effect_facts(&path_str, None, true);
     let errors: Vec<Diagnostic> = diags
         .iter()
         .filter(|d| d.severity == Severity::Error)
@@ -57,7 +57,7 @@ pub(super) struct ProjectChange {
 
 pub(super) fn project_context_for_entry(path: &Path) -> ProjectContext {
     let entry_dir = path.parent().unwrap_or_else(|| Path::new("."));
-    let manifest_root = crate::Loader::find_manifest_root(entry_dir);
+    let manifest_root = jet_driver::Loader::find_manifest_root(entry_dir);
     let workspace_root = find_workspace_root(manifest_root.as_deref().unwrap_or(entry_dir));
     let project_root = workspace_root
         .as_deref()
@@ -104,17 +104,17 @@ fn collect_project_files(
 ) -> Vec<ProjectFileRec> {
     let mut paths = Vec::new();
     push_existing(&mut paths, entry_path);
-    push_existing(&mut paths, &project_root.join(crate::Syntax::ENV_FILE));
+    push_existing(&mut paths, &project_root.join(jet_driver::Syntax::ENV_FILE));
     if let Some(root) = manifest_root {
-        push_existing(&mut paths, &root.join(crate::Syntax::PAYLOAD_FILE));
+        push_existing(&mut paths, &root.join(jet_driver::Syntax::PAYLOAD_FILE));
     }
     if let Some(root) = workspace_root {
-        push_existing(&mut paths, &root.join(crate::Syntax::WORKSPACE_FILE));
-        push_existing(&mut paths, &root.join(crate::Syntax::UNIFIED_LOCK_FILE));
+        push_existing(&mut paths, &root.join(jet_driver::Syntax::WORKSPACE_FILE));
+        push_existing(&mut paths, &root.join(jet_driver::Syntax::UNIFIED_LOCK_FILE));
         if let Some(Ok(plan)) = jetpack::WorkspaceFile::load(root) {
             for member in plan.members {
                 let member_dir = root.join(member.path);
-                push_existing(&mut paths, &member_dir.join(crate::Syntax::PAYLOAD_FILE));
+                push_existing(&mut paths, &member_dir.join(jet_driver::Syntax::PAYLOAD_FILE));
                 collect_jet_files(&member_dir, &mut paths);
             }
         }
@@ -131,16 +131,16 @@ fn collect_project_files(
         .filter_map(|path| {
             let bytes = fs::read(&path).ok()?;
             let kind = if path.file_name().and_then(|n| n.to_str())
-                == Some(crate::Syntax::PAYLOAD_FILE)
+                == Some(jet_driver::Syntax::PAYLOAD_FILE)
             {
                 "manifest"
             } else if path.file_name().and_then(|n| n.to_str())
-                == Some(crate::Syntax::WORKSPACE_FILE)
+                == Some(jet_driver::Syntax::WORKSPACE_FILE)
             {
                 "workspace"
-            } else if path.file_name().and_then(|n| n.to_str()) == Some(crate::Syntax::ENV_FILE) {
+            } else if path.file_name().and_then(|n| n.to_str()) == Some(jet_driver::Syntax::ENV_FILE) {
                 "env"
-            } else if rel_path(project_root, &path) == crate::Syntax::UNIFIED_LOCK_FILE {
+            } else if rel_path(project_root, &path) == jet_driver::Syntax::UNIFIED_LOCK_FILE {
                 "lock"
             } else {
                 "source"
@@ -177,8 +177,8 @@ fn collect_jet_files(dir: &Path, out: &mut Vec<PathBuf>) {
             collect_jet_files(&path, out);
             continue;
         }
-        if path.extension().and_then(|e| e.to_str()) == Some(crate::Syntax::FILE_EXT)
-            && path.file_name().and_then(|n| n.to_str()) != Some(crate::Syntax::PAYLOAD_FILE)
+        if path.extension().and_then(|e| e.to_str()) == Some(jet_driver::Syntax::FILE_EXT)
+            && path.file_name().and_then(|n| n.to_str()) != Some(jet_driver::Syntax::PAYLOAD_FILE)
         {
             out.push(path);
         }
@@ -218,7 +218,7 @@ pub(super) fn workspace_project_json(project_root: &Path, workspace_root: Option
         Some(Err(d)) => {
             return format!(
                 "{{\"path\":{},\"members\":[],\"diagnostics\":[{}]}}",
-                json_str(&rel_path(project_root, &root.join(crate::Syntax::WORKSPACE_FILE))),
+                json_str(&rel_path(project_root, &root.join(jet_driver::Syntax::WORKSPACE_FILE))),
                 diagnostic_json(&d)
             );
         }
@@ -226,7 +226,7 @@ pub(super) fn workspace_project_json(project_root: &Path, workspace_root: Option
     };
     format!(
         "{{\"path\":{},\"members\":[{}],\"diagnostics\":[]}}",
-        json_str(&rel_path(project_root, &root.join(crate::Syntax::WORKSPACE_FILE))),
+        json_str(&rel_path(project_root, &root.join(jet_driver::Syntax::WORKSPACE_FILE))),
         members
     )
 }
@@ -274,9 +274,9 @@ pub(super) fn targets_project_json(
 }
 
 fn package_targets_project_json(project_root: &Path, dir: &Path) -> Option<Vec<String>> {
-    let manifest_path = dir.join(crate::Syntax::PAYLOAD_FILE);
+    let manifest_path = dir.join(jet_driver::Syntax::PAYLOAD_FILE);
     let raw = fs::read_to_string(&manifest_path).ok()?;
-    let manifest = crate::PackageManifest::parse(&raw).ok()?;
+    let manifest = jet_driver::PackageManifest::parse(&raw).ok()?;
     let package_path = rel_path(project_root, dir);
     let manifest_rel = rel_path(project_root, &manifest_path);
     Some(
@@ -301,9 +301,9 @@ fn package_targets_project_json(project_root: &Path, dir: &Path) -> Option<Vec<S
 }
 
 fn package_project_json(project_root: &Path, dir: &Path) -> Option<String> {
-    let manifest_path = dir.join(crate::Syntax::PAYLOAD_FILE);
+    let manifest_path = dir.join(jet_driver::Syntax::PAYLOAD_FILE);
     let raw = fs::read_to_string(&manifest_path).ok()?;
-    match crate::PackageManifest::parse(&raw) {
+    match jet_driver::PackageManifest::parse(&raw) {
         Ok(manifest) => {
             let deps = manifest
                 .deps
@@ -364,7 +364,7 @@ pub(super) struct EnvProjectJson {
 }
 
 pub(super) fn env_project_json(project_root: &Path) -> EnvProjectJson {
-    let path = project_root.join(crate::Syntax::ENV_FILE);
+    let path = project_root.join(jet_driver::Syntax::ENV_FILE);
     let Ok(src) = fs::read_to_string(&path) else {
         return EnvProjectJson {
             envs: String::new(),
@@ -395,8 +395,8 @@ pub(super) fn env_project_json(project_root: &Path) -> EnvProjectJson {
             EnvProjectJson {
                 envs: format!(
                     "{{\"path\":{},\"prompt\":{},\"packages\":[{}],\"secrets\":[{}],\"diagnostics\":[]}}",
-                    json_str(crate::Syntax::ENV_FILE),
-                    json_str(plan.prompt.as_deref().unwrap_or(crate::Syntax::JETPACK_PROMPT_LABEL)),
+                    json_str(jet_driver::Syntax::ENV_FILE),
+                    json_str(plan.prompt.as_deref().unwrap_or(jet_driver::Syntax::JETPACK_PROMPT_LABEL)),
                     packages,
                     secrets
                 ),
@@ -441,12 +441,12 @@ fn dev_service_project_json(service: &jet_env_model::ModuleEval::DevServicePlan)
         json_optional_str(service.data_dir.as_deref()),
         json_optional_str(service.ready.as_deref()),
         extra,
-        json_str(crate::Syntax::ENV_FILE)
+        json_str(jet_driver::Syntax::ENV_FILE)
     )
 }
 
 pub(super) fn lock_project_json(project_root: &Path) -> String {
-    let lock_path = project_root.join(crate::Syntax::UNIFIED_LOCK_FILE);
+    let lock_path = project_root.join(jet_driver::Syntax::UNIFIED_LOCK_FILE);
     if !lock_path.is_file() {
         return String::new();
     }
@@ -460,28 +460,28 @@ pub(super) fn lock_project_json(project_root: &Path) -> String {
     )
 }
 
-fn dep_source_label(source: &crate::PackageManifest::DepSource) -> String {
+fn dep_source_label(source: &jet_driver::PackageManifest::DepSource) -> String {
     match source {
-        crate::PackageManifest::DepSource::Version(v) => format!("version:{v}"),
-        crate::PackageManifest::DepSource::Provider { provider, target } => {
+        jet_driver::PackageManifest::DepSource::Version(v) => format!("version:{v}"),
+        jet_driver::PackageManifest::DepSource::Provider { provider, target } => {
             format!("{provider:?}@{target}")
         }
-        crate::PackageManifest::DepSource::Git { url, selector } => {
+        jet_driver::PackageManifest::DepSource::Git { url, selector } => {
             format!("git:{url}@{selector:?}")
         }
-        crate::PackageManifest::DepSource::CLib { target } => {
+        jet_driver::PackageManifest::DepSource::CLib { target } => {
             format!("c:{target}")
         }
     }
 }
 
-fn target_label(target: &crate::PackageManifest::Target) -> String {
+fn target_label(target: &jet_driver::PackageManifest::Target) -> String {
     match target {
-        crate::PackageManifest::Target::Library => "library".to_string(),
-        crate::PackageManifest::Target::Executable => "executable".to_string(),
-        crate::PackageManifest::Target::Test => "test".to_string(),
-        crate::PackageManifest::Target::Example => "example".to_string(),
-        crate::PackageManifest::Target::Benchmark => "benchmark".to_string(),
-        crate::PackageManifest::Target::Plugin { .. } => "plugin".to_string(),
+        jet_driver::PackageManifest::Target::Library => "library".to_string(),
+        jet_driver::PackageManifest::Target::Executable => "executable".to_string(),
+        jet_driver::PackageManifest::Target::Test => "test".to_string(),
+        jet_driver::PackageManifest::Target::Example => "example".to_string(),
+        jet_driver::PackageManifest::Target::Benchmark => "benchmark".to_string(),
+        jet_driver::PackageManifest::Target::Plugin { .. } => "plugin".to_string(),
     }
 }

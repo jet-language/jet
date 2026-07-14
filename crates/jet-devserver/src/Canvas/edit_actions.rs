@@ -1,9 +1,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::Diagnostics::{Diagnostic, Severity, Span, TextEdit};
-use crate::AST::{self, Expr, Item, Stmt};
-use crate::FixEngine;
+use jet_driver::Diagnostics::{Diagnostic, Severity, Span, TextEdit};
+use jet_driver::AST::{self, Expr, Item, Stmt};
+use jet_driver::FixEngine;
 use jet_semindex::SourceSpan;
 
 use super::debug_source_git::canonical_path;
@@ -23,7 +23,7 @@ use super::validation_json::{
 
 pub(super) fn apply_noop(path: &Path, src: &str) -> Result<String, String> {
     let formatted =
-        crate::format_source(src).map_err(|diags| diagnostics_error(path, src, &diags))?;
+        jet_driver::Formatter::format_source(src).map_err(|diags| diagnostics_error(path, src, &diags))?;
     let changed = formatted != src;
     if changed {
         fs::write(path, formatted).map_err(|e| edit_error("io", &e.to_string()))?;
@@ -81,7 +81,7 @@ pub(super) fn apply_create_trait_impl(
     trait_name: &str,
 ) -> Result<String, String> {
     let path_str = path.to_string_lossy();
-    let (diags, bundle) = crate::Driver::check_file(&path_str, None, true);
+    let (diags, bundle) = jet_driver::Driver::check_file(&path_str, None, true);
     let errors = diags
         .iter()
         .filter(|d| d.severity == Severity::Error)
@@ -590,10 +590,10 @@ pub(super) fn canvas_action_candidate(
     )
     .map_err(|_| edit_error("overlap", "Canvas action edit overlapped"))?;
     let formatted =
-        crate::format_source(&changed).map_err(|diags| diagnostics_error(path, src, &diags))?;
+        jet_driver::Formatter::format_source(&changed).map_err(|diags| diagnostics_error(path, src, &diags))?;
     let tmp = temp_canvas_check_path(path);
     fs::write(&tmp, &formatted).map_err(|e| edit_error("io", &e.to_string()))?;
-    let (check, _) = crate::Driver::check_file(&tmp.display().to_string(), None, true);
+    let (check, _) = jet_driver::Driver::check_file(&tmp.display().to_string(), None, true);
     let _ = fs::remove_file(&tmp);
     let errors = check
         .iter()
@@ -929,7 +929,7 @@ pub(super) fn apply_reorder_statements(
         ));
     };
     let path_str = path.to_string_lossy();
-    let (diags, bundle) = crate::Driver::check_file(&path_str, None, true);
+    let (diags, bundle) = jet_driver::Driver::check_file(&path_str, None, true);
     let errors = diags
         .iter()
         .filter(|d| d.severity == Severity::Error)
@@ -1209,7 +1209,7 @@ fn checked_func_by_name_span(
 
 fn checked_bundle(path: &Path, src: &str) -> Result<&'static AST::ProgramBundle, String> {
     let path_str = path.to_string_lossy();
-    let (diags, bundle) = crate::Driver::check_file(&path_str, None, true);
+    let (diags, bundle) = jet_driver::Driver::check_file(&path_str, None, true);
     let errors = diags
         .iter()
         .filter(|d| d.severity == Severity::Error)
@@ -2279,12 +2279,12 @@ fn same_span(a: SourceSpan, b: SourceSpan) -> bool {
 }
 
 pub(super) fn write_checked_formatted(path: &Path, before: &str, candidate: &str) -> Result<String, String> {
-    let formatted = crate::format_source(candidate)
+    let formatted = jet_driver::Formatter::format_source(candidate)
         .map_err(|diags| diagnostics_error(path, candidate, &diags))?;
     let path_str = path.to_string_lossy();
     let abs = canonical_path(path);
     let (diags, _, _) =
-        crate::Driver::check_file_with_effect_facts(&path_str, Some((&abs, &formatted)), true);
+        jet_driver::Driver::check_file_with_effect_facts(&path_str, Some((&abs, &formatted)), true);
     let errors: Vec<Diagnostic> = diags
         .iter()
         .filter(|d| d.severity == Severity::Error)

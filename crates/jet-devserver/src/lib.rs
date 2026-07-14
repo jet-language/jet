@@ -5,6 +5,8 @@
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 
+pub mod Canvas;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum WatchPolicy { Auto, Restart, Swap, Once }
 
