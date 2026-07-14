@@ -928,6 +928,19 @@ laundered through **E3208** rather than exposing `gfortran` diagnostics.
 
 Example: `examples/features/lowlevel/polyglot_fortran/`.
 
+## E3 — COBOL project binder (D-FFI-COBOL1=A, GnuCOBOL C-ABI vertical)
+
+`jet inspect bind cobol <program.cob> --copybook <record.cpy> --pkg <lib>`
+compiles one linkage program with provisioned GnuCOBOL and writes a
+`cobol.<lib>` cache. The copybook subset is closed: one level-01 record with
+level-05 fixed text, COMP-5 integers, and COMP-3 packed decimals. The binder
+records exact offsets and widths, emits an `@Codable` Jet record, and maps every
+COMP-3 field to `Decimal`, never `Float`. Its callable C bridge accepts packed
+decimal values as scaled minor-unit `Int` values, initializes `libcob` once,
+and invokes the exported `int PROGRAM(cob_u8_t*)` entry in-process. Generated
+tools have 60-second deadlines and 64 KiB capture ceilings. Unknown layouts and
+laundered foreign-tool failures use **E3208**.
+
 ## E3 — JVM project binder (D-FFI-JVM1=A, embedded class vertical)
 
 `jet inspect bind java <source.java> --pkg <lib>` uses the provisioned OpenJDK

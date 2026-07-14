@@ -52,6 +52,12 @@ impl user_Encode for char {
 impl user_Encode for u8 {
     fn jet_encode(&self) -> jet_std::DataTree { jet_std::DataTree::Int(*self as i64) }
 }
+impl user_Encode for jet_std::JetDecimal {
+    fn jet_encode(&self) -> jet_std::DataTree {
+        // Decimal stays exact through the shared tree; text preserves scale.
+        jet_std::DataTree::Text(self.to_string_rep())
+    }
+}
 impl<T: user_Encode> user_Encode for Vec<T> {
     fn jet_encode(&self) -> jet_std::DataTree {
         // D-ENC-CBOR-SURFACE1: `[U8]` carries binary identity through the shared
@@ -172,6 +178,19 @@ impl user_Decode for u8 {
         match t {
             jet_std::DataTree::Int(n) if (0..=255).contains(n) => Ok(*n as u8),
             other => Err(jet_std::DecodeError::new(format!("expected U8, found {}", jet_std::datatree_kind(other)))),
+        }
+    }
+}
+impl user_Decode for jet_std::JetDecimal {
+    fn jet_decode(t: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError> {
+        match t {
+            jet_std::DataTree::Text(s) => jet_std::JetDecimal::from_str(s)
+                .map_err(|e| jet_std::DecodeError::new(format!("expected Decimal: {e}"))),
+            jet_std::DataTree::Int(n) => jet_std::JetDecimal::from_str(&n.to_string())
+                .map_err(jet_std::DecodeError::new),
+            other => Err(jet_std::DecodeError::new(format!(
+                "expected Decimal, found {}", jet_std::datatree_kind(other)
+            ))),
         }
     }
 }

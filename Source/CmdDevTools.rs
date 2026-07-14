@@ -1295,6 +1295,7 @@ pub(crate) fn run_explain(code: Option<&str>, mode: OutputMode) {
 /// prototypes — use `#Extern module c.<lib>` for those declarations.
 pub(crate) fn run_bind(args: &[&String]) {
     if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::COM_MODULE_ROOT){run_com_bind(&args[1..]);return;}
+    if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::COBOL_MODULE_ROOT){run_cobol_bind(&args[1..]);return;}
     if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::PERL_MODULE_ROOT){run_perl_bind(&args[1..]);return;}
     if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::PWSH_MODULE_ROOT){run_powershell_bind(&args[1..]);return;}
     if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::DART_MODULE_ROOT){run_dart_bind(&args[1..]);return;}
@@ -1713,6 +1714,31 @@ fn fortran_bind_error(source: &str, why: &str) -> ! {
     eprintln!(" Why: {why}.");
     eprintln!(" Fix: use explicit `bind(C, name=\"...\")` routines with ISO_C_BINDING scalar `value` inputs or fixed-shape `intent(in)` arrays, then rerun `jet inspect bind fortran`.");
     exit(ExitCodes::USER_ERROR);
+}
+
+fn run_cobol_bind(args: &[&String]) {
+    let usage = || eprintln!("usage: {} inspect bind cobol <program.cob> --copybook <record.cpy> [--pkg <lib>] [-o <out.jet>]", jet::Syntax::BINARY_NAME);
+    if args.is_empty() || args[0] == "--help" || args[0] == "-h" { usage(); exit(if args.is_empty(){ExitCodes::USAGE}else{0}) }
+    let source_path=args[0].as_str(); let mut copybook=None; let mut pkg=None; let mut out=None; let mut i=1;
+    while i<args.len(){match args[i].as_str(){"--copybook"=>{copybook=args.get(i+1).map(|v|v.to_string());if copybook.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{eprintln!("error: unknown `bind cobol` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}
+    let Some(copybook_path)=copybook else{usage();exit(ExitCodes::USAGE)};
+    let lib=pkg.unwrap_or_else(||{let b=source_path.rsplit('/').next().unwrap_or(source_path);b.rsplit_once('.').map(|v|v.0).unwrap_or(b).to_ascii_lowercase().replace('-',"_")});
+    let source=std::fs::read_to_string(source_path).unwrap_or_else(|e|cobol_bind_error(source_path,&format!("the program could not be read ({e})")));
+    let copybook=std::fs::read_to_string(&copybook_path).unwrap_or_else(|e|cobol_bind_error(&copybook_path,&format!("the copybook could not be read ({e})")));
+    let out_path=out.unwrap_or_else(||format!(".jet/bindings/{}/{}.{}",jet::Syntax::COBOL_MODULE_ROOT,lib,jet::Syntax::FILE_EXT));
+    let cache=std::path::Path::new(&out_path).parent().unwrap_or_else(||std::path::Path::new("."));
+    let result=jet::CobolBind::bind(std::path::Path::new(source_path),&source,std::path::Path::new(&copybook_path),&copybook,&lib,cache).unwrap_or_else(|e|cobol_bind_error(source_path,&e.to_string()));
+    if let Err(e)=std::fs::write(&out_path,&result.source){cobol_bind_error(source_path,&format!("the generated cache could not be written ({e})"))}
+    if let Err(e)=std::fs::write(cache.join(format!("{lib}.cobol-path")),format!("{}\n",result.runtime_dir.display())){cobol_bind_error(source_path,&format!("the libcob runtime identity could not be written ({e})"))}
+    println!("bound GnuCOBOL program `{}` and {}-byte copybook `{}` → {out_path}",result.program,result.layout.width,result.layout.name);
+    for field in &result.layout.fields{println!("  layout: {} offset={} width={} type={}",field.name,field.offset,field.width,field.kind.jet_type())}
+}
+
+fn cobol_bind_error(path:&str,why:&str)->!{
+    eprintln!("Error [E3208]: Could not generate bindings from `{path}`.");
+    eprintln!(" Why: {why}.");
+    eprintln!(" Fix: use one GnuCOBOL PROGRAM-ID with a level-01 copybook containing level-05 X(n), COMP-5, or COMP-3 fields, then rerun `jet inspect bind cobol`.");
+    exit(ExitCodes::USER_ERROR)
 }
 
 /// S60 / D-PURE1 (E2-M16): evaluate a `pure fn run()` program.

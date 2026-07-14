@@ -2133,6 +2133,19 @@ end module broken_math
 }
 
 #[test]
+fn cobol_bind_launders_foreign_compiler_failure_as_e3208() {
+    if Command::new("cobc").arg("--version").output().is_err() { return; }
+    let dir=isolated_cwd("cobol_bind_failure"); let source=dir.join("broken.cob"); let copybook=dir.join("record.cpy");
+    fs::write(&source,"       IDENTIFICATION DIVISION.\n       PROGRAM-ID. BROKEN.\n       THIS IS NOT COBOL.\n").unwrap();
+    fs::write(&copybook,"       01 RECORD.\n          05 AMOUNT PIC S9(7)V99 COMP-3.\n").unwrap();
+    let output=Command::new(jet()).args(["inspect","bind","cobol"]).arg(&source).args(["--copybook"]).arg(&copybook).args(["--pkg","broken"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
+    assert!(!output.status.success()); let stderr=String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Error [E3208]:")); assert!(stderr.contains(" Why:")); assert!(stderr.contains(" Fix:"));
+    assert!(!stderr.contains("broken.cob:"),"raw cobc location leaked:\n{stderr}");
+    check_snapshot("bind_cobol_invalid_e3208.txt",&scrub(&stderr,&source));
+}
+
+#[test]
 fn unknown_cross_target_is_e3302() {
     let src = std::env::temp_dir().join("jet_unknown_cross_target.jet");
     fs::write(&src, "fn run() { print(\"target\") }\n").unwrap();

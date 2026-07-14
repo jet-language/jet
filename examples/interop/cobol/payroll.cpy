@@ -1,0 +1,4 @@
+       01 PAYROLL-RECORD.
+          05 EMPLOYEE-ID PIC 9(6) COMP-5.
+          05 EMPLOYEE-NAME PIC X(20).
+          05 GROSS-PAY PIC S9(7)V99 COMP-3.

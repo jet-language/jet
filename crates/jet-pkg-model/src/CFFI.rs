@@ -742,6 +742,27 @@ pub fn resolve_link(lib: &str, project_root: &Path) -> Result<LinkFlags, Diagnos
         }
         return Err(e3201(lib));
     }
+    if let Some(actual) = lib.strip_prefix("jet_cobol_") {
+        let dir = project_root
+            .join(Syntax::SOURCE_ROOT_DIR)
+            .join(ForeignLanguage::Cobol.bindings_subdir());
+        let archive = dir.join(format!("libjet_cobol_{actual}.a"));
+        let path_file = dir.join(format!("{actual}.cobol-path"));
+        let Ok(runtime_dir) = std::fs::read_to_string(path_file) else { return Err(e3201(lib)); };
+        let runtime_dir = runtime_dir.trim();
+        if archive.is_file()
+            && std::path::Path::new(runtime_dir).is_absolute()
+            && std::path::Path::new(runtime_dir).join(if cfg!(target_os="macos") { "libcob.dylib" } else { "libcob.so" }).is_file()
+        {
+            return Ok(LinkFlags {
+                lib_dirs: vec![dir.display().to_string(), runtime_dir.to_string()],
+                link_names: vec![format!("static=jet_cobol_{actual}"), "dylib=cob".into(), "pthread".into(), "dl".into(), "m".into()],
+                rpath_dirs: vec![runtime_dir.to_string()],
+                ..Default::default()
+            });
+        }
+        return Err(e3201(lib));
+    }
     // 1. A declared `<lib>: c@…` dep in the manifest's `deps:` block.
     if let Some(target) = declared_c_dep(lib, project_root) {
         return clib_link(lib, &target, project_root);

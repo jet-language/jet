@@ -67,6 +67,8 @@ pub enum Effect {
     DotNet,
     /// D-FFI-FORTRAN1=A: an in-process ISO_C_BINDING call.
     Fortran,
+    /// D-FFI-COBOL1=A: an in-process GnuCOBOL C-ABI call.
+    Cobol,
     /// D-FFI-TCL1=A: synchronous in-process Tcl evaluation.
     Tcl,
     /// D-FFI-ADA1=A: checked call into a GNAT C-ABI export.
@@ -108,6 +110,7 @@ impl Effect {
             Effect::Java => "Java",
             Effect::DotNet => "DotNet",
             Effect::Fortran => "Fortran",
+            Effect::Cobol => "Cobol",
             Effect::Tcl => "Tcl",
             Effect::Ada => "Ada",
             Effect::Pascal => "Pascal",
@@ -137,6 +140,7 @@ impl Effect {
             "Java" => Effect::Java,
             "DotNet" => Effect::DotNet,
             "Fortran" => Effect::Fortran,
+            "Cobol" => Effect::Cobol,
             "Tcl" => Effect::Tcl,
             "Ada" => Effect::Ada,
             "Pascal" => Effect::Pascal,
@@ -170,6 +174,7 @@ impl Effect {
             Effect::Java,
             Effect::DotNet,
             Effect::Fortran,
+            Effect::Cobol,
             Effect::Tcl,
             Effect::Ada,
             Effect::Pascal,

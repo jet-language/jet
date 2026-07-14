@@ -17,6 +17,33 @@ mod common;
 use common::{have_rustc, FfiBridgeLock};
 
 #[test]
+fn cobol_copybook_binder_runs_real_gnucobol_and_preserves_comp3() {
+    if Command::new("cobc").arg("--version").output().is_err() {
+        eprintln!("note: provisioned cobc unavailable; skipping COBOL integration");
+        return;
+    }
+    let root = std::env::temp_dir().join(format!("jet_cobol_e2e_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/interop/cobol");
+    for file in ["payroll.cob", "payroll.cpy", "main.jet", "expected.out"] {
+        fs::copy(repo.join(file), root.join(file)).unwrap();
+    }
+    let bind = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["inspect", "bind", "cobol", "payroll.cob", "--copybook", "payroll.cpy", "--pkg", "payroll"])
+        .current_dir(&root).output().unwrap();
+    assert!(bind.status.success(), "{}", String::from_utf8_lossy(&bind.stderr));
+    let generated = fs::read_to_string(root.join(".jet/bindings/cobol/payroll.jet")).unwrap();
+    assert!(generated.contains("gross_pay: Decimal;"));
+    assert!(generated.contains("offset=24 width=5 type=Decimal scale=2 encoding=COMP-3"));
+    assert!(!generated.contains("gross_pay: Float"));
+    let run = Command::new(env!("CARGO_BIN_EXE_jet")).args(["run", "main.jet"]).current_dir(&root).output().unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), fs::read_to_string(root.join("expected.out")).unwrap());
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn forged_fortran_library_prefix_cannot_admit_list_abi() {
     let root = std::env::temp_dir().join(format!(
         "jet_fortran_prefix_{}",
@@ -78,6 +105,13 @@ fn unified_foreign_binder_registry_routes_active_and_planned_languages() {
             ForeignLanguage::Fortran,
             "fortran",
             "bindings/fortran",
+            BinderSurface::Namespace,
+            BinderStatus::Active,
+        ),
+        (
+            ForeignLanguage::Cobol,
+            "cobol",
+            "bindings/cobol",
             BinderSurface::Namespace,
             BinderStatus::Active,
         ),

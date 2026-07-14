@@ -30,6 +30,7 @@ pub use jet_sema::{Diagnostics, Lexer, Parser, Sema, Syntax, AST, SHA256};
 pub mod AdaBind;
 pub mod CBind;
 pub mod CFFI;
+pub mod CobolBind;
 pub mod ComBind;
 pub mod DotNetBind;
 pub mod FortranBind;

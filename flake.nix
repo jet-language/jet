@@ -111,6 +111,8 @@
             pkgs.powershell
             # D-FFI-FORTRAN1=A: provision the ISO_C_BINDING bridge compiler.
             pkgs.gfortran
+            # D-FFI-COBOL1=A: provision GnuCOBOL for C-ABI estate bindings.
+            (pkgs.lib.getBin pkgs.gnucobol)
             # D-FFI-GO1=A: provision the in-process c-archive bridge compiler.
             pkgs.go
             # D-FFI-JVM1=A: provision javac/javap plus the embedded libjvm runtime.

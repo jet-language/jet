@@ -177,7 +177,8 @@ pub(crate) fn is_encodable_ty(ty: &Type, reg: &TraitRegistry) -> bool {
         Type::Map { key, value, .. } => matches!(**key, Type::String) && is_encodable_ty(value, reg),
         // A non-local type (imported) is trusted; a local one must derive Encode.
         Type::Named(n) => {
-            is_json_type_name(n)
+            n == "Decimal"
+                || is_json_type_name(n)
                 || !reg.local_types.contains(n)
                 || reg.implements_trait(n, crate::Generics::ENCODE)
         }
@@ -203,7 +204,7 @@ pub(crate) fn is_decodable_ty(ty: &Type, reg: &TraitRegistry) -> bool {
         Type::FixedList { elem, .. } => is_decodable_ty(elem, reg),
         Type::Map { key, value, .. } => matches!(**key, Type::String) && is_decodable_ty(value, reg),
         Type::Named(n) => {
-            !reg.local_types.contains(n) || reg.implements_trait(n, crate::Generics::DECODE)
+            n == "Decimal" || !reg.local_types.contains(n) || reg.implements_trait(n, crate::Generics::DECODE)
         }
         Type::Apply { name, args } => {
             apply_serde_ok(name, args, reg, crate::Generics::DECODE, &|t| {
