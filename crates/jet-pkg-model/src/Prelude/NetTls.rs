@@ -1,18 +1,29 @@
-use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::sync::atomic::{AtomicI64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 
 type TlsStream = rustls::StreamOwned<rustls::ClientConnection, TcpStream>;
 
-thread_local! {
-    static JET_NET_TLS_STREAMS: RefCell<BTreeMap<i64, TlsStream>> = RefCell::new(BTreeMap::new());
-    static JET_NET_TLS_CLOSED: RefCell<std::collections::BTreeSet<i64>> = RefCell::new(std::collections::BTreeSet::new());
+struct JetTlsState {
+    stream: TlsStream,
+    server_name: String,
+    pending_write: Option<usize>,
+    closing: bool,
 }
 
 static JET_NET_TLS_NEXT: AtomicI64 = AtomicI64::new(1);
+static JET_NET_TLS_STREAMS: OnceLock<Mutex<BTreeMap<i64, JetTlsState>>> = OnceLock::new();
+static JET_NET_TLS_CLOSED: OnceLock<Mutex<std::collections::BTreeSet<i64>>> = OnceLock::new();
+
+fn jet_net_tls_streams() -> &'static Mutex<BTreeMap<i64, JetTlsState>> {
+    JET_NET_TLS_STREAMS.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+fn jet_net_tls_closed() -> &'static Mutex<std::collections::BTreeSet<i64>> {
+    JET_NET_TLS_CLOSED.get_or_init(|| Mutex::new(std::collections::BTreeSet::new()))
+}
 
 fn jet_net_tls_config(custom_ca_pem: Option<&[u8]>) -> Result<Arc<rustls::ClientConfig>, String> {
     let mut roots = rustls::RootCertStore::empty();
@@ -112,18 +123,6 @@ fn jet_net_tls_pem_base64(text: &str) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
-fn jet_net_tls_connect_inner(
-    stream: TcpStream,
-    server_name: &String,
-    custom_ca_pem: Option<&[u8]>,
-) -> Result<i64, String> {
-    let id = jet_net_tls_begin_inner(stream, server_name, custom_ca_pem)?;
-    loop {
-        if jet_net_tls_handshake_step_impl(id)? { return Ok(id); }
-        std::thread::sleep(std::time::Duration::from_millis(2));
-    }
-}
-
 fn jet_net_tls_begin_inner(
     stream: TcpStream,
     server_name: &String,
@@ -142,9 +141,15 @@ fn jet_net_tls_begin_inner(
         .map_err(|e| format!("TLS handshake with `{}` failed: {}", server_name, e))?;
     let tls = rustls::StreamOwned::new(conn, stream);
     let id = JET_NET_TLS_NEXT.fetch_add(1, Ordering::Relaxed);
-    JET_NET_TLS_STREAMS.with(|cell| {
-        cell.borrow_mut().insert(id, tls);
-    });
+    jet_net_tls_streams().lock().unwrap().insert(
+        id,
+        JetTlsState {
+            stream: tls,
+            server_name: server_name.clone(),
+            pending_write: None,
+            closing: false,
+        },
+    );
     Ok(id)
 }
 
@@ -163,112 +168,127 @@ pub fn jet_net_tls_begin_with_ca_impl(
 }
 
 pub fn jet_net_tls_handshake_step_impl(id: i64) -> Result<bool, String> {
-    JET_NET_TLS_STREAMS.with(|cell| {
-        let mut streams = cell.borrow_mut();
-        let tls = streams.get_mut(&id).ok_or_else(|| "TLS stream is closed".to_string())?;
+    let mut streams = jet_net_tls_streams().lock().unwrap();
+    let state = streams
+        .get_mut(&id)
+        .ok_or_else(|| "TLS stream is closed".to_string())?;
+    let tls = &mut state.stream;
         if !tls.conn.is_handshaking() {
-            tls.sock.set_nonblocking(false)
-                .map_err(|e| format!("TLS could not configure the TCP stream: {}", e))?;
             return Ok(true);
         }
         match tls.conn.complete_io(&mut tls.sock) {
             Ok(_) if tls.conn.is_handshaking() => Ok(false),
-            Ok(_) => {
-                tls.sock.set_nonblocking(false)
-                    .map_err(|e| format!("TLS could not configure the TCP stream: {}", e))?;
-                Ok(true)
-            }
-            Err(error) if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => Ok(false),
-            Err(error) => Err(format!("TLS handshake failed: {}", error)),
+            Ok(_) => Ok(true),
+            Err(error) if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted | std::io::ErrorKind::TimedOut) => Ok(false),
+            Err(error) => Err(format!(
+                "TLS handshake with `{}` failed: {}",
+                state.server_name, error
+            )),
         }
-    })
+}
+
+pub fn jet_net_tls_wants_impl(id: i64) -> Result<(bool, bool), String> {
+    let streams = jet_net_tls_streams().lock().unwrap();
+    let tls = &streams
+        .get(&id)
+        .ok_or_else(|| "TLS stream is closed".to_string())?
+        .stream;
+    Ok((tls.conn.wants_read(), tls.conn.wants_write()))
+}
+
+pub fn jet_net_tls_abort_impl(id: i64) {
+    jet_net_tls_streams().lock().unwrap().remove(&id);
+    jet_net_tls_closed().lock().unwrap().insert(id);
 }
 
 pub fn jet_net_tls_set_poll_timeout_impl(id: i64, millis: i64) -> Result<(), String> {
     if !(1..=1000).contains(&millis) {
         return Err("TLS poll timeout must be between 1 and 1000 milliseconds".to_string());
     }
-    JET_NET_TLS_STREAMS.with(|cell| {
-        let mut streams = cell.borrow_mut();
-        let tls = streams.get_mut(&id).ok_or_else(|| "TLS stream is closed".to_string())?;
+    {
+        let mut streams = jet_net_tls_streams().lock().unwrap();
+        let tls = &mut streams
+            .get_mut(&id)
+            .ok_or_else(|| "TLS stream is closed".to_string())?
+            .stream;
         let timeout = Some(std::time::Duration::from_millis(millis as u64));
         tls.sock.set_read_timeout(timeout).map_err(|e| format!("TLS could not set read timeout: {}", e))?;
         tls.sock.set_write_timeout(timeout).map_err(|e| format!("TLS could not set write timeout: {}", e))
-    })
-}
-
-pub fn jet_net_tls_connect_impl(stream: TcpStream, server_name: &String) -> Result<i64, String> {
-    jet_net_tls_connect_inner(stream, server_name, None)
-}
-
-/// D-EMAIL-SMTP-CONFIG1=A: verified SystemPlusCa connection. Custom roots are
-/// appended to system roots; rustls' normal DNS-name verifier remains active.
-pub fn jet_net_tls_connect_with_ca_impl(
-    stream: TcpStream,
-    server_name: &String,
-    custom_ca_pem: &Vec<u8>,
-) -> Result<i64, String> {
-    jet_net_tls_connect_inner(stream, server_name, Some(custom_ca_pem))
+    }
 }
 
 pub fn jet_net_tls_read_impl(id: i64) -> Result<String, String> {
-    JET_NET_TLS_STREAMS.with(|cell| {
-        let mut streams = cell.borrow_mut();
-        let stream = streams
-            .get_mut(&id)
-            .ok_or_else(|| "TLS stream is closed".to_string())?;
-        let mut buf = [0u8; 8192];
-        stream
-            .read(&mut buf)
-            .map_err(|e| format!("TLS read failed: {}", e))
-            .and_then(|n| {
-                String::from_utf8(buf[..n].to_vec())
-                    .map_err(|e| format!("TLS read: invalid UTF-8: {}", e))
-            })
-    })
+    let bytes = jet_net_tls_read_bytes_impl(id, 8192)?;
+    String::from_utf8(bytes).map_err(|e| format!("TLS read: invalid UTF-8: {}", e))
 }
 
 pub fn jet_net_tls_read_bytes_impl(id: i64, limit: i64) -> Result<Vec<u8>, String> {
-    if limit < 0 {
-        return Err("TLS read limit must be non-negative".to_string());
+    match jet_net_tls_read_step_impl(id, limit)? {
+        Some(bytes) => Ok(bytes),
+        None => Err("TLS read would block".to_string()),
     }
-    JET_NET_TLS_STREAMS.with(|cell| {
-        let mut streams = cell.borrow_mut();
-        let stream = streams.get_mut(&id).ok_or_else(|| "TLS stream is closed".to_string())?;
-        let mut bytes = vec![0u8; std::cmp::min(limit as usize, 16 * 1024 * 1024)];
-        if bytes.is_empty() { return Ok(bytes); }
-        let n = stream.read(&mut bytes).map_err(|e| format!("TLS read failed: {}", e))?;
-        bytes.truncate(n);
-        Ok(bytes)
-    })
+}
+
+pub fn jet_net_tls_read_step_impl(id: i64, limit: i64) -> Result<Option<Vec<u8>>, String> {
+    if limit <= 0 {
+        return Err("TLS read limit must be positive".to_string());
+    }
+    let mut streams = jet_net_tls_streams().lock().unwrap();
+    let stream = &mut streams
+        .get_mut(&id)
+        .ok_or_else(|| "TLS stream is closed".to_string())?
+        .stream;
+    let mut bytes = vec![0u8; std::cmp::min(limit as usize, 16 * 1024 * 1024)];
+    match stream.read(&mut bytes) {
+        Ok(n) => {
+            bytes.truncate(n);
+            Ok(Some(bytes))
+        }
+        Err(error) if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted | std::io::ErrorKind::TimedOut) => Ok(None),
+        Err(error) => Err(format!("TLS read failed: {}", error)),
+    }
 }
 
 pub fn jet_net_tls_write_impl(id: i64, data: &String) -> Result<(), String> {
-    JET_NET_TLS_STREAMS.with(|cell| {
-        let mut streams = cell.borrow_mut();
-        let stream = streams
-            .get_mut(&id)
-            .ok_or_else(|| "TLS stream is closed".to_string())?;
-        stream
-            .write_all(data.as_bytes())
-            .map_err(|e| format!("TLS write failed: {}", e))
-    })
+    jet_net_tls_write_all_bytes_impl(id, &data.as_bytes().to_vec())
 }
 
 pub fn jet_net_tls_write_bytes_impl(id: i64, data: &Vec<u8>) -> Result<i64, String> {
-    JET_NET_TLS_STREAMS.with(|cell| {
-        let mut streams = cell.borrow_mut();
-        let stream = streams.get_mut(&id).ok_or_else(|| "TLS stream is closed".to_string())?;
-        stream.write(data).map(|n| n as i64).map_err(|e| format!("TLS write failed: {}", e))
-    })
+    match jet_net_tls_write_step_impl(id, data)? {
+        Some(count) => Ok(count),
+        None => Err("TLS write would block".to_string()),
+    }
 }
 
 pub fn jet_net_tls_write_all_bytes_impl(id: i64, data: &Vec<u8>) -> Result<(), String> {
-    JET_NET_TLS_STREAMS.with(|cell| {
-        let mut streams = cell.borrow_mut();
-        let stream = streams.get_mut(&id).ok_or_else(|| "TLS stream is closed".to_string())?;
-        stream.write_all(data).map_err(|e| format!("TLS write failed: {}", e))
-    })
+    match jet_net_tls_write_step_impl(id, data)? {
+        Some(count) if count as usize == data.len() => Ok(()),
+        Some(count) => Err(format!("TLS write accepted {} of {} bytes", count, data.len())),
+        None => Err("TLS write would block".to_string()),
+    }
+}
+
+pub fn jet_net_tls_write_step_impl(id: i64, data: &Vec<u8>) -> Result<Option<i64>, String> {
+    let mut streams = jet_net_tls_streams().lock().unwrap();
+    let state = streams.get_mut(&id).ok_or_else(|| "TLS stream is closed".to_string())?;
+    if state.closing {
+        return Err("TLS stream is closed".to_string());
+    }
+    if state.pending_write.is_none() {
+        match state.stream.write(data) {
+            Ok(count) => state.pending_write = Some(count),
+            Err(error) if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted | std::io::ErrorKind::TimedOut) => return Ok(None),
+            Err(error) => return Err(format!("TLS write failed: {}", error)),
+        }
+    }
+    match state.stream.flush() {
+        Ok(()) => Ok(state.pending_write.take().map(|count| count as i64)),
+        Err(error) if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted | std::io::ErrorKind::TimedOut) => Ok(None),
+        Err(error) => {
+            state.pending_write = None;
+            Err(format!("TLS write failed: {}", error))
+        }
+    }
 }
 
 fn jet_net_tls_flush_close_notify<S: Read + Write>(
@@ -281,15 +301,37 @@ fn jet_net_tls_flush_close_notify<S: Read + Write>(
 }
 
 pub fn jet_net_tls_close_impl(id: i64) -> Result<(), String> {
-    JET_NET_TLS_STREAMS.with(|cell| {
-        let mut streams = cell.borrow_mut();
-        if let Some(stream) = streams.get_mut(&id) {
-            jet_net_tls_flush_close_notify(stream)?;
+    match jet_net_tls_close_step_impl(id)? {
+        true => Ok(()),
+        false => Err("TLS close would block".to_string()),
+    }
+}
+
+pub fn jet_net_tls_close_step_impl(id: i64) -> Result<bool, String> {
+    let mut streams = jet_net_tls_streams().lock().unwrap();
+    let Some(state) = streams.get_mut(&id) else {
+        return if jet_net_tls_closed().lock().unwrap().contains(&id) {
+            Ok(true)
+        } else {
+            Err("TLS stream is closed".to_string())
+        };
+    };
+    if !state.closing {
+        state.stream.conn.send_close_notify();
+        state.closing = true;
+    }
+    match state.stream.flush() {
+        Ok(()) => {
+            match state.stream.sock.shutdown(std::net::Shutdown::Write) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotConnected => {}
+                Err(error) => return Err(format!("TLS socket write shutdown failed: {}", error)),
+            }
             streams.remove(&id);
-            JET_NET_TLS_CLOSED.with(|closed| { closed.borrow_mut().insert(id); });
-            return Ok(());
+            jet_net_tls_closed().lock().unwrap().insert(id);
+            Ok(true)
         }
-        if JET_NET_TLS_CLOSED.with(|closed| closed.borrow().contains(&id)) { Ok(()) }
-        else { Err("TLS stream is closed".to_string()) }
-    })
+        Err(error) if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted | std::io::ErrorKind::TimedOut) => Ok(false),
+        Err(error) => Err(format!("TLS close-notify flush failed: {}", error)),
+    }
 }

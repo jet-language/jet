@@ -106,20 +106,17 @@ impl JetIoReader for JetTlsStream {
                 Some("tls read limit must be positive".to_string()),
             )));
         }
-        jet_net_tls_result((self.read_bytes)(self.id, limit), "tls read")
-            .map_err(jet_net_to_io_error)
+        jet_net_tls_read_bytes(self, limit).map_err(jet_net_to_io_error)
     }
 }
 
 impl JetIoWriter for JetTlsStream {
     fn write(&mut self, bytes: &Vec<u8>) -> Result<i64, jet_std::IoError> {
-        jet_net_tls_result((self.write_bytes)(self.id, bytes), "tls write")
-            .map_err(jet_net_to_io_error)
+        jet_net_tls_write_bytes(self, bytes).map_err(jet_net_to_io_error)
     }
 
     fn write_all(&mut self, bytes: &Vec<u8>) -> Result<(), jet_std::IoError> {
-        jet_net_tls_result((self.write_all_bytes)(self.id, bytes), "tls write all")
-            .map_err(jet_net_to_io_error)
+        jet_net_tls_write_all_bytes(self, bytes).map_err(jet_net_to_io_error)
     }
 }
 
@@ -229,9 +226,13 @@ pub struct JetUnixStream;
 
 pub struct JetTlsStream {
     id: i64,
-    read_bytes: fn(i64, i64) -> Result<Vec<u8>, String>,
-    write_bytes: fn(i64, &Vec<u8>) -> Result<i64, String>,
-    write_all_bytes: fn(i64, &Vec<u8>) -> Result<(), String>,
+    socket: std::net::TcpStream,
+    read_timeout_ms: Option<i64>,
+    write_timeout_ms: Option<i64>,
+    wants: fn(i64) -> Result<(bool, bool), String>,
+    read_step: fn(i64, i64) -> Result<Option<Vec<u8>>, String>,
+    write_step: fn(i64, &Vec<u8>) -> Result<Option<i64>, String>,
+    close_step: fn(i64) -> Result<bool, String>,
 }
 
 #[derive(Clone)]
@@ -609,6 +610,136 @@ fn jet_net_udp_scheduler_wait(
         JetSchedulerWait::Panicked(message) => Err(JetNetError::Other(jet_net_detail(
             operation, None, None, format!("{} scheduler wait failed: {}", operation, message), None,
         ))),
+    }
+}
+
+fn jet_net_tls_scheduler_wait(
+    stream: &JetTlsStream,
+    fallback_read: bool,
+    fallback_write: bool,
+    operation: &str,
+) -> Result<(), JetNetError> {
+    let (mut read, mut write) = jet_net_tls_result((stream.wants)(stream.id), operation)?;
+    if !read && !write {
+        read = fallback_read;
+        write = fallback_write;
+    }
+    jet_net_scheduler_wait(&stream.socket, read, write, operation)
+}
+
+fn jet_net_tls_client_scheduler(
+    stream: JetTcpStream,
+    server_name: &String,
+    begin: fn(std::net::TcpStream, &String) -> Result<i64, String>,
+    handshake_step: fn(i64) -> Result<bool, String>,
+    abort: fn(i64),
+    wants: fn(i64) -> Result<(bool, bool), String>,
+    read_step: fn(i64, i64) -> Result<Option<Vec<u8>>, String>,
+    write_step: fn(i64, &Vec<u8>) -> Result<Option<i64>, String>,
+    close_step: fn(i64) -> Result<bool, String>,
+) -> Result<JetTlsStream, JetNetError> {
+    let socket = stream
+        .inner
+        .try_clone()
+        .map_err(|error| jet_net_io_error("tls scheduler registration", None, error))?;
+    let read_timeout_ms = stream.read_timeout_ms;
+    let write_timeout_ms = stream.write_timeout_ms;
+    let handshake_timeout_ms = match (read_timeout_ms, write_timeout_ms) {
+        (Some(read), Some(write)) => Some(read.min(write)),
+        (read, write) => read.or(write),
+    };
+    let id = jet_net_tls_result(begin(stream.inner, server_name), "tls handshake")?;
+    let tls = JetTlsStream {
+        id,
+        socket,
+        read_timeout_ms,
+        write_timeout_ms,
+        wants,
+        read_step,
+        write_step,
+        close_step,
+    };
+    let result = (|| {
+        let _deadline = jet_net_operation_deadline(handshake_timeout_ms);
+        loop {
+            if jet_net_tls_result(handshake_step(id), "tls handshake")? {
+                return Ok(tls);
+            }
+            jet_net_tls_scheduler_wait(&tls, true, true, "tls handshake")?;
+        }
+    })();
+    if result.is_err() {
+        abort(id);
+    }
+    result
+}
+
+fn jet_net_tls_read_bytes(stream: &mut JetTlsStream, limit: i64) -> Result<Vec<u8>, JetNetError> {
+    if limit <= 0 {
+        return Err(JetNetError::InvalidInput(jet_net_detail(
+            "tls read", None, None, "tls read limit must be positive".to_string(), None,
+        )));
+    }
+    let _deadline = jet_net_operation_deadline(stream.read_timeout_ms);
+    loop {
+        match jet_net_tls_result((stream.read_step)(stream.id, limit), "tls read")? {
+            Some(bytes) => return Ok(bytes),
+            None => jet_net_tls_scheduler_wait(stream, true, false, "tls read")?,
+        }
+    }
+}
+
+fn jet_net_tls_read_text(stream: &mut JetTlsStream) -> Result<String, JetNetError> {
+    let bytes = jet_net_tls_read_bytes(stream, 8192)?;
+    String::from_utf8(bytes).map_err(|error| JetNetError::InvalidInput(jet_net_detail(
+        "tls read text", None, None, format!("tls read text failed: invalid UTF-8: {}", error), None,
+    )))
+}
+
+fn jet_net_tls_write_bytes_with_current_deadline(
+    stream: &mut JetTlsStream,
+    data: &Vec<u8>,
+) -> Result<i64, JetNetError> {
+    loop {
+        match jet_net_tls_result((stream.write_step)(stream.id, data), "tls write")? {
+            Some(count) => return Ok(count),
+            None => jet_net_tls_scheduler_wait(stream, false, true, "tls write")?,
+        }
+    }
+}
+
+fn jet_net_tls_write_bytes(stream: &mut JetTlsStream, data: &Vec<u8>) -> Result<i64, JetNetError> {
+    let _deadline = jet_net_operation_deadline(stream.write_timeout_ms);
+    jet_net_tls_write_bytes_with_current_deadline(stream, data)
+}
+
+fn jet_net_tls_write_all_bytes(stream: &mut JetTlsStream, data: &Vec<u8>) -> Result<(), JetNetError> {
+    let _deadline = jet_net_operation_deadline(stream.write_timeout_ms);
+    let mut offset = 0usize;
+    while offset < data.len() {
+        let chunk = data[offset..].to_vec();
+        let count = jet_net_tls_write_bytes_with_current_deadline(stream, &chunk)? as usize;
+        if count == 0 {
+            return Err(JetNetError::ConnectionReset(jet_net_detail(
+                "tls write all", None, None, "tls write all failed: zero bytes written".to_string(), None,
+            )));
+        }
+        offset += count;
+    }
+    Ok(())
+}
+
+fn jet_net_tls_write_text(stream: &mut JetTlsStream, text: &String) -> Result<(), JetNetError> {
+    jet_net_tls_write_all_bytes(stream, &text.as_bytes().to_vec())
+}
+
+fn jet_net_tls_close(stream: &mut JetTlsStream) -> Result<(), JetNetError> {
+    let _deadline = jet_net_operation_deadline(stream.write_timeout_ms);
+    loop {
+        if jet_net_tls_result((stream.close_step)(stream.id), "tls close")? {
+            return Ok(());
+        }
+        jet_net_tls_scheduler_wait(stream, false, true, "tls close")?;
     }
 }
 

@@ -283,19 +283,33 @@ mod net_tls_close_tests {
         (address, server)
     }
 
+    fn connect_with_ca_for_test(
+        socket: std::net::TcpStream,
+        server_name: &str,
+        pem: &Vec<u8>,
+    ) -> Result<i64, String> {
+        let id = jet_net_tls_begin_with_ca_impl(socket, &server_name.to_string(), pem)?;
+        loop {
+            if jet_net_tls_handshake_step_impl(id)? {
+                return Ok(id);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    }
+
     #[test]
     fn system_plus_ca_extends_roots_and_keeps_hostname_verification() {
         let pem = include_bytes!("../../../tests/fixtures/tls/smtp.ca.cert.pem").to_vec();
         let (address, server) = tls_fixture();
         let socket = std::net::TcpStream::connect(address).unwrap();
-        let id = jet_net_tls_connect_with_ca_impl(socket, &"localhost".to_string(), &pem)
+        let id = connect_with_ca_for_test(socket, "localhost", &pem)
             .expect("fixture CA should verify localhost");
         jet_net_tls_close_impl(id).unwrap();
         server.join().unwrap();
 
         let (address, server) = tls_fixture();
         let socket = std::net::TcpStream::connect(address).unwrap();
-        let error = jet_net_tls_connect_with_ca_impl(socket, &"example.com".to_string(), &pem)
+        let error = connect_with_ca_for_test(socket, "example.com", &pem)
             .expect_err("custom CA must not disable DNS-name verification");
         assert!(error.contains("TLS handshake with `example.com` failed"), "{error}");
         assert!(error.to_ascii_lowercase().contains("not valid for name"), "{error}");

@@ -3920,6 +3920,67 @@ fn run() {
 }
 
 #[test]
+fn core_tls_stalled_handshake_observes_timeout_and_cancellation() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_core_tls_stalled_handshake_{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        let mut peers = Vec::new();
+        for _ in 0..2 {
+            let (peer, _) = listener.accept().unwrap();
+            peers.push(peer);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    });
+    let source = format!(
+        r#"
+use core.net as net
+use core.tasks as tasks
+use core.tls as tls
+
+fn run() {{
+    timed := net.tcp_connect("{address}") ?? panic("timeout tcp")
+    net.set_timeout(&timed, 30) ?? panic("timeout budget")
+    if net.tls_connect(^timed, "localhost") == {{
+        ok(_) -> panic("stalled handshake succeeded")
+        err(error) -> print("{{net.error_operation(error)}}:{{net.error_message(error)}}")
+    }}
+
+    (ready_tx, ready_rx) :: tasks.channel<Int>()
+    blocked :: tasks.spawn(take(ready_tx) () => {{
+        tcp := net.tcp_connect("{address}") ?? panic("cancel tcp")
+        ready_tx.send(1)
+        if tls.client(^tcp, "localhost") == {{
+            ok(_) -> panic("cancelled handshake succeeded")
+            err(error) -> print("{{net.error_operation(error)}}:{{net.error_message(error)}}")
+        }}
+    }})
+    _ready :: ready_rx.receive() ?? panic("ready")
+    blocked.cancel()
+    blocked.join()
+}}
+"#
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "tls_stalled_handshake", &source, &[], None);
+    server.join().unwrap();
+    assert_eq!(code, 0, "{stderr}");
+    let mut lines: Vec<_> = stdout.lines().collect();
+    lines.sort_unstable();
+    assert_eq!(
+        lines,
+        [
+            "tls handshake:deadline exceeded while waiting in tls handshake",
+            "tls handshake:tls handshake cancelled",
+        ]
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn canonical_core_import_resolves() {
     let out = compile_temp(
         "core_imports.jet",

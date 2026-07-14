@@ -1236,6 +1236,59 @@ fn dev_default_aot_fallback_matches_socket_echo() {
 }
 
 #[test]
+fn dev_default_aot_fallback_matches_tls_deadline() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_dev_tls_deadline_parity_{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        let mut peers = Vec::new();
+        for _ in 0..2 {
+            let (peer, _) = listener.accept().unwrap();
+            peers.push(peer);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    });
+    let file = dir.join("tls_deadline.jet");
+    fs::write(
+        &file,
+        format!(
+            r#"use core.net as net
+use core.tls as tls
+
+fn run() {{
+    tcp := net.tcp_connect("{address}") ?? panic("tcp")
+    net.set_timeout(&tcp, 25) ?? panic("timeout")
+    if tls.client(^tcp, "localhost") == {{
+        ok(_) -> panic("stalled handshake succeeded")
+        err(error) -> print(net.error_message(error))
+    }}
+}}
+"#
+        ),
+    )
+    .unwrap();
+    let shown = file.to_string_lossy().to_string();
+    let expected = compiled_binary_output(&dir, "tls_deadline", 0, "tls_deadline", &shown);
+    let got = match dev_iteration(&shown, false, false) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => {
+            panic!("default dev should AOT-fallback-run TLS deadline: {diags:?}")
+        }
+    };
+    server.join().unwrap();
+    assert_eq!(got, expected);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn dev_default_aot_fallback_matches_io_log() {
     let dir = std::env::temp_dir();
     let file = "examples/features/io/log.jet";

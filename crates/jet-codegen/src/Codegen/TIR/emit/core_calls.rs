@@ -1627,58 +1627,66 @@ pub(crate) fn emit_tir_core_call(
             format!("{}(&({}))", helper("jet_net_dns_srv_weight"), arg(0))
         }
         ("core.net", "tls_connect") => format!(
-            "{{ let _s = {}; {}({}(_s.inner, &({})), \"tls handshake\").map(|id| JetTlsStream{{id, read_bytes: {}::jet_net_tls_read_bytes_impl, write_bytes: {}::jet_net_tls_write_bytes_impl, write_all_bytes: {}::jet_net_tls_write_all_bytes_impl}}) }}",
+            "{}({}, &({}), {}, {}, {}, {}, {}, {}, {})",
+            helper("jet_net_tls_client_scheduler"),
             arg(0),
-            helper("jet_net_tls_result"),
-            regex_fn("jet_net_tls_connect_impl"),
             arg(1),
-            cx.ffi_crate.as_deref().unwrap_or("jet_ffi"),
-            cx.ffi_crate.as_deref().unwrap_or("jet_ffi"),
-            cx.ffi_crate.as_deref().unwrap_or("jet_ffi")
+            regex_fn("jet_net_tls_begin_impl"),
+            regex_fn("jet_net_tls_handshake_step_impl"),
+            regex_fn("jet_net_tls_abort_impl"),
+            regex_fn("jet_net_tls_wants_impl"),
+            regex_fn("jet_net_tls_read_step_impl"),
+            regex_fn("jet_net_tls_write_step_impl"),
+            regex_fn("jet_net_tls_close_step_impl")
         ),
         ("core.net", "tls_read") => {
-            format!("{}({}(({}).id), \"tls read text\")", helper("jet_net_tls_result"), regex_fn("jet_net_tls_read_impl"), arg(0))
+            format!("{}(&mut ({}))", helper("jet_net_tls_read_text"), arg(0))
         }
         ("core.net", "tls_write") => format!(
-            "{}({}(({}).id, &({})), \"tls write text\")",
-            helper("jet_net_tls_result"),
-            regex_fn("jet_net_tls_write_impl"),
+            "{}(&mut ({}), &({}))",
+            helper("jet_net_tls_write_text"),
             arg(0),
             arg(1)
         ),
         ("core.net", "tls_close") => {
-            format!("{}({}(({}).id), \"tls close\")", helper("jet_net_tls_result"), regex_fn("jet_net_tls_close_impl"), arg(0))
+            format!("{}(&mut ({}))", helper("jet_net_tls_close"), arg(0))
         }
         ("core.tls", "client") => format!(
-            "{{ let _s = {}; {}({}(_s.inner, &({})), \"tls handshake\").map(|id| JetTlsStream{{id, read_bytes: {}::jet_net_tls_read_bytes_impl, write_bytes: {}::jet_net_tls_write_bytes_impl, write_all_bytes: {}::jet_net_tls_write_all_bytes_impl}}) }}",
-            arg(0), helper("jet_net_tls_result"), regex_fn("jet_net_tls_connect_impl"), arg(1),
-            cx.ffi_crate.as_deref().unwrap_or("jet_ffi"),
-            cx.ffi_crate.as_deref().unwrap_or("jet_ffi"),
-            cx.ffi_crate.as_deref().unwrap_or("jet_ffi")
+            "{}({}, &({}), {}, {}, {}, {}, {}, {}, {})",
+            helper("jet_net_tls_client_scheduler"),
+            arg(0),
+            arg(1),
+            regex_fn("jet_net_tls_begin_impl"),
+            regex_fn("jet_net_tls_handshake_step_impl"),
+            regex_fn("jet_net_tls_abort_impl"),
+            regex_fn("jet_net_tls_wants_impl"),
+            regex_fn("jet_net_tls_read_step_impl"),
+            regex_fn("jet_net_tls_write_step_impl"),
+            regex_fn("jet_net_tls_close_step_impl")
         ),
         ("core.tls", "read") => format!(
-            "{}({}(({}).id, {}), \"tls read\")",
-            helper("jet_net_tls_result"), regex_fn("jet_net_tls_read_bytes_impl"), arg(0), arg(1)
+            "{}(&mut ({}), {})",
+            helper("jet_net_tls_read_bytes"), arg(0), arg(1)
         ),
         ("core.tls", "read_text") => format!(
-            "{}({}(({}).id), \"tls read text\")",
-            helper("jet_net_tls_result"), regex_fn("jet_net_tls_read_impl"), arg(0)
+            "{}(&mut ({}))",
+            helper("jet_net_tls_read_text"), arg(0)
         ),
         ("core.tls", "write") => format!(
-            "{}({}(({}).id, &({})), \"tls write\")",
-            helper("jet_net_tls_result"), regex_fn("jet_net_tls_write_bytes_impl"), arg(0), arg(1)
+            "{}(&mut ({}), &({}))",
+            helper("jet_net_tls_write_bytes"), arg(0), arg(1)
         ),
         ("core.tls", "write_all") => format!(
-            "{}({}(({}).id, &({})), \"tls write all\")",
-            helper("jet_net_tls_result"), regex_fn("jet_net_tls_write_all_bytes_impl"), arg(0), arg(1)
+            "{}(&mut ({}), &({}))",
+            helper("jet_net_tls_write_all_bytes"), arg(0), arg(1)
         ),
         ("core.tls", "write_text") => format!(
-            "{}({}(({}).id, &({})), \"tls write text\")",
-            helper("jet_net_tls_result"), regex_fn("jet_net_tls_write_impl"), arg(0), arg(1)
+            "{}(&mut ({}), &({}))",
+            helper("jet_net_tls_write_text"), arg(0), arg(1)
         ),
         ("core.tls", "close") => format!(
-            "{}({}(({}).id), \"tls close\")",
-            helper("jet_net_tls_result"), regex_fn("jet_net_tls_close_impl"), arg(0)
+            "{}(&mut ({}))",
+            helper("jet_net_tls_close"), arg(0)
         ),
         // E2-M10: jet.http — HTTP client.
         ("jet.http", "get") => format!("{}(&({}))", helper("jet_http_get"), arg(0)),

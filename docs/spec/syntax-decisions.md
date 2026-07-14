@@ -2001,15 +2001,19 @@ index, not a substitute for that law.
   readiness backend. On Unix, UDP send/receive and Unix-socket accept/read/write
   use the same scheduler park slots; blocked operations return typed
   `.Cancelled` or `.Timeout`, UDP preserves datagram atomicity, and Unix streams
-  preserve the shared byte/half-close/idempotent-close contract. Same-handle TCP
-  readiness and deadline bounding exist. DNS, TLS, per-call deadline coverage,
-  JIT parity, Windows IOCP, and remaining platform proof stay tracked by #300;
+  preserve the shared byte/half-close/idempotent-close contract. TLS consumes
+  that same nonblocking TCP handle: handshake, read, write, write_all, and
+  close-notify park through the shared readiness slots, preserve inherited
+  socket deadlines, and return typed cancellation or timeout. Same-handle TCP
+  readiness and deadline bounding exist. Per-call deadline coverage, JIT parity,
+  Windows IOCP, and remaining platform proof stay tracked by #300;
   #306's shared cancellation/runtime prerequisite is complete.
 - **D-NETTLSSTREAM1=A**: `core.tls.client` consumes a connected `TcpStream` and
   returns a `TlsStream` with the same byte and close law. Safe defaults verify the server name
   with system roots; advanced roots, ALPN, identity, protocol bounds, peer
-  identity, readiness/deadline/cancellation/shutdown integration, and advanced
-  close-notify controls remain implementation work under #306/#300.
+  identity, and advanced close-notify controls remain implementation work under
+  #300. The stream itself uses shared socket readiness, deadlines, cancellation,
+  explicit close-notify, underlying write half-close, and idempotent close.
 - **D-HTTPDEPTH1=A**: `core.http` owns Client, Server, Router, middleware,
   streaming bodies, forms/multipart, cookies, redirects, timeouts, TLS policy,
   and SSE, built on `core.url`, `core.mime`, and `core.net`. WebSocket support

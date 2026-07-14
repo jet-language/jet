@@ -2413,13 +2413,16 @@ The built module exposes only this byte/text stream surface:
 
 | Function | Returns | Notes |
 |----------|---------|-------|
-| `client(stream, server_name)` | `TlsStream ? NetError` | Consume the `TcpStream`; verify the server name with system roots |
-| `read(stream, limit)` / `read_text(stream)` | `[U8] ? NetError` / `String ? NetError` | Read bytes or checked text from the TLS stream |
-| `write(stream, bytes)` / `write_all(stream, bytes)` | `Int ? NetError` / `() ? NetError` | Write some or all bytes |
+| `client(stream, server_name)` | `TlsStream ? NetError` | Consume the `TcpStream`; verify the server name with system roots; preserve its deadline budgets |
+| `read(stream, limit)` / `read_text(stream)` | `[U8] ? NetError` / `String ? NetError` | Scheduler-aware byte or checked-text read; empty bytes mean clean EOF |
+| `write(stream, bytes)` / `write_all(stream, bytes)` | `Int ? NetError` / `() ? NetError` | Scheduler-aware partial or complete byte write |
 | `write_text(stream, text)` | `() ? NetError` | Write the complete text payload |
 | `close(stream)` | `() ? NetError` | Send close-notify; repeated close is harmless |
 
-TLS failures use `core.net.NetError`; there is no separate TLS error hierarchy.
+TLS handshake, read, write, and close-notify use the consumed socket's shared
+readiness path. Ambient cancellation and the earliest ambient or inherited
+socket deadline return typed `NetError` values. TLS failures use
+`core.net.NetError`; there is no separate TLS error hierarchy.
 
 ---
 
