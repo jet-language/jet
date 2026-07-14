@@ -64,7 +64,7 @@ D-COMPILERSEAMS1/2 split the compiler into workspace seam crates. The root
 | `jet-debug` | complete source debugger and DAP product over `jet-driver` plus leaf JSON/exit policy | debugger diagnostics only |
 | `jet-cli` | canonical command/flag registry, completions, man page, diagnostic reference, and hybrid help UI over leaf syntax policy plus `jet-repl` terminal/symbol support | renders existing diagnostics only |
 | `jet-canvas` | Canvas browser HTML/JS projection assets over leaf JSON escaping | no |
-| `jet-devserver` | watch policy, HTTP/static transport, Canvas asset routes, and the source-backed Canvas semantic/edit service over checked driver and semantic-index facts; web build/rustc orchestration remains in the root host | renders existing diagnostics only |
+| `jet-devserver` | watch/HTTP/static policy, Canvas routes and semantic/edit service, browser-client leases, terminal/browser status parity, live reload, and atomic last-good artifact swapping; the root retains only the R5 compile/rustc executor and process watch loop | renders existing diagnostics only |
 | `jet-rt` | runtime helpers shared by generated code and JIT/dev paths | no |
 | `jet-jit` | dev/JIT execution tier over codegen/TIR facts | internal fallback only |
 | `jet-net` | runtime/comptime fetch helper with TLS diagnostics | yes, for fetch failures |
@@ -124,6 +124,10 @@ interpreter eligibility walk lives in `jet-driver`; stable exit codes and the
 std-only JSON codec live in dependency-free `jet-foundation`. Neither product
 depends on the root package, splices root source with `include!`, or owns rustc
 invocation and ICE classification; R5 remains in `Source/CmdCompile.rs`.
+`crates/jet-devserver` likewise owns the web server, Canvas routes, status
+surfaces, client leases, live reload, and last-good swap. `CmdCompile.rs`
+drives its build-state API while retaining compile/codegen/rustc execution;
+there is no callback or dependency edge from the seam back to the root.
 
 ### Adding an FFI bridge
 

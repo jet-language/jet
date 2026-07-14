@@ -6,6 +6,7 @@ use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 
 pub mod Canvas;
+pub mod WebHost;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum WatchPolicy { Auto, Restart, Swap, Once }

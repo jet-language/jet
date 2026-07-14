@@ -1,9 +1,9 @@
-//! `jet dev <file>.jet --target=web` (c134 Phase 7): compile-once, watch,
-//! rebuild-on-save, and serve the `build/` folder with browser live-reload —
-//! std-only (I6: no `notify`, no HTTP-server crate, no WebSocket crate).
+//! Web dev-server state, terminal/browser parity UI, routes, live reload, and
+//! last-good artifact swapping — std-only (I6: no `notify`, HTTP-server, or
+//! WebSocket crate).
 //!
 //! This is a completely different execution model from the native `jet dev`
-//! (`run_dev` in `CmdDevTools.rs`), which interprets/hot-swaps the program in
+//! native `jet dev`, which interprets/hot-swaps the program in
 //! process. Compiling to JS/WASM has nothing to hot-swap in that sense — the
 //! only thing a save can do is trigger a full recompile, so this module only
 //! reuses the *mtime-poll watch pattern* (and the `file_mtime` helper itself)
@@ -14,18 +14,14 @@ use std::fs;
 use std::io::{BufReader, IsTerminal, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::process::exit;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use jet::Diagnostics::ColorChoice;
-use jet::ExitCodes;
+use jet_driver::Diagnostics::ColorChoice;
 
-use crate::CmdCompile::write_web_artifacts;
-use crate::{report_problems, OutputMode};
-use jet_devserver::{content_type_for, file_mtime, query_param, static_path, write_response, Request};
+use crate::{content_type_for, query_param, static_path, write_response, Request};
 
 /// Ports tried, in order, before giving up. 8080 is the conventional static-
 /// dev-server port; a small bounded scan upward covers "something else is
@@ -69,6 +65,7 @@ struct DevStatus {
     /// (dashboard's depth, D-FE-DEVSRV1=D "on-demand depth").
     verbose: AtomicBool,
     active: AtomicBool,
+    exit_code: AtomicU64,
     /// Set only after raw-mode input succeeds. Verbose DECSTBM pinning must
     /// not start before its Ctrl-C/EOF cleanup guard exists.
     controls_ready: AtomicBool,
@@ -122,6 +119,7 @@ impl DevStatus {
             port: AtomicU64::new(0),
             verbose: AtomicBool::new(verbose),
             active: AtomicBool::new(false),
+            exit_code: AtomicU64::new(0),
             controls_ready: AtomicBool::new(false),
             reconnecting: AtomicBool::new(false),
             color,
@@ -497,25 +495,92 @@ impl DevStatus {
     }
 }
 
+pub struct WebHost {
+    listener: Mutex<Option<TcpListener>>,
+    status: Arc<DevStatus>,
+    canvas_file: String,
+}
+
+impl WebHost {
+    pub fn bind(file: &str, verbose: bool, port: Option<u16>) -> Result<Self, String> {
+        let listener = bind_dev_server(port)?;
+        let bound_port = listener
+            .local_addr()
+            .map(|address| address.port())
+            .unwrap_or(*PORT_RANGE.start());
+        let status = Arc::new(DevStatus::new(file, verbose));
+        status.set_port(bound_port);
+        Ok(Self {
+            listener: Mutex::new(Some(listener)),
+            status,
+            canvas_file: file.to_string(),
+        })
+    }
+
+    pub fn start(&self) {
+        let listener = self.listener.lock().unwrap().take();
+        if let Some(listener) = listener {
+            let status = Arc::clone(&self.status);
+            let canvas_file = self.canvas_file.clone();
+            thread::spawn(move || serve_forever(listener, status, canvas_file));
+        }
+        {
+            let status = Arc::clone(&self.status);
+            thread::spawn(move || loop {
+                thread::sleep(Duration::from_millis(LIVE_RELOAD_POLL_MS));
+                status.expire_clients();
+            });
+        }
+        if !self.status.pin {
+            println!(
+                "serving http://localhost:{} — watching {} … (Ctrl-C to stop)",
+                self.status.port(),
+                self.canvas_file
+            );
+            println!("Canvas: http://localhost:{}/canvas", self.status.port());
+        }
+        start_terminal_controls(Arc::clone(&self.status));
+        self.status.activate();
+    }
+
+    pub fn mark_building(&self) {
+        self.status.mark_building();
+    }
+
+    pub fn mark_ready(&self, elapsed_ms: u128, is_rebuild: bool) {
+        self.status.mark_ready(elapsed_ms, is_rebuild);
+    }
+
+    pub fn mark_error(&self, code: String, diagnostic: String, is_rebuild: bool) {
+        self.status.mark_error(code, diagnostic, is_rebuild);
+    }
+
+    pub fn exit_code(&self) -> Option<i32> {
+        let code = self.status.exit_code.load(Ordering::SeqCst);
+        (code != 0).then_some(code as i32)
+    }
+}
+
 fn start_terminal_controls(status: Arc<DevStatus>) {
     if !status.pin {
         return;
     }
-    let Some(raw) = jet::Term::RawGuard::enable() else {
+    let Some(raw) = jet_repl::Term::RawGuard::enable() else {
         return;
     };
     status.controls_ready.store(true, Ordering::SeqCst);
     thread::spawn(move || {
-        let mut keys = jet::Term::KeyReader::new(std::io::stdin());
+        let mut keys = jet_repl::Term::KeyReader::new(std::io::stdin());
         loop {
             match keys.read_key() {
-                jet::Term::Key::Char('v' | 'V') => status.toggle_verbose(),
-                jet::Term::Key::CtrlC => {
+                jet_repl::Term::Key::Char('v' | 'V') => status.toggle_verbose(),
+                jet_repl::Term::Key::CtrlC => {
                     status.disable_terminal_controls();
                     drop(raw);
-                    exit(130);
+                    status.exit_code.store(130, Ordering::SeqCst);
+                    return;
                 }
-                jet::Term::Key::Eof => {
+                jet_repl::Term::Key::Eof => {
                     status.disable_terminal_controls();
                     drop(raw);
                     return;
@@ -621,168 +686,6 @@ fn json_escape(s: &str) -> String {
     out
 }
 
-/// `jet dev <file>.jet --target=web`: build once, serve `build/` over plain
-/// HTTP with live-reload, then watch `file` and rebuild on every save.
-/// `port`: `--port=<N>` if given — bind that exact port, no fallback scan
-/// (an explicit choice fails loud, same convention as `PORT=3000 node ...`).
-/// `None` scans `PORT_RANGE` starting at 8080.
-pub(crate) fn run_dev_web(file: &str, mode: OutputMode, verbose: bool, port: Option<u16>) {
-    let path = Path::new(file);
-    if !path.exists() {
-        eprintln!("error: can't find the file `{}`", file);
-        eprintln!(
-            " fix: check the spelling, or run {} from the folder that contains it",
-            jet::Syntax::BINARY_NAME
-        );
-        exit(ExitCodes::USER_ERROR);
-    }
-
-    // Bind first so the port is known before the initial build's status
-    // renders its parity line (D-FE-DEVSRV1=D: `ready · localhost:<port> …`).
-    let listener = bind_dev_server(port);
-    let port = listener
-        .local_addr()
-        .map(|a| a.port())
-        .unwrap_or(*PORT_RANGE.start());
-
-    let status = Arc::new(DevStatus::new(file, verbose));
-    status.set_port(port);
-
-    // The initial build must succeed — there's nothing to serve otherwise.
-    // `rebuild_web` already prints diagnostics/ICE messages on failure.
-    if !rebuild_web(file, mode, verbose, false, Some(&status)) {
-        exit(ExitCodes::USER_ERROR);
-    }
-
-    {
-        let status = Arc::clone(&status);
-        let canvas_file = file.to_string();
-        thread::spawn(move || serve_forever(listener, status, canvas_file));
-    }
-
-    {
-        let status = Arc::clone(&status);
-        thread::spawn(move || loop {
-            thread::sleep(Duration::from_millis(LIVE_RELOAD_POLL_MS));
-            status.expire_clients();
-        });
-    }
-
-    if !status.pin {
-        println!(
-            "serving http://localhost:{} — watching {} … (Ctrl-C to stop)",
-            port, file
-        );
-        println!("Canvas: http://localhost:{}/canvas", port);
-    }
-    start_terminal_controls(Arc::clone(&status));
-    // Render only after raw-mode setup. With `--verbose`, this prevents a
-    // DECSTBM scroll region from being installed without its cleanup guard.
-    status.activate();
-
-    // Same mtime-poll/debounce shape as `run_dev` (Source/CmdDevTools.rs),
-    // reusing `file_mtime` verbatim (I6: no filesystem-notification crate).
-    let mut last_mtime = file_mtime(path);
-    loop {
-        thread::sleep(Duration::from_millis(120));
-        let now = file_mtime(path);
-        if now != last_mtime {
-            last_mtime = now;
-            // A debounce sleep lets editors finish writing before we read.
-            thread::sleep(Duration::from_millis(30));
-            rebuild_web(file, mode, verbose, true, Some(&status));
-            // `rebuild_web` drives the parity header + verbose log itself
-            // (`DevStatus::refresh`/`log_rebuild`) on both success and
-            // failure — nothing left to print here.
-            // On failure: `rebuild_web` never touches `build/` until every
-            // artifact (including the wasm rustc pass) has compiled clean —
-            // see `stage_and_swap` — so the dev server keeps serving the last
-            // good build, exactly as a broken mid-edit save should behave.
-        }
-    }
-}
-
-/// Compile `file` for the web target and, on success, atomically replace
-/// `build/*` with the new output. Returns whether the rebuild succeeded.
-///
-/// A front-end compile error (the common case while editing) never writes to
-/// `build/` at all — diagnostics are reported and the previous build stands.
-/// A codegen/rustc failure (I2: always an internal compiler error, not the
-/// user's fault) is reported the same way and likewise leaves `build/`
-/// untouched, because the new artifacts are written to a staging directory
-/// first and only moved into place once the whole set, wasm included,
-/// compiled successfully.
-fn rebuild_web(
-    file: &str,
-    mode: OutputMode,
-    verbose: bool,
-    is_rebuild: bool,
-    status: Option<&DevStatus>,
-) -> bool {
-    let started = Instant::now();
-    if let Some(status) = status {
-        status.mark_building();
-    }
-    let src = fs::read_to_string(file).unwrap_or_default();
-    let out = match jet::compile_web(file) {
-        Ok(out) => out,
-        Err(diags) => {
-            // On the very first build the process exits right after this
-            // (no dev loop has started yet), so the standard rich CLI
-            // diagnostic (color, hyperlinks, "N problems found") is exactly
-            // right — same as `jet build`. On a save-triggered rebuild the
-            // parity header + framed/plain diagnostic (`DevStatus::refresh`,
-            // driven by `mark_error` below) IS the terminal error surface
-            // (D-FE-DEVSRV1=D); printing `report_problems` too would just
-            // duplicate the same diagnostic in a second, different format.
-            if !is_rebuild {
-                report_problems(mode, file, &src, &diags);
-            }
-            if let Some(status) = status {
-                let code = diags.first().map(|d| d.code.to_string()).unwrap_or_default();
-                status.mark_error(code, jet::render_diagnostics(file, &src, &diags), is_rebuild);
-            } else if is_rebuild {
-                report_problems(mode, file, &src, &diags);
-            }
-            return false;
-        }
-    };
-    let web = match &out.web {
-        Some(w) => w,
-        None => {
-            eprintln!("error: internal compiler error: missing web codegen output");
-            if let Some(status) = status {
-                status.mark_error(
-                    "ICE".to_string(),
-                    "internal compiler error: missing web codegen output".to_string(),
-                    is_rebuild,
-                );
-            }
-            return false;
-        }
-    };
-
-    let staging = PathBuf::from("build").join(".jet-dev-staging");
-    if let Err(msg) = write_web_artifacts(file, web, verbose, &staging) {
-        eprintln!("{}", msg);
-        if let Some(status) = status {
-            status.mark_error("ICE".to_string(), msg, is_rebuild);
-        }
-        return false;
-    }
-    if let Err(e) = stage_and_swap(&staging, Path::new("build")) {
-        eprintln!("error: couldn't finalize web build: {}", e);
-        if let Some(status) = status {
-            status.mark_error("ICE".to_string(), format!("couldn't finalize web build: {e}"), is_rebuild);
-        }
-        return false;
-    }
-
-    if let Some(status) = status {
-        status.mark_ready(started.elapsed().as_millis(), is_rebuild);
-    }
-    true
-}
 
 /// Move every file `write_web_artifacts` staged into the real output
 /// directory. Each `fs::rename` is atomic on the same filesystem (staging
@@ -791,7 +694,7 @@ fn rebuild_web(
 /// they only run after the entire staged set — including the wasm compile —
 /// has already succeeded, so there is nothing left that can fail mid-swap
 /// except a bare I/O error.
-fn stage_and_swap(staging: &Path, out_dir: &Path) -> std::io::Result<()> {
+pub fn stage_and_swap(staging: &Path, out_dir: &Path) -> std::io::Result<()> {
     const FILES: [&str; 6] = [
         "web.manifest.json",
         "jet_dom_runtime.js",
@@ -831,44 +734,42 @@ fn rename_with_retry(src: &Path, dst: &Path) -> std::io::Result<()> {
 /// Bind the dev server's `TcpListener`. `Some(port)` (from `--port=<N>`)
 /// binds that exact port and fails loud if it's taken — an explicit choice
 /// isn't a hint. `None` scans `PORT_RANGE` for a free port.
-fn bind_dev_server(port: Option<u16>) -> TcpListener {
+fn bind_dev_server(port: Option<u16>) -> Result<TcpListener, String> {
     if let Some(port) = port {
         return match TcpListener::bind(("127.0.0.1", port)) {
-            Ok(listener) => listener,
+            Ok(listener) => Ok(listener),
             Err(e) => {
-                eprintln!("error: couldn't bind to port {}: {}", port, e);
-                if e.kind() == std::io::ErrorKind::AddrInUse {
-                    eprintln!(
-                        " fix: stop whatever's using port {}, or pick another with --port=<N>",
+                let fix = if e.kind() == std::io::ErrorKind::AddrInUse {
+                    format!(
+                        "\n fix: stop whatever's using port {}, or pick another with --port=<N>",
                         port
-                    );
-                }
-                exit(ExitCodes::USER_ERROR);
+                    )
+                } else {
+                    String::new()
+                };
+                Err(format!("error: couldn't bind to port {}: {}{}", port, e, fix))
             }
         };
     }
     let mut last_err: Option<std::io::Error> = None;
     for port in PORT_RANGE {
         match TcpListener::bind(("127.0.0.1", port)) {
-            Ok(listener) => return listener,
+            Ok(listener) => return Ok(listener),
             Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
                 last_err = Some(e);
                 continue;
             }
             Err(e) => {
-                eprintln!("error: couldn't start the dev server: {}", e);
-                exit(ExitCodes::USER_ERROR);
+                return Err(format!("error: couldn't start the dev server: {}", e));
             }
         }
     }
-    eprintln!(
-        "error: every port from {} to {} is already in use{}",
+    Err(format!(
+        "error: every port from {} to {} is already in use{}\n fix: free one of those ports, stop the other process using it, or pick one explicitly with --port=<N>",
         PORT_RANGE.start(),
         PORT_RANGE.end(),
         last_err.map(|e| format!(" ({})", e)).unwrap_or_default()
-    );
-    eprintln!(" fix: free one of those ports, stop the other process using it, or pick one explicitly with --port=<N>");
-    exit(ExitCodes::USER_ERROR);
+    ))
 }
 
 /// Accept connections forever, one thread per connection (a dev tool serving
@@ -912,14 +813,14 @@ fn handle_connection(
     }
 
     let path = target.split('?').next().unwrap_or("/");
-    if let Some(asset) = jet::DevServer::canvas_asset(method, target, path) {
+    if let Some(asset) = crate::canvas_asset(method, target, path) {
         return write_response(&mut stream, asset.status, asset.content_type, asset.body.as_bytes());
     }
     if target == "/?jet_panel_graph=1" {
         if method != "GET" {
             return method_not_allowed(&mut stream);
         }
-        return match jet::Canvas::graph_json_for_file(Path::new(canvas_file)) {
+        return match crate::Canvas::graph_json_for_file(Path::new(canvas_file)) {
             Ok(body) => write_response(
                 &mut stream,
                 "200 OK",
@@ -928,7 +829,7 @@ fn handle_connection(
             ),
             Err(diags) => {
                 let src = fs::read_to_string(canvas_file).unwrap_or_default();
-                let body = jet::render_diagnostics(canvas_file, &src, &diags);
+                let body = jet_driver::Diagnostics::render_all(canvas_file, &src, &diags);
                 write_response(
                     &mut stream,
                     "409 Conflict",
@@ -943,7 +844,7 @@ fn handle_connection(
             return method_not_allowed(&mut stream);
         }
         let source_id = query_param(target, "source_id");
-        return match jet::Canvas::graph_json_for_entry_source(Path::new(canvas_file), source_id.as_deref()) {
+        return match crate::Canvas::graph_json_for_entry_source(Path::new(canvas_file), source_id.as_deref()) {
             Ok(body) => write_response(
                 &mut stream,
                 "200 OK",
@@ -962,7 +863,7 @@ fn handle_connection(
         if method != "GET" {
             return method_not_allowed(&mut stream);
         }
-        let body = jet::Canvas::project_json_for_entry(Path::new(canvas_file));
+        let body = crate::Canvas::project_json_for_entry(Path::new(canvas_file));
         return write_response(
             &mut stream,
             "200 OK",
@@ -977,7 +878,7 @@ fn handle_connection(
         if method != "GET" {
             return method_not_allowed(&mut stream);
         }
-        let body = jet::Canvas::source_control_json_for_entry(Path::new(canvas_file));
+        let body = crate::Canvas::source_control_json_for_entry(Path::new(canvas_file));
         return write_response(
             &mut stream,
             "200 OK",
@@ -993,7 +894,7 @@ fn handle_connection(
             return method_not_allowed(&mut stream);
         }
         let query = query_param(target, "query").unwrap_or_default();
-        return match jet::Canvas::core_catalog_json_for_entry(Path::new(canvas_file), &query) {
+        return match crate::Canvas::core_catalog_json_for_entry(Path::new(canvas_file), &query) {
             Ok(body) => write_response(
                 &mut stream,
                 "200 OK",
@@ -1014,7 +915,7 @@ fn handle_connection(
         }
         let source_id = query_param(target, "source_id");
         let receipt = status.command_receipt();
-        return match jet::Canvas::proof_json_for_entry_with_receipt(
+        return match crate::Canvas::proof_json_for_entry_with_receipt(
             Path::new(canvas_file),
             source_id.as_deref(),
             receipt.as_deref(),
@@ -1040,7 +941,7 @@ fn handle_connection(
         let source_id = query_param(target, "source_id");
         let source_path = source_id
             .as_deref()
-            .and_then(|id| jet::Canvas::project_path_for_source_id(Path::new(canvas_file), id))
+            .and_then(|id| crate::Canvas::project_path_for_source_id(Path::new(canvas_file), id))
             .unwrap_or_else(|| PathBuf::from(canvas_file));
         return match fs::read(&source_path) {
             Ok(body) => write_response(
@@ -1062,7 +963,7 @@ fn handle_connection(
             return method_not_allowed(&mut stream);
         }
         let request = String::from_utf8_lossy(&body);
-        return match jet::Canvas::command_receipt_json_for_entry(Path::new(canvas_file), &request)
+        return match crate::Canvas::command_receipt_json_for_entry(Path::new(canvas_file), &request)
         {
             Ok(body) => {
                 status.record_command_receipt(body.clone());
@@ -1089,7 +990,7 @@ fn handle_connection(
             return method_not_allowed(&mut stream);
         }
                 let request = String::from_utf8_lossy(&body);
-        return match jet::Canvas::apply_transaction_json(Path::new(canvas_file), &request) {
+        return match crate::Canvas::apply_transaction_json(Path::new(canvas_file), &request) {
             Ok(body) => {
                 status.version.fetch_add(1, Ordering::SeqCst);
                 write_response(
@@ -1115,7 +1016,7 @@ fn handle_connection(
             return method_not_allowed(&mut stream);
         }
         let request = String::from_utf8_lossy(&body);
-        return match jet::Canvas::apply_project_transaction_json(Path::new(canvas_file), &request)
+        return match crate::Canvas::apply_project_transaction_json(Path::new(canvas_file), &request)
         {
             Ok(body) => {
                 status.version.fetch_add(1, Ordering::SeqCst);
@@ -1139,7 +1040,7 @@ fn handle_connection(
             return method_not_allowed(&mut stream);
         }
         let request = String::from_utf8_lossy(&body);
-        return match jet::Canvas::query_json_for_entry(Path::new(canvas_file), &request) {
+        return match crate::Canvas::query_json_for_entry(Path::new(canvas_file), &request) {
             Ok(body) => write_response(
                 &mut stream,
                 "200 OK",
@@ -1159,7 +1060,7 @@ fn handle_connection(
             return method_not_allowed(&mut stream);
         }
         let request = String::from_utf8_lossy(&body);
-        return match jet::Canvas::debug_session_json_for_file(Path::new(canvas_file), &request) {
+        return match crate::Canvas::debug_session_json_for_file(Path::new(canvas_file), &request) {
             Ok(body) => write_response(
                 &mut stream,
                 "200 OK",

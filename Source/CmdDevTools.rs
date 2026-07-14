@@ -340,10 +340,6 @@ pub(crate) fn run_repl(project_dir: Option<&str>, allow: &[String], deny: &[Stri
     exit(code);
 }
 
-/// Last-modified time of a path, or `None` if it can't be read (treated as a
-/// distinct state so a transient unlink/rewrite still triggers a re-run).
-/// `pub(crate)`: also reused verbatim by `CmdDevWeb::run_dev_web` (c134
-/// Phase 7) — same mtime-poll pattern, no `notify` crate (I6).
 /// Run one dev iteration and render its outcome to the terminal in the active
 /// output mode. Diagnostics use the SAME renderer as batch compilation
 /// (D-DEV), so a problem looks identical whether seen via `jet check` or

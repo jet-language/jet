@@ -20,7 +20,6 @@ mod CmdCodemod;
 mod CmdBudget;
 mod CmdCompile;
 mod CmdDevTools;
-mod CmdDevWeb;
 mod CmdDossier;
 mod CmdExpand;
 mod CmdImpact;
@@ -35,14 +34,13 @@ mod EngineDispatch;
 
 use CmdCodemod::run_codemod;
 use CmdCompile::{
-    run_build_query, run_compile_cmd, run_debug_native, run_dev_entry, run_fix, run_fmt,
+    run_build_query, run_compile_cmd, run_debug_native, run_dev_entry, run_dev_web, run_fix, run_fmt,
     run_fuzz, run_new, run_task_entry, run_test, run_test_opts, FuzzRunOpts, TestRunOpts,
 };
 use CmdDevTools::{
     run_bench, run_bind, run_completions, run_dev, run_devtools, run_doctor, run_emit_rust,
     run_eval, run_explain, run_lint_a11y, run_repl, watch_policy_from, WatchPolicy,
 };
-use CmdDevWeb::run_dev_web;
 use CmdDossier::run_dossier;
 use CmdExpand::run_expand;
 use CmdImpact::run_impact;

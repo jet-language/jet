@@ -162,7 +162,19 @@ fn workspace_crates_keep_declared_dependency_direction() {
         &["jet-foundation", "jet-repl"],
     );
     assert_deps("crates/jet-canvas/Cargo.toml", &["jet-foundation"]);
-    assert_deps("crates/jet-devserver/Cargo.toml", &["jet-canvas"]);
+    assert_deps(
+        "crates/jet-devserver/Cargo.toml",
+        &[
+            "jet-canvas",
+            "jet-debug",
+            "jet-driver",
+            "jet-env-model",
+            "jet-impact",
+            "jet-repl",
+            "jet-semindex",
+            "jetpack",
+        ],
+    );
     assert_deps(
         "crates/jet-jit/Cargo.toml",
         &["jet-codegen", "jet-foundation", "jet-rt"],
@@ -210,7 +222,14 @@ fn jetpack_dependency_debt_is_explicit_until_product_split() {
     // (slice 2) is expected to depend on `jetpack` until a later card
     // physically relocates the JetOS realization engine out of it (open
     // scope gate, not this slice — see docs/plans/epoch-3/product-split-slice4.md).
-    let allowed = ["Cargo.toml", "crates/jetos/Cargo.toml"];
+    // Canvas's pre-existing WorkspaceFile/WorkspaceLock engine calls moved
+    // with their implementation into jet-devserver; this is relocated debt,
+    // not a new package-engine consumer.
+    let allowed = [
+        "Cargo.toml",
+        "crates/jet-devserver/Cargo.toml",
+        "crates/jetos/Cargo.toml",
+    ];
     let mut actual = Vec::new();
     for manifest in repo_files_with_suffix("crates", "Cargo.toml")
         .into_iter()
@@ -237,9 +256,9 @@ fn direct_jetpack_imports_stay_behind_known_boundaries() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let allowed = [
         "crates/jetos/src/main.rs",
-        "Source/Canvas/project_scan.rs",
-        "Source/Canvas/project_transactions.rs",
-        "Source/Canvas/schema_api.rs",
+        "crates/jet-devserver/src/Canvas/project_scan.rs",
+        "crates/jet-devserver/src/Canvas/project_transactions.rs",
+        "crates/jet-devserver/src/Canvas/schema_api.rs",
         "Source/LSP/Completion.rs",
         "Source/LSP/Server.rs",
         "Source/lib.rs",

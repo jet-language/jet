@@ -5,6 +5,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command};
 use std::sync::OnceLock;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use jet::ExitCodes;
 
@@ -2036,6 +2038,104 @@ fn validate_target(triple: &str, mode: OutputMode) {
             exit(ExitCodes::USER_ERROR);
         }
     }
+}
+
+/// `jet dev <file>.jet --target=web`: the root retains only the R5 build
+/// executor and process watch loop. HTTP, Canvas routes, terminal/browser
+/// status, client leases, and last-good swapping live in `jet-devserver`.
+pub(crate) fn run_dev_web(
+    file: &str,
+    mode: OutputMode,
+    verbose: bool,
+    port: Option<u16>,
+) {
+    let path = Path::new(file);
+    if !path.exists() {
+        eprintln!("error: can't find the file `{}`", file);
+        eprintln!(
+            " fix: check the spelling, or run {} from the folder that contains it",
+            jet::Syntax::BINARY_NAME
+        );
+        exit(ExitCodes::USER_ERROR);
+    }
+
+    let host = match jet_devserver::WebHost::WebHost::bind(file, verbose, port) {
+        Ok(host) => host,
+        Err(message) => {
+            eprintln!("{message}");
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    if !rebuild_dev_web(file, mode, verbose, false, &host) {
+        exit(ExitCodes::USER_ERROR);
+    }
+    host.start();
+
+    let mut last_mtime = jet_devserver::file_mtime(path);
+    loop {
+        thread::sleep(Duration::from_millis(120));
+        if let Some(code) = host.exit_code() {
+            exit(code);
+        }
+        let now = jet_devserver::file_mtime(path);
+        if now != last_mtime {
+            last_mtime = now;
+            thread::sleep(Duration::from_millis(30));
+            rebuild_dev_web(file, mode, verbose, true, &host);
+        }
+    }
+}
+
+fn rebuild_dev_web(
+    file: &str,
+    mode: OutputMode,
+    verbose: bool,
+    is_rebuild: bool,
+    host: &jet_devserver::WebHost::WebHost,
+) -> bool {
+    let started = Instant::now();
+    host.mark_building();
+    let src = fs::read_to_string(file).unwrap_or_default();
+    let out = match jet::compile_web(file) {
+        Ok(out) => out,
+        Err(diags) => {
+            if !is_rebuild {
+                report_problems(mode, file, &src, &diags);
+            }
+            let code = diags
+                .first()
+                .map(|diagnostic| diagnostic.code.to_string())
+                .unwrap_or_default();
+            host.mark_error(
+                code,
+                jet::render_diagnostics(file, &src, &diags),
+                is_rebuild,
+            );
+            return false;
+        }
+    };
+    let Some(web) = &out.web else {
+        let message = "internal compiler error: missing web codegen output".to_string();
+        eprintln!("error: {message}");
+        host.mark_error("ICE".to_string(), message, is_rebuild);
+        return false;
+    };
+
+    let staging = PathBuf::from("build").join(".jet-dev-staging");
+    if let Err(message) = write_web_artifacts(file, web, verbose, &staging) {
+        eprintln!("{message}");
+        host.mark_error("ICE".to_string(), message, is_rebuild);
+        return false;
+    }
+    if let Err(error) = jet_devserver::WebHost::stage_and_swap(&staging, Path::new("build")) {
+        let message = format!("couldn't finalize web build: {error}");
+        eprintln!("error: {message}");
+        host.mark_error("ICE".to_string(), message, is_rebuild);
+        return false;
+    }
+
+    host.mark_ready(started.elapsed().as_millis(), is_rebuild);
+    true
 }
 
 /// Where `write_web_artifacts` put each `build/*` file it wrote — returned so

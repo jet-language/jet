@@ -478,6 +478,19 @@ fn compiler_seam_crates_have_only_path_dependencies() {
             && !root.join("Source/Canvas").exists(),
         "D-ARCH-SOURCE1 requires jet-devserver ownership of Canvas semantics, not root wrappers"
     );
+    let root_main = fs::read_to_string(root.join("Source/main.rs")).expect("Source/main.rs missing");
+    let root_compile =
+        fs::read_to_string(root.join("Source/CmdCompile.rs")).expect("Source/CmdCompile.rs missing");
+    let devserver =
+        fs::read_to_string(root.join("crates/jet-devserver/src/lib.rs")).expect("jet-devserver missing");
+    assert!(
+        !root.join("Source/CmdDevWeb.rs").exists()
+            && !root_main.contains("mod CmdDevWeb;")
+            && root_compile.contains("pub(crate) fn run_dev_web(")
+            && root_compile.contains("jet_devserver::WebHost::WebHost::bind")
+            && devserver.contains("pub mod WebHost;"),
+        "D-ARCH-SOURCE1 requires inward web-host ownership with only the R5 executor in CmdCompile"
+    );
     assert!(
         root_lib.contains("pub use jet_canvas as CanvasUi;")
             && !root.join("Source/Canvas/html.rs").exists()
