@@ -91,9 +91,9 @@
     /// the method in the type's `methods` list. As with `covers`, the
     /// sema-dependent facts a method body needs (`recv_type` on inner method calls)
     /// are not filled by `build_cx` alone, so the gate paths that consult them are
-    /// proven by `tests/tir.rs` + the byte-parity check; here we exercise the
-    /// sema-independent structural gating (self receiver, static shape, param/return
-    /// types, the `self`-assignment exclusion).
+    /// proven by the TIR feature integration targets + the byte-parity check;
+    /// here we exercise the sema-independent structural gating (self receiver,
+    /// static shape, param/return types, the `self`-assignment exclusion).
     fn covers_method(src: &str, type_name: &str, method: &str) -> bool {
         let (toks, lex_diags) = crate::Lexer::lex(src);
         assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
@@ -152,7 +152,8 @@
         // from a param value, is in-subset (struct + clone are covered). The borrowed-
         // ident clone is a SEMA rewrite (`(n).clone()`) — the `covers` helper is
         // build_cx-only so it sees the bare ident here, which is also in-subset; the
-        // authoritative byte-for-byte proof is tests/tir.rs `borrowed_struct_lit_field_value_cloned`.
+        // authoritative byte-for-byte proof is
+        // tests/tir_patterns_and_fields.rs::borrowed_struct_lit_field_value_cloned.
         let src = "\
 struct Person {
     name: String
@@ -197,7 +198,8 @@ fn make(n: String) -> Person {
     /// `build_cx`-only path leaves `core_imports` empty — it is populated from the bundle
     /// at real codegen; mirror that here so the core-`mem` gate paths are exercised). The
     /// end-to-end build+run + the full-suite byte-parity diff are the authoritative proof
-    /// (see `tests/tir.rs::unsafe_fn_block_and_ptr_ops`); this exercises the gate shape.
+    /// (see `tests/tir_unsafe_and_runtime.rs::unsafe_fn_block_and_ptr_ops`);
+    /// this exercises the gate shape.
     fn covers_with_mem(src: &str, fn_name: &str) -> bool {
         let (toks, lex_diags) = crate::Lexer::lex(src);
         assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
@@ -219,7 +221,8 @@ fn make(n: String) -> Person {
     /// Like `covers`, but injects a foreign type → module mapping (`cx.foreign_types`)
     /// — the `build_cx`-only path leaves it empty (it's populated from the bundle at real
     /// codegen). Mirrors `covers_with_mem`. The end-to-end build+run + the full-suite
-    /// byte-parity diff are the authoritative proof (tests/tir.rs); this exercises the gate.
+    /// byte-parity diff are the authoritative proof (the TIR feature integration
+    /// targets); this exercises the gate.
     fn covers_with_foreign(src: &str, fn_name: &str, foreign: &[(&str, &str)]) -> bool {
         let (toks, lex_diags) = crate::Lexer::lex(src);
         assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
@@ -283,8 +286,9 @@ fn mk() {
         // c109 (B2): a fixed-size-list type `[E#N]` is covered like a list (`Vec<E>`)
         // as a param/return type and as a struct field, once its element type is
         // covered. (Indexing a `[E#N]` is in-subset only once sema resolves the
-        // `IndexKind` — exercised end-to-end by tests/tir.rs; here we gate the
-        // sema-independent type-coverage facts the four helpers decide.)
+        // `IndexKind` — exercised end-to-end by the TIR feature integration
+        // targets; here we gate the sema-independent type-coverage facts the four
+        // helpers decide.)
         let mk = |src: &str| {
             let (toks, _) = crate::Lexer::lex(src);
             let prog = crate::Parser::parse(&toks).expect("parse");
@@ -526,9 +530,9 @@ fn mk() {
 
     // c109 Phase 5: collections. (Index/slice/index-assign coverage needs the
     // sema-resolved `IndexKind`, which `build_cx` alone does not fill, so those are
-    // proven by the byte-parity check + `tests/tir.rs`; here we gate the
-    // sema-independent constructs: list/map literals, list/map-typed params, and
-    // collection iteration.)
+    // proven by the byte-parity check + the TIR feature integration targets; here
+    // we gate the sema-independent constructs: list/map literals, list/map-typed
+    // params, and collection iteration.)
 
     #[test]
     fn covers_list_literal_and_param() {
@@ -599,8 +603,9 @@ fn mk() {
     }
 
     // c109 Phase 6: methods + clones. (The gate paths that need a sema-resolved
-    // `recv_type` are proven by the byte-parity check + `tests/tir.rs`; `build_cx`
-    // alone does not fill `recv_type`. Here we gate the sema-independent facts:
+    // `recv_type` are proven by the byte-parity check + the TIR feature integration
+    // targets; `build_cx` alone does not fill `recv_type`. Here we gate the
+    // sema-independent facts:
     // covered method *signatures* are registered, and a covered function bodyless
     // of method calls is unaffected.)
 
@@ -664,7 +669,8 @@ fn mk() {
         // `emit_builtin_method` (the fix), so the gate admits it. `recv_type` is a sema fact
         // (`build_cx` alone leaves the call node's `recv_type` empty), so we drive
         // `method_call_in_subset` directly with a synthetic `Some("Bag")` receiver — exactly
-        // the node sema produces. (The end-to-end build+run + byte-parity in tests/tir.rs is
+        // the node sema produces. (The end-to-end build+run + byte-parity in the TIR
+        // feature integration targets is
         // the authoritative proof; this exercises the gate's user-vs-builtin decision.)
         let src = "struct Bag {\n items: [Int]\n fn get(self) -> Int {\n return 1\n }\n fn len(self) -> Int {\n return 2\n }\n}\n";
         let (toks, _) = crate::Lexer::lex(src);
@@ -796,7 +802,8 @@ fn mk() {
         // sema EnumLit rewrite needed, so `build_cx` alone proves the gate. A
         // scalar-payload *error enum* literal is `Bad.Code(1)`, which parses as a
         // MethodCall and is only rewritten to an `EnumLit` by full sema; that path is
-        // proven end-to-end by `tests/tir.rs::fallible_try_and_or_fallback`.)
+        // proven end-to-end by
+        // `tests/tir_collections_and_methods.rs::fallible_try_and_or_fallback`.)
         let src = "fn f(x: Int) -> Int ? Error {\n if x == 0 {\n return err(\"bad\")\n }\n return ok(x)\n}\nfn g(x: Int) -> Int ? Error {\n n :: f(x)?\n return ok((n + 1))\n}\n";
         assert!(covers(src, "f"));
         assert!(covers(src, "g"));
@@ -1162,7 +1169,8 @@ fn greet() -> String { return input() }
         // fn-typed field renders to `Box<dyn Fn(...)>` and needs no clone/deref decision at
         // the field site (sema-independent — `build_cx` populates `struct_fields`). (The
         // full construction + `w.step(4)` fn-field CALL is sema-dependent — `recv_type ==
-        // Some("Worker")` is a sema fact — so it is proven by tests/tir.rs + byte-parity.)
+        // Some("Worker")` is a sema fact — so it is proven by the TIR feature
+        // integration targets + byte-parity.)
         let src = "struct Worker { step: fn(Int) -> Int }\nfn f() {}";
         let (toks, _) = crate::Lexer::lex(src);
         let prog = crate::Parser::parse(&toks).expect("parse");
@@ -1172,7 +1180,8 @@ fn greet() -> String { return input() }
             &cx
         ));
         // The fn-field-call shape resolves the field's Fn type from a covered struct's
-        // `struct_fields` (the `recv_type` half is the sema fact tests/tir.rs supplies).
+        // `struct_fields` (the `recv_type` half is supplied by the TIR feature
+        // integration targets).
         assert!(fn_field_call_ty("step", &Some("Worker".to_string()), &cx).is_some());
         // A non-existent / non-Fn field is not a fn-field call.
         assert!(fn_field_call_ty("missing", &Some("Worker".to_string()), &cx).is_none());
@@ -1314,7 +1323,8 @@ fn greet() -> String { return input() }
         // (the unannotated AST default), which is exactly what the d3 shape keys on;
         // the `Receiver<Int>` annotation supplies the value type. (The
         // `tasks.spawn(take(..) …)`/`Task.join` slice depends on sema-filled
-        // `Lambda.meta`, so it's proven end-to-end in tests/tir.rs.)
+        // `Lambda.meta`, so it's proven end-to-end in the TIR feature integration
+        // targets.)
         let src = "\
 use core.tasks as tasks
 fn produce(s: Sender<Int>) {
@@ -1453,8 +1463,9 @@ fn consume(ch: Receiver<Int>) -> Int {
         // type. A fn that builds and returns `DataTree` values routes (the dynamic value
         // type is a covered foreign value type;
         // construction is the `JsonLit` shape). The if-let MATCHING + index-assign need
-        // full sema (the `DataTree` pattern / `IndexKind`), proven by `tests/tir.rs` + the
-        // whole-suite byte-parity diff; here we gate the sema-independent construction.
+        // full sema (the `DataTree` pattern / `IndexKind`), proven by the TIR feature
+        // integration targets + the whole-suite byte-parity diff; here we gate the
+        // sema-independent construction.
         let src = "\
 fn build() -> DataTree {
     items: [DataTree] := []
@@ -1502,7 +1513,8 @@ fn name_of(n: Note) -> String {
     fn covers_local_enum_with_foreign_payload_value_type() {
         // c109 Phase 24: a local enum whose variant payload is itself a covered enum is
         // covered (`enum_payload_ty_covered` admits a covered enum). (A FOREIGN-enum
-        // payload needs the cross-module `foreign_types` table, proven by `tests/tir.rs`;
+        // payload needs the cross-module `foreign_types` table, proven by the TIR
+        // feature integration targets;
         // here a LOCAL nested enum exercises the same payload-covered path.)
         let src = "\
 enum Kind { A B }
@@ -1684,7 +1696,8 @@ fn maybe_shape(s: Shape) -> (Shape?) {
         // c109 Phase 30: a TRAIT-OBJECT param (`s: Shape` → `&Box<dyn user_Shape>`). The
         // param type is admitted (`is_covered_trait_object_ty`); a body with no method
         // call is structurally in-subset (the dynamic-dispatch shape needs sema's
-        // `recv_type`, proven by tests/tir.rs + parity). An empty body covers.
+        // `recv_type`, proven by the TIR feature integration targets + parity). An
+        // empty body covers.
         let src = "\
 trait Shape {
     fn area(self) -> Float

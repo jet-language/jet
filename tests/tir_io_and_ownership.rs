@@ -1,6 +1,12 @@
 //! TIR io and ownership integration tests.
 
-use super::*;
+#[path = "tir_support/mod.rs"]
+mod tir_support;
+
+use std::fs;
+use std::process::Command;
+
+use tir_support::{build_and_run, build_and_run_multi, have_rustc};
 
 /// Build `src` to a binary, then run it with `stdin` piped in. Like `build_and_run`
 /// but feeds a deterministic stdin so an `io.input(...)` reads known lines (and EOF).

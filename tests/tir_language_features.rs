@@ -1,6 +1,11 @@
 //! TIR language features integration tests.
 
-use super::*;
+#[path = "tir_support/mod.rs"]
+mod tir_support;
+
+use std::fs;
+
+use tir_support::{build_and_run, build_and_run_full, build_and_run_multi, have_rustc};
 
 // ===========================================================================
 // c109 Phase 23: @Pure / #Todo / default params / named args / distinct / tuples
@@ -483,7 +488,7 @@ fn run() {
 }
 ";
     let (code, _stdout, stderr) =
-        common::build_and_run("jet_tir_test", "tir_http_duplicate_route", src);
+        build_and_run_full("jet_tir_test", "tir_http_duplicate_route", src);
     assert_ne!(code, 0);
     assert!(
         stderr.contains("panic: E2804: duplicate route `GET /users/:name`"),

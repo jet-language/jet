@@ -22,7 +22,7 @@
 ## Build order
 
 ### Phase 1 — computed alias fix (DONE, verified 2026-07-02)
-`"computed"` is present in the `jet.reactive` export list (`core_module_items` in `CheckerCoreLib.rs`, `"jet.reactive" => &["signal", "derived", "computed", "effect"]`) and fully wired in sema (`CheckerCoreLib.rs:1120`) and codegen (`TIR/lower.rs:5247`, `TIR/subset.rs:3773`). Covered end-to-end by `examples/features/ui/reactive_scope.jet` (golden) + `tests/tir.rs::reactive_scope_marker`. Landed as part of the c134 Phase 7 checkpoint commit (`edfa5f57`); this plan's "buildable now" note was stale.
+`"computed"` is present in the `jet.reactive` export list (`core_module_items` in `CheckerCoreLib.rs`, `"jet.reactive" => &["signal", "derived", "computed", "effect"]`) and fully wired in sema (`CheckerCoreLib.rs:1120`) and codegen (`TIR/lower.rs:5247`, `TIR/subset.rs:3773`). Covered end-to-end by `examples/features/ui/reactive_scope.jet` (golden) + `tests/tir_data_math_reactive.rs::reactive_scope_marker`. Landed as part of the c134 Phase 7 checkpoint commit (`edfa5f57`); this plan's "buildable now" note was stale.
 
 ### Phase 2 — View model layer (BLOCKED: D-UITREE1)
 Typed node tree over `core.reactive`. Composable, diff-based subtree rerenders.

@@ -1,6 +1,9 @@
 //! TIR collections and methods integration tests.
 
-use super::*;
+#[path = "tir_support/mod.rs"]
+mod tir_support;
+
+use tir_support::{build_and_run, have_rustc};
 
 // c109 Phase 5: collections — list/map literals, indexing/slicing, index-assign,
 // and `loop x in coll` / `loop k, v in map` iteration. The `IndexKind` (List/Map)

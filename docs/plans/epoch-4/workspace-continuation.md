@@ -43,8 +43,9 @@ The 2026-06-29 log entry says a full `cargo test` run reached "an unrelated
 capstone linker ICE in logbook" after the D-WORKSPACELOCK1 slice landed. No
 file, example, or test fixture named `logbook` or `capstone` exists in the
 tree today (`grep -ri logbook`/`capstone` across the repo turns up only two
-unrelated string literals in `tests/tir.rs` fixtures — a comptime-const demo
-and a foreign-enum-matching demo, neither a showcase program). E2-M17 GA
+unrelated string literals in `tests/tir_modules_and_enums.rs` and
+`tests/tir_language_features.rs` fixtures — a comptime-const demo and a
+foreign-enum-matching demo, neither a showcase program). E2-M17 GA
 retired all 6 showcase programs from `examples/` before this note was
 written. All workspace/jetpack/pkg/ring_layer suites are green. Conclusion:
 either the ICE was in a scratch fixture the agent built and discarded during

@@ -1,6 +1,11 @@
 //! TIR data math reactive integration tests.
 
-use super::*;
+#[path = "tir_support/mod.rs"]
+mod tir_support;
+
+use std::fs;
+
+use tir_support::{build_and_run, have_rustc};
 
 // --- D-SOA1 / D-SOA2A-D: `#Layout(columnar)` struct-of-arrays --------------
 
@@ -71,7 +76,7 @@ fn columnar_lowers_to_struct_of_arrays_no_unsafe() {
     );
     // I1: no `unsafe` anywhere in generated columnar code.
     assert!(
-        !common::strip_vetted_prelude_modules(&rust).contains("unsafe"),
+        !tir_support::strip_vetted_prelude_modules(&rust).contains("unsafe"),
         "columnar codegen must emit no `unsafe`"
     );
 }

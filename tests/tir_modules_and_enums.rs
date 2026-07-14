@@ -1,6 +1,11 @@
 //! TIR modules and enums integration tests.
 
-use super::*;
+#[path = "tir_support/mod.rs"]
+mod tir_support;
+
+use std::fs;
+
+use tir_support::{build_and_run, build_and_run_multi, have_rustc};
 
 /// c109 Phase 14: a qualified inline code-module call `math.double(5)` (D-MOD2).
 /// `main` routes through the TIR (`ModuleCall::InlineMangled` → `user_math__double`),

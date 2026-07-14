@@ -1,6 +1,12 @@
 //! TIR pattern, field, and collection-receiver integration tests.
 
-use super::*;
+#[path = "tir_support/mod.rs"]
+mod tir_support;
+
+use std::fs;
+use std::process::Command;
+
+use tir_support::{build_and_run, have_rustc};
 
 /// c109 (builtin-name collision): a user method whose name collides with a builtin
 /// (`get`/`len`) was mis-dispatched by `emit_builtin_method` (name-keyed, not

@@ -1,6 +1,11 @@
 //! TIR unsafe and runtime integration tests.
 
-use super::*;
+#[path = "tir_support/mod.rs"]
+mod tir_support;
+
+use std::fs;
+
+use tir_support::{build_and_run, have_rustc};
 
 /// c109 Phase 18 / D-UNSAFE2: the expert low-level tier (S58, E2-M13/D-LL1). A
 /// `#Unsafe("reason") fn` lowers to a Rust `unsafe fn`; a `#Unsafe("reason") { … }`
@@ -111,7 +116,7 @@ cell: Int :: 1337
     // I1 self-check: drop every vetted prelude region (jet_mem and the rest of
     // the canonical list), then every remaining `unsafe` must be a gated form
     // (`unsafe {` or `unsafe fn`).
-    let user = common::strip_vetted_prelude_modules(&out.rust);
+    let user = tir_support::strip_vetted_prelude_modules(&out.rust);
     for line in user.lines() {
         // Skip comment lines (the source-map path comment can contain the word).
         if line.trim_start().starts_with("//") {

@@ -1,6 +1,11 @@
 //! TIR core and closures integration tests.
 
-use super::*;
+#[path = "tir_support/mod.rs"]
+mod tir_support;
+
+use std::fs;
+
+use tir_support::{build_and_run, have_rustc};
 
 /// c109 Phase 10: core/stdlib module calls route through the TIR. `math.*`,
 /// `path.join`, and `crypto.sha256` are type-monomorphic (in `core_fixed_sig`),
@@ -26,7 +31,7 @@ fn make_path(a: String, b: String) -> String {
     return path.join(copy a, copy b)
 }
 fn hash(s: String) -> String {
-    return crypto.sha256(copy s)
+    return crypto.sha256(s.bytes()).hex()
 }
 fn run() {
     print(calc(16.0))

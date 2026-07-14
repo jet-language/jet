@@ -1,6 +1,9 @@
 //! TIR control and data integration tests.
 
-use super::*;
+#[path = "tir_support/mod.rs"]
+mod tir_support;
+
+use tir_support::{build_and_run, have_rustc};
 
 /// Arithmetic + a helper call + interpolation. The helper `double` and `main`
 /// are both fully covered, so both route through the TIR.

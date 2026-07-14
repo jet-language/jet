@@ -44,7 +44,6 @@ generic `execute_raw(sql)` escape.
 
 ## Verification
 
-- `nix develop -c cargo test --test tir core_db`
+- `nix develop -c cargo test --test corelib db_`
 - `nix develop -c cargo test --test golden`
 - `nix develop -c cargo test`
-
