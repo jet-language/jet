@@ -436,6 +436,8 @@ fn jet_net_dns_result<T>(result: Result<T, String>, name: &str) -> Result<T, Jet
     result.map_err(|message| {
         if message.starts_with("DNS name not found") {
             JetNetError::Dns(JetNetDnsError::NotFound(name.to_string()))
+        } else if message.starts_with("network operation cancelled") {
+            JetNetError::Cancelled(jet_net_detail("dns", None, Some(name.to_string()), message, None))
         } else if message.starts_with("network protocol error") {
             JetNetError::Protocol(jet_net_detail("dns", None, Some(name.to_string()), message, None))
         } else if message.contains("timed out") || message.contains("timeout") {
@@ -1288,13 +1290,16 @@ fn jet_net_dns_encode_name(out: &mut Vec<u8>, name: &str) -> Result<(), String> 
         return Ok(());
     }
     for label in trimmed.split('.') {
-        if label.is_empty() || label.len() > 63 {
+        if label.is_empty() || label.len() > 63 || !label.is_ascii() {
             return Err(format!("invalid DNS name `{}`", name));
         }
         out.push(label.len() as u8);
         out.extend_from_slice(label.as_bytes());
     }
     out.push(0);
+    if out.len() > 255 {
+        return Err(format!("invalid DNS name `{}`: encoded name exceeds 255 bytes", name));
+    }
     Ok(())
 }
 
@@ -1320,6 +1325,9 @@ fn jet_net_dns_read_name(packet: &[u8], pos: &mut usize) -> Result<String, Strin
             let ptr = (((len & 0x3f) as usize) << 8) | packet[p + 1] as usize;
             if ptr >= packet.len() {
                 return Err("network protocol error: DNS compression pointer is out of bounds".to_string());
+            }
+            if ptr >= p {
+                return Err("network protocol error: DNS compression pointer does not point backward".to_string());
             }
             if !jumped {
                 *pos = p + 2;
@@ -1374,20 +1382,12 @@ struct JetDnsWireRecord {
     rdata_len: usize,
 }
 
-fn jet_net_dns_txid() -> u16 {
-    use std::hash::{BuildHasher, Hasher};
-    // RandomState is seeded from the platform's process entropy by std.  Mix a
-    // fresh state with monotonic/process facts so concurrent queries cannot
-    // repeat a predictable counter or a source-code constant.
-    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
-    h.write_u32(std::process::id());
-    h.write_u128(
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos(),
-    );
-    h.finish() as u16
+fn jet_net_dns_txid() -> Result<u16, String> {
+    let mut bytes = [0u8; 2];
+    jet_crypto_entropy_fill(&mut bytes).map_err(|_| {
+        "DNS transaction ID needs operating-system cryptographic randomness".to_string()
+    })?;
+    Ok(u16::from_be_bytes(bytes))
 }
 
 fn jet_net_dns_read_u16(packet: &[u8], at: usize, what: &str) -> Result<u16, String> {
@@ -1416,6 +1416,9 @@ fn jet_net_dns_parse_response(
     if flags & 0x7800 != 0 {
         return Err("network protocol error: unsupported DNS opcode".to_string());
     }
+    if flags & 0x0040 != 0 {
+        return Err("network protocol error: reserved DNS header bit is set".to_string());
+    }
     let rcode = flags & 0x000f;
     if rcode == 3 {
         return Err(format!("DNS name not found: `{}`", name));
@@ -1441,6 +1444,17 @@ fn jet_net_dns_parse_response(
     {
         return Err("network protocol error: DNS question echo mismatch".to_string());
     }
+    // TC explicitly means the UDP body is incomplete. The header and echoed
+    // question above must still authenticate; declared records cannot be parsed
+    // safely until the bounded TCP retry supplies the complete message.
+    if flags & 0x0200 != 0 {
+        return Ok((true, Vec::new()));
+    }
+    let minimum_record_bytes = total_records.checked_mul(11)
+        .ok_or_else(|| "network protocol error: DNS record count overflows packet bounds".to_string())?;
+    if minimum_record_bytes > packet.len().saturating_sub(pos) {
+        return Err("network protocol error: DNS record counts exceed packet bounds".to_string());
+    }
     let packet = std::sync::Arc::new(packet);
     let mut records = Vec::with_capacity(total_records);
     for _ in 0..total_records {
@@ -1465,36 +1479,96 @@ fn jet_net_dns_parse_response(
     if pos != packet.len() {
         return Err("network protocol error: trailing bytes after DNS records".to_string());
     }
-    Ok((flags & 0x0200 != 0, records))
+    Ok((false, records))
+}
+
+fn jet_net_dns_cancelled() -> bool {
+    jet_scheduler_task_cancelled() && !jet_scheduler_shielded()
+}
+
+fn jet_net_dns_remaining(deadline: std::time::Instant, name: &str) -> Result<std::time::Duration, String> {
+    if jet_net_dns_cancelled() {
+        return Err(format!("network operation cancelled during DNS lookup for `{}`", name));
+    }
+    let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+    if remaining.is_zero() {
+        return Err(format!("network timeout during DNS lookup for `{}`", name));
+    }
+    Ok(remaining)
+}
+
+fn jet_net_dns_io_slice(deadline: std::time::Instant, name: &str) -> Result<std::time::Duration, String> {
+    Ok(jet_net_dns_remaining(deadline, name)?.min(std::time::Duration::from_millis(10)))
 }
 
 fn jet_net_dns_tcp_exchange(
     server_addr: std::net::SocketAddr,
     request: &[u8],
-    timeout: std::time::Duration,
+    deadline: std::time::Instant,
+    name: &str,
 ) -> Result<Vec<u8>, String> {
     use std::io::{Read, Write};
-    let mut stream = std::net::TcpStream::connect_timeout(&server_addr, timeout)
+    let mut stream = std::net::TcpStream::connect_timeout(
+        &server_addr,
+        jet_net_dns_remaining(deadline, name)?,
+    )
         .map_err(|e| format!("DNS TCP connect to `{}` failed: {}", server_addr, e))?;
-    stream.set_read_timeout(Some(timeout)).map_err(|e| format!("DNS TCP timeout setup failed: {}", e))?;
-    stream.set_write_timeout(Some(timeout)).map_err(|e| format!("DNS TCP timeout setup failed: {}", e))?;
     let len = u16::try_from(request.len()).map_err(|_| "network protocol error: DNS request exceeds TCP frame".to_string())?;
-    stream.write_all(&len.to_be_bytes()).and_then(|_| stream.write_all(request))
-        .map_err(|e| format!("DNS TCP query send failed: {}", e))?;
+    let mut framed = Vec::with_capacity(request.len() + 2);
+    framed.extend_from_slice(&len.to_be_bytes());
+    framed.extend_from_slice(request);
+    let mut written = 0usize;
+    while written < framed.len() {
+        stream.set_write_timeout(Some(jet_net_dns_io_slice(deadline, name)?))
+            .map_err(|e| format!("DNS TCP timeout setup failed: {}", e))?;
+        match stream.write(&framed[written..]) {
+            Ok(0) => return Err("network protocol error: DNS TCP connection closed while sending query".to_string()),
+            Ok(n) => written += n,
+            Err(error) if matches!(error.kind(), std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted) => continue,
+            Err(error) => return Err(format!("DNS TCP query send failed: {}", error)),
+        }
+    }
     let mut prefix = [0u8; 2];
-    stream.read_exact(&mut prefix).map_err(|e| format!("DNS TCP response length failed: {}", e))?;
+    let mut prefix_read = 0usize;
+    while prefix_read < prefix.len() {
+        stream.set_read_timeout(Some(jet_net_dns_io_slice(deadline, name)?))
+            .map_err(|e| format!("DNS TCP timeout setup failed: {}", e))?;
+        match stream.read(&mut prefix[prefix_read..]) {
+            Ok(0) => return Err("network protocol error: DNS TCP connection closed before response length".to_string()),
+            Ok(n) => prefix_read += n,
+            Err(error) if matches!(error.kind(), std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted) => continue,
+            Err(error) => return Err(format!("DNS TCP response length failed: {}", error)),
+        }
+    }
     let response_len = u16::from_be_bytes(prefix) as usize;
     if response_len < 12 || response_len > 65535 {
         return Err("network protocol error: invalid DNS TCP response length".to_string());
     }
     let mut packet = vec![0u8; response_len];
-    stream.read_exact(&mut packet).map_err(|e| format!("DNS TCP response truncated: {}", e))?;
+    let mut read = 0usize;
+    while read < packet.len() {
+        stream.set_read_timeout(Some(jet_net_dns_io_slice(deadline, name)?))
+            .map_err(|e| format!("DNS TCP timeout setup failed: {}", e))?;
+        match stream.read(&mut packet[read..]) {
+            Ok(0) => return Err("network protocol error: DNS TCP response is truncated".to_string()),
+            Ok(n) => read += n,
+            Err(error) if matches!(error.kind(), std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted) => continue,
+            Err(error) => return Err(format!("DNS TCP response truncated: {}", error)),
+        }
+    }
     Ok(packet)
 }
 
 fn jet_net_dns_query(server: &String, name: &String, qtype: u16, ms: i64) -> Result<Vec<JetDnsWireRecord>, String> {
-    let timeout = jet_net_timeout(ms)?;
-    let deadline = std::time::Instant::now() + timeout;
+    let configured = jet_net_timeout(ms)?;
+    let timeout = match jet_deadline_remaining_ms() {
+        Some(remaining) if remaining <= 0 => return Err(format!("network timeout during DNS lookup for `{}`", name)),
+        Some(remaining) => configured.min(std::time::Duration::from_millis(remaining as u64)),
+        None => configured,
+    };
+    let deadline = std::time::Instant::now().checked_add(timeout)
+        .ok_or_else(|| "network timeout exceeds platform range".to_string())?;
+    jet_net_dns_remaining(deadline, name)?;
     let server_addr = server
         .parse::<std::net::SocketAddr>()
         .map_err(|e| format!("invalid DNS server `{}`: {}", server, e))?;
@@ -1502,11 +1576,8 @@ fn jet_net_dns_query(server: &String, name: &String, qtype: u16, ms: i64) -> Res
     let socket = std::net::UdpSocket::bind(bind_addr)
         .map_err(|e| format!("dns socket bind failed: {}", e))?;
     socket.connect(server_addr).map_err(|e| format!("DNS server `{}` is unreachable: {}", server, e))?;
-    socket
-        .set_read_timeout(Some(deadline.saturating_duration_since(std::time::Instant::now())))
-        .map_err(|e| format!("dns timeout setup failed: {}", e))?;
     let mut req = Vec::new();
-    let txid = jet_net_dns_txid();
+    let txid = jet_net_dns_txid()?;
     req.extend_from_slice(&txid.to_be_bytes());
     req.extend_from_slice(&0x0100u16.to_be_bytes());
     req.extend_from_slice(&1u16.to_be_bytes());
@@ -1520,17 +1591,19 @@ fn jet_net_dns_query(server: &String, name: &String, qtype: u16, ms: i64) -> Res
         .send(&req)
         .map_err(|e| format!("dns query send failed: {}", e))?;
     let mut packet = vec![0u8; 65535];
-    let n = socket
-        .recv(&mut packet)
-        .map_err(|e| format!("dns query for `{}` failed: {}", name, e))?;
+    let n = loop {
+        socket.set_read_timeout(Some(jet_net_dns_io_slice(deadline, name)?))
+            .map_err(|e| format!("dns timeout setup failed: {}", e))?;
+        match socket.recv(&mut packet) {
+            Ok(n) => break n,
+            Err(error) if matches!(error.kind(), std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted) => continue,
+            Err(error) => return Err(format!("dns query for `{}` failed: {}", name, error)),
+        }
+    };
     packet.truncate(n);
     let (truncated, records) = jet_net_dns_parse_response(packet, txid, name, qtype)?;
     if truncated {
-        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-        if remaining.is_zero() {
-            return Err(format!("network timeout during DNS lookup for `{}`", name));
-        }
-        let packet = jet_net_dns_tcp_exchange(server_addr, &req, remaining)?;
+        let packet = jet_net_dns_tcp_exchange(server_addr, &req, deadline, name)?;
         let (still_truncated, records) = jet_net_dns_parse_response(packet, txid, name, qtype)?;
         if still_truncated {
             return Err("network protocol error: DNS TCP response is truncated".to_string());
@@ -1588,13 +1661,16 @@ fn jet_net_dns_system_lookup(name: &String, ms: i64) -> Result<Vec<std::net::Soc
             .map_err(|e| e.to_string());
         let _ = tx.send(result);
     });
-    match rx.recv_timeout(timeout) {
-        Ok(result) => result.map_err(|e| format!("DNS lookup for `{}` failed: {}", name, e)),
-        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-            Err(format!("network timeout during DNS lookup for `{}`", name))
-        }
-        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-            Err(format!("DNS lookup worker for `{}` failed", name))
+    let deadline = std::time::Instant::now().checked_add(timeout)
+        .ok_or_else(|| "network timeout exceeds platform range".to_string())?;
+    loop {
+        let slice = jet_net_dns_io_slice(deadline, name)?;
+        match rx.recv_timeout(slice) {
+            Ok(result) => return result.map_err(|e| format!("DNS lookup for `{}` failed: {}", name, e)),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(format!("DNS lookup worker for `{}` failed", name));
+            }
         }
     }
 }

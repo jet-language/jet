@@ -2697,10 +2697,14 @@ fn dns_truncated_response(query: &[u8]) -> Vec<u8> {
     response.extend_from_slice(&query[0..2]);
     response.extend_from_slice(&0x8380u16.to_be_bytes());
     response.extend_from_slice(&1u16.to_be_bytes());
-    response.extend_from_slice(&0u16.to_be_bytes());
+    response.extend_from_slice(&1u16.to_be_bytes());
     response.extend_from_slice(&0u16.to_be_bytes());
     response.extend_from_slice(&0u16.to_be_bytes());
     response.extend_from_slice(&query[12..end]);
+    // A TC response may end inside a declared record. The client must validate
+    // the authenticated header/question, then retry over TCP without parsing
+    // an explicitly incomplete UDP record body.
+    response.push(0xc0);
     response
 }
 
@@ -3028,6 +3032,128 @@ fn core_net_dns_rejects_non_response_and_cyclic_compression() {
     assert!(qr.contains("invalid DNS accepted"), "{qr}");
     let cycle = run_rejected_dns_response("dns_pointer_cycle", cyclic_compression);
     assert!(cycle.contains("invalid DNS accepted"), "{cycle}");
+}
+
+#[test]
+fn core_net_dns_rejects_reserved_header_forward_pointer_and_impossible_counts() {
+    fn reserved_header(query: &[u8]) -> Vec<u8> {
+        let mut response = dns_cname_additional_response(query);
+        response[3] |= 0x40;
+        response
+    }
+    fn forward_pointer(query: &[u8]) -> Vec<u8> {
+        let end = dns_question_end(query);
+        let record_start = end;
+        let pointer_target = record_start + 6;
+        let mut response = Vec::new();
+        response.extend_from_slice(&query[0..2]);
+        response.extend_from_slice(&0x8180u16.to_be_bytes());
+        response.extend_from_slice(&1u16.to_be_bytes());
+        response.extend_from_slice(&1u16.to_be_bytes());
+        response.extend_from_slice(&0u16.to_be_bytes());
+        response.extend_from_slice(&0u16.to_be_bytes());
+        response.extend_from_slice(&query[12..end]);
+        response.push(0xc0 | ((pointer_target >> 8) as u8 & 0x3f));
+        response.push(pointer_target as u8);
+        response.extend_from_slice(&1u16.to_be_bytes());
+        response.extend_from_slice(&1u16.to_be_bytes());
+        response.extend_from_slice(&0u32.to_be_bytes());
+        response.extend_from_slice(&4u16.to_be_bytes());
+        response.extend_from_slice(&[192, 0, 2, 1]);
+        response
+    }
+    fn impossible_counts(query: &[u8]) -> Vec<u8> {
+        let end = dns_question_end(query);
+        let mut response = Vec::new();
+        response.extend_from_slice(&query[0..2]);
+        response.extend_from_slice(&0x8180u16.to_be_bytes());
+        response.extend_from_slice(&1u16.to_be_bytes());
+        response.extend_from_slice(&u16::MAX.to_be_bytes());
+        response.extend_from_slice(&u16::MAX.to_be_bytes());
+        response.extend_from_slice(&u16::MAX.to_be_bytes());
+        response.extend_from_slice(&query[12..end]);
+        response
+    }
+
+    let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    let addr = socket.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        let responses: [fn(&[u8]) -> Vec<u8>; 3] =
+            [reserved_header, forward_pointer, impossible_counts];
+        for response in responses {
+            let mut query = [0u8; 512];
+            let (n, peer) = socket.recv_from(&mut query).unwrap();
+            socket.send_to(&response(&query[..n]), peer).unwrap();
+        }
+    });
+    let dir = std::env::temp_dir().join(format!(
+        "jet_core_net_dns_hostile_{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    let src = format!(
+        r#"
+use core.net as net
+
+fn run() {{
+    if net.dns_a_at("{0}", "service.example.test", 1000) == {{
+        ok(_) -> panic("reserved DNS header accepted")
+        err(_) -> print("rejected")
+    }}
+    if net.dns_a_at("{0}", "service.example.test", 1000) == {{
+        ok(_) -> panic("forward DNS pointer accepted")
+        err(_) -> print("rejected")
+    }}
+    if net.dns_a_at("{0}", "service.example.test", 1000) == {{
+        ok(_) -> panic("impossible DNS counts accepted")
+        err(_) -> print("rejected")
+    }}
+}}
+"#,
+        addr
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "dns_hostile_bounds", &src, &[], None);
+    server.join().unwrap();
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, "rejected\nrejected\nrejected\n");
+}
+
+#[test]
+fn core_net_dns_wire_lookup_observes_task_cancellation() {
+    let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    let addr = socket.local_addr().unwrap();
+    let dir = std::env::temp_dir().join(format!(
+        "jet_core_net_dns_cancel_{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    let src = format!(
+        r#"
+use core.net as net
+use core.tasks as tasks
+use core.time as time
+
+fn run() {{
+    (ready_tx, ready_rx) :: tasks.channel<Int>()
+    lookup :: tasks.spawn(take(ready_tx) () => {{
+        ready_tx.send(1)
+        if net.dns_a_at("{}", "service.example.test", 5000) == {{
+            ok(_) -> print("unexpected DNS response")
+            err(error) -> print(net.error_message(error))
+        }}
+    }})
+    _ready :: ready_rx.receive() ?? panic("ready")
+    time.sleep(50)
+    lookup.cancel()
+    lookup.join()
+}}
+"#,
+        addr
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "dns_task_cancel", &src, &[], None);
+    drop(socket);
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, "network operation cancelled during DNS lookup for `service.example.test`\n");
 }
 
 #[test]
