@@ -915,6 +915,103 @@ fn frequency_ring_groups_execute_real_handlers() {
 }
 
 #[test]
+fn shape6_groups_inspect_and_registry_while_rejecting_bare_actions() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let hello = root.join("examples/features/basics/hello.jet");
+    let dossier = Command::new(jet())
+        .args(["inspect", "dossier"])
+        .arg(&hello)
+        .output()
+        .unwrap();
+    assert!(
+        dossier.status.success(),
+        "grouped dossier did not reach its handler: {}",
+        String::from_utf8_lossy(&dossier.stderr)
+    );
+    assert!(String::from_utf8_lossy(&dossier.stdout).contains("run"));
+
+    let empty = isolated_cwd("shape6_registry_publish");
+    let publish = Command::new(jet())
+        .args(["registry", "publish"])
+        .current_dir(&empty)
+        .output()
+        .unwrap();
+    assert_eq!(publish.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&publish.stderr).contains("no `pkg.jet` found"),
+        "grouped publish did not reach its handler: {}",
+        String::from_utf8_lossy(&publish.stderr)
+    );
+
+    for (bare, canonical) in [
+        ("dossier", "jet inspect dossier"),
+        ("publish", "jet registry publish"),
+    ] {
+        let out = Command::new(jet()).arg(bare).output().unwrap();
+        assert_eq!(out.status.code(), Some(2));
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains("E2101") && stderr.contains(canonical), "{stderr}");
+    }
+}
+
+#[test]
+fn shape_cli_entry_type_drives_shell_inputs_but_remains_optional() {
+    let dir = isolated_cwd("shape_cli_entry_source");
+    fs::write(
+        dir.join("typed.jet"),
+        r#"@Cli
+struct RunArgs {
+    @[Doc("person to greet")] name: String
+    #[Default(2)] retries: Int
+    verbose: Bool
+}
+
+fn run(args: RunArgs) {
+    print(args.name)
+    print(args.retries)
+    print(args.verbose)
+}
+"#,
+    )
+    .unwrap();
+    let typed = Command::new(jet())
+        .args(["run", "typed.jet", "--", "--name", "Ada", "--verbose"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        typed.status.success(),
+        "typed entry failed: {}",
+        String::from_utf8_lossy(&typed.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&typed.stdout), "Ada\n2\ntrue\n");
+
+    let help = Command::new(jet())
+        .args(["run", "typed.jet", "--", "--help"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(help.status.success());
+    let help = String::from_utf8_lossy(&help.stdout);
+    for field_fact in ["--name", "person to greet", "--retries", "--verbose"] {
+        assert!(help.contains(field_fact), "typed help missing {field_fact}: {help}");
+    }
+
+    fs::write(dir.join("plain.jet"), "fn run() { print(\"plain\") }\n").unwrap();
+    let plain = Command::new(jet())
+        .args(["run", "plain.jet"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        plain.status.success(),
+        "plain fn run() became invalid: {}",
+        String::from_utf8_lossy(&plain.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&plain.stdout), "plain\n");
+}
+
+#[test]
 fn moved_bare_commands_are_teaching_errors_not_aliases() {
     for (verb, replacement) in [
         ("publish", "jet registry publish"),

@@ -41,12 +41,12 @@ pub const CONTRACT_BUNDLE_COMPARABLE: &str = "Comparable"; // D-CAPBUNDLE1
 pub const CONTRACT_BUNDLE_PRINTABLE: &str = "Printable"; // D-CAPBUNDLE1
 pub const CONTRACT_BUNDLE_CODABLE_AS_BASE: &str = "CodableAsBase"; // D-CAPBUNDLE1
 
-/// D-CLIFLAG1 (rides D-CONTRACTCASE1/D-MARKERMOVE1, plane+casing fixed
-/// 2026-07-02): struct-level CLI-derive marker — `@Cli`. The CLI-generation
-/// feature itself is a separate card (c7cliflag); this constant exists so
-/// that card builds against a fixed name. Never shipped as `#`, so no
-/// teaching error.
-pub const CONTRACT_CLI: &str = "Cli"; // D-CLIFLAG1
+/// D-CLIFLAG1 / D-SHAPE-CLI1 (rides D-CONTRACTCASE1/D-MARKERMOVE1):
+/// struct-level CLI derive marker — `@Cli`. A resolved `fn run(args: T)`
+/// parameter type owns parsing, defaults, help, completion, validation, and
+/// audit facts. The marker is optional because plain `fn run()` remains a
+/// complete entry. Never shipped as `#`, so no teaching error.
+pub const CONTRACT_CLI: &str = "Cli"; // D-CLIFLAG1, D-SHAPE-CLI1
 /// D-PATCH1 (card #181): struct-level derive — generates nested `T.Patch` with
 /// `apply`/`diff`/`merge`, Codable by construction (Encode+Decode on Patch).
 pub const CONTRACT_PATCHABLE: &str = "Patchable"; // D-PATCH1
@@ -108,7 +108,7 @@ pub const CONTRACT_MARKERS: &[&str] = &[
     CONTRACT_INLINE_ALWAYS,
     CONTRACT_BUNDLE_PRINTABLE,
     CONTRACT_BUNDLE_CODABLE_AS_BASE,
-    // D-CLIFLAG1 (G4) — registered, feature not yet implemented
+    // D-CLIFLAG1 / D-SHAPE-CLI1 — typed entry CLI contract
     CONTRACT_CLI,
     CONTRACT_DOC,
     // D-PATCH1 (card #181)

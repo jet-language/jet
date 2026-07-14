@@ -38,8 +38,8 @@ pub struct CommandSpec {
     pub headline: bool,
 }
 
-/// D-CLI-SURFACE1=B / D-CLI-SURFACE2=A / D-CLI-SURFACE3=B: authoritative
-/// nested command registry.
+/// D-SHAPE6=A / D-CLI-SURFACE1=B / D-CLI-SURFACE2=A / D-CLI-SURFACE3=B:
+/// authoritative noun-then-verb command registry.
 pub struct CommandGroup {
     pub name: &'static str,
     pub summary: &'static str,

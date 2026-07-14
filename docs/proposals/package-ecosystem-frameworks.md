@@ -1,12 +1,11 @@
 # Package and environment ecosystem research archive
 
 > **Status, 2026-07-14:** the Deck/Roles/Fold proposal and its later atomic
-> ballots are archived research. One live D-ECO1 ballot now chooses a complete
-> project graph: packages, inputs, environments, variants, receipts, images,
-> systems, services, and JetOS share one typed mechanism rooted in
-> `project.jet`. The options compare GNU Guix/Guile directly, a typed Guix
-> adaptation, a Jet-native graph, Bazel/Starlark, and CUE. Nothing below
-> authorizes syntax.
+> ballots are archived research. Six focused live ballots now decide graph
+> scope, source control, extension authority, composition, realization, and
+> JetOS lifecycle. `project.jet` is an option only in D-ECO-SOURCE1; current
+> `pkg.jet` / `env.jet` / `workspace.jet` law remains until that vote. Nothing
+> below authorizes syntax.
 
 ## Archived three-framework comparison
 
@@ -14,14 +13,17 @@
 
 The new ballots test one coherent model, not unrelated syntax samples:
 
-1. A package is one nominal, typed graph.
-2. Files are editing views. Moving text cannot change the graph.
-3. A workspace selects package sources. It never becomes a second resolver.
-4. Dependencies, tools, data, and toolchains may become one typed input graph.
-5. Libraries, commands, services, checks, and environments are typed outputs.
-6. Target and profile are tested as orthogonal selectors over those outputs.
-7. A separate ballot tests whether the lock is a semantic receipt containing
-   exact content, toolchain, selectors, patches, provenance, and selection reasons.
+1. D-ECO1 chooses whether package through JetOS share one semantic graph.
+2. D-ECO-SOURCE1 alone may replace the current role-file division.
+3. D-ECO-EXTENSION1 chooses how third parties produce normal typed nodes.
+4. D-ECO-COMPOSE2 chooses a finite, order-independent composition law.
+5. D-ECO-RECEIPT2 chooses one action, output, receipt, and generation DAG.
+6. D-ECO-JETOS2 chooses realization, proof, activation, and rollback behavior.
+
+Ratified resolver, variant, BuildContext, and policy laws are inputs to these
+ballots. They are not reopened. Moving a role contribution cannot change its
+semantic identity; explicit relative paths and generated-module workspace paths
+retain their existing path-sensitive laws.
 
 The beginner lens is still small:
 
@@ -688,8 +690,8 @@ A solo dev folds forever; a team shards fully; same semantics.
 
 ## Archived reviewer recommendation — superseded
 
-This recommendation compared file layouts only. D-ECO1 now decides the full
-project graph and supersedes it; Fold is not a live option or recommendation.
+This recommendation compared file layouts only. D-ECO-SOURCE1 now owns that
+choice; Fold is not a live option or recommendation.
 
 Adversarial review reframed the axis: the real choice is **fixed file model vs
 user-chosen file model**. Fold subsumes the other two as states — folded *is*
@@ -718,7 +720,7 @@ silently settle them.
 
 | ID | Decision | Deck | Roles | Fold |
 |---|---|---|---|---|
-| **D-ECO1** | **Archived file-model comparison; replaced by the atomic live ballot** | one `project.jet` | reserved role files | folded→split |
+| **D-ECO1** | **Archived file-model comparison; source layout now lives in D-ECO-SOURCE1** | one `project.jet` | reserved role files | folded→split |
 | D-ECO2 | `build: Recipe.cargo(lock:)` as first-class package build field | yes | yes | yes |
 | D-ECO3 | `wrap: Wrap.{ path_prefix, env }` (replaces `wrapProgram`) | yes | yes | yes |
 | D-ECO4 | `alias(package, bin:)` (replaces `apps.*` second binary) | yes | yes | yes |

@@ -2589,11 +2589,19 @@ Guarantee: **every past and future `jet` can read the identity block of any
 `pkg.jet`.** New manifest features may only *add* fields/blocks the identity
 reader ignores; the three identity fields keep this exact `key: value` shape.
 
-## Typed entry-signature CLI parsing (D-CLIFLAG1, c7cliflag)
+## Command grouping and typed inputs (D-SHAPE6, D-SHAPE-CLI1)
 
-The entry function's typed parameter IS the CLI spec — no separate flag
-DSL to learn. `fn run()` (S12, zero-arg) is the simple program entry; a program
-opts into CLI parsing by defining `fn run` with one parameter:
+Tool families use one noun-then-verb grammar: `jet inspect dossier` and
+`jet registry publish`. Daily lifecycle commands such as `jet run`, `jet build`,
+and `jet test` stay flat. A bare moved action is E2101 and names its canonical
+grouped route; it is never a compatibility alias. Help, completion, manual, typo
+suggestion, and dispatch views are generated from the same command registry.
+
+### Typed entry-signature CLI parsing (D-CLIFLAG1, D-SHAPE-CLI1, c7cliflag)
+
+When present, the entry function's resolved parameter type IS the CLI spec —
+no separate flag DSL to learn. `fn run()` (S12, zero-arg) is the simple program
+entry; a program opts into CLI parsing by defining `fn run` with one parameter:
 
 ```jet
 @[Cli]

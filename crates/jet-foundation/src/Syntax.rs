@@ -12,6 +12,11 @@
 // KW_COMPTIME, KW_DERIVE, ATTR_TRACK. Constants live in the private modules
 // below; keep this root file mentioning them so I7 audits can check one
 // canonical surface entrypoint.
+//
+// D-SHAPE-CLI1 reuses the existing `fn run` / `@Cli` surface: a resolved
+// entry-parameter type owns typed shell inputs, while zero-parameter `fn run()`
+// stays valid. D-SHAPE6 adds no Jet source token; grouped tool commands remain
+// owned by the single registry in crates/jet-cli/src/CLI.rs.
 
 mod core_surface;
 pub use core_surface::*;

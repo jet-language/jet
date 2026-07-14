@@ -104,6 +104,13 @@ existing `core.args` `ArgsSpec` builder (D-ARGS1) remains the library floor
 for non-entry parsing; the typed layer generates onto it rather than adding
 a second parser.
 
+**D-SHAPE-CLI1=A — entry type owns command inputs** *(ratified 2026-07-14,
+card #541)*: when present, the resolved parameter type of `fn run(args: T)` is
+the single source for shell input names, types, defaults, parsing, help,
+completion, validation, and audit facts. This adds no required ceremony:
+plain `fn run()` remains a fully valid entry and may read raw arguments through
+`core.args` when typed derivation is not wanted.
+
 **S27 — Methods**: `self` receiver with capability sigils (`^self`,
 `&self`; bare `self` = read, D-MEM1). Call `value.method(args)`. Methods live in the
 type body, in `impl Type { }`, or top-level `fn Type.method(self)`
@@ -3379,6 +3386,12 @@ per D-CLI-STORE2), `jet self` (toolchain, upgrade, doctor, completions, man,
 devtools). The bare ungrouped spelling of a moved verb is a teaching error
 naming the grouped form, never a silent alias (I8).
 
+**D-SHAPE6=A — one grouped command grammar** *(ratified 2026-07-14, card
+#541)*: tool families use noun then verb, including `jet inspect dossier` and
+`jet registry publish`; daily lifecycle verbs remain flat. Bare moved actions
+are teaching errors naming the grouped route, never aliases. Help, completions,
+man pages, typo suggestions, and dispatch consume one command registry.
+
 **D-CLI-STORE2=A — hangar is the store noun** *(ratified 2026-07-11, card
 #497)*: `jet hangar` owns every physical store verb — verify, repair, copy,
 import, export, dump/restore, sign, rollback, generations, du. `jet clean`
@@ -3579,12 +3592,20 @@ implementation milestone is pending.
 
 | ID | Question | Needed by |
 | --- | -------- | --------- |
-| D-ECO1 | the complete project, package, environment, image, and JetOS graph | **Epoch 4** — Tower #532 |
-| D-SHAPE-INTERNAL1 | the complete `_name` / `__name` naming system | **Epoch 3** — Tower #551 |
-| D-SHAPE-RESOURCE1 | how a resource ends before its surrounding scope | **Epoch 3** — Tower #557 |
-| D-SHAPE-VIEW1 | how source requests a non-owning view | **Epoch 3** — Tower #567 |
-| D-SHAPE-QUANTITY1 | where dimension arithmetic is proved | **Epoch 3** — Tower #576 |
-| D-SHAPE-HASH1 | the single job retained by `#` | **Epoch 3** — Tower #583 |
+| D-ECO1 | which project concepts share one semantic graph | **Epoch 4** — Tower #532 |
+| D-ECO-SOURCE1 | whether one `project.jet` replaces the current role-file division | **Epoch 4** — Tower #610 |
+| D-ECO-EXTENSION1 | how third parties add typed graph vocabulary | **Epoch 4** — Tower #611 |
+| D-ECO-COMPOSE2 | how independent project contributions compose | **Epoch 4** — Tower #605 |
+| D-ECO-RECEIPT2 | how the graph lowers to actions, receipts, and generations | **Epoch 4** — Tower #608 |
+| D-ECO-JETOS2 | how the project graph becomes JetOS and activates safely | **Epoch 4** — Tower #609 |
+| D-SHAPE-INTERNAL1 | whether public `_name` marks unsupported API | **Epoch 3** — Tower #551 |
+| D-SHAPE-DUNDER2 | who owns the `__name` namespace | **Epoch 3** — Tower #601 |
+| D-SHAPE-MODULEINTERNAL1 | how `module _name` participates in discovery | **Epoch 3** — Tower #602 |
+| D-SHAPE-RESOURCE1 | how an owned resource releases before its surrounding scope | **Epoch 3** — Tower #557 |
+| D-SHAPE-RESOURCEFINISH1 | receiver state after fallible protocol completion | **Epoch 3** — Tower #612 |
+| D-SHAPE-VIEW1 | how source creates a read-only non-owning view | **Epoch 3** — Tower #567 |
+| D-SHAPE-VIEWMUT1 | how source creates an exclusive mutable view | **Epoch 3** — Tower #613 |
+| D-SHAPE-QUANTITY1 | who owns dimensional algebra | **Epoch 3** — Tower #576 |
 
 Blocked follow-ups stay on Tower planning cards and remain outside the owner
 queue. They enter this table only after their blockers resolve and the ballot
