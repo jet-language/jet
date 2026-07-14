@@ -36,6 +36,11 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
         "the ice! macro's own panic! implementation",
     ),
     (
+        "crates/jet-foundation/src/XmlPull.rs",
+        3,
+        "#[cfg(test)] XML event/tree shape assertion fixtures",
+    ),
+    (
         "crates/jet-codegen/src/Prelude/Core.rs",
         4,
         "include_str! runtime template — user-program RUNTIME_PANIC path, not compiler code",
@@ -54,6 +59,11 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
         "crates/jet-codegen/src/scheduler.rs",
         6,
         "one scheduler runtime unwind boundary plus five #[cfg(test)] fixtures: IOCP completion, deadline, cancel result, shield result, and body-panic cleanup",
+    ),
+    (
+        "crates/jet-codegen/src/scheduler/io.rs",
+        1,
+        "#[cfg(test)] Windows IOCP scale-result assertion fixture",
     ),
     (
         "crates/jet-codegen/src/Codegen/TIR/tests.rs",
