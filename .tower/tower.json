@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 597,
-    "rev": 6523,
+    "nextNum": 598,
+    "rev": 6529,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -17718,6 +17718,74 @@
       "needsAcceptance": false,
       "created": "2026-07-14T18:55:16.724Z",
       "updated": "2026-07-14"
+    },
+    {
+      "id": "c0zoq183",
+      "num": 597,
+      "title": "Restore Jetpack zero unwrap/expect ratchet",
+      "body": "Full verification regressed after #456: production scanner reports 35 unwrap/expect sites in NixDrv, CRAN/LuaRocks providers, Store ingest, and TrustRoot fixtures. Restore the ratified zero ceiling without weakening scanner coverage or hiding reachable panics.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": "Replace each reachable unwrap/expect with total control flow and existing typed errors; isolate genuine test-only fixtures correctly; add hostile-path proof where behavior changes; rerun scanner, affected suites, then full verification.",
+      "blockedBy": [],
+      "workOrder": 0,
+      "assignee": "terra-unwrap-regression",
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Production Jetpack unwrap/expect scanner returns zero without weakening lexical, cfg, symlink, or seeded-failure coverage.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-14T20:51:51.613Z"
+        },
+        {
+          "n": 2,
+          "text": "NixDrv parsing, CRAN/LuaRocks realization, Store ingest, and TrustRoot paths replace reachable panics with total control flow or existing typed errors; focused valid and hostile-path tests preserve behavior.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-14T20:51:51.714Z"
+        },
+        {
+          "n": 3,
+          "text": "Affected Jetpack and scanner test targets pass with no new diagnostic, dependency, unsafe, or user-syntax surface.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-14T20:51:51.816Z"
+        },
+        {
+          "n": 4,
+          "text": "scripts/agent/verify-full.sh exits zero on the integrated tree.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-14T20:51:51.910Z"
+        }
+      ],
+      "refs": [
+        "tests/ban_jetpack_unwrap_expect.rs",
+        "crates/jetpack/src/NixDrv.rs",
+        "crates/jetpack/src/Provider/cran.rs",
+        "crates/jetpack/src/Provider/luarocks.rs",
+        "crates/jetpack/src/Store/Ingest.rs",
+        "crates/jetpack/src/TrustRoot.rs",
+        "docs/plans/agent-durability.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-14T20:51:31.519Z",
+      "updated": "2026-07-14",
+      "claimedAt": "2026-07-14T20:51:52.028Z"
     }
   ],
   "decisions": [
@@ -38726,6 +38794,48 @@
   ],
   "events": [
     {
+      "at": "2026-07-14T20:51:52.028Z",
+      "by": "terra-unwrap-regression",
+      "action": "card.claim",
+      "ref": "c0zoq183",
+      "note": ""
+    },
+    {
+      "at": "2026-07-14T20:51:51.910Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0zoq183",
+      "note": "#4 scripts/agent/verify-full.sh exits zero on the integrated tr"
+    },
+    {
+      "at": "2026-07-14T20:51:51.816Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0zoq183",
+      "note": "#3 Affected Jetpack and scanner test targets pass with no new d"
+    },
+    {
+      "at": "2026-07-14T20:51:51.715Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0zoq183",
+      "note": "#2 NixDrv parsing, CRAN/LuaRocks realization, Store ingest, and"
+    },
+    {
+      "at": "2026-07-14T20:51:51.613Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0zoq183",
+      "note": "#1 Production Jetpack unwrap/expect scanner returns zero withou"
+    },
+    {
+      "at": "2026-07-14T20:51:31.520Z",
+      "by": "codex-orchestrator",
+      "action": "card.add",
+      "ref": "c0zoq183",
+      "note": "Restore Jetpack zero unwrap/expect ratchet"
+    },
+    {
       "at": "2026-07-14T20:48:03.309Z",
       "by": "luna-hygiene-verifier",
       "action": "card.criteria-verify",
@@ -42181,48 +42291,6 @@
       "by": "codex-main",
       "action": "card.update",
       "ref": "c0zh74hs",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-07-14T15:36:40.653Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0vkynby",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-07-14T15:36:40.453Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c03teoty",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-07-14T15:36:40.249Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0xbtyir",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-07-14T15:36:40.038Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0bo7bp5",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-07-14T15:36:39.832Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0xqkis5",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-07-14T15:36:39.622Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0vvxein",
       "note": "blockedBy"
     }
   ],
