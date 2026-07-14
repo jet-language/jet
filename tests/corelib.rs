@@ -6387,9 +6387,9 @@ fn run() {
     once_first :: once_event.emit_async(1)
     once_started :: once_started_rx.receive() ?? panic("started")
     once_second :: once_event.emit_async(2)
-    once_second_report :: once_second.join()
     once_release_tx.send(1)
     once_first_report :: once_first.join()
+    once_second_report :: once_second.join()
     print("once first={once_first_report.delivered_handlers()} second={once_second_report.delivered_handlers()}")
 
     failure_scope :: event.scope()
@@ -6438,6 +6438,104 @@ fn run() {
     assert_eq!(
         stdout,
         "newest=true\noldest=true\nonce first=2 second=1\ncollect=true handlers=2 failures=2\nqueued -> running -> handler:0:failed -> handler:1:failed -> terminal:HandlerFailed\nstop=true handlers=1 failures=1\nlog error=true handlers=2 failures=0 traced=true\nignore error=true handlers=2 failures=0 traced=false\npanic log=true handlers=1 failures=1 traced=true\npanic ignore=true handlers=1 failures=1 traced=true\n"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn async_event_scope_cancel_and_inherited_deadline_are_single_terminal() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc { return; }
+    let dir = std::env::temp_dir().join(format!("jet_corelib_async_event_lifecycle_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "async_event_lifecycle",
+        r#"
+use core.event as event
+use core.tasks as tasks
+use core.time as time
+
+fn owner_teardown_task() -> Task<DispatchReport<String>> {
+    ev :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    task :: ev.emit_async(99)
+    return task
+}
+
+fn run() {
+    cancel_scope :: event.scope()
+    cancelled :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    (cancel_started_tx, cancel_started_rx) :: tasks.channel<Int>()
+    (cancel_release_tx, cancel_release_rx) :: tasks.channel<Int>()
+    cancelled.on(cancel_scope, (n: Int) => {
+        cancel_started_tx.send(copy n)
+        released :: cancel_release_rx.receive() ?? panic("release")
+    })
+    cancel_running :: cancelled.emit_async(1)
+    started :: cancel_started_rx.receive() ?? panic("started")
+    cancel_queued :: cancelled.emit_async(2)
+    cancel_pending :: cancelled.emit_async(3)
+    print("before-cancel q={cancelled.queued_count()} r={cancelled.running_count()} p={cancelled.blocked_count()}")
+    cancel_scope.cancel()
+    pending_report :: cancel_pending.join()
+    queued_report :: cancel_queued.join()
+    running_report :: cancel_running.join()
+    print("cancel pending={!pending_report.accepted() && pending_report.state() == .Cancelled} trace={pending_report.trace().summary()}")
+    print("cancel queued={queued_report.accepted() && queued_report.state() == .Cancelled} trace={queued_report.trace().summary()}")
+    print("cancel running={running_report.accepted() && running_report.state() == .Cancelled} trace={running_report.trace().summary()}")
+    print("after-cancel q={cancelled.queued_count()} r={cancelled.running_count()} p={cancelled.blocked_count()}")
+
+    queued_scope :: event.scope()
+    queued_deadline :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    (queued_started_tx, queued_started_rx) :: tasks.channel<Int>()
+    (queued_release_tx, queued_release_rx) :: tasks.channel<Int>()
+    queued_deadline.on(queued_scope, (n: Int) => {
+        queued_started_tx.send(copy n)
+        released :: queued_release_rx.receive() ?? panic("release")
+    })
+    queued_running :: queued_deadline.emit_async(10)
+    queued_started :: queued_started_rx.receive() ?? panic("started")
+    #Context(deadline: time.now() + 20) {
+        expires_queued :: queued_deadline.emit_async(11)
+        queued_expired :: expires_queued.join()
+        print("deadline queued={queued_expired.accepted() && queued_expired.state() == .DeadlineExceeded} trace={queued_expired.trace().summary()}")
+    }
+    queued_scope.cancel()
+    queued_running.join()
+
+    pending_scope :: event.scope()
+    pending_deadline :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    (pending_started_tx, pending_started_rx) :: tasks.channel<Int>()
+    (pending_release_tx, pending_release_rx) :: tasks.channel<Int>()
+    pending_deadline.on(pending_scope, (n: Int) => {
+        pending_started_tx.send(copy n)
+        released :: pending_release_rx.receive() ?? panic("release")
+    })
+    pending_running :: pending_deadline.emit_async(20)
+    pending_started :: pending_started_rx.receive() ?? panic("started")
+    pending_queued :: pending_deadline.emit_async(21)
+    #Context(deadline: time.now() + 20) {
+        expires_pending :: pending_deadline.emit_async(22)
+        pending_expired :: expires_pending.join()
+        print("deadline pending={!pending_expired.accepted() && pending_expired.state() == .DeadlineExceeded} trace={pending_expired.trace().summary()}")
+    }
+    pending_scope.cancel()
+    pending_queued.join()
+    pending_running.join()
+
+    owner_task :: owner_teardown_task()
+    owner_report :: owner_task.join()
+    print("owner teardown={owner_report.accepted() && owner_report.state() == .Cancelled} trace={owner_report.trace().summary()}")
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "async event lifecycle failed: {stderr}");
+    assert_eq!(
+        stdout,
+        "before-cancel q=1 r=1 p=1\ncancel pending=true trace=pending -> terminal:Cancelled\ncancel queued=true trace=queued -> terminal:Cancelled\ncancel running=true trace=queued -> running -> terminal:Cancelled\nafter-cancel q=0 r=0 p=0\ndeadline queued=true trace=queued -> terminal:DeadlineExceeded\ndeadline pending=true trace=pending -> terminal:DeadlineExceeded\nowner teardown=true trace=queued -> terminal:Cancelled\n"
     );
     let _ = fs::remove_dir_all(&dir);
 }

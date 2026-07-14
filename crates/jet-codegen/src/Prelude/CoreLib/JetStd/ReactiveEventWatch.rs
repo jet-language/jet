@@ -264,6 +264,7 @@
     pub struct JetEventScope {
         subs: Rc<RefCell<Vec<JetSubscription>>>,
         cancelled: Rc<Cell<bool>>,
+        hard_cancellers: Rc<RefCell<Vec<(u64, Rc<dyn Fn()>)>>>,
     }
 
     impl JetEventScope {
@@ -271,6 +272,19 @@
             JetEventScope {
                 subs: Rc::new(RefCell::new(Vec::new())),
                 cancelled: Rc::new(Cell::new(false)),
+                hard_cancellers: Rc::new(RefCell::new(Vec::new())),
+            }
+        }
+        fn cancelled(&self) -> bool {
+            self.cancelled.get()
+        }
+        fn track_hard_cancel<F: Fn() + 'static>(&self, owner_id: u64, cancel: F) {
+            if self.cancelled.get() {
+                return;
+            }
+            let mut cancellers = self.hard_cancellers.borrow_mut();
+            if !cancellers.iter().any(|(id, _)| *id == owner_id) {
+                cancellers.push((owner_id, Rc::new(cancel)));
             }
         }
         pub fn track(&self, sub: JetSubscription) -> JetSubscription {
@@ -284,10 +298,16 @@
             sub
         }
         pub fn cancel(&self) {
-            self.cancelled.set(true);
+            if self.cancelled.replace(true) {
+                return;
+            }
             let subs = std::mem::take(&mut *self.subs.borrow_mut());
             for sub in subs {
                 sub.unsubscribe();
+            }
+            let cancellers = std::mem::take(&mut *self.hard_cancellers.borrow_mut());
+            for (_, cancel) in cancellers {
+                cancel();
             }
         }
         pub fn active_count(&self) -> i64 {
@@ -579,17 +599,25 @@
 
     struct JetAsyncEntry<T, E: Clone + Send + 'static> {
         id: u64,
+        phase: std::sync::atomic::AtomicU8,
         accepted: std::sync::atomic::AtomicBool,
         payload: std::sync::Mutex<Option<T>>,
         terminal: std::sync::Mutex<Option<JetDispatchReport<E>>>,
         trace: std::sync::Mutex<Vec<String>>,
         wake: std::sync::Arc<super::ParkSlot>,
+        control: std::sync::Arc<super::JetTaskControl>,
     }
+
+    const JET_EVENT_PENDING: u8 = 0;
+    const JET_EVENT_QUEUED: u8 = 1;
+    const JET_EVENT_RUNNING: u8 = 2;
+    const JET_EVENT_TERMINAL: u8 = 3;
 
     struct JetAsyncState<T, E: Clone + Send + 'static> {
         listeners: Vec<JetAsyncListener<T, E>>,
         queued: std::collections::VecDeque<std::sync::Arc<JetAsyncEntry<T, E>>>,
         blocked: std::collections::VecDeque<std::sync::Arc<JetAsyncEntry<T, E>>>,
+        running_entries: Vec<std::sync::Arc<JetAsyncEntry<T, E>>>,
         running: usize,
         closed: bool,
         cancelled: bool,
@@ -600,6 +628,7 @@
         failure_policy: JetFailurePolicy,
         state: std::sync::Arc<std::sync::Mutex<JetAsyncState<T, E>>>,
         owner: Option<std::sync::Arc<()>>,
+        owner_id: u64,
     }
 
     impl<T: Clone + Send + 'static, E: Clone + Send + 'static> Clone for JetAsyncEvent<T, E> {
@@ -609,6 +638,7 @@
                 failure_policy: self.failure_policy,
                 state: self.state.clone(),
                 owner: self.owner.clone(),
+                owner_id: self.owner_id,
             }
         }
     }
@@ -617,12 +647,7 @@
         fn drop(&mut self) {
             let Some(owner) = &self.owner else { return; };
             if std::sync::Arc::strong_count(owner) != 1 { return; }
-            let wakes = {
-                let mut state = self.state.lock().unwrap();
-                state.cancelled = true;
-                state.queued.iter().chain(state.blocked.iter()).map(|e| e.wake.clone()).collect::<Vec<_>>()
-            };
-            for wake in wakes { super::jet_scheduler_wake(&wake); }
+            Self::hard_cancel_state(&self.state);
         }
     }
 
@@ -636,11 +661,13 @@
                     listeners: Vec::new(),
                     queued: std::collections::VecDeque::new(),
                     blocked: std::collections::VecDeque::new(),
+                    running_entries: Vec::new(),
                     running: 0,
                     closed: false,
                     cancelled: false,
                 })),
                 owner: Some(std::sync::Arc::new(())),
+                owner_id: JET_EVENT_NEXT_ID.fetch_add(1, Ordering::Relaxed),
             })
         }
 
@@ -659,9 +686,19 @@
         fn add<F, R>(&self, scope: &JetEventScope, priority: i64, once: bool, handler: F) -> JetSubscription
         where F: Fn(T) -> R + Send + Sync + 'static, R: JetIntoDispatchResult<E> {
             let active = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+            if scope.cancelled() {
+                active.store(false, std::sync::atomic::Ordering::Release);
+                return JetSubscription::shared(active);
+            }
             let id = JET_EVENT_NEXT_ID.fetch_add(1, Ordering::Relaxed);
             self.state.lock().unwrap().listeners.push(JetAsyncListener {
                 id, priority, once, active: active.clone(), handler: std::sync::Arc::new(move |payload| handler(payload).into_dispatch_result()),
+            });
+            let cancel_state = std::sync::Arc::downgrade(&self.state);
+            scope.track_hard_cancel(self.owner_id, move || {
+                if let Some(state) = cancel_state.upgrade() {
+                    Self::hard_cancel_state(&state);
+                }
             });
             let sub = JetSubscription::shared(active);
             let state = std::sync::Arc::downgrade(&self.state);
@@ -674,19 +711,31 @@
         }
 
         pub fn emit_async(&self, payload: T) -> super::jet_std::JetTask<JetDispatchReport<E>> {
+            let control = super::JetTaskControl::new();
             let entry = std::sync::Arc::new(JetAsyncEntry {
                 id: JET_EVENT_NEXT_ID.fetch_add(1, Ordering::Relaxed),
+                phase: std::sync::atomic::AtomicU8::new(JET_EVENT_PENDING),
                 accepted: std::sync::atomic::AtomicBool::new(false),
                 payload: std::sync::Mutex::new(Some(payload)),
                 terminal: std::sync::Mutex::new(None),
                 trace: std::sync::Mutex::new(Vec::new()),
                 wake: super::ParkSlot::new(),
+                control: control.clone(),
             });
             {
                 let mut state = self.state.lock().unwrap();
                 if state.closed {
-                    *entry.terminal.lock().unwrap() = Some(JetDispatchReport::terminal(false, JetDispatchState::Closed));
+                    Self::complete_entry(&entry, JET_EVENT_PENDING, false, JetDispatchState::Closed);
+                } else if state.cancelled {
+                    Self::complete_entry(&entry, JET_EVENT_PENDING, false, JetDispatchState::Cancelled);
                 } else if state.queued.len() < self.policy.capacity as usize {
+                    let moved = entry.phase.compare_exchange(
+                        JET_EVENT_PENDING,
+                        JET_EVENT_QUEUED,
+                        std::sync::atomic::Ordering::AcqRel,
+                        std::sync::atomic::Ordering::Acquire,
+                    ).is_ok();
+                    debug_assert!(moved, "fresh async event entry must become queued once");
                     entry.accepted.store(true, std::sync::atomic::Ordering::Release);
                     entry.trace.lock().unwrap().push("queued".to_string());
                     state.queued.push_back(entry.clone());
@@ -697,14 +746,19 @@
                             state.blocked.push_back(entry.clone());
                         }
                         JetEventOverflow::DropNewest => {
-                            *entry.terminal.lock().unwrap() = Some(JetDispatchReport::terminal(false, JetDispatchState::DroppedNewest));
+                            Self::complete_entry(&entry, JET_EVENT_PENDING, false, JetDispatchState::DroppedNewest);
                         }
                         JetEventOverflow::DropOldest => {
                             if let Some(oldest) = state.queued.pop_front() {
-                                let trace = oldest.trace.lock().unwrap().clone();
-                                *oldest.terminal.lock().unwrap() = Some(JetDispatchReport::terminal_with_trace(true, JetDispatchState::DroppedOldest, trace));
-                                oldest.wake.wake();
+                                Self::complete_entry(&oldest, JET_EVENT_QUEUED, true, JetDispatchState::DroppedOldest);
                             }
+                            let moved = entry.phase.compare_exchange(
+                                JET_EVENT_PENDING,
+                                JET_EVENT_QUEUED,
+                                std::sync::atomic::Ordering::AcqRel,
+                                std::sync::atomic::Ordering::Acquire,
+                            ).is_ok();
+                            debug_assert!(moved, "fresh replacement entry must become queued once");
                             entry.accepted.store(true, std::sync::atomic::Ordering::Release);
                             entry.trace.lock().unwrap().push("queued".to_string());
                             state.queued.push_back(entry.clone());
@@ -718,8 +772,86 @@
                 failure_policy: self.failure_policy,
                 state: self.state.clone(),
                 owner: None,
+                owner_id: self.owner_id,
             };
-            super::jet_std::JetTask::spawn(move || event.run_entry(entry))
+            super::jet_std::JetTask::spawn_typed_deadline(
+                move || event.run_entry(entry),
+                control,
+            )
+        }
+
+        fn complete_entry(
+            entry: &std::sync::Arc<JetAsyncEntry<T, E>>,
+            expected: u8,
+            accepted: bool,
+            state: JetDispatchState,
+        ) -> bool {
+            let mut terminal = entry.terminal.lock().unwrap();
+            if entry.phase.compare_exchange(
+                expected,
+                JET_EVENT_TERMINAL,
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Acquire,
+            ).is_err() {
+                return false;
+            }
+            entry.accepted.store(accepted, std::sync::atomic::Ordering::Release);
+            let trace = entry.trace.lock().unwrap().clone();
+            *terminal = Some(JetDispatchReport::terminal_with_trace(
+                accepted,
+                state,
+                trace,
+            ));
+            // Payload ownership ends at the same winning terminal transition.
+            // A competing lifecycle path cannot drop or deliver it again.
+            entry.payload.lock().unwrap().take();
+            entry.wake.wake();
+            true
+        }
+
+        fn complete_report(
+            entry: &std::sync::Arc<JetAsyncEntry<T, E>>,
+            report: JetDispatchReport<E>,
+        ) -> bool {
+            let mut terminal = entry.terminal.lock().unwrap();
+            if entry.phase.compare_exchange(
+                JET_EVENT_RUNNING,
+                JET_EVENT_TERMINAL,
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Acquire,
+            ).is_err() {
+                return false;
+            }
+            *terminal = Some(report);
+            entry.payload.lock().unwrap().take();
+            entry.wake.wake();
+            true
+        }
+
+        fn hard_cancel_state(state: &std::sync::Arc<std::sync::Mutex<JetAsyncState<T, E>>>) {
+            let (queued, blocked, running) = {
+                let mut state = state.lock().unwrap();
+                if state.cancelled {
+                    return;
+                }
+                state.cancelled = true;
+                (
+                    state.queued.drain(..).collect::<Vec<_>>(),
+                    state.blocked.drain(..).collect::<Vec<_>>(),
+                    state.running_entries.clone(),
+                )
+            };
+            for entry in queued {
+                Self::complete_entry(&entry, JET_EVENT_QUEUED, true, JetDispatchState::Cancelled);
+            }
+            for entry in blocked {
+                Self::complete_entry(&entry, JET_EVENT_PENDING, false, JetDispatchState::Cancelled);
+            }
+            for entry in running {
+                if entry.phase.load(std::sync::atomic::Ordering::Acquire) == JET_EVENT_RUNNING {
+                    entry.control.cancel();
+                }
+            }
         }
 
         fn run_entry(&self, entry: std::sync::Arc<JetAsyncEntry<T, E>>) -> JetDispatchReport<E> {
@@ -727,20 +859,30 @@
             match run {
                 Ok(report) => report,
                 Err(payload) if payload.is::<super::JetCancelUnwind>() => {
+                    let phase = entry.phase.load(std::sync::atomic::Ordering::Acquire);
+                    let accepted = entry.accepted.load(std::sync::atomic::Ordering::Acquire);
+                    Self::complete_entry(&entry, phase, accepted, JetDispatchState::Cancelled);
                     self.remove_entry(&entry);
-                    JetDispatchReport::terminal_with_trace(
-                        entry.accepted.load(std::sync::atomic::Ordering::Acquire),
-                        JetDispatchState::Cancelled,
-                        entry.trace.lock().unwrap().clone(),
-                    )
+                    entry.terminal.lock().unwrap().clone().unwrap_or_else(|| {
+                        JetDispatchReport::terminal_with_trace(
+                            accepted,
+                            JetDispatchState::Cancelled,
+                            entry.trace.lock().unwrap().clone(),
+                        )
+                    })
                 }
                 Err(payload) if payload.is::<super::JetDeadlineUnwind>() => {
+                    let phase = entry.phase.load(std::sync::atomic::Ordering::Acquire);
+                    let accepted = entry.accepted.load(std::sync::atomic::Ordering::Acquire);
+                    Self::complete_entry(&entry, phase, accepted, JetDispatchState::DeadlineExceeded);
                     self.remove_entry(&entry);
-                    JetDispatchReport::terminal_with_trace(
-                        entry.accepted.load(std::sync::atomic::Ordering::Acquire),
-                        JetDispatchState::DeadlineExceeded,
-                        entry.trace.lock().unwrap().clone(),
-                    )
+                    entry.terminal.lock().unwrap().clone().unwrap_or_else(|| {
+                        JetDispatchReport::terminal_with_trace(
+                            accepted,
+                            JetDispatchState::DeadlineExceeded,
+                            entry.trace.lock().unwrap().clone(),
+                        )
+                    })
                 }
                 Err(payload) => std::panic::resume_unwind(payload),
             }
@@ -749,34 +891,63 @@
         fn run_entry_inner(&self, entry: &std::sync::Arc<JetAsyncEntry<T, E>>) -> JetDispatchReport<E> {
             loop {
                 if let Some(report) = entry.terminal.lock().unwrap().clone() { return report; }
+                // Deadline competes with Queued -> Running through the same
+                // phase CAS. If it already expired, no handler observes payload.
+                super::jet_deadline_check("async event dispatch");
                 let listeners = {
                     let mut state = self.state.lock().unwrap();
                     if state.cancelled {
-                        return JetDispatchReport::terminal_with_trace(
-                            entry.accepted.load(std::sync::atomic::Ordering::Acquire),
-                            JetDispatchState::Cancelled,
-                            entry.trace.lock().unwrap().clone(),
-                        );
+                        let phase = entry.phase.load(std::sync::atomic::Ordering::Acquire);
+                        let accepted = entry.accepted.load(std::sync::atomic::Ordering::Acquire);
+                        Self::complete_entry(entry, phase, accepted, JetDispatchState::Cancelled);
+                        return entry.terminal.lock().unwrap().clone().unwrap_or_else(|| {
+                            JetDispatchReport::terminal_with_trace(
+                                accepted,
+                                JetDispatchState::Cancelled,
+                                entry.trace.lock().unwrap().clone(),
+                            )
+                        });
                     }
                     if let Some(pos) = state.blocked.iter().position(|item| item.id == entry.id) {
                         if state.closed {
                             state.blocked.remove(pos);
-                            return JetDispatchReport::terminal_with_trace(
-                                false,
-                                JetDispatchState::Closed,
-                                entry.trace.lock().unwrap().clone(),
-                            );
+                            Self::complete_entry(entry, JET_EVENT_PENDING, false, JetDispatchState::Closed);
+                            return entry.terminal.lock().unwrap().clone().unwrap_or_else(|| {
+                                JetDispatchReport::terminal_with_trace(
+                                    false,
+                                    JetDispatchState::Closed,
+                                    entry.trace.lock().unwrap().clone(),
+                                )
+                            });
                         }
                         if state.queued.len() < self.policy.capacity as usize {
                             state.blocked.remove(pos);
-                            entry.accepted.store(true, std::sync::atomic::Ordering::Release);
-                            entry.trace.lock().unwrap().push("queued".to_string());
-                            state.queued.push_back(entry.clone());
+                            if entry.phase.compare_exchange(
+                                JET_EVENT_PENDING,
+                                JET_EVENT_QUEUED,
+                                std::sync::atomic::Ordering::AcqRel,
+                                std::sync::atomic::Ordering::Acquire,
+                            ).is_ok() {
+                                entry.accepted.store(true, std::sync::atomic::Ordering::Release);
+                                entry.trace.lock().unwrap().push("queued".to_string());
+                                state.queued.push_back(entry.clone());
+                            }
                         }
                     }
-                    if state.queued.front().is_some_and(|front| front.id == entry.id) {
+                    if state.running == 0
+                        && state.queued.front().is_some_and(|front| front.id == entry.id)
+                    {
                         state.queued.pop_front();
+                        if entry.phase.compare_exchange(
+                            JET_EVENT_QUEUED,
+                            JET_EVENT_RUNNING,
+                            std::sync::atomic::Ordering::AcqRel,
+                            std::sync::atomic::Ordering::Acquire,
+                        ).is_err() {
+                            None
+                        } else {
                         state.running += 1;
+                        state.running_entries.push(entry.clone());
                         entry.trace.lock().unwrap().push("running".to_string());
                         let mut listeners = state.listeners.iter()
                             .filter_map(|listener| {
@@ -797,10 +968,22 @@
                         listeners.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
                         for blocked in &state.blocked { blocked.wake.wake(); }
                         Some(listeners)
+                        }
                     } else { None }
                 };
                 if let Some(listeners) = listeners {
-                    let payload = entry.payload.lock().unwrap().take().expect("async event payload consumed once");
+                    let Some(payload) = entry.payload.lock().unwrap().take() else {
+                        let accepted = entry.accepted.load(std::sync::atomic::Ordering::Acquire);
+                        Self::complete_entry(entry, JET_EVENT_RUNNING, accepted, JetDispatchState::Cancelled);
+                        self.remove_entry(entry);
+                        return entry.terminal.lock().unwrap().clone().unwrap_or_else(|| {
+                            JetDispatchReport::terminal_with_trace(
+                                accepted,
+                                JetDispatchState::Cancelled,
+                                entry.trace.lock().unwrap().clone(),
+                            )
+                        });
+                    };
                     let mut report = JetDispatchReport {
                         accepted: true,
                         state: JetDispatchState::Delivered,
@@ -838,6 +1021,11 @@
                                 }
                             }
                             Err(payload) => {
+                                if payload.is::<super::JetCancelUnwind>()
+                                    || payload.is::<super::JetDeadlineUnwind>()
+                                {
+                                    std::panic::resume_unwind(payload);
+                                }
                                 let message = payload.downcast_ref::<String>().cloned()
                                     .or_else(|| payload.downcast_ref::<&str>().map(|s| (*s).to_string()))
                                     .unwrap_or_else(|| "event handler panicked".to_string());
@@ -849,14 +1037,19 @@
                         }
                     }
                     report.trace.push(format!("terminal:{:?}", report.state));
+                    Self::complete_report(entry, report.clone());
                     let wakes = {
                         let mut state = self.state.lock().unwrap();
-                        state.running = state.running.saturating_sub(1);
+                        let before = state.running_entries.len();
+                        state.running_entries.retain(|item| item.id != entry.id);
+                        if state.running_entries.len() != before {
+                            state.running = state.running.saturating_sub(1);
+                        }
                         state.listeners.retain(|listener| listener.active.load(std::sync::atomic::Ordering::Acquire));
                         state.queued.front().into_iter().chain(state.blocked.iter()).map(|item| item.wake.clone()).collect::<Vec<_>>()
                     };
                     for wake in wakes { wake.wake(); }
-                    return report;
+                    return entry.terminal.lock().unwrap().clone().unwrap_or(report);
                 }
                 super::jet_scheduler_yield("async event dispatch", &entry.wake, None);
             }
@@ -867,19 +1060,26 @@
                 let mut state = self.state.lock().unwrap();
                 state.queued.retain(|item| item.id != entry.id);
                 state.blocked.retain(|item| item.id != entry.id);
+                let before = state.running_entries.len();
+                state.running_entries.retain(|item| item.id != entry.id);
+                if state.running_entries.len() != before {
+                    state.running = state.running.saturating_sub(1);
+                }
                 state.queued.front().into_iter().chain(state.blocked.iter()).map(|item| item.wake.clone()).collect::<Vec<_>>()
             };
             for wake in wakes { wake.wake(); }
         }
 
         pub fn close(&self) {
-            let wakes = {
+            let blocked = {
                 let mut state = self.state.lock().unwrap();
                 if state.closed { return; }
                 state.closed = true;
-                state.blocked.iter().map(|item| item.wake.clone()).collect::<Vec<_>>()
+                state.blocked.drain(..).collect::<Vec<_>>()
             };
-            for wake in wakes { wake.wake(); }
+            for entry in blocked {
+                Self::complete_entry(&entry, JET_EVENT_PENDING, false, JetDispatchState::Closed);
+            }
         }
         pub fn queued_count(&self) -> i64 { self.state.lock().unwrap().queued.len() as i64 }
         pub fn running_count(&self) -> i64 { self.state.lock().unwrap().running as i64 }

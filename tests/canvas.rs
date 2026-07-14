@@ -321,13 +321,31 @@ fn run() {
 
 const CANVAS_EVENT_DISPATCHER_FIXTURE: &str = r#"use core.event as event
 
+struct Resource {
+    id: Int
+
+    fn on(&self) {}
+    fn close(&self) {}
+    fn cancel(&self) {}
+}
+
 fn run() {
+    resource := Resource.{ id: 1 }
+    resource.on()
+    resource.close()
+    resource.cancel()
     scope :: event.scope()
     clicked :: event.new<Int>()
     clicked.on(scope, (n) => { print("clicked {n}") })
     clicked.once(scope, (n) => { print("once {n}") })
     clicked.on_priority(scope, 10, (n) => { print("priority {n}") })
     print(clicked.emit(1).summary())
+    jobs :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 2, overflow: .Block }, .Collect) ?? panic("policy")
+    jobs.on(scope, (n) => { print("job {n}") })
+    report :: jobs.emit_async(2)
+    print(jobs.queued_count())
+    jobs.close()
+    scope.cancel()
 }
 "#;
 
@@ -2818,8 +2836,14 @@ fn canvas_projects_event_dispatchers_from_core_event() {
         "\"kind\":\"event_subscribe_once\"",
         "\"kind\":\"event_subscribe_priority\"",
         "\"kind\":\"event_emit\"",
+        "\"kind\":\"async_event_create\"",
+        "\"kind\":\"event_emit_async\"",
+        "\"kind\":\"event_queued_count\"",
+        "\"kind\":\"event_close\"",
+        "\"kind\":\"event_scope_cancel\"",
         "\"lifetime\":\"EventScope-owned\"",
-        "\"debug_overlay\":\"EventTrace delivered/queued/dropped\"",
+        "\"fact_source\":\"semindex_checked_call\"",
+        "\"observables\":[\"listener_count\",\"blocked_count\",\"queued_count\",\"running_count\",\"DispatchReport.trace\"]",
         "\"semantics\":\"core.event_source_truth\"",
     ] {
         assert!(
@@ -2827,6 +2851,21 @@ fn canvas_projects_event_dispatchers_from_core_event() {
             "event dispatcher graph missing {field}: {graph}"
         );
     }
+    assert_eq!(
+        count_occurrences(&graph, "\"kind\":\"event_subscribe\""),
+        2,
+        "unrelated Resource.on must not become an event fact: {graph}"
+    );
+    assert_eq!(
+        count_occurrences(&graph, "\"kind\":\"event_close\""),
+        1,
+        "unrelated Resource.close must not become an event fact: {graph}"
+    );
+    assert_eq!(
+        count_occurrences(&graph, "\"kind\":\"event_scope_cancel\""),
+        1,
+        "unrelated Resource.cancel must not become an event fact: {graph}"
+    );
 }
 
 #[test]

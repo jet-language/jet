@@ -1671,12 +1671,16 @@ those states. Each payload uses stable priority then subscription order, with
 once reserved atomically before invocation. Reports expose
 `state`, `accepted`, `delivered_handlers`, `failures`, and ordered `EventTrace`.
 `close()` rejects new and Pending producers as Closed while draining accepted
-Queued and Running work. StopFirst stops after the first `E`; Collect preserves
+Queued and Running work. `EventScope.cancel()` and last-owner teardown hard-cancel
+Pending and Queued work, request structured cancellation for Running handlers,
+and publish exactly one terminal report. Inherited deadlines publish
+DeadlineExceeded through that same single-winner transition. StopFirst stops
+after the first `E`; Collect preserves
 all `E` values in order; Log records failure facts in trace without storing `E`;
 Ignore stores neither. A panic always stops that payload as HandlerFailed with
-`DispatchFailure.Panic`, independent of failure policy. EventScope cancellation,
-owner-teardown cancellation, inherited-deadline transitions, and DecisionHook
-remain deferred; this tranche does not claim them.
+`DispatchFailure.Panic`, independent of failure policy. DecisionHook remains
+gated on clarification of the ratified `Continue` result arity; no spelling is
+inferred meanwhile.
 
 **D-FILES-WRITE1 — `core.fs`/`core.files` merge** *(ratified/shipped
 2026-07-04, cv5syntaxdecrees)*: one `core.files` module for both whole-file

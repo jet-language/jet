@@ -1,6 +1,7 @@
 # First-Party Event System
 
-Status: D-EVENT1 ratified 2026-07-07; first compiler-known Core slice shipped.
+Status: D-EVENT1 and D-EVENT2=A ratified; synchronous and typed asynchronous
+Core lifecycle slices shipped. DecisionHook awaits an owner clarification ballot.
 
 This is not a Canvas feature. Canvas should project the event system once it exists. The event system is a first-party Jet language/runtime/library feature because it affects game loops, web UI, servers, plugins, observability, hot reload, testing, and structured concurrency.
 
@@ -92,6 +93,14 @@ terminal and idempotent: tracked listeners are removed, retained inactive
 handles are released, and later registrations through that owner are inactive.
 D-EVENT2=A scopes typed handler failure aggregation to `AsyncEvent<T, E>`;
 `Event<T>` stays the infallible beginner path.
+
+`AsyncEvent<T, E>` implements bounded Queued capacity; separately observable
+Pending and Running states; deterministic priority/order; single-terminal close,
+cancellation, teardown, and inherited-deadline transitions; and structured
+cancellation of Running handlers. Canvas event facts now come from checked
+SemIndex receiver identities, not text matches. DecisionHook remains absent
+until the owner resolves whether `Continue` carries the current unit or original
+payload; the ratified wording currently states both.
 
 ## Best Hybrid
 

@@ -45,7 +45,7 @@ pub(super) fn project_checked(
         );
     }
     let fmt = crate::format_source(src).unwrap_or_else(|_| src.to_string());
-    let blueprint = canvas_blueprint_facts_json(src, bundle);
+    let blueprint = canvas_blueprint_facts_json(src, bundle, &index);
     let json = format!(
         "{{\"protocol\":\"jet.canvas.graph\",\"schema_version\":{},\"source_id\":{},\"revision\":{},\"fmt_fingerprint\":{},\"source_text\":{},\"graphs\":[{}],\"diagnostics\":[],\"facts\":{{\"semindex_schema_version\":{},\"handles\":[\"definitions\",\"references\",\"calls\",\"effects\",\"members\"],\"blueprint\":{}}}}}",
         GRAPH_SCHEMA_VERSION,
@@ -151,7 +151,11 @@ fn function_is_fallible(f: &AST::Func) -> bool {
     matches!(f.return_type.as_ref(), Some(AST::Type::Result { .. }))
 }
 
-fn canvas_blueprint_facts_json(src: &str, bundle: &AST::ProgramBundle) -> String {
+fn canvas_blueprint_facts_json(
+    src: &str,
+    bundle: &AST::ProgramBundle,
+    index: &SemIndex,
+) -> String {
     let mut interfaces = Vec::new();
     collect_interface_facts(
         &bundle
@@ -161,7 +165,7 @@ fn canvas_blueprint_facts_json(src: &str, bundle: &AST::ProgramBundle) -> String
             .collect::<Vec<_>>(),
         &mut interfaces,
     );
-    let dispatchers = event_dispatcher_facts(src).join(",");
+    let dispatchers = event_dispatcher_facts(src, index).join(",");
     let task_flows = task_flow_facts(src).join(",");
     format!(
         "{{\"event_dispatchers\":[{}],\"interfaces\":[{}],\"task_flows\":[{}],\"source_truth\":\"ordinary_jet_source\"}}",
@@ -276,27 +280,98 @@ pub(super) fn trait_method_signature(m: &AST::TraitMethodSig) -> String {
     format!("fn {}({}){}", m.name, params, ret)
 }
 
-fn event_dispatcher_facts(src: &str) -> Vec<String> {
-    let mut facts = Vec::new();
-    for (needle, kind) in [
-        ("event.new<", "event_stream_create"),
-        ("event.hook<", "hook_create"),
-        (".on(", "event_subscribe"),
-        (".once(", "event_subscribe_once"),
-        (".on_priority(", "event_subscribe_priority"),
-        (".emit(", "event_emit"),
-        (".emit_async(", "event_emit_async"),
-    ] {
-        for span in text_matches(src, needle) {
-            facts.push(format!(
-                "{{\"kind\":{},\"source\":{},\"source_span\":{},\"lifetime\":\"EventScope-owned\",\"debug_overlay\":\"EventTrace delivered/queued/dropped\",\"semantics\":\"core.event_source_truth\"}}",
+fn event_dispatcher_facts(src: &str, index: &SemIndex) -> Vec<String> {
+    index
+        .call_edges()
+        .iter()
+        .filter_map(|call| {
+            let source = src
+                .get(call.call_span.start..call.call_span.end)
+                .unwrap_or(&call.callee);
+            let is_core_constructor = matches!(
+                call.callee.as_str(),
+                "new" | "async_result" | "hook" | "scope"
+            );
+            if is_core_constructor {
+                let line_start = src[..call.call_span.start.min(src.len())]
+                    .rfind('\n')
+                    .map(|offset| offset + 1)
+                    .unwrap_or(0);
+                if !src[line_start..call.call_span.start.min(src.len())].ends_with("event.") {
+                    return None;
+                }
+            }
+            let receiver_ty = event_receiver_type(src, index, call.call_span);
+            let kind = if is_core_constructor {
+                match call.callee.as_str() {
+                    "new" => "event_stream_create",
+                    "async_result" => "async_event_create",
+                    "hook" => "hook_create",
+                    "scope" => "event_scope_create",
+                    _ => return None,
+                }
+            } else {
+                match (receiver_ty?, call.callee.as_str()) {
+                    (ty, "on") if is_event_handler_type(ty) => "event_subscribe",
+                    (ty, "once") if is_event_handler_type(ty) => "event_subscribe_once",
+                    (ty, "on_priority") if is_event_handler_type(ty) => {
+                        "event_subscribe_priority"
+                    }
+                    (ty, "emit") if ty.starts_with("Event<") => "event_emit",
+                    (ty, "emit_async") if ty.starts_with("AsyncEvent<") => "event_emit_async",
+                    (ty, "close") if ty.starts_with("AsyncEvent<") => "event_close",
+                    ("EventScope", "cancel") => "event_scope_cancel",
+                    (ty, "listener_count") if is_event_handler_type(ty) => {
+                        "event_listener_count"
+                    }
+                    (ty, "blocked_count") if ty.starts_with("AsyncEvent<") => {
+                        "event_pending_count"
+                    }
+                    (ty, "queued_count") if ty.starts_with("AsyncEvent<") => {
+                        "event_queued_count"
+                    }
+                    (ty, "running_count") if ty.starts_with("AsyncEvent<") => {
+                        "event_running_count"
+                    }
+                    _ => return None,
+                }
+            };
+            Some(format!(
+                "{{\"kind\":{},\"source\":{},\"source_span\":{},\"fact_source\":\"semindex_checked_call\",\"lifetime\":\"EventScope-owned\",\"observables\":[\"listener_count\",\"blocked_count\",\"queued_count\",\"running_count\",\"DispatchReport.trace\"],\"semantics\":\"core.event_source_truth\"}}",
                 json_str(kind),
-                json_str(needle),
-                span_json(span)
-            ));
-        }
+                json_str(source),
+                span_json(call.call_span),
+            ))
+        })
+        .collect()
+}
+
+fn event_receiver_type<'a>(
+    src: &str,
+    index: &'a SemIndex,
+    call_span: SourceSpan,
+) -> Option<&'a str> {
+    let receiver = index
+        .references()
+        .iter()
+        .filter(|reference| reference.span.end <= call_span.start)
+        .filter(|reference| {
+            src.get(reference.span.end..call_span.start)
+                .is_some_and(|between| between.trim() == ".")
+        })
+        .max_by_key(|reference| reference.span.end)?;
+    let target = receiver.target.as_ref()?;
+    let definition = index.definitions().iter().find(|definition| {
+        definition.module_path == target.module_path && definition.def_span == target.def_span
+    })?;
+    match &definition.kind {
+        SymbolKind::Local { ty: Some(ty), .. } | SymbolKind::Param { ty } => Some(ty),
+        _ => None,
     }
-    facts
+}
+
+fn is_event_handler_type(ty: &str) -> bool {
+    ty.starts_with("Event<") || ty.starts_with("AsyncEvent<") || ty.starts_with("Hook<")
 }
 
 fn task_flow_facts(src: &str) -> Vec<String> {

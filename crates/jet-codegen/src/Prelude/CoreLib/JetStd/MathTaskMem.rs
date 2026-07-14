@@ -222,12 +222,17 @@
     pub struct JetTask<T: Send + 'static> {
         handle: Option<super::JetSchedulerJoin<T>>,
         control: std::sync::Arc<super::JetTaskControl>,
+        // Typed operations such as AsyncEvent convert their inherited deadline
+        // into their own result value. Re-checking the caller deadline after
+        // join would replace that value with E3003 and violate the typed API.
+        skip_join_deadline: bool,
     }
     impl<T: Send + 'static> Default for JetTask<T> {
         fn default() -> Self {
             JetTask {
                 handle: None,
                 control: super::JetTaskControl::new(),
+                skip_join_deadline: false,
             }
         }
     }
@@ -244,6 +249,24 @@
                     control.clone(),
                 )),
                 control,
+                skip_join_deadline: false,
+            }
+        }
+        pub(crate) fn spawn_typed_deadline<F: FnOnce() -> T + Send + 'static>(
+            f: F,
+            control: std::sync::Arc<super::JetTaskControl>,
+        ) -> JetTask<T> {
+            let inherited_deadline = super::jet_ctx_deadline_ms();
+            JetTask {
+                handle: Some(super::jet_scheduler_spawn_with_control(
+                    move || {
+                        let _deadline_guard = inherited_deadline.map(super::jet_ctx_push_deadline);
+                        f()
+                    },
+                    control.clone(),
+                )),
+                control,
+                skip_join_deadline: true,
             }
         }
         // D-COROUTINE1=A: control-plane hooks on the M:N scheduler substrate.
@@ -268,9 +291,13 @@
             format!("paused={},cancel={}", paused, cancel)
         }
         pub fn join(mut self) -> T {
-            super::jet_deadline_check("task join");
+            if !self.skip_join_deadline {
+                super::jet_deadline_check("task join");
+            }
             let v = self.handle.take().unwrap().join();
-            super::jet_deadline_check("task join");
+            if !self.skip_join_deadline {
+                super::jet_deadline_check("task join");
+            }
             v
         }
     }
