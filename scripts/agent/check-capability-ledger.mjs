@@ -14,7 +14,7 @@ const FIXTURES_PATH = join(ROOT, "tests/fixtures/capability-claims/hostile-cases
 const DEFAULT_TOWER_PATH = join(ROOT, ".tower/tower.json");
 const DEFAULT_HISTORY_PATH = join(ROOT, ".tower/history.json");
 const EXPECTED_CLASSES = ["reserved", "facade", "partial", "implemented", "proven"];
-const PUBLIC_DECLARATION_FILES = ["README.md", "docs/reference/core-library.md", "Source/CLI.rs"];
+const PUBLIC_DECLARATION_FILES = ["README.md", "docs/reference/core-library.md", "crates/jet-cli/src/CLI.rs"];
 
 /** Live board cards plus archived history (D-TWR-ARCHIVE1) for owner lookup. */
 function loadBoardCards(towerPath) {
@@ -93,7 +93,7 @@ function declarationClaims(overrides) {
 }
 
 function cliCommands() {
-  const text = readFileSync(join(ROOT, "Source/CLI.rs"), "utf8");
+  const text = readFileSync(join(ROOT, "crates/jet-cli/src/CLI.rs"), "utf8");
   // A command may appear once in the nested group registry and once in the
   // canonical top-level inventory. Ownership is per public spelling, not per
   // registry occurrence.
@@ -252,7 +252,7 @@ function validateManifest(manifest, board, options = {}) {
     if (!claims.has(owner)) errors.push(`core ${surface}: unknown owner claim ${owner}`);
   }
   if (!sameSet(Object.keys(manifest.cliOwnership ?? {}), cliCommands())) {
-    errors.push("manifest: Source/CLI.rs has unowned or stale advertised commands");
+    errors.push("manifest: crates/jet-cli/src/CLI.rs has unowned or stale advertised commands");
   }
   if (!sameSet(Object.keys(manifest.coreOwnership ?? {}), coreModules())) {
     errors.push("manifest: KNOWN_CORE_MODULES has unowned or stale advertised modules");
