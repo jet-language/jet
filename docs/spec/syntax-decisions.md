@@ -343,7 +343,7 @@ compile-time constant; length-changing ops rejected (E0963–E0965).
 
 **S29 / D-DOTCTOR1 / D-DOTCTOR2 — Construction**: the only struct-literal
 spellings are **`Type.{ field: expr, … }`** (named) and **`.{ … }`**
-(type inferred from expected type — the U18 expected-type elaboration, now
+(type inferred from expected type — the D-DOTCTOR2 expected-type elaboration, now
 dot-spelled). Dotless `Type { … }` is E0320. Every field exactly once, any
 order; flush style `Point.{x: 3.0, y: 4.0}` (S29-FLUSH). `.{}` constructs an
 empty/unit value.
@@ -3531,7 +3531,8 @@ Control flow).
 **S53 — concurrency**: deferred past v1.0 (see Capabilities & memory).
 **S81 — `?continue`**: superseded by `expr ?? continue` (D-ORRETURN-CANON1).
 **U1 / U10 filenames, D-JPK3/8/13, D-BIND1/2, D-ATTR1/3, D-CAP1/2-words,
-D-JSONOUT1, D-LITSUFFIX-SCOPE, D-UNIT1-spelling, U18-bare-braces**: all
+D-JSONOUT1, D-LITSUFFIX-SCOPE, D-UNIT1-spelling, the bare-brace constructor
+spelling superseded by D-DOTCTOR2**: all
 superseded by the entries above; law as written in this file is final.
 
 ## Enforcement

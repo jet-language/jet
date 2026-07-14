@@ -268,14 +268,14 @@ pub const TASK_DETACH: &str = "detach"; // D-DETACH1
 /// Growable fields (`[T]`, `Map`, `String`) are rejected (E1104).
 /// PascalCase per D-MARKERCASE1=A.
 pub const ATTR_LAYOUT: &str = "Layout"; // D-REPRC1 / D-MARKERCASE1
-/// D-REPRC1: the C-compatible layout variant — `#layout(c)` → `#[repr(C)]`.
+/// D-REPRC1: the C-compatible layout variant — `#Layout(c)` → `#[repr(C)]`.
 pub const LAYOUT_C: &str = "c"; // D-REPRC1
 /// D-REPRC1: reserved layout variants — parse-and-error until their milestones ship.
 pub const LAYOUT_PACKED: &str = "packed"; // D-REPRC1 (reserved)
 pub const LAYOUT_ALIGN: &str = "align"; // D-REPRC1 (reserved)
 /// D-SOA1 / D-SOA2A=C (implemented): the struct-of-arrays layout variant —
-/// `#layout(columnar) struct S` stores a `[S]` collection column-per-field.
-/// Whole-struct only in v1 (D-SOA2B); the partial form `#layout(columnar: …)`
+/// `#Layout(columnar) struct S` stores a `[S]` collection column-per-field.
+/// Whole-struct only in v1 (D-SOA2B); the partial form `#Layout(columnar: …)`
 /// is rejected (E1109) and the per-container prefix `columnar [T]` is reserved
 /// (D-SOA2C, E1107).
 pub const LAYOUT_COLUMNAR: &str = "columnar"; // D-SOA1 / D-SOA2A

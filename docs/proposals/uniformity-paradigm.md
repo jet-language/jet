@@ -193,8 +193,9 @@ name, opposite placement rule, no local cue. Cite manifest F2.
 - **M — invokable entry: name vs marker:** `fn run/dev/build` are magic by
   name; `#Task fn deploy` is magic by marker (core F14).
 - **N — hygiene drift:** registry doc comments write `#layout`/`#grant`
-  (lowercase) against PascalCase constants; informal `U11`/`U13`/`U18` reused
-  for unrelated features with no canonical header (core F12, manifest F10).
+  (lowercase) against PascalCase constants; informal planning-number citations
+  are reused for unrelated features with no canonical header (core F12,
+  manifest F10).
 
 ---
 
@@ -769,7 +770,7 @@ The principle guides; it does not prescribe.
 | **D-SHAPE7** | External-ref sigil unification across `provider@target`, version-pin, CLI `:` ref, and the three `D-MONOREF1` member forms. **Scope guard: must NOT disturb `[T#N]`, `#(E)`, or the `.{`/`.[` family (bright spots) — the chosen sigil is named and bounded** | D-SHAPE1 | manifest F4, F9; core F8 |
 | **D-SHAPE8** | Effects-plane consolidation: reconcile `@Pure` vs `#(…)` into one signature effect-annotation spelling | D-SHAPE1, D-SHAPE2 | core F7 |
 | **D-SHAPE9** | Invokable-entry law: reserved `fn run/dev/build` names vs `#Task fn` marker — pick one mechanism | D-SHAPE1, D-SHAPE2 | core F14 |
-| **SHAPE-HYGIENE1** *(card, no owner gate)* | Registry doc casing (`#layout`→`#Layout`), `U11`/`U13`/`U18` citation drift → canonical headers, `W`-prefix diagnostics note — pure correction, can start now | — | core F12; manifest F10 |
+| **SHAPE-HYGIENE1** *(card, no owner gate)* | Registry doc casing (`#layout`→`#Layout`), ambiguous planning-number citations → canonical headers, historical `W`-prefix diagnostics note — pure correction, can start now | — | core F12; manifest F10 |
 
 Order: **D-SHAPE1 ratifies first** (nothing else is a real decision until the
 law exists, and it commits the wave directions per the note). Then the

@@ -371,8 +371,9 @@ packages: { jet: executable { … }, jetpack: alias(…),
 module env.ci { packages: [ pkgs.[cargo, rustc, gcc, lld] ]  git_hooks_path: "scripts/githooks" }
 
 // + a jetos host. Option keys use the ratified D-JPK-OSNS1 namespaces; the
-//   ordered dotted `options:` list is ratified U13 (a different construct from
-//   map literals like `env_vars:` — both spellings are shipped law):
+//   ordered dotted `options:` list belongs to the jetos system schema (a
+//   different construct from map literals like `env_vars:` — both spellings
+//   are shipped law):
 module system.build-box {
     target: linux.x64
     packages: [ pkgs.[git, ripgrep, ccache] ]
@@ -631,7 +632,7 @@ A solo dev folds forever; a team shards fully; same semantics.
 ### What this overturns
 
 - Reserved filenames become **preferred convention, not requirement** (amends
-  S52/U18 "reserved" wording; D-JPK-OSHOST1 discovery generalizes from
+  S52/D-JPK-TWONAMES1 "reserved" wording; D-JPK-OSHOST1 discovery generalizes from
   `./config.jet` to "the file holding `system.<host>`, conventionally
   `config.jet`") — D-ECO1.
 - Adds `jet split`/`jet fold`, whole-tree role discovery, and the

@@ -2914,7 +2914,7 @@ fix, span). Semantic facts are cloned from the existing semindex schema. No
 API returns `Program`, `Item`, `Expr`, `Token`, mutable caches, parser state,
 or sema internals, and no API can feed modified syntax back into compilation.
 
-## Inline script dependencies — `use pkg#version` (D-JPK-SCRIPTDEP1=A, U11)
+## Inline script dependencies — `use pkg#version` (D-JPK-SCRIPTDEP1=A)
 
 A bare `.jet` script — no `pkg.jet` — may open with an inline dependency
 instead of a manifest:

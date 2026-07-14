@@ -52,7 +52,7 @@ pub const KW_SANITIZER: &str = "Sanitizer";
 /// in any other state is E0150. The state is an ordinary `tag` (D-QUAL2); the
 /// current state of a value is a compile-time fact threaded by forward dataflow,
 /// erased in codegen (I3 — zero runtime cost). A paren-arg fn marker, parallel to
-/// `#layout(c)` / `#UnitFamily(currency)`. The exact spelling is the implemented
+/// `#Layout(c)` / `#UnitFamily(currency)`. The exact spelling is the implemented
 /// default queued for owner confirmation as D-STATE-REQ.
 pub const KW_STATE: &str = "State";
 
@@ -99,7 +99,7 @@ pub const STATE_ENTRY: &str = "_";
 pub const KW_CAPS: &str = "Caps";
 
 /// D-SCAP1 (ratified 2026-06-21): the scoped-capability grant marker, written
-/// `#grant(Fs) { caps -> … }`. Grants (authorizes) the listed effect(s) inside
+/// `#Grant(Fs) { caps -> … }`. Grants (authorizes) the listed effect(s) inside
 /// the block through the first-class handle bound after `{` (here `caps`), and
 /// **revokes** the capability at scope end (RAII, S63) — the handle is bound only
 /// for the block. The dual of `#Caps` (which restricts): an effect used inside
@@ -108,10 +108,10 @@ pub const KW_CAPS: &str = "Caps";
 pub const KW_GRANT: &str = "Grant";
 
 /// D-SCAP1: the `->` token between the grant handle and the block body —
-/// `#grant(Fs) { caps -> … }`.
+/// `#Grant(Fs) { caps -> … }`.
 pub const GRANT_ARROW: &str = "->";
 
-/// D-SCAP1: the type of a capability handle bound by `#grant(…) { caps -> … }`.
+/// D-SCAP1: the type of a capability handle bound by `#Grant(…) { caps -> … }`.
 /// An opaque sema-only handle (authority to perform the granted effects); erased
 /// in codegen (I3). Mirrors `TXN_HANDLE_TYPE`.
 pub const CAP_HANDLE_TYPE: &str = "Capability";

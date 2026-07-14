@@ -30,8 +30,9 @@ folded into Tower's active replacement program (#395, #421-#434).
 The latest decisions override stale prose in older Epoch 4 notes:
 
 - **The reserved package file is `pkg.jet`, not `pack.jet`.**
-  `D-JPK-FILENAME2=B` keeps the shipped `pkg.jet` name and amends the U18
-  two-names text. Do not rename fixtures or docs back to `pack.jet`.
+  `D-JPK-FILENAME2=B` keeps the shipped `pkg.jet` name and amends
+  D-JPK-TWONAMES1's reserved-file text. Do not rename fixtures or docs back to
+  `pack.jet`.
 - **Role namespaces live in module declaration names.**
   `D-JPK-MODBODY1=A`: active Jetpack work writes `module env.dev { ... }`
   and `module image.server { ... }` for OCI images. `system.*`, disk images,
@@ -49,8 +50,8 @@ The latest decisions override stale prose in older Epoch 4 notes:
 - **Users type `jet`; engines are separate executables.**
   `D-JPK-DISPATCH1=B`: Jetpack / jetos verbs must cross a git-style process
   boundary (`jetpack`, `jetos`, or future engine binary), with exit-code,
-  `--json`, diagnostics, and version-skew contracts. Do not pile U11-U19 onto
-  the old in-process `jet::Jetpack::run` path.
+  `--json`, diagnostics, and version-skew contracts. Do not pile the historical
+  package-gate surfaces onto the old in-process `jet::Jetpack::run` path.
 - **The OS product name is `jetos`.**
   `D-JPK-OSNAME1=A`; trademark sweep remains pre-release work.
 
@@ -121,13 +122,13 @@ Phase A — foundation
   dispatch seam + pkg.jet canon + module-declaration role form + filename cleanup
 
 Phase B — independent surfaces
-  U11 script deps
+  D-JPK-SCRIPTDEP1 script deps
   U14 OCI image capture / native OCI layout
   U19 env/dev split + trust gate
 
 Phase C — env runtime
   U12 services
-  U13 secrets
+  D-JPK-SECRET1 / D-JPK-SECRETCRYPTO1 secrets
   U16 Nix bridge
 
 Frozen research — jetos realization (Epoch 7)
@@ -140,8 +141,8 @@ Edges:
 
 - Phase A comes first; every later gate depends on names, module shape, and
   process dispatch.
-- U19 gates U12, U13, and U16 because it defines what `jet env`, `jet dev`,
-  and trust mean.
+- D-JPK-DEVCOMPOSE1 gates D-JPK-SERVICE1, D-JPK-SECRET1, and D-JPK-BRIDGE1
+  because it defines what `jet env`, `jet dev`, and trust mean.
 - U14 OCI parse/capture can land before registry push support; registry push
   waits on TLS. Disk images wait for Epoch 7 jetos.
 - Fleet rollout and `jet push` wait for Epoch 7 jetos ballots; no jetos
