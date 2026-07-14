@@ -19,6 +19,26 @@ fn jet() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
 }
 
+#[test]
+fn lua_bind_runs_embedded_vm_and_recovers_after_hostile_calls() {
+    if Command::new("lua").arg("-v").output().is_err() { return }
+    let dir=isolated_cwd("lua_bind_e2e");let root=PathBuf::from(env!("CARGO_MANIFEST_DIR"));let example=root.join("examples/interop/lua");
+    fs::copy(example.join("ops.lua"),dir.join("ops.lua")).unwrap();fs::copy(example.join("main.jet"),dir.join("main.jet")).unwrap();
+    let bind=Command::new(jet()).args(["inspect","bind","lua","ops.lua","--pkg","ops"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(bind.status.success(),"Lua bind failed:\n{}",String::from_utf8_lossy(&bind.stderr));
+    let cache=dir.join(".jet/bindings/lua");assert!(cache.join("libjet_lua_ops.a").is_file());let provenance=fs::read_to_string(cache.join("ops.provenance")).unwrap();assert!(provenance.contains("state=per-session\ntransport=datatree\nhook=instructions\n"));
+    let run=Command::new(jet()).args(["run","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"embedded Lua binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),fs::read_to_string(example.join("expected.out")).unwrap());
+    fs::copy(root.join("tests/fixtures/lua_lifecycle.c"),dir.join("lifecycle.c")).unwrap();let lua_dir=fs::read_to_string(cache.join("ops.lua-path")).unwrap();let lua_dir=lua_dir.trim();let link_dir=format!("-L{lua_dir}");let rpath=format!("-Wl,-rpath,{lua_dir}");
+    let cc=Command::new("cc").arg("lifecycle.c").args(["-L.jet/bindings/lua","-l:libjet_lua_ops.a"]).arg(link_dir).arg(rpath).args(["-llua","-lpthread","-ldl","-lm","-o","lifecycle"]).current_dir(&dir).output().unwrap();assert!(cc.status.success(),"Lua lifecycle probe link failed:\n{}",String::from_utf8_lossy(&cc.stderr));let lifecycle=Command::new(dir.join("lifecycle")).current_dir(&dir).output().unwrap();assert!(lifecycle.status.success(),"Lua lifecycle probe failed: {:?}",lifecycle.status.code());
+}
+
+#[test]
+fn lua_bind_discovers_without_executing_and_launders_parse_errors() {
+    if Command::new("luac").arg("-v").output().is_err() { return }
+    let dir=isolated_cwd("lua_bind_static");let script=dir.join("static.lua");fs::write(&script,"error('discovery executed source')\n-- function fake(input) end\nlocal function hidden(input) return input end\nfunction visible(input) return input end\n").unwrap();
+    let bind=Command::new(jet()).args(["inspect","bind","lua"]).arg(&script).args(["--pkg","static_ops"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(bind.status.success(),"static Lua discovery failed:\n{}",String::from_utf8_lossy(&bind.stderr));let generated=fs::read_to_string(dir.join(".jet/bindings/lua/static_ops.jet")).unwrap();assert!(generated.contains("pub fn visible("));assert!(!generated.contains("pub fn fake(")&&!generated.contains("pub fn hidden("));
+    let invalid=dir.join("invalid.lua");fs::write(&invalid,"function broken(input)\n  return {\nend\n").unwrap();let failed=Command::new(jet()).args(["inspect","bind","lua"]).arg(&invalid).args(["--pkg","bad"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert_eq!(failed.status.code(),Some(1));let stderr=String::from_utf8_lossy(&failed.stderr);assert!(stderr.contains("Error [E3208]"));assert!(!stderr.contains("invalid.lua:")&&!stderr.contains("near 'end'"),"raw Lua parser detail escaped: {stderr}");
+}
+
 fn cli_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/cli")
 }
@@ -2272,6 +2292,7 @@ outer <- function(input) {
   nested <- function(input) input
   input
 }
+
 "#).unwrap();
     let bind=Command::new(jet()).args(["inspect","bind","r"]).arg(&script).args(["--pkg","static_ops"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(bind.status.success(),"static R discovery failed:\n{}",String::from_utf8_lossy(&bind.stderr));let generated=fs::read_to_string(dir.join(".jet/bindings/r/static_ops.jet")).unwrap();assert!(generated.contains("pub fn outer("));assert!(!generated.contains("pub fn fake("));assert!(!generated.contains("pub fn also_fake("));assert!(!generated.contains("pub fn nested("));
 }

@@ -700,6 +700,13 @@ pub fn resolve_link(lib: &str, project_root: &Path) -> Result<LinkFlags, Diagnos
         if archive.is_file()&&std::path::Path::new(tcl_dir).is_absolute()&&std::path::Path::new(tcl_dir).join(if cfg!(target_os="macos"){"libtcl.dylib"}else{"libtcl.so"}).is_file(){return Ok(LinkFlags{lib_dirs:vec![dir.display().to_string(),tcl_dir.into()],link_names:vec![format!("static=jet_tcl_{actual}"),"tcl".into(),"pthread".into(),"dl".into()],rpath_dirs:vec![tcl_dir.into()],..Default::default()})}
         return Err(e3201(lib));
     }
+    if let Some(actual)=lib.strip_prefix("jet_lua_") {
+        let dir=project_root.join(Syntax::SOURCE_ROOT_DIR).join(ForeignLanguage::Lua.bindings_subdir());
+        let archive=dir.join(format!("libjet_lua_{actual}.a"));let path_file=dir.join(format!("{actual}.lua-path"));
+        let Ok(lua_dir)=std::fs::read_to_string(path_file) else{return Err(e3201(lib))};let lua_dir=lua_dir.trim();
+        if archive.is_file()&&std::path::Path::new(lua_dir).is_absolute()&&std::path::Path::new(lua_dir).join(if cfg!(target_os="macos"){"liblua.dylib"}else{"liblua.so"}).is_file(){return Ok(LinkFlags{lib_dirs:vec![dir.display().to_string(),lua_dir.into()],link_names:vec![format!("static=jet_lua_{actual}"),"lua".into(),"pthread".into(),"dl".into(),"m".into()],rpath_dirs:vec![lua_dir.into()],..Default::default()})}
+        return Err(e3201(lib));
+    }
     if let Some(actual)=lib.strip_prefix("jet_ada_") {
         let dir=project_root.join(Syntax::SOURCE_ROOT_DIR).join(ForeignLanguage::Ada.bindings_subdir());
         let archive=dir.join(format!("libjet_ada_{actual}.a"));let path_file=dir.join(format!("{actual}.ada-path"));

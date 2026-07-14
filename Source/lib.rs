@@ -26,6 +26,7 @@ pub use jet_driver::{
     FortranBind,
     GoBind,
     JavaBind,
+    LuaBind,
     PascalBind,
     PerlBind,
     RubyBind,

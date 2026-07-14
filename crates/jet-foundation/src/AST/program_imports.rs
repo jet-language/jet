@@ -125,6 +125,7 @@ pub enum ForeignLanguage {
     Java,
     DotNet,
     Tcl,
+    Lua,
     Fortran,
     Cobol,
     Ada,
@@ -139,7 +140,7 @@ pub enum ForeignLanguage {
 }
 
 impl ForeignLanguage {
-    pub const ALL: [ForeignLanguage; 20] = [
+    pub const ALL: [ForeignLanguage; 21] = [
         ForeignLanguage::C,
         ForeignLanguage::Rust,
         ForeignLanguage::Py,
@@ -149,6 +150,7 @@ impl ForeignLanguage {
         ForeignLanguage::Java,
         ForeignLanguage::DotNet,
         ForeignLanguage::Tcl,
+        ForeignLanguage::Lua,
         ForeignLanguage::Fortran,
         ForeignLanguage::Cobol,
         ForeignLanguage::Ada,
@@ -173,6 +175,7 @@ impl ForeignLanguage {
             Syntax::JAVA_MODULE_ROOT => Some(ForeignLanguage::Java),
             Syntax::CS_MODULE_ROOT => Some(ForeignLanguage::DotNet),
             Syntax::TCL_MODULE_ROOT => Some(ForeignLanguage::Tcl),
+            Syntax::LUA_MODULE_ROOT => Some(ForeignLanguage::Lua),
             Syntax::FORTRAN_MODULE_ROOT => Some(ForeignLanguage::Fortran),
             Syntax::COBOL_MODULE_ROOT => Some(ForeignLanguage::Cobol),
             Syntax::ADA_MODULE_ROOT => Some(ForeignLanguage::Ada),
@@ -199,6 +202,7 @@ impl ForeignLanguage {
             ForeignLanguage::Java => Syntax::JAVA_MODULE_ROOT,
             ForeignLanguage::DotNet => Syntax::CS_MODULE_ROOT,
             ForeignLanguage::Tcl => Syntax::TCL_MODULE_ROOT,
+            ForeignLanguage::Lua => Syntax::LUA_MODULE_ROOT,
             ForeignLanguage::Fortran => Syntax::FORTRAN_MODULE_ROOT,
             ForeignLanguage::Cobol => Syntax::COBOL_MODULE_ROOT,
             ForeignLanguage::Ada => Syntax::ADA_MODULE_ROOT,

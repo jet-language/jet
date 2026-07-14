@@ -44,6 +44,7 @@ pub mod RBind;
 pub mod DartBind;
 pub mod PowerShellBind;
 pub mod TclBind;
+pub mod LuaBind;
 // Card #367 / D-PRODUCT-SPLIT1=C slice 3: pure policy computation over the
 // manifest/effect-fixpoint data (no network/provider/shell engine code, same
 // bar as the rest of this crate) — moved here from `jetpack` so `jet`'s own

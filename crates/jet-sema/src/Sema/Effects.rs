@@ -71,6 +71,8 @@ pub enum Effect {
     Cobol,
     /// D-FFI-TCL1=A: synchronous in-process Tcl evaluation.
     Tcl,
+    /// D-FFI-LUA1=A: synchronous evaluation in a session-owned Lua VM.
+    Lua,
     /// D-FFI-ADA1=A: checked call into a GNAT C-ABI export.
     Ada,
     /// D-FFI-PASCAL1=A: call into a FreePascal cdecl library.
@@ -118,6 +120,7 @@ impl Effect {
             Effect::Fortran => "Fortran",
             Effect::Cobol => "Cobol",
             Effect::Tcl => "Tcl",
+            Effect::Lua => "Lua",
             Effect::Ada => "Ada",
             Effect::Pascal => "Pascal",
             Effect::Dart => "Dart",
@@ -151,6 +154,7 @@ impl Effect {
             "Fortran" => Effect::Fortran,
             "Cobol" => Effect::Cobol,
             "Tcl" => Effect::Tcl,
+            "Lua" => Effect::Lua,
             "Ada" => Effect::Ada,
             "Pascal" => Effect::Pascal,
             "Dart" => Effect::Dart,
@@ -188,6 +192,7 @@ impl Effect {
             Effect::Fortran,
             Effect::Cobol,
             Effect::Tcl,
+            Effect::Lua,
             Effect::Ada,
             Effect::Pascal,
             Effect::Dart,

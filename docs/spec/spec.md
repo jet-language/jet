@@ -1013,6 +1013,36 @@ future Tcl event-limit contract. Bridge tools run under a 60-second deadline
 with 64-KiB diagnostic capture. Binding provenance hashes the initialization
 script, Tcl runtime identity, and schema. Bind failures use **E3208**.
 
+## E3 — Lua project binder (D-FFI-LUA1=A)
+
+`jet inspect bind lua <script.lua> --pkg <lib>` validates the script with the
+Jetpack-provisioned Lua compiler, discovers direct top-level
+`function name(input)` declarations without executing the script, and compiles
+a native archive against the provisioned Lua 5.4 headers. Each `open()` owns an
+independent in-process `lua_State` and evaluates the script once. Mutable module
+state persists within one session and remains isolated between sessions. No
+subprocess or raw Lua handle is part of the public API.
+
+Generated functions accept `DataTree`; sibling `<name>_typed<T>` adapters require
+`T: [Encode, Decode]` and validate the decoded result before returning it. Null,
+booleans, integers, floats, text, lists, and string-keyed maps retain their data
+meaning. Cyclic tables, unsupported keys and values, nesting beyond 64 levels,
+and input or output at least 1 MiB fail at the boundary. Lua errors become the
+closed `LuaError` variants; exception text, paths, and stack frames never cross.
+Calls carry the `Lua` effect root.
+
+The VM instruction hook enforces each call deadline and observes concurrent
+`cancel(session)` requests without destroying the session. A caught timeout,
+cancellation, Lua exception, or protocol error leaves the VM available for the
+next call. A bounded 32-slot generation table owns states. `close(^session)`
+deterministically calls `lua_close`; stale and post-close calls return
+`LuaError.NotRunning`. Provenance binds source, runtime identity, and schema.
+Binding tools have a 60-second deadline and 64-KiB output cap; parse and tool
+failures use laundered **E3208** copy. LuaRocks realization remains Jetpack
+provider work and is not claimed by this binder.
+
+Example: `examples/interop/lua/`.
+
 ## E3 — Ada project binder (D-FFI-ADA1=A, GNAT C-ABI vertical)
 
 `jet inspect bind ada <package.ads> --pkg <lib>` reads exported functions from

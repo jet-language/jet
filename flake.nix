@@ -128,6 +128,8 @@
             pkgs.dotnet-sdk_8
             # D-FFI-TCL1=A: provision embeddable Tcl headers, runtime, and shell.
             pkgs.tcl
+            # D-FFI-LUA1=A: provision Lua's in-process VM, headers, and compiler.
+            pkgs.lua5_4
             pkgs.lld
             # D-FFI-RUBY1=A: provision the supervised Ruby worker and stdlib JSON/Ripper.
             pkgs.ruby
