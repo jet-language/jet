@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 531,
-    "rev": 5789,
+    "nextNum": 532,
+    "rev": 5805,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -25,7 +25,7 @@
         "radar:e4"
       ]
     },
-    "digestCursor": "2026-07-14T04:57:42.498Z"
+    "digestCursor": "2026-07-14T11:46:26.772Z"
   },
   "epochs": [
     {
@@ -10742,12 +10742,27 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-14",
+          "by": "owner",
+          "text": "Owner: remove VAPID feature. Closed after deletion + tests green. History rewrite remains D-TOWER-HISTORY1 follow-through."
+        },
+        {
+          "at": "2026-07-14",
+          "by": "cursor-main",
+          "text": "D-VERDICT-460-1: web push removed entirely. Criterion 7 (rotate/resubscribe) void — no push feature left. Auth secrets path retained. History scrub still owed under D-TOWER-HISTORY1=A as separate git rewrite."
+        },
+        {
+          "at": "2026-07-14",
+          "by": "owner",
+          "text": "Verdict recorded (D-VERDICT-460-1): Delete web push (VAPID keys, subscribe UI, service-worker push handler, /api/push/*). Keep SSE. Auth secrets stay. Exposed historic keys still scrubbed per D-TOWER-HISTORY1=A when history rewrite runs — no rotation/resubscribe needed because feature is gone."
+        },
         {
           "at": "2026-07-12",
           "by": "codex-main",
@@ -10847,6 +10862,15 @@
           "verifiedBy": "card296-audit",
           "evidence": "Independent audit confirms ratified D-TOWER-HISTORY1=A exactly records the owner choice to scrub all reachable history after rotation; execution belongs to the separate rotation and rewrite work.",
           "at": "2026-07-12T06:36:24.568Z"
+        },
+        {
+          "n": 9,
+          "text": "Web push/VAPID fully removed: no webpush.mjs, no /api/push/*, no UI subscribe, secrets reject push, tests green",
+          "status": "verified",
+          "metBy": "cursor-main",
+          "verifiedBy": "cursor-verify",
+          "evidence": "Re-read diffs: no push routes; SECRET_KEYS=auth only; wave asserts push routes 404",
+          "at": "2026-07-14T11:48:04.624Z"
         }
       ],
       "needsAcceptance": false,
@@ -14896,6 +14920,80 @@
       "created": "2026-07-13T11:38:37.154Z",
       "updated": "2026-07-14",
       "claimedAt": "2026-07-13T23:39:51.139Z"
+    },
+    {
+      "id": "c02ydczm",
+      "num": 531,
+      "title": "Terminal + CLI visual system: designed color/polish on EVERY user-facing surface",
+      "body": "Owner mandate (repeated, 2026-07-14 and earlier #360 bounce): sparse/NO_COLOR-looking TTYs are unacceptable on real terminals. Every user-facing surface must look intentionally designed in color mode — not one cyan row and plain chrome.\n\nSurfaces in scope (non-exhaustive, add as found):\n- jet ? help palette (interactive + query + F1)\n- jet REPL hybrid UI\n- jet diagnostics / explain\n- jetpack + jetos CLI Theme/Output (nh-class)\n- jet env shell prompt receipts/spinners\n- tower CLI status/brief human output\n- any new interactive TTY app\n\nLaw:\n- One shared Theme vocabulary (accent, dim, success, warn, error, invert selection, borders) — I8, no per-surface inventing unrelated palettes.\n- Color on when TTY && !NO_COLOR (and --color=always|never honored). NO_COLOR keeps a readable monochrome design, not an afterthought.\n- Borders, headers, categories, hints, selections, match emphasis all styled in color mode.\n- Do not close a frontend/CLI card that ships a new interactive surface without this bar.\n\nFirst vertical: jet ? Help/Render rich color. Then share Theme into REPL/diagnostics/jetpack.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "building",
+      "priority": "P0",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-14",
+          "by": "cursor-main",
+          "text": "Owner mandate locked. First vertical: jet ? richer color landed in Help/Render. Remaining: share Theme into REPL/diagnostics/jetpack/env prompt/tower CLI."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Shared Theme vocabulary (accent/dim/success/warn/error/invert/border) used by jet ? Help color mode",
+          "status": "met",
+          "metBy": "cursor-main",
+          "verifiedBy": null,
+          "evidence": "Help/Render paint()+dim borders+bright title+styled categories/cmds/summaries+selection bg",
+          "at": "2026-07-14T11:48:05.441Z"
+        },
+        {
+          "n": 2,
+          "text": "jet ? color mode styles chrome, headers, categories, hints, selection, match emphasis — not sparse cyan-only",
+          "status": "met",
+          "metBy": "cursor-main",
+          "verifiedBy": null,
+          "evidence": "jet-cli Help::Render 12/12; color mode asserts bright title + selection bg",
+          "at": "2026-07-14T11:48:05.537Z"
+        },
+        {
+          "n": 3,
+          "text": "NO_COLOR and --color=never keep readable monochrome design; --color=always forces color on TTY",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-14T11:48:05.160Z"
+        },
+        {
+          "n": 4,
+          "text": "Same Theme vocabulary applied to REPL, diagnostics/explain, jetpack Output, jet env prompt receipts",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-14T11:48:05.252Z"
+        },
+        {
+          "n": 5,
+          "text": "tower CLI human status/brief output uses the same polish bar",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-14T11:48:05.348Z"
+        }
+      ],
+      "refs": [],
+      "needsAcceptance": false,
+      "created": "2026-07-14T11:44:28.016Z",
+      "updated": "2026-07-14",
+      "workOrder": 8
     }
   ],
   "decisions": [
@@ -30377,6 +30475,29 @@
       "created": "2026-07-14T01:49:21.430Z",
       "outcome": "C",
       "ratifiedAt": "2026-07-14"
+    },
+    {
+      "id": "D-VERDICT-460-1",
+      "cardId": "c0df169q",
+      "group": "verdict",
+      "title": "Remove Tower web-push/VAPID entirely",
+      "gist": "",
+      "lesson": "",
+      "explainer": "",
+      "story": "",
+      "inWild": "",
+      "detail": "",
+      "options": [],
+      "comparisons": [],
+      "rec": null,
+      "recommendation": null,
+      "hybrid": null,
+      "draft": false,
+      "status": "ratified",
+      "outcome": "Delete web push (VAPID keys, subscribe UI, service-worker push handler, /api/push/*). Keep SSE. Auth secrets stay. Exposed historic keys still scrubbed per D-TOWER-HISTORY1=A when history rewrite runs — no rotation/resubscribe needed because feature is gone.",
+      "comment": "Delete web push (VAPID keys, subscribe UI, service-worker push handler, /api/push/*). Keep SSE. Auth secrets stay. Exposed historic keys still scrubbed per D-TOWER-HISTORY1=A when history rewrite runs — no rotation/resubscribe needed because feature is gone.",
+      "created": "2026-07-14T11:44:27.913Z",
+      "ratifiedAt": "2026-07-14"
     }
   ],
   "questions": [
@@ -31159,6 +31280,118 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-14T11:48:05.654Z",
+      "by": "cursor-main",
+      "action": "card.update",
+      "ref": "c02ydczm",
+      "note": "workOrder,logEntry"
+    },
+    {
+      "at": "2026-07-14T11:48:05.537Z",
+      "by": "cursor-main",
+      "action": "card.criteria-meet",
+      "ref": "c02ydczm",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-14T11:48:05.441Z",
+      "by": "cursor-main",
+      "action": "card.criteria-meet",
+      "ref": "c02ydczm",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-14T11:48:05.348Z",
+      "by": "cursor-main",
+      "action": "card.criteria-add",
+      "ref": "c02ydczm",
+      "note": "#5 tower CLI human status/brief output uses the same polish bar"
+    },
+    {
+      "at": "2026-07-14T11:48:05.252Z",
+      "by": "cursor-main",
+      "action": "card.criteria-add",
+      "ref": "c02ydczm",
+      "note": "#4 Same Theme vocabulary applied to REPL, diagnostics/explain, "
+    },
+    {
+      "at": "2026-07-14T11:48:05.161Z",
+      "by": "cursor-main",
+      "action": "card.criteria-add",
+      "ref": "c02ydczm",
+      "note": "#3 NO_COLOR and --color=never keep readable monochrome design; "
+    },
+    {
+      "at": "2026-07-14T11:48:05.068Z",
+      "by": "cursor-main",
+      "action": "card.criteria-add",
+      "ref": "c02ydczm",
+      "note": "#2 jet ? color mode styles chrome, headers, categories, hints, "
+    },
+    {
+      "at": "2026-07-14T11:48:04.971Z",
+      "by": "cursor-main",
+      "action": "card.criteria-add",
+      "ref": "c02ydczm",
+      "note": "#1 Shared Theme vocabulary (accent/dim/success/warn/error/inver"
+    },
+    {
+      "at": "2026-07-14T11:48:04.874Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0df169q",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-14T11:48:04.874Z",
+      "by": "owner",
+      "action": "card.criteria-bypass",
+      "ref": "c0df169q",
+      "note": "owner bypass"
+    },
+    {
+      "at": "2026-07-14T11:48:04.751Z",
+      "by": "cursor-main",
+      "action": "card.update",
+      "ref": "c0df169q",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-14T11:48:04.625Z",
+      "by": "cursor-verify",
+      "action": "card.criteria-verify",
+      "ref": "c0df169q",
+      "note": "#9"
+    },
+    {
+      "at": "2026-07-14T11:48:04.521Z",
+      "by": "cursor-main",
+      "action": "card.criteria-meet",
+      "ref": "c0df169q",
+      "note": "#9"
+    },
+    {
+      "at": "2026-07-14T11:48:04.411Z",
+      "by": "cursor-main",
+      "action": "card.criteria-add",
+      "ref": "c0df169q",
+      "note": "#9 Web push/VAPID fully removed: no webpush.mjs, no /api/push/*"
+    },
+    {
+      "at": "2026-07-14T11:44:28.016Z",
+      "by": "cursor-main",
+      "action": "card.add",
+      "ref": "c02ydczm",
+      "note": "Terminal + CLI visual system: designed color/polish on EVERY user-facing surface"
+    },
+    {
+      "at": "2026-07-14T11:44:27.913Z",
+      "by": "owner",
+      "action": "decision.verdict",
+      "ref": "D-VERDICT-460-1",
+      "note": "Delete web push (VAPID keys, subscribe UI, service-worker push handler, /api/push/*). Keep SSE. Auth secrets stay. Exposed historic keys still scrubbed per D-TOWER-HISTORY1=A when history rewrite runs — no rotation/resubscribe needed because feature is gone."
+    },
     {
       "at": "2026-07-14T11:34:40.614Z",
       "by": "owner",
@@ -34546,118 +34779,6 @@
       "action": "card.update",
       "ref": "c0z3l25j",
       "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-13T17:08:41.604Z",
-      "by": "codex-card-530",
-      "action": "card.claim",
-      "ref": "c0aadf2p",
-      "note": ""
-    },
-    {
-      "at": "2026-07-13T17:07:26.546Z",
-      "by": "fable-296-cbor2",
-      "action": "card.release",
-      "ref": "c0uxsyns",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-13T17:06:43.857Z",
-      "by": "codex-root",
-      "action": "card.update",
-      "ref": "c0uxsyns",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-13T16:48:38.511Z",
-      "by": "terra-241-providers",
-      "action": "card.release",
-      "ref": "ccq07pav",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-13T16:48:03.740Z",
-      "by": "codex-root",
-      "action": "card.release",
-      "ref": "ccq07pav",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-13T16:47:25.852Z",
-      "by": "codex-root",
-      "action": "card.update",
-      "ref": "ccq07pav",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-13T16:36:52.924Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-EMAIL-SMTP-SURFACE1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-13T16:35:50.836Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-IOERROR-TREE1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-13T16:35:21.707Z",
-      "by": "terra-286-async",
-      "action": "card.claim",
-      "ref": "c0fiunwy",
-      "note": ""
-    },
-    {
-      "at": "2026-07-13T16:34:52.001Z",
-      "by": "fable-296-cbor2",
-      "action": "card.claim",
-      "ref": "c0uxsyns",
-      "note": ""
-    },
-    {
-      "at": "2026-07-13T16:33:19.840Z",
-      "by": "terra-530-smtp",
-      "action": "card.release",
-      "ref": "c0aadf2p",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-13T16:32:46.353Z",
-      "by": "codex-orchestrator",
-      "action": "decision.add",
-      "ref": "D-EMAIL-SMTP-SURFACE1",
-      "note": "What exact SMTP configuration, send, report, and trust surface should Jet expose?"
-    },
-    {
-      "at": "2026-07-13T16:30:42.605Z",
-      "by": "terra-296-cbor",
-      "action": "card.release",
-      "ref": "c0uxsyns",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-13T16:29:58.281Z",
-      "by": "agent",
-      "action": "card.update",
-      "ref": "c0uxsyns",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-13T16:24:07.474Z",
-      "by": "terra-241-providers",
-      "action": "card.claim",
-      "ref": "ccq07pav",
-      "note": ""
-    },
-    {
-      "at": "2026-07-13T16:23:34.213Z",
-      "by": "terra-530-smtp",
-      "action": "card.claim",
-      "ref": "c0aadf2p",
-      "note": ""
     }
   ],
   "nextNum": 368,

@@ -48,16 +48,15 @@ Migrating an older board: `tower import <old-tower.json> --name "<Project>"`
   instant it's ratified — the owner sees it on Now's "Recently decided"
   strip and can reopen it in one tap while it's fresh.
 
-## Remote access, push, git linking
+## Remote access, git linking
 
-- First `tower serve` generates VAPID push keys in ignored
-  `.tower/secrets.json`; the owner enables push per-device with **◍ notify**.
-  Auth is OPT-IN: set `"auth": {"token": "…"}` in `secrets.json` to require
-  a key from non-localhost devices (unlock screen
-  asks once per device; localhost always exempt).
+- Auth is OPT-IN: set `"auth": {"token": "…"}` in ignored `.tower/secrets.json`
+  to require a key from non-localhost devices (unlock screen asks once per
+  device; localhost always exempt). Web push/VAPID is removed — live updates
+  use SSE only. Tower never invents secrets.
 - Never put `auth` or `push` in tracked `config.json`. Tower rejects that
   legacy layout with migration guidance. Remove those fields, rotate any
-  committed credentials, then write only replacements to `secrets.json`.
+  committed auth token, delete leftover `push` from secrets.
 - `tower githook` installs a post-commit hook so commits mentioning `#12`
   append to that card's log — install it once per repo.
 

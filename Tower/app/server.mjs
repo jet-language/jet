@@ -1,12 +1,11 @@
-// Std-only HTTP server: static UI + JSON API + SSE live stream + web push.
+// Std-only HTTP server: static UI + JSON API + SSE live stream.
 //
 // Auth: non-localhost requests need the token from config.auth (cookie,
 // Bearer header, or ?key=…). Localhost is always exempt so local CLIs and
 // agents just work. Static PWA plumbing (manifest, sw.js) is public.
 //
 // Live: every mutation broadcasts the projected state over /api/stream
-// (SSE). New ballots and questions fan out as payload-less web pushes to
-// the owner's subscribed devices.
+// (SSE). Web push / VAPID removed (owner D-VERDICT-460-1, 2026-07-14).
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { readdirSync, existsSync } from 'node:fs';
@@ -14,8 +13,6 @@ import { join, extname, normalize, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
 import { UI, readJSON } from './paths.mjs';
-import { saveSecrets } from './config.mjs';
-import { generateVapid, pushTo } from './webpush.mjs';
 import * as db from './store.mjs';
 import { TowerError } from './store.mjs';
 import { lint } from './lint.mjs';
@@ -61,36 +58,6 @@ function broadcast(store) {
   if (!sseClients.size) return;
   const data = `data: ${JSON.stringify(projected(store))}\n\n`;
   for (const res of [...sseClients]) { try { res.write(`event: state\n${data}`); } catch { sseClients.delete(res); } }
-}
-
-// ---- web push ----------------------------------------------------------------
-let lastPushAt = 0;
-function persistPush(store, push) {
-  store.config.push = push;
-  saveSecrets(store.dataDir, { push });
-  return push;
-}
-
-export function removeDeadSubscriptions(store, deadEndpoints) {
-  if (!deadEndpoints.length || !store.config.push) return;
-  const dead = new Set(deadEndpoints);
-  persistPush(store, {
-    ...store.config.push,
-    subscriptions: (store.config.push.subscriptions || []).filter(sub => !dead.has(sub.endpoint)),
-  });
-}
-
-async function pushOwner(store, reason) {
-  const push = store.config.push;
-  if (!push?.subscriptions?.length) return;
-  if (Date.now() - lastPushAt < 25_000) return;   // burst throttle; SW fetches fresh state anyway
-  lastPushAt = Date.now();
-  const dead = [];
-  await Promise.all(push.subscriptions.map(async (sub) => {
-    const r = await pushTo(sub, { privateJwk: push.privateJwk, publicKey: push.publicKey });
-    if (r.gone) dead.push(sub.endpoint);
-  }));
-  removeDeadSubscriptions(store, dead);
 }
 
 // route → (state, payload, config) mutation. Same verbs as the CLI.
@@ -222,13 +189,8 @@ async function serveStatic(req, res) {
 }
 
 export function serve(store, port = 7878, open = false) {
-  // one-time provisioning: VAPID push keys. Auth is OPT-IN: set
-  //   "auth": { "token": "…" }
-  // in untracked secrets.json to require a key from non-localhost devices.
-  if (!store.config.push?.publicKey) {
-    const v = generateVapid();
-    persistPush(store, { publicKey: v.publicKey, privateJwk: v.privateJwk, subscriptions: store.config.push?.subscriptions || [] });
-  }
+  // Auth is OPT-IN: set "auth": { "token": "…" } in untracked secrets.json
+  // to require a key from non-localhost devices. No VAPID provisioning.
   const token = store.config.auth?.token || null;
 
   const server = createServer(async (req, res) => {
@@ -255,7 +217,6 @@ export function serve(store, port = 7878, open = false) {
         const current = computeVersion(TOWER_ROOT);
         return send(res, 200, { start: START_VERSION, current, stale: current !== START_VERSION });
       }
-      if (req.method === 'GET' && url.pathname === '/api/push/key') return send(res, 200, { key: store.config.push.publicKey, subscribed: store.config.push.subscriptions.length });
       if (req.method === 'GET' && url.pathname === '/api/events') {
         return send(res, 200, store.load().events.slice(0, Number(url.searchParams.get('limit') || 50)));
       }
@@ -310,19 +271,6 @@ export function serve(store, port = 7878, open = false) {
         return send(res, 200, db.buildBrief(s, card.id));
       }
       // ---- writes ----
-      if (req.method === 'POST' && url.pathname === '/api/push/subscribe') {
-        const p = await jsonBody(req);
-        if (!p.subscription?.endpoint) return send(res, 400, { error: 'E_INVALID', message: 'missing subscription' });
-        const push = { ...store.config.push,
-          subscriptions: [...store.config.push.subscriptions.filter(s => s.endpoint !== p.subscription.endpoint),
-            { ...p.subscription, ua: (req.headers['user-agent'] || '').slice(0, 80), created: new Date().toISOString() }] };
-        persistPush(store, push);
-        return send(res, 200, { ok: true, subscribed: push.subscriptions.length });
-      }
-      if (req.method === 'POST' && url.pathname === '/api/push/test') {
-        lastPushAt = 0; await pushOwner(store, 'test');
-        return send(res, 200, { ok: true, sent: store.config.push.subscriptions.length });
-      }
       if (req.method === 'POST' && url.pathname === '/api/undo') {
         const p = await jsonBody(req);
         const bdir = join(store.dataDir, 'backups');
@@ -403,8 +351,6 @@ export function serve(store, port = 7878, open = false) {
           }
         }
         const { result } = store.mutate((s, cfg) => fn(s, p, cfg), { expectRev: p.expectRev });
-        // side effect: new ballots/questions push to the owner's devices
-        if (name === 'decision/add' || name === 'question/add') pushOwner(store, name);
         broadcast(store);
         return send(res, 200, { ok: true, result, state: projected(store) });
       }

@@ -74,26 +74,42 @@ fn truncate_visible(s: &str, width: usize) -> String {
     out
 }
 
-fn top(width: usize, label: &str) -> String {
-    let width = w(width);
-    let head = format!("┌─ {} ", label);
-    let fill = width.saturating_sub(cols(&head) + 1);
-    format!("{}{}┐", head, "─".repeat(fill))
+fn paint(on: bool, sgr: &str, text: &str) -> String {
+    if on {
+        format!("\x1b[{sgr}m{text}\x1b[0m")
+    } else {
+        text.to_string()
+    }
 }
 
-fn mid(width: usize) -> String {
+fn top(width: usize, label: &str, color: bool) -> String {
     let width = w(width);
-    format!("├{}┤", "─".repeat(width.saturating_sub(2)))
+    let plain = format!("┌─ {} ", label);
+    let fill = width.saturating_sub(cols(&plain) + 1);
+    if color {
+        format!(
+            "{}\x1b[1;96m{}\x1b[0m{}",
+            paint(true, "90", "┌─ "),
+            label,
+            paint(true, "90", &format!(" {}┐", "─".repeat(fill)))
+        )
+    } else {
+        format!("{}{}┐", plain, "─".repeat(fill))
+    }
 }
 
-fn bottom(width: usize) -> String {
+fn mid(width: usize, color: bool) -> String {
     let width = w(width);
-    format!("└{}┘", "─".repeat(width.saturating_sub(2)))
+    paint(color, "90", &format!("├{}┤", "─".repeat(width.saturating_sub(2))))
 }
 
-/// One content row. `selected` draws the NO_COLOR `>` marker (color mode
-/// leaves the marker off — a real TTY would reverse-video the row instead,
-/// which `Interactive` layers on top of this plain text).
+fn bottom(width: usize, color: bool) -> String {
+    let width = w(width);
+    paint(color, "90", &format!("└{}┘", "─".repeat(width.saturating_sub(2))))
+}
+
+/// One content row. `selected` draws the NO_COLOR `>` marker; color mode uses
+/// reverse-video via `selected_row`.
 fn row(width: usize, text: &str, selected: bool) -> String {
     let width = w(width);
     let marker = if selected { "> " } else { "  " };
@@ -102,10 +118,23 @@ fn row(width: usize, text: &str, selected: bool) -> String {
 }
 
 fn selected_row(width: usize, text: &str, selected: bool, color: bool) -> String {
+    let width = w(width);
     if selected && color {
-        let width = w(width);
         let inner = width.saturating_sub(2);
-        format!("│\x1b[7m{}\x1b[0m│", pad(text, inner))
+        format!(
+            "{}\x1b[48;5;24;97;1m{}\x1b[0m{}",
+            paint(true, "90", "│"),
+            pad(text, inner),
+            paint(true, "90", "│")
+        )
+    } else if color {
+        let inner = width.saturating_sub(4);
+        format!(
+            "{}  {}{}",
+            paint(true, "90", "│"),
+            pad(text, inner),
+            paint(true, "90", "│")
+        )
     } else {
         row(width, text, selected)
     }
@@ -196,11 +225,16 @@ pub fn render_categorized(
 ) -> String {
     let width = w(width);
     let mut out = String::new();
-    out.push_str(&top(width, "jet ? — command palette"));
+    out.push_str(&top(width, "jet ? — command palette", color));
     out.push('\n');
-    out.push_str(&row(width, "type to search · ↑↓ move · ⏎ prefill · ⇥ detail · F1 reference", false));
+    let hint = if color {
+        paint(true, "2;37", "type to search · ↑↓ move · ⏎ prefill · ⇥ detail · F1 reference")
+    } else {
+        "type to search · ↑↓ move · ⏎ prefill · ⇥ detail · F1 reference".to_string()
+    };
+    out.push_str(&selected_row(width, &hint, false, color));
     out.push('\n');
-    out.push_str(&mid(width));
+    out.push_str(&mid(width, color));
     out.push('\n');
     for (ci, cat) in super::CATEGORIES.iter().enumerate() {
         let entries: Vec<&Entry> = index.iter().filter(|e| &e.category == cat).collect();
@@ -211,7 +245,9 @@ pub fn render_categorized(
         let marker = if is_expanded { "▾" } else { "▸" };
         let plain = format!("{} {}", marker, cat);
         let label = if color && ci == selected_category {
-            format!("\x1b[1;36m{}\x1b[0m", plain)
+            format!("\x1b[1;96m{}\x1b[0m", plain)
+        } else if color {
+            format!("\x1b[1;37m{}\x1b[0m", plain)
         } else {
             plain
         };
@@ -219,17 +255,32 @@ pub fn render_categorized(
         out.push('\n');
         if is_expanded {
             if *cat == "Error codes" {
-                out.push_str(&row(width, "type an E-code, such as E0102, for verbatim help", false));
+                let tip = if color {
+                    paint(true, "2;37", "type an E-code, such as E0102, for verbatim help")
+                } else {
+                    "type an E-code, such as E0102, for verbatim help".to_string()
+                };
+                out.push_str(&selected_row(width, &tip, false, color));
                 out.push('\n');
             }
             for e in entries {
-                let line = format!("jet {:<20} {}", e.cmd, e.summary);
+                let line = if color {
+                    let cmd_col = format!("{:<20}", e.cmd);
+                    format!(
+                        "{} {} {}",
+                        paint(true, "1;36", "jet"),
+                        paint(true, "1;37", &cmd_col),
+                        paint(true, "2;37", &e.summary)
+                    )
+                } else {
+                    format!("jet {:<20} {}", e.cmd, e.summary)
+                };
                 out.push_str(&selected_row(width, &line, selected_cmd == Some(e.cmd.as_str()), color));
                 out.push('\n');
             }
         }
     }
-    out.push_str(&bottom(width));
+    out.push_str(&bottom(width, color));
     out
 }
 
@@ -247,14 +298,20 @@ pub fn categorized_order(index: &[Entry]) -> Vec<&str> {
 pub fn render_result_list(hits: &[Hit], query: &str, width: usize, color: bool, selected: Option<usize>) -> String {
     let width = w(width);
     let mut out = String::new();
-    out.push_str(&top(width, "find a command"));
+    out.push_str(&top(width, "find a command", color));
     out.push('\n');
-    out.push_str(&row(width, &format!("> {}", query), false));
+    let query_line = if color {
+        format!("{} {}", paint(true, "1;96", ">"), paint(true, "1;37", query))
+    } else {
+        format!("> {}", query)
+    };
+    out.push_str(&selected_row(width, &query_line, false, color));
     out.push('\n');
-    out.push_str(&mid(width));
+    out.push_str(&mid(width, color));
     out.push('\n');
     if hits.is_empty() {
-        out.push_str(&row(width, "no matches", false));
+        let empty = if color { paint(true, "2;37", "no matches") } else { "no matches".to_string() };
+        out.push_str(&selected_row(width, &empty, false, color));
         out.push('\n');
     }
     for (i, hit) in hits.iter().enumerate() {
@@ -278,17 +335,27 @@ pub fn render_result_list(hits: &[Hit], query: &str, width: usize, color: bool, 
         }
         out.push('\n');
     }
-    out.push_str(&mid(width));
+    out.push_str(&mid(width, color));
     out.push('\n');
     if let Some(Hit::Command { entry, .. }) = hits.first() {
         if let Some(ex) = &entry.example {
-            out.push_str(&row(width, &format!("example  {}", ex), false));
+            let ex_line = if color {
+                format!("{} {}", paint(true, "2;37", "example"), paint(true, "37", ex))
+            } else {
+                format!("example  {}", ex)
+            };
+            out.push_str(&selected_row(width, &ex_line, false, color));
             out.push('\n');
         }
     }
-    out.push_str(&row(width, "↑↓ move · ⏎ prefill shell · ⇥ detail · F1 reference", false));
+    let footer = if color {
+        paint(true, "2;37", "↑↓ move · ⏎ prefill shell · ⇥ detail · F1 reference")
+    } else {
+        "↑↓ move · ⏎ prefill shell · ⇥ detail · F1 reference".to_string()
+    };
+    out.push_str(&selected_row(width, &footer, false, color));
     out.push('\n');
-    out.push_str(&bottom(width));
+    out.push_str(&bottom(width, color));
     out
 }
 
@@ -297,41 +364,41 @@ pub fn render_result_list(hits: &[Hit], query: &str, width: usize, color: bool, 
 pub fn render_detail(entry: &Entry, width: usize, color: bool) -> String {
     let width = w(width);
     let mut out = String::new();
-    out.push_str(&top(width, &format!("jet {}  ⇥ collapse", entry.cmd)));
+    out.push_str(&top(width, &format!("jet {}  ⇥ collapse", entry.cmd), color));
     out.push('\n');
-    out.push_str(&row(width, &format!("Usage   {}", entry.usage), false));
+    out.push_str(&selected_row(width, &format!("Usage   {}", entry.usage), false, color));
     out.push('\n');
-    out.push_str(&row(width, entry.summary, false));
+    out.push_str(&selected_row(width, entry.summary, false, color));
     out.push('\n');
     if entry.flags.is_empty() {
-        out.push_str(&row(width, "Flags   (none)", false));
+        out.push_str(&selected_row(width, "Flags   (none)", false, color));
         out.push('\n');
     } else {
         for (i, (flag, help)) in entry.flags.iter().enumerate() {
             let label = if i == 0 { "Flags   " } else { "        " };
-            out.push_str(&row(width, &format!("{}{}  {}", label, flag, help), false));
+            out.push_str(&selected_row(width, &format!("{}{}  {}", label, flag, help), false, color));
             out.push('\n');
         }
     }
     if let Some(ex) = &entry.example {
-        out.push_str(&row(width, &format!("Example {}", ex), false));
+        out.push_str(&selected_row(width, &format!("Example {}", ex), false, color));
         out.push('\n');
     }
     if !entry.see_also.is_empty() {
-        out.push_str(&row(width, &format!("See also  {}", entry.see_also.join(" · ")), false));
+        out.push_str(&selected_row(width, &format!("See also  {}", entry.see_also.join(" · ")), false, color));
         out.push('\n');
     }
-    out.push_str(&mid(width));
+    out.push_str(&mid(width, color));
     out.push('\n');
     let prefill = entry.example.clone().unwrap_or_else(|| format!("jet {}", entry.cmd));
     let footer = if color {
-        format!("\x1b[2m⏎ prefill: {} · F1 open in reference\x1b[0m", prefill)
+        format!("\x1b[2;37m⏎ prefill: {} · F1 open in reference\x1b[0m", prefill)
     } else {
         format!("prefill: {} · F1 open in reference", prefill)
     };
-    out.push_str(&row(width, &footer, false));
+    out.push_str(&selected_row(width, &footer, false, color));
     out.push('\n');
-    out.push_str(&bottom(width));
+    out.push_str(&bottom(width, color));
     out
 }
 
@@ -505,8 +572,8 @@ mod tests {
     fn color_mode_styles_header_and_selection_without_breaking_width() {
         let index = build_index();
         let out = render_categorized(&index, 0, true, Some("run"), 64, true);
-        assert!(out.contains("\x1b[1;36m"));
-        assert!(out.contains("\x1b[7m"));
+        assert!(out.contains("\x1b[1;96m"));
+        assert!(out.contains("\x1b[48;5;24;97;1m"));
         for line in out.lines() {
             assert_eq!(cols(line), 64, "bad colored width: {line:?}");
         }

@@ -1,7 +1,6 @@
-// Tower service worker: static-shell cache + payload-less push.
-// A push carries no body; we fetch fresh state and compose the notification
-// locally, so nothing sensitive transits the push service.
-const SHELL = 'tower-shell-v3';
+// Tower service worker: static-shell cache only.
+// Web push / VAPID removed (owner D-VERDICT-460-1). Live board updates use SSE.
+const SHELL = 'tower-shell-v4';
 const ASSETS = ['/', '/tower.css', '/tower.js', '/icon.svg', '/manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {
@@ -19,30 +18,4 @@ self.addEventListener('fetch', (e) => {
     if (r.ok) { const copy = r.clone(); caches.open(SHELL).then(c => c.put(e.request, copy)); }
     return r;
   }).catch(() => caches.match(e.request)));
-});
-
-self.addEventListener('push', (e) => {
-  e.waitUntil((async () => {
-    let title = 'Tower', body = 'Something needs you.';
-    try {
-      const s = await (await fetch('/api/state')).json();
-      const c = s.counts;
-      const bits = [];
-      if (c.decide) bits.push(`${c.decide} decision${c.decide > 1 ? 's' : ''}`);
-      if (c.unreadForOwner) bits.push(`${c.unreadForOwner} message${c.unreadForOwner > 1 ? 's' : ''}`);
-      title = `Tower · ${s.meta.project}`;
-      body = bits.length ? bits.join(' · ') + ' waiting on you' : 'All clear — an agent reported in.';
-    } catch { /* offline: generic */ }
-    await self.registration.showNotification(title, {
-      body, icon: '/icon.svg', badge: '/icon.svg', tag: 'tower', renotify: false,
-    });
-  })());
-});
-
-self.addEventListener('notificationclick', (e) => {
-  e.notification.close();
-  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(ws => {
-    for (const w of ws) if ('focus' in w) return w.focus();
-    return self.clients.openWindow('/#now');
-  }));
 });

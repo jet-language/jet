@@ -100,11 +100,16 @@ fn shell_prefill_mode_keeps_palette_on_tty_while_stdout_is_captured() {
 #[test]
 fn explicit_color_law_reaches_interactive_renderer() {
     let colored = run_pty(b"q", "always", false);
-    assert!(colored.contains("\x1b[1;36m"), "color renderer not active:\n{colored:?}");
+    assert!(
+        colored.contains("\x1b[1;96m") || colored.contains("\x1b[48;5;24"),
+        "color renderer not active:\n{colored:?}"
+    );
     let plain = run_pty(b"q", "never", false);
-    assert!(!plain.contains("\x1b[1;36m"), "--color=never leaked styles:\n{plain:?}");
+    assert!(!plain.contains("\x1b[1;96m"), "--color=never leaked styles:\n{plain:?}");
+    assert!(!plain.contains("\x1b[48;5;24"), "--color=never leaked selection bg:\n{plain:?}");
     let no_color = run_pty(b"q", "auto", true);
-    assert!(!no_color.contains("\x1b[1;36m"), "NO_COLOR leaked styles:\n{no_color:?}");
+    assert!(!no_color.contains("\x1b[1;96m"), "NO_COLOR leaked styles:\n{no_color:?}");
+    assert!(!no_color.contains("\x1b[48;5;24"), "NO_COLOR leaked selection bg:\n{no_color:?}");
 }
 
 #[test]

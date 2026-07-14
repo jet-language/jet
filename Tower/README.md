@@ -100,8 +100,8 @@ write; `--expect-rev N` gives optimistic concurrency (exit 2 on conflict).
   `.tower/secrets.json` to
   require a key from non-localhost devices (`/?key=<token>` once per device;
   localhost always exempt). Without it the board is open to your LAN/tailnet.
-- **PWA + push** — installable app; the ◍ notify button subscribes the
-  device to payload-less web push (new ballot / new question).
+- **PWA** — installable app (offline shell). Live updates use SSE; web push
+  was removed (owner D-VERDICT-460-1).
 - **Undo** — every owner action shows an Undo toast (`tower undo` in the
   CLI); rev-guarded so it can never revert another agent's interleaved write.
 - **Git linking** — `tower githook` installs a post-commit hook: commits
@@ -150,10 +150,12 @@ Runtime credentials belong only in ignored `.tower/secrets.json`:
 }
 ```
 
-First `tower serve` adds push credentials and subscriptions to that file.
+Auth token (optional) belongs only in ignored `.tower/secrets.json`. Tower
+never provisions push credentials — web push was removed.
 If an older tracked `config.json` contains `auth` or `push`, Tower refuses to
-start: remove those fields, rotate exposed credentials, then put only the new
-values in `secrets.json`. Tower never migrates committed credentials forward.
+start: remove those fields, rotate any exposed auth token, then put only auth
+in `secrets.json`. Delete any leftover `push` key from secrets. Tower never
+migrates committed credentials forward.
 
 ## UI
 

@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { openStore, empty } from '../app/store.mjs';
 import { saveSecrets } from '../app/config.mjs';
 import { configFile, readJSON, secretsFile, writeJSON } from '../app/paths.mjs';
-import { serve, removeDeadSubscriptions } from '../app/server.mjs';
+import { serve } from '../app/server.mjs';
 
 const dir = mkdtempSync(join(tmpdir(), 'tower-wave-'));
 writeJSON(join(dir, 'tower.json'), empty('Wave'));
@@ -24,27 +24,25 @@ const post = async (p, b, raw = false) => {
   return { status: r.status, json: await r.json().catch(() => null) };
 };
 
-test('provisioning: vapid keys generated; auth stays opt-in (no auto token)', () => {
-  assert.ok(store.config.push?.publicKey?.length > 40);
+test('provisioning: no vapid; auth stays opt-in (no auto token)', () => {
+  assert.equal(store.config.push, null);
   assert.equal(store.config.auth.token, 'test-token-123456', 'configured token respected, none invented');
   assert.deepEqual(Object.keys(readJSON(configFile(dir), {})), ['project']);
   const secrets = readJSON(secretsFile(dir), {});
-  assert.equal(typeof secrets.push?.privateJwk, 'object');
-  assert.equal(Array.isArray(secrets.push?.subscriptions), true);
+  assert.equal(Object.hasOwn(secrets, 'push'), false);
+  assert.equal(typeof secrets.auth?.token, 'string');
   const projected = store.project();
   assert.equal(Object.hasOwn(projected.config, 'auth'), false);
   assert.equal(Object.hasOwn(projected.config, 'push'), false);
 });
 
-test('subscription writes and dead-endpoint cleanup touch secrets only', async () => {
-  const endpoint = 'https://example.invalid/dead';
-  const added = await post('/api/push/subscribe', { subscription: { endpoint, keys: { p256dh: 'shape', auth: 'shape' } } });
-  assert.equal(added.status, 200);
-  assert.equal(Object.hasOwn(readJSON(configFile(dir), {}), 'push'), false);
-  assert.equal(readJSON(secretsFile(dir), {}).push.subscriptions.length, 1);
-  removeDeadSubscriptions(store, [endpoint]);
-  assert.equal(readJSON(secretsFile(dir), {}).push.subscriptions.length, 0);
-  assert.equal(Object.hasOwn(readJSON(configFile(dir), {}), 'push'), false);
+test('push routes are gone', async () => {
+  const key = await fetch(url('/api/push/key'));
+  assert.equal(key.status, 404);
+  const sub = await post('/api/push/subscribe', { subscription: { endpoint: 'https://example.invalid/x', keys: {} } });
+  assert.equal(sub.status, 404);
+  const testPush = await post('/api/push/test', {});
+  assert.equal(testPush.status, 404);
 });
 
 test('undo: revert last write, conflict-guarded', async () => {

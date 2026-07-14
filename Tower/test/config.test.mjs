@@ -12,12 +12,12 @@ import { configFile, readJSON, secretsFile, writeJSON } from '../app/paths.mjs';
 test('public config and runtime secrets load through separate files', () => {
   const dir = mkdtempSync(join(tmpdir(), 'tower-config-'));
   writeJSON(configFile(dir), { project: 'Split', port: 8123 });
-  saveSecrets(dir, { auth: { token: 'runtime-only' }, push: { publicKey: 'public-shape', privateJwk: { d: 'private-shape' }, subscriptions: [] } });
+  saveSecrets(dir, { auth: { token: 'runtime-only' } });
 
   const runtime = loadConfig(dir);
   assert.equal(runtime.project, 'Split');
   assert.equal(typeof runtime.auth?.token, 'string');
-  assert.equal(typeof runtime.push?.privateJwk, 'object');
+  assert.equal(runtime.push, null);
   assert.deepEqual(Object.keys(readJSON(configFile(dir), {})).sort(), ['port', 'project']);
   assert.deepEqual(Object.keys(publicConfig(runtime)).sort().includes('auth'), false);
   assert.deepEqual(Object.keys(publicConfig(runtime)).sort().includes('push'), false);

@@ -12,7 +12,10 @@ export class ConfigError extends Error {
   constructor(message) { super(message); this.code = 'E_SECRET_CONFIG'; }
 }
 
-const SECRET_KEYS = ['auth', 'push'];
+const SECRET_KEYS = ['auth'];
+// Tracked config must never hold these (legacy push + auth). Push itself is
+// gone (D-VERDICT-460-1); rejection stays so old committed shapes fail closed.
+const TRACKED_SECRET_KEYS = ['auth', 'push'];
 const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
 const noFollow = constants.O_NOFOLLOW || 0;
 
@@ -90,12 +93,14 @@ function writeSecrets(file, value) {
 }
 
 const rejectSecretKeys = (value, file) => {
-  const found = SECRET_KEYS.filter(key => hasOwn(value, key));
+  const found = TRACKED_SECRET_KEYS.filter(key => hasOwn(value, key));
   if (!found.length) return;
   throw new ConfigError(
     `${file} contains secret field${found.length > 1 ? 's' : ''} ${found.join(', ')}. ` +
-    `Remove ${found.join('/')} from tracked config, rotate any credentials that were committed, ` +
-    `and put replacement values in .tower/secrets.json. Tower will not load tracked secrets.`
+    `Remove ${found.join('/')} from tracked config` +
+    (found.includes('auth') ? ', rotate any credentials that were committed, and put auth.token in .tower/secrets.json' : '') +
+    (found.includes('push') ? '. Web push/VAPID was removed — delete push entirely' : '') +
+    `. Tower will not load tracked secrets.`
   );
 };
 
@@ -128,13 +133,21 @@ export function saveConfig(dataDir, patch) {
 }
 
 // Secrets have one persistence path. The whole file is untracked and mode
-// 0600; callers may update auth/push without touching public config.
+// 0600; callers may update auth without touching public config. Push/VAPID
+// is retired — saveSecrets rejects `push` patches.
 export function saveSecrets(dataDir, patch) {
   const unknown = Object.keys(patch || {}).filter(key => !SECRET_KEYS.includes(key));
-  if (unknown.length) throw new ConfigError(`.tower/secrets.json accepts only auth and push; got ${unknown.join(', ')}`);
+  if (unknown.length) {
+    const msg = unknown.includes('push')
+      ? `.tower/secrets.json no longer accepts push (web push/VAPID removed); got ${unknown.join(', ')}`
+      : `.tower/secrets.json accepts only auth; got ${unknown.join(', ')}`;
+    throw new ConfigError(msg);
+  }
   const file = secretsFile(dataDir);
   const cur = loadSecrets(file) || {};
-  const next = { ...cur, ...patch };
+  const { push: _dropPush, ...kept } = cur;
+  const next = { ...kept, ...patch };
+  delete next.push;
   writeSecrets(file, next);
   return next;
 }
@@ -149,11 +162,12 @@ export function loadConfig(dataDir) {
   const user = readJSON(configFile(dataDir), {}) || {};
   rejectSecretKeys(user, '.tower/config.json');
   const secrets = loadSecrets(secretsFile(dataDir)) || {};
+  // Ignore legacy push blobs left in secrets.json after feature removal.
   return {
     ...DEFAULTS,
     ...user,
     terms: { ...DEFAULTS.terms, ...(user.terms || {}) },
     auth: secrets.auth || null,
-    push: secrets.push || null,
+    push: null,
   };
 }

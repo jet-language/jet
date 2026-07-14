@@ -102,7 +102,7 @@ tower decision add --file /tmp/ballot.json --by <me>
 ```
 
 The card's lane flips to `decide` automatically; leave it there. Nudge the
-owner if it's urgent (new ballots already trigger a push notification).
+owner if it's urgent (new ballots show on the live SSE board — web push removed).
 
 ## Rules
 

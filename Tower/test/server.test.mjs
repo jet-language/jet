@@ -30,8 +30,7 @@ test('server round-trip: add, state, validation, conflict, next', async () => {
   assert.equal(Object.hasOwn(add.json.state.config, 'push'), false);
   assert.equal(Object.hasOwn(readJSON(configFile(dir), {}), 'push'), false);
   const secretShape = readJSON(secretsFile(dir), {});
-  assert.equal(typeof secretShape.push?.privateJwk, 'object');
-  assert.equal(Array.isArray(secretShape.push?.subscriptions), true);
+  assert.equal(Object.hasOwn(secretShape, 'push'), false);
 
   const state = await (await fetch(url('/api/state'))).json();
   assert.equal(state.meta.project, 'Srv');

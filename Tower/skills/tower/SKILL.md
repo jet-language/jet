@@ -76,7 +76,7 @@ everything as JSON; `tower status` is the human summary.
    clean; the card waits in `verify` for that ratification, not `done`.
 5. Report through the board itself: a `--log` entry on each card you advanced
    and a question/ballot for anything newly blocked on the owner — those are
-   what the owner sees (and gets push notifications for).
+   what the owner sees (live SSE UI — web push removed).
 
 ## Burndown scope + durability sweep (#457)
 

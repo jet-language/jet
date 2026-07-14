@@ -1145,31 +1145,8 @@ connectStream();
 checkVersion();
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { refresh(); checkVersion(); } });
 
-// PWA: service worker + push
+// PWA: service worker (offline shell only — web push removed)
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
-async function enablePush() {
-  try {
-    const reg = await navigator.serviceWorker.ready;
-    const perm = await Notification.requestPermission();
-    if (perm !== 'granted') return toast('notifications not allowed', true);
-    const { key } = await (await fetch('/api/push/key')).json();
-    const raw = Uint8Array.from(atob(key.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
-    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: raw });
-    const r = await fetch('/api/push/subscribe', { method: 'POST', body: JSON.stringify({ subscription: sub.toJSON() }) });
-    if ((await r.json()).ok) { toast('push enabled on this device'); render(); }
-  } catch (e) { toast('push failed: ' + (e.message || e), true); }
-}
-window.__towerEnablePush = enablePush;
-(async () => {
-  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
-  const bell = $('#bell');
-  bell.addEventListener('click', enablePush);
-  try {
-    const reg = await navigator.serviceWorker.ready;
-    const sub = await reg.pushManager.getSubscription();
-    bell.hidden = !!sub;
-  } catch { bell.hidden = false; }
-})();
 
 if (RENDER[location.hash.slice(1)]) VIEW = location.hash.slice(1);
 // top-level await: the window load event waits for the first full render

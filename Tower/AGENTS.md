@@ -63,7 +63,7 @@ never paraphrased.
 
 Report completions and blockers on the card itself: a `--log` entry when you
 advance it, a `tower question answer` when the owner asked something. The
-board (and its push notifications) is how the owner finds out — there is no
+board (and the live SSE UI) is how the owner finds out — there is no
 side channel.
 
 Auth note: localhost is exempt. Remote access reads `auth.token` from the
