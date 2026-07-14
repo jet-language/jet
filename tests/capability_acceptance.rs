@@ -30,16 +30,25 @@ enum JetByteKind {
 fn jet_lexical_mask(source: &str) -> Vec<JetByteKind> {
     let bytes = source.as_bytes();
     let mut mask = vec![JetByteKind::Code; bytes.len()];
-    let mut i = 0;
-    while i < bytes.len() {
+    mask_jet_code_range(bytes, &mut mask, 0, bytes.len());
+    mask
+}
+
+fn mask_jet_code_range(
+    bytes: &[u8],
+    mask: &mut [JetByteKind],
+    mut i: usize,
+    end: usize,
+) {
+    while i < end {
         if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'/') {
-            while i < bytes.len() && bytes[i] != b'\n' {
+            while i < end && bytes[i] != b'\n' {
                 mask[i] = JetByteKind::Comment;
                 i += 1;
             }
         } else if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
             let mut depth = 0usize;
-            while i < bytes.len() {
+            while i < end {
                 if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
                     mask[i] = JetByteKind::Comment;
                     mask[i + 1] = JetByteKind::Comment;
@@ -58,16 +67,19 @@ fn jet_lexical_mask(source: &str) -> Vec<JetByteKind> {
                     i += 1;
                 }
             }
+        } else if bytes.get(i..i + 3) == Some(b"\"\"\"") {
+            i = mask_jet_triple_string(bytes, mask, i, end);
         } else if bytes[i] == b'"' {
             mask[i] = JetByteKind::StringDelimiter;
             i += 1;
-            while i < bytes.len() {
+            while i < end {
                 if bytes[i] == b'\\' {
                     mask[i] = JetByteKind::String;
                     i += 1;
-                    if i < bytes.len() {
-                        mask[i] = JetByteKind::String;
-                        i += 1;
+                    if i < end {
+                        let escaped_end = next_utf8_char(bytes, i, end);
+                        mask[i..escaped_end].fill(JetByteKind::String);
+                        i = escaped_end;
                     }
                 } else if bytes[i] == b'"' {
                     mask[i] = JetByteKind::StringDelimiter;
@@ -82,7 +94,95 @@ fn jet_lexical_mask(source: &str) -> Vec<JetByteKind> {
             i += 1;
         }
     }
-    mask
+}
+
+fn next_utf8_char(bytes: &[u8], at: usize, end: usize) -> usize {
+    let width = match bytes[at] {
+        0x00..=0x7f => 1,
+        0xc0..=0xdf => 2,
+        0xe0..=0xef => 3,
+        _ => 4,
+    };
+    (at + width).min(end)
+}
+
+/// Locate `}` exactly like S70's lexer pass: nested braces count, quoted text
+/// suppresses braces, and a backslash skips one Unicode scalar.
+fn triple_interpolation_end(bytes: &[u8], mut i: usize, end: usize) -> Option<usize> {
+    let mut depth = 1usize;
+    while i < end {
+        match bytes[i] {
+            b'{' => {
+                depth += 1;
+                i += 1;
+            }
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+                i += 1;
+            }
+            b'"' => {
+                i += 1;
+                while i < end && bytes[i] != b'"' {
+                    if bytes[i] == b'\\' {
+                        i += 1;
+                        if i < end {
+                            i = next_utf8_char(bytes, i, end);
+                        }
+                    } else {
+                        i = next_utf8_char(bytes, i, end);
+                    }
+                }
+                if i < end {
+                    i += 1;
+                }
+            }
+            _ => i = next_utf8_char(bytes, i, end),
+        }
+    }
+    None
+}
+
+fn mask_jet_triple_string(
+    bytes: &[u8],
+    mask: &mut [JetByteKind],
+    open: usize,
+    end: usize,
+) -> usize {
+    mask[open..open + 3].fill(JetByteKind::StringDelimiter);
+    let mut i = open + 3;
+    while i < end {
+        if bytes[i] == b'\\' {
+            mask[i] = JetByteKind::String;
+            i += 1;
+            if i < end {
+                let escaped_end = next_utf8_char(bytes, i, end);
+                mask[i..escaped_end].fill(JetByteKind::String);
+                i = escaped_end;
+            }
+        } else if bytes[i] == b'{' && bytes.get(i + 1) == Some(&b'{') {
+            mask[i..i + 2].fill(JetByteKind::String);
+            i += 2;
+        } else if bytes[i] == b'{' {
+            mask[i] = JetByteKind::String;
+            let Some(close) = triple_interpolation_end(bytes, i + 1, end) else {
+                mask[i + 1..end].fill(JetByteKind::String);
+                return end;
+            };
+            mask_jet_code_range(bytes, mask, i + 1, close);
+            mask[close] = JetByteKind::String;
+            i = close + 1;
+        } else if bytes.get(i..i + 3) == Some(b"\"\"\"") {
+            mask[i..i + 3].fill(JetByteKind::StringDelimiter);
+            return i + 3;
+        } else {
+            mask[i] = JetByteKind::String;
+            i += 1;
+        }
+    }
+    end
 }
 
 fn code_starts_with(bytes: &[u8], mask: &[JetByteKind], at: usize, needle: &[u8]) -> bool {
@@ -311,6 +411,7 @@ fn audited_discard() {
         "/* value.drop(\"block comment\") */",
         "/* outer /* value.drop(\"nested comment\") */ still comment */",
         "print(\"value.drop(\\\"string contents\\\")\")",
+        "\"\"\"ordinary \"quotes\" and value.drop(\"triple contents\")\"\"\"",
         "value.drop(\"\")",
         "value.drop(reason)",
         "value.dropper(\"not the method\")",
@@ -325,6 +426,12 @@ fn audited_discard() {
         "discard probe must accept an active nonempty Unicode reason"
     );
     assert!(
+        has_executable_drop_with_reason(
+            "\"\"\"discarded: {value.drop(\"interpolated reason\")}\"\"\""
+        ),
+        "discard probe must inspect active triple-string interpolations"
+    );
+    assert!(
         has_active_suppress_must_use_block(
             "#Suppress /* outer /* nested */ comment */ (\n MustUse /* gap */ ) { }"
         ),
@@ -334,6 +441,7 @@ fn audited_discard() {
         "// #Suppress(MustUse) { }",
         "/* outer /* #Suppress(MustUse) { } */ still comment */",
         "print(\"#Suppress(MustUse) { }\")",
+        "\"\"\"ordinary \"quotes\" and #Suppress(MustUse) { }\"\"\"",
     ] {
         assert!(
             !has_active_suppress_must_use_block(fake),
