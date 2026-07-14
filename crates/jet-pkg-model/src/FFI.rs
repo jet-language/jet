@@ -315,6 +315,8 @@ mod net_tls_close_tests {
 
     static SMTP_CANCELLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     static SMTP_DEADLINE_MS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(i64::MAX);
+    static SMTP_WIPES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    static SMTP_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn smtp_now_ms() -> i64 {
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
@@ -325,7 +327,25 @@ mod net_tls_close_tests {
         let deadline = SMTP_DEADLINE_MS.load(std::sync::atomic::Ordering::SeqCst);
         (deadline != i64::MAX).then(|| deadline.saturating_sub(smtp_now_ms()))
     }
-    fn smtp_wipe(bytes: &mut Vec<u8>) { bytes.fill(0); bytes.clear(); }
+    fn smtp_wipe(bytes: &mut Vec<u8>) {
+        bytes.fill(0);
+        bytes.clear();
+    }
+    fn smtp_counting_wipe(bytes: &mut Vec<u8>) {
+        bytes.fill(0);
+        bytes.clear();
+        SMTP_WIPES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+    fn smtp_sha256(bytes: &[u8]) -> [u8; 32] {
+        use sha2::Digest;
+        sha2::Sha256::digest(bytes).into()
+    }
+    fn smtp_dkim_sign(key: &Vec<u8>, message: &[u8]) -> Result<Vec<u8>, String> {
+        use ed25519_dalek::Signer;
+        let seed: [u8; 32] = key.as_slice().try_into()
+            .map_err(|_| "DKIM test key length".to_string())?;
+        Ok(ed25519_dalek::SigningKey::from_bytes(&seed).sign(message).to_bytes().to_vec())
+    }
 
     fn smtp_runtime() -> smtp_adapter::jet_email::RuntimeFns {
         smtp_adapter::jet_email::RuntimeFns {
@@ -337,10 +357,17 @@ mod net_tls_close_tests {
             tls_write_all: jet_net_tls_write_all_bytes_impl,
             tls_close: jet_net_tls_close_impl,
             wipe: smtp_wipe,
+            sha256: smtp_sha256,
+            ed25519_sign: smtp_dkim_sign,
             cancelled: smtp_cancelled,
             remaining_ms: smtp_remaining,
             accepted_at: smtp_adapter::jet_email::runtime_now,
         }
+    }
+    fn smtp_counting_runtime() -> smtp_adapter::jet_email::RuntimeFns {
+        let mut runtime = smtp_runtime();
+        runtime.wipe = smtp_counting_wipe;
+        runtime
     }
 
     fn smtp_server_config() -> std::sync::Arc<rustls::ServerConfig> {
@@ -464,7 +491,79 @@ mod net_tls_close_tests {
                 pem: include_bytes!("../../../tests/fixtures/tls/smtp.ca.cert.pem").to_vec(),
             },
             limits: email::Limits::safe(),
+            dkim: None,
         }
+    }
+
+    fn test_base64_decode(text: &str) -> Vec<u8> {
+        let value = |byte| match byte {
+            b'A'..=b'Z' => byte - b'A', b'a'..=b'z' => byte - b'a' + 26,
+            b'0'..=b'9' => byte - b'0' + 52, b'+' => 62, b'/' => 63,
+            _ => 0,
+        };
+        let bytes: Vec<u8> = text.bytes().filter(|byte| !byte.is_ascii_whitespace()).collect();
+        let mut out = Vec::new();
+        for chunk in bytes.chunks_exact(4) {
+            let values = [value(chunk[0]), value(chunk[1]), value(chunk[2]), value(chunk[3])];
+            out.push(values[0] << 2 | values[1] >> 4);
+            if chunk[2] != b'=' { out.push(values[1] << 4 | values[2] >> 2); }
+            if chunk[3] != b'=' { out.push(values[2] << 6 | values[3]); }
+        }
+        out
+    }
+
+    fn test_relaxed_header(header: &str) -> String {
+        let (name, value) = header.split_once(':').unwrap();
+        let unfolded = value.replace("\r\n ", " ").replace("\r\n\t", " ");
+        let value = unfolded.split_ascii_whitespace().collect::<Vec<_>>().join(" ");
+        format!("{}:{}\r\n", name.to_ascii_lowercase(), value)
+    }
+
+    fn verify_dkim_wire(wire: &str, seed: [u8; 32]) {
+        use sha2::Digest;
+        let boundary = wire.find("\r\n\r\n").unwrap();
+        let headers = &wire[..boundary];
+        let body = &wire[boundary + 4..];
+        let mut first_end = 0usize;
+        for (index, line) in headers.split("\r\n").enumerate() {
+            if index != 0 && !line.starts_with([' ', '\t']) { break; }
+            first_end += line.len() + 2;
+        }
+        let dkim_header = &headers[..first_end - 2];
+        let unfolded = dkim_header.replace("\r\n ", " ");
+        let tags = unfolded.split_once(':').unwrap().1.split(';')
+            .filter_map(|tag| tag.trim().split_once('='))
+            .map(|(name, value)| (name, value)).collect::<std::collections::HashMap<_, _>>();
+        assert_eq!(tags["a"], "ed25519-sha256");
+        assert_eq!(tags["c"], "relaxed/relaxed");
+        assert_eq!(tags["d"], "example.com");
+        assert_eq!(tags["s"], "login-2026");
+
+        let mut body_lines: Vec<&str> = body.split("\r\n").collect();
+        while body_lines.last().is_some_and(|line| line.trim_end_matches([' ', '\t']).is_empty()) {
+            body_lines.pop();
+        }
+        let canonical_body = if body_lines.is_empty() { "\r\n".to_string() } else {
+            body_lines.into_iter().map(|line| line.trim_end_matches([' ', '\t']))
+                .collect::<Vec<_>>().join("\r\n") + "\r\n"
+        };
+        let body_hash: [u8; 32] = sha2::Sha256::digest(canonical_body.as_bytes()).into();
+        assert_eq!(test_base64_decode(tags["bh"]), body_hash);
+
+        let mut signing_input = String::new();
+        for wanted in tags["h"].split(':') {
+            let header = headers.rsplit("\r\n")
+                .find(|line| line.split_once(':').is_some_and(|(name, _)| name.eq_ignore_ascii_case(wanted)))
+                .unwrap();
+            signing_input.push_str(&test_relaxed_header(header));
+        }
+        let empty_b = format!("{}b=", unfolded.split("b=").next().unwrap());
+        signing_input.push_str(&test_relaxed_header(&empty_b));
+        let signature: [u8; 64] = test_base64_decode(tags["b"]).try_into().unwrap();
+        let header_hash: [u8; 32] = sha2::Sha256::digest(signing_input.as_bytes()).into();
+        ed25519_dalek::SigningKey::from_bytes(&seed).verifying_key()
+            .verify_strict(&header_hash, &ed25519_dalek::Signature::from_bytes(&signature))
+            .unwrap();
     }
 
     #[test]
@@ -518,6 +617,109 @@ mod net_tls_close_tests {
         assert!(matches!(mailer.send(smtp_message()), Err(email::Error::TimedOut { .. })));
         server.join().unwrap();
         SMTP_DEADLINE_MS.store(i64::MAX, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    #[test]
+    fn mailer_dkim_signs_final_wire_with_real_ed25519_verifier() {
+        use smtp_adapter::jet_email as email;
+        let seed = [7u8; 32];
+        let mut wires = Vec::new();
+        for _ in 0..2 {
+            let (address, transcript, server) = spawn_smtp_server(false, SmtpFixture::Success);
+            let mut config = smtp_config(address.port(), false);
+            config.dkim = Some(email::DkimConfig {
+                domain: "example.com".to_string(), selector: "login-2026".to_string(),
+                private_key: seed.to_vec(),
+                signed_headers: ["from", "to", "subject", "mime-version", "content-type",
+                    "content-transfer-encoding"].iter().map(|value| value.to_string()).collect(),
+            });
+            let mut mailer = email::smtp(&config, |secret| secret.clone(), smtp_runtime()).unwrap();
+            mailer.send(smtp_message()).unwrap();
+            server.join().unwrap();
+            let transcript = transcript.lock().unwrap();
+            let stuffed = transcript.iter().find(|part| part.starts_with("DKIM-Signature:")).unwrap();
+            wires.push(stuffed.strip_suffix(".\r\n").unwrap().replace("\r\n..", "\r\n."));
+        }
+        assert_eq!(wires[0], wires[1], "DKIM ordering and folding must be deterministic");
+        verify_dkim_wire(&wires[0], seed);
+        let mut relaxed_variant = wires[0].replace("\r\nFrom: ", "\r\nfRoM:\t  ");
+        let body = relaxed_variant.find("\r\n\r\n").unwrap() + 4;
+        let first_body_line = relaxed_variant[body..].find("\r\n").unwrap() + body;
+        relaxed_variant.insert_str(first_body_line, " \t");
+        verify_dkim_wire(&relaxed_variant, seed);
+        assert!(wires[0].starts_with("DKIM-Signature: v=1; a=ed25519-sha256; c=relaxed/relaxed;\r\n"));
+    }
+
+    #[test]
+    fn mailer_dkim_rejects_before_connect_and_wipes_every_key_copy() {
+        use smtp_adapter::jet_email as email;
+        SMTP_WIPES.store(0, std::sync::atomic::Ordering::SeqCst);
+        let mut config = smtp_config(465, false);
+        config.dkim = Some(email::DkimConfig {
+            domain: "example.com".to_string(), selector: "login-2026".to_string(),
+            private_key: vec![0x5a; 31], signed_headers: vec!["from".to_string()],
+        });
+        let error = match email::smtp(&config, |secret| secret.clone(), smtp_counting_runtime()) {
+            Err(error) => error,
+            Ok(_) => panic!("31-byte DKIM seed was accepted"),
+        };
+        assert!(matches!(&error, email::Error::Configuration { operation, reason, .. }
+            if operation == "dkim" && reason == "private_key must contain exactly 32 bytes"));
+        assert!(!format!("{error:?}").contains("5a5a"));
+        assert_eq!(SMTP_WIPES.load(std::sync::atomic::Ordering::SeqCst), 2,
+            "construction failure must wipe copied SMTP password and DKIM seed");
+
+        config.dkim.as_mut().unwrap().private_key.push(0x5a);
+        let mailer = email::smtp(&config, |secret| secret.clone(), smtp_counting_runtime()).unwrap();
+        drop(mailer);
+        assert_eq!(SMTP_WIPES.load(std::sync::atomic::Ordering::SeqCst), 4,
+            "Mailer drop must wipe owned SMTP password and DKIM seed");
+
+        config.dkim.as_mut().unwrap().signed_headers.push("x-absent".to_string());
+        let mut mailer = email::smtp(&config, |secret| secret.clone(), smtp_counting_runtime()).unwrap();
+        let error = mailer.send(smtp_message()).unwrap_err();
+        assert!(matches!(error, email::Error::Configuration { operation, reason, .. }
+            if operation == "dkim" && reason.contains("x-absent") && reason.contains("absent")));
+        drop(mailer);
+        assert_eq!(SMTP_WIPES.load(std::sync::atomic::Ordering::SeqCst), 6);
+    }
+
+    #[test]
+    fn smtp_from_env_dkim_is_all_or_none_and_redacted() {
+        use smtp_adapter::jet_email as email;
+        let _guard = SMTP_ENV_LOCK.lock().unwrap();
+        for name in ["SMTP_DKIM_DOMAIN", "SMTP_DKIM_SELECTOR",
+            "SMTP_DKIM_PRIVATE_KEY_BASE64", "SMTP_DKIM_SIGNED_HEADERS"]
+        {
+            std::env::remove_var(name);
+        }
+        std::env::set_var("SMTP_HOST", "localhost");
+        std::env::set_var("SMTP_SECURITY", "tls");
+        std::env::set_var("SMTP_PORT", "465");
+        std::env::set_var("SMTP_DKIM_DOMAIN", "example.com");
+        let partial = match email::smtp_from_env(smtp_runtime()) {
+            Err(error) => error,
+            Ok(_) => panic!("partial DKIM environment was accepted"),
+        };
+        assert!(matches!(partial, email::Error::Configuration { operation, reason, .. }
+            if operation == "smtp_from_env" && reason.contains("must be set together")));
+
+        std::env::set_var("SMTP_DKIM_SELECTOR", "login-2026");
+        std::env::set_var("SMTP_DKIM_PRIVATE_KEY_BASE64", "private-key-not-base64");
+        let malformed = match email::smtp_from_env(smtp_runtime()) {
+            Err(error) => error,
+            Ok(_) => panic!("malformed DKIM environment was accepted"),
+        };
+        assert!(!format!("{malformed:?}").contains("private-key-not-base64"));
+
+        std::env::set_var("SMTP_DKIM_PRIVATE_KEY_BASE64", "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=");
+        let mailer = email::smtp_from_env(smtp_runtime()).unwrap();
+        drop(mailer);
+        for name in ["SMTP_HOST", "SMTP_SECURITY", "SMTP_PORT", "SMTP_DKIM_DOMAIN",
+            "SMTP_DKIM_SELECTOR", "SMTP_DKIM_PRIVATE_KEY_BASE64", "SMTP_DKIM_SIGNED_HEADERS"]
+        {
+            std::env::remove_var(name);
+        }
     }
 }
 

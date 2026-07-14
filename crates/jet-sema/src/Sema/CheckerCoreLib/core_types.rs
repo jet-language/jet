@@ -226,7 +226,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-EMAIL1=A / D-EMAIL-SMTP-SURFACE1=A: exact ungated email values.
         | "Address" | "Message" | "Attachment" | "Envelope" | "EmailError"
         | "SmtpSecurity" | "RecipientPolicy" | "RecipientReport" | "SendReport"
-        | "Limits" | "SmtpAuth" | "TlsTrust" | "SmtpConfig" | "Mailer"
+        | "Limits" | "SmtpAuth" | "TlsTrust" | "DkimConfig" | "SmtpConfig" | "Mailer"
         // D-REGEXENGINE1=A: std-only linear regex values.
         | "Regex" | "RegexFlags" | "Match"
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP types.
@@ -264,7 +264,7 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     if type_name == "HttpShutdownReport" && matches!(field, "accepted" | "overloaded" | "completed" | "cancelled") {
         return Some(Type::Int);
     }
-    if matches!(type_name, "EncodingLimits" | "EncodingCause" | "EncodingError" | "CBOROptions" | "CBORError" | "AsyncPolicy" | "RecipientReport" | "SendReport" | "Limits" | "SmtpConfig") {
+    if matches!(type_name, "EncodingLimits" | "EncodingCause" | "EncodingError" | "CBOROptions" | "CBORError" | "AsyncPolicy" | "RecipientReport" | "SendReport" | "Limits" | "DkimConfig" | "SmtpConfig") {
         return core_constructable_fields(type_name)?.into_iter().find(|(name, _)| name == field).map(|(_, ty)| ty);
     }
     if type_name == "Envelope" {
@@ -922,6 +922,13 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             ("recipient_policy".to_string(), Type::Named("RecipientPolicy".to_string())),
             ("trust".to_string(), Type::Named("TlsTrust".to_string())),
             ("limits".to_string(), Type::Named("Limits".to_string())),
+            ("dkim".to_string(), Type::Option(Box::new(Type::Named("DkimConfig".to_string())))),
+        ]),
+        "DkimConfig" => Some(vec![
+            ("domain".to_string(), Type::String),
+            ("selector".to_string(), Type::String),
+            ("private_key".to_string(), Type::Named("Secret".to_string())),
+            ("signed_headers".to_string(), Type::List(Box::new(Type::String))),
         ]),
         "EncodingCause" => Some(vec![
             ("kind".to_string(), Type::String),

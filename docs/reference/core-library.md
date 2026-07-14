@@ -362,6 +362,16 @@ optional `SMTP_CA_PEM`, and optional `SMTP_RECIPIENT_POLICY` (`require_all` by
 default, or `deliver_accepted`). It constructs the same `SmtpConfig` accepted
 by `smtp(config)`; missing or unsafe values are configuration errors.
 
+Optional DKIM uses the same Mailer policy. Set `SMTP_DKIM_DOMAIN`,
+`SMTP_DKIM_SELECTOR`, and `SMTP_DKIM_PRIVATE_KEY_BASE64` together;
+`SMTP_DKIM_SIGNED_HEADERS` may replace the default comma-separated
+`from,to,subject,mime-version,content-type` header set.
+Partial, malformed, or non-32-byte key configuration fails before connecting.
+The expert form sets `dkim:Val(DkimConfig)`; `dkim:None` sends unsigned mail.
+One Mailer owns one signing identity and signs every message with fixed
+`ed25519-sha256` relaxed/relaxed DKIM over the final MIME bytes. Use separate
+Mailers for separate identities.
+
 `Mailer.send(message)` is the only submission call. Port 587 requires verified
 STARTTLS; port 465 requires TLS from connect. Custom CA PEM extends system roots
 without disabling hostname verification. Password bytes leave `Secret` only in
@@ -378,10 +388,19 @@ config := email.SmtpConfig.{
     auth: .Password.{ username: "mailer", password: password },
     recipient_policy: .RequireAll, trust: .System,
     limits: email.Limits.safe(),
+    dkim: None,
 }
 mailer := email.smtp(config) ?? return
 report :: mailer.send(message) ?? return
 ```
+
+To enable DKIM, store the 32-byte Ed25519 seed in `Secret`, construct
+`DkimConfig.{ domain, selector, private_key, signed_headers }`, and place
+`Val(dkim)` in the config. `from` must be signed. Publish
+`v=DKIM1; k=ed25519; p=<base64 public key>` at
+`<selector>._domainkey.<domain>`. Key rotation creates a new selector and
+Mailer. SPF and DMARC are separate DNS policies; DKIM signing does not publish
+or configure them.
 
 ### `core.http` — HTTP client and server
 

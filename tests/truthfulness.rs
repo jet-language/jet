@@ -413,7 +413,7 @@ fn compiler_seam_crates_have_only_path_dependencies() {
         ("jet-net", &["D-NETDEP1", "D-TLS1"]),
         // Card #367 / D-PRODUCT-SPLIT1=C: FFI.rs (the rustls test-only
         // loopback peer) moved from `jetpack` to `jet-pkg-model`.
-        ("jet-pkg-model", &["D-TLS1"]),
+        ("jet-pkg-model", &["D-TLS1", "D-EMAIL-DKIM-CONFIG1"]),
     ];
 
     let root = root();

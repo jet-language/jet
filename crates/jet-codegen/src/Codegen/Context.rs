@@ -449,6 +449,7 @@ impl Cx {
             (Some("core.email"), "SmtpAuth") => Some("SmtpAuth"),
             (Some("core.email"), "TlsTrust") => Some("TlsTrust"),
             (Some("core.email"), "SmtpConfig") => Some("SmtpConfig"),
+            (Some("core.email"), "DkimConfig") => Some("DkimConfig"),
             (Some("core.email"), "Mailer") => Some("Mailer"),
             (Some("core.encoding.json"), "JSONReader") => Some("JSONReader"),
             (Some("core.encoding.json"), "JSONWriter") => Some("JSONWriter"),
@@ -677,9 +678,9 @@ impl Cx {
                 let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
                 format!("{}jet_email::SmtpAuth<{}::Secret>", self.root_prefix, ffi)
             }
-            Type::Named(name) if name == "SmtpConfig" => {
+            Type::Named(name) if matches!(name.as_str(), "DkimConfig" | "SmtpConfig") => {
                 let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
-                format!("{}jet_email::SmtpConfig<{}::Secret>", self.root_prefix, ffi)
+                format!("{}jet_email::{}<{}::Secret>", self.root_prefix, name, ffi)
             }
             Type::Named(name) if matches!(name.as_str(), "TlsTrust" | "Mailer") => {
                 format!("{}jet_email::{}", self.root_prefix, name)
@@ -878,7 +879,7 @@ impl Cx {
                     let rust = if resolved == "EmailError" { "Error" } else { resolved };
                     return format!("{}jet_email::{rust}", self.root_prefix);
                 }
-                if resolved == "SmtpAuth" || resolved == "SmtpConfig" {
+                if matches!(resolved, "SmtpAuth" | "DkimConfig" | "SmtpConfig") {
                     let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
                     return format!("{}jet_email::{}<{}::Secret>", self.root_prefix, resolved, ffi);
                 }
@@ -1384,6 +1385,13 @@ pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
         ("recipient_policy".to_string(), Type::Named("RecipientPolicy".to_string())),
         ("trust".to_string(), Type::Named("TlsTrust".to_string())),
         ("limits".to_string(), Type::Named("Limits".to_string())),
+        ("dkim".to_string(), Type::Option(Box::new(Type::Named("DkimConfig".to_string())))),
+    ]);
+    cx.struct_fields.insert("DkimConfig".to_string(), vec![
+        ("domain".to_string(), Type::String),
+        ("selector".to_string(), Type::String),
+        ("private_key".to_string(), Type::Named("Secret".to_string())),
+        ("signed_headers".to_string(), Type::List(Box::new(Type::String))),
     ]);
     cx.cloneable.extend(["Envelope".to_string(), "RecipientReport".to_string(), "SendReport".to_string(), "Limits".to_string()]);
 }

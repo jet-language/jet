@@ -960,7 +960,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     };
                 }
                 if cx.core_imports.get(alias).map(String::as_str) == Some(crate::Syntax::CORE_EMAIL_MODULE)
-                    && matches!(type_name.as_str(), "RecipientReport" | "SendReport" | "Limits" | "SmtpConfig")
+                    && matches!(type_name.as_str(), "RecipientReport" | "SendReport" | "Limits" | "DkimConfig" | "SmtpConfig")
                 {
                     let tfields = fields
                         .iter()
@@ -969,8 +969,8 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     return TExpr {
                         ty: Type::Named(type_name.clone()),
                         kind: TExprKind::StructLit {
-                            rust_type: if type_name == "SmtpConfig" {
-                                format!("{}jet_email::SmtpConfig::<{}::Secret>", cx.root_prefix,
+                            rust_type: if matches!(type_name.as_str(), "DkimConfig" | "SmtpConfig") {
+                                format!("{}jet_email::{}::<{}::Secret>", cx.root_prefix, type_name,
                                     cx.ffi_crate.as_deref().unwrap_or("jet_ffi"))
                             } else { cx.rust_type(&Type::Named(type_name.clone())) },
                             fields: tfields,
@@ -1107,7 +1107,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     },
                 };
             }
-            if matches!(type_name.as_str(), "RecipientReport" | "SendReport" | "Limits" | "SmtpConfig") {
+            if matches!(type_name.as_str(), "RecipientReport" | "SendReport" | "Limits" | "DkimConfig" | "SmtpConfig") {
                 let tfields = fields
                     .iter()
                     .map(|(name, _, value)| (name.clone(), lower_expr(value, cx, env), false))
@@ -1115,8 +1115,8 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 return TExpr {
                     ty: Type::Named(type_name.clone()),
                     kind: TExprKind::StructLit {
-                        rust_type: if type_name == "SmtpConfig" {
-                            format!("{}jet_email::SmtpConfig::<{}::Secret>", cx.root_prefix,
+                        rust_type: if matches!(type_name.as_str(), "DkimConfig" | "SmtpConfig") {
+                            format!("{}jet_email::{}::<{}::Secret>", cx.root_prefix, type_name,
                                 cx.ffi_crate.as_deref().unwrap_or("jet_ffi"))
                         } else { cx.rust_type(&Type::Named(type_name.clone())) },
                         fields: tfields,

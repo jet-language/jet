@@ -170,7 +170,7 @@ fn core_email_smtp_config_limits_and_trust_follow_ratified_law() {
         if reason.starts_with("max_reply_line_bytes")));
 
     let pem = b"-----BEGIN CERTIFICATE-----\nMAMCAQE=\n-----END CERTIFICATE-----\n".to_vec();
-    let config: jet_email::SmtpConfig<()> = jet_email::SmtpConfig {
+    let mut config: jet_email::SmtpConfig<()> = jet_email::SmtpConfig {
         host: "smtp.example.com".to_string(),
         port: 587,
         security: jet_email::SmtpSecurity::StartTls,
@@ -178,8 +178,21 @@ fn core_email_smtp_config_limits_and_trust_follow_ratified_law() {
         recipient_policy: jet_email::RecipientPolicy::RequireAll,
         trust: jet_email::TlsTrust::SystemPlusCa { pem },
         limits: safe.clone(),
+        dkim: None,
     };
     jet_email::validate_smtp_config(&config).unwrap();
+    config.dkim = Some(jet_email::DkimConfig {
+        domain: "example.com".to_string(), selector: "login-2026".to_string(),
+        private_key: (), signed_headers: vec!["subject".to_string()],
+    });
+    assert!(matches!(jet_email::validate_smtp_config(&config),
+        Err(jet_email::Error::Configuration { reason, .. }) if reason.contains("include `from`")));
+    config.dkim.as_mut().unwrap().signed_headers = vec!["from".to_string(), "FROM".to_string()];
+    assert!(matches!(jet_email::validate_smtp_config(&config),
+        Err(jet_email::Error::Configuration { reason, .. }) if reason.contains("duplicate")));
+    config.dkim.as_mut().unwrap().signed_headers = vec!["from".to_string(), "received".to_string()];
+    assert!(matches!(jet_email::validate_smtp_config(&config),
+        Err(jet_email::Error::Configuration { reason, .. }) if reason.contains("hop header")));
 
     let malformed: jet_email::SmtpConfig<()> = jet_email::SmtpConfig {
         host: "smtp.example.com".to_string(),
@@ -191,6 +204,7 @@ fn core_email_smtp_config_limits_and_trust_follow_ratified_law() {
             pem: b"-----BEGIN PRIVATE KEY-----\nAA==\n-----END PRIVATE KEY-----".to_vec(),
         },
         limits: safe,
+        dkim: None,
     };
     assert!(matches!(jet_email::validate_smtp_config(&malformed),
         Err(jet_email::Error::Configuration { reason, .. }) if reason.contains("certificate")));
@@ -274,6 +288,7 @@ fn core_email_smtp_transaction_starttls_auth_rcpt_and_data_are_real() {
         recipient_policy: jet_email::RecipientPolicy::DeliverAccepted,
         trust: jet_email::TlsTrust::System,
         limits: jet_email::Limits::safe(),
+        dkim: None,
     };
     let replies = concat!(
         "220 relay ready\r\n",
@@ -351,6 +366,7 @@ fn core_email_smtp_transaction_require_all_and_delivery_unknown_are_honest() {
         security: jet_email::SmtpSecurity::Tls, auth: jet_email::SmtpAuth::None,
         recipient_policy: policy, trust: jet_email::TlsTrust::System,
         limits: jet_email::Limits::safe(),
+        dkim: None,
     };
 
     for (stop, timed_out) in [
@@ -435,6 +451,13 @@ use core.crypto as crypto
 
 fn run() {
     password :: crypto.Secret.from_text("not-logged")
+    dkim_key :: crypto.Secret.from_text("0123456789abcdef0123456789abcdef")
+    dkim := email.DkimConfig.{
+        domain: "example.com",
+        selector: "login-2026",
+        private_key: dkim_key,
+        signed_headers: ["from", "subject", "mime-version", "content-type"],
+    }
     auth: email.SmtpAuth := .Password.{ username: "mailer", password: password }
     config := email.SmtpConfig.{
         host: "localhost",
@@ -444,6 +467,7 @@ fn run() {
         recipient_policy: .RequireAll,
         trust: .System,
         limits: email.Limits.safe(),
+        dkim: Val(dkim),
     }
     mailer := email.smtp(config) ?? panic("mailer config")
     env_mailer := email.smtp_from_env() ?? panic("environment mailer config")

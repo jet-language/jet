@@ -27,7 +27,7 @@ pub(crate) fn emit_tir_core_call(
         format!("{}::{}", crate_name, name)
     };
     let email_runtime = || format!(
-        "{}jet_email::RuntimeFns {{ tls_begin: {}, tls_begin_ca: {}, tls_handshake_step: {}, tls_set_poll_timeout: {}, tls_read: {}, tls_write_all: {}, tls_close: {}, wipe: {}, cancelled: jet_scheduler_task_cancelled, remaining_ms: jet_deadline_remaining_ms, accepted_at: {}jet_email::runtime_now }}",
+        "{}jet_email::RuntimeFns {{ tls_begin: {}, tls_begin_ca: {}, tls_handshake_step: {}, tls_set_poll_timeout: {}, tls_read: {}, tls_write_all: {}, tls_close: {}, wipe: {}, sha256: {}, ed25519_sign: {}, cancelled: jet_scheduler_task_cancelled, remaining_ms: jet_deadline_remaining_ms, accepted_at: {}jet_email::runtime_now }}",
         cx.root_prefix,
         regex_fn("jet_net_tls_begin_impl"),
         regex_fn("jet_net_tls_begin_with_ca_impl"),
@@ -37,6 +37,8 @@ pub(crate) fn emit_tir_core_call(
         regex_fn("jet_net_tls_write_all_bytes_impl"),
         regex_fn("jet_net_tls_close_impl"),
         regex_fn("jet_crypto_zeroize_email_impl"),
+        regex_fn("jet_crypto_email_sha256_impl"),
+        regex_fn("jet_crypto_email_ed25519_sign_impl"),
         cx.root_prefix,
     );
     let normalized_module =

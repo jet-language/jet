@@ -466,6 +466,7 @@ pub const TYPE_EMAIL_LIMITS: &str = "Limits";
 pub const TYPE_EMAIL_SMTP_AUTH: &str = "SmtpAuth";
 pub const TYPE_EMAIL_TLS_TRUST: &str = "TlsTrust";
 pub const TYPE_EMAIL_SMTP_CONFIG: &str = "SmtpConfig";
+pub const TYPE_EMAIL_DKIM_CONFIG: &str = "DkimConfig"; // D-EMAIL-DKIM-CONFIG1=A
 pub const TYPE_EMAIL_MAILER: &str = "Mailer";
 pub const EMAIL_LIMITS_SAFE_METHOD: &str = "safe";
 pub const CORE_EMAIL_ADDRESS_FN: &str = "address";

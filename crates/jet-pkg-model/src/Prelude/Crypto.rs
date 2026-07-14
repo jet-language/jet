@@ -13,7 +13,7 @@ use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use chacha20poly1305::aead::Payload;
 use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
 use hkdf::Hkdf;
-use sha2::{Digest, Sha512};
+use sha2::{Digest, Sha256, Sha512};
 use subtle::ConstantTimeEq;
 
 const JETV_MAGIC: &[u8; 4] = b"JETV";
@@ -71,6 +71,16 @@ pub fn jet_crypto_secret_copy_for_smtp_impl(secret: &Secret) -> Vec<u8> {
 pub fn jet_crypto_zeroize_email_impl(bytes: &mut Vec<u8>) {
     zeroize(bytes);
     bytes.clear();
+}
+pub fn jet_crypto_email_sha256_impl(bytes: &[u8]) -> [u8; 32] {
+    Sha256::digest(bytes).into()
+}
+pub fn jet_crypto_email_ed25519_sign_impl(key: &Vec<u8>, message: &[u8]) -> Result<Vec<u8>, String> {
+    let mut seed: [u8; 32] = key.as_slice().try_into()
+        .map_err(|_| "DKIM private key must contain exactly 32 bytes".to_string())?;
+    let signature = SigningKey::from_bytes(&seed).sign(message).to_bytes().to_vec();
+    zeroize(&mut seed);
+    Ok(signature)
 }
 pub fn jet_crypto_x25519_generate_impl() -> Result<JetX25519SecretKey, JetCryptoError> {
     let mut bytes = vec![0; 32];

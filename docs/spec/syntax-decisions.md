@@ -1834,6 +1834,22 @@ index, not a substitute for that law.
   credentials can be sent. There is no trust-all mode. SMTP interprets secret
   bytes as UTF-8 only inside authentication and rejects invalid UTF-8 as
   configuration.
+- **D-EMAIL-DKIM-CONFIG1=A**: optional DKIM policy is the
+  `dkim:DkimConfig?` field on `SmtpConfig`; `None` sends unsigned and `Val(dkim)`
+  signs every message through that `Mailer`. `DkimConfig` contains exactly
+  `domain:String`, `selector:String`, `private_key:Secret`, and
+  `signed_headers:[String]`. Signing is fixed to `ed25519-sha256` with
+  relaxed/relaxed canonicalization over final MIME bytes. `from` is mandatory;
+  names match case-insensitively; duplicates, absent requested headers, hop
+  headers, invalid DNS names/selectors, and non-32-byte Ed25519 seeds fail as
+  `EmailError.Configuration` before connecting. Mailer owns and zeroizes the
+  extracted key; no signing failure falls back to unsigned delivery.
+  `smtp_from_env` accepts DKIM only when `SMTP_DKIM_DOMAIN`,
+  `SMTP_DKIM_SELECTOR`, and `SMTP_DKIM_PRIVATE_KEY_BASE64` are all present;
+  `SMTP_DKIM_SIGNED_HEADERS` optionally replaces the safe header set. DNS must
+  publish `v=DKIM1; k=ed25519; p=<base64 public key>` at
+  `<selector>._domainkey.<domain>`. SPF and DMARC remain DNS policy. Multiple
+  identities use separate named Mailers; there is no per-message override.
 - **D-ENCSTREAM1=A**: each `core.encoding` codec has one adapter identity with
   whole-value and reader/writer stream modes over the shared `DataTree`
   and `Codable` machinery. Streaming is a mode of that adapter, never a second

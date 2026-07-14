@@ -1438,7 +1438,8 @@ D-CORE-COMPRESS1=A splits compression by job. `core.compress.gzip` and
 operations only (`zip_compress`, `zip_decompress`, `tar_add`, `tar_get`,
 `tar_names_json`). It has no gzip re-export or compatibility alias.
 
-D-EMAIL1/D-EMAIL-SMTP-SURFACE1/D-EMAIL-SMTP-CONFIG1 define one native
+D-EMAIL1/D-EMAIL-SMTP-SURFACE1/D-EMAIL-SMTP-CONFIG1/
+D-EMAIL-DKIM-CONFIG1 define one native
 `core.email` path. Typed `Message` values retain a separate envelope so Bcc is
 never serialized. `smtp_from_env()` and `smtp(config)` construct the same
 `Mailer`; `Mailer.send(message)` performs verified TLS-from-connect or mandatory
@@ -1448,6 +1449,12 @@ roots while retaining hostname verification. Passwords use the existing
 move-only `Secret`, cross one private extraction boundary, and are zeroized on
 failure and drop. Ambient task cancellation and `#Context` deadlines govern
 every transport wait; interruption after DATA is `DeliveryUnknown`.
+Optional `SmtpConfig.dkim:DkimConfig?` binds one Ed25519 signing identity to
+every send through that Mailer. The signer uses relaxed/relaxed DKIM over final
+MIME bytes, requires `from`, rejects invalid or absent requested headers before
+connecting, and never falls back to unsigned mail. Environment configuration
+requires the domain, selector, and base64 32-byte seed together. Separate
+identities use separate Mailers.
 
 ## E2-M1 — Concurrency (tasks and channels, verified 2026-06-14)
 

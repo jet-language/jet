@@ -108,6 +108,13 @@ pub mod jet_email {
         Password { username: String, password: S },
     }
 
+    pub struct DkimConfig<S> {
+        pub domain: String,
+        pub selector: String,
+        pub private_key: S,
+        pub signed_headers: Vec<String>,
+    }
+
     #[derive(Clone, Debug, PartialEq)]
     pub enum TlsTrust {
         System,
@@ -122,6 +129,7 @@ pub mod jet_email {
         pub recipient_policy: RecipientPolicy,
         pub trust: TlsTrust,
         pub limits: Limits,
+        pub dkim: Option<DkimConfig<S>>,
     }
 
     #[derive(Clone, Copy)]
@@ -134,6 +142,8 @@ pub mod jet_email {
         pub tls_write_all: fn(i64, &Vec<u8>) -> Result<(), String>,
         pub tls_close: fn(i64) -> Result<(), String>,
         pub wipe: fn(&mut Vec<u8>),
+        pub sha256: fn(&[u8]) -> [u8; 32],
+        pub ed25519_sign: fn(&Vec<u8>, &[u8]) -> Result<Vec<u8>, String>,
         pub cancelled: fn() -> bool,
         pub remaining_ms: fn() -> Option<i64>,
         pub accepted_at: fn() -> String,
@@ -154,6 +164,9 @@ pub mod jet_email {
             if let SmtpAuth::Password { password, .. } = &mut self.config.auth {
                 (self.runtime.wipe)(password);
             }
+            if let Some(dkim) = &mut self.config.dkim {
+                (self.runtime.wipe)(&mut dkim.private_key);
+            }
         }
     }
 
@@ -169,24 +182,40 @@ pub mod jet_email {
                 password: extract(password),
             },
         };
+        let dkim = config.dkim.as_ref().map(|dkim| DkimConfig {
+            domain: dkim.domain.clone(),
+            selector: dkim.selector.clone(),
+            private_key: extract(&dkim.private_key),
+            signed_headers: dkim.signed_headers.clone(),
+        });
         smtp_bytes(SmtpConfig {
             host: config.host.clone(), port: config.port, security: config.security.clone(), auth,
-            recipient_policy: config.recipient_policy.clone(), trust: config.trust.clone(), limits: config.limits.clone(),
+            recipient_policy: config.recipient_policy.clone(), trust: config.trust.clone(),
+            limits: config.limits.clone(), dkim,
         }, runtime)
     }
 
     fn smtp_bytes(mut config: SmtpConfig<Vec<u8>>, runtime: RuntimeFns) -> Result<Mailer, Error> {
         if let Err(error) = validate_smtp_config(&config) {
-            if let SmtpAuth::Password { password, .. } = &mut config.auth { (runtime.wipe)(password); }
+            wipe_config_secrets(&mut config, runtime);
             return Err(error);
+        }
+        if config.dkim.as_ref().is_some_and(|dkim| dkim.private_key.len() != 32) {
+            wipe_config_secrets(&mut config, runtime);
+            return Err(error("dkim", "private_key must contain exactly 32 bytes"));
         }
         if let SmtpAuth::Password { password, .. } = &config.auth {
             if std::str::from_utf8(password).is_err() {
-                if let SmtpAuth::Password { password, .. } = &mut config.auth { (runtime.wipe)(password); }
+                wipe_config_secrets(&mut config, runtime);
                 return Err(error("auth", "SMTP password must be UTF-8"));
             }
         }
         Ok(Mailer { config, runtime })
+    }
+
+    fn wipe_config_secrets(config: &mut SmtpConfig<Vec<u8>>, runtime: RuntimeFns) {
+        if let SmtpAuth::Password { password, .. } = &mut config.auth { (runtime.wipe)(password); }
+        if let Some(dkim) = &mut config.dkim { (runtime.wipe)(&mut dkim.private_key); }
     }
 
     pub fn smtp_from_env(runtime: RuntimeFns) -> Result<Mailer, Error> {
@@ -215,7 +244,7 @@ pub mod jet_email {
         };
         let username = std::env::var("SMTP_USERNAME").ok();
         let password = std::env::var("SMTP_PASSWORD").ok();
-        let auth = match (username, password) {
+        let mut auth = match (username, password) {
             (None, None) => SmtpAuth::None,
             (Some(username), Some(mut password)) => {
                 let bytes = std::mem::take(&mut password).into_bytes();
@@ -228,7 +257,43 @@ pub mod jet_email {
             }
             (Some(_), None) => return Err(error("smtp_from_env", "SMTP_USERNAME and SMTP_PASSWORD must be set together")),
         };
-        smtp_bytes(SmtpConfig { host, port, security, auth, recipient_policy, trust, limits: Limits::safe() }, runtime)
+        let domain = std::env::var("SMTP_DKIM_DOMAIN").ok();
+        let selector = std::env::var("SMTP_DKIM_SELECTOR").ok();
+        let private_key = std::env::var("SMTP_DKIM_PRIVATE_KEY_BASE64").ok();
+        let signed_headers_env = std::env::var("SMTP_DKIM_SIGNED_HEADERS").ok();
+        let dkim = match (domain, selector, private_key) {
+            (None, None, None) if signed_headers_env.is_none() => None,
+            (Some(domain), Some(selector), Some(private_key)) => {
+                let mut encoded = private_key.into_bytes();
+                let decoded = decode_dkim_base64(&encoded, runtime.wipe);
+                (runtime.wipe)(&mut encoded);
+                let private_key = match decoded {
+                    Ok(key) => key,
+                    Err(error) => { wipe_auth(&mut auth, runtime); return Err(error); }
+                };
+                let signed_headers = match signed_headers_env {
+                    Some(value) => value.split(',').map(|name| name.trim().to_string()).collect(),
+                    None => default_dkim_headers(),
+                };
+                Some(DkimConfig { domain, selector, private_key, signed_headers })
+            }
+            (_, _, Some(private_key)) => {
+                let mut encoded = private_key.into_bytes();
+                (runtime.wipe)(&mut encoded);
+                wipe_auth(&mut auth, runtime);
+                return Err(error("smtp_from_env", "SMTP_DKIM_DOMAIN, SMTP_DKIM_SELECTOR, and SMTP_DKIM_PRIVATE_KEY_BASE64 must be set together"));
+            }
+            _ => {
+                wipe_auth(&mut auth, runtime);
+                return Err(error("smtp_from_env", "SMTP_DKIM_DOMAIN, SMTP_DKIM_SELECTOR, and SMTP_DKIM_PRIVATE_KEY_BASE64 must be set together"));
+            }
+        };
+        smtp_bytes(SmtpConfig { host, port, security, auth, recipient_policy, trust,
+            limits: Limits::safe(), dkim }, runtime)
+    }
+
+    fn wipe_auth(auth: &mut SmtpAuth<Vec<u8>>, runtime: RuntimeFns) {
+        if let SmtpAuth::Password { password, .. } = auth { (runtime.wipe)(password); }
     }
 
     pub fn validate_smtp_config<S>(config: &SmtpConfig<S>) -> Result<(), Error> {
@@ -256,6 +321,62 @@ pub mod jet_email {
         }
         if let TlsTrust::SystemPlusCa { pem } = &config.trust {
             validate_ca_pem(pem)?;
+        }
+        if let Some(dkim) = &config.dkim { validate_dkim_config(dkim)?; }
+        Ok(())
+    }
+
+    fn default_dkim_headers() -> Vec<String> {
+        ["from", "to", "subject", "mime-version", "content-type"]
+            .iter().map(|name| name.to_string()).collect()
+    }
+
+    fn valid_dns_name(value: &str) -> bool {
+        !value.is_empty() && value.len() <= 253 && value.is_ascii()
+            && value.split('.').all(|label| !label.is_empty() && label.len() <= 63
+                && !label.starts_with('-') && !label.ends_with('-')
+                && label.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-'))
+    }
+
+    fn validate_dkim_config<S>(dkim: &DkimConfig<S>) -> Result<(), Error> {
+        if !valid_dns_name(&dkim.domain) {
+            return Err(error("dkim", "domain must be a valid ASCII DNS name"));
+        }
+        if dkim.selector.contains('.') || !valid_dns_name(&dkim.selector) {
+            return Err(error("dkim", "selector must be one valid ASCII DNS label"));
+        }
+        if dkim.signed_headers.is_empty() {
+            return Err(error("dkim", "signed_headers must not be empty"));
+        }
+        if dkim.signed_headers.len() > 64 {
+            return Err(error("dkim", "signed_headers must contain at most 64 names"));
+        }
+        let mut normalized = Vec::new();
+        for name in &dkim.signed_headers {
+            let lower = name.to_ascii_lowercase();
+            if name.is_empty() || !name.is_ascii()
+                || !name.bytes().all(|byte| (33..=126).contains(&byte) && byte != b':')
+            {
+                return Err(error("dkim", "signed_headers must contain valid header names"));
+            }
+            if matches!(lower.as_str(), "received" | "return-path" | "dkim-signature"
+                | "authentication-results" | "arc-authentication-results"
+                | "arc-message-signature" | "arc-seal")
+            {
+                return Err(error("dkim", format!("signed_headers contains forbidden hop header `{lower}`")));
+            }
+            if normalized.contains(&lower) {
+                return Err(error("dkim", format!("signed_headers contains duplicate `{lower}`")));
+            }
+            normalized.push(lower);
+        }
+        if !normalized.iter().any(|name| name == "from") {
+            return Err(error("dkim", "signed_headers must include `from`"));
+        }
+        let list_bytes = normalized.iter().map(String::len).sum::<usize>()
+            .saturating_add(normalized.len().saturating_sub(1));
+        if list_bytes + " h=;\r\n".len() > MAX_HEADER_BYTES {
+            return Err(error("dkim", "signed_headers exceeds the DKIM header line bound"));
         }
         Ok(())
     }
@@ -341,6 +462,41 @@ pub mod jet_email {
             b'/' => Some(63),
             _ => None,
         }
+    }
+
+    fn decode_dkim_base64(text: &[u8], wipe: fn(&mut Vec<u8>)) -> Result<Vec<u8>, Error> {
+        if text.is_empty() || text.len() % 4 != 0 {
+            return Err(error("smtp_from_env", "SMTP_DKIM_PRIVATE_KEY_BASE64 must be valid base64"));
+        }
+        let mut out = Vec::new();
+        for (chunk_index, chunk) in text.chunks_exact(4).enumerate() {
+            let last = chunk_index + 1 == text.len() / 4;
+            let pads = usize::from(chunk[3] == b'=') + usize::from(chunk[2] == b'=');
+            if pads > 2 || (!last && pads != 0) || (chunk[2] == b'=' && chunk[3] != b'=') {
+                wipe(&mut out);
+                return Err(error("smtp_from_env", "SMTP_DKIM_PRIVATE_KEY_BASE64 must be valid base64"));
+            }
+            let a = base64_value(chunk[0]);
+            let b = base64_value(chunk[1]);
+            let c = if chunk[2] == b'=' { Some(0) } else { base64_value(chunk[2]) };
+            let d = if chunk[3] == b'=' { Some(0) } else { base64_value(chunk[3]) };
+            let (Some(a), Some(b), Some(c), Some(d)) = (a, b, c, d) else {
+                wipe(&mut out);
+                return Err(error("smtp_from_env", "SMTP_DKIM_PRIVATE_KEY_BASE64 must be valid base64"));
+            };
+            if (pads == 2 && b & 0x0f != 0) || (pads == 1 && c & 0x03 != 0) {
+                wipe(&mut out);
+                return Err(error("smtp_from_env", "SMTP_DKIM_PRIVATE_KEY_BASE64 must be valid base64"));
+            }
+            out.push(a << 2 | b >> 4);
+            if pads < 2 { out.push(b << 4 | c >> 2); }
+            if pads == 0 { out.push(c << 6 | d); }
+        }
+        if out.len() != 32 {
+            wipe(&mut out);
+            return Err(error("smtp_from_env", "SMTP_DKIM_PRIVATE_KEY_BASE64 must decode to exactly 32 bytes"));
+        }
+        Ok(out)
     }
 
     #[derive(Clone, Debug, PartialEq)]
@@ -693,11 +849,144 @@ pub mod jet_email {
         fn take_stop(&mut self) -> Option<SmtpStop> { self.stopped.take() }
     }
 
+    fn relaxed_body(body: &[u8]) -> Result<Vec<u8>, Error> {
+        let text = std::str::from_utf8(body)
+            .map_err(|_| error("dkim", "serialized message body must be UTF-8"))?;
+        let mut lines: Vec<&str> = text.split("\r\n").collect();
+        while lines.last().is_some_and(|line| line.trim_end_matches([' ', '\t']).is_empty()) {
+            lines.pop();
+        }
+        let mut out = Vec::new();
+        for line in lines {
+            out.extend_from_slice(line.trim_end_matches([' ', '\t']).as_bytes());
+            out.extend_from_slice(b"\r\n");
+        }
+        if out.is_empty() { out.extend_from_slice(b"\r\n"); }
+        Ok(out)
+    }
+
+    fn relaxed_header(header: &[u8]) -> Result<Vec<u8>, Error> {
+        let colon = header.iter().position(|byte| *byte == b':')
+            .ok_or_else(|| error("dkim", "serialized message contains a malformed header"))?;
+        let name = std::str::from_utf8(&header[..colon])
+            .map_err(|_| error("dkim", "serialized header name must be ASCII"))?
+            .to_ascii_lowercase();
+        let mut value = Vec::new();
+        let mut index = colon + 1;
+        let mut whitespace = false;
+        while index < header.len() {
+            if index + 2 < header.len() && &header[index..index + 2] == b"\r\n"
+                && matches!(header[index + 2], b' ' | b'\t')
+            {
+                whitespace = true;
+                index += 3;
+                continue;
+            }
+            let byte = header[index];
+            if matches!(byte, b' ' | b'\t') {
+                whitespace = true;
+            } else {
+                if whitespace && !value.is_empty() { value.push(b' '); }
+                whitespace = false;
+                value.push(byte);
+            }
+            index += 1;
+        }
+        while value.last() == Some(&b' ') { value.pop(); }
+        let mut out = name.into_bytes();
+        out.push(b':');
+        out.extend_from_slice(&value);
+        out.extend_from_slice(b"\r\n");
+        Ok(out)
+    }
+
+    fn message_headers(wire: &[u8]) -> Result<(Vec<Vec<u8>>, &[u8]), Error> {
+        let split = wire.windows(4).position(|window| window == b"\r\n\r\n")
+            .ok_or_else(|| error("dkim", "serialized message is missing its header/body boundary"))?;
+        let raw = &wire[..split];
+        let mut headers: Vec<Vec<u8>> = Vec::new();
+        for line in raw.split(|byte| *byte == b'\n') {
+            let line = line.strip_suffix(b"\r").unwrap_or(line);
+            if matches!(line.first(), Some(b' ' | b'\t')) {
+                let Some(previous) = headers.last_mut() else {
+                    return Err(error("dkim", "serialized message starts with a folded header"));
+                };
+                previous.extend_from_slice(b"\r\n");
+                previous.extend_from_slice(line);
+            } else {
+                headers.push(line.to_vec());
+            }
+        }
+        Ok((headers, &wire[split + 4..]))
+    }
+
+    fn header_name(header: &[u8]) -> Option<String> {
+        let colon = header.iter().position(|byte| *byte == b':')?;
+        std::str::from_utf8(&header[..colon]).ok().map(str::to_ascii_lowercase)
+    }
+
+    fn dkim_sign(wire: Vec<u8>, dkim: &DkimConfig<Vec<u8>>, runtime: RuntimeFns)
+        -> Result<Vec<u8>, Error>
+    {
+        let (headers, body) = message_headers(&wire)?;
+        let names: Vec<String> = dkim.signed_headers.iter().map(|name| name.to_ascii_lowercase()).collect();
+        let mut signed = Vec::new();
+        for name in &names {
+            let header = headers.iter().rev().find(|header| header_name(header).as_deref() == Some(name))
+                .ok_or_else(|| error("dkim", format!("signed header `{name}` is absent from the final message")))?;
+            signed.extend_from_slice(&relaxed_header(header)?);
+        }
+        let body_hash = base64(&(runtime.sha256)(&relaxed_body(body)?));
+        let header_list = names.join(":");
+        let unsigned_value = format!(
+            "v=1; a=ed25519-sha256; c=relaxed/relaxed; d={}; s={}; h={}; bh={}; b=",
+            dkim.domain, dkim.selector, header_list, body_hash,
+        );
+        signed.extend_from_slice(&relaxed_header(format!("DKIM-Signature: {unsigned_value}").as_bytes())?);
+        let header_hash = (runtime.sha256)(&signed);
+        let signature = (runtime.ed25519_sign)(&dkim.private_key, &header_hash)
+            .map_err(|_| error("dkim", "Ed25519 signing failed"))?;
+        if signature.len() != 64 {
+            return Err(error("dkim", "Ed25519 signer returned an invalid signature"));
+        }
+        let signature = base64(&signature);
+        let folded = format!(
+            "DKIM-Signature: v=1; a=ed25519-sha256; c=relaxed/relaxed;\r\n d={}; s={};\r\n h={};\r\n bh={};\r\n b={}\r\n",
+            dkim.domain, dkim.selector, header_list, body_hash, signature,
+        );
+        let mut out = Vec::with_capacity(folded.len() + wire.len());
+        out.extend_from_slice(folded.as_bytes());
+        out.extend_from_slice(&wire);
+        Ok(out)
+    }
+
+    fn prepare_message(config: &SmtpConfig<Vec<u8>>, message: &Message, runtime: Option<RuntimeFns>)
+        -> Result<Vec<u8>, Error>
+    {
+        validate_smtp_config(config)?;
+        if config.dkim.as_ref().is_some_and(|dkim| dkim.private_key.len() != 32) {
+            return Err(error("dkim", "private_key must contain exactly 32 bytes"));
+        }
+        let mut wire = serialize(message)?;
+        if let Some(dkim) = &config.dkim {
+            let runtime = runtime.ok_or_else(|| error("dkim", "signing runtime is unavailable"))?;
+            wire = dkim_sign(wire, dkim, runtime)?;
+        }
+        if wire.len() > config.limits.max_message_bytes as usize {
+            return Err(smtp_error(ErrorKind::Configuration, "message", &config.host, None,
+                "serialized message including DKIM exceeds configured max_message_bytes"));
+        }
+        Ok(wire)
+    }
+
     impl Mailer {
         pub fn send(&mut self, message: Message) -> Result<SendReport, Error> {
             let control = AmbientSmtpControl(self.runtime);
+            let mime = prepare_message(&self.config, &message, Some(self.runtime))?;
             let mut transport = RuntimeTransport::connect(&self.config, self.runtime)?;
-            smtp_transaction(&mut transport, &self.config, &message, &control)
+            let result = smtp_transaction_inner(&mut transport, &self.config, &message, &mime, &control);
+            transport.close();
+            result
         }
     }
 
@@ -707,7 +996,8 @@ pub mod jet_email {
         message: &Message,
         control: &C,
     ) -> Result<SendReport, Error> {
-        let result = smtp_transaction_inner(transport, config, message, control);
+        let mime = prepare_message(config, message, None)?;
+        let result = smtp_transaction_inner(transport, config, message, &mime, control);
         transport.close();
         result
     }
@@ -716,6 +1006,7 @@ pub mod jet_email {
         transport: &mut T,
         config: &SmtpConfig<Vec<u8>>,
         message: &Message,
+        mime: &[u8],
         control: &C,
     ) -> Result<SendReport, Error> {
         validate_smtp_config(config)?;
@@ -723,13 +1014,6 @@ pub mod jet_email {
             return Err(smtp_error(
                 ErrorKind::Configuration, "recipients", &config.host, None,
                 "envelope exceeds configured max_recipients",
-            ));
-        }
-        let mime = serialize(message)?;
-        if mime.len() > config.limits.max_message_bytes as usize {
-            return Err(smtp_error(
-                ErrorKind::Configuration, "message", &config.host, None,
-                "serialized message exceeds configured max_message_bytes",
             ));
         }
         if let SmtpAuth::Password { password, .. } = &config.auth {
@@ -811,7 +1095,7 @@ pub mod jet_email {
         let data_reply = read_reply(transport, config, "data", false)?;
         expect_code(&data_reply, 354, "data", &config.host)?;
         checkpoint(control, "data_body", &config.host, false)?;
-        let wire = dot_stuff(&mime, config.limits.max_message_bytes as usize)?;
+        let wire = dot_stuff(mime, config.limits.max_message_bytes as usize)?;
         if let Err(reason) = transport.write_all(&wire) {
             return Err(transport_failure(transport, "data_body", &config.host, true, ErrorKind::DeliveryUnknown,
                 format!("connection failed after DATA began: {reason}")));
