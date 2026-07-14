@@ -681,6 +681,34 @@ fn budget_unreadable_compiler_identity_rejects_before_artifact() {
 }
 
 #[test]
+#[cfg(target_os = "linux")]
+fn budget_compiler_identity_survives_running_executable_unlink() {
+    use jet_foundation::PerformanceBudget::CanonicalJson;
+    let dir = budget_project("budget_unlinked_compiler_identity", 10);
+    let copied = dir.join("jet-running-unlinked");
+    fs::copy(jet(), &copied).unwrap();
+    let expected = jet::SHA256::sha256_file_hex(&copied).unwrap();
+    let child = Command::new(&copied)
+        .args(["budget", "check", "--json"])
+        .current_dir(&dir)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    fs::remove_file(&copied).unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "stdout: {}\nstderr: {}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    assert!(out.stderr.is_empty());
+    let CanonicalJson::Object(command) = CanonicalJson::parse_canonical(&out.stdout).unwrap() else { panic!("command object") };
+    let CanonicalJson::Object(report) = &command["report"] else { panic!("report object") };
+    let CanonicalJson::Object(content) = &report["content"] else { panic!("content object") };
+    let CanonicalJson::Object(toolchain) = &content["toolchain"] else { panic!("toolchain object") };
+    assert_eq!(toolchain["compiler_build_id"], CanonicalJson::String(expected.clone()));
+    assert_eq!(toolchain["runner_id"], CanonicalJson::String(expected.clone()));
+    assert_eq!(toolchain["stdlib_id"], CanonicalJson::String(expected));
+}
+
+#[test]
 fn budget_failure_has_human_github_projection_and_exit_one() {
     let dir = budget_project("budget_failure", 0);
     let out = Command::new(jet()).args(["budget", "check", "--annotations", "github"]).current_dir(&dir).output().unwrap();
@@ -3469,7 +3497,7 @@ fn scene_probe_produces_real_frame_time_samples_and_rejects_forged_cache() {
     use jet_foundation::PerformanceBudget::CanonicalJson;
     let dir = scene_probe_project("scene_probe_runtime");
     let run = || Command::new(jet())
-        .args(["devtools", "probe", "src/main.jet"])
+        .args(["self", "devtools", "probe", "src/main.jet"])
         .current_dir(&dir)
         .output()
         .unwrap();
@@ -3596,7 +3624,7 @@ fn run() {}
     .unwrap();
 
     let out = Command::new(jet())
-        .args(["devtools", "probe", "src/main.jet"])
+        .args(["self", "devtools", "probe", "src/main.jet"])
         .current_dir(&dir)
         .env("JETPACK_ROOT", dir.join("jetpack-root"))
         .env("HOME", dir.join("home"))
