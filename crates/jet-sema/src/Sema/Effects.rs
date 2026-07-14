@@ -63,6 +63,8 @@ pub enum Effect {
     Go,
     /// D-FFI-JVM1=A: an embedded JVM invocation.
     Java,
+    /// D-FFI-DOTNET1=A: an embedded CoreCLR invocation.
+    DotNet,
     /// D-FFI-TCL1=A: synchronous in-process Tcl evaluation.
     Tcl,
     /// D-FFI-ADA1=A: checked call into a GNAT C-ABI export.
@@ -100,6 +102,7 @@ impl Effect {
             Effect::Gpu => "Gpu",
             Effect::Go => "Go",
             Effect::Java => "Java",
+            Effect::DotNet => "DotNet",
             Effect::Tcl => "Tcl",
             Effect::Ada => "Ada",
             Effect::Pascal => "Pascal",
@@ -126,6 +129,7 @@ impl Effect {
             "Gpu" => Effect::Gpu,
             "Go" => Effect::Go,
             "Java" => Effect::Java,
+            "DotNet" => Effect::DotNet,
             "Tcl" => Effect::Tcl,
             "Ada" => Effect::Ada,
             "Pascal" => Effect::Pascal,
@@ -156,6 +160,7 @@ impl Effect {
             Effect::Gpu,
             Effect::Go,
             Effect::Java,
+            Effect::DotNet,
             Effect::Tcl,
             Effect::Ada,
             Effect::Pascal,

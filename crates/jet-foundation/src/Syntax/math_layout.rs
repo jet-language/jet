@@ -350,7 +350,7 @@ pub const CORE_CANONICAL: &str = "core";
 
 /// S51 (ratified M10): first-party short names reserved before packages land.
 pub const FIRST_PARTY_RESERVED: &[&str] = &[
-    "core", "jet", "c", "rust", "py", "js", "swift", "go", "java", "tcl", "fortran", "ada", "pascal", "dart", "pwsh", "com", "http", "regex", "csv", "toml", "crypto",
+    "core", "jet", "c", "rust", "py", "js", "swift", "go", "java", "cs", "tcl", "fortran", "ada", "pascal", "dart", "pwsh", "com", "http", "regex", "csv", "toml", "crypto",
     "archive",
 ];
 
@@ -367,6 +367,7 @@ pub const FOREIGN_ROOTS: &[&str] = &[
     SWIFT_MODULE_ROOT,
     GO_MODULE_ROOT,
     JAVA_MODULE_ROOT,
+    CS_MODULE_ROOT,
     TCL_MODULE_ROOT,
     FORTRAN_MODULE_ROOT,
     ADA_MODULE_ROOT,
@@ -380,6 +381,7 @@ pub const JS_MODULE_ROOT: &str = "js"; // D-FFI-JS1 / D-FFI-UNIFY1
 pub const SWIFT_MODULE_ROOT: &str = "swift"; // D-FFI-SWIFT1 / D-FFI-UNIFY1
 pub const GO_MODULE_ROOT: &str = "go"; // D-FFI-GO1 / D-FFI-UNIFY1
 pub const JAVA_MODULE_ROOT: &str = "java"; // D-FFI-JVM1 / D-FFI-UNIFY1
+pub const CS_MODULE_ROOT: &str = "cs"; // D-FFI-DOTNET1 / D-FFI-UNIFY1
 pub const TCL_MODULE_ROOT: &str = "tcl"; // D-FFI-TCL1 / D-FFI-UNIFY1
 pub const FORTRAN_MODULE_ROOT: &str = "fortran"; // D-FFI-FORTRAN1 / D-FFI-UNIFY1
 pub const ADA_MODULE_ROOT: &str = "ada"; // D-FFI-ADA1 / D-FFI-UNIFY1

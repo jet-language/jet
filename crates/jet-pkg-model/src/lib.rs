@@ -31,6 +31,7 @@ pub mod AdaBind;
 pub mod CBind;
 pub mod CFFI;
 pub mod ComBind;
+pub mod DotNetBind;
 pub mod FortranBind;
 pub mod GoBind;
 pub mod JavaBind;

@@ -20,6 +20,7 @@ pub use jet_driver::{
     CBind,
     ComBind,
     DartBind,
+    DotNetBind,
     PowerShellBind,
     FortranBind,
     GoBind,

@@ -1304,6 +1304,10 @@ pub(crate) fn run_bind(args: &[&String]) {
         run_java_bind(&args[1..]);
         return;
     }
+    if args.first().is_some_and(|arg| arg.as_str() == jet::Syntax::CS_MODULE_ROOT) {
+        run_dotnet_bind(&args[1..]);
+        return;
+    }
     if args
         .first()
         .is_some_and(|arg| arg.as_str() == jet::Syntax::GO_MODULE_ROOT)
@@ -1530,6 +1534,18 @@ fn run_java_bind(args: &[&String]) {
 }
 
 fn java_bind_error(source:&str,why:&str)->!{eprintln!("Error [E3208]: Could not generate bindings from `{source}`.");eprintln!(" Why: {why}.");eprintln!(" Fix: use a public Java class with one public long/double constructor and non-overloaded long/double methods, then rerun `jet inspect bind java`.");exit(ExitCodes::USER_ERROR)}
+
+/// D-FFI-DOTNET1=A: reflect a C# assembly surface, then generate an in-process
+/// hostfxr bridge. Managed state remains behind consuming GCHandle ownership.
+fn run_dotnet_bind(args:&[&String]){
+    let usage=||eprintln!("usage: {} inspect bind cs <source.cs> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);
+    if args.is_empty()||args[0]=="--help"||args[0]=="-h"{usage();exit(if args.is_empty(){ExitCodes::USAGE}else{0})}
+    let path=args[0].as_str();let mut pkg=None;let mut out=None;let mut i=1;while i<args.len(){match args[i].as_str(){"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{eprintln!("error: unknown `bind cs` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}
+    let lib=pkg.unwrap_or_else(||{let base=path.rsplit('/').next().unwrap_or(path);base.rsplit_once('.').map(|v|v.0).unwrap_or(base).to_ascii_lowercase()});let source=std::fs::read_to_string(path).unwrap_or_else(|e|dotnet_bind_error(path,&format!("the C# source could not be read ({e})")));
+    let out_path=out.unwrap_or_else(||format!(".jet/bindings/{}/{}.{}",jet::Syntax::CS_MODULE_ROOT,lib,jet::Syntax::FILE_EXT));let cache=std::path::Path::new(&out_path).parent().unwrap_or_else(||std::path::Path::new("."));let result=jet::DotNetBind::bind(std::path::Path::new(path),&source,&lib,cache).unwrap_or_else(|e|dotnet_bind_error(path,&e.to_string()));
+    if let Err(e)=std::fs::write(&out_path,&result.source){dotnet_bind_error(path,&format!("the generated cache could not be written ({e})"))}if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),&result.provenance){dotnet_bind_error(path,&format!("the provenance could not be written ({e})"))}println!("bound {} .NET member{} from `{path}` → {out_path}",result.bound.len(),if result.bound.len()==1{""}else{"s"});
+}
+fn dotnet_bind_error(path:&str,why:&str)->!{eprintln!("Error [E3208]: Could not generate bindings from `{path}`.");eprintln!(" Why: {why}.");eprintln!(" Fix: use one public C# class with one public long/double constructor and non-overloaded public long/double methods, then rerun `jet inspect bind cs`.");exit(ExitCodes::USER_ERROR)}
 
 /// D-FFI-GO1=A: compile exported scalar Go functions and move-only `uintptr`
 /// handles into an in-process c-archive and emit a typed `go.<lib>` Jet module.

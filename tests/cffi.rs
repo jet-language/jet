@@ -72,6 +72,13 @@ fn unified_foreign_binder_registry_routes_active_and_planned_languages() {
             BinderStatus::Active,
         ),
         (
+            ForeignLanguage::DotNet,
+            "cs",
+            "bindings/cs",
+            BinderSurface::Namespace,
+            BinderStatus::Active,
+        ),
+        (
             ForeignLanguage::Tcl,
             "tcl",
             "bindings/tcl",
@@ -147,6 +154,7 @@ fn unified_foreign_namespace_model_recognizes_c_project_import_only() {
         ForeignLanguage::Fortran
     );
     assert_eq!(ForeignNamespace::from_module_path("java.counter").unwrap().language, ForeignLanguage::Java);
+    assert_eq!(ForeignNamespace::from_module_path("cs.counter").unwrap().language, ForeignLanguage::DotNet);
     assert_eq!(ForeignNamespace::from_module_path("tcl.eda").unwrap().language, ForeignLanguage::Tcl);
     assert_eq!(ForeignNamespace::from_module_path("ada.geodesy").unwrap().language, ForeignLanguage::Ada);
     assert_eq!(ForeignNamespace::from_module_path("pascal.inventory").unwrap().language, ForeignLanguage::Pascal);

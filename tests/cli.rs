@@ -1702,6 +1702,34 @@ fn java_bind_launders_javac_failure_as_e3208() {
 }
 
 #[test]
+fn dotnet_bind_embeds_coreclr_state_calls_and_errors(){
+    let dir=isolated_cwd("dotnet_bind_embedded");let source=dir.join("Counter.cs");fs::write(&source,r#"public class Counter {
+    private long value;
+    public Counter(long value) { this.value = value; }
+    public long add(long amount) { value += amount; return value; }
+    public long explode(long code) { if (code < 0) throw new System.InvalidOperationException("hidden managed detail"); return code; }
+    public static double twice(double value) { return value * 2.0; }
+}
+"#).unwrap();
+    let bind=Command::new(jet()).args(["inspect","bind","cs"]).arg(&source).args(["--pkg","counter"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(bind.status.success(),".NET bind failed:\n{}",String::from_utf8_lossy(&bind.stderr));
+    assert!(dir.join(".jet/bindings/cs/libjet_cs_counter.a").is_file());assert!(dir.join(".jet/bindings/cs/counter.dotnet/JetBinding.dll").is_file());assert!(dir.join(".jet/bindings/cs/counter.provenance").is_file());
+    fs::write(dir.join("main.jet"),r#"use cs.counter as counter
+
+fn run() #(DotNet, Io) {
+    handle :: counter.new(40) ?? panic("CoreCLR create failed")
+    print(counter.add(handle, 2) ?? -1)
+    print(counter.twice(2.5) ?? -1.0)
+    print(counter.explode(handle, -1) ?? -7)
+    counter.close(^handle) ?? panic("CoreCLR close failed")
+}
+"#).unwrap();
+    let run=Command::new(jet()).args(["run","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"embedded CoreCLR binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),"42\n5.0\n-7\n");assert!(!String::from_utf8_lossy(&run.stderr).contains("hidden managed detail"));
+}
+
+#[test]
+fn dotnet_bind_launders_compiler_failure_as_e3208(){let dir=isolated_cwd("dotnet_bind_failure");let source=dir.join("Broken.cs");fs::write(&source,"public class Broken { public Broken(long n) { this. = n; } public long value() => 1; }\n").unwrap();let output=Command::new(jet()).args(["inspect","bind","cs"]).arg(&source).args(["--pkg","broken"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(!output.status.success());let stderr=String::from_utf8_lossy(&output.stderr);assert!(stderr.contains("Error [E3208]:"));assert!(stderr.contains(" Why:"));assert!(stderr.contains(" Fix:"));assert!(!stderr.contains("Broken.cs:"),"raw C# source frame leaked:\n{stderr}");check_snapshot("bind_dotnet_invalid_e3208.txt",&scrub(&stderr,&source));}
+
+#[test]
 fn tcl_bind_runs_one_shot_and_persistent_typed_sessions() {
     let dir=isolated_cwd("tcl_bind_session");let source=dir.join("eda.tcl");
     fs::write(&source,"set counter 40\n").unwrap();

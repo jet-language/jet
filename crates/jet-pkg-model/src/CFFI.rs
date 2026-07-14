@@ -304,6 +304,9 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
                 function.effect_root = Some("Java".to_string());
             }
         }
+        if lib.starts_with("jet_cs_") {
+            for function in &mut merged { function.effect_root=Some("DotNet".to_string()); }
+        }
         if lib.starts_with("jet_tcl_") {
             for function in &mut merged { function.effect_root=Some("Tcl".to_string()); }
         }
@@ -656,6 +659,12 @@ pub fn resolve_link(lib: &str, project_root: &Path) -> Result<LinkFlags, Diagnos
                 ..Default::default()
             });
         }
+        return Err(e3201(lib));
+    }
+    if let Some(actual)=lib.strip_prefix("jet_cs_") {
+        let dir=project_root.join(Syntax::SOURCE_ROOT_DIR).join(ForeignLanguage::DotNet.bindings_subdir());
+        let archive=dir.join(format!("libjet_cs_{actual}.a"));
+        if archive.is_file(){return Ok(LinkFlags{lib_dirs:vec![dir.display().to_string()],link_names:vec![format!("static=jet_cs_{actual}"),"pthread".into(),"dl".into()],..Default::default()})}
         return Err(e3201(lib));
     }
     if let Some(actual)=lib.strip_prefix("jet_tcl_") {

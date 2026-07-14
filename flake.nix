@@ -115,6 +115,8 @@
             pkgs.go
             # D-FFI-JVM1=A: provision javac/javap plus the embedded libjvm runtime.
             pkgs.jdk
+            # D-FFI-DOTNET1=A: provision SDK plus hostfxr/hostpolicy embedding runtime.
+            pkgs.dotnet-sdk_8
             # D-FFI-TCL1=A: provision embeddable Tcl headers, runtime, and shell.
             pkgs.tcl
             pkgs.lld

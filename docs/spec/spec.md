@@ -932,6 +932,29 @@ run under a 60-second deadline with 64-KiB diagnostic capture. Cache provenance
 binds the source, discovered bytecode surface, class cache path, and schema with
 SHA-256. Tool failures use **E3208** what/why/fix copy.
 
+## E3 — .NET project binder (D-FFI-DOTNET1=A, embedded class vertical)
+
+`jet inspect bind cs <source.cs> --pkg <lib>` compiles the source with the
+provisioned .NET 8 SDK and discovers its public API through managed reflection.
+One public class, one constructor, and non-overloaded methods using `long` and
+`double` project into a typed `cs.<lib>` module. Unsupported types and overloads
+fail binding rather than guessing an ABI.
+
+The generated native archive embeds CoreCLR through
+`hostfxr_initialize_for_runtime_config` and
+`load_assembly_and_get_function_pointer`. Generated managed entry points use
+`[UnmanagedCallersOnly]`; no worker process, file protocol, or environment
+transport participates in calls. Instances cross as opaque move-only `Handle`
+values backed by a 1,024-slot generation-checked `GCHandle` table.
+`close(^handle)` deterministically releases the managed root. Exhaustion becomes
+`DotNetError.ResourceLimit`; managed exceptions become
+`DotNetError.Exception`; invalid, stale, or released handles become
+`DotNetError.InvalidHandle`, with foreign exception text never exposed. Calls
+carry the `DotNet` effect root. SDK, C compiler, and
+archive tools run under a 60-second deadline with 64-KiB output capture.
+Provenance binds source, reflected surface, hostfxr identity, and schema with
+SHA-256. Tool failures use the snapshotted **E3208** diagnostic.
+
 ## E3 — Tcl project binder (D-FFI-TCL1=A, live-session vertical)
 
 `jet inspect bind tcl <script.tcl> --pkg <lib>` compiles a std-only C bridge
