@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 614,
-    "rev": 6778,
+    "rev": 6782,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -17265,13 +17265,18 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "verify",
       "priority": "P0",
       "plan": "Restore already-ratified nested-route contract in the canonical command registry; preserve teaching errors for moved bare forms; regenerate only derived completion/man goldens; keep owner syntax unchanged; run targeted CLI tests, independent review, then parent full verification.",
       "blockedBy": [],
       "workOrder": 0,
       "assignee": "codex-orchestrator",
       "log": [
+        {
+          "at": "2026-07-14",
+          "by": "codex-cli-reviewer",
+          "text": "[verify] Independent registry/generator review clean. jet-cli 31/31 and five exact CLI regressions green. Criteria 1-3 verified; criterion 4 remains parent full-suite gate."
+        },
         {
           "at": "2026-07-14",
           "by": "codex-cli-builder",
@@ -17282,29 +17287,29 @@
         {
           "n": 1,
           "text": "Canonical palette exposes only ratified top-level commands and nested routes; moved bare actions return grouped E2101 teaching diagnostics with exit 2.",
-          "status": "met",
+          "status": "verified",
           "metBy": "codex-cli-builder",
-          "verifiedBy": null,
-          "evidence": "Canonical registry now treats only D-JPK-IMPORTCMD1 source import as dual-use; every other grouped action is non-canonical top-level. cargo test -p jet-cli: 31/31; moved bare, grouped E2101, and palette targeted tests pass.",
-          "at": "2026-07-14T23:04:46.736Z"
+          "verifiedBy": "codex-cli-reviewer",
+          "evidence": "Independent diff review confirms import is the sole explicit dual-use action; every other grouped action is excluded from canonical top-level routes and closest-command suggestions. jet-cli 31/31 plus moved-bare, grouped E2101, and palette exact tests pass.",
+          "at": "2026-07-14T23:08:32.531Z"
         },
         {
           "n": 2,
           "text": "Bash, zsh, fish completion and man-page goldens match the canonical registry without hand-maintained route divergence.",
-          "status": "met",
+          "status": "verified",
           "metBy": "codex-cli-builder",
-          "verifiedBy": null,
-          "evidence": "Completion and man snapshots regenerated only through UPDATE_EXPECT=1 named tests after reviewing actual diffs. Deltas: canonical source import, nested inspect live, and D-OBSERVE-LIVE1 flags. Completion/man targeted tests pass without update mode.",
-          "at": "2026-07-14T23:04:46.841Z"
+          "verifiedBy": "codex-cli-reviewer",
+          "evidence": "Independent generator review confirms Bash, zsh, fish, PowerShell, and man output derive top-level and nested routes from COMMANDS/COMMAND_GROUPS. Completion and man exact golden tests pass without update mode.",
+          "at": "2026-07-14T23:08:37.653Z"
         },
         {
           "n": 3,
           "text": "The five named CLI regression tests pass; no new syntax, diagnostic code, dependency, unsafe code, or owner decision is introduced.",
-          "status": "met",
+          "status": "verified",
           "metBy": "codex-cli-builder",
-          "verifiedBy": null,
-          "evidence": "Fresh cargo build completed; all five named tests pass: moved_bare_commands_are_teaching_errors_not_aliases, grouped_e2101_human_and_json_goldens, palette_uses_canonical_nested_routes, completions_generate_for_every_shell, man_page_golden. No syntax, diagnostic code, dependency, unsafe, or owner decision added.",
-          "at": "2026-07-14T23:04:46.938Z"
+          "verifiedBy": "codex-cli-reviewer",
+          "evidence": "Independent run: cargo test -p jet-cli passed 31/31; all five required CLI tests passed individually with --exact. Diff adds no syntax, diagnostic code, dependency, unsafe block, or decision.",
+          "at": "2026-07-14T23:08:42.097Z"
         },
         {
           "n": 4,
@@ -38048,6 +38053,34 @@
   ],
   "events": [
     {
+      "at": "2026-07-14T23:08:47.249Z",
+      "by": "codex-cli-reviewer",
+      "action": "card.update",
+      "ref": "c0x3pi8i",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-14T23:08:42.098Z",
+      "by": "codex-cli-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0x3pi8i",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-14T23:08:37.653Z",
+      "by": "codex-cli-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0x3pi8i",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-14T23:08:32.531Z",
+      "by": "codex-cli-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0x3pi8i",
+      "note": "#1"
+    },
+    {
       "at": "2026-07-14T23:05:59.458Z",
       "by": "codex-main",
       "action": "decision.update",
@@ -41518,34 +41551,6 @@
       "action": "decision.delete",
       "ref": "D-SHAPE-EFFECTOMIT1",
       "note": "When an effect set may be omitted"
-    },
-    {
-      "at": "2026-07-14T17:28:16.706Z",
-      "by": "codex",
-      "action": "decision.delete",
-      "ref": "D-SHAPE-PIPESLOT1",
-      "note": "Where a pipeline places its value"
-    },
-    {
-      "at": "2026-07-14T17:28:16.607Z",
-      "by": "codex",
-      "action": "decision.delete",
-      "ref": "D-SHAPE-MODULEDISABLE1",
-      "note": "How should a source module be deliberately disabled?"
-    },
-    {
-      "at": "2026-07-14T17:28:16.512Z",
-      "by": "codex",
-      "action": "decision.delete",
-      "ref": "D-SHAPE-INTERNALOVERRIDE1",
-      "note": "Which implementation details may experts replace?"
-    },
-    {
-      "at": "2026-07-14T17:28:16.416Z",
-      "by": "codex",
-      "action": "decision.delete",
-      "ref": "D-SHAPE-INTERNALACCESS1",
-      "note": "How may outside code reach a leading-underscore name?"
     }
   ],
   "nextNum": 368,
