@@ -56,7 +56,7 @@ D-COMPILERSEAMS1/2 split the compiler into workspace seam crates. The root
 | `jet-env-model` | **L2**, the shared pure plan model (card #367 slice 4): `ModuleEval` (the computed-modules evaluator) and its typed plan outputs (`EnvPlan`/`SystemPlan`/`ImagePlan`/`FleetPlan`/…). Depends on `jet-pkg-model` (L1) + `jet-codegen`; no provider/store/network/shell | plan-evaluation diagnostics |
 | `jetpack` | **L3**, package manager engine: provider/network/shell realization, JetOS, CLI — depends on `jet-pkg-model` (L1) for read-only data and `jet-env-model` (L2) for the plan model it realizes | package/JetOS diagnostics |
 | `jetos` | `jetos` binary front door for OS workflows; still dispatches into `jetpack`'s `os` verb (JetOS realization hasn't physically relocated out of `jetpack::JetOS` — that's a distinct, still-open scope gate, not part of slice 4) | package/JetOS diagnostics (via `jetpack`) |
-| `jet-driver` | front-end orchestration and compile outputs; depends on `jet-pkg-model` (never `jetpack`'s engine) for manifest/lock/FFI preparation; owns the shared pure dev/debug interpreter-boundary classifier | front-end and interpreter-boundary diagnostics |
+| `jet-driver` | front-end orchestration and compile outputs; depends on `jet-pkg-model` (never `jetpack`'s engine) for manifest/lock/FFI preparation; owns the shared pure dev/debug interpreter-boundary classifier, fix application, and compatible budget-report projection | front-end and interpreter-boundary diagnostics |
 | `jet-queries` | std-only demand cache for incremental inputs and derived query values | no |
 | `jet-semindex` | stable semantic index over checked programs for tooling | no new diagnostics |
 | `jet-impact` | blast-radius reports over `jet-semindex` | no |
@@ -64,7 +64,7 @@ D-COMPILERSEAMS1/2 split the compiler into workspace seam crates. The root
 | `jet-debug` | complete source debugger and DAP product over `jet-driver` plus leaf JSON/exit policy | debugger diagnostics only |
 | `jet-cli` | canonical command/flag registry, completions, man page, diagnostic reference, and hybrid help UI over leaf syntax policy plus `jet-repl` terminal/symbol support | renders existing diagnostics only |
 | `jet-canvas` | Canvas browser HTML/JS projection assets over leaf JSON escaping | no |
-| `jet-devserver` | watch policy plus HTTP/static transport and Canvas asset routes; depends inward on `jet-canvas`; semantic Canvas/build orchestration remains in root | no |
+| `jet-devserver` | watch policy, HTTP/static transport, Canvas asset routes, and the source-backed Canvas semantic/edit service over checked driver and semantic-index facts; web build/rustc orchestration remains in the root host | renders existing diagnostics only |
 | `jet-rt` | runtime helpers shared by generated code and JIT/dev paths | no |
 | `jet-jit` | dev/JIT execution tier over codegen/TIR facts | internal fallback only |
 | `jet-net` | runtime/comptime fetch helper with TLS diagnostics | yes, for fetch failures |
@@ -103,7 +103,7 @@ pins exactly which). `ModuleEval` is no longer one of them: card #367 slice 4
 sank it into `jet-env-model` (L2, pure eval — three acyclic layers now: L1
 `jet-pkg-model` data, L2 `jet-env-model` plan model, L3 `jetpack` env-runtime
 + JetOS realization, both depending down on L2 rather than sharing it by
-living in one engine crate). `Source/Canvas`'s package-manifest scans
+living in one engine crate). `jet-devserver::Canvas`'s package-manifest scans
 (`WorkspaceFile`) still route through the `jetpack` engine directly; its
 env-plan scans (`jet_env_model::ModuleEval::evaluate_env`) go straight to
 `jet-env-model`, the same crate both realizers depend on. The root binary
