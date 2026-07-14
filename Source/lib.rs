@@ -26,6 +26,7 @@ pub use jet_driver::{
     GoBind,
     JavaBind,
     PascalBind,
+    PerlBind,
     TclBind,
     CanonicalAST,
     Capabilities,

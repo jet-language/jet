@@ -36,6 +36,7 @@ pub mod FortranBind;
 pub mod GoBind;
 pub mod JavaBind;
 pub mod PascalBind;
+pub mod PerlBind;
 pub mod DartBind;
 pub mod PowerShellBind;
 pub mod TclBind;

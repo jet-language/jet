@@ -131,6 +131,13 @@ fn unified_foreign_binder_registry_routes_active_and_planned_languages() {
             BinderStatus::Active,
         ),
         (
+            ForeignLanguage::Perl,
+            "perl",
+            "bindings/perl",
+            BinderSurface::Namespace,
+            BinderStatus::Active,
+        ),
+        (
             ForeignLanguage::Com,
             "com",
             "bindings/com",
@@ -177,6 +184,7 @@ fn unified_foreign_namespace_model_recognizes_c_project_import_only() {
     assert_eq!(ForeignNamespace::from_module_path("pascal.inventory").unwrap().language, ForeignLanguage::Pascal);
     assert_eq!(ForeignNamespace::from_module_path("dart.callbacks").unwrap().language, ForeignLanguage::Dart);
     assert_eq!(ForeignNamespace::from_module_path("pwsh.inventory").unwrap().language, ForeignLanguage::PowerShell);
+    assert_eq!(ForeignNamespace::from_module_path("perl.text").unwrap().language, ForeignLanguage::Perl);
     assert_eq!(ForeignNamespace::from_module_path("com.excel").unwrap().language, ForeignLanguage::Com);
     assert!(ForeignNamespace::from_module_path("c").is_none());
     assert!(ForeignNamespace::from_module_path("c.raylib.extra").is_none());
@@ -334,6 +342,18 @@ fn foreign_interop_routes_powershell_as_active_supervised_worker() {
     assert_eq!(route.descriptor.runtime,BinderRuntime::SupervisedPowerShell);
     assert_eq!(route.descriptor.stub_kind,BindingStubKind::PowerShellScript);
     assert_eq!(route.host,ForeignHost::SupervisedPowerShell);
+}
+
+#[test]
+fn foreign_interop_routes_perl_as_active_supervised_worker() {
+    use jet::Foreign::{route_plan,BinderRuntime,BinderStatus,BindingStubKind,ForeignHost,ForeignTarget};
+    use jet::AST::{ForeignLanguage,ForeignNamespace};
+    let route=route_plan(&PathBuf::from("/tmp/jet_foreign_route"),ForeignNamespace::from_module_path("perl.text").unwrap(),ForeignTarget::Native).unwrap();
+    assert_eq!(route.descriptor.language,ForeignLanguage::Perl);
+    assert_eq!(route.descriptor.status,BinderStatus::Active);
+    assert_eq!(route.descriptor.runtime,BinderRuntime::SupervisedPerl);
+    assert_eq!(route.descriptor.stub_kind,BindingStubKind::PerlScript);
+    assert_eq!(route.host,ForeignHost::SupervisedPerl);
 }
 
 #[test]

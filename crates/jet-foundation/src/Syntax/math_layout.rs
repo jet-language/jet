@@ -350,7 +350,7 @@ pub const CORE_CANONICAL: &str = "core";
 
 /// S51 (ratified M10): first-party short names reserved before packages land.
 pub const FIRST_PARTY_RESERVED: &[&str] = &[
-    "core", "jet", "c", "rust", "py", "js", "swift", "go", "java", "cs", "tcl", "fortran", "ada", "pascal", "dart", "pwsh", "com", "http", "regex", "csv", "toml", "crypto",
+    "core", "jet", "c", "rust", "py", "js", "swift", "go", "java", "cs", "tcl", "fortran", "ada", "pascal", "dart", "pwsh", "perl", "com", "http", "regex", "csv", "toml", "crypto",
     "archive",
 ];
 
@@ -374,6 +374,7 @@ pub const FOREIGN_ROOTS: &[&str] = &[
     PASCAL_MODULE_ROOT,
     DART_MODULE_ROOT,
     PWSH_MODULE_ROOT,
+    PERL_MODULE_ROOT,
     COM_MODULE_ROOT,
 ];
 pub const PY_MODULE_ROOT: &str = "py"; // D-FFI-PY1 / D-FFI-UNIFY1
@@ -388,6 +389,7 @@ pub const ADA_MODULE_ROOT: &str = "ada"; // D-FFI-ADA1 / D-FFI-UNIFY1
 pub const PASCAL_MODULE_ROOT: &str = "pascal"; // D-FFI-PASCAL1 / D-FFI-UNIFY1
 pub const DART_MODULE_ROOT: &str = "dart"; // D-FFI-DART1 / D-FFI-UNIFY1
 pub const PWSH_MODULE_ROOT: &str = "pwsh"; // D-FFI-PWSH1 / D-FFI-UNIFY1
+pub const PERL_MODULE_ROOT: &str = "perl"; // D-FFI-PERL1 / D-FFI-UNIFY1
 pub const COM_MODULE_ROOT: &str = "com"; // D-FFI-COM1 / D-FFI-UNIFY1
 
 /// S59 (ratified E2-M14): C FFI module path root — `c.<lib>`, `c.<lib>.__bindgen__`.

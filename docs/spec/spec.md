@@ -1100,6 +1100,37 @@ have a 60-second deadline and 64-KiB output capture. Failures use laundered
 **E3208** copy. Provenance hashes the script, canonical script and PowerShell
 identities, worker protocol, and binder schema.
 
+## E3 — Persistent Perl worker (D-FFI-PERL1=A)
+
+`jet inspect bind perl <script.pl> --pkg <lib>` validates the script with the
+provisioned Perl compiler, discovers named main-package `sub` declarations from
+compiler metadata without running the top-level runtime body, and writes a
+typed `perl.<lib>` cache. Perl's normal compile-time blocks still obey `perl -c`.
+`open()` starts one supervised Perl process, loads the script once, and retains
+its lexical and package state across calls. Generated entrypoints carry fixed
+function identities; the worker rejects names outside the binder-generated
+allowlist. Runtime source and arbitrary command strings never cross the API.
+The process supervisor is POSIX-only; unsupported hosts reject binding
+generation instead of emitting an unusable bridge.
+
+Every bound function accepts one `DataTree` and returns one `DataTree` through
+Perl's core `JSON::PP`. Null, booleans, integers, floats, text, arrays, and
+objects retain their JSON data meaning. The binary protocol length-frames each
+request and response, checks response identities, limits frames to 1 MiB, and
+never treats stdout text as a result. Perl exceptions become
+`PerlError.CommandFailed`; stderr, script paths, stack traces, and exception
+text stay inside the worker. Calls carry the `Perl` effect.
+
+Calls require a 1–300000 ms deadline. Expiry or `cancel(session)` kills and
+reaps the worker process group and invalidates the generation-tagged handle.
+`close(^session)` consumes the session. At most 32 workers exist per process;
+process teardown reaps all survivors. Binding-time Perl, C compiler, and
+archiver processes have 60-second deadlines and 64-KiB output capture. Their
+failures use laundered **E3208** copy. Provenance hashes source, canonical
+script and Perl identities, worker protocol, and binder schema. CPAN package
+realization remains the Jetpack provider's responsibility; the binder consumes
+the Perl executable and installed modules exposed by that realized environment.
+
 ## E3 — Windows COM automation (D-FFI-COM1=A)
 
 `com.*` exists only on a Windows host. Elsewhere, importing it or running

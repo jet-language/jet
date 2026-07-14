@@ -2027,6 +2027,36 @@ fn powershell_bind_launders_parse_failure_as_e3208() {
     let output=Command::new(jet()).args(["inspect","bind","pwsh"]).arg(&script).args(["--pkg","broken"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(!output.status.success());let stderr=String::from_utf8_lossy(&output.stderr);assert!(stderr.contains("Error [E3208]:"));assert!(!stderr.contains("Unexpected token"));assert!(!stderr.contains("broken.ps1:"));check_snapshot("bind_powershell_invalid_e3208.txt",&scrub(&stderr,&script));
 }
 
+#[test]
+fn perl_bind_round_trips_datatree_state_timeout_and_cancellation() {
+    if Command::new("perl").arg("-v").output().is_err(){return}
+    let dir=isolated_cwd("perl_bind_round_trip");let script=dir.join("ops.pl");
+    let example=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/interop/perl");fs::copy(example.join("ops.pl"),&script).unwrap();
+    let bind=Command::new(jet()).args(["inspect","bind","perl"]).arg(&script).args(["--pkg","ops"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(bind.status.success(),"Perl bind failed:\n{}",String::from_utf8_lossy(&bind.stderr));let cache=dir.join(".jet/bindings/perl");assert!(cache.join("libjet_perl_ops.a").is_file());assert!(cache.join("ops_worker.pl").is_file());assert!(cache.join("ops.provenance").is_file());
+    fs::copy(example.join("main.jet"),dir.join("main.jet")).unwrap();
+    let run=Command::new(jet()).args(["run","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"generated Perl binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),fs::read_to_string(example.join("expected.out")).unwrap());
+    fs::write(dir.join("cancel.c"),r#"#include <pthread.h>
+#include <stdint.h>
+#include <unistd.h>
+extern int64_t jet_perl_ops_open(void);
+extern const char* jet_perl_ops_invoke_Sleep(int64_t,const char*,int64_t);
+extern void jet_perl_ops_cancel(int64_t);
+extern void jet_perl_ops_close(int64_t);
+extern int64_t jet_perl_ops_take_error(void);
+static int64_t handle;static int64_t code;
+static void* call(void*unused){(void)unused;jet_perl_ops_invoke_Sleep(handle,"null",60000);code=jet_perl_ops_take_error();return 0;}
+int main(void){handle=jet_perl_ops_open();if(!handle)return 1;pthread_t thread;if(pthread_create(&thread,0,call,0))return 2;usleep(100000);jet_perl_ops_cancel(handle);pthread_join(thread,0);if(code!=3)return 3;int64_t fresh=jet_perl_ops_open();if(!fresh)return 4;jet_perl_ops_close(fresh);return 0;}
+"#).unwrap();
+    let cc=Command::new("cc").arg("cancel.c").args(["-L.jet/bindings/perl","-l:libjet_perl_ops.a","-lpthread","-o","cancel"]).current_dir(&dir).output().unwrap();assert!(cc.status.success(),"Perl cancellation probe link failed:\n{}",String::from_utf8_lossy(&cc.stderr));let cancel=Command::new(dir.join("cancel")).current_dir(&dir).output().unwrap();assert!(cancel.status.success(),"Perl cancellation did not clean the worker: {:?}",cancel.status.code());
+}
+
+#[test]
+fn perl_bind_launders_parse_failure_as_e3208() {
+    if Command::new("perl").arg("-v").output().is_err(){return}
+    let dir=isolated_cwd("perl_bind_invalid");let script=dir.join("broken.pl");fs::write(&script,"sub Broken { if ( }\n").unwrap();
+    let output=Command::new(jet()).args(["inspect","bind","perl"]).arg(&script).args(["--pkg","broken"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(!output.status.success());let stderr=String::from_utf8_lossy(&output.stderr);assert!(stderr.contains("Error [E3208]:"));assert!(!stderr.contains("syntax error at"));assert!(!stderr.contains("broken.pl line"));check_snapshot("bind_perl_invalid_e3208.txt",&scrub(&stderr,&script));
+}
+
 #[cfg(not(target_os="windows"))]
 #[test]
 fn com_bind_rejects_non_windows_before_reading_input() {
