@@ -3593,6 +3593,7 @@ implementation milestone is pending.
 | ID | Question | Needed by |
 | --- | -------- | --------- |
 | D-ECO1 | which project concepts share one semantic graph | **Epoch 4** — Tower #532 |
+| D-ECO-DECL1 | one source shape for packages through JetOS systems | **Epoch 4** — Tower #615 |
 | D-ECO-SOURCE1 | whether one `project.jet` replaces the current role-file division | **Epoch 4** — Tower #610 |
 | D-ECO-EXTENSION1 | how third parties add typed graph vocabulary | **Epoch 4** — Tower #611 |
 | D-ECO-COMPOSE2 | how independent project contributions compose | **Epoch 4** — Tower #605 |
@@ -3602,7 +3603,6 @@ implementation milestone is pending.
 | D-SHAPE-DUNDER2 | who owns the `__name` namespace | **Epoch 3** — Tower #601 |
 | D-SHAPE-MODULEINTERNAL1 | how `module _name` participates in discovery | **Epoch 3** — Tower #602 |
 | D-SHAPE-RESOURCE1 | how an owned resource releases before its surrounding scope | **Epoch 3** — Tower #557 |
-| D-SHAPE-RESOURCEFINISH1 | receiver state after fallible protocol completion | **Epoch 3** — Tower #612 |
 | D-SHAPE-VIEW1 | how source creates a read-only non-owning view | **Epoch 3** — Tower #567 |
 | D-SHAPE-VIEWMUT1 | how source creates an exclusive mutable view | **Epoch 3** — Tower #613 |
 | D-SHAPE-QUANTITY1 | who owns dimensional algebra | **Epoch 3** — Tower #576 |

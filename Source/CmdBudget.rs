@@ -14,6 +14,9 @@ use std::io::{IsTerminal, Write};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+const SELECTED_BUILD_DEADLINE: Duration = Duration::from_secs(120);
+const PROVIDER_DEADLINE: Duration = Duration::from_secs(30);
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Annotations { Auto, None, Github }
 
@@ -374,7 +377,7 @@ fn build_report(root:&Path, store:&BudgetStore, bundle:&jet::AST::ProgramBundle,
         };
         let requests=indices.iter().map(|index|ProviderSpec{budget_hash:bases[*index].1.clone(),metric:ordered[*index].spec.metric.clone()}).collect();
         let request=ProviderRequest{schema:"jet.provider-request".into(),version:1,request_id:stable_id(&workload),provider_hash:stable_id(provider),context_hash:stable_id(&context_subject),specs:requests,workload,policy:CanonicalJson::Null};
-        let evidence=registry.collect(kind,&request,Duration::from_secs(30)).map_err(|e|e.reason)?;
+        let evidence=registry.collect(kind,&request,PROVIDER_DEADLINE).map_err(|e|e.reason)?;
         for event in evidence.events {
             match event {
                 ProviderEvent::Sample{spec,value,..}=>{
@@ -625,7 +628,7 @@ fn build_selected_artifact(root:&Path,entry:&Path)->Result<(PathBuf,u64,String),
     // Building prepares provider input; it is not provider measurement. Give
     // a real native build its own bounded deadline while BuildArtifact
     // collection below keeps the tighter production 30-second deadline.
-    let deadline=Instant::now()+Duration::from_secs(120);
+    let deadline=Instant::now()+SELECTED_BUILD_DEADLINE;
     loop{match child.try_wait(){Ok(Some(status))if status.success()=>break,Ok(Some(status))=>return Err(format!("selected artifact build exited with {status}")),Ok(None)if Instant::now()<deadline=>std::thread::sleep(Duration::from_millis(5)),Ok(None)=>{terminate_group(&mut child);return Err("selected artifact build exceeded 120 second build deadline".into())},Err(e)=>{terminate_group(&mut child);return Err(format!("cannot supervise selected artifact build: {e}"))}}}
     let stem=entry.file_stem().and_then(|v|v.to_str()).ok_or("selected artifact entry has no UTF-8 stem")?;let artifact=root.join("build").join(if cfg!(windows){format!("{stem}.exe")}else{stem.into()});let metadata=std::fs::symlink_metadata(&artifact).map_err(|e|format!("selected artifact was not produced: {e}"))?;if metadata.file_type().is_symlink()||!metadata.is_file(){return Err("selected artifact is not a regular file".into())}let digest=jet::SHA256::sha256_file_hex(&artifact).map_err(|e|format!("cannot hash selected artifact: {e}"))?;Ok((artifact,metadata.len(),digest))
 }
@@ -764,3 +767,15 @@ fn tool_failure(options:&Options,why:&str)->i32{if options.json{let diagnostic=C
 fn tool_failure_with_report(options:&Options,id:&str,why:&str)->i32{if options.json{return tool_failure(options,why)}eprintln!("Error [E2908]: performance budget operation failed\n Why: {why}\n Fix: correct the named failure and retry\nbudget command failed · report {id} was not accepted");1}
 
 fn timestamp_now()->String{let elapsed=SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();let seconds=elapsed.as_secs()as i64;let(days,second)=(seconds.div_euclid(86400),seconds.rem_euclid(86400));let z=days+719468;let era=if z>=0{z}else{z-146096}/146097;let doe=z-era*146097;let yoe=(doe-doe/1460+doe/36524-doe/146096)/365;let mut year=yoe+era*400;let doy=doe-(365*yoe+yoe/4-yoe/100);let mp=(5*doy+2)/153;let day=doy-(153*mp+2)/5+1;let month=mp+if mp<10{3}else{-9};year+=if month<=2{1}else{0};format!("{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{:09}Z",second/3600,(second%3600)/60,second%60,elapsed.subsec_nanos())}
+
+#[cfg(test)]
+mod tests {
+    use super::{PROVIDER_DEADLINE, SELECTED_BUILD_DEADLINE};
+    use std::time::Duration;
+
+    #[test]
+    fn provider_deadline_stays_stricter_than_artifact_build_prep() {
+        assert_eq!(PROVIDER_DEADLINE, Duration::from_secs(30));
+        assert_eq!(SELECTED_BUILD_DEADLINE, Duration::from_secs(120));
+    }
+}
