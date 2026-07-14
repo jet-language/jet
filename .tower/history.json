@@ -21645,6 +21645,62 @@
       "outcome": "A",
       "ratifiedAt": "2026-07-11",
       "retiredAt": "2026-07-14T00:25:48.598Z"
+    },
+    {
+      "id": "D-JPK-VARIANT1",
+      "cardId": "c0hgr4pk",
+      "group": "tooling",
+      "title": "Package variant vocabulary",
+      "gist": "Choose the axes used to match package producers and consumers.",
+      "explainer": "Fable hybrid review: A pushes linkage/ABI/role back into ad-hoc recipes and recreates the vcpkg triplet explosion; B is Gradle's open-attribute ambiguity, an explicitly rejected anti-pattern. C names the right axes but omits the matching/defaulting law where Gradle actually hurts (ambiguous candidates), never binds the selected variant into action keys and the lock (JP15), and gives the closed set no evolution path. The hybrid states total defaults, deterministic tie-break with a naming diagnostic, lock/key entry, and ballot-gated axis growth.",
+      "story": "George needs a static musl library for an ARM target, a native code generator for macOS, and a shared debug library for local tests. Variant facts must be precise and finite.",
+      "inWild": "need: role .Target, os .Linux, arch .Aarch64, libc .Musl, linkage .Static\nselected: exact compatible artifact",
+      "detail": "Captures real compatibility without Gradle-style unbounded ambiguity.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Platform only",
+          "detail": "Selection considers OS and architecture; recipes handle linkage, ABI, runtime, and role ad hoc.",
+          "code": "variant: aarch64-linux"
+        },
+        {
+          "key": "B",
+          "name": "Open attribute maps",
+          "detail": "Providers and packages invent arbitrary keys; a generic matcher picks compatible maps.",
+          "code": "variant: { os: linux, fooMode: turbo, abiX: 7 }"
+        },
+        {
+          "key": "C",
+          "name": "Typed core axes plus namespaced provider facts",
+          "detail": "Closed native axes: build/host/target role, OS, arch, runtime/libc, linkage, ABI, artifact kind, feature set. Providers may preserve extra facts, but native selection uses them only after explicit mapping.",
+          "code": "variant: Variant.{ role: .Target, os: .Linux, arch: .Aarch64, linkage: .Static }\nproviderFacts: { conan.compiler.runtime: \"libstdc++11\" }"
+        },
+        {
+          "key": "D",
+          "name": "Closed axes, total defaults, deterministic match, ballot-gated growth (hybrid)",
+          "detail": "Native selection uses only the closed typed axes — build/host/target role, OS, arch, runtime/libc, linkage, ABI, artifact kind, feature set — and every axis has a defined default derived from the requesting context, so beginners never write variants. Matching is exact-then-compatible under one total documented order; an ambiguous tie is an E12xx listing the candidates and the first distinguishing axis, never a silent pick. The selected variant enters the action key and the semantic lock. Provider facts persist under namespaced keys and influence selection only through explicit variant_map declarations in source policy; adding a native axis requires a decision ballot.",
+          "code": "need: Variant.{ role: .Target, os: .Linux, arch: .Aarch64, libc: .Musl, linkage: .Static }\nselected: openssl 3.2 [static musl aarch64] — exact match, keyed into action + lock\nE12xx: two candidates differ only in conan.compiler.runtime; add variant_map or pin one"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Gradle",
+          "note": "Variant-aware resolution matches producer/consumer attributes.",
+          "code": "Usage, Category, LibraryElements, Bundling"
+        },
+        {
+          "lang": "vcpkg",
+          "note": "Triplets encode platform/linkage/runtime choices.",
+          "code": "x64-windows-static-md"
+        }
+      ],
+      "rec": "D",
+      "status": "ratified",
+      "created": "2026-07-09T20:54:50.957Z",
+      "outcome": "D",
+      "ratifiedAt": "2026-07-10",
+      "draft": false,
+      "retiredAt": "2026-07-14T00:54:59.608Z"
     }
   ],
   "cards": [
@@ -73776,6 +73832,342 @@
       "action": "card.update",
       "ref": "c05o0105",
       "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T03:04:41.822Z",
+      "by": "codex-epoch3-306",
+      "action": "card.claim",
+      "ref": "c05o0105",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T03:07:35.836Z",
+      "by": "codex-epoch3-306",
+      "action": "card.update",
+      "ref": "c05o0105",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T03:07:35.930Z",
+      "by": "codex-epoch3-306",
+      "action": "card.release",
+      "ref": "c05o0105",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T03:45:48.547Z",
+      "by": "fable-impl-521d",
+      "action": "card.update",
+      "ref": "c0a9unm3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T05:09:48.429Z",
+      "by": "fable-impl-521e",
+      "action": "card.update",
+      "ref": "c0a9unm3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T05:29:51.703Z",
+      "by": "fable-impl-521f",
+      "action": "card.update",
+      "ref": "c2sj0bd9",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T05:29:51.835Z",
+      "by": "fable-impl-521f",
+      "action": "card.update",
+      "ref": "c2yj0nk5",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T05:29:51.966Z",
+      "by": "fable-impl-521f",
+      "action": "card.update",
+      "ref": "c2zj0p7p",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T05:29:52.095Z",
+      "by": "fable-impl-521f",
+      "action": "card.update",
+      "ref": "c2iizmyx",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T05:37:29.908Z",
+      "by": "fable-impl-521f",
+      "action": "card.criteria-meet",
+      "ref": "c02wa1dn",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-13T05:37:30.016Z",
+      "by": "fable-impl-521f",
+      "action": "card.criteria-meet",
+      "ref": "c02wa1dn",
+      "note": "#8"
+    },
+    {
+      "at": "2026-07-13T05:37:30.122Z",
+      "by": "fable-impl-521f",
+      "action": "card.criteria-meet",
+      "ref": "c02wa1dn",
+      "note": "#9"
+    },
+    {
+      "at": "2026-07-13T05:38:49.222Z",
+      "by": "fable-impl-521f",
+      "action": "card.update",
+      "ref": "c0a9unm3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T05:39:18.264Z",
+      "by": "fable-impl-521f",
+      "action": "card.update",
+      "ref": "c02wa1dn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T06:41:59.576Z",
+      "by": "fable-impl-521g",
+      "action": "card.update",
+      "ref": "c0a9unm3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T06:43:53.012Z",
+      "by": "fable-main",
+      "action": "card.add",
+      "ref": "c0awpem6",
+      "note": "R12 divergence: compile_with_path rejects user-derive markers jet run accepts (E0927)"
+    },
+    {
+      "at": "2026-07-13T06:43:53.177Z",
+      "by": "fable-main",
+      "action": "card.add",
+      "ref": "c0dnbc5s",
+      "note": "dev suite parallel flake: core.perf fidelity signal is a process-global static"
+    },
+    {
+      "at": "2026-07-13T07:13:27.981Z",
+      "by": "fable-impl-528",
+      "action": "card.claim",
+      "ref": "c0awpem6",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T07:29:16.803Z",
+      "by": "fable-impl-528",
+      "action": "card.update",
+      "ref": "c0awpem6",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-13T07:29:45.409Z",
+      "by": "fable-impl-528",
+      "action": "card.update",
+      "ref": "c0awpem6",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T07:30:21.012Z",
+      "by": "fable-impl-528",
+      "action": "card.criteria-add",
+      "ref": "c0awpem6",
+      "note": "#1 sema_soundness full target green (7 tests) after fixture syn"
+    },
+    {
+      "at": "2026-07-13T07:30:36.623Z",
+      "by": "fable-impl-528",
+      "action": "card.criteria-add",
+      "ref": "c0awpem6",
+      "note": "#2 golden examples_compile_and_run green for comptime/comptime_"
+    },
+    {
+      "at": "2026-07-13T07:30:41.306Z",
+      "by": "fable-main",
+      "action": "decision.add",
+      "ref": "D-OPDEF1",
+      "note": "User-defined operators for structs and classes"
+    },
+    {
+      "at": "2026-07-13T07:30:52.230Z",
+      "by": "fable-impl-528",
+      "action": "card.criteria-add",
+      "ref": "c0awpem6",
+      "note": "#3 root cause documented: no entrypoint divergence found; premi"
+    },
+    {
+      "at": "2026-07-13T07:31:18.021Z",
+      "by": "fable-impl-528",
+      "action": "card.criteria-meet",
+      "ref": "c0awpem6",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-13T07:31:33.545Z",
+      "by": "fable-impl-528",
+      "action": "card.criteria-meet",
+      "ref": "c0awpem6",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-13T07:31:49.155Z",
+      "by": "fable-impl-528",
+      "action": "card.criteria-meet",
+      "ref": "c0awpem6",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-13T08:06:38.198Z",
+      "by": "jet-verify-close2",
+      "action": "card.criteria-verify",
+      "ref": "c02wa1dn",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-13T08:06:53.791Z",
+      "by": "jet-verify-close2",
+      "action": "card.criteria-verify",
+      "ref": "c02wa1dn",
+      "note": "#8"
+    },
+    {
+      "at": "2026-07-13T08:07:09.675Z",
+      "by": "jet-verify-close2",
+      "action": "card.criteria-verify",
+      "ref": "c02wa1dn",
+      "note": "#9"
+    },
+    {
+      "at": "2026-07-13T08:07:30.639Z",
+      "by": "jet-verify-close2",
+      "action": "card.criteria-verify",
+      "ref": "c0awpem6",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-13T08:07:49.307Z",
+      "by": "jet-verify-close2",
+      "action": "card.criteria-verify",
+      "ref": "c0awpem6",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-13T08:08:04.522Z",
+      "by": "jet-verify-close2",
+      "action": "card.criteria-verify",
+      "ref": "c0awpem6",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-13T08:08:46.180Z",
+      "by": "jet-verify-close2",
+      "action": "card.update",
+      "ref": "c0a9unm3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T08:10:22.153Z",
+      "by": "fable-main",
+      "action": "card.criteria-meet",
+      "ref": "c0a9unm3",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-13T08:10:22.262Z",
+      "by": "fable-main",
+      "action": "card.criteria-meet",
+      "ref": "c0a9unm3",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-13T08:10:22.373Z",
+      "by": "fable-main",
+      "action": "card.criteria-meet",
+      "ref": "c0a9unm3",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-13T08:10:22.480Z",
+      "by": "fable-main",
+      "action": "card.criteria-meet",
+      "ref": "c0a9unm3",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-13T08:10:22.584Z",
+      "by": "fable-main",
+      "action": "card.criteria-meet",
+      "ref": "c0a9unm3",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-13T08:10:22.688Z",
+      "by": "fable-main",
+      "action": "card.criteria-meet",
+      "ref": "c0a9unm3",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-13T08:11:00.818Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c02wa1dn",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T08:11:00.940Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0awpem6",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T08:11:11.282Z",
+      "by": "jet-verify-close2",
+      "action": "card.criteria-verify",
+      "ref": "c0a9unm3",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-13T08:11:26.812Z",
+      "by": "jet-verify-close2",
+      "action": "card.criteria-verify",
+      "ref": "c0a9unm3",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-13T08:11:41.641Z",
+      "by": "jet-verify-close2",
+      "action": "card.criteria-verify",
+      "ref": "c0a9unm3",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-13T08:12:06.396Z",
+      "by": "jet-verify-close2",
+      "action": "card.criteria-verify",
+      "ref": "c0a9unm3",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-13T08:12:55.882Z",
+      "by": "jet-verify-close2",
+      "action": "card.criteria-verify",
+      "ref": "c0a9unm3",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-13T08:14:28.655Z",
+      "by": "jet-verify-close2",
+      "action": "card.criteria-verify",
+      "ref": "c0a9unm3",
+      "note": "#6"
     }
   ]
 }
