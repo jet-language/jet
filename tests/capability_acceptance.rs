@@ -17,6 +17,96 @@ fn read(rel: &str) -> String {
     fs::read_to_string(root().join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"))
 }
 
+fn skip_jet_string(bytes: &[u8], quote: usize) -> usize {
+    let mut i = quote + 1;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' => i = (i + 2).min(bytes.len()),
+            b'"' => return i + 1,
+            _ => i += 1,
+        }
+    }
+    bytes.len()
+}
+
+fn jet_code_without_line_comments_or_strings(source: &str) -> String {
+    let bytes = source.as_bytes();
+    let mut active = String::with_capacity(source.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'/') {
+            while i < bytes.len() && bytes[i] != b'\n' {
+                i += 1;
+            }
+            active.push('\n');
+        } else if bytes[i] == b'"' {
+            i = skip_jet_string(bytes, i);
+            active.push_str("\"\"");
+        } else {
+            active.push(bytes[i] as char);
+            i += 1;
+        }
+    }
+    active
+}
+
+fn has_executable_drop_with_reason(source: &str) -> bool {
+    let bytes = source.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'/') {
+            while i < bytes.len() && bytes[i] != b'\n' {
+                i += 1;
+            }
+            continue;
+        }
+        if bytes[i] == b'"' {
+            i = skip_jet_string(bytes, i);
+            continue;
+        }
+        if bytes[i..].starts_with(b".drop") {
+            let mut cursor = i + ".drop".len();
+            if bytes
+                .get(cursor)
+                .is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'_')
+            {
+                i += 1;
+                continue;
+            }
+            while bytes.get(cursor).is_some_and(|b| b.is_ascii_whitespace()) {
+                cursor += 1;
+            }
+            if bytes.get(cursor) != Some(&b'(') {
+                i += 1;
+                continue;
+            }
+            cursor += 1;
+            while bytes.get(cursor).is_some_and(|b| b.is_ascii_whitespace()) {
+                cursor += 1;
+            }
+            if bytes.get(cursor) != Some(&b'"') {
+                i += 1;
+                continue;
+            }
+            let reason_start = cursor + 1;
+            let after_reason = skip_jet_string(bytes, cursor);
+            if after_reason <= reason_start + 1 {
+                i += 1;
+                continue;
+            }
+            cursor = after_reason;
+            while bytes.get(cursor).is_some_and(|b| b.is_ascii_whitespace()) {
+                cursor += 1;
+            }
+            if bytes.get(cursor) == Some(&b')') {
+                return true;
+            }
+        }
+        i += 1;
+    }
+    false
+}
+
 fn jet_bin() -> PathBuf {
     let from_env = std::env::var_os("CARGO_BIN_EXE_jet").map(PathBuf::from);
     if let Some(p) = from_env {
@@ -65,12 +155,13 @@ fn run_example(rel: &str) -> String {
 #[test]
 fn derive_source_reentry() {
     // CAPABILITY_CLAIM: claim.metaprogramming / source-reentry
-    let registration = read("crates/jet-sema/src/Sema/Registration.rs");
+    let serde_registration = read("crates/jet-sema/src/Sema/Registration/Serde.rs");
     let codegen_items = read("crates/jet-codegen/src/Codegen/Items.rs");
     assert!(
-        registration.contains("parse_builtin_serde_fragment")
-            && registration.contains("impl {}.Encode")
-            && registration.contains("impl {}.Decode"),
+        serde_registration.contains("source.push_str(&format!(\"impl {}.Encode")
+            && serde_registration.contains("source.push_str(&format!(\"impl {}.Decode")
+            && serde_registration.contains("parse_builtin_serde_fragment(&source")
+            && serde_registration.contains("crate::Parser::parse(&tokens)"),
         "built-in codecs must emit ordinary Jet impl fragments and parse them"
     );
     for retired in [
@@ -79,7 +170,7 @@ fn derive_source_reentry() {
         "trait_impls.extend",
     ] {
         assert!(
-            !registration.contains(retired),
+            !serde_registration.contains(retired),
             "retired AST transplant path remains: {retired}"
         );
     }
@@ -133,7 +224,19 @@ fn audited_discard() {
 
     let example = read("examples/features/errors/discard_fallible.jet");
     assert!(
-        example.contains(".drop(\"") && !example.contains("#Suppress(MustUse) {"),
+        !has_executable_drop_with_reason(
+            "// fake.drop(\"comment\")\nprint(\"fake.drop(\\\"string\\\")\")"
+        ),
+        "discard probe must ignore comments and string contents"
+    );
+    let active_code = jet_code_without_line_comments_or_strings(&example);
+    let compact_active_code: String = active_code
+        .chars()
+        .filter(|ch| !ch.is_whitespace())
+        .collect();
+    assert!(
+        has_executable_drop_with_reason(&example)
+            && !compact_active_code.contains("#Suppress(MustUse){"),
         "I5 example must exercise the sole discard channel"
     );
     let expected = read("examples/features/expected/errors/discard_fallible.out");

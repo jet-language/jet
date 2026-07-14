@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 600,
-    "rev": 6562,
+    "rev": 6566,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -17873,40 +17873,46 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P0",
       "plan": "Repair the acceptance probes to inspect the actual serde source-reentry module and distinguish active Jet lines from comments. Keep the capability claims non-vacuous: prove generated impl text is parsed through Parser, prove an executable .drop(reason) call exists, and prove no active #Suppress block exists. Run capability acceptance; parent full verification.",
       "blockedBy": [],
       "workOrder": 0,
       "assignee": "terra-capability-probes",
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-14",
+          "by": "terra-capability-probes",
+          "text": "Repaired two drifted structural probes without product changes. Focused derive/discard lanes and full capability_acceptance target pass. Ready for independent review and parent full suite."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "Serde source-reentry acceptance reads the canonical Registration/Serde.rs implementation and proves generated Encode/Decode impl source reaches Parser::parse; retired AST/Rust synthesis paths remain absent.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "terra-capability-probes",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-14T21:45:27.092Z"
+          "evidence": "Acceptance reads Registration/Serde.rs and asserts generated Encode/Decode impl source reaches parse_builtin_serde_fragment and Parser::parse; retired AST transplant and direct Rust synthesis names remain absent.",
+          "at": "2026-07-14T21:51:00.114Z"
         },
         {
           "n": 2,
           "text": "Audited-discard acceptance ignores comments when checking active syntax, proves at least one executable .drop(reason) call, and rejects any active #Suppress(MustUse) block.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "terra-capability-probes",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-14T21:45:27.186Z"
+          "evidence": "Acceptance lexical scanner ignores line comments and string contents, requires executable .drop with a nonempty literal reason, rejects active #Suppress(MustUse), and retains golden/UI assertions.",
+          "at": "2026-07-14T21:51:00.212Z"
         },
         {
           "n": 3,
           "text": "All capability_acceptance tests pass without product, protocol, diagnostic, dependency, unsafe, or user-syntax changes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "terra-capability-probes",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-14T21:45:27.283Z"
+          "evidence": "cargo test --test capability_acceptance: 7 passed; test-only change in tests/capability_acceptance.rs.",
+          "at": "2026-07-14T21:51:00.306Z"
         },
         {
           "n": 4,
@@ -38945,6 +38951,34 @@
   ],
   "events": [
     {
+      "at": "2026-07-14T21:51:00.421Z",
+      "by": "terra-capability-probes",
+      "action": "card.update",
+      "ref": "c0ckmp1o",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-14T21:51:00.306Z",
+      "by": "terra-capability-probes",
+      "action": "card.criteria-meet",
+      "ref": "c0ckmp1o",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-14T21:51:00.212Z",
+      "by": "terra-capability-probes",
+      "action": "card.criteria-meet",
+      "ref": "c0ckmp1o",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-14T21:51:00.114Z",
+      "by": "terra-capability-probes",
+      "action": "card.criteria-meet",
+      "ref": "c0ckmp1o",
+      "note": "#1"
+    },
+    {
       "at": "2026-07-14T21:45:27.496Z",
       "by": "terra-capability-probes",
       "action": "card.claim",
@@ -42415,34 +42449,6 @@
       "action": "card.update",
       "ref": "c07d1t1q",
       "note": "phase"
-    },
-    {
-      "at": "2026-07-14T17:00:56.445Z",
-      "by": "codex",
-      "action": "decision.add",
-      "ref": "D-SHAPE-CONTEXT1",
-      "note": "What should a hash marker always tell the reader? (draft)"
-    },
-    {
-      "at": "2026-07-14T17:00:56.355Z",
-      "by": "codex",
-      "action": "card.add",
-      "ref": "c07d1t1q",
-      "note": "Choose the meaning of hash markers"
-    },
-    {
-      "at": "2026-07-14T17:00:56.257Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-SHAPE2",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T17:00:56.154Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c083ne8x",
-      "note": "title,body,kind,track,epoch,priority,plan,refs,phase,workOrder"
     }
   ],
   "nextNum": 368,
