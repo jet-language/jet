@@ -813,6 +813,28 @@ fn handle_connection(
     }
 
     let path = target.split('?').next().unwrap_or("/");
+    if path == "/__jet_canvas/live" {
+        if method != "GET" {
+            return method_not_allowed(&mut stream);
+        }
+        let pid = query_param(target, "pid")
+            .and_then(|value| value.parse::<u32>().ok())
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "missing live pid"))?;
+        return match crate::LiveInspect::read(pid) {
+            Ok(snapshot) => write_response(
+                &mut stream,
+                "200 OK",
+                "application/json; charset=utf-8",
+                snapshot.as_bytes(),
+            ),
+            Err(message) => write_response(
+                &mut stream,
+                "404 Not Found",
+                "text/plain; charset=utf-8",
+                message.as_bytes(),
+            ),
+        };
+    }
     if let Some(asset) = crate::canvas_asset(method, target, path) {
         return write_response(&mut stream, asset.status, asset.content_type, asset.body.as_bytes());
     }

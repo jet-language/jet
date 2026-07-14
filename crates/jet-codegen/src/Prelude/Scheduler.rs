@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 
 type Job = Box<dyn FnOnce() + Send>;
 
+
 thread_local! {
     static JET_SCHEDULER_CATCHING_PANIC: std::cell::Cell<bool> =
         const { std::cell::Cell::new(false) };
@@ -267,6 +268,7 @@ impl ParkSlot {
 pub struct JetTaskControl {
     pub paused: AtomicBool,
     pub cancelled: AtomicBool,
+    observe_id: AtomicUsize,
     park: Arc<ParkSlot>,
     cancel_waiters: Mutex<Vec<std::sync::Weak<ParkSlot>>>,
 }
@@ -276,6 +278,7 @@ impl JetTaskControl {
         Arc::new(JetTaskControl {
             paused: AtomicBool::new(false),
             cancelled: AtomicBool::new(false),
+            observe_id: AtomicUsize::new(0),
             park: ParkSlot::new(),
             cancel_waiters: Mutex::new(Vec::new()),
         })
@@ -283,15 +286,33 @@ impl JetTaskControl {
 
     pub fn pause(&self) {
         self.paused.store(true, Ordering::Relaxed);
+        if let Some(registry) = jet_observe_registry() {
+            let id = self.observe_id.load(Ordering::Relaxed);
+            if let Some(task) = registry.tasks.lock().unwrap().get_mut(&id) {
+                task.state = "paused";
+            }
+        }
     }
 
     pub fn resume(&self) {
         self.paused.store(false, Ordering::Relaxed);
+        if let Some(registry) = jet_observe_registry() {
+            let id = self.observe_id.load(Ordering::Relaxed);
+            if let Some(task) = registry.tasks.lock().unwrap().get_mut(&id) {
+                task.state = "running";
+            }
+        }
         self.park.wake();
     }
 
     pub fn cancel(&self) {
         self.cancelled.store(true, Ordering::Relaxed);
+        if let Some(registry) = jet_observe_registry() {
+            let id = self.observe_id.load(Ordering::Relaxed);
+            if let Some(task) = registry.tasks.lock().unwrap().get_mut(&id) {
+                task.cancelled = true;
+            }
+        }
         self.park.wake();
         for waiter in self.cancel_waiters.lock().unwrap().drain(..) {
             if let Some(waiter) = waiter.upgrade() {
@@ -339,6 +360,7 @@ fn current_task_control() -> Option<Arc<JetTaskControl>> {
 
 /// Park at a yield point; honors pause/cancel on the running task.
 pub fn jet_scheduler_yield(wait_kind: &str, slot: &Arc<ParkSlot>, timeout: Option<Duration>) {
+    jet_observe_task_update("blocked", wait_kind, jet_deadline_remaining_ms());
     let ctrl = current_task_control();
     // D-CANCELMODEL1=C: inside a shielded region, cancel/deadline are deferred to
     // region exit — this wait point behaves as if the task were not cancelled, so
@@ -400,6 +422,7 @@ pub fn jet_scheduler_yield(wait_kind: &str, slot: &Arc<ParkSlot>, timeout: Optio
         }
         ctrl.wait_while_paused();
     }
+    jet_observe_task_update("running", "", jet_deadline_remaining_ms());
 }
 
 pub fn jet_scheduler_wake(slot: &ParkSlot) {
@@ -1250,6 +1273,21 @@ struct ChannelState<T> {
 
 pub(crate) struct ChannelInner<T> {
     state: Mutex<ChannelState<T>>,
+    observe_id: usize,
+}
+
+fn jet_observe_channel_update<T>(id: usize, state: &ChannelState<T>) {
+    let Some(registry) = jet_observe_registry() else { return };
+    registry.channels.lock().unwrap().insert(
+        id,
+        JetObserveChannel {
+            depth: state.queue.len(),
+            capacity: state.capacity,
+            send_waiters: state.send_waiters.len(),
+            recv_waiters: state.recv_waiters.len(),
+            closed: state.closed,
+        },
+    );
 }
 
 pub struct JetSchedulerChannel<T> {
@@ -1262,7 +1300,10 @@ pub struct JetSchedulerChannel<T> {
 // `JetSchedulerSender`'s manual impl right below.
 impl<T> Clone for JetSchedulerChannel<T> {
     fn clone(&self) -> Self {
-        self.inner.state.lock().unwrap().receiver_count += 1;
+        let mut state = self.inner.state.lock().unwrap();
+        state.receiver_count += 1;
+        jet_observe_channel_update(self.inner.observe_id, &state);
+        drop(state);
         JetSchedulerChannel {
             inner: self.inner.clone(),
         }
@@ -1274,12 +1315,14 @@ impl<T> Drop for JetSchedulerChannel<T> {
         let send_waiters = {
             let mut st = self.inner.state.lock().unwrap();
             st.receiver_count = st.receiver_count.saturating_sub(1);
-            if st.receiver_count == 0 {
+            let waiters = if st.receiver_count == 0 {
                 st.closed = true;
                 std::mem::take(&mut st.send_waiters)
             } else {
                 Vec::new()
-            }
+            };
+            jet_observe_channel_update(self.inner.observe_id, &st);
+            waiters
         };
         for slot in send_waiters {
             slot.wake();
@@ -1297,7 +1340,10 @@ impl<T: Send> JetSchedulerChannel<T> {
     }
 
     fn with_capacity(capacity: Option<usize>) -> Self {
-        JetSchedulerChannel {
+        let observe_id = jet_observe_registry()
+            .map(|registry| registry.next_channel.fetch_add(1, Ordering::Relaxed))
+            .unwrap_or(0);
+        let channel = JetSchedulerChannel {
             inner: Arc::new(ChannelInner {
                 state: Mutex::new(ChannelState {
                     queue: VecDeque::new(),
@@ -1308,12 +1354,21 @@ impl<T: Send> JetSchedulerChannel<T> {
                     sender_count: 0,
                     receiver_count: 1,
                 }),
+                observe_id,
             }),
+        };
+        if observe_id != 0 {
+            let state = channel.inner.state.lock().unwrap();
+            jet_observe_channel_update(observe_id, &state);
         }
+        channel
     }
 
     pub fn sender(&self) -> JetSchedulerSender<T> {
-        self.inner.state.lock().unwrap().sender_count += 1;
+        let mut state = self.inner.state.lock().unwrap();
+        state.sender_count += 1;
+        jet_observe_channel_update(self.inner.observe_id, &state);
+        drop(state);
         JetSchedulerSender {
             inner: self.inner.clone(),
         }
@@ -1338,18 +1393,22 @@ impl<T: Send> JetSchedulerChannel<T> {
                     if let Some(slot) = st.send_waiters.pop() {
                         slot.wake();
                     }
+                    jet_observe_channel_update(self.inner.observe_id, &st);
                     return Some(v);
                 }
                 if st.closed {
+                    jet_observe_channel_update(self.inner.observe_id, &st);
                     return None;
                 }
                 st.recv_waiters.push(slot.clone());
+                jet_observe_channel_update(self.inner.observe_id, &st);
                 true
             };
             if parked {
                 jet_scheduler_yield("channel receive", &slot, None);
                 let mut st = self.inner.state.lock().unwrap();
                 st.recv_waiters.retain(|w| !Arc::ptr_eq(w, &slot));
+                jet_observe_channel_update(self.inner.observe_id, &st);
             }
         }
     }
@@ -1362,6 +1421,7 @@ impl<T: Send> JetSchedulerChannel<T> {
                 slot.wake();
             }
         }
+        jet_observe_channel_update(self.inner.observe_id, &st);
         out
     }
 
@@ -1369,10 +1429,12 @@ impl<T: Send> JetSchedulerChannel<T> {
         let (recv_waiters, send_waiters) = {
             let mut st = self.inner.state.lock().unwrap();
             st.closed = true;
-            (
+            let waiters = (
                 std::mem::take(&mut st.recv_waiters),
                 std::mem::take(&mut st.send_waiters),
-            )
+            );
+            jet_observe_channel_update(self.inner.observe_id, &st);
+            waiters
         };
         for w in recv_waiters.into_iter().chain(send_waiters) {
             w.wake();
@@ -1386,7 +1448,10 @@ pub struct JetSchedulerSender<T> {
 
 impl<T> Clone for JetSchedulerSender<T> {
     fn clone(&self) -> Self {
-        self.inner.state.lock().unwrap().sender_count += 1;
+        let mut state = self.inner.state.lock().unwrap();
+        state.sender_count += 1;
+        jet_observe_channel_update(self.inner.observe_id, &state);
+        drop(state);
         JetSchedulerSender {
             inner: self.inner.clone(),
         }
@@ -1398,12 +1463,14 @@ impl<T> Drop for JetSchedulerSender<T> {
         let recv_waiters = {
             let mut st = self.inner.state.lock().unwrap();
             st.sender_count = st.sender_count.saturating_sub(1);
-            if st.sender_count == 0 {
+            let waiters = if st.sender_count == 0 {
                 st.closed = true;
                 std::mem::take(&mut st.recv_waiters)
             } else {
                 Vec::new()
-            }
+            };
+            jet_observe_channel_update(self.inner.observe_id, &st);
+            waiters
         };
         for slot in recv_waiters {
             slot.wake();
@@ -1428,16 +1495,19 @@ impl<T: Send> JetSchedulerSender<T> {
             let wake = {
                 let mut st = self.inner.state.lock().unwrap();
                 if st.closed || st.receiver_count == 0 {
+                    jet_observe_channel_update(self.inner.observe_id, &st);
                     return false;
                 }
                 let full = st.capacity.is_some_and(|cap| st.queue.len() >= cap);
-                if full {
+                let wake = if full {
                     st.send_waiters.push(slot.clone());
                     None
                 } else {
                     st.queue.push_back(value.take().expect("channel send value missing"));
                     st.recv_waiters.pop()
-                }
+                };
+                jet_observe_channel_update(self.inner.observe_id, &st);
+                wake
             };
             if let Some(slot) = wake {
                 jet_scheduler_wake(&slot);
@@ -1448,6 +1518,7 @@ impl<T: Send> JetSchedulerSender<T> {
             jet_scheduler_yield("channel send", &slot, None);
             let mut st = self.inner.state.lock().unwrap();
             st.send_waiters.retain(|w| !Arc::ptr_eq(w, &slot));
+            jet_observe_channel_update(self.inner.observe_id, &st);
         }
     }
 }
@@ -1721,6 +1792,7 @@ impl Scheduler {
     fn worker_loop(self: &Arc<Self>, id: usize) {
         loop {
             if let Some(job) = self.take_work(id) {
+                JET_OBSERVE_QUEUED.fetch_sub(1, Ordering::Relaxed);
                 self.live.fetch_add(1, Ordering::Relaxed);
                 job();
                 self.live.fetch_sub(1, Ordering::Relaxed);
@@ -1739,6 +1811,7 @@ impl Scheduler {
     }
 
     fn submit(self: &Arc<Self>, job: Job) {
+        JET_OBSERVE_QUEUED.fetch_add(1, Ordering::Relaxed);
         self.global.lock().unwrap().push_back(job);
         self.notify.notify_one();
     }
@@ -1762,6 +1835,7 @@ fn scheduler() -> Arc<Scheduler> {
     SCHEDULER
         .get_or_init(|| {
             let n = worker_count();
+            JET_OBSERVE_WORKERS.store(n, Ordering::Relaxed);
             let sched = Arc::new(Scheduler {
                 workers: (0..n)
                     .map(|_| WorkerSlot {
@@ -1998,8 +2072,34 @@ where
     F: FnOnce() -> T + Send + 'static,
     T: Send + 'static,
 {
+    let parent = JET_OBSERVE_TASK_ID.with(|current| current.get());
+    let observe_id = jet_observe_registry()
+        .map(|registry| {
+            let id = registry.next_task.fetch_add(1, Ordering::Relaxed);
+            registry.tasks.lock().unwrap().insert(
+                id,
+                JetObserveTask {
+                    parent,
+                    state: "queued",
+                    wait: String::new(),
+                    deadline_ms: None,
+                    cancelled: false,
+                },
+            );
+            id
+        })
+        .unwrap_or(0);
+    control.observe_id.store(observe_id, Ordering::Relaxed);
     let (tx, rx) = std::sync::mpsc::sync_channel(1);
     scheduler().submit(Box::new(move || {
+        if observe_id != 0 {
+            JET_OBSERVE_TASK_ID.with(|current| current.set(observe_id));
+            if let Some(registry) = jet_observe_registry() {
+                if let Some(task) = registry.tasks.lock().unwrap().get_mut(&observe_id) {
+                    task.state = "running";
+                }
+            }
+        }
         jet_scheduler_set_task_control(Some(control.clone()));
         jet_scheduler_task_panic_enter();
         control.wait_while_paused();
@@ -2008,19 +2108,26 @@ where
         if control.paused.load(Ordering::Relaxed) && control.cancelled.load(Ordering::Relaxed) {
             jet_scheduler_task_panic_leave();
             jet_scheduler_set_task_control(None);
+            if let Some(registry) = jet_observe_registry() {
+                registry.tasks.lock().unwrap().remove(&observe_id);
+            }
             let _ = tx.send(JetSchedulerResult::Cancelled);
             return;
         }
         let out = jet_scheduler_catch_task_unwind(f);
         jet_scheduler_task_panic_leave();
         jet_scheduler_set_task_control(None);
-        let _ = tx.send(match out {
+        let result = match out {
             Ok(v) => JetSchedulerResult::Value(v),
             // D-CANCELMODEL1=C: a `JetCancelUnwind` payload is a task that unwound at
             // a wait point because it was cancelled — report Cancelled, not Panicked.
             Err(e) if e.is::<JetCancelUnwind>() => JetSchedulerResult::Cancelled,
             Err(_) => JetSchedulerResult::Panicked,
-        });
+        };
+        if let Some(registry) = jet_observe_registry() {
+            registry.tasks.lock().unwrap().remove(&observe_id);
+        }
+        let _ = tx.send(result);
     }));
     JetSchedulerJoin { rx }
 }

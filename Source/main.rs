@@ -962,6 +962,13 @@ fn main() {
         }
     };
 
+    // D-OBSERVE-LIVE1=A: dev sessions expose bounded scheduler facts by
+    // default; other executions opt in explicitly. Generated programs derive
+    // their own PID and publish no payloads or secrets.
+    if cmd == "dev" || raw.iter().any(|arg| arg == "--observe") {
+        std::env::set_var("JET_OBSERVE", "1");
+    }
+
     // If the first word is not in the single CLI registry, try an external
     // `jet-<cmd>` on PATH (D-DX5, cargo/git style), else teach E2101 with a
     // "did you mean".
@@ -1040,6 +1047,38 @@ fn main() {
 
     // Commands with no required positional target.
     match cmd {
+        "live" => {
+            let pid = args
+                .get(1)
+                .and_then(|value| value.parse::<u32>().ok())
+                .unwrap_or_else(|| {
+                    eprintln!("error: jet inspect live needs a process id");
+                    eprintln!(" fix: run jet inspect live --attach <pid>");
+                    exit(ExitCodes::USAGE);
+                });
+            let once = raw.iter().any(|arg| arg == "--once")
+                || mode.json
+                || !std::io::stdout().is_terminal();
+            loop {
+                let snapshot = jet::DevServer::LiveInspect::read(pid).unwrap_or_else(|message| {
+                    eprintln!("error: {message}");
+                    eprintln!(" fix: start the program with --observe, or attach to a jet dev process");
+                    exit(ExitCodes::USER_ERROR);
+                });
+                if mode.json {
+                    println!("{snapshot}");
+                } else {
+                    if !once {
+                        print!("\x1b[2J\x1b[H");
+                    }
+                    print!("{}", jet::DevServer::LiveInspect::render(&snapshot));
+                }
+                if once {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(250));
+            }
+        }
         "budget" => {
             exit(CmdBudget::run(&raw));
         }

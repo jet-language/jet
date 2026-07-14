@@ -69,7 +69,7 @@ pub struct NestedCommandSpec {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HandlerKey {
     Publish, Yank, Keygen, Key, Vendor,
-    Graph, Query, ExplainBuild, Impact, Dossier, Semindex, Expand, Schema, Codemod, Audit, Sbom, Bind,
+    Graph, Query, ExplainBuild, Impact, Dossier, Semindex, Expand, Schema, Codemod, Audit, Sbom, Bind, Live,
     Logs, Search, Info, Outdated,
     Hangar,
     Push, Bridge, Services, Config,
@@ -84,7 +84,7 @@ impl HandlerKey {
             Self::Query => "query", Self::ExplainBuild => "explain-build", Self::Impact => "impact",
             Self::Dossier => "dossier", Self::Semindex => "semindex", Self::Expand => "expand",
             Self::Schema => "schema", Self::Codemod => "codemod", Self::Audit => "audit",
-            Self::Sbom => "sbom", Self::Bind => "bind",
+            Self::Sbom => "sbom", Self::Bind => "bind", Self::Live => "live",
             Self::Logs => "logs", Self::Search => "search", Self::Info => "info", Self::Outdated => "outdated",
             Self::Hangar => "hangar",
             Self::Push => "push", Self::Bridge => "bridge", Self::Services => "services", Self::Config => "config",
@@ -107,6 +107,7 @@ const REGISTRY_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "vendor", summary: "copy all dependencies into vendor/", handler: HandlerKey::Vendor },
 ];
 const INSPECT_ACTIONS: &[NestedCommandSpec] = &[
+    NestedCommandSpec { name: "live", summary: "attach to a running observable Jet process", handler: HandlerKey::Live },
     NestedCommandSpec { name: "graph", summary: "print the typed programmable-build graph", handler: HandlerKey::Graph },
     NestedCommandSpec { name: "query", summary: "query typed semantic and build facts", handler: HandlerKey::Query },
     NestedCommandSpec { name: "explain-build", summary: "explain one build target, action, or file", handler: HandlerKey::ExplainBuild },
@@ -456,6 +457,11 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
     },
     CommandSpec {
+        name: "live",
+        summary: "attach to a running observable Jet process (D-OBSERVE-LIVE1)",
+        headline: false,
+    },
+    CommandSpec {
         name: "graph",
         summary: "print typed programmable-build graph (D-BUILDQUERY1)",
         headline: false,
@@ -569,6 +575,9 @@ pub fn is_canonical_top_level(name: &str) -> bool {
 /// Every global flag the driver understands. Used to flag-check and to suggest
 /// on a typo (E2102), and to complete after `--`.
 pub const FLAGS: &[FlagSpec] = &[
+    FlagSpec { long: "--attach", help: "with inspect live: process id to observe" },
+    FlagSpec { long: "--once", help: "with inspect live: print one snapshot and exit" },
+    FlagSpec { long: "--observe", help: "with run: expose bounded live runtime facts for attachment" },
     FlagSpec { long: "--structural", help: "with diff/merge: compare checked definitions by semantic identity" },
     FlagSpec { long: "--out", help: "with structural merge: write the checked result to this path" },
     FlagSpec { long: "--report", help: "with structural diff/merge: text, json, or editor report" },
@@ -1024,6 +1033,7 @@ mod tests {
             ("inspect", "schema", Schema, "schema", false), ("inspect", "codemod", Codemod, "codemod", false),
             ("inspect", "audit", Audit, "audit", false), ("inspect", "sbom", Sbom, "sbom", false),
             ("inspect", "bind", Bind, "bind", false),
+            ("inspect", "live", Live, "live", false),
             ("inspect", "logs", Logs, "logs", false), ("inspect", "search", Search, "search", false),
             ("inspect", "info", Info, "info", false), ("inspect", "outdated", Outdated, "outdated", false),
             ("hangar", "verify", Hangar, "hangar", true), ("hangar", "repair", Hangar, "hangar", true),

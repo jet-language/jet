@@ -6,6 +6,7 @@ use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 
 pub mod Canvas;
+pub mod LiveInspect;
 pub mod WebHost;
 
 #[derive(Clone, Copy, PartialEq, Eq)]

@@ -18,7 +18,7 @@ mod jet_mem {
     // I6: zero external crates — plain std Rust only.
     // D-LL1: the one vetted lifetime-extension lives here, inside the core.mem
     // helper module; it never leaks into user-visible generated code.
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
 
     /// Arena allocator: grow-only bump buffer. Every value handed to `alloc`
     /// is boxed and kept alive in `chunks` until the arena is reset or freed;
@@ -29,14 +29,17 @@ mod jet_mem {
         // hand out aliases its interior for `'arena`. We never move or drop a
         // box while the arena is borrowed, so the alias stays valid.
         chunks: RefCell<Vec<Box<dyn std::any::Any>>>,
+        bytes: Cell<usize>,
     }
 
     impl JetArena {
         pub fn new() -> Self {
-            JetArena { chunks: RefCell::new(Vec::new()) }
+            super::jet_observe_arena_open();
+            JetArena { chunks: RefCell::new(Vec::new()), bytes: Cell::new(0) }
         }
         pub fn with_capacity(cap: usize) -> Self {
-            JetArena { chunks: RefCell::new(Vec::with_capacity(cap)) }
+            super::jet_observe_arena_open();
+            JetArena { chunks: RefCell::new(Vec::with_capacity(cap)), bytes: Cell::new(0) }
         }
 
         /// Store `val` in the arena and return a mutable view into its storage,
@@ -44,6 +47,9 @@ mod jet_mem {
         /// is tied to `&self`, so the borrow checker keeps the arena alive and
         /// un-reset/un-freed for the whole life of the view.
         pub fn alloc<T: 'static>(&self, val: T) -> &mut T {
+            let bytes = std::mem::size_of::<T>();
+            self.bytes.set(self.bytes.get().saturating_add(bytes));
+            super::jet_observe_arena_alloc(bytes);
             let mut boxed: Box<T> = Box::new(val);
             // Pointer into the box's heap allocation. The box itself is parked
             // in `chunks` (below) and never moved/dropped while borrowed, so
@@ -65,6 +71,9 @@ mod jet_mem {
         /// `&mut self` — the borrow checker forbids calling this while any view
         /// handed out by `alloc` is still live (Jet rejects first: E0632).
         pub fn reset(&mut self) {
+            let allocations = self.chunks.borrow().len();
+            let bytes = self.bytes.replace(0);
+            super::jet_observe_arena_reset(allocations, bytes);
             self.chunks.borrow_mut().clear();
         }
 
@@ -72,6 +81,15 @@ mod jet_mem {
         /// view can outlive it (Jet rejects first: E0632/E0631).
         pub fn free(self) {
             drop(self);
+        }
+    }
+
+    impl Drop for JetArena {
+        fn drop(&mut self) {
+            let allocations = self.chunks.borrow().len();
+            let bytes = self.bytes.get();
+            super::jet_observe_arena_reset(allocations, bytes);
+            super::jet_observe_arena_close();
         }
     }
 

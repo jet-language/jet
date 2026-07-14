@@ -44,6 +44,7 @@ pub use Web::{emit_web, validate_web_tir_support, WebArtifacts, WebTirUnsupporte
 const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core.rs"),
     include_str!("../Prelude/Core/RuntimeControl.rs"),
+    include_str!("../Prelude/Observe.rs"),
 ];
 
 fn push_prelude(out: &mut String) {

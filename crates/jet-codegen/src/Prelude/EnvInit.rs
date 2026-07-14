@@ -23,6 +23,7 @@ fn jet_env_table() -> &'static std::sync::RwLock<JetEnvEntries> {
 
 fn jet_std_env_init() {
     let _ = jet_env_table();
+    jet_observe_runtime_start();
 }
 
 fn jet_env_read() -> std::sync::RwLockReadGuard<'static, JetEnvEntries> {
