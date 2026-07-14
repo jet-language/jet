@@ -23,6 +23,8 @@ pub enum Source {
     Path,
     /// A package from the CRAN R package registry (D-FFI-R1).
     Cran,
+    /// A package from the LuaRocks registry (D-FFI-LUA1).
+    LuaRocks,
     /// A pack-declared named source, e.g. `stable` → a pinned nixpkgs (D-JPK17).
     Named(String),
 }
@@ -35,6 +37,7 @@ impl Source {
             Source::Github => Syntax::REF_SOURCE_GITHUB,
             Source::Path => Syntax::REF_SOURCE_PATH,
             Source::Cran => Syntax::REF_SOURCE_CRAN,
+            Source::LuaRocks => Syntax::REF_SOURCE_LUAROCKS,
             Source::Named(name) => name,
         }
     }
@@ -45,6 +48,7 @@ impl Source {
             || name == Syntax::REF_SOURCE_GITHUB
             || name == Syntax::REF_SOURCE_PATH
             || name == Syntax::REF_SOURCE_CRAN
+            || name == Syntax::REF_SOURCE_LUAROCKS
     }
 
     fn builtin(name: &str) -> Option<Source> {
@@ -53,6 +57,7 @@ impl Source {
             n if n == Syntax::REF_SOURCE_GITHUB => Some(Source::Github),
             n if n == Syntax::REF_SOURCE_PATH => Some(Source::Path),
             n if n == Syntax::REF_SOURCE_CRAN => Some(Source::Cran),
+            n if n == Syntax::REF_SOURCE_LUAROCKS => Some(Source::LuaRocks),
             _ => None,
         }
     }
@@ -73,6 +78,7 @@ pub enum ProviderKind {
     Nix,
     Core,
     Cran,
+    LuaRocks,
     /// Decide `Nix` vs `Core` at realize time by peeking the source's
     /// `pkg.jet` (U9). Only the typed `github@…` surface produces this.
     Infer,
@@ -85,6 +91,7 @@ impl ProviderKind {
         match s {
             "core" => ProviderKind::Core,
             "cran" => ProviderKind::Cran,
+            "luarocks" => ProviderKind::LuaRocks,
             _ => ProviderKind::Nix,
         }
     }
@@ -94,6 +101,7 @@ impl ProviderKind {
             ProviderKind::Nix => "nix",
             ProviderKind::Core => "core",
             ProviderKind::Cran => "cran",
+            ProviderKind::LuaRocks => "luarocks",
             // Never user-shown: resolved before any listing/diagnostic.
             ProviderKind::Infer => "infer",
         }
@@ -619,6 +627,14 @@ mod tests {
         let r = classify("cran:jsonlite#version=1.9.0").unwrap();
         assert_eq!(r.source, Source::Cran);
         assert_eq!(r.package, "jsonlite#version=1.9.0");
+    }
+
+    #[test]
+    fn classifies_direct_luarocks_root_with_exact_version() {
+        let r = classify("luarocks:luasocket#version=3.1.0-1").unwrap();
+        assert_eq!(r.source, Source::LuaRocks);
+        assert_eq!(r.package, "luasocket#version=3.1.0-1");
+        assert_eq!(ProviderKind::parse("luarocks"), ProviderKind::LuaRocks);
     }
 
     #[test]

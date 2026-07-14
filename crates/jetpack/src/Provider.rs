@@ -20,7 +20,9 @@ use std::process::Command;
 
 mod remote;
 mod cran;
+mod luarocks;
 use cran::CranProvider;
+use luarocks::LuaRocksProvider;
 
 use remote::{
     copy_tree, fetch_remote_repo, infer_package_kind, parse_remote_source, source_cache_dir,
@@ -202,6 +204,21 @@ pub fn cache_expectation(
                 allow_unsigned_local: true,
             })
         }
+        ProviderKind::LuaRocks => {
+            let project = ctx.project_dir?;
+            let (output, source_hash, _repository, env) =
+                super::Lock::luarocks_realization(project, &spec.raw)?;
+            Some(super::Store::CacheExpectation {
+                identity: super::Store::CacheIdentity {
+                    source_fingerprint: source_hash,
+                    recipe_fingerprint: SHA256::sha256_hex(luarocks::RECIPE_ID.as_bytes()),
+                    policy_fingerprint: super::RuntimePolicy::cache_policy_fingerprint(ctx.offline),
+                    platform: if env.platform.is_empty() { super::Envelope::host_platform() } else { env.platform.clone() },
+                },
+                owned_output: Some(PathBuf::from(output)),
+                allow_unsigned_local: true,
+            })
+        }
         // An inferred source realized offline defaults to nix with no lock-backed
         // identity to match; no early cache path.
         ProviderKind::Infer => None,
@@ -285,6 +302,8 @@ pub enum ProviderError {
     CoreBuild(String),
     /// Native CRAN metadata, integrity, dependency, or R installation failure.
     Cran(String),
+    /// Native LuaRocks metadata, integrity, dependency, or installation failure.
+    LuaRocks(String),
     /// E1232 (D-MONOREF1): a monorepo source could not be fetched — the sparse
     /// subtree checkout and the full-clone fallback both failed.
     MonorepoFetch(String),
@@ -320,6 +339,7 @@ impl ProviderError {
             ProviderError::BuildDebug(_) => Some("E1273"),
             ProviderError::Offline(_) => Some("E1276"),
             ProviderError::Cran(_) => None,
+            ProviderError::LuaRocks(_) => None,
             _ => None,
         }
     }
@@ -354,6 +374,7 @@ pub fn flake_ref(spec: &RefSpec, table: &SourceTable) -> String {
         Source::Github => format!("github:{}", spec.package),
         Source::Path => format!("path:{}", spec.package),
         Source::Cran => format!("cran:{}", spec.package),
+        Source::LuaRocks => format!("luarocks:{}", spec.package),
         Source::Named(name) => {
             let upstream = table.upstream(name).unwrap_or(name);
             format!("{upstream}#{}", spec.package)
@@ -733,6 +754,7 @@ pub(crate) fn provider_for(kind: ProviderKind) -> Box<dyn Provider> {
     match kind {
         ProviderKind::Core => Box::new(CoreProvider),
         ProviderKind::Cran => Box::new(CranProvider),
+        ProviderKind::LuaRocks => Box::new(LuaRocksProvider),
         _ => Box::new(NixProvider),
     }
 }
@@ -754,10 +776,14 @@ pub fn resolve_kind(
     if matches!(spec.source, Source::Cran) {
         return ProviderKind::Cran;
     }
+    if matches!(spec.source, Source::LuaRocks) {
+        return ProviderKind::LuaRocks;
+    }
     let Source::Named(name) = &spec.source else { return ProviderKind::Nix; };
     match table.provider(name) {
         ProviderKind::Core => ProviderKind::Core,
         ProviderKind::Cran => ProviderKind::Cran,
+        ProviderKind::LuaRocks => ProviderKind::LuaRocks,
         ProviderKind::Nix => ProviderKind::Nix,
         // U9: peek the remote's `pkg.jet` to choose core vs nix.
         ProviderKind::Infer => match table.upstream(name) {
@@ -950,6 +976,10 @@ fn stage_adapter_source(
         )),
         Source::Cran => Err(ProviderError::Adapter(
             "CRAN packages must be realized before they can be adapter source bytes.".to_string(),
+        )),
+        Source::LuaRocks => Err(ProviderError::Adapter(
+            "LuaRocks packages must be realized before they can be adapter source bytes."
+                .to_string(),
         )),
         Source::Named(_) => Err(ProviderError::Adapter(
             "adapter source must be a built-in provider ref like `path@vendor/tool`.".to_string(),

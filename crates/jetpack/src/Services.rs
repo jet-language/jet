@@ -397,6 +397,7 @@ mod tests {
     fn env() -> ShellEnv {
         ShellEnv {
             bin_dirs: Vec::new(),
+            vars: std::collections::BTreeMap::new(),
             refs: Vec::new(),
             label: "jetpack".to_string(),
             prompt_path: PromptPathMode::Short,

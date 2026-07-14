@@ -437,6 +437,11 @@ pub(crate) fn report_provider_error(theme: &Theme, err: &ProviderError) {
             reason,
             "check the exact CRAN package ref and the configured CRAN authority.",
         ),
+        ProviderError::LuaRocks(reason) => theme.error(
+            "could not realize the LuaRocks package",
+            reason,
+            "use an exact `luarocks:<name>#version=<version>` ref and verify the repository metadata and source hash",
+        ),
         // E1232: sparse subtree fetch + full-clone fallback both failed.
         ProviderError::MonorepoFetch(reason) => theme.error_coded(
             "E1232",

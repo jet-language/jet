@@ -1827,6 +1827,14 @@ dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
   `Recipe.prebuilt(bin:, as:)` into ordinary hangar packages, with the same
   store/lock path as any other package. `jetpack add <ref> --adapt` prints a
   draft adapter and does not run upstream code.
+- **Direct ecosystem providers (D-JPK-PROVIDERS2):** LuaRocks uses the exact
+  `luarocks:<name>#version=<version>` root. Jetpack resolves the repository
+  manifest and rockspec dependency closure, verifies every source SHA-256,
+  records the qualified ref and closure in `.jet/lock`, and projects the
+  realized `LUA_PATH`/`LUA_CPATH` into the environment. Mutable refs, unsupported
+  platform/native build metadata, dependency cycles, unsafe archive paths,
+  source drift, and cache tampering fail closed. Offline reuse re-verifies the
+  sealed Hangar output without contacting the repository.
 - **No-Nix machines (U23):** core packages and adapted packages realize without
   Nix. Package refs that still route through the Nix compatibility provider are
   reported together as E1272, naming only those holes and suggesting either

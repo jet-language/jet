@@ -204,6 +204,7 @@ fn run_project_task(
     } else {
         Env {
             bin_dirs: Vec::new(),
+            vars: std::collections::BTreeMap::new(),
             refs: Vec::new(),
             label: Syntax::JETPACK_PROMPT_LABEL.to_string(),
             prompt_path: ModuleEval::PromptPathMode::default(),

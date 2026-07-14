@@ -43,6 +43,8 @@ impl ShellKind {
 /// A composed environment: what to expose and how to label the prompt.
 pub struct Env {
     pub bin_dirs: Vec<String>,
+    /// Provider-owned runtime search paths projected into child processes.
+    pub vars: std::collections::BTreeMap<String, String>,
     pub refs: Vec<String>,
     pub label: String,
     pub prompt_path: PromptPathMode,
@@ -83,6 +85,9 @@ impl Env {
     fn apply(&self, cmd: &mut Command) {
         let base = std::env::var("PATH").unwrap_or_default();
         cmd.env("PATH", self.composed_path(&base));
+        for (name, value) in &self.vars {
+            cmd.env(name, value);
+        }
         cmd.env(Syntax::JETPACK_ENV_MARKER, "1");
         cmd.env(Syntax::JETPACK_REF_VAR, self.refs.join(" "));
     }
@@ -444,6 +449,7 @@ mod tests {
     fn env_with(dirs: &[&str]) -> Env {
         Env {
             bin_dirs: dirs.iter().map(|s| s.to_string()).collect(),
+            vars: std::collections::BTreeMap::new(),
             refs: vec![],
             label: Syntax::JETPACK_PROMPT_LABEL.to_string(),
             prompt_path: PromptPathMode::Short,
@@ -458,6 +464,18 @@ mod tests {
         let sep = super::super::Platform::path_separator();
         let path = env.composed_path(&format!("/usr/bin{sep}/b/bin"));
         assert_eq!(path, format!("/a/bin{sep}/b/bin{sep}/usr/bin"));
+    }
+
+    #[test]
+    fn run_command_projects_provider_runtime_paths() {
+        let mut env = env_with(&[]);
+        env.vars.insert("JET_PROVIDER_PATH_TEST".to_string(), "locked-path".to_string());
+        let args = vec![
+            "sh".to_string(),
+            "-c".to_string(),
+            "test \"$JET_PROVIDER_PATH_TEST\" = locked-path".to_string(),
+        ];
+        assert_eq!(run_command(&env, &args), 0);
     }
 
     #[test]

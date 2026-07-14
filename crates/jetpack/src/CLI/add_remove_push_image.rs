@@ -161,6 +161,15 @@ fn cmd_add_adapt(theme: &Theme, raw: &str) -> i32 {
                 );
                 return 2;
             }
+            RefSpec::Source::LuaRocks => {
+                theme.error_coded(
+                    "E1270",
+                    "adapter draft needs source bytes",
+                    "a LuaRocks ref names a registry package, not an unpacked source tree.",
+                    "realize the LuaRocks package first, then adapt its locked source artifact.",
+                );
+                return 2;
+            }
         }
     };
     let name = source

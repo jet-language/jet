@@ -345,6 +345,8 @@ pub const REF_SOURCE_GITHUB: &str = "github";
 pub const REF_SOURCE_PATH: &str = "path";
 /// D-FFI-R1 / D-JPK-PROVIDERS2: direct CRAN ecosystem root.
 pub const REF_SOURCE_CRAN: &str = "cran";
+/// D-JPK-PROVIDERS2 / D-FFI-LUA1: direct LuaRocks ecosystem root.
+pub const REF_SOURCE_LUAROCKS: &str = "luarocks";
 
 /// D-JPK2/9: the Phase 1 verb set.
 pub const JETPACK_VERBS: &[&str] = &[

@@ -169,6 +169,7 @@ fn trust_record_matches(record: &Trust::TrustRecord, selector: &str) -> bool {
 pub(super) fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &RunPlan) -> Result<Env, i32> {
     RuntimePolicy::enforce_sandbox_policy(theme, flags.json)?;
     let mut bin_dirs = Vec::new();
+    let mut provider_vars: std::collections::BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
     let mut realized_refs = Vec::new();
     let mut holes = Vec::new();
     let mut failed = false;
@@ -185,6 +186,14 @@ pub(super) fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &Ru
                 // stages source for import and contributes nothing to PATH.
                 if !entry.bin.is_empty() {
                     bin_dirs.push(entry.bin);
+                }
+                for (file, variable) in [("lua-path", "LUA_PATH"), ("lua-cpath", "LUA_CPATH")] {
+                    if let Ok(value) = std::fs::read_to_string(std::path::Path::new(&entry.out).join(file)) {
+                        let value = value.trim();
+                        if !value.is_empty() {
+                            provider_vars.entry(variable.to_string()).or_default().push(value.to_string());
+                        }
+                    }
                 }
                 realized_refs.push(entry.reference);
                 cache_leases.push(lease);
@@ -226,6 +235,7 @@ pub(super) fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &Ru
     // threshold rule (`Shell::enter`) instead of a redundant summary line.
     Ok(Env {
         bin_dirs,
+        vars: provider_vars.into_iter().map(|(name, values)| (name, format!("{};;", values.join(";")))).collect(),
         refs: realized_refs,
         label: plan.label.clone(),
         prompt_path: plan.prompt_path,
