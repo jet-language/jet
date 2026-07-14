@@ -204,7 +204,7 @@ always bypasses (bypass event-logged). D-TWRGUARD1=C.
 
 | Guard | Trigger | Error | Escape |
 |---|---|---|---|
-| Ballot-ready | missing required fields, last-pass hybrid, complete recommendation rationale, or plain-language density limits | `E_BALLOT` | `--draft`, rewrite, then `decision update <id> --ready` |
+| Ballot-ready | missing required fields, complete recommendation rationale, or plain-language density limits | `E_BALLOT` | `--draft`, rewrite, then `decision update <id> --ready` |
 | Owner-only ratify | `decision ratify` by a non-owner, for a non-acceptance ballot | `E_OWNER_ONLY` | `--quote "owner's words"` |
 | Owner acceptance provenance | Any generic ratify, clearance, quote, or batch attempt on `D-ACCEPT-*` | `E_ACCEPTANCE_OWNER_UI` | Owner uses the verification UI (loopback or an `auth.token`-authenticated device) |
 | Frozen lane | any write to a `frozen` card | `E_OWNER_LANE` | none — owner moves it out with `tower card update --phase ... --by owner` |

@@ -1,18 +1,12 @@
 # Package and environment ecosystem research archive
 
-> **Status, 2026-07-14:** the Deck/Roles/Fold mega-ballot is withdrawn. It
-> coupled file layout, role vocabulary, merge law, development environments,
-> outputs, aliases, and build lowering. The examples below remain prior-art and
-> parity research. They are not one live choice and do not authorize syntax.
->
-> Live decisions are atomic: D-ECO1 chooses whether file placement changes
-> meaning; D-ECO-ROOT1 chooses workspace discovery; D-ECO-ENV1 chooses the
-> environment source of truth; D-ECO-OUTPUT1 chooses the output model;
-> D-ECO-MATRIX1 chooses target/profile representation; D-ECO-MATRIX-MERGE1
-> chooses overlap law; D-ECO-INPUT1 chooses input representation;
-> D-ECO-SHARE1 chooses shared selection; D-ECO-LOCK1 chooses receipt contents;
-> D-ECO-RECEIPT-SCOPE1 chooses receipt slicing; D-ECO-UPDATE1 chooses update
-> scope; D-SHAPE-MERGE1 separately chooses package contribution authority.
+> **Status, 2026-07-14:** the Deck/Roles/Fold proposal and its later atomic
+> ballots are archived research. One live D-ECO1 ballot now chooses a complete
+> project graph: packages, inputs, environments, variants, receipts, images,
+> systems, services, and JetOS share one typed mechanism rooted in
+> `project.jet`. The options compare GNU Guix/Guile directly, a typed Guix
+> adaptation, a Jet-native graph, Bazel/Starlark, and CUE. Nothing below
+> authorizes syntax.
 
 ## Archived three-framework comparison
 
