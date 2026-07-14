@@ -392,26 +392,6 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
     },
     CommandSpec {
-        name: "outdated",
-        summary: "report Jetpack channel refs with newer locks available",
-        headline: false,
-    },
-    CommandSpec {
-        name: "search",
-        summary: "search the local offline Jetpack package index",
-        headline: false,
-    },
-    CommandSpec {
-        name: "info",
-        summary: "show local offline Jetpack package metadata",
-        headline: false,
-    },
-    CommandSpec {
-        name: "logs",
-        summary: "show latest Jetpack build logs",
-        headline: false,
-    },
-    CommandSpec {
         name: "clean",
         summary: "optimize and collect stale Jetpack hangar entries",
         headline: false,
@@ -672,6 +652,12 @@ pub const FLAGS: &[FlagSpec] = &[
 /// Is `name` a built-in command?
 pub fn is_builtin(name: &str) -> bool {
     COMMANDS.iter().any(|c| c.name == name)
+        // Group normalization rewrites canonical `jet <group> <action>` into
+        // its internal handler word after rejecting the retired bare form.
+        || COMMAND_GROUPS
+            .iter()
+            .flat_map(|group| group.actions)
+            .any(|action| action.handler.dispatch_word() == name)
         // E0043 teaching path: `jet install` is intentionally not advertised in
         // help/completions, but dispatch must reach its bespoke "use fetch"
         // diagnostic instead of generic unknown-command E2101.

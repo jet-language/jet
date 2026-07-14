@@ -3,7 +3,7 @@ use super::bridge_os_studio::{cmd_bridge, cmd_os, cmd_studio, cmd_user};
 use super::cmd_doctor;
 use super::package_hangar_vendor::{cmd_audit, cmd_clean, cmd_hangar, cmd_list, cmd_vendor};
 use super::run_enter_dev::{cmd_dev, cmd_enter, cmd_run};
-use super::services_secrets_config::{cmd_config, cmd_secrets, cmd_services};
+use super::services_secrets_config::{cmd_config, cmd_secrets, cmd_service_probe, cmd_services};
 use super::tool::cmd_tool;
 use super::trust_env_build::{cmd_build, cmd_test, cmd_trust};
 use super::update_search_info::{
@@ -303,6 +303,7 @@ pub fn main(args: Vec<String>) -> i32 {
         "info" => cmd_info(&theme, &parsed),
         "explain" => cmd_explain(&theme, &parsed),
         "logs" => cmd_logs(&theme, &parsed),
+        "__service-probe" => cmd_service_probe(&theme, &parsed),
         "override" => cmd_override(&theme, &parsed),
         "push" => cmd_push(&theme, &parsed),
         v if v == Syntax::IMAGE_SUBCOMMAND => cmd_image(&theme, &parsed),

@@ -2309,8 +2309,6 @@ pub(crate) fn collect_service_evidence(
     root: &std::path::Path,
     specs: &[jet::Sema::LocatedBudgetSpec],
 ) -> Vec<crate::CmdBudget::ServiceEvidence> {
-    use jet_env_model::ModuleEval;
-
     // Names of services that have a ServiceProbe budget.
     let service_names: std::collections::BTreeSet<String> = specs
         .iter()
@@ -2331,46 +2329,58 @@ pub(crate) fn collect_service_evidence(
         return Vec::new();
     }
 
-    // Evaluate env.jet to get DevServicePlan for each named service.
-    let env_path = root.join(jet::Syntax::ENV_FILE);
-    let src = match std::fs::read_to_string(&env_path) {
-        Ok(s) => s,
-        Err(_) => return Vec::new(),
-    };
-    let plan = match ModuleEval::evaluate_env(&src, root) {
-        Ok(p) => p,
-        Err(_) => return Vec::new(),
-    };
-
-    // Use a minimal ShellEnv (no realized packages) — the service's init
-    // command must be available on the host PATH already when measuring.
-    let shell_env = jetpack::Shell::Env {
-        bin_dirs: Vec::new(),
-        vars: std::collections::BTreeMap::new(),
-        refs: Vec::new(),
-        label: "jetpack".to_string(),
-        prompt_path: jet_env_model::ModuleEval::PromptPathMode::Short,
-        prompt_strip: jet_env_model::ModuleEval::PromptStripMode::Off,
-        cache_leases: Vec::new(),
-    };
-
     let mut result = Vec::new();
     for name in &service_names {
-        let Some(svc_plan) = plan.dev_services.iter().find(|s| &s.name == name) else {
-            eprintln!("budget: ServiceProbe `{name}` not found in env.jet services");
+        let argv = vec![
+            "__service-probe".to_string(),
+            name.clone(),
+            "--no-color".to_string(),
+        ];
+        let output = match crate::EngineDispatch::capture(
+            jet::Syntax::JETPACK_BINARY_NAME,
+            "ServiceProbe",
+            &argv,
+            root,
+        ) {
+            Ok(output) => output,
+            Err(_) => continue,
+        };
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            eprintln!("budget: ServiceProbe `{name}` measurement failed: {}", stderr.trim());
+            continue;
+        }
+        let stdout = match String::from_utf8(output.stdout) {
+            Ok(stdout) => stdout,
+            Err(_) => {
+                eprintln!("budget: ServiceProbe `{name}` returned non-UTF-8 evidence");
+                continue;
+            }
+        };
+        let expected_name: String = name.bytes().map(|byte| format!("{byte:02x}")).collect();
+        let mut rows = stdout.lines();
+        let Some(row) = rows.next() else {
+            eprintln!("budget: ServiceProbe `{name}` returned no evidence");
             continue;
         };
-        if !svc_plan.enable {
-            eprintln!("budget: ServiceProbe `{name}` is disabled in env.jet; skipping");
+        if rows.next().is_some() {
+            eprintln!("budget: ServiceProbe `{name}` returned extra evidence rows");
             continue;
         }
-        match jetpack::Services::measure_readiness(root, &shell_env, svc_plan, 20) {
-            Ok(samples_ns) => result.push(crate::CmdBudget::ServiceEvidence {
-                name: name.clone(),
-                samples_ns,
-            }),
-            Err(e) => eprintln!("budget: ServiceProbe `{name}` measurement failed: {e}"),
+        let mut fields = row.split('\t');
+        if fields.next() != Some("JETSERVICE1") || fields.next() != Some(expected_name.as_str()) {
+            eprintln!("budget: ServiceProbe `{name}` returned incompatible evidence");
+            continue;
         }
+        let samples_ns: Option<Vec<u64>> = fields.map(|field| field.parse().ok()).collect();
+        let Some(samples_ns) = samples_ns.filter(|samples| samples.len() == 20) else {
+            eprintln!("budget: ServiceProbe `{name}` did not return exactly 20 samples");
+            continue;
+        };
+        result.push(crate::CmdBudget::ServiceEvidence {
+            name: name.clone(),
+            samples_ns,
+        });
     }
     result
 }

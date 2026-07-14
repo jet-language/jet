@@ -410,10 +410,10 @@ package management (M12.1):
   {bin} store fetch --locked        verify lock only, no network
   {bin} update                      refresh @latest / branch selectors
   {bin} update <dep>                update one moving selector
-  {bin} outdated                    report Jetpack channel refs with newer locks available
-  {bin} search <query>              search local offline Jetpack package index
-  {bin} info <source>.<package>     show local offline Jetpack package metadata
-  {bin} logs <pkg>                  show latest Jetpack build logs
+  {bin} inspect outdated            report Jetpack channel refs with newer locks available
+  {bin} inspect search <query>      search local offline Jetpack package index
+  {bin} inspect info <source>.<package>   show local offline Jetpack package metadata
+  {bin} inspect logs <pkg>          show latest Jetpack build logs
   {bin} store verify                re-check all store entry hashes
   {bin} store generations           list recorded store generations (D-PURE3)
   {bin} store rollback <gen>        roll back to a prior generation (D-PURE3)

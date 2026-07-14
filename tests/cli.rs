@@ -3423,6 +3423,7 @@ fn service_probe_unavailable_without_dev_reports_diagnostic() {
     fs::write(dir.join("src/main.jet"), r#"module env.dev {
     services: { mydb: { enable: true, init: "echo mydb", ready: "true" } }
 }
+
 module perf.package {
     budgets: [Budget.{
         name: "readiness",
@@ -3454,4 +3455,91 @@ fn run() {}
         combined.contains("ServiceProbe") || combined.contains("unavailable") || combined.contains("jet dev"),
         "expected unavailability message; got:\n{combined}"
     );
+}
+
+#[test]
+fn service_probe_uses_jetpack_lifecycle_and_produces_twenty_samples() {
+    use jet_foundation::PerformanceBudget::CanonicalJson;
+
+    let dir = isolated_cwd("service_probe_runtime");
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(
+        dir.join("pkg.jet"),
+        "payload: { name: \"app\", version: \"0.1.0\" }\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("env.jet"),
+        r#"module env.dev {
+    services: { mydb: { enable: true, init: "sleep 30" } }
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/main.jet"),
+        r#"module env.dev {
+    services: { mydb: { enable: true, init: "sleep 30" } }
+}
+
+module perf.package {
+    budgets: [Budget.{
+        name: "readiness",
+        scope: .Service("mydb"),
+        metric: .ServiceReadiness,
+        provider: .ServiceProbe("mydb"),
+        comparison: .AbsoluteFrom("local/mydb"),
+        limit: .AtMost(500ms),
+        enforcement: .Warn,
+    }],
+}
+fn run() {}
+"#,
+    )
+    .unwrap();
+
+    let out = Command::new(jet())
+        .args(["devtools", "probe", "src/main.jet"])
+        .current_dir(&dir)
+        .env("JETPACK_ROOT", dir.join("jetpack-root"))
+        .env("HOME", dir.join("home"))
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let reports = fs::read_dir(dir.join(".jet/perf/reports"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect::<Vec<_>>();
+    assert_eq!(reports.len(), 1, "expected one report; got {reports:?}");
+    let bytes = fs::read(&reports[0]).unwrap();
+    jet_foundation::PerformanceBudget::verify_budget_report(&bytes).unwrap();
+    let CanonicalJson::Object(report) = CanonicalJson::parse_canonical(&bytes).unwrap() else {
+        panic!("report")
+    };
+    let CanonicalJson::Object(content) = &report["content"] else {
+        panic!("content")
+    };
+    let CanonicalJson::Array(measurements) = &content["measurements"] else {
+        panic!("measurements")
+    };
+    assert_eq!(measurements.len(), 1);
+    let CanonicalJson::Object(measurement) = &measurements[0] else {
+        panic!("measurement")
+    };
+    let CanonicalJson::Object(provider) = &measurement["provider"] else {
+        panic!("provider")
+    };
+    assert_eq!(provider["kind"], CanonicalJson::String("ServiceProbe".into()));
+    assert_eq!(provider["identity"], CanonicalJson::String("mydb".into()));
+    let CanonicalJson::Array(samples) = &measurement["samples"] else {
+        panic!("samples")
+    };
+    assert_eq!(samples.len(), 20, "ServiceProbe must produce exactly 20 samples");
 }

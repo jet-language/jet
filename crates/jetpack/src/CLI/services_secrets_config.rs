@@ -226,6 +226,66 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
     }
 }
 
+/// Compiler-internal ServiceProbe transport. This is deliberately absent from
+/// help/completions: Jetpack owns service realization and measurement, while
+/// `jet budget` owns the typed report. The versioned row is validated by the
+/// compiler before any sample enters a report.
+pub(super) fn cmd_service_probe(theme: &Theme, parsed: &Parsed) -> i32 {
+    let [name] = parsed.positional.as_slice() else {
+        theme.error(
+            "internal service probe needs exactly one service name",
+            "the compiler and Jetpack use this operation as a version-checked machine protocol.",
+            "use `jet budget check` or `jet dev`; do not invoke the internal operation directly.",
+        );
+        return 2;
+    };
+    let plan = match load_project_plan(theme) {
+        Ok(plan) => plan,
+        Err(code) => return code,
+    };
+    let Some(service) = plan.dev_services.iter().find(|service| service.name == *name) else {
+        theme.error(
+            &format!("no dev service named `{name}`"),
+            "the ServiceProbe budget names a service absent from this project's env.jet.",
+            "name an enabled service declared under the active env role.",
+        );
+        return 2;
+    };
+    if !service.enable {
+        theme.error(
+            &format!("service `{name}` is disabled"),
+            "a disabled service has no startup-readiness workload to measure.",
+            "enable the service or remove its ServiceProbe budget.",
+        );
+        return 2;
+    }
+
+    let roots = Store::resolve();
+    let env = match compose_env(theme, &roots, &parsed.flags, &plan) {
+        Ok(env) => env,
+        Err(code) => return code,
+    };
+    let project_dir = std::env::current_dir().unwrap_or_default();
+    let samples = match Services::measure_readiness(&project_dir, &env, service, 20) {
+        Ok(samples) => samples,
+        Err(message) => {
+            theme.error(
+                &format!("couldn't measure service `{name}`"),
+                &message,
+                "check the service init, shutdown, and readiness declarations.",
+            );
+            return 2;
+        }
+    };
+    let encoded_name: String = name.bytes().map(|byte| format!("{byte:02x}")).collect();
+    print!("JETSERVICE1\t{encoded_name}");
+    for sample in samples {
+        print!("\t{sample}");
+    }
+    println!();
+    0
+}
+
 /// `jetpack secrets keygen|set|get|recipients` (U13, D-JPK-SECRETCRYPTO1).
 pub(super) fn cmd_secrets(theme: &Theme, parsed: &Parsed) -> i32 {
     let Some(verb) = parsed.positional.first().cloned() else {

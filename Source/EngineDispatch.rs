@@ -16,8 +16,8 @@
 //!     and compares the reply to its own version (E1227 on mismatch).
 //!   - a missing engine binary is E1228, not a generic "command not found".
 
-use std::path::PathBuf;
-use std::process::Command;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
 
 use jet::ExitCodes;
 
@@ -132,29 +132,57 @@ fn query_engine_protocol(bin: &PathBuf) -> Option<String> {
 /// code `jet` itself should return — never panics, never prints past what the
 /// diagnostics above already print.
 pub fn dispatch(engine: &str, verb: &str, argv: &[String]) -> i32 {
-    let Some(bin) = find_engine_binary(engine) else {
-        eprint!("{}", missing_engine_message(engine, verb));
-        return ExitCodes::USER_ERROR;
+    let bin = match compatible_engine(engine, verb) {
+        Ok(bin) => bin,
+        Err(code) => return code,
     };
-
-    let jet_version = env!("CARGO_PKG_VERSION");
-    match query_engine_protocol(&bin) {
-        Some(ev) if ev == jet_version => {}
-        Some(ev) => {
-            eprint!("{}", version_skew_message(engine, jet_version, Some(&ev)));
-            return ExitCodes::USER_ERROR;
-        }
-        None => {
-            eprint!("{}", version_skew_message(engine, jet_version, None));
-            return ExitCodes::USER_ERROR;
-        }
-    }
 
     match Command::new(&bin).args(argv).status() {
         Ok(status) => status.code().unwrap_or(ExitCodes::USER_ERROR),
         Err(e) => {
             eprintln!("error: couldn't run `{}`: {}", bin.display(), e);
             ExitCodes::USER_ERROR
+        }
+    }
+}
+
+/// Run a hidden machine operation through the same resolved, version-checked
+/// engine boundary as [`dispatch`], capturing its wire output for the compiler
+/// process to validate. The child runs at `cwd`, so project-owned engine state
+/// is resolved exactly as it is for an interactive Jetpack command.
+pub fn capture(
+    engine: &str,
+    verb: &str,
+    argv: &[String],
+    cwd: &Path,
+) -> Result<Output, i32> {
+    let bin = compatible_engine(engine, verb)?;
+    Command::new(&bin)
+        .args(argv)
+        .current_dir(cwd)
+        .output()
+        .map_err(|e| {
+            eprintln!("error: couldn't run `{}`: {}", bin.display(), e);
+            ExitCodes::USER_ERROR
+        })
+}
+
+fn compatible_engine(engine: &str, verb: &str) -> Result<PathBuf, i32> {
+    let Some(bin) = find_engine_binary(engine) else {
+        eprint!("{}", missing_engine_message(engine, verb));
+        return Err(ExitCodes::USER_ERROR);
+    };
+
+    let jet_version = env!("CARGO_PKG_VERSION");
+    match query_engine_protocol(&bin) {
+        Some(ev) if ev == jet_version => Ok(bin),
+        Some(ev) => {
+            eprint!("{}", version_skew_message(engine, jet_version, Some(&ev)));
+            Err(ExitCodes::USER_ERROR)
+        }
+        None => {
+            eprint!("{}", version_skew_message(engine, jet_version, None));
+            Err(ExitCodes::USER_ERROR)
         }
     }
 }
