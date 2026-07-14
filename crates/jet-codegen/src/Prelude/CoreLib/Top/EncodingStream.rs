@@ -1670,7 +1670,7 @@ impl jet_std::CSVReader {
                     self.offset, self.line, self.column, jet_csv_path(self.record_index, field_index), "quoted CSV field ended before its closing quote")),
                 None => {
                     self.eof = true;
-                    if let Err(e) = jet_csv_finish_field(&budget, &mut row, &mut field, &mut decoded, &self.limits, self.record_index) { return self.fail(e); }
+                    if let Err(e) = jet_csv_finish_field(&budget, &mut row, &mut field, &mut decoded, &self.limits, self.record_index, self.offset, self.line, self.column) { return self.fail(e); }
                     self.record_index += 1;
                     return Ok(Some(row));
                 }
@@ -1679,18 +1679,18 @@ impl jet_std::CSVReader {
                     if quoted {
                         if after_quote {
                             if b == b'"' { after_quote = false; if let Err(e) = jet_csv_push_byte(&budget, &mut field, b'"', &mut decoded, &self.limits, self.record_index, field_index, self.offset, self.line, self.column) { return self.fail(e); } }
-                            else if b == b',' { quoted = false; after_quote = false; if let Err(e) = jet_csv_finish_field(&budget, &mut row, &mut field, &mut decoded, &self.limits, self.record_index) { return self.fail(e); } }
-                            else if b == b'\r' { quoted = false; after_quote = false; match self.byte(field_index) { Ok(Some(b'\n')) => {}, Ok(None) => return self.fail(jet_csv_error(jet_std::EncodingErrorKind::Truncated, self.offset, self.line, self.column, jet_csv_path(self.record_index, field_index), "CSV CR record ending is missing LF")), Ok(Some(_)) => return self.fail(jet_csv_error(jet_std::EncodingErrorKind::Syntax, self.offset - 1, self.line, self.column.saturating_sub(1), jet_csv_path(self.record_index, field_index), "CSV records use CRLF; bare CR is not a record ending")), Err(e) => return self.fail(e) }; if let Err(e) = jet_csv_finish_field(&budget, &mut row, &mut field, &mut decoded, &self.limits, self.record_index) { return self.fail(e); } self.record_index += 1; return Ok(Some(row)); }
+                            else if b == b',' { quoted = false; after_quote = false; if let Err(e) = jet_csv_finish_field(&budget, &mut row, &mut field, &mut decoded, &self.limits, self.record_index, self.offset - 1, self.line, self.column.saturating_sub(1)) { return self.fail(e); } }
+                            else if b == b'\r' { quoted = false; after_quote = false; match self.byte(field_index) { Ok(Some(b'\n')) => {}, Ok(None) => return self.fail(jet_csv_error(jet_std::EncodingErrorKind::Truncated, self.offset, self.line, self.column, jet_csv_path(self.record_index, field_index), "CSV CR record ending is missing LF")), Ok(Some(_)) => return self.fail(jet_csv_error(jet_std::EncodingErrorKind::Syntax, self.offset - 1, self.line, self.column.saturating_sub(1), jet_csv_path(self.record_index, field_index), "CSV records use CRLF; bare CR is not a record ending")), Err(e) => return self.fail(e) }; if let Err(e) = jet_csv_finish_field(&budget, &mut row, &mut field, &mut decoded, &self.limits, self.record_index, self.offset - 1, self.line.saturating_sub(1), 1) { return self.fail(e); } self.record_index += 1; return Ok(Some(row)); }
                             else { return self.fail(jet_csv_error(jet_std::EncodingErrorKind::Syntax, self.offset - 1, self.line, self.column.saturating_sub(1), jet_csv_path(self.record_index, field_index), "only quote, comma, CRLF, or EOF may follow a closing CSV quote")); }
                         } else if b == b'"' { after_quote = true; }
                         else if let Err(e) = jet_csv_push_byte(&budget, &mut field, b, &mut decoded, &self.limits, self.record_index, field_index, self.offset, self.line, self.column) { return self.fail(e); }
                     } else if b == b'"' {
                         if field.is_empty() { quoted = true; } else { return self.fail(jet_csv_error(jet_std::EncodingErrorKind::Syntax, self.offset - 1, self.line, self.column.saturating_sub(1), jet_csv_path(self.record_index, field_index), "quote inside an unquoted CSV field")); }
                     } else if b == b',' {
-                        if let Err(e) = jet_csv_finish_field(&budget, &mut row, &mut field, &mut decoded, &self.limits, self.record_index) { return self.fail(e); }
+                        if let Err(e) = jet_csv_finish_field(&budget, &mut row, &mut field, &mut decoded, &self.limits, self.record_index, self.offset - 1, self.line, self.column.saturating_sub(1)) { return self.fail(e); }
                     } else if b == b'\r' {
                         match self.byte(field_index) { Ok(Some(b'\n')) => {}, Ok(None) => return self.fail(jet_csv_error(jet_std::EncodingErrorKind::Truncated, self.offset, self.line, self.column, jet_csv_path(self.record_index, field_index), "CSV CR record ending is missing LF")), Ok(Some(_)) => return self.fail(jet_csv_error(jet_std::EncodingErrorKind::Syntax, self.offset - 1, self.line, self.column.saturating_sub(1), jet_csv_path(self.record_index, field_index), "CSV records use CRLF; bare CR is not a record ending")), Err(e) => return self.fail(e) }
-                        if let Err(e) = jet_csv_finish_field(&budget, &mut row, &mut field, &mut decoded, &self.limits, self.record_index) { return self.fail(e); }
+                        if let Err(e) = jet_csv_finish_field(&budget, &mut row, &mut field, &mut decoded, &self.limits, self.record_index, self.offset - 1, self.line.saturating_sub(1), 1) { return self.fail(e); }
                         self.record_index += 1;
                         return Ok(Some(row));
                     } else if b == b'\n' { return self.fail(jet_csv_error(jet_std::EncodingErrorKind::Syntax, self.offset - 1, self.line.saturating_sub(1), 1, jet_csv_path(self.record_index, field_index), "CSV records use CRLF; bare LF is not a record ending")); }
@@ -1712,16 +1712,16 @@ fn jet_csv_push_byte(budget: &JetJsonAllocationBudget, field: &mut Vec<u8>, byte
     field.push(byte); *decoded += 1; Ok(())
 }
 
-fn jet_csv_finish_field(budget: &JetJsonAllocationBudget, row: &mut Vec<String>, field: &mut Vec<u8>, _decoded: &mut usize, _limits: &jet_std::EncodingLimits, record: i64) -> Result<(), jet_std::EncodingError> {
+fn jet_csv_finish_field(budget: &JetJsonAllocationBudget, row: &mut Vec<String>, field: &mut Vec<u8>, _decoded: &mut usize, _limits: &jet_std::EncodingLimits, record: i64, offset: i64, line: i64, column: i64) -> Result<(), jet_std::EncodingError> {
     let index = row.len();
     if row.len() == row.capacity() {
         let old = row.capacity(); let next = if old == 0 { 4 } else { old.saturating_mul(2) };
         let bytes = next.saturating_sub(old).saturating_mul(std::mem::size_of::<String>());
-        if !budget.charge(bytes) { return Err(jet_csv_error(jet_std::EncodingErrorKind::Limit, 0, 1, 1, jet_csv_path(record, index), "CSV record heap exceeded the bounded allocator ceiling")); }
-        row.try_reserve_exact(next.saturating_sub(old)).map_err(|_| jet_csv_error(jet_std::EncodingErrorKind::Limit, 0, 1, 1, jet_csv_path(record, index), "CSV record allocation failed"))?;
+        if !budget.charge(bytes) { return Err(jet_csv_error(jet_std::EncodingErrorKind::Limit, offset, line, column, jet_csv_path(record, index), "CSV record heap exceeded the bounded allocator ceiling")); }
+        row.try_reserve_exact(next.saturating_sub(old)).map_err(|_| jet_csv_error(jet_std::EncodingErrorKind::Limit, offset, line, column, jet_csv_path(record, index), "CSV record allocation failed"))?;
     }
     let bytes = std::mem::take(field);
-    row.push(String::from_utf8(bytes).map_err(|_| jet_csv_error(jet_std::EncodingErrorKind::Syntax, 0, 1, 1, jet_csv_path(record, index), "CSV field is not valid UTF-8"))?);
+    row.push(String::from_utf8(bytes).map_err(|_| jet_csv_error(jet_std::EncodingErrorKind::Syntax, offset, line, column, jet_csv_path(record, index), "CSV field is not valid UTF-8"))?);
     Ok(())
 }
 

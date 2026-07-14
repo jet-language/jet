@@ -1170,15 +1170,18 @@ fn csv_stream_records_are_incremental_rfc4180_bounded_and_terminal() {
     let input_path = dir.join("input.csv");
     let output_path = dir.join("output.csv");
     let malformed_path = dir.join("malformed.csv");
+    let invalid_utf8_path = dir.join("invalid-utf8.csv");
     let item_limit_path = dir.join("item-limit.csv");
     let total_limit_path = dir.join("total-limit.csv");
     fs::write(&input_path, "a,\"b,b\",\"c\"\"c\",\"line1\nline2\"\r\nlast,,tail").unwrap();
     fs::write(&malformed_path, "\"bad").unwrap();
+    fs::write(&invalid_utf8_path, [b'a', b',', 0xff]).unwrap();
     fs::write(&item_limit_path, "\"abcd\"\r\n").unwrap();
     fs::write(&total_limit_path, "a,b\r\n").unwrap();
     let input = input_path.to_string_lossy().replace('\\', "\\\\");
     let output = output_path.to_string_lossy().replace('\\', "\\\\");
     let malformed = malformed_path.to_string_lossy().replace('\\', "\\\\");
+    let invalid_utf8 = invalid_utf8_path.to_string_lossy().replace('\\', "\\\\");
     let item_limit = item_limit_path.to_string_lossy().replace('\\', "\\\\");
     let total_limit = total_limit_path.to_string_lossy().replace('\\', "\\\\");
     let source = format!(
@@ -1238,6 +1241,19 @@ fn run() {{
         }}
     }}
 
+    invalid_utf8_input :: files.open("{invalid_utf8}") ?? panic("invalid utf8 open")
+    invalid_utf8_reader :: csv.reader(^invalid_utf8_input) ?? panic("invalid utf8 reader")
+    invalid_utf8_result :: invalid_utf8_reader.next()
+    if invalid_utf8_result == {{
+        ok(_) -> {{ print("invalid-utf8-missed") }}
+        err(error) -> {{
+            print(error.byte_offset)
+            print(error.line ?? 0)
+            print(error.column ?? 0)
+            print(error.path)
+        }}
+    }}
+
     item_limits := encoding.EncodingLimits.safe()
     item_limits.max_item_bytes = 3
     item_input :: files.open("{item_limit}") ?? panic("item open")
@@ -1292,7 +1308,7 @@ fn run() {{
     assert_eq!(code, 0, "stderr: {stderr}");
     assert_eq!(
         stdout,
-        "true\na\nb,b\nc\"c\nline1\nline2\nlast\ntrue\ntail\ntrue\ntrue\n$[0][0]\ntrue\n$[0][0]\ntrue\n3\n$[0][1]\ntrue\n$[0][0]\ntrue\n"
+        "true\na\nb,b\nc\"c\nline1\nline2\nlast\ntrue\ntail\ntrue\ntrue\n$[0][0]\ntrue\n3\n1\n4\n$[0][1]\n$[0][0]\ntrue\n3\n$[0][1]\ntrue\n$[0][0]\ntrue\n"
     );
     assert_eq!(fs::read_to_string(&output_path).unwrap(), "a,\"b,b\",\"c\"\"c\",\"line1\nline2\"\r\nlast,,tail\r\n");
     assert_eq!(stderr, "");
