@@ -313,9 +313,15 @@ fn ingest_tree_unlocked(
 }
 
 fn valid_output_name(name: &str) -> bool {
-    let mut components = Path::new(name).components();
-    matches!(components.next(), Some(std::path::Component::Normal(_)))
-        && components.next().is_none()
+    if name.bytes().any(|byte| matches!(byte, b'/' | b'\\')) {
+        return false;
+    }
+    let path = Path::new(name);
+    let mut components = path.components();
+    let Some(std::path::Component::Normal(component)) = components.next() else {
+        return false;
+    };
+    component == path.as_os_str() && components.next().is_none()
 }
 
 /// Referrers of `digest`: objects that list it in `references`.

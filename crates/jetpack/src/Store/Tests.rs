@@ -848,20 +848,66 @@ mod tests {
 
     #[test]
     fn ingest_rejects_output_names_that_escape_staging() {
+        for alias in [
+            "../escaped-output",
+            "..\\escaped-output",
+            ".",
+            "out/",
+            "out//",
+            "out/.",
+            "out/./",
+            "out\\",
+            "out\\.",
+        ] {
+            let (roots, _g) = temp_roots();
+            let src = roots.root.join("src-output-name");
+            fs::create_dir_all(&src).unwrap();
+            fs::write(src.join("payload"), "bytes").unwrap();
+            let escaped = roots.root.join("escaped-output");
+            let mut outputs = BTreeMap::new();
+            outputs.insert("out".to_string(), src.clone());
+            outputs.insert(alias.to_string(), src);
+            let err = ingest_tree(
+                &roots,
+                &IngestRequest {
+                    name: "bad-output-name".into(),
+                    version: "1".into(),
+                    reference: "path:bad-output-name".into(),
+                    cache_identity: test_identity(),
+                    references: Vec::new(),
+                    outputs,
+                    signature: String::new(),
+                    provenance: String::new(),
+                    platform_artifact_kind: String::new(),
+                },
+            )
+            .unwrap_err();
+            assert_eq!(err.code(), "E1315", "alias {alias:?}: {err:?}");
+            assert!(
+                err.what().contains("one path component"),
+                "alias {alias:?}: {err:?}"
+            );
+            assert!(!roots.hangar_dir().exists(), "alias {alias:?}");
+            assert!(!escaped.exists(), "alias {alias:?}");
+        }
+    }
+
+    #[test]
+    fn ingest_installs_valid_secondary_named_output_with_matching_digest() {
         let (roots, _g) = temp_roots();
-        let src = roots.root.join("src-output-name");
-        fs::create_dir_all(&src).unwrap();
-        fs::write(src.join("payload"), "bytes").unwrap();
-        let escaped = roots.root.join("escaped-output");
-        let mut outputs = BTreeMap::new();
-        outputs.insert("out".to_string(), src.clone());
-        outputs.insert("../escaped-output".to_string(), src);
-        let err = ingest_tree(
+        let out = roots.root.join("src-primary");
+        let dev = roots.root.join("src-dev");
+        fs::create_dir_all(&out).unwrap();
+        fs::create_dir_all(&dev).unwrap();
+        fs::write(out.join("payload"), "primary").unwrap();
+        fs::write(dev.join("payload"), "development").unwrap();
+        let outputs = BTreeMap::from([("out".to_string(), out), ("dev".to_string(), dev)]);
+        let ingested = ingest_tree(
             &roots,
             &IngestRequest {
-                name: "bad-output-name".into(),
+                name: "named-output".into(),
                 version: "1".into(),
-                reference: "path:bad-output-name".into(),
+                reference: "path:named-output".into(),
                 cache_identity: test_identity(),
                 references: Vec::new(),
                 outputs,
@@ -870,10 +916,15 @@ mod tests {
                 platform_artifact_kind: String::new(),
             },
         )
-        .unwrap_err();
-        assert_eq!(err.code(), "E1315");
-        assert!(err.what().contains("one path component"), "{err:?}");
-        assert!(!escaped.exists());
+        .unwrap();
+        let installed = Path::new(&ingested.entry.out).join(".named/dev");
+        assert_eq!(
+            fs::read_to_string(installed.join("payload")).unwrap(),
+            "development"
+        );
+        let actual = super::super::super::Envelope::try_output_hash_of(&installed.to_string_lossy())
+            .unwrap();
+        assert_eq!(ingested.entry.named_outputs.get("dev"), Some(&actual));
     }
 
     #[test]
