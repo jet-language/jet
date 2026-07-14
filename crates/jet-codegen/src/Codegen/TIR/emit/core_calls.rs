@@ -1223,10 +1223,12 @@ pub(crate) fn emit_tir_core_call(
             arg(2)
         ),
         ("jet.crypto", "file_seal") => format!(
-            "{}(&({}), &({}))",
+            "{}({}, &({}.inner.to_string_lossy().into_owned()), &({}.inner.to_string_lossy().into_owned()), {}jet_scheduler_task_cancelled)",
             regex_fn("jet_crypto_file_seal_impl"),
             arg(0),
-            arg(1)
+            arg(1),
+            arg(2),
+            cx.root_prefix,
         ),
         ("jet.crypto", "open") => format!(
             "{}(&({}), {}, &({}))",
@@ -1236,10 +1238,12 @@ pub(crate) fn emit_tir_core_call(
             arg(2)
         ),
         ("jet.crypto", "file_open") => format!(
-            "{}(&({}), &({}))",
+            "{}(&({}), &({}.inner.to_string_lossy().into_owned()), &({}.inner.to_string_lossy().into_owned()), {}jet_scheduler_task_cancelled)",
             regex_fn("jet_crypto_file_open_impl"),
             arg(0),
-            arg(1)
+            arg(1),
+            arg(2),
+            cx.root_prefix,
         ),
         ("jet.crypto", "sign") => format!(
             "{}(&({}), &({}))",

@@ -2105,6 +2105,22 @@ explicit expert exposure instead. Versioned `JETC` envelope headers give
 algorithm agility; PQ algorithms later (D-PQCRYPTO1). `core.encoding`
 hex/base64 + `core.uuid` v4/v7 (D-UUIDENC1).
 
+**D-CRYPTO-ENVELOPE2=A — recipient JETC v2 files** *(ratified by owner,
+card #302)*: safe file crypto is
+`crypto.file_seal([X25519PublicKey], Path, Path)` and
+`crypto.file_open(&X25519SecretKey, Path, Path)`. Both stream bounded,
+authenticated 1 MiB chunks through the canonical recipient JETC v2 format;
+sealing snapshots and revalidates the source before its four independent RNG
+requests, and neither operation overwrites or exposes partial output. Safe open
+accepts v2 only and collapses attacker-controlled parse, recipient, and auth
+failures to `FileCryptoError.OpenFailed`. Legacy v1 is confined to the ratified
+expert `open_v1`/`migrate_v1` path under `#Unsafe`; no v1 writer exists.
+`crypto.file_inspect` is parse-only and never authenticates. Secret material
+and plaintext staging buffers are zeroized on every exit. The exact format,
+nonce/AAD domains, parser caps, atomic publication rules, cancellation points,
+and platform primitives are normative parts of the decision, not replaceable
+aliases or whole-buffer facades.
+
 **D-CORE-NUMERIC1=A — one math home** *(ratified by owner 2026-07-12, card #512)*: `BigInt` and `Decimal` move into `core.math`; `core.numeric` leaves the registry (ordinary unknown-module error). Construction spellings, the no-auto-promotion law (E0130–E0133), and lint L0504 are unchanged.
 
 **D-API-LEN1=A — Law 1 blessed vocabulary** *(ratified by owner 2026-07-12, card #513)*: the API rubric keeps its plain-English rule; `len` joins a closed blessed-abbreviation list (with the module names `fmt`, `args`, `env`, `mem`); extensions to the list need a ballot. The shipped `len()`/`.len` surface is untouched.

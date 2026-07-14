@@ -1,5 +1,6 @@
 // D-CRYPTO-SUITE1=A / D-PWHASH1=A: misuse-resistant suite.
 use core.crypto as crypto
+use core.files as fs
 
 fn run() {
     abc: [U8] :: [0x61, 0x62, 0x63]
@@ -23,17 +24,30 @@ fn run() {
     shared :: crypto.x25519_shared(alice_secret, bob_public) ?? panic("shared")
     print(shared == shared_expected)
 
-    phc :: crypto.password_hash_with_salt("correct horse battery staple", salt) ?? panic("password hash")
-    print(phc.starts_with("$argon2id$"))
-    stored :: crypto.PasswordHash.parse(phc) ?? panic("password parse")
-    print(crypto.password_verify(crypto.Secret.from_text("correct horse battery staple"), stored) ?? panic("password verify"))
-    print(crypto.password_verify(crypto.Secret.from_text("wrong"), stored) ?? panic("password verify"))
+    password :: crypto.Secret.from_text("correct horse battery staple")
+    phc :: crypto.password_hash(password) ?? panic("password hash")
+    print(phc.text().starts_with("$argon2id$"))
+    print(crypto.password_verify(password, phc) ?? panic("password verify"))
+    print(crypto.password_verify(crypto.Secret.from_text("wrong"), phc) ?? panic("password verify"))
 
     print(crypto.constant_time_eq([1, 2, 3], [1, 2, 3]))
     print(crypto.constant_time_eq([1, 2, 3], [1, 2, 4]))
 
-    key: [U8] :: [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f]
-    sealed :: crypto.file_seal(key, abc) ?? panic("file seal")
-    opened :: crypto.file_open(key, sealed) ?? panic("file open")
-    print(opened == abc)
+    source_text :: "/tmp/jet_crypto_suite_source"
+    sealed_text :: "/tmp/jet_crypto_suite_sealed"
+    opened_text :: "/tmp/jet_crypto_suite_opened"
+    if fs.exists(source_text) { fs.remove(source_text) ?? panic("crypto fixture cleanup") }
+    if fs.exists(sealed_text) { fs.remove(sealed_text) ?? panic("crypto fixture cleanup") }
+    if fs.exists(opened_text) { fs.remove(opened_text) ?? panic("crypto fixture cleanup") }
+    source :: Path.from(source_text)
+    sealed :: Path.from(sealed_text)
+    opened :: Path.from(opened_text)
+    source.write_atomic(abc) ?? panic("file source")
+    file_recipient :: crypto.X25519SecretKey.generate() ?? panic("file recipient")
+    crypto.file_seal([file_recipient.public_key()], source, sealed) ?? panic("file seal")
+    crypto.file_open(&file_recipient, sealed, opened) ?? panic("file open")
+    print((fs.read(opened_text) ?? panic("file read")) == "abc")
+    fs.remove(source_text) ?? panic("crypto fixture cleanup")
+    fs.remove(sealed_text) ?? panic("crypto fixture cleanup")
+    fs.remove(opened_text) ?? panic("crypto fixture cleanup")
 }

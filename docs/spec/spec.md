@@ -2035,6 +2035,28 @@ KiB, 1–10 iterations, 1–8 lanes, `memory >= 8 * lanes`, and
 `memory * iterations <= 1048576`; salts are 8–64 bytes and outputs 16–64
 bytes. These failures use the same `CryptoError` family as the safe API.
 
+`crypto.file_seal(recipients, source, destination)` and
+`crypto.file_open(&recipient, source, destination)` use the recipient-based
+JETC v2 envelope ratified by D-CRYPTO-ENVELOPE2. The fixed prefix is `JETC`,
+version 2, kind 1, suite 1, flags 0, followed by little-endian header and body
+lengths. The authenticated header carries a 16-byte file id, ephemeral X25519
+public key, 16-byte nonce prefix, the fixed 1 MiB chunk size, 1–256 canonical
+recipient stanzas, no metadata, and its tag. Body records carry a little-endian
+length, final flag, ciphertext, and tag. Non-final records are exactly 1 MiB;
+there is exactly one final record, including an empty final record after an
+exact multiple. Readers cap all declared sizes before allocation and accept
+safe-open v2 only.
+
+Sealing snapshots and revalidates a no-follow regular source before requesting
+envelope randomness. Seal and open stream one authenticated chunk at a time,
+poll cancellation between chunks, zeroize secret and plaintext buffers on every
+exit, and publish with atomic no-overwrite semantics only after authentication
+and durable staging. Identity, framing, recipient, and authentication failures
+from safe open collapse to `FileCryptoError.OpenFailed`; no failure publishes a
+partial destination. The current native bridge supplies this runtime on Linux.
+The ratified Windows delete-on-close and rename implementation remains required
+before cross-platform completion.
+
 ### HTTPS client default (D-TLS1)
 
 `core.net.fetch` and `core.http.client` support `https://` in the default build

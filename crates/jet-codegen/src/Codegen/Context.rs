@@ -628,14 +628,15 @@ impl Cx {
             }
             Type::Named(name) if name == "Unit" || name == "Void" => "()".to_string(),
             Type::Named(name) if name == "Error" => "String".to_string(),
-            Type::Named(name) if matches!(name.as_str(), "Secret" | "SigningKey" | "VerifyKey" | "X25519SecretKey" | "X25519PublicKey" | "SharedSecret" | "Signature" | "Sealed" | "WrappedKey" | "PasswordHash" | "Digest256" | "Digest512" | "CryptoError") => {
+            Type::Named(name) if matches!(name.as_str(), "Secret" | "SigningKey" | "VerifyKey" | "X25519SecretKey" | "X25519PublicKey" | "SharedSecret" | "Signature" | "Sealed" | "WrappedKey" | "PasswordHash" | "Digest256" | "Digest512" | "CryptoError" | "FileCryptoError") => {
                 let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
                 let rust = match name.as_str() {
                     "Secret" => "Secret", "SigningKey" => "JetSigningKey", "VerifyKey" => "JetVerifyKey",
                     "X25519SecretKey" => "JetX25519SecretKey", "X25519PublicKey" => "JetX25519PublicKey",
                     "SharedSecret" => "JetSharedSecret", "Signature" => "JetSignature", "Sealed" => "JetSealed",
                     "WrappedKey" => "JetWrappedKey", "PasswordHash" => "JetPasswordHash",
-                    "Digest256" => "JetDigest256", "Digest512" => "JetDigest512", _ => "JetCryptoError",
+                    "Digest256" => "JetDigest256", "Digest512" => "JetDigest512",
+                    "FileCryptoError" => "JetFileCryptoError", _ => "JetCryptoError",
                 };
                 format!("{ffi}::{rust}")
             }

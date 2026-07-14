@@ -415,6 +415,7 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "Digest256",
             "Digest512",
             "CryptoError",
+            "FileCryptoError",
             "sha256",
             "sha256_bytes",
             "sha512_bytes",
@@ -697,6 +698,6 @@ pub(crate) fn core_module_type_item(module: &str, item: &str) -> bool {
         (module.as_str(), item),
         ("jet.crypto", "Secret" | "SigningKey" | "VerifyKey" | "X25519SecretKey"
             | "X25519PublicKey" | "SharedSecret" | "Signature" | "Sealed" | "WrappedKey"
-            | "PasswordHash" | "Digest256" | "Digest512" | "CryptoError")
+            | "PasswordHash" | "Digest256" | "Digest512" | "CryptoError" | "FileCryptoError")
     )
 }

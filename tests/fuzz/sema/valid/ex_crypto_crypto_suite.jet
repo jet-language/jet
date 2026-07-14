@@ -1,5 +1,6 @@
 // D-CRYPTO-SUITE1=A / D-PWHASH1=A: misuse-resistant suite.
 use core.crypto as crypto
+use core.files as fs
 
 fn run() {
     abc: [U8] :: [0x61, 0x62, 0x63]
@@ -9,9 +10,9 @@ fn run() {
     ikm: [U8] :: [0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b]
     salt: [U8] :: [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c]
     info: [U8] :: [0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9]
-    okm :: crypto.hkdf_sha256(ikm, salt, info, 42) ?? panic("hkdf")
+    okm :: crypto.hkdf_sha256(crypto.Secret.from_bytes(ikm), salt, info, 42) ?? panic("hkdf")
     expected_okm: [U8] :: [0x3c, 0xb2, 0x5f, 0x25, 0xfa, 0xac, 0xd5, 0x7a, 0x90, 0x43, 0x4f, 0x64, 0xd0, 0x36, 0x2f, 0x2a, 0x2d, 0x2d, 0x0a, 0x90, 0xcf, 0x1a, 0x5a, 0x4c, 0x5d, 0xb0, 0x2d, 0x56, 0xec, 0xc4, 0xc5, 0xbf, 0x34, 0x00, 0x72, 0x08, 0xd5, 0xb8, 0x87, 0x18, 0x58, 0x65]
-    print(okm == expected_okm)
+    print(crypto.constant_time_equal(okm, crypto.Secret.from_bytes(expected_okm)))
 
     alice_secret: [U8] :: [0x77, 0x07, 0x6d, 0x0a, 0x73, 0x18, 0xa5, 0x7d, 0x3c, 0x16, 0xc1, 0x72, 0x51, 0xb2, 0x66, 0x45, 0xdf, 0x4c, 0x2f, 0x87, 0xeb, 0xc0, 0x99, 0x2a, 0xb1, 0x77, 0xfb, 0xa5, 0x1d, 0xb9, 0x2c, 0x2a]
     bob_secret: [U8] :: [0x5d, 0xab, 0x08, 0x7e, 0x62, 0x4a, 0x8a, 0x4b, 0x79, 0xe1, 0x7f, 0x8b, 0x83, 0x80, 0x0e, 0xe6, 0x6f, 0x3b, 0xb1, 0x29, 0x26, 0x18, 0xb6, 0xfd, 0x1c, 0x2f, 0x8b, 0x27, 0xff, 0x88, 0xe0, 0xeb]
@@ -23,16 +24,30 @@ fn run() {
     shared :: crypto.x25519_shared(alice_secret, bob_public) ?? panic("shared")
     print(shared == shared_expected)
 
-    phc :: crypto.password_hash_with_salt("correct horse battery staple", salt) ?? panic("password hash")
-    print(phc.starts_with("$argon2id$"))
-    print(crypto.password_verify("correct horse battery staple", phc))
-    print(crypto.password_verify("wrong", phc))
+    password :: crypto.Secret.from_text("correct horse battery staple")
+    phc :: crypto.password_hash(password) ?? panic("password hash")
+    print(phc.text().starts_with("$argon2id$"))
+    print(crypto.password_verify(password, phc) ?? panic("password verify"))
+    print(crypto.password_verify(crypto.Secret.from_text("wrong"), phc) ?? panic("password verify"))
 
     print(crypto.constant_time_eq([1, 2, 3], [1, 2, 3]))
     print(crypto.constant_time_eq([1, 2, 3], [1, 2, 4]))
 
-    key: [U8] :: [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f]
-    sealed :: crypto.file_seal(key, abc) ?? panic("file seal")
-    opened :: crypto.file_open(key, sealed) ?? panic("file open")
-    print(opened == abc)
+    source_text :: "/tmp/jet_crypto_suite_source"
+    sealed_text :: "/tmp/jet_crypto_suite_sealed"
+    opened_text :: "/tmp/jet_crypto_suite_opened"
+    if fs.exists(source_text) { fs.remove(source_text) ?? panic("crypto fixture cleanup") }
+    if fs.exists(sealed_text) { fs.remove(sealed_text) ?? panic("crypto fixture cleanup") }
+    if fs.exists(opened_text) { fs.remove(opened_text) ?? panic("crypto fixture cleanup") }
+    source :: Path.from(source_text)
+    sealed :: Path.from(sealed_text)
+    opened :: Path.from(opened_text)
+    source.write_atomic(abc) ?? panic("file source")
+    file_recipient :: crypto.X25519SecretKey.generate() ?? panic("file recipient")
+    crypto.file_seal([file_recipient.public_key()], source, sealed) ?? panic("file seal")
+    crypto.file_open(&file_recipient, sealed, opened) ?? panic("file open")
+    print((fs.read(opened_text) ?? panic("file read")) == "abc")
+    fs.remove(source_text) ?? panic("crypto fixture cleanup")
+    fs.remove(sealed_text) ?? panic("crypto fixture cleanup")
+    fs.remove(opened_text) ?? panic("crypto fixture cleanup")
 }

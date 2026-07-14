@@ -886,9 +886,21 @@ pub fn core_fixed_sig(
             ],
             Some(result_ty(Type::List(Box::new(u8_ty())), Type::Named("CryptoError".into()))),
         )),
-        ("jet.crypto", "file_seal" | "file_open") => Some((
-            vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty())))],
-            Some(result_ty(Type::List(Box::new(u8_ty())), Type::String)),
+        ("jet.crypto", "file_seal") => Some((
+            vec![
+                (read, Type::List(Box::new(Type::Named("X25519PublicKey".into())))),
+                (read, Type::Named("Path".into())),
+                (read, Type::Named("Path".into())),
+            ],
+            Some(result_ty(Type::Named("Unit".into()), Type::Named("FileCryptoError".into()))),
+        )),
+        ("jet.crypto", "file_open") => Some((
+            vec![
+                (read, Type::Named("X25519SecretKey".into())),
+                (read, Type::Named("Path".into())),
+                (read, Type::Named("Path".into())),
+            ],
+            Some(result_ty(Type::Named("Unit".into()), Type::Named("FileCryptoError".into()))),
         )),
         ("jet.crypto", "sign") => Some((
             vec![

@@ -39,13 +39,6 @@ mod tests {
 
         fail_entropy();
         assert_eq!(
-            jet_crypto_file_seal_impl(&key, &plaintext),
-            Err("the operating system could not provide cryptographic randomness".to_string())
-        );
-        jet_crypto_entropy_clear_test_provider();
-
-        fail_entropy();
-        assert_eq!(
             jet_crypto_keygen_impl(),
             Err("the operating system could not provide cryptographic randomness".to_string())
         );
@@ -239,6 +232,157 @@ mod tests {
         ] {
             assert!(jet_crypto_x25519_public_from_text_impl(hostile).is_err());
         }
+    }
+
+    fn never_cancelled() -> bool { false }
+    fn always_cancelled() -> bool { true }
+
+    fn test_dir(name: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "jetc-v2-{name}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&path);
+        std::fs::create_dir(&path).unwrap();
+        path
+    }
+
+    #[test]
+    fn jetc_v2_streams_authenticated_chunks_and_publishes_without_overwrite() {
+        let root = test_dir("roundtrip");
+        let source = root.join("source.bin");
+        let envelope = root.join("sealed.jetc");
+        let restored = root.join("restored.bin");
+        let wrong_output = root.join("wrong.bin");
+        let mut plain = vec![0x5a; JETC_V2_CHUNK + 17];
+        plain[0] = 1;
+        plain[JETC_V2_CHUNK] = 2;
+        std::fs::write(&source, &plain).unwrap();
+        let recipient = jet_crypto_x25519_generate_impl().unwrap();
+        let public = jet_crypto_x25519_public_typed_impl(&recipient);
+        jet_crypto_file_seal_impl(
+            vec![public],
+            &source.to_string_lossy().into_owned(),
+            &envelope.to_string_lossy().into_owned(),
+            never_cancelled,
+        ).unwrap();
+        let encoded = std::fs::read(&envelope).unwrap();
+        assert_eq!(&encoded[..8], b"JETC\x02\x01\x01\x00");
+        let header_len = u32::from_le_bytes(encoded[8..12].try_into().unwrap()) as usize;
+        let body_len = u64::from_le_bytes(encoded[12..20].try_into().unwrap()) as usize;
+        assert_eq!(header_len, JETC_V2_HEADER_BASE + JETC_V2_STANZA + 16);
+        assert_eq!(encoded.len(), 20 + header_len + body_len);
+        let body = &encoded[20 + header_len..];
+        assert_eq!(u32::from_le_bytes(body[..4].try_into().unwrap()), JETC_V2_CHUNK as u32);
+        assert_eq!(body[4], 0);
+        let final_at = 5 + JETC_V2_CHUNK + 16;
+        assert_eq!(u32::from_le_bytes(body[final_at..final_at+4].try_into().unwrap()), 17);
+        assert_eq!(body[final_at+4], 1);
+        jet_crypto_file_open_impl(
+            &recipient,
+            &envelope.to_string_lossy().into_owned(),
+            &restored.to_string_lossy().into_owned(),
+            never_cancelled,
+        ).unwrap();
+        assert_eq!(std::fs::read(&restored).unwrap(), plain);
+
+        let wrong = jet_crypto_x25519_generate_impl().unwrap();
+        assert_eq!(
+            jet_crypto_file_open_impl(
+                &wrong,
+                &envelope.to_string_lossy().into_owned(),
+                &wrong_output.to_string_lossy().into_owned(),
+                never_cancelled,
+            ),
+            Err(JetFileCryptoError::OpenFailed)
+        );
+        assert!(!wrong_output.exists());
+
+        std::fs::write(&restored, b"do not replace").unwrap();
+        assert_eq!(
+            jet_crypto_file_open_impl(
+                &recipient,
+                &envelope.to_string_lossy().into_owned(),
+                &restored.to_string_lossy().into_owned(),
+                never_cancelled,
+            ),
+            Err(JetFileCryptoError::DestinationExists)
+        );
+        assert_eq!(std::fs::read(&restored).unwrap(), b"do not replace");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn jetc_v2_rejects_tamper_truncation_append_and_cancellation_without_output() {
+        let root = test_dir("hostile");
+        let source = root.join("source.bin");
+        let envelope = root.join("sealed.jetc");
+        std::fs::write(&source, b"authenticated file").unwrap();
+        let recipient = jet_crypto_x25519_generate_impl().unwrap();
+        jet_crypto_file_seal_impl(
+            vec![jet_crypto_x25519_public_typed_impl(&recipient)],
+            &source.to_string_lossy().into_owned(),
+            &envelope.to_string_lossy().into_owned(),
+            never_cancelled,
+        ).unwrap();
+        let canonical = std::fs::read(&envelope).unwrap();
+        let mut tampered = canonical.clone();
+        *tampered.last_mut().unwrap() ^= 1;
+        for (name, hostile) in [
+            ("tampered", tampered),
+            ("truncated", canonical[..canonical.len()-1].to_vec()),
+            ("appended", { let mut b = canonical.clone(); b.push(0); b }),
+            ("v1", { let mut b = canonical.clone(); b[4] = 1; b }),
+        ] {
+            let input = root.join(format!("{name}.jetc"));
+            let output = root.join(format!("{name}.out"));
+            std::fs::write(&input, hostile).unwrap();
+            assert_eq!(
+                jet_crypto_file_open_impl(
+                    &recipient,
+                    &input.to_string_lossy().into_owned(),
+                    &output.to_string_lossy().into_owned(),
+                    never_cancelled,
+                ),
+                Err(JetFileCryptoError::OpenFailed)
+            );
+            assert!(!output.exists());
+        }
+        let cancelled = root.join("cancelled.out");
+        assert_eq!(
+            jet_crypto_file_open_impl(
+                &recipient,
+                &envelope.to_string_lossy().into_owned(),
+                &cancelled.to_string_lossy().into_owned(),
+                always_cancelled,
+            ),
+            Err(JetFileCryptoError::Cancelled)
+        );
+        assert!(!cancelled.exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn jetc_v2_entropy_failure_occurs_after_verified_snapshot_and_publishes_nothing() {
+        let root = test_dir("entropy");
+        let source = root.join("source.bin");
+        let envelope = root.join("sealed.jetc");
+        std::fs::write(&source, b"snapshot first").unwrap();
+        fail_entropy();
+        assert_eq!(
+            jet_crypto_file_seal_impl(
+                vec![JetX25519PublicKey([9; 32])],
+                &source.to_string_lossy().into_owned(),
+                &envelope.to_string_lossy().into_owned(),
+                never_cancelled,
+            ),
+            Err(JetFileCryptoError::SealFailed(JetCryptoError::EntropyUnavailable))
+        );
+        jet_crypto_entropy_clear_test_provider();
+        assert!(!envelope.exists());
+        assert_eq!(std::fs::read(&source).unwrap(), b"snapshot first");
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
