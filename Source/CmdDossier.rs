@@ -36,18 +36,21 @@ pub(crate) fn run_dossier(args: &[String], json: bool) {
                     .unwrap_or("run")
             });
             let dossier = idx.dossier(target);
-            let budgets = budget_projection(&abs);
+            let (budgets, command) = auxiliary_projections(&abs);
             if json {
                 let mut value = dossier.to_json();
                 if value.ends_with('}') {
                     value.pop();
                     value.push_str(",\"performance_budgets\":");
                     value.push_str(&budgets.to_json());
+                    value.push_str(",\"command_schema\":");
+                    value.push_str(&command_json(command.as_ref()));
                     value.push('}');
                 }
                 println!("{value}");
             } else {
                 print!("{}", dossier.render_text());
+                print!("{}", command_text(command.as_ref()));
                 print!("{}", budgets.render_text());
             }
             if dossier.definition.is_none() {
@@ -70,20 +73,142 @@ pub(crate) fn run_dossier(args: &[String], json: bool) {
     }
 }
 
-fn budget_projection(entry: &Path) -> jet::BudgetView::BudgetProjection {
+fn auxiliary_projections(
+    entry: &Path,
+) -> (
+    jet::BudgetView::BudgetProjection,
+    Option<jet_foundation::CliSchema::CliCommandSchema>,
+) {
     let entry_text = entry.to_string_lossy();
     let (diagnostics, bundle, _) = jet::Driver::check_file_with_effect_facts(&entry_text, None, false);
     if diagnostics.iter().any(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error) {
-        return jet::BudgetView::BudgetProjection::default();
+        return (jet::BudgetView::BudgetProjection::default(), None);
     }
-    let Some(bundle) = bundle else { return jet::BudgetView::BudgetProjection::default() };
+    let Some(bundle) = bundle else {
+        return (jet::BudgetView::BudgetProjection::default(), None);
+    };
+    let command = entry_command_schema(&bundle);
     let root = jet::Loader::find_manifest_root(entry.parent().unwrap_or(Path::new(".")))
         .unwrap_or_else(|| entry.parent().unwrap_or(Path::new(".")).to_path_buf());
     let sources = bundle.modules.iter().map(|module| {
         let path = module.path.strip_prefix(&root).unwrap_or(&module.path).to_string_lossy().replace('\\', "/");
         (path, jet::SHA256::sha256_hex(module.source.as_bytes()))
     }).collect::<Vec<_>>();
-    jet::BudgetView::read_compatible(&root, &sources)
+    (jet::BudgetView::read_compatible(&root, &sources), command)
+}
+
+fn entry_command_schema(
+    bundle: &jet::AST::ProgramBundle,
+) -> Option<jet_foundation::CliSchema::CliCommandSchema> {
+    let items = &bundle.modules.get(bundle.entry)?.items;
+    let run_type = items.iter().find_map(|item| match item {
+        jet::AST::Item::Func(function)
+            if function.name == "run" && function.params.len() == 1 =>
+        {
+            match &function.params[0].ty {
+                jet::AST::Type::Named(name) => Some(name.as_str()),
+                _ => None,
+            }
+        }
+        _ => None,
+    })?;
+    let structure = items.iter().find_map(|item| match item {
+        jet::AST::Item::Struct(structure) if structure.name == run_type => Some(structure),
+        _ => None,
+    })?;
+    jet_foundation::CliSchema::command_schema(structure)
+}
+
+fn command_json(command: Option<&jet_foundation::CliSchema::CliCommandSchema>) -> String {
+    let Some(command) = command else {
+        return "null".to_string();
+    };
+    let inputs = command
+        .inputs
+        .iter()
+        .map(|input| {
+            let shape = match input.shape {
+                jet_foundation::CliSchema::CliInputShape::Flag => "flag",
+                jet_foundation::CliSchema::CliInputShape::Value { .. } => "option",
+            };
+            let default = input
+                .default_display()
+                .map(|value| json_string(&value))
+                .unwrap_or_else(|| "null".to_string());
+            let metavar = input
+                .metavar
+                .as_deref()
+                .map(json_string)
+                .unwrap_or_else(|| "null".to_string());
+            format!(
+                "{{\"field\":{},\"flag\":{},\"shape\":{},\"value_type\":{},\"required\":{},\"default\":{},\"metavar\":{},\"help\":{}}}",
+                json_string(&input.field),
+                json_string(&format!("--{}", input.flag)),
+                json_string(shape),
+                json_string(input.value_kind().as_str()),
+                input.required(),
+                default,
+                metavar,
+                json_string(&input.help),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let completion = command
+        .completion_words()
+        .iter()
+        .map(|word| json_string(word))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"source\":{},\"entry_type\":{},\"inputs\":[{}],\"completion_words\":[{}]}}",
+        json_string(&format!("fn run(args: {})", command.entry_type)),
+        json_string(&command.entry_type),
+        inputs,
+        completion,
+    )
+}
+
+fn command_text(command: Option<&jet_foundation::CliSchema::CliCommandSchema>) -> String {
+    let Some(command) = command else {
+        return "command schema\n  none (plain fn run() or non-command target)\n".to_string();
+    };
+    let mut out = format!("command schema\n  entry: fn run(args: {})\n", command.entry_type);
+    for input in &command.inputs {
+        let status = if input.required() { "required" } else { "optional" };
+        let default = input
+            .default_display()
+            .map(|value| format!(", default {value}"))
+            .unwrap_or_default();
+        out.push_str(&format!(
+            "  --{}: {} ({status}{default}) — {}\n",
+            input.flag,
+            input.value_kind().as_str(),
+            input.help,
+        ));
+    }
+    out.push_str(&format!(
+        "  completion words: {}\n",
+        command.completion_words().join(" ")
+    ));
+    out
+}
+
+fn json_string(value: &str) -> String {
+    let mut out = String::from("\"");
+    for ch in value.chars() {
+        match ch {
+            '\"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('\"');
+    out
 }
 
 fn absolutize(path: &str) -> PathBuf {

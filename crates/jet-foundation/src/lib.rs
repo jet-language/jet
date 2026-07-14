@@ -3,6 +3,7 @@
 pub mod AST;
 mod BuildEffects;
 pub mod CanonicalAST;
+pub mod CliSchema;
 pub mod Collections;
 pub mod Diagnostics;
 pub mod ExitCodes;

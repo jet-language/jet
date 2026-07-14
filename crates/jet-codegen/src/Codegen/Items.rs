@@ -334,12 +334,6 @@ fn emit_columnar_storage(cx: &Cx, s: &StructDef, out: &mut String) {
 // arms below are a real invariant, not a TODO.
 // ──────────────────────────────────────────────────────────────────────────────
 
-/// D-CLIFLAG1: is `ty` one of the scalar types a CLI flag can hold?
-fn is_cli_scalar(ty: &Type) -> bool {
-    matches!(ty, Type::Int | Type::Float | Type::Bool | Type::String)
-        || matches!(ty, Type::Named(n) if n == "Path")
-}
-
 /// D-CLIFLAG1: a runtime expression converting an owned `String` (from
 /// `ParsedArgs`) into `ty`. `Int`/`Float` are fallible (`return Err(...)`
 /// on a bad value, in the same "core.args runtime error" voice as
@@ -363,30 +357,29 @@ fn cli_scalar_from_string(ty: &Type, var: &str, flag: &str) -> String {
 /// `@[Cli]`-derived struct. See the pinned field-mapping rule in
 /// docs/spec/spec.md ("Typed entry-signature CLI parsing (D-CLIFLAG1)").
 fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
-    if !s.derives.iter().any(|(t, _)| t == "Cli") {
+    let Some(schema) = jet_foundation::CliSchema::command_schema(s) else {
         return;
-    }
+    };
     let cn = user_type_rust(&s.name);
 
     let mut spec_body = String::new();
     spec_body.push_str("    let __s = jet_args_spec();\n");
-    spec_body.push_str(
-        "    let __s = jet_args_flag(__s, &\"help\".to_string(), &\"show this help and exit\".to_string());\n",
-    );
     let mut decode_lines = String::new();
 
-    // D-FIELDPOL1: a computed field isn't a CLI-settable member (E0339 already
-    // rejects it in a struct literal for the same reason) — skip it here too.
-    for f in s.fields.iter().filter(|f| f.computed.is_none()) {
-        let flag = f.name.replace('_', "-");
-        let help = serde_marker(&f.serde_markers, crate::Syntax::CONTRACT_DOC)
-            .and_then(marker_str_arg)
-            .unwrap_or_else(|| format!("value for --{}", flag));
-        let metavar = flag.replace('-', "_").to_uppercase();
-        let m = mangle(&f.name);
+    // CliSchema is the checked projection shared with `jet inspect dossier`.
+    // Codegen consumes it rather than reconstructing shell mapping rules.
+    for input in &schema.inputs {
+        let f = s
+            .fields
+            .iter()
+            .find(|field| field.name == input.field)
+            .expect("CliSchema fields originate from this struct");
+        let flag = &input.flag;
+        let help = &input.help;
+        let m = mangle(&input.field);
 
-        match &f.ty {
-            Type::Bool => {
+        match &input.shape {
+            jet_foundation::CliSchema::CliInputShape::Flag => {
                 spec_body.push_str(&format!(
                     "    let __s = jet_args_flag(__s, &{flag:?}.to_string(), &{help:?}.to_string());\n"
                 ));
@@ -394,7 +387,13 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
                     "    let {m}: bool = jet_parsed_flag(__parsed, &{flag:?}.to_string());\n"
                 ));
             }
-            Type::Option(inner) if is_cli_scalar(inner) => {
+            jet_foundation::CliSchema::CliInputShape::Value {
+                optional: true, ..
+            } => {
+                let Type::Option(inner) = &f.ty else {
+                    unreachable!("optional CliSchema input comes from an Option field")
+                };
+                let metavar = input.metavar.as_deref().unwrap_or("VALUE");
                 spec_body.push_str(&format!(
                     "    let __s = jet_args_option(__s, &{flag:?}.to_string(), &{help:?}.to_string(), &{metavar:?}.to_string());\n"
                 ));
@@ -404,14 +403,25 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
                     "    let {m}: Option<{rust}> = match jet_parsed_option(__parsed, &{flag:?}.to_string()) {{ Some(__v) => Some({conv}), None => None }};\n"
                 ));
             }
-            ty if is_cli_scalar(ty) => {
+            jet_foundation::CliSchema::CliInputShape::Value {
+                optional: false,
+                default,
+                ..
+            } => {
+                let ty = &f.ty;
+                let metavar = input.metavar.as_deref().unwrap_or("VALUE");
                 spec_body.push_str(&format!(
                     "    let __s = jet_args_option(__s, &{flag:?}.to_string(), &{help:?}.to_string(), &{metavar:?}.to_string());\n"
                 ));
                 let rust = cx.rust_type(ty);
                 let conv = cli_scalar_from_string(ty, "__v", &flag);
-                let absent = match field_default_rust(f) {
-                    Some(d) => d,
+                let absent = match default {
+                    Some(jet_foundation::CliSchema::CliDefault::Value(value)) => {
+                        value.serialize()
+                    }
+                    Some(jet_foundation::CliSchema::CliDefault::TypeDefault) => {
+                        "Default::default()".to_string()
+                    }
                     None => format!(
                         "return Err(format!(\"missing required flag --{{}}\\n\\n{{}}\", {flag:?}, __spec.help()))"
                     ),
@@ -420,9 +430,6 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
                     "    let {m}: {rust} = match jet_parsed_option(__parsed, &{flag:?}.to_string()) {{ Some(__v) => {conv}, None => {absent} }};\n"
                 ));
             }
-            _ => unreachable!(
-                "Sema::CheckerCli::validate_cli_items only allows Bool/Option<scalar>/scalar fields on a @[Cli] struct"
-            ),
         }
     }
     spec_body.push_str("    __s\n");
@@ -796,22 +803,6 @@ fn field_wire_key(style: Option<&str>, f: &Field) -> String {
         None => f.name.clone(),
     }
 }
-fn field_default_rust(f: &Field) -> Option<String> {
-    let m = serde_marker(&f.serde_markers, crate::Syntax::ATTR_DEFAULT)?;
-    Some(match (m.args.first(), &m.ct) {
-        // `#[Default(expr)]`: emit the exact compile-time value sema evaluated
-        // (`eval_default_markers`) — byte-for-byte the same `CtValue` the
-        // comptime decode tier uses, so a non-primitive default round-trips
-        // exactly (R12) instead of silently degrading to `Default::default()`.
-        // A non-const argument is rejected in sema (E2414), so a present arg
-        // always carries a value here.
-        (Some(_), Some(v)) => v.serialize(),
-        (Some(_), None) => "Default::default()".to_string(),
-        // bare `#[Default]`: the field type's zero value.
-        (None, _) => "Default::default()".to_string(),
-    })
-}
-
 /// D-MIGRATE4: the migration blocks for a struct, when the runtime chain
 /// applies: `@PublishedSchema`, concrete (no type params), with at least one
 /// `migration { }` block in the module. Mirrors the gate in

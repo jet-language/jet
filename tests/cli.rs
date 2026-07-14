@@ -669,7 +669,7 @@ fn budget_path_tools_cannot_forge_provenance() {
 #[cfg(unix)]
 fn budget_unreadable_compiler_identity_rejects_before_artifact() {
     use std::os::unix::fs::PermissionsExt;
-    let dir = budget_project("budget_missing_compiler_identity", 10);
+    let dir = artifact_budget_project("budget_missing_compiler_identity", 100_000_000);
     let copied = dir.join("jet-unreadable");
     fs::copy(jet(), &copied).unwrap();
     fs::set_permissions(&copied, fs::Permissions::from_mode(0o111)).unwrap();
@@ -678,6 +678,7 @@ fn budget_unreadable_compiler_identity_rejects_before_artifact() {
     let stderr = String::from_utf8(out.stderr).unwrap();
     assert!(stderr.contains("cannot hash running compiler executable"), "{stderr}");
     assert!(!dir.join(".jet").exists(), "missing compiler identity emitted an artifact");
+    assert!(!dir.join("build/main").exists(), "missing compiler identity started the selected artifact build");
 }
 
 #[test]
@@ -1037,6 +1038,42 @@ fn run(args: RunArgs) {
     let help = String::from_utf8_lossy(&help.stdout);
     for field_fact in ["--name", "person to greet", "--retries", "--verbose"] {
         assert!(help.contains(field_fact), "typed help missing {field_fact}: {help}");
+    }
+    assert_eq!(
+        help.lines()
+            .filter(|line| line.trim_start().starts_with("--help"))
+            .count(),
+        1,
+        "generated and Core help both claimed --help:\n{help}"
+    );
+
+    let dossier = Command::new(jet())
+        .args(["inspect", "dossier", "typed.jet", "run", "--json"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        dossier.status.success(),
+        "typed command dossier failed: {}",
+        String::from_utf8_lossy(&dossier.stderr)
+    );
+    let dossier = String::from_utf8(dossier.stdout).unwrap();
+    for projected in [
+        "\"entry_type\":\"RunArgs\"",
+        "\"flag\":\"--name\"",
+        "\"value_type\":\"String\"",
+        "\"required\":true",
+        "\"help\":\"person to greet\"",
+        "\"flag\":\"--retries\"",
+        "\"default\":\"2\"",
+        "\"flag\":\"--verbose\"",
+        "\"shape\":\"flag\"",
+        "\"completion_words\":[\"--help\",\"--name\",\"--retries\",\"--verbose\"]",
+    ] {
+        assert!(
+            dossier.contains(projected),
+            "typed command dossier omitted {projected}: {dossier}"
+        );
     }
 
     fs::write(dir.join("plain.jet"), "fn run() { print(\"plain\") }\n").unwrap();

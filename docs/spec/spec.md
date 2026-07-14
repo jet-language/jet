@@ -2693,6 +2693,11 @@ only for the compile-time shape checks above (E1305–E1308). `88_args_spec`/
 `64_cli_args`-style direct builder use is untouched; this feature is a
 layer generated on top of it, not a replacement.
 
+`jet inspect dossier <entry.jet> run --json` projects that same checked command
+schema as `command_schema`: shell flag, value type, required/default state,
+help text, and completion words. The human dossier prints the same facts. Tools
+consume this projection instead of reconstructing field-to-shell mapping.
+
 **Diagnostics:** E1305 (unmappable field type), E1306 (flag-name collision,
 including the reserved `--help`), E1307 (subcommand payload isn't
 `@[Cli]`), E1308 (`run`'s one parameter isn't a `@[Cli]` struct or an enum
