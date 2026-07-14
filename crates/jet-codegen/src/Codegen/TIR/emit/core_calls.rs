@@ -1176,7 +1176,7 @@ pub(crate) fn emit_tir_core_call(
         ),
         ("jet.crypto", "hkdf_sha256") => format!(
             "{}(&({}), &({}), &({}), {})",
-            regex_fn("jet_crypto_hkdf_sha256_impl"),
+            regex_fn("jet_crypto_hkdf_typed_impl"),
             arg(0),
             arg(1),
             arg(2),
