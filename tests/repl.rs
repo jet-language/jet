@@ -2344,9 +2344,9 @@ fn repl_core_data_lazy_plans_and_typed_joins() {
     let out = run_transcript(inputs, None);
     assert!(out.contains("[table, filter]"), "deferred plan missing: {out}");
     assert!(out.contains("[2, 3]"), "materialized filter/sort result missing: {out}");
-    assert_eq!(
-        out.matches("DataJoin(left: 1, right: 1)").count(),
-        4,
+    assert!(
+        out.lines()
+            .any(|line| line.matches("DataJoin(left: 1, right: 1)").count() == 4),
         "inner join multiplicity lost: {out}"
     );
     assert!(
