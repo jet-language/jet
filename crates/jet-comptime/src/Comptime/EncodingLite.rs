@@ -1589,7 +1589,14 @@ fn xml_to_ct(value: jet_foundation::XmlPull::Value) -> CtValue {
 
 fn xml_from_ct(value: &CtValue) -> Result<jet_foundation::XmlPull::Value, String> {
     use jet_foundation::XmlPull::Value;
-    if json_payload(value, "Null").is_some() {
+    if matches!(
+        value,
+        CtValue::Enum {
+            type_name,
+            variant,
+            args,
+        } if type_name == "Json" && variant == "Null" && args.is_empty()
+    ) {
         return Ok(Value::Null);
     }
     if let Some(CtValue::Bool(value)) = json_payload(value, "Bool") {

@@ -252,6 +252,16 @@ fn comptime_module_calls_match_runtime() {
 }
 
 #[test]
+fn xml_rich_whole_value_matches_comptime_and_runtime() {
+    if !have_rustc() {
+        eprintln!("note: rustc not found; skipping rich XML comptime differential");
+        return;
+    }
+    let src = "use core.encoding.xml as xml\ncomptime C = xml.to_string(xml.parse(\"<r xmlns=\\\"urn:r\\\" xmlns:p=\\\"urn:p\\\" p:a=\\\"x&amp;y\\\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><p:c/></r>\") ?? panic(\"bad\"))\n\nfn run() {\n    r :: xml.to_string(xml.parse(\"<r xmlns=\\\"urn:r\\\" xmlns:p=\\\"urn:p\\\" p:a=\\\"x&amp;y\\\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><p:c/></r>\") ?? panic(\"bad\"))\n    print(\"{C}\")\n    print(\"{r}\")\n}\n";
+    check_comptime_src(2004, "rich lossless XML whole-value round-trip", src);
+}
+
+#[test]
 fn cbor_generic_whole_decode_matches_comptime_and_aot() {
     if !have_rustc() {
         eprintln!("note: rustc not found; skipping CBOR whole-value differential");
