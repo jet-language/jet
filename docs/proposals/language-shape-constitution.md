@@ -1,328 +1,207 @@
-# Jet language-shape constitution
+# Jet language-shape work
 
-Status: owner ballot set. Nothing in this document is ratified syntax.
+Status: design rules for open Tower ballots. No new syntax here is ratified.
 
 ## Goal
 
-A developer should be able to identify a construct's job and predict its shape.
-The rule must work across ordinary code, manifests, Core APIs, tooling, and expert
-features. It must preserve Jet's beginner default, expert reach, implicit typing,
-and one-mechanical-path law.
+Jet should be easy to read, easy to write, and easy to reason about. A short
+form is good only when its full meaning is unique and easy to reveal.
 
-Uniformity does not mean one spelling for unrelated jobs. It means one visible
-axis for each real distinction. A record literal and an invariant-bearing
-container should not look identical. A description attached to a declaration
-and an authority-changing scope should not share a marker family.
+Beginners should write intent without ceremony. Experts should be able to add
+the exact type, effect, provider, target, ownership, or build choice. Companies
+should be able to require those facts at selected boundaries and audit where
+each fact came from.
 
-## Why the previous ballot set failed
+These are three views of one program. They are not three languages.
 
-The previous ballots named isolated inconsistencies, then offered shallow
-choices such as “fix all,” “leave as-is,” or “pick a subset.” They did not give
-the punctuation a complete meaning, did not account for grammatical position,
-and did not show how the answers compose into one language. Several ballots also
-mixed independent choices or asked the owner to approve future cleanup rather
-than decide an actual user experience.
+## What stays
 
-The replacement starts with a slot grammar. Prefix markers, infix reference
-separators, delimiters, declarations, constructors, and operations are different
-slots. Each slot gets one predictable law. Reusing a glyph in two visibly
-different slots is acceptable only when both readings are fixed and cannot be
-confused by a reader or parser.
-
-## Proposed default: semantic slots
-
-The recommended direction is not “everything is a type.” It harvests the useful
-part of that idea: typed data should look typed, and expected-type inference
-should remove repeated names. It rejects the part that would make hidden work or
-invariants look like a passive literal.
-
-| Job | Canonical shape | Reader question |
-| --- | --- | --- |
-| Declare a named kind or namespace | `kind Name { ... }` or `kind Name = Type` | What does this name introduce? |
-| Write a body or scoped enclosure | `{ ... }` | What is inside this body? |
-| Write a plural group or collection | `[ ... ]` | Which items belong together? |
-| Supply inputs or payload components | `( ... )` | What goes into this call/signature/variant? |
-| Supply type parameters | `< ... >` | Which types specialize this declaration? |
-| Construct transparent record data | `Type.{ field: value }` or inferred `.{ ... }` | Which visible fields make this value? |
-| Select a choice | `Type.Variant(...)` or inferred `.Variant(...)` | Which case is this? |
-| Create hidden state or uphold invariants | `Type.new(...)` or a precise named constructor | What work creates a valid value? |
-| Convert an existing value | `Type.from(...)`, `Type.parse(...)`, or a precise conversion name | What source becomes this type? |
-| Operate on a value | `value.verb(...)` | What happens to this receiver? |
-| Attach a descriptive fact or contract | `@Name` or `@[A, B]` | What is true about this declaration/field? |
-| Change source interpretation, authority, phase, or inclusion | `#Name ...` / `#Name { ... }` | Under what explicit context does this source run or compile? |
-| Name an external reference | `source@package#version` | Where, what, and which exact version? |
-| State alternatives | `a | b` | Which peer alternatives are accepted? |
-| Carry a value through stages, if adopted | `value |> stage` | Where does this value go next? |
-
-This table is a candidate law, not a bundle of automatic outcomes. Each row
-that changes current syntax remains its own owner decision.
-
-## Prefix `@` and `#`: a user-visible boundary
-
-“Attribute versus compiler instruction” is not enough. It asks the user to know
-compiler internals. The replacement boundary is visible in source:
-
-- `@` attaches a description to the next declaration or field. It never opens a
-  scope, appears as an expression, or changes which source exists. Removing it
-  removes a promise, derived interface, wire fact, or documentation fact about
-  that item.
-- `#` establishes an active interpretation context. It opens a scope or applies
-  to a whole declaration/file. It changes authority, phase, target inclusion,
-  execution mode, or implementation language.
-
-Under that rule:
+Several existing forms already achieve that goal:
 
 ```jet
-@[Pure, MustUse, Codable]
-fn decode(...) { ... }
+point :: Point.{ x: 2, y: 3 }
+point: Point :: .{ x: 2, y: 3 }
 
-@[Rename("user_id")]
-id: UserId
-
-#Unsafe("MMIO") { ... }
-#Test("round trip") { ... }
-#Target(Web) fn render(...) { ... }
-#FFI(c) fn crc32(...) { """...""" }
+role :: Role.Admin
+role: Role :: .Admin
 ```
 
-Behavior-free `#Meta` and field-level wire facts fail this rule and should be
-reconsidered for `@`. Expression queries such as `#Caller()` also fail it and
-should become ordinary comptime APIs. Effect notation gets its own ballot rather
-than being forced onto either marker family.
+The explicit and inferred forms have the same value shape. A leading dot says
+that the expected type supplies the missing qualifier. If there is no unique
+expected type, Jet must ask for the explicit form.
 
-The infix reference grammar is a separate, unmistakable slot:
+The language-wide rule is:
 
-```text
-source@package#version
-```
+> Users may omit a fact only when one answer is already forced. Jet must show
+> that answer, explain why it was chosen, and let the user write it explicitly.
 
-Here `@` separates source from package and `#` pins an exact selector. Prefix
-markers cannot be confused with these infix separators. This preserves the
-owner's reference direction without weakening the prefix-marker rule.
+This rule does not reopen `Type.{...}`, `.{...}`, `Type.Variant`, `.Variant`,
+or `fn run()`.
 
-## Delimiter constitution
+## Evaluation model: one truth, several views
 
-### Curly braces: bodies and scopes
+This is a model for judging ballots and a candidate tooling direction, not a
+ratified three-view feature. Source text remaining complete and portable is the
+constraint. Tools may eventually offer three lossless views:
 
-Curly braces contain a body: declarations, executable code, a context applied to
-nested code, or the visible field body of one transparent record value.
+- **Compact:** hide facts that are uniquely known.
+- **Exact:** show inferred types, effects, ownership, providers, targets, and
+  defaults beside the source that caused them.
+- **Audit:** add policy results, provenance, hashes, and proof status.
+
+Revealing a fact does not invent another syntax. It shows the legal explicit
+form. Pinning that fact writes the explicit form into source. Folding it is
+allowed only when the compiler can prove the short form still has one meaning.
+
+Views must preserve comments, formatting choices, names, order, and behavior.
+Plain-text editing, copying, diffing, and building must never require an editor
+database.
+
+## Punctuation map under review
+
+The owner has given the intended high-level roles. They are conformance rules,
+not a reason to create a ballot for every punctuation mark. A ballot is needed
+only where two credible designs still disagree. Any such ballot decides one
+row and cannot silently choose another.
+
+| Shape | One question |
+| --- | --- |
+| `{ ... }` | What kind of body or scope may braces contain? |
+| `[ ... ]` | What plural values or requirements may brackets group? |
+| `( ... )` | What inputs, signatures, or payload parts may parentheses group? |
+| `< ... >` | What type specialization may angles contain? |
+| `.` | When may the expected type supply a missing qualifier? |
+| `|` | Which peer alternatives does a form accept? |
+| `|>` | Should one value move through ordinary calls from left to right? |
+| `_name` | What promise does an internal-looking name make? |
+| `@` | What may this prefix apply to one declaration? |
+| `#` | What may this prefix change about a nested source region? |
+
+The old phrase “attribute versus compiler instruction” is rejected as a user
+model. It requires knowledge of compiler internals. The open marker ballots
+instead compare concrete user-visible boundaries, including retiring one of the
+two prefix families.
+
+## Records, variants, and other construction
+
+Plain record construction is already decided:
 
 ```jet
-struct User { ... }
-fn save(...) { ... }
-#Transact { ... }
-User.{ id: id, name: name }
+User.{ name: "Ada", role: .Admin }
 ```
 
-An untyped loose manifest object such as `payload: { ... }` is therefore a bad
-fit. The body should either belong to a named role module or be an explicit
-typed value such as `PackageId.{ ... }`.
+The remaining construction questions are narrower:
 
-### Square brackets: plural groups and collections
+- how a type creates fresh hidden state;
+- how an existing value converts to another type;
+- how code creates a non-owning view;
+- whether expected type may shorten opaque construction.
 
-Square brackets always answer “which items?” They cover lists, maps, fixed-size
-collections, grouped modifiers, trait bounds, effect lists, and fan-out lists.
-The surrounding slot supplies the element relationship.
+These jobs are separate ballots. A vote on fresh state must not also choose
+conversion or view spelling.
+
+## Calls and flow
+
+Jet should have one declared operation. The existing UFCS decision does not
+allow an ordinary free function to become a receiver call. The open pipe ballot
+asks only whether a left-to-right lens may call that same operation.
 
 ```jet
-[a, b, c]
-["name": value]
-@[Pure, MustUse]
-effects [Net, !Fs]
-T: [Renderable, Serializable]
+parse(raw)
+raw |> parse
 ```
 
-`[T#N]` can remain coherent if infix `#` is defined as an exact pin: package
-version in a reference, cardinality in a collection type. The delimiter still
-means collection; the infix separator states which exact instance.
+The second line is still only a ballot option. If adopted, both lines must
+resolve the same symbol. There is no fallback search. The pipe cannot add
+separate error, ownership, effect, or scheduling behavior.
 
-### Parentheses: inputs, signatures, and payloads
+Whether Jet admits `|>` and which input receives its value are separate votes.
 
-Parentheses group inputs supplied to a call, parameters accepted by a function,
-or components carried by one variant. They should not be a generic “group
-anything” delimiter.
+## Effects and resources
 
-```jet
-fn resize(width: Int, height: Int) -> Image
-resize(800, 600)
-.Rect(width: 800, height: 600)
-```
+The effect model, its source location, omission, denial, and generic rows are
+separate questions. Ballots must not treat this as one punctuation choice.
 
-### Angle brackets: type specialization
+The beginner may omit an effect set only when inference has one answer. The
+expert can pin it. A company can require it at public or audited boundaries.
+Policy may narrow authority; policy may not silently add authority or change
+behavior.
 
-Angle brackets remain type-parameter territory. Values do not enter this slot
-except narrowly ratified generic-module specialization, where parameter kind is
-already statically known.
+Owned resources already clean up at scope exit. Remaining decisions cover
+early release, cleanup failure, and asynchronous cleanup separately.
 
-## Construction without false uniformity
+## Packages are typed information
 
-“Everything as a type” correctly attacks arbitrary factories. It fails when a
-literal shape hides validation, allocation, entropy, I/O, identity, or
-deduplication. A `Set` and a `Deque` are not passive field bags.
+Package identity, sources, outputs, dependencies, environments, and policy must
+form one closed typed graph. Unknown fields fail. File order never silently
+wins. Every contribution keeps its source location.
 
-The recommended construction ladder makes those semantic differences visible:
+This does not decide the source spelling. Separate ballots choose:
 
-```jet
-Point.{ x: 3, y: 4 }          // transparent record data
-.Connected(socket)            // inferred enum case
-Deque.new()                   // fresh stateful value
-Set.from(items)               // conversion from existing data
-Reader.over(bytes)            // non-owning view
-Int.parse(text)?              // fallible text conversion
-Key.generate(rng)?            // entropy-producing operation
-```
+- one package role's shape;
+- whether moving it between files changes meaning;
+- how repeated field contributions combine;
+- how an expert replaces a value;
+- what provenance the build keeps;
+- how one output is represented;
+- how aliases select outputs;
+- how an output points to an ordinary callable.
 
-This is more than one spelling because the operations are genuinely different.
-The predictable part is that the operation's semantics choose the spelling.
-Named constructors remain available where “new,” “from,” or “over” would hide
-meaning. Bare `Type(...)` remains an explicit ballot question for component
-values and checked scalar wrappers.
+The same `Greeter` package appears in every option. A package ballot may not
+quietly choose effect syntax, entry conventions, or record construction.
 
-Expected-type inference stays first-class:
+## Internal names
 
-```jet
-color: Color :: .Red
-result: Result<Data, Error> :: .Ok(data)
-point: Point :: .{ x: 3, y: 4 }
-```
+The useful part of Python's leading underscore is discoverability, not privacy.
+Jet is already private by default. The open decisions separately ask:
 
-The full type name is always legal when no expected type exists. Inference never
-guesses between multiple possible types.
+- what `_name` tells a reader;
+- who may explicitly access it;
+- who may replace it;
+- how the current underscore module-disable feature is replaced.
 
-## Manifest and module shape
+Hard access control remains a real access-control rule. A naming convention is
+not a security boundary.
 
-File placement and semantic shape must be independent. A role declaration
-should mean the same thing whether it shares a file or lives alone.
+## Decision order
 
-This is not true of the current implementation. The parser recognizes a closed
-set of role names through special branches rather than the ordinary module
-mechanism. Package parsing also accepts some fields that never enter the typed
-model. That is a truthfulness defect, not an implementation detail the new
-surface may preserve. The replacement must use one closed typed graph, reject
-unknown fields, and retain source provenance for every contribution.
+Work follows this dependency order:
 
-Recommended role-module direction:
+1. Enforce the owner-directed delimiter roles and find real conflicts.
+2. Apply the atomic admission checks below to each concrete syntax question.
+3. Decide one prefix-marker role at a time.
+4. Declaration and internal-name rules.
+5. Fresh state, conversions, views, flow, and ownership transfer.
+6. Effects and resources.
+7. Runtime units and optional dimensional numbers.
+8. Package roles, composition, outputs, aliases, and entry links.
+9. Command-line and cross-surface exposure.
+10. Conformance audit and implementation.
 
-```jet
-module package.identity {
-    name: "jet"
-    version: "1.0.0"
-}
+An open dependency is named as an assumption, not silently preselected.
 
-module package.sources {
-    items: [.Package.{ reference: github@nixos/nixpkgs#unstable }]
-}
+## Ballot quality gate
 
-module package.outputs {
-    items: [
-        .Executable.{ name: "jet", build: .Cargo.{ lock: "Cargo.lock" } },
-        .Alias.{ name: "jetpack", of: output.jet },
-    ]
-}
+Every ballot must pass all of these checks:
 
-module env.dev { ... }
-module workspace.root { ... }
-module system.build-box { ... }
-```
+1. Its result fits one enforceable sentence.
+2. Every option changes the same property.
+3. The owner may postpone every sibling and still leave coherent law.
+4. Reversing this result does not require reversing a sibling.
+5. Every option solves the same fixed example.
+6. Every option is a design an informed language author could honestly choose.
+7. The recommendation names the human mistake it prevents.
+8. The beginner path has no expert ceremony.
+9. The expert can reveal and pin every hidden fact.
+10. Enterprise policy can narrow, require, and audit the same facts.
+11. No option is ranked by implementation effort.
+12. The prose uses common words and shows code before formal detail.
 
-The exact names remain ballot material. The structural rule is the important
-part: role modules own fields; fields do not float at file top level; output
-kinds are typed choices, not bare keyword blocks; aliases are data in the output
-family, not a one-off function.
+If the owner can like an option's main idea but reject one punctuation detail
+inside it, the ballot is bundled and must be split.
 
-Repeated role bodies need their own composition law. Every typed field is
-`unique`, `append`, `keyed`, or `refinable`. File order never decides a conflict.
-Unknown fields fail. Refinement requires a visible override and records both
-sources. `jet inspect package --provenance` presents the merged graph and every
-contributor.
+## Evidence
 
-One file may contain every role module. Conventional files may each contain one
-or more. Moving a whole module between files changes no syntax and needs no
-special split/fold language feature. Tooling may offer a source move, but file
-layout is not semantics.
-
-## Underscore: soft internal, not another access modifier
-
-Jet is private by default, so Python's “underscore means private” would duplicate
-`priv` and teach the wrong rule. The useful Python idea is discoverability.
-
-The recommended ballot direction makes leading `_` mean soft internal:
-
-- legal to access explicitly;
-- hidden from default completion, generated docs, and beginner views;
-- visible in expert/all-symbol views;
-- excluded from stable public-API promises;
-- never bypasses real access control or safety;
-- user code may shadow compiler-provided `_` helpers only where Jet already
-  permits user shadowing, such as the closed prelude rule.
-
-Current Jet also uses a leading underscore to disable a role module. That
-conflicts directly with the proposed internal meaning. Ratification therefore
-requires a separate explicit disable mechanism; both meanings may not coexist.
-
-This provides an expert hatch without turning hidden APIs into an untracked
-second standard library. Hard privacy remains `priv`/default visibility.
-
-## Pipe family
-
-Bare `|` already means peer alternatives in dispatch patterns. That is a strong,
-predictable use and should stay.
-
-The useful extension is `|>` for left-to-right value flow:
-
-```jet
-request
-    |> decode
-    |> validate
-    |> save
-```
-
-If adopted, it is a structural entrypoint to the same call semantics, not a new
-dispatch, error, ownership, or effect mechanism. The input occupies one fixed
-argument slot; labels and capabilities remain visible. Methods remain ordinary
-methods. The ballot must decide the slot rule and whether this writing
-flexibility is worth reopening D-SUGAR2.
-
-The bold alternative is a typed flow block that combines alternatives and
-stages, but it risks duplicating `if` dispatch. It belongs as the final creative
-option, not the baseline recommendation.
-
-## Decision architecture
-
-The work should be decided in dependency order:
-
-1. Shape constitution and delimiter roles.
-2. Prefix marker boundary and effect spelling.
-3. Declaration, construction, variants, lifecycle, and underscore rules.
-4. Manifest role algebra and external references.
-5. Core API vocabulary, resource lifetime, duration values, CLI grammar, and
-   invokable entries.
-6. Package-ecosystem ballots rewritten from the ratified laws.
-7. One conformance matrix and automated lint prevent future drift.
-
-The ecosystem wave includes an explicit D-ECO2–19 audit. Those decisions are
-already ratified, but many examples mix passive values, constructors, keyword
-blocks, aliases, build behavior, and tooling operations. Each receives a
-recorded keep, reopen, or supersede result. A prior ratification is not evidence
-that its spelling conforms to the later constitution.
-
-Each ballot presents three developed conventional systems, then one additional
-frontier option that challenges the assumptions behind them. The frontier
-option must preserve safety and explain the new mental model; novelty alone is
-not a merit.
-
-## Acceptance test
-
-Before ratification, build a sibling-prediction matrix from every public syntax
-entry, Core constructor family, manifest construct, and CLI command. A rule
-passes when a reader given the job and one sibling can predict the new shape.
-Every miss must be one of:
-
-1. a genuine semantic distinction made visible by the shape;
-2. a closed, named DSL island with no effect outside its scope; or
-3. a defect that gets its own ballot.
-
-After ratification, the matrix becomes executable policy: `Syntax.rs`, Core API
-registries, manifests, CLI tables, docs, examples, formatter output, and editor
-grammars must agree. New surface cannot merge without a decision ID and a shape
-classification.
+The shared language examples, mechanism research, primary sources, and
+psychology audit live in
+[`language-shape-research.md`](language-shape-research.md).

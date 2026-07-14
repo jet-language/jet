@@ -3573,30 +3573,57 @@ implementation milestone is pending.
 
 ### Registered for M3–M14
 
+#### Ready for one decision now
+
 
 | ID | Question | Needed by |
 | --- | -------- | --------- |
 | S56 | typed reflection / user derives | **Epoch 3** — Tower #129 |
-| D-SHAPE1 | binding language-shape constitution | **Epoch 3** — Tower #533 |
-| D-SHAPE2 | user-visible `@` attachment / `#` context boundary | **Epoch 3** — Tower #534 |
-| D-SHAPE-LIFECYCLE | explicit copy at an ownership-taking call | **Epoch 3** — Tower #535 |
-| D-SHAPE3a | construction taxonomy and named constructor verbs | **Epoch 3** — Tower #536 |
-| D-SHAPE4 | Core API verb grammar | **Epoch 3** — Tower #538 |
-| D-SHAPE5a | package-role body structure | **Epoch 3** — Tower #539 |
-| D-SHAPE5b | typed package-output algebra | **Epoch 3** — Tower #540 |
-| D-SHAPE7 | `source@package#version` reference slots | **Epoch 3** — Tower #542 |
-| D-SHAPE8 | collection-shaped effect signatures | **Epoch 3** — Tower #543 |
-| D-SHAPE-DELIMS1 | delimiter constitution | **Epoch 3** — Tower #550 |
-| D-SHAPE-INTERNAL1 | leading-underscore internal / expert surface | **Epoch 3** — Tower #551 |
-| D-SHAPE-PIPE1 | pipe alternatives and data flow | **Epoch 3** — Tower #552 |
-| D-SHAPE-INFER1 | expected-type shorthand boundary | **Epoch 3** — Tower #553 |
-| D-SHAPE-DECL1 | declaration admission rule | **Epoch 3** — Tower #554 |
-| D-SHAPE-CLI1 | function-derived command-line interfaces | **Epoch 3** — Tower #541 |
-| D-SHAPE-ENTRY1 | callable-to-entrypoint law | **Epoch 3** — Tower #544 |
-| D-SHAPE-RESOURCE1 | deterministic resource lifetime and early release | **Epoch 3** — Tower #557 |
-| D-SHAPE-DURATION1 | static and dynamic duration construction | **Epoch 3** — Tower #558 |
-| D-SHAPE-MERGE1 | typed package-role merge and provenance | **Epoch 3** — Tower #559 |
-| D-ECO1 | one-file through workspace package composition | **Epoch 3** — Tower #532 |
+| D-ECO1 | whether package meaning depends on its file | **Epoch 3** — Tower #532 |
+| D-SHAPE2 | how attached rules and scoped rules differ | **Epoch 3** — Tower #534 |
+| D-SHAPE-LIFECYCLE | how a caller keeps a value that a function takes | **Epoch 3** — Tower #535 |
+| D-SHAPE3a | how fresh hidden-state values are created | **Epoch 3** — Tower #536 |
+| D-SHAPE5a | how one package role holds its fields | **Epoch 3** — Tower #539 |
+| D-SHAPE5b | how one package output is written | **Epoch 3** — Tower #540 |
+| D-SHAPE-CLI1 | what owns the root command's input types | **Epoch 3** — Tower #541 |
+| D-SHAPE8 | where effects appear in a function signature | **Epoch 3** — Tower #543 |
+| D-SHAPE-INTERNAL1 | what a leading underscore promises | **Epoch 3** — Tower #551 |
+| D-SHAPE-PIPE1 | whether Jet has a left-to-right flow lens | **Epoch 3** — Tower #552 |
+| D-SHAPE-RESOURCE1 | how a resource closes early | **Epoch 3** — Tower #557 |
+| D-SHAPE-DURATION1 | how a runtime number becomes a duration | **Epoch 3** — Tower #558 |
+| D-SHAPE-MERGE1 | how repeated package fields combine | **Epoch 3** — Tower #559 |
+| D-SHAPE-CONVERT1 | which side names a conversion | **Epoch 3** — Tower #566 |
+| D-SHAPE-VIEW1 | how a non-owning view is requested | **Epoch 3** — Tower #567 |
+| D-SHAPE-OPAQUE-INFER1 | when generic constructor arguments disappear | **Epoch 3** — Tower #568 |
+| D-SHAPE-DURATIONCONVERT1 | how code asks for whole duration units | **Epoch 3** — Tower #575 |
+| D-SHAPE-QUANTITY1 | whether units beyond time share one checked system | **Epoch 3** — Tower #576 |
+| D-SHAPE-MERGEPROVENANCE1 | where complete package merge history is stored | **Epoch 3** — Tower #578 |
+| D-SHAPE-EXPOSE1 | what every interface lens must share | **Epoch 3** — Tower #582 |
+
+#### Queued behind a parent decision
+
+These are blocked planning cards, not visible ballots. A parent answer may
+remove them, rewrite them, or make one ballot visible when it becomes the next
+independent choice.
+
+| ID | One later question | Tower |
+| --- | ------------------ | ----- |
+| D-SHAPE-ENTRY1 | how a package output points to its start function | #544 |
+| D-SHAPE-CONTEXT1 | what a hash marker always tells the reader | #561 |
+| D-SHAPE-CONTEXTFORM1 | how code shows the extent of a hash rule | #562 |
+| D-SHAPE-INTERNALACCESS1 | how outside code reaches an underscore name | #563 |
+| D-SHAPE-INTERNALOVERRIDE1 | which implementation details experts may replace | #564 |
+| D-SHAPE-MODULEDISABLE1 | how a source module is deliberately disabled | #565 |
+| D-SHAPE-PIPESLOT1 | where a pipeline places its value | #569 |
+| D-SHAPE-EFFECTOMIT1 | when an effect set may be omitted | #570 |
+| D-SHAPE-EFFECTDENY1 | how a signature forbids effects | #571 |
+| D-SHAPE-EFFECTROW1 | how an effect set stays open | #572 |
+| D-SHAPE-RESOURCEERROR1 | how cleanup reports an error | #573 |
+| D-SHAPE-RESOURCEASYNC1 | what cancellation does during cleanup | #574 |
+| D-SHAPE-MERGEOVERRIDE1 | how an expert deliberately replaces package data | #577 |
+| D-SHAPE-OUTPUT-ALIAS1 | how one output name selects other outputs | #579 |
+| D-SHAPE-CLIINPUT1 | how command fields choose their shell source | #580 |
+| D-SHAPE-CLINEST1 | how command groups and subcommands are written | #581 |
 
 
 ## Decision log
