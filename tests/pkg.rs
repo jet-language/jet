@@ -321,6 +321,7 @@ fn lock_records_catalog_owner_and_rationale() {
     use jetpack::SemanticLock::{parse, write, SemanticLockFile};
     let lock = SemanticLockFile {
         records: vec![semantic_record("app", "core.log", "1.2.3")],
+        ..Default::default()
     };
     let text = write(&lock);
     assert!(text.contains("owner-package = \"app\""));
@@ -334,9 +335,11 @@ fn catalog_merge_conflict_names_owner_package() {
     use jetpack::SemanticLock::{merge, SemanticLockFile};
     let left = SemanticLockFile {
         records: vec![semantic_record("app", "core.log", "1.2.3")],
+        ..Default::default()
     };
     let right = SemanticLockFile {
         records: vec![semantic_record("app", "core.log", "1.3.0")],
+        ..Default::default()
     };
     let out = merge(&SemanticLockFile::default(), &left, &right);
     assert_eq!(out.conflicts.len(), 1);
@@ -402,6 +405,7 @@ fn lock_record_kinds_roundtrip_unknown_future_fields() {
     );
     let reparsed = parse(&write(&SemanticLockFile {
         records: parsed.records,
+        ..Default::default()
     }));
     assert_eq!(
         reparsed.records[0].future_fields.get("future-key"),
@@ -414,6 +418,7 @@ fn lock_rationale_preserves_exact_identity() {
     use jetpack::SemanticLock::SemanticLockFile;
     let a = SemanticLockFile {
         records: vec![semantic_record("app", "core.log", "1.2.3")],
+        ..Default::default()
     };
     let mut b = a.clone();
     b.records[0].rationales[0].reason = "human text changed".to_string();
@@ -428,9 +433,11 @@ fn lock_merge_independent_additions() {
     use jetpack::SemanticLock::{merge, SemanticLockFile};
     let left = SemanticLockFile {
         records: vec![semantic_record("app", "core.log", "1.2.3")],
+        ..Default::default()
     };
     let right = SemanticLockFile {
         records: vec![semantic_record("app", "core.http", "2.0.0")],
+        ..Default::default()
     };
     let out = merge(&SemanticLockFile::default(), &left, &right);
     assert!(out.conflicts.is_empty());
@@ -442,9 +449,11 @@ fn lock_merge_same_identity_two_owners() {
     use jetpack::SemanticLock::{merge, SemanticLockFile};
     let left = SemanticLockFile {
         records: vec![semantic_record("app", "core.log", "1.2.3")],
+        ..Default::default()
     };
     let right = SemanticLockFile {
         records: vec![semantic_record("worker", "core.log", "1.2.3")],
+        ..Default::default()
     };
     let out = merge(&SemanticLockFile::default(), &left, &right);
     assert!(out.conflicts.is_empty());
@@ -456,9 +465,11 @@ fn lock_merge_conflicting_identity_diagnostic() {
     use jetpack::SemanticLock::{merge, SemanticLockFile};
     let left = SemanticLockFile {
         records: vec![semantic_record("app", "core.log", "1.2.3")],
+        ..Default::default()
     };
     let right = SemanticLockFile {
         records: vec![semantic_record("app", "core.log", "1.3.0")],
+        ..Default::default()
     };
     let out = merge(&SemanticLockFile::default(), &left, &right);
     assert_eq!(out.conflicts[0].left_reason, "app declared core.log");
@@ -475,6 +486,7 @@ fn lock_merge_conflicts_on_same_version_different_hash() {
             "1.2.3",
             "sha256-left",
         )],
+        ..Default::default()
     };
     let right = SemanticLockFile {
         records: vec![semantic_record_with_hash(
@@ -483,6 +495,7 @@ fn lock_merge_conflicts_on_same_version_different_hash() {
             "1.2.3",
             "sha256-right",
         )],
+        ..Default::default()
     };
     let out = merge(&SemanticLockFile::default(), &left, &right);
     assert_eq!(out.conflicts.len(), 1);
@@ -493,10 +506,12 @@ fn lock_merge_accepts_one_sided_identity_change_from_base() {
     use jetpack::SemanticLock::{merge, SemanticLockFile};
     let base = SemanticLockFile {
         records: vec![semantic_record("app", "core.log", "1.2.3")],
+        ..Default::default()
     };
     let left = base.clone();
     let right = SemanticLockFile {
         records: vec![semantic_record("app", "core.log", "1.3.0")],
+        ..Default::default()
     };
     let out = merge(&base, &left, &right);
     assert!(out.conflicts.is_empty());
@@ -508,11 +523,13 @@ fn lock_merge_platform_specific_records() {
     use jetpack::SemanticLock::{merge, SemanticLockFile};
     let left = SemanticLockFile {
         records: vec![semantic_record("app", "bin.tool:x86_64-linux", "1")],
+        ..Default::default()
     };
     let mut right_rec = semantic_record("app", "bin.tool:aarch64-macos", "1");
     right_rec.identity.platform = "aarch64-macos".to_string();
     let right = SemanticLockFile {
         records: vec![right_rec],
+        ..Default::default()
     };
     let out = merge(&SemanticLockFile::default(), &left, &right);
     assert!(out.conflicts.is_empty());
@@ -524,6 +541,7 @@ fn lock_explain_names_owner_policy_provider_platform() {
     use jetpack::SemanticLock::{explain, SemanticLockFile};
     let lock = SemanticLockFile {
         records: vec![semantic_record("app", "core.log", "1.2.3")],
+        ..Default::default()
     };
     let fact = explain(&lock, "package:core.log").expect("explain fact");
     assert_eq!(fact.owners, vec!["app".to_string()]);
@@ -566,6 +584,7 @@ fn read_only_verbs_do_not_rewrite_lock() {
     use jetpack::SemanticLock::{parse, write, SemanticLockFile};
     let lock = SemanticLockFile {
         records: vec![semantic_record("app", "core.log", "1.2.3")],
+        ..Default::default()
     };
     let before = write(&lock);
     let after = write(&parse(&before));
@@ -985,6 +1004,7 @@ fn replacement_lock_merge_conflict_names_owners() {
             "x86_64-linux",
             "policy-left",
         )],
+        ..Default::default()
     };
     let right = SemanticLockFile {
         records: vec![replacement_lock_record(
@@ -993,6 +1013,7 @@ fn replacement_lock_merge_conflict_names_owners() {
             "x86_64-linux",
             "policy-right",
         )],
+        ..Default::default()
     };
     let out = merge(&SemanticLockFile::default(), &left, &right);
     assert_eq!(out.conflicts.len(), 1);

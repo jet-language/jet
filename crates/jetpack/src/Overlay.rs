@@ -704,6 +704,35 @@ pub fn semantic_records(
     records
 }
 
+/// Map `(overlay, package)` → policy fingerprint for exact invalidation diffs.
+pub fn policy_fingerprints(
+    policy: &OverlayPolicy,
+) -> std::collections::BTreeMap<(String, String), String> {
+    let mut out = std::collections::BTreeMap::new();
+    for overlay in &policy.overlays {
+        for package in &overlay.packages {
+            out.insert(
+                (overlay.name.clone(), package.package.clone()),
+                package.policy_fingerprint(overlay),
+            );
+        }
+    }
+    out
+}
+
+/// Diff overlay policies and return exact action invalidations (E4-JP13).
+pub fn invalidations_against(
+    before: &OverlayPolicy,
+    after: &OverlayPolicy,
+    actions_by_package: &std::collections::BTreeMap<String, Vec<String>>,
+) -> Vec<super::SemanticLock::OverlayInvalidation> {
+    super::SemanticLock::overlay_invalidations(
+        &policy_fingerprints(before),
+        &policy_fingerprints(after),
+        actions_by_package,
+    )
+}
+
 pub fn draft_overlay_source(
     existing: Option<&str>,
     overlay: &str,

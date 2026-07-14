@@ -313,6 +313,7 @@ fn cmd_explain_overlay(theme: &Theme, query: &str) -> i32 {
     };
     let lock = SemanticLock::SemanticLockFile {
         records: Overlay::semantic_records(&plan.overlay_policy, "workspace", std::env::consts::OS),
+        ..Default::default()
     };
     let Some(fact) = SemanticLock::explain(&lock, query) else {
         theme.error_coded(
