@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 616,
-    "rev": 6904,
+    "rev": 6942,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -15477,7 +15477,7 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": "e4-jetpack-world-class",
-      "phase": "verify",
+      "phase": "building",
       "priority": "P0",
       "plan": "Ratify one source of truth, then derive parsing, help, completion, validation, and audit output from it.",
       "blockedBy": [],
@@ -17560,49 +17560,55 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "verify",
       "priority": "P0",
       "plan": "Write deterministic concurrency regression first. Identify which tests mutate or replace the shared compiler executable and remove shared-state coupling; bound or serialize native artifact builds at the narrow test seam without weakening production provider deadlines. Preserve real measurement, provenance, and hostile-path coverage. Run focused parallel CLI slice, full CLI target, independent review, then parent full verification.",
       "blockedBy": [],
       "workOrder": 0,
       "assignee": "codex-orchestrator",
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-14",
+          "by": "codex-budget-builder",
+          "text": "Builder verification complete: deadline unit 1/1; unlink race 1/1; unreadable fail-closed 1/1; real BuildArtifact 1/1; mixed 1/1; bench 1/1; allocation 1/1; full CLI 129/129 in 204.46s default scheduler. Criteria 1-4 met. Independent verifier and parent full gate remain."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "Parallel CLI execution never makes the running compiler identity path disappear; compiler digesting is stable while child native builds run.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "codex-budget-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-14T23:19:11.559Z"
+          "evidence": "Linux compiler identity and child self-spawn now use /proc/self/exe after a fail-closed pathname probe, preserving access to the executing inode across concurrent unlink/relink. Deterministic two-child regression unlinks their shared copied compiler after exec; both real native builds and SHA-256 provenance pass.",
+          "at": "2026-07-14T23:40:32.686Z"
         },
         {
           "n": 2,
           "text": "Real BuildArtifact, bench, allocation, scene, and service providers remain measured locally with verified provenance; no fake measurements or weakened production deadline.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "codex-budget-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-14T23:19:11.657Z"
+          "evidence": "Provider collection remains pinned to PROVIDER_DEADLINE=30s; selected native build preparation has a separate bounded 120s deadline. Deadline invariant unit test passes. Focused real BuildArtifact, mixed, benchmark, and allocation tests pass; full CLI also passes scene and service provenance/hostile-cache coverage.",
+          "at": "2026-07-14T23:40:32.780Z"
         },
         {
           "n": 3,
           "text": "A focused parallel regression and the full 126-test CLI target pass under the default test scheduler without global single-thread mode.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "codex-budget-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-14T23:19:11.750Z"
+          "evidence": "Focused parallel unlink regression passes (2 concurrent child native builds, 42.01s). cargo test --test cli -- --nocapture passes 129/129 under default scheduler in 204.46s; no global single-thread mode.",
+          "at": "2026-07-14T23:40:32.875Z"
         },
         {
           "n": 4,
           "text": "No new syntax, diagnostic code, dependency, unsafe code, or owner decision is introduced.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "codex-budget-builder",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-14T23:19:11.848Z"
+          "evidence": "Diff changes only compiler executable identity, bounded timing constants, and CLI regression coverage. No syntax, diagnostic code/text, dependency, unsafe block, or owner-gated choice added.",
+          "at": "2026-07-14T23:40:32.971Z"
         },
         {
           "n": 5,
@@ -33803,7 +33809,7 @@
       "lesson": "A project can be pictured as a map. It shows what you build, what it needs, how you test it, and where it runs.\n\nWith one map, Jet can explain why a service runs on a server. The answer leads back through the package, compiler, and downloaded input.\n\nThis vote chooses the size of that map. Other ballots choose how it is written, split, combined, and saved.",
       "explainer": "",
       "story": "Rin starts with a command-line app. It grows into an API, a development setup, a container image, and two home servers. Rin wants one place to understand the whole thing.",
-      "inWild": "// The recommended family: one ordinary typed Jet value.\nproject :: Project.{\n    packages: {\n        api: Package.{ source: \"apps/api\" },\n    },\n    environments: {\n        dev: Environment.{ packages: [packages.api] },\n    },\n    services: {\n        api: Service.{ run: packages.api },\n    },\n    images: {\n        server: Image.{ services: [services.api] },\n    },\n    systems: {\n        halcyon: System.{ image: images.server },\n    },\n}\n\n$ jet explain systems.halcyon.services.api\nhalcyon uses image server\nserver includes service api\nservice api runs package api\npackage api was built from apps/api\n\n$ jet run api\n$ jet image build server\n$ jet os switch halcyon",
+      "inWild": "// The recommended family: one ordinary typed Jet value.\nproject :: Project.{\n    packages: {\n        api: Package.{ source: \"apps/api\" },\n    },\n    environments: {\n        dev: Environment.{ packages: [packages.api] },\n    },\n    services: {\n        api: Service.{ run: packages.api },\n    },\n    images: {\n        server: Image.{ services: [services.api] },\n    },\n    systems: {\n        halcyon: System.{ image: images.server },\n    },\n}\n\n$ jet explain systems.halcyon.services.api\nhalcyon uses image server\nserver includes service api\nservice api runs package api\npackage api was built from apps/api\n\n$ jet run api\n$ jet image build server\n$ jet os switch halcyon\n\n// Magic defaults when the project only has one runnable package.\n$ jet run\nrunning api\n$ jet test\nall package tests passed\n$ jet dev\nready · default development setup created\n\n// Users never author a lock file. Jet creates .jet/lock when inputs appear.",
       "detail": "",
       "options": [
         {
@@ -36816,7 +36822,7 @@
       "lesson": "A lockfile usually remembers versions. That is not enough to explain a real build. The compiler, target, settings, permissions, source bytes, and chosen project branch also matter.\n\nJet can keep one receipt that connects those facts. Beginners see “built” or “switched.” Experts can open the same receipt to learn why something was chosen, rebuilt, or activated.\n\nA build description and its output are kept separate. That lets Jet notice when the same work unexpectedly produces different bytes.",
       "explainer": "",
       "story": "A security update moves PostgreSQL from 16.2 to 16.3. Rin wants a preview showing exactly what changes, then a machine generation that can be proved and rolled back.",
-      "inWild": "$ jet update postgres --dry-run\npostgres 16.2 -> 16.3\n2 receipt entries change\napi and production image rebuild\n412 other entries stay exactly locked\n\n$ jet receipt systems.production\nproject: pulse\nsource inputs: exact\nbuild tools: exact\ntarget: aarch64-linux\nactions: 6\noutputs: 6 verified\nactivation checks: ready\nprevious generation: 43\n\n$ jet os switch production\nchecks passed\nactivated generation 44\nrollback available: jet os rollback production\n\n$ jet explain --why-rebuilt packages.api\nrebuilt because postgres changed from 16.2 to 16.3\ncompiler, target, source, and every other input stayed the same",
+      "inWild": "$ jet update postgres --dry-run\npostgres 16.2 -> 16.3\n2 receipt entries change\napi and production image rebuild\n412 other entries stay exactly locked\n\n$ jet receipt systems.production\nproject: pulse\nsource inputs: exact\nbuild tools: exact\ntarget: aarch64-linux\nactions: 6\noutputs: 6 verified\nactivation checks: ready\nprevious generation: 43\n\n$ jet os switch production\nchecks passed\nactivated generation 44\nrollback available: jet os rollback production\n\n$ jet explain --why-rebuilt packages.api\nrebuilt because postgres changed from 16.2 to 16.3\ncompiler, target, source, and every other input stayed the same\n\n// .jet/lock and receipts are generated state.\n// The project source never repeats exact resolved facts by hand.",
       "detail": "",
       "options": [
         {
@@ -36999,14 +37005,14 @@
       "lesson": "A tiny project should fit in one `project.jet`. Larger projects need several files so people can work independently.\n\nSplitting should not introduce member manifests, role filenames, import lists, or file-order behavior. The root should still show where project pieces come from.\n\nA project part is just a typed piece of the same Project value. Its declared names carry meaning. Project paths stay relative to the root, so moving a part does not silently retarget `apps/api`.",
       "explainer": "",
       "story": "Rin starts with one package. Later, backend, development, release, and machines move into separate files. Rin wants the root to remain three lines and every part to keep the same syntax.",
-      "inWild": "// project.jet — small\nproject :: Project.{\n    packages: { hello: Package.{ source: \"src/hello.jet\" } },\n}\n\n// project.jet — grown\nproject :: Project.{\n    name: \"pulse\",\n    parts: find(\"project\"),\n}\n\n// project/backend.jet\npub backend :: ProjectPart.{\n    packages: {\n        api: Package.{ source: \"apps/api\" },\n        worker: Package.{ source: \"apps/worker\" },\n    },\n    services: {\n        api: Service.{ run: packages.api },\n    },\n}\n\n// project/machines.jet\npub machines :: ProjectPart.{\n    systems: {\n        staging: System.{ services: [services.api] },\n    },\n}\n\n$ jet project parts\nbackend  project/backend.jet\nmachines project/machines.jet\n\n$ jet project fold --check\nsame project: yes",
+      "inWild": "// project.jet — small\nproject :: Project.{\n    packages: { hello: Package.{ source: \"src/hello.jet\" } },\n}\n\n// project.jet — grown\nproject :: Project.{\n    name: \"pulse\",\n    parts: find(\"project\"),\n}\n\n// project/backend.jet\npub backend :: ProjectPart.{\n    packages: {\n        api: Package.{ source: \"apps/api\" },\n        worker: Package.{ source: \"apps/worker\" },\n    },\n    services: {\n        api: Service.{ run: packages.api },\n    },\n}\n\n// project/machines.jet\npub machines :: ProjectPart.{\n    systems: {\n        staging: System.{ services: [services.api] },\n    },\n}\n\n$ jet project parts\nbackend  project/backend.jet\nmachines project/machines.jet\n\n$ jet project fold --check\nsame project: yes\n\n// Still true forever:\n$ jet run scratch.jet\n// no project.jet, .jet directory, or package knowledge needed",
       "detail": "",
       "options": [
         {
           "key": "A",
           "name": "One root plus typed parts",
           "detail": "Start in `project.jet`. When it grows, add `parts: find(\"project\")`. Each discovered file exports a normal `ProjectPart`; the root stays in charge.",
-          "technical": "This replaces the current `pkg.jet`, `env.jet`, and `workspace.jet` split. Project paths resolve from the project root. A lone `.jet` program still needs no project file.",
+          "technical": "This replaces `pkg.jet`, `env.jet`, and `workspace.jet` with one `project.jet`. For project pieces, `parts: find(...)` replaces role-module discovery. Normal Jet modules and `use` remain unchanged. A lone `.jet` program still needs no project file.",
           "code": "// project.jet\nproject :: Project.{ parts: find(\"project\") }\n\n// project/backend.jet\npub backend :: ProjectPart.{\n    packages: { api: Package.{ source: \"apps/api\" } },\n}\n\n// Moving backend.jet does not change \"apps/api\"."
         },
         {
@@ -37273,7 +37279,7 @@
           "key": "A",
           "name": "Normal named Jet values",
           "detail": "Every entry is a name, a type, and its fields: `api: Package.{ ... }`. The same shape works at every level and remains ordinary Jet code.",
-          "technical": "Project and ProjectPart are typed records. Their named sections provide completion, validation, and references. No package-only parser or evaluator is added.",
+          "technical": "Project and ProjectPart are typed records. Their named sections provide completion, validation, and references. No package-only parser or evaluator is added. Inside Project and ProjectPart, names such as `packages.api` are stable project references. This replaces package and role modules as project declarations; ordinary Jet code modules remain unchanged.",
           "code": "api: Package.{ source: \"apps/api\" }\ndev: Environment.{ packages: [packages.api] }\nunit: Check.{ run: packages.api.tests }\nweb: Service.{ run: packages.api }\nserver: Image.{ services: [services.web] }\nhome: System.{ image: images.server }"
         },
         {
@@ -37319,7 +37325,7 @@
       ],
       "rec": "A",
       "recommendation": {
-        "why": "A is both simple and fully Jet. One pattern teaches the whole product, editors know every field, and experts can use normal functions without learning a plugin language.",
+        "why": "A is both simple and fully Jet. One pattern teaches the whole product, editors know every field, and experts can use normal functions without learning a plugin language. The same `name: Type.{ fields }` shape works in the root, every part, and every extension library.",
         "whyNot": [
           {
             "key": "B",
@@ -38145,6 +38151,272 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-14T23:41:12.622Z",
+      "by": "terra-541-builder",
+      "action": "card.update",
+      "ref": "c0bo7bp5",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-14T23:40:33.085Z",
+      "by": "codex-budget-builder",
+      "action": "card.update",
+      "ref": "c0c008wm",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-14T23:40:32.971Z",
+      "by": "codex-budget-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0c008wm",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-14T23:40:32.875Z",
+      "by": "codex-budget-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0c008wm",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-14T23:40:32.780Z",
+      "by": "codex-budget-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0c008wm",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-14T23:40:32.686Z",
+      "by": "codex-budget-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0c008wm",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-14T23:37:44.984Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-VIEWMUT1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:37:44.840Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-ECO-EXTENSION1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:37:44.699Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-ECO-SOURCE1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:37:44.555Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-ECO-JETOS2",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:37:44.418Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-ECO-RECEIPT2",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:37:44.275Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-ECO-COMPOSE2",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:37:44.138Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-MODULEINTERNAL1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:37:43.993Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-DUNDER2",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:37:43.853Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-QUANTITY1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:37:43.712Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-VIEW1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:37:43.576Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-RESOURCE1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:37:43.441Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-INTERNAL1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:37:43.299Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-ECO-DECL1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:37:43.150Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-ECO1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:37:32.906Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-VIEWMUT1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:37:32.696Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-ECO-EXTENSION1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:37:32.484Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-ECO-SOURCE1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:37:32.275Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-ECO-JETOS2",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:37:32.071Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-ECO-RECEIPT2",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:37:31.873Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-ECO-COMPOSE2",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:37:31.665Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-MODULEINTERNAL1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:37:31.467Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-DUNDER2",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:37:31.258Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-QUANTITY1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:37:31.059Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-VIEW1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:37:30.854Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-RESOURCE1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:37:30.663Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-SHAPE-INTERNAL1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:37:30.451Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-ECO-DECL1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:37:30.242Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-ECO1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:36:13.459Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-ECO-RECEIPT2",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:36:13.321Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-ECO-SOURCE1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:36:13.179Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-ECO-DECL1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-14T23:36:13.040Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-ECO1",
+      "note": "marked ready"
+    },
     {
       "at": "2026-07-14T23:34:19.518Z",
       "by": "codex-main",
@@ -41378,272 +41650,6 @@
       "action": "card.update",
       "ref": "c05tkc8v",
       "note": "title,body,kind,track,epoch,phase,priority,plan,blockedBy,refs"
-    },
-    {
-      "at": "2026-07-14T18:54:46.259Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-ECO-LOCK1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T18:54:46.157Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c02opb9d",
-      "note": "title,body,kind,track,epoch,phase,priority,plan,blockedBy,refs"
-    },
-    {
-      "at": "2026-07-14T18:54:46.041Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-ECO-SHARE1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T18:54:45.942Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c0zgfaml",
-      "note": "title,body,kind,track,epoch,phase,priority,plan,blockedBy,refs"
-    },
-    {
-      "at": "2026-07-14T18:54:45.825Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-ECO-MATRIX-MERGE1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T18:54:45.721Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c0w907me",
-      "note": "title,body,kind,track,epoch,phase,priority,plan,blockedBy,refs"
-    },
-    {
-      "at": "2026-07-14T18:54:45.595Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-SHAPE-DUNDERACCESS1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T18:54:45.489Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c0sy8a96",
-      "note": "title,body,kind,track,epoch,phase,priority,plan,blockedBy,refs"
-    },
-    {
-      "at": "2026-07-14T18:54:15.971Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-ECO-INPUT1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T18:54:15.868Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c0wv3f1v",
-      "note": "title,body,kind,track,epoch,phase,priority,plan,refs"
-    },
-    {
-      "at": "2026-07-14T18:54:15.748Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-ECO-MATRIX1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T18:54:15.645Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c0tocbko",
-      "note": "title,body,kind,track,epoch,phase,priority,plan,refs"
-    },
-    {
-      "at": "2026-07-14T18:54:15.535Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-ECO-OUTPUT1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T18:54:15.435Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c0qj346l",
-      "note": "title,body,kind,track,epoch,phase,priority,plan,refs"
-    },
-    {
-      "at": "2026-07-14T18:54:15.322Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-ECO-ENV1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T18:54:15.224Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c0nec3bh",
-      "note": "title,body,kind,track,epoch,phase,priority,plan,refs"
-    },
-    {
-      "at": "2026-07-14T18:54:15.108Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-ECO-ROOT1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T18:54:15.005Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c0ka97qg",
-      "note": "title,body,kind,track,epoch,phase,priority,plan,refs"
-    },
-    {
-      "at": "2026-07-14T18:54:14.885Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-SHAPE-DUNDER1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T18:54:14.783Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c0h376ay",
-      "note": "title,body,kind,track,epoch,phase,priority,plan,refs"
-    },
-    {
-      "at": "2026-07-14T18:54:14.665Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-SHAPE-HASH1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T18:54:14.559Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c0dv54re",
-      "note": "title,body,kind,track,epoch,phase,priority,plan,blockedBy,refs"
-    },
-    {
-      "at": "2026-07-14T18:53:38.590Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-SHAPE-QUANTITY1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T18:53:38.489Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-SHAPE-VIEW1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T18:53:38.392Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-SHAPE-MERGE1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T18:53:38.291Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-SHAPE-RESOURCE1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T18:53:38.193Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-SHAPE-PIPE1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T18:53:38.098Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-SHAPE-INTERNAL1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T18:53:37.998Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-SHAPE8",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T18:53:37.900Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-SHAPE3a",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T18:53:37.801Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-SHAPE-LIFECYCLE",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T18:53:37.697Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-SHAPE2",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T18:53:37.601Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-ECO1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T18:50:53.285Z",
-      "by": "owner",
-      "action": "idea.add",
-      "ref": "b1siym42",
-      "note": "# Meta : Data \"file\" comments at beginning of file like C++ "
-    },
-    {
-      "at": "2026-07-14T18:47:07.574Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-ECO-INPUT1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T18:47:07.472Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c0wv3f1v",
-      "note": "title,body,kind,track,epoch,phase,priority,plan,refs"
-    },
-    {
-      "at": "2026-07-14T18:47:07.349Z",
-      "by": "codex",
-      "action": "decision.update",
-      "ref": "D-ECO-MATRIX1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-07-14T18:47:07.239Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c0tocbko",
-      "note": "title,body,kind,track,epoch,phase,priority,plan,refs"
     }
   ],
   "nextNum": 368,
