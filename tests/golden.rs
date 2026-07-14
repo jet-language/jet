@@ -208,6 +208,11 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
         return;
     }
 
+    if entry.stem.starts_with("lowlevel/polyglot_") {
+        check_polyglot_binder_example(entry, env);
+        return;
+    }
+
     let src = fs::read_to_string(&entry.path).unwrap();
     let stem = entry.stem.as_str();
     let uses_ffi_bridge = matches!(
@@ -436,6 +441,99 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
             }
         }
     }
+}
+
+/// I5 for card #502: each managed-runtime example binds its checked foreign
+/// source through the public CLI, then runs the generated project binding.
+/// Generated caches and native archives stay temp-only and host-specific.
+fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
+    let (language, package, foreign_source) = match entry.stem.as_str() {
+        "lowlevel/polyglot_go" => ("go", "handles", "handles.go"),
+        "lowlevel/polyglot_java" => ("java", "counter", "Counter.java"),
+        "lowlevel/polyglot_dotnet" => ("cs", "counter", "Counter.cs"),
+        "lowlevel/polyglot_fortran" => ("fortran", "matrix", "matrix.f90"),
+        other => panic!("unknown polyglot golden `{other}`"),
+    };
+    if !env.have_rustc || !env.have_cargo {
+        eprintln!(
+            "note: skipping examples/features/{} golden (need provisioned compiler toolchain)",
+            entry.stem
+        );
+        return;
+    }
+
+    let _ffi_lock = FfiBridgeLock::acquire();
+    let flat_stem = entry.stem.replace('/', "_");
+    let dir = std::env::temp_dir().join(format!(
+        "jet_golden_{}_{}",
+        std::process::id(),
+        flat_stem
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let source_dir = entry.path.parent().expect("polyglot example directory");
+    fs::copy(&entry.path, dir.join("main.jet")).unwrap();
+    fs::copy(
+        source_dir.join(foreign_source),
+        dir.join(foreign_source),
+    )
+    .unwrap();
+
+    let bind = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["inspect", "bind", language, foreign_source, "--pkg", package])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        bind.status.success(),
+        "{} binder example failed:\n{}",
+        language,
+        String::from_utf8_lossy(&bind.stderr)
+    );
+
+    let run = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["run", "main.jet"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        run.status.success(),
+        "{} binder example failed at runtime:\nstdout: {}\nstderr: {}",
+        language,
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+
+    let out_path = env
+        .ex_dir
+        .join("expected")
+        .join(format!("{}.out", entry.stem));
+    assert!(
+        out_path.is_file(),
+        "missing examples/features/expected/{}.out",
+        entry.stem
+    );
+    let actual = String::from_utf8_lossy(&run.stdout);
+    if env.update_expected {
+        fs::write(&out_path, actual.as_bytes()).unwrap();
+    } else {
+        let expected = fs::read_to_string(&out_path).unwrap();
+        if actual != expected {
+            panic!(
+                "output mismatch for example {}:\n{}",
+                entry.stem,
+                unified_diff(
+                    &format!("examples/features/expected/{}.out", entry.stem),
+                    &format!("examples/features/{}/main.jet stdout (actual)", entry.stem),
+                    &expected,
+                    &actual,
+                )
+            );
+        }
+    }
+    let _ = fs::remove_dir_all(&dir);
 }
 
 /// I5 for `examples/features/jetpack/task_runner.jet`: compile+run both

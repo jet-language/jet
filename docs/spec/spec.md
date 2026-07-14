@@ -911,6 +911,8 @@ ordinary C externs remain maximally effectful. Unsupported signatures fail befor
 are laundered through **E3208** and never expose raw foreign source frames
 (I2/I4).
 
+Example: `examples/features/lowlevel/polyglot_go/`.
+
 ## E3 — Fortran project binder (D-FFI-FORTRAN1=A, checked ISO_C_BINDING vertical)
 
 `jet inspect bind fortran <source.f90> --pkg <lib>` discovers explicit
@@ -923,6 +925,8 @@ rejects a list whose length does not exactly match the shape before passing its
 pointer across the private C ABI seam. Generated `fortran.*` calls contribute
 the `Fortran` effect root. Unsupported declarations and compiler failures are
 laundered through **E3208** rather than exposing `gfortran` diagnostics.
+
+Example: `examples/features/lowlevel/polyglot_fortran/`.
 
 ## E3 — JVM project binder (D-FFI-JVM1=A, embedded class vertical)
 
@@ -944,6 +948,8 @@ Generated calls carry the `Java` effect root. `javac`, `javap`, `cc`, and `ar`
 run under a 60-second deadline with 64-KiB diagnostic capture. Cache provenance
 binds the source, discovered bytecode surface, class cache path, and schema with
 SHA-256. Tool failures use **E3208** what/why/fix copy.
+
+Example: `examples/features/lowlevel/polyglot_java/`.
 
 ## E3 — .NET project binder (D-FFI-DOTNET1=A, embedded class vertical)
 
@@ -967,6 +973,8 @@ carry the `DotNet` effect root. SDK, C compiler, and
 archive tools run under a 60-second deadline with 64-KiB output capture.
 Provenance binds source, reflected surface, hostfxr identity, and schema with
 SHA-256. Tool failures use the snapshotted **E3208** diagnostic.
+
+Example: `examples/features/lowlevel/polyglot_dotnet/`.
 
 ## E3 — Tcl project binder (D-FFI-TCL1=A, live-session vertical)
 
