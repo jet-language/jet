@@ -21701,6 +21701,113 @@
       "ratifiedAt": "2026-07-10",
       "draft": false,
       "retiredAt": "2026-07-14T00:54:59.608Z"
+    },
+    {
+      "id": "D-JPK-TRUSTROOT1",
+      "cardId": "c041flkr",
+      "group": "safety",
+      "title": "Registry, publisher, and cache trust root",
+      "gist": "Choose the trust architecture for registry metadata, publishers, caches, and offline verification.",
+      "explainer": "Fable hybrid review: Option A's TOFU defends none of the story's attacks and is already listed as a production blocker in the plan. Option B forbids identity-based signing, hurting key-loss recovery; option C is strongest but leaves bootstrap distribution, transparency-log checkpoint pinning, recovery drills, and the beginner verdict surface unstated, and both B and C amend D-PKGSIGN1, which does not appear in the ratified digest — that reference needs reconciliation at ratification. The hybrid keeps C's architecture and closes bootstrap, agility (D-PQCRYPTO1), offline-grace (D-JPK-OFFLINE1), and audit-UX gaps.",
+      "story": "Martha's registry timestamp key is stolen. Attackers must not replace packages, roll clients back, freeze updates, or make a new publisher key look legitimate on first use.",
+      "inWild": "$ jet audit trust\nroot: 3-of-5 offline threshold\nregistry snapshot: current\npublisher: verified identity bundle\ncache builder: approved provenance\nresult: trusted",
+      "detail": "Automatic beginner verification plus exact expert roots, thresholds, privacy, offline, and recovery controls.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Author TOFU plus Git index",
+          "detail": "Keep first-seen Ed25519 author keys and current Git history as the principal trust model.",
+          "code": "trust: first seen key for acme/web"
+        },
+        {
+          "key": "B",
+          "name": "TUF thresholds plus long-lived author keys",
+          "detail": "Offline threshold root, delegated targets, snapshot/timestamp freshness, rotation/revocation; public-registry releases require publisher Ed25519/KMS signatures, explicitly amending D-PKGSIGN1 there. Private registries may set an equally explicit signature policy.",
+          "code": "root: 3-of-5\npublisher: ed25519/acme"
+        },
+        {
+          "key": "C",
+          "name": "TUF thresholds plus hybrid publisher identity",
+          "detail": "TUF secures registry authority/freshness; trusted-root bootstrap, monotonic updates, bad clocks, expiry, and signature stripping fail closed. Public-registry releases require either Sigstore identity bundles or Ed25519/KMS/HSM publisher signatures, explicitly amending D-PKGSIGN1 there; private registries choose an explicit offline policy. SLSA provenance covers builders.",
+          "code": "root: 3-of-5, monotonic + unexpired\npublisher: required sigstore bundle OR offline key\nbuilder: signed provenance"
+        },
+        {
+          "key": "D",
+          "name": "TUF + hybrid publisher identity, pinned bootstrap, agile algorithms (hybrid)",
+          "detail": "TUF secures registry authority: offline threshold root, delegated targets, snapshot/timestamp freshness, consistent snapshots, monotonic versions; expiry, rollback, bad clocks, and signature stripping fail closed with named E12xx, while already-realized environments keep working offline per D-JPK-OFFLINE1. The trusted root ships pinned inside the jet toolchain object, so bootstrap never trusts first network contact; rotation, revocation, and threshold-minus-one recovery are drilled surfaces, and all signature algorithms ride the D-PQCRYPTO1 agility seam over the D-DEP-CRYPTO1 backend. Public-registry releases require a Sigstore identity bundle verified against a pinned transparency-log checkpoint OR an offline Ed25519/KMS/HSM publisher signature — both feed one monitorable audit stream — explicitly amending D-PKGSIGN1 there; private registries set an equally explicit offline policy. Cache builders and remote executors hold distinct identities with SLSA provenance bound to action and output digests. `jet audit trust` gives beginners one verdict line; `--json` exposes every role, threshold, and expiry.",
+          "code": "$ jet audit trust\nroot: 3-of-5 offline, pinned via toolchain, unexpired, monotonic\npublisher: sigstore bundle (log checkpoint verified)\nbuilder: SLSA provenance, approved identity\nresult: trusted\n$ jet audit trust --json   # full chain: roles, thresholds, expiry"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "TUF",
+          "note": "Separates offline root, delegated targets, snapshot, and timestamp roles.",
+          "code": "root.json targets.json snapshot.json timestamp.json"
+        },
+        {
+          "lang": "Sigstore",
+          "note": "Binds ephemeral keys to workload/user identity with transparency proof bundles.",
+          "code": "cosign verify --bundle release.sigstore"
+        }
+      ],
+      "rec": "D",
+      "status": "ratified",
+      "created": "2026-07-09T20:54:50.723Z",
+      "outcome": "D",
+      "ratifiedAt": "2026-07-10",
+      "draft": false,
+      "retiredAt": "2026-07-14T04:34:10.415Z"
+    },
+    {
+      "id": "D-JPK-NIXBASELINE1",
+      "cardId": "c0uxofls",
+      "group": "tooling",
+      "title": "Pinned Nix compatibility baseline",
+      "gist": "Choose which Nix version and experimental features define the parity contract.",
+      "explainer": "Fable hybrid review: A amputates flakes, contradicting the epoch exit claim and the dominant real-world nixpkgs entry point. C promises bit-parity with dynamic derivations and IFD — experimental moving targets — even though IFD's hidden store coupling is a plan-listed rejected anti-pattern, and C states no baseline-advancement law. The hybrid keeps C's full coverage claim and its good impure trust-grant law, delivers IFD/dynamic through the already-gated JP21 typed staging instead of Nix's mechanism, and adds the machine-readable matrix plus a corpus-gated re-pin procedure that A/B/C all lack.",
+      "story": "Walter compares Jetpack against Nix after a Nix upgrade changes derivation behavior. A pinned baseline tells CI whether Jetpack diverged or the oracle changed.",
+      "inWild": "$ jetpack compatibility\nNix baseline: 2.34 stable\nnixpkgs: <pinned commit>\nflakes: yes\nCA derivations: yes\ndynamic derivations: staged compatibility",
+      "detail": "Meets the requested full pinned parity while keeping unsafe/impure behavior isolated from Jet authoring.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Stable Nix surface only; narrow parity claim",
+          "detail": "Pin latest stable Nix language/store protocol; exclude flakes and experiments. Selecting this explicitly amends the epoch exit claim and drops flake/experimental compatibility.",
+          "code": "baseline: Nix stable\nparity exceptions: flakes, experimental features"
+        },
+        {
+          "key": "B",
+          "name": "Stable plus selected production experiments",
+          "detail": "Pin Nix 2.34 stable plus flakes, new CLI lock/registry behavior, and CA derivations. Dynamic/recursive/IFD and impure derivations remain named compatibility exceptions, narrowing full Nix parity.",
+          "code": "baseline: Nix 2.34\nfeatures: flakes nix-command ca-derivations"
+        },
+        {
+          "key": "C",
+          "name": "Full pinned Nix compatibility",
+          "detail": "Pin one Nix release and implement its stable plus experimental package-manager/evaluator/store features, including flakes, CA, dynamic/recursive derivations, IFD, and impure compatibility. Impure Nix is never enabled by import/default: an explicit trust grant binds host/network/env capabilities; results stay private, untrusted, and non-promotable unless rebuilt hermetically.",
+          "code": "baseline: Nix 2.34\nfeatures: full pinned set\nimpure: explicit capability grant -> private/untrusted output"
+        },
+        {
+          "key": "D",
+          "name": "Pinned full baseline: tiered core/staged features, granted impurity (hybrid)",
+          "detail": "Pin Nix 2.34 plus a nixpkgs commit as the sole parity oracle. The core tier — stable language/store/protocol, flakes, nix-command, and CA derivations — carries full bit-parity by default; IFD and dynamic/recursive derivations form a staged tier that lowers to the D-JPK-DYNAMICPLAN1 finite typed-staging mechanism, never Nix's hidden store coupling, and until that ballot ratifies such refs fail with one E-code naming the construct, tier, and fix. Impure evaluation is never enabled by import or default: an explicit `jet trust` grant binds host/network/env capabilities, and outputs stay private, untrusted, and non-promotable unless rebuilt hermetically. `jetpack compatibility` emits a machine-readable feature matrix; a baseline re-pin requires the full differential corpus green under the new pin and is recorded as a decision amendment.",
+          "code": "baseline: Nix 2.34 + nixpkgs <pin>\ncore: stable flakes nix-command ca-derivations -> bit parity\nstaged: ifd dynamic-derivations -> JP21 typed staging (ballot-gated)\nimpure: explicit trust grant -> private/untrusted output\n$ jetpack compatibility --json"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Nix",
+          "note": "Many important capabilities remain behind experimental feature flags.",
+          "code": "experimental-features = nix-command flakes ca-derivations"
+        }
+      ],
+      "rec": "D",
+      "status": "ratified",
+      "created": "2026-07-09T20:54:51.197Z",
+      "outcome": "D",
+      "ratifiedAt": "2026-07-10",
+      "draft": false,
+      "retiredAt": "2026-07-14T04:34:40.807Z"
     }
   ],
   "cards": [
@@ -74238,6 +74345,1483 @@
       "action": "card.criteria-meet",
       "ref": "c0wf4bxf",
       "note": "#3"
+    },
+    {
+      "at": "2026-07-13T09:12:28.335Z",
+      "by": "fable-impl-522",
+      "action": "card.criteria-meet",
+      "ref": "c0wf4bxf",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-13T09:13:23.646Z",
+      "by": "fable-impl-522",
+      "action": "card.update",
+      "ref": "c0wf4bxf",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T09:25:10.990Z",
+      "by": "owner",
+      "action": "card.criteria-bypass",
+      "ref": "c0wf4bxf",
+      "note": "owner bypass"
+    },
+    {
+      "at": "2026-07-13T09:25:10.990Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0wf4bxf",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T09:26:22.676Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CLI-HANGAR1",
+      "note": "B"
+    },
+    {
+      "at": "2026-07-13T09:27:27.581Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c11pkkov",
+      "note": "#1 Syntax.rs entry updated"
+    },
+    {
+      "at": "2026-07-13T09:27:27.581Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c11pkkov",
+      "note": "#2 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-07-13T09:27:27.581Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c11pkkov",
+      "note": "#3 jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-07-13T09:27:27.581Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c11pkkov",
+      "note": "#4 snapshots re-blessed"
+    },
+    {
+      "at": "2026-07-13T09:27:27.581Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-OPDEF1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-13T09:28:09.804Z",
+      "by": "owner",
+      "action": "card.criteria-bypass",
+      "ref": "c05o0105",
+      "note": "owner bypass"
+    },
+    {
+      "at": "2026-07-13T09:28:09.804Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c05o0105",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T09:32:45.423Z",
+      "by": "fable-impl-529",
+      "action": "card.claim",
+      "ref": "c0dnbc5s",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T09:33:06.061Z",
+      "by": "fable-impl-529",
+      "action": "card.criteria-add",
+      "ref": "c0dnbc5s",
+      "note": "#1 parallel default cargo test --test dev green 3 consecutive r"
+    },
+    {
+      "at": "2026-07-13T09:33:25.802Z",
+      "by": "fable-impl-529",
+      "action": "card.criteria-add",
+      "ref": "c0dnbc5s",
+      "note": "#2 cargo test --test dev --test-threads=1 still fully green (no"
+    },
+    {
+      "at": "2026-07-13T09:33:44.849Z",
+      "by": "fable-impl-529",
+      "action": "card.criteria-add",
+      "ref": "c0dnbc5s",
+      "note": "#3 no golden/effects regression from the fix (golden 3/3, effec"
+    },
+    {
+      "at": "2026-07-13T09:34:14.503Z",
+      "by": "fable-impl-529",
+      "action": "card.criteria-meet",
+      "ref": "c0dnbc5s",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-13T09:34:34.408Z",
+      "by": "fable-impl-529",
+      "action": "card.criteria-meet",
+      "ref": "c0dnbc5s",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-13T09:34:55.997Z",
+      "by": "fable-impl-529",
+      "action": "card.criteria-meet",
+      "ref": "c0dnbc5s",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-13T09:35:26.137Z",
+      "by": "terra-302-final",
+      "action": "card.claim",
+      "ref": "c0184j6s",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T09:36:16.054Z",
+      "by": "fable-impl-529",
+      "action": "card.update",
+      "ref": "c0dnbc5s",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T09:36:57.420Z",
+      "by": "fable-impl-529",
+      "action": "card.update",
+      "ref": "c0dnbc5s",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-13T09:40:14.073Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0184j6s",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-13T09:41:16.832Z",
+      "by": "terra-302-final",
+      "action": "card.update",
+      "ref": "c0184j6s",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-13T09:41:41.225Z",
+      "by": "terra-302-final",
+      "action": "card.criteria-verify",
+      "ref": "c0184j6s",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-13T09:42:08.150Z",
+      "by": "terra-302-final",
+      "action": "card.criteria-verify",
+      "ref": "c0184j6s",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-13T09:44:05.336Z",
+      "by": "grok-477-verify",
+      "action": "card.update",
+      "ref": "c0fchu51",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-13T09:44:05.458Z",
+      "by": "grok-477-verify",
+      "action": "card.release",
+      "ref": "c0fchu51",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T09:44:06.660Z",
+      "by": "grok-476-verify2",
+      "action": "card.release",
+      "ref": "c0qwckht",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-13T09:44:06.802Z",
+      "by": "grok-476-verify2",
+      "action": "card.update",
+      "ref": "c0qwckht",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T09:44:12.566Z",
+      "by": "cursor-e4-burn",
+      "action": "card.update",
+      "ref": "c0qwckht",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T09:44:12.699Z",
+      "by": "cursor-e4-burn",
+      "action": "card.update",
+      "ref": "c0fchu51",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T09:44:12.838Z",
+      "by": "grok-477-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0fchu51",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-13T09:44:12.978Z",
+      "by": "grok-477-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0fchu51",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-13T09:44:13.106Z",
+      "by": "grok-477-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0fchu51",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-13T09:44:13.264Z",
+      "by": "grok-477-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0fchu51",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-13T09:45:12.199Z",
+      "by": "terra-302-final",
+      "action": "card.update",
+      "ref": "c0184j6s",
+      "note": "phase,plan,logEntry"
+    },
+    {
+      "at": "2026-07-13T09:45:37.725Z",
+      "by": "terra-302-final",
+      "action": "card.release",
+      "ref": "c0184j6s",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-13T09:46:03.914Z",
+      "by": "grok-393-builder",
+      "action": "card.claim",
+      "ref": "c0to4gms",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T09:46:04.042Z",
+      "by": "grok-419-builder",
+      "action": "card.claim",
+      "ref": "c0yxdqju",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T09:46:12.066Z",
+      "by": "cursor-e4-burn",
+      "action": "card.criteria-add",
+      "ref": "c0to4gms",
+      "note": "#1 Hangar layout is content-addressed objects+metadata; ingest "
+    },
+    {
+      "at": "2026-07-13T09:46:12.173Z",
+      "by": "cursor-e4-burn",
+      "action": "card.criteria-add",
+      "ref": "c0to4gms",
+      "note": "#2 Canonical archive hashing covers node type/mode/bytes/symlin"
+    },
+    {
+      "at": "2026-07-13T09:46:12.280Z",
+      "by": "cursor-e4-burn",
+      "action": "card.criteria-add",
+      "ref": "c0to4gms",
+      "note": "#3 Realization boundary used by CLI (and JetOS-ready API) verif"
+    },
+    {
+      "at": "2026-07-13T09:46:12.398Z",
+      "by": "cursor-e4-burn",
+      "action": "card.criteria-add",
+      "ref": "c0to4gms",
+      "note": "#4 Docs/plan truth-matrix row for #393 updated to reflect live "
+    },
+    {
+      "at": "2026-07-13T09:46:12.515Z",
+      "by": "cursor-e4-burn",
+      "action": "card.criteria-add",
+      "ref": "c0yxdqju",
+      "note": "#1 One executable action IR covers BuildRecipe/fn build/adapter"
+    },
+    {
+      "at": "2026-07-13T09:46:12.646Z",
+      "by": "cursor-e4-burn",
+      "action": "card.criteria-add",
+      "ref": "c0yxdqju",
+      "note": "#2 Action/cache keys include every declared input (parser/sema/"
+    },
+    {
+      "at": "2026-07-13T09:46:12.756Z",
+      "by": "cursor-e4-burn",
+      "action": "card.criteria-add",
+      "ref": "c0yxdqju",
+      "note": "#3 Focused build_graph/build_sandbox/Recipe/Store identity test"
+    },
+    {
+      "at": "2026-07-13T09:46:12.877Z",
+      "by": "cursor-e4-burn",
+      "action": "card.criteria-add",
+      "ref": "c0yxdqju",
+      "note": "#4 truth-matrix + plan JP2 exit notes match live behavior; no f"
+    },
+    {
+      "at": "2026-07-13T09:47:06.333Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0184j6s",
+      "note": "#7 D-CRYPTO-API1=A ships the exact purpose-bound nominal Secret"
+    },
+    {
+      "at": "2026-07-13T09:47:06.506Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0184j6s",
+      "note": "#8 D-CRYPTO-ENVELOPE2=A ships recipient-based JETC v2 file_seal"
+    },
+    {
+      "at": "2026-07-13T09:47:06.671Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0184j6s",
+      "note": "#9 D-CRYPTO-VAULT1=A ships typed persistent SigningKey/X25519Se"
+    },
+    {
+      "at": "2026-07-13T09:47:06.832Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0184j6s",
+      "note": "#10 D-CRYPTO-KEYWRAP1=A ships type-distinct JVKW/v1 recipient an"
+    },
+    {
+      "at": "2026-07-13T09:47:07.008Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0184j6s",
+      "note": "#11 D-CRYPTO-DIAG1=A ships the closed typed error projections an"
+    },
+    {
+      "at": "2026-07-13T09:47:07.178Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0184j6s",
+      "note": "#12 Reference vectors, hostile framing/tamper/bounds tests, wron"
+    },
+    {
+      "at": "2026-07-13T09:48:26.481Z",
+      "by": "terra-509-builder",
+      "action": "card.claim",
+      "ref": "c0s8u85x",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T09:49:24.849Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c2sj0bd9",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-13T09:49:25.049Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c2yj0nk5",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-13T09:49:25.236Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c2zj0p7p",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-13T09:49:36.707Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c2iizmyx",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-13T09:55:54.756Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0llk894",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-13T09:55:54.878Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0llk894",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T09:56:35.512Z",
+      "by": "owner",
+      "action": "acceptance.resolve",
+      "ref": "D-ACCEPT-359",
+      "note": "owner-ui session=8WHALWn6BWg challenge=0UVl-I6GsiE outcome=accept"
+    },
+    {
+      "at": "2026-07-13T09:59:15.211Z",
+      "by": "jet-verify-close3",
+      "action": "card.criteria-verify",
+      "ref": "c0wf4bxf",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-13T09:59:47.110Z",
+      "by": "jet-verify-close3",
+      "action": "card.criteria-verify",
+      "ref": "c0wf4bxf",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-13T10:00:22.838Z",
+      "by": "jet-verify-close3",
+      "action": "card.criteria-verify",
+      "ref": "c0wf4bxf",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-13T10:00:44.358Z",
+      "by": "jet-verify-close3",
+      "action": "card.criteria-verify",
+      "ref": "c0wf4bxf",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-13T10:01:08.277Z",
+      "by": "jet-verify-close3",
+      "action": "card.criteria-verify",
+      "ref": "c0dnbc5s",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-13T10:01:31.153Z",
+      "by": "jet-verify-close3",
+      "action": "card.criteria-verify",
+      "ref": "c0dnbc5s",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-13T10:01:52.999Z",
+      "by": "jet-verify-close3",
+      "action": "card.criteria-verify",
+      "ref": "c0dnbc5s",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-13T10:02:46.183Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0wf4bxf",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T10:02:46.324Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0dnbc5s",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T10:06:49.905Z",
+      "by": "terra-509-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0s8u85x",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-13T10:06:50.088Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c0s8u85x",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-13T10:06:50.256Z",
+      "by": "terra-509-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0s8u85x",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-13T10:06:50.431Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c0s8u85x",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-13T10:06:50.632Z",
+      "by": "terra-509-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0s8u85x",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-13T10:06:50.790Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c0s8u85x",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-13T10:06:50.973Z",
+      "by": "terra-509-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0s8u85x",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-13T10:06:51.158Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c0s8u85x",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-13T10:06:54.466Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0s8u85x",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-13T10:16:20.385Z",
+      "by": "codex-orchestrator",
+      "action": "card.claim",
+      "ref": "c1jixkit",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T10:17:23.105Z",
+      "by": "terra-296-builder",
+      "action": "card.claim",
+      "ref": "c0uxsyns",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T10:17:52.990Z",
+      "by": "terra-436-builder",
+      "action": "card.claim",
+      "ref": "c0ai04g0",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T10:18:21.084Z",
+      "by": "terra-436-builder",
+      "action": "card.release",
+      "ref": "c0ai04g0",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-13T10:18:47.952Z",
+      "by": "terra-241-builder",
+      "action": "card.claim",
+      "ref": "ccq07pav",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T10:21:07.069Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "ccq07pav",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T10:21:42.498Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0uxsyns",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T10:22:09.349Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c1jixkit",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T10:23:43.370Z",
+      "by": "fable-impl-505b",
+      "action": "card.update",
+      "ref": "c0qdl0gg",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T10:25:58.371Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0qdl0gg",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-13T10:26:07.702Z",
+      "by": "terra-500-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0llk894",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-13T10:26:07.887Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c0llk894",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-13T10:26:08.066Z",
+      "by": "terra-500-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0llk894",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-13T10:26:08.245Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c0llk894",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-13T10:26:08.421Z",
+      "by": "terra-500-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0llk894",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-13T10:26:08.601Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c0llk894",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-13T10:26:08.774Z",
+      "by": "terra-500-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0llk894",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-13T10:26:08.947Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c0llk894",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-13T10:26:09.120Z",
+      "by": "terra-500-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0llk894",
+      "note": "#8"
+    },
+    {
+      "at": "2026-07-13T10:26:09.294Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c0llk894",
+      "note": "#8"
+    },
+    {
+      "at": "2026-07-13T10:26:15.594Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0llk894",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-13T10:29:51.226Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c29iz43a",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-13T10:31:22.675Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "cbq06v8j",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-13T10:32:41.239Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0wqwqaq",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T10:40:14.276Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c1jixkit",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T10:40:53.262Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "ccq07pav",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T11:14:22.606Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c1jixkit",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T11:15:31.273Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "ccq07pav",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T11:16:07.640Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0uxsyns",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T11:27:29.130Z",
+      "by": "fable-impl-506stm",
+      "action": "card.criteria-add",
+      "ref": "c0n6vj96",
+      "note": "#5 D-STM1 STM end-to-end: #Transact over Shared<T> commits mult"
+    },
+    {
+      "at": "2026-07-13T11:28:10.269Z",
+      "by": "fable-impl-506stm",
+      "action": "card.criteria-meet",
+      "ref": "c0n6vj96",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-13T11:28:10.403Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0n6vj96",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T11:29:59.887Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0n6vj96",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T11:31:51.352Z",
+      "by": "terra-91-builder",
+      "action": "card.criteria-meet",
+      "ref": "c1jixkit",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-13T11:32:22.698Z",
+      "by": "sol-91-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c1jixkit",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-13T11:32:55.545Z",
+      "by": "terra-91-builder",
+      "action": "card.criteria-meet",
+      "ref": "c1jixkit",
+      "note": "#8"
+    },
+    {
+      "at": "2026-07-13T11:33:28.689Z",
+      "by": "sol-91-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c1jixkit",
+      "note": "#8"
+    },
+    {
+      "at": "2026-07-13T11:36:56.340Z",
+      "by": "fable-impl-506auth",
+      "action": "card.update",
+      "ref": "c0n6vj96",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T11:37:11.710Z",
+      "by": "terra-91-builder",
+      "action": "card.criteria-meet",
+      "ref": "c1jixkit",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-13T11:37:27.200Z",
+      "by": "fable-impl-506auth",
+      "action": "card.criteria-add",
+      "ref": "c0n6vj96",
+      "note": "#6 D-AUTH1=A batteries suite lands its ratified surface end-to-"
+    },
+    {
+      "at": "2026-07-13T11:37:52.577Z",
+      "by": "sol-91-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c1jixkit",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-13T11:38:37.154Z",
+      "by": "fable-main",
+      "action": "card.add",
+      "ref": "c0aadf2p",
+      "note": "core email/SMTP substrate — magic links, notifications"
+    },
+    {
+      "at": "2026-07-13T11:43:10.567Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c1jixkit",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-13T11:44:04.525Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c1jixkit",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-13T11:44:46.435Z",
+      "by": "terra-436-aarch64",
+      "action": "card.claim",
+      "ref": "c0ai04g0",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T11:49:40.259Z",
+      "by": "fable-main",
+      "action": "decision.add",
+      "ref": "D-AUTH2",
+      "note": "JWT/PASETO verify before the app graph"
+    },
+    {
+      "at": "2026-07-13T11:49:40.368Z",
+      "by": "fable-main",
+      "action": "decision.add",
+      "ref": "D-TAINT2",
+      "note": "Credential taint: attach grammar and leak sinks"
+    },
+    {
+      "at": "2026-07-13T11:52:51.596Z",
+      "by": "terra-241-builder",
+      "action": "card.criteria-meet",
+      "ref": "ccq07pav",
+      "note": "#8"
+    },
+    {
+      "at": "2026-07-13T11:52:51.912Z",
+      "by": "sol-241-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "ccq07pav",
+      "note": "#8"
+    },
+    {
+      "at": "2026-07-13T11:53:13.881Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c0ai04g0",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-13T11:53:14.052Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c0ai04g0",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-13T11:53:14.219Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c0ai04g0",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-13T11:53:14.387Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c0ai04g0",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-13T11:53:14.554Z",
+      "by": "terra-436-aarch64",
+      "action": "card.criteria-meet",
+      "ref": "c0ai04g0",
+      "note": "#10"
+    },
+    {
+      "at": "2026-07-13T11:53:14.722Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-verify",
+      "ref": "c0ai04g0",
+      "note": "#10"
+    },
+    {
+      "at": "2026-07-13T11:53:26.828Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0ai04g0",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-13T11:54:28.537Z",
+      "by": "terra-302-api",
+      "action": "card.claim",
+      "ref": "c0184j6s",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T11:58:39.422Z",
+      "by": "sol-241-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "ccq07pav",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-13T12:03:11.979Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "ccq07pav",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T12:03:12.311Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0uxsyns",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T12:05:19.743Z",
+      "by": "codex-orchestrator",
+      "action": "card.release",
+      "ref": "ccq07pav",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-13T12:05:20.063Z",
+      "by": "codex-orchestrator",
+      "action": "card.release",
+      "ref": "c0uxsyns",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-13T12:05:33.831Z",
+      "by": "terra-300-builder",
+      "action": "card.claim",
+      "ref": "c0z3l25j",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T12:05:34.142Z",
+      "by": "terra-123-builder",
+      "action": "card.claim",
+      "ref": "c2fizfx3",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T12:05:34.448Z",
+      "by": "terra-286-builder",
+      "action": "card.claim",
+      "ref": "c0fiunwy",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T12:10:45.448Z",
+      "by": "codex-orchestrator",
+      "action": "card.release",
+      "ref": "c0fiunwy",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-13T12:11:28.265Z",
+      "by": "terra-530-ballot",
+      "action": "card.claim",
+      "ref": "c0aadf2p",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T12:13:38.308Z",
+      "by": "fable-impl-506env",
+      "action": "card.update",
+      "ref": "c0n6vj96",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T12:15:06.749Z",
+      "by": "fable-impl-506env",
+      "action": "card.update",
+      "ref": "c0n6vj96",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T12:16:14.532Z",
+      "by": "fable-impl-506env",
+      "action": "card.criteria-add",
+      "ref": "c0n6vj96",
+      "note": "#7 D-ENVHOOK1=A end-to-end: `jet env hook bash|zsh|fish` prints"
+    },
+    {
+      "at": "2026-07-13T12:16:47.279Z",
+      "by": "fable-impl-506env",
+      "action": "card.criteria-meet",
+      "ref": "c0n6vj96",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-13T12:17:50.516Z",
+      "by": "sol-300-reviewer",
+      "action": "card.update",
+      "ref": "c0z3l25j",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T12:19:58.539Z",
+      "by": "fable-main",
+      "action": "card.update",
+      "ref": "c0n6vj96",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T12:20:27.379Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-TAINT2",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-13T12:20:32.923Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-TAINT2",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-13T12:21:04.299Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-AUTH2",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-13T12:22:47.873Z",
+      "by": "terra-530-ballot",
+      "action": "decision.add",
+      "ref": "D-EMAIL1",
+      "note": "What is Jet's canonical email and SMTP surface?"
+    },
+    {
+      "at": "2026-07-13T12:23:03.325Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0aadf2p",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T12:23:03.631Z",
+      "by": "codex-orchestrator",
+      "action": "card.release",
+      "ref": "c0aadf2p",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T12:24:11.403Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-EMAIL1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-13T12:25:07.679Z",
+      "by": "terra-129-builder",
+      "action": "card.claim",
+      "ref": "c2lizsmx",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T12:28:58.613Z",
+      "by": "terra-302-api",
+      "action": "card.update",
+      "ref": "c0184j6s",
+      "note": "phase,plan,logEntry"
+    },
+    {
+      "at": "2026-07-13T12:29:04.992Z",
+      "by": "terra-302-api",
+      "action": "card.release",
+      "ref": "c0184j6s",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-13T12:32:17.181Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c2fizfx3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T12:32:17.487Z",
+      "by": "codex-orchestrator",
+      "action": "card.release",
+      "ref": "c2fizfx3",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-13T12:36:12.708Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0z3l25j",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T12:36:13.013Z",
+      "by": "codex-orchestrator",
+      "action": "card.release",
+      "ref": "c0z3l25j",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-13T12:38:15.033Z",
+      "by": "terra-286-sync",
+      "action": "card.claim",
+      "ref": "c0fiunwy",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T12:47:42.942Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c2lizsmx",
+      "note": "#1 R11-generated Struct and Enum declarations re-enter ordinary"
+    },
+    {
+      "at": "2026-07-13T12:47:43.249Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c2lizsmx",
+      "note": "#2 Generic-target user derives emit valid impls retaining type "
+    },
+    {
+      "at": "2026-07-13T12:47:43.557Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c2lizsmx",
+      "note": "#3 Typed reflection and user-derive examples, hostile duplicate"
+    },
+    {
+      "at": "2026-07-13T12:47:43.880Z",
+      "by": "terra-129-builder",
+      "action": "card.criteria-meet",
+      "ref": "c2lizsmx",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-13T12:47:44.198Z",
+      "by": "sol-129-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c2lizsmx",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-13T12:47:59.997Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c2lizsmx",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T12:48:00.299Z",
+      "by": "codex-orchestrator",
+      "action": "card.release",
+      "ref": "c2lizsmx",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-13T12:50:11.549Z",
+      "by": "terra-129-generic",
+      "action": "card.claim",
+      "ref": "c2lizsmx",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T12:52:13.274Z",
+      "by": "terra-123-qualified",
+      "action": "card.claim",
+      "ref": "c2fizfx3",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T12:56:32.723Z",
+      "by": "terra-286-sync",
+      "action": "card.criteria-meet",
+      "ref": "c0fiunwy",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-13T12:56:33.027Z",
+      "by": "sol-286-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0fiunwy",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-13T12:56:49.299Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0fiunwy",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T12:56:49.610Z",
+      "by": "codex-orchestrator",
+      "action": "card.release",
+      "ref": "c0fiunwy",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-13T12:58:45.320Z",
+      "by": "terra-286-async",
+      "action": "card.claim",
+      "ref": "c0fiunwy",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T13:05:54.450Z",
+      "by": "terra-123-reviewer",
+      "action": "card.update",
+      "ref": "c2fizfx3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T13:07:07.345Z",
+      "by": "codex-orchestrator",
+      "action": "card.release",
+      "ref": "c0fiunwy",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-13T13:15:10.500Z",
+      "by": "sol-123-reviewer",
+      "action": "card.update",
+      "ref": "c2fizfx3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T13:25:20.403Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c2lizsmx",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T13:25:20.722Z",
+      "by": "codex-orchestrator",
+      "action": "card.release",
+      "ref": "c2lizsmx",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-13T13:26:58.358Z",
+      "by": "terra-286-async",
+      "action": "card.claim",
+      "ref": "c0fiunwy",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T13:28:29.048Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c2fizfx3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T13:28:29.338Z",
+      "by": "codex-orchestrator",
+      "action": "card.release",
+      "ref": "c2fizfx3",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T13:29:45.273Z",
+      "by": "codex-orchestrator",
+      "action": "card.release",
+      "ref": "c0fiunwy",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T13:29:58.929Z",
+      "by": "terra-296-jsonl",
+      "action": "card.claim",
+      "ref": "c0uxsyns",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T13:30:38.982Z",
+      "by": "terra-241-parser",
+      "action": "card.claim",
+      "ref": "ccq07pav",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T13:54:37.815Z",
+      "by": "sol-241-reviewer",
+      "action": "card.update",
+      "ref": "ccq07pav",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T13:54:38.148Z",
+      "by": "terra-296-reviewer",
+      "action": "card.update",
+      "ref": "c0uxsyns",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T14:11:16.931Z",
+      "by": "sol-241-reviewer",
+      "action": "card.update",
+      "ref": "ccq07pav",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T14:11:17.259Z",
+      "by": "terra-296-reviewer",
+      "action": "card.update",
+      "ref": "c0uxsyns",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T14:30:54.158Z",
+      "by": "terra-241-parser",
+      "action": "card.criteria-meet",
+      "ref": "ccq07pav",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-13T14:30:54.465Z",
+      "by": "sol-241-parser-reviewer",
+      "action": "card.criteria-verify",
+      "ref": "ccq07pav",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-13T14:31:16.405Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "ccq07pav",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T14:31:16.689Z",
+      "by": "codex-orchestrator",
+      "action": "card.release",
+      "ref": "ccq07pav",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-13T14:33:48.977Z",
+      "by": "terra-241-cli",
+      "action": "card.claim",
+      "ref": "ccq07pav",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T14:43:47.526Z",
+      "by": "agent",
+      "action": "card.update",
+      "ref": "c0uxsyns",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T14:44:41.046Z",
+      "by": "agent",
+      "action": "card.release",
+      "ref": "c0uxsyns",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-13T14:46:56.802Z",
+      "by": "terra-296-csv",
+      "action": "card.claim",
+      "ref": "c0uxsyns",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T14:47:24.962Z",
+      "by": "fable-300-io",
+      "action": "card.claim",
+      "ref": "c0z3l25j",
+      "note": ""
+    },
+    {
+      "at": "2026-07-13T15:17:26.174Z",
+      "by": "agent",
+      "action": "card.update",
+      "ref": "c0uxsyns",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T15:18:02.835Z",
+      "by": "agent",
+      "action": "card.release",
+      "ref": "c0uxsyns",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-13T15:24:14.186Z",
+      "by": "agent",
+      "action": "card.update",
+      "ref": "c0z3l25j",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-13T15:26:59.216Z",
+      "by": "codex-orchestrator",
+      "action": "decision.add",
+      "ref": "D-IOERROR-TREE1",
+      "note": "What exact structured IOError tree should every byte stream use?"
+    },
+    {
+      "at": "2026-07-13T15:27:32.914Z",
+      "by": "fable-300-io",
+      "action": "card.release",
+      "ref": "c0z3l25j",
+      "note": "[handoff] logged"
     }
   ]
 }
