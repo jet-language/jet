@@ -2350,7 +2350,7 @@ fn repl_core_data_lazy_plans_and_typed_joins() {
         "inner join multiplicity lost: {out}"
     );
     assert!(
-        out.contains("DataJoin(left: 2, right: None)"),
+        out.contains("DataJoin(left: 2, right: null)"),
         "left join unmatched row missing: {out}"
     );
 }
